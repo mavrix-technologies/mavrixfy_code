@@ -4,6 +4,7 @@ import {
   getDocs,
   getDoc,
   setDoc,
+  updateDoc,
   addDoc,
   deleteDoc,
   query,
@@ -281,6 +282,122 @@ export async function removeLikedSongFromFirestore(userId: string, songId: strin
       await deleteDoc(songDocRef);
       return true;
     }
+  } catch (error) {
+    return false;
+  }
+}
+
+// Add song to Firestore playlist
+export async function addSongToFirestorePlaylist(playlistId: string, song: any): Promise<boolean> {
+  try {
+    if (!db) {
+      console.error('[Firestore] Database not initialized');
+      return false;
+    }
+
+    const playlistRef = doc(db, "playlists", playlistId);
+    const playlistSnap = await getDoc(playlistRef);
+
+    if (!playlistSnap.exists()) {
+      console.error('[Firestore] Playlist not found:', playlistId);
+      return false;
+    }
+
+    const playlist = playlistSnap.data() as FirestorePlaylist;
+    const songs = playlist.songs || [];
+
+    // Check if song already exists
+    const songExists = songs.some((s: any) => s.id === song.id);
+    if (songExists) {
+      console.log('[Firestore] Song already exists in playlist:', song.id);
+      return true;
+    }
+
+    // Add song to playlist
+    // Note: serverTimestamp() is not supported inside arrays, so we use ISO string
+    const newSong = {
+      id: song.id,
+      title: song.title,
+      artist: song.artist,
+      album: song.album || "",
+      imageUrl: song.coverUrl,
+      audioUrl: song.audioUrl,
+      duration: song.duration || 0,
+      addedAt: new Date().toISOString(),
+    };
+
+    songs.push(newSong);
+
+    // Use updateDoc to only update specific fields
+    await updateDoc(playlistRef, {
+      songs: songs,
+      updatedAt: serverTimestamp(),
+    });
+
+    console.log('[Firestore] Song added successfully:', song.title, 'to playlist:', playlistId);
+    return true;
+  } catch (error) {
+    console.error('[Firestore] Error adding song to playlist:', error);
+    return false;
+  }
+}
+
+// Update Firestore playlist
+export async function updateFirestorePlaylist(
+  playlistId: string,
+  updates: Partial<{ name: string; description: string; isPublic: boolean; imageUrl: string }>
+): Promise<boolean> {
+  try {
+    if (!db) {
+      return false;
+    }
+
+    const playlistRef = doc(db, "playlists", playlistId);
+    const playlistSnap = await getDoc(playlistRef);
+
+    if (!playlistSnap.exists()) {
+      return false;
+    }
+
+    await setDoc(playlistRef, {
+      ...playlistSnap.data(),
+      ...updates,
+      updatedAt: serverTimestamp(),
+    });
+
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Remove song from Firestore playlist
+export async function removeSongFromFirestorePlaylist(playlistId: string, songId: string): Promise<boolean> {
+  try {
+    if (!db) {
+      return false;
+    }
+
+    const playlistRef = doc(db, "playlists", playlistId);
+    const playlistSnap = await getDoc(playlistRef);
+
+    if (!playlistSnap.exists()) {
+      return false;
+    }
+
+    const playlist = playlistSnap.data() as FirestorePlaylist;
+    const songs = playlist.songs || [];
+
+    // Remove song from array
+    const updatedSongs = songs.filter((s: any) => s.id !== songId);
+
+    await setDoc(playlistRef, {
+      ...playlist,
+      songs: updatedSongs,
+      updatedAt: serverTimestamp(),
+    });
+
+    return true;
   } catch (error) {
     return false;
   }

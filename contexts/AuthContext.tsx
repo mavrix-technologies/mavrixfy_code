@@ -13,7 +13,6 @@ import {
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { logLogin, logSignUp } from "@/lib/analytics";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 
 interface AppUser {
@@ -33,14 +32,11 @@ interface AuthContextValue {
   register: (email: string, password: string, fullName: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signInWithGoogleCredential: (idToken: string) => Promise<void>;
-  continueAsGuest: () => void;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-const GUEST_KEY = "mavrixfy_guest_mode";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
@@ -70,24 +66,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const checkGuest = async () => {
-      try {
-        const guestMode = await AsyncStorage.getItem(GUEST_KEY);
-        if (guestMode === "true") setIsGuest(true);
-      } catch {}
-    };
-    checkGuest();
-
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
         setFirebaseUser(fbUser);
         const appUser = await buildAppUser(fbUser);
         setUser(appUser);
         setIsGuest(false);
-        await AsyncStorage.removeItem(GUEST_KEY);
       } else {
         setFirebaseUser(null);
         setUser(null);
+        setIsGuest(false);
       }
       setLoading(false);
     });
@@ -101,7 +89,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(appUser);
     setFirebaseUser(cred.user);
     setIsGuest(false);
-    await AsyncStorage.removeItem(GUEST_KEY);
     logLogin("email");
   }, [buildAppUser]);
 
@@ -123,7 +110,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(appUser);
     setFirebaseUser(cred.user);
     setIsGuest(false);
-    await AsyncStorage.removeItem(GUEST_KEY);
     logSignUp("email");
   }, []);
 
@@ -150,7 +136,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(appUser);
       setFirebaseUser(fbUser);
       setIsGuest(false);
-      await AsyncStorage.removeItem(GUEST_KEY);
     } else {
       throw new Error("Google Sign-In on native requires expo-auth-session. Use the mobile Google Sign-In button instead.");
     }
@@ -178,15 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(appUser);
     setFirebaseUser(fbUser);
     setIsGuest(false);
-    await AsyncStorage.removeItem(GUEST_KEY);
   }, [buildAppUser]);
-
-  const continueAsGuest = useCallback(async () => {
-    setIsGuest(true);
-    setUser(null);
-    setFirebaseUser(null);
-    await AsyncStorage.setItem(GUEST_KEY, "true");
-  }, []);
 
   const logout = useCallback(async () => {
     try {
@@ -195,7 +172,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setFirebaseUser(null);
     setIsGuest(false);
-    await AsyncStorage.removeItem(GUEST_KEY);
   }, []);
 
   const refreshUser = useCallback(async () => {
@@ -215,10 +191,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     register,
     signInWithGoogle,
     signInWithGoogleCredential,
-    continueAsGuest,
     logout,
     refreshUser,
-  }), [user, firebaseUser, loading, isGuest, login, register, signInWithGoogle, signInWithGoogleCredential, continueAsGuest, logout, refreshUser]);
+  }), [user, firebaseUser, loading, isGuest, login, register, signInWithGoogle, signInWithGoogleCredential, logout, refreshUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

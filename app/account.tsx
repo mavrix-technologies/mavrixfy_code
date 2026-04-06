@@ -21,6 +21,13 @@ import { safeGoBack } from "@/utils/navigation";
 export default function AccountScreen() {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const bottomScrollPadding = Platform.OS === "web" ? 110 : Math.max(118, insets.bottom + 112);
+  const appVersion = Constants.expoConfig?.version || Constants.nativeAppVersion || "1.3.10";
+  const configuredBuild =
+    Platform.OS === "android"
+      ? Constants.expoConfig?.android?.versionCode
+      : Constants.expoConfig?.ios?.buildNumber;
+  const buildVersion = String(configuredBuild || Constants.nativeBuildVersion || "10310");
   const { user, isAuthenticated, isGuest, logout } = useAuth();
   const router = useRouter();
 
@@ -50,7 +57,7 @@ export default function AccountScreen() {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={{ paddingBottom: 80 }}
+        contentContainerStyle={{ paddingBottom: bottomScrollPadding }}
         showsVerticalScrollIndicator={false}
       >
         {/* Profile Section */}
@@ -63,10 +70,10 @@ export default function AccountScreen() {
             />
           ) : (
             <LinearGradient
-              colors={["#1DB954", "#1ed760"]}
+              colors={[Colors.primary, "#84E655"]}
               style={styles.avatar}
             >
-              <Ionicons name="person" size={48} color="#fff" />
+              <Ionicons name="person" size={48} color={Colors.black} />
             </LinearGradient>
           )}
           <Text style={styles.userName}>
@@ -138,7 +145,7 @@ export default function AccountScreen() {
             <View style={styles.infoContent}>
               <Text style={styles.infoLabel}>Version</Text>
               <Text style={styles.infoValue}>
-                {Constants.expoConfig?.version || "1.1.0"}
+                {appVersion}
               </Text>
             </View>
           </View>
@@ -150,9 +157,7 @@ export default function AccountScreen() {
             <View style={styles.infoContent}>
               <Text style={styles.infoLabel}>Build</Text>
               <Text style={styles.infoValue}>
-                {Platform.OS === "android"
-                  ? Constants.expoConfig?.android?.versionCode || "2"
-                  : Constants.expoConfig?.ios?.buildNumber || "2"}
+                {buildVersion}
               </Text>
             </View>
           </View>
@@ -305,3 +310,4 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
   },
 });
+

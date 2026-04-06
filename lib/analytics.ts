@@ -12,23 +12,10 @@ export function logEvent(eventName: string, params?: Record<string, any>) {
     if (analytics) {
       try {
         firebaseLogEvent(analytics, eventName, params);
-        if (__DEV__) {
-          console.log(`📊 Analytics (web): ${eventName}`, params || {});
-          console.log(`🔍 Check Firebase DebugView: https://console.firebase.google.com/project/spotify-8fefc/analytics/debugview`);
-        }
       } catch (error) {
-        if (__DEV__) {
-          console.error("❌ Analytics error:", error);
-        }
-      }
-    } else {
-      if (__DEV__) {
-        console.warn("⚠️ Analytics not initialized yet:", eventName, params);
+        // Silent fail in production
       }
     }
-  } else if (__DEV__) {
-    // Native: Log to console in development
-    console.log(`📊 Analytics (native - logged only): ${eventName}`, params || {});
   }
 }
 

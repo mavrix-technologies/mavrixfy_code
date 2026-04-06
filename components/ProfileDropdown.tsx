@@ -66,10 +66,10 @@ export const ProfileDropdown: React.FC<ProfileDropdownProps> = ({
               />
             ) : (
               <LinearGradient
-                colors={["#1DB954", "#1ed760"]}
+                colors={[Colors.primary, "#84E655"]}
                 style={styles.avatar}
               >
-                <Ionicons name="person" size={24} color="#fff" />
+                <Ionicons name="person" size={24} color={Colors.black} />
               </LinearGradient>
             )}
             <View style={styles.userInfo}>
@@ -142,7 +142,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 60,
     right: 16,
-    backgroundColor: "#1a1a1a",
+    backgroundColor: Colors.surface,
     borderRadius: 16,
     minWidth: 260,
     elevation: 12,
@@ -152,14 +152,14 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderColor: Colors.cardBorder,
   },
   profileSection: {
     flexDirection: "row",
     alignItems: "center",
     padding: 16,
     gap: 12,
-    backgroundColor: "rgba(29, 185, 84, 0.08)",
+    backgroundColor: Colors.surfaceLight,
   },
   avatar: {
     width: 48,
@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
-    borderColor: Colors.primary,
+    borderColor: Colors.cardBorderStrong,
   },
   userInfo: {
     flex: 1,
@@ -192,13 +192,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   menuItemPressed: {
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   iconContainer: {
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: "rgba(29, 185, 84, 0.12)",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -219,7 +219,8 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    backgroundColor: Colors.cardBorder,
     marginVertical: 4,
   },
 });
+

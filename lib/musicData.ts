@@ -33,7 +33,9 @@ export interface JioSaavnSong {
     all: Array<{ id: string; name: string; role: string; image: JioSaavnImage[]; url: string }>;
   };
   image: JioSaavnImage[];
-  downloadUrl: JioSaavnImage[];
+  downloadUrl?: unknown;
+  audioUrl?: unknown;
+  url?: string;
 }
 
 export interface JioSaavnPlaylist {
@@ -67,18 +69,91 @@ export interface Genre {
   color: string;
 }
 
+function normalizeJioSaavnImageUrl(rawUrl: string): string {
+  const trimmed = String(rawUrl || "").trim();
+  if (!trimmed) return "";
+
+  // Prefer higher-res covers to avoid badge-like thumbnail variants.
+  return trimmed
+    .replace(/50x50/gi, "500x500")
+    .replace(/150x150/gi, "500x500")
+    .replace(/_50x50\./gi, "_500x500.")
+    .replace(/_150x150\./gi, "_500x500.")
+    .replace(/-50x50\./gi, "-500x500.")
+    .replace(/-150x150\./gi, "-500x500.");
+}
+
+function qualityScore(quality: string | undefined, url: string | undefined): number {
+  const qualityKey = String(quality || "").trim().toLowerCase();
+  const direct: Record<string, number> = {
+    "500x500": 3,
+    "150x150": 2,
+    "50x50": 1,
+  };
+  if (qualityKey in direct) return direct[qualityKey];
+
+  const match = String(url || "").match(/(\d{2,4})x(\d{2,4})/i);
+  if (!match) return 0;
+  const width = Number(match[1]) || 0;
+  const height = Number(match[2]) || 0;
+  return Math.max(width, height);
+}
+
 export function getBestImageUrl(images: JioSaavnImage[]): string {
   if (!images || images.length === 0) return "";
   const sorted = [...images].sort((a, b) => {
-    const qualityOrder: Record<string, number> = { "500x500": 3, "150x150": 2, "50x50": 1 };
-    return (qualityOrder[b.quality] || 0) - (qualityOrder[a.quality] || 0);
+    return qualityScore(b.quality, b.url) - qualityScore(a.quality, a.url);
   });
-  return sorted[0]?.url || "";
+  return normalizeJioSaavnImageUrl(sorted[0]?.url || "");
 }
 
-export function getBestAudioUrl(downloadUrls: JioSaavnImage[]): string {
-  if (!downloadUrls || downloadUrls.length === 0) return "";
-  const sorted = [...downloadUrls].sort((a, b) => {
+type AudioCandidate = {
+  quality: string;
+  url: string;
+};
+
+function normalizeAudioCandidates(downloadUrls: unknown): AudioCandidate[] {
+  if (!downloadUrls) return [];
+
+  if (typeof downloadUrls === "string") {
+    const url = downloadUrls.trim();
+    return url ? [{ quality: "320kbps", url }] : [];
+  }
+
+  if (Array.isArray(downloadUrls)) {
+    return downloadUrls
+      .map((item) => {
+        if (typeof item === "string") {
+          const url = item.trim();
+          return url ? { quality: "", url } : null;
+        }
+
+        if (!item || typeof item !== "object") return null;
+        const obj = item as { quality?: unknown; url?: unknown; link?: unknown };
+        const urlValue = typeof obj.url === "string" ? obj.url : typeof obj.link === "string" ? obj.link : "";
+        const qualityValue = typeof obj.quality === "string" ? obj.quality : "";
+        const url = urlValue.trim();
+        if (!url) return null;
+        return { quality: qualityValue, url };
+      })
+      .filter((item): item is AudioCandidate => Boolean(item));
+  }
+
+  if (typeof downloadUrls === "object") {
+    const obj = downloadUrls as { url?: unknown; link?: unknown };
+    const urlValue = typeof obj.url === "string" ? obj.url : typeof obj.link === "string" ? obj.link : "";
+    const url = urlValue.trim();
+    if (url) return [{ quality: "", url }];
+  }
+
+  return [];
+}
+
+export function getBestAudioUrl(downloadUrls: unknown): string {
+  const candidates = normalizeAudioCandidates(downloadUrls);
+  if (candidates.length === 0) return "";
+
+  const sorted = [...candidates].sort((a, b) => {
     const qualityOrder: Record<string, number> = { "320kbps": 4, "160kbps": 3, "96kbps": 2, "48kbps": 1, "12kbps": 0 };
     return (qualityOrder[b.quality] || 0) - (qualityOrder[a.quality] || 0);
   });
@@ -95,7 +170,7 @@ export function convertJioSaavnSong(song: JioSaavnSong): Song {
     duration: song.duration || 0,
     coverUrl: getBestImageUrl(song.image),
     genre: song.language || "",
-    audioUrl: getBestAudioUrl(song.downloadUrl),
+    audioUrl: getBestAudioUrl(song.downloadUrl || song.audioUrl || song.url),
     year: song.year,
     language: song.language,
     hasLyrics: song.hasLyrics,

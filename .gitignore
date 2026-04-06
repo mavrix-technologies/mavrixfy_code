@@ -5,6 +5,7 @@ node_modules/
 
 # Expo
 .expo/
+.expo-shared/
 dist/
 web-build/
 expo-env.d.ts
@@ -12,12 +13,17 @@ expo-env.d.ts
 # Native
 ios/
 android/
+outputs/
+*.apk
+*.aab
+*.ipa
 *.orig.*
 *.jks
 *.p8
 *.p12
 *.key
 *.mobileprovision
+*.der
 
 # Metro
 .metro-health-check*
@@ -44,6 +50,13 @@ yarn-error.*
 attached_assets/
 *.tmp
 *.log
+app.aab.json
+
+# Local tooling / editor artifacts
+.vscode/
+.stitch/
+stitch_exports/
+g/
 
 # Documentation (keep only essential)
 *_DEBUG.md

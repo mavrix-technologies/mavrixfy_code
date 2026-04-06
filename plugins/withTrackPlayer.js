@@ -1,74 +1,111 @@
-const { withAndroidManifest, withAppBuildGradle } = require('@expo/config-plugins');
+const fs = require("fs");
+const path = require("path");
+const { withAndroidManifest, withDangerousMod, AndroidConfig } = require("@expo/config-plugins");
 
-/**
- * Expo config plugin for react-native-track-player
- * Adds required Android configuration
- */
+function ensureUsesPermission(manifest, permissionName) {
+  const permissions = manifest["uses-permission"] ?? [];
+  const hasPermission = permissions.some(
+    (permission) => permission?.$?.["android:name"] === permissionName
+  );
+
+  if (!hasPermission) {
+    permissions.push({
+      $: {
+        "android:name": permissionName,
+      },
+    });
+  }
+
+  manifest["uses-permission"] = permissions;
+}
+
+function ensureIntentFilterAction(service, actionName) {
+  service["intent-filter"] = service["intent-filter"] ?? [];
+  const hasAction = service["intent-filter"].some((intentFilter) =>
+    Array.isArray(intentFilter.action)
+      ? intentFilter.action.some((action) => action?.$?.["android:name"] === actionName)
+      : false
+  );
+
+  if (!hasAction) {
+    service["intent-filter"].push({
+      action: [
+        {
+          $: {
+            "android:name": actionName,
+          },
+        },
+      ],
+    });
+  }
+}
+
 function withTrackPlayer(config) {
-  // Add Android manifest configuration
-  config = withAndroidManifest(config, (config) => {
-    const { manifest } = config.modResults;
+  config = withAndroidManifest(config, (cfg) => {
+    const manifest = cfg.modResults.manifest;
 
-    // Add FOREGROUND_SERVICE permission if not already present
-    if (!manifest.$ ['uses-permission']) {
-      manifest.$['uses-permission'] = [];
-    }
+    ensureUsesPermission(manifest, "android.permission.FOREGROUND_SERVICE");
+    ensureUsesPermission(manifest, "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK");
 
-    const permissions = manifest.$['uses-permission'];
-    const hasForegroundService = permissions.some(
-      (perm) => perm.$['android:name'] === 'android.permission.FOREGROUND_SERVICE'
+    const mainApplication = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
+    AndroidConfig.Manifest.addMetaDataItemToMainApplication(
+      mainApplication,
+      "com.google.android.gms.car.application",
+      "@xml/automotive_app_desc",
+      "resource"
     );
 
-    if (!hasForegroundService) {
-      permissions.push({
-        $: {
-          'android:name': 'android.permission.FOREGROUND_SERVICE',
-        },
-      });
-    }
-
-    // Add service to application
-    if (!manifest.application) {
-      manifest.application = [{}];
-    }
-
-    const application = manifest.application[0];
-
-    if (!application.service) {
-      application.service = [];
-    }
-
-    // Add MusicService
-    const hasMusicService = application.service.some(
+    mainApplication.service = mainApplication.service ?? [];
+    let musicService = mainApplication.service.find(
       (service) =>
-        service.$['android:name'] === 'com.doublesymmetry.trackplayer.service.MusicService'
+        service?.$?.["android:name"] === "com.doublesymmetry.trackplayer.service.MusicService"
     );
 
-    if (!hasMusicService) {
-      application.service.push({
+    if (!musicService) {
+      musicService = {
         $: {
-          'android:name': 'com.doublesymmetry.trackplayer.service.MusicService',
-          'android:foregroundServiceType': 'mediaPlayback',
-          'android:exported': 'false',
+          "android:name": "com.doublesymmetry.trackplayer.service.MusicService",
+          "android:enabled": "true",
+          "android:exported": "true",
+          "android:foregroundServiceType": "mediaPlayback",
         },
-      });
+      };
+      mainApplication.service.push(musicService);
+    } else {
+      musicService.$ = musicService.$ ?? {};
+      musicService.$["android:enabled"] = musicService.$["android:enabled"] ?? "true";
+      musicService.$["android:exported"] = "true";
+      musicService.$["android:foregroundServiceType"] = "mediaPlayback";
     }
 
-    return config;
+    ensureIntentFilterAction(musicService, "android.intent.action.MEDIA_BUTTON");
+    ensureIntentFilterAction(musicService, "android.media.browse.MediaBrowserService");
+
+    return cfg;
   });
 
-  // Add Gradle configuration
-  config = withAppBuildGradle(config, (config) => {
-    // Ensure compileSdkVersion is at least 31 for foregroundServiceType
-    if (config.modResults.contents.includes('compileSdkVersion')) {
-      config.modResults.contents = config.modResults.contents.replace(
-        /compileSdkVersion\s+\d+/,
-        'compileSdkVersion 34'
+  config = withDangerousMod(config, [
+    "android",
+    async (cfg) => {
+      const xmlDir = path.join(cfg.modRequest.platformProjectRoot, "app", "src", "main", "res", "xml");
+      const xmlFile = path.join(xmlDir, "automotive_app_desc.xml");
+
+      await fs.promises.mkdir(xmlDir, { recursive: true });
+      await fs.promises.writeFile(
+        xmlFile,
+        [
+          '<?xml version="1.0" encoding="utf-8"?>',
+          "<automotiveApp>",
+          '  <uses name="media"/>',
+          "</automotiveApp>",
+          "",
+        ].join("\n"),
+        "utf8"
       );
-    }
 
-    return config;
-  });
+      return cfg;
+    },
+  ]);
 
   return config;
 }

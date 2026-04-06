@@ -10,6 +10,14 @@ export function getApiUrl(): string {
   return getMusicApiUrl();
 }
 
+async function consumeResponseBody(res: Response) {
+  try {
+    await res.text();
+  } catch {
+    // Best effort only
+  }
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -50,6 +58,7 @@ export const getQueryFn: <T>(options: {
       });
 
       if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+        await consumeResponseBody(res);
         return null;
       }
 

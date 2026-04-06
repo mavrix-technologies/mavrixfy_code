@@ -37,6 +37,7 @@ export interface AppSettings {
   downloadQuality: "low" | "medium" | "high";
   equalizer: Record<string, number>;
   equalizerEnabled: boolean;
+  hapticsEnabled: boolean;
   crossfade: number;
   gapless: boolean;
   normalizeVolume: boolean;
@@ -54,6 +55,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     "15KHz": 0,
   },
   equalizerEnabled: false,
+  hapticsEnabled: false,
   crossfade: 0,
   gapless: true,
   normalizeVolume: false,
@@ -147,6 +149,84 @@ export async function saveUserPlaylists(playlists: UserPlaylist[]): Promise<void
   await setJSON(KEYS.USER_PLAYLISTS, playlists);
 }
 
+/**
+ * Fetch synced Spotify liked songs from backend and update local cache
+ * Call this after Spotify connection to load new songs
+ */
+export async function syncSpotifyLikedSongsToLocal(userId: string, backendUrl: string = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://api.mavrixfy.site'): Promise<Song[]> {
+  try {
+    console.log('📱 Fetching synced Spotify songs from backend for user:', userId);
+    
+    const response = await fetch(`${backendUrl}/spotify/liked-songs/${userId}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Backend returned ${response.status}: ${response.statusText}`);
+    }
+
+    const spotifySongs = await response.json();
+    
+    // Convert backend format to app Song format
+    const convertedSongs: Song[] = spotifySongs.map((song: any) => ({
+      id: song.id || song.songId || song.trackId,
+      title: song.title || song.name || 'Unknown',
+      artist: song.artist || 'Unknown Artist',
+      coverUrl: song.imageUrl || song.coverUrl || '',
+      audioUrl: song.audioUrl || song.previewUrl || '',
+      duration: song.duration || 0,
+      album: song.album || song.albumName || '',
+      source: 'spotify' as const,
+      isLocal: false,
+      addedAt: song.addedAt || song.likedAt || new Date().toISOString(),
+      // Keep original data for reference
+      _original: song,
+    }));
+
+    console.log(`✅ Fetched ${convertedSongs.length} songs from Spotify sync`);
+
+    // Get existing liked songs to merge
+    const existingIds = await getLikedSongIds();
+    const existingData = await getLikedSongsData();
+    
+    // Create a map of existing songs by ID
+    const existingMap = new Map(existingData.map(s => [s.id, s]));
+    
+    // Add new songs that aren't already liked
+    const newSongs: Song[] = [];
+    for (const song of convertedSongs) {
+      if (!existingMap.has(song.id)) {
+        newSongs.push(song);
+      }
+    }
+
+    // Merge and save
+    const mergedSongs = [...newSongs, ...existingData]; // New Spotify songs first
+    const mergedIds = mergedSongs.map(s => s.id);
+
+    console.log(`📊 Merged ${mergedSongs.length} total songs (${newSongs.length} new from Spotify)`);
+
+    // Update storage
+    await Promise.all([
+      setJSON(KEYS.LIKED_SONGS, mergedIds),
+      setJSON(KEYS.LIKED_SONGS_DATA, mergedSongs),
+    ]);
+
+    // Clear memory cache to force refresh
+    memoryCache.delete(KEYS.LIKED_SONGS);
+    memoryCache.delete(KEYS.LIKED_SONGS_DATA);
+
+    return mergedSongs;
+  } catch (error) {
+    console.error('❌ Error syncing Spotify songs to local:', error);
+    // Don't throw - return empty array and let app continue
+    return [];
+  }
+}
+
 export async function createUserPlaylist(name: string, description?: string): Promise<UserPlaylist> {
   const playlists = await getUserPlaylists();
   const newPlaylist: UserPlaylist = {
@@ -181,6 +261,23 @@ export async function addSongToPlaylist(playlistId: string, song: Song): Promise
   await saveUserPlaylists(playlists);
 }
 
+export async function updateUserPlaylist(
+  playlistId: string,
+  updates: Partial<{ name: string; description: string; coverUrl: string }>
+): Promise<void> {
+  const playlists = await getUserPlaylists();
+  const idx = playlists.findIndex(p => p.id === playlistId);
+  if (idx === -1) return;
+  
+  playlists[idx] = {
+    ...playlists[idx],
+    ...updates,
+    updatedAt: Date.now(),
+  };
+  
+  await saveUserPlaylists(playlists);
+}
+
 export async function removeSongFromPlaylist(playlistId: string, songId: string): Promise<void> {
   const playlists = await getUserPlaylists();
   const idx = playlists.findIndex(p => p.id === playlistId);
@@ -202,7 +299,16 @@ export async function addRecentlyPlayed(item: Omit<RecentlyPlayedItem, "lastPlay
 }
 
 export async function getSettings(): Promise<AppSettings> {
-  return getJSON<AppSettings>(KEYS.SETTINGS, DEFAULT_SETTINGS);
+  const saved = await getJSON<Partial<AppSettings>>(KEYS.SETTINGS, DEFAULT_SETTINGS);
+  return {
+    ...DEFAULT_SETTINGS,
+    ...saved,
+    equalizer: {
+      ...DEFAULT_SETTINGS.equalizer,
+      ...(saved.equalizer || {}),
+    },
+    hapticsEnabled: Boolean(saved.hapticsEnabled),
+  };
 }
 
 export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {

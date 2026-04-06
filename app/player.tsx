@@ -1,89 +1,185 @@
-import React, { useCallback, useState, useEffect, useRef, memo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
+import Slider from "@react-native-community/slider";
 import {
   View,
   Text,
+  FlatList,
+  ScrollView,
   Pressable,
   StyleSheet,
-  Dimensions,
   Platform,
+  Alert,
+  ToastAndroid,
   ActivityIndicator,
   Animated,
+  LayoutChangeEvent,
+  GestureResponderEvent,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  useWindowDimensions,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
+import { router, useNavigation } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import { usePlayer } from "@/contexts/PlayerContext";
-import { formatDuration } from "@/lib/musicData";
-import { extractDominantColor } from "@/lib/colorExtractor";
+import { formatDuration, Song } from "@/lib/musicData";
+import { triggerImpact } from "@/lib/haptics";
+import { getLikedSongsData, getRecentlyPlayed, getUserPlaylists } from "@/lib/storage";
 import { PingPongScroll } from "@/components/PingPongScroll";
+import { createSpotifyColorTheme, extractDominantColor } from "@/lib/colorExtractor";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const ART_SIZE = Math.min(SCREEN_WIDTH - 48, 400);
+function hexToRgba(color: string, alpha: number): string {
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+  const hex = color.replace("#", "").trim();
+  if (hex.length === 3) {
+    const red = Number.parseInt(hex[0] + hex[0], 16);
+    const green = Number.parseInt(hex[1] + hex[1], 16);
+    const blue = Number.parseInt(hex[2] + hex[2], 16);
+    if (!Number.isNaN(red) && !Number.isNaN(green) && !Number.isNaN(blue)) {
+      return `rgba(${red},${green},${blue},${safeAlpha})`;
+    }
+  }
+  if (hex.length === 6) {
+    const red = Number.parseInt(hex.slice(0, 2), 16);
+    const green = Number.parseInt(hex.slice(2, 4), 16);
+    const blue = Number.parseInt(hex.slice(4, 6), 16);
+    if (!Number.isNaN(red) && !Number.isNaN(green) && !Number.isNaN(blue)) {
+      return `rgba(${red},${green},${blue},${safeAlpha})`;
+    }
+  }
+  return `rgba(255,255,255,${safeAlpha})`;
+}
 
-// Optimized play button component
-const PlayerPlayButton = memo(({ 
-  isPlaying, 
-  isLoading, 
-  onPress 
-}: { 
-  isPlaying: boolean; 
-  isLoading: boolean; 
-  onPress: () => void;
-}) => {
-  return (
-    <Pressable onPress={onPress} style={styles.playButton}>
+function getSeededFraction(seed: number): number {
+  const safeSeed = seed >>> 0;
+  return (safeSeed % 1000003) / 1000003;
+}
+
+function hashArtworkKey(input: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function mapSeededRange(seed: number, min: number, max: number): number {
+  return min + (max - min) * getSeededFraction(seed);
+}
+
+function getArtworkCardDecor(seedKey: string) {
+  const baseSeed = hashArtworkKey(seedKey);
+  const rotateDeg = mapSeededRange(baseSeed, -5.4, 5.4);
+  const borderAlpha = mapSeededRange(Math.imul(baseSeed, 48271) + 7, 0.2, 0.36);
+  return {
+    rotateDeg,
+    borderAlpha,
+  };
+}
+
+const AnimatedSongFlatList = Animated.createAnimatedComponent(
+  FlatList as React.ComponentType<any>
+);
+
+const PlayerPlayButton = memo(
+  ({
+    isPlaying,
+    isLoading,
+    buttonSize,
+    iconSize,
+    accentColor,
+    onAccentColor,
+    onPress,
+  }: {
+    isPlaying: boolean;
+    isLoading: boolean;
+    buttonSize: number;
+    iconSize: number;
+    accentColor: string;
+    onAccentColor: string;
+    onPress: () => void;
+  }) => (
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.playButton,
+        {
+          width: buttonSize,
+          height: buttonSize,
+          borderRadius: buttonSize / 2,
+          backgroundColor: hexToRgba(accentColor, 0.28),
+          borderWidth: 1,
+          borderColor: hexToRgba(accentColor, 0.56),
+        },
+      ]}
+    >
       {isLoading ? (
-        <ActivityIndicator size="large" color={Colors.black} />
+        <ActivityIndicator size="small" color={onAccentColor} />
       ) : (
         <Ionicons
           name={isPlaying ? "pause" : "play"}
-          size={38}
-          color={Colors.black}
-          style={!isPlaying ? { marginLeft: 4 } : undefined}
+          size={iconSize}
+          color={onAccentColor}
+          style={!isPlaying ? { marginLeft: 2 } : undefined}
         />
       )}
     </Pressable>
-  );
-}, (prevProps, nextProps) => {
-  // Only re-render if isPlaying or isLoading changed
-  return prevProps.isPlaying === nextProps.isPlaying && 
-         prevProps.isLoading === nextProps.isLoading;
-});
+  )
+);
 
 PlayerPlayButton.displayName = "PlayerPlayButton";
 
-// Helper function to adjust color brightness
-function adjustColorBrightness(hex: string, percent: number): string {
-  // Remove # if present
-  hex = hex.replace("#", "");
-  
-  // Convert to RGB
-  let r = parseInt(hex.substring(0, 2), 16);
-  let g = parseInt(hex.substring(2, 4), 16);
-  let b = parseInt(hex.substring(4, 6), 16);
-  
-  // Adjust brightness
-  r = Math.max(0, Math.min(255, r + (r * percent / 100)));
-  g = Math.max(0, Math.min(255, g + (g * percent / 100)));
-  b = Math.max(0, Math.min(255, b + (b * percent / 100)));
-  
-  // Convert back to hex
-  const rr = Math.round(r).toString(16).padStart(2, "0");
-  const gg = Math.round(g).toString(16).padStart(2, "0");
-  const bb = Math.round(b).toString(16).padStart(2, "0");
-  
-  return `#${rr}${gg}${bb}`;
-}
+const DEV_PREVIEW_SONGS: Song[] = [
+  {
+    id: "dev-preview-1",
+    title: "Midnight Drive",
+    artist: "Mavrixfy Preview",
+    album: "UI Preview",
+    duration: 214,
+    coverUrl: "https://placehold.co/600x600/1b2d4b/f4f7fb?text=Preview+1",
+    genre: "Preview",
+    audioUrl: "",
+    source: "local",
+  },
+  {
+    id: "dev-preview-2",
+    title: "Afterglow",
+    artist: "Mavrixfy Preview",
+    album: "UI Preview",
+    duration: 187,
+    coverUrl: "https://placehold.co/600x600/3d2748/f4f7fb?text=Preview+2",
+    genre: "Preview",
+    audioUrl: "",
+    source: "local",
+  },
+  {
+    id: "dev-preview-3",
+    title: "Blue Avenue",
+    artist: "Mavrixfy Preview",
+    album: "UI Preview",
+    duration: 201,
+    coverUrl: "https://placehold.co/600x600/14385a/f4f7fb?text=Preview+3",
+    genre: "Preview",
+    audioUrl: "",
+    source: "local",
+  },
+];
 
 export default function PlayerScreen() {
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const {
     currentSong,
+    queue,
+    sourceQueue,
+    queueIndex,
     isPlaying,
     progress,
     duration,
@@ -92,6 +188,7 @@ export default function PlayerScreen() {
     repeatMode,
     isLoading,
     togglePlay,
+    playSong,
     nextSong,
     prevSong,
     seekTo,
@@ -100,201 +197,1230 @@ export default function PlayerScreen() {
     toggleLike,
     isLiked,
     albumColor,
-    textColor,
+    setAlbumColor,
+    setTextColor,
   } = usePlayer();
 
+  const [sliderPreviewProgress, setSliderPreviewProgress] = useState<number | null>(null);
   const [isSeeking, setIsSeeking] = useState(false);
-  const [gradientColors, setGradientColors] = useState<[string, string, string, string, string]>([
-    "#0a0a0a",
-    "#1a1a2e",
-    "#16213e",
-    "#0f3460",
-    Colors.background,
-  ]);
+  const [isLoadingDevTrack, setIsLoadingDevTrack] = useState(false);
+  const [isDevPreviewEnabled, setIsDevPreviewEnabled] = useState(false);
+  const [devPreviewIndex, setDevPreviewIndex] = useState(0);
+  const [devPreviewIsPlaying, setDevPreviewIsPlaying] = useState(true);
+  const [devPreviewProgress, setDevPreviewProgress] = useState(0.18);
+  const [devPreviewIsShuffled, setDevPreviewIsShuffled] = useState(false);
+  const [devPreviewRepeatMode, setDevPreviewRepeatMode] = useState<"off" | "all" | "one">("off");
+  const [devPreviewLikedSongIds, setDevPreviewLikedSongIds] = useState<string[]>([]);
+  const [progressTrackWidth, setProgressTrackWidth] = useState(0);
+  const androidSeekFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seekPreviewFrameRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
+  const pendingSeekPreviewRef = useRef<number | null>(null);
+  const lastRenderedSeekPreviewRef = useRef<number | null>(null);
+  const lastPreviewStateUpdateMsRef = useRef(0);
+  const progressFillRef = useRef<View | null>(null);
+  const progressThumbRef = useRef<View | null>(null);
+  const seekVisualProgressRef = useRef(0);
   const fadeAnim = useRef(new Animated.Value(0)).current;
-
-  // Update gradient colors based on album color
-  useEffect(() => {
-    if (currentSong?.coverUrl && albumColor) {
-      // Create gradient from album color to dark background
-      const baseColor = albumColor;
-      const darkColor = Colors.background;
-      setGradientColors([
-        baseColor,
-        adjustColorBrightness(baseColor, -20),
-        adjustColorBrightness(baseColor, -40),
-        adjustColorBrightness(baseColor, -60),
-        darkColor,
-      ] as [string, string, string, string, string]);
-    }
-  }, [currentSong?.id, albumColor]);
+  const artScrollX = useRef(new Animated.Value(0)).current;
+  const artCarouselRef = useRef<FlatList<Song> | null>(null);
+  const hasAlignedArtCarouselRef = useRef(false);
+  const pendingArtworkTargetIndexRef = useRef<number | null>(null);
+  const didHandleSheetDismissRef = useRef(false);
+  const sheetDetentReadyAtRef = useRef(0);
+  const isDevPreviewActive = __DEV__ && !currentSong && isDevPreviewEnabled;
+  const devPreviewSong =
+    DEV_PREVIEW_SONGS[Math.max(0, Math.min(devPreviewIndex, DEV_PREVIEW_SONGS.length - 1))] ??
+    DEV_PREVIEW_SONGS[0];
+  const screenSong = currentSong ?? (isDevPreviewActive ? devPreviewSong : null);
 
   useEffect(() => {
+    fadeAnim.setValue(0);
     Animated.timing(fadeAnim, {
       toValue: 1,
-      duration: 400,
+      duration: 320,
       useNativeDriver: true,
     }).start();
-  }, [currentSong?.id]);
+  }, [screenSong?.id, screenSong?.coverUrl, fadeAnim]);
 
-  const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 34 : insets.bottom;
+  useEffect(() => {
+    didHandleSheetDismissRef.current = false;
+    sheetDetentReadyAtRef.current = Date.now() + 450;
+  }, [screenSong?.id]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") {
+      return;
+    }
+
+    const unsubscribe = navigation.addListener("sheetDetentChange" as never, ((event: any) => {
+      const index = event?.data?.index;
+      const isStable = event?.data?.stable ?? true;
+      if (Date.now() < sheetDetentReadyAtRef.current) {
+        return;
+      }
+      if (!isStable || index !== 0) {
+        return;
+      }
+      if (didHandleSheetDismissRef.current) {
+        return;
+      }
+      didHandleSheetDismissRef.current = true;
+      safeGoBack();
+    }) as never);
+
+    return unsubscribe;
+  }, [navigation]);
+
+  useEffect(() => {
+    let active = true;
+    const cover = screenSong?.coverUrl?.trim();
+    if (!cover) return () => {};
+
+    extractDominantColor(cover)
+      .then((colors) => {
+        if (!active) return;
+        setAlbumColor(colors.primary);
+        setTextColor(colors.text);
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, [screenSong?.id, screenSong?.coverUrl, setAlbumColor, setTextColor]);
+
+  const rawTopInset = Platform.OS === "web" ? 67 : insets.top;
+  const topInset = Platform.OS === "ios" ? Math.max(2, rawTopInset - 18) : rawTopInset;
+  const bottomInset = Platform.OS === "web" ? 28 : insets.bottom;
+  const isShortScreen = screenHeight <= 760;
+  const isVeryShortScreen = screenHeight <= 700;
+  const topBarHeight = isShortScreen ? 50 : 54;
+  const controlButtonSize = isVeryShortScreen ? 34 : isShortScreen ? 38 : 42;
+  const prevNextIconSize = isVeryShortScreen ? 20 : isShortScreen ? 22 : 24;
+  const shuffleRepeatIconSize = isVeryShortScreen ? 16 : isShortScreen ? 17 : 19;
+  const playButtonSize = isVeryShortScreen ? 56 : isShortScreen ? 62 : 74;
+  const playIconSize = isVeryShortScreen ? 28 : isShortScreen ? 30 : 34;
+  const listBottomPadding = Platform.OS === "web" ? 16 : Math.max(32, bottomInset + 28);
+  const defaultArtByWidth = Math.min(screenWidth - 62, 336);
+  const defaultArtByHeight = Math.max(192, Math.floor(screenHeight * (isVeryShortScreen ? 0.3 : 0.34)));
+  const artSize = Math.min(defaultArtByWidth, defaultArtByHeight);
 
   const haptic = useCallback(() => {
-    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (Platform.OS !== "web") {
+      void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
+    }
   }, []);
 
-  if (!currentSong) {
+  const livePlayingQueue = useMemo(() => {
+    const hasFullActiveQueue = queue.length > 1;
+    const hasFullSourceQueue = sourceQueue.length > 1;
+    if (hasFullActiveQueue) {
+      return queue.filter((song) => Boolean(song?.id));
+    }
+    if (hasFullSourceQueue) {
+      return sourceQueue.filter((song) => Boolean(song?.id));
+    }
+    if (queue.length === 1) {
+      return queue;
+    }
+    return currentSong ? [currentSong] : [];
+  }, [currentSong, queue, sourceQueue]);
+  const liveActiveQueueIndex = useMemo(() => {
+    if (livePlayingQueue.length === 0) return 0;
+    if (currentSong?.id) {
+      const currentIndex = livePlayingQueue.findIndex((song) => song.id === currentSong.id);
+      if (currentIndex >= 0) {
+        return currentIndex;
+      }
+    }
+    const rawIndex = queue.length > 0 ? queueIndex : 0;
+    return Math.max(0, Math.min(rawIndex, livePlayingQueue.length - 1));
+  }, [currentSong?.id, livePlayingQueue, queue.length, queueIndex]);
+  const playingQueue = isDevPreviewActive ? DEV_PREVIEW_SONGS : livePlayingQueue;
+  const activeQueueIndex = isDevPreviewActive ? devPreviewIndex : liveActiveQueueIndex;
+  const playerIsPlaying = isDevPreviewActive ? devPreviewIsPlaying : isPlaying;
+  const playerProgress = isDevPreviewActive ? devPreviewProgress : progress;
+  const playerDuration = isDevPreviewActive ? (devPreviewSong?.duration ?? 0) * 1000 : duration;
+  const playerPositionMillis = isDevPreviewActive
+    ? Math.round((devPreviewSong?.duration ?? 0) * 1000 * devPreviewProgress)
+    : positionMillis;
+  const playerIsShuffled = isDevPreviewActive ? devPreviewIsShuffled : isShuffled;
+  const playerRepeatMode = isDevPreviewActive ? devPreviewRepeatMode : repeatMode;
+  const currentTimeSec = Math.floor(playerPositionMillis / 1000);
+  const totalDurationSec = Math.floor(playerDuration / 1000);
+  const rawSongDuration = Number(screenSong?.duration ?? 0);
+  const safeSongDuration = Number.isFinite(rawSongDuration) ? Math.max(0, rawSongDuration) : 0;
+  const effectiveDurationSec = totalDurationSec > 0 ? totalDurationSec : safeSongDuration;
+  const canSeek =
+    isDevPreviewActive ||
+    effectiveDurationSec > 0 ||
+    (Platform.OS === "android" && Boolean(screenSong?.id));
+  const liked = screenSong
+    ? isDevPreviewActive
+      ? devPreviewLikedSongIds.includes(screenSong.id)
+      : isLiked(screenSong.id)
+    : false;
+  const displayDuration =
+    totalDurationSec > 0 ? formatDuration(totalDurationSec) : formatDuration(safeSongDuration);
+  const queueCountLabel = `${playingQueue.length} ${playingQueue.length === 1 ? "song" : "songs"}`;
+  const artWrapHorizontalPadding = isShortScreen ? 14 : 20;
+  const artCarouselViewportWidth = Math.max(1, screenWidth - artWrapHorizontalPadding * 2);
+  const artCarouselPageWidth = artCarouselViewportWidth;
+  const artCarouselSnapInterval = artCarouselPageWidth;
+
+  const playerTheme = useMemo(
+    () => createSpotifyColorTheme(albumColor || Colors.primary),
+    [albumColor]
+  );
+  const gradientColors = playerTheme.playerGradient;
+  const controlButtonBg = "rgba(16,23,33,0.76)";
+  const controlButtonBorder = "rgba(223,226,235,0.24)";
+  const controlIconColor = "rgba(236,240,247,0.96)";
+  const controlButtonActiveBg = hexToRgba(playerTheme.accent, 0.2);
+  const controlButtonActiveBorder = hexToRgba(playerTheme.accent, 0.64);
+  const deviceButtonBg = "rgba(15,22,32,0.72)";
+  const deviceButtonBorder = hexToRgba(playerTheme.accent, 0.36);
+  const deviceButtonTextColor = "rgba(232,238,246,0.94)";
+  const progressTrackColor = "rgba(255,255,255,0.16)";
+  const progressFillColor = playerTheme.accent;
+  const progressThumbColor = "rgba(255,255,255,0.96)";
+  const usesResponderSeek = Platform.OS === "web" || Platform.OS === "android";
+
+  const clampProgress = useCallback((value: number) => {
+    return Math.max(0, Math.min(1, value));
+  }, []);
+
+  const clearAndroidSeekFallbackTimer = useCallback(() => {
+    if (!androidSeekFallbackTimerRef.current) return;
+    clearTimeout(androidSeekFallbackTimerRef.current);
+    androidSeekFallbackTimerRef.current = null;
+  }, []);
+
+  const clearSeekPreviewFrame = useCallback(() => {
+    if (seekPreviewFrameRef.current === null) return;
+    cancelAnimationFrame(seekPreviewFrameRef.current);
+    seekPreviewFrameRef.current = null;
+  }, []);
+
+  const applySeekVisualProgress = useCallback(
+    (value: number) => {
+      const clamped = clampProgress(value);
+      seekVisualProgressRef.current = clamped;
+      const percent = `${clamped * 100}%`;
+      progressFillRef.current?.setNativeProps?.({ style: { width: percent } });
+      progressThumbRef.current?.setNativeProps?.({ style: { left: percent } });
+      return clamped;
+    },
+    [clampProgress]
+  );
+
+  const setSeekPreviewImmediate = useCallback(
+    (value: number | null) => {
+      clearSeekPreviewFrame();
+      pendingSeekPreviewRef.current = null;
+
+      if (value === null) {
+        lastRenderedSeekPreviewRef.current = null;
+        seekVisualProgressRef.current = clampProgress(playerProgress);
+        setSliderPreviewProgress(null);
+        return;
+      }
+
+      const clamped = applySeekVisualProgress(value);
+      lastRenderedSeekPreviewRef.current = clamped;
+      lastPreviewStateUpdateMsRef.current = Date.now();
+      setSliderPreviewProgress(clamped);
+    },
+    [applySeekVisualProgress, clampProgress, clearSeekPreviewFrame, playerProgress]
+  );
+
+  const flushQueuedSeekPreview = useCallback(() => {
+    const queuedValue = pendingSeekPreviewRef.current;
+    pendingSeekPreviewRef.current = null;
+    if (queuedValue === null) {
+      return;
+    }
+    if (
+      lastRenderedSeekPreviewRef.current !== null &&
+      Math.abs(lastRenderedSeekPreviewRef.current - queuedValue) < 0.0025
+    ) {
+      return;
+    }
+    lastRenderedSeekPreviewRef.current = queuedValue;
+    applySeekVisualProgress(queuedValue);
+    const now = Date.now();
+    if (now - lastPreviewStateUpdateMsRef.current >= 90) {
+      lastPreviewStateUpdateMsRef.current = now;
+      setSliderPreviewProgress(queuedValue);
+    }
+  }, [applySeekVisualProgress]);
+
+  const queueSeekPreview = useCallback(
+    (value: number) => {
+      pendingSeekPreviewRef.current = clampProgress(value);
+      if (seekPreviewFrameRef.current !== null) {
+        return;
+      }
+      seekPreviewFrameRef.current = requestAnimationFrame(() => {
+        seekPreviewFrameRef.current = null;
+        flushQueuedSeekPreview();
+      });
+    },
+    [clampProgress, flushQueuedSeekPreview]
+  );
+
+  const visualProgress = useMemo(() => {
+    return clampProgress(sliderPreviewProgress ?? playerProgress);
+  }, [clampProgress, playerProgress, sliderPreviewProgress]);
+
+  useEffect(() => {
+    if (isSeeking && pendingSeekPreviewRef.current !== null) {
+      return;
+    }
+    applySeekVisualProgress(visualProgress);
+  }, [applySeekVisualProgress, isSeeking, visualProgress]);
+
+  useEffect(() => {
+    clearAndroidSeekFallbackTimer();
+    clearSeekPreviewFrame();
+    setIsSeeking(false);
+    setSeekPreviewImmediate(null);
+  }, [clearAndroidSeekFallbackTimer, clearSeekPreviewFrame, screenSong?.id, setSeekPreviewImmediate]);
+
+  useEffect(() => {
+    return () => {
+      clearAndroidSeekFallbackTimer();
+      clearSeekPreviewFrame();
+    };
+  }, [clearAndroidSeekFallbackTimer, clearSeekPreviewFrame]);
+
+  useEffect(() => {
+    if (isSeeking) return;
+    if (sliderPreviewProgress === null) return;
+    if (Math.abs(playerProgress - sliderPreviewProgress) <= 0.02) {
+      setSeekPreviewImmediate(null);
+      return;
+    }
+
+    const syncTimeout = setTimeout(() => {
+      setSeekPreviewImmediate(null);
+    }, 2200);
+
+    return () => clearTimeout(syncTimeout);
+  }, [isSeeking, playerProgress, setSeekPreviewImmediate, sliderPreviewProgress]);
+
+  const handleSlidingStart = useCallback(
+    (value: number) => {
+      clearAndroidSeekFallbackTimer();
+      if (Platform.OS !== "web") {
+        void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+      }
+      setIsSeeking(true);
+      setSeekPreviewImmediate(value);
+    },
+    [clearAndroidSeekFallbackTimer, setSeekPreviewImmediate]
+  );
+
+  const handleSliderValueChange = useCallback(
+    (value: number) => {
+      const nextProgress = clampProgress(value);
+      queueSeekPreview(nextProgress);
+
+      if (Platform.OS === "android" && !isDevPreviewActive) {
+        clearAndroidSeekFallbackTimer();
+        androidSeekFallbackTimerRef.current = setTimeout(() => {
+          androidSeekFallbackTimerRef.current = null;
+          setIsSeeking(false);
+          setSeekPreviewImmediate(nextProgress);
+          seekTo(nextProgress);
+        }, 180);
+      }
+    },
+    [clampProgress, clearAndroidSeekFallbackTimer, isDevPreviewActive, queueSeekPreview, seekTo, setSeekPreviewImmediate]
+  );
+
+  const handleSlidingComplete = useCallback(
+    (value: number) => {
+      clearAndroidSeekFallbackTimer();
+      const nextProgress = clampProgress(value);
+      setIsSeeking(false);
+      setSeekPreviewImmediate(nextProgress);
+      if (isDevPreviewActive) {
+        setDevPreviewProgress(nextProgress);
+        return;
+      }
+      seekTo(nextProgress);
+    },
+    [clampProgress, clearAndroidSeekFallbackTimer, isDevPreviewActive, seekTo, setSeekPreviewImmediate]
+  );
+
+  const handleProgressLayout = useCallback((event: LayoutChangeEvent) => {
+    setProgressTrackWidth(event.nativeEvent.layout.width);
+  }, []);
+
+  const getResponderSeekProgress = useCallback(
+    (event: GestureResponderEvent) => {
+      const nativeX = event.nativeEvent.locationX;
+      const safeWidth = progressTrackWidth > 0 ? progressTrackWidth : Math.max(1, screenWidth - 48);
+      return clampProgress(nativeX / safeWidth);
+    },
+    [clampProgress, progressTrackWidth, screenWidth]
+  );
+
+  const commitSeekProgress = useCallback(
+    (nextProgress: number) => {
+      setIsSeeking(false);
+      setSeekPreviewImmediate(nextProgress);
+      if (isDevPreviewActive) {
+        setDevPreviewProgress(nextProgress);
+        return;
+      }
+      seekTo(nextProgress);
+    },
+    [isDevPreviewActive, seekTo, setSeekPreviewImmediate]
+  );
+
+  const handleResponderSeekGrant = useCallback(
+    (event: GestureResponderEvent) => {
+      if (!usesResponderSeek || !canSeek) return;
+      const nextProgress = getResponderSeekProgress(event);
+      clearAndroidSeekFallbackTimer();
+      if (Platform.OS !== "web") {
+        void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+      }
+      setIsSeeking(true);
+      setSeekPreviewImmediate(nextProgress);
+    },
+    [canSeek, clearAndroidSeekFallbackTimer, getResponderSeekProgress, setSeekPreviewImmediate, usesResponderSeek]
+  );
+
+  const handleResponderSeekMove = useCallback(
+    (event: GestureResponderEvent) => {
+      if (!usesResponderSeek) return;
+      if (!isSeeking) return;
+      queueSeekPreview(getResponderSeekProgress(event));
+    },
+    [getResponderSeekProgress, isSeeking, queueSeekPreview, usesResponderSeek]
+  );
+
+  const handleResponderSeekRelease = useCallback(
+    (event: GestureResponderEvent) => {
+      if (!usesResponderSeek) return;
+      clearAndroidSeekFallbackTimer();
+      const nextProgress = getResponderSeekProgress(event);
+      commitSeekProgress(nextProgress);
+    },
+    [clearAndroidSeekFallbackTimer, commitSeekProgress, getResponderSeekProgress, usesResponderSeek]
+  );
+
+  const handleQueueSongPress = useCallback(
+    (song: Song) => {
+      haptic();
+      playSong(song, playingQueue);
+    },
+    [haptic, playSong, playingQueue]
+  );
+
+  const showDevLoadMessage = useCallback((message: string) => {
+    if (Platform.OS === "android") {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    Alert.alert("Player Dev Helper", message);
+  }, []);
+
+  const normalizePlayableSong = useCallback((source: Partial<Song> | null | undefined): Song | null => {
+    if (!source?.id || !source.audioUrl || source.audioUrl.trim().length === 0) {
+      return null;
+    }
+
+    return {
+      id: source.id,
+      title: source.title || "Unknown Song",
+      artist: source.artist || "Unknown Artist",
+      album: source.album || "",
+      duration: Number(source.duration) || 0,
+      coverUrl: source.coverUrl || "",
+      genre: source.genre || "",
+      audioUrl: source.audioUrl,
+      year: source.year,
+      language: source.language,
+      hasLyrics: source.hasLyrics,
+      source: source.source,
+    };
+  }, []);
+
+  const handleLoadDevTrack = useCallback(async () => {
+    if (isLoadingDevTrack) {
+      return;
+    }
+
+    setIsLoadingDevTrack(true);
+    try {
+      const recentItems = await getRecentlyPlayed();
+      const recentSongs = recentItems
+        .filter((item) => item.type === "song")
+        .map((item) => normalizePlayableSong(item.data as Partial<Song> | undefined))
+        .filter((song): song is Song => Boolean(song));
+
+      const likedSongs = (await getLikedSongsData())
+        .map((song) => normalizePlayableSong(song))
+        .filter((song): song is Song => Boolean(song));
+
+      const localPlaylistSongs = (await getUserPlaylists())
+        .flatMap((playlist) => playlist.songs || [])
+        .map((song) => normalizePlayableSong(song))
+        .filter((song): song is Song => Boolean(song));
+
+      const candidateQueue = [recentSongs, likedSongs, localPlaylistSongs].find((songs) => songs.length > 0) || [];
+
+      if (candidateQueue.length === 0) {
+        showDevLoadMessage("No saved playable song found yet. Play one song from Home once, then come back here.");
+        return;
+      }
+
+      playSong(candidateQueue[0], candidateQueue);
+    } catch {
+      showDevLoadMessage("Could not load a development test song.");
+    } finally {
+      setIsLoadingDevTrack(false);
+    }
+  }, [isLoadingDevTrack, normalizePlayableSong, playSong, showDevLoadMessage]);
+
+  const openDevPreview = useCallback(() => {
+    setIsDevPreviewEnabled(true);
+    setDevPreviewIndex(0);
+    setDevPreviewIsPlaying(true);
+    setDevPreviewProgress(0.18);
+    setDevPreviewIsShuffled(false);
+    setDevPreviewRepeatMode("off");
+    setDevPreviewLikedSongIds([]);
+    setSliderPreviewProgress(null);
+    setIsSeeking(false);
+  }, []);
+
+  const handleArtworkSongChange = useCallback(
+    (targetIndex: number) => {
+      if (targetIndex < 0 || targetIndex >= playingQueue.length || targetIndex === activeQueueIndex) {
+        return;
+      }
+
+      haptic();
+
+      if (isDevPreviewActive) {
+        setDevPreviewIndex(targetIndex);
+        setDevPreviewProgress(0.18);
+        return;
+      }
+
+      if (targetIndex === activeQueueIndex + 1) {
+        void nextSong();
+        return;
+      }
+
+      if (targetIndex === activeQueueIndex - 1) {
+        void prevSong();
+        return;
+      }
+
+      const targetSong = playingQueue[targetIndex];
+      if (!targetSong) {
+        return;
+      }
+
+      playSong(targetSong, playingQueue);
+    },
+    [activeQueueIndex, haptic, isDevPreviewActive, nextSong, playSong, playingQueue, prevSong]
+  );
+
+  useEffect(() => {
+    pendingArtworkTargetIndexRef.current = activeQueueIndex;
+  }, [activeQueueIndex]);
+
+  const handleArtworkScrollFinished = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (playingQueue.length <= 1 || artCarouselSnapInterval <= 0) {
+        return;
+      }
+
+      const rawIndex = Math.round(event.nativeEvent.contentOffset.x / artCarouselSnapInterval);
+      const targetIndex = Math.max(0, Math.min(rawIndex, playingQueue.length - 1));
+
+      if (
+        targetIndex === activeQueueIndex ||
+        targetIndex === pendingArtworkTargetIndexRef.current
+      ) {
+        return;
+      }
+
+      pendingArtworkTargetIndexRef.current = targetIndex;
+      handleArtworkSongChange(targetIndex);
+    },
+    [activeQueueIndex, artCarouselSnapInterval, handleArtworkSongChange, playingQueue.length]
+  );
+
+  const handleArtworkScroll = useMemo(
+    () =>
+      Animated.event([{ nativeEvent: { contentOffset: { x: artScrollX } } }], {
+        useNativeDriver: true,
+      }),
+    [artScrollX]
+  );
+
+  useEffect(() => {
+    if (!artCarouselRef.current || artCarouselSnapInterval <= 0 || playingQueue.length === 0) {
+      return;
+    }
+
+    const targetOffset = activeQueueIndex * artCarouselSnapInterval;
+    const shouldAnimate = hasAlignedArtCarouselRef.current && playingQueue.length > 1;
+    if (!shouldAnimate) {
+      artScrollX.setValue(targetOffset);
+    }
+    const frame = requestAnimationFrame(() => {
+      artCarouselRef.current?.scrollToOffset({
+        offset: targetOffset,
+        animated: shouldAnimate,
+      });
+      hasAlignedArtCarouselRef.current = true;
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [activeQueueIndex, artCarouselSnapInterval, artScrollX, playingQueue.length]);
+
+  const renderArtworkCard = useCallback(
+    ({ item, index }: { item: Song; index: number }) => {
+      const isActiveCard = index === activeQueueIndex;
+      const decor = getArtworkCardDecor(`${item.id || "art"}-${index}`);
+      const inputRange = [
+        (index - 1) * artCarouselSnapInterval,
+        index * artCarouselSnapInterval,
+        (index + 1) * artCarouselSnapInterval,
+      ];
+      const slideScale = artScrollX.interpolate({
+        inputRange,
+        outputRange: [0.9, 1, 0.9],
+        extrapolate: "clamp",
+      });
+      const slideOpacity = artScrollX.interpolate({
+        inputRange,
+        outputRange: [0.64, 1, 0.64],
+        extrapolate: "clamp",
+      });
+      const slideTranslateY = artScrollX.interpolate({
+        inputRange,
+        outputRange: [14, 0, 14],
+        extrapolate: "clamp",
+      });
+      const slideTranslateX = artScrollX.interpolate({
+        inputRange,
+        outputRange: [16, 0, -16],
+        extrapolate: "clamp",
+      });
+      const slideRotateY = artScrollX.interpolate({
+        inputRange,
+        outputRange: ["9deg", "0deg", "-9deg"],
+        extrapolate: "clamp",
+      });
+      const slideRotateZ = artScrollX.interpolate({
+        inputRange,
+        outputRange: [`${decor.rotateDeg * 0.55}deg`, "0deg", `${-decor.rotateDeg * 0.55}deg`],
+        extrapolate: "clamp",
+      });
+      const imageParallaxX = artScrollX.interpolate({
+        inputRange,
+        outputRange: [-12, 0, 12],
+        extrapolate: "clamp",
+      });
+      const cardOpacity = isActiveCard ? Animated.multiply(slideOpacity, fadeAnim) : slideOpacity;
+
+      return (
+        <Pressable
+          style={[styles.artCarouselTouch, { width: artCarouselPageWidth, height: artSize }]}
+          onPress={() => handleArtworkSongChange(index)}
+          disabled={isActiveCard}
+        >
+          <Animated.View
+            style={[
+              styles.artFrame,
+              styles.artFrameDefault,
+              styles.artCarouselCard,
+              { width: artSize, height: artSize },
+              {
+                opacity: cardOpacity,
+                borderColor: isActiveCard
+                  ? hexToRgba(playerTheme.accent, 0.54)
+                  : hexToRgba(playerTheme.accent, decor.borderAlpha),
+                shadowColor: isActiveCard ? hexToRgba(playerTheme.accent, 0.74) : "#000",
+                transform: [
+                  { perspective: 1200 },
+                  { translateX: slideTranslateX },
+                  { translateY: slideTranslateY },
+                  { scale: slideScale },
+                  { rotateY: slideRotateY },
+                  { rotateZ: slideRotateZ },
+                ],
+              },
+            ]}
+          >
+            <Animated.View
+              style={[
+                styles.albumArtParallax,
+                {
+                  transform: [{ translateX: imageParallaxX }],
+                },
+              ]}
+            >
+              {item.coverUrl?.trim() ? (
+                <Image
+                  source={{ uri: item.coverUrl }}
+                  style={styles.albumArt}
+                  contentFit="cover"
+                  transition={180}
+                />
+              ) : (
+                <View style={[styles.albumArt, styles.albumFallback]}>
+                  <Ionicons name="musical-notes" size={58} color={Colors.subtext} />
+                </View>
+              )}
+            </Animated.View>
+          </Animated.View>
+        </Pressable>
+      );
+    },
+    [
+      activeQueueIndex,
+      artCarouselPageWidth,
+      artCarouselSnapInterval,
+      artScrollX,
+      artSize,
+      fadeAnim,
+      handleArtworkSongChange,
+      playerTheme.accent,
+    ]
+  );
+
+  const renderQueueSong = useCallback(
+    ({ item, index }: { item: Song; index: number }) => {
+      const isCurrent = index === activeQueueIndex;
+
+      return (
+        <Pressable
+          style={[styles.queueRow, isShortScreen && styles.queueRowCompact]}
+          onPress={() => {
+            if (isDevPreviewActive) {
+              setDevPreviewIndex(index);
+              setDevPreviewProgress(0.18);
+              return;
+            }
+            handleQueueSongPress(item);
+          }}
+        >
+          <View style={styles.queueLead}>
+            {isCurrent ? (
+              <Ionicons name={playerIsPlaying ? "volume-high" : "pause"} size={14} color={playerTheme.accent} />
+            ) : (
+              <Text style={styles.queueIndex}>{index + 1}</Text>
+            )}
+          </View>
+
+          <Image
+            source={{ uri: item.coverUrl || undefined }}
+            style={[styles.queueThumb, isShortScreen && styles.queueThumbCompact]}
+            contentFit="cover"
+            transition={120}
+          />
+
+          <View style={styles.queueTextWrap}>
+            <Text
+              style={[
+                styles.queueTitle,
+                isCurrent && styles.queueTitleActive,
+                isCurrent && { color: playerTheme.accent },
+              ]}
+              numberOfLines={1}
+            >
+              {item.title}
+            </Text>
+            <Text style={styles.queueMeta} numberOfLines={1}>
+              {item.artist}
+            </Text>
+          </View>
+
+          <Text
+            style={[
+              styles.queueDuration,
+              isCurrent && styles.queueDurationActive,
+              isCurrent && { color: playerTheme.accent },
+            ]}
+          >
+            {formatDuration(item.duration)}
+          </Text>
+        </Pressable>
+      );
+    },
+    [activeQueueIndex, handleQueueSongPress, isDevPreviewActive, isShortScreen, playerIsPlaying, playerTheme.accent]
+  );
+
+  if (!screenSong) {
     return (
-      <View style={[styles.container, { paddingTop: topInset }]}>
+      <View style={[styles.emptyContainer, { paddingTop: topInset }]}>
         <View style={styles.emptyState}>
           <Ionicons name="musical-notes-outline" size={64} color={Colors.inactive} />
           <Text style={styles.emptyText}>No song playing</Text>
-          <Pressable onPress={safeGoBack} style={styles.backBtnEmpty}>
-            <Ionicons name="arrow-down" size={28} color={Colors.text} />
+          {__DEV__ ? (
+            <>
+              <Text style={styles.emptyHint}>
+                Development helper: load a saved recent, liked, or playlist song to test the player quickly.
+              </Text>
+              <Pressable
+                onPress={() => {
+                  void handleLoadDevTrack();
+                }}
+                style={styles.emptyDevButton}
+              >
+                {isLoadingDevTrack ? (
+                  <ActivityIndicator size="small" color={Colors.text} />
+                ) : (
+                  <>
+                    <Ionicons name="play" size={16} color={Colors.text} />
+                    <Text style={styles.emptyDevButtonText}>Load Dev Test Song</Text>
+                  </>
+                )}
+              </Pressable>
+              <Pressable onPress={openDevPreview} style={styles.emptyDevSecondaryButton}>
+                <Ionicons name="eye-outline" size={16} color={Colors.text} />
+                <Text style={styles.emptyDevSecondaryButtonText}>Open UI Preview</Text>
+              </Pressable>
+            </>
+          ) : null}
+          <Pressable onPress={safeGoBack} style={styles.emptyBackButton}>
+            <Ionicons name="arrow-down" size={26} color={Colors.text} />
           </Pressable>
         </View>
       </View>
     );
   }
 
-  const currentTimeSec = Math.floor(positionMillis / 1000);
-  const totalDurationSec = Math.floor(duration / 1000);
-  const liked = isLiked(currentSong.id);
-
-  const handleSeek = (evt: any) => {
-    const { locationX } = evt.nativeEvent;
-    const barWidth = SCREEN_WIDTH - 48;
-    const newProgress = Math.max(0, Math.min(1, locationX / barWidth));
-    seekTo(newProgress);
-  };
-
   return (
-    <LinearGradient
-      colors={gradientColors}
-      locations={[0, 0.2, 0.4, 0.6, 1]}
-      style={[styles.container, { paddingTop: topInset, paddingBottom: bottomInset + 8 }]}
-    >
-      <View style={styles.header}>
-        <Pressable onPress={safeGoBack} hitSlop={12}>
-          <Ionicons name="arrow-down" size={28} color={Colors.text} />
+    <View style={styles.container}>
+      <LinearGradient
+        colors={gradientColors}
+        locations={[0, 0.36, 0.74, 1]}
+        style={[
+          styles.container,
+          { paddingTop: topInset, paddingBottom: 0 },
+        ]}
+      >
+      <View style={[styles.topBar, { height: topBarHeight, paddingHorizontal: isShortScreen ? 14 : 18 }]}>
+        <Pressable style={styles.headerIconButton} onPress={safeGoBack} hitSlop={10}>
+          <Ionicons name="arrow-down" size={22} color={Colors.text} />
         </Pressable>
+
         <View style={styles.headerCenter}>
-          <Text style={styles.headerSubtitle}>PLAYING FROM</Text>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {currentSong.album}
+          <Text style={styles.headerCaption}>Now Playing</Text>
+          <Text style={[styles.headerAlbum, { fontSize: isShortScreen ? 12 : 13 }]} numberOfLines={1}>
+            {screenSong.album || "Single"}
           </Text>
         </View>
-        <Pressable hitSlop={12}>
-          <Ionicons name="ellipsis-horizontal" size={24} color={Colors.text} />
+
+        <Pressable
+          style={styles.headerIconButton}
+          onPress={() => router.push("/queue")}
+          hitSlop={10}
+        >
+          <Ionicons name="list-outline" size={21} color={Colors.text} />
         </Pressable>
       </View>
 
-      <View style={styles.artContainer}>
-        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
-          <Image
-            source={{ uri: currentSong.coverUrl }}
-            style={[
-              styles.albumArt,
-              { width: ART_SIZE, height: ART_SIZE },
-              Platform.OS !== "web" && styles.albumArtShadow,
-            ]}
-            contentFit="cover"
-          />
-        </Animated.View>
-      </View>
+      <ScrollView
+        style={styles.playerScroll}
+        contentContainerStyle={[styles.playerScrollContent, { paddingBottom: listBottomPadding }]}
+        showsVerticalScrollIndicator={false}
+        scrollEnabled={Platform.OS === "android" ? !isSeeking : true}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled={Platform.OS === "android"}
+        bounces={Platform.OS === "ios"}
+        alwaysBounceVertical={Platform.OS === "ios"}
+        overScrollMode="never"
+      >
+      <View style={[styles.playerContent, { paddingBottom: isShortScreen ? 10 : 14 }]}>
+        <View style={styles.playerPrimaryStack}>
+              <View
+                style={[
+                  styles.artWrap,
+                  { marginTop: isShortScreen ? 4 : 8, paddingHorizontal: artWrapHorizontalPadding },
+                ]}
+              >
+                <AnimatedSongFlatList
+                  ref={(list: any) => {
+                    artCarouselRef.current = list as FlatList<Song> | null;
+                  }}
+                  data={playingQueue}
+                  keyExtractor={(item: Song, index: number) => `${item.id}-${index}`}
+                  renderItem={renderArtworkCard}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  bounces={false}
+                  scrollEnabled={playingQueue.length > 1 && !isSeeking}
+                  decelerationRate="fast"
+                  disableIntervalMomentum
+                  snapToAlignment="start"
+                  snapToInterval={artCarouselSnapInterval}
+                  contentContainerStyle={styles.artCarouselContent}
+                  style={styles.artCarousel}
+                  getItemLayout={(_: Song[] | null | undefined, index: number) => ({
+                    length: artCarouselSnapInterval,
+                    offset: artCarouselSnapInterval * index,
+                    index,
+                  })}
+                  initialNumToRender={3}
+                  maxToRenderPerBatch={5}
+                  windowSize={5}
+                  removeClippedSubviews={Platform.OS === "android"}
+                  onScroll={handleArtworkScroll}
+                  scrollEventThrottle={16}
+                  onMomentumScrollEnd={handleArtworkScrollFinished}
+                />
+              </View>
 
-      <View style={styles.infoSection}>
-        <View style={styles.songInfoRow}>
-          <View style={styles.songInfo}>
-            <PingPongScroll
-              text={currentSong.title}
-              style={styles.songTitle}
-              velocity={15}
-            />
-            <PingPongScroll
-              text={currentSong.artist}
-              style={styles.songArtist}
-              velocity={12}
-            />
-          </View>
-          <Pressable
-            onPress={() => { haptic(); toggleLike(currentSong); }}
-            hitSlop={10}
-            style={styles.likeButton}
-          >
-            <Ionicons
-              name={liked ? "heart" : "heart-outline"}
-              size={28}
-              color={liked ? "#1DB954" : Colors.subtext}
-            />
-          </Pressable>
-        </View>
-
-        <View style={styles.progressSection}>
-          <Pressable
-            onPress={handleSeek}
-            onPressIn={() => setIsSeeking(true)}
-            onPressOut={() => setIsSeeking(false)}
-            style={styles.progressBarTouch}
-          >
-            <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-              {isSeeking && (
-                <View style={[styles.progressDot, { left: `${progress * 100}%` }]} />
-              )}
+              <View
+                style={[
+                  styles.songBlock,
+                  { marginTop: isShortScreen ? 10 : 18, marginHorizontal: isShortScreen ? 14 : 20 },
+                ]}
+              >
+                <View style={styles.songTextWrap}>
+                  <PingPongScroll
+                    text={screenSong.title}
+                    style={[
+                      styles.songTitle,
+                      { fontSize: isVeryShortScreen ? 24 : isShortScreen ? 26 : 29 },
+                    ]}
+                    velocity={14}
+                  />
+                  <PingPongScroll
+                    text={screenSong.artist}
+                    style={[
+                      styles.songArtist,
+                      { fontSize: isVeryShortScreen ? 12 : 14 },
+                    ]}
+                    velocity={12}
+                  />
+                </View>
+                <Pressable
+                  onPress={() => {
+                    haptic();
+                    if (isDevPreviewActive) {
+                      setDevPreviewLikedSongIds((prev) =>
+                        prev.includes(screenSong.id)
+                          ? prev.filter((songId) => songId !== screenSong.id)
+                          : [...prev, screenSong.id]
+                      );
+                      return;
+                    }
+                    toggleLike(screenSong);
+                  }}
+                  hitSlop={10}
+                  style={styles.likeButton}
+                >
+                  <Ionicons
+                    name={liked ? "heart" : "heart-outline"}
+                    size={24}
+                  color={liked ? playerTheme.accent : Colors.subtext}
+                />
+              </Pressable>
+              </View>
             </View>
-          </Pressable>
-          <View style={styles.timeRow}>
-            <Text style={styles.timeText}>{formatDuration(currentTimeSec)}</Text>
-            <Text style={styles.timeText}>
-              {totalDurationSec > 0 ? formatDuration(totalDurationSec) : formatDuration(currentSong.duration)}
-            </Text>
-          </View>
-        </View>
 
-        <View style={styles.controls}>
-          <Pressable onPress={() => { haptic(); toggleShuffle(); }}>
+        <View style={styles.playerActionStack}>
+              <View
+                style={[
+                  styles.progressCard,
+                  { marginTop: isShortScreen ? 8 : 14, marginHorizontal: isShortScreen ? 14 : 20 },
+                ]}
+              >
+                <View
+                  style={styles.progressTouch}
+                  onLayout={usesResponderSeek ? handleProgressLayout : undefined}
+                >
+                  {usesResponderSeek ? (
+                    <View pointerEvents="none" style={styles.progressVisual}>
+                      <View style={[styles.progressTrack, { backgroundColor: progressTrackColor }]} />
+                      <View
+                        ref={(node) => {
+                          progressFillRef.current = node;
+                        }}
+                        style={[
+                          styles.progressFill,
+                          {
+                            width: `${visualProgress * 100}%`,
+                            backgroundColor: progressFillColor,
+                          },
+                        ]}
+                      />
+                      <View
+                        ref={(node) => {
+                          progressThumbRef.current = node;
+                        }}
+                        style={[
+                          styles.progressThumb,
+                          {
+                            left: `${visualProgress * 100}%`,
+                            backgroundColor: progressThumbColor,
+                          },
+                        ]}
+                      />
+                    </View>
+                  ) : null}
+                  {usesResponderSeek ? (
+                    <View
+                      style={[
+                        styles.progressGestureResponder,
+                        Platform.OS === "web" && styles.progressWebResponder,
+                      ]}
+                      onStartShouldSetResponder={() => canSeek}
+                      onMoveShouldSetResponder={() => canSeek}
+                      onResponderTerminationRequest={() => false}
+                      onResponderGrant={handleResponderSeekGrant}
+                      onResponderMove={handleResponderSeekMove}
+                      onResponderRelease={handleResponderSeekRelease}
+                      onResponderTerminate={handleResponderSeekRelease}
+                    />
+                  ) : (
+                    <Slider
+                      style={styles.progressSliderNative}
+                      minimumValue={0}
+                      maximumValue={1}
+                      value={visualProgress}
+                      disabled={!canSeek}
+                      minimumTrackTintColor={progressFillColor}
+                      maximumTrackTintColor={progressTrackColor}
+                      thumbTintColor={progressThumbColor}
+                      tapToSeek={Platform.OS === "ios"}
+                      onSlidingStart={handleSlidingStart}
+                      onValueChange={handleSliderValueChange}
+                      onSlidingComplete={handleSlidingComplete}
+                    />
+                  )}
+                </View>
+                <View style={styles.timeRow}>
+                  <Text style={styles.timeText}>
+                    {formatDuration(
+                      sliderPreviewProgress !== null
+                        ? Math.floor(Math.max(0, effectiveDurationSec) * visualProgress)
+                        : currentTimeSec
+                    )}
+                  </Text>
+                  <Text style={styles.timeText}>{displayDuration}</Text>
+                </View>
+              </View>
+
+              <View
+                style={[
+                  styles.controlsRow,
+                  {
+                    marginTop: isShortScreen ? 6 : 12,
+                    marginHorizontal: isShortScreen ? 14 : 20,
+                    gap: isShortScreen ? 5 : 8,
+                  },
+                ]}
+              >
+          <Pressable
+            style={[
+              styles.roundIconButton,
+              {
+                width: controlButtonSize,
+                height: controlButtonSize,
+                borderRadius: controlButtonSize / 2,
+                backgroundColor: controlButtonBg,
+                borderColor: controlButtonBorder,
+              },
+              playerIsShuffled && styles.roundIconButtonActive,
+              playerIsShuffled && {
+                borderColor: controlButtonActiveBorder,
+                backgroundColor: controlButtonActiveBg,
+              },
+            ]}
+            onPress={() => {
+              haptic();
+              if (isDevPreviewActive) {
+                setDevPreviewIsShuffled((prev) => !prev);
+                return;
+              }
+              toggleShuffle();
+            }}
+          >
             <Ionicons
               name="shuffle"
-              size={22}
-              color={isShuffled ? Colors.primary : Colors.subtext}
+              size={shuffleRepeatIconSize}
+              color={playerIsShuffled ? playerTheme.accent : controlIconColor}
             />
           </Pressable>
-          <Pressable onPress={() => { haptic(); prevSong(); }}>
-            <Ionicons name="play-skip-back" size={28} color={Colors.text} />
+
+          <Pressable
+            style={[
+              styles.roundIconButton,
+              {
+                width: controlButtonSize,
+                height: controlButtonSize,
+                borderRadius: controlButtonSize / 2,
+                backgroundColor: controlButtonBg,
+                borderColor: controlButtonBorder,
+              },
+            ]}
+            onPress={() => {
+              haptic();
+              if (isDevPreviewActive) {
+                setDevPreviewIndex((prev) => Math.max(0, prev - 1));
+                setDevPreviewProgress(0.18);
+                return;
+              }
+              prevSong();
+            }}
+          >
+            <Ionicons name="play-skip-back" size={prevNextIconSize} color={controlIconColor} />
           </Pressable>
-          <PlayerPlayButton 
-            isPlaying={isPlaying}
+
+          <PlayerPlayButton
+            isPlaying={playerIsPlaying}
             isLoading={isLoading}
-            onPress={() => { haptic(); togglePlay(); }}
+            buttonSize={playButtonSize}
+            iconSize={playIconSize}
+            accentColor={playerTheme.accent}
+            onAccentColor={Colors.text}
+            onPress={() => {
+              haptic();
+              if (isDevPreviewActive) {
+                setDevPreviewIsPlaying((prev) => !prev);
+                return;
+              }
+              togglePlay();
+            }}
           />
-          <Pressable onPress={() => { haptic(); nextSong(); }}>
-            <Ionicons name="play-skip-forward" size={28} color={Colors.text} />
+
+          <Pressable
+            style={[
+              styles.roundIconButton,
+              {
+                width: controlButtonSize,
+                height: controlButtonSize,
+                borderRadius: controlButtonSize / 2,
+                backgroundColor: controlButtonBg,
+                borderColor: controlButtonBorder,
+              },
+            ]}
+            onPress={() => {
+              haptic();
+              if (isDevPreviewActive) {
+                setDevPreviewIndex((prev) => Math.min(DEV_PREVIEW_SONGS.length - 1, prev + 1));
+                setDevPreviewProgress(0.18);
+                return;
+              }
+              nextSong();
+            }}
+          >
+            <Ionicons name="play-skip-forward" size={prevNextIconSize} color={controlIconColor} />
           </Pressable>
-          <Pressable onPress={() => { haptic(); toggleRepeat(); }}>
+
+          <Pressable
+            style={[
+              styles.roundIconButton,
+              {
+                width: controlButtonSize,
+                height: controlButtonSize,
+                borderRadius: controlButtonSize / 2,
+                backgroundColor: controlButtonBg,
+                borderColor: controlButtonBorder,
+              },
+              playerRepeatMode !== "off" && styles.roundIconButtonActive,
+              playerRepeatMode !== "off" && {
+                borderColor: controlButtonActiveBorder,
+                backgroundColor: controlButtonActiveBg,
+              },
+            ]}
+            onPress={() => {
+              haptic();
+              if (isDevPreviewActive) {
+                setDevPreviewRepeatMode((prev) =>
+                  prev === "off" ? "all" : prev === "all" ? "one" : "off"
+                );
+                return;
+              }
+              toggleRepeat();
+            }}
+          >
             <Ionicons
-              name={repeatMode === "one" ? "repeat" : "repeat"}
-              size={22}
-              color={repeatMode !== "off" ? Colors.primary : Colors.subtext}
+              name="repeat"
+              size={shuffleRepeatIconSize}
+              color={playerRepeatMode !== "off" ? playerTheme.accent : controlIconColor}
             />
-            {repeatMode === "one" && <View style={styles.repeatDot} />}
+            {playerRepeatMode === "one" ? <Text style={[styles.repeatOneBadge, { color: playerTheme.accent }]}>1</Text> : null}
           </Pressable>
+          </View>
+
+          <View
+            style={[
+              styles.deviceActionRow,
+              { marginTop: isShortScreen ? 6 : 8, marginHorizontal: isShortScreen ? 14 : 20 },
+            ]}
+          >
+            <Pressable
+              style={[
+                styles.deviceActionButton,
+                {
+                  backgroundColor: deviceButtonBg,
+                  borderColor: deviceButtonBorder,
+                },
+              ]}
+              onPress={() => {
+                haptic();
+                router.push("/bluetooth");
+              }}
+            >
+              <Ionicons name="bluetooth-outline" size={18} color={playerTheme.accent} />
+              {!isVeryShortScreen ? (
+                <Text style={[styles.deviceActionText, { color: deviceButtonTextColor }]}>Devices</Text>
+              ) : null}
+            </Pressable>
+          </View>
+
+      </View>
+      </View>
+
+      <View
+        style={[
+          styles.playingListSection,
+          { marginTop: isShortScreen ? 4 : 8, marginHorizontal: isShortScreen ? 14 : 20 },
+        ]}
+      >
+        <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
+          <Text style={styles.playingListTitle}>Playlist Songs</Text>
+          <View style={styles.playingListHeaderRight}>
+            <Text style={styles.playingListCount}>{queueCountLabel}</Text>
+          </View>
         </View>
 
-        <View style={styles.bottomRow}>
-          <Pressable hitSlop={10}>
-            <Ionicons name="phone-portrait-outline" size={20} color={Colors.subtext} />
-          </Pressable>
-          <Pressable hitSlop={10}>
-            <Ionicons name="list-outline" size={20} color={Colors.subtext} />
-          </Pressable>
-          <Pressable hitSlop={10}>
-            <Ionicons name="share-outline" size={20} color={Colors.subtext} />
-          </Pressable>
-        </View>
+        <FlatList
+          data={playingQueue}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
+            renderItem={renderQueueSong}
+          style={styles.playingList}
+          contentContainerStyle={styles.playingListContent}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={false}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          updateCellsBatchingPeriod={80}
+          windowSize={4}
+          removeClippedSubviews={false}
+        />
       </View>
-    </LinearGradient>
+      </ScrollView>
+
+      </LinearGradient>
+    </View>
   );
 }
 
@@ -303,169 +1429,474 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  header: {
+  topBar: {
+    height: 54,
+    paddingHorizontal: 18,
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  playerScroll: {
+    flex: 1,
+  },
+  playerScrollContent: {
+    paddingBottom: 20,
+  },
+  playerContent: {
+    flexGrow: 0,
+  },
+  playerPrimaryStack: {
+    flexGrow: 0,
+  },
+  playerActionStack: {
+    flexGrow: 0,
+  },
+  headerIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
   },
   headerCenter: {
     flex: 1,
     alignItems: "center",
-    marginHorizontal: 16,
+    minWidth: 0,
   },
-  headerSubtitle: {
+  headerCaption: {
     color: Colors.subtext,
     fontSize: 10,
-    fontFamily: "Inter_500Medium",
-    letterSpacing: 1.5,
-    marginBottom: 2,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.9,
+    textTransform: "uppercase",
   },
-  headerTitle: {
+  headerAlbum: {
+    marginTop: 2,
     color: Colors.text,
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
-    textAlign: "center",
   },
-  artContainer: {
+  artWrap: {
     alignItems: "center",
     justifyContent: "center",
-    flex: 1,
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
+    marginTop: 8,
   },
-  albumArt: {
-    borderRadius: 16,
+  artCarousel: {
+    width: "100%",
+    overflow: "hidden",
   },
-  albumArtShadow: {
+  artCarouselContent: {
+    alignItems: "center",
+  },
+  artCarouselTouch: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  artCarouselCard: {
+    alignSelf: "center",
+  },
+  artFrame: {
+    borderRadius: 18,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: Colors.cardBorderStrong,
+    backgroundColor: Colors.surfaceLight,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.6,
+    shadowOpacity: 0.45,
     shadowRadius: 24,
-    elevation: 20,
+    elevation: 14,
   },
-  infoSection: {
-    paddingHorizontal: 24,
-    paddingBottom: 16,
+  artFrameDefault: {
+    borderRadius: 18,
   },
-  songInfoRow: {
+  albumArt: {
+    width: "100%",
+    height: "100%",
+  },
+  albumArtParallax: {
+    width: "100%",
+    height: "100%",
+  },
+  albumFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  songBlock: {
+    marginTop: 18,
+    marginHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 20,
+    gap: 12,
   },
-  songInfo: {
+  songBlockCompact: {
+    marginTop: 10,
+  },
+  songTextWrap: {
     flex: 1,
-    marginRight: 16,
+    minWidth: 0,
   },
   songTitle: {
     color: Colors.text,
-    fontSize: 22,
-    fontFamily: "Inter_700Bold",
+    fontSize: 29,
+    fontFamily: "Inter_800ExtraBold",
+    letterSpacing: -0.45,
+  },
+  songTitleCompact: {
+    fontSize: 23,
   },
   songArtist: {
+    marginTop: 3,
     color: Colors.subtext,
     fontSize: 14,
     fontFamily: "Inter_500Medium",
-    marginTop: 4,
+  },
+  songArtistCompact: {
+    marginTop: 2,
+    fontSize: 11,
   },
   likeButton: {
-    padding: 4,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
   },
-  progressSection: {
-    marginBottom: 16,
+  progressCard: {
+    marginTop: 14,
+    marginHorizontal: 20,
+    paddingHorizontal: 2,
+    paddingVertical: 4,
+    borderRadius: 0,
+    backgroundColor: "transparent",
+    borderWidth: 0,
   },
-  progressBarTouch: {
+  progressCardCompact: {
+    marginTop: 2,
+    paddingVertical: 4,
+  },
+  progressTouch: {
     paddingVertical: 8,
-  },
-  progressBar: {
-    height: 4,
-    backgroundColor: Colors.inactive,
-    borderRadius: 2,
+    justifyContent: "center",
     position: "relative",
+    height: 28,
+  },
+  progressVisual: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+  },
+  progressTrack: {
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.16)",
   },
   progressFill: {
-    height: 4,
-    backgroundColor: Colors.primary,
-    borderRadius: 2,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 4,
-  },
-  progressDot: {
     position: "absolute",
-    top: -5,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: Colors.primary,
-    marginLeft: -7,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 6,
-    elevation: 5,
+    left: 0,
+    top: "50%",
+    height: 4,
+    borderRadius: 999,
+    transform: [{ translateY: -2 }],
+  },
+  progressThumb: {
+    position: "absolute",
+    top: "50%",
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    transform: [{ translateX: -6 }, { translateY: -6 }],
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  progressSliderNative: {
+    width: "100%",
+    height: 28,
+  },
+  progressGestureResponder: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+  },
+  progressWebResponder: {
+    cursor: "pointer",
   },
   timeRow: {
+    marginTop: 8,
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 8,
   },
   timeText: {
     color: Colors.subtext,
     fontSize: 11,
-    fontFamily: "Inter_400Regular",
+    fontFamily: "Inter_500Medium",
   },
-  controls: {
+  controlsRow: {
+    marginTop: 12,
+    marginHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-around",
-    marginBottom: 28,
-    paddingHorizontal: 4,
+    justifyContent: "space-between",
+    gap: 8,
   },
-  playButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: Colors.text,
+  controlsRowCompact: {
+    marginTop: 0,
+  },
+  deviceActionRow: {
+    marginTop: 8,
+    marginHorizontal: 20,
+    alignItems: "flex-start",
+  },
+  deviceActionRowCompact: {
+    marginTop: 4,
+  },
+  deviceActionButton: {
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(37, 201, 231, 0.14)",
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+  },
+  deviceActionButtonCompact: {
+    height: 30,
+    paddingHorizontal: 10,
+  },
+  deviceActionText: {
+    color: Colors.text,
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
+  playingListSection: {
+    overflow: "hidden",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    backgroundColor: "rgba(10,16,24,0.28)",
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  playingListHeader: {
+    height: 38,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  playingListHeaderCompact: {
+    height: 34,
+  },
+  playingListHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    minWidth: 72,
+    gap: 8,
+  },
+  playingListTitle: {
+    color: Colors.text,
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.2,
+  },
+  playingListCount: {
+    color: Colors.subtext,
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+    textAlign: "right",
+  },
+  playingList: {
+    flex: 1,
+  },
+  playingListContent: {
+    paddingBottom: 4,
+    paddingHorizontal: 14,
+  },
+  queueRow: {
+    height: 54,
+    paddingHorizontal: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.12)",
+  },
+  queueRowCompact: {
+    height: 48,
+    gap: 8,
+  },
+  queueLead: {
+    width: 18,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
   },
-  repeatDot: {
-    position: "absolute",
-    bottom: -6,
-    alignSelf: "center",
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.primary,
-    left: "50%",
-    marginLeft: -2,
+  queueIndex: {
+    color: Colors.inactive,
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
   },
-  bottomRow: {
-    flexDirection: "row",
-    justifyContent: "space-around",
+  queueThumb: {
+    width: 38,
+    height: 38,
+    borderRadius: 7,
+    backgroundColor: Colors.surfaceLight,
+  },
+  queueThumbCompact: {
+    width: 34,
+    height: 34,
+  },
+  queueTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  queueTitle: {
+    color: Colors.text,
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    textAlign: "left",
+  },
+  queueTitleActive: {
+    color: Colors.primary,
+  },
+  queueMeta: {
+    marginTop: 1,
+    color: Colors.subtext,
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+    textAlign: "left",
+  },
+  queueDuration: {
+    color: Colors.subtext,
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+    width: 34,
+    textAlign: "right",
+  },
+  queueDurationActive: {
+    color: Colors.primary,
+  },
+  roundIconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
-    paddingHorizontal: 8,
+    justifyContent: "center",
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    position: "relative",
+  },
+  roundIconButtonActive: {
+    borderColor: Colors.primary,
+    backgroundColor: "rgba(37, 201, 231, 0.14)",
+  },
+  playButton: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.text,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  repeatOneBadge: {
+    position: "absolute",
+    bottom: 5,
+    right: 7,
+    color: Colors.primary,
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+  },
+  emptyContainer: {
+    flex: 1,
+    backgroundColor: Colors.background,
   },
   emptyState: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 16,
+    gap: 14,
   },
   emptyText: {
     color: Colors.subtext,
     fontSize: 18,
     fontFamily: "Inter_500Medium",
   },
-  backBtnEmpty: {
-    marginTop: 16,
+  emptyHint: {
+    maxWidth: 280,
+    color: Colors.inactive,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+    fontFamily: "Inter_500Medium",
+  },
+  emptyDevButton: {
+    minHeight: 42,
+    paddingHorizontal: 16,
+    borderRadius: 21,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: Colors.primary,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  emptyDevButtonText: {
+    color: Colors.text,
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+  },
+  emptyDevSecondaryButton: {
+    minHeight: 42,
+    paddingHorizontal: 16,
+    borderRadius: 21,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+  },
+  emptyDevSecondaryButtonText: {
+    color: Colors.text,
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+  },
+  emptyBackButton: {
+    marginTop: 8,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
   },
 });

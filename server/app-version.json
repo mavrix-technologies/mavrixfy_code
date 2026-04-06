@@ -1,27 +1,34 @@
 {
-  "latestVersion": "1.1.0",
+  "latestVersion": "2.0.0",
   "minimumSupportedVersion": "1.0.0",
   "forceUpdate": false,
   "updateUrl": {
-    "android": "https://play.google.com/store/apps/details?id=com.mavrixfy.app",
+    "android": "https://play.google.com/store/apps/details?id=com.mavrixfy.app&pcampaignid=web_share",
     "ios": "https://apps.apple.com/app/mavrixfy/id123456789"
   },
-  "message": "New version available with improved performance and bug fixes",
+  "message": "🎉 New update available! Optimized performance and reduced app size. Play Store visibility is currently limited to testers who joined the Google Group.",
   "changelog": [
-    "Fixed JioSaavn playlist showing only 10 songs",
-    "Improved music streaming performance",
-    "Enhanced UI animations",
-    "Bug fixes and stability improvements"
+    "Play Store listing is visible only for users who joined the Google Group testing program",
+    "Optimized APK size - smaller and faster downloads",
+    "Enhanced audio streaming performance",
+    "Fixed JioSaavn playlist loading issues",
+    "Improved compatibility with Android 14",
+    "Better error handling and stability",
+    "Reduced memory usage for smoother experience"
   ],
-  "releaseDate": "2026-02-23",
+  "releaseDate": "2026-04-01",
   "features": [
     {
-      "title": "Complete Playlists",
-      "description": "Now see all songs in JioSaavn playlists, not just 10"
+      "title": "Optimized Build",
+      "description": "Reduced app size by 30% with armeabi-v7a architecture"
     },
     {
       "title": "Better Performance",
-      "description": "Faster loading and smoother playback"
+      "description": "Faster startup and improved audio playback stability"
+    },
+    {
+      "title": "Enhanced Compatibility",
+      "description": "Full support for Android 14 with improved stability"
     }
   ]
 }

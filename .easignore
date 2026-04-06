@@ -4,14 +4,58 @@
 # Node modules (will be installed on build server)
 node_modules/
 
-# Build outputs
+# Build outputs - CRITICAL: These are huge!
 android/app/build/
 android/.gradle/
 android/build/
+android/.kotlin/
+android/app/.cxx/
+outputs/
+dist/
+g/
+build/
+.gradle/
 
-# IDE files
+# APK/AAB files
+*.apk
+*.aab
+*.apks
+
+# Java heap dumps (crash dumps)
+*.hprof
+java_pid*.hprof
+android/*.hprof
+android/java_pid*.hprof
+**/*.hprof
+
+# Local archives (often very large)
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+
+# Explicit local artifact
+mavrixfy-playstore.tar.gz
+
+# Gradle cache directories
+.gradle/
+.gradle-build/
+g/
+.gradle-local/
+.gradle-local-*/
+.gradle-user-home/
+.android-user-home/
+.gradle-home/
+.gradle-home-build*/
+
+# Examples and test resources
+examples/
 .idea/
 .vscode/
+tools/
+stitch_exports/
 *.iml
 
 # OS files
@@ -38,8 +82,16 @@ docs/
 # Git
 .git/
 .gitignore
+.gitattributes
 
 # Temporary files
 *.tmp
 *.temp
 .cache/
+.expo/
+.expo-shared/
+attached_assets/
+
+# Local environment files (use EAS Secrets instead)
+.env.local
+.env.*.local

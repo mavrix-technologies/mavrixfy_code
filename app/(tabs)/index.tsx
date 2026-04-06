@@ -1,59 +1,153 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View,
   Text,
-  ScrollView,
   FlatList,
   Pressable,
   StyleSheet,
   Platform,
   ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import { Image } from "expo-image";
-import { fetch } from "expo/fetch";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getBestImageUrl, JioSaavnImage } from "@/lib/musicData";
+import { getBestImageUrl, JioSaavnImage, Song } from "@/lib/musicData";
 import { getRecentlyPlayed, RecentlyPlayedItem } from "@/lib/storage";
-import { getApiUrl } from "@/lib/query-client";
-import { getPublicPlaylists, FirestorePlaylist, firestorePlaylistToLocalSongs } from "@/lib/firestore";
+import { getPublicPlaylists, FirestorePlaylist } from "@/lib/firestore";
+import { getCachedHomePublicPlaylists, setCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePlayerRow } from "@/contexts/PlayerContext";
 import { ProfileDropdown } from "@/components/ProfileDropdown";
 import { useScreenTracking } from "@/hooks/useScreenTracking";
+import {
+  clearJioSaavnPlaylistCache,
+  getHomeJioSaavnCategories,
+  HomeJioSaavnCategoryData,
+} from "@/lib/jioSaavnService";
 
-interface JioSaavnPlaylistResult {
-  id: string;
-  name: string;
-  image: JioSaavnImage[];
-  songCount: number;
+const APP_BRAND_ICON = require("@/assets/images/icon.png");
+
+type HomeSection =
+  | { id: "recents"; type: "recents" }
+  | { id: "public-playlists"; type: "public-playlists" }
+  | { id: "trending"; type: "trending" }
+  | { id: "new-releases"; type: "new-releases" }
+  | { id: string; type: "category"; data: HomeJioSaavnCategoryData };
+
+type HomeSessionCache = {
+  hydrated: boolean;
+  categories: HomeJioSaavnCategoryData[];
+  publicPlaylists: FirestorePlaylist[];
+  recentlyPlayed: RecentlyPlayedItem[];
+};
+
+const HOME_SESSION_CACHE: HomeSessionCache = {
+  hydrated: false,
+  categories: [],
+  publicPlaylists: [],
+  recentlyPlayed: [],
+};
+
+const HOME_JIOSAAVN_SECTION_ORDER = [
+  "trending",
+  "most-viral",
+  "most-played",
+  "new-arrivals",
+] as const;
+
+const HOME_JIOSAAVN_TITLES: Record<(typeof HOME_JIOSAAVN_SECTION_ORDER)[number], string> = {
+  trending: "New & Trending",
+  "most-viral": "Most Viral",
+  "most-played": "Most Played",
+  "new-arrivals": "New Arrivals",
+};
+
+const BRAND = {
+  blue: "#26E19A",
+  teal: "#26E19A",
+  green: "#00B87B",
+  ink900: "#10141A",
+  ink800: "#181C22",
+  ink700: "#262A31",
+  panelStrong: "#262A31",
+  panelSoft: "#1C2026",
+  chipSurface: "#262A31",
+  textPrimary: "#DFE2EB",
+  textSecondary: "rgba(223,226,235,0.9)",
+  textMuted: "rgba(188,203,185,0.76)",
+};
+
+const MIN_PUBLIC_PLAYLIST_ITEMS = 1;
+const PUBLIC_PLAYLIST_FETCH_TIMEOUT_MS = 4500;
+const HOME_CATEGORY_FETCH_TIMEOUT_MS = 12000;
+const HOME_BOOTSTRAP_MAX_WAIT_MS = 15000;
+const MAX_ROW_ITEMS = 8;
+const MAX_EXTRA_CATEGORY_ROWS = 2;
+
+function getThumbImageUrl(images: JioSaavnImage[] | undefined): string {
+  if (!Array.isArray(images) || images.length === 0) return "";
+  return getBestImageUrl(images);
 }
 
-interface CategoryData {
-  title: string;
-  query: string;
-  results: JioSaavnPlaylistResult[];
+function normalizeId(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.trim();
 }
 
-const CATEGORIES: { title: string; query: string }[] = [
-  { title: "Trending Now", query: "top 50" },
-  { title: "Bollywood Hits", query: "bollywood" },
-  { title: "Romantic", query: "romantic" },
-  { title: "Punjabi", query: "punjabi" },
-  { title: "Party Anthems", query: "party" },
-  { title: "Workout", query: "workout" },
-  { title: "Devotional", query: "devotional" },
-  { title: "90s Retro", query: "90s" },
-  { title: "Tamil Hits", query: "tamil" },
-  { title: "English Pop", query: "english" },
-  { title: "Chill Vibes", query: "chill" },
-  { title: "Sad Songs", query: "sad" },
-  { title: "Hip Hop", query: "hip hop" },
-  { title: "Rock", query: "rock" },
-  { title: "Classical", query: "classical" },
-];
+function dedupeJioPlaylistsById(
+  items: HomeJioSaavnCategoryData["results"],
+  limit: number
+): HomeJioSaavnCategoryData["results"] {
+  const seen = new Set<string>();
+  const unique: HomeJioSaavnCategoryData["results"] = [];
+
+  for (const item of items) {
+    const id = normalizeId(item?.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    unique.push(item);
+    if (unique.length >= limit) break;
+  }
+
+  return unique;
+}
+
+function dedupeFirestorePlaylistsById(items: FirestorePlaylist[], limit: number): FirestorePlaylist[] {
+  const seen = new Set<string>();
+  const unique: FirestorePlaylist[] = [];
+
+  for (const item of items) {
+    const id = normalizeId(item?.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    unique.push(item);
+    if (unique.length >= limit) break;
+  }
+
+  return unique;
+}
+
+function withPromiseTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
 
 export default function HomeScreen() {
   useScreenTracking("Home");
@@ -61,458 +155,776 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
+  const { playSong, currentSongId } = usePlayerRow();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
 
-  const [recentlyPlayed, setRecentlyPlayed] = useState<RecentlyPlayedItem[]>([]);
-  const [categories, setCategories] = useState<CategoryData[]>([]);
-  const [publicPlaylists, setPublicPlaylists] = useState<FirestorePlaylist[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedFilter, setSelectedFilter] = useState<"all" | "music" | "podcasts">("all");
+  const [recentlyPlayed, setRecentlyPlayed] = useState<RecentlyPlayedItem[]>(
+    HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.recentlyPlayed : []
+  );
+  const [categories, setCategories] = useState<HomeJioSaavnCategoryData[]>(
+    HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.categories : []
+  );
+  const [publicPlaylists, setPublicPlaylists] = useState<FirestorePlaylist[]>(
+    HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.publicPlaylists : []
+  );
+  const [loading, setLoading] = useState(!HOME_SESSION_CACHE.hydrated);
+  const [refreshing, setRefreshing] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const latestLoadIdRef = useRef(0);
+  const hasHydratedRef = useRef(HOME_SESSION_CACHE.hydrated);
 
-  const greeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return "Good morning";
-    if (hour < 18) return "Good afternoon";
-    return "Good evening";
-  };
+  const INITIAL_CATEGORY_LIMIT = 10;
+  const REFRESH_CATEGORY_LIMIT = 12;
+  const INITIAL_PUBLIC_LIMIT = 10;
 
-  const getFirstName = () => {
-    if (!user?.name) return "";
-    return user.name.split(" ")[0];
-  };
+  const loadHomeData = useCallback(
+    async (options?: {
+      forceRefresh?: boolean;
+      showLoader?: boolean;
+      refreshPublicPlaylists?: boolean;
+      realtimeRefresh?: boolean;
+      limitPerCategory?: number;
+      publicLimit?: number;
+    }) => {
+      const forceRefresh = options?.forceRefresh ?? false;
+      const showLoader = options?.showLoader ?? true;
+      const refreshPublicPlaylists = options?.refreshPublicPlaylists ?? true;
+      const realtimeRefresh = options?.realtimeRefresh ?? false;
+      const limitPerCategory = options?.limitPerCategory ?? INITIAL_CATEGORY_LIMIT;
+      const publicLimit = options?.publicLimit ?? INITIAL_PUBLIC_LIMIT;
 
-  useFocusEffect(
-    useCallback(() => {
-      const loadRecent = async () => {
-        try {
-          const recent = await getRecentlyPlayed();
-          setRecentlyPlayed(recent.slice(0, 6)); // Show only 6 recent items
-        } catch { }
-      };
-      loadRecent();
-    }, [])
+      const loadId = ++latestLoadIdRef.current;
+      const shouldShowLoader = showLoader && !hasHydratedRef.current;
+
+      if (shouldShowLoader) {
+        setLoading(true);
+      }
+
+      try {
+        const [publicPlaylistsResult, categoryResult] = await Promise.allSettled([
+          refreshPublicPlaylists
+            ? withPromiseTimeout(
+                getPublicPlaylists(publicLimit),
+                PUBLIC_PLAYLIST_FETCH_TIMEOUT_MS,
+                "Home public playlists timeout"
+              )
+            : Promise.resolve<FirestorePlaylist[]>(HOME_SESSION_CACHE.publicPlaylists.slice(0, publicLimit)),
+          withPromiseTimeout(
+            getHomeJioSaavnCategories({
+              forceRefresh,
+              limitPerCategory,
+              realtime: realtimeRefresh,
+            }),
+            HOME_CATEGORY_FETCH_TIMEOUT_MS,
+            "Home categories timeout"
+          ),
+        ]);
+
+        if (loadId !== latestLoadIdRef.current) {
+          return;
+        }
+
+        if (refreshPublicPlaylists && publicPlaylistsResult.status === "fulfilled") {
+          const nextPublicPlaylists = publicPlaylistsResult.value;
+          const hasPreviousPublicPlaylists = HOME_SESSION_CACHE.publicPlaylists.length > 0;
+          const shouldReplacePublicPlaylists = nextPublicPlaylists.length > 0 || !hasPreviousPublicPlaylists;
+
+          if (shouldReplacePublicPlaylists) {
+            setPublicPlaylists(nextPublicPlaylists);
+            HOME_SESSION_CACHE.publicPlaylists = nextPublicPlaylists;
+          }
+
+          if (nextPublicPlaylists.length > 0) {
+            void setCachedHomePublicPlaylists(nextPublicPlaylists);
+          }
+        }
+
+        if (categoryResult.status === "fulfilled") {
+          const validCategories = categoryResult.value.filter((cat) => cat.results.length > 0);
+          const hasPreviousCategories = HOME_SESSION_CACHE.categories.length > 0;
+          const shouldReplaceCategories = validCategories.length > 0 || !hasPreviousCategories;
+
+          if (shouldReplaceCategories) {
+            setCategories(validCategories);
+            HOME_SESSION_CACHE.categories = validCategories;
+          }
+
+          if (validCategories.length > 0) {
+            hasHydratedRef.current = true;
+            HOME_SESSION_CACHE.hydrated = true;
+          }
+        }
+
+        if (refreshPublicPlaylists && publicPlaylistsResult.status === "fulfilled") {
+          if (publicPlaylistsResult.value.length > 0) {
+            hasHydratedRef.current = true;
+            HOME_SESSION_CACHE.hydrated = true;
+          }
+        }
+
+        if (
+          HOME_SESSION_CACHE.recentlyPlayed.length > 0 ||
+          HOME_SESSION_CACHE.categories.length > 0 ||
+          HOME_SESSION_CACHE.publicPlaylists.length > 0
+        ) {
+          hasHydratedRef.current = true;
+          HOME_SESSION_CACHE.hydrated = true;
+        }
+
+        // Mark bootstrapped even on empty/offline response to avoid repeated heavy reloads.
+        if (!HOME_SESSION_CACHE.hydrated) {
+          HOME_SESSION_CACHE.hydrated = true;
+          hasHydratedRef.current = true;
+        }
+      } finally {
+        if (shouldShowLoader && loadId === latestLoadIdRef.current) {
+          setLoading(false);
+        }
+      }
+    },
+    []
   );
 
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const playlists = await getPublicPlaylists(20);
-        setPublicPlaylists(playlists);
-      } catch (error) {
-        // Silent fail
-      }
+  const resetHomeState = useCallback((options?: { clearUi?: boolean }) => {
+    const clearUi = options?.clearUi ?? false;
+    latestLoadIdRef.current += 1;
+    hasHydratedRef.current = false;
+    HOME_SESSION_CACHE.hydrated = false;
+    HOME_SESSION_CACHE.categories = [];
+    HOME_SESSION_CACHE.publicPlaylists = [];
+    HOME_SESSION_CACHE.recentlyPlayed = [];
 
-      try {
-        const apiUrl = getApiUrl();
-
-        const results = await Promise.all(
-          CATEGORIES.map(async (cat, index) => {
-            try {
-              await new Promise(resolve => setTimeout(resolve, index * 50));
-
-              const url = `${apiUrl}api/jiosaavn/search/playlists?query=${encodeURIComponent(cat.query)}&limit=20`;
-
-              const res = await fetch(url, {
-                headers: {
-                  'Accept': 'application/json',
-                },
-              });
-
-              if (!res.ok) {
-                return { ...cat, results: [] };
-              }
-
-              const json = await res.json();
-
-              let results = [];
-              if (json.success && json.data?.results) {
-                results = json.data.results;
-              } else if (json.data?.results) {
-                results = json.data.results;
-              } else if (Array.isArray(json.results)) {
-                results = json.results;
-              }
-
-              const validPlaylists = results.filter((playlist: JioSaavnPlaylistResult) => {
-                return playlist.songCount && playlist.songCount > 0;
-              });
-
-              return { ...cat, results: validPlaylists };
-            } catch (error) {
-              return { ...cat, results: [] };
-            }
-          })
-        );
-
-        const validCategories = results.filter(cat => cat.results.length >= 5);
-        setCategories(validCategories);
-      } catch (error) {
-        // Silent fail
-      }
-
-      setLoading(false);
-    };
-
-    loadData();
+    if (clearUi) {
+      setCategories([]);
+      setPublicPlaylists([]);
+      setRecentlyPlayed([]);
+      setLoading(true);
+    }
   }, []);
 
-  // Use memoization for heavy filter calculations to prevent re-running on every render
-  // IMPORTANT: These must be called before any conditional returns to follow Rules of Hooks
-  const featuredPlaylists = React.useMemo(() => {
-    return categories
-      .filter((cat) => cat.results.length > 0)
-      .slice(0, 7)
-      .map((cat) => ({
-        id: cat.results[0].id,
-        name: cat.results[0].name,
-        imageUrl: getBestImageUrl(cat.results[0].image),
-        type: "jiosaavn" as const,
-      }));
-  }, [categories]);
-
-  const biggestHits = React.useMemo(() => {
-    return categories.find((cat) => cat.results.length >= 8)?.results.slice(0, 8) ||
-      categories.find((cat) => cat.results.length > 0)?.results || [];
-  }, [categories]);
-
-  // Section data structure for the main vertical FlatList to enable complete virtualization
-  const sections = React.useMemo(() => {
-    const data = [];
-
-    // 1. Featured Grid (Liked Songs + first 5 featured playlists to fit 2 columns nicely)
-    data.push({ id: 'featured', type: 'featured' });
-
-    // 2. Public Playlists
-    if (publicPlaylists.length > 0) {
-      data.push({ id: 'public-playlists', type: 'public-playlists' });
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      resetHomeState();
+      await clearJioSaavnPlaylistCache();
+      try {
+        const recent = await getRecentlyPlayed();
+        const trimmedRecent = recent.slice(0, 8);
+        setRecentlyPlayed(trimmedRecent);
+        HOME_SESSION_CACHE.recentlyPlayed = trimmedRecent;
+      } catch {
+        setRecentlyPlayed([]);
+        HOME_SESSION_CACHE.recentlyPlayed = [];
+      }
+      await loadHomeData({
+        forceRefresh: true,
+        showLoader: false,
+        refreshPublicPlaylists: true,
+        realtimeRefresh: false,
+        limitPerCategory: REFRESH_CATEGORY_LIMIT,
+        publicLimit: INITIAL_PUBLIC_LIMIT,
+      });
+    } finally {
+      setRefreshing(false);
     }
+  }, [INITIAL_PUBLIC_LIMIT, REFRESH_CATEGORY_LIMIT, loadHomeData, resetHomeState]);
 
-    // 3. Biggest Hits
-    if (biggestHits.length >= 5) {
-      data.push({ id: 'biggest-hits', type: 'biggest-hits' });
-    }
+  useEffect(() => {
+    let cancelled = false;
 
-    // 4. Recents
-    if (recentlyPlayed.length > 0) {
-      data.push({ id: 'recents', type: 'recents' });
-    }
+    const bootstrap = async () => {
+      if (HOME_SESSION_CACHE.hydrated) {
+        setRecentlyPlayed(HOME_SESSION_CACHE.recentlyPlayed);
+        setCategories(HOME_SESSION_CACHE.categories);
+        setPublicPlaylists(HOME_SESSION_CACHE.publicPlaylists);
+        setLoading(false);
+        return;
+      }
 
-    // 5. Other Categories
-    const otherCategories = categories.slice(1).filter(cat => cat.results.length >= 5);
-    otherCategories.forEach((cat) => {
-      data.push({ id: `category-${cat.title}`, type: 'category', data: cat });
+      const [recentResult, cachedPublicResult] = await Promise.allSettled([
+        getRecentlyPlayed(),
+        getCachedHomePublicPlaylists({ allowStale: true }),
+      ]);
+
+      let hasWarmContent = false;
+
+      if (!cancelled) {
+        if (recentResult.status === "fulfilled") {
+          const trimmedRecent = recentResult.value.slice(0, 8);
+          setRecentlyPlayed(trimmedRecent);
+          HOME_SESSION_CACHE.recentlyPlayed = trimmedRecent;
+          hasWarmContent = hasWarmContent || trimmedRecent.length > 0;
+        } else {
+          setRecentlyPlayed([]);
+          HOME_SESSION_CACHE.recentlyPlayed = [];
+        }
+
+        if (cachedPublicResult.status === "fulfilled") {
+          const cachedPublic = cachedPublicResult.value.slice(0, INITIAL_PUBLIC_LIMIT);
+          if (cachedPublic.length > 0) {
+            setPublicPlaylists(cachedPublic);
+            HOME_SESSION_CACHE.publicPlaylists = cachedPublic;
+            hasWarmContent = true;
+          }
+        }
+
+        if (hasWarmContent) {
+          hasHydratedRef.current = true;
+          HOME_SESSION_CACHE.hydrated = true;
+          setLoading(false);
+        }
+      }
+
+      if (cancelled) return;
+
+      try {
+        await withPromiseTimeout(
+          loadHomeData({
+            forceRefresh: false,
+            showLoader: !hasWarmContent,
+            refreshPublicPlaylists: true,
+            realtimeRefresh: false,
+            limitPerCategory: INITIAL_CATEGORY_LIMIT,
+            publicLimit: INITIAL_PUBLIC_LIMIT,
+          }),
+          HOME_BOOTSTRAP_MAX_WAIT_MS,
+          "Home bootstrap timeout"
+        );
+      } catch {
+        if (!cancelled) {
+          setLoading(false);
+          hasHydratedRef.current = true;
+          HOME_SESSION_CACHE.hydrated = true;
+        }
+      }
+    };
+
+    bootstrap();
+
+    return () => {
+      cancelled = true;
+      latestLoadIdRef.current += 1;
+    };
+  }, [loadHomeData]);
+
+  const orderedHomeCategories = useMemo<HomeJioSaavnCategoryData[]>(() => {
+    const categoryById = new Map<string, HomeJioSaavnCategoryData>();
+    categories.forEach((category) => {
+      categoryById.set(category.id, category);
     });
 
+    const preferred = HOME_JIOSAAVN_SECTION_ORDER
+      .map((categoryId) => {
+        const category = categoryById.get(categoryId);
+        if (!category || category.results.length === 0) return null;
+        return {
+          ...category,
+          title: category.title || HOME_JIOSAAVN_TITLES[categoryId],
+        };
+      })
+      .filter((category): category is HomeJioSaavnCategoryData => Boolean(category));
+
+    const preferredIds = new Set(preferred.map((category) => category.id));
+    const extras = categories
+      .filter((category) => !preferredIds.has(category.id) && category.results.length > 0)
+      .map((category) => ({
+        ...category,
+        title: category.title || category.id,
+      }));
+
+    return [...preferred, ...extras];
+  }, [categories]);
+
+  const weekdayLabel = useMemo(() => {
+    return new Date().toLocaleDateString("en-US", { weekday: "long" });
+  }, []);
+
+  const categoryById = useMemo(() => {
+    const map = new Map<string, HomeJioSaavnCategoryData>();
+    orderedHomeCategories.forEach((category) => {
+      map.set(category.id, category);
+    });
+    return map;
+  }, [orderedHomeCategories]);
+
+  const trendingItems = useMemo(
+    () => dedupeJioPlaylistsById(categoryById.get("trending")?.results ?? [], MAX_ROW_ITEMS),
+    [categoryById]
+  );
+
+  const newReleaseItems = useMemo(() => {
+    const primary = dedupeJioPlaylistsById(categoryById.get("new-arrivals")?.results ?? [], MAX_ROW_ITEMS);
+    if (primary.length > 0) return primary;
+    return dedupeJioPlaylistsById(categoryById.get("most-viral")?.results ?? [], MAX_ROW_ITEMS);
+  }, [categoryById]);
+
+  const publicPlaylistsForSection = useMemo(
+    () => dedupeFirestorePlaylistsById(publicPlaylists, MAX_ROW_ITEMS),
+    [publicPlaylists]
+  );
+
+  const extraCategoryRows = useMemo(() => {
+    const reserved = new Set(["trending", "new-arrivals", "most-viral"]);
+
+    return orderedHomeCategories
+      .filter((category) => !reserved.has(category.id))
+      .map((category) => ({
+        ...category,
+        results: dedupeJioPlaylistsById(category.results, MAX_ROW_ITEMS),
+      }))
+      .filter((category) => category.results.length > 0)
+      .slice(0, MAX_EXTRA_CATEGORY_ROWS);
+  }, [orderedHomeCategories]);
+
+  const sections = useMemo<HomeSection[]>(() => {
+    const data: HomeSection[] = [];
+
+    if (recentlyPlayed.length > 0) {
+      data.push({ id: "recents", type: "recents" });
+    }
+
+    if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS) {
+      data.push({ id: "public-playlists", type: "public-playlists" });
+    }
+
+    if (trendingItems.length > 0) {
+      data.push({ id: "trending", type: "trending" });
+    }
+
+    if (newReleaseItems.length > 0) {
+      data.push({ id: "new-releases", type: "new-releases" });
+    }
+
+    extraCategoryRows.forEach((cat) =>
+      data.push({ id: `category-${cat.id}`, type: "category", data: cat })
+    );
+
     return data;
-  }, [categories, publicPlaylists, biggestHits, recentlyPlayed]);
+  }, [
+    recentlyPlayed,
+    publicPlaylistsForSection,
+    trendingItems,
+    newReleaseItems,
+    extraCategoryRows,
+  ]);
 
-  // Render horizontal items functions - must be before conditional returns
-  const renderPublicPlaylist = useCallback(({ item: playlist }: { item: any }) => (
-    <Pressable
-      style={({ pressed }) => [styles.playlistCard, pressed && styles.cardPressed]}
-      onPress={() =>
-        router.push({
-          pathname: "/playlist/[id]",
-          params: { id: playlist.id, firestore: "true" },
-        })
+  const openJioSaavnPlaylist = useCallback(
+    (playlistId: string) => {
+      router.push({
+        pathname: "/playlist/[id]",
+        params: { id: playlistId, jiosaavn: "true", firestore: "false" },
+      }, {
+        withAnchor: true,
+        dangerouslySingular: () => "playlist-details",
+      });
+    },
+    [router]
+  );
+
+  const openFirestorePlaylist = useCallback(
+    (playlistId: string) => {
+      router.push({
+        pathname: "/playlist/[id]",
+        params: { id: playlistId, firestore: "true", jiosaavn: "false" },
+      }, {
+        withAnchor: true,
+        dangerouslySingular: () => "playlist-details",
+      });
+    },
+    [router]
+  );
+
+  const handleRecentPress = useCallback(
+    (item: RecentlyPlayedItem) => {
+      const itemId = item?.id?.trim();
+      if (!itemId) {
+        return;
       }
-    >
-      <Image
-        source={{ uri: playlist.imageUrl || undefined }}
-        style={styles.playlistImage}
-        contentFit="cover"
-        transition={200}
-      />
-      <Text style={styles.playlistName} numberOfLines={1}>{playlist.name}</Text>
-      <Text style={styles.playlistCreator} numberOfLines={1}>
-        By {playlist.createdBy?.fullName || "Unknown"}
-      </Text>
-    </Pressable>
-  ), []);
 
-  const renderBigHit = useCallback(({ item: playlist }: { item: any }) => (
-    <Pressable
-      style={({ pressed }) => [styles.bigHitCard, pressed && styles.cardPressed]}
-      onPress={() =>
-        router.push({
-          pathname: "/playlist/[id]",
-          params: { id: playlist.id, jiosaavn: "true" },
-        })
-      }
-    >
-      <Image
-        source={{ uri: getBestImageUrl(playlist.image) }}
-        style={styles.bigHitImage}
-        contentFit="cover"
-        transition={200}
-      />
-      <Text style={styles.bigHitName} numberOfLines={2}>{playlist.name}</Text>
-    </Pressable>
-  ), []);
+      if (item.type === "song") {
+        const sourceSong = item.data as Partial<Song> | undefined;
+        if (sourceSong && typeof sourceSong.id === "string") {
+          const legacySource = sourceSong as Partial<Song> & {
+            url?: string;
+            uri?: string;
+            streamUrl?: string;
+            downloadUrl?: string | { url?: string; link?: string };
+          };
+          const downloadUrlCandidate =
+            typeof legacySource.downloadUrl === "string"
+              ? legacySource.downloadUrl
+              : legacySource.downloadUrl?.url || legacySource.downloadUrl?.link || "";
+          const resolvedAudioUrl = [
+            sourceSong.audioUrl,
+            legacySource.url,
+            legacySource.uri,
+            legacySource.streamUrl,
+            downloadUrlCandidate,
+          ].find((candidate) => typeof candidate === "string" && candidate.trim().length > 0)?.trim() || "";
 
-  const renderRecent = useCallback(({ item }: { item: any }) => (
-    <Pressable
-      style={({ pressed }) => [styles.recentCard, pressed && styles.cardPressed]}
-      onPress={() => {
-        if (item.type === "jiosaavn-playlist") {
-          router.push({
-            pathname: "/playlist/[id]",
-            params: { id: item.id, jiosaavn: "true" },
-          });
-        } else if (item.type === "playlist") {
-          router.push({
-            pathname: "/playlist/[id]",
-            params: { id: item.id },
-          });
+          const hydratedSong: Song = {
+            id: sourceSong.id,
+            title: sourceSong.title || item.name || "Unknown Song",
+            artist: sourceSong.artist || "Unknown Artist",
+            album: sourceSong.album || "",
+            duration: Number(sourceSong.duration) || 0,
+            coverUrl: sourceSong.coverUrl || item.imageUrl || "",
+            genre: sourceSong.genre || "",
+            audioUrl: resolvedAudioUrl,
+            year: sourceSong.year,
+            language: sourceSong.language,
+            hasLyrics: sourceSong.hasLyrics,
+            source: sourceSong.source,
+          };
+          if (hydratedSong.audioUrl.trim().length > 0) {
+            playSong(hydratedSong, [hydratedSong]);
+            router.push("/player");
+            return;
+          }
         }
-      }}
-    >
-      <Image
-        source={{ uri: item.imageUrl }}
-        style={styles.recentImage}
-        contentFit="cover"
-        transition={200}
-      />
-    </Pressable>
-  ), []);
+        if (currentSongId) {
+          router.push("/player");
+        }
+        return;
+      }
 
-  const renderCategoryPlaylist = useCallback(({ item: playlist }: { item: any }) => (
-    <Pressable
-      style={({ pressed }) => [styles.playlistCard, pressed && styles.cardPressed]}
-      onPress={() =>
+      if (item.type === "jiosaavn-playlist") {
+        openJioSaavnPlaylist(itemId);
+        return;
+      }
+
+      const maybePlaylistData =
+        item.data && typeof item.data === "object" ? (item.data as Record<string, unknown>) : null;
+      if (maybePlaylistData && "createdBy" in maybePlaylistData) {
+        openFirestorePlaylist(itemId);
+        return;
+      }
+
+      if (itemId.startsWith("user_")) {
         router.push({
           pathname: "/playlist/[id]",
-          params: { id: playlist.id, jiosaavn: "true" },
-        })
+          params: { id: itemId, jiosaavn: "false", firestore: "false" },
+        }, {
+          withAnchor: true,
+          dangerouslySingular: () => "playlist-details",
+        });
+        return;
       }
-    >
-      <Image
-        source={{ uri: getBestImageUrl(playlist.image) }}
-        style={styles.playlistImage}
-        contentFit="cover"
-        transition={200}
-      />
-      <Text style={styles.playlistName} numberOfLines={1}>{playlist.name}</Text>
-    </Pressable>
-  ), []);
 
-  // Use ListHeaderComponent for Header to avoid it scrolling separately
-  const renderHeader = useCallback(() => (
-    <View style={styles.header}>
-      <View style={styles.headerTop}>
-        <Pressable onPress={() => setShowProfileDropdown(true)}>
-          {isAuthenticated && user?.picture ? (
-            <Image
-              source={{ uri: user.picture }}
-              style={styles.avatarImage}
-              contentFit="cover"
-            />
-          ) : (
-            <View style={styles.avatar}>
-              <Ionicons name="person" size={16} color={Colors.black} />
+      // Legacy fallback: non-local playlist recents are usually JioSaavn ids.
+      openJioSaavnPlaylist(itemId);
+    },
+    [currentSongId, openFirestorePlaylist, openJioSaavnPlaylist, playSong, router]
+  );
+
+  const renderRecentCard = useCallback(
+    ({ item }: { item: RecentlyPlayedItem }) => (
+      <Pressable
+        style={({ pressed }) => [styles.recentCard, pressed && styles.cardPressed]}
+        onPress={() => handleRecentPress(item)}
+      >
+        <Image
+          source={{ uri: item.imageUrl }}
+          style={styles.recentImage}
+          contentFit="cover"
+          transition={80}
+          cachePolicy="memory-disk"
+          recyclingKey={`recent-${item.id}`}
+        />
+        <LinearGradient
+          colors={["transparent", "rgba(38,42,49,0.36)", "rgba(16,20,26,0.9)"]}
+          locations={[0, 0.62, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.recentLabelWrap}>
+          <Text style={styles.recentLabel} numberOfLines={1}>
+            {item.name}
+          </Text>
+        </View>
+      </Pressable>
+    ),
+    [handleRecentPress]
+  );
+
+  const renderPublicPlaylist = useCallback(
+    ({ item }: { item: FirestorePlaylist }) => (
+      <Pressable
+        style={({ pressed }) => [styles.rectCard, pressed && styles.cardPressed]}
+        onPress={() => openFirestorePlaylist(item.id)}
+      >
+        <View style={styles.rectCardImageWrap}>
+          <Image
+            source={{ uri: item.imageUrl || undefined }}
+            style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
+            contentFit="contain"
+            transition={80}
+            cachePolicy="memory-disk"
+            recyclingKey={`public-${item.id}`}
+          />
+          <View pointerEvents="none" style={styles.brandCoverBadge}>
+            <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
+          </View>
+        </View>
+        <Text style={styles.rectCardTitle} numberOfLines={2}>
+          {item.name}
+        </Text>
+        <Text style={styles.rectCardMeta} numberOfLines={1}>
+          {`${item.createdBy?.name || "Community"} • ${Math.max(0, item.songs?.length || 0)} songs`}
+        </Text>
+      </Pressable>
+    ),
+    [openFirestorePlaylist]
+  );
+
+  const renderCategoryPlaylist = useCallback(
+    (categoryId: string, categoryTitle: string) =>
+      function CategoryPlaylistCard({ item }: { item: HomeJioSaavnCategoryData["results"][number] }) {
+        return (
+          <Pressable
+            style={({ pressed }) => [styles.rectCard, pressed && styles.cardPressed]}
+            onPress={() => openJioSaavnPlaylist(item.id)}
+          >
+            <View style={styles.rectCardImageWrap}>
+              <Image
+                source={{ uri: getThumbImageUrl(item.image) }}
+                style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
+                contentFit="contain"
+                transition={80}
+                cachePolicy="memory-disk"
+                recyclingKey={`${categoryId}-${item.id}`}
+              />
+              <View pointerEvents="none" style={styles.brandCoverBadge}>
+                <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
+              </View>
             </View>
-          )}
-        </Pressable>
+            <Text style={styles.rectCardTitle} numberOfLines={2}>
+              {item.name}
+            </Text>
+            <Text style={styles.rectCardMeta} numberOfLines={1}>
+              {categoryTitle}
+            </Text>
+          </Pressable>
+        );
+      },
+    [openJioSaavnPlaylist]
+  );
 
-        <View style={styles.filterPills}>
-          <Pressable
-            style={[styles.pill, selectedFilter === "all" && styles.pillActive]}
-            onPress={() => setSelectedFilter("all")}
-          >
-            <Text style={[styles.pillText, selectedFilter === "all" && styles.pillTextActive]}>
-              All
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.pill, selectedFilter === "music" && styles.pillActive]}
-            onPress={() => setSelectedFilter("music")}
-          >
-            <Text style={[styles.pillText, selectedFilter === "music" && styles.pillTextActive]}>
-              Music
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.pill, selectedFilter === "podcasts" && styles.pillActive]}
-            onPress={() => setSelectedFilter("podcasts")}
-          >
-            <Text style={[styles.pillText, selectedFilter === "podcasts" && styles.pillTextActive]}>
-              Podcasts
-            </Text>
+  const renderHeader = useCallback(() => {
+    const firstName =
+      isAuthenticated && typeof user?.name === "string" && user.name.trim().length > 0
+        ? user.name.trim().split(" ")[0]
+        : "Listener";
+
+    return (
+      <View style={styles.header}>
+        <View style={styles.topMenuRow}>
+          <Pressable style={styles.topProfileButton} onPress={() => setShowProfileDropdown(true)}>
+            {isAuthenticated && user?.picture ? (
+              <Image source={{ uri: user.picture }} style={styles.avatarImage} contentFit="cover" />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Ionicons name="person" size={16} color={Colors.black} />
+              </View>
+            )}
           </Pressable>
         </View>
-      </View>
-    </View>
-  ), [isAuthenticated, user?.picture, selectedFilter]);
 
-  const renderSection = useCallback(({ item: section }: { item: any }) => {
-    switch (section.type) {
-      case 'featured':
-        // Safe slice to Ensure even grid 
-        const gridPlaylists = featuredPlaylists.slice(0, 5);
-        return (
-          <View style={styles.featuredGrid}>
-            <Pressable
-              style={({ pressed }) => [styles.featuredCard, styles.likedSongsCard, pressed && styles.cardPressed]}
-              onPress={() => router.push("/(tabs)/liked-songs")}
-            >
-              <View style={styles.likedSongsIcon}>
-                <Ionicons name="heart" size={24} color={Colors.text} />
-              </View>
-              <Text style={styles.featuredCardTitle}>Liked Songs</Text>
-              <Ionicons name="ellipsis-horizontal" size={20} color={Colors.subtext} style={styles.featuredCardMenu} />
+        <LinearGradient
+          colors={["rgba(38,225,154,0.22)", "rgba(0,184,123,0.1)", "rgba(24,28,34,0.9)"]}
+          locations={[0, 0.56, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.heroBanner}
+        >
+          <Text style={styles.heroEyebrow}>Mavrixfy Picks</Text>
+          <Text style={styles.heroTitle}>
+            {isAuthenticated ? `${firstName}, find your next vibe` : "Find your next vibe"}
+          </Text>
+          <Text style={styles.heroSubtitle}>
+            Fresh playlists, trending hits, and your recent favorites in one place.
+          </Text>
+          <View style={styles.heroActionRow}>
+            <Pressable style={styles.heroPrimaryButton} onPress={() => router.push("/(tabs)/search")}>
+              <Ionicons name="search" size={15} color={Colors.black} />
+              <Text style={styles.heroPrimaryText}>Search</Text>
             </Pressable>
-
-            {gridPlaylists.map((playlist) => (
-              <Pressable
-                key={playlist.id}
-                style={({ pressed }) => [styles.featuredCard, pressed && styles.cardPressed]}
-                onPress={() =>
-                  router.push({
-                    pathname: "/playlist/[id]",
-                    params: { id: playlist.id, [playlist.type]: "true" },
-                  })
-                }
-              >
-                <Image
-                  source={{ uri: playlist.imageUrl }}
-                  style={styles.featuredCardImage}
-                  contentFit="cover"
-                />
-                <Text style={styles.featuredCardTitle} numberOfLines={2}>
-                  {playlist.name}
-                </Text>
-              </Pressable>
-            ))}
+            <Pressable style={styles.heroGhostButton} onPress={() => router.push("/(tabs)/liked-songs")}>
+              <Ionicons name="heart" size={14} color={Colors.text} />
+              <Text style={styles.heroGhostText}>Liked Songs</Text>
+            </Pressable>
           </View>
-        );
+        </LinearGradient>
+      </View>
+    );
+  }, [isAuthenticated, router, user?.name, user?.picture]);
 
-      case 'public-playlists':
-        return (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Public Playlists</Text>
-            <FlatList
-              data={publicPlaylists}
-              renderItem={renderPublicPlaylist}
-              keyExtractor={(item) => item.id}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-              initialNumToRender={3}
-              maxToRenderPerBatch={4}
-              windowSize={5}
-            />
-          </View>
-        );
+  const renderSectionHeader = useCallback((title: string) => {
+    return (
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+    );
+  }, []);
 
-      case 'biggest-hits':
-        return (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Today's biggest hits</Text>
-              <Pressable>
-                <Text style={styles.showAllText}>Show all</Text>
-              </Pressable>
+  const renderSection = useCallback(
+    ({ item: section }: { item: HomeSection }) => {
+      switch (section.type) {
+        case "recents":
+          return (
+            <View style={styles.section}>
+              {renderSectionHeader("Jump Back In")}
+              <FlatList
+                data={recentlyPlayed}
+                renderItem={renderRecentCard}
+                keyExtractor={(item, index) => `recent-${item.id}-${index}`}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.rowContent}
+                initialNumToRender={1}
+                maxToRenderPerBatch={2}
+                windowSize={3}
+                removeClippedSubviews={Platform.OS === "android"}
+              />
             </View>
-            <FlatList
-              data={biggestHits.slice(0, 10)}
-              renderItem={renderBigHit}
-              keyExtractor={(item) => item.id}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-              initialNumToRender={3}
-              maxToRenderPerBatch={4}
-              windowSize={5}
-              decelerationRate="fast"
-              snapToInterval={176} // 160 width + 16 margin
-            />
-          </View>
-        );
+          );
 
-      case 'recents':
-        return (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recents</Text>
-              <Pressable>
-                <Text style={styles.showAllText}>Show all</Text>
-              </Pressable>
+        case "public-playlists":
+          return (
+            <View style={styles.section}>
+              {renderSectionHeader("Made for You")}
+              <FlatList
+                data={publicPlaylistsForSection}
+                renderItem={renderPublicPlaylist}
+                keyExtractor={(item, index) => `public-${item.id}-${index}`}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.rowContent}
+                initialNumToRender={1}
+                maxToRenderPerBatch={2}
+                windowSize={3}
+                removeClippedSubviews={Platform.OS === "android"}
+              />
             </View>
-            <FlatList
-              data={recentlyPlayed}
-              renderItem={renderRecent}
-              keyExtractor={(item) => item.id}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-              initialNumToRender={3}
-              maxToRenderPerBatch={4}
-              windowSize={5}
-            />
-          </View>
-        );
+          );
 
-      case 'category':
-        return (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>{section.data.title}</Text>
-              <Pressable>
-                <Text style={styles.showAllText}>Show all</Text>
-              </Pressable>
+        case "trending":
+          return (
+            <View style={styles.section}>
+              {renderSectionHeader("Trending Now")}
+              <FlatList
+                data={trendingItems}
+                renderItem={renderCategoryPlaylist("trending", "Trending Now")}
+                keyExtractor={(item, index) => `trending-${item.id}-${index}`}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.rowContent}
+                initialNumToRender={1}
+                maxToRenderPerBatch={2}
+                windowSize={3}
+                removeClippedSubviews={Platform.OS === "android"}
+              />
             </View>
-            <FlatList
-              data={section.data.results.slice(0, 15)}
-              renderItem={renderCategoryPlaylist}
-              keyExtractor={(item) => item.id}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-              initialNumToRender={4}
-              maxToRenderPerBatch={5}
-              windowSize={5}
-            />
-          </View>
-        );
+          );
 
-      default:
-        return null;
-    }
-  }, [featuredPlaylists, publicPlaylists, biggestHits, recentlyPlayed]);
+        case "new-releases":
+          return (
+            <View style={styles.section}>
+              {renderSectionHeader(`New Releases ${weekdayLabel}`)}
+              <FlatList
+                data={newReleaseItems}
+                renderItem={renderCategoryPlaylist("new-arrivals", "New Releases")}
+                keyExtractor={(item, index) => `new-releases-${item.id}-${index}`}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.rowContent}
+                initialNumToRender={1}
+                maxToRenderPerBatch={2}
+                windowSize={3}
+                removeClippedSubviews={Platform.OS === "android"}
+              />
+            </View>
+          );
 
-  // Check loading state after all hooks are defined
+        case "category":
+          return (
+            <View style={styles.section}>
+              {renderSectionHeader(section.data.title)}
+              <FlatList
+                data={section.data.results}
+                renderItem={renderCategoryPlaylist(section.data.id, section.data.title)}
+                keyExtractor={(item, index) => `${section.data.id}-${item.id}-${index}`}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.rowContent}
+                initialNumToRender={1}
+                maxToRenderPerBatch={2}
+                windowSize={3}
+                removeClippedSubviews={Platform.OS === "android"}
+              />
+            </View>
+          );
+
+        default:
+          return null;
+      }
+    },
+    [
+      recentlyPlayed,
+      renderRecentCard,
+      publicPlaylistsForSection,
+      renderPublicPlaylist,
+      trendingItems,
+      newReleaseItems,
+      renderCategoryPlaylist,
+      renderSectionHeader,
+      weekdayLabel,
+    ]
+  );
+
   if (loading) {
     return (
       <View style={[styles.container, styles.loadingContainer, { paddingTop: topInset }]}>
-        <ActivityIndicator size="large" color={Colors.primary} />
+        <ActivityIndicator size="large" color={BRAND.teal} />
       </View>
     );
   }
 
   return (
-    <LinearGradient
-      colors={["#0a0a0a", "#121212", "#1a1a1a"]}
-      style={[styles.container, { paddingTop: topInset }]}
-    >
+    <View style={[styles.container, { paddingTop: topInset }]}>
       <FlatList
         data={sections}
         renderItem={renderSection}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={renderHeader}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={BRAND.teal}
+            colors={[BRAND.teal]}
+            progressBackgroundColor="rgba(255,255,255,0.12)"
+          />
+        }
         style={styles.scrollView}
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={3}
-        maxToRenderPerBatch={3}
-        windowSize={5}
-        removeClippedSubviews={Platform.OS === 'android'}
+        initialNumToRender={2}
+        maxToRenderPerBatch={2}
+        windowSize={3}
+        updateCellsBatchingPeriod={60}
+        removeClippedSubviews={Platform.OS === "android"}
+      />
+      <LinearGradient
+        pointerEvents="none"
+        colors={["rgba(16,20,26,0)", "rgba(16,20,26,0.52)", "rgba(16,20,26,0.84)", Colors.background]}
+        locations={[0, 0.58, 0.86, 1]}
+        style={styles.bottomVisibilityOverlay}
       />
       <ProfileDropdown
         visible={showProfileDropdown}
         onClose={() => setShowProfileDropdown(false)}
       />
-    </LinearGradient>
+    </View>
   );
 }
 
@@ -528,192 +940,221 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 16,
+  scrollContent: {
+    paddingBottom: 156,
   },
-  headerTop: {
+  bottomVisibilityOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 176,
+  },
+  header: {
+    paddingHorizontal: 14,
+    paddingTop: 4,
+    paddingBottom: 6,
+  },
+  topMenuRow: {
+    minHeight: 42,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    justifyContent: "flex-start",
+    gap: 8,
   },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.primary,
+  topProfileButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  avatarFallback: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: BRAND.green,
     justifyContent: "center",
     alignItems: "center",
   },
   avatarImage: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
   },
-  filterPills: {
-    flexDirection: "row",
-    gap: 8,
-    flex: 1,
-  },
-  pill: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: Colors.surfaceLight,
-  },
-  pillActive: {
-    backgroundColor: Colors.primary,
-  },
-  pillText: {
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-    color: Colors.text,
-  },
-  pillTextActive: {
-    color: Colors.black,
-  },
-  featuredGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    paddingHorizontal: 12,
-    gap: 8,
-  },
-  featuredCard: {
-    width: "48%" as any,
-    height: 64,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: 6,
+  heroBanner: {
+    marginTop: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     overflow: "hidden",
-    position: "relative",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 6,
   },
-  likedSongsCard: {
-    backgroundColor: "#5038a0",
+  heroEyebrow: {
+    color: "rgba(223,226,235,0.86)",
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
   },
-  likedSongsIcon: {
-    width: 64,
-    height: 64,
-    backgroundColor: "#5038a0",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  featuredCardImage: {
-    width: 64,
-    height: 64,
-  },
-  featuredCardTitle: {
-    flex: 1,
-    fontSize: 13,
-    fontFamily: "Inter_700Bold",
+  heroTitle: {
+    marginTop: 6,
     color: Colors.text,
-    paddingHorizontal: 10,
-    letterSpacing: -0.2,
+    fontSize: 25,
+    lineHeight: 30,
+    letterSpacing: -0.4,
+    fontFamily: "Inter_700Bold",
   },
-  featuredCardMenu: {
-    position: "absolute",
-    top: 4,
-    right: 4,
+  heroSubtitle: {
+    marginTop: 6,
+    color: BRAND.textMuted,
+    fontSize: 12.5,
+    lineHeight: 17,
+    fontFamily: "Inter_500Medium",
+    maxWidth: "95%",
   },
-  cardPressed: {
-    opacity: 0.7,
+  heroActionRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  heroPrimaryButton: {
+    height: 34,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    backgroundColor: Colors.primary,
+    borderWidth: 1,
+    borderColor: "rgba(38,225,154,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 5,
+  },
+  heroPrimaryText: {
+    color: Colors.black,
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+  },
+  heroGhostButton: {
+    height: 34,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    backgroundColor: Colors.surfaceGlass,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 5,
+  },
+  heroGhostText: {
+    color: Colors.text,
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
   },
   section: {
-    marginTop: 24,
+    marginTop: 20,
   },
   sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
     paddingHorizontal: 16,
     marginBottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
   },
   sectionTitle: {
-    fontSize: 22,
+    fontSize: 19,
+    color: BRAND.textPrimary,
     fontFamily: "Inter_700Bold",
-    color: Colors.text,
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    letterSpacing: -0.18,
   },
-  showAllText: {
-    fontSize: 13,
-    fontFamily: "Inter_600SemiBold",
-    color: Colors.subtext,
-  },
-  horizontalList: {
+  rowContent: {
     paddingLeft: 16,
-    paddingRight: 8,
-  },
-  bigHitCard: {
-    width: 160,
-    marginRight: 16,
-  },
-  bigHitImage: {
-    width: 160,
-    height: 160,
-    borderRadius: 8,
-    backgroundColor: Colors.surfaceLight,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 10,
-  },
-  bigHitName: {
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-    color: Colors.text,
-    marginTop: 8,
-    lineHeight: 18,
-    letterSpacing: -0.2,
+    paddingRight: 16,
+    gap: 12,
   },
   recentCard: {
-    width: 160,
-    marginRight: 16,
+    width: 134,
+    height: 134,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
   },
   recentImage: {
-    width: 160,
-    height: 160,
-    borderRadius: 8,
-    backgroundColor: Colors.surfaceLight,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 10,
+    width: "100%",
+    height: "100%",
+    position: "absolute",
   },
-  playlistCard: {
-    width: 160,
-    marginRight: 16,
+  recentLabelWrap: {
+    position: "absolute",
+    left: 8,
+    right: 8,
+    bottom: 8,
   },
-  playlistImage: {
-    width: 160,
-    height: 160,
-    borderRadius: 8,
-    backgroundColor: Colors.surfaceLight,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 10,
-  },
-  playlistName: {
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
-    color: Colors.text,
-    marginTop: 8,
-    letterSpacing: -0.2,
-  },
-  playlistCreator: {
+  recentLabel: {
+    color: BRAND.textPrimary,
     fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    color: Colors.subtext,
-    marginTop: 4,
+    fontFamily: "Inter_700Bold",
+  },
+  rectCard: {
+    width: 152,
+  },
+  rectCardImageWrap: {
+    width: 152,
+    height: 152,
+    borderRadius: 16,
+    overflow: "hidden",
+    position: "relative",
+  },
+  rectCardImage: {
+    width: 152,
+    height: 152,
+    borderRadius: 16,
+    backgroundColor: Colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+  },
+  rectCardTitle: {
+    color: BRAND.textPrimary,
+    fontSize: 12.5,
+    lineHeight: 16,
+    fontFamily: "Inter_600SemiBold",
+    marginTop: 8,
+    paddingRight: 4,
+  },
+  rectCardMeta: {
+    color: BRAND.textMuted,
+    fontSize: 10,
+    fontFamily: "Inter_500Medium",
+    marginTop: 3,
+  },
+  brandCoverBadge: {
+    position: "absolute",
+    top: 4,
+    left: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.45)",
+    backgroundColor: "#0E131A",
+  },
+  brandCoverBadgeImage: {
+    width: "100%",
+    height: "100%",
+    opacity: 0.82,
+  },
+  cardPressed: {
+    opacity: 0.76,
+    transform: [{ scale: 0.985 }],
   },
 });

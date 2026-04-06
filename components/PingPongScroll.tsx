@@ -1,10 +1,19 @@
-import React, { useEffect, useRef, useState } from "react";
-import { View, Text, Animated, StyleSheet, LayoutChangeEvent } from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  View,
+  Text,
+  Animated,
+  Easing,
+  StyleSheet,
+  LayoutChangeEvent,
+  StyleProp,
+  TextStyle,
+} from "react-native";
 
 interface PingPongScrollProps {
   text: string;
   className?: string;
-  style?: any;
+  style?: StyleProp<TextStyle>;
   velocity?: number;
 }
 
@@ -19,50 +28,57 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
   const [textWidth, setTextWidth] = useState(0);
   const animatedValue = useRef(new Animated.Value(0)).current;
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const GAP = 28;
 
   useEffect(() => {
-    // Stop any existing animation
     if (animationRef.current) {
       animationRef.current.stop();
-      animatedValue.setValue(0);
+      animationRef.current = null;
     }
 
-    // Check if text overflows container
-    const shouldScroll = textWidth > containerWidth && containerWidth > 0 && textWidth > 0;
-    
+    const overflow = textWidth - containerWidth;
+    const shouldScroll = overflow > 6 && containerWidth > 0 && textWidth > 0;
+
+    animatedValue.setValue(0);
+
     if (shouldScroll) {
       setNeedsScroll(true);
-      const distance = textWidth - containerWidth + 30; // Add extra padding
-      const duration = (distance / velocity) * 1000;
+      const distance = overflow + GAP;
+      const duration = Math.max(900, Math.round((distance / Math.max(8, velocity)) * 1000));
 
       const animation = Animated.loop(
         Animated.sequence([
-          Animated.delay(1500), // Initial delay
+          Animated.delay(850),
           Animated.timing(animatedValue, {
             toValue: -distance,
-            duration: duration,
+            duration,
+            easing: Easing.linear,
             useNativeDriver: true,
           }),
-          Animated.delay(1000), // Pause at end
+          Animated.delay(500),
           Animated.timing(animatedValue, {
             toValue: 0,
-            duration: duration,
+            duration,
+            easing: Easing.linear,
             useNativeDriver: true,
           }),
-          Animated.delay(1000), // Pause at start
+          Animated.delay(450),
         ])
       );
 
       animationRef.current = animation;
       animation.start();
-
-      return () => {
-        animation.stop();
-      };
     } else {
       setNeedsScroll(false);
     }
-  }, [containerWidth, textWidth, velocity, animatedValue, text]);
+
+    return () => {
+      if (animationRef.current) {
+        animationRef.current.stop();
+        animationRef.current = null;
+      }
+    };
+  }, [animatedValue, containerWidth, text, textWidth, velocity]);
 
   const handleContainerLayout = (event: LayoutChangeEvent) => {
     const { width } = event.nativeEvent.layout;
@@ -78,20 +94,60 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
     }
   };
 
+  const sanitizedTextStyle = useMemo(() => {
+    const flat = (StyleSheet.flatten(style) || {}) as TextStyle & {
+      width?: number | string;
+      maxWidth?: number | string;
+      minWidth?: number | string;
+      flex?: number;
+      flexGrow?: number;
+      flexShrink?: number;
+    };
+    const {
+      width,
+      maxWidth,
+      minWidth,
+      flex,
+      flexGrow,
+      flexShrink,
+      ...rest
+    } = flat;
+    return rest;
+  }, [style]);
+
   return (
     <View style={styles.container} onLayout={handleContainerLayout}>
-      <Animated.Text
-        style={[
-          styles.text,
-          style,
-          needsScroll && {
-            transform: [{ translateX: animatedValue }],
-          },
-        ]}
+      <Text
+        style={[styles.measureText, sanitizedTextStyle]}
         numberOfLines={1}
         onLayout={handleTextLayout}
       >
         {text}
+      </Text>
+
+      {!needsScroll ? (
+        <Text style={[styles.text, sanitizedTextStyle]} numberOfLines={1}>
+          {text}
+        </Text>
+      ) : (
+        <Animated.View
+          style={[
+            styles.animatedTrack,
+            textWidth > 0 ? { width: textWidth } : undefined,
+            { transform: [{ translateX: animatedValue }] },
+          ]}
+        >
+          <Text style={[styles.text, sanitizedTextStyle]} numberOfLines={1}>
+            {text}
+          </Text>
+        </Animated.View>
+      )}
+
+      <Animated.Text
+        style={styles.hiddenTextFix}
+        numberOfLines={1}
+      >
+        {" "}
       </Animated.Text>
     </View>
   );
@@ -101,8 +157,24 @@ const styles = StyleSheet.create({
   container: {
     overflow: "hidden",
     width: "100%",
+    justifyContent: "center",
+  },
+  measureText: {
+    position: "absolute",
+    opacity: 0,
+    left: -9999,
+    top: 0,
+  },
+  animatedTrack: {
+    flexDirection: "row",
   },
   text: {
     flexShrink: 0,
+  },
+  hiddenTextFix: {
+    position: "absolute",
+    opacity: 0,
+    width: 0,
+    height: 0,
   },
 });

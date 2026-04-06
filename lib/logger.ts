@@ -56,8 +56,6 @@ export const perfMonitor = {
     if (isDev) {
       performance.mark(`${label}-end`);
       performance.measure(label, `${label}-start`, `${label}-end`);
-      const measure = performance.getEntriesByName(label)[0];
-      console.log(`⏱️ ${label}: ${measure.duration.toFixed(2)}ms`);
     }
   },
 };

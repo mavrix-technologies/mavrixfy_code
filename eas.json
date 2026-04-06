@@ -60,16 +60,26 @@
         "EXPO_NO_CLIENT_SIDE_ENV": "1"
       }
     },
+    "playstore-aab": {
+      "android": {
+        "buildType": "app-bundle",
+        "gradleCommand": ":app:bundleRelease"
+      },
+      "channel": "production",
+      "autoIncrement": true,
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_NO_DOTENV": "1"
+      }
+    },
     "production-aab": {
       "android": {
         "buildType": "app-bundle"
       },
       "channel": "production",
+      "autoIncrement": true,
       "env": {
-        "NODE_ENV": "production",
-        "EXPO_USE_UPDATES": "1",
-        "EXPO_NO_FLIPPER": "1",
-        "EXPO_NO_CLIENT_SIDE_ENV": "1"
+        "NODE_ENV": "production"
       }
     },
     "production-arm64": {
@@ -121,6 +131,21 @@
         "NODE_ENV": "production",
         "EXPO_USE_UPDATES": "1",
         "EXPO_NO_FLIPPER": "1"
+      }
+    },
+    "production-armeabi-v7a": {
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "channel": "production",
+      "autoIncrement": false,
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_USE_UPDATES": "1",
+        "EXPO_NO_FLIPPER": "1",
+        "EXPO_NO_CLIENT_SIDE_ENV": "1",
+        "EXPO_NO_DOTENV": "1"
       }
     }
   },
