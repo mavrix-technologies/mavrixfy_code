@@ -2,7 +2,7 @@
   "expo": {
     "name": "Mavrixfy",
     "slug": "mavrixfy",
-    "version": "2.0.0",
+    "version": "2.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mavrixfy",
@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.mavrixfy.app",
-      "buildNumber": "20000",
+      "buildNumber": "20100",
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -24,14 +24,12 @@
         "NSCameraUsageDescription": "This app uses the camera to upload profile pictures.",
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to upload images.",
         "NSAppleMusicUsageDescription": "This app streams music content.",
-        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to scan and connect nearby devices.",
-        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to scan and connect nearby devices.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.mavrixfy.app",
-      "versionCode": 20003,
+      "versionCode": 20103,
       "googleServicesFile": "./android/app/google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -42,14 +40,20 @@
       "permissions": [
         "INTERNET",
         "ACCESS_NETWORK_STATE",
-        "BLUETOOTH_SCAN",
-        "BLUETOOTH_CONNECT",
         "WAKE_LOCK",
-        "FOREGROUND_SERVICE"
+        "FOREGROUND_SERVICE",
+        "VIBRATE"
       ],
       "blockedPermissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ],
       "enableDangerousExperimentalLeanBuilds": true,
       "navigationBar": {
@@ -93,7 +97,10 @@
             "usesCleartextTraffic": false
           }
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker",
+      "expo-audio",
+      "expo-brightness"
     ],
     "experiments": {
       "typedRoutes": true
@@ -107,10 +114,10 @@
     ],
     "updates": {
       "url": "https://u.expo.dev/93293119-93b7-4dbb-acdd-7241771254c4",
-      "checkAutomatically": "ON_LOAD",
+      "checkAutomatically": "ON_ERROR_RECOVERY",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": "2.0.0",
+    "runtimeVersion": "2.1.1",
     "extra": {
       "domain": "spotify-api-drab.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",
