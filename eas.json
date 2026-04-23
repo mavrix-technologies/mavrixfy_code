@@ -66,10 +66,11 @@
         "gradleCommand": ":app:bundleRelease"
       },
       "channel": "production",
-      "autoIncrement": true,
+      "autoIncrement": false,
       "env": {
         "NODE_ENV": "production",
-        "EXPO_NO_DOTENV": "1"
+        "EXPO_USE_UPDATES": "1",
+        "EAS_NO_VCS": "1"
       }
     },
     "production-aab": {

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from "react";
+import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
+  Animated,
   RefreshControl,
 } from "react-native";
 import { Image } from "expo-image";
@@ -32,8 +33,9 @@ import {
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import { triggerImpact } from "@/lib/haptics";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
+import { getFollowedArtists, FollowedArtist } from "@/lib/followedArtists";
 
-type Filter = "playlists" | "favorite";
+type Filter = "playlists" | "artists" | "favorite" | null;
 type ViewMode = "list" | "grid";
 type DisplayPlaylist = UserPlaylist & { isFirestore?: boolean };
 type CreateTileItem = { id: "__library_create_tile__"; isCreateTile: true };
@@ -101,6 +103,7 @@ export default function LibraryScreen() {
   const [playlists, setPlaylists] = useState<DisplayPlaylist[]>(
     hasCachedPlaylists ? LIBRARY_SESSION_CACHE.playlists : []
   );
+  const [followedArtists, setFollowedArtists] = useState<FollowedArtist[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [newPlaylistDescription, setNewPlaylistDescription] = useState("");
@@ -108,8 +111,23 @@ export default function LibraryScreen() {
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isLoading, setIsLoading] = useState(!hasCachedPlaylists);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<Filter>("playlists");
+  const [filter, setFilter] = useState<Filter>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+
+  // Animated opacity for the chip row — fades when a filter is active
+  const chipRowOpacity = useRef(new Animated.Value(1)).current;
+  const prevFilter = useRef<Filter>(null);
+
+  // Animate chip row on filter change
+  useEffect(() => {
+    if (prevFilter.current === filter) return;
+    prevFilter.current = filter;
+    // Quick fade out → in so the cross icon appears smoothly
+    Animated.sequence([
+      Animated.timing(chipRowOpacity, { toValue: 0.6, duration: 80, useNativeDriver: true }),
+      Animated.timing(chipRowOpacity, { toValue: 1, duration: 140, useNativeDriver: true }),
+    ]).start();
+  }, [filter, chipRowOpacity]);
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
 
@@ -224,6 +242,11 @@ export default function LibraryScreen() {
     loadPlaylists();
   }, [activeUserId, loadPlaylists]);
 
+  // Load followed artists whenever the artists tab is active
+  useEffect(() => {
+    getFollowedArtists().then(setFollowedArtists);
+  }, [filter]);
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -251,7 +274,6 @@ export default function LibraryScreen() {
         setSelectedImage(asset.uri);
       }
     } catch (error) {
-      console.error("Error selecting image:", error);
       Alert.alert("Error", "Failed to select image");
     }
   };
@@ -294,7 +316,6 @@ export default function LibraryScreen() {
       await loadPlaylists({ silent: true });
       Alert.alert("Success", "Playlist created successfully!");
     } catch (error) {
-      console.error("Error creating playlist:", error);
       Alert.alert("Error", "Failed to create playlist. Please try again.");
     } finally {
       setIsUploadingImage(false);
@@ -347,6 +368,10 @@ export default function LibraryScreen() {
         id: playlist.id,
         firestore: playlist.isFirestore ? "true" : "false",
         jiosaavn: "false",
+        title: playlist.name,
+        description: playlist.description || "",
+        cover: playlist.coverUrl || "",
+        songCount: String(playlist.songs?.length || 0),
       },
     }, {
       withAnchor: true,
@@ -368,18 +393,18 @@ export default function LibraryScreen() {
   );
 
   const listData = useMemo<LibraryListItem[]>(() => {
+    // Hide playlist rows when "artists" filter is active
+    if (filter === "artists") return [];
+
     if (viewMode !== "grid") {
       return filteredPlaylists as LibraryListItem[];
     }
 
     return [
       ...filteredPlaylists,
-      {
-        id: CREATE_TILE_ID,
-        isCreateTile: true,
-      },
+      { id: CREATE_TILE_ID, isCreateTile: true },
     ];
-  }, [filteredPlaylists, viewMode]);
+  }, [filteredPlaylists, viewMode, filter]);
 
   const renderListPlaylistItem = ({ item }: { item: DisplayPlaylist }) => {
     const subtitle =
@@ -513,39 +538,63 @@ export default function LibraryScreen() {
         </View>
       </View>
 
-      <View style={styles.filterAndToggleRow}>
+      <Animated.View style={[styles.filterAndToggleRow, { opacity: chipRowOpacity }]}>
+        {/* Chips — show × on left when active, tap active chip to deselect */}
         <View style={styles.filterRow}>
+          {/* "Playlists" chip */}
           <Pressable
             style={[styles.filterChip, filter === "playlists" && styles.filterChipActive]}
-            onPress={() => setFilter("playlists")}
+            onPress={() => setFilter(filter === "playlists" ? null : "playlists")}
           >
-            <Text style={[styles.filterText, filter === "playlists" && styles.filterTextActive]}>Your Playlists</Text>
+            {filter === "playlists" ? (
+              <Ionicons name="close" size={13} color={UI.onPrimary} style={styles.chipClose} />
+            ) : null}
+            <Text style={[styles.filterText, filter === "playlists" && styles.filterTextActive]}>Playlists</Text>
           </Pressable>
+
+          {/* "Artists" chip */}
+          <Pressable
+            style={[styles.filterChip, filter === "artists" && styles.filterChipActive]}
+            onPress={() => setFilter(filter === "artists" ? null : "artists")}
+          >
+            {filter === "artists" ? (
+              <Ionicons name="close" size={13} color={UI.onPrimary} style={styles.chipClose} />
+            ) : null}
+            <Text style={[styles.filterText, filter === "artists" && styles.filterTextActive]}>Artists</Text>
+          </Pressable>
+
+          {/* "Liked" chip — navigates directly */}
           <Pressable
             style={[styles.filterChip, filter === "favorite" && styles.filterChipActive]}
             onPress={() => {
+              if (filter === "favorite") { setFilter(null); return; }
               setFilter("favorite");
               handleLikedPress();
             }}
           >
-            <Text style={[styles.filterText, filter === "favorite" && styles.filterTextActive]}>Favorite</Text>
+            {filter === "favorite" ? (
+              <Ionicons name="close" size={13} color={UI.onPrimary} style={styles.chipClose} />
+            ) : null}
+            <Text style={[styles.filterText, filter === "favorite" && styles.filterTextActive]}>Liked</Text>
           </Pressable>
         </View>
+
+        {/* Compact icon-only toggle */}
         <View style={styles.viewToggleWrap}>
           <Pressable
             style={[styles.viewToggleButton, viewMode === "grid" && styles.viewToggleActive]}
             onPress={() => setViewMode("grid")}
           >
-            <Ionicons name="grid-outline" size={17} color={viewMode === "grid" ? UI.primary : UI.subtext} />
+            <Ionicons name="grid-outline" size={16} color={viewMode === "grid" ? UI.primary : UI.subtext} />
           </Pressable>
           <Pressable
             style={[styles.viewToggleButton, viewMode === "list" && styles.viewToggleActive]}
             onPress={() => setViewMode("list")}
           >
-            <Ionicons name="list-outline" size={17} color={viewMode === "list" ? UI.primary : UI.subtext} />
+            <Ionicons name="list-outline" size={16} color={viewMode === "list" ? UI.primary : UI.subtext} />
           </Pressable>
         </View>
-      </View>
+      </Animated.View>
 
       <Pressable style={styles.likedCard} onPress={handleLikedPress}>
         <LinearGradient colors={[UI.likedFrom, UI.likedTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.likedCardGradient}>
@@ -560,10 +609,50 @@ export default function LibraryScreen() {
         </LinearGradient>
       </Pressable>
 
-      <View style={styles.sectionTitleRow}>
-        <Ionicons name="swap-vertical" size={12} color={UI.subtext} />
-        <Text style={styles.sectionTitleText}>Recently played</Text>
-      </View>
+      {/* ── Followed Artists section — shown when "Artists" or no filter ── */}
+      {(filter === null || filter === "artists") ? (
+        <View style={styles.artistsSection}>
+          {followedArtists.length === 0 ? (
+            <View style={styles.artistsEmpty}>
+              <Ionicons name="person-add-outline" size={36} color={UI.subtext} />
+              <Text style={styles.artistsEmptyTitle}>No followed artists yet</Text>
+              <Text style={styles.artistsEmptySub}>
+                Follow artists from their profile page to see them here.
+              </Text>
+              <Pressable style={styles.artistsEmptyBtn} onPress={() => router.push("/artists", { withAnchor: true })}>
+                <Text style={styles.artistsEmptyBtnText}>Browse Artists</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <>
+              <View style={styles.artistsHeader}>
+                <Text style={styles.artistsTitle}>Following</Text>
+                <Text style={styles.artistsCount}>{followedArtists.length}</Text>
+              </View>
+              {followedArtists.map((a) => (
+                <Pressable
+                  key={a.id}
+                  style={({ pressed }) => [styles.artistRow, pressed && styles.pressed]}
+                  onPress={() => router.push({ pathname: "/artist/[id]", params: { id: a.id, name: a.name, image: a.image } }, { withAnchor: true, dangerouslySingular: () => "artist-profile" })}
+                >
+                  <Image
+                    source={{ uri: a.image || undefined }}
+                    style={styles.artistRowAvatar}
+                    contentFit="cover"
+                    transition={80}
+                    cachePolicy="memory-disk"
+                  />
+                  <View style={styles.artistRowInfo}>
+                    <Text style={styles.artistRowName} numberOfLines={1}>{a.name}</Text>
+                    <Text style={styles.artistRowSub}>Artist</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={UI.subtext} />
+                </Pressable>
+              ))}
+            </>
+          )}
+        </View>
+      ) : null}
     </View>
   );
 
@@ -830,17 +919,20 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   filterRow: {
-    flex: 1,
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
+    flexShrink: 1,
   },
   filterChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 999,
     backgroundColor: UI.highSurface,
     borderWidth: 1,
     borderColor: UI.outline,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
   filterChipActive: {
     backgroundColor: UI.primary,
@@ -855,23 +947,23 @@ const styles = StyleSheet.create({
   filterTextActive: {
     color: UI.onPrimary,
   },
+  chipClose: {
+    marginRight: 1,
+  },
   viewToggleWrap: {
     flexDirection: "row",
-    backgroundColor: UI.highSurface,
-    borderWidth: 1,
-    borderColor: UI.outline,
-    borderRadius: 999,
-    padding: 3,
+    gap: 2,
+    flexShrink: 0,
   },
   viewToggleButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 999,
+    width: 30,
+    height: 30,
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
   },
   viewToggleActive: {
-    backgroundColor: "rgba(223, 226, 235, 0.12)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   likedCard: {
     marginTop: 10,
@@ -1279,4 +1371,75 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_700Bold",
   },
+
+  // ── Followed Artists ──
+  artistsSection: {
+    marginTop: 4,
+    paddingBottom: 8,
+  },
+  artistsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+  },
+  artistsTitle: {
+    color: UI.text,
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.2,
+  },
+  artistsCount: {
+    color: UI.subtext,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  artistRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  artistRowAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: UI.highSurface,
+  },
+  artistRowInfo: { flex: 1, gap: 2 },
+  artistRowName: { color: UI.text, fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  artistRowSub: { color: UI.subtext, fontSize: 12, fontFamily: "Inter_400Regular" },
+  artistsEmpty: {
+    alignItems: "center",
+    paddingTop: 32,
+    paddingBottom: 16,
+    gap: 10,
+  },
+  artistsEmptyTitle: {
+    color: UI.text,
+    fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
+  },
+  artistsEmptySub: {
+    color: UI.subtext,
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    maxWidth: 260,
+  },
+  artistsEmptyBtn: {
+    marginTop: 4,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: UI.primary,
+  },
+  artistsEmptyBtnText: {
+    color: UI.onPrimary,
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+  },
 });
+

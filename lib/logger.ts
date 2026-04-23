@@ -19,8 +19,7 @@ export const logger = {
   },
   
   error: (...args: any[]) => {
-    // Always log errors, even in production
-    console.error(...args);
+    if (isDev) console.error(...args);
   },
   
   debug: (...args: any[]) => {

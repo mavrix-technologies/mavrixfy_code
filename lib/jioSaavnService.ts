@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetch } from "expo/fetch";
-import { getApiUrl } from "@/lib/query-client";
 import { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
 
 export interface JioSaavnPlaylistResult {
@@ -80,15 +79,18 @@ const PLAYLIST_FETCH_LIMIT = 50;
 const PLAYLIST_MAX_PAGES = 10;
 const PLAYLIST_DETAILS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CATEGORY_STALE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const HOME_FETCH_CATEGORY_CONCURRENCY = 3;
 export const AUTO_REFRESH_POLL_INTERVAL_MS = 30 * 1000;
 export const JIOSAAVN_CATEGORY_CACHE_TTL_MS = 30 * 60 * 1000;
 const CATEGORY_TTL_MS: Record<string, number> = {
-  // Live category TTL buckets
-  trending: 30 * 60 * 1000,
-  "most-viral": 45 * 60 * 1000,
-  "most-played": 60 * 60 * 1000,
-  "top-dhurandhar": 60 * 60 * 1000,
+  trending:      30 * 60 * 1000,
   "new-arrivals": 45 * 60 * 1000,
+  "most-viral":  45 * 60 * 1000,
+  "party-mix":   60 * 60 * 1000,
+  "chill-vibes": 60 * 60 * 1000,
+  romance:       60 * 60 * 1000,
+  workout:       60 * 60 * 1000,
+  retro:         90 * 60 * 1000,
 };
 const JIOSAAVN_PLAYLIST_BASE_URLS = [
   "https://saavn.sumit.co/api",
@@ -106,76 +108,80 @@ export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
     id: "trending",
     title: "Trending Now",
     searchTerms: [
-      `trending now ${CURRENT_YEAR}`,
-      `top 50 ${CURRENT_YEAR}`,
-      `superhits ${CURRENT_YEAR}`,
-      `chartbusters ${CURRENT_YEAR}`,
-      `viral hits ${CURRENT_YEAR}`,
-      `most played ${CURRENT_YEAR}`,
-      `popular songs ${CURRENT_YEAR}`,
-      `hit songs ${CURRENT_YEAR}`,
-      `latest hits ${CURRENT_YEAR}`,
       `trending songs ${CURRENT_YEAR}`,
-      `new hits ${CURRENT_YEAR}`,
-      `fresh hits ${CURRENT_YEAR}`,
-      "latest trending",
-      "trending hindi",
+      `top hits ${CURRENT_YEAR}`,
       "trending bollywood",
-      `top charts ${CURRENT_YEAR}`,
-      "weekly top 50",
-      "monthly hits",
-      "current hits",
-      "now playing",
-    ],
-  },
-  {
-    id: "most-viral",
-    title: "Most Viral",
-    searchTerms: [
-      `viral songs ${CURRENT_YEAR}`,
-      "viral hits",
-      "instagram reels songs",
-      "youtube shorts songs",
-      "viral bollywood",
-      "viral hindi",
-      "viral now",
-      "reels trending songs",
-    ],
-  },
-  {
-    id: "most-played",
-    title: "Most Played",
-    searchTerms: [
-      `most played songs ${CURRENT_YEAR}`,
-      "most streamed songs",
-      "top played songs",
-      "popular this week",
-      "most listened songs",
-      "top chart songs",
-    ],
-  },
-  {
-    id: "top-dhurandhar",
-    title: "Top Dhurandhar",
-    searchTerms: [
-      "hindi superhits",
-      "desi chart hits",
-      "bollywood power hits",
-      "top hindi songs",
-      "indian chartbusters",
+      "trending hindi songs",
     ],
   },
   {
     id: "new-arrivals",
-    title: "New Arrivals",
+    title: "New Releases",
     searchTerms: [
       `new movie songs ${CURRENT_YEAR}`,
-      `latest songs ${CURRENT_YEAR}`,
-      "new arrivals music",
-      "social media trending songs",
-      "instagram reels new songs",
-      "hype songs",
-      "upcoming movie hits",
+      `latest bollywood songs ${CURRENT_YEAR}`,
+      "new hindi songs",
+      "latest releases",
+    ],
+  },
+  {
+    id: "most-viral",
+    title: "Viral Hits",
+    searchTerms: [
+      "instagram reels songs",
+      "youtube shorts trending songs",
+      "reels viral songs",
+      "social media hits",
+    ],
+  },
+  {
+    id: "party-mix",
+    title: "Party Mix",
+    searchTerms: [
+      "party songs hindi",
+      "dance hits bollywood",
+      "dj remix songs",
+      "party anthems",
+    ],
+  },
+  {
+    id: "chill-vibes",
+    title: "Chill Vibes",
+    searchTerms: [
+      "chill hindi songs",
+      "lo-fi bollywood",
+      "relaxing songs hindi",
+      "soft hindi songs",
+    ],
+  },
+  {
+    id: "romance",
+    title: "Love & Romance",
+    searchTerms: [
+      "romantic hindi songs",
+      "love songs bollywood",
+      "best romantic songs",
+      "hindi love songs",
+    ],
+  },
+  {
+    id: "workout",
+    title: "Workout & Energy",
+    searchTerms: [
+      "workout songs hindi",
+      "gym motivation songs",
+      "high energy songs",
+      "power songs",
+    ],
+  },
+  {
+    id: "retro",
+    title: "Retro Classics",
+    searchTerms: [
+      "old hindi songs",
+      "classic bollywood hits",
+      "retro hindi songs",
+      "evergreen songs",
     ],
   },
 ];
@@ -495,9 +501,9 @@ function normalizePlaylistSong(raw: any): JioSaavnSong | null {
     raw?.downloadUrl ??
     raw?.download_url ??
     raw?.more_info?.downloadUrl ??
-    raw?.more_info?.download_url ??
-    raw?.more_info?.encrypted_media_url ??
-    raw?.encrypted_media_url;
+    raw?.more_info?.download_url;
+  // NOTE: encrypted_media_url is NOT a direct playable URL — intentionally excluded.
+  // audioUrl / media_url are preview/low-quality direct URLs used as last resort.
   const audioUrlCandidate =
     raw?.audioUrl ??
     raw?.audio_url ??
@@ -552,13 +558,12 @@ function normalizePlaylistDetailsData(raw: any): JioSaavnPlaylistDetailsData | n
     raw?.data?.songs,
     raw?.data?.results,
   ];
+  // Pick the first array that actually has items — don't stop on an empty array
   let selectedSongArray: unknown[] = [];
   for (const candidate of songArrays) {
-    if (Array.isArray(candidate)) {
+    if (Array.isArray(candidate) && candidate.length > 0) {
       selectedSongArray = candidate;
-      if (candidate.length > 0) {
-        break;
-      }
+      break;
     }
   }
 
@@ -659,7 +664,6 @@ async function searchPlaylistsRaw(
   limit: number,
   forceRefresh: boolean
 ): Promise<JioSaavnPlaylistResult[]> {
-  const baseUrl = getApiUrl();
   let enhancedQuery = query.trim();
 
   if (shouldAppendYear(enhancedQuery)) {
@@ -670,17 +674,13 @@ async function searchPlaylistsRaw(
   const page = forceRefresh ? randomInt(1, 3) : 1;
   const requestLimit = forceRefresh ? limit + 4 : limit;
 
-  const primaryUrl =
-    `${baseUrl}api/jiosaavn/search/playlists?` +
-    `query=${encodeURIComponent(finalQuery)}&limit=${requestLimit}&page=${page}`;
-  const fallbackUrls = JIOSAAVN_SEARCH_BASE_URLS.map((endpointBase) => {
+  const requestUrls = JIOSAAVN_SEARCH_BASE_URLS.map((endpointBase) => {
     const trimmed = endpointBase.replace(/\/+$/, "");
     return (
       `${trimmed}/search/playlists?` +
       `query=${encodeURIComponent(finalQuery)}&limit=${requestLimit}&page=${page}`
     );
   });
-  const requestUrls = [primaryUrl, ...fallbackUrls];
 
   for (const requestUrl of requestUrls) {
     try {
@@ -1152,62 +1152,39 @@ async function fetchPlaylistDetailsPage(
   page: number,
   limit: number
 ): Promise<PlaylistDetailsPageResult> {
-  let saw404 = false;
-  let hadTransientFailure = false;
-  const appBase = getApiUrl().replace(/\/+$/, "");
   const encodedId = encodeURIComponent(playlistId);
   const query = `id=${encodedId}&limit=${limit}&page=${page}`;
-  const candidateUrls = [
-    `${appBase}/api/jiosaavn/playlists?${query}`,
-    `${appBase}/api/jiosaavn/playlist?${query}`,
-    ...JIOSAAVN_PLAYLIST_BASE_URLS.map((baseUrl) => {
-      const trimmedBase = baseUrl.replace(/\/+$/, "");
-      return `${trimmedBase}/playlists?${query}`;
-    }),
-  ];
 
-  const requestUrls = Array.from(new Set(candidateUrls));
-  for (const requestUrl of requestUrls) {
+  const candidateUrls = JIOSAAVN_PLAYLIST_BASE_URLS.map(
+    (base) => `${base.replace(/\/+$/, "")}/playlists?${query}`
+  );
+
+  let allNotFound = true;
+  for (const url of candidateUrls) {
     try {
       const response = await withTimeout(
-        fetch(requestUrl, {
-          headers: { Accept: "application/json" },
-        })
+        fetch(url, { headers: { Accept: "application/json" } }),
+        6000
       );
-
-      if (response.status === 404) {
-        await consumeResponseBody(response);
-        saw404 = true;
-        continue;
-      }
-
       if (!response.ok) {
+        if (response.status !== 404) {
+          allNotFound = false;
+        }
         await consumeResponseBody(response);
-        hadTransientFailure = true;
         continue;
       }
-
-      const json = (await response.json()) as JioSaavnPlaylistDetailsResponse;
+      const json = await response.json();
       const normalized = parsePlaylistDetailsResponse(json);
-      if (!normalized) {
-        hadTransientFailure = true;
-        continue;
+      if (normalized) {
+        return { data: normalized, reason: "network" };
       }
-
-      return {
-        data: normalized,
-        reason: "network",
-      };
+      allNotFound = false;
     } catch {
-      hadTransientFailure = true;
-      // Try next endpoint
+      allNotFound = false;
     }
   }
 
-  return {
-    data: null,
-    reason: saw404 && !hadTransientFailure ? "not_found" : "network",
-  };
+  return { data: null, reason: allNotFound ? "not_found" : "network" };
 }
 
 function buildPlaylistDetailsCacheKey(playlistId: string): string {
@@ -1255,192 +1232,426 @@ async function setCachedPlaylistDetails(
   }
 }
 
+// ── Prefetch ──────────────────────────────────────────────────────────────────
+// In-flight set prevents duplicate concurrent fetches for the same playlist.
+const prefetchInFlight = new Set<string>();
+
+/**
+ * Fire-and-forget: fetch + cache a playlist's songs in the background.
+ * Safe to call multiple times — deduped by playlist ID.
+ * Never throws.
+ */
+export function prefetchPlaylistDetails(playlistId: string): void {
+  const id = String(playlistId || "").trim();
+  if (!id || prefetchInFlight.has(id)) return;
+
+  prefetchInFlight.add(id);
+
+  // Skip if already cached
+  getCachedPlaylistDetails(id)
+    .then((cached) => {
+      if (cached?.songs?.length) {
+        prefetchInFlight.delete(id);
+        return;
+      }
+      return fetchPlaylistDetailsPage(id, 1, PLAYLIST_FETCH_LIMIT)
+        .then((res) => {
+          if (res.data?.songs?.length) {
+            return setCachedPlaylistDetails(id, res.data);
+          }
+        })
+        .finally(() => prefetchInFlight.delete(id));
+    })
+    .catch(() => prefetchInFlight.delete(id));
+}
+
+/**
+ * Prefetch the first N playlists from each category section.
+ * Called after the home feed renders — staggered so it doesn't compete
+ * with the initial render or image loading.
+ */
+export function prefetchVisiblePlaylists(
+  categories: HomeJioSaavnCategoryData[],
+  perSection = 3
+): void {
+  const ids: string[] = [];
+  for (const cat of categories) {
+    for (const p of cat.results.slice(0, perSection)) {
+      if (p.id) ids.push(p.id);
+    }
+  }
+
+  // Stagger: one prefetch every 400ms so we don't flood the network
+  ids.forEach((id, i) => {
+    setTimeout(() => prefetchPlaylistDetails(id), i * 400);
+  });
+}
+
 export async function getJioSaavnPlaylistDetails(
   playlistId: string,
   options?: GetJioSaavnPlaylistDetailsOptions
 ): Promise<JioSaavnPlaylistDetailsData> {
-  const loadAllPages = options?.loadAllPages ?? true;
-  const preferCache = options?.preferCache ?? false;
-  const normalizedPlaylistId = String(playlistId || "").trim();
-  if (!normalizedPlaylistId) {
+  const normalizedId = String(playlistId || "").trim();
+  if (!normalizedId) {
     throw new JioSaavnPlaylistDetailsError("NOT_FOUND", "Playlist not found");
   }
 
-  const cached = await getCachedPlaylistDetails(normalizedPlaylistId);
-  if (preferCache && cached?.songs?.length) {
+  // 1. Serve cache immediately — instant render for returning users
+  const cached = await getCachedPlaylistDetails(normalizedId);
+  if (cached?.songs?.length) {
+    // Silently refresh cache in background
+    void fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT)
+      .then((res) => {
+        if (res.data?.songs?.length) {
+          void setCachedPlaylistDetails(normalizedId, res.data);
+        }
+      })
+      .catch(() => {});
     return cached;
   }
 
-  const firstPage = await fetchPlaylistDetailsPage(normalizedPlaylistId, 1, PLAYLIST_FETCH_LIMIT);
-  if (!firstPage.data) {
-    if (cached) {
-      return cached;
-    }
+  // 2. Fetch — all URLs raced in parallel (fast)
+  const firstPage = await fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT);
 
-    if (firstPage.reason === "not_found") {
-      throw new JioSaavnPlaylistDetailsError("NOT_FOUND", "Playlist not found");
-    }
-
-    throw new JioSaavnPlaylistDetailsError(
-      "NETWORK",
-      "Unable to fetch playlist details"
-    );
+  if (firstPage.data?.songs?.length) {
+    void setCachedPlaylistDetails(normalizedId, firstPage.data);
+    return firstPage.data;
   }
 
-  const playlist = firstPage.data;
-  let allSongs = Array.isArray(playlist.songs) ? [...playlist.songs] : [];
-  const totalSongs = Number(playlist.songCount || allSongs.length || 0);
-
-  if (allSongs.length >= totalSongs || totalSongs === 0) {
-    const immediatePlaylist = {
-      ...playlist,
-      songs: allSongs,
-    };
-    if (immediatePlaylist.songs.length === 0 && cached?.songs?.length) {
-      return cached;
+  // 3. Got a response but songs array was empty — the API sometimes returns
+  //    playlist metadata without songs on first hit. Retry once.
+  if (firstPage.data && !firstPage.data.songs?.length) {
+    const retry = await fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT);
+    if (retry.data?.songs?.length) {
+      void setCachedPlaylistDetails(normalizedId, retry.data);
+      return retry.data;
     }
-    await setCachedPlaylistDetails(normalizedPlaylistId, immediatePlaylist);
-    return immediatePlaylist;
+    // Return the metadata-only response so the screen can at least show the header
+    if (retry.data) return retry.data;
+    if (firstPage.data) return firstPage.data;
   }
 
-  const immediatePlaylist = {
-    ...playlist,
-    songs: allSongs,
-  };
-  await setCachedPlaylistDetails(normalizedPlaylistId, immediatePlaylist);
-
-  if (!loadAllPages) {
-    return immediatePlaylist;
+  // 4. Complete failure
+  if (firstPage.reason === "not_found") {
+    throw new JioSaavnPlaylistDetailsError("NOT_FOUND", "Playlist not found");
   }
-
-  const maxPages = Math.min(
-    Math.ceil(totalSongs / PLAYLIST_FETCH_LIMIT),
-    PLAYLIST_MAX_PAGES
-  );
-
-  for (let page = 2; page <= maxPages; page += 1) {
-    const pageResponse = await fetchPlaylistDetailsPage(normalizedPlaylistId, page, PLAYLIST_FETCH_LIMIT);
-    if (!pageResponse.data?.songs?.length) {
-      break;
-    }
-
-    const existingSongIds = new Set(allSongs.map((song: any) => song?.id).filter(Boolean));
-    const uniqueNewSongs = pageResponse.data.songs.filter(
-      (song: any) => song?.id && !existingSongIds.has(song.id)
-    );
-
-    allSongs = [...allSongs, ...uniqueNewSongs];
-
-    if (allSongs.length >= totalSongs) {
-      break;
-    }
-  }
-
-  const finalPlaylist = {
-    ...playlist,
-    songs: allSongs,
-  };
-
-  if (finalPlaylist.songs.length === 0 && cached?.songs?.length) {
-    return cached;
-  }
-
-  await setCachedPlaylistDetails(normalizedPlaylistId, finalPlaylist);
-  return finalPlaylist;
+  throw new JioSaavnPlaylistDetailsError("NETWORK", "Unable to fetch playlist details");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEXT-LEVEL RANKING ENGINE
+// Multi-signal scoring: freshness + popularity + trend keywords + context +
+// daily rotation + anti-repetition. Replaces the old keyword-sort approach.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FAST_TIMEOUT_MS = 3800;
+const LAST_SHOWN_KEY = "@mavrixfy_last_shown_playlists_v1";
+const LAST_SHOWN_MAX = 40; // remember last 40 shown playlist IDs
+
+// One primary search term per category — fast, single request
+const FAST_SEARCH_TERMS: Record<string, string> = {
+  trending:       `trending songs ${CURRENT_YEAR}`,
+  "new-arrivals": `new movie songs ${CURRENT_YEAR}`,
+  "most-viral":   `viral reels hits ${CURRENT_YEAR}`,
+  "party-mix":    "party songs hindi",
+  "chill-vibes":  "chill hindi songs",
+  romance:        "romantic hindi songs",
+  workout:        "workout songs hindi",
+  retro:          "old hindi songs",
+};
+
+// ── 1. Multi-signal score ─────────────────────────────────────────────────────
+function calculatePlaylistScore(
+  playlist: JioSaavnPlaylistResult,
+  context: AutoRefreshContext
+): number {
+  let score = 0;
+  const name = playlist.name.toLowerCase();
+  const year  = String(CURRENT_YEAR);
+  const prevY = String(CURRENT_YEAR - 1);
+
+  // Freshness
+  if (name.includes(year))   score += 30;
+  if (name.includes("latest") || name.includes("new") || name.includes("fresh")) score += 20;
+  if (name.includes(prevY))  score -= 10;
+
+  // Popularity proxy (capped)
+  score += Math.min(playlist.songCount * 0.5, 50);
+
+  // Generic trend keywords
+  if (name.includes("trending") || name.includes("viral"))  score += 15;
+  if (name.includes("top") || name.includes("chart"))       score += 8;
+  if (name.includes("hit") || name.includes("superhit"))    score += 6;
+
+  // Time-of-day context
+  if (context.slot === "morning"   && (name.includes("morning") || name.includes("workout"))) score += 15;
+  if (context.slot === "evening"   && (name.includes("party")   || name.includes("evening"))) score += 15;
+  if (context.slot === "night"     && (name.includes("night")   || name.includes("chill")))   score += 15;
+  if (context.slot === "afternoon" && (name.includes("afternoon")|| name.includes("relax")))  score += 10;
+
+  // Language context
+  if (context.languageBias === "hindi"   && (name.includes("hindi")   || name.includes("bollywood"))) score += 10;
+  if (context.languageBias === "punjabi" && (name.includes("punjabi")  || name.includes("bhangra")))  score += 10;
+  if (context.isWeekend && (name.includes("weekend") || name.includes("party"))) score += 8;
+
+  // Controlled randomness — prevents identical order every session
+  score += Math.random() * 8;
+
+  return score;
+}
+
+// ── 2. Rank by score ──────────────────────────────────────────────────────────
+function rankPlaylists(
+  playlists: JioSaavnPlaylistResult[],
+  context: AutoRefreshContext
+): JioSaavnPlaylistResult[] {
+  return playlists
+    .map((p) => ({ p, score: calculatePlaylistScore(p, context) }))
+    .sort((a, b) => b.score - a.score)
+    .map(({ p }) => p);
+}
+
+// ── 3. Daily freshness rotation ───────────────────────────────────────────────
+// Each day the order shifts deterministically — no backend needed.
+function applyFreshnessRotation(playlists: JioSaavnPlaylistResult[]): JioSaavnPlaylistResult[] {
+  const todaySeed = new Date().getDate(); // 1–31
+  return [...playlists].sort((a, b) => {
+    const hashA = (a.id.charCodeAt(0) + todaySeed) % 13;
+    const hashB = (b.id.charCodeAt(0) + todaySeed) % 13;
+    return hashB - hashA;
+  });
+}
+
+// ── 4. Anti-repetition — filter recently shown playlists ─────────────────────
+async function getLastShownIds(): Promise<Set<string>> {
+  try {
+    const raw = await AsyncStorage.getItem(LAST_SHOWN_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+async function updateLastShownIds(ids: string[]): Promise<void> {
+  try {
+    const existing = await getLastShownIds();
+    const merged = [...ids, ...existing].slice(0, LAST_SHOWN_MAX);
+    await AsyncStorage.setItem(LAST_SHOWN_KEY, JSON.stringify(merged));
+  } catch {}
+}
+
+function removeRecentlyShown(
+  playlists: JioSaavnPlaylistResult[],
+  history: Set<string>
+): JioSaavnPlaylistResult[] {
+  const filtered = playlists.filter((p) => !history.has(p.id));
+  // If filtering removes too many, fall back to full list to avoid empty sections
+  return filtered.length >= Math.min(playlists.length, 4) ? filtered : playlists;
+}
+
+// ── 5. Fast single-term fetch ─────────────────────────────────────────────────
+async function fetchCategoryFast(
+  categoryId: string,
+  limit: number
+): Promise<JioSaavnPlaylistResult[]> {
+  const term = FAST_SEARCH_TERMS[categoryId] ?? `${categoryId} songs ${CURRENT_YEAR}`;
+  // Request more than needed so the ranking + global dedupe has a real pool to work with
+  const apiLimit = Math.max(limit, 20);
+  const urls = JIOSAAVN_SEARCH_BASE_URLS.map((base) => {
+    const trimmed = base.replace(/\/+$/, "");
+    return `${trimmed}/search/playlists?query=${encodeURIComponent(term)}&limit=${apiLimit}&page=1`;
+  });
+
+  for (const url of urls) {
+    try {
+      const res = await withTimeout(
+        fetch(url, { headers: { Accept: "application/json" } }),
+        FAST_TIMEOUT_MS
+      );
+      if (!res.ok) {
+        await consumeResponseBody(res);
+        continue;
+      }
+      const json = await res.json();
+      const parsed = parsePlaylistSearchResponse(json);
+      if (parsed.length > 0) return parsed;
+    } catch {
+      // Try next provider.
+    }
+  }
+  return [];
+}
+
+async function runWithConcurrencyLimit<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const maxWorkers = Math.max(1, Math.min(concurrency, items.length));
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  const workers = Array.from({ length: maxWorkers }, async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) break;
+      results[currentIndex] = await worker(items[currentIndex]);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
+// ── 6. Full pipeline for one category ────────────────────────────────────────
+async function fetchAndRankCategory(
+  cat: HomeJioSaavnCategory,
+  limit: number,
+  context: AutoRefreshContext,
+  history: Set<string>
+): Promise<JioSaavnPlaylistResult[]> {
+  // Fetch a larger pool — 4× limit gives the global dedupe enough unique candidates
+  const raw = await fetchCategoryFast(cat.id, limit * 4);
+  if (raw.length === 0) return [];
+
+  const deduped  = dedupeByPlaylistId(raw);
+  const noRepeat = removeRecentlyShown(deduped, history);
+  const ranked   = rankPlaylists(noRepeat, context);
+  const rotated  = applyFreshnessRotation(ranked);
+  // Return the full pool — caller slices after global dedupe
+  return rotated;
+}
+
+// ── 7. Mix strategy — interleave trending + new + viral for the feed ──────────
+function mixForFeed(
+  byCategory: Record<string, JioSaavnPlaylistResult[]>,
+  limit: number
+): JioSaavnPlaylistResult[] {
+  const trending   = byCategory["trending"]      ?? [];
+  const newArr     = byCategory["new-arrivals"]  ?? [];
+  const viral      = byCategory["most-viral"]    ?? [];
+
+  const mixed = [
+    ...trending.slice(0, 5),
+    ...newArr.slice(0, 5),
+    ...viral.slice(0, 5),
+  ];
+
+  // Dedupe then light shuffle so the mix feels alive
+  const deduped = dedupeByPlaylistId(mixed);
+  return shuffleArray(deduped).slice(0, limit);
+}
+
+// ── 8. Day-keyed cache signature ──────────────────────────────────────────────
+// Bumping to v6 + day ensures daily auto-refresh without manual invalidation.
+function buildDaySignature(context: AutoRefreshContext): string {
+  const day = new Date().getDate();
+  return `v6|${context.slot}|${context.isWeekend ? "weekend" : "weekday"}|${context.languageBias}|day${day}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC API
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function getHomeJioSaavnCategories(options?: {
   forceRefresh?: boolean;
   limitPerCategory?: number;
   realtime?: boolean;
+  categoryIds?: string[];
 }): Promise<HomeJioSaavnCategoryData[]> {
   const forceRefresh = options?.forceRefresh ?? false;
-  const limitPerCategory = options?.limitPerCategory ?? 15;
-  const realtime = options?.realtime ?? false;
-  const context = getCurrentRefreshContext();
-  const liveCategoryIds = ["trending", "most-viral", "most-played", "new-arrivals"];
+  const limit        = Math.min(options?.limitPerCategory ?? 10, 12);
+  const context      = getCurrentRefreshContext();
+  const daySig       = buildDaySignature(context);
+  const categoryIdFilter = new Set(options?.categoryIds ?? []);
+  const categoriesToFetch =
+    categoryIdFilter.size > 0
+      ? HOME_JIOSAAVN_CATEGORIES.filter((cat) => categoryIdFilter.has(cat.id))
+      : HOME_JIOSAAVN_CATEGORIES;
 
-  const categoryResults = await Promise.all(
-    HOME_JIOSAAVN_CATEGORIES.map(async (category) => {
-      const shouldBypassCache = forceRefresh || (realtime && liveCategoryIds.includes(category.id));
-      const shouldForceCategoryRefresh = forceRefresh || (realtime && liveCategoryIds.includes(category.id));
-      const staleFallback = shouldBypassCache
-        ? null
-        : await getCategoryCache(category.id, context, { allowSignatureMismatch: true });
+  if (categoriesToFetch.length === 0) {
+    return [];
+  }
 
-      if (!shouldBypassCache) {
-        const cached = await getCategoryCache(category.id, context);
+  // Load anti-repetition history once (cross-session)
+  const history = await getLastShownIds();
+
+  // ── Step 1: Fetch all categories in parallel (fast) ───────────────────────
+  // Each category gets a larger pool (limit + 10) so the global dedupe below
+  // has enough candidates to fill every section after removing cross-section dupes.
+  const rawResults = await runWithConcurrencyLimit(
+    categoriesToFetch,
+    HOME_FETCH_CATEGORY_CONCURRENCY,
+    async (cat) => {
+      const fetchLimit = limit + 8;
+
+      if (!forceRefresh) {
+        const cached = await getCategoryCache(cat.id, context, { allowSignatureMismatch: false });
         if (cached && cached.length > 0) {
-          return {
-            id: category.id,
-            title: category.title,
-            results: cached.slice(0, limitPerCategory),
-          };
-        }
-
-        if (staleFallback && staleFallback.length > 0) {
-          return {
-            id: category.id,
-            title: category.title,
-            results: staleFallback.slice(0, limitPerCategory),
-          };
+          const ranked = rankPlaylists(cached, context);
+          const rotated = applyFreshnessRotation(ranked);
+          return { cat, pool: rotated };
         }
       }
 
       let fresh: JioSaavnPlaylistResult[] = [];
       try {
-        fresh = await getPlaylistsByCategory(
-          category,
-          limitPerCategory,
-          shouldForceCategoryRefresh,
-          context
-        );
+        fresh = await fetchAndRankCategory(cat, fetchLimit, context, history);
       } catch {
         fresh = [];
       }
 
       if (fresh.length > 0) {
-        await setCategoryCache(category.id, fresh, context.signature);
+        void setCategoryCache(cat.id, fresh, daySig);
+        return { cat, pool: fresh };
       }
 
-      const finalResults =
-        fresh.length > 0
-          ? fresh
-          : staleFallback && staleFallback.length > 0
-            ? staleFallback.slice(0, limitPerCategory)
-            : [];
+      // Stale fallback
+      const stale = await getCategoryCache(cat.id, context, { allowSignatureMismatch: true });
+      if (stale && stale.length > 0) {
+        const rotated = applyFreshnessRotation(rankPlaylists(stale, context));
+        return { cat, pool: rotated };
+      }
 
-      return {
-        id: category.id,
-        title: category.title,
-        results: finalResults,
-      };
-    })
+      return { cat, pool: [] as JioSaavnPlaylistResult[] };
+    }
   );
 
-  // Prefer unique playlists across sections, but don't starve a category.
-  // If dedupe drops a section too low, keep its original list for healthy UI density.
-  const MIN_RESULTS_AFTER_DEDUPE = Math.min(limitPerCategory, 4);
-  const usedPlaylistIds: Record<string, true> = {};
-  const uniqueCategoryResults = categoryResults
-    .map((category) => {
-      const uniqueResults = category.results.filter((playlist) => {
-        if (usedPlaylistIds[playlist.id]) return false;
-        usedPlaylistIds[playlist.id] = true;
-        return true;
-      });
+  // ── Step 2: Global cross-section dedupe ───────────────────────────────────
+  // Walk categories in priority order. Once a playlist ID is claimed by a
+  // section, it cannot appear in any later section.
+  const globalUsed = new Set<string>();
 
-      const safeResults =
-        uniqueResults.length >= MIN_RESULTS_AFTER_DEDUPE
-          ? uniqueResults
-          : category.results.slice(0, limitPerCategory);
+  const deduped = rawResults.map(({ cat, pool }) => {
+    const unique: JioSaavnPlaylistResult[] = [];
+    for (const p of pool) {
+      if (!globalUsed.has(p.id)) {
+        globalUsed.add(p.id);
+        unique.push(p);
+        if (unique.length >= limit) break;
+      }
+    }
+    return { id: cat.id, title: cat.title, results: unique };
+  });
 
-      return {
-        ...category,
-        results: safeResults,
-      };
-    })
-    .filter((category) => category.results.length > 0);
+  const nonEmpty = deduped.filter((cat) => cat.results.length > 0);
 
-  return uniqueCategoryResults;
+  // ── Step 3: Update cross-session anti-repetition history ─────────────────
+  const shownIds = nonEmpty.flatMap((cat) => cat.results.map((p) => p.id));
+  void updateLastShownIds(shownIds);
+
+  return nonEmpty;
+}
+
+// Exported so the home screen can use the mixed feed as a "For You" section
+export function buildMixedFeed(
+  categories: HomeJioSaavnCategoryData[],
+  limit = 15
+): JioSaavnPlaylistResult[] {
+  const byId: Record<string, JioSaavnPlaylistResult[]> = {};
+  categories.forEach((c) => { byId[c.id] = c.results; });
+  return mixForFeed(byId, limit);
 }

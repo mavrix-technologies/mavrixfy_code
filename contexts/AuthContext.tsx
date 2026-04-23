@@ -8,12 +8,20 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithCredential,
+  sendPasswordResetEmail,
+  deleteUser,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
+  EmailAuthProvider,
   User as FirebaseUser,
 } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { logLogin, logSignUp } from "@/lib/analytics";
 import { Platform } from "react-native";
+import { deleteUserFirestoreData } from "@/lib/firestore";
+import { clearAppStorage } from "@/lib/storage";
+import { clearUserCache } from "@/lib/cache";
 
 interface AppUser {
   id: string;
@@ -28,10 +36,13 @@ interface AuthContextValue {
   loading: boolean;
   isAuthenticated: boolean;
   isGuest: boolean;
+  continueAsGuest: () => void;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, fullName: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signInWithGoogleCredential: (idToken: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  deleteAccount: (options?: { password?: string; googleIdToken?: string }) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -65,6 +76,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const clearAuthState = useCallback((userId?: string | null) => {
+    if (userId) {
+      clearUserCache(userId);
+    }
+    setFirebaseUser(null);
+    setUser(null);
+    setIsGuest(false);
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
@@ -92,13 +112,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logLogin("email");
   }, [buildAppUser]);
 
+  const continueAsGuest = useCallback(() => {
+    setFirebaseUser(null);
+    setUser(null);
+    setIsGuest(true);
+  }, []);
+
   const register = useCallback(async (email: string, password: string, fullName: string) => {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(cred.user, { displayName: fullName });
+    // Create user doc WITHOUT onboardingCompleted — the onboarding flow sets it
     await setDoc(doc(db, "users", cred.user.uid), {
       email,
       fullName,
       imageUrl: null,
+      onboardingCompleted: false,
       createdAt: new Date().toISOString(),
     });
     const appUser: AppUser = {
@@ -165,14 +193,69 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsGuest(false);
   }, [buildAppUser]);
 
+  const resetPassword = useCallback(async (email: string) => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      throw new Error("Please enter your email address first.");
+    }
+
+    await sendPasswordResetEmail(auth, trimmedEmail);
+  }, []);
+
+  const deleteAccount = useCallback(async (options?: { password?: string; googleIdToken?: string }) => {
+    const currentUser = auth.currentUser;
+
+    if (!currentUser) {
+      throw new Error("No signed-in account was found.");
+    }
+
+    const providerIds = currentUser.providerData
+      .map((provider) => provider.providerId)
+      .filter(Boolean);
+    const primaryProviderId = providerIds[0] || currentUser.providerId;
+
+    if (primaryProviderId === "password") {
+      const email = currentUser.email?.trim();
+      const password = options?.password?.trim();
+
+      if (!email) {
+        throw new Error("This account is missing an email address.");
+      }
+
+      if (!password) {
+        throw new Error("Please enter your password to confirm deletion.");
+      }
+
+      const credential = EmailAuthProvider.credential(email, password);
+      await reauthenticateWithCredential(currentUser, credential);
+    } else if (primaryProviderId === "google.com") {
+      if (Platform.OS === "web") {
+        const provider = new GoogleAuthProvider();
+        await reauthenticateWithPopup(currentUser, provider);
+      } else {
+        const googleIdToken = options?.googleIdToken?.trim();
+        if (!googleIdToken) {
+          throw new Error("Please confirm with Google before deleting your account.");
+        }
+
+        const credential = GoogleAuthProvider.credential(googleIdToken);
+        await reauthenticateWithCredential(currentUser, credential);
+      }
+    }
+
+    await deleteUserFirestoreData(currentUser.uid);
+    await clearAppStorage();
+    await deleteUser(currentUser);
+    clearAuthState(currentUser.uid);
+  }, [clearAuthState]);
+
   const logout = useCallback(async () => {
+    const currentUserId = auth.currentUser?.uid || firebaseUser?.uid || user?.id;
     try {
       await firebaseSignOut(auth);
     } catch {}
-    setUser(null);
-    setFirebaseUser(null);
-    setIsGuest(false);
-  }, []);
+    clearAuthState(currentUserId);
+  }, [clearAuthState, firebaseUser?.uid, user?.id]);
 
   const refreshUser = useCallback(async () => {
     if (auth.currentUser) {
@@ -187,13 +270,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     isAuthenticated: !!user,
     isGuest,
+    continueAsGuest,
     login,
     register,
     signInWithGoogle,
     signInWithGoogleCredential,
+    resetPassword,
+    deleteAccount,
     logout,
     refreshUser,
-  }), [user, firebaseUser, loading, isGuest, login, register, signInWithGoogle, signInWithGoogleCredential, logout, refreshUser]);
+  }), [user, firebaseUser, loading, isGuest, continueAsGuest, login, register, signInWithGoogle, signInWithGoogleCredential, resetPassword, deleteAccount, logout, refreshUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

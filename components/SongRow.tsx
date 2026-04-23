@@ -7,6 +7,7 @@ import Colors from "@/constants/colors";
 import { Song, formatDuration } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import { usePlayerRow } from "@/contexts/PlayerContext";
+import EqualizerBars from "@/components/EqualizerBars";
 
 interface Props {
   song: Song;
@@ -14,12 +15,20 @@ interface Props {
   queue?: Song[];
   showCover?: boolean;
   onRemove?: () => void;
+  topResult?: boolean;
 }
 
 const SWIPE_ACTION_WIDTH = 92;
 const SWIPE_TRIGGER = 56;
 
-const SongRow = memo(function SongRow({ song, index, queue, showCover = true, onRemove }: Props) {
+const SongRow = memo(function SongRow({
+  song,
+  index,
+  queue,
+  showCover = true,
+  onRemove,
+  topResult = false,
+}: Props) {
   const { playSong, currentSongId, isPlaying, toggleLike, isLiked, addToQueue, playNext } = usePlayerRow();
   const translateX = useRef(new Animated.Value(0)).current;
   const swipeInFlightRef = useRef(false);
@@ -148,13 +157,13 @@ const SongRow = memo(function SongRow({ song, index, queue, showCover = true, on
           onLongPress={handleLongPress}
         >
           {index !== undefined && (
-            <Text style={[styles.index, isActive && styles.activeText]}>
-              {isActive && isPlaying ? (
-                <Ionicons name="musical-notes" size={14} color={Colors.primary} />
+            <View style={styles.indexWrap}>
+              {isActive ? (
+                <EqualizerBars isPlaying={isPlaying} size={3} />
               ) : (
-                index + 1
+                <Text style={styles.index}>{index + 1}</Text>
               )}
-            </Text>
+            </View>
           )}
           {showCover && song.coverUrl && (
             <Image
@@ -167,9 +176,16 @@ const SongRow = memo(function SongRow({ song, index, queue, showCover = true, on
             />
           )}
           <View style={styles.info}>
-            <Text style={[styles.title, isActive && styles.activeText]} numberOfLines={1}>
-              {song.title || "Unknown Title"}
-            </Text>
+            <View style={styles.titleRow}>
+              <Text style={[styles.title, isActive && styles.activeText]} numberOfLines={1}>
+                {song.title || "Unknown Title"}
+              </Text>
+              {topResult ? (
+                <View style={styles.topResultBadge}>
+                  <Text style={styles.topResultBadgeText}>Top Result</Text>
+                </View>
+              ) : null}
+            </View>
             <Text style={styles.artist} numberOfLines={1}>
               {song.artist || "Unknown Artist"}
             </Text>
@@ -199,7 +215,8 @@ const SongRow = memo(function SongRow({ song, index, queue, showCover = true, on
     prevProps.song.id === nextProps.song.id &&
     prevProps.index === nextProps.index &&
     prevProps.showCover === nextProps.showCover &&
-    prevProps.queue?.length === nextProps.queue?.length
+    prevProps.queue?.length === nextProps.queue?.length &&
+    prevProps.topResult === nextProps.topResult
   );
 });
 
@@ -250,8 +267,12 @@ const styles = StyleSheet.create({
     color: Colors.subtext,
     fontSize: 14,
     fontFamily: "Inter_400Regular",
-    width: 28,
     textAlign: "center",
+  },
+  indexWrap: {
+    width: 28,
+    alignItems: "center",
+    justifyContent: "center",
   },
   cover: {
     width: 48,
@@ -263,13 +284,34 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
   title: {
     color: Colors.text,
     fontSize: 15,
     fontFamily: "Inter_500Medium",
+    flexShrink: 1,
   },
   activeText: {
     color: Colors.primary,
+  },
+  topResultBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(38,225,154,0.4)",
+    backgroundColor: "rgba(38,225,154,0.18)",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  topResultBadgeText: {
+    color: Colors.primary,
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.2,
+    textTransform: "uppercase",
   },
   artist: {
     color: Colors.subtext,

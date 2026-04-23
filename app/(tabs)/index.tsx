@@ -10,6 +10,7 @@ import {
   RefreshControl,
 } from "react-native";
 import { Image } from "expo-image";
+import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -21,21 +22,23 @@ import { getPublicPlaylists, FirestorePlaylist } from "@/lib/firestore";
 import { getCachedHomePublicPlaylists, setCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePlayerRow } from "@/contexts/PlayerContext";
-import { ProfileDropdown } from "@/components/ProfileDropdown";
 import { useScreenTracking } from "@/hooks/useScreenTracking";
+import { triggerImpact } from "@/lib/haptics";
 import {
   clearJioSaavnPlaylistCache,
   getHomeJioSaavnCategories,
   HomeJioSaavnCategoryData,
+  prefetchVisiblePlaylists,
 } from "@/lib/jioSaavnService";
+import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistService";
+import HomeSkeletonLoader from "@/components/HomeSkeletonLoader";
 
 const APP_BRAND_ICON = require("@/assets/images/icon.png");
 
 type HomeSection =
   | { id: "recents"; type: "recents" }
   | { id: "public-playlists"; type: "public-playlists" }
-  | { id: "trending"; type: "trending" }
-  | { id: "new-releases"; type: "new-releases" }
+  | { id: "featured-artists"; type: "featured-artists" }
   | { id: string; type: "category"; data: HomeJioSaavnCategoryData };
 
 type HomeSessionCache = {
@@ -43,27 +46,39 @@ type HomeSessionCache = {
   categories: HomeJioSaavnCategoryData[];
   publicPlaylists: FirestorePlaylist[];
   recentlyPlayed: RecentlyPlayedItem[];
+  featuredArtists: ArtistCard[];
 };
+
+type HomeFeedState = "ready" | "empty" | "network";
 
 const HOME_SESSION_CACHE: HomeSessionCache = {
   hydrated: false,
   categories: [],
   publicPlaylists: [],
   recentlyPlayed: [],
+  featuredArtists: [],
 };
 
 const HOME_JIOSAAVN_SECTION_ORDER = [
   "trending",
-  "most-viral",
-  "most-played",
   "new-arrivals",
+  "most-viral",
+  "party-mix",
+  "chill-vibes",
+  "romance",
+  "workout",
+  "retro",
 ] as const;
 
-const HOME_JIOSAAVN_TITLES: Record<(typeof HOME_JIOSAAVN_SECTION_ORDER)[number], string> = {
-  trending: "New & Trending",
-  "most-viral": "Most Viral",
-  "most-played": "Most Played",
-  "new-arrivals": "New Arrivals",
+const HOME_JIOSAAVN_TITLES: Record<string, string> = {
+  trending:       "Trending Now",
+  "new-arrivals": "New Releases",
+  "most-viral":   "Viral Hits",
+  "party-mix":    "Party Mix",
+  "chill-vibes":  "Chill Vibes",
+  romance:        "Love & Romance",
+  workout:        "Workout & Energy",
+  retro:          "Retro Classics",
 };
 
 const BRAND = {
@@ -85,8 +100,35 @@ const MIN_PUBLIC_PLAYLIST_ITEMS = 1;
 const PUBLIC_PLAYLIST_FETCH_TIMEOUT_MS = 4500;
 const HOME_CATEGORY_FETCH_TIMEOUT_MS = 12000;
 const HOME_BOOTSTRAP_MAX_WAIT_MS = 15000;
-const MAX_ROW_ITEMS = 8;
-const MAX_EXTRA_CATEGORY_ROWS = 2;
+const MAX_ROW_ITEMS = 10;
+// Show all category sections — no artificial cap
+const MAX_EXTRA_CATEGORY_ROWS = 20;
+const HOME_PRIORITY_CATEGORY_IDS = ["trending", "new-arrivals", "most-viral"] as const;
+const HOME_PRIORITY_CATEGORY_TIMEOUT_MS = 5500;
+const PLACEHOLDER_ROW_ITEMS = [0, 1, 2, 3];
+const HORIZONTAL_ROW_GAP = 12;
+const RECENT_CARD_SIZE = 90;
+const RECENT_ITEM_STRIDE = RECENT_CARD_SIZE + HORIZONTAL_ROW_GAP;
+const RECT_CARD_WIDTH = 152;
+const RECT_ITEM_STRIDE = RECT_CARD_WIDTH + HORIZONTAL_ROW_GAP;
+const ARTIST_CARD_WIDTH = 120;
+const ARTIST_ITEM_STRIDE = ARTIST_CARD_WIDTH + HORIZONTAL_ROW_GAP;
+
+function hasHomeContent(source: {
+  categories: HomeJioSaavnCategoryData[];
+  publicPlaylists: FirestorePlaylist[];
+  recentlyPlayed: RecentlyPlayedItem[];
+}): boolean {
+  return (
+    source.recentlyPlayed.length > 0 ||
+    source.categories.length > 0 ||
+    source.publicPlaylists.length > 0
+  );
+}
+
+function hasVisibleHomeSections(source: HomeSessionCache): boolean {
+  return hasHomeContent(source) || source.featuredArtists.length > 0;
+}
 
 function getThumbImageUrl(images: JioSaavnImage[] | undefined): string {
   if (!Array.isArray(images) || images.length === 0) return "";
@@ -167,9 +209,20 @@ export default function HomeScreen() {
   const [publicPlaylists, setPublicPlaylists] = useState<FirestorePlaylist[]>(
     HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.publicPlaylists : []
   );
+  const [featuredArtists, setFeaturedArtists] = useState<ArtistCard[]>(
+    HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.featuredArtists : []
+  );
   const [loading, setLoading] = useState(!HOME_SESSION_CACHE.hydrated);
+  const [homeFeedState, setHomeFeedState] = useState<HomeFeedState>(
+    hasHomeContent(HOME_SESSION_CACHE) ? "ready" : "empty"
+  );
   const [refreshing, setRefreshing] = useState(false);
-  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(
+    !HOME_SESSION_CACHE.hydrated && HOME_SESSION_CACHE.categories.length === 0
+  );
+  const [isLoadingPublicPlaylists, setIsLoadingPublicPlaylists] = useState(
+    !HOME_SESSION_CACHE.hydrated && HOME_SESSION_CACHE.publicPlaylists.length === 0
+  );
   const latestLoadIdRef = useRef(0);
   const hasHydratedRef = useRef(HOME_SESSION_CACHE.hydrated);
 
@@ -199,77 +252,172 @@ export default function HomeScreen() {
       if (shouldShowLoader) {
         setLoading(true);
       }
+      if (HOME_SESSION_CACHE.categories.length === 0) {
+        setIsLoadingCategories(true);
+      }
+      if (refreshPublicPlaylists && HOME_SESSION_CACHE.publicPlaylists.length === 0) {
+        setIsLoadingPublicPlaylists(true);
+      }
 
       try {
-        const [publicPlaylistsResult, categoryResult] = await Promise.allSettled([
-          refreshPublicPlaylists
-            ? withPromiseTimeout(
-                getPublicPlaylists(publicLimit),
-                PUBLIC_PLAYLIST_FETCH_TIMEOUT_MS,
-                "Home public playlists timeout"
-              )
-            : Promise.resolve<FirestorePlaylist[]>(HOME_SESSION_CACHE.publicPlaylists.slice(0, publicLimit)),
-          withPromiseTimeout(
-            getHomeJioSaavnCategories({
-              forceRefresh,
-              limitPerCategory,
-              realtime: realtimeRefresh,
-            }),
-            HOME_CATEGORY_FETCH_TIMEOUT_MS,
-            "Home categories timeout"
-          ),
-        ]);
-
-        if (loadId !== latestLoadIdRef.current) {
-          return;
-        }
-
-        if (refreshPublicPlaylists && publicPlaylistsResult.status === "fulfilled") {
-          const nextPublicPlaylists = publicPlaylistsResult.value;
-          const hasPreviousPublicPlaylists = HOME_SESSION_CACHE.publicPlaylists.length > 0;
-          const shouldReplacePublicPlaylists = nextPublicPlaylists.length > 0 || !hasPreviousPublicPlaylists;
-
-          if (shouldReplacePublicPlaylists) {
-            setPublicPlaylists(nextPublicPlaylists);
-            HOME_SESSION_CACHE.publicPlaylists = nextPublicPlaylists;
+        const markReadyIfContentVisible = () => {
+          if (loadId !== latestLoadIdRef.current) return;
+          if (hasVisibleHomeSections(HOME_SESSION_CACHE)) {
+            hasHydratedRef.current = true;
+            HOME_SESSION_CACHE.hydrated = true;
+            setHomeFeedState("ready");
+            setLoading(false);
           }
+        };
 
-          if (nextPublicPlaylists.length > 0) {
-            void setCachedHomePublicPlaylists(nextPublicPlaylists);
-          }
-        }
+        const publicPlaylistsPromise = refreshPublicPlaylists
+          ? withPromiseTimeout(
+              getPublicPlaylists(publicLimit),
+              PUBLIC_PLAYLIST_FETCH_TIMEOUT_MS,
+              "Home public playlists timeout"
+            )
+          : Promise.resolve<FirestorePlaylist[]>(HOME_SESSION_CACHE.publicPlaylists.slice(0, publicLimit));
 
-        if (categoryResult.status === "fulfilled") {
-          const validCategories = categoryResult.value.filter((cat) => cat.results.length > 0);
+        // Load artists in parallel — no separate timeout, it's fast from cache
+        const artistsPromise = getFeaturedArtists().catch(() => [] as ArtistCard[]);
+
+        const publicPlaylistsResultPromise = publicPlaylistsPromise
+          .then((nextPublicPlaylists) => {
+            if (loadId !== latestLoadIdRef.current) {
+              return { status: "fulfilled" as const, value: nextPublicPlaylists };
+            }
+
+            if (refreshPublicPlaylists) {
+              const hasPreviousPublicPlaylists = HOME_SESSION_CACHE.publicPlaylists.length > 0;
+              const shouldReplacePublicPlaylists =
+                nextPublicPlaylists.length > 0 || !hasPreviousPublicPlaylists;
+
+              if (shouldReplacePublicPlaylists) {
+                setPublicPlaylists(nextPublicPlaylists);
+                HOME_SESSION_CACHE.publicPlaylists = nextPublicPlaylists;
+              }
+
+              if (nextPublicPlaylists.length > 0) {
+                void setCachedHomePublicPlaylists(nextPublicPlaylists);
+              }
+            }
+
+            if (nextPublicPlaylists.length > 0) {
+              markReadyIfContentVisible();
+            }
+
+            return { status: "fulfilled" as const, value: nextPublicPlaylists };
+          })
+          .catch((reason) => ({ status: "rejected" as const, reason }));
+
+        const applyCategorySnapshot = (categoryData: HomeJioSaavnCategoryData[]) => {
+          const validCategories = categoryData.filter((cat) => cat.results.length > 0);
           const hasPreviousCategories = HOME_SESSION_CACHE.categories.length > 0;
           const shouldReplaceCategories = validCategories.length > 0 || !hasPreviousCategories;
 
           if (shouldReplaceCategories) {
             setCategories(validCategories);
             HOME_SESSION_CACHE.categories = validCategories;
+            if (validCategories.length > 0) {
+              setTimeout(() => prefetchVisiblePlaylists(validCategories, 3), 1200);
+            }
           }
 
           if (validCategories.length > 0) {
-            hasHydratedRef.current = true;
-            HOME_SESSION_CACHE.hydrated = true;
+            markReadyIfContentVisible();
           }
+        };
+
+        const categoryResultPromise = (async () => {
+          let partialCategories: HomeJioSaavnCategoryData[] = [];
+          let hasPartialCategories = false;
+
+          try {
+            const priorityCategoryData = await withPromiseTimeout(
+              getHomeJioSaavnCategories({
+                forceRefresh,
+                limitPerCategory: Math.min(limitPerCategory, 8),
+                realtime: realtimeRefresh,
+                categoryIds: [...HOME_PRIORITY_CATEGORY_IDS],
+              }),
+              HOME_PRIORITY_CATEGORY_TIMEOUT_MS,
+              "Home priority categories timeout"
+            );
+
+            if (loadId === latestLoadIdRef.current) {
+              applyCategorySnapshot(priorityCategoryData);
+            }
+
+            partialCategories = priorityCategoryData;
+            hasPartialCategories = priorityCategoryData.some((cat) => cat.results.length > 0);
+          } catch {
+            // Continue to full fetch fallback below.
+          }
+
+          try {
+            const fullCategoryData = await withPromiseTimeout(
+              getHomeJioSaavnCategories({
+                forceRefresh,
+                limitPerCategory,
+                realtime: realtimeRefresh,
+              }),
+              HOME_CATEGORY_FETCH_TIMEOUT_MS,
+              "Home categories timeout"
+            );
+
+            if (loadId === latestLoadIdRef.current) {
+              applyCategorySnapshot(fullCategoryData);
+            }
+
+            return { status: "fulfilled" as const, value: fullCategoryData };
+          } catch (reason) {
+            if (hasPartialCategories) {
+              return { status: "fulfilled" as const, value: partialCategories };
+            }
+
+            return { status: "rejected" as const, reason };
+          }
+        })();
+
+        const artistsResultPromise = artistsPromise
+          .then((artists) => {
+            if (loadId !== latestLoadIdRef.current) {
+              return { status: "fulfilled" as const, value: artists };
+            }
+
+            if (artists.length > 0) {
+              setFeaturedArtists(artists);
+              HOME_SESSION_CACHE.featuredArtists = artists;
+              artists.slice(0, 4).forEach((a) => prefetchArtist(a.id));
+              markReadyIfContentVisible();
+            }
+
+            return { status: "fulfilled" as const, value: artists };
+          })
+          .catch((reason) => ({ status: "rejected" as const, reason }));
+
+        const [publicPlaylistsResult, categoryResult] = await Promise.all([
+          publicPlaylistsResultPromise,
+          categoryResultPromise,
+        ]);
+
+        await artistsResultPromise;
+
+        if (loadId !== latestLoadIdRef.current) {
+          return;
         }
 
-        if (refreshPublicPlaylists && publicPlaylistsResult.status === "fulfilled") {
-          if (publicPlaylistsResult.value.length > 0) {
-            hasHydratedRef.current = true;
-            HOME_SESSION_CACHE.hydrated = true;
-          }
-        }
-
-        if (
-          HOME_SESSION_CACHE.recentlyPlayed.length > 0 ||
-          HOME_SESSION_CACHE.categories.length > 0 ||
-          HOME_SESSION_CACHE.publicPlaylists.length > 0
-        ) {
+        if (hasVisibleHomeSections(HOME_SESSION_CACHE)) {
           hasHydratedRef.current = true;
           HOME_SESSION_CACHE.hydrated = true;
         }
+
+        const nextFeedState = hasHomeContent(HOME_SESSION_CACHE)
+          ? "ready"
+          : publicPlaylistsResult.status === "rejected" || categoryResult.status === "rejected"
+            ? "network"
+            : "empty";
+        setHomeFeedState(nextFeedState);
 
         // Mark bootstrapped even on empty/offline response to avoid repeated heavy reloads.
         if (!HOME_SESSION_CACHE.hydrated) {
@@ -277,8 +425,13 @@ export default function HomeScreen() {
           hasHydratedRef.current = true;
         }
       } finally {
-        if (shouldShowLoader && loadId === latestLoadIdRef.current) {
+        // Always clear loading — whether we set it or it was already true from bootstrap
+        if (loadId === latestLoadIdRef.current) {
           setLoading(false);
+          setIsLoadingCategories(false);
+          if (refreshPublicPlaylists) {
+            setIsLoadingPublicPlaylists(false);
+          }
         }
       }
     },
@@ -299,7 +452,11 @@ export default function HomeScreen() {
       setPublicPlaylists([]);
       setRecentlyPlayed([]);
       setLoading(true);
+      setIsLoadingCategories(true);
+      setIsLoadingPublicPlaylists(true);
     }
+
+    setHomeFeedState("empty");
   }, []);
 
   const handleRefresh = useCallback(async () => {
@@ -337,8 +494,20 @@ export default function HomeScreen() {
         setRecentlyPlayed(HOME_SESSION_CACHE.recentlyPlayed);
         setCategories(HOME_SESSION_CACHE.categories);
         setPublicPlaylists(HOME_SESSION_CACHE.publicPlaylists);
-        setLoading(false);
-        return;
+        setFeaturedArtists(HOME_SESSION_CACHE.featuredArtists);
+        setIsLoadingCategories(HOME_SESSION_CACHE.categories.length === 0);
+        setIsLoadingPublicPlaylists(HOME_SESSION_CACHE.publicPlaylists.length === 0);
+        setHomeFeedState(hasHomeContent(HOME_SESSION_CACHE) ? "ready" : "empty");
+        const hasVisibleFeed =
+          hasHomeContent(HOME_SESSION_CACHE) || HOME_SESSION_CACHE.featuredArtists.length > 0;
+        setLoading(!hasVisibleFeed);
+        if (HOME_SESSION_CACHE.categories.length > 0) {
+          setTimeout(() => prefetchVisiblePlaylists(HOME_SESSION_CACHE.categories, 3), 800);
+        }
+        const hasFullFeed = HOME_SESSION_CACHE.categories.length > 0 &&
+          HOME_SESSION_CACHE.featuredArtists.length > 0;
+        if (hasFullFeed) return;
+        // Fall through to load missing data
       }
 
       const [recentResult, cachedPublicResult] = await Promise.allSettled([
@@ -364,6 +533,7 @@ export default function HomeScreen() {
           if (cachedPublic.length > 0) {
             setPublicPlaylists(cachedPublic);
             HOME_SESSION_CACHE.publicPlaylists = cachedPublic;
+            setIsLoadingPublicPlaylists(false);
             hasWarmContent = true;
           }
         }
@@ -371,7 +541,9 @@ export default function HomeScreen() {
         if (hasWarmContent) {
           hasHydratedRef.current = true;
           HOME_SESSION_CACHE.hydrated = true;
+          // Show warm content immediately while live categories refresh in background.
           setLoading(false);
+          setHomeFeedState("ready");
         }
       }
 
@@ -393,6 +565,7 @@ export default function HomeScreen() {
       } catch {
         if (!cancelled) {
           setLoading(false);
+          setHomeFeedState(hasWarmContent ? "ready" : "network");
           hasHydratedRef.current = true;
           HOME_SESSION_CACHE.hydrated = true;
         }
@@ -409,28 +582,21 @@ export default function HomeScreen() {
 
   const orderedHomeCategories = useMemo<HomeJioSaavnCategoryData[]>(() => {
     const categoryById = new Map<string, HomeJioSaavnCategoryData>();
-    categories.forEach((category) => {
-      categoryById.set(category.id, category);
-    });
+    categories.forEach((cat) => categoryById.set(cat.id, cat));
 
+    // Preferred order first, then any extras the service returned
     const preferred = HOME_JIOSAAVN_SECTION_ORDER
-      .map((categoryId) => {
-        const category = categoryById.get(categoryId);
-        if (!category || category.results.length === 0) return null;
-        return {
-          ...category,
-          title: category.title || HOME_JIOSAAVN_TITLES[categoryId],
-        };
+      .map((id) => {
+        const cat = categoryById.get(id);
+        if (!cat || cat.results.length === 0) return null;
+        return { ...cat, title: HOME_JIOSAAVN_TITLES[id] ?? cat.title };
       })
-      .filter((category): category is HomeJioSaavnCategoryData => Boolean(category));
+      .filter((cat): cat is HomeJioSaavnCategoryData => Boolean(cat));
 
-    const preferredIds = new Set(preferred.map((category) => category.id));
+    const preferredIds = new Set(preferred.map((c) => c.id));
     const extras = categories
-      .filter((category) => !preferredIds.has(category.id) && category.results.length > 0)
-      .map((category) => ({
-        ...category,
-        title: category.title || category.id,
-      }));
+      .filter((c) => !preferredIds.has(c.id) && c.results.length > 0)
+      .map((c) => ({ ...c, title: HOME_JIOSAAVN_TITLES[c.id] ?? c.title }));
 
     return [...preferred, ...extras];
   }, [categories]);
@@ -439,80 +605,79 @@ export default function HomeScreen() {
     return new Date().toLocaleDateString("en-US", { weekday: "long" });
   }, []);
 
-  const categoryById = useMemo(() => {
-    const map = new Map<string, HomeJioSaavnCategoryData>();
-    orderedHomeCategories.forEach((category) => {
-      map.set(category.id, category);
-    });
-    return map;
+  const allCategoryRows = useMemo(() => {
+    return orderedHomeCategories
+      .map((cat) => ({
+        ...cat,
+        results: dedupeJioPlaylistsById(cat.results, MAX_ROW_ITEMS),
+      }))
+      .filter((cat) => cat.results.length > 0);
   }, [orderedHomeCategories]);
-
-  const trendingItems = useMemo(
-    () => dedupeJioPlaylistsById(categoryById.get("trending")?.results ?? [], MAX_ROW_ITEMS),
-    [categoryById]
-  );
-
-  const newReleaseItems = useMemo(() => {
-    const primary = dedupeJioPlaylistsById(categoryById.get("new-arrivals")?.results ?? [], MAX_ROW_ITEMS);
-    if (primary.length > 0) return primary;
-    return dedupeJioPlaylistsById(categoryById.get("most-viral")?.results ?? [], MAX_ROW_ITEMS);
-  }, [categoryById]);
 
   const publicPlaylistsForSection = useMemo(
     () => dedupeFirestorePlaylistsById(publicPlaylists, MAX_ROW_ITEMS),
     [publicPlaylists]
   );
 
-  const extraCategoryRows = useMemo(() => {
-    const reserved = new Set(["trending", "new-arrivals", "most-viral"]);
-
-    return orderedHomeCategories
-      .filter((category) => !reserved.has(category.id))
-      .map((category) => ({
-        ...category,
-        results: dedupeJioPlaylistsById(category.results, MAX_ROW_ITEMS),
-      }))
-      .filter((category) => category.results.length > 0)
-      .slice(0, MAX_EXTRA_CATEGORY_ROWS);
-  }, [orderedHomeCategories]);
-
   const sections = useMemo<HomeSection[]>(() => {
     const data: HomeSection[] = [];
 
+    // 1. Featured Artists — very top
+    if (featuredArtists.length > 0) {
+      data.push({ id: "featured-artists", type: "featured-artists" });
+    }
+
+    // 2. Jump Back In (recents)
     if (recentlyPlayed.length > 0) {
       data.push({ id: "recents", type: "recents" });
     }
 
-    if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS) {
+    // 3. Stable category slots: priority rows are always reserved while loading.
+    const rowById = new Map(allCategoryRows.map((cat) => [cat.id, cat]));
+
+    HOME_PRIORITY_CATEGORY_IDS.forEach((priorityId) => {
+      const existing = rowById.get(priorityId);
+      if (existing) {
+        data.push({ id: `category-${existing.id}`, type: "category", data: existing });
+        return;
+      }
+      if (isLoadingCategories) {
+        data.push({
+          id: `category-loading-${priorityId}`,
+          type: "category",
+          data: {
+            id: priorityId,
+            title: HOME_JIOSAAVN_TITLES[priorityId] ?? priorityId,
+            results: [],
+          },
+        });
+      }
+    });
+
+    allCategoryRows
+      .filter((cat) => !HOME_PRIORITY_CATEGORY_IDS.includes(cat.id as (typeof HOME_PRIORITY_CATEGORY_IDS)[number]))
+      .forEach((cat) => data.push({ id: `category-${cat.id}`, type: "category", data: cat }));
+
+    // 4. Made for You — bottom
+    if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS || isLoadingPublicPlaylists) {
       data.push({ id: "public-playlists", type: "public-playlists" });
     }
 
-    if (trendingItems.length > 0) {
-      data.push({ id: "trending", type: "trending" });
-    }
-
-    if (newReleaseItems.length > 0) {
-      data.push({ id: "new-releases", type: "new-releases" });
-    }
-
-    extraCategoryRows.forEach((cat) =>
-      data.push({ id: `category-${cat.id}`, type: "category", data: cat })
-    );
-
     return data;
-  }, [
-    recentlyPlayed,
-    publicPlaylistsForSection,
-    trendingItems,
-    newReleaseItems,
-    extraCategoryRows,
-  ]);
+  }, [recentlyPlayed, publicPlaylistsForSection, featuredArtists, allCategoryRows, isLoadingCategories, isLoadingPublicPlaylists]);
 
   const openJioSaavnPlaylist = useCallback(
-    (playlistId: string) => {
+    (playlist: { id: string; name?: string; imageUrl?: string; songCount?: number }) => {
       router.push({
         pathname: "/playlist/[id]",
-        params: { id: playlistId, jiosaavn: "true", firestore: "false" },
+        params: {
+          id: playlist.id,
+          jiosaavn: "true",
+          firestore: "false",
+          title: playlist.name || "",
+          cover: playlist.imageUrl || "",
+          songCount: playlist.songCount ? String(playlist.songCount) : "",
+        },
       }, {
         withAnchor: true,
         dangerouslySingular: () => "playlist-details",
@@ -522,10 +687,18 @@ export default function HomeScreen() {
   );
 
   const openFirestorePlaylist = useCallback(
-    (playlistId: string) => {
+    (playlist: { id: string; name?: string; imageUrl?: string; description?: string; songCount?: number }) => {
       router.push({
         pathname: "/playlist/[id]",
-        params: { id: playlistId, firestore: "true", jiosaavn: "false" },
+        params: {
+          id: playlist.id,
+          firestore: "true",
+          jiosaavn: "false",
+          title: playlist.name || "",
+          description: playlist.description || "",
+          cover: playlist.imageUrl || "",
+          songCount: playlist.songCount ? String(playlist.songCount) : "",
+        },
       }, {
         withAnchor: true,
         dangerouslySingular: () => "playlist-details",
@@ -589,21 +762,38 @@ export default function HomeScreen() {
       }
 
       if (item.type === "jiosaavn-playlist") {
-        openJioSaavnPlaylist(itemId);
+        openJioSaavnPlaylist({
+          id: itemId,
+          name: item.name,
+          imageUrl: item.imageUrl,
+        });
         return;
       }
 
       const maybePlaylistData =
         item.data && typeof item.data === "object" ? (item.data as Record<string, unknown>) : null;
       if (maybePlaylistData && "createdBy" in maybePlaylistData) {
-        openFirestorePlaylist(itemId);
+        openFirestorePlaylist({
+          id: itemId,
+          name: item.name,
+          imageUrl: item.imageUrl,
+          description:
+            typeof maybePlaylistData.description === "string" ? maybePlaylistData.description : "",
+          songCount: Array.isArray(maybePlaylistData.songs) ? maybePlaylistData.songs.length : 0,
+        });
         return;
       }
 
       if (itemId.startsWith("user_")) {
         router.push({
           pathname: "/playlist/[id]",
-          params: { id: itemId, jiosaavn: "false", firestore: "false" },
+          params: {
+            id: itemId,
+            jiosaavn: "false",
+            firestore: "false",
+            title: item.name,
+            cover: item.imageUrl,
+          },
         }, {
           withAnchor: true,
           dangerouslySingular: () => "playlist-details",
@@ -612,7 +802,11 @@ export default function HomeScreen() {
       }
 
       // Legacy fallback: non-local playlist recents are usually JioSaavn ids.
-      openJioSaavnPlaylist(itemId);
+      openJioSaavnPlaylist({
+        id: itemId,
+        name: item.name,
+        imageUrl: item.imageUrl,
+      });
     },
     [currentSongId, openFirestorePlaylist, openJioSaavnPlaylist, playSong, router]
   );
@@ -650,7 +844,15 @@ export default function HomeScreen() {
     ({ item }: { item: FirestorePlaylist }) => (
       <Pressable
         style={({ pressed }) => [styles.rectCard, pressed && styles.cardPressed]}
-        onPress={() => openFirestorePlaylist(item.id)}
+        onPress={() =>
+          openFirestorePlaylist({
+            id: item.id,
+            name: item.name,
+            imageUrl: item.imageUrl,
+            description: item.description,
+            songCount: item.songs?.length || 0,
+          })
+        }
       >
         <View style={styles.rectCardImageWrap}>
           <Image
@@ -669,11 +871,46 @@ export default function HomeScreen() {
           {item.name}
         </Text>
         <Text style={styles.rectCardMeta} numberOfLines={1}>
-          {`${item.createdBy?.name || "Community"} • ${Math.max(0, item.songs?.length || 0)} songs`}
+          Made for You
         </Text>
       </Pressable>
     ),
     [openFirestorePlaylist]
+  );
+
+  const renderArtistCard = useCallback(
+    ({ item }: { item: ArtistCard }) => {
+      const img = item.image?.length ? getBestImageUrl(item.image) : "";
+      return (
+        <Pressable
+          style={({ pressed }) => [styles.artistCard, pressed && styles.cardPressed]}
+          onPress={() =>
+            router.push(
+              { pathname: "/artist/[id]", params: { id: item.id, name: item.name, image: img } },
+              { withAnchor: true, dangerouslySingular: () => "artist-profile" }
+            )
+          }
+        >
+          <View style={styles.artistAvatarWrap}>
+            <Image
+              source={{ uri: img || undefined }}
+              style={styles.artistAvatar}
+              contentFit="cover"
+              transition={80}
+              cachePolicy="memory-disk"
+              recyclingKey={`artist-${item.id}`}
+            />
+          </View>
+          <Text style={styles.artistCardName} numberOfLines={2}>{item.name}</Text>
+          {item.dominantLanguage ? (
+            <Text style={styles.artistCardLang} numberOfLines={1}>
+              {item.dominantLanguage}
+            </Text>
+          ) : null}
+        </Pressable>
+      );
+    },
+    [router]
   );
 
   const renderCategoryPlaylist = useCallback(
@@ -682,7 +919,14 @@ export default function HomeScreen() {
         return (
           <Pressable
             style={({ pressed }) => [styles.rectCard, pressed && styles.cardPressed]}
-            onPress={() => openJioSaavnPlaylist(item.id)}
+            onPress={() =>
+              openJioSaavnPlaylist({
+                id: item.id,
+                name: item.name,
+                imageUrl: getThumbImageUrl(item.image),
+                songCount: Number(item.songCount || 0),
+              })
+            }
           >
             <View style={styles.rectCardImageWrap}>
               <Image
@@ -701,7 +945,7 @@ export default function HomeScreen() {
               {item.name}
             </Text>
             <Text style={styles.rectCardMeta} numberOfLines={1}>
-              {categoryTitle}
+              {item.songCount > 0 ? `${item.songCount} songs` : categoryTitle}
             </Text>
           </Pressable>
         );
@@ -709,16 +953,42 @@ export default function HomeScreen() {
     [openJioSaavnPlaylist]
   );
 
-  const renderHeader = useCallback(() => {
-    const firstName =
-      isAuthenticated && typeof user?.name === "string" && user.name.trim().length > 0
-        ? user.name.trim().split(" ")[0]
-        : "Listener";
+  const renderRectPlaceholder = useCallback(
+    ({ item }: { item: number }) => (
+      <View key={`placeholder-${item}`} style={styles.rectCard}>
+        <View style={styles.rectCardImageWrap}>
+          <View style={[styles.rectCardImage, styles.placeholderBlock]} />
+        </View>
+        <View style={[styles.placeholderLine, styles.placeholderLineTitle]} />
+        <View style={[styles.placeholderLine, styles.placeholderLineMeta]} />
+      </View>
+    ),
+    []
+  );
 
+  const getRecentItemLayout = useCallback((_: unknown, index: number) => {
+    return { length: RECENT_ITEM_STRIDE, offset: RECENT_ITEM_STRIDE * index, index };
+  }, []);
+
+  const getRectItemLayout = useCallback((_: unknown, index: number) => {
+    return { length: RECT_ITEM_STRIDE, offset: RECT_ITEM_STRIDE * index, index };
+  }, []);
+
+  const getArtistItemLayout = useCallback((_: unknown, index: number) => {
+    return { length: ARTIST_ITEM_STRIDE, offset: ARTIST_ITEM_STRIDE * index, index };
+  }, []);
+
+  const renderHeader = useCallback(() => {
     return (
       <View style={styles.header}>
         <View style={styles.topMenuRow}>
-          <Pressable style={styles.topProfileButton} onPress={() => setShowProfileDropdown(true)}>
+          <Pressable
+            style={styles.topProfileButton}
+            onPress={() => {
+              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/profile");
+            }}
+          >
             {isAuthenticated && user?.picture ? (
               <Image source={{ uri: user.picture }} style={styles.avatarImage} contentFit="cover" />
             ) : (
@@ -728,40 +998,71 @@ export default function HomeScreen() {
             )}
           </Pressable>
         </View>
-
-        <LinearGradient
-          colors={["rgba(38,225,154,0.22)", "rgba(0,184,123,0.1)", "rgba(24,28,34,0.9)"]}
-          locations={[0, 0.56, 1]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.heroBanner}
-        >
-          <Text style={styles.heroEyebrow}>Mavrixfy Picks</Text>
-          <Text style={styles.heroTitle}>
-            {isAuthenticated ? `${firstName}, find your next vibe` : "Find your next vibe"}
-          </Text>
-          <Text style={styles.heroSubtitle}>
-            Fresh playlists, trending hits, and your recent favorites in one place.
-          </Text>
-          <View style={styles.heroActionRow}>
-            <Pressable style={styles.heroPrimaryButton} onPress={() => router.push("/(tabs)/search")}>
-              <Ionicons name="search" size={15} color={Colors.black} />
-              <Text style={styles.heroPrimaryText}>Search</Text>
-            </Pressable>
-            <Pressable style={styles.heroGhostButton} onPress={() => router.push("/(tabs)/liked-songs")}>
-              <Ionicons name="heart" size={14} color={Colors.text} />
-              <Text style={styles.heroGhostText}>Liked Songs</Text>
-            </Pressable>
-          </View>
-        </LinearGradient>
       </View>
     );
-  }, [isAuthenticated, router, user?.name, user?.picture]);
+  }, [isAuthenticated, router, user?.picture]);
 
-  const renderSectionHeader = useCallback((title: string) => {
+  const renderEmptyState = useCallback(() => {
+    const isNetworkIssue = homeFeedState === "network";
+    const title = isNetworkIssue ? "Fresh content is taking longer than expected" : "Start listening right away";
+    const subtitle = isNetworkIssue
+      ? "We could not refresh live recommendations right now. You can retry, import songs, or browse search instead."
+      : "Your Home feed is still warming up. You can retry, import songs, or jump into search while live recommendations load.";
+
+    return (
+      <View style={styles.emptyStateWrap}>
+        <View style={styles.emptyStateCard}>
+          <View style={styles.emptyStateIcon}>
+            <Ionicons
+              name={isNetworkIssue ? "cloud-offline-outline" : "musical-notes-outline"}
+              size={22}
+              color={Colors.primary}
+            />
+          </View>
+          <Text style={styles.emptyStateTitle}>{title}</Text>
+          <Text style={styles.emptyStateText}>{subtitle}</Text>
+
+          <View style={styles.emptyActionRow}>
+            <Pressable
+              style={[styles.emptyActionButton, styles.emptyActionPrimary]}
+              onPress={() => {
+                void handleRefresh();
+              }}
+            >
+              <Ionicons name="refresh" size={16} color={Colors.black} />
+              <Text style={styles.emptyActionPrimaryText}>Try Again</Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.emptyActionButton, styles.emptyActionSecondary]}
+              onPress={() => router.push("/(tabs)/search")}
+            >
+              <Ionicons name="search" size={16} color={Colors.text} />
+              <Text style={styles.emptyActionSecondaryText}>Search</Text>
+            </Pressable>
+          </View>
+
+          <Pressable
+            style={[styles.emptyActionButton, styles.emptyActionTertiary]}
+            onPress={() => router.push("/import-songs")}
+          >
+            <Ionicons name="cloud-upload-outline" size={16} color={Colors.text} />
+            <Text style={styles.emptyActionSecondaryText}>Import Songs</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }, [handleRefresh, homeFeedState, router]);
+
+  const renderSectionHeader = useCallback((title: string, onViewAll?: () => void) => {
     return (
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>{title}</Text>
+        {onViewAll ? (
+          <Pressable onPress={onViewAll} hitSlop={8}>
+            <Text style={styles.viewAllText}>View All</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   }, []);
@@ -776,14 +1077,16 @@ export default function HomeScreen() {
               <FlatList
                 data={recentlyPlayed}
                 renderItem={renderRecentCard}
-                keyExtractor={(item, index) => `recent-${item.id}-${index}`}
+                keyExtractor={(item) => `recent-${item.id}`}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.rowContent}
-                initialNumToRender={1}
-                maxToRenderPerBatch={2}
-                windowSize={3}
-                removeClippedSubviews={Platform.OS === "android"}
+                getItemLayout={getRecentItemLayout}
+                initialNumToRender={4}
+                maxToRenderPerBatch={6}
+                windowSize={6}
+                updateCellsBatchingPeriod={24}
+                removeClippedSubviews={false}
               />
             </View>
           );
@@ -792,55 +1095,53 @@ export default function HomeScreen() {
           return (
             <View style={styles.section}>
               {renderSectionHeader("Made for You")}
-              <FlatList
-                data={publicPlaylistsForSection}
-                renderItem={renderPublicPlaylist}
-                keyExtractor={(item, index) => `public-${item.id}-${index}`}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.rowContent}
-                initialNumToRender={1}
-                maxToRenderPerBatch={2}
-                windowSize={3}
-                removeClippedSubviews={Platform.OS === "android"}
-              />
+              {publicPlaylistsForSection.length > 0 ? (
+                <FlatList
+                  data={publicPlaylistsForSection}
+                  renderItem={renderPublicPlaylist}
+                  keyExtractor={(item) => `public-${item.id}`}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.rowContent}
+                  getItemLayout={getRectItemLayout}
+                  initialNumToRender={4}
+                  maxToRenderPerBatch={6}
+                  windowSize={6}
+                  updateCellsBatchingPeriod={24}
+                  removeClippedSubviews={false}
+                />
+              ) : (
+                <FlatList
+                  data={PLACEHOLDER_ROW_ITEMS}
+                  renderItem={renderRectPlaceholder}
+                  keyExtractor={(item) => `public-loading-${item}`}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.rowContent}
+                  getItemLayout={getRectItemLayout}
+                  scrollEnabled={false}
+                />
+              )}
             </View>
           );
 
-        case "trending":
+        case "featured-artists":
           return (
             <View style={styles.section}>
-              {renderSectionHeader("Trending Now")}
+              {renderSectionHeader("Featured Artists", () => router.push("/artists", { withAnchor: true }))}
               <FlatList
-                data={trendingItems}
-                renderItem={renderCategoryPlaylist("trending", "Trending Now")}
-                keyExtractor={(item, index) => `trending-${item.id}-${index}`}
+                data={featuredArtists}
+                renderItem={renderArtistCard}
+                keyExtractor={(item) => `artist-${item.id}`}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.rowContent}
-                initialNumToRender={1}
-                maxToRenderPerBatch={2}
-                windowSize={3}
-                removeClippedSubviews={Platform.OS === "android"}
-              />
-            </View>
-          );
-
-        case "new-releases":
-          return (
-            <View style={styles.section}>
-              {renderSectionHeader(`New Releases ${weekdayLabel}`)}
-              <FlatList
-                data={newReleaseItems}
-                renderItem={renderCategoryPlaylist("new-arrivals", "New Releases")}
-                keyExtractor={(item, index) => `new-releases-${item.id}-${index}`}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.rowContent}
-                initialNumToRender={1}
-                maxToRenderPerBatch={2}
-                windowSize={3}
-                removeClippedSubviews={Platform.OS === "android"}
+                getItemLayout={getArtistItemLayout}
+                initialNumToRender={4}
+                maxToRenderPerBatch={6}
+                windowSize={6}
+                updateCellsBatchingPeriod={24}
+                removeClippedSubviews={false}
               />
             </View>
           );
@@ -849,18 +1150,33 @@ export default function HomeScreen() {
           return (
             <View style={styles.section}>
               {renderSectionHeader(section.data.title)}
-              <FlatList
-                data={section.data.results}
-                renderItem={renderCategoryPlaylist(section.data.id, section.data.title)}
-                keyExtractor={(item, index) => `${section.data.id}-${item.id}-${index}`}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.rowContent}
-                initialNumToRender={1}
-                maxToRenderPerBatch={2}
-                windowSize={3}
-                removeClippedSubviews={Platform.OS === "android"}
-              />
+              {section.data.results.length > 0 ? (
+                <FlatList
+                  data={section.data.results}
+                  renderItem={renderCategoryPlaylist(section.data.id, section.data.title)}
+                  keyExtractor={(item) => `${section.data.id}-${item.id}`}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.rowContent}
+                  getItemLayout={getRectItemLayout}
+                  initialNumToRender={4}
+                  maxToRenderPerBatch={6}
+                  windowSize={6}
+                  updateCellsBatchingPeriod={24}
+                  removeClippedSubviews={false}
+                />
+              ) : (
+                <FlatList
+                  data={PLACEHOLDER_ROW_ITEMS}
+                  renderItem={renderRectPlaceholder}
+                  keyExtractor={(item) => `${section.data.id}-loading-${item}`}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.rowContent}
+                  getItemLayout={getRectItemLayout}
+                  scrollEnabled={false}
+                />
+              )}
             </View>
           );
 
@@ -873,18 +1189,24 @@ export default function HomeScreen() {
       renderRecentCard,
       publicPlaylistsForSection,
       renderPublicPlaylist,
-      trendingItems,
-      newReleaseItems,
+      renderRectPlaceholder,
+      featuredArtists,
+      renderArtistCard,
+      allCategoryRows,
       renderCategoryPlaylist,
       renderSectionHeader,
-      weekdayLabel,
+      getRecentItemLayout,
+      getRectItemLayout,
+      getArtistItemLayout,
     ]
   );
 
-  if (loading) {
+  const shouldShowSkeleton = loading && sections.length === 0;
+
+  if (shouldShowSkeleton) {
     return (
-      <View style={[styles.container, styles.loadingContainer, { paddingTop: topInset }]}>
-        <ActivityIndicator size="large" color={BRAND.teal} />
+      <View style={[styles.container, { paddingTop: topInset }]}>
+        <HomeSkeletonLoader />
       </View>
     );
   }
@@ -906,12 +1228,13 @@ export default function HomeScreen() {
           />
         }
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, sections.length === 0 && styles.scrollContentEmpty]}
+        ListEmptyComponent={renderEmptyState}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={2}
-        maxToRenderPerBatch={2}
-        windowSize={3}
-        updateCellsBatchingPeriod={60}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={5}
+        updateCellsBatchingPeriod={32}
         removeClippedSubviews={Platform.OS === "android"}
       />
       <LinearGradient
@@ -919,10 +1242,6 @@ export default function HomeScreen() {
         colors={["rgba(16,20,26,0)", "rgba(16,20,26,0.52)", "rgba(16,20,26,0.84)", Colors.background]}
         locations={[0, 0.58, 0.86, 1]}
         style={styles.bottomVisibilityOverlay}
-      />
-      <ProfileDropdown
-        visible={showProfileDropdown}
-        onClose={() => setShowProfileDropdown(false)}
       />
     </View>
   );
@@ -936,12 +1255,30 @@ const styles = StyleSheet.create({
   loadingContainer: {
     justifyContent: "center",
     alignItems: "center",
+    paddingHorizontal: 28,
+  },
+  loadingTitle: {
+    marginTop: 16,
+    color: Colors.text,
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+  },
+  loadingText: {
+    marginTop: 6,
+    color: Colors.subtext,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center",
+    fontFamily: "Inter_400Regular",
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     paddingBottom: 156,
+  },
+  scrollContentEmpty: {
+    flexGrow: 1,
   },
   bottomVisibilityOverlay: {
     position: "absolute",
@@ -986,87 +1323,90 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 17,
   },
-  heroBanner: {
-    marginTop: 12,
+  section: {
+    marginTop: 20,
+  },
+  emptyStateWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 24,
+    paddingBottom: 32,
+  },
+  emptyStateCard: {
     borderRadius: 18,
     borderWidth: 1,
     borderColor: Colors.cardBorder,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    overflow: "hidden",
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
   },
-  heroEyebrow: {
-    color: "rgba(223,226,235,0.86)",
-    fontSize: 11,
-    fontFamily: "Inter_600SemiBold",
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
+  emptyStateIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(38,225,154,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
   },
-  heroTitle: {
-    marginTop: 6,
+  emptyStateTitle: {
     color: Colors.text,
-    fontSize: 25,
-    lineHeight: 30,
-    letterSpacing: -0.4,
+    fontSize: 20,
+    lineHeight: 26,
     fontFamily: "Inter_700Bold",
   },
-  heroSubtitle: {
-    marginTop: 6,
-    color: BRAND.textMuted,
-    fontSize: 12.5,
-    lineHeight: 17,
-    fontFamily: "Inter_500Medium",
-    maxWidth: "95%",
+  emptyStateText: {
+    marginTop: 8,
+    color: Colors.subtext,
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: "Inter_400Regular",
   },
-  heroActionRow: {
-    marginTop: 12,
+  emptyActionRow: {
+    marginTop: 18,
     flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+    gap: 10,
   },
-  heroPrimaryButton: {
-    height: 34,
+  emptyActionButton: {
+    flex: 1,
+    minHeight: 44,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    backgroundColor: Colors.primary,
-    borderWidth: 1,
-    borderColor: "rgba(38,225,154,0.55)",
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
-    gap: 5,
+    gap: 6,
+    paddingHorizontal: 12,
   },
-  heroPrimaryText: {
+  emptyActionPrimary: {
+    backgroundColor: Colors.primary,
+  },
+  emptyActionPrimaryText: {
     color: Colors.black,
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: "Inter_700Bold",
   },
-  heroGhostButton: {
-    height: 34,
-    borderRadius: 999,
-    paddingHorizontal: 12,
+  emptyActionSecondary: {
     backgroundColor: Colors.surfaceGlass,
     borderWidth: 1,
     borderColor: Colors.cardBorder,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 5,
   },
-  heroGhostText: {
+  emptyActionSecondaryText: {
     color: Colors.text,
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: "Inter_600SemiBold",
   },
-  section: {
-    marginTop: 20,
+  emptyActionTertiary: {
+    marginTop: 10,
+    width: "100%",
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
   },
   sectionHeader: {
     paddingHorizontal: 16,
     marginBottom: 12,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-start",
+    justifyContent: "space-between",
   },
   sectionTitle: {
     fontSize: 19,
@@ -1074,19 +1414,25 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     letterSpacing: -0.18,
   },
+  viewAllText: {
+    color: Colors.primary,
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+  },
   rowContent: {
     paddingLeft: 16,
     paddingRight: 16,
-    gap: 12,
+    gap: HORIZONTAL_ROW_GAP,
   },
   recentCard: {
-    width: 134,
-    height: 134,
-    borderRadius: 16,
+    width: 90,
+    height: 90,
+    borderRadius: 8,
     overflow: "hidden",
-    backgroundColor: Colors.surface,
+    position: "relative",
     borderWidth: 1,
     borderColor: Colors.cardBorder,
+    backgroundColor: Colors.surface,
   },
   recentImage: {
     width: "100%",
@@ -1101,23 +1447,50 @@ const styles = StyleSheet.create({
   },
   recentLabel: {
     color: BRAND.textPrimary,
-    fontSize: 12,
+    fontSize: 10,
     fontFamily: "Inter_700Bold",
   },
   rectCard: {
     width: 152,
   },
+  artistCard: {
+    width: 120,
+    alignItems: "center",
+    gap: 6,
+  },
+  artistAvatarWrap: {
+    position: "relative",
+  },
+  artistAvatar: {
+    width: 108,
+    height: 108,
+    borderRadius: 54,
+    backgroundColor: "#1e2228",
+  },
+  artistCardName: {
+    color: "#DFE2EB",
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    textAlign: "center",
+  },
+  artistCardLang: {
+    color: "rgba(188,203,185,0.76)",
+    fontSize: 10,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    textTransform: "capitalize",
+  },
   rectCardImageWrap: {
     width: 152,
     height: 152,
-    borderRadius: 16,
+    borderRadius: 8,
     overflow: "hidden",
     position: "relative",
   },
   rectCardImage: {
     width: 152,
     height: 152,
-    borderRadius: 16,
+    borderRadius: 8,
     backgroundColor: Colors.surfaceLight,
     borderWidth: 1,
     borderColor: Colors.cardBorder,
@@ -1153,8 +1526,29 @@ const styles = StyleSheet.create({
     height: "100%",
     opacity: 0.82,
   },
+  placeholderBlock: {
+    backgroundColor: Colors.surfaceLight,
+    borderColor: Colors.cardBorder,
+  },
+  placeholderLine: {
+    marginTop: 8,
+    marginLeft: 1,
+    borderRadius: 4,
+    backgroundColor: "rgba(223,226,235,0.2)",
+  },
+  placeholderLineTitle: {
+    width: 124,
+    height: 11,
+  },
+  placeholderLineMeta: {
+    width: 84,
+    height: 9,
+    marginTop: 6,
+    opacity: 0.75,
+  },
   cardPressed: {
     opacity: 0.76,
     transform: [{ scale: 0.985 }],
   },
 });
+

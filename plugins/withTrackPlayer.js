@@ -1,113 +1,167 @@
+/**
+ * withTrackPlayer — Expo config plugin for react-native-track-player + Android Auto.
+ *
+ * Ensures required Android manifest entries are present after prebuild/EAS:
+ * - TrackPlayer MusicService
+ * - MediaBrowserService for Android Auto discovery
+ * - Android Auto media metadata descriptor
+ * - Automotive app descriptor metadata
+ */
 const fs = require("fs");
 const path = require("path");
-const { withAndroidManifest, withDangerousMod, AndroidConfig } = require("@expo/config-plugins");
+const { withAndroidManifest, withDangerousMod } = require("@expo/config-plugins");
 
-function ensureUsesPermission(manifest, permissionName) {
-  const permissions = manifest["uses-permission"] ?? [];
-  const hasPermission = permissions.some(
-    (permission) => permission?.$?.["android:name"] === permissionName
+function ensureIntentAction(service, actionName) {
+  if (!service["intent-filter"]) {
+    service["intent-filter"] = [{ action: [{ $: { "android:name": actionName } }] }];
+    return;
+  }
+  const filters = service["intent-filter"];
+  const hasAction = filters.some((filter) =>
+    (filter.action || []).some((action) => action.$?.["android:name"] === actionName)
   );
+  if (!hasAction) {
+    filters.push({ action: [{ $: { "android:name": actionName } }] });
+  }
+}
 
-  if (!hasPermission) {
-    permissions.push({
+function ensureService(app, serviceDef) {
+  if (!app.service) app.service = [];
+  const name = serviceDef.$["android:name"];
+  const existing = app.service.find((item) => item.$?.["android:name"] === name);
+  if (!existing) {
+    app.service.push(serviceDef);
+    return;
+  }
+
+  existing.$ = { ...(existing.$ || {}), ...(serviceDef.$ || {}) };
+  const expectedFilters = serviceDef["intent-filter"] || [];
+  expectedFilters.forEach((filter) => {
+    (filter.action || []).forEach((action) => {
+      const actionName = action.$?.["android:name"];
+      if (actionName) {
+        ensureIntentAction(existing, actionName);
+      }
+    });
+    (filter.category || []).forEach((category) => {
+      if (!existing["intent-filter"]) existing["intent-filter"] = [];
+      if (existing["intent-filter"].length === 0) existing["intent-filter"].push({});
+      const targetFilter = existing["intent-filter"][0];
+      if (!targetFilter.category) targetFilter.category = [];
+      const categoryName = category.$?.["android:name"];
+      const hasCategory = targetFilter.category.some((item) => item.$?.["android:name"] === categoryName);
+      if (!hasCategory && categoryName) {
+        targetFilter.category.push({ $: { "android:name": categoryName } });
+      }
+    });
+  });
+
+  const serviceMeta = serviceDef["meta-data"] || [];
+  if (serviceMeta.length > 0) {
+    if (!existing["meta-data"]) existing["meta-data"] = [];
+    serviceMeta.forEach((meta) => {
+      const metaName = meta.$?.["android:name"];
+      if (!metaName) return;
+      const target = existing["meta-data"].find((item) => item.$?.["android:name"] === metaName);
+      if (target) {
+        target.$ = { ...(target.$ || {}), ...(meta.$ || {}) };
+      } else {
+        existing["meta-data"].push(meta);
+      }
+    });
+  }
+}
+
+function ensureAppMetaData(app, meta) {
+  if (!app["meta-data"]) app["meta-data"] = [];
+  const name = meta.$["android:name"];
+  const existing = app["meta-data"].find((item) => item.$?.["android:name"] === name);
+  if (existing) {
+    existing.$ = { ...(existing.$ || {}), ...(meta.$ || {}) };
+  } else {
+    app["meta-data"].push(meta);
+  }
+}
+
+function ensureUsesFeature(manifest, featureName) {
+  if (!manifest["uses-feature"]) manifest["uses-feature"] = [];
+  const exists = manifest["uses-feature"].some(
+    (item) => item.$?.["android:name"] === featureName
+  );
+  if (!exists) {
+    manifest["uses-feature"].push({
       $: {
-        "android:name": permissionName,
+        "android:name": featureName,
+        "android:required": "false",
       },
     });
   }
-
-  manifest["uses-permission"] = permissions;
 }
 
-function ensureIntentFilterAction(service, actionName) {
-  service["intent-filter"] = service["intent-filter"] ?? [];
-  const hasAction = service["intent-filter"].some((intentFilter) =>
-    Array.isArray(intentFilter.action)
-      ? intentFilter.action.some((action) => action?.$?.["android:name"] === actionName)
-      : false
-  );
+const withTrackPlayer = (config) => {
+  config = withAndroidManifest(config, (config) => {
+    const manifest = config.modResults.manifest;
+    const app = manifest.application?.[0];
+    if (!app) return config;
 
-  if (!hasAction) {
-    service["intent-filter"].push({
-      action: [
+    ensureUsesFeature(manifest, "android.hardware.type.automotive");
+    ensureAppMetaData(app, {
+      $: {
+        "android:name": "com.google.android.gms.car.application",
+        "android:resource": "@xml/automotive_app_desc",
+      },
+    });
+    ensureAppMetaData(app, {
+      $: {
+        "android:name": "androidx.car.app.TintableAttributionIcon",
+        "android:resource": "@drawable/ic_queue_music",
+      },
+    });
+
+    ensureService(app, {
+      $: {
+        "android:name": "com.doublesymmetry.trackplayer.service.MusicService",
+        "android:enabled": "true",
+        "android:exported": "true",
+        "android:foregroundServiceType": "mediaPlayback",
+      },
+      "intent-filter": [
         {
-          $: {
-            "android:name": actionName,
-          },
+          action: [{ $: { "android:name": "android.intent.action.MEDIA_BUTTON" } }],
         },
       ],
     });
-  }
-}
 
-function withTrackPlayer(config) {
-  config = withAndroidManifest(config, (cfg) => {
-    const manifest = cfg.modResults.manifest;
-
-    ensureUsesPermission(manifest, "android.permission.FOREGROUND_SERVICE");
-    ensureUsesPermission(manifest, "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK");
-
-    const mainApplication = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
-    AndroidConfig.Manifest.addMetaDataItemToMainApplication(
-      mainApplication,
-      "com.google.android.gms.car.application",
-      "@xml/automotive_app_desc",
-      "resource"
-    );
-
-    mainApplication.service = mainApplication.service ?? [];
-    let musicService = mainApplication.service.find(
-      (service) =>
-        service?.$?.["android:name"] === "com.doublesymmetry.trackplayer.service.MusicService"
-    );
-
-    if (!musicService) {
-      musicService = {
-        $: {
-          "android:name": "com.doublesymmetry.trackplayer.service.MusicService",
-          "android:enabled": "true",
-          "android:exported": "true",
-          "android:foregroundServiceType": "mediaPlayback",
+    ensureService(app, {
+      $: {
+        "android:name": ".auto.MavrixfyAutoService",
+        "android:enabled": "true",
+        "android:exported": "true",
+        "android:foregroundServiceType": "mediaPlayback",
+      },
+      "intent-filter": [
+        {
+          action: [{ $: { "android:name": "android.media.browse.MediaBrowserService" } }],
         },
-      };
-      mainApplication.service.push(musicService);
-    } else {
-      musicService.$ = musicService.$ ?? {};
-      musicService.$["android:enabled"] = musicService.$["android:enabled"] ?? "true";
-      musicService.$["android:exported"] = "true";
-      musicService.$["android:foregroundServiceType"] = "mediaPlayback";
-    }
+      ],
+    });
 
-    ensureIntentFilterAction(musicService, "android.intent.action.MEDIA_BUTTON");
-    ensureIntentFilterAction(musicService, "android.media.browse.MediaBrowserService");
-
-    return cfg;
+    return config;
   });
 
   config = withDangerousMod(config, [
     "android",
-    async (cfg) => {
-      const xmlDir = path.join(cfg.modRequest.platformProjectRoot, "app", "src", "main", "res", "xml");
-      const xmlFile = path.join(xmlDir, "automotive_app_desc.xml");
-
-      await fs.promises.mkdir(xmlDir, { recursive: true });
-      await fs.promises.writeFile(
-        xmlFile,
-        [
-          '<?xml version="1.0" encoding="utf-8"?>',
-          "<automotiveApp>",
-          '  <uses name="media"/>',
-          "</automotiveApp>",
-          "",
-        ].join("\n"),
-        "utf8"
-      );
-
-      return cfg;
+    async (config) => {
+      const xmlDir = path.join(config.modRequest.projectRoot, "android", "app", "src", "main", "res", "xml");
+      fs.mkdirSync(xmlDir, { recursive: true });
+      const automotiveDescPath = path.join(xmlDir, "automotive_app_desc.xml");
+      const content = `<?xml version="1.0" encoding="utf-8"?>\n<automotiveApp>\n  <uses name="media"/>\n</automotiveApp>\n`;
+      fs.writeFileSync(automotiveDescPath, content, "utf8");
+      return config;
     },
   ]);
 
   return config;
-}
+};
 
 module.exports = withTrackPlayer;

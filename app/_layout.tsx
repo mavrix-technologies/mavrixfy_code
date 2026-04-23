@@ -1,39 +1,100 @@
 import { QueryClientProvider } from "@tanstack/react-query";
+import { DarkTheme, ThemeProvider } from "@react-navigation/native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
 import React, { useEffect, useState } from "react";
-import { Platform, View, Text } from "react-native";
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View, Text } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from "@expo-google-fonts/inter";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
 import { PlayerProvider } from "@/contexts/PlayerContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { KeepAwakeProvider, useKeepAwake } from "@/contexts/KeepAwakeContext";
 import Colors from "@/constants/colors";
 import { logAppOpen } from "@/lib/analytics";
+import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
+import { getRecentlyPlayed } from "@/lib/storage";
 
 // Set navigation bar color on Android
 if (Platform.OS === 'android') {
   SystemUI.setBackgroundColorAsync(Colors.background);
 }
 
+
+// ─── Background content pre-warm ─────────────────────────────────────────────
+// Kick off cache reads as early as possible so the home screen has data
+// ready the moment it mounts — no waiting spinner for returning users.
+let preWarmStarted = false;
+export function preWarmHomeCache() {
+  if (preWarmStarted) return;
+  preWarmStarted = true;
+  // Fire-and-forget — results land in AsyncStorage / memory cache
+  Promise.allSettled([
+    getCachedHomePublicPlaylists({ allowStale: true }),
+    getRecentlyPlayed(),
+  ]).catch(() => {});
+}
+
+// ─── Auth guard ───────────────────────────────────────────────────────────────
+// Protected routes that require authentication
+const PROTECTED_SEGMENTS = ["(tabs)"];
+// Routes that are only for unauthenticated users
+const AUTH_ONLY_SEGMENTS = ["login"];
+
+/** Invisible full-screen overlay — captures any tap to restore brightness */
+function WakeOverlay() {
+  const { isDimmed, wakeUp } = useKeepAwake();
+  if (!isDimmed) return null;
+  return (
+    <Pressable
+      style={[StyleSheet.absoluteFillObject, { backgroundColor: "#000", zIndex: 99999 }]}
+      onPress={wakeUp}
+      accessible={false}
+    />
+  );
+}
+
 function RootLayoutNav() {
   const router = useRouter();
   const segments = useSegments();
-  const { loading, isAuthenticated } = useAuth();
+  const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
+  const { registerActivity } = useKeepAwake();
 
   useEffect(() => {
     if (loading) return;
 
-    const isLoginScreen = segments[0] === "login";
-    if (!isAuthenticated && !isLoginScreen) {
+    const inProtected = PROTECTED_SEGMENTS.some((s) => segments[0] === s);
+    const inAuthOnly  = AUTH_ONLY_SEGMENTS.some((s) => segments[0] === s);
+    const inOnboarding = segments[0] === "onboarding";
+
+    if (isAuthenticated && inAuthOnly) {
+      // Check if onboarding is needed
+      if (firebaseUser) {
+        import("firebase/firestore").then(({ doc, getDoc }) => {
+          import("@/lib/firebase").then(({ db }) => {
+            getDoc(doc(db, "users", firebaseUser.uid)).then((snap) => {
+              if (snap.exists() && snap.data()?.onboardingCompleted) {
+                router.replace("/(tabs)");
+              } else {
+                router.replace("/onboarding");
+              }
+            }).catch(() => router.replace("/(tabs)"));
+          });
+        });
+      } else {
+        router.replace("/(tabs)");
+      }
+    } else if (!isAuthenticated && !isGuest && inProtected) {
+      router.replace("/login");
+    } else if (!isAuthenticated && !isGuest && inOnboarding) {
       router.replace("/login");
     }
-  }, [loading, isAuthenticated, segments, router]);
+  }, [loading, isAuthenticated, isGuest, firebaseUser, segments, router]);
 
   return (
-    <>
+    <View style={{ flex: 1 }} onTouchStart={registerActivity}>
       <Stack
         screenOptions={{
           headerShown: false,
@@ -42,12 +103,7 @@ function RootLayoutNav() {
           animation: "default",
         }}
       >
-        <Stack.Screen
-          name="(tabs)"
-          options={{
-            gestureEnabled: false,
-          }}
-        />
+        <Stack.Screen name="(tabs)"   options={{ gestureEnabled: false }} />
         <Stack.Screen
           name="player"
           options={{
@@ -61,7 +117,6 @@ function RootLayoutNav() {
               : {
                   presentation: "modal",
                   animation: "slide_from_bottom",
-                  animationDuration: 320,
                   gestureDirection: "vertical",
                   gestureEnabled: true,
                   fullScreenGestureEnabled: true,
@@ -72,35 +127,43 @@ function RootLayoutNav() {
         <Stack.Screen
           name="queue"
           options={{
+            ...(Platform.OS === "ios"
+              ? {
+                  presentation: "formSheet",
+                  gestureEnabled: true,
+                  sheetAllowedDetents: [0.6, 1],
+                  sheetInitialDetentIndex: 0,
+                  sheetGrabberVisible: true,
+                  sheetExpandsWhenScrolledToEdge: true,
+                  sheetCornerRadius: 28,
+                  contentStyle: { backgroundColor: "transparent" },
+                }
+              : {
+                  presentation: "modal",
+                  animation: "slide_from_bottom",
+                  animationDuration: 320,
+                  gestureDirection: "vertical",
+                  gestureEnabled: true,
+                }),
+          }}
+        />
+        <Stack.Screen
+          name="artist-mix"
+          options={{
             presentation: "modal",
             animation: "slide_from_bottom",
-            animationDuration: 320,
+            gestureEnabled: true,
             gestureDirection: "vertical",
-            gestureEnabled: true,
             fullScreenGestureEnabled: Platform.OS === "ios",
-            animationMatchesGesture: Platform.OS === "ios",
           }}
         />
+        <Stack.Screen name="login" options={{ gestureEnabled: false }} />
         <Stack.Screen
-          name="bluetooth"
-          options={{
-            presentation: "formSheet",
-            gestureEnabled: true,
-            sheetAllowedDetents: [0.5, 1],
-            sheetInitialDetentIndex: 0,
-            sheetGrabberVisible: true,
-            sheetExpandsWhenScrolledToEdge: false,
-            sheetCornerRadius: 24,
-          }}
-        />
-        <Stack.Screen
-          name="login"
-          options={{
-            gestureEnabled: false,
-          }}
+          name="onboarding/index"
+          options={{ gestureEnabled: false, animation: "fade" }}
         />
       </Stack>
-    </>
+    </View>
   );
 }
 
@@ -117,6 +180,8 @@ export default function RootLayout() {
   useEffect(() => {
     async function prepare() {
       try {
+        // Start cache pre-warm immediately — don't wait for it
+        preWarmHomeCache();
         await logAppOpen();
       } catch {
         // Silent fail
@@ -130,7 +195,6 @@ export default function RootLayout() {
     }
   }, [fontsLoaded]);
 
-  // Show error screen if something went wrong
   if (error) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', padding: 20 }}>
@@ -141,21 +205,39 @@ export default function RootLayout() {
   }
 
   if (!appIsReady || !fontsLoaded) {
-    return <View style={{ flex: 1, backgroundColor: Colors.background }} />;
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: Colors.background,
+          justifyContent: "center",
+          alignItems: "center",
+          paddingHorizontal: 28,
+        }}
+      >
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={{ color: Colors.text, fontSize: 22, marginTop: 16, fontWeight: "700" }}>
+          Mavrixfy
+        </Text>
+      </View>
+    );
   }
 
   return (
-    <ErrorBoundary onError={(error, stackTrace) => {
-      setError(error);
-    }}>
+    <ErrorBoundary onError={(err) => setError(err)}>
       <QueryClientProvider client={queryClient}>
         <GestureHandlerRootView style={{ flex: 1 }}>
-          <AuthProvider>
-            <PlayerProvider>
-              <StatusBar style="light" />
-              <RootLayoutNav />
-            </PlayerProvider>
-          </AuthProvider>
+          <ThemeProvider value={DarkTheme}>
+            <AuthProvider>
+              <PlayerProvider>
+                <KeepAwakeProvider>
+                <StatusBar style="light" />
+                <RootLayoutNav />
+                <WakeOverlay />
+                </KeepAwakeProvider>
+              </PlayerProvider>
+            </AuthProvider>
+          </ThemeProvider>
         </GestureHandlerRootView>
       </QueryClientProvider>
     </ErrorBoundary>

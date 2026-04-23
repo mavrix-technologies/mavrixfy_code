@@ -18,8 +18,13 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { fetch } from "expo/fetch";
 import Colors from "@/constants/colors";
-import { convertJioSaavnSong, getBestImageUrl, Song } from "@/lib/musicData";
+import { getBestImageUrl, Song } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
+import {
+  createSearchPlan,
+  extractSongResults,
+  rankSongsTopK,
+} from "@/lib/searchPipeline";
 import SongRow from "@/components/SongRow";
 
 interface PlaylistResult {
@@ -208,6 +213,7 @@ export default function SearchScreen() {
   const [query, setQuery] = useState("");
   const [songResults, setSongResults] = useState<Song[]>([]);
   const [playlistResults, setPlaylistResults] = useState<PlaylistResult[]>([]);
+  const [searchDisplayQuery, setSearchDisplayQuery] = useState("");
   const [recentSearches, setRecentSearches] = useState<RecentSearchItem[]>(
     STITCH_RECENT_SEARCHES
   );
@@ -234,37 +240,44 @@ export default function SearchScreen() {
     if (normalizedQuery.length < 2) {
       setSongResults([]);
       setPlaylistResults([]);
+      setSearchDisplayQuery("");
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     const apiUrl = getApiUrl();
+    const freshnessKey = Math.floor(Date.now() / 60000);
+    const searchPlan = createSearchPlan(normalizedQuery);
+    const songRequests = searchPlan.retrievalQueries.map((candidate, index) =>
+      fetch(
+        `${apiUrl}api/jiosaavn/search/songs?query=${encodeURIComponent(candidate)}&limit=${index === 0 ? 50 : 25}&fresh=${freshnessKey}`
+      )
+    );
 
     try {
-      const [songsRes, playlistsRes] = await Promise.all([
-        fetch(`${apiUrl}api/jiosaavn/search/songs?query=${encodeURIComponent(normalizedQuery)}&limit=20`),
-        fetch(`${apiUrl}api/jiosaavn/search/playlists?query=${encodeURIComponent(normalizedQuery)}&limit=10`),
+      const [playlistsRes, ...songResponses] = await Promise.all([
+        fetch(
+          `${apiUrl}api/jiosaavn/search/playlists?query=${encodeURIComponent(normalizedQuery)}&limit=10&fresh=${freshnessKey}`
+        ),
+        ...songRequests,
       ]);
 
-      const [songsData, playlistsData] = await Promise.all([
-        parseJsonResponse(songsRes),
+      const [playlistsData, ...songPayloads] = await Promise.all([
         parseJsonResponse(playlistsRes),
+        ...songResponses.map((response) => parseJsonResponse(response)),
       ]);
 
       if (requestId !== requestSeqRef.current) {
         return;
       }
 
-      if (songsData?.success && songsData.data?.results) {
-        setSongResults(songsData.data.results.map(convertJioSaavnSong));
-      } else if (songsData?.data?.results) {
-        setSongResults(songsData.data.results.map(convertJioSaavnSong));
-      } else if (Array.isArray(songsData?.results)) {
-        setSongResults(songsData.results.map(convertJioSaavnSong));
-      } else {
-        setSongResults([]);
-      }
+      const rawSongResults = songPayloads.flatMap((payload) =>
+        extractSongResults(payload)
+      );
+      const rankedSongs = rankSongsTopK(normalizedQuery, rawSongResults, 20);
+      setSongResults(rankedSongs.songs);
+      setSearchDisplayQuery(rankedSongs.correctedQuery || normalizedQuery);
 
       if (playlistsData?.success && playlistsData.data?.results) {
         setPlaylistResults(normalizePlaylistResults(playlistsData.data.results));
@@ -281,6 +294,7 @@ export default function SearchScreen() {
       }
       setSongResults([]);
       setPlaylistResults([]);
+      setSearchDisplayQuery(normalizedQuery);
     } finally {
       if (requestId === requestSeqRef.current) {
         setIsLoading(false);
@@ -359,6 +373,7 @@ export default function SearchScreen() {
     setQuery("");
     setSongResults([]);
     setPlaylistResults([]);
+    setSearchDisplayQuery("");
     setIsLoading(false);
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
@@ -375,6 +390,7 @@ export default function SearchScreen() {
       requestSeqRef.current += 1;
       setSongResults([]);
       setPlaylistResults([]);
+      setSearchDisplayQuery("");
       setIsLoading(false);
       return;
     }
@@ -467,6 +483,7 @@ export default function SearchScreen() {
   const showPlaylistResults = resultFilter !== "songs" && playlistResults.length > 0;
   const showSongResults = resultFilter !== "playlists" && songResults.length > 0;
   const displayedSongs = showSongResults ? songResults : [];
+  const topSongId = displayedSongs[0]?.id ?? null;
   const featuredPlaylists = useMemo(() => playlistResults.slice(0, 6), [playlistResults]);
   const controlsOpacity = resultsControlsAnim.interpolate({
     inputRange: [0, 1],
@@ -511,8 +528,14 @@ export default function SearchScreen() {
   }, [query, resultFilter, resultsControlsAnim]);
 
   const renderSong = useCallback(
-    ({ item }: { item: Song }) => <SongRow song={item} queue={songResults} />,
-    [songResults]
+    ({ item, index }: { item: Song; index: number }) => (
+      <SongRow
+        song={item}
+        queue={songResults}
+        topResult={Boolean(topSongId && item.id === topSongId && index === 0)}
+      />
+    ),
+    [songResults, topSongId]
   );
 
   const renderPlaylistCard = useCallback(
@@ -537,6 +560,9 @@ export default function SearchScreen() {
                 id: String(playlist.id).trim(),
                 jiosaavn: "true",
                 firestore: "false",
+                title: playlist.name,
+                cover: getBestImageUrl(playlist.image),
+                songCount: String(Math.max(0, playlist.songCount || 0)),
               },
             }, {
               withAnchor: true,
@@ -740,7 +766,7 @@ export default function SearchScreen() {
             <View style={styles.resultsHeaderPlain}>
               <Ionicons name="search" size={15} color={Colors.primary} />
               <Text style={styles.resultsPillText} numberOfLines={1}>
-                Results for: {query.trim()}
+                Results for: {searchDisplayQuery || query.trim()}
               </Text>
             </View>
             <View style={styles.filterTabsWrap}>

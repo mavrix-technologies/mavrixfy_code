@@ -84,7 +84,6 @@ export const uploadImageToCloudinary = async (
 
     return data.secure_url;
   } catch (error) {
-    console.error('Error uploading to Cloudinary:', error);
     throw new Error('Failed to upload image. Please try again.');
   }
 };

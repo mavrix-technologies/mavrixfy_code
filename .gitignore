@@ -54,15 +54,7 @@ app.aab.json
 
 # Local tooling / editor artifacts
 .vscode/
-.stitch/
-stitch_exports/
-g/
+.gradle-local/
 
-# Documentation (keep only essential)
-*_DEBUG.md
-*_FIX.md
-*_GUIDE.md
-*_INSTRUCTIONS.md
-*_STATUS.md
-BUILD_*.md
-FIX_*.md
+# Build artifacts
+server_dist/

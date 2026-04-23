@@ -29,7 +29,7 @@ import { ParsedSong } from "@/types/import";
 import { useAuth } from "@/contexts/AuthContext";
 import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
-import { createUserPlaylist, addSongToPlaylist, addLikedSong, getUserPlaylists, UserPlaylist } from "@/lib/storage";
+import { createUserPlaylist, addSongToPlaylist, getUserPlaylists, UserPlaylist } from "@/lib/storage";
 import { createFirestorePlaylist, addLikedSongToFirestore, getUserFirestorePlaylists, FirestorePlaylist, addSongToFirestorePlaylist } from "@/lib/firestore";
 
 export default function FileImportScreen() {
@@ -419,12 +419,13 @@ export default function FileImportScreen() {
         };
 
         if (importDestination === 'liked') {
-          // Add to liked songs
-          await addLikedSong(appSong);
-          
-          // Also add to Firestore if user is logged in
-          if (user?.id) {
-            await addLikedSongToFirestore(user.id, appSong);
+          if (!user?.id) {
+            throw new Error('Sign in to import liked songs');
+          }
+
+          const success = await addLikedSongToFirestore(user.id, appSong);
+          if (!success) {
+            throw new Error('Failed to add liked song');
           }
         } else if (playlistId) {
           // Check if this is a Firestore playlist
@@ -688,11 +689,32 @@ export default function FileImportScreen() {
             style={styles.completeButton}
             onPress={() => {
               if ((importDestination === 'new-playlist' || importDestination === 'existing-playlist') && createdPlaylistId) {
+                const selectedPlaylist = userPlaylists.find((playlist) => playlist.id === selectedPlaylistId);
+                const playlistTitle =
+                  importDestination === 'new-playlist'
+                    ? newPlaylistName.trim() || "Imported Playlist"
+                    : selectedPlaylist?.name || "Imported Playlist";
+
                 // Navigate with proper parameters
                 if (isFirestorePlaylist) {
-                  router.replace(`/playlist/${createdPlaylistId}?firestore=true`);
+                  router.replace({
+                    pathname: "/playlist/[id]",
+                    params: {
+                      id: createdPlaylistId,
+                      firestore: "true",
+                      title: playlistTitle,
+                      songCount: String(addedCount),
+                    },
+                  });
                 } else {
-                  router.replace(`/playlist/${createdPlaylistId}`);
+                  router.replace({
+                    pathname: "/playlist/[id]",
+                    params: {
+                      id: createdPlaylistId,
+                      title: playlistTitle,
+                      songCount: String(addedCount),
+                    },
+                  });
                 }
               } else {
                 router.replace("/(tabs)/liked-songs");

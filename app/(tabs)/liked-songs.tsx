@@ -7,9 +7,11 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { safeGoBack } from "@/utils/navigation";
+import { useAuth } from "@/contexts/AuthContext";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { formatDuration, Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
+import EqualizerBars from "@/components/EqualizerBars";
 
 const UI = {
   bg: "#10141a",
@@ -25,6 +27,7 @@ const UI = {
 export default function LikedSongsScreen() {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const { isAuthenticated } = useAuth();
   const { playSong, likedSongs, currentSong, isPlaying, togglePlay, toggleLike, queue } = usePlayerBrowse();
 
   const songs = useMemo(() => {
@@ -87,8 +90,8 @@ export default function LikedSongsScreen() {
           style={({ pressed }) => [styles.trackRow, pressed && styles.trackRowPressed]}
         >
           <View style={styles.indexCell}>
-            {isCurrent && isPlaying ? (
-              <Ionicons name="play" size={12} color={UI.primaryA} />
+            {isCurrent ? (
+              <EqualizerBars isPlaying={isPlaying} size={3} />
             ) : (
               <Text style={styles.indexText}>{index + 1}</Text>
             )}
@@ -223,8 +226,14 @@ export default function LikedSongsScreen() {
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
             <Ionicons name="heart-outline" size={56} color={UI.subtext} />
-            <Text style={styles.emptyTitle}>No liked songs yet</Text>
-            <Text style={styles.emptySubtitle}>Tap the heart on a song to save it here.</Text>
+            <Text style={styles.emptyTitle}>
+              {isAuthenticated ? "No liked songs yet" : "Sign in to view liked songs"}
+            </Text>
+            <Text style={styles.emptySubtitle}>
+              {isAuthenticated
+                ? "Tap the heart on a song to save it here."
+                : "Liked songs now come only from your account in Firebase."}
+            </Text>
           </View>
         }
         style={styles.list}

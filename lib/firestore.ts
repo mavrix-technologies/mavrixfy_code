@@ -290,32 +290,19 @@ export async function removeLikedSongFromFirestore(userId: string, songId: strin
 // Add song to Firestore playlist
 export async function addSongToFirestorePlaylist(playlistId: string, song: any): Promise<boolean> {
   try {
-    if (!db) {
-      console.error('[Firestore] Database not initialized');
-      return false;
-    }
+    if (!db) return false;
 
     const playlistRef = doc(db, "playlists", playlistId);
     const playlistSnap = await getDoc(playlistRef);
 
-    if (!playlistSnap.exists()) {
-      console.error('[Firestore] Playlist not found:', playlistId);
-      return false;
-    }
+    if (!playlistSnap.exists()) return false;
 
     const playlist = playlistSnap.data() as FirestorePlaylist;
     const songs = playlist.songs || [];
 
-    // Check if song already exists
-    const songExists = songs.some((s: any) => s.id === song.id);
-    if (songExists) {
-      console.log('[Firestore] Song already exists in playlist:', song.id);
-      return true;
-    }
+    if (songs.some((s: any) => s.id === song.id)) return true;
 
-    // Add song to playlist
-    // Note: serverTimestamp() is not supported inside arrays, so we use ISO string
-    const newSong = {
+    songs.push({
       id: song.id,
       title: song.title,
       artist: song.artist,
@@ -324,20 +311,15 @@ export async function addSongToFirestorePlaylist(playlistId: string, song: any):
       audioUrl: song.audioUrl,
       duration: song.duration || 0,
       addedAt: new Date().toISOString(),
-    };
+    });
 
-    songs.push(newSong);
-
-    // Use updateDoc to only update specific fields
     await updateDoc(playlistRef, {
-      songs: songs,
+      songs,
       updatedAt: serverTimestamp(),
     });
 
-    console.log('[Firestore] Song added successfully:', song.title, 'to playlist:', playlistId);
     return true;
-  } catch (error) {
-    console.error('[Firestore] Error adding song to playlist:', error);
+  } catch {
     return false;
   }
 }
@@ -401,4 +383,33 @@ export async function removeSongFromFirestorePlaylist(playlistId: string, songId
   } catch (error) {
     return false;
   }
+}
+
+export async function deleteUserFirestoreData(userId: string): Promise<void> {
+  if (!db) {
+    return;
+  }
+
+  const likedSongsRef = collection(db, "users", userId, "likedSongs");
+  const playlistsRef = collection(db, "playlists");
+  const userRef = doc(db, "users", userId);
+
+  const [likedSongsSnapshot, playlistsSnapshot] = await Promise.all([
+    getDocs(likedSongsRef),
+    getDocs(query(playlistsRef, where("createdBy.id", "==", userId))),
+  ]);
+
+  const deletions: Promise<void>[] = [];
+
+  likedSongsSnapshot.forEach((songDoc) => {
+    deletions.push(deleteDoc(songDoc.ref));
+  });
+
+  playlistsSnapshot.forEach((playlistDoc) => {
+    deletions.push(deleteDoc(playlistDoc.ref));
+  });
+
+  deletions.push(deleteDoc(userRef));
+
+  await Promise.all(deletions);
 }

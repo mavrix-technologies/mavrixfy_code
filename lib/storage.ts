@@ -106,6 +106,8 @@ async function setJSON(key: string, value: unknown): Promise<void> {
   } catch {}
 }
 
+export { setJSON };
+
 export async function getLikedSongIds(): Promise<string[]> {
   return getJSON<string[]>(KEYS.LIKED_SONGS, []);
 }
@@ -155,8 +157,6 @@ export async function saveUserPlaylists(playlists: UserPlaylist[]): Promise<void
  */
 export async function syncSpotifyLikedSongsToLocal(userId: string, backendUrl: string = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://api.mavrixfy.site'): Promise<Song[]> {
   try {
-    console.log('📱 Fetching synced Spotify songs from backend for user:', userId);
-    
     const response = await fetch(`${backendUrl}/spotify/liked-songs/${userId}`, {
       method: 'GET',
       headers: {
@@ -170,7 +170,6 @@ export async function syncSpotifyLikedSongsToLocal(userId: string, backendUrl: s
 
     const spotifySongs = await response.json();
     
-    // Convert backend format to app Song format
     const convertedSongs: Song[] = spotifySongs.map((song: any) => ({
       id: song.id || song.songId || song.trackId,
       title: song.title || song.name || 'Unknown',
@@ -180,22 +179,11 @@ export async function syncSpotifyLikedSongsToLocal(userId: string, backendUrl: s
       duration: song.duration || 0,
       album: song.album || song.albumName || '',
       source: 'spotify' as const,
-      isLocal: false,
-      addedAt: song.addedAt || song.likedAt || new Date().toISOString(),
-      // Keep original data for reference
-      _original: song,
     }));
 
-    console.log(`✅ Fetched ${convertedSongs.length} songs from Spotify sync`);
-
-    // Get existing liked songs to merge
-    const existingIds = await getLikedSongIds();
     const existingData = await getLikedSongsData();
-    
-    // Create a map of existing songs by ID
     const existingMap = new Map(existingData.map(s => [s.id, s]));
     
-    // Add new songs that aren't already liked
     const newSongs: Song[] = [];
     for (const song of convertedSongs) {
       if (!existingMap.has(song.id)) {
@@ -203,26 +191,19 @@ export async function syncSpotifyLikedSongsToLocal(userId: string, backendUrl: s
       }
     }
 
-    // Merge and save
-    const mergedSongs = [...newSongs, ...existingData]; // New Spotify songs first
+    const mergedSongs = [...newSongs, ...existingData];
     const mergedIds = mergedSongs.map(s => s.id);
 
-    console.log(`📊 Merged ${mergedSongs.length} total songs (${newSongs.length} new from Spotify)`);
-
-    // Update storage
     await Promise.all([
       setJSON(KEYS.LIKED_SONGS, mergedIds),
       setJSON(KEYS.LIKED_SONGS_DATA, mergedSongs),
     ]);
 
-    // Clear memory cache to force refresh
     memoryCache.delete(KEYS.LIKED_SONGS);
     memoryCache.delete(KEYS.LIKED_SONGS_DATA);
 
     return mergedSongs;
-  } catch (error) {
-    console.error('❌ Error syncing Spotify songs to local:', error);
-    // Don't throw - return empty array and let app continue
+  } catch {
     return [];
   }
 }
@@ -314,4 +295,22 @@ export async function getSettings(): Promise<AppSettings> {
 export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
   const current = await getSettings();
   await setJSON(KEYS.SETTINGS, { ...current, ...settings });
+}
+
+export async function clearAppStorage(options?: { preserveSettings?: boolean }): Promise<void> {
+  const preserveSettings = options?.preserveSettings ?? false;
+
+  try {
+    memoryCache.clear();
+
+    const keys = await AsyncStorage.getAllKeys();
+    const appKeys = keys.filter((key) => key.startsWith("@mavrixfy_"));
+    const keysToRemove = preserveSettings
+      ? appKeys.filter((key) => key !== KEYS.SETTINGS)
+      : appKeys;
+
+    if (keysToRemove.length > 0) {
+      await AsyncStorage.multiRemove(keysToRemove);
+    }
+  } catch {}
 }

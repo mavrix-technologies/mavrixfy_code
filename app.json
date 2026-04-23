@@ -74,6 +74,7 @@
         }
       ],
       "./plugins/withTrackPlayer",
+      "./plugins/withIOSAVPlayer",
       [
         "expo-build-properties",
         {

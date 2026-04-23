@@ -9,68 +9,122 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Alert,
-  Image,
   useWindowDimensions,
+  Image,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import * as WebBrowser from "expo-web-browser";
-import * as Linking from "expo-linking";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
-import { getAuthApiUrl } from "@/lib/api-config";
 import { triggerNotification } from "@/lib/haptics";
+import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
+import { getGoogleMobileIdToken } from "@/lib/googleAuth";
+
+type AuthMode = "login" | "signup";
+
+function AuthField({
+  icon,
+  placeholder,
+  value,
+  onChangeText,
+  keyboardType,
+  autoCapitalize,
+  secureTextEntry,
+  trailing,
+  compact,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  placeholder: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  keyboardType?: "default" | "email-address";
+  autoCapitalize?: "none" | "words";
+  secureTextEntry?: boolean;
+  trailing?: React.ReactNode;
+  compact?: boolean;
+}) {
+  return (
+    <View style={[styles.fieldShell, compact ? styles.fieldShellCompact : null]}>
+      <Ionicons name={icon} size={18} color={Colors.inactive} />
+      <TextInput
+        style={styles.fieldInput}
+        placeholder={placeholder}
+        placeholderTextColor={Colors.inactive}
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
+        secureTextEntry={secureTextEntry}
+        selectionColor={Colors.primary}
+      />
+      {trailing}
+    </View>
+  );
+}
 
 export default function LoginScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { login, register, signInWithGoogle, signInWithGoogleCredential } = useAuth();
-  const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 34 : insets.bottom;
-  const isCompactHeight = screenHeight <= 760;
-  const isVeryCompactHeight = screenHeight <= 700;
-  const isWideLayout = screenWidth >= 768;
-  const horizontalPadding = isWideLayout ? 28 : 20;
-  const contentMaxWidth = Math.min(560, screenWidth - horizontalPadding * 2);
-  const heroVisualSize = Math.round(
-    Math.min(contentMaxWidth, isVeryCompactHeight ? 220 : isCompactHeight ? 260 : 320)
-  );
-  const circleSize = Math.round(Math.max(56, Math.min(88, heroVisualSize * 0.275)));
-  const logoSize = Math.round(Math.max(64, Math.min(92, heroVisualSize * 0.3)));
-  const heroTitleSize = isVeryCompactHeight ? 26 : isCompactHeight ? 30 : 34;
-  const heroTitleLineHeight = isVeryCompactHeight ? 31 : isCompactHeight ? 36 : 40;
-  const primaryButtonHeight = isVeryCompactHeight ? 46 : 50;
-  const formGap = isVeryCompactHeight ? 8 : 10;
+  const {
+    login,
+    register,
+    signInWithGoogle,
+    signInWithGoogleCredential,
+    resetPassword,
+    continueAsGuest,
+  } = useAuth();
 
-  const [showSignupForm, setShowSignupForm] = useState(false);
+  const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const bottomInset = Platform.OS === "web" ? 20 : insets.bottom;
+  const isShort = screenHeight <= 780;
+  const isUltraShort = screenHeight <= 690;
+  const isWide = screenWidth >= 960 && screenHeight >= 640;
+  const isNarrow = screenWidth <= 360;
+  const shellMaxWidth = Math.min(isWide ? 980 : 460, screenWidth - 32);
+  const logoSize = isUltraShort ? 42 : 50;
+  const cardPadding = isUltraShort ? 16 : isShort ? 18 : 24;
+  const heroTitleSize = isWide ? 40 : isUltraShort ? 22 : isShort ? 26 : 30;
+  const heroLineHeight = isWide ? 46 : isUltraShort ? 27 : isShort ? 31 : 36;
+  const primaryButtonHeight = isUltraShort ? 44 : 48;
+  const fieldGap = isUltraShort ? 8 : 10;
+  const heroVisible = isWide;
+
+  const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
+
+  const isSignup = mode === "signup";
+  const title = isSignup ? "Create your account" : "Log in to Mavrixfy";
+  const subtitle = isSignup
+    ? "Set up your profile and keep your library synced."
+    : "Music, playlists, and account access in one clean place.";
 
   const handleSubmit = async () => {
     if (!email.trim() || !password.trim()) {
       Alert.alert("Error", "Please fill in all fields");
       return;
     }
-    if (showSignupForm && !fullName.trim()) {
+    if (isSignup && !fullName.trim()) {
       Alert.alert("Error", "Please enter your full name");
       return;
     }
-    if (showSignupForm && password.length < 6) {
+    if (isSignup && password.length < 6) {
       Alert.alert("Error", "Password must be at least 6 characters");
       return;
     }
 
     setLoading(true);
     try {
-      if (showSignupForm) {
+      if (isSignup) {
         await register(email.trim(), password, fullName.trim());
       } else {
         await login(email.trim(), password);
@@ -79,10 +133,14 @@ export default function LoginScreen() {
       router.replace("/(tabs)");
     } catch (error: any) {
       const msg = error.message || "Something went wrong";
-      const friendlyMsg = msg.includes("user-not-found") ? "No account found with this email"
-        : msg.includes("wrong-password") || msg.includes("invalid-credential") ? "Incorrect password"
-          : msg.includes("email-already-in-use") ? "An account with this email already exists"
-            : msg.includes("invalid-email") ? "Please enter a valid email address"
+      const friendlyMsg = msg.includes("user-not-found")
+        ? "No account found with this email"
+        : msg.includes("wrong-password") || msg.includes("invalid-credential")
+          ? "Incorrect password"
+          : msg.includes("email-already-in-use")
+            ? "An account with this email already exists"
+            : msg.includes("invalid-email")
+              ? "Please enter a valid email address"
               : msg;
       Alert.alert("Error", friendlyMsg);
     } finally {
@@ -106,29 +164,10 @@ export default function LoginScreen() {
 
     setGoogleLoading(true);
     try {
-      const returnUrl = Linking.createURL("google-auth");
-      const apiUrl = getAuthApiUrl();
-      const authUrl = `${apiUrl}api/auth/google-mobile?returnUrl=${encodeURIComponent(returnUrl)}`;
-
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, returnUrl);
-
-      if (result.type === "success" && result.url) {
-        const parsedUrl = Linking.parse(result.url);
-        const queryParams = parsedUrl.queryParams as Record<string, string | undefined> | undefined;
-        const idToken = queryParams?.id_token;
-
-        if (idToken) {
-          await signInWithGoogleCredential(idToken);
-          void triggerNotification(Haptics.NotificationFeedbackType.Success);
-          router.replace("/(tabs)");
-        } else {
-          Alert.alert("Error", "Could not complete Google Sign-In. No token received.");
-        }
-      } else if (result.type === "cancel") {
-        Alert.alert("Cancelled", "Google Sign-In was cancelled");
-      } else {
-        Alert.alert("Error", "Could not complete Google Sign-In. Please try again.");
-      }
+      const idToken = await getGoogleMobileIdToken("Google Sign-In");
+      await signInWithGoogleCredential(idToken);
+      void triggerNotification(Haptics.NotificationFeedbackType.Success);
+      router.replace("/(tabs)");
     } catch (error: any) {
       Alert.alert("Error", error.message || "Google Sign-In failed");
     } finally {
@@ -136,380 +175,280 @@ export default function LoginScreen() {
     }
   };
 
+  const handleForgotPassword = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      Alert.alert("Forgot Password", "Enter your email address first, then tap Forgot Password again.");
+      return;
+    }
+
+    setResetPasswordLoading(true);
+    try {
+      await resetPassword(trimmedEmail);
+      Alert.alert("Check your email", `We sent a password reset link to ${trimmedEmail}.`);
+    } catch (error: any) {
+      const msg = String(error?.message || "");
+      const friendlyMsg = msg.includes("invalid-email")
+        ? "Please enter a valid email address."
+        : msg.includes("user-not-found")
+          ? "No account was found with that email address."
+          : msg || "Could not send a reset email right now.";
+      Alert.alert("Unable to reset password", friendlyMsg);
+    } finally {
+      setResetPasswordLoading(false);
+    }
+  };
+
+  const handleContinueAsGuest = () => {
+    continueAsGuest();
+    router.replace("/(tabs)");
+  };
+
+  const switchMode = (nextMode: AuthMode) => {
+    setMode(nextMode);
+    setPassword("");
+    if (nextMode === "login") {
+      setFullName("");
+    }
+  };
+
   return (
-    <View style={[styles.container, { paddingTop: topInset }]}>
-      <LinearGradient
-        colors={Colors.gradientDark as [string, string, string]}
-        style={StyleSheet.absoluteFill}
-      />
+    <View style={styles.container}>
+      <LinearGradient colors={Colors.gradientDark as [string, string, string]} style={StyleSheet.absoluteFill} />
+      <View style={[styles.glowOrb, styles.glowOrbTop]} />
+      <View style={[styles.glowOrb, styles.glowOrbBottom]} />
 
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? topInset : 0}
       >
-          {!showSignupForm ? (
-            // Main Login Screen
+        <View
+          style={[
+            styles.page,
+            {
+              paddingTop: topInset + (isUltraShort ? 8 : 18),
+              paddingBottom: bottomInset + 12,
+              paddingHorizontal: 16,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.authShell,
+              {
+                maxWidth: shellMaxWidth,
+                flexDirection: isWide ? "row" : "column",
+              },
+            ]}
+          >
+            {heroVisible ? (
+              <View style={styles.heroPanel}>
+                <View style={styles.heroBrandRow}>
+                  <View style={[styles.logoBadge, { width: 58, height: 58, borderRadius: 29 }]}>
+                    <Image source={require("@/assets/images/icon.png")} style={styles.logoImage} resizeMode="contain" />
+                  </View>
+                  <View style={styles.heroBrandCopy}>
+                    <Text style={styles.heroBrandName}>Mavrixfy</Text>
+                    <Text style={styles.heroBrandTag}>Streaming, imports, and account control</Text>
+                  </View>
+                </View>
+
+                <Text style={[styles.heroTitle, { fontSize: heroTitleSize, lineHeight: heroLineHeight }]}>
+                  Focused music access that feels clean on every screen.
+                </Text>
+                <Text style={styles.heroText}>
+                  The auth flow stays compact, readable, and aligned with the Mavrixfy theme across phones and larger displays.
+                </Text>
+
+                <View style={styles.heroFeatureStack}>
+                  <View style={styles.heroFeature}>
+                    <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                    <Text style={styles.heroFeatureText}>Fast sign in, sign up, and guest access</Text>
+                  </View>
+                  <View style={styles.heroFeature}>
+                    <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                    <Text style={styles.heroFeatureText}>Responsive spacing for short and tall devices</Text>
+                  </View>
+                  <View style={styles.heroFeature}>
+                    <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+                    <Text style={styles.heroFeatureText}>Matches the current Mavrixfy visual style</Text>
+                  </View>
+                </View>
+              </View>
+            ) : null}
+
             <View
               style={[
-                styles.mainContent,
+                styles.card,
                 {
-                  paddingHorizontal: horizontalPadding,
-                  paddingBottom: bottomInset + 16,
+                  padding: cardPadding,
+                  width: isWide ? 430 : "100%",
                 },
               ]}
             >
-              <View
-                style={[
-                  styles.mainInner,
-                  {
-                    maxWidth: contentMaxWidth,
-                    justifyContent: isVeryCompactHeight ? "space-between" : "space-evenly",
-                  },
-                ]}
-              >
-              {/* Hero Section with Artist Images */}
-              <View
-                style={[
-                  styles.heroSection,
-                  { height: heroVisualSize, marginBottom: isVeryCompactHeight ? 12 : 18 },
-                ]}
-              >
-                <View style={[styles.circleGrid, { width: heroVisualSize, height: heroVisualSize }]}>
-                  {/* Artist/Album Images from internet */}
-                  <View
-                    style={[
-                      styles.artistCircle,
-                      {
-                        width: circleSize,
-                        height: circleSize,
-                        borderRadius: circleSize / 2,
-                        top: Math.round(heroVisualSize * 0.02),
-                        left: Math.round(heroVisualSize * 0.03),
-                      },
-                    ]}
-                  >
-                    <Image
-                      source={{ uri: "https://i.scdn.co/image/ab67616d0000b273e787cffec20aa2a396a61647" }}
-                      style={styles.circleImage}
-                    />
-                  </View>
-                  <View
-                    style={[
-                      styles.artistCircle,
-                      {
-                        width: circleSize,
-                        height: circleSize,
-                        borderRadius: circleSize / 2,
-                        top: Math.round(heroVisualSize * 0.08),
-                        left: Math.round(heroVisualSize * 0.36),
-                      },
-                    ]}
-                  >
-                    <Image
-                      source={{ uri: "https://i.scdn.co/image/ab6761610000e5eb0c68f6c95232e716f0abee8d" }}
-                      style={styles.circleImage}
-                    />
-                  </View>
-                  <View
-                    style={[
-                      styles.artistCircle,
-                      {
-                        width: circleSize,
-                        height: circleSize,
-                        borderRadius: circleSize / 2,
-                        top: Math.round(heroVisualSize * 0.02),
-                        right: Math.round(heroVisualSize * 0.03),
-                      },
-                    ]}
-                  >
-                    <Image
-                      source={{ uri: "https://i.scdn.co/image/ab6761610000e5eb8ae7f2aaa9817a704a87ea36" }}
-                      style={styles.circleImage}
-                    />
-                  </View>
-                  <View
-                    style={[
-                      styles.artistCircle,
-                      {
-                        width: circleSize,
-                        height: circleSize,
-                        borderRadius: circleSize / 2,
-                        top: Math.round(heroVisualSize * 0.44),
-                        left: Math.round(heroVisualSize * 0.01),
-                      },
-                    ]}
-                  >
-                    <Image
-                      source={{ uri: "https://i.scdn.co/image/ab6761610000e5eb40b5c07ab77b6b1a9075fdc0" }}
-                      style={styles.circleImage}
-                    />
-                  </View>
-                  <View
-                    style={[
-                      styles.artistCircle,
-                      {
-                        width: circleSize,
-                        height: circleSize,
-                        borderRadius: circleSize / 2,
-                        top: Math.round(heroVisualSize * 0.54),
-                        left: Math.round(heroVisualSize * 0.42),
-                      },
-                    ]}
-                  >
-                    <Image
-                      source={{ uri: "https://i.scdn.co/image/ab6761610000e5eb12d5ab979779aa0c87a8c8c0" }}
-                      style={styles.circleImage}
-                    />
-                  </View>
-                  <View
-                    style={[
-                      styles.artistCircle,
-                      {
-                        width: circleSize,
-                        height: circleSize,
-                        borderRadius: circleSize / 2,
-                        top: Math.round(heroVisualSize * 0.44),
-                        right: Math.round(heroVisualSize * 0.05),
-                      },
-                    ]}
-                  >
-                    <Image
-                      source={{ uri: "https://i.scdn.co/image/ab6761610000e5eb6a224073987b930f99adc706" }}
-                      style={styles.circleImage}
-                    />
-                  </View>
-                </View>
-
-                {/* Mavrixfy Logo */}
-                <View
-                  style={[
-                    styles.logoCircle,
-                    {
-                      width: logoSize,
-                      height: logoSize,
-                      borderRadius: logoSize / 2,
-                      marginLeft: -(logoSize / 2),
-                      bottom: Math.round(heroVisualSize * 0.04),
-                      padding: Math.round(logoSize * 0.22),
-                    },
-                  ]}
-                >
-                  <Image
-                    source={require("@/assets/images/icon.png")}
-                    style={styles.logoImage}
-                    resizeMode="contain"
-                  />
-                </View>
-              </View>
-
-              {/* Title */}
-              <View
-                style={[
-                  styles.titleSection,
-                  { marginBottom: isVeryCompactHeight ? 16 : 24 },
-                ]}
-              >
-                <Text style={[styles.heroTitle, { fontSize: heroTitleSize, lineHeight: heroTitleLineHeight }]}>
-                  Millions of songs.
-                </Text>
-                <Text style={[styles.heroTitle, { fontSize: heroTitleSize, lineHeight: heroTitleLineHeight }]}>
-                  Free on Mavrixfy.
-                </Text>
-              </View>
-
-              {/* Google Sign In */}
-              <Pressable
-                style={[styles.googleBtn, { height: primaryButtonHeight, marginBottom: 16 }]}
-                onPress={handleGoogleSignIn}
-                disabled={googleLoading}
-              >
-                {googleLoading ? (
-                  <ActivityIndicator size="small" color={Colors.black} />
-                ) : (
-                  <>
-                    <View style={styles.googleIconCircle}>
-                      <MaterialCommunityIcons name="google" size={20} color="#DB4437" />
-                    </View>
-                    <Text style={styles.googleBtnText}>Continue with Google</Text>
-                  </>
-                )}
-              </Pressable>
-
-              {/* Login Form */}
-              <View style={[styles.formSection, { gap: formGap }]}>
-                <View style={[styles.inputGroup, { marginBottom: formGap }]}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Email address"
-                    placeholderTextColor={Colors.inactive}
-                    value={email}
-                    onChangeText={setEmail}
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    selectionColor={Colors.primary}
-                  />
-                </View>
-
-                <View style={[styles.inputGroup, { marginBottom: formGap }]}>
-                  <View style={styles.passwordContainer}>
-                    <TextInput
-                      style={[styles.input, styles.passwordInput]}
-                      placeholder="Password"
-                      placeholderTextColor={Colors.inactive}
-                      value={password}
-                      onChangeText={setPassword}
-                      secureTextEntry={!showPassword}
-                      selectionColor={Colors.primary}
-                    />
-                    <Pressable
-                      style={styles.eyeIcon}
-                      onPress={() => setShowPassword(!showPassword)}
-                      hitSlop={10}
-                    >
-                      <Ionicons
-                        name={showPassword ? "eye-off-outline" : "eye-outline"}
-                        size={20}
-                        color={Colors.inactive}
-                      />
-                    </Pressable>
-                  </View>
-                </View>
-
-                <Pressable style={styles.forgotPassword}>
-                  <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-                </Pressable>
-
-                <Pressable
-                  style={[styles.loginBtn, loading && styles.loginBtnDisabled]}
-                  onPress={handleSubmit}
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <ActivityIndicator color={Colors.black} />
+              <View style={styles.cardTop}>
+                <View style={styles.mobileBrandRow}>
+                  {!heroVisible ? (
+                    <>
+                      <View style={[styles.logoBadge, { width: logoSize, height: logoSize, borderRadius: logoSize / 2 }]}>
+                        <Image source={require("@/assets/images/icon.png")} style={styles.logoImage} resizeMode="contain" />
+                      </View>
+                      <View style={styles.mobileBrandCopy}>
+                        <Text style={styles.mobileBrandName}>Mavrixfy</Text>
+                        <Text style={styles.mobileBrandTag}>
+                          {isSignup ? "Create your profile" : "Login or guest access"}
+                        </Text>
+                      </View>
+                    </>
                   ) : (
-                    <Text style={styles.loginBtnText}>Log In</Text>
+                    <View />
                   )}
-                </Pressable>
 
-                <View style={styles.signupPrompt}>
-                  <Text style={styles.signupPromptText}>Don&apos;t have an account? </Text>
-                  <Pressable onPress={() => setShowSignupForm(true)}>
-                    <Text style={styles.signupLink}>Sign up</Text>
+                  <View style={styles.modeBadge}>
+                    <Text style={styles.modeBadgeText}>{isSignup ? "SIGN UP" : "LOGIN"}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.modeSwitch}>
+                  <Pressable
+                    style={[styles.modeSwitchBtn, !isSignup ? styles.modeSwitchBtnActive : null]}
+                    onPress={() => switchMode("login")}
+                  >
+                    <Text style={[styles.modeSwitchText, !isSignup ? styles.modeSwitchTextActive : null]}>
+                      Log In
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.modeSwitchBtn, isSignup ? styles.modeSwitchBtnActive : null]}
+                    onPress={() => switchMode("signup")}
+                  >
+                    <Text style={[styles.modeSwitchText, isSignup ? styles.modeSwitchTextActive : null]}>
+                      Sign Up
+                    </Text>
                   </Pressable>
                 </View>
-              </View>
-            </View>
-            </View>
-          ) : (
-            // Signup Form
-            <View
-              style={[
-                styles.signupContent,
-                {
-                  paddingHorizontal: horizontalPadding,
-                  paddingBottom: bottomInset + 16,
-                },
-              ]}
-            >
-              <View
-                style={[
-                  styles.signupInner,
-                  {
-                    maxWidth: contentMaxWidth,
-                    justifyContent: isVeryCompactHeight ? "flex-start" : "center",
-                  },
-                ]}
-              >
-              <Pressable
-                style={styles.backButton}
-                onPress={() => {
-                  setShowSignupForm(false);
-                  setEmail("");
-                  setPassword("");
-                  setFullName("");
-                }}
-              >
-                <Ionicons name="arrow-back" size={24} color={Colors.text} />
-              </Pressable>
 
-              <View style={styles.signupHeader}>
-                <Text style={styles.signupTitle}>Create your account</Text>
+                <Text style={styles.cardTitle}>{title}</Text>
+                {!isUltraShort ? <Text style={styles.cardSubtitle}>{subtitle}</Text> : null}
               </View>
 
-              <View style={[styles.signupForm, { gap: formGap }]}>
-                <View style={[styles.inputGroup, { marginBottom: formGap }]}>
-                  <TextInput
-                    style={styles.input}
+              {!isSignup ? (
+                <View style={styles.authActionStack}>
+                  <Pressable
+                    style={[styles.oauthButton, { height: primaryButtonHeight }]}
+                    onPress={handleGoogleSignIn}
+                    disabled={googleLoading}
+                  >
+                    {googleLoading ? (
+                      <ActivityIndicator size="small" color={Colors.black} />
+                    ) : (
+                      <>
+                        <View style={styles.oauthIconWrap}>
+                          <MaterialCommunityIcons name="google" size={18} color="#DB4437" />
+                        </View>
+                        <Text style={styles.oauthButtonText}>Continue with Google</Text>
+                      </>
+                    )}
+                  </Pressable>
+
+                  <Pressable
+                    style={[styles.secondaryButton, { height: primaryButtonHeight }]}
+                    onPress={handleContinueAsGuest}
+                  >
+                    <Ionicons name="person-circle-outline" size={18} color={Colors.text} />
+                    <Text style={styles.secondaryButtonText}>Continue As A Guest</Text>
+                  </Pressable>
+
+                  <View style={styles.dividerRow}>
+                    <View style={styles.dividerLine} />
+                    <Text style={styles.dividerText}>or use email</Text>
+                    <View style={styles.dividerLine} />
+                  </View>
+                </View>
+              ) : null}
+
+              <View style={[styles.formStack, { gap: fieldGap }]}>
+                {isSignup ? (
+                  <AuthField
+                    icon="person-outline"
                     placeholder="Full Name"
-                    placeholderTextColor={Colors.inactive}
                     value={fullName}
                     onChangeText={setFullName}
                     autoCapitalize="words"
-                    selectionColor={Colors.primary}
+                    compact={isUltraShort}
                   />
-                </View>
+                ) : null}
 
-                <View style={[styles.inputGroup, { marginBottom: formGap }]}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Email address"
-                    placeholderTextColor={Colors.inactive}
-                    value={email}
-                    onChangeText={setEmail}
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    selectionColor={Colors.primary}
-                  />
-                </View>
+                <AuthField
+                  icon="mail-outline"
+                  placeholder="Email address"
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  compact={isUltraShort}
+                />
 
-                <View style={[styles.inputGroup, { marginBottom: formGap }]}>
-                  <View style={styles.passwordContainer}>
-                    <TextInput
-                      style={[styles.input, styles.passwordInput]}
-                      placeholder="Password"
-                      placeholderTextColor={Colors.inactive}
-                      value={password}
-                      onChangeText={setPassword}
-                      secureTextEntry={!showPassword}
-                      selectionColor={Colors.primary}
-                    />
-                    <Pressable
-                      style={styles.eyeIcon}
-                      onPress={() => setShowPassword(!showPassword)}
-                      hitSlop={10}
-                    >
+                <AuthField
+                  icon="lock-closed-outline"
+                  placeholder="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                  compact={isUltraShort}
+                  trailing={
+                    <Pressable onPress={() => setShowPassword((prev) => !prev)} hitSlop={10}>
                       <Ionicons
                         name={showPassword ? "eye-off-outline" : "eye-outline"}
                         size={20}
                         color={Colors.inactive}
                       />
                     </Pressable>
-                  </View>
-                </View>
+                  }
+                />
 
-                <Pressable
-                  style={[styles.loginBtn, loading && styles.loginBtnDisabled]}
-                  onPress={handleSubmit}
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <ActivityIndicator color={Colors.black} />
-                  ) : (
-                    <Text style={styles.loginBtnText}>Sign Up</Text>
-                  )}
-                </Pressable>
-
-                <View style={styles.signupPrompt}>
-                  <Text style={styles.signupPromptText}>Already have an account? </Text>
-                  <Pressable onPress={() => setShowSignupForm(false)}>
-                    <Text style={styles.signupLink}>Log in</Text>
+                {!isSignup ? (
+                  <Pressable
+                    style={styles.inlineLink}
+                    onPress={handleForgotPassword}
+                    disabled={resetPasswordLoading}
+                  >
+                    <Text style={[styles.inlineLinkText, resetPasswordLoading ? styles.inlineLinkDisabled : null]}>
+                      {resetPasswordLoading ? "Sending reset link..." : "Forgot Password?"}
+                    </Text>
                   </Pressable>
-                </View>
+                ) : (
+                  <Text style={styles.signupHint}>Use at least 6 characters for your password.</Text>
+                )}
               </View>
+
+              <Pressable
+                style={[styles.primaryButton, { height: primaryButtonHeight }, loading ? styles.primaryButtonDisabled : null]}
+                onPress={handleSubmit}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color={Colors.black} />
+                ) : (
+                  <Text style={styles.primaryButtonText}>{isSignup ? "Create Account" : "Log In"}</Text>
+                )}
+              </Pressable>
+
+              <Text style={[styles.legalText, isNarrow ? styles.legalTextCompact : null]}>
+                By continuing, you agree to our{" "}
+                <Text style={styles.legalLink} onPress={() => { void openTermsOfService(); }}>
+                  Terms of Service
+                </Text>
+                {" "}and{" "}
+                <Text style={styles.legalLink} onPress={() => { void openPrivacyPolicy(); }}>
+                  Privacy Policy
+                </Text>
+                .
+              </Text>
             </View>
-            </View>
-          )}
+          </View>
+        </View>
       </KeyboardAvoidingView>
     </View>
   );
@@ -523,189 +462,323 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-
-  // Main Content
-  mainContent: {
+  page: {
     flex: 1,
-    width: "100%",
-  },
-  mainInner: {
-    flex: 1,
-    width: "100%",
-    alignSelf: "center",
-  },
-
-  // Hero Section with Colorful Circles
-  heroSection: {
-    width: "100%",
     alignItems: "center",
     justifyContent: "center",
-    position: "relative",
   },
-  circleGrid: {
-    alignSelf: "center",
-    position: "relative",
-  },
-  artistCircle: {
-    position: "absolute",
-    overflow: "hidden",
-  },
-  circleImage: {
+  authShell: {
     width: "100%",
-    height: "100%",
+    alignSelf: "center",
+    gap: 16,
+    alignItems: "stretch",
+    justifyContent: "center",
   },
-  logoCircle: {
+  glowOrb: {
     position: "absolute",
-    bottom: 12,
-    left: "50%",
-    backgroundColor: Colors.text,
+    borderRadius: 999,
+    opacity: 0.18,
+  },
+  glowOrbTop: {
+    width: 220,
+    height: 220,
+    top: 40,
+    right: -50,
+    backgroundColor: Colors.primary,
+  },
+  glowOrbBottom: {
+    width: 200,
+    height: 200,
+    bottom: 20,
+    left: -50,
+    backgroundColor: "#1D4ED8",
+  },
+  heroPanel: {
+    flex: 1,
+    paddingRight: 14,
+    justifyContent: "center",
+  },
+  heroBrandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  heroBrandCopy: {
+    marginLeft: 14,
+    flex: 1,
+  },
+  heroBrandName: {
+    color: Colors.text,
+    fontSize: 19,
+    fontFamily: "Inter_700Bold",
+  },
+  heroBrandTag: {
+    marginTop: 2,
+    color: Colors.subtext,
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+  },
+  logoBadge: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
     alignItems: "center",
     justifyContent: "center",
-    overflow: "hidden",
+    padding: 10,
   },
   logoImage: {
     width: "100%",
     height: "100%",
   },
-
-  // Title Section
-  titleSection: {
-    alignItems: "center",
-    marginBottom: 24,
-  },
   heroTitle: {
-    fontSize: 34,
-    fontFamily: "Inter_700Bold",
+    marginTop: 24,
     color: Colors.text,
-    textAlign: "center",
-    lineHeight: 40,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.7,
+    maxWidth: 520,
   },
-
-  // Google Button
-  googleBtn: {
+  heroText: {
+    marginTop: 12,
+    color: Colors.subtext,
+    fontSize: 15,
+    lineHeight: 22,
+    maxWidth: 500,
+    fontFamily: "Inter_400Regular",
+  },
+  heroFeatureStack: {
+    marginTop: 20,
+    gap: 10,
+  },
+  heroFeature: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  heroFeatureText: {
+    color: Colors.text,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  card: {
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    backgroundColor: "rgba(17,23,31,0.9)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.24,
+    shadowRadius: 28,
+    elevation: 10,
+    alignSelf: "center",
+  },
+  cardTop: {
+    marginBottom: 12,
+  },
+  mobileBrandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    minHeight: 34,
+  },
+  mobileBrandCopy: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  mobileBrandName: {
+    color: Colors.text,
+    fontSize: 17,
+    fontFamily: "Inter_700Bold",
+  },
+  mobileBrandTag: {
+    marginTop: 2,
+    color: Colors.subtext,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  modeBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+  },
+  modeBadgeText: {
+    color: Colors.primary,
+    fontSize: 10,
+    letterSpacing: 0.8,
+    fontFamily: "Inter_700Bold",
+  },
+  modeSwitch: {
+    marginTop: 14,
+    flexDirection: "row",
+    padding: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+  },
+  modeSwitchBtn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modeSwitchBtnActive: {
+    backgroundColor: Colors.primary,
+  },
+  modeSwitchText: {
+    color: Colors.subtext,
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+  },
+  modeSwitchTextActive: {
+    color: Colors.black,
+  },
+  cardTitle: {
+    marginTop: 16,
+    color: Colors.text,
+    fontSize: 25,
+    lineHeight: 31,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.4,
+  },
+  cardSubtitle: {
+    marginTop: 6,
+    color: Colors.subtext,
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: "Inter_400Regular",
+  },
+  authActionStack: {
+    gap: 10,
+    marginBottom: 4,
+  },
+  oauthButton: {
+    marginTop: 4,
+    borderRadius: 999,
+    backgroundColor: Colors.text,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.text,
-    borderRadius: 25,
-    height: 50,
-    marginBottom: 16,
-    gap: 12,
+    gap: 10,
   },
-  googleIconCircle: {
+  oauthIconWrap: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
-  googleBtnText: {
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
+  oauthButtonText: {
     color: Colors.black,
-  },
-
-  // Form Section
-  formSection: {
-    gap: 10,
-  },
-  inputGroup: {
-    marginBottom: 10,
-  },
-  input: {
-    backgroundColor: "rgba(255,255,255,0.1)",
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    height: 48,
-    color: Colors.text,
     fontSize: 15,
-    fontFamily: "Inter_400Regular",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-  },
-  passwordContainer: {
-    position: "relative",
-  },
-  passwordInput: {
-    paddingRight: 50,
-  },
-  eyeIcon: {
-    position: "absolute",
-    right: 16,
-    top: 14,
-  },
-  forgotPassword: {
-    alignSelf: "flex-end",
-    marginBottom: 6,
-  },
-  forgotPasswordText: {
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
-    color: Colors.text,
-  },
-  loginBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: 25,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 6,
-  },
-  loginBtnDisabled: {
-    opacity: 0.6,
-  },
-  loginBtnText: {
-    fontSize: 16,
     fontFamily: "Inter_700Bold",
-    color: Colors.black,
   },
-  signupPrompt: {
+  secondaryButton: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    backgroundColor: "rgba(255,255,255,0.04)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 16,
+    gap: 8,
   },
-  signupPromptText: {
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    color: Colors.subtext,
-  },
-  signupLink: {
-    fontSize: 14,
-    fontFamily: "Inter_700Bold",
+  secondaryButtonText: {
     color: Colors.text,
-    textDecorationLine: "underline",
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
   },
-
-  // Signup Screen
-  signupContent: {
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  dividerLine: {
     flex: 1,
-    width: "100%",
-    paddingTop: 10,
+    height: 1,
+    backgroundColor: Colors.cardBorder,
   },
-  signupInner: {
+  dividerText: {
+    color: Colors.inactive,
+    fontSize: 11,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    fontFamily: "Inter_600SemiBold",
+  },
+  formStack: {
+    marginTop: 2,
+  },
+  fieldShell: {
+    height: 48,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  fieldShellCompact: {
+    height: 44,
+  },
+  fieldInput: {
     flex: 1,
-    width: "100%",
-    alignSelf: "center",
+    color: Colors.text,
+    fontSize: 15,
+    fontFamily: "Inter_500Medium",
+    paddingVertical: 0,
   },
-  backButton: {
-    width: 40,
-    height: 40,
+  inlineLink: {
+    alignSelf: "flex-end",
+    marginTop: 2,
+  },
+  inlineLinkText: {
+    color: Colors.text,
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+  },
+  inlineLinkDisabled: {
+    opacity: 0.7,
+  },
+  signupHint: {
+    color: Colors.inactive,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  primaryButton: {
+    marginTop: 14,
+    borderRadius: 999,
+    backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 10,
   },
-  signupHeader: {
-    marginBottom: 24,
+  primaryButtonDisabled: {
+    opacity: 0.65,
   },
-  signupTitle: {
-    fontSize: 24,
+  primaryButtonText: {
+    color: Colors.black,
+    fontSize: 15,
     fontFamily: "Inter_700Bold",
-    color: Colors.text,
-    textAlign: "center",
   },
-  signupForm: {
-    gap: 10,
+  legalText: {
+    marginTop: 12,
+    color: Colors.subtext,
+    fontSize: 11.5,
+    lineHeight: 17,
+    textAlign: "center",
+    fontFamily: "Inter_400Regular",
+  },
+  legalTextCompact: {
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  legalLink: {
+    color: Colors.text,
+    textDecorationLine: "underline",
+    fontFamily: "Inter_600SemiBold",
   },
 });

@@ -29,9 +29,13 @@ import { safeGoBack } from "@/utils/navigation";
 import { usePlayer } from "@/contexts/PlayerContext";
 import { formatDuration, Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
-import { getLikedSongsData, getRecentlyPlayed, getUserPlaylists } from "@/lib/storage";
+import { getRecentlyPlayed, getUserPlaylists } from "@/lib/storage";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { createSpotifyColorTheme, extractDominantColor } from "@/lib/colorExtractor";
+import EqualizerBars from "@/components/EqualizerBars";
+import { getArtistDetails, JioSaavnArtist, searchArtists } from "@/lib/artistService";
+import { getBestImageUrl } from "@/lib/musicData";
+import { isFollowingArtist, toggleFollowArtist } from "@/lib/followedArtists";
 
 function hexToRgba(color: string, alpha: number): string {
   const safeAlpha = Math.max(0, Math.min(1, alpha));
@@ -171,7 +175,7 @@ const DEV_PREVIEW_SONGS: Song[] = [
   },
 ];
 
-export default function PlayerScreen() {
+function LegacyPlayerScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -201,9 +205,12 @@ export default function PlayerScreen() {
     setTextColor,
   } = usePlayer();
 
-  const [sliderPreviewProgress, setSliderPreviewProgress] = useState<number | null>(null);
+  // Simple seek state — while dragging we show the drag value, on release we commit.
+  const [seekValue, setSeekValue] = useState<number | null>(null);
   const [isSeeking, setIsSeeking] = useState(false);
   const [isLoadingDevTrack, setIsLoadingDevTrack] = useState(false);
+  const [queueExpanded, setQueueExpanded] = useState(false);
+  const chevronAnim = useRef(new Animated.Value(0)).current;
   const [isDevPreviewEnabled, setIsDevPreviewEnabled] = useState(false);
   const [devPreviewIndex, setDevPreviewIndex] = useState(0);
   const [devPreviewIsPlaying, setDevPreviewIsPlaying] = useState(true);
@@ -213,13 +220,6 @@ export default function PlayerScreen() {
   const [devPreviewLikedSongIds, setDevPreviewLikedSongIds] = useState<string[]>([]);
   const [progressTrackWidth, setProgressTrackWidth] = useState(0);
   const androidSeekFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const seekPreviewFrameRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
-  const pendingSeekPreviewRef = useRef<number | null>(null);
-  const lastRenderedSeekPreviewRef = useRef<number | null>(null);
-  const lastPreviewStateUpdateMsRef = useRef(0);
-  const progressFillRef = useRef<View | null>(null);
-  const progressThumbRef = useRef<View | null>(null);
-  const seekVisualProgressRef = useRef(0);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const artScrollX = useRef(new Animated.Value(0)).current;
   const artCarouselRef = useRef<FlatList<Song> | null>(null);
@@ -228,16 +228,21 @@ export default function PlayerScreen() {
   const didHandleSheetDismissRef = useRef(false);
   const sheetDetentReadyAtRef = useRef(0);
   const isDevPreviewActive = __DEV__ && !currentSong && isDevPreviewEnabled;
+
+  // ── About the artist / Credits state ────────────────────────────────────────
+  const [artistInfo, setArtistInfo] = useState<JioSaavnArtist | null>(null);
+  const [artistFollowing, setArtistFollowing] = useState(false);
+  const artistFetchIdRef = useRef<string>("");
   const devPreviewSong =
     DEV_PREVIEW_SONGS[Math.max(0, Math.min(devPreviewIndex, DEV_PREVIEW_SONGS.length - 1))] ??
     DEV_PREVIEW_SONGS[0];
   const screenSong = currentSong ?? (isDevPreviewActive ? devPreviewSong : null);
 
   useEffect(() => {
-    fadeAnim.setValue(0);
+    fadeAnim.setValue(0.3);
     Animated.timing(fadeAnim, {
       toValue: 1,
-      duration: 320,
+      duration: 120,
       useNativeDriver: true,
     }).start();
   }, [screenSong?.id, screenSong?.coverUrl, fadeAnim]);
@@ -288,6 +293,32 @@ export default function PlayerScreen() {
       active = false;
     };
   }, [screenSong?.id, screenSong?.coverUrl, setAlbumColor, setTextColor]);
+
+  // Fetch artist info whenever the current song's artist changes
+  useEffect(() => {
+    const artistName = currentSong?.artist?.split(",")[0]?.trim();
+    if (!artistName) { setArtistInfo(null); return; }
+
+    let cancelled = false;
+    const fetchId = artistName;
+    artistFetchIdRef.current = fetchId;
+
+    // Try to find artist by name then fetch full details
+    searchArtists(artistName)
+      .then(async (results) => {
+        if (cancelled || artistFetchIdRef.current !== fetchId) return;
+        const first = results[0];
+        if (!first) return;
+        const details = await getArtistDetails(first.id);
+        if (cancelled || artistFetchIdRef.current !== fetchId) return;
+        setArtistInfo(details);
+        const following = await isFollowingArtist(first.id);
+        if (!cancelled) setArtistFollowing(following);
+      })
+      .catch(() => {});
+
+    return () => { cancelled = true; };
+  }, [currentSong?.artist]);
 
   const rawTopInset = Platform.OS === "web" ? 67 : insets.top;
   const topInset = Platform.OS === "ios" ? Math.max(2, rawTopInset - 18) : rawTopInset;
@@ -378,9 +409,6 @@ export default function PlayerScreen() {
   const controlIconColor = "rgba(236,240,247,0.96)";
   const controlButtonActiveBg = hexToRgba(playerTheme.accent, 0.2);
   const controlButtonActiveBorder = hexToRgba(playerTheme.accent, 0.64);
-  const deviceButtonBg = "rgba(15,22,32,0.72)";
-  const deviceButtonBorder = hexToRgba(playerTheme.accent, 0.36);
-  const deviceButtonTextColor = "rgba(232,238,246,0.94)";
   const progressTrackColor = "rgba(255,255,255,0.16)";
   const progressFillColor = playerTheme.accent;
   const progressThumbColor = "rgba(255,255,255,0.96)";
@@ -396,222 +424,86 @@ export default function PlayerScreen() {
     androidSeekFallbackTimerRef.current = null;
   }, []);
 
-  const clearSeekPreviewFrame = useCallback(() => {
-    if (seekPreviewFrameRef.current === null) return;
-    cancelAnimationFrame(seekPreviewFrameRef.current);
-    seekPreviewFrameRef.current = null;
-  }, []);
+  // While dragging show seekValue; otherwise show live playerProgress.
+  const visualProgress = isSeeking && seekValue !== null
+    ? seekValue
+    : playerProgress;
 
-  const applySeekVisualProgress = useCallback(
-    (value: number) => {
-      const clamped = clampProgress(value);
-      seekVisualProgressRef.current = clamped;
-      const percent = `${clamped * 100}%`;
-      progressFillRef.current?.setNativeProps?.({ style: { width: percent } });
-      progressThumbRef.current?.setNativeProps?.({ style: { left: percent } });
-      return clamped;
-    },
-    [clampProgress]
-  );
-
-  const setSeekPreviewImmediate = useCallback(
-    (value: number | null) => {
-      clearSeekPreviewFrame();
-      pendingSeekPreviewRef.current = null;
-
-      if (value === null) {
-        lastRenderedSeekPreviewRef.current = null;
-        seekVisualProgressRef.current = clampProgress(playerProgress);
-        setSliderPreviewProgress(null);
-        return;
-      }
-
-      const clamped = applySeekVisualProgress(value);
-      lastRenderedSeekPreviewRef.current = clamped;
-      lastPreviewStateUpdateMsRef.current = Date.now();
-      setSliderPreviewProgress(clamped);
-    },
-    [applySeekVisualProgress, clampProgress, clearSeekPreviewFrame, playerProgress]
-  );
-
-  const flushQueuedSeekPreview = useCallback(() => {
-    const queuedValue = pendingSeekPreviewRef.current;
-    pendingSeekPreviewRef.current = null;
-    if (queuedValue === null) {
-      return;
-    }
-    if (
-      lastRenderedSeekPreviewRef.current !== null &&
-      Math.abs(lastRenderedSeekPreviewRef.current - queuedValue) < 0.0025
-    ) {
-      return;
-    }
-    lastRenderedSeekPreviewRef.current = queuedValue;
-    applySeekVisualProgress(queuedValue);
-    const now = Date.now();
-    if (now - lastPreviewStateUpdateMsRef.current >= 90) {
-      lastPreviewStateUpdateMsRef.current = now;
-      setSliderPreviewProgress(queuedValue);
-    }
-  }, [applySeekVisualProgress]);
-
-  const queueSeekPreview = useCallback(
-    (value: number) => {
-      pendingSeekPreviewRef.current = clampProgress(value);
-      if (seekPreviewFrameRef.current !== null) {
-        return;
-      }
-      seekPreviewFrameRef.current = requestAnimationFrame(() => {
-        seekPreviewFrameRef.current = null;
-        flushQueuedSeekPreview();
-      });
-    },
-    [clampProgress, flushQueuedSeekPreview]
-  );
-
-  const visualProgress = useMemo(() => {
-    return clampProgress(sliderPreviewProgress ?? playerProgress);
-  }, [clampProgress, playerProgress, sliderPreviewProgress]);
-
+  // Reset seek state when song changes.
   useEffect(() => {
-    if (isSeeking && pendingSeekPreviewRef.current !== null) {
-      return;
-    }
-    applySeekVisualProgress(visualProgress);
-  }, [applySeekVisualProgress, isSeeking, visualProgress]);
-
-  useEffect(() => {
-    clearAndroidSeekFallbackTimer();
-    clearSeekPreviewFrame();
     setIsSeeking(false);
-    setSeekPreviewImmediate(null);
-  }, [clearAndroidSeekFallbackTimer, clearSeekPreviewFrame, screenSong?.id, setSeekPreviewImmediate]);
+    setSeekValue(null);
+    setQueueExpanded(false);
+    chevronAnim.setValue(0);
+    clearAndroidSeekFallbackTimer();
+  }, [screenSong?.id, clearAndroidSeekFallbackTimer, chevronAnim]);
 
   useEffect(() => {
-    return () => {
-      clearAndroidSeekFallbackTimer();
-      clearSeekPreviewFrame();
-    };
-  }, [clearAndroidSeekFallbackTimer, clearSeekPreviewFrame]);
+    return () => { clearAndroidSeekFallbackTimer(); };
+  }, [clearAndroidSeekFallbackTimer]);
 
-  useEffect(() => {
-    if (isSeeking) return;
-    if (sliderPreviewProgress === null) return;
-    if (Math.abs(playerProgress - sliderPreviewProgress) <= 0.02) {
-      setSeekPreviewImmediate(null);
-      return;
-    }
+  const handleSlidingStart = useCallback((value: number) => {
+    clearAndroidSeekFallbackTimer();
+    if (Platform.OS !== "web") void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    setIsSeeking(true);
+    setSeekValue(clampProgress(value));
+  }, [clearAndroidSeekFallbackTimer, clampProgress]);
 
-    const syncTimeout = setTimeout(() => {
-      setSeekPreviewImmediate(null);
-    }, 2200);
+  const handleSliderValueChange = useCallback((value: number) => {
+    setSeekValue(clampProgress(value));
+  }, [clampProgress]);
 
-    return () => clearTimeout(syncTimeout);
-  }, [isSeeking, playerProgress, setSeekPreviewImmediate, sliderPreviewProgress]);
-
-  const handleSlidingStart = useCallback(
-    (value: number) => {
-      clearAndroidSeekFallbackTimer();
-      if (Platform.OS !== "web") {
-        void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-      }
-      setIsSeeking(true);
-      setSeekPreviewImmediate(value);
-    },
-    [clearAndroidSeekFallbackTimer, setSeekPreviewImmediate]
-  );
-
-  const handleSliderValueChange = useCallback(
-    (value: number) => {
-      const nextProgress = clampProgress(value);
-      queueSeekPreview(nextProgress);
-
-      if (Platform.OS === "android" && !isDevPreviewActive) {
-        clearAndroidSeekFallbackTimer();
-        androidSeekFallbackTimerRef.current = setTimeout(() => {
-          androidSeekFallbackTimerRef.current = null;
-          setIsSeeking(false);
-          setSeekPreviewImmediate(nextProgress);
-          seekTo(nextProgress);
-        }, 180);
-      }
-    },
-    [clampProgress, clearAndroidSeekFallbackTimer, isDevPreviewActive, queueSeekPreview, seekTo, setSeekPreviewImmediate]
-  );
-
-  const handleSlidingComplete = useCallback(
-    (value: number) => {
-      clearAndroidSeekFallbackTimer();
-      const nextProgress = clampProgress(value);
-      setIsSeeking(false);
-      setSeekPreviewImmediate(nextProgress);
-      if (isDevPreviewActive) {
-        setDevPreviewProgress(nextProgress);
-        return;
-      }
-      seekTo(nextProgress);
-    },
-    [clampProgress, clearAndroidSeekFallbackTimer, isDevPreviewActive, seekTo, setSeekPreviewImmediate]
-  );
+  const handleSlidingComplete = useCallback((value: number) => {
+    clearAndroidSeekFallbackTimer();
+    const next = clampProgress(value);
+    setSeekValue(next);
+    setIsSeeking(false);
+    if (isDevPreviewActive) { setDevPreviewProgress(next); return; }
+    seekTo(next);
+    // Clear override after a short delay so live progress takes over cleanly.
+    androidSeekFallbackTimerRef.current = setTimeout(() => {
+      setSeekValue(null);
+    }, 1500);
+  }, [clearAndroidSeekFallbackTimer, clampProgress, isDevPreviewActive, seekTo]);
 
   const handleProgressLayout = useCallback((event: LayoutChangeEvent) => {
     setProgressTrackWidth(event.nativeEvent.layout.width);
   }, []);
 
-  const getResponderSeekProgress = useCallback(
-    (event: GestureResponderEvent) => {
-      const nativeX = event.nativeEvent.locationX;
-      const safeWidth = progressTrackWidth > 0 ? progressTrackWidth : Math.max(1, screenWidth - 48);
-      return clampProgress(nativeX / safeWidth);
-    },
-    [clampProgress, progressTrackWidth, screenWidth]
-  );
+  const getResponderSeekProgress = useCallback((event: GestureResponderEvent) => {
+    const nativeX = event.nativeEvent.locationX;
+    const safeWidth = progressTrackWidth > 0 ? progressTrackWidth : Math.max(1, screenWidth - 48);
+    return clampProgress(nativeX / safeWidth);
+  }, [clampProgress, progressTrackWidth, screenWidth]);
 
-  const commitSeekProgress = useCallback(
-    (nextProgress: number) => {
-      setIsSeeking(false);
-      setSeekPreviewImmediate(nextProgress);
-      if (isDevPreviewActive) {
-        setDevPreviewProgress(nextProgress);
-        return;
-      }
-      seekTo(nextProgress);
-    },
-    [isDevPreviewActive, seekTo, setSeekPreviewImmediate]
-  );
+  const commitSeekProgress = useCallback((next: number) => {
+    setIsSeeking(false);
+    setSeekValue(next);
+    if (isDevPreviewActive) { setDevPreviewProgress(next); return; }
+    seekTo(next);
+    clearAndroidSeekFallbackTimer();
+    androidSeekFallbackTimerRef.current = setTimeout(() => {
+      setSeekValue(null);
+    }, 1500);
+  }, [clearAndroidSeekFallbackTimer, isDevPreviewActive, seekTo]);
 
-  const handleResponderSeekGrant = useCallback(
-    (event: GestureResponderEvent) => {
-      if (!usesResponderSeek || !canSeek) return;
-      const nextProgress = getResponderSeekProgress(event);
-      clearAndroidSeekFallbackTimer();
-      if (Platform.OS !== "web") {
-        void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-      }
-      setIsSeeking(true);
-      setSeekPreviewImmediate(nextProgress);
-    },
-    [canSeek, clearAndroidSeekFallbackTimer, getResponderSeekProgress, setSeekPreviewImmediate, usesResponderSeek]
-  );
+  const handleResponderSeekGrant = useCallback((event: GestureResponderEvent) => {
+    if (!usesResponderSeek || !canSeek) return;
+    clearAndroidSeekFallbackTimer();
+    if (Platform.OS !== "web") void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    setIsSeeking(true);
+    setSeekValue(getResponderSeekProgress(event));
+  }, [canSeek, clearAndroidSeekFallbackTimer, getResponderSeekProgress, usesResponderSeek]);
 
-  const handleResponderSeekMove = useCallback(
-    (event: GestureResponderEvent) => {
-      if (!usesResponderSeek) return;
-      if (!isSeeking) return;
-      queueSeekPreview(getResponderSeekProgress(event));
-    },
-    [getResponderSeekProgress, isSeeking, queueSeekPreview, usesResponderSeek]
-  );
+  const handleResponderSeekMove = useCallback((event: GestureResponderEvent) => {
+    if (!usesResponderSeek || !isSeeking) return;
+    setSeekValue(getResponderSeekProgress(event));
+  }, [getResponderSeekProgress, isSeeking, usesResponderSeek]);
 
-  const handleResponderSeekRelease = useCallback(
-    (event: GestureResponderEvent) => {
-      if (!usesResponderSeek) return;
-      clearAndroidSeekFallbackTimer();
-      const nextProgress = getResponderSeekProgress(event);
-      commitSeekProgress(nextProgress);
-    },
-    [clearAndroidSeekFallbackTimer, commitSeekProgress, getResponderSeekProgress, usesResponderSeek]
-  );
+  const handleResponderSeekRelease = useCallback((event: GestureResponderEvent) => {
+    if (!usesResponderSeek) return;
+    commitSeekProgress(getResponderSeekProgress(event));
+  }, [commitSeekProgress, getResponderSeekProgress, usesResponderSeek]);
 
   const handleQueueSongPress = useCallback(
     (song: Song) => {
@@ -663,16 +555,12 @@ export default function PlayerScreen() {
         .map((item) => normalizePlayableSong(item.data as Partial<Song> | undefined))
         .filter((song): song is Song => Boolean(song));
 
-      const likedSongs = (await getLikedSongsData())
-        .map((song) => normalizePlayableSong(song))
-        .filter((song): song is Song => Boolean(song));
-
       const localPlaylistSongs = (await getUserPlaylists())
         .flatMap((playlist) => playlist.songs || [])
         .map((song) => normalizePlayableSong(song))
         .filter((song): song is Song => Boolean(song));
 
-      const candidateQueue = [recentSongs, likedSongs, localPlaylistSongs].find((songs) => songs.length > 0) || [];
+      const candidateQueue = [recentSongs, localPlaylistSongs].find((songs) => songs.length > 0) || [];
 
       if (candidateQueue.length === 0) {
         showDevLoadMessage("No saved playable song found yet. Play one song from Home once, then come back here.");
@@ -695,7 +583,7 @@ export default function PlayerScreen() {
     setDevPreviewIsShuffled(false);
     setDevPreviewRepeatMode("off");
     setDevPreviewLikedSongIds([]);
-    setSliderPreviewProgress(null);
+    setSeekValue(null);
     setIsSeeking(false);
   }, []);
 
@@ -876,7 +764,10 @@ export default function PlayerScreen() {
                   source={{ uri: item.coverUrl }}
                   style={styles.albumArt}
                   contentFit="cover"
-                  transition={180}
+                  cachePolicy="memory-disk"
+                  recyclingKey={item.id}
+                  priority={isActiveCard ? "high" : "normal"}
+                  transition={80}
                 />
               ) : (
                 <View style={[styles.albumArt, styles.albumFallback]}>
@@ -918,7 +809,7 @@ export default function PlayerScreen() {
         >
           <View style={styles.queueLead}>
             {isCurrent ? (
-              <Ionicons name={playerIsPlaying ? "volume-high" : "pause"} size={14} color={playerTheme.accent} />
+              <EqualizerBars isPlaying={playerIsPlaying} size={3} color={playerTheme.accent} />
             ) : (
               <Text style={styles.queueIndex}>{index + 1}</Text>
             )}
@@ -1143,15 +1034,12 @@ export default function PlayerScreen() {
               >
                 <View
                   style={styles.progressTouch}
-                  onLayout={usesResponderSeek ? handleProgressLayout : undefined}
+                  onLayout={handleProgressLayout}
                 >
                   {usesResponderSeek ? (
                     <View pointerEvents="none" style={styles.progressVisual}>
                       <View style={[styles.progressTrack, { backgroundColor: progressTrackColor }]} />
                       <View
-                        ref={(node) => {
-                          progressFillRef.current = node;
-                        }}
                         style={[
                           styles.progressFill,
                           {
@@ -1161,9 +1049,6 @@ export default function PlayerScreen() {
                         ]}
                       />
                       <View
-                        ref={(node) => {
-                          progressThumbRef.current = node;
-                        }}
                         style={[
                           styles.progressThumb,
                           {
@@ -1208,7 +1093,7 @@ export default function PlayerScreen() {
                 <View style={styles.timeRow}>
                   <Text style={styles.timeText}>
                     {formatDuration(
-                      sliderPreviewProgress !== null
+                      seekValue !== null
                         ? Math.floor(Math.max(0, effectiveDurationSec) * visualProgress)
                         : currentTimeSec
                     )}
@@ -1360,32 +1245,6 @@ export default function PlayerScreen() {
           </Pressable>
           </View>
 
-          <View
-            style={[
-              styles.deviceActionRow,
-              { marginTop: isShortScreen ? 6 : 8, marginHorizontal: isShortScreen ? 14 : 20 },
-            ]}
-          >
-            <Pressable
-              style={[
-                styles.deviceActionButton,
-                {
-                  backgroundColor: deviceButtonBg,
-                  borderColor: deviceButtonBorder,
-                },
-              ]}
-              onPress={() => {
-                haptic();
-                router.push("/bluetooth");
-              }}
-            >
-              <Ionicons name="bluetooth-outline" size={18} color={playerTheme.accent} />
-              {!isVeryShortScreen ? (
-                <Text style={[styles.deviceActionText, { color: deviceButtonTextColor }]}>Devices</Text>
-              ) : null}
-            </Pressable>
-          </View>
-
       </View>
       </View>
 
@@ -1403,25 +1262,159 @@ export default function PlayerScreen() {
         </View>
 
         <FlatList
-          data={playingQueue}
+          data={queueExpanded ? playingQueue : playingQueue.slice(0, 10)}
           keyExtractor={(item, index) => `${item.id}-${index}`}
             renderItem={renderQueueSong}
           style={styles.playingList}
           contentContainerStyle={styles.playingListContent}
           showsVerticalScrollIndicator={false}
           scrollEnabled={false}
-          initialNumToRender={8}
+          initialNumToRender={10}
           maxToRenderPerBatch={8}
           updateCellsBatchingPeriod={80}
           windowSize={4}
           removeClippedSubviews={false}
         />
+
+        {playingQueue.length > 10 ? (
+          <Pressable
+            style={styles.queueExpandBtn}
+            onPress={() => {
+              const next = !queueExpanded;
+              setQueueExpanded(next);
+              Animated.spring(chevronAnim, {
+                toValue: next ? 1 : 0,
+                useNativeDriver: true,
+                speed: 18,
+                bounciness: 4,
+              }).start();
+            }}
+          >
+            <Animated.View
+              style={{
+                transform: [{
+                  rotate: chevronAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ["0deg", "180deg"],
+                  }),
+                }],
+              }}
+            >
+              <Ionicons name="chevron-down" size={22} color="rgba(255,255,255,0.55)" />
+            </Animated.View>
+          </Pressable>
+        ) : null}
       </View>
+
+      {/* ── About the artist ── */}
+      {artistInfo && !isDevPreviewActive ? (
+        <View style={styles.infoCard}>
+          <Text style={styles.infoCardLabel}>ABOUT THE ARTIST</Text>
+          <Pressable
+            style={styles.artistInfoRow}
+            onPress={() => {
+              const img = artistInfo.image?.length ? getBestImageUrl(artistInfo.image) : "";
+              router.push(
+                { pathname: "/artist/[id]", params: { id: artistInfo.id, name: artistInfo.name, image: img } },
+                { withAnchor: true, dangerouslySingular: () => "artist-profile" }
+              );
+            }}
+          >
+            {artistInfo.image?.length ? (
+              <Image
+                source={{ uri: getBestImageUrl(artistInfo.image) }}
+                style={styles.artistInfoAvatar}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+              />
+            ) : (
+              <View style={[styles.artistInfoAvatar, styles.artistInfoAvatarFallback]}>
+                <Ionicons name="person" size={28} color="rgba(255,255,255,0.2)" />
+              </View>
+            )}
+            <View style={styles.artistInfoMeta}>
+              <Text style={styles.artistInfoName} numberOfLines={1}>{artistInfo.name}</Text>
+              {artistInfo.followerCount ? (
+                <Text style={styles.artistInfoSub}>
+                  {artistInfo.followerCount >= 1_000_000
+                    ? `${(artistInfo.followerCount / 1_000_000).toFixed(1)}M followers`
+                    : artistInfo.followerCount >= 1_000
+                    ? `${(artistInfo.followerCount / 1_000).toFixed(0)}K followers`
+                    : `${artistInfo.followerCount} followers`}
+                </Text>
+              ) : null}
+            </View>
+            <Pressable
+              style={[styles.artistFollowBtn, artistFollowing && styles.artistFollowBtnActive]}
+              onPress={async () => {
+                const img = artistInfo.image?.length ? getBestImageUrl(artistInfo.image) : "";
+                const nowFollowing = await toggleFollowArtist({ id: artistInfo.id, name: artistInfo.name, image: img, followedAt: Date.now() });
+                setArtistFollowing(nowFollowing);
+              }}
+            >
+              <Text style={[styles.artistFollowBtnText, artistFollowing && styles.artistFollowBtnTextActive]}>
+                {artistFollowing ? "Following" : "Follow"}
+              </Text>
+            </Pressable>
+          </Pressable>
+          {artistInfo.bio?.length ? (
+            <Text style={styles.artistBio} numberOfLines={4}>
+              {artistInfo.bio[0]?.text?.replace(/<[^>]*>/g, "").trim() ?? ""}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* ── Credits ── */}
+      {screenSong && !isDevPreviewActive ? (
+        <View style={styles.infoCard}>
+          <Text style={styles.infoCardLabel}>CREDITS</Text>
+          <View style={styles.creditsGrid}>
+            <View style={styles.creditItem}>
+              <Text style={styles.creditLabel}>Title</Text>
+              <Text style={styles.creditValue} numberOfLines={2}>{screenSong.title}</Text>
+            </View>
+            <View style={styles.creditItem}>
+              <Text style={styles.creditLabel}>Artist</Text>
+              <Text style={styles.creditValue} numberOfLines={2}>{screenSong.artist}</Text>
+            </View>
+            {screenSong.album ? (
+              <View style={styles.creditItem}>
+                <Text style={styles.creditLabel}>Album</Text>
+                <Text style={styles.creditValue} numberOfLines={2}>{screenSong.album}</Text>
+              </View>
+            ) : null}
+            {screenSong.year ? (
+              <View style={styles.creditItem}>
+                <Text style={styles.creditLabel}>Year</Text>
+                <Text style={styles.creditValue}>{screenSong.year}</Text>
+              </View>
+            ) : null}
+            {screenSong.language ? (
+              <View style={styles.creditItem}>
+                <Text style={styles.creditLabel}>Language</Text>
+                <Text numberOfLines={1} style={[styles.creditValue, { textTransform: "capitalize" }]}>{screenSong.language}</Text>
+              </View>
+            ) : null}
+            {screenSong.genre ? (
+              <View style={styles.creditItem}>
+                <Text style={styles.creditLabel}>Genre</Text>
+                <Text numberOfLines={1} style={[styles.creditValue, { textTransform: "capitalize" }]}>{screenSong.genre}</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
       </ScrollView>
 
       </LinearGradient>
     </View>
   );
+}
+
+export default function PlayerScreen() {
+  return <LegacyPlayerScreen />;
 }
 
 const styles = StyleSheet.create({
@@ -1659,41 +1652,14 @@ const styles = StyleSheet.create({
   controlsRowCompact: {
     marginTop: 0,
   },
-  deviceActionRow: {
-    marginTop: 8,
-    marginHorizontal: 20,
-    alignItems: "flex-start",
-  },
-  deviceActionRowCompact: {
-    marginTop: 4,
-  },
-  deviceActionButton: {
-    height: 32,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(37, 201, 231, 0.14)",
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-  },
-  deviceActionButtonCompact: {
-    height: 30,
-    paddingHorizontal: 10,
-  },
-  deviceActionText: {
-    color: Colors.text,
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-  },
   playingListSection: {
     overflow: "hidden",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
     backgroundColor: "rgba(10,16,24,0.28)",
     borderWidth: 1,
-    borderBottomWidth: 0,
     borderColor: "rgba(255,255,255,0.08)",
   },
   playingListHeader: {
@@ -1731,6 +1697,13 @@ const styles = StyleSheet.create({
   playingListContent: {
     paddingBottom: 4,
     paddingHorizontal: 14,
+  },
+  queueExpandBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.08)",
   },
   queueRow: {
     height: 54,
@@ -1898,5 +1871,104 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.cardBorder,
+  },
+
+  // ── About the artist / Credits cards ────────────────────────────────────────
+  infoCard: {
+    marginHorizontal: 16,
+    marginTop: 20,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.07)",
+  },
+  infoCardLabel: {
+    color: "rgba(255,255,255,0.35)",
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 1.4,
+    marginBottom: 14,
+  },
+
+  // Artist row
+  artistInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  artistInfoAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.surface,
+    flexShrink: 0,
+  },
+  artistInfoAvatarFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  artistInfoMeta: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  artistInfoName: {
+    color: "#fff",
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+  },
+  artistInfoSub: {
+    color: "rgba(255,255,255,0.45)",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  artistFollowBtn: {
+    height: 30,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  artistFollowBtnActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  artistFollowBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+  },
+  artistFollowBtnTextActive: {
+    color: "#000",
+  },
+  artistBio: {
+    marginTop: 14,
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 20,
+  },
+
+  // Credits grid
+  creditsGrid: {
+    gap: 14,
+  },
+  creditItem: {
+    gap: 2,
+  },
+  creditLabel: {
+    color: "rgba(255,255,255,0.35)",
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.3,
+  },
+  creditValue: {
+    color: "#fff",
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
   },
 });
