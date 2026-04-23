@@ -1,0 +1,76 @@
+name: iOS-IPA-Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    name: 🍎 iOS Build
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Setup Expo
+        run: npm install -g expo-cli eas-cli
+
+      - name: Prebuild iOS
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios
+          pod install
+
+      - name: Build iOS app (no codesign)
+        run: |
+          cd ios
+          xcodebuild -workspace Mavrixfy.xcworkspace \
+            -scheme Mavrixfy \
+            -configuration Release \
+            -archivePath $PWD/build/Mavrixfy.xcarchive \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            clean archive
+
+      - name: Create Payload directory
+        run: |
+          mkdir -p Payload
+          cp -r ios/build/Mavrixfy.xcarchive/Products/Applications/Mavrixfy.app Payload/
+
+      - name: Create IPA
+        run: |
+          zip -r Mavrixfy.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Mavrixfy-iOS
+          path: Mavrixfy.ipa
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: Mavrixfy.ipa
+          tag: v${{ github.run_number }}
+          overwrite: true
+          body: "iOS IPA Build - Unsigned"
