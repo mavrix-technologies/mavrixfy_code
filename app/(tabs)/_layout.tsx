@@ -1035,7 +1035,8 @@ export default function TabLayout() {
 
   const shouldHideTabBar = pathname?.includes("/import-songs/file");
 
-  if (isIOS) {
+  // Force iOS to use native tabs
+  if (isIOS && !isWeb) {
     return (
       <View style={{ flex: 1, backgroundColor: Colors.background }}>
         <IOSNativeTabLayout />
