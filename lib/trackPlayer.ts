@@ -54,7 +54,9 @@ async function configurePlayerOptions() {
           Capability.Pause,
           Capability.SkipToNext,
         ],
-        progressUpdateEventInterval: 1,
+        // Emit native progress often enough for smooth Android Auto/session sync
+        // without waiting a full second between updates.
+        progressUpdateEventInterval: 0.5,
         notificationCapabilities: [
           Capability.Play,
           Capability.Pause,

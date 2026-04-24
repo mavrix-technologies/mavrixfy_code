@@ -2,11 +2,10 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import {
   View,
   Text,
-  FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Platform,
-  ActivityIndicator,
   RefreshControl,
 } from "react-native";
 import { Image } from "expo-image";
@@ -23,6 +22,7 @@ import { getCachedHomePublicPlaylists, setCachedHomePublicPlaylists } from "@/li
 import { useAuth } from "@/contexts/AuthContext";
 import { usePlayerRow } from "@/contexts/PlayerContext";
 import { useScreenTracking } from "@/hooks/useScreenTracking";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { triggerImpact } from "@/lib/haptics";
 import {
   clearJioSaavnPlaylistCache,
@@ -101,18 +101,13 @@ const PUBLIC_PLAYLIST_FETCH_TIMEOUT_MS = 4500;
 const HOME_CATEGORY_FETCH_TIMEOUT_MS = 12000;
 const HOME_BOOTSTRAP_MAX_WAIT_MS = 15000;
 const MAX_ROW_ITEMS = 10;
-// Show all category sections — no artificial cap
-const MAX_EXTRA_CATEGORY_ROWS = 20;
 const HOME_PRIORITY_CATEGORY_IDS = ["trending", "new-arrivals", "most-viral"] as const;
 const HOME_PRIORITY_CATEGORY_TIMEOUT_MS = 5500;
 const PLACEHOLDER_ROW_ITEMS = [0, 1, 2, 3];
 const HORIZONTAL_ROW_GAP = 12;
 const RECENT_CARD_SIZE = 90;
-const RECENT_ITEM_STRIDE = RECENT_CARD_SIZE + HORIZONTAL_ROW_GAP;
 const RECT_CARD_WIDTH = 152;
-const RECT_ITEM_STRIDE = RECT_CARD_WIDTH + HORIZONTAL_ROW_GAP;
 const ARTIST_CARD_WIDTH = 120;
-const ARTIST_ITEM_STRIDE = ARTIST_CARD_WIDTH + HORIZONTAL_ROW_GAP;
 
 function hasHomeContent(source: {
   categories: HomeJioSaavnCategoryData[];
@@ -192,6 +187,14 @@ function withPromiseTimeout<T>(promise: Promise<T>, timeoutMs: number, message: 
 }
 
 export default function HomeScreen() {
+  return (
+    <ErrorBoundary>
+      <HomeScreenInner />
+    </ErrorBoundary>
+  );
+}
+
+function HomeScreenInner() {
   useScreenTracking("Home");
 
   const insets = useSafeAreaInsets();
@@ -601,10 +604,6 @@ export default function HomeScreen() {
     return [...preferred, ...extras];
   }, [categories]);
 
-  const weekdayLabel = useMemo(() => {
-    return new Date().toLocaleDateString("en-US", { weekday: "long" });
-  }, []);
-
   const allCategoryRows = useMemo(() => {
     return orderedHomeCategories
       .map((cat) => ({
@@ -955,7 +954,7 @@ export default function HomeScreen() {
 
   const renderRectPlaceholder = useCallback(
     ({ item }: { item: number }) => (
-      <View key={`placeholder-${item}`} style={styles.rectCard}>
+      <View style={styles.rectCard}>
         <View style={styles.rectCardImageWrap}>
           <View style={[styles.rectCardImage, styles.placeholderBlock]} />
         </View>
@@ -965,18 +964,6 @@ export default function HomeScreen() {
     ),
     []
   );
-
-  const getRecentItemLayout = useCallback((_: unknown, index: number) => {
-    return { length: RECENT_ITEM_STRIDE, offset: RECENT_ITEM_STRIDE * index, index };
-  }, []);
-
-  const getRectItemLayout = useCallback((_: unknown, index: number) => {
-    return { length: RECT_ITEM_STRIDE, offset: RECT_ITEM_STRIDE * index, index };
-  }, []);
-
-  const getArtistItemLayout = useCallback((_: unknown, index: number) => {
-    return { length: ARTIST_ITEM_STRIDE, offset: ARTIST_ITEM_STRIDE * index, index };
-  }, []);
 
   const renderHeader = useCallback(() => {
     return (
@@ -1074,20 +1061,18 @@ export default function HomeScreen() {
           return (
             <View style={styles.section}>
               {renderSectionHeader("Jump Back In")}
-              <FlatList
-                data={recentlyPlayed}
-                renderItem={renderRecentCard}
-                keyExtractor={(item) => `recent-${item.id}`}
+              <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.rowContent}
-                getItemLayout={getRecentItemLayout}
-                initialNumToRender={4}
-                maxToRenderPerBatch={6}
-                windowSize={6}
-                updateCellsBatchingPeriod={24}
-                removeClippedSubviews={false}
-              />
+                nestedScrollEnabled
+              >
+                {recentlyPlayed.map((item) => (
+                  <React.Fragment key={`recent-${item.id}`}>
+                    {renderRecentCard({ item })}
+                  </React.Fragment>
+                ))}
+              </ScrollView>
             </View>
           );
 
@@ -1096,31 +1081,31 @@ export default function HomeScreen() {
             <View style={styles.section}>
               {renderSectionHeader("Made for You")}
               {publicPlaylistsForSection.length > 0 ? (
-                <FlatList
-                  data={publicPlaylistsForSection}
-                  renderItem={renderPublicPlaylist}
-                  keyExtractor={(item) => `public-${item.id}`}
+                <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
-                  getItemLayout={getRectItemLayout}
-                  initialNumToRender={4}
-                  maxToRenderPerBatch={6}
-                  windowSize={6}
-                  updateCellsBatchingPeriod={24}
-                  removeClippedSubviews={false}
-                />
+                  nestedScrollEnabled
+                >
+                  {publicPlaylistsForSection.map((item) => (
+                    <React.Fragment key={`public-${item.id}`}>
+                      {renderPublicPlaylist({ item })}
+                    </React.Fragment>
+                  ))}
+                </ScrollView>
               ) : (
-                <FlatList
-                  data={PLACEHOLDER_ROW_ITEMS}
-                  renderItem={renderRectPlaceholder}
-                  keyExtractor={(item) => `public-loading-${item}`}
+                <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
-                  getItemLayout={getRectItemLayout}
                   scrollEnabled={false}
-                />
+                >
+                  {PLACEHOLDER_ROW_ITEMS.map((item) => (
+                    <React.Fragment key={`public-loading-${item}`}>
+                      {renderRectPlaceholder({ item })}
+                    </React.Fragment>
+                  ))}
+                </ScrollView>
               )}
             </View>
           );
@@ -1129,20 +1114,18 @@ export default function HomeScreen() {
           return (
             <View style={styles.section}>
               {renderSectionHeader("Featured Artists", () => router.push("/artists", { withAnchor: true }))}
-              <FlatList
-                data={featuredArtists}
-                renderItem={renderArtistCard}
-                keyExtractor={(item) => `artist-${item.id}`}
+              <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.rowContent}
-                getItemLayout={getArtistItemLayout}
-                initialNumToRender={4}
-                maxToRenderPerBatch={6}
-                windowSize={6}
-                updateCellsBatchingPeriod={24}
-                removeClippedSubviews={false}
-              />
+                nestedScrollEnabled
+              >
+                {featuredArtists.map((item) => (
+                  <React.Fragment key={`artist-${item.id}`}>
+                    {renderArtistCard({ item })}
+                  </React.Fragment>
+                ))}
+              </ScrollView>
             </View>
           );
 
@@ -1151,31 +1134,31 @@ export default function HomeScreen() {
             <View style={styles.section}>
               {renderSectionHeader(section.data.title)}
               {section.data.results.length > 0 ? (
-                <FlatList
-                  data={section.data.results}
-                  renderItem={renderCategoryPlaylist(section.data.id, section.data.title)}
-                  keyExtractor={(item) => `${section.data.id}-${item.id}`}
+                <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
-                  getItemLayout={getRectItemLayout}
-                  initialNumToRender={4}
-                  maxToRenderPerBatch={6}
-                  windowSize={6}
-                  updateCellsBatchingPeriod={24}
-                  removeClippedSubviews={false}
-                />
+                  nestedScrollEnabled
+                >
+                  {section.data.results.map((item) => (
+                    <React.Fragment key={`${section.data.id}-${item.id}`}>
+                      {renderCategoryPlaylist(section.data.id, section.data.title)({ item })}
+                    </React.Fragment>
+                  ))}
+                </ScrollView>
               ) : (
-                <FlatList
-                  data={PLACEHOLDER_ROW_ITEMS}
-                  renderItem={renderRectPlaceholder}
-                  keyExtractor={(item) => `${section.data.id}-loading-${item}`}
+                <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
-                  getItemLayout={getRectItemLayout}
                   scrollEnabled={false}
-                />
+                >
+                  {PLACEHOLDER_ROW_ITEMS.map((item) => (
+                    <React.Fragment key={`${section.data.id}-loading-${item}`}>
+                      {renderRectPlaceholder({ item })}
+                    </React.Fragment>
+                  ))}
+                </ScrollView>
               )}
             </View>
           );
@@ -1192,12 +1175,9 @@ export default function HomeScreen() {
       renderRectPlaceholder,
       featuredArtists,
       renderArtistCard,
-      allCategoryRows,
       renderCategoryPlaylist,
       renderSectionHeader,
-      getRecentItemLayout,
-      getRectItemLayout,
-      getArtistItemLayout,
+      router,
     ]
   );
 
@@ -1213,11 +1193,7 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
-      <FlatList
-        data={sections}
-        renderItem={renderSection}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={renderHeader}
+      <ScrollView
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1229,14 +1205,15 @@ export default function HomeScreen() {
         }
         style={styles.scrollView}
         contentContainerStyle={[styles.scrollContent, sections.length === 0 && styles.scrollContentEmpty]}
-        ListEmptyComponent={renderEmptyState}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={4}
-        maxToRenderPerBatch={4}
-        windowSize={5}
-        updateCellsBatchingPeriod={32}
-        removeClippedSubviews={Platform.OS === "android"}
-      />
+      >
+        {renderHeader()}
+        {sections.length === 0
+          ? renderEmptyState()
+          : sections.map((section) => (
+              <React.Fragment key={section.id}>{renderSection({ item: section })}</React.Fragment>
+            ))}
+      </ScrollView>
       <LinearGradient
         pointerEvents="none"
         colors={["rgba(16,20,26,0)", "rgba(16,20,26,0.52)", "rgba(16,20,26,0.84)", Colors.background]}
@@ -1251,25 +1228,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
-  },
-  loadingContainer: {
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 28,
-  },
-  loadingTitle: {
-    marginTop: 16,
-    color: Colors.text,
-    fontSize: 20,
-    fontFamily: "Inter_700Bold",
-  },
-  loadingText: {
-    marginTop: 6,
-    color: Colors.subtext,
-    fontSize: 13,
-    lineHeight: 19,
-    textAlign: "center",
-    fontFamily: "Inter_400Regular",
   },
   scrollView: {
     flex: 1,
@@ -1425,8 +1383,8 @@ const styles = StyleSheet.create({
     gap: HORIZONTAL_ROW_GAP,
   },
   recentCard: {
-    width: 90,
-    height: 90,
+    width: RECENT_CARD_SIZE,
+    height: RECENT_CARD_SIZE,
     borderRadius: 8,
     overflow: "hidden",
     position: "relative",
@@ -1451,10 +1409,10 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
   },
   rectCard: {
-    width: 152,
+    width: RECT_CARD_WIDTH,
   },
   artistCard: {
-    width: 120,
+    width: ARTIST_CARD_WIDTH,
     alignItems: "center",
     gap: 6,
   },
@@ -1481,15 +1439,15 @@ const styles = StyleSheet.create({
     textTransform: "capitalize",
   },
   rectCardImageWrap: {
-    width: 152,
-    height: 152,
+    width: RECT_CARD_WIDTH,
+    height: RECT_CARD_WIDTH,
     borderRadius: 8,
     overflow: "hidden",
     position: "relative",
   },
   rectCardImage: {
-    width: 152,
-    height: 152,
+    width: RECT_CARD_WIDTH,
+    height: RECT_CARD_WIDTH,
     borderRadius: 8,
     backgroundColor: Colors.surfaceLight,
     borderWidth: 1,

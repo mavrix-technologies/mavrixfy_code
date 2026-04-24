@@ -242,7 +242,7 @@ export default function LikedSongsScreen() {
           songs.length === 0 ? styles.listContentEmpty : undefined,
         ]}
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews={Platform.OS === "android"}
+        removeClippedSubviews={false}
         initialNumToRender={12}
         maxToRenderPerBatch={12}
         windowSize={8}

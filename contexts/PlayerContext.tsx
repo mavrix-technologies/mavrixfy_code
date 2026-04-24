@@ -243,7 +243,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const { user: authUser } = useAuth();
 
   const playbackState = usePlaybackState();
-  const progressData = useProgress();
+  const progressData = useProgress(250);
   const { position, duration: trackDuration } = progressData;
 
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
@@ -268,8 +268,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     position: 0,
     duration: 0,
   });
+  const [runtimePlaybackStateSnapshot, setRuntimePlaybackStateSnapshot] = useState<any>(undefined);
   const PRELOAD_QUEUE_SIZE = 20;
 
+  const currentSongRef = useRef<Song | null>(null);
   const queueRef = useRef<Song[]>([]);
   const queueIndexRef = useRef(0);
   const repeatModeRef = useRef<"off" | "all" | "one">("off");
@@ -281,6 +283,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const lastPlaybackNoticeAtRef = useRef(0);
   const playbackSwitchChainRef = useRef<Promise<void>>(Promise.resolve());
 
+  useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
   useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
@@ -303,15 +306,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     : 0;
   const safePosition =
     Platform.OS === "android"
-      ? runtimePosition > 0
-        ? runtimePosition
-        : hookPosition
+      ? hookTrackDuration > 0 || hookPosition > 0
+        ? hookPosition
+        : runtimePosition
       : hookPosition;
   const safeTrackDuration =
     Platform.OS === "android"
-      ? runtimeTrackDuration > 0
-        ? runtimeTrackDuration
-        : hookTrackDuration
+      ? hookTrackDuration > 0
+        ? hookTrackDuration
+        : runtimeTrackDuration
       : hookTrackDuration;
   const fallbackDurationSeconds =
     currentSongDurationSeconds || queueSongDurationSeconds || sourceQueueSongDurationSeconds;
@@ -325,7 +328,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const positionMillis = effectivePositionSeconds * 1000;
   const duration = effectiveTrackDurationSeconds * 1000;
   const isPreviewSession = isExpoGoRuntime && !canUseNativePlayback && Boolean(currentSong);
-  const resolvedIsPlaying = isPreviewSession ? previewIsPlaying : isPlaying;
   const resolvedProgress = isPreviewSession ? previewProgress : progress;
   const resolvedDuration = isPreviewSession
     ? (previewDuration > 0 ? previewDuration : currentSongDurationSeconds * 1000)
@@ -335,6 +337,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     : positionMillis;
   const resolvedIsShuffled = isPreviewSession ? previewIsShuffled : isShuffled;
   const resolvedRepeatMode = isPreviewSession ? previewRepeatMode : repeatMode;
+  const runtimeIsPlaying =
+    runtimePlaybackStateSnapshot === State.Playing ||
+    runtimePlaybackStateSnapshot === State.Buffering ||
+    runtimePlaybackStateSnapshot === State.Loading;
+  const resolvedIsPlaying = isPreviewSession
+    ? previewIsPlaying
+    : Platform.OS === "android" && runtimePlaybackStateSnapshot !== undefined
+      ? runtimeIsPlaying
+      : isPlaying;
 
   useEffect(() => {
     if (!isPreviewSession) return;
@@ -390,13 +401,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     let appState = "active";
     const appStateSub = require("react-native").AppState.addEventListener(
       "change",
-      (next: string) => { appState = next; }
+      async (next: string) => {
+        const prev = appState;
+        appState = next;
+        // When app comes back to foreground, sync currentSong from TrackPlayer.
+        // This handles the case where Android Auto changed the track while the
+        // app was backgrounded — without this the home screen mini-player stays blank.
+        if (next === "active" && prev !== "active" && mounted) {
+          try {
+            const activeTrack = await TrackPlayer.getActiveTrack();
+            if (!mounted || !activeTrack?.id) return;
+            const cq = queueRef.current;
+            const mappedIndex = cq.findIndex((s) => String(s.id) === String(activeTrack.id));
+            if (mappedIndex >= 0) {
+              setQueueIndex(mappedIndex);
+              queueIndexRef.current = mappedIndex;
+              setCurrentSong((prev) => (prev?.id === cq[mappedIndex].id ? prev : cq[mappedIndex]));
+            }
+          } catch {
+            // Silent fail
+          }
+        }
+      }
     );
 
     const syncRuntimeProgress = async () => {
       if (appState !== "active") return;
       try {
-        const runtimeProgress = await TrackPlayer.getProgress();
+        const [runtimeProgress, activeTrack, activeTrackIndex, runtimePlaybackState] = await Promise.all([
+          TrackPlayer.getProgress(),
+          TrackPlayer.getActiveTrack(),
+          typeof TrackPlayer.getActiveTrackIndex === "function"
+            ? TrackPlayer.getActiveTrackIndex()
+            : Promise.resolve(undefined),
+          TrackPlayer.getPlaybackState(),
+        ]);
         if (!mounted) return;
 
         const nextPosition = Number.isFinite(runtimeProgress?.position)
@@ -405,6 +444,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         const nextDuration = Number.isFinite(runtimeProgress?.duration)
           ? Math.max(0, runtimeProgress.duration)
           : 0;
+        const nextPlaybackState =
+          runtimePlaybackState && typeof runtimePlaybackState === "object" && "state" in runtimePlaybackState
+            ? runtimePlaybackState.state
+            : runtimePlaybackState;
+        const activeTrackId = String(activeTrack?.id ?? "").trim();
+        const currentQueue = queueRef.current;
+        const mappedIndexById = activeTrackId
+          ? currentQueue.findIndex((song) => String(song.id) === activeTrackId)
+          : -1;
+        const fallbackActiveIndex =
+          typeof activeTrackIndex === "number" && Number.isFinite(activeTrackIndex) ? activeTrackIndex : -1;
+        const nextQueueIndex = mappedIndexById >= 0 ? mappedIndexById : fallbackActiveIndex;
 
         setRuntimeProgressSnapshot((prev) => {
           const positionDelta = Math.abs(prev.position - nextPosition);
@@ -414,6 +465,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           }
           return { position: nextPosition, duration: nextDuration };
         });
+        setRuntimePlaybackStateSnapshot((prev: any) => (prev === nextPlaybackState ? prev : nextPlaybackState));
+
+        if (nextQueueIndex >= 0 && nextQueueIndex < currentQueue.length) {
+          const nextSong = currentQueue[nextQueueIndex];
+          if (queueIndexRef.current !== nextQueueIndex) {
+            setQueueIndex(nextQueueIndex);
+            queueIndexRef.current = nextQueueIndex;
+          }
+          if (nextSong?.id && currentSongRef.current?.id !== nextSong.id) {
+            setCurrentSong(nextSong);
+          }
+        }
       } catch {
         // Silent runtime progress fallback failure
       }
@@ -571,6 +634,106 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         trackChangedSubscription.remove();
       }
     };
+  }, [isPlayerReady]);
+
+  // Listen for Android Auto queue replacements so we can sync currentSong immediately
+  // without waiting for PlaybackActiveTrackChanged (which fires after the queue is set)
+  useEffect(() => {
+    if (!isPlayerReady || Platform.OS !== "android") {
+      return;
+    }
+
+    const { DeviceEventEmitter } = require("react-native");
+    const subscription = DeviceEventEmitter.addListener(
+      "AutoQueueApplied",
+      (event: { tracks: Song[]; startIndex: number; queueTitle: string }) => {
+        try {
+          const { tracks, startIndex } = event;
+          if (!Array.isArray(tracks) || tracks.length === 0) return;
+          const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
+          setQueue(tracks);
+          setSourceQueue(tracks);
+          queueRef.current = tracks;
+          originalQueueRef.current = tracks;
+          setQueueIndex(safeIndex);
+          queueIndexRef.current = safeIndex;
+          setCurrentSong(tracks[safeIndex]);
+        } catch {
+          // Silent fail
+        }
+      }
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isPlayerReady]);
+
+  useEffect(() => {
+    if (!isPlayerReady || Platform.OS !== "android") {
+      return;
+    }
+
+    const { NativeEventEmitter, NativeModules } = require("react-native");
+    const autoPlayModule = NativeModules.AutoPlayModule;
+    if (!autoPlayModule) {
+      return;
+    }
+
+    try {
+      const emitter = new NativeEventEmitter(autoPlayModule);
+      const subscription = emitter.addListener("AutoTransportCommand", (payload: unknown) => {
+        if (typeof payload !== "string" || payload.trim().length === 0) {
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(payload) as { command?: string; queueIndex?: number };
+          const currentQueue = queueRef.current;
+
+          switch (parsed.command) {
+            case "play":
+              setRuntimePlaybackStateSnapshot(State.Playing);
+              break;
+            case "pause":
+            case "stop":
+              setRuntimePlaybackStateSnapshot(State.Paused ?? "paused");
+              break;
+            case "next": {
+              const nextIndex = queueIndexRef.current + 1;
+              const nextSong = currentQueue[nextIndex];
+              if (!nextSong) return;
+              setQueueIndex(nextIndex);
+              queueIndexRef.current = nextIndex;
+              setCurrentSong(nextSong);
+              break;
+            }
+            case "skipToQueueItem": {
+              if (typeof parsed.queueIndex !== "number" || !Number.isFinite(parsed.queueIndex)) {
+                return;
+              }
+              const nextIndex = Math.max(0, Math.min(parsed.queueIndex, currentQueue.length - 1));
+              const nextSong = currentQueue[nextIndex];
+              if (!nextSong) return;
+              setQueueIndex(nextIndex);
+              queueIndexRef.current = nextIndex;
+              setCurrentSong(nextSong);
+              break;
+            }
+            default:
+              break;
+          }
+        } catch {
+          // Ignore malformed transport payloads.
+        }
+      });
+
+      return () => {
+        subscription.remove();
+      };
+    } catch {
+      return;
+    }
   }, [isPlayerReady]);
 
   const showPlaybackNotice = useCallback((message: string) => {

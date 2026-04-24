@@ -969,7 +969,7 @@ function LegacyPlayerScreen() {
                   initialNumToRender={3}
                   maxToRenderPerBatch={5}
                   windowSize={5}
-                  removeClippedSubviews={Platform.OS === "android"}
+                  removeClippedSubviews={false}
                   onScroll={handleArtworkScroll}
                   scrollEventThrottle={16}
                   onMomentumScrollEnd={handleArtworkScrollFinished}

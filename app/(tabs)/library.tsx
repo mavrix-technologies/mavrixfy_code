@@ -735,6 +735,7 @@ export default function LibraryScreen() {
         keyExtractor={(item) =>
           isCreateTileItem(item) ? item.id : `${item.id}-${item.isFirestore ? "cloud" : "local"}`
         }
+        key={viewMode}
         renderItem={
           viewMode === "grid"
             ? renderGridPlaylistItem
@@ -759,7 +760,7 @@ export default function LibraryScreen() {
         initialNumToRender={8}
         maxToRenderPerBatch={8}
         windowSize={7}
-        removeClippedSubviews={Platform.OS === "android"}
+        removeClippedSubviews={false}
       />
 
       <Modal

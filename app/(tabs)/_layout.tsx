@@ -1035,8 +1035,13 @@ export default function TabLayout() {
 
   const shouldHideTabBar = pathname?.includes("/import-songs/file");
 
-  // Force iOS to use native tabs
-  if (isIOS && !isWeb) {
+  // Check if we're in a production build (not dev client)
+  // NativeTabs only work in production builds via App Store/TestFlight
+  const isProductionBuild = !__DEV__ && Platform.OS === "ios" && !isWeb;
+  
+  // Use native tabs only in production iOS builds
+  // For development/sideloaded builds, use custom tabs
+  if (isProductionBuild) {
     return (
       <View style={{ flex: 1, backgroundColor: Colors.background }}>
         <IOSNativeTabLayout />

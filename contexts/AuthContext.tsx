@@ -116,6 +116,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setFirebaseUser(null);
     setUser(null);
     setIsGuest(true);
+    // Must clear loading so the auth guard can navigate to (tabs)
+    setLoading(false);
   }, []);
 
   const register = useCallback(async (email: string, password: string, fullName: string) => {

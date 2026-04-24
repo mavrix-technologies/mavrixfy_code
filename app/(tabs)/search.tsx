@@ -852,7 +852,7 @@ export default function SearchScreen() {
                 style={styles.scrollView}
                 contentContainerStyle={[styles.playlistGridContentContainer, { paddingBottom: 146 }]}
                 showsVerticalScrollIndicator={false}
-                removeClippedSubviews={Platform.OS === "android"}
+                removeClippedSubviews={false}
                 initialNumToRender={8}
                 maxToRenderPerBatch={8}
                 windowSize={7}
@@ -889,7 +889,7 @@ export default function SearchScreen() {
                   contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={false}
-                  removeClippedSubviews={Platform.OS === "android"}
+                  removeClippedSubviews={false}
                   initialNumToRender={10}
                   maxToRenderPerBatch={10}
                   windowSize={7}
