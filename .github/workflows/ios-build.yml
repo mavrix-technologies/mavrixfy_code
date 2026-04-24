@@ -3,6 +3,9 @@ name: iOS-ipa-build
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-ios:
     name: 🎉 iOS Build
@@ -72,33 +75,17 @@ jobs:
           path: ./Mavrixfy.ipa
           compression-level: 0
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release and Upload IPA
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
-          release_name: iOS Build v${{ github.run_number }}
+          name: iOS Build v${{ github.run_number }}
           body: |
             iOS IPA Build - Unsigned (No Code Signing)
             
             **Build Details:**
             - Build Number: ${{ github.run_number }}
             - Commit: ${{ github.sha }}
-            - Date: ${{ github.event.head_commit.timestamp }}
-            
-            **Download:**
-            The IPA file is available in the artifacts section above.
           draft: false
           prerelease: false
-
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./Mavrixfy.ipa
-          asset_name: Mavrixfy-v${{ github.run_number }}.ipa
-          asset_content_type: application/octet-stream
+          files: ./Mavrixfy.ipa
