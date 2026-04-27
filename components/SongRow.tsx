@@ -34,9 +34,19 @@ const SongRow = memo(function SongRow({
   const swipeInFlightRef = useRef(false);
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gesture) =>
-        Math.abs(gesture.dx) > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gesture) => {
+        // Only capture horizontal swipes, ignore vertical scrolling
+        const isHorizontal = Math.abs(gesture.dx) > Math.abs(gesture.dy);
+        const hasMovedEnough = Math.abs(gesture.dx) > 10;
+        return isHorizontal && hasMovedEnough;
+      },
+      onPanResponderGrant: () => {
+        // Stop any ongoing animations when user starts swiping
+        translateX.stopAnimation();
+      },
       onPanResponderMove: (_, gesture) => {
+        // Only allow left swipe, clamp to action width
         const nextX = Math.max(-SWIPE_ACTION_WIDTH, Math.min(0, gesture.dx));
         translateX.setValue(nextX);
       },
@@ -69,21 +79,23 @@ const SongRow = memo(function SongRow({
           });
           return;
         }
+        // Smooth spring animation back to closed position
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
-          damping: 20,
-          stiffness: 210,
-          mass: 0.9,
+          damping: 22,
+          stiffness: 220,
+          mass: 0.8,
         }).start();
       },
       onPanResponderTerminate: () => {
+        // Smooth spring animation back to closed position on termination
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
-          damping: 20,
-          stiffness: 210,
-          mass: 0.9,
+          damping: 22,
+          stiffness: 220,
+          mass: 0.8,
         }).start();
       },
     })

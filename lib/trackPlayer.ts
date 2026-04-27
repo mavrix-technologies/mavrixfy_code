@@ -32,9 +32,9 @@ async function configurePlayerOptions() {
     await withTimeout(
       TrackPlayer.updateOptions({
         android: {
-          // Keep the notification available after the app leaves recents without
-          // forcing playback to continue.
-          appKilledPlaybackBehavior: AppKilledPlaybackBehavior.PausePlayback,
+          // Keep the native player alive when the phone UI is swiped away.
+          // Android Auto reconnects to this background session.
+          appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
           alwaysPauseOnInterruption: true,
         },
         capabilities: [
@@ -89,12 +89,17 @@ export async function setupPlayer() {
   if (!setupPromise) {
     setupPromise = (async () => {
       try {
-        await withTimeout(
-          TrackPlayer.setupPlayer({
+        const playerOptions = {
             maxCacheSize: 1024 * 50, // 50 MB cache
             autoUpdateMetadata: true,
             autoHandleInterruptions: true,
-          }),
+            // RNTP normally rejects Android setup while the app is backgrounded.
+            // Our patched native module permits this for Android Auto/headless playback.
+            allowBackgroundSetup: true,
+          } as any;
+
+        await withTimeout(
+          TrackPlayer.setupPlayer(playerOptions),
           PLAYER_SETUP_TIMEOUT_MS,
           "setupPlayer"
         );

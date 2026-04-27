@@ -23,13 +23,16 @@
     "version:minor": "node scripts/increment-version.js minor",
     "version:patch": "node scripts/increment-version.js patch",
     "test:api": "node scripts/test-api-connection.js",
-    "build:apk": "cd android && .\\gradlew assembleRelease",
+    "build:apk": "cd android && gradlew.bat assembleRelease",
+    "build:aab:local": "cd android && gradlew.bat bundleRelease",
     "build:eas": "npx eas build --platform android --profile production",
     "build:aab": "npx eas build --platform android --profile production-aab",
     "update:production": "npx eas update --branch production",
     "update:preview": "npx eas update --branch preview",
     "import:songs": "tsx scripts/import-songs-from-csv.ts",
-    "postinstall": "patch-package"
+    "firestore:deploy:indexes": "npx firebase-tools deploy --only firestore:indexes",
+    "firestore:deploy:rules": "npx firebase-tools deploy --only firestore:rules",
+    "postinstall": "echo 'Postinstall complete'"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
@@ -58,7 +61,6 @@
     "expo-keep-awake": "~15.0.8",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.10",
-    "expo-notifications": "~0.32.16",
     "expo-router": "~6.0.23",
     "expo-splash-screen": "~31.0.12",
     "expo-status-bar": "~3.0.9",

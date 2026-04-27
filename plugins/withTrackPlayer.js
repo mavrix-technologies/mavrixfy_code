@@ -25,6 +25,30 @@ function ensureIntentAction(service, actionName) {
   }
 }
 
+function hasIntentAction(filter, actionName) {
+  return (filter.action || []).some((action) => action.$?.["android:name"] === actionName);
+}
+
+function cloneManifestNode(node) {
+  return JSON.parse(JSON.stringify(node));
+}
+
+function ensureRemovedIntentAction(service, filter) {
+  const actionName = (filter.action || [])[0]?.$?.["android:name"];
+  if (!actionName) return true;
+
+  if (!service["intent-filter"]) service["intent-filter"] = [];
+  const exists = service["intent-filter"].some(
+    (existingFilter) =>
+      existingFilter.$?.["tools:node"] === "remove" &&
+      hasIntentAction(existingFilter, actionName)
+  );
+  if (!exists) {
+    service["intent-filter"].push(cloneManifestNode(filter));
+  }
+  return true;
+}
+
 function ensureService(app, serviceDef) {
   if (!app.service) app.service = [];
   const name = serviceDef.$["android:name"];
@@ -37,6 +61,11 @@ function ensureService(app, serviceDef) {
   existing.$ = { ...(existing.$ || {}), ...(serviceDef.$ || {}) };
   const expectedFilters = serviceDef["intent-filter"] || [];
   expectedFilters.forEach((filter) => {
+    if (filter.$?.["tools:node"] === "remove") {
+      ensureRemovedIntentAction(existing, filter);
+      return;
+    }
+
     (filter.action || []).forEach((action) => {
       const actionName = action.$?.["android:name"];
       if (actionName) {
@@ -98,23 +127,25 @@ function ensureUsesFeature(manifest, featureName) {
   }
 }
 
+function ensureToolsNamespace(manifest) {
+  manifest.$ = manifest.$ || {};
+  if (!manifest.$["xmlns:tools"]) {
+    manifest.$["xmlns:tools"] = "http://schemas.android.com/tools";
+  }
+}
+
 const withTrackPlayer = (config) => {
   config = withAndroidManifest(config, (config) => {
     const manifest = config.modResults.manifest;
     const app = manifest.application?.[0];
     if (!app) return config;
 
+    ensureToolsNamespace(manifest);
     ensureUsesFeature(manifest, "android.hardware.type.automotive");
     ensureAppMetaData(app, {
       $: {
         "android:name": "com.google.android.gms.car.application",
         "android:resource": "@xml/automotive_app_desc",
-      },
-    });
-    ensureAppMetaData(app, {
-      $: {
-        "android:name": "androidx.car.app.TintableAttributionIcon",
-        "android:resource": "@drawable/ic_queue_music",
       },
     });
 
@@ -124,10 +155,15 @@ const withTrackPlayer = (config) => {
         "android:enabled": "true",
         "android:exported": "true",
         "android:foregroundServiceType": "mediaPlayback",
+        "tools:replace": "android:exported,android:foregroundServiceType",
       },
       "intent-filter": [
         {
           action: [{ $: { "android:name": "android.intent.action.MEDIA_BUTTON" } }],
+        },
+        {
+          $: { "tools:node": "remove" },
+          action: [{ $: { "android:name": "android.media.browse.MediaBrowserService" } }],
         },
       ],
     });

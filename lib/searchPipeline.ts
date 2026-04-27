@@ -311,13 +311,18 @@ function buildCandidate(
 }
 
 function compareCandidates(a: RankedSongCandidate, b: RankedSongCandidate): number {
+  if (Math.abs(b.matchScore - a.matchScore) > 0.15) {
+    return b.matchScore - a.matchScore;
+  }
+  
+  if (b.year !== a.year) return b.year - a.year;
+
   if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore;
   if (b.originalPriority !== a.originalPriority) {
     return b.originalPriority - a.originalPriority;
   }
   if (b.playCount !== a.playCount) return b.playCount - a.playCount;
   if (b.metadataScore !== a.metadataScore) return b.metadataScore - a.metadataScore;
-  if (b.year !== a.year) return b.year - a.year;
   return a.title.localeCompare(b.title);
 }
 

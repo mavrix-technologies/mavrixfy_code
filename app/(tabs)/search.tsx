@@ -20,12 +20,8 @@ import { fetch } from "expo/fetch";
 import Colors from "@/constants/colors";
 import { getBestImageUrl, Song } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
-import {
-  createSearchPlan,
-  extractSongResults,
-  rankSongsTopK,
-} from "@/lib/searchPipeline";
 import SongRow from "@/components/SongRow";
+import { getCatalogSongs, searchCatalog } from "@/lib/catalogService";
 
 interface PlaylistResult {
   id: string;
@@ -60,7 +56,7 @@ const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
 ];
 
 const CARD_ROTATION_PATTERN = [-11, 8, -7, 10, -5, 6] as const;
-const APP_BRAND_ICON = require("@/assets/images/icon.png");
+const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 
 const STITCH_RECENT_SEARCHES: RecentSearchItem[] = [
   {
@@ -248,40 +244,85 @@ export default function SearchScreen() {
     setIsLoading(true);
     const apiUrl = getApiUrl();
     const freshnessKey = Math.floor(Date.now() / 60000);
-    const searchPlan = createSearchPlan(normalizedQuery);
-    const songRequests = searchPlan.retrievalQueries.map((candidate, index) =>
-      fetch(
-        `${apiUrl}api/jiosaavn/search/songs?query=${encodeURIComponent(candidate)}&limit=${index === 0 ? 50 : 25}&fresh=${freshnessKey}`
-      )
-    );
 
     try {
-      const [playlistsRes, ...songResponses] = await Promise.all([
-        fetch(
-          `${apiUrl}api/jiosaavn/search/playlists?query=${encodeURIComponent(normalizedQuery)}&limit=10&fresh=${freshnessKey}`
-        ),
-        ...songRequests,
+      // Run JioSaavn search + catalog + playlists in parallel
+      const [searchRes, playlistsRes, catalogSongs] = await Promise.all([
+        // Use JioSaavn search directly (3 providers, best quality)
+        fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(normalizedQuery)}&limit=20&fresh=${freshnessKey}`),
+        fetch(`${apiUrl}api/jiosaavn/search/playlists?query=${encodeURIComponent(normalizedQuery)}&limit=10&fresh=${freshnessKey}`),
+        // Fetch admin catalog songs from Firestore directly
+        getCatalogSongs().catch(() => [] as Song[]),
       ]);
 
-      const [playlistsData, ...songPayloads] = await Promise.all([
+      if (requestId !== requestSeqRef.current) return;
+
+      const [searchData, playlistsData] = await Promise.all([
+        parseJsonResponse(searchRes),
         parseJsonResponse(playlistsRes),
-        ...songResponses.map((response) => parseJsonResponse(response)),
       ]);
 
-      if (requestId !== requestSeqRef.current) {
-        return;
-      }
+      if (requestId !== requestSeqRef.current) return;
 
-      const rawSongResults = songPayloads.flatMap((payload) =>
-        extractSongResults(payload)
-      );
-      const rankedSongs = rankSongsTopK(normalizedQuery, rawSongResults, 20);
-      setSongResults(rankedSongs.songs);
-      setSearchDisplayQuery(rankedSongs.correctedQuery || normalizedQuery);
+      // Convert JioSaavn results
+      const rawResults = searchData?.data?.results || searchData?.results || [];
+      const jiosaavnSongs: Song[] = rawResults
+        .filter((s: any) => s?.id)
+        .map((s: any) => {
+          const downloads: any[] = Array.isArray(s.downloadUrl) ? s.downloadUrl : [];
+          const audioUrl =
+            downloads.find((d: any) => d.quality === '320kbps')?.url ||
+            downloads.find((d: any) => d.quality === '160kbps')?.url ||
+            downloads[downloads.length - 1]?.url || '';
+          const images: any[] = Array.isArray(s.image) ? s.image : [];
+          const coverUrl = images.find((i: any) => i.quality === '500x500')?.url ||
+            images[images.length - 1]?.url || '';
+          const artist = s.artists?.primary?.map((a: any) => a.name).join(', ') ||
+            s.primaryArtists || s.artist || 'Unknown Artist';
+          return {
+            id: s.id,
+            title: s.name || s.title || '',
+            artist,
+            album: s.album?.name || '',
+            duration: Number(s.duration) || 0,
+            coverUrl,
+            genre: s.language || '',
+            audioUrl,
+            year: s.year ? String(s.year) : '',
+            source: 'jiosaavn' as const,
+          };
+        })
+        .filter((s: Song) => s.audioUrl);
 
+      // Merge catalog songs that match the query
+      const matchingCatalog = searchCatalog(catalogSongs, normalizedQuery);
+      const existingIds = new Set(jiosaavnSongs.map(s => s.id));
+      const newCatalog = matchingCatalog.filter(s => !existingIds.has(s.id));
+
+      // Rank: latest year first, then by title relevance as tiebreaker
+      const q = normalizedQuery.toLowerCase();
+      const score = (s: Song) => {
+        const t = s.title.toLowerCase();
+        const a = s.artist.toLowerCase();
+        if (t === q) return 100;
+        if (t.startsWith(q)) return 80;
+        if (t.includes(q)) return 60;
+        if (a.includes(q)) return 30;
+        return 10;
+      };
+
+      const allSongs = [...jiosaavnSongs, ...newCatalog]
+        .sort((a, b) => {
+          const yearDiff = (Number(b.year) || 0) - (Number(a.year) || 0);
+          if (yearDiff !== 0) return yearDiff;
+          return score(b) - score(a);
+        })
+        .filter(s => s.audioUrl);
+      setSongResults(allSongs);
+      setSearchDisplayQuery(normalizedQuery);
+
+      // Playlists
       if (playlistsData?.success && playlistsData.data?.results) {
-        setPlaylistResults(normalizePlaylistResults(playlistsData.data.results));
-      } else if (playlistsData?.data?.results) {
         setPlaylistResults(normalizePlaylistResults(playlistsData.data.results));
       } else if (Array.isArray(playlistsData?.results)) {
         setPlaylistResults(normalizePlaylistResults(playlistsData.results));
@@ -289,16 +330,12 @@ export default function SearchScreen() {
         setPlaylistResults([]);
       }
     } catch {
-      if (requestId !== requestSeqRef.current) {
-        return;
-      }
+      if (requestId !== requestSeqRef.current) return;
       setSongResults([]);
       setPlaylistResults([]);
       setSearchDisplayQuery(normalizedQuery);
     } finally {
-      if (requestId === requestSeqRef.current) {
-        setIsLoading(false);
-      }
+      if (requestId === requestSeqRef.current) setIsLoading(false);
     }
   }, []);
 

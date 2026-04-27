@@ -1062,11 +1062,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         else return;
       }
 
-      await TrackPlayer.skip(ni);
-      await TrackPlayer.play();
+      // Update state first for immediate UI feedback
       setQueueIndex(ni);
       queueIndexRef.current = ni;
       setCurrentSong(cq[ni]);
+
+      // Then perform TrackPlayer operations smoothly
+      await TrackPlayer.skip(ni);
+      await TrackPlayer.play();
     } catch (error) {
       // Silent fail
     }
@@ -1120,11 +1123,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      await TrackPlayer.skip(pi);
-      await TrackPlayer.play();
+      // Update state first for immediate UI feedback
       setQueueIndex(pi);
       queueIndexRef.current = pi;
       setCurrentSong(cq[pi]);
+
+      // Then perform TrackPlayer operations smoothly
+      await TrackPlayer.skip(pi);
+      await TrackPlayer.play();
     } catch (error) {
       // Silent fail
     }
@@ -1188,7 +1194,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [effectiveTrackDurationSeconds, isPlayerReady]);
 
-  const toggleShuffle = useCallback(() => {
+  const toggleShuffle = useCallback(async () => {
     if (!TrackPlayer || !setupPlayer) {
       if (isExpoGoRuntime) {
         setPreviewIsShuffled((prev) => !prev);
@@ -1198,58 +1204,71 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!isPlayerReady) {
       return;
     }
-    setIsShuffled(prev => {
-      const next = !prev;
-      if (next) {
-        const cq = [...queueRef.current];
-        const ci = queueIndexRef.current;
-        const currentSongItem = cq[ci];
-        if (!currentSongItem) {
-          return prev;
+    
+    await runSerializedPlaybackSwitch(async () => {
+      setIsShuffled(prev => {
+        const next = !prev;
+        if (next) {
+          const cq = [...queueRef.current];
+          const ci = queueIndexRef.current;
+          const currentSongItem = cq[ci];
+          if (!currentSongItem) {
+            return prev;
+          }
+          const rest = cq.filter((_, i) => i !== ci);
+          for (let i = rest.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [rest[i], rest[j]] = [rest[j], rest[i]];
+          }
+          const shuffled = [currentSongItem, ...rest];
+          setQueue(shuffled);
+          queueRef.current = shuffled;
+          setQueueIndex(0);
+          queueIndexRef.current = 0;
+          
+          // Smooth queue rebuild
+          void (async () => {
+            try {
+              await TrackPlayer.reset();
+              const validSongs = shuffled
+                .map(normalizePlayableSong)
+                .filter((item): item is Song => Boolean(item));
+              await TrackPlayer.add(validSongs.map(songToTrack));
+              await TrackPlayer.skip(0);
+              await TrackPlayer.play();
+            } catch {
+              // Silent fail
+            }
+          })();
+        } else {
+          const orig = originalQueueRef.current;
+          const cs = queueRef.current[queueIndexRef.current];
+          const origIdx = orig.findIndex(s => s.id === cs?.id);
+          setQueue(orig);
+          queueRef.current = orig;
+          setQueueIndex(origIdx >= 0 ? origIdx : 0);
+          queueIndexRef.current = origIdx >= 0 ? origIdx : 0;
+          
+          // Smooth queue rebuild
+          void (async () => {
+            try {
+              await TrackPlayer.reset();
+              const validSongs = orig
+                .map(normalizePlayableSong)
+                .filter((item): item is Song => Boolean(item));
+              await TrackPlayer.add(validSongs.map(songToTrack));
+              const validIdx = validSongs.findIndex(s => s.id === cs?.id);
+              await TrackPlayer.skip(validIdx >= 0 ? validIdx : 0);
+              await TrackPlayer.play();
+            } catch {
+              // Silent fail
+            }
+          })();
         }
-        const rest = cq.filter((_, i) => i !== ci);
-        for (let i = rest.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [rest[i], rest[j]] = [rest[j], rest[i]];
-        }
-        const shuffled = [currentSongItem, ...rest];
-        setQueue(shuffled);
-        queueRef.current = shuffled;
-        setQueueIndex(0);
-        queueIndexRef.current = 0;
-        
-        TrackPlayer.reset().then(() => {
-          const validSongs = shuffled
-            .map(normalizePlayableSong)
-            .filter((item): item is Song => Boolean(item));
-          TrackPlayer.add(validSongs.map(songToTrack)).then(() => {
-            TrackPlayer.skip(0);
-            TrackPlayer.play();
-          }).catch(() => {});
-        }).catch(() => {});
-      } else {
-        const orig = originalQueueRef.current;
-        const cs = queueRef.current[queueIndexRef.current];
-        const origIdx = orig.findIndex(s => s.id === cs?.id);
-        setQueue(orig);
-        queueRef.current = orig;
-        setQueueIndex(origIdx >= 0 ? origIdx : 0);
-        queueIndexRef.current = origIdx >= 0 ? origIdx : 0;
-        
-        TrackPlayer.reset().then(() => {
-          const validSongs = orig
-            .map(normalizePlayableSong)
-            .filter((item): item is Song => Boolean(item));
-          TrackPlayer.add(validSongs.map(songToTrack)).then(() => {
-            const validIdx = validSongs.findIndex(s => s.id === cs?.id);
-            TrackPlayer.skip(validIdx >= 0 ? validIdx : 0);
-            TrackPlayer.play();
-          }).catch(() => {});
-        }).catch(() => {});
-      }
-      return next;
+        return next;
+      });
     });
-  }, [isPlayerReady]);
+  }, [isPlayerReady, runSerializedPlaybackSwitch]);
 
   const toggleRepeat = useCallback(async () => {
     if (!TrackPlayer || !setupPlayer) {

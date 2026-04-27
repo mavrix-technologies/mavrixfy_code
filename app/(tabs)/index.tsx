@@ -33,7 +33,7 @@ import {
 import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistService";
 import HomeSkeletonLoader from "@/components/HomeSkeletonLoader";
 
-const APP_BRAND_ICON = require("@/assets/images/icon.png");
+const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 
 type HomeSection =
   | { id: "recents"; type: "recents" }

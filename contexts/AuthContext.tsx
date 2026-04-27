@@ -15,7 +15,7 @@ import {
   EmailAuthProvider,
   User as FirebaseUser,
 } from "firebase/auth";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { logLogin, logSignUp } from "@/lib/analytics";
 import { Platform } from "react-native";
@@ -121,20 +121,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const register = useCallback(async (email: string, password: string, fullName: string) => {
-    const cred = await createUserWithEmailAndPassword(auth, email, password);
-    await updateProfile(cred.user, { displayName: fullName });
+    const normalizedEmail = email.trim();
+    const displayName = fullName.trim();
+    const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+    await updateProfile(cred.user, { displayName });
     // Create user doc WITHOUT onboardingCompleted — the onboarding flow sets it
     await setDoc(doc(db, "users", cred.user.uid), {
-      email,
-      fullName,
+      uid: cred.user.uid,
+      email: normalizedEmail,
+      emailLower: normalizedEmail.toLowerCase(),
+      displayName,
+      fullName: displayName,
       imageUrl: null,
+      photoURL: null,
+      provider: "password",
       onboardingCompleted: false,
-      createdAt: new Date().toISOString(),
+      schemaVersion: 2,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
     const appUser: AppUser = {
       id: cred.user.uid,
-      email,
-      name: fullName,
+      email: normalizedEmail,
+      name: displayName,
       picture: "",
     };
     setUser(appUser);
@@ -150,16 +159,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const fbUser = result.user;
       const userDocRef = doc(db, "users", fbUser.uid);
       const userDocSnap = await getDoc(userDocRef);
+      const googleUserData = {
+        uid: fbUser.uid,
+        email: fbUser.email || "",
+        emailLower: (fbUser.email || "").toLowerCase(),
+        displayName: fbUser.displayName || "",
+        fullName: fbUser.displayName || "",
+        imageUrl: fbUser.photoURL || null,
+        photoURL: fbUser.photoURL || null,
+        provider: "google.com",
+        schemaVersion: 2,
+        updatedAt: serverTimestamp(),
+        lastLoginAt: serverTimestamp(),
+      };
       if (!userDocSnap.exists()) {
         await setDoc(userDocRef, {
-          email: fbUser.email,
-          fullName: fbUser.displayName || "",
-          imageUrl: fbUser.photoURL || null,
-          uid: fbUser.uid,
-          createdAt: new Date().toISOString(),
+          ...googleUserData,
+          createdAt: serverTimestamp(),
         });
         logSignUp("google");
       } else {
+        await setDoc(userDocRef, googleUserData, { merge: true });
         logLogin("google");
       }
       const appUser = await buildAppUser(fbUser);
@@ -177,16 +197,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const fbUser = result.user;
     const userDocRef = doc(db, "users", fbUser.uid);
     const userDocSnap = await getDoc(userDocRef);
+    const googleUserData = {
+      uid: fbUser.uid,
+      email: fbUser.email || "",
+      emailLower: (fbUser.email || "").toLowerCase(),
+      displayName: fbUser.displayName || "",
+      fullName: fbUser.displayName || "",
+      imageUrl: fbUser.photoURL || null,
+      photoURL: fbUser.photoURL || null,
+      provider: "google.com",
+      schemaVersion: 2,
+      updatedAt: serverTimestamp(),
+      lastLoginAt: serverTimestamp(),
+    };
     if (!userDocSnap.exists()) {
       await setDoc(userDocRef, {
-        email: fbUser.email,
-        fullName: fbUser.displayName || "",
-        imageUrl: fbUser.photoURL || null,
-        uid: fbUser.uid,
-        createdAt: new Date().toISOString(),
+        ...googleUserData,
+        createdAt: serverTimestamp(),
       });
       logSignUp("google");
     } else {
+      await setDoc(userDocRef, googleUserData, { merge: true });
       logLogin("google");
     }
     const appUser = await buildAppUser(fbUser);

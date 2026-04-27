@@ -23,31 +23,87 @@ export interface FirestorePlaylist {
   songs: any[];
   createdBy: {
     id: string;
+    _id?: string;
+    uid?: string;
     name: string;
+    fullName?: string;
+    imageUrl?: string;
   };
   isPublic: boolean;
+  songCount?: number;
   createdAt?: any;
   updatedAt?: any;
 }
 
+function normalizeForDedupe(value: unknown): string {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function getSongDedupeKey(song: any): string {
+  return `${normalizeForDedupe(song?.title || song?.name)}|${normalizeForDedupe(song?.artist || song?.artists)}`;
+}
+
+function getTimestampMillis(value: any): number {
+  if (!value) return 0;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") {
+    const date = value.toDate();
+    return date instanceof Date ? date.getTime() : 0;
+  }
+  const seconds = typeof value.seconds === "number" ? value.seconds : value._seconds;
+  return typeof seconds === "number" ? seconds * 1000 : 0;
+}
+
+function sortPlaylistsByNewest(playlists: FirestorePlaylist[]): FirestorePlaylist[] {
+  return [...playlists].sort((a, b) => {
+    const aTime = getTimestampMillis(a.updatedAt) || getTimestampMillis(a.createdAt);
+    const bTime = getTimestampMillis(b.updatedAt) || getTimestampMillis(b.createdAt);
+    return bTime - aTime;
+  });
+}
+
 // Get user playlists from Firestore
-export async function getUserFirestorePlaylists(userId: string): Promise<FirestorePlaylist[]> {
+export async function getUserFirestorePlaylists(userId: string, maxCount: number = 50): Promise<FirestorePlaylist[]> {
   try {
     if (!db) {
       return [];
     }
 
+    const safeLimit = Math.min(Math.max(Number(maxCount) || 50, 1), 100);
     const playlistsRef = collection(db, "playlists");
-    const q = query(playlistsRef, where("createdBy.id", "==", userId));
-    const querySnapshot = await getDocs(q);
+    const queries = [
+      query(playlistsRef, where("createdBy.uid", "==", userId), orderBy("createdAt", "desc"), limit(safeLimit)),
+      query(playlistsRef, where("createdBy.id", "==", userId), orderBy("createdAt", "desc"), limit(safeLimit)),
+    ];
+    const snapshots = await Promise.allSettled(queries.map((q) => getDocs(q)));
+    const byId = new Map<string, FirestorePlaylist>();
 
-    const playlists: FirestorePlaylist[] = [];
-    querySnapshot.forEach((doc) => {
-      playlists.push({ id: doc.id, ...doc.data() } as FirestorePlaylist);
-    });
+    const addSnapshot = (result: PromiseSettledResult<Awaited<ReturnType<typeof getDocs>>>) => {
+      if (result.status !== "fulfilled") return;
+      result.value.forEach((doc) => {
+        const data = doc.data() as Record<string, unknown>;
+        byId.set(doc.id, { id: doc.id, ...data } as FirestorePlaylist);
+      });
+    };
 
-    return playlists;
-  } catch (error) {
+    snapshots.forEach(addSnapshot);
+
+    if (snapshots.some((result) => result.status === "rejected")) {
+      const fallbackQueries = [
+        query(playlistsRef, where("createdBy.uid", "==", userId), limit(safeLimit)),
+        query(playlistsRef, where("createdBy.id", "==", userId), limit(safeLimit)),
+      ];
+      const fallbackSnapshots = await Promise.allSettled(fallbackQueries.map((q) => getDocs(q)));
+      fallbackSnapshots.forEach(addSnapshot);
+    }
+
+    return sortPlaylistsByNewest(Array.from(byId.values())).slice(0, safeLimit);
+  } catch {
     return [];
   }
 }
@@ -71,9 +127,16 @@ export async function createFirestorePlaylist(
       songs: [],
       createdBy: {
         id: userId,
+        _id: userId,
+        uid: userId,
         name: userName,
+        fullName: userName,
       },
       isPublic: false,
+      songCount: 0,
+      schemaVersion: 2,
+      source: "mavrixfy_app",
+      searchableName: normalizeForDedupe(name),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -85,11 +148,15 @@ export async function createFirestorePlaylist(
       songs: [],
       createdBy: {
         id: userId,
+        _id: userId,
+        uid: userId,
         name: userName,
+        fullName: userName,
       },
       isPublic: false,
+      songCount: 0,
     };
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -104,7 +171,7 @@ export async function deleteFirestorePlaylist(playlistId: string): Promise<boole
     const playlistRef = doc(db, "playlists", playlistId);
     await deleteDoc(playlistRef);
     return true;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -117,16 +184,28 @@ export async function getPublicPlaylists(maxCount: number = 50): Promise<Firesto
     }
 
     const playlistsRef = collection(db, "playlists");
-    const q = query(playlistsRef, where("isPublic", "==", true), limit(maxCount));
-    const querySnapshot = await getDocs(q);
+    let querySnapshot;
+
+    try {
+      const q = query(
+        playlistsRef,
+        where("isPublic", "==", true),
+        orderBy("updatedAt", "desc"),
+        limit(maxCount)
+      );
+      querySnapshot = await getDocs(q);
+    } catch {
+      const q = query(playlistsRef, where("isPublic", "==", true), limit(maxCount));
+      querySnapshot = await getDocs(q);
+    }
 
     const playlists: FirestorePlaylist[] = [];
     querySnapshot.forEach((doc) => {
       playlists.push({ id: doc.id, ...doc.data() } as FirestorePlaylist);
     });
 
-    return playlists;
-  } catch (error) {
+    return sortPlaylistsByNewest(playlists).slice(0, maxCount);
+  } catch {
     return [];
   }
 }
@@ -144,7 +223,7 @@ export async function getLikedSongsFromFirestore(userId: string): Promise<any[]>
     try {
       const q = query(likedSongsRef, orderBy('likedAt', 'desc'));
       snapshot = await getDocs(q);
-    } catch (orderError) {
+    } catch {
       snapshot = await getDocs(likedSongsRef);
     }
 
@@ -162,7 +241,7 @@ export async function getLikedSongsFromFirestore(userId: string): Promise<any[]>
         title: data.title || data.name || "",
         artist: data.artist || data.artists || "",
         coverUrl: data.imageUrl || data.coverUrl || data.image || "",
-        audioUrl: data.audioUrl || data.url || data.previewUrl || "",
+        audioUrl: data.audioUrl || data.streamUrl || data.url || data.previewUrl || "",
         duration: data.duration || 0,
         album: data.album || data.albumName || "",
         addedAt: data.likedAt || data.addedAt || data.syncedAt,
@@ -175,7 +254,7 @@ export async function getLikedSongsFromFirestore(userId: string): Promise<any[]>
     });
 
     return likedSongs;
-  } catch (error) {
+  } catch {
     return [];
   }
 }
@@ -195,7 +274,7 @@ export async function getPlaylistById(playlistId: string): Promise<FirestorePlay
     }
 
     return { id: docSnap.id, ...docSnap.data() } as FirestorePlaylist;
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -209,7 +288,7 @@ export function firestorePlaylistToLocalSongs(playlist: FirestorePlaylist): any[
     title: song.title || song.name || "",
     artist: song.artist || song.artists || "",
     coverUrl: song.coverUrl || song.image || song.imageUrl || "",
-    audioUrl: song.audioUrl || song.url || "",
+    audioUrl: song.audioUrl || song.streamUrl || song.url || "",
     duration: song.duration || 0,
     album: song.album || "",
   }));
@@ -222,7 +301,13 @@ export async function addLikedSongToFirestore(userId: string, song: any): Promis
       return false;
     }
 
-    const documentId = song.id;
+    const title = String(song.title || song.name || "").trim();
+    const artist = String(song.artist || song.artists || "").trim();
+    const documentId = String(song.id || song._id || song.songId || getSongDedupeKey({ title, artist })).replace(/\//g, "_");
+    if (!documentId || !title || !artist) {
+      return false;
+    }
+
     const songDocRef = doc(db, "users", userId, "likedSongs", documentId);
 
     const docSnap = await getDoc(songDocRef);
@@ -230,21 +315,32 @@ export async function addLikedSongToFirestore(userId: string, song: any): Promis
       return true;
     }
 
+    const normalizedTitle = normalizeForDedupe(title);
+    const normalizedArtist = normalizeForDedupe(artist);
+
     await setDoc(songDocRef, {
-      id: song.id,
-      title: song.title,
-      artist: song.artist,
-      albumName: song.album || "",
-      imageUrl: song.coverUrl,
-      audioUrl: song.audioUrl,
+      id: song.id || song._id || documentId,
+      title,
+      titleLower: normalizedTitle,
+      normalizedTitle,
+      artist,
+      artistLower: normalizedArtist,
+      normalizedArtist,
+      albumName: song.album || song.albumName || "",
+      imageUrl: song.coverUrl || song.imageUrl || "",
+      audioUrl: song.audioUrl || song.streamUrl || "",
       duration: song.duration || 0,
       year: "",
+      dedupeKey: `${normalizedTitle}|${normalizedArtist}`,
+      createdAt: serverTimestamp(),
       likedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
       source: "mavrixfy",
+      client: "mavrixfy_app",
     });
 
     return true;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -282,7 +378,7 @@ export async function removeLikedSongFromFirestore(userId: string, songId: strin
       await deleteDoc(songDocRef);
       return true;
     }
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -308,13 +404,14 @@ export async function addSongToFirestorePlaylist(playlistId: string, song: any):
       artist: song.artist,
       album: song.album || "",
       imageUrl: song.coverUrl,
-      audioUrl: song.audioUrl,
+      audioUrl: song.audioUrl || song.streamUrl || "",
       duration: song.duration || 0,
       addedAt: new Date().toISOString(),
     });
 
     await updateDoc(playlistRef, {
       songs,
+      songCount: songs.length,
       updatedAt: serverTimestamp(),
     });
 
@@ -341,14 +438,18 @@ export async function updateFirestorePlaylist(
       return false;
     }
 
-    await setDoc(playlistRef, {
-      ...playlistSnap.data(),
-      ...updates,
+    const cleanUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([, value]) => value !== undefined)
+    );
+
+    await updateDoc(playlistRef, {
+      ...cleanUpdates,
+      ...(typeof updates.name === "string" ? { searchableName: normalizeForDedupe(updates.name) } : {}),
       updatedAt: serverTimestamp(),
     });
 
     return true;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -373,14 +474,14 @@ export async function removeSongFromFirestorePlaylist(playlistId: string, songId
     // Remove song from array
     const updatedSongs = songs.filter((s: any) => s.id !== songId);
 
-    await setDoc(playlistRef, {
-      ...playlist,
+    await updateDoc(playlistRef, {
       songs: updatedSongs,
+      songCount: updatedSongs.length,
       updatedAt: serverTimestamp(),
     });
 
     return true;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -391,12 +492,30 @@ export async function deleteUserFirestoreData(userId: string): Promise<void> {
   }
 
   const likedSongsRef = collection(db, "users", userId, "likedSongs");
+  const pushTokensRef = collection(db, "users", userId, "pushTokens");
+  const spotifyTokensRef = collection(db, "users", userId, "spotifyTokens");
+  const spotifySyncRef = collection(db, "users", userId, "spotifySync");
+  const spotifyLikedSongsRef = collection(db, "users", userId, "spotifyLikedSongs");
   const playlistsRef = collection(db, "playlists");
   const userRef = doc(db, "users", userId);
+  const legacyLikedSongsRef = doc(db, "likedSongs", userId);
 
-  const [likedSongsSnapshot, playlistsSnapshot] = await Promise.all([
+  const [
+    likedSongsSnapshot,
+    pushTokensSnapshot,
+    spotifyTokensSnapshot,
+    spotifySyncSnapshot,
+    spotifyLikedSongsSnapshot,
+    playlistsByIdSnapshot,
+    playlistsByUidSnapshot,
+  ] = await Promise.all([
     getDocs(likedSongsRef),
+    getDocs(pushTokensRef),
+    getDocs(spotifyTokensRef),
+    getDocs(spotifySyncRef),
+    getDocs(spotifyLikedSongsRef),
     getDocs(query(playlistsRef, where("createdBy.id", "==", userId))),
+    getDocs(query(playlistsRef, where("createdBy.uid", "==", userId))),
   ]);
 
   const deletions: Promise<void>[] = [];
@@ -405,10 +524,34 @@ export async function deleteUserFirestoreData(userId: string): Promise<void> {
     deletions.push(deleteDoc(songDoc.ref));
   });
 
-  playlistsSnapshot.forEach((playlistDoc) => {
-    deletions.push(deleteDoc(playlistDoc.ref));
+  pushTokensSnapshot.forEach((tokenDoc) => {
+    deletions.push(deleteDoc(tokenDoc.ref));
   });
 
+  spotifyTokensSnapshot.forEach((tokenDoc) => {
+    deletions.push(deleteDoc(tokenDoc.ref));
+  });
+
+  spotifySyncSnapshot.forEach((syncDoc) => {
+    deletions.push(deleteDoc(syncDoc.ref));
+  });
+
+  spotifyLikedSongsSnapshot.forEach((songDoc) => {
+    deletions.push(deleteDoc(songDoc.ref));
+  });
+
+  const playlistRefs = new Map<string, (typeof playlistsByIdSnapshot.docs)[number]["ref"]>();
+  playlistsByIdSnapshot.forEach((playlistDoc) => {
+    playlistRefs.set(playlistDoc.id, playlistDoc.ref);
+  });
+  playlistsByUidSnapshot.forEach((playlistDoc) => {
+    playlistRefs.set(playlistDoc.id, playlistDoc.ref);
+  });
+  playlistRefs.forEach((playlistRef) => {
+    deletions.push(deleteDoc(playlistRef));
+  });
+
+  deletions.push(deleteDoc(legacyLikedSongsRef));
   deletions.push(deleteDoc(userRef));
 
   await Promise.all(deletions);

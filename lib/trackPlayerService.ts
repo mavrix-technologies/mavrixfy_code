@@ -1,5 +1,6 @@
 import TrackPlayer, { Event, RepeatMode, State } from "react-native-track-player";
 import { DeviceEventEmitter, NativeEventEmitter, NativeModules, Platform } from "react-native";
+import { setupPlayer } from "@/lib/trackPlayer";
 
 type AutoPlayTrackPayload = {
   id?: string;
@@ -27,15 +28,30 @@ let autoSyncTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingAutoSyncReason = "initial";
 let lastProgressSecond = -1;
 let lastKnownQueueTitle = "";
+let pausedForTransientDuck = false;
+let applyingAutoPlayPayload: string | null = null;
+let lastAppliedAutoPlayPayload = "";
+let lastAppliedAutoPlayAtMs = 0;
 
 const EVENT_TRANSPORT = "AutoTransportCommand";
 const AUTO_SYNC_DEBOUNCE_MS = 140;
+const AUTO_RETRY_DELAYS_MS = [1200, 3000, 6000];
 
 type AutoTransportPayload = {
   command?: string;
   position?: number;
   queueIndex?: number;
 };
+
+async function ensureTrackPlayerReady(reason: string): Promise<boolean> {
+  try {
+    await setupPlayer();
+    return true;
+  } catch {
+    scheduleAutoSessionSync(`setup-failed:${reason}`, true);
+    return false;
+  }
+}
 
 function mapPlaybackRepeatMode(mode?: number): RepeatMode {
   // PlaybackStateCompat: NONE=0, ONE=1, ALL=2
@@ -188,8 +204,20 @@ function scheduleAutoSessionSync(reason: string, immediate = false) {
 
 async function handleNextCommand() {
   try {
-    await TrackPlayer.skipToNext();
-    await TrackPlayer.play();
+    const queue = await TrackPlayer.getQueue();
+    const activeIndex = await TrackPlayer.getActiveTrackIndex();
+    
+    if (typeof activeIndex === "number" && activeIndex < queue.length - 1) {
+      await TrackPlayer.skipToNext();
+      await TrackPlayer.play();
+    } else {
+      // At end of queue, check repeat mode
+      const repeatMode = await TrackPlayer.getRepeatMode();
+      if (repeatMode === RepeatMode.Queue) {
+        await TrackPlayer.skip(0);
+        await TrackPlayer.play();
+      }
+    }
   } catch {
     // Silent fail when the queue is already at the end.
   }
@@ -203,8 +231,21 @@ async function handlePreviousCommand() {
       return;
     }
 
-    await TrackPlayer.skipToPrevious();
-    await TrackPlayer.play();
+    const activeIndex = await TrackPlayer.getActiveTrackIndex();
+    if (typeof activeIndex === "number" && activeIndex > 0) {
+      await TrackPlayer.skipToPrevious();
+      await TrackPlayer.play();
+    } else {
+      // At start of queue, check repeat mode
+      const repeatMode = await TrackPlayer.getRepeatMode();
+      if (repeatMode === RepeatMode.Queue) {
+        const queue = await TrackPlayer.getQueue();
+        await TrackPlayer.skip(queue.length - 1);
+        await TrackPlayer.play();
+      } else {
+        await TrackPlayer.seekTo(0);
+      }
+    }
   } catch {
     try {
       await TrackPlayer.seekTo(0);
@@ -217,6 +258,8 @@ async function handlePreviousCommand() {
 async function handleAutoTransportCommand(rawPayload: unknown) {
   const payload = parseAutoTransportPayload(rawPayload);
   if (!payload?.command) return;
+  const ready = await ensureTrackPlayerReady(`transport:${payload.command}`);
+  if (!ready) return;
 
   switch (payload.command) {
     case "play":
@@ -275,62 +318,111 @@ function normalizeAutoTracks(payload: AutoPlayPayload) {
     .filter((track): track is NonNullable<typeof track> => Boolean(track));
 }
 
-async function applyAutoPlayPayload(rawPayload: unknown) {
+async function applyAutoPlayPayload(rawPayload: unknown, attempt = 0) {
+  const rawPayloadText = typeof rawPayload === "string" ? rawPayload : "";
+  if (
+    attempt === 0 &&
+    rawPayloadText &&
+    rawPayloadText === lastAppliedAutoPlayPayload &&
+    Date.now() - lastAppliedAutoPlayAtMs < 5000
+  ) {
+    return;
+  }
+
+  if (attempt === 0 && rawPayloadText && applyingAutoPlayPayload === rawPayloadText) {
+    return;
+  }
+
   const payload = parseAutoPayload(rawPayload);
   if (!payload) return;
 
   const songs = normalizeAutoTracks(payload);
   if (songs.length === 0) return;
-  lastKnownQueueTitle = String(payload.queueTitle ?? "").trim();
 
-  const requestedIndex =
-    typeof payload.startIndex === "number" && Number.isFinite(payload.startIndex)
-      ? payload.startIndex
-      : 0;
-  const targetIndex = Math.max(0, Math.min(requestedIndex, songs.length - 1));
-
-  // Convert Song format to TrackPlayer track format
-  const tracks = songs.map((song) => ({
-    id: song.id,
-    url: song.audioUrl,
-    title: song.title,
-    artist: song.artist,
-    album: song.album,
-    genre: song.genre,
-    artwork: song.coverUrl,
-    duration: song.duration,
-  }));
-
-  if (typeof (TrackPlayer as any).setQueue === "function") {
-    await (TrackPlayer as any).setQueue(tracks);
-  } else {
-    await TrackPlayer.reset();
-    await TrackPlayer.add(tracks);
+  const ready = await ensureTrackPlayerReady(`auto-play:${attempt}`);
+  if (!ready) {
+    const retryDelay = AUTO_RETRY_DELAYS_MS[attempt];
+    if (retryDelay != null) {
+      setTimeout(() => {
+        void applyAutoPlayPayload(rawPayload, attempt + 1);
+      }, retryDelay);
+    }
+    return;
   }
 
-  if (targetIndex > 0) {
-    await TrackPlayer.skip(targetIndex);
+  if (rawPayloadText) {
+    applyingAutoPlayPayload = rawPayloadText;
   }
 
-  await TrackPlayer.setRepeatMode(mapPlaybackRepeatMode(payload.repeatMode));
-
-  if (payload.playWhenReady !== false) {
-    await TrackPlayer.play();
-  }
-
-  // Notify PlayerContext that the queue was replaced by Android Auto so it can
-  // update currentSong / queue state without waiting for PlaybackActiveTrackChanged.
   try {
-    DeviceEventEmitter.emit("AutoQueueApplied", {
-      tracks: songs,
-      startIndex: targetIndex,
-      queueTitle: payload.queueTitle ?? "",
-    });
-  } catch {
-    // Silent fail — PlayerContext will sync on next PlaybackActiveTrackChanged
-  }
+    lastKnownQueueTitle = String(payload.queueTitle ?? "").trim();
 
-  scheduleAutoSessionSync("auto-queue-applied", true);
+    const requestedIndex =
+      typeof payload.startIndex === "number" && Number.isFinite(payload.startIndex)
+        ? payload.startIndex
+        : 0;
+    const targetIndex = Math.max(0, Math.min(requestedIndex, songs.length - 1));
+
+    // Convert Song format to TrackPlayer track format
+    const tracks = songs.map((song) => ({
+      id: song.id,
+      url: song.audioUrl,
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      genre: song.genre,
+      artwork: song.coverUrl,
+      duration: song.duration,
+    }));
+
+    if (typeof (TrackPlayer as any).setQueue === "function") {
+      await (TrackPlayer as any).setQueue(tracks);
+    } else {
+      await TrackPlayer.reset();
+      await TrackPlayer.add(tracks);
+    }
+
+    if (targetIndex > 0) {
+      await TrackPlayer.skip(targetIndex);
+    }
+
+    await TrackPlayer.setRepeatMode(mapPlaybackRepeatMode(payload.repeatMode));
+
+    if (payload.playWhenReady !== false) {
+      await TrackPlayer.play();
+    }
+
+    if (rawPayloadText) {
+      lastAppliedAutoPlayPayload = rawPayloadText;
+      lastAppliedAutoPlayAtMs = Date.now();
+    }
+
+    try {
+      (NativeModules.AutoPlayModule as
+        | { clearPendingAutoCommand?: (command: string) => void }
+        | undefined)?.clearPendingAutoCommand?.("play");
+    } catch {
+      // Best effort: native retry suppression only.
+    }
+
+    // Notify PlayerContext that the queue was replaced by Android Auto so it can
+    // update currentSong / queue state without waiting for PlaybackActiveTrackChanged.
+    try {
+      DeviceEventEmitter.emit("AutoQueueApplied", {
+        tracks: songs,
+        startIndex: targetIndex,
+        queueTitle: payload.queueTitle ?? "",
+      });
+    } catch {
+      // Silent fail — PlayerContext will sync on next PlaybackActiveTrackChanged
+    }
+
+    scheduleAutoSessionSync("auto-queue-applied", true);
+  } finally {
+    if (rawPayloadText && applyingAutoPlayPayload === rawPayloadText) {
+      applyingAutoPlayPayload = null;
+    }
+  }
 }
 
 function setupAutoPlayBridge() {
@@ -456,6 +548,7 @@ async function playTrackFromSearch(event: any) {
 }
 
 export const trackPlayerService = async () => {
+  await ensureTrackPlayerReady("service-start");
   setupAutoPlayBridge();
   scheduleAutoSessionSync("service-start", true);
 
@@ -504,6 +597,23 @@ export const trackPlayerService = async () => {
     scheduleAutoSessionSync("remote-play-search", true);
   });
 
+  // CRITICAL: Audio focus handling for Spotify-level behavior
+  // Duck: Lower volume when another app needs audio (e.g., navigation)
+  TrackPlayer.addEventListener(Event.RemoteDuck, async (event) => {
+    if (event.permanent) {
+      pausedForTransientDuck = false;
+      await TrackPlayer.stop();
+    } else if (event.paused) {
+      pausedForTransientDuck = true;
+      await TrackPlayer.pause();
+    } else if (pausedForTransientDuck) {
+      pausedForTransientDuck = false;
+      await TrackPlayer.play();
+    }
+
+    scheduleAutoSessionSync("remote-duck", true);
+  });
+
   TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, () => {
     lastProgressSecond = -1;
     scheduleAutoSessionSync("playback-active-track-changed", true);
@@ -518,6 +628,15 @@ export const trackPlayerService = async () => {
     if (progressSecond !== lastProgressSecond) {
       lastProgressSecond = progressSecond;
       scheduleAutoSessionSync("playback-progress-updated");
+    }
+  });
+
+  // CRITICAL: Queue ended - handle auto-advance behavior
+  // This ensures the queue advances properly and metadata updates
+  TrackPlayer.addEventListener(Event.PlaybackQueueEnded, async (event) => {
+    if (event.track !== undefined) {
+      // Queue ended at a specific track - sync state
+      scheduleAutoSessionSync("playback-queue-ended", true);
     }
   });
 };

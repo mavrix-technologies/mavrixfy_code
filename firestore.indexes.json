@@ -1,0 +1,137 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "likedSongs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "normalizedTitle", "order": "ASCENDING" },
+        { "fieldPath": "normalizedArtist", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "likedSongs",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "likedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "playlists",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdBy.uid", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "playlists",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdBy.id", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "playlists",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdBy.uid", "order": "ASCENDING" },
+        { "fieldPath": "moodGenerated", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "playlists",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isPublic", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "playlists",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "featured", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "playlist_shares",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdBy", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "playlist_shares",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "playlistId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mood_playlist_analytics",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "eventType", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "songs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "featured", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "songs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "albumId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "songs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "genre", "order": "ASCENDING" },
+        { "fieldPath": "moodTags", "arrayConfig": "CONTAINS" }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "likedSongs",
+      "fieldPath": "audioUrl",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "likedSongs",
+      "fieldPath": "imageUrl",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "playlists",
+      "fieldPath": "songs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "mood_playlist_cache",
+      "fieldPath": "playlist.songs",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "likedSongs",
+      "fieldPath": "songs",
+      "indexes": []
+    }
+  ]
+}

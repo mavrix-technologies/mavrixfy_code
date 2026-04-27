@@ -1,11 +1,12 @@
-import React from "react";
+import React, { useCallback } from "react";
 import {
   View,
   Text,
-  ScrollView,
+  FlatList,
   Pressable,
   StyleSheet,
   Platform,
+  ListRenderItem,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -15,6 +16,13 @@ import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { usePlayer } from "@/contexts/PlayerContext";
+import { Song } from "@/lib/musicData";
+
+type QueueItem = {
+  type: "header" | "now-playing" | "up-next-header" | "song" | "empty";
+  song?: Song;
+  index?: number;
+};
 
 export default function QueueScreen() {
   const insets = useSafeAreaInsets();
@@ -22,17 +30,121 @@ export default function QueueScreen() {
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
 
-  const handleSongPress = (song: any) => {
+  const handleSongPress = useCallback((song: Song) => {
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     playSong(song, queue);
-  };
+  }, [playSong, queue]);
 
-  const handleRemove = (index: number) => {
+  const handleRemove = useCallback((index: number) => {
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     removeFromQueue(index);
-  };
+  }, [removeFromQueue]);
 
   const upNext = queue.slice(queueIndex + 1);
+
+  // Build flat data structure for FlatList
+  const data: QueueItem[] = [];
+  
+  if (currentSong) {
+    data.push({ type: "now-playing", song: currentSong });
+  }
+  
+  if (upNext.length > 0) {
+    data.push({ type: "up-next-header" });
+    upNext.forEach((song, idx) => {
+      data.push({ type: "song", song, index: queueIndex + 1 + idx });
+    });
+  } else if (!currentSong) {
+    data.push({ type: "empty" });
+  }
+
+  const renderItem: ListRenderItem<QueueItem> = useCallback(({ item }) => {
+    if (item.type === "now-playing" && item.song) {
+      return (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Now Playing</Text>
+          <Pressable
+            style={styles.songRow}
+            onPress={() => router.push("/player")}
+          >
+            <Image
+              source={{ uri: item.song.coverUrl }}
+              style={styles.songImage}
+              contentFit="cover"
+            />
+            <View style={styles.songInfo}>
+              <Text style={styles.songTitle} numberOfLines={1}>
+                {item.song.title}
+              </Text>
+              <Text style={styles.songArtist} numberOfLines={1}>
+                {item.song.artist}
+              </Text>
+            </View>
+            <Ionicons name="musical-notes" size={20} color={Colors.primary} />
+          </Pressable>
+        </View>
+      );
+    }
+
+    if (item.type === "up-next-header") {
+      return (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Up Next ({upNext.length})</Text>
+        </View>
+      );
+    }
+
+    if (item.type === "song" && item.song && typeof item.index === "number") {
+      return (
+        <Pressable
+          style={[styles.songRow, styles.songRowPadded]}
+          onPress={() => handleSongPress(item.song!)}
+        >
+          <Image
+            source={{ uri: item.song.coverUrl }}
+            style={styles.songImage}
+            contentFit="cover"
+          />
+          <View style={styles.songInfo}>
+            <Text style={styles.songTitle} numberOfLines={1}>
+              {item.song.title}
+            </Text>
+            <Text style={styles.songArtist} numberOfLines={1}>
+              {item.song.artist}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => handleRemove(item.index!)}
+            hitSlop={10}
+            style={styles.removeBtn}
+          >
+            <Ionicons name="close-circle" size={24} color={Colors.subtext} />
+          </Pressable>
+        </Pressable>
+      );
+    }
+
+    if (item.type === "empty") {
+      return (
+        <View style={styles.emptyState}>
+          <Ionicons name="list-outline" size={64} color={Colors.inactive} />
+          <Text style={styles.emptyText}>Queue is empty</Text>
+          <Text style={styles.emptySubtext}>
+            Add songs to your queue to see them here
+          </Text>
+        </View>
+      );
+    }
+
+    return null;
+  }, [handleSongPress, handleRemove, upNext.length]);
+
+  const keyExtractor = useCallback((item: QueueItem, index: number) => {
+    if (item.type === "song" && item.song) {
+      return `song-${item.song.id}-${item.index}`;
+    }
+    return `${item.type}-${index}`;
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -55,80 +167,18 @@ export default function QueueScreen() {
         </View>
       </LinearGradient>
 
-      <ScrollView
-        style={styles.scrollView}
+      <FlatList
+        data={data}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
         contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
-      >
-        {/* Now Playing */}
-        {currentSong && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Now Playing</Text>
-            <Pressable
-              style={styles.songRow}
-              onPress={() => router.push("/player")}
-            >
-              <Image
-                source={{ uri: currentSong.coverUrl }}
-                style={styles.songImage}
-                contentFit="cover"
-              />
-              <View style={styles.songInfo}>
-                <Text style={styles.songTitle} numberOfLines={1}>
-                  {currentSong.title}
-                </Text>
-                <Text style={styles.songArtist} numberOfLines={1}>
-                  {currentSong.artist}
-                </Text>
-              </View>
-              <Ionicons name="musical-notes" size={20} color={Colors.primary} />
-            </Pressable>
-          </View>
-        )}
-
-        {/* Up Next */}
-        {upNext.length > 0 ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Up Next ({upNext.length})</Text>
-            {upNext.map((song, index) => (
-              <Pressable
-                key={`${song.id}-${index}`}
-                style={styles.songRow}
-                onPress={() => handleSongPress(song)}
-              >
-                <Image
-                  source={{ uri: song.coverUrl }}
-                  style={styles.songImage}
-                  contentFit="cover"
-                />
-                <View style={styles.songInfo}>
-                  <Text style={styles.songTitle} numberOfLines={1}>
-                    {song.title}
-                  </Text>
-                  <Text style={styles.songArtist} numberOfLines={1}>
-                    {song.artist}
-                  </Text>
-                </View>
-                <Pressable
-                  onPress={() => handleRemove(queueIndex + 1 + index)}
-                  hitSlop={10}
-                  style={styles.removeBtn}
-                >
-                  <Ionicons name="close-circle" size={24} color={Colors.subtext} />
-                </Pressable>
-              </Pressable>
-            ))}
-          </View>
-        ) : (
-          <View style={styles.emptyState}>
-            <Ionicons name="list-outline" size={64} color={Colors.inactive} />
-            <Text style={styles.emptyText}>Queue is empty</Text>
-            <Text style={styles.emptySubtext}>
-              Add songs to your queue to see them here
-            </Text>
-          </View>
-        )}
-      </ScrollView>
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        updateCellsBatchingPeriod={50}
+        windowSize={21}
+        initialNumToRender={15}
+      />
     </View>
   );
 }
@@ -178,6 +228,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 8,
     gap: 12,
+  },
+  songRowPadded: {
+    paddingHorizontal: 16,
   },
   songImage: {
     width: 48,
