@@ -72,9 +72,6 @@
         "EXPO_USE_UPDATES": "1",
         "EAS_NO_VCS": "1",
         "SKIP_PATCH_PACKAGE": "1"
-      },
-      "hooks": {
-        "preInstall": "./eas-build-pre-install.sh"
       }
     },
     "production-aab": {

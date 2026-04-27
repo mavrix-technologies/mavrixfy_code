@@ -12,7 +12,12 @@ expo-env.d.ts
 
 # Native
 ios/
-android/
+# android/ - Commented out to allow committing android directory for EAS builds
+android/build/
+android/app/build/
+android/.gradle/
+android/.idea/
+android/local.properties
 outputs/
 *.apk
 *.aab

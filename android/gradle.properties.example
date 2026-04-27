@@ -1,0 +1,14 @@
+# Mavrixfy Release Signing Configuration
+# Copy this file to gradle.properties and fill in your actual values
+# NEVER commit gradle.properties to Git!
+
+# Release keystore configuration
+MAVRIXFY_RELEASE_STORE_FILE=../../mavrixfy-upload-key.jks
+MAVRIXFY_RELEASE_KEY_ALIAS=upload
+MAVRIXFY_RELEASE_STORE_PASSWORD=your_keystore_password_here
+MAVRIXFY_RELEASE_KEY_PASSWORD=your_key_password_here
+
+# Build optimizations
+android.enableMinifyInReleaseBuilds=true
+android.enableShrinkResourcesInReleaseBuilds=true
+android.enablePngCrunchInReleaseBuilds=true
