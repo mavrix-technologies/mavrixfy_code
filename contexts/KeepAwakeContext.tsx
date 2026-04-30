@@ -126,10 +126,11 @@ export function KeepAwakeProvider({ children }: { children: React.ReactNode }) {
     startedAtRef.current = Date.now();
     setRemainingMs(ms);
     sleepTimerRef.current = setTimeout(() => { void dimScreen(); }, ms);
+    // Reduced countdown update frequency from 1000ms to 5000ms to save battery
     countdownRef.current  = setInterval(() => {
       const left = Math.max(0, ms - (Date.now() - startedAtRef.current));
       setRemainingMs(left);
-    }, 1000);
+    }, 5000); // Update every 5 seconds instead of every second
   }, [clearTimers, dimScreen]);
 
   // ── Wake up on user interaction ────────────────────────────────────────────

@@ -12,10 +12,12 @@ import { queryClient } from "@/lib/query-client";
 import { PlayerProvider } from "@/contexts/PlayerContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { KeepAwakeProvider, useKeepAwake } from "@/contexts/KeepAwakeContext";
+import { DownloadProvider } from "@/contexts/DownloadContext";
 import Colors from "@/constants/colors";
 import { logAppOpen } from "@/lib/analytics";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { getRecentlyPlayed } from "@/lib/storage";
+import { AppNavBar } from "@/app/(tabs)/_layout";
 
 // Set navigation bar color on Android
 if (Platform.OS === 'android') {
@@ -99,28 +101,25 @@ function RootLayoutNav() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: Colors.background },
-          gestureEnabled: true,
-          animation: "default",
+          gestureEnabled: false,
         }}
       >
-        <Stack.Screen name="(tabs)"   options={{ gestureEnabled: false }} />
+        <Stack.Screen name="(tabs)" options={{ gestureEnabled: false }} />
         <Stack.Screen
           name="player"
           options={{
             ...(Platform.OS === "android"
               ? {
                   presentation: "formSheet",
-                  sheetAllowedDetents: [0.18, 1],
-                  sheetInitialDetentIndex: "last",
+                  sheetAllowedDetents: [1],
+                  sheetInitialDetentIndex: 0,
                   sheetCornerRadius: 24,
                 }
               : {
                   presentation: "modal",
-                  animation: "slide_from_bottom",
-                  gestureDirection: "vertical",
                   gestureEnabled: true,
+                  gestureDirection: "vertical",
                   fullScreenGestureEnabled: true,
-                  animationMatchesGesture: true,
                 }),
           }}
         />
@@ -140,10 +139,7 @@ function RootLayoutNav() {
                 }
               : {
                   presentation: "modal",
-                  animation: "slide_from_bottom",
-                  animationDuration: 320,
-                  gestureDirection: "vertical",
-                  gestureEnabled: true,
+                  gestureEnabled: false,
                 }),
           }}
         />
@@ -151,16 +147,27 @@ function RootLayoutNav() {
           name="artist-mix"
           options={{
             presentation: "modal",
-            animation: "slide_from_bottom",
+            gestureEnabled: false,
+          }}
+        />
+        <Stack.Screen
+          name="downloaded-songs"
+          options={{
+            presentation: "card",
             gestureEnabled: true,
-            gestureDirection: "vertical",
-            fullScreenGestureEnabled: Platform.OS === "ios",
+          }}
+        />
+        <Stack.Screen
+          name="downloads"
+          options={{
+            presentation: "modal",
+            gestureEnabled: true,
           }}
         />
         <Stack.Screen name="login" options={{ gestureEnabled: false }} />
         <Stack.Screen
           name="onboarding/index"
-          options={{ gestureEnabled: false, animation: "fade" }}
+          options={{ gestureEnabled: false }}
         />
       </Stack>
     </View>
@@ -229,13 +236,16 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1 }}>
           <ThemeProvider value={DarkTheme}>
             <AuthProvider>
-              <PlayerProvider>
-                <KeepAwakeProvider>
-                <StatusBar style="light" />
-                <RootLayoutNav />
-                <WakeOverlay />
-                </KeepAwakeProvider>
-              </PlayerProvider>
+              <DownloadProvider>
+                <PlayerProvider>
+                  <KeepAwakeProvider>
+                  <StatusBar style="light" />
+                  <RootLayoutNav />
+                  <AppNavBar />
+                  <WakeOverlay />
+                  </KeepAwakeProvider>
+                </PlayerProvider>
+              </DownloadProvider>
             </AuthProvider>
           </ThemeProvider>
         </GestureHandlerRootView>

@@ -17,6 +17,10 @@ This project uses the same Firestore schema as Mavrixfy-web. Keep new writes in 
 - `songs`, `albums`, `trendingSongs`: public catalog reads, admin writes.
 - `mood_playlist_cache`, `mood_playlist_rate_limits`, `mood_playlist_analytics`, `mood_playlist_metrics`, `mood_playlist_alerts`: backend/admin mood playlist collections.
 
+## Planned Extensions
+
+- Offline downloads are not implemented in the current schema. The proposed entitlement, device, offline license, and admin catalog fields are documented in [offline-downloads-prd.md](./offline-downloads-prd.md).
+
 ## Deploy
 
 Deploy rules and indexes from either repo:

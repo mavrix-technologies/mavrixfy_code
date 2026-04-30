@@ -418,7 +418,11 @@ export default function LibraryScreen() {
         onLongPress={() => handleDeletePlaylist(item)}
       >
         {item.coverUrl ? (
-          <Image source={{ uri: item.coverUrl }} style={styles.playlistCover} contentFit="cover" />
+          <Image 
+            recyclingKey={item.id}
+            source={{ uri: item.coverUrl }} 
+            style={styles.playlistCover} 
+            contentFit="cover" />
         ) : (
           <View style={[styles.playlistCover, styles.playlistCoverPlaceholder]}>
             <Ionicons name="musical-notes" size={22} color={UI.subtext} />
@@ -500,7 +504,11 @@ export default function LibraryScreen() {
       >
         {item.coverUrl ? (
           <View style={styles.gridImageWrap}>
-            <Image source={{ uri: item.coverUrl }} style={styles.gridImage} contentFit="cover" />
+            <Image 
+              recyclingKey={item.id}
+              source={{ uri: item.coverUrl }} 
+              style={styles.gridImage} 
+              contentFit="cover" />
             <View style={styles.gridFloatingPlay}>
               <Ionicons name="play" size={13} color={UI.onPrimary} />
             </View>
@@ -529,11 +537,26 @@ export default function LibraryScreen() {
           <Text style={styles.headerTitle}>Your Library</Text>
         </View>
         <View style={styles.headerActions}>
-          <Pressable style={styles.headerActionButton} onPress={handleSearchPress} hitSlop={10}>
-            <Ionicons name="search-outline" size={18} color={UI.text} />
+          <Pressable 
+            style={({ pressed }) => [
+              styles.headerActionButton,
+              pressed && styles.headerActionButtonPressed
+            ]}
+            onPress={handleSearchPress} 
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Ionicons name="search-outline" size={20} color={UI.text} />
           </Pressable>
-          <Pressable style={[styles.headerActionButton, styles.headerActionButtonPrimary]} onPress={handleAddPress} hitSlop={10}>
-            <Ionicons name="add" size={20} color={UI.onPrimary} />
+          <Pressable 
+            style={({ pressed }) => [
+              styles.headerActionButton, 
+              styles.headerActionButtonPrimary,
+              pressed && styles.headerActionButtonPressed
+            ]}
+            onPress={handleAddPress} 
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Ionicons name="add" size={22} color={UI.onPrimary} />
           </Pressable>
         </View>
       </View>
@@ -636,6 +659,7 @@ export default function LibraryScreen() {
                   onPress={() => router.push({ pathname: "/artist/[id]", params: { id: a.id, name: a.name, image: a.image } }, { withAnchor: true, dangerouslySingular: () => "artist-profile" })}
                 >
                   <Image
+                    recyclingKey={a.id}
                     source={{ uri: a.image || undefined }}
                     style={styles.artistRowAvatar}
                     contentFit="cover"
@@ -688,9 +712,9 @@ export default function LibraryScreen() {
           </View>
           <Text style={styles.categoryLabel}>Artists</Text>
         </Pressable>
-        <Pressable style={styles.categoryCard}>
-          <View style={[styles.categoryIconWrap, { backgroundColor: "rgba(38,42,49,0.9)" }]}>
-            <Ionicons name="download-outline" size={16} color={UI.subtext} />
+        <Pressable style={styles.categoryCard} onPress={() => router.push("/downloaded-songs")}>
+          <View style={[styles.categoryIconWrap, { backgroundColor: "rgba(38,225,154,0.18)" }]}>
+            <Ionicons name="download-outline" size={16} color={UI.primary} />
           </View>
           <Text style={styles.categoryLabel}>Downloads</Text>
         </Pressable>
@@ -899,9 +923,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   headerActionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: UI.highSurface,
     borderWidth: 1,
     borderColor: UI.outline,
@@ -911,6 +935,10 @@ const styles = StyleSheet.create({
   headerActionButtonPrimary: {
     backgroundColor: UI.primary,
     borderColor: "rgba(38,225,154,0.55)",
+  },
+  headerActionButtonPressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.96 }],
   },
   filterAndToggleRow: {
     marginTop: 12,

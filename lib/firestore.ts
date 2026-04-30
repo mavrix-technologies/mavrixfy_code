@@ -177,7 +177,7 @@ export async function deleteFirestorePlaylist(playlistId: string): Promise<boole
 }
 
 // Get public playlists from Firestore
-export async function getPublicPlaylists(maxCount: number = 50): Promise<FirestorePlaylist[]> {
+export async function getPublicPlaylists(maxCount: number = 100): Promise<FirestorePlaylist[]> {
   try {
     if (!db) {
       return [];
@@ -312,7 +312,7 @@ export async function addLikedSongToFirestore(userId: string, song: any): Promis
 
     const docSnap = await getDoc(songDocRef);
     if (docSnap.exists()) {
-      return true;
+      return false; // Return false for duplicates
     }
 
     const normalizedTitle = normalizeForDedupe(title);
@@ -396,7 +396,8 @@ export async function addSongToFirestorePlaylist(playlistId: string, song: any):
     const playlist = playlistSnap.data() as FirestorePlaylist;
     const songs = playlist.songs || [];
 
-    if (songs.some((s: any) => s.id === song.id)) return true;
+    // Check for duplicates - return false if already exists
+    if (songs.some((s: any) => s.id === song.id)) return false;
 
     songs.push({
       id: song.id,

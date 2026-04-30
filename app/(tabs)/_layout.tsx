@@ -1,4 +1,4 @@
-import { Tabs, router, usePathname } from "expo-router";
+import { Tabs, router, usePathname, useRouter } from "expo-router";
 import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, InteractionManager, PanResponder, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
@@ -8,7 +8,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
-import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import type { BottomTabBarProps } from "@react-navigation/bottom-tabs"; // kept for type compat
 import Colors from "@/constants/colors";
 import { usePlayerLite } from "@/contexts/PlayerContext";
 import { PingPongScroll } from "@/components/PingPongScroll";
@@ -105,23 +105,23 @@ function NavTabItem({
 }: NavTabItemProps) {
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
 
-  const handlePressIn = () => {
+  const handlePressIn = React.useCallback(() => {
     Animated.spring(scaleAnim, {
       toValue: 0.965,
       speed: 35,
       bounciness: 0,
       useNativeDriver: true,
     }).start();
-  };
+  }, [scaleAnim]);
 
-  const handlePressOut = () => {
+  const handlePressOut = React.useCallback(() => {
     Animated.spring(scaleAnim, {
       toValue: 1,
       speed: 25,
       bounciness: 8,
       useNativeDriver: true,
     }).start();
-  };
+  }, [scaleAnim]);
 
   return (
     <Animated.View style={[styles.navItemAnimWrap, { transform: [{ scale: scaleAnim }] }]}>
@@ -170,15 +170,24 @@ function NavTabItem({
   );
 }
 
-function MergedTabBar({
-  state,
-  navigation,
-  insets,
-}: BottomTabBarProps) {
+// Memoize NavTabItem to prevent unnecessary re-renders
+const MemoizedNavTabItem = React.memo(NavTabItem, (prev, next) => {
+  return (
+    prev.isFocused === next.isFocused &&
+    prev.item.route === next.item.route &&
+    prev.navIconSize === next.navIconSize &&
+    prev.activeNavColor === next.activeNavColor &&
+    prev.navInactiveColor === next.navInactiveColor
+  );
+});
+
+export function AppNavBar() {
+  const router = useRouter();
+  const pathname = usePathname();
   const isWeb = Platform.OS === "web";
   const isIOS = Platform.OS === "ios";
   const safeInsets = useSafeAreaInsets();
-  const bottomInset = Math.max(safeInsets.bottom ?? insets?.bottom ?? 0, 0);
+  const bottomInset = Math.max(safeInsets.bottom ?? 0, 0);
   const { width } = useWindowDimensions();
   const isAndroid = Platform.OS === "android";
   const isNarrowMobile = !isWeb && width <= 380;
@@ -301,12 +310,8 @@ function MergedTabBar({
   }, [activeSong?.id, activeSong?.coverUrl]);
 
   const resolvedBottomInset = isWeb ? 0 : Math.max(bottomInset, 0);
-  const floatingBottom = isWeb
-    ? TAB_BOTTOM
-    : isIOS
-      ? Math.max(4, Math.min(10, Math.round(resolvedBottomInset * 0.14)))
-      : 0;
-  const containerBottomPadding = isIOS ? 2 : 0;
+  const floatingBottom = 0;
+  const containerBottomPadding = 0;
   const containerWidth: DimensionValue = isIOS && !isWeb
     ? Math.min(width - 14, 560)
     : "96%";
@@ -316,17 +321,9 @@ function MergedTabBar({
   const navLabelSize = isIOS ? 10 : (isNarrowMobile ? 9 : 10);
   const navLabelLineHeight = isIOS ? 12 : (isNarrowMobile ? 12 : 13);
   const navTopPadding = 0;
-  const navBottomSafePadding = isWeb
-    ? 0
-    : isIOS
-      ? Math.max(8, Math.min(14, Math.round(resolvedBottomInset * 0.45)))
-      : Math.max(2, Math.min(6, Math.round(resolvedBottomInset * 0.3)));
-  const navBaseHeight = isIOS
-    ? (isNarrowMobile ? 50 : 54)
-    : isNarrowMobile
-      ? 46
-      : 50;
-  const navHeight = navBaseHeight + navTopPadding + navBottomSafePadding;
+  const navBottomSafePadding = 0;
+  const navBaseHeight = 54;
+  const navHeight = navBaseHeight;
   const navHorizontalPadding = isIOS ? 12 : (isNarrowMobile ? 8 : 10);
   const navItemPaddingTop = isIOS ? 4 : (isNarrowMobile ? 2 : 3);
   const navItemPaddingBottom = isIOS ? 3 : 1;
@@ -402,8 +399,8 @@ function MergedTabBar({
     : colorToRgba(miniPlayerTheme.accent, 0.72, "rgba(38, 225, 154, 0.72)");
   const miniSecondaryIconColor = isIOS ? "rgba(255,255,255,0.88)" : playIconColor;
   const coverUrl = activeSong?.coverUrl?.trim();
-  const miniPlayerHeight = 50;
-  const miniCoverSize = 52;
+  const miniPlayerHeight = 52; // Reduced from 60 to 52
+  const miniCoverSize = 44; // Reduced from 60 to 44
   const miniControlSize = 32;
   const miniControlRadius = Math.round(miniControlSize / 2);
   const trashShiftX = trashOpacity.interpolate({
@@ -428,10 +425,9 @@ function MergedTabBar({
 
   return (
     <>
-      <SafeAreaView
+      <View
         pointerEvents="box-none"
-        edges={["bottom"]}
-        style={[styles.wrapper, { bottom: floatingBottom }]}
+        style={[styles.wrapper, { bottom: resolvedBottomInset }]}
       >
       <View
         style={[
@@ -590,7 +586,7 @@ function MergedTabBar({
               </View>
             </Pressable>
 
-            <View pointerEvents="none" style={[styles.playerProgressTrack, { left: miniCoverSize }]}>
+            <View pointerEvents="none" style={[styles.playerProgressTrack, { left: 0 }]}>
               <View
                 style={[
                   styles.playerProgressFill,
@@ -643,13 +639,13 @@ function MergedTabBar({
             style={styles.navGlowFill}
           />
           {NAV_ITEMS.map((item) => {
-            const route = state.routes.find((r) => r.name === item.route);
-            if (!route) return null;
-            const routeIndex = state.routes.findIndex((r) => r.key === route.key);
-            const isFocused = state.index === routeIndex;
+            const isFocused =
+              item.route === "index"
+                ? pathname === "/" || pathname === "/index"
+                : pathname === `/${item.route}` || pathname?.startsWith(`/${item.route}/`);
 
             return (
-              <NavTabItem
+              <MemoizedNavTabItem
                 key={item.route}
                 item={item}
                 isFocused={isFocused}
@@ -664,28 +660,17 @@ function MergedTabBar({
                 navInactiveColor={navInactiveColor}
                 onPress={() => {
                   void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                  const event = navigation.emit({
-                    type: "tabPress",
-                    target: route.key,
-                    canPreventDefault: true,
-                  });
-
-                  if (!isFocused && !event.defaultPrevented) {
-                    navigation.navigate(route.name);
+                  if (!isFocused) {
+                    router.push(item.route === "index" ? "/" : `/${item.route}` as any);
                   }
                 }}
-                onLongPress={() => {
-                  navigation.emit({
-                    type: "tabLongPress",
-                    target: route.key,
-                  });
-                }}
+                onLongPress={() => {}}
               />
             );
           })}
         </View>
       </View>
-      </SafeAreaView>
+      </View>
 
     </>
   );
@@ -1084,17 +1069,11 @@ export default function TabLayout() {
         detachInactiveScreens
         screenOptions={{
           headerShown: false,
-          animation: "fade",
           lazy: true,
           freezeOnBlur: true,
           sceneStyle: { backgroundColor: Colors.background },
         }}
-        tabBar={(props) => {
-          tabsNavigationRef.current = props.navigation;
-          return shouldHideTabBar ? null : (
-            <MergedTabBar {...props} />
-          );
-        }}
+        tabBar={() => null}
       >
         <Tabs.Screen name="index" options={{ title: "Home" }} />
         <Tabs.Screen name="search" options={{ title: "Search" }} />
@@ -1352,10 +1331,10 @@ const styles = StyleSheet.create({
   },
   container: {
     width: "96%",
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderBottomLeftRadius: 40,
-    borderBottomRightRadius: 40,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
     overflow: "hidden",
     borderWidth: 0,
     borderColor: "transparent",
@@ -1366,25 +1345,25 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   containerIOS: {
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
     shadowOffset: { width: 0, height: 14 },
     shadowOpacity: 0.16,
     shadowRadius: 22,
   },
   containerNavOnly: {
-    borderTopLeftRadius: 40,
-    borderTopRightRadius: 40,
-    borderBottomLeftRadius: 40,
-    borderBottomRightRadius: 40,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
   },
   containerNavOnlyIOS: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
   },
   glassLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -1401,45 +1380,45 @@ const styles = StyleSheet.create({
   },
   glassOutline: {
     ...StyleSheet.absoluteFillObject,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderBottomLeftRadius: 40,
-    borderBottomRightRadius: 40,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
     borderWidth: 1,
     borderBottomWidth: 0,
     borderColor: "rgba(255, 255, 255, 0.06)",
   },
   glassOutlineIOS: {
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
     borderBottomWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.09)",
   },
   glassOutlineNavOnly: {
-    borderTopLeftRadius: 40,
-    borderTopRightRadius: 40,
-    borderBottomLeftRadius: 40,
-    borderBottomRightRadius: 40,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
   },
   glassOutlineNavOnlyIOS: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
   },
   playerSection: {
     backgroundColor: "#0A0A0C",
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(61, 74, 61, 0.4)",
     overflow: "hidden",
   },
   playerSectionIOS: {
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
     borderBottomColor: "rgba(255,255,255,0.07)",
   },
   playerBlur: {
@@ -1554,7 +1533,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(82, 16, 16, 0.95)",
   },
   playerRow: {
-    height: 50,
+    height: 60,
     paddingLeft: 0,
     paddingRight: 10,
     flexDirection: "row",
@@ -1568,26 +1547,28 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   coverWrap: {
-    width: 52,
-    height: "100%",
-    overflow: "visible",
-    borderRightWidth: 1,
-    borderRightColor: "rgba(61, 74, 61, 0.42)",
+    width: 44, // Reduced from 60
+    height: 44, // Fixed height instead of 100%
+    overflow: "hidden",
+    borderRightWidth: 0,
     justifyContent: "center",
     alignItems: "center",
     position: "relative",
+    marginLeft: 8, // Add left margin for gap
+    marginVertical: 4, // Add vertical margin for gap
+    borderRadius: 6, // Add rounded corners
   },
   coverAlbumTint: {
     position: "absolute",
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    borderWidth: 1,
+    width: 44, // Match new size
+    height: 44, // Match new size
+    borderRadius: 6, // Match rounded corners
+    borderWidth: 0,
   },
   cover: {
-    width: 52,
-    height: 52,
-    borderRadius: 0,
+    width: 44, // Match new size
+    height: 44, // Match new size
+    borderRadius: 6, // Add rounded corners
     backgroundColor: "#111111",
   },
   coverFallback: {
@@ -1597,7 +1578,7 @@ const styles = StyleSheet.create({
   songInfo: {
     flex: 1,
     minWidth: 0,
-    marginLeft: 10,
+    marginLeft: 10, // Reduced from 12 for better spacing
     marginRight: 4,
     justifyContent: "center",
   },
@@ -1635,7 +1616,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(38, 225, 154, 0.72)",
   },
   navContent: {
-    height: 48,
+    height: 54,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -1672,10 +1653,11 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
   },
   navIconWrap: {
-    width: 24,
-    height: 24,
+    width: 44,
+    height: 28,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 14,
   },
   navItem: {
     flex: 1,
@@ -1693,7 +1675,7 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   navItemIOSActive: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "transparent",
   },
   navLabel: {
     fontSize: 10,

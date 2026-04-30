@@ -9,7 +9,6 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
-  Animated,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -22,6 +21,11 @@ import { getBestImageUrl, Song } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
 import SongRow from "@/components/SongRow";
 import { getCatalogSongs, searchCatalog } from "@/lib/catalogService";
+import {
+  normalizeText,
+  rankSongs,
+  parseStructuredQuery
+} from "@/lib/searchUtils";
 
 interface PlaylistResult {
   id: string;
@@ -33,8 +37,10 @@ interface PlaylistResult {
 interface RecentSearchItem {
   id: string;
   label: string;
+  subtitle?: string;
   imageUrl?: string;
   icon?: keyof typeof Ionicons.glyphMap;
+  type?: "song" | "playlist" | "artist" | "query";
 }
 
 interface BrowseCategory {
@@ -46,8 +52,6 @@ interface BrowseCategory {
 }
 
 type ResultFilter = "all" | "songs" | "playlists";
-const RESULTS_HEADER_BASE_HEIGHT = 46;
-const RESULTS_CONTROLS_FULL_HEIGHT = 92;
 
 const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
   { key: "all", label: "All" },
@@ -62,19 +66,31 @@ const STITCH_RECENT_SEARCHES: RecentSearchItem[] = [
   {
     id: "midnight-city",
     label: "Midnight City",
+    subtitle: "Song • M83",
+    type: "song",
     imageUrl:
       "https://lh3.googleusercontent.com/aida-public/AB6AXuCqB9ybv3HO8eHYX6bQVSEyicyS_SlOfwKehM-c1kpTsDSV_5n4MoNQKRuiLVqFKvl2ZG5cLdNV-cCJFBXinik9HqbxpeRZrt7lXngNX-5TGleoJYrumblrEw0tacOx7eLVQ8p9g9BcyWFRUPZIl9VR0NDUf1HF3cwjfVayM8TF6WSKSdOvu-ENf_z8FpFsOAlwNIvBB4LOGds41GdDZRAfm6LGWNCRFuxpnSc6WBHo9QuzulYUqG2oqzMOwvxggwk12uT0FOft_Wk",
   },
   {
     id: "techno-bloom",
     label: "Techno Bloom",
+    subtitle: "Playlist",
+    type: "playlist",
     imageUrl:
       "https://lh3.googleusercontent.com/aida-public/AB6AXuChTYl4xH3ZLJ4ARFgn-rbApfKx9tJbZROrKLiLUdfQiUDfWNAQkFvf4geu4s_aOHEIhe35l0Ohs0QovMiD9sXnnLsGEGxoe6S1gvgj9MwmJZNQC84g13alq3Nq_NlbifmxN654WcJC-YPxnjQVhu59HB9RHT5QZiQrEG_P2JSWmccfT6Y21RdKCurdSNKeU0Vhp2vaO6zSjJGrXEa6xPMWP9XtXjXM-bXcnautbSLYBTmKZfnS-cJVReNH9HoclyFpocsBZsGk72Y",
   },
-  { id: "the-weeknd", label: "The Weeknd", icon: "person" },
+  {
+    id: "the-weeknd",
+    label: "The Weeknd",
+    subtitle: "Artist",
+    type: "artist",
+    icon: "person",
+  },
   {
     id: "coffee-jazz",
     label: "Coffee & Jazz",
+    subtitle: "Playlist",
+    type: "playlist",
     imageUrl:
       "https://lh3.googleusercontent.com/aida-public/AB6AXuDF65iTajyxJ3pY_3UEgaEW904AIU2tgjMxR5nFVYA-a4pMW61Kv8YDwfMgptSw3ucmCvM1KahK-8SJ1uh3RB_pXxlJbGvdq6-zw277CJj1UUhPTeUNpmTYkdwKvLKpFcricdxCBw8Z6UTISEL6keZa5GWMv4vjHlGOpMuTw8_GZF-pmQvE3_kEQSk5RIrhD6dB5uDLIPrxgpgh8fBQk2z9ORzDfj1FqWnlXAl9DqmYpuygexks2zhfYCb2Pm8NIgCA8ga2fOz9Tok",
   },
@@ -154,23 +170,6 @@ const STITCH_BROWSE_CATEGORIES: BrowseCategory[] = [
   },
 ];
 
-async function parseJsonResponse(response: Response): Promise<any | null> {
-  if (!response.ok) {
-    try {
-      await response.text();
-    } catch {
-      // Best effort only
-    }
-    return null;
-  }
-
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
 function normalizePlaylistResults(raw: unknown): PlaylistResult[] {
   if (!Array.isArray(raw)) return [];
 
@@ -219,8 +218,7 @@ export default function SearchScreen() {
   const requestSeqRef = useRef(0);
   const resultsPlaylistsListRef = useRef<FlatList<PlaylistResult> | null>(null);
   const resultsSongsListRef = useRef<FlatList<Song> | null>(null);
-  const resultsControlsAnim = useRef(new Animated.Value(0)).current;
-  const controlsHiddenRef = useRef(false);
+  const searchCacheRef = useRef<Map<string, { songs: Song[]; playlists: PlaylistResult[]; timestamp: number }>>(new Map());
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const shuffledBrowseCategories = useMemo(() => {
@@ -241,103 +239,163 @@ export default function SearchScreen() {
       return;
     }
 
+    // Check cache first (5 minute TTL)
+    const cacheKey = normalizedQuery.toLowerCase();
+    const cached = searchCacheRef.current.get(cacheKey);
+    const now = Date.now();
+    if (cached && (now - cached.timestamp) < 300000) { // 5 minutes
+      setSongResults(cached.songs);
+      setPlaylistResults(cached.playlists);
+      setSearchDisplayQuery(normalizedQuery);
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     const apiUrl = getApiUrl();
     const freshnessKey = Math.floor(Date.now() / 60000);
+    const parsedQuery = parseStructuredQuery(normalizedQuery);
+    const searchTerm = parsedQuery.freeText || normalizedQuery;
+
+    // Safe fetch — returns parsed JSON or null, never throws
+    const safeFetch = (url: string) =>
+      fetch(url).then(r => (r.ok ? r.json() : null)).catch(() => null);
+
+    // Deduplication key: normalized title + first artist
+    const mkKey = (title: string, artist: string) => {
+      const t = normalizeText(title);
+      const a = artist === 'Unknown Artist'
+        ? 'unknown'
+        : normalizeText(artist.split(',')[0].trim());
+      return `${t}|||${a}`;
+    };
+
+    // Which version of a song is better?
+    const isBetter = (n: Song, e: Song): boolean => {
+      if (n.artist === 'Unknown Artist' && e.artist !== 'Unknown Artist') return false;
+      if (n.artist !== 'Unknown Artist' && e.artist === 'Unknown Artist') return true;
+      const remix = /\b(remix|lofi|slowed|cover|live|acoustic|instrumental|8d|nightcore)\b/i;
+      const nR = remix.test(n.title), eR = remix.test(e.title);
+      if (!nR && eR) return true;
+      if (nR && !eR) return false;
+      return (n.playCount || 0) > (e.playCount || 0);
+    };
+
+    // Parse song from jiosaavn-api-privatecvc2 (uses .link and primaryArtists string)
+    const parseBackup = (s: any): Song | null => {
+      if (!s?.id) return null;
+      const dl: any[] = Array.isArray(s.downloadUrl) ? s.downloadUrl : [];
+      const audioUrl =
+        dl.find(d => d.quality === '320kbps')?.link ||
+        dl.find(d => d.quality === '320kbps')?.url ||
+        dl.find(d => d.quality === '160kbps')?.link ||
+        dl.find(d => d.quality === '160kbps')?.url ||
+        dl[dl.length - 1]?.link || dl[dl.length - 1]?.url || '';
+      if (!audioUrl) return null;
+      const imgs: any[] = Array.isArray(s.image) ? s.image : [];
+      const coverUrl =
+        imgs.find(i => i.quality === '500x500')?.link ||
+        imgs.find(i => i.quality === '500x500')?.url ||
+        imgs.find(i => i.quality === '150x150')?.link ||
+        imgs[imgs.length - 1]?.link || imgs[imgs.length - 1]?.url || '';
+      const artist = (typeof s.primaryArtists === 'string' && s.primaryArtists.trim())
+        ? s.primaryArtists.trim()
+        : (s.artists?.primary || []).map((a: any) => a.name).join(', ') || 'Unknown Artist';
+      const sec = Number(s.duration) || 0;
+      return {
+        id: s.id, title: s.name || s.title || '', artist,
+        album: s.album?.name || '', duration: sec,
+        coverUrl, genre: s.language || '', audioUrl,
+        year: s.year ? String(s.year) : '', source: 'jiosaavn',
+        playCount: Number(s.playCount) || 0,
+      };
+    };
+
+    const mergeInto = (map: Map<string, Song>, song: Song) => {
+      const k = mkKey(song.title, song.artist);
+      const ex = map.get(k);
+      if (!ex || isBetter(song, ex)) map.set(k, song);
+    };
+
+    const toFinalList = (map: Map<string, Song>) => {
+      const ts = Date.now();
+      return Array.from(map.values()).map((s, i) => ({ ...s, id: `${s.id}-${i}-${ts}` }));
+    };
+
+    // Fast rank using JioSaavn playCount only — no network wait
+    const fastRank = (songs: Song[]) =>
+      rankSongs(songs, normalizedQuery, 5).map(r => r.song).slice(0, 15);
 
     try {
-      // Run JioSaavn search + catalog + playlists in parallel
-      const [searchRes, playlistsRes, catalogSongs] = await Promise.all([
-        // Use JioSaavn search directly (3 providers, best quality)
-        fetch(`https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(normalizedQuery)}&limit=20&fresh=${freshnessKey}`),
-        fetch(`${apiUrl}api/jiosaavn/search/playlists?query=${encodeURIComponent(normalizedQuery)}&limit=10&fresh=${freshnessKey}`),
-        // Fetch admin catalog songs from Firestore directly
-        getCatalogSongs().catch(() => [] as Song[]),
-      ]);
-
+      // OPTIMIZATION: Fetch catalog songs first (instant, local)
+      const catalogSongs = await getCatalogSongs().catch(() => [] as Song[]);
+      
       if (requestId !== requestSeqRef.current) return;
 
-      const [searchData, playlistsData] = await Promise.all([
-        parseJsonResponse(searchRes),
-        parseJsonResponse(playlistsRes),
-      ]);
-
-      if (requestId !== requestSeqRef.current) return;
-
-      // Convert JioSaavn results
-      const rawResults = searchData?.data?.results || searchData?.results || [];
-      const jiosaavnSongs: Song[] = rawResults
-        .filter((s: any) => s?.id)
-        .map((s: any) => {
-          const downloads: any[] = Array.isArray(s.downloadUrl) ? s.downloadUrl : [];
-          const audioUrl =
-            downloads.find((d: any) => d.quality === '320kbps')?.url ||
-            downloads.find((d: any) => d.quality === '160kbps')?.url ||
-            downloads[downloads.length - 1]?.url || '';
-          const images: any[] = Array.isArray(s.image) ? s.image : [];
-          const coverUrl = images.find((i: any) => i.quality === '500x500')?.url ||
-            images[images.length - 1]?.url || '';
-          const artist = s.artists?.primary?.map((a: any) => a.name).join(', ') ||
-            s.primaryArtists || s.artist || 'Unknown Artist';
-          return {
-            id: s.id,
-            title: s.name || s.title || '',
-            artist,
-            album: s.album?.name || '',
-            duration: Number(s.duration) || 0,
-            coverUrl,
-            genre: s.language || '',
-            audioUrl,
-            year: s.year ? String(s.year) : '',
-            source: 'jiosaavn' as const,
-          };
-        })
-        .filter((s: Song) => s.audioUrl);
-
-      // Merge catalog songs that match the query
-      const matchingCatalog = searchCatalog(catalogSongs, normalizedQuery);
-      const existingIds = new Set(jiosaavnSongs.map(s => s.id));
-      const newCatalog = matchingCatalog.filter(s => !existingIds.has(s.id));
-
-      // Rank: latest year first, then by title relevance as tiebreaker
-      const q = normalizedQuery.toLowerCase();
-      const score = (s: Song) => {
-        const t = s.title.toLowerCase();
-        const a = s.artist.toLowerCase();
-        if (t === q) return 100;
-        if (t.startsWith(q)) return 80;
-        if (t.includes(q)) return 60;
-        if (a.includes(q)) return 30;
-        return 10;
-      };
-
-      const allSongs = [...jiosaavnSongs, ...newCatalog]
-        .sort((a, b) => {
-          const yearDiff = (Number(b.year) || 0) - (Number(a.year) || 0);
-          if (yearDiff !== 0) return yearDiff;
-          return score(b) - score(a);
-        })
-        .filter(s => s.audioUrl);
-      setSongResults(allSongs);
-      setSearchDisplayQuery(normalizedQuery);
-
-      // Playlists
-      if (playlistsData?.success && playlistsData.data?.results) {
-        setPlaylistResults(normalizePlaylistResults(playlistsData.data.results));
-      } else if (Array.isArray(playlistsData?.results)) {
-        setPlaylistResults(normalizePlaylistResults(playlistsData.results));
-      } else {
-        setPlaylistResults([]);
+      // Show catalog results immediately
+      const songsMap = new Map<string, Song>();
+      for (const s of searchCatalog(catalogSongs, normalizedQuery)) {
+        mergeInto(songsMap, s);
       }
+      
+      const catalogResults = toFinalList(songsMap);
+      if (catalogResults.length > 0) {
+        setSongResults(fastRank(catalogResults));
+        setSearchDisplayQuery(normalizedQuery);
+      }
+
+      // OPTIMIZATION: Fetch songs and playlists in parallel (network)
+      const [songsData, playlistsData] = await Promise.all([
+        safeFetch(`https://jiosaavn-api-privatecvc2.vercel.app/search/songs?query=${encodeURIComponent(searchTerm)}&limit=12`),
+        safeFetch(`${apiUrl}api/jiosaavn/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=6&fresh=${freshnessKey}`),
+      ]);
+
+      if (requestId !== requestSeqRef.current) return;
+
+      // Merge network results with catalog results
+      for (const s of (songsData?.data?.results || songsData?.results || [])) {
+        const song = parseBackup(s);
+        if (song) mergeInto(songsMap, song);
+      }
+
+      const playlists = playlistsData?.success
+        ? normalizePlaylistResults(playlistsData.data?.results)
+        : Array.isArray(playlistsData?.results)
+          ? normalizePlaylistResults(playlistsData.results)
+          : [];
+
+      const songs = toFinalList(songsMap);
+      const rankedSongs = fastRank(songs);
+
+      // Cache results
+      searchCacheRef.current.set(cacheKey, {
+        songs: rankedSongs,
+        playlists,
+        timestamp: now
+      });
+
+      // Limit cache size to 20 entries
+      if (searchCacheRef.current.size > 20) {
+        const firstKey = searchCacheRef.current.keys().next().value;
+        searchCacheRef.current.delete(firstKey);
+      }
+
+      // Show final results with network data
+      setSongResults(rankedSongs);
+      setPlaylistResults(playlists);
+      setSearchDisplayQuery(normalizedQuery);
+      setIsLoading(false);
+
     } catch {
       if (requestId !== requestSeqRef.current) return;
       setSongResults([]);
       setPlaylistResults([]);
       setSearchDisplayQuery(normalizedQuery);
-    } finally {
-      if (requestId === requestSeqRef.current) setIsLoading(false);
+      setIsLoading(false);
     }
   }, []);
+
+
 
   const handleChangeText = useCallback((text: string) => {
     setQuery(text);
@@ -351,6 +409,7 @@ export default function SearchScreen() {
       const nextItem: RecentSearchItem = {
         id: `q-${normalized.toLowerCase().replace(/\s+/g, "-")}`,
         label: normalized,
+        type: "query",
       };
       const filtered = prev.filter(
         (item) => item.label.toLowerCase() !== normalized.toLowerCase()
@@ -389,10 +448,6 @@ export default function SearchScreen() {
 
   const handleRemoveRecentSearch = useCallback((id: string) => {
     setRecentSearches((prev) => prev.filter((item) => item.id !== id));
-  }, []);
-
-  const handleClearRecentSearches = useCallback(() => {
-    setRecentSearches([]);
   }, []);
 
   const handleSubmitSearch = useCallback(() => {
@@ -435,7 +490,7 @@ export default function SearchScreen() {
     setIsLoading(true);
     debounceTimer.current = setTimeout(() => {
       void performSearch(trimmed);
-    }, 260);
+    }, 300); // Increased from 150ms to 300ms for better performance
 
     return () => {
       if (debounceTimer.current) {
@@ -490,89 +545,26 @@ export default function SearchScreen() {
     });
   }, [isLoading, resultFilter, showBrowse, songResults.length, playlistResults.length]);
 
-  const suggestionTerms = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (normalizedQuery.length < 2) return [];
-
-    const candidates = [
-      ...recentSearches.map((item) => item.label),
-      ...playlistResults.slice(0, 4).map((item) => item.name),
-      ...songResults.slice(0, 4).map((item) => item.title),
-    ];
-
-    const seen = new Set<string>();
-    const filtered: string[] = [];
-
-    for (const raw of candidates) {
-      const label = String(raw || "").trim();
-      if (label.length < 2) continue;
-      const normalized = label.toLowerCase();
-      if (!normalized.includes(normalizedQuery)) continue;
-      if (normalized === normalizedQuery) continue;
-      if (seen.has(normalized)) continue;
-      seen.add(normalized);
-      filtered.push(label);
-      if (filtered.length >= 8) break;
-    }
-
-    return filtered;
-  }, [playlistResults, query, recentSearches, songResults]);
   const showPlaylistResults = resultFilter !== "songs" && playlistResults.length > 0;
   const showSongResults = resultFilter !== "playlists" && songResults.length > 0;
   const displayedSongs = showSongResults ? songResults : [];
-  const topSongId = displayedSongs[0]?.id ?? null;
   const featuredPlaylists = useMemo(() => playlistResults.slice(0, 6), [playlistResults]);
-  const controlsOpacity = resultsControlsAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 0],
-    extrapolate: "clamp",
-  });
-  const controlsHeight = resultsControlsAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [RESULTS_CONTROLS_FULL_HEIGHT, 0],
-    extrapolate: "clamp",
-  });
-  const controlsTranslateY = resultsControlsAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, -8],
-    extrapolate: "clamp",
-  });
-  const controlsMarginBottom = resultsControlsAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [6, 2],
-    extrapolate: "clamp",
-  });
-
-  const handleResultsScroll = useCallback(
-    (event: any) => {
-      const offsetY = Number(event?.nativeEvent?.contentOffset?.y || 0);
-      const shouldHide = offsetY > 24;
-      if (shouldHide === controlsHiddenRef.current) return;
-      controlsHiddenRef.current = shouldHide;
-
-      Animated.timing(resultsControlsAnim, {
-        toValue: shouldHide ? 1 : 0,
-        duration: 180,
-        useNativeDriver: false,
-      }).start();
-    },
-    [resultsControlsAnim]
-  );
-
-  useEffect(() => {
-    controlsHiddenRef.current = false;
-    resultsControlsAnim.setValue(0);
-  }, [query, resultFilter, resultsControlsAnim]);
 
   const renderSong = useCallback(
-    ({ item, index }: { item: Song; index: number }) => (
-      <SongRow
-        song={item}
-        queue={songResults}
-        topResult={Boolean(topSongId && item.id === topSongId && index === 0)}
-      />
-    ),
-    [songResults, topSongId]
+    ({ item }: { item: Song; index: number }) => {
+      // Queue = tapped song first, then other results that have a DIFFERENT title.
+      // This means "next song" will be a related but differently-named track,
+      // not another "Starter Boy" variant from the same search.
+      const normalizedItemTitle = normalizeText(item.title);
+      const relatedQueue = [
+        item,
+        ...songResults.filter(
+          s => s.id !== item.id && normalizeText(s.title) !== normalizedItemTitle
+        ),
+      ];
+      return <SongRow song={item} queue={relatedQueue} />;
+    },
+    [songResults]
   );
 
   const renderPlaylistCard = useCallback(
@@ -609,6 +601,7 @@ export default function SearchScreen() {
         >
           <View style={[styles.playlistGridImageWrap, { transform: [{ rotate: `${tilt}deg` }] }]}>
             <Image
+              recyclingKey={playlist.id}
               source={{ uri: getBestImageUrl(playlist.image) }}
               style={styles.playlistGridImage}
               contentFit="contain"
@@ -638,40 +631,32 @@ export default function SearchScreen() {
     [router]
   );
 
-  const handleSuggestionPress = useCallback(
-    (term: string) => {
-      const next = term.trim();
-      if (next.length < 2) return;
-      setQuery(next);
-      rememberRecentSearch(next);
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
-      void performSearch(next);
-    },
-    [performSearch, rememberRecentSearch]
-  );
-
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
-      <View style={styles.topBar}>
-        <Text style={styles.header}>Search</Text>
-      </View>
-
-      <View style={styles.searchBar}>
-        <Ionicons name="search" size={22} color="#BCCBB9" />
-        <TextInput
-          style={styles.input}
-          placeholder="Artists, songs, or podcasts"
-          placeholderTextColor="#7E8A99"
-          value={query}
-          onChangeText={handleChangeText}
-          onSubmitEditing={handleSubmitSearch}
-          returnKeyType="search"
-        />
+      {/* ── Search bar ── */}
+      <View style={styles.searchBarRow}>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={16} color="#6A6A6A" />
+          <TextInput
+            style={styles.input}
+            placeholder="What do you want to listen to?"
+            placeholderTextColor="#6A6A6A"
+            value={query}
+            onChangeText={handleChangeText}
+            onSubmitEditing={handleSubmitSearch}
+            returnKeyType="search"
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
+          {query.length > 0 ? (
+            <Pressable onPress={handleClear} hitSlop={10}>
+              <Ionicons name="close-circle" size={18} color="#6A6A6A" />
+            </Pressable>
+          ) : null}
+        </View>
         {query.length > 0 ? (
-          <Pressable onPress={handleClear} hitSlop={10}>
-            <Ionicons name="close-circle" size={20} color="#7E8A99" />
+          <Pressable onPress={handleClear} style={styles.cancelBtn}>
+            <Text style={styles.cancelText}>Cancel</Text>
           </Pressable>
         ) : null}
       </View>
@@ -683,104 +668,76 @@ export default function SearchScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.recentSection}>
-            <View style={styles.recentHeaderRow}>
-              <Text style={styles.recentTitle}>Recent Searches</Text>
-              {recentSearches.length > 0 ? (
-                <Pressable onPress={handleClearRecentSearches}>
-                  <Text style={styles.recentClearText}>Clear all</Text>
-                </Pressable>
-              ) : null}
-            </View>
-
-            <View style={styles.recentChipWrap}>
+          {/* ── Recent searches ── */}
+          {recentSearches.length > 0 ? (
+            <View style={styles.recentSection}>
+              <Text style={styles.recentTitle}>Recent searches</Text>
               {recentSearches.map((item) => (
                 <Pressable
                   key={item.id}
-                  style={({ pressed }) => [
-                    styles.recentChip,
-                    pressed && styles.recentChipPressed,
-                  ]}
+                  style={({ pressed }) => [styles.recentRow, pressed && styles.recentRowPressed]}
                   onPress={() => handleRecentSearchPress(item.label)}
                 >
                   {item.imageUrl ? (
                     <Image
                       source={{ uri: item.imageUrl }}
-                      style={styles.recentChipImage}
+                      style={[styles.recentThumb, item.type === "artist" && styles.recentThumbRound]}
                       contentFit="cover"
-                      transition={120}
+                      transition={100}
                     />
                   ) : (
-                    <View style={styles.recentChipIconWrap}>
-                      <Ionicons
-                        name={item.icon || "search"}
-                        size={14}
-                        color={Colors.primary}
-                      />
+                    <View style={[styles.recentThumb, styles.recentThumbRound, styles.recentThumbFallback]}>
+                      <Ionicons name={item.icon ?? "person"} size={24} color={Colors.subtext} />
                     </View>
                   )}
-
-                  <Text style={styles.recentChipLabel} numberOfLines={1}>
-                    {item.label}
-                  </Text>
-
-                  <Pressable
-                    hitSlop={6}
-                    style={styles.recentChipCloseBtn}
-                    onPress={(event) => {
-                      event.stopPropagation();
-                      handleRemoveRecentSearch(item.id);
-                    }}
-                  >
-                    <Ionicons name="close" size={13} color="#BCCBB9" />
-                  </Pressable>
+                  <View style={styles.recentInfo}>
+                    <Text style={styles.recentLabel} numberOfLines={1}>{item.label}</Text>
+                    {item.subtitle ? (
+                      <Text style={styles.recentSubtitle} numberOfLines={1}>{item.subtitle}</Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.recentActions}>
+                    {item.type !== "artist" && item.type !== "query" ? (
+                      <Pressable hitSlop={10} style={styles.recentActionBtn} onPress={(e) => e.stopPropagation()}>
+                        <Ionicons name="add-circle-outline" size={22} color={Colors.subtext} />
+                      </Pressable>
+                    ) : null}
+                    <Pressable
+                      hitSlop={10}
+                      style={styles.recentActionBtn}
+                      onPress={(e) => { e.stopPropagation(); handleRemoveRecentSearch(item.id); }}
+                    >
+                      <Ionicons name="close" size={18} color={Colors.subtext} />
+                    </Pressable>
+                  </View>
                 </Pressable>
               ))}
             </View>
-          </View>
+          ) : null}
 
+          {/* ── Browse All ── */}
           <View style={styles.browseSection}>
-            <Text style={styles.browseTitle}>Browse All</Text>
+            <Text style={styles.browseTitle}>Browse all</Text>
             <View style={styles.browseGrid}>
-              {shuffledBrowseCategories.map((category, index) => (
+              {shuffledBrowseCategories.filter(c => !c.isHero).map((category, index) => (
                 <Pressable
                   key={category.id}
                   style={({ pressed }) => [
                     styles.browseCard,
-                    category.isHero ? styles.browseHeroCard : styles.browseSmallCard,
-                    {
-                      backgroundColor: category.color,
-                      marginBottom: category.isHero ? 12 : 10,
-                    },
+                    { backgroundColor: category.color },
                     pressed && styles.browseCardPressed,
                   ]}
                   onPress={() => handleGenrePress(category.title)}
                 >
-                  <LinearGradient
-                    colors={
-                      category.isHero
-                        ? ["rgba(0,0,0,0.12)", "rgba(0,0,0,0.22)"]
-                        : ["rgba(0,0,0,0.06)", "rgba(0,0,0,0.20)"]
-                    }
-                    style={StyleSheet.absoluteFill}
-                  />
-                  <Text
-                    style={[
-                      styles.browseCardTitle,
-                      category.isHero && styles.browseHeroCardTitle,
-                    ]}
-                  >
-                    {category.title}
-                  </Text>
+                  <Text style={styles.browseCardTitle}>{category.title}</Text>
                   <Image
                     source={{ uri: category.imageUrl }}
                     style={[
                       styles.browseCardImage,
-                      category.isHero && styles.browseHeroCardImage,
                       { transform: [{ rotate: `${CARD_ROTATION_PATTERN[index % CARD_ROTATION_PATTERN.length]}deg` }] },
                     ]}
                     contentFit="cover"
-                    transition={120}
+                    transition={100}
                   />
                 </Pressable>
               ))}
@@ -788,184 +745,91 @@ export default function SearchScreen() {
           </View>
         </ScrollView>
       ) : (
+        /* ── Results ── */
         <View style={styles.resultsWrap}>
-          <Animated.View
-            style={[
-              styles.resultsControlsWrap,
-              {
-                height: controlsHeight,
-                opacity: controlsOpacity,
-                marginBottom: controlsMarginBottom,
-                transform: [{ translateY: controlsTranslateY }],
-              },
-            ]}
-          >
-            <View style={styles.resultsHeaderPlain}>
-              <Ionicons name="search" size={15} color={Colors.primary} />
-              <Text style={styles.resultsPillText} numberOfLines={1}>
-                Results for: {searchDisplayQuery || query.trim()}
-              </Text>
-            </View>
-            <View style={styles.filterTabsWrap}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.filterTabsRow}
-              >
-                {RESULT_FILTERS.map((filter) => (
-                  <Pressable
-                    key={filter.key}
-                    style={({ pressed }) => [
-                      styles.filterTabChip,
-                      resultFilter === filter.key && styles.filterTabChipActive,
-                      pressed && styles.filterTabChipPressed,
-                    ]}
-                    onPress={() => setResultFilter(filter.key)}
-                  >
-                    <Text
-                      style={[
-                        styles.filterTabChipText,
-                        resultFilter === filter.key && styles.filterTabChipTextActive,
-                      ]}
-                    >
-                      {filter.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </View>
-          </Animated.View>
-
-          {suggestionTerms.length > 0 ? (
-            <View style={styles.suggestionStripWrap}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.suggestionStripContent}
-              >
-                {suggestionTerms.map((term) => (
-                  <Pressable
-                    key={term}
-                    style={({ pressed }) => [
-                      styles.suggestionChip,
-                      pressed && styles.suggestionChipPressed,
-                    ]}
-                    onPress={() => handleSuggestionPress(term)}
-                  >
-                    <Ionicons name="sparkles-outline" size={13} color={Colors.primary} />
-                    <Text style={styles.suggestionChipText} numberOfLines={1}>
-                      {term}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </View>
-          ) : null}
+          {/* Filter chips */}
+          <View style={styles.filterRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRowContent}>
+              {RESULT_FILTERS.map((f) => (
+                <Pressable
+                  key={f.key}
+                  style={[styles.filterChip, resultFilter === f.key && styles.filterChipActive]}
+                  onPress={() => setResultFilter(f.key)}
+                >
+                  <Text style={[styles.filterChipText, resultFilter === f.key && styles.filterChipTextActive]}>
+                    {f.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
 
           {isLoading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={Colors.primary} />
+              <ActivityIndicator size="large" color="#FFFFFF" />
             </View>
-          ) : null}
-
-          {!isLoading && !hasResults ? (
+          ) : !hasResults ? (
             <View style={styles.empty}>
-              <Ionicons name="search-outline" size={48} color={Colors.inactive} />
-              <Text style={styles.emptyText}>No results found</Text>
-              <Text style={styles.emptySubtext}>Try a different keyword.</Text>
+              <Text style={styles.emptyText}>No results for "{searchDisplayQuery}"</Text>
+              <Text style={styles.emptySubtext}>Check the spelling, or search for something else.</Text>
             </View>
-          ) : null}
-
-          {!isLoading && hasResults ? (
-            resultFilter === "playlists" ? (
-              <FlatList
-                ref={resultsPlaylistsListRef}
-                key={`playlist-results-${resultDataKey}`}
-                data={showPlaylistResults ? playlistResults : []}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item, index }) => (
-                  <View style={styles.playlistGridItemWrap}>{renderPlaylistCard(item, index)}</View>
-                )}
-                style={styles.scrollView}
-                contentContainerStyle={[styles.playlistGridContentContainer, { paddingBottom: 146 }]}
-                showsVerticalScrollIndicator={false}
-                removeClippedSubviews={false}
-                initialNumToRender={8}
-                maxToRenderPerBatch={8}
-                windowSize={7}
-                onScroll={handleResultsScroll}
-                scrollEventThrottle={16}
-                numColumns={2}
-                columnWrapperStyle={styles.playlistGridRow}
-                ListHeaderComponent={
-                  showPlaylistResults ? (
+          ) : resultFilter === "playlists" ? (
+            <FlatList
+              ref={resultsPlaylistsListRef}
+              key={`pl-${resultDataKey}`}
+              data={showPlaylistResults ? playlistResults : []}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item, index }) => (
+                <View style={styles.playlistGridItemWrap}>{renderPlaylistCard(item, index)}</View>
+              )}
+              style={styles.scrollView}
+              contentContainerStyle={[styles.playlistGridContentContainer, { paddingBottom: 146 }]}
+              showsVerticalScrollIndicator={false}
+              numColumns={2}
+              columnWrapperStyle={styles.playlistGridRow}
+              initialNumToRender={8}
+              maxToRenderPerBatch={8}
+              ListEmptyComponent={<View style={styles.emptyInline}><Text style={styles.emptyInlineText}>No playlists found.</Text></View>}
+            />
+          ) : !showSongResults && resultFilter === "songs" ? (
+            <View style={styles.emptyInline}><Text style={styles.emptyInlineText}>No songs found.</Text></View>
+          ) : (
+            <FlatList
+              ref={resultsSongsListRef}
+              key={`sg-${resultDataKey}`}
+              data={displayedSongs}
+              keyExtractor={(item) => item.id}
+              renderItem={renderSong}
+              style={styles.scrollView}
+              contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              initialNumToRender={20}
+              maxToRenderPerBatch={20}
+              windowSize={11}
+              ListFooterComponent={
+                showPlaylistResults ? (
+                  <View style={styles.sectionBlock}>
                     <View style={styles.sectionHeaderRow}>
                       <Text style={styles.sectionTitle}>Playlists</Text>
+                      {resultFilter === "all" ? (
+                        <Pressable onPress={() => setResultFilter("playlists")}>
+                          <Text style={styles.sectionActionText}>See all</Text>
+                        </Pressable>
+                      ) : null}
                     </View>
-                  ) : null
-                }
-                ListEmptyComponent={
-                  <View style={styles.emptyInline}>
-                    <Text style={styles.emptyInlineText}>No playlists found for this search.</Text>
+                    <View style={styles.playlistGridWrap}>
+                      {featuredPlaylists.map((playlist, index) => (
+                        <View key={playlist.id} style={styles.playlistGridItemWrap}>
+                          {renderPlaylistCard(playlist, index)}
+                        </View>
+                      ))}
+                    </View>
                   </View>
-                }
-              />
-            ) : (
-              !showSongResults && resultFilter === "songs" ? (
-                <View style={styles.emptyInline}>
-                  <Text style={styles.emptyInlineText}>No songs found for this search.</Text>
-                </View>
-              ) : (
-                <FlatList
-                  ref={resultsSongsListRef}
-                  key={`song-results-${resultDataKey}`}
-                  data={displayedSongs}
-                  keyExtractor={(item) => item.id}
-                  renderItem={renderSong}
-                  style={styles.scrollView}
-                  contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
-                  removeClippedSubviews={false}
-                  initialNumToRender={10}
-                  maxToRenderPerBatch={10}
-                  windowSize={7}
-                  onScroll={handleResultsScroll}
-                  scrollEventThrottle={16}
-                  ListHeaderComponent={
-                    <View>
-                      {showPlaylistResults ? (
-                        <View style={styles.sectionBlock}>
-                          <View style={styles.sectionHeaderRow}>
-                            <Text style={styles.sectionTitle}>Featured Playlists</Text>
-                            {resultFilter === "all" ? (
-                              <Pressable onPress={() => setResultFilter("playlists")}>
-                                <Text style={styles.sectionActionText}>View all</Text>
-                              </Pressable>
-                            ) : null}
-                          </View>
-                          <View style={styles.playlistGridWrap}>
-                            {featuredPlaylists.map((playlist, index) => (
-                              <View key={playlist.id} style={styles.playlistGridItemWrap}>
-                                {renderPlaylistCard(playlist, index)}
-                              </View>
-                            ))}
-                          </View>
-                        </View>
-                      ) : null}
-                      {showSongResults ? (
-                        <View style={styles.sectionHeaderRow}>
-                          <Text style={styles.sectionTitle}>
-                            {resultFilter === "songs" ? "Songs" : "Top Songs"}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  }
-                />
-              )
-            )
-          ) : null}
+                ) : null
+              }
+            />
+          )}
         </View>
       )}
     </View>
@@ -973,297 +837,220 @@ export default function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
+  // ── Layout ──────────────────────────────────────────────────────────────────
   container: {
     flex: 1,
     backgroundColor: Colors.background,
   },
-  topBar: {
-    paddingHorizontal: 18,
-    paddingTop: 2,
-    paddingBottom: 4,
-  },
-  header: {
-    fontSize: 30,
-    lineHeight: 36,
-    fontFamily: "Inter_800ExtraBold",
-    color: Colors.text,
-    letterSpacing: -0.6,
-  },
-  searchBar: {
+
+  // ── Search bar ──────────────────────────────────────────────────────────────
+  searchBarRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: Colors.surfaceLight,
-    marginHorizontal: 18,
-    marginTop: 4,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 12,
+    gap: 12,
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 4,
+    paddingHorizontal: 10,
+    height: 40,
     gap: 8,
   },
   input: {
     flex: 1,
+    color: "#000000",
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    padding: 0,
+  },
+  clearButton: { padding: 2 },
+  clearButtonPressed: { opacity: 0.6 },
+  cancelBtn: { paddingVertical: 4 },
+  cancelText: {
+    color: Colors.text,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+  },
+
+  // ── Scroll / shared ─────────────────────────────────────────────────────────
+  scrollView: { flex: 1 },
+  content: { paddingTop: 4 },
+
+  // ── Recent searches ─────────────────────────────────────────────────────────
+  recentSection: {
+    paddingBottom: 24,
+  },
+  recentTitle: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  recentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    gap: 14,
+  },
+  recentRowPressed: { backgroundColor: "rgba(255,255,255,0.05)" },
+  recentThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 4,
+    backgroundColor: Colors.surface,
+  },
+  recentThumbRound: { borderRadius: 28 },
+  recentThumbFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.surfaceLight,
+  },
+  recentInfo: { flex: 1, gap: 3 },
+  recentLabel: {
     color: Colors.text,
     fontSize: 15,
     fontFamily: "Inter_500Medium",
-    padding: 0,
   },
-  scrollView: {
-    flex: 1,
-  },
-  resultsWrap: {
-    flex: 1,
-    backgroundColor: "transparent",
-    paddingTop: 6,
-  },
-  resultsControlsWrap: {
-    marginHorizontal: 18,
-    marginBottom: 6,
-    overflow: "hidden",
-  },
-  resultsHeaderPlain: {
-    minHeight: RESULTS_HEADER_BASE_HEIGHT,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(84,103,123,0.28)",
-    backgroundColor: "rgba(20,29,40,0.72)",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    gap: 8,
-  },
-  resultsPillText: {
-    flex: 1,
-    color: "rgba(223,226,235,0.92)",
-    fontSize: 13,
-    lineHeight: 18,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: -0.22,
-  },
-  filterTabsWrap: {
-    marginTop: 4,
-  },
-  filterTabsRow: {
-    paddingHorizontal: 0,
-    paddingTop: 0,
-    paddingBottom: 0,
-    gap: 8,
-  },
-  filterTabChip: {
-    height: 36,
-    borderRadius: 999,
-    paddingHorizontal: 15,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    backgroundColor: "rgba(21,28,37,0.72)",
-  },
-  filterTabChipActive: {
-    borderColor: Colors.primary,
-    backgroundColor: "rgba(38,225,154,0.2)",
-  },
-  filterTabChipPressed: {
-    opacity: 0.92,
-  },
-  filterTabChipText: {
+  recentSubtitle: {
     color: Colors.subtext,
-    fontSize: 12.5,
-    fontFamily: "Inter_600SemiBold",
-  },
-  filterTabChipTextActive: {
-    color: Colors.text,
-  },
-  suggestionStripWrap: {
-    marginTop: 6,
-  },
-  suggestionStripContent: {
-    paddingHorizontal: 18,
-    gap: 8,
-  },
-  suggestionChip: {
-    height: 36,
-    borderRadius: 999,
-    paddingHorizontal: 13,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: Colors.surfaceGlass,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-  },
-  suggestionChipPressed: {
-    opacity: 0.9,
-  },
-  suggestionChipText: {
-    color: Colors.text,
-    fontSize: 12.5,
-    fontFamily: "Inter_500Medium",
-  },
-  content: {
-    paddingTop: 16,
-  },
-  resultsContent: {
-    paddingTop: 16,
-  },
-  sectionBlock: {
-    paddingHorizontal: 18,
-    marginBottom: 14,
-  },
-  sectionHeaderRow: {
-    paddingHorizontal: 18,
-    marginBottom: 8,
-    marginTop: 2,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  sectionActionText: {
-    color: Colors.primary,
-    fontSize: 12.5,
-    fontFamily: "Inter_600SemiBold",
-  },
-  recentSection: {
-    paddingHorizontal: 20,
-    marginTop: 10,
-    marginBottom: 20,
-  },
-  recentHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  recentTitle: {
-    fontSize: 18,
-    fontFamily: "Inter_700Bold",
-    color: Colors.text,
-    letterSpacing: -0.2,
-  },
-  recentClearText: {
-    color: Colors.primary,
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-  },
-  recentChipWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-  },
-  recentChip: {
-    flexBasis: "48%",
-    maxWidth: "48%",
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: Colors.surface,
-    borderRadius: 999,
-    paddingLeft: 8,
-    paddingRight: 10,
-    minHeight: 42,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "rgba(134,149,133,0.2)",
-  },
-  recentChipPressed: {
-    opacity: 0.9,
-  },
-  recentChipImage: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginRight: 8,
-  },
-  recentChipIconWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginRight: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(38,225,154,0.16)",
-  },
-  recentChipLabel: {
-    color: Colors.text,
     fontSize: 13,
-    fontFamily: "Inter_500Medium",
-    flex: 1,
+    fontFamily: "Inter_400Regular",
   },
-  recentChipCloseBtn: {
-    marginLeft: 7,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+  recentActions: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 2,
   },
+  recentActionBtn: { padding: 8 },
+
+  // legacy stubs (unused but referenced nowhere — safe to keep empty)
+  recentHeaderRow: {},
+  recentClearText: {},
+  recentChipWrap: {},
+  recentChip: {},
+  recentChipPressed: {},
+  recentChipImage: {},
+  recentChipIconWrap: {},
+  recentChipLabel: {},
+  recentChipCloseBtn: {},
+  topBar: {},
+  header: {},
+
+  // ── Browse All ───────────────────────────────────────────────────────────────
   browseSection: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
   browseTitle: {
     fontSize: 22,
-    fontFamily: "Inter_800ExtraBold",
+    fontFamily: "Inter_700Bold",
     color: Colors.text,
-    letterSpacing: -0.3,
     marginBottom: 14,
   },
   browseGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    gap: 8,
   },
   browseCard: {
-    overflow: "hidden",
-    borderRadius: 12,
-    position: "relative",
-  },
-  browseHeroCard: {
-    width: "100%",
-    minHeight: 178,
-    padding: 16,
-  },
-  browseSmallCard: {
     width: "48%",
-    minHeight: 112,
-    padding: 14,
+    height: 100,
+    borderRadius: 8,
+    overflow: "hidden",
+    padding: 12,
+    justifyContent: "flex-end",
   },
-  browseCardPressed: {
-    transform: [{ scale: 0.988 }],
-    opacity: 0.93,
-  },
+  browseCardPressed: { opacity: 0.85 },
   browseCardTitle: {
     color: "#FFFFFF",
-    fontSize: 22,
-    fontFamily: "Inter_800ExtraBold",
-    letterSpacing: -0.35,
-  },
-  browseHeroCardTitle: {
-    fontSize: 34,
-    letterSpacing: -0.8,
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
   },
   browseCardImage: {
     position: "absolute",
-    right: -8,
-    bottom: -7,
-    width: 72,
-    height: 72,
-    borderRadius: 12,
+    right: -4,
+    bottom: -4,
+    width: 64,
+    height: 64,
+    borderRadius: 6,
+    transform: [{ rotate: "25deg" }],
   },
-  browseHeroCardImage: {
-    width: 126,
-    height: 126,
-    right: -6,
-    bottom: -14,
+  // unused hero styles kept as stubs
+  browseHeroCard: {},
+  browseSmallCard: {},
+  browseHeroCardTitle: {},
+  browseHeroCardImage: {},
+
+  // ── Results ──────────────────────────────────────────────────────────────────
+  resultsWrap: { flex: 1 },
+  filterRow: {
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
+  filterRowContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  filterChip: {
+    height: 32,
+    borderRadius: 4,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+    backgroundColor: Colors.surface,
+  },
+  filterChipActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  filterChipText: {
+    color: Colors.subtext,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  filterChipTextActive: {
+    color: Colors.background,
+    fontFamily: "Inter_700Bold",
+  },
+  resultsContent: { paddingTop: 8 },
+  sectionBlock: {
+    paddingHorizontal: 16,
+    marginBottom: 14,
+  },
+  sectionHeaderRow: {
+    paddingHorizontal: 16,
+    marginBottom: 10,
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   sectionTitle: {
     fontSize: 18,
     fontFamily: "Inter_700Bold",
     color: Colors.text,
-    letterSpacing: -0.2,
   },
+  sectionActionText: {
+    color: Colors.subtext,
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+  },
+
+  // ── Playlist grid ────────────────────────────────────────────────────────────
   playlistGridContentContainer: {
-    paddingTop: 16,
-    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingHorizontal: 16,
   },
   playlistGridRow: {
     justifyContent: "space-between",
@@ -1275,87 +1062,71 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   playlistGridItemWrap: {
-    width: "48.3%",
-    marginBottom: 12,
+    width: "48.5%",
+    marginBottom: 16,
   },
   playlistGridCard: {
     width: "100%",
     backgroundColor: "transparent",
-    borderRadius: 12,
   },
-  playlistClassicCardPressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.985 }],
-  },
+  playlistClassicCardPressed: { opacity: 0.8 },
   playlistGridImageWrap: {
     width: "100%",
     aspectRatio: 1,
-    position: "relative",
+    borderRadius: 4,
     overflow: "hidden",
-    borderRadius: 14,
-    backgroundColor: "rgba(18,24,33,0.78)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    backgroundColor: Colors.surface,
   },
-  playlistGridImage: {
-    width: "100%",
-    height: "100%",
-  },
+  playlistGridImage: { width: "100%", height: "100%" },
   brandCoverBadge: {
     position: "absolute",
     top: 4,
     left: 4,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.45)",
-    backgroundColor: "#0E131A",
+    backgroundColor: Colors.background,
   },
-  brandCoverBadgeImage: {
-    width: "100%",
-    height: "100%",
-    opacity: 0.82,
-  },
-  playlistGridContent: {
-    marginTop: 9,
-    paddingHorizontal: 1,
-  },
+  brandCoverBadgeImage: { width: "100%", height: "100%" },
+  playlistGridContent: { marginTop: 8 },
   playlistGridName: {
     color: Colors.text,
-    fontSize: 17,
-    lineHeight: 21,
+    fontSize: 14,
     fontFamily: "Inter_700Bold",
+    lineHeight: 18,
   },
   playlistGridMeta: {
-    marginTop: 5,
+    marginTop: 3,
     color: Colors.subtext,
     fontSize: 12,
-    fontFamily: "Inter_500Medium",
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
+    fontFamily: "Inter_400Regular",
   },
+
+  // ── States ───────────────────────────────────────────────────────────────────
   loadingContainer: {
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 96,
+    paddingTop: 80,
   },
   empty: {
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 96,
-    gap: 8,
+    paddingTop: 80,
+    paddingHorizontal: 32,
+    gap: 10,
   },
   emptyText: {
     color: Colors.text,
-    fontSize: 17,
-    fontFamily: "Inter_600SemiBold",
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+    textAlign: "center",
   },
   emptySubtext: {
     color: Colors.subtext,
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: "Inter_400Regular",
+    textAlign: "center",
   },
   emptyInline: {
     marginTop: 40,
@@ -1364,8 +1135,20 @@ const styles = StyleSheet.create({
   },
   emptyInlineText: {
     color: Colors.subtext,
-    fontSize: 13.5,
-    fontFamily: "Inter_500Medium",
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
     textAlign: "center",
   },
+
+  // ── Unused stubs ─────────────────────────────────────────────────────────────
+  resultsControlsWrap: {},
+  resultsHeaderPlain: {},
+  resultsPillText: {},
+  filterTabsWrap: {},
+  filterTabsRow: {},
+  filterTabChip: {},
+  filterTabChipActive: {},
+  filterTabChipPressed: {},
+  filterTabChipText: {},
+  filterTabChipTextActive: {},
 });

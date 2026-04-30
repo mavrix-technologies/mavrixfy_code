@@ -8,6 +8,10 @@ export interface ParsedSong {
   status: 'ready' | 'added' | 'error' | 'searching';
   message?: string;
   matchConfidence?: 'high' | 'medium' | 'low';
+  spotifyUri?: string;
+  isrc?: string;
+  popularity?: number;
+  explicit?: boolean;
 }
 
 export interface SpotifyTrack {

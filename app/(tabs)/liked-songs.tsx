@@ -12,6 +12,8 @@ import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { formatDuration, Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import EqualizerBars from "@/components/EqualizerBars";
+import DownloadCollectionButton from "@/components/DownloadCollectionButton";
+import DownloadButton from "@/components/DownloadButton";
 
 const UI = {
   bg: "#10141a",
@@ -129,6 +131,7 @@ export default function LikedSongsScreen() {
             >
               <Ionicons name={liked ? "heart" : "heart-outline"} size={19} color={UI.primaryA} />
             </Pressable>
+            <DownloadButton song={item} size={18} style={styles.downloadBtn} />
             <Text style={styles.trackDuration}>{formatDuration(item.duration)}</Text>
           </View>
 
@@ -208,6 +211,14 @@ export default function LikedSongsScreen() {
                 >
                   <Ionicons name="search" size={17} color={UI.subtext} />
                 </Pressable>
+                <DownloadCollectionButton
+                  songs={songs}
+                  collectionId="liked-songs"
+                  collectionName="Liked Songs"
+                  collectionImage=""
+                  compact
+                  style={styles.utilityIcon}
+                />
               </View>
             </View>
 
@@ -494,6 +505,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   likeButton: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  downloadBtn: {
     width: 28,
     height: 28,
     alignItems: "center",

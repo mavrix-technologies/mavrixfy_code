@@ -151,6 +151,7 @@ export default function AllArtistsScreen() {
         <View style={[styles.avatarWrap, { width: cardWidth, height: cardWidth }]}>
           {img ? (
             <Image
+              recyclingKey={item.id}
               source={{ uri: img }}
               style={StyleSheet.absoluteFill}
               contentFit="cover"

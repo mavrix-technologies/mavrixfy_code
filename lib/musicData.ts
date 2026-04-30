@@ -11,6 +11,7 @@ export interface Song {
   language?: string;
   hasLyrics?: boolean;
   source?: "jiosaavn" | "local";
+  playCount?: number; // JioSaavn real play count
 }
 
 export interface JioSaavnImage {

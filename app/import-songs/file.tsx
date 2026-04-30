@@ -38,13 +38,15 @@ export default function FileImportScreen() {
   const { user } = useAuth();
   
   const [parsedSongs, setParsedSongs] = useState<ParsedSong[]>([]);
-  const [isLoading, setIsLoading] = useState(false); // Changed to false initially
+  const [isLoading, setIsLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [currentStep, setCurrentStep] = useState<'upload' | 'parse' | 'search' | 'select' | 'import' | 'complete'>('upload');
+  const [currentStep, setCurrentStep] = useState<'parse' | 'searching' | 'review' | 'importing' | 'complete'>('parse');
   const [progress, setProgress] = useState(0);
   const [addedCount, setAddedCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
+  const [duplicates, setDuplicates] = useState(0);
+  const [foundCount, setFoundCount] = useState(0);
   const [importDestination, setImportDestination] = useState<'liked' | 'new-playlist' | 'existing-playlist'>('liked');
   const [showDestinationModal, setShowDestinationModal] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState("");
@@ -118,7 +120,9 @@ export default function FileImportScreen() {
 
       setParsedSongs(result.songs);
       setIsLoading(false);
-      setCurrentStep('select'); // Go to select step to show parsed songs first
+      
+      // Automatically start searching for songs
+      await searchAllSongs(result.songs);
       
       if (result.errors.length > 0) {
         Alert.alert(
@@ -224,137 +228,135 @@ export default function FileImportScreen() {
     }
   }, [showDestinationModal, loadUserPlaylists]);
 
-  // Step 2: Search for song details and images
-  const searchForSongs = async () => {
-    if (parsedSongs.length === 0) return;
+  // Search all songs after parsing
+  const searchAllSongs = async (songs: ParsedSong[]) => {
+    if (songs.length === 0) return;
     
     setIsSearching(true);
-    setCurrentStep('search');
+    setCurrentStep('searching');
     setProgress(0);
+    setFoundCount(0);
 
-    const updatedSongs = [...parsedSongs];
+    const updatedSongs = [...songs];
+    const batchSize = 10; // Search 10 songs in parallel
+    let found = 0;
+    let processed = 0;
 
-    for (let i = 0; i < updatedSongs.length; i++) {
-      const song = updatedSongs[i];
-
-      try {
-        updatedSongs[i] = { ...song, status: 'searching', message: 'Searching...' };
-        setParsedSongs([...updatedSongs]);
-
-        const matchResult = await searchSong(song.title, song.artist, song.album);
-
-        if (matchResult && matchResult.song) {
-          const confidence = getMatchConfidence(matchResult.confidence);
+    for (let batchStart = 0; batchStart < updatedSongs.length; batchStart += batchSize) {
+      const batchEnd = Math.min(batchStart + batchSize, updatedSongs.length);
+      const batch = updatedSongs.slice(batchStart, batchEnd);
+      
+      // Process batch in parallel
+      await Promise.all(
+        batch.map(async (song, batchIndex) => {
+          const i = batchStart + batchIndex;
           
-          // Extract download URL - handle both array and object formats
-          let audioUrl = "";
-          if (matchResult.song.downloadUrl) {
-            if (Array.isArray(matchResult.song.downloadUrl)) {
-              // Get the highest quality available
-              const urls = matchResult.song.downloadUrl;
-              const downloadUrl = urls[urls.length - 1] || urls[4] || urls[3] || urls[2] || urls[1] || urls[0];
-              audioUrl = downloadUrl?.url || downloadUrl?.link || downloadUrl || "";
-            } else if (typeof matchResult.song.downloadUrl === 'string') {
-              audioUrl = matchResult.song.downloadUrl;
+          try {
+            updatedSongs[i] = { ...song, status: 'searching', message: 'Searching...' };
+            setParsedSongs([...updatedSongs]);
+
+            // Search for the song (calls 3 APIs in parallel)
+            const matchResult = await searchSong(song.title, song.artist, song.album, song);
+
+            if (matchResult && matchResult.song) {
+              // Extract media URLs
+              let audioUrl = "";
+              if (matchResult.song.downloadUrl) {
+                if (Array.isArray(matchResult.song.downloadUrl)) {
+                  const urls = matchResult.song.downloadUrl;
+                  const downloadUrl = urls[urls.length - 1] || urls[4] || urls[3] || urls[2] || urls[1] || urls[0];
+                  audioUrl = downloadUrl?.url || downloadUrl?.link || downloadUrl || "";
+                } else if (typeof matchResult.song.downloadUrl === 'string') {
+                  audioUrl = matchResult.song.downloadUrl;
+                }
+              }
+              
+              let imageUrl = "";
+              if (matchResult.song.image) {
+                if (Array.isArray(matchResult.song.image)) {
+                  const images = matchResult.song.image;
+                  const image = images[images.length - 1] || images[2] || images[1] || images[0];
+                  imageUrl = image?.url || image?.link || image || "";
+                } else if (typeof matchResult.song.image === 'string') {
+                  imageUrl = matchResult.song.image;
+                }
+              }
+              
+              if (!imageUrl && matchResult.song.imageUrl) imageUrl = matchResult.song.imageUrl;
+              if (!audioUrl && matchResult.song.audioUrl) audioUrl = matchResult.song.audioUrl;
+
+              const confidence = getMatchConfidence(matchResult.confidence);
+              
+              updatedSongs[i] = {
+                ...song,
+                status: 'ready',
+                message: confidence === 'high' ? 'High match' : confidence === 'medium' ? 'Good match' : 'Low match',
+                matchConfidence: confidence,
+                imageUrl: imageUrl,
+                audioUrl: audioUrl,
+                duration: matchResult.song.duration || song.duration,
+                album: matchResult.song.album?.name || matchResult.song.album || song.album,
+              };
+              
+              if (audioUrl) found++;
+            } else {
+              updatedSongs[i] = {
+                ...song,
+                status: 'ready',
+                message: 'Not found',
+                matchConfidence: 'low',
+              };
             }
+          } catch {
+            updatedSongs[i] = {
+              ...song,
+              status: 'ready',
+              message: 'Search failed',
+            };
           }
-          
-          // Extract image URL - handle both array and string formats
-          let imageUrl = "";
-          if (matchResult.song.image) {
-            if (Array.isArray(matchResult.song.image)) {
-              // Get the highest quality available
-              const images = matchResult.song.image;
-              const image = images[images.length - 1] || images[2] || images[1] || images[0];
-              imageUrl = image?.url || image?.link || image || "";
-            } else if (typeof matchResult.song.image === 'string') {
-              imageUrl = matchResult.song.image;
-            }
-          }
-          
-          // Fallback: try direct properties
-          if (!imageUrl && matchResult.song.imageUrl) {
-            imageUrl = matchResult.song.imageUrl;
-          }
-          if (!audioUrl && matchResult.song.audioUrl) {
-            audioUrl = matchResult.song.audioUrl;
-          }
-          
-          updatedSongs[i] = {
-            ...song,
-            status: 'ready',
-            message: confidence === 'high' ? 'High match' : confidence === 'medium' ? 'Good match' : 'Low match',
-            matchConfidence: confidence,
-            imageUrl: imageUrl,
-            audioUrl: audioUrl,
-            duration: matchResult.song.duration || song.duration,
-            album: matchResult.song.album?.name || matchResult.song.album || song.album,
-          };
-        } else {
-          updatedSongs[i] = {
-            ...song,
-            status: 'ready',
-            message: 'No match found',
-            matchConfidence: 'low',
-          };
-        }
-      } catch {
-        updatedSongs[i] = {
-          ...song,
-          status: 'ready',
-          message: 'Search failed',
-        };
-      }
 
-      setProgress(Math.round(((i + 1) / updatedSongs.length) * 100));
-      setParsedSongs([...updatedSongs]);
-
-      // Delay between requests
-      if (i < updatedSongs.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 300));
+          processed++;
+          const currentProgress = Math.floor((processed / updatedSongs.length) * 100);
+          setFoundCount(found);
+          setProgress(currentProgress);
+          setParsedSongs([...updatedSongs]);
+        })
+      );
+      
+      // Small delay between batches
+      if (batchEnd < updatedSongs.length) {
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
 
     setIsSearching(false);
-    setCurrentStep('select');
-    
-    // Show destination modal after search completes
-    setTimeout(() => {
-      setShowDestinationModal(true);
-    }, 300);
+    setCurrentStep('review');
   };
 
-  // Step 3: Show destination selection
-  const handleNext = () => {
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
+  // Merged: Search and Import in one flow
+  const handleStartImport = async () => {
+    if (parsedSongs.length === 0) return;
     
-    // Check if we need to search first
-    const needsSearch = parsedSongs.some(song => !song.imageUrl && !song.audioUrl);
-    
-    if (needsSearch) {
-      // Start search process
-      searchForSongs();
-    } else {
-      // Already searched, go to destination modal
-      setShowDestinationModal(true);
-    }
+    // Show destination modal first
+    setShowDestinationModal(true);
   };
 
-  // Step 4: Import songs
-  const handleImport = async () => {
+  // Start the actual import process (no search needed, already done)
+  const handleConfirmImport = async () => {
     if (parsedSongs.length === 0) return;
     
     setShowDestinationModal(false);
-    
     void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
     
-    setCurrentStep('import');
+    setCurrentStep('importing');
     setIsProcessing(true);
     setProgress(0);
     setAddedCount(0);
     setSkippedCount(0);
+    setDuplicates(0);
 
     let playlistId: string | null = null;
+    let isNewPlaylistFirestore = false;
 
     // Create playlist if needed or use existing
     if (importDestination === 'new-playlist') {
@@ -368,12 +370,14 @@ export default function FileImportScreen() {
           );
           playlistId = result?.id || null;
           setCreatedPlaylistId(playlistId);
-          setIsFirestorePlaylist(true); // Mark as Firestore playlist
+          setIsFirestorePlaylist(true);
+          isNewPlaylistFirestore = true;
         } else {
           const result = await createUserPlaylist(newPlaylistName || "Imported Playlist");
           playlistId = result.id;
           setCreatedPlaylistId(playlistId);
-          setIsFirestorePlaylist(false); // Mark as local playlist
+          setIsFirestorePlaylist(false);
+          isNewPlaylistFirestore = false;
         }
       } catch {
         Alert.alert("Error", "Failed to create playlist");
@@ -383,22 +387,24 @@ export default function FileImportScreen() {
     } else if (importDestination === 'existing-playlist') {
       playlistId = selectedPlaylistId;
       setCreatedPlaylistId(playlistId);
-      // Check if selected playlist is Firestore
       const selectedPlaylist = userPlaylists.find(p => p.id === playlistId);
-      setIsFirestorePlaylist(selectedPlaylist ? 'createdBy' in selectedPlaylist : false);
+      const isFirestore = selectedPlaylist ? 'createdBy' in selectedPlaylist : false;
+      setIsFirestorePlaylist(isFirestore);
+      isNewPlaylistFirestore = isFirestore;
     }
 
     const updatedSongs = [...parsedSongs];
-    let added = 0;
-    let skipped = 0;
-
+    
+    // Process songs sequentially to avoid race conditions
     for (let i = 0; i < updatedSongs.length; i++) {
       const song = updatedSongs[i];
-
+      
       // Skip songs without audio
       if (!song.audioUrl) {
-        updatedSongs[i] = { ...song, status: 'error', message: 'No audio found' };
-        skipped++;
+        updatedSongs[i] = { ...song, status: 'error', message: 'No audio' };
+        setSkippedCount(prev => prev + 1);
+        const currentProgress = Math.floor(((i + 1) / updatedSongs.length) * 100);
+        setProgress(currentProgress);
         setParsedSongs([...updatedSongs]);
         continue;
       }
@@ -407,8 +413,12 @@ export default function FileImportScreen() {
         updatedSongs[i] = { ...song, status: 'searching', message: 'Adding...' };
         setParsedSongs([...updatedSongs]);
 
+        // Create song object and add to destination
+        // Use consistent ID based on title and artist for deduplication
+        const songId = `${song.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${song.artist.toLowerCase().replace(/[^a-z0-9]/g, '-')}`.substring(0, 100);
+        
         const appSong: Song = {
-          id: `imported-${Date.now()}-${i}`,
+          id: songId,
           title: song.title,
           artist: song.artist,
           album: song.album || "",
@@ -418,60 +428,60 @@ export default function FileImportScreen() {
           genre: "",
         };
 
+        let addSuccess = false;
+        
         if (importDestination === 'liked') {
           if (!user?.id) {
             throw new Error('Sign in to import liked songs');
           }
-
-          const success = await addLikedSongToFirestore(user.id, appSong);
-          if (!success) {
-            throw new Error('Failed to add liked song');
-          }
+          addSuccess = await addLikedSongToFirestore(user.id, appSong);
         } else if (playlistId) {
-          // Check if this is a Firestore playlist
-          const selectedPlaylist = userPlaylists.find(p => p.id === playlistId);
-          const isFirestorePlaylist = selectedPlaylist && 'createdBy' in selectedPlaylist;
-          
-          if (isFirestorePlaylist && user?.id) {
-            // Firestore playlist - add directly to Firestore
-            const success = await addSongToFirestorePlaylist(playlistId, appSong);
-            if (!success) {
-              throw new Error('Failed to add to Firestore playlist');
-            }
+          // Check if it's a Firestore playlist (either newly created or existing)
+          if (isNewPlaylistFirestore && user?.id) {
+            addSuccess = await addSongToFirestorePlaylist(playlistId, appSong);
           } else {
-            // Local playlist - add to AsyncStorage
-            await addSongToPlaylist(playlistId, appSong);
+            // Local playlist
+            addSuccess = await addSongToPlaylist(playlistId, appSong);
           }
+        }
+        
+        // Handle duplicate detection
+        if (!addSuccess) {
+          setDuplicates(prev => prev + 1);
+          updatedSongs[i] = {
+            ...song,
+            status: 'added',
+            message: 'Already exists',
+          };
+          const currentProgress = Math.floor(((i + 1) / updatedSongs.length) * 100);
+          setProgress(currentProgress);
+          setParsedSongs([...updatedSongs]);
+          continue;
         }
 
         updatedSongs[i] = {
           ...song,
           status: 'added',
-          message: 'Added successfully',
+          message: 'Added',
         };
-        added++;
-      } catch {
+        setAddedCount(prev => prev + 1);
+      } catch (error) {
+        console.error(`Failed to add song "${song.title}":`, error);
         updatedSongs[i] = {
           ...song,
           status: 'error',
-          message: 'Failed to add',
+          message: 'Failed',
         };
-        skipped++;
+        setSkippedCount(prev => prev + 1);
       }
 
-      setAddedCount(added);
-      setSkippedCount(skipped);
-      setProgress(Math.round(((i + 1) / updatedSongs.length) * 100));
+      const currentProgress = Math.floor(((i + 1) / updatedSongs.length) * 100);
+      setProgress(currentProgress);
       setParsedSongs([...updatedSongs]);
-
-      // Small delay
-      if (i < updatedSongs.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
     }
 
-    // Wait a bit longer for Firestore writes to complete
-    if (isFirestorePlaylist) {
+    // Wait for Firestore writes to complete
+    if (isNewPlaylistFirestore) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
@@ -485,182 +495,88 @@ export default function FileImportScreen() {
     setParsedSongs(newSongs);
   };
 
+  // Loading state
   if (isLoading || currentStep === 'parse') {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.loadingText}>
-            {currentStep === 'parse' ? 'Parsing file...' : 'Loading...'}
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
-  // Search phase - show songs with images as they're found
-  if (isSearching || currentStep === 'search') {
-    return (
-      <View style={[styles.container, { paddingTop: topInset }]}>
         <LinearGradient
-          colors={["#0a0a0a", "#1a1a1a", "#0f0f0f"]}
+          colors={[Colors.background, "#1a1a1a"]}
           style={StyleSheet.absoluteFill}
         />
-        
-        {/* Header */}
-        <View style={styles.detectHeader}>
-          <View style={styles.detectHeaderTop}>
-            <Pressable onPress={safeGoBack} hitSlop={10}>
-              <Ionicons name="close" size={26} color={Colors.text} />
-            </Pressable>
-            <Text style={styles.detectHeaderTitle}>Detecting Songs</Text>
-            <View style={{ width: 26 }} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Parsing file...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Searching state - Simple and clean
+  if (isSearching || currentStep === 'searching') {
+    return (
+      <View style={[styles.container, { paddingTop: topInset, backgroundColor: Colors.background }]}>
+        <View style={styles.simpleSearchContainer}>
+          {/* Animated Search Icon */}
+          <View style={styles.simpleSearchIconContainer}>
+            <View style={styles.simpleSearchIconCircle}>
+              <Ionicons name="search" size={48} color={Colors.primary} />
+            </View>
           </View>
+
+          {/* Title */}
+          <Text style={styles.simpleSearchTitle}>Finding Your Music</Text>
+          
+          {/* Progress */}
+          <Text style={styles.simpleSearchProgress}>{foundCount} of {parsedSongs.length}</Text>
           
           {/* Progress Bar */}
-          <View style={styles.progressBarContainer}>
-            <View style={styles.progressBarBg}>
-              <LinearGradient
-                colors={[Colors.primary, "#84E655"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={[styles.progressBarFill, { width: `${progress}%` }]}
-              />
+          <View style={styles.simpleProgressBarContainer}>
+            <View style={styles.simpleProgressBar}>
+              <View style={[styles.simpleProgressFill, { width: `${progress}%` }]} />
             </View>
-            <Text style={styles.progressBarText}>
-              {Math.round(progress)}% • {parsedSongs.filter(s => s.status === 'ready').length}/{parsedSongs.length} songs
-            </Text>
-          </View>
-        </View>
-
-        {/* Song List with Real-time Updates */}
-        <ScrollView 
-          style={styles.detectScrollView}
-          contentContainerStyle={styles.detectScrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {parsedSongs.map((song, index) => {
-            const isSearching = song.status === 'searching';
-            const isReady = song.status === 'ready';
-            const hasImage = song.imageUrl && song.imageUrl.length > 0;
-            
-            return (
-              <View 
-                key={index} 
-                style={[
-                  styles.detectSongCard,
-                  isSearching && styles.detectSongCardActive
-                ]}
-              >
-                {/* Album Art or Placeholder */}
-                <View style={styles.detectImageContainer}>
-                  {hasImage ? (
-                    <Image 
-                      source={{ uri: song.imageUrl }} 
-                      style={styles.detectSongImage}
-                      contentFit="cover"
-                      cachePolicy="memory-disk"
-                      priority={isSearching ? "high" : "normal"}
-                      transition={300}
-                    />
-                  ) : (
-                    <View style={styles.detectSongImagePlaceholder}>
-                      {isSearching ? (
-                        <ActivityIndicator size="small" color={Colors.primary} />
-                      ) : (
-                        <Ionicons 
-                          name="musical-note" 
-                          size={24} 
-                          color={isReady ? Colors.inactive : Colors.subtext} 
-                        />
-                      )}
-                    </View>
-                  )}
-                  
-                  {/* Status Badge */}
-                  {isReady && song.matchConfidence && (
-                    <View style={[
-                      styles.detectStatusBadge,
-                      song.matchConfidence === 'high' && styles.detectStatusBadgeHigh,
-                      song.matchConfidence === 'medium' && styles.detectStatusBadgeMedium,
-                      song.matchConfidence === 'low' && styles.detectStatusBadgeLow,
-                    ]}>
-                      <Ionicons 
-                        name={
-                          song.matchConfidence === 'high' ? "checkmark-circle" :
-                          song.matchConfidence === 'medium' ? "checkmark" :
-                          "alert-circle"
-                        }
-                        size={10}
-                        color="#fff"
-                      />
-                    </View>
-                  )}
-                </View>
-                
-                {/* Song Info */}
-                <View style={styles.detectSongInfo}>
-                  <Text style={styles.detectSongTitle} numberOfLines={1}>
-                    {song.title}
-                  </Text>
-                  <Text style={styles.detectSongArtist} numberOfLines={1}>
-                    {song.artist}
-                  </Text>
-                  
-                  {/* Status Message */}
-                  {song.message && (
-                    <View style={styles.detectStatusRow}>
-                      {isSearching && (
-                        <ActivityIndicator size="small" color={Colors.primary} style={{ marginRight: 6 }} />
-                      )}
-                      <Text style={[
-                        styles.detectStatusText,
-                        isSearching && styles.detectStatusTextActive,
-                        song.matchConfidence === 'high' && styles.detectStatusTextHigh,
-                        song.matchConfidence === 'medium' && styles.detectStatusTextMedium,
-                        song.matchConfidence === 'low' && styles.detectStatusTextLow,
-                      ]} numberOfLines={1}>
-                        {song.message}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* Right Icon */}
-                <View style={styles.detectSongRight}>
-                  {isSearching && (
-                    <View style={styles.detectPulse}>
-                      <View style={styles.detectPulseInner} />
-                    </View>
-                  )}
-                  {isReady && song.matchConfidence === 'high' && (
-                    <Ionicons name="checkmark-circle" size={24} color={Colors.primary} />
-                  )}
-                  {isReady && song.matchConfidence === 'medium' && (
-                    <Ionicons name="checkmark-circle-outline" size={24} color="#FFA500" />
-                  )}
-                  {isReady && song.matchConfidence === 'low' && (
-                    <Ionicons name="alert-circle-outline" size={24} color={Colors.inactive} />
-                  )}
-                </View>
-              </View>
-            );
-          })}
-        </ScrollView>
-
-        {/* Bottom Info */}
-        <View style={styles.detectBottomInfo}>
-          <View style={styles.detectInfoCard}>
-            <Ionicons name="information-circle" size={18} color={Colors.primary} />
-            <Text style={styles.detectInfoText}>
-              Finding high-quality audio and artwork for your songs...
-            </Text>
+            <Text style={styles.simpleProgressPercentage}>{progress}%</Text>
           </View>
         </View>
       </View>
     );
   }
 
+  // Importing state - Simple and clean
+  if (currentStep === 'importing' || isProcessing) {
+    return (
+      <View style={[styles.container, { paddingTop: topInset, backgroundColor: Colors.background }]}>
+        <View style={styles.simpleSearchContainer}>
+          {/* Animated Import Icon */}
+          <View style={styles.simpleSearchIconContainer}>
+            <View style={styles.simpleSearchIconCircle}>
+              <Ionicons name="download" size={48} color={Colors.primary} />
+            </View>
+          </View>
+
+          {/* Title */}
+          <Text style={styles.simpleSearchTitle}>Importing Songs</Text>
+          
+          {/* Progress */}
+          <Text style={styles.simpleSearchProgress}>{addedCount} of {parsedSongs.length}</Text>
+          
+          {/* Progress Bar */}
+          <View style={styles.simpleProgressBarContainer}>
+            <View style={styles.simpleProgressBar}>
+              <View style={[styles.simpleProgressFill, { width: `${progress}%` }]} />
+            </View>
+            <Text style={styles.simpleProgressPercentage}>{progress}%</Text>
+          </View>
+
+          {/* Skipped count if any */}
+          {skippedCount > 0 && (
+            <Text style={styles.simpleSkippedText}>{skippedCount} skipped</Text>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  // Complete state
   if (currentStep === 'complete') {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
@@ -670,18 +586,24 @@ export default function FileImportScreen() {
         />
         
         <View style={styles.completeContainer}>
-          <View style={styles.completeIcon}>
+          <View style={styles.completeIconContainer}>
             <Ionicons name="checkmark-circle" size={80} color={Colors.primary} />
           </View>
           
           <Text style={styles.completeTitle}>Import Complete!</Text>
           <Text style={styles.completeSubtitle}>
-            Successfully added {addedCount} songs to {importDestination === 'liked' ? 'your liked songs' : 'your playlist'}
+            Successfully added {addedCount} {addedCount === 1 ? 'song' : 'songs'}
           </Text>
 
           {skippedCount > 0 && (
             <Text style={styles.completeSkipped}>
-              {skippedCount} songs could not be matched
+              {skippedCount} {skippedCount === 1 ? 'song' : 'songs'} could not be found
+            </Text>
+          )}
+          
+          {duplicates > 0 && (
+            <Text style={styles.completeSkipped}>
+              {duplicates} {duplicates === 1 ? 'song was' : 'songs were'} already in the playlist
             </Text>
           )}
 
@@ -695,7 +617,6 @@ export default function FileImportScreen() {
                     ? newPlaylistName.trim() || "Imported Playlist"
                     : selectedPlaylist?.name || "Imported Playlist";
 
-                // Navigate with proper parameters
                 if (isFirestorePlaylist) {
                   router.replace({
                     pathname: "/playlist/[id]",
@@ -721,69 +642,23 @@ export default function FileImportScreen() {
               }
             }}
           >
-            <Text style={styles.completeButtonText}>
-              {(importDestination === 'new-playlist' || importDestination === 'existing-playlist') ? 'View Playlist' : 'View Liked Songs'}
-            </Text>
+            <LinearGradient
+              colors={[Colors.primary, "#84E655"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.completeButtonGradient}
+            >
+              <Text style={styles.completeButtonText}>
+                {(importDestination === 'new-playlist' || importDestination === 'existing-playlist') ? 'View Playlist' : 'View Liked Songs'}
+              </Text>
+            </LinearGradient>
           </Pressable>
         </View>
       </View>
     );
   }
 
-  if (currentStep === 'import' || isProcessing) {
-    return (
-      <View style={[styles.container, { paddingTop: topInset }]}>
-        <LinearGradient
-          colors={[Colors.background, "#1a1a1a"]}
-          style={StyleSheet.absoluteFill}
-        />
-        
-        <View style={styles.processingContainer}>
-          <View style={styles.progressCircle}>
-            <Text style={styles.progressText}>{progress}%</Text>
-          </View>
-
-          <Text style={styles.processingTitle}>Processing Songs</Text>
-          <Text style={styles.processingSubtitle}>
-            Finding high-quality audio for your music...
-          </Text>
-
-          <View style={styles.statsContainer}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{addedCount}</Text>
-              <Text style={styles.statLabel}>Added</Text>
-            </View>
-            {skippedCount > 0 && (
-              <View style={styles.statItem}>
-                <Text style={[styles.statValue, { color: Colors.inactive }]}>{skippedCount}</Text>
-                <Text style={styles.statLabel}>Skipped</Text>
-              </View>
-            )}
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{parsedSongs.length}</Text>
-              <Text style={styles.statLabel}>Total</Text>
-            </View>
-          </View>
-
-          {/* Current song */}
-          {parsedSongs.find(s => s.status === 'searching') && (
-            <View style={styles.currentSong}>
-              <Ionicons name="musical-note" size={20} color={Colors.primary} />
-              <View style={styles.currentSongInfo}>
-                <Text style={styles.currentSongTitle} numberOfLines={1}>
-                  {parsedSongs.find(s => s.status === 'searching')?.title}
-                </Text>
-                <Text style={styles.currentSongArtist} numberOfLines={1}>
-                  {parsedSongs.find(s => s.status === 'searching')?.artist}
-                </Text>
-              </View>
-            </View>
-          )}
-        </View>
-      </View>
-    );
-  }
-
+  // Review state - Main UI
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
       <LinearGradient
@@ -796,7 +671,7 @@ export default function FileImportScreen() {
         <Pressable onPress={safeGoBack} hitSlop={10}>
           <Ionicons name="chevron-back" size={28} color={Colors.text} />
         </Pressable>
-        <Text style={styles.headerTitle}>Import from File</Text>
+        <Text style={styles.headerTitle}>Import Songs</Text>
         <View style={{ width: 28 }} />
       </View>
 
@@ -805,70 +680,56 @@ export default function FileImportScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Compact File Info */}
-        <View style={styles.compactFileInfo}>
-          <View style={styles.fileIconSmall}>
-            <Ionicons name="document-text" size={20} color={Colors.primary} />
+        {/* File Info Card */}
+        <View style={styles.fileInfoCard}>
+          <View style={styles.fileIconContainer}>
+            <Ionicons name="document-text" size={24} color={Colors.primary} />
           </View>
-          <View style={styles.fileTextInfo}>
-            <Text style={styles.fileNameCompact} numberOfLines={1}>{fileName}</Text>
-            <Text style={styles.songCountCompact}>
-              {parsedSongs.length} {parsedSongs.length === 1 ? 'song' : 'songs'}
+          <View style={styles.fileInfo}>
+            <Text style={styles.fileName} numberOfLines={1}>{fileName}</Text>
+            <Text style={styles.songCount}>
+              {parsedSongs.filter(s => s.audioUrl).length} of {parsedSongs.length} songs ready to import
             </Text>
           </View>
         </View>
 
-        {/* Compact Song List */}
+        {/* Song List */}
+        <View style={styles.songListHeader}>
+          <Text style={styles.songListTitle}>Songs</Text>
+        </View>
+
         {parsedSongs.map((song, index) => (
-          <View key={index} style={styles.compactSongItem}>
+          <View key={index} style={styles.songItem}>
             {song.imageUrl ? (
               <Image 
                 source={{ uri: song.imageUrl }} 
-                style={styles.compactCover}
+                style={styles.songIconPlaceholder}
                 contentFit="cover"
                 cachePolicy="memory-disk"
-                priority="high"
-                transition={200}
               />
             ) : (
-              <View style={styles.compactCoverPlaceholder}>
-                <Ionicons name="musical-note" size={18} color={Colors.subtext} />
+              <View style={styles.songIconPlaceholder}>
+                <Ionicons name="musical-note" size={20} color={Colors.subtext} />
               </View>
             )}
             
-            <View style={styles.compactSongInfo}>
-              <Text style={styles.compactTitle} numberOfLines={1}>{song.title}</Text>
-              <View style={styles.compactMetaRow}>
-                <Text style={styles.compactArtist} numberOfLines={1}>{song.artist}</Text>
+            <View style={styles.songInfo}>
+              <Text style={styles.songTitle} numberOfLines={1}>{song.title}</Text>
+              <View style={styles.songMetaRow}>
+                <Text style={styles.songArtist} numberOfLines={1}>{song.artist}</Text>
                 {song.matchConfidence && (
-                  <>
-                    <Text style={styles.dotSeparator}>•</Text>
-                    <View style={styles.compactBadge}>
-                      <Ionicons 
-                        name={
-                          song.matchConfidence === 'high' ? "checkmark-circle" :
-                          song.matchConfidence === 'medium' ? "checkmark" :
-                          "alert-circle"
-                        }
-                        size={10}
-                        color={
-                          song.matchConfidence === 'high' ? Colors.primary :
-                          song.matchConfidence === 'medium' ? "#FFA500" :
-                          Colors.inactive
-                        }
-                      />
-                      <Text style={[
-                        styles.compactBadgeText,
-                        song.matchConfidence === 'high' && { color: Colors.primary },
-                        song.matchConfidence === 'medium' && { color: "#FFA500" },
-                        song.matchConfidence === 'low' && { color: Colors.inactive },
-                      ]}>
-                        {song.matchConfidence === 'high' ? 'High' : 
-                         song.matchConfidence === 'medium' ? 'Good' : 
-                         'Low'}
-                      </Text>
-                    </View>
-                  </>
+                  <View style={[
+                    styles.matchBadge,
+                    song.matchConfidence === 'high' && styles.matchBadgeHigh,
+                    song.matchConfidence === 'medium' && styles.matchBadgeMedium,
+                    song.matchConfidence === 'low' && styles.matchBadgeLow,
+                  ]}>
+                    <Text style={styles.matchBadgeText}>
+                      {song.matchConfidence === 'high' ? 'High' : 
+                       song.matchConfidence === 'medium' ? 'Good' : 
+                       'Low'}
+                    </Text>
+                  </View>
                 )}
               </View>
             </View>
@@ -876,7 +737,7 @@ export default function FileImportScreen() {
             <Pressable
               onPress={() => removeSong(index)}
               hitSlop={8}
-              style={styles.compactRemove}
+              style={styles.removeButton}
             >
               <Ionicons name="close-circle" size={22} color={Colors.inactive} />
             </Pressable>
@@ -884,30 +745,28 @@ export default function FileImportScreen() {
         ))}
       </ScrollView>
 
-      {/* Redesigned Bottom Button */}
-      <View style={styles.bottomBar}>
+      {/* Bottom Button */}
+      <View style={styles.bottomContainer}>
         <Pressable
-          style={[styles.actionButton, parsedSongs.length === 0 && styles.actionButtonDisabled]}
-          onPress={handleNext}
-          disabled={parsedSongs.length === 0}
+          style={[styles.importButton, parsedSongs.filter(s => s.audioUrl).length === 0 && styles.importButtonDisabled]}
+          onPress={handleStartImport}
+          disabled={parsedSongs.filter(s => s.audioUrl).length === 0}
         >
           <LinearGradient
-            colors={parsedSongs.length === 0 ? ["#444", "#555"] : [Colors.primary, "#84E655"]}
+            colors={parsedSongs.filter(s => s.audioUrl).length === 0 ? ["#444", "#555"] : [Colors.primary, "#84E655"]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
-            style={styles.actionButtonGradient}
+            style={styles.importButtonGradient}
           >
-            <Text style={styles.actionButtonText}>
-              {parsedSongs.some(s => !s.imageUrl && !s.audioUrl) 
-                ? `Find & Import ${parsedSongs.length} Songs`
-                : `Import ${parsedSongs.length} Songs`}
+            <Text style={styles.importButtonText}>
+              Import {parsedSongs.filter(s => s.audioUrl).length} {parsedSongs.filter(s => s.audioUrl).length === 1 ? 'Song' : 'Songs'}
             </Text>
-            <Ionicons name="arrow-forward" size={18} color="#fff" />
+            <Ionicons name="arrow-forward" size={20} color="#fff" />
           </LinearGradient>
         </Pressable>
       </View>
 
-      {/* Destination Modal - Native Bottom Sheet */}
+      {/* Destination Modal */}
       <Modal
         visible={showDestinationModal}
         transparent
@@ -916,7 +775,6 @@ export default function FileImportScreen() {
         statusBarTranslucent
       >
         <View style={styles.modalOverlay}>
-          {/* Backdrop */}
           <Animated.View 
             style={[
               StyleSheet.absoluteFill,
@@ -932,7 +790,6 @@ export default function FileImportScreen() {
             />
           </Animated.View>
 
-          {/* Bottom Sheet */}
           <Animated.View
             style={[
               styles.modalBottomSheet,
@@ -941,12 +798,10 @@ export default function FileImportScreen() {
               },
             ]}
           >
-            {/* Drag Handle */}
             <View {...panResponder.panHandlers} style={styles.modalDragHandle}>
               <View style={styles.modalDragIndicator} />
             </View>
 
-            {/* Content */}
             <ScrollView 
               style={styles.modalScrollView}
               contentContainerStyle={styles.modalContent}
@@ -1056,7 +911,7 @@ export default function FileImportScreen() {
                       ? styles.modalButtonConfirmDisabled
                       : null
                   ]}
-                  onPress={handleImport}
+                  onPress={handleConfirmImport}
                   disabled={
                     (importDestination === 'new-playlist' && !newPlaylistName.trim()) ||
                     (importDestination === 'existing-playlist' && !selectedPlaylistId)
@@ -1073,7 +928,7 @@ export default function FileImportScreen() {
                     end={{ x: 1, y: 0 }}
                     style={styles.modalButtonConfirmGradient}
                   >
-                    <Text style={styles.modalButtonConfirmText}>Import</Text>
+                    <Text style={styles.modalButtonConfirmText}>Start Import</Text>
                   </LinearGradient>
                 </Pressable>
               </View>
@@ -1703,6 +1558,234 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     color: Colors.subtext,
+  },
+  
+  // New Review Page Styles
+  fileInfoCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.surface,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 14,
+  },
+  fileIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: Colors.primary + "20",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fileInfo: {
+    flex: 1,
+  },
+  fileName: {
+    fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  songCount: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.subtext,
+  },
+  songListHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  songListTitle: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.subtext,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  songItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.surface,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 12,
+  },
+  songIconPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  songInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  songTitle: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
+    marginBottom: 4,
+  },
+  songMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  songArtist: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    color: Colors.subtext,
+    flex: 1,
+  },
+  matchBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    flexShrink: 0,
+  },
+  matchBadgeHigh: {
+    backgroundColor: Colors.primary + "20",
+  },
+  matchBadgeMedium: {
+    backgroundColor: "#FFA50020",
+  },
+  matchBadgeLow: {
+    backgroundColor: Colors.inactive + "20",
+  },
+  matchBadgeText: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
+  },
+  removeButton: {
+    padding: 4,
+  },
+  bottomContainer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: Colors.background,
+    borderTopWidth: 1,
+    borderTopColor: Colors.surfaceLight + "40",
+  },
+  importButton: {
+    borderRadius: 24,
+    overflow: "hidden",
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  importButtonDisabled: {
+    opacity: 0.5,
+    shadowOpacity: 0,
+  },
+  importButtonGradient: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    gap: 10,
+  },
+  importButtonText: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    color: "#fff",
+    letterSpacing: 0.3,
+  },
+
+  // Simple Search/Import UI - Clean and minimal
+  simpleSearchContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 40,
+  },
+  simpleSearchIconContainer: {
+    marginBottom: 32,
+  },
+  simpleSearchIconCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: Colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  simpleSearchTitle: {
+    fontSize: 26,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  simpleSearchProgress: {
+    fontSize: 18,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.subtext,
+    marginBottom: 32,
+    textAlign: "center",
+  },
+  simpleProgressBarContainer: {
+    width: "100%",
+    maxWidth: 400,
+    alignItems: "center",
+  },
+  simpleProgressBar: {
+    width: "100%",
+    height: 6,
+    backgroundColor: Colors.surface,
+    borderRadius: 3,
+    overflow: "hidden",
+    marginBottom: 12,
+  },
+  simpleProgressFill: {
+    height: "100%",
+    backgroundColor: Colors.primary,
+    borderRadius: 3,
+  },
+  simpleProgressPercentage: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.primary,
+  },
+  simpleSkippedText: {
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+    color: Colors.inactive,
+    marginTop: 24,
+    textAlign: "center",
+  },
+  
+  // Complete State Styles
+  completeIconContainer: {
+    marginBottom: 32,
+  },
+  completeButtonGradient: {
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 24,
   },
 });
 

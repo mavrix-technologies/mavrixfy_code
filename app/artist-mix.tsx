@@ -182,6 +182,7 @@ export default function ArtistMixScreen() {
           {ids.map((id, i) => (
             <View key={id} style={[styles.avatarWrap, i > 0 && { marginLeft: -24 }]}>
               <Image
+                recyclingKey={id}
                 source={{ uri: images[i] || undefined }}
                 style={styles.avatar}
                 contentFit="cover"

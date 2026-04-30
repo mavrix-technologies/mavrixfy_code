@@ -11,20 +11,4 @@
 -keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
-# Android Auto / Car App Library
--keep class com.mavrixfy.app.auto.** { *; }
--keep class androidx.car.app.** { *; }
--keep class androidx.media.** { *; }
--keep class android.support.v4.media.** { *; }
--keep class com.google.android.exoplayer2.** { *; }
-
 # Add any project specific keep options here:
-
-# @generated begin expo-build-properties - expo prebuild (DO NOT MODIFY)
--keep class com.facebook.hermes.unicode.** { *; }
--keep class com.facebook.jni.** { *; }
--keep class com.doublesymmetry.** { *; }
--keep class expo.modules.updates.** { *; }
--keep class kotlin.** { *; }
--keep class kotlin.reflect.** { *; }
-# @generated end expo-build-properties

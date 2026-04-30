@@ -14,11 +14,3 @@ local.properties
 
 # Bundle artifacts
 *.jsbundle
-
-# Keystore files - NEVER commit these!
-*.keystore
-*.jks
-gradle.properties
-
-# Keep example file
-!gradle.properties.example

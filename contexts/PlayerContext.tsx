@@ -207,8 +207,8 @@ function normalizePlayableSong(song: Song | null | undefined): Song | null {
   };
 }
 
-function songToTrack(song: Song): any {
-  const audioUrl = resolveAudioUrl(song as SongPlaybackSource);
+function songToTrack(song: Song, localUrl?: string | null): any {
+  const audioUrl = localUrl || resolveAudioUrl(song as SongPlaybackSource);
   const durationSeconds = toDurationSeconds(song.duration);
   
   return {
@@ -221,6 +221,18 @@ function songToTrack(song: Song): any {
     artwork: song.coverUrl,
     duration: durationSeconds,
   };
+}
+
+/** Resolve the best playback URL for a song — local file first, then stream. */
+async function resolvePlaybackUrl(song: Song): Promise<string | null> {
+  try {
+    const { getLocalPlaybackUrl } = await import("@/lib/downloads/downloadManager");
+    const local = await getLocalPlaybackUrl(song.id);
+    if (local) return local;
+  } catch {
+    // downloads module not available — fall through to stream
+  }
+  return null;
 }
 
 function isPlayableSong(song: Song | null | undefined): song is Song {
@@ -287,6 +299,55 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
   useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
+
+  // ── Persist player state on every song change ─────────────────────────────
+  useEffect(() => {
+    if (!currentSong) return;
+    void Storage.savePlayerState({
+      currentSong,
+      queue,
+      queueIndex,
+    });
+  }, [currentSong?.id, queueIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Restore player state on mount (show mini player with last song) ────────
+  useEffect(() => {
+    // Wait until the native player is ready before restoring
+    if (!isPlayerReady && canUseNativePlayback) return;
+
+    Storage.loadPlayerState().then(async (saved) => {
+      if (!saved?.currentSong) return;
+
+      // Restore UI state
+      setCurrentSong(saved.currentSong);
+      setQueue(saved.queue);
+      setSourceQueue(saved.queue);
+      queueRef.current = saved.queue;
+      originalQueueRef.current = saved.queue;
+      setQueueIndex(saved.queueIndex);
+      queueIndexRef.current = saved.queueIndex;
+
+      // Pre-load the track into TrackPlayer so play works immediately
+      if (TrackPlayer && setupPlayer && isPlayerReady) {
+        try {
+          const playableQueue = saved.queue
+            .map(normalizePlayableSong)
+            .filter((s): s is Song => Boolean(s));
+          if (playableQueue.length > 0) {
+            await TrackPlayer.reset();
+            await TrackPlayer.add(playableQueue.map(songToTrack));
+            const idx = Math.max(0, Math.min(saved.queueIndex, playableQueue.length - 1));
+            if (idx > 0) await TrackPlayer.skip(idx);
+            // Don't call play() — just load so it's ready
+          }
+        } catch {
+          // Silent fail — UI state is still restored
+        }
+      } else if (isExpoGoRuntime) {
+        // Expo Go: UI state restored — play will load on first tap via togglePlay
+      }
+    }).catch(() => {});
+  }, [isPlayerReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const playbackStateValue =
     playbackState && typeof playbackState === "object" && "state" in playbackState
@@ -484,8 +545,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     void syncRuntimeProgress();
     const interval = setInterval(() => {
-      void syncRuntimeProgress();
-    }, Platform.OS === "android" ? 500 : 800);
+      // Only sync when app is active to save battery
+      if (AppState.currentState === 'active') {
+        void syncRuntimeProgress();
+      }
+    }, 2000); // Increased from 500-800ms to 2000ms to reduce battery drain
 
     return () => {
       mounted = false;
@@ -843,17 +907,36 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }
 
         if (queueIsSame) {
-          // Fast path: when queue is unchanged, jump instantly instead of rebuilding.
+          // Fast path: queue unchanged — update the track URL in case it was
+          // just downloaded since the queue was last built, then skip.
+          const localUrl = await resolvePlaybackUrl(targetSong).catch(() => null);
+          if (localUrl) {
+            try {
+              await TrackPlayer.remove(targetIndex);
+              await TrackPlayer.add(songToTrack(targetSong, localUrl), targetIndex);
+            } catch {
+              // If patching fails, just skip — stream will work as fallback.
+            }
+          }
           await TrackPlayer.skip(targetIndex);
           await TrackPlayer.play();
           return;
         }
 
-        const tracks = playableQueue.map(songToTrack);
+        // Resolve local file URLs for ALL songs in the initial batch.
         const preloadCount = Math.max(
-          Math.min(tracks.length, PRELOAD_QUEUE_SIZE),
+          Math.min(playableQueue.length, PRELOAD_QUEUE_SIZE),
           targetIndex + 1
         );
+        const localUrlMap = new Map<string, string>();
+        await Promise.allSettled(
+          playableQueue.slice(0, preloadCount).map(async (s) => {
+            const local = await resolvePlaybackUrl(s).catch(() => null);
+            if (local) localUrlMap.set(s.id, local);
+          })
+        );
+
+        const tracks = playableQueue.map((s) => songToTrack(s, localUrlMap.get(s.id)));
         const initialTracks = tracks.slice(0, preloadCount);
         const remainingTracks = tracks.slice(preloadCount);
 
@@ -985,7 +1068,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           if (previewIsPlayingRef.current) {
             ExpoAvPlayer.pause();
           } else {
-            ExpoAvPlayer.play();
+            // If no URL loaded yet (e.g. after app reopen), load first then play
+            if (!ExpoAvPlayer.isLoaded()) {
+              const url = resolveAudioUrl(currentSong as any);
+              if (url) {
+                void ExpoAvPlayer.loadAndPlay(url);
+              }
+            } else {
+              ExpoAvPlayer.play();
+            }
           }
           return;
         }

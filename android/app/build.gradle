@@ -1,5 +1,4 @@
 apply plugin: "com.android.application"
-apply plugin: "com.google.gms.google-services"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
@@ -88,33 +87,15 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.mavrixfy.app'
-
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-    
-    // Read version from app.json to keep it in sync
-    def appJsonFile = file("$projectRoot/app.json")
-    def appJson = new groovy.json.JsonSlurper().parseText(appJsonFile.text)
-    def appVersionName = appJson.expo.version
-    def appVersionCode = appJson.expo.android?.versionCode ?: 20500
-    
+    namespace "com.mavrixfy"
     defaultConfig {
-        applicationId 'com.mavrixfy.app'
+        applicationId "com.mavrixfy"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode appVersionCode
-        versionName appVersionName
+        versionCode 1
+        versionName "1.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
-        
-        // Print version info for debugging
-        println "Building Mavrixfy v${appVersionName} (${appVersionCode})"
     }
     signingConfigs {
         debug {
@@ -123,49 +104,21 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        release {
-            if (project.hasProperty('MAVRIXFY_RELEASE_STORE_FILE')) {
-                storeFile file(MAVRIXFY_RELEASE_STORE_FILE)
-                storePassword MAVRIXFY_RELEASE_STORE_PASSWORD
-                keyAlias MAVRIXFY_RELEASE_KEY_ALIAS
-                keyPassword MAVRIXFY_RELEASE_KEY_PASSWORD
-                println "Using release keystore: ${MAVRIXFY_RELEASE_STORE_FILE}"
-            } else {
-                // Fallback to debug keystore if release keystore not configured
-                storeFile file('debug.keystore')
-                storePassword 'android'
-                keyAlias 'androiddebugkey'
-                keyPassword 'android'
-                println "WARNING: Using debug keystore for release build!"
-            }
-        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
-            versionNameSuffix "-debug"
         }
         release {
-            signingConfig signingConfigs.release
+            // Caution! In production, you need to generate your own keystore file.
+            // see https://reactnative.dev/docs/signed-apk-android.
+            signingConfig signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
             crunchPngs enablePngCrunchInRelease.toBoolean()
-        }
-    }
-    
-    splits {
-        abi {
-            reset()
-            // Only enable splits for APK builds, not for AAB
-            def buildingBundle = gradle.startParameter.taskNames.any { it.contains("bundle") || it.contains("Bundle") }
-            enable !buildingBundle
-            // Keep ABI splits for size, but also generate a universal APK to avoid
-            // architecture-mismatch crashes when a single split is uploaded by mistake.
-            universalApk true
-            include "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
         }
     }
     packagingOptions {
@@ -176,11 +129,6 @@ android {
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
-    }
-
-    lint {
-        abortOnError false
-        disable 'Instantiatable'
     }
 }
 
@@ -207,9 +155,6 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
-    
-    // Android Auto media support — official requirement
-    implementation("androidx.media:media:1.7.0")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
@@ -229,8 +174,7 @@ dependencies {
         }
     }
 
-    def hermesEnabled = (findProperty('expo.jsEngine') ?: "hermes") == "hermes"
-    if (hermesEnabled) {
+    if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor

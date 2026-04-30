@@ -7,6 +7,7 @@ const KEYS = {
   USER_PLAYLISTS: "@mavrixfy_user_playlists",
   RECENTLY_PLAYED: "@mavrixfy_recently_played",
   SETTINGS: "@mavrixfy_settings",
+  PLAYER_STATE: "@mavrixfy_player_state",
 } as const;
 
 // Memory cache for frequently accessed data
@@ -229,17 +230,18 @@ export async function deleteUserPlaylist(playlistId: string): Promise<void> {
   await saveUserPlaylists(playlists.filter(p => p.id !== playlistId));
 }
 
-export async function addSongToPlaylist(playlistId: string, song: Song): Promise<void> {
+export async function addSongToPlaylist(playlistId: string, song: Song): Promise<boolean> {
   const playlists = await getUserPlaylists();
   const idx = playlists.findIndex(p => p.id === playlistId);
-  if (idx === -1) return;
-  if (playlists[idx].songs.some(s => s.id === song.id)) return;
+  if (idx === -1) return false;
+  if (playlists[idx].songs.some(s => s.id === song.id)) return false; // Duplicate
   playlists[idx].songs.push(song);
   playlists[idx].updatedAt = Date.now();
   if (!playlists[idx].coverUrl && song.coverUrl) {
     playlists[idx].coverUrl = song.coverUrl;
   }
   await saveUserPlaylists(playlists);
+  return true;
 }
 
 export async function updateUserPlaylist(
@@ -313,4 +315,30 @@ export async function clearAppStorage(options?: { preserveSettings?: boolean }):
       await AsyncStorage.multiRemove(keysToRemove);
     }
   } catch {}
+}
+
+// ─── Player state persistence ─────────────────────────────────────────────────
+
+export interface PersistedPlayerState {
+  currentSong: Song | null;
+  queue: Song[];
+  queueIndex: number;
+}
+
+export async function savePlayerState(state: PersistedPlayerState): Promise<void> {
+  try {
+    await AsyncStorage.setItem(KEYS.PLAYER_STATE, JSON.stringify(state));
+  } catch {}
+}
+
+export async function loadPlayerState(): Promise<PersistedPlayerState | null> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.PLAYER_STATE);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedPlayerState;
+    if (!parsed?.currentSong?.id) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }

@@ -68,6 +68,7 @@ export default function QueueScreen() {
             onPress={() => router.push("/player")}
           >
             <Image
+              recyclingKey={item.song.id}
               source={{ uri: item.song.coverUrl }}
               style={styles.songImage}
               contentFit="cover"
@@ -101,6 +102,7 @@ export default function QueueScreen() {
           onPress={() => handleSongPress(item.song!)}
         >
           <Image
+            recyclingKey={item.song.id}
             source={{ uri: item.song.coverUrl }}
             style={styles.songImage}
             contentFit="cover"

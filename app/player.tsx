@@ -761,6 +761,7 @@ function LegacyPlayerScreen() {
             >
               {item.coverUrl?.trim() ? (
                 <Image
+                  recyclingKey={item.id}
                   source={{ uri: item.coverUrl }}
                   style={styles.albumArt}
                   contentFit="cover"
@@ -816,6 +817,7 @@ function LegacyPlayerScreen() {
           </View>
 
           <Image
+            recyclingKey={item.id}
             source={{ uri: item.coverUrl || undefined }}
             style={[styles.queueThumb, isShortScreen && styles.queueThumbCompact]}
             contentFit="cover"

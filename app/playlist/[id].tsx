@@ -8,6 +8,11 @@ import {
   StyleSheet,
   Text,
   View,
+  Modal,
+  TextInput,
+  Alert,
+  Dimensions,
+  PanResponder,
 } from "react-native";
 import { Image } from "expo-image";
 import { useLocalSearchParams } from "expo-router";
@@ -15,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import {
@@ -25,12 +31,15 @@ import {
   JioSaavnSong,
 } from "@/lib/musicData";
 import { usePlayer } from "@/contexts/PlayerContext";
-import { getUserPlaylists } from "@/lib/storage";
-import { firestorePlaylistToLocalSongs, getPlaylistById } from "@/lib/firestore";
+import { getUserPlaylists, updateUserPlaylist, deleteUserPlaylist, removeSongFromPlaylist } from "@/lib/storage";
+import { firestorePlaylistToLocalSongs, getPlaylistById, updateFirestorePlaylist, deleteFirestorePlaylist, removeSongFromFirestorePlaylist } from "@/lib/firestore";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { getJioSaavnPlaylistDetails } from "@/lib/jioSaavnService";
+import { useAuth } from "@/contexts/AuthContext";
+import { uploadImageToCloudinary } from "@/lib/cloudinary";
+import DownloadCollectionButton from "@/components/DownloadCollectionButton";
 
 function pickFirstParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? "";
@@ -65,6 +74,7 @@ export default function PlaylistScreen() {
   const hasPrefilledHeader = initialTitle.length > 0 || initialCover.length > 0 || initialSongCount > 0;
 
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const { playSong, currentSong, isPlaying, queue, togglePlay } = usePlayer();
   const topInset  = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 132 : Math.max(150, insets.bottom + 126);
@@ -79,10 +89,26 @@ export default function PlaylistScreen() {
   const [songs, setSongs]       = useState<Song[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [playlistIsPublic, setPlaylistIsPublic] = useState(false);
+
+  // Edit modal state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCover, setEditCover] = useState("");
+  const [editIsPublic, setEditIsPublic] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   // Sticky header
   const stickyOpacity = useRef(new Animated.Value(0)).current;
   const stickyVisible = useRef(false);
+
+  // Bottom sheet animation
+  const screenHeight = Dimensions.get('window').height;
+  const modalTranslateY = useRef(new Animated.Value(screenHeight)).current;
+  const modalOpacity = useRef(new Animated.Value(0)).current;
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const totalDuration = useMemo(() => songs.reduce((a, s) => a + s.duration, 0), [songs]);
@@ -133,7 +159,7 @@ export default function PlaylistScreen() {
   }, [normalizeLoadedSongs]);
 
   const applyFirestorePlaylistData = useCallback((playlist: {
-    name?: string; description?: string; imageUrl?: string; songs?: Song[] | unknown[];
+    name?: string; description?: string; imageUrl?: string; songs?: Song[] | unknown[]; isPublic?: boolean;
   }) => {
     const nextSongs = firestorePlaylistToLocalSongs({
       id: playlistId,
@@ -142,11 +168,12 @@ export default function PlaylistScreen() {
       imageUrl: playlist.imageUrl || "",
       songs: Array.isArray(playlist.songs) ? playlist.songs : [],
       createdBy: { id: "", name: "Community" },
-      isPublic: true,
+      isPublic: playlist.isPublic ?? false,
     });
     setPlaylistName(playlist.name || initialTitle || "Playlist");
     setPlaylistDescription((playlist.description || "").trim() || `${nextSongs.length || initialSongCount} songs`);
     setPlaylistCover(playlist.imageUrl || initialCover || "");
+    setPlaylistIsPublic(playlist.isPublic ?? false);
     setSongs(nextSongs);
   }, [initialCover, initialSongCount, initialTitle, playlistId]);
 
@@ -258,6 +285,241 @@ export default function PlaylistScreen() {
     playSong(shuffled[0], shuffled);
   }, [songs, playSong]);
 
+  // Edit handlers
+  const handleOpenEdit = useCallback(() => {
+    setEditName(playlistName);
+    setEditDescription(playlistDescription);
+    setEditCover(playlistCover);
+    setEditIsPublic(playlistIsPublic);
+    setShowEditModal(true);
+    if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }, [playlistName, playlistDescription, playlistCover, playlistIsPublic]);
+
+  const handlePickImage = useCallback(async () => {
+    try {
+      // Request permission
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please allow access to your photo library to upload images.');
+        return;
+      }
+
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setEditCover(result.assets[0].uri);
+        if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to pick image');
+    }
+  }, []);
+
+  const handleRemoveImage = useCallback(() => {
+    setEditCover('');
+    if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }, []);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!editName.trim()) {
+      Alert.alert("Error", "Playlist name cannot be empty");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Upload image to Cloudinary if it's a local URI
+      let finalImageUrl = editCover;
+      if (editCover && (editCover.startsWith('file://') || editCover.startsWith('content://'))) {
+        try {
+          setIsUploadingImage(true);
+          finalImageUrl = await uploadImageToCloudinary(editCover, (progress) => {
+            setUploadProgress(progress);
+          });
+          setIsUploadingImage(false);
+          
+          if (!finalImageUrl) {
+            throw new Error('Failed to upload image');
+          }
+        } catch (error) {
+          setIsUploadingImage(false);
+          Alert.alert("Upload Error", "Failed to upload image. Please try again.");
+          setIsSaving(false);
+          return;
+        }
+      }
+
+      if (isFirestoreSource && user?.id) {
+        await updateFirestorePlaylist(playlistId, {
+          name: editName.trim(),
+          description: editDescription.trim(),
+          imageUrl: finalImageUrl.trim(),
+          isPublic: editIsPublic,
+        });
+      } else {
+        await updateUserPlaylist(playlistId, {
+          name: editName.trim(),
+          description: editDescription.trim(),
+          coverUrl: finalImageUrl.trim(),
+        });
+      }
+
+      setPlaylistName(editName.trim());
+      setPlaylistDescription(editDescription.trim());
+      setPlaylistCover(finalImageUrl.trim());
+      setPlaylistIsPublic(editIsPublic);
+      setShowEditModal(false);
+      
+      // Show success message
+      Alert.alert("Success", "Playlist updated successfully");
+      
+      if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      Alert.alert("Error", "Failed to update playlist");
+      if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setIsSaving(false);
+      setUploadProgress(0);
+    }
+  }, [editName, editDescription, editCover, editIsPublic, playlistId, isFirestoreSource, user?.id]);
+
+  const handleDeletePlaylist = useCallback(() => {
+    Alert.alert(
+      "Delete Playlist",
+      `Are you sure you want to delete "${playlistName}"? This action cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              if (isFirestoreSource && user?.id) {
+                await deleteFirestorePlaylist(playlistId);
+              } else {
+                await deleteUserPlaylist(playlistId);
+              }
+              if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              safeGoBack();
+            } catch (error) {
+              Alert.alert("Error", "Failed to delete playlist");
+              if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            }
+          },
+        },
+      ]
+    );
+  }, [playlistName, playlistId, isFirestoreSource, user?.id]);
+
+  const handleRemoveSong = useCallback(async (songId: string) => {
+    try {
+      if (isFirestoreSource && user?.id) {
+        await removeSongFromFirestorePlaylist(playlistId, songId);
+      } else {
+        await removeSongFromPlaylist(playlistId, songId);
+      }
+      setSongs(prev => prev.filter(s => s.id !== songId));
+      if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      Alert.alert("Error", "Failed to remove song");
+      if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  }, [playlistId, isFirestoreSource, user?.id]);
+
+  // Pan responder for drag-to-dismiss with improved gesture handling
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Only respond to downward drags with minimal horizontal movement
+        return gestureState.dy > 10 && Math.abs(gestureState.dx) < Math.abs(gestureState.dy);
+      },
+      onPanResponderGrant: () => {
+        // Add haptic feedback when drag starts
+        if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        // Only allow dragging down
+        if (gestureState.dy > 0) {
+          modalTranslateY.setValue(gestureState.dy);
+          // Reduce opacity as user drags down
+          const progress = Math.min(gestureState.dy / 200, 1);
+          modalOpacity.setValue(1 - progress * 0.5);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        // Close if dragged down more than 120px or with high velocity
+        if (gestureState.dy > 120 || gestureState.vy > 0.8) {
+          if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          closeEditModal();
+        } else {
+          // Snap back to open position with spring animation
+          Animated.parallel([
+            Animated.spring(modalTranslateY, {
+              toValue: 0,
+              useNativeDriver: true,
+              tension: 65,
+              friction: 10,
+            }),
+            Animated.spring(modalOpacity, {
+              toValue: 1,
+              useNativeDriver: true,
+              tension: 65,
+              friction: 10,
+            }),
+          ]).start();
+        }
+      },
+    })
+  ).current;
+
+  const closeEditModal = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(modalOpacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(modalTranslateY, {
+        toValue: screenHeight,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowEditModal(false);
+      modalTranslateY.setValue(screenHeight);
+    });
+  }, [modalOpacity, modalTranslateY, screenHeight]);
+
+  // Open modal animation
+  useEffect(() => {
+    if (showEditModal) {
+      Animated.parallel([
+        Animated.timing(modalOpacity, {
+          toValue: 1,
+          duration: 250,
+          useNativeDriver: true,
+        }),
+        Animated.spring(modalTranslateY, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 50,
+          friction: 8,
+        }),
+      ]).start();
+    }
+  }, [showEditModal, modalOpacity, modalTranslateY]);
+
+  // Check if user can edit (only local or owned Firestore playlists)
+  const canEdit = !isJioSaavnSource && (!isFirestoreSource || user?.id);
+
   // ── Error / not-found screens ──────────────────────────────────────────────
   if (loading && !hasPrefilledHeader) {
     return (
@@ -318,14 +580,34 @@ export default function PlaylistScreen() {
           <Pressable onPress={safeGoBack} style={[styles.heroBack, { top: topInset + 8 }]}>
             <Ionicons name="arrow-back" size={22} color="#fff" />
           </Pressable>
+          {/* Edit button - only for editable playlists */}
+          {canEdit && (
+            <Pressable onPress={handleOpenEdit} style={[styles.heroEdit, { top: topInset + 8 }]}>
+              <Ionicons name="create-outline" size={20} color="#fff" />
+            </Pressable>
+          )}
           {/* Info overlay */}
           <View style={styles.heroInfo}>
-            <Text
-              numberOfLines={3}
-              style={[styles.heroTitle, { fontSize: playlistTitleSize }]}
-            >
-              {playlistName}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <Text
+                numberOfLines={3}
+                style={[styles.heroTitle, { fontSize: playlistTitleSize, flex: 1 }]}
+              >
+                {playlistName}
+              </Text>
+              {isFirestoreSource && (
+                <View style={[styles.visibilityBadge, playlistIsPublic ? styles.visibilityBadgePublic : styles.visibilityBadgePrivate]}>
+                  <Ionicons 
+                    name={playlistIsPublic ? "globe-outline" : "lock-closed-outline"} 
+                    size={12} 
+                    color="#fff" 
+                  />
+                  <Text style={styles.visibilityBadgeText}>
+                    {playlistIsPublic ? "Public" : "Private"}
+                  </Text>
+                </View>
+              )}
+            </View>
             {playlistDescription && !/^\d+\s+songs?$/i.test(playlistDescription) ? (
               <Text numberOfLines={1} style={styles.heroSub}>{playlistDescription}</Text>
             ) : null}
@@ -349,6 +631,15 @@ export default function PlaylistScreen() {
                   {isPlayingFromThisPlaylist && isPlaying ? "Pause" : "Play All"}
                 </Text>
               </Pressable>
+              {songs.length > 0 && (
+                <DownloadCollectionButton
+                  songs={songs}
+                  collectionId={playlistId}
+                  collectionName={playlistName}
+                  collectionImage={playlistCover}
+                  compact
+                />
+              )}
             </View>
           </View>
         </View>
@@ -397,6 +688,201 @@ export default function PlaylistScreen() {
           />
         </Pressable>
       </Animated.View>
+
+      {/* ── Edit Modal ── */}
+      <Modal
+        visible={showEditModal}
+        transparent
+        animationType="none"
+        onRequestClose={closeEditModal}
+        statusBarTranslucent
+      >
+        <View style={styles.modalOverlay}>
+          <Animated.View 
+            style={[
+              StyleSheet.absoluteFill,
+              { 
+                backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                opacity: modalOpacity,
+              }
+            ]}
+          >
+            <Pressable 
+              style={StyleSheet.absoluteFill} 
+              onPress={closeEditModal}
+            />
+          </Animated.View>
+
+          <Animated.View
+            style={[
+              styles.modalBottomSheet,
+              {
+                transform: [{ translateY: modalTranslateY }],
+              },
+            ]}
+          >
+            <View {...panResponder.panHandlers} style={styles.modalDragHandle}>
+              <View style={styles.modalDragIndicator} />
+            </View>
+
+            <ScrollView 
+              style={styles.modalScrollView}
+              contentContainerStyle={styles.modalContent}
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              <Text style={styles.modalTitle}>Edit Playlist</Text>
+
+              {/* Compact Cover Image Section */}
+              <View style={styles.compactImageSection}>
+                {editCover ? (
+                  <View style={styles.compactImageContainer}>
+                    <Image
+                      source={{ uri: editCover }}
+                      style={styles.compactImage}
+                      contentFit="cover"
+                    />
+                    <View style={styles.compactImageOverlay}>
+                      <Pressable
+                        style={styles.compactImageButton}
+                        onPress={handlePickImage}
+                      >
+                        <Ionicons name="camera" size={16} color="#fff" />
+                      </Pressable>
+                      <Pressable
+                        style={[styles.compactImageButton, styles.compactImageButtonDanger]}
+                        onPress={handleRemoveImage}
+                      >
+                        <Ionicons name="trash" size={16} color="#fff" />
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <Pressable
+                    style={styles.compactImagePlaceholder}
+                    onPress={handlePickImage}
+                  >
+                    <Ionicons name="image" size={28} color={Colors.subtext} />
+                    <Text style={styles.compactImagePlaceholderText}>Add Cover</Text>
+                  </Pressable>
+                )}
+
+                {/* Playlist Info */}
+                <View style={styles.compactInfoSection}>
+                  <TextInput
+                    style={styles.compactInput}
+                    placeholder="Playlist name"
+                    placeholderTextColor={Colors.subtext}
+                    value={editName}
+                    onChangeText={setEditName}
+                    maxLength={100}
+                  />
+                  <TextInput
+                    style={[styles.compactInput, styles.compactInputSmall]}
+                    placeholder="Description (optional)"
+                    placeholderTextColor={Colors.subtext}
+                    value={editDescription}
+                    onChangeText={setEditDescription}
+                    maxLength={150}
+                  />
+                </View>
+              </View>
+
+              {/* Public/Private Toggle - Compact Design */}
+              {isFirestoreSource && (
+                <View style={styles.compactToggleSection}>
+                  <View style={styles.compactToggleHeader}>
+                    <Ionicons name="eye-outline" size={18} color={Colors.text} />
+                    <Text style={styles.compactToggleLabel}>Visibility</Text>
+                  </View>
+                  <View style={styles.compactToggleButtons}>
+                    <Pressable
+                      style={[styles.compactToggleButton, editIsPublic && styles.compactToggleButtonActive]}
+                      onPress={() => {
+                        setEditIsPublic(true);
+                        if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      }}
+                    >
+                      <Ionicons 
+                        name="globe-outline" 
+                        size={16} 
+                        color={editIsPublic ? "#fff" : Colors.subtext} 
+                      />
+                      <Text style={[styles.compactToggleButtonText, editIsPublic && styles.compactToggleButtonTextActive]}>
+                        Public
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      style={[styles.compactToggleButton, !editIsPublic && styles.compactToggleButtonActive]}
+                      onPress={() => {
+                        setEditIsPublic(false);
+                        if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      }}
+                    >
+                      <Ionicons 
+                        name="lock-closed-outline" 
+                        size={16} 
+                        color={!editIsPublic ? "#fff" : Colors.subtext} 
+                      />
+                      <Text style={[styles.compactToggleButtonText, !editIsPublic && styles.compactToggleButtonTextActive]}>
+                        Private
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {/* Action Buttons - Compact */}
+              <View style={styles.compactActions}>
+                <Pressable
+                  style={[styles.compactActionButton, styles.compactActionButtonPrimary, (isSaving || isUploadingImage || !editName.trim()) && styles.compactActionButtonDisabled]}
+                  onPress={handleSaveEdit}
+                  disabled={isSaving || isUploadingImage || !editName.trim()}
+                >
+                  <LinearGradient
+                    colors={isSaving || isUploadingImage || !editName.trim() ? ["#555", "#666"] : [Colors.primary, "#84E655"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.compactActionButtonGradient}
+                  >
+                    {isSaving || isUploadingImage ? (
+                      <View style={styles.compactActionButtonContent}>
+                        <ActivityIndicator size="small" color="#000" />
+                        {isUploadingImage && (
+                          <Text style={[styles.compactActionButtonText, { fontSize: 11 }]}>
+                            {uploadProgress}%
+                          </Text>
+                        )}
+                      </View>
+                    ) : (
+                      <Text style={styles.compactActionButtonText}>Save</Text>
+                    )}
+                  </LinearGradient>
+                </Pressable>
+
+                <Pressable
+                  style={[styles.compactActionButton, styles.compactActionButtonSecondary]}
+                  onPress={closeEditModal}
+                  disabled={isSaving}
+                >
+                  <Text style={styles.compactActionButtonTextSecondary}>Cancel</Text>
+                </Pressable>
+              </View>
+
+              {/* Delete Button - Compact */}
+              <Pressable
+                style={styles.compactDeleteButton}
+                onPress={handleDeletePlaylist}
+                disabled={isSaving || isUploadingImage}
+              >
+                <Ionicons name="trash-outline" size={16} color="#FF4444" />
+                <Text style={styles.compactDeleteButtonText}>Delete Playlist</Text>
+              </Pressable>
+            </ScrollView>
+          </Animated.View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -421,6 +907,16 @@ const styles = StyleSheet.create({
   heroBack: {
     position: "absolute",
     left: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroEdit: {
+    position: "absolute",
+    right: 16,
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -551,5 +1047,267 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  // Edit Modal - Redesigned Compact & Official
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  modalBottomSheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: "85%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 24,
+  },
+  modalDragHandle: {
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+  },
+  modalDragIndicator: {
+    width: 36,
+    height: 4,
+    backgroundColor: Colors.subtext + "50",
+    borderRadius: 2,
+  },
+  modalScrollView: {
+    maxHeight: "100%",
+  },
+  modalContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 32,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontFamily: "Inter_700Bold",
+    color: Colors.text,
+    marginBottom: 20,
+    textAlign: "center",
+  },
+
+  // Compact Image Section
+  compactImageSection: {
+    flexDirection: "row",
+    gap: 16,
+    marginBottom: 20,
+  },
+  compactImageContainer: {
+    position: "relative",
+    width: 100,
+    height: 100,
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  compactImage: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: Colors.surfaceLight,
+  },
+  compactImageOverlay: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    padding: 6,
+    gap: 6,
+  },
+  compactImageButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+  },
+  compactImageButtonDanger: {
+    backgroundColor: "rgba(255, 68, 68, 0.3)",
+  },
+  compactImagePlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 12,
+    backgroundColor: Colors.background,
+    borderWidth: 2,
+    borderColor: Colors.surfaceLight,
+    borderStyle: "dashed",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  compactImagePlaceholderText: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.subtext,
+  },
+
+  // Compact Info Section
+  compactInfoSection: {
+    flex: 1,
+    gap: 10,
+  },
+  compactInput: {
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
+    borderWidth: 1,
+    borderColor: Colors.surfaceLight,
+  },
+  compactInputSmall: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    paddingVertical: 10,
+  },
+
+  // Compact Toggle Section
+  compactToggleSection: {
+    backgroundColor: Colors.background,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: Colors.surfaceLight,
+  },
+  compactToggleHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  compactToggleLabel: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
+  },
+  compactToggleButtons: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  compactToggleButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.surfaceLight,
+  },
+  compactToggleButtonActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  compactToggleButtonText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.subtext,
+  },
+  compactToggleButtonTextActive: {
+    color: "#000",
+  },
+
+  // Compact Actions
+  compactActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 12,
+  },
+  compactActionButton: {
+    flex: 1,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  compactActionButtonPrimary: {
+    flex: 2,
+  },
+  compactActionButtonSecondary: {
+    backgroundColor: Colors.background,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: Colors.surfaceLight,
+  },
+  compactActionButtonGradient: {
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  compactActionButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  compactActionButtonText: {
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+    color: "#000",
+  },
+  compactActionButtonTextSecondary: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.text,
+  },
+  compactActionButtonDisabled: {
+    opacity: 0.5,
+  },
+
+  // Compact Delete Button
+  compactDeleteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: "rgba(255, 68, 68, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 68, 68, 0.2)",
+  },
+  compactDeleteButtonText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+    color: "#FF4444",
+  },
+
+  // Visibility Badge
+  visibilityBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    flexShrink: 0,
+  },
+  visibilityBadgePublic: {
+    backgroundColor: "rgba(76, 175, 80, 0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(76, 175, 80, 0.4)",
+  },
+  visibilityBadgePrivate: {
+    backgroundColor: "rgba(158, 158, 158, 0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(158, 158, 158, 0.4)",
+  },
+  visibilityBadgeText: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    color: "#fff",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
 });

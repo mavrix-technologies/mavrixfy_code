@@ -8,14 +8,16 @@ import { Song, formatDuration } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import { usePlayerRow } from "@/contexts/PlayerContext";
 import EqualizerBars from "@/components/EqualizerBars";
+import DownloadButton from "@/components/DownloadButton";
 
 interface Props {
   song: Song;
   index?: number;
   queue?: Song[];
   showCover?: boolean;
+  /** Show the download button. Defaults to true. */
+  showDownload?: boolean;
   onRemove?: () => void;
-  topResult?: boolean;
 }
 
 const SWIPE_ACTION_WIDTH = 92;
@@ -26,8 +28,8 @@ const SongRow = memo(function SongRow({
   index,
   queue,
   showCover = true,
+  showDownload = true,
   onRemove,
-  topResult = false,
 }: Props) {
   const { playSong, currentSongId, isPlaying, toggleLike, isLiked, addToQueue, playNext } = usePlayerRow();
   const translateX = useRef(new Animated.Value(0)).current;
@@ -36,17 +38,14 @@ const SongRow = memo(function SongRow({
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gesture) => {
-        // Only capture horizontal swipes, ignore vertical scrolling
         const isHorizontal = Math.abs(gesture.dx) > Math.abs(gesture.dy);
         const hasMovedEnough = Math.abs(gesture.dx) > 10;
         return isHorizontal && hasMovedEnough;
       },
       onPanResponderGrant: () => {
-        // Stop any ongoing animations when user starts swiping
         translateX.stopAnimation();
       },
       onPanResponderMove: (_, gesture) => {
-        // Only allow left swipe, clamp to action width
         const nextX = Math.max(-SWIPE_ACTION_WIDTH, Math.min(0, gesture.dx));
         translateX.setValue(nextX);
       },
@@ -64,22 +63,11 @@ const SongRow = memo(function SongRow({
           }
 
           Animated.sequence([
-            Animated.timing(translateX, {
-              toValue: -SWIPE_ACTION_WIDTH,
-              duration: 90,
-              useNativeDriver: true,
-            }),
-            Animated.timing(translateX, {
-              toValue: 0,
-              duration: 170,
-              useNativeDriver: true,
-            }),
-          ]).start(() => {
-            swipeInFlightRef.current = false;
-          });
+            Animated.timing(translateX, { toValue: -SWIPE_ACTION_WIDTH, duration: 90, useNativeDriver: true }),
+            Animated.timing(translateX, { toValue: 0, duration: 170, useNativeDriver: true }),
+          ]).start(() => { swipeInFlightRef.current = false; });
           return;
         }
-        // Smooth spring animation back to closed position
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
@@ -89,7 +77,6 @@ const SongRow = memo(function SongRow({
         }).start();
       },
       onPanResponderTerminate: () => {
-        // Smooth spring animation back to closed position on termination
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
@@ -100,16 +87,14 @@ const SongRow = memo(function SongRow({
       },
     })
   ).current;
+
   const queueActionOpacity = translateX.interpolate({
     inputRange: [-SWIPE_ACTION_WIDTH, -8, 0],
     outputRange: [1, 0.35, 0],
     extrapolate: "clamp",
   });
 
-  // Safety check for song data
-  if (!song || !song.id || !song.title) {
-    return null;
-  }
+  if (!song || !song.id || !song.title) return null;
 
   const isActive = currentSongId === song.id;
   const liked = isLiked(song.id);
@@ -162,6 +147,7 @@ const SongRow = memo(function SongRow({
         <Ionicons name="add-circle-outline" size={20} color={Colors.primary} />
         <Text style={styles.queueActionText}>Queue</Text>
       </Animated.View>
+
       <Animated.View style={[styles.rowLayer, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
         <Pressable
           style={({ pressed }) => [styles.container, pressed && styles.pressed]}
@@ -177,8 +163,10 @@ const SongRow = memo(function SongRow({
               )}
             </View>
           )}
+
           {showCover && song.coverUrl && (
             <Image
+              recyclingKey={song.id}
               source={{ uri: song.coverUrl }}
               style={styles.cover}
               contentFit="cover"
@@ -187,29 +175,31 @@ const SongRow = memo(function SongRow({
               recyclingKey={song.id}
             />
           )}
+
           <View style={styles.info}>
-            <View style={styles.titleRow}>
-              <Text style={[styles.title, isActive && styles.activeText]} numberOfLines={1}>
-                {song.title || "Unknown Title"}
-              </Text>
-              {topResult ? (
-                <View style={styles.topResultBadge}>
-                  <Text style={styles.topResultBadgeText}>Top Result</Text>
-                </View>
-              ) : null}
-            </View>
+            <Text style={[styles.title, isActive && styles.activeText]} numberOfLines={1}>
+              {song.title || "Unknown Title"}
+            </Text>
             <Text style={styles.artist} numberOfLines={1}>
               {song.artist || "Unknown Artist"}
             </Text>
           </View>
+
+          {/* Like button */}
           <Pressable onPress={handleLike} hitSlop={10} style={styles.likeBtn}>
             <Ionicons
               name={liked ? "heart" : "heart-outline"}
-              size={22}
+              size={20}
               color={liked ? Colors.primary : Colors.subtext}
-              style={liked && { textShadowColor: "rgba(29, 185, 84, 0.5)", textShadowRadius: 4 }}
             />
           </Pressable>
+
+          {/* Download button — hidden when a remove action is present */}
+          {showDownload && !onRemove && (
+            <DownloadButton song={song} size={20} style={styles.downloadBtn} />
+          )}
+
+          {/* Remove / duration */}
           {onRemove ? (
             <Pressable onPress={handleRemove} hitSlop={10} style={styles.removeBtn}>
               <Ionicons name="trash" size={18} color={Colors.subtext} />
@@ -222,13 +212,12 @@ const SongRow = memo(function SongRow({
     </View>
   );
 }, (prevProps, nextProps) => {
-  // Custom comparison for better performance
   return (
     prevProps.song.id === nextProps.song.id &&
     prevProps.index === nextProps.index &&
     prevProps.showCover === nextProps.showCover &&
-    prevProps.queue?.length === nextProps.queue?.length &&
-    prevProps.topResult === nextProps.topResult
+    prevProps.showDownload === nextProps.showDownload &&
+    prevProps.queue?.length === nextProps.queue?.length
   );
 });
 
@@ -275,16 +264,16 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     backgroundColor: "rgba(255,255,255,0.05)",
   },
+  indexWrap: {
+    width: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   index: {
     color: Colors.subtext,
     fontSize: 14,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
-  },
-  indexWrap: {
-    width: 28,
-    alignItems: "center",
-    justifyContent: "center",
   },
   cover: {
     width: 48,
@@ -296,34 +285,13 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
-  titleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
   title: {
     color: Colors.text,
     fontSize: 15,
     fontFamily: "Inter_500Medium",
-    flexShrink: 1,
   },
   activeText: {
     color: Colors.primary,
-  },
-  topResultBadge: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(38,225,154,0.4)",
-    backgroundColor: "rgba(38,225,154,0.18)",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  topResultBadgeText: {
-    color: Colors.primary,
-    fontSize: 10,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.2,
-    textTransform: "uppercase",
   },
   artist: {
     color: Colors.subtext,
@@ -333,6 +301,10 @@ const styles = StyleSheet.create({
   },
   likeBtn: {
     padding: 6,
+  },
+  downloadBtn: {
+    padding: 6,
+    marginLeft: 2,
   },
   removeBtn: {
     padding: 6,

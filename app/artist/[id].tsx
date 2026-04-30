@@ -234,6 +234,7 @@ export default function ArtistScreen() {
   const renderAlbum = useCallback(({ item }: { item: JioSaavnArtistAlbum }) => (
     <Pressable style={styles.albumCard} onPress={() => handleAlbumPress(item)}>
       <Image
+        recyclingKey={item.id}
         source={{ uri: getBestImageUrl(item.image) }}
         style={styles.albumCover}
         contentFit="cover"
@@ -253,6 +254,7 @@ export default function ArtistScreen() {
         onPress={() => handleSimilarArtistPress(item.id, item.name, img)}
       >
         <Image
+          recyclingKey={item.id}
           source={{ uri: img }}
           style={styles.similarAvatar}
           contentFit="cover"
@@ -397,6 +399,7 @@ export default function ArtistScreen() {
               {artist.topAlbums.map((item) => (
                 <Pressable key={item.id} style={styles.albumCard} onPress={() => handleAlbumPress(item)}>
                   <Image
+                    recyclingKey={item.id}
                     source={{ uri: getBestImageUrl(item.image) }}
                     style={styles.albumCover}
                     contentFit="cover"
@@ -430,6 +433,7 @@ export default function ArtistScreen() {
                     onPress={() => handleSimilarArtistPress(item.id, item.name, img)}
                   >
                     <Image
+                      recyclingKey={item.id}
                       source={{ uri: img }}
                       style={styles.similarAvatar}
                       contentFit="cover"

@@ -1,0 +1,327 @@
+/**
+ * Download Queue — concurrency-limited, race-condition-free download engine.
+ *
+ * Design:
+ * - MAX_CONCURRENT downloads run at once (default 2). Others wait in a pending list.
+ * - A per-song mutex (startingSet) prevents two concurrent calls for the same song
+ *   from both passing the "already running" guard.
+ * - Progress callbacks update the in-memory store only (no AsyncStorage read per tick).
+ * - When a slot frees up, the next pending song is automatically started.
+ */
+
+import {
+  createDownloadResumable,
+  DownloadResumable,
+} from "expo-file-system/legacy";
+import {
+  DownloadItem,
+  DownloadStatus,
+  DownloadPreferences,
+} from "@/types/downloads";
+import {
+  saveDownload,
+  loadDownload,
+} from "@/lib/downloads/downloadStore";
+import {
+  ensureTrackDir,
+  getTrackFileUri,
+  hasSufficientStorage,
+} from "@/lib/downloads/storagePolicy";
+import { logger } from "@/lib/logger";
+
+// ─── Concurrency config ───────────────────────────────────────────────────────
+
+const MAX_CONCURRENT = 2;
+
+// ─── Event emitter ────────────────────────────────────────────────────────────
+
+type QueueEventType = "progress" | "status" | "completed" | "failed";
+type QueueListener = (songId: string, item: DownloadItem) => void;
+
+const listeners = new Map<QueueEventType, Set<QueueListener>>();
+
+export function onQueueEvent(event: QueueEventType, fn: QueueListener): () => void {
+  if (!listeners.has(event)) listeners.set(event, new Set());
+  listeners.get(event)!.add(fn);
+  return () => listeners.get(event)?.delete(fn);
+}
+
+function emit(event: QueueEventType, songId: string, item: DownloadItem) {
+  listeners.get(event)?.forEach((fn) => {
+    try { fn(songId, item); } catch { /* ignore */ }
+  });
+}
+
+// ─── Queue state ──────────────────────────────────────────────────────────────
+
+/** Songs actively downloading right now. */
+const activeHandles = new Map<string, DownloadResumable>();
+
+/** Songs waiting for a free slot. */
+const pendingQueue: string[] = [];
+
+/** Guards against two concurrent startDownload calls for the same songId. */
+const startingSet = new Set<string>();
+
+// ─── Slot management ──────────────────────────────────────────────────────────
+
+function activeCount(): number {
+  return activeHandles.size;
+}
+
+/** Called when a download finishes (success, fail, or cancel) to free its slot. */
+function releaseSlot(songId: string) {
+  activeHandles.delete(songId);
+  startingSet.delete(songId);
+  drainQueue();
+}
+
+/** Start the next pending song if a slot is free. */
+function drainQueue() {
+  while (activeCount() < MAX_CONCURRENT && pendingQueue.length > 0) {
+    const next = pendingQueue.shift()!;
+    // Fire and forget — errors are handled inside executeDownload
+    executeDownload(next).catch(() => {});
+  }
+}
+
+// ─── Status helper ────────────────────────────────────────────────────────────
+
+async function updateStatus(
+  songId: string,
+  status: DownloadStatus,
+  extra?: Partial<DownloadItem>
+): Promise<DownloadItem | null> {
+  const item = await loadDownload(songId);
+  if (!item) return null;
+  const updated: DownloadItem = { ...item, status, ...extra };
+  await saveDownload(updated);
+  emit("status", songId, updated);
+  return updated;
+}
+
+// ─── Core download execution ──────────────────────────────────────────────────
+
+async function executeDownload(songId: string): Promise<void> {
+  // Double-check guard — prevents re-entry if somehow called twice
+  if (activeHandles.has(songId)) return;
+
+  const item = await loadDownload(songId);
+  if (!item) return;
+
+  // If it was cancelled while waiting in the pending queue, skip it
+  if (item.status === "deleted" || item.status === "completed") return;
+
+  await ensureTrackDir(songId);
+  const destUri = getTrackFileUri(songId);
+
+  await updateStatus(songId, "downloading");
+
+  const handle = createDownloadResumable(
+    item.audioUrl,
+    destUri,
+    {},
+    (progress) => {
+      // Progress callback: update cache only — no AsyncStorage read per tick
+      const { totalBytesWritten, totalBytesExpectedToWrite } = progress;
+      const pct =
+        totalBytesExpectedToWrite > 0
+          ? Math.round((totalBytesWritten / totalBytesExpectedToWrite) * 100)
+          : 0;
+
+      // Read from cache synchronously (no await needed — cache is always current)
+      loadDownload(songId).then((current) => {
+        if (!current || current.status !== "downloading") return;
+        const patched: DownloadItem = {
+          ...current,
+          progress: pct,
+          bytesDownloaded: totalBytesWritten,
+          totalBytes: totalBytesExpectedToWrite,
+        };
+        saveDownload(patched);          // writes cache immediately, AsyncStorage async
+        emit("progress", songId, patched);
+      });
+    }
+  );
+
+  activeHandles.set(songId, handle);
+
+  try {
+    const result = await handle.downloadAsync();
+
+    if (!result) {
+      // Paused / cancelled by user
+      await updateStatus(songId, "paused");
+      releaseSlot(songId);
+      return;
+    }
+
+    const completedItem = await updateStatus(songId, "completed", {
+      progress: 100,
+      localPath: result.uri,
+      totalBytes: (result as any).totalBytesExpectedToWrite ?? 0,
+      bytesDownloaded: (result as any).totalBytesWritten ?? 0,
+      completedAt: new Date().toISOString(),
+      failureReason: null,
+      failedAt: null,
+    });
+
+    if (completedItem) emit("completed", songId, completedItem);
+    releaseSlot(songId);
+
+  } catch (err: any) {
+    const wasCancelled =
+      err?.code === "ERR_TASK_CANCELLED" ||
+      err?.message?.includes("cancel") ||
+      err?.message?.includes("cancelled");
+
+    if (wasCancelled) {
+      await updateStatus(songId, "paused");
+      releaseSlot(songId);
+      return;
+    }
+
+    logger.error("[DownloadQueue] download failed", { songId, error: err?.message });
+
+    const current = await loadDownload(songId);
+    const retryCount = (current?.retryCount ?? 0) + 1;
+    const MAX_RETRIES = 3;
+
+    releaseSlot(songId); // free the slot before retry delay
+
+    if (retryCount < MAX_RETRIES) {
+      await updateStatus(songId, "queued", {
+        retryCount,
+        failureReason: err?.message ?? "Unknown error",
+        failedAt: new Date().toISOString(),
+      });
+      const delays = [2000, 5000, 10000];
+      setTimeout(() => {
+        // Re-add to pending queue for the next available slot
+        if (!pendingQueue.includes(songId) && !activeHandles.has(songId)) {
+          pendingQueue.push(songId);
+          drainQueue();
+        }
+      }, delays[retryCount - 1] ?? 10000);
+    } else {
+      const failedItem = await updateStatus(songId, "failed", {
+        retryCount,
+        failureReason: err?.message ?? "Download failed after retries",
+        failedAt: new Date().toISOString(),
+      });
+      if (failedItem) emit("failed", songId, failedItem);
+    }
+  }
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+export async function enqueueDownload(
+  item: DownloadItem,
+  _prefs: DownloadPreferences
+): Promise<void> {
+  const songId = item.songId;
+
+  // Idempotency: skip if already active or pending
+  if (activeHandles.has(songId) || pendingQueue.includes(songId) || startingSet.has(songId)) {
+    return;
+  }
+
+  await saveDownload({ ...item, status: "queued" });
+  emit("status", songId, { ...item, status: "queued" });
+
+  const hasSpace = await hasSufficientStorage();
+  if (!hasSpace) {
+    await updateStatus(songId, "paused", { failureReason: "Insufficient storage" });
+    return;
+  }
+
+  if (activeCount() < MAX_CONCURRENT) {
+    startingSet.add(songId);
+    executeDownload(songId).catch(() => {}).finally(() => startingSet.delete(songId));
+  } else {
+    // Queue it — will start when a slot opens
+    pendingQueue.push(songId);
+    await updateStatus(songId, "queued");
+  }
+}
+
+export async function startDownload(songId: string): Promise<void> {
+  if (activeHandles.has(songId) || startingSet.has(songId)) return;
+
+  if (activeCount() < MAX_CONCURRENT) {
+    startingSet.add(songId);
+    executeDownload(songId).catch(() => {}).finally(() => startingSet.delete(songId));
+  } else {
+    if (!pendingQueue.includes(songId)) {
+      pendingQueue.push(songId);
+    }
+    await updateStatus(songId, "queued");
+  }
+}
+
+export async function pauseDownload(songId: string): Promise<void> {
+  // Remove from pending queue if waiting
+  const pendingIdx = pendingQueue.indexOf(songId);
+  if (pendingIdx !== -1) pendingQueue.splice(pendingIdx, 1);
+
+  const handle = activeHandles.get(songId);
+  if (handle) {
+    try { await handle.pauseAsync(); } catch { /* ignore */ }
+    // releaseSlot called inside executeDownload catch block
+  }
+  await updateStatus(songId, "paused");
+}
+
+export async function resumeDownload(
+  songId: string,
+  _prefs: DownloadPreferences
+): Promise<void> {
+  const item = await loadDownload(songId);
+  if (!item) return;
+  if (item.status !== "paused" && item.status !== "queued" && item.status !== "failed") return;
+  if (activeHandles.has(songId) || startingSet.has(songId)) return;
+
+  const hasSpace = await hasSufficientStorage();
+  if (!hasSpace) {
+    await updateStatus(songId, "paused", { failureReason: "Insufficient storage" });
+    return;
+  }
+
+  await startDownload(songId);
+}
+
+export async function cancelDownload(songId: string): Promise<void> {
+  // Remove from pending queue
+  const pendingIdx = pendingQueue.indexOf(songId);
+  if (pendingIdx !== -1) pendingQueue.splice(pendingIdx, 1);
+
+  const handle = activeHandles.get(songId);
+  if (handle) {
+    try { await handle.cancelAsync(); } catch { /* ignore */ }
+    releaseSlot(songId);
+  }
+  await updateStatus(songId, "deleted");
+}
+
+export async function retryDownload(
+  songId: string,
+  prefs: DownloadPreferences
+): Promise<void> {
+  await updateStatus(songId, "queued", {
+    retryCount: 0,
+    failureReason: null,
+    failedAt: null,
+  });
+  await resumeDownload(songId, prefs);
+}
+
+/** How many downloads are currently active (for debug/UI). */
+export function getActiveDownloadCount(): number {
+  return activeHandles.size;
+}
+
+/** How many downloads are waiting for a slot (for debug/UI). */
+export function getPendingQueueLength(): number {
+  return pendingQueue.length;
+}

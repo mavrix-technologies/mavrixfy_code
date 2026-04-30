@@ -8,7 +8,6 @@ buildscript {
   dependencies {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
-    classpath('com.google.gms:google-services:4.4.4')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
   }
 }
@@ -18,20 +17,6 @@ allprojects {
     google()
     mavenCentral()
     maven { url 'https://www.jitpack.io' }
-  }
-}
-
-subprojects { subproject ->
-  afterEvaluate {
-    subproject.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-      kotlinOptions {
-        jvmTarget = "17"
-      }
-    }
-    subproject.tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach {
-      sourceCompatibility = "17"
-      targetCompatibility = "17"
-    }
   }
 }
 

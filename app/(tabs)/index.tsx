@@ -32,6 +32,7 @@ import {
 } from "@/lib/jioSaavnService";
 import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistService";
 import HomeSkeletonLoader from "@/components/HomeSkeletonLoader";
+import PromotionBanner from "@/components/PromotionBanner";
 
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 
@@ -231,7 +232,7 @@ function HomeScreenInner() {
 
   const INITIAL_CATEGORY_LIMIT = 10;
   const REFRESH_CATEGORY_LIMIT = 12;
-  const INITIAL_PUBLIC_LIMIT = 10;
+  const INITIAL_PUBLIC_LIMIT = 100; // Increased to show all playlists
 
   const loadHomeData = useCallback(
     async (options?: {
@@ -614,7 +615,7 @@ function HomeScreenInner() {
   }, [orderedHomeCategories]);
 
   const publicPlaylistsForSection = useMemo(
-    () => dedupeFirestorePlaylistsById(publicPlaylists, MAX_ROW_ITEMS),
+    () => dedupeFirestorePlaylistsById(publicPlaylists, publicPlaylists.length),
     [publicPlaylists]
   );
 
@@ -817,6 +818,7 @@ function HomeScreenInner() {
         onPress={() => handleRecentPress(item)}
       >
         <Image
+          recyclingKey={item.id}
           source={{ uri: item.imageUrl }}
           style={styles.recentImage}
           contentFit="cover"
@@ -855,6 +857,7 @@ function HomeScreenInner() {
       >
         <View style={styles.rectCardImageWrap}>
           <Image
+            recyclingKey={item.id}
             source={{ uri: item.imageUrl || undefined }}
             style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
             contentFit="contain"
@@ -870,7 +873,7 @@ function HomeScreenInner() {
           {item.name}
         </Text>
         <Text style={styles.rectCardMeta} numberOfLines={1}>
-          Made for You
+          {item.createdBy?.name || item.createdBy?.fullName || "Community"}
         </Text>
       </Pressable>
     ),
@@ -892,6 +895,7 @@ function HomeScreenInner() {
         >
           <View style={styles.artistAvatarWrap}>
             <Image
+              recyclingKey={item.id}
               source={{ uri: img || undefined }}
               style={styles.artistAvatar}
               contentFit="cover"
@@ -929,6 +933,7 @@ function HomeScreenInner() {
           >
             <View style={styles.rectCardImageWrap}>
               <Image
+                recyclingKey={item.id}
                 source={{ uri: getThumbImageUrl(item.image) }}
                 style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
                 contentFit="contain"
@@ -983,6 +988,20 @@ function HomeScreenInner() {
                 <Ionicons name="person" size={16} color={Colors.black} />
               </View>
             )}
+          </Pressable>
+
+          {/* Spacer pushes downloads button to the right */}
+          <View style={{ flex: 1 }} />
+
+          <Pressable
+            style={styles.topDownloadButton}
+            onPress={() => {
+              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/downloaded-songs");
+            }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="arrow-down-circle-outline" size={20} color={Colors.subtext} />
           </Pressable>
         </View>
       </View>
@@ -1208,6 +1227,7 @@ function HomeScreenInner() {
         showsVerticalScrollIndicator={false}
       >
         {renderHeader()}
+        <PromotionBanner />
         {sections.length === 0
           ? renderEmptyState()
           : sections.map((section) => (
@@ -1267,6 +1287,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
+  },
+  topDownloadButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(38,42,49,0.45)",
   },
   avatarFallback: {
     width: 36,
