@@ -24,22 +24,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Prebuild iOS
-        run: npx expo prebuild --platform ios --clean
-
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.0'
+          bundler-cache: true
+
+      - name: Prebuild iOS (generate native project)
+        run: npx expo prebuild --platform ios --no-install
+        env:
+          NODE_ENV: production
 
       - name: Install CocoaPods dependencies
         run: |
           cd ios
-          pod install
+          pod install --repo-update
+
+      - name: Install xcpretty for readable output
+        run: gem install xcpretty
 
       - name: Build iOS app (no codesign)
         run: |
           cd ios
+          set -o pipefail
           xcodebuild -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
             -configuration Release \
@@ -49,7 +56,8 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
-            build
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build | xcpretty --color
 
       - name: Create Payload directory
         run: mkdir Payload
