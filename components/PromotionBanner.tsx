@@ -10,30 +10,8 @@ import { router } from "expo-router";
 import Colors from "@/constants/colors";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-
-// Layout dimensions
-const LAYOUT_DIMENSIONS = {
-  hero: {
-    width: SCREEN_WIDTH - 32,
-    height: 180,
-    borderRadius: 16,
-  },
-  card: {
-    width: SCREEN_WIDTH - 32,
-    height: 140,
-    borderRadius: 12,
-  },
-  'full-width': {
-    width: SCREEN_WIDTH,
-    height: 120,
-    borderRadius: 0,
-  },
-  sidebar: {
-    width: (SCREEN_WIDTH - 48) / 2, // Half width minus padding
-    height: 200,
-    borderRadius: 12,
-  },
-};
+const BANNER_WIDTH = SCREEN_WIDTH - 32;
+const BANNER_HEIGHT = 140;
 
 type MediaType = "image" | "gif" | "video" | "audio";
 type Platform = "web" | "app";
@@ -113,13 +91,13 @@ export default function PromotionBanner() {
     try {
       const today = new Date().toISOString().split("T")[0];
       
-      // Simplified query to avoid composite index requirement
-      // Fetch active promotions for app platform (no orderBy to avoid index)
+      // Fetch active promotions for app platform, ordered by priority
       const q = query(
         collection(db, "promotions"),
         where("status", "==", "active"),
         where("platforms", "==", "app"),
-        limit(10) // Fetch more, then filter and sort in memory
+        orderBy("priority", "desc"),
+        limit(5)
       );
 
       const snapshot = await getDocs(q);
@@ -135,15 +113,9 @@ export default function PromotionBanner() {
         return startValid && endValid;
       });
 
-      // Sort by priority in memory (descending)
-      validPromos.sort((a, b) => (b.priority || 0) - (a.priority || 0));
-
-      // Take top 5
-      setPromotions(validPromos.slice(0, 5));
+      setPromotions(validPromos);
     } catch (error) {
       console.error("[PromotionBanner] Error fetching promotions:", error);
-      // Silently fail - banner just won't show
-      setPromotions([]);
     } finally {
       setLoading(false);
     }
@@ -160,18 +132,14 @@ export default function PromotionBanner() {
       switch (actionType) {
         case "song":
           if (promo.attachedSong) {
-            // Play the attached song with proper structure
+            // Play the attached song
             await playSong({
               id: promo.attachedSong.id,
               title: promo.attachedSong.title,
               artist: promo.attachedSong.artist,
-              coverUrl: promo.attachedSong.imageUrl, // ✅ Changed from imageUrl to coverUrl
-              audioUrl: promo.attachedSong.streamUrl, // ✅ Changed from streamUrl to audioUrl
-              album: "", // Default empty album
+              imageUrl: promo.attachedSong.imageUrl,
+              streamUrl: promo.attachedSong.streamUrl,
               duration: 0, // Duration not stored in promotion
-              genre: "",
-              year: "",
-              source: "promotion" as const,
             });
             console.log("[PromotionBanner] Playing song:", promo.attachedSong.title);
           } else {
@@ -231,24 +199,12 @@ export default function PromotionBanner() {
   }
 
   const currentPromo = promotions[currentIndex];
-  const layout = currentPromo.layout || 'card'; // Default to card layout
-  const dimensions = LAYOUT_DIMENSIONS[layout];
 
   return (
-    <View style={[
-      styles.container,
-      layout === 'full-width' && styles.containerFullWidth,
-    ]}>
+    <View style={styles.container}>
       <Pressable
         style={({ pressed }) => [
           styles.banner,
-          {
-            width: dimensions.width,
-            height: dimensions.height,
-            borderRadius: dimensions.borderRadius,
-          },
-          layout === 'hero' && styles.bannerHero,
-          layout === 'sidebar' && styles.bannerSidebar,
           pressed && styles.bannerPressed,
         ]}
         onPress={() => handleBannerPress(currentPromo)}
@@ -283,25 +239,11 @@ export default function PromotionBanner() {
 
         <View style={styles.content}>
           <View style={styles.textContainer}>
-            <Text 
-              style={[
-                styles.title,
-                layout === 'hero' && { fontSize: 22, lineHeight: 28 },
-                layout === 'sidebar' && { fontSize: 16, lineHeight: 20 },
-              ]} 
-              numberOfLines={layout === 'sidebar' ? 3 : 2}
-            >
+            <Text style={styles.title} numberOfLines={2}>
               {currentPromo.title}
             </Text>
             {currentPromo.description && (
-              <Text 
-                style={[
-                  styles.description,
-                  layout === 'hero' && { fontSize: 14, lineHeight: 20 },
-                  layout === 'sidebar' && { fontSize: 12, lineHeight: 16 },
-                ]} 
-                numberOfLines={layout === 'sidebar' ? 3 : 2}
-              >
+              <Text style={styles.description} numberOfLines={2}>
                 {currentPromo.description}
               </Text>
             )}
@@ -350,27 +292,15 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 16,
   },
-  containerFullWidth: {
-    paddingHorizontal: 0,
-  },
   banner: {
+    width: BANNER_WIDTH,
+    height: BANNER_HEIGHT,
+    borderRadius: 12,
     overflow: "hidden",
     position: "relative",
     borderWidth: 1,
     borderColor: Colors.cardBorder,
     backgroundColor: Colors.surface,
-  },
-  bannerHero: {
-    // Hero banner - larger, more prominent
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  bannerSidebar: {
-    // Sidebar - compact, vertical
-    aspectRatio: 0.6,
   },
   bannerPressed: {
     opacity: 0.85,

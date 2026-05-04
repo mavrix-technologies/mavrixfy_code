@@ -1,0 +1,20 @@
+diff --git a/node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift b/node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift
+index 1234567..abcdefg 100644
+--- a/node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift
++++ b/node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift
+@@ -6,7 +6,12 @@ import Foundation
+ 
+ public class DateComponentsSerializer {
+   static func serialize(_ dateComponents: DateComponents?) -> [AnyHashable: Any]? {
+     guard let dateComponents = dateComponents else { return nil }
+-    serializedComponents["isRepeatedDay"] = dateComponents.isRepeatedDay ?? false
++    
++    var serializedComponents: [AnyHashable: Any] = [:]
++    
++    // Note: isRepeatedDay is not a standard DateComponents property
++    // Setting to false as default value for compatibility with Xcode 16.4 and iOS 18.5
++    serializedComponents["isRepeatedDay"] = false
++    
+     return serializedComponents
+   }
+ }

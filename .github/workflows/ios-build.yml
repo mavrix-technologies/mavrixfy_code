@@ -9,8 +9,8 @@ permissions:
 jobs:
   build-ios:
     name: 🎉 iOS Build
-    runs-on: ubuntu-latest
-
+    runs-on: macos-latest
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,28 +21,52 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Setup Expo and EAS
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
       - name: Install dependencies
         run: npm ci
 
-      - name: Build iOS IPA with EAS
-        run: eas build --platform ios --profile ios-unsigned --non-interactive --wait
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      - name: Prebuild iOS
+        run: npx expo prebuild --platform ios --clean
 
-      - name: Download IPA from EAS
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+
+      - name: Install CocoaPods dependencies
         run: |
-          BUILD_URL=$(eas build:list --platform ios --limit 1 --json --non-interactive | jq -r '.[0].artifacts.buildUrl')
-          echo "Build URL: $BUILD_URL"
-          curl -L "$BUILD_URL" -o Mavrixfy.ipa
+          cd ios
+          pod install
+
+      - name: Build iOS app (no codesign)
+        run: |
+          cd ios
+          xcodebuild -workspace Mavrixfy.xcworkspace \
+            -scheme Mavrixfy \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
+
+      - name: Create Payload directory
+        run: mkdir Payload
+        working-directory: ios/build/Build/Products/Release-iphoneos
+
+      - name: Move app to Payload
+        run: mv Mavrixfy.app Payload/
+        working-directory: ios/build/Build/Products/Release-iphoneos
+
+      - name: Zip output
+        run: zip -qq -r -9 MavrixfyIpaExport.ipa Payload
+        working-directory: ios/build/Build/Products/Release-iphoneos
+
+      - name: Rename IPA for direct download
+        run: |
+          cp ios/build/Build/Products/Release-iphoneos/MavrixfyIpaExport.ipa ./Mavrixfy.ipa
           ls -lh Mavrixfy.ipa
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
@@ -57,8 +81,8 @@ jobs:
           tag_name: v${{ github.run_number }}
           name: iOS Build v${{ github.run_number }}
           body: |
-            iOS IPA Build (EAS)
-
+            iOS IPA Build - Unsigned (No Code Signing)
+            
             **Build Details:**
             - Build Number: ${{ github.run_number }}
             - Commit: ${{ github.sha }}

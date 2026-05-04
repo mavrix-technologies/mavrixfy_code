@@ -399,8 +399,8 @@ export function AppNavBar() {
     : colorToRgba(miniPlayerTheme.accent, 0.72, "rgba(38, 225, 154, 0.72)");
   const miniSecondaryIconColor = isIOS ? "rgba(255,255,255,0.88)" : playIconColor;
   const coverUrl = activeSong?.coverUrl?.trim();
-  const miniPlayerHeight = 52; // Reduced from 60 to 52
-  const miniCoverSize = 44; // Reduced from 60 to 44
+  const miniPlayerHeight = 60;
+  const miniCoverSize = 60;
   const miniControlSize = 32;
   const miniControlRadius = Math.round(miniControlSize / 2);
   const trashShiftX = trashOpacity.interpolate({
@@ -1547,28 +1547,25 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   coverWrap: {
-    width: 44, // Reduced from 60
-    height: 44, // Fixed height instead of 100%
+    width: 60,
+    height: "100%",
     overflow: "hidden",
     borderRightWidth: 0,
     justifyContent: "center",
     alignItems: "center",
     position: "relative",
-    marginLeft: 8, // Add left margin for gap
-    marginVertical: 4, // Add vertical margin for gap
-    borderRadius: 6, // Add rounded corners
   },
   coverAlbumTint: {
     position: "absolute",
-    width: 44, // Match new size
-    height: 44, // Match new size
-    borderRadius: 6, // Match rounded corners
+    width: 60,
+    height: 60,
+    borderRadius: 0,
     borderWidth: 0,
   },
   cover: {
-    width: 44, // Match new size
-    height: 44, // Match new size
-    borderRadius: 6, // Add rounded corners
+    width: 60,
+    height: 60,
+    borderRadius: 0,
     backgroundColor: "#111111",
   },
   coverFallback: {
@@ -1578,7 +1575,7 @@ const styles = StyleSheet.create({
   songInfo: {
     flex: 1,
     minWidth: 0,
-    marginLeft: 10, // Reduced from 12 for better spacing
+    marginLeft: 12,
     marginRight: 4,
     justifyContent: "center",
   },

@@ -8,16 +8,6 @@
       "developmentClient": true,
       "distribution": "internal"
     },
-    "ios-unsigned": {
-      "ios": {
-        "buildConfiguration": "Release",
-        "simulator": false
-      },
-      "distribution": "internal",
-      "env": {
-        "NODE_ENV": "production"
-      }
-    },
     "preview": {
       "distribution": "internal",
       "ios": {
