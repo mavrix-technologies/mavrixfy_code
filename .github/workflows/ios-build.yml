@@ -31,7 +31,16 @@ jobs:
         run: npm ci
 
       - name: Build iOS IPA with EAS
-        run: eas build --platform ios --profile ios-unsigned --non-interactive --output ./Mavrixfy.ipa
+        run: eas build --platform ios --profile ios-unsigned --non-interactive --wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Download IPA from EAS
+        run: |
+          BUILD_URL=$(eas build:list --platform ios --limit 1 --json --non-interactive | jq -r '.[0].artifacts.buildUrl')
+          echo "Build URL: $BUILD_URL"
+          curl -L "$BUILD_URL" -o Mavrixfy.ipa
+          ls -lh Mavrixfy.ipa
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
