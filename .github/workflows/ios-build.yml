@@ -9,8 +9,8 @@ permissions:
 jobs:
   build-ios:
     name: 🎉 iOS Build
-    runs-on: macos-latest
-    
+    runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,92 +21,19 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.0'
-          bundler-cache: true
-
-      - name: Prebuild iOS (generate native project)
-        run: npx expo prebuild --platform ios --no-install
+      - name: Build iOS IPA with EAS
+        run: eas build --platform ios --profile ios-unsigned --non-interactive --output ./Mavrixfy.ipa
         env:
-          NODE_ENV: production
-
-      - name: Fix expo-notifications for iOS SDK 18.5
-        run: |
-          FILE="node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift"
-          echo "=== Current content of DateComponentsSerializer.swift ==="
-          cat "$FILE"
-          echo "=== Applying fix ==="
-          # Replace the unguarded isRepeatedDay line with an availability-guarded version
-          sed -i '' \
-            's/serializedComponents\["isRepeatedDay"\] = dateComponents\.isRepeatedDay ?? false/if #available(iOS 26.0, *) {\n      serializedComponents["isRepeatedDay"] = dateComponents.isRepeatedDay ?? false\n    }/' \
-            "$FILE"
-          echo "=== Fixed content ==="
-          cat "$FILE"
-
-      - name: Install CocoaPods dependencies
-        run: |
-          cd ios
-          pod install --repo-update
-
-      - name: Install xcpretty for readable output
-        run: gem install xcpretty
-
-      - name: Build iOS app (no codesign)
-        run: |
-          cd ios
-          set -o pipefail
-          xcodebuild -workspace Mavrixfy.xcworkspace \
-            -scheme Mavrixfy \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            build 2>&1 | tee build_full.log | xcpretty --color --report html --output build_report.html
-          BUILD_EXIT=${PIPESTATUS[0]}
-          echo "xcodebuild exit code: $BUILD_EXIT"
-          if [ $BUILD_EXIT -ne 0 ]; then
-            echo "=== BUILD FAILED - Last 100 lines of build log ==="
-            tail -100 build_full.log
-            echo "=== ERRORS ONLY ==="
-            grep -E "error:|BUILD FAILED|fatal error" build_full.log | head -50
-            exit $BUILD_EXIT
-          fi
-
-      - name: Upload build log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: xcodebuild-log
-          path: |
-            ios/build_full.log
-            ios/build_report.html
-          retention-days: 5
-
-      - name: Create Payload directory
-        run: mkdir Payload
-        working-directory: ios/build/Build/Products/Release-iphoneos
-
-      - name: Move app to Payload
-        run: mv Mavrixfy.app Payload/
-        working-directory: ios/build/Build/Products/Release-iphoneos
-
-      - name: Zip output
-        run: zip -qq -r -9 MavrixfyIpaExport.ipa Payload
-        working-directory: ios/build/Build/Products/Release-iphoneos
-
-      - name: Rename IPA for direct download
-        run: |
-          cp ios/build/Build/Products/Release-iphoneos/MavrixfyIpaExport.ipa ./Mavrixfy.ipa
-          ls -lh Mavrixfy.ipa
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
@@ -121,8 +48,8 @@ jobs:
           tag_name: v${{ github.run_number }}
           name: iOS Build v${{ github.run_number }}
           body: |
-            iOS IPA Build - Unsigned (No Code Signing)
-            
+            iOS IPA Build (EAS)
+
             **Build Details:**
             - Build Number: ${{ github.run_number }}
             - Commit: ${{ github.sha }}
