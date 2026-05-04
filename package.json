@@ -32,7 +32,7 @@
     "import:songs": "tsx scripts/import-songs-from-csv.ts",
     "firestore:deploy:indexes": "npx firebase-tools deploy --only firestore:indexes",
     "firestore:deploy:rules": "npx firebase-tools deploy --only firestore:rules",
-    "postinstall": "patch-package && node scripts/fix-expo-notifications.js"
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

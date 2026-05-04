@@ -35,6 +35,9 @@ jobs:
         env:
           NODE_ENV: production
 
+      - name: Fix expo-notifications for iOS SDK 18.5
+        run: node scripts/fix-expo-notifications.js
+
       - name: Install CocoaPods dependencies
         run: |
           cd ios
