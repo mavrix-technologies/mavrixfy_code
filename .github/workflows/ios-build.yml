@@ -57,7 +57,26 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            build | xcpretty --color
+            build 2>&1 | tee build_full.log | xcpretty --color --report html --output build_report.html
+          BUILD_EXIT=${PIPESTATUS[0]}
+          echo "xcodebuild exit code: $BUILD_EXIT"
+          if [ $BUILD_EXIT -ne 0 ]; then
+            echo "=== BUILD FAILED - Last 100 lines of build log ==="
+            tail -100 build_full.log
+            echo "=== ERRORS ONLY ==="
+            grep -E "error:|BUILD FAILED|fatal error" build_full.log | head -50
+            exit $BUILD_EXIT
+          fi
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: |
+            ios/build_full.log
+            ios/build_report.html
+          retention-days: 5
 
       - name: Create Payload directory
         run: mkdir Payload
