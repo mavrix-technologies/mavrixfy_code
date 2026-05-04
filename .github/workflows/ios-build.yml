@@ -36,7 +36,17 @@ jobs:
           NODE_ENV: production
 
       - name: Fix expo-notifications for iOS SDK 18.5
-        run: node scripts/fix-expo-notifications.js
+        run: |
+          FILE="node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift"
+          echo "=== Current content of DateComponentsSerializer.swift ==="
+          cat "$FILE"
+          echo "=== Applying fix ==="
+          # Replace the unguarded isRepeatedDay line with an availability-guarded version
+          sed -i '' \
+            's/serializedComponents\["isRepeatedDay"\] = dateComponents\.isRepeatedDay ?? false/if #available(iOS 26.0, *) {\n      serializedComponents["isRepeatedDay"] = dateComponents.isRepeatedDay ?? false\n    }/' \
+            "$FILE"
+          echo "=== Fixed content ==="
+          cat "$FILE"
 
       - name: Install CocoaPods dependencies
         run: |
