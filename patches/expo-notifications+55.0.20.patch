@@ -1,0 +1,15 @@
+diff --git a/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift b/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift
+index 1234567..abcdefg 100644
+--- a/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift
++++ b/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift
+@@ -6,7 +6,8 @@ import Foundation
+ 
+ struct DateComponentsSerializer {
+   static func serialize(_ dateComponents: DateComponents) -> [String: Any] {
+     var serializedComponents = [String: Any]()
+-    serializedComponents["isRepeatedDay"] = dateComponents.isRepeatedDay ?? false
++    // isRepeatedDay is not a valid DateComponents property, set default value
++    serializedComponents["isRepeatedDay"] = false
+     serializedComponents["weekday"] = dateComponents.weekday
+     serializedComponents["weekdayOrdinal"] = dateComponents.weekdayOrdinal
+     serializedComponents["quarter"] = dateComponents.quarter
