@@ -37,13 +37,15 @@ jobs:
         run: npm ci
 
       - name: Fix expo-notifications for SDK compatibility
-        # With Xcode 16.4 (iOS 18.5 SDK) the #available(iOS 26.0, *) block compiles fine.
-        # With Xcode 16.2 (iOS 18.2 SDK) it does not — patch it to a safe default.
-        # This script is a no-op when the pattern is already absent.
+        # Keep this patch defensive: newer branches may not install expo-notifications
+        # at all, so the workflow must not fail just because that module is absent.
         run: |
           python3 - <<'EOF'
           import pathlib, re
           f = pathlib.Path("node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift")
+          if not f.exists():
+            print("expo-notifications patch skipped: DateComponentsSerializer.swift not found")
+            raise SystemExit(0)
           text = f.read_text()
           patched = re.sub(
             r'\s*if #available\(iOS 26\.0, \*\) \{\s*serializedComponents\["isRepeatedDay"\] = dateComponents\.isRepeatedDay \?\? false\s*\}\s*',
