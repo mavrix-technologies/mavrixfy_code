@@ -41,6 +41,7 @@
         "ACCESS_NETWORK_STATE",
         "WAKE_LOCK",
         "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "VIBRATE"
       ],
       "blockedPermissions": [

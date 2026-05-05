@@ -142,6 +142,17 @@ const withTrackPlayer = (config) => {
 
     ensureToolsNamespace(manifest);
     ensureUsesFeature(manifest, "android.hardware.type.automotive");
+
+    // Required on Android 14+ for media playback foreground service
+    if (!manifest["uses-permission"]) manifest["uses-permission"] = [];
+    const hasFgPerm = manifest["uses-permission"].some(
+      (p) => p.$?.["android:name"] === "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+    );
+    if (!hasFgPerm) {
+      manifest["uses-permission"].push({
+        $: { "android:name": "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" },
+      });
+    }
     ensureAppMetaData(app, {
       $: {
         "android:name": "com.google.android.gms.car.application",

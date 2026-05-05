@@ -44,12 +44,12 @@ type AutoTransportPayload = {
 
 async function ensureTrackPlayerReady(reason: string): Promise<boolean> {
   try {
-    // Inline setup to avoid module resolution issues in the background service context
-    await TrackPlayer.setupPlayer({
-      maxCacheSize: 1024 * 50,
-      autoUpdateMetadata: true,
-      autoHandleInterruptions: true,
-    });
+    // Use the shared setupPlayer which also calls updateOptions (capabilities,
+    // lock screen buttons, notification config). Calling it here ensures the
+    // background service always has the full configuration even if the app was
+    // cold-started via a notification tap.
+    const { setupPlayer } = require("@/lib/trackPlayer");
+    await setupPlayer();
     return true;
   } catch (e: any) {
     if (e?.code === "player_already_initialized") return true;
@@ -585,6 +585,28 @@ export const trackPlayerService = async () => {
   TrackPlayer.addEventListener(Event.RemoteSeek, async (event) => {
     await TrackPlayer.seekTo(event.position);
     scheduleAutoSessionSync("remote-seek", true);
+  });
+
+  // Jump forward/backward — shown on iOS lock screen and some Android notifications
+  TrackPlayer.addEventListener(Event.RemoteJumpForward, async (event) => {
+    try {
+      const progress = await TrackPlayer.getProgress();
+      const newPos = Math.min(
+        (progress?.position ?? 0) + (event.interval ?? 15),
+        progress?.duration ?? 0
+      );
+      await TrackPlayer.seekTo(newPos);
+      scheduleAutoSessionSync("remote-jump-forward", true);
+    } catch { /* silent */ }
+  });
+
+  TrackPlayer.addEventListener(Event.RemoteJumpBackward, async (event) => {
+    try {
+      const progress = await TrackPlayer.getProgress();
+      const newPos = Math.max((progress?.position ?? 0) - (event.interval ?? 15), 0);
+      await TrackPlayer.seekTo(newPos);
+      scheduleAutoSessionSync("remote-jump-backward", true);
+    } catch { /* silent */ }
   });
 
   TrackPlayer.addEventListener(Event.RemoteSkip, async (event) => {

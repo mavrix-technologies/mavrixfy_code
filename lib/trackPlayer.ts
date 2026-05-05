@@ -1,3 +1,13 @@
+/**
+ * TrackPlayer setup — official react-native-track-player v4 API.
+ *
+ * References:
+ * - https://rntp.dev/docs/api/functions/lifecycle
+ * - https://rntp.dev/docs/api/constants/capability
+ * - https://developer.apple.com/documentation/mediaplayer/mpnowplayinginfocenter
+ * - https://developer.android.com/media/implement/surfaces/mobile
+ */
+
 import TrackPlayer, {
   AppKilledPlaybackBehavior,
   Capability,
@@ -8,8 +18,8 @@ import { logger } from "@/lib/logger";
 let setupPromise: Promise<void> | null = null;
 let hasSetupPlayer = false;
 
-const PLAYER_SETUP_TIMEOUT_MS  = 12_000;
-const PLAYER_OPTIONS_TIMEOUT_MS = 6_000;
+const PLAYER_SETUP_TIMEOUT_MS   = 12_000;
+const PLAYER_OPTIONS_TIMEOUT_MS =  6_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -28,39 +38,62 @@ async function configurePlayerOptions(): Promise<void> {
   try {
     await withTimeout(
       TrackPlayer.updateOptions({
+        // ── Android notification ──────────────────────────────────────────
         android: {
+          // Keep the service alive when the app is swiped away so background
+          // playback continues (required for Android Auto).
           appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
+          // Pause on phone calls, navigation audio, etc.
           alwaysPauseOnInterruption: true,
+          // Give 5 s grace before the foreground service stops after pause.
+          stopForegroundGracePeriod: 5,
         },
+
+        // ── Lock screen / notification capabilities ───────────────────────
+        // These map to:
+        //   iOS  → MPRemoteCommandCenter buttons
+        //   Android → MediaSession actions + notification buttons
         capabilities: [
           Capability.Play,
           Capability.Pause,
           Capability.Stop,
-          Capability.Skip,
           Capability.SkipToNext,
           Capability.SkipToPrevious,
           Capability.SeekTo,
+          Capability.JumpForward,
+          Capability.JumpBackward,
           Capability.PlayFromId,
           Capability.PlayFromSearch,
         ],
+
+        // ── Android compact notification (3 buttons max) ──────────────────
         compactCapabilities: [
           Capability.SkipToPrevious,
           Capability.Play,
           Capability.Pause,
           Capability.SkipToNext,
         ],
+
+        // ── Android full notification (all buttons) ───────────────────────
+        // notificationCapabilities defaults to `capabilities` when omitted,
+        // but we set it explicitly for clarity.
         notificationCapabilities: [
           Capability.Play,
           Capability.Pause,
           Capability.Stop,
-          Capability.Skip,
           Capability.SkipToNext,
           Capability.SkipToPrevious,
           Capability.SeekTo,
-          Capability.PlayFromId,
-          Capability.PlayFromSearch,
         ],
-        progressUpdateEventInterval: 0.5,
+
+        // ── Jump intervals (shown on iOS lock screen and Android notification)
+        forwardJumpInterval:  15,
+        backwardJumpInterval: 15,
+
+        // ── Progress update interval ──────────────────────────────────────
+        // 1 second is the Apple-recommended interval for MPNowPlayingInfoCenter.
+        // Shorter values drain battery; longer values make the seek bar jerky.
+        progressUpdateEventInterval: 1,
       }),
       PLAYER_OPTIONS_TIMEOUT_MS,
       "updateOptions"
@@ -82,17 +115,21 @@ export async function setupPlayer(): Promise<void> {
       try {
         await withTimeout(
           TrackPlayer.setupPlayer({
-            maxCacheSize: 1024 * 50, // 50 MB
+            // 50 MB audio cache — avoids re-buffering recently played tracks.
+            maxCacheSize: 1024 * 50,
+            // Automatically update MPNowPlayingInfoCenter / MediaSession metadata.
             autoUpdateMetadata: true,
+            // Let RNTP handle audio interruptions (calls, alarms, etc.).
             autoHandleInterruptions: true,
-            // allowBackgroundSetup is Android-only (patched native module).
-            // Do NOT pass it on iOS — it is not a valid option and can cause crashes.
+            // allowBackgroundSetup is Android-only (patched native module for
+            // Android Auto headless startup). Do NOT pass on iOS.
             ...(Platform.OS === "android" ? { allowBackgroundSetup: true } : {}),
           } as Parameters<typeof TrackPlayer.setupPlayer>[0]),
           PLAYER_SETUP_TIMEOUT_MS,
           "setupPlayer"
         );
       } catch (error: any) {
+        // player_already_initialized is not an error — just means setup ran twice.
         if (error?.code !== "player_already_initialized") throw error;
       }
 
