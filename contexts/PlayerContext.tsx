@@ -231,9 +231,14 @@ function songToTrack(song: Song, localUrl?: string | null): any {
 /** Resolve the best playback URL for a song — local file first, then stream. */
 async function resolvePlaybackUrl(song: Song): Promise<string | null> {
   try {
+    // Static import path — dynamic import can fail silently in some contexts
     const { getLocalPlaybackUrl } = await import("@/lib/downloads/downloadManager");
     const local = await getLocalPlaybackUrl(song.id);
-    if (local) return local;
+    if (local) {
+      // Ensure the URI has the file:// scheme — RNTP requires it on both platforms
+      if (local.startsWith("file://") || local.startsWith("http")) return local;
+      return `file://${local}`;
+    }
   } catch {
     // downloads module not available — fall through to stream
   }

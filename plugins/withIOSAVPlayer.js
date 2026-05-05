@@ -67,7 +67,10 @@ final class MavrixfyAVPlayer: RCTEventEmitter {
       controller.entersFullScreenWhenPlaybackBegins = false
       controller.exitsFullScreenWhenPlaybackEnds = false
       controller.allowsPictureInPicturePlayback = true
-      controller.updatesNowPlayingInfoCenter = true
+      // Do NOT set updatesNowPlayingInfoCenter = true here.
+      // react-native-track-player manages MPNowPlayingInfoCenter exclusively.
+      // Two players writing to it simultaneously causes lock screen conflicts.
+      controller.updatesNowPlayingInfoCenter = false
       controller.delegate = controller
 
       let player = AVPlayer(url: url)
