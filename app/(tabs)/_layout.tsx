@@ -1,5 +1,4 @@
 import { Tabs, router, usePathname, useRouter } from "expo-router";
-import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, InteractionManager, PanResponder, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,6 +17,21 @@ import { useLastMix, clearLastMix } from "@/lib/lastMix";
 
 const TAB_BOTTOM = 0;
 const MIX_DELETE_THRESHOLD = -72;
+
+type NativeTabsModule = typeof import("expo-router/unstable-native-tabs");
+
+let nativeTabsModule: NativeTabsModule | null = null;
+
+function getNativeTabsModule(): NativeTabsModule {
+  if (!nativeTabsModule) {
+    // Native tabs can terminate sideloaded iOS builds during startup, so only
+    // resolve the module when the fallback is intentionally disabled.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    nativeTabsModule = require("expo-router/unstable-native-tabs") as NativeTabsModule;
+  }
+
+  return nativeTabsModule;
+}
 
 function colorToRgba(input: string | undefined, alpha: number, fallback: string): string {
   if (!input) return fallback;
@@ -677,6 +691,8 @@ export function AppNavBar() {
 }
 
 function IOSNativeTabLayout() {
+  const { Icon, Label, NativeTabs } = getNativeTabsModule();
+
   return (
     <NativeTabs
       disableTransparentOnScrollEdge

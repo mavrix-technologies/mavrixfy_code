@@ -100,7 +100,8 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-audio",
-      "expo-brightness"
+      "expo-brightness",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true

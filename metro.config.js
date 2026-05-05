@@ -2,7 +2,8 @@ const { getDefaultConfig } = require("expo/metro-config");
 
 const config = getDefaultConfig(__dirname);
 
-// Disable bridgeless mode for compatibility
+// Keep Metro aligned with the current Expo config. New architecture is already
+// disabled in the native project settings where it actually matters.
 config.resolver = {
   ...config.resolver,
   blockList: [
@@ -50,7 +51,5 @@ config.transformer = {
     },
   }),
 };
-
-config.unstable_bridgelessEnabled = false;
 
 module.exports = config;

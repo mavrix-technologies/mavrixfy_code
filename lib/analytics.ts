@@ -1,34 +1,68 @@
-import { logEvent as firebaseLogEvent } from "firebase/analytics";
-import { analytics } from "./firebase";
 import { Platform } from "react-native";
 
-/**
- * Log an analytics event
- * Works on web platform with Firebase Analytics
- * For native (iOS/Android), events are logged to console for development
- */
-export function logEvent(eventName: string, params?: Record<string, any>) {
-  if (Platform.OS === "web") {
-    if (analytics) {
-      try {
-        firebaseLogEvent(analytics, eventName, params);
-      } catch (error) {
-        // Silent fail in production
-      }
-    }
+type AnalyticsModule = {
+  analytics: unknown;
+  logEvent: (analytics: unknown, eventName: string, params?: Record<string, unknown>) => void;
+};
+
+let analyticsModulePromise: Promise<AnalyticsModule | null> | null = null;
+
+async function loadAnalyticsModule(): Promise<AnalyticsModule | null> {
+  if (Platform.OS !== "web") {
+    return null;
   }
+
+  if (!analyticsModulePromise) {
+    analyticsModulePromise = (async () => {
+      try {
+        const [{ getAnalytics, isSupported, logEvent }, firebaseAppModule] = await Promise.all([
+          import("firebase/analytics"),
+          import("./firebase"),
+        ]);
+
+        const supported = await isSupported().catch(() => false);
+        if (!supported) {
+          return null;
+        }
+
+        return {
+          analytics: getAnalytics(firebaseAppModule.default),
+          logEvent,
+        };
+      } catch {
+        return null;
+      }
+    })();
+  }
+
+  return analyticsModulePromise;
 }
 
 /**
- * Log app open event
+ * Log an analytics event.
+ * Native builds intentionally no-op here so startup never pulls in the web
+ * Firebase Analytics bundle.
  */
+export function logEvent(eventName: string, params?: Record<string, unknown>) {
+  if (Platform.OS !== "web") {
+    return;
+  }
+
+  void loadAnalyticsModule()
+    .then((module) => {
+      if (!module) {
+        return;
+      }
+
+      module.logEvent(module.analytics, eventName, params);
+    })
+    .catch(() => {});
+}
+
 export function logAppOpen() {
   logEvent("app_open");
 }
 
-/**
- * Log screen view event
- */
 export function logScreenView(screenName: string, screenClass?: string) {
   logEvent("screen_view", {
     screen_name: screenName,
@@ -36,30 +70,18 @@ export function logScreenView(screenName: string, screenClass?: string) {
   });
 }
 
-/**
- * Log user login event
- */
 export function logLogin(method: string) {
   logEvent("login", { method });
 }
 
-/**
- * Log user signup event
- */
 export function logSignUp(method: string) {
   logEvent("sign_up", { method });
 }
 
-/**
- * Log search event
- */
 export function logSearch(searchTerm: string) {
   logEvent("search", { search_term: searchTerm });
 }
 
-/**
- * Log content selection (e.g., song, playlist)
- */
 export function logSelectContent(contentType: string, itemId: string) {
   logEvent("select_content", {
     content_type: contentType,
