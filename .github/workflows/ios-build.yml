@@ -44,21 +44,22 @@ jobs:
           if [ ! -f "$FILE" ]; then
             echo "expo-notifications patch skipped: $FILE not found"
           else
-            python3 - <<'EOF'
-            import pathlib, re
-            f = pathlib.Path("node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift")
+            PATCH_FILE="$FILE" python3 -c '
+            import os, pathlib, re
+
+            f = pathlib.Path(os.environ["PATCH_FILE"])
             text = f.read_text()
             patched = re.sub(
-              r'\s*if #available\(iOS 26\.0, \*\) \{\s*serializedComponents\["isRepeatedDay"\] = dateComponents\.isRepeatedDay \?\? false\s*\}\s*',
-              '\n    serializedComponents["isRepeatedDay"] = false\n',
-              text
+                r"\s*if #available\(iOS 26\.0, \*\) \{\s*serializedComponents\[\"isRepeatedDay\"\] = dateComponents\.isRepeatedDay \?\? false\s*\}\s*",
+                "\n    serializedComponents[\"isRepeatedDay\"] = false\n",
+                text,
             )
             if patched != text:
-              f.write_text(patched)
-              print("Patched DateComponentsSerializer.swift (removed iOS 26.0 availability guard)")
+                f.write_text(patched)
+                print("Patched DateComponentsSerializer.swift (removed iOS 26.0 availability guard)")
             else:
-              print("DateComponentsSerializer.swift — no patch needed")
-            EOF
+                print("DateComponentsSerializer.swift - no patch needed")
+            '
           fi
 
       - name: Remove expo-dev-client before prebuild
