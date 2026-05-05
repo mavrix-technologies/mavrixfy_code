@@ -7,17 +7,23 @@ import { getStorage } from "firebase/storage";
 import { getAnalytics, isSupported } from "firebase/analytics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
-import Constants from "expo-constants";
+import { getExpoExtra } from "./expoExtra";
 
-// Get config from expo-constants (works in production builds) or fallback to env vars (dev)
+const expoExtra = getExpoExtra();
+
+// Get config from the resolved Expo manifest, or fall back to env vars in dev.
 const firebaseConfig = {
-  apiKey: Constants.expoConfig?.extra?.firebaseApiKey || process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
-  authDomain: Constants.expoConfig?.extra?.firebaseAuthDomain || process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: Constants.expoConfig?.extra?.firebaseProjectId || process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: Constants.expoConfig?.extra?.firebaseStorageBucket || process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: Constants.expoConfig?.extra?.firebaseMessagingSenderId || process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: Constants.expoConfig?.extra?.firebaseAppId || process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
-  measurementId: Constants.expoConfig?.extra?.firebaseMeasurementId || process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
+  apiKey: (expoExtra.firebaseApiKey as string | undefined) || process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: (expoExtra.firebaseAuthDomain as string | undefined) || process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: (expoExtra.firebaseProjectId as string | undefined) || process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: (expoExtra.firebaseStorageBucket as string | undefined) || process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId:
+    (expoExtra.firebaseMessagingSenderId as string | undefined) ||
+    process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: (expoExtra.firebaseAppId as string | undefined) || process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  measurementId:
+    (expoExtra.firebaseMeasurementId as string | undefined) ||
+    process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
 // Validate Firebase config

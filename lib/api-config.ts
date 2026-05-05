@@ -1,4 +1,4 @@
-import Constants from 'expo-constants';
+import { getExpoExtra } from "./expoExtra";
 
 /**
  * API Configuration
@@ -9,7 +9,8 @@ import Constants from 'expo-constants';
  * Gets the base URL for authentication and general API
  */
 export function getAuthApiUrl(): string {
-  const host = Constants.expoConfig?.extra?.domain || process.env.EXPO_PUBLIC_DOMAIN;
+  const expoExtra = getExpoExtra();
+  const host = (expoExtra.domain as string | undefined) || process.env.EXPO_PUBLIC_DOMAIN;
   
   if (!host) {
     const fallbackHost = 'spotify-api-drab.vercel.app';
