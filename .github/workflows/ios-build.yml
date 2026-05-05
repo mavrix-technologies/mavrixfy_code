@@ -16,7 +16,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Select Xcode version
-        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+        # GitHub's macOS 15 runners have had runtime-registration issues when
+        # switching back to Xcode 16.2. Prefer Xcode 16.4 when available,
+        # otherwise stay on the image default instead of forcing 16.2.
+        run: |
+          if [ -d /Applications/Xcode_16.4.app/Contents/Developer ]; then
+            sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          else
+            echo "Xcode 16.4 not found; using the runner default Xcode"
+          fi
+          xcodebuild -version
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
