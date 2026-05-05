@@ -32,31 +32,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Remove expo-dev-client before prebuild
+        # expo-dev-client pulls in expo-dev-launcher whose Assets.xcassets
+        # fails to compile with Xcode 16 in Release mode. It is a dev-only
+        # tool and must not be included in production builds.
+        run: |
+          npm uninstall --no-save expo-dev-client
+          # Also remove the packages it pulls in transitively
+          rm -rf node_modules/expo-dev-launcher node_modules/expo-dev-menu node_modules/expo-dev-client
+
       - name: Prebuild iOS
         run: npx expo prebuild --platform ios --clean
 
-      - name: Patch Podfile — strip dev-only pods for Release
-        working-directory: ios
-        run: |
-          # expo-dev-launcher's Assets.xcassets fails to compile with Xcode 16+
-          # in Release mode. These pods are only needed for development builds.
-          python3 - <<'EOF'
-          import pathlib
-          pf = pathlib.Path("Podfile")
-          text = pf.read_text()
-          dev_pods = [
-            "expo-dev-launcher",
-            "expo-dev-menu",
-            "expo-dev-client",
-            "EXDevLauncher",
-            "EXDevMenu",
-          ]
-          lines = text.splitlines(keepends=True)
-          filtered = [l for l in lines if not any(p in l for p in dev_pods)]
-          pf.write_text("".join(filtered))
-          removed = len(lines) - len(filtered)
-          print(f"Patched Podfile: removed {removed} dev-pod line(s)")
-          EOF
+      - name: Remove Podfile patch step (no longer needed — packages removed from node_modules)
+        run: echo "expo-dev-client removed from node_modules before prebuild — no Podfile patching needed"
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
