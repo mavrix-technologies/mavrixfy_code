@@ -1,6 +1,5 @@
 import TrackPlayer, { Event, RepeatMode, State } from "react-native-track-player";
 import { DeviceEventEmitter, NativeEventEmitter, NativeModules, Platform } from "react-native";
-import { setupPlayer } from "@/lib/trackPlayer";
 
 type AutoPlayTrackPayload = {
   id?: string;
@@ -45,9 +44,15 @@ type AutoTransportPayload = {
 
 async function ensureTrackPlayerReady(reason: string): Promise<boolean> {
   try {
-    await setupPlayer();
+    // Inline setup to avoid module resolution issues in the background service context
+    await TrackPlayer.setupPlayer({
+      maxCacheSize: 1024 * 50,
+      autoUpdateMetadata: true,
+      autoHandleInterruptions: true,
+    });
     return true;
-  } catch {
+  } catch (e: any) {
+    if (e?.code === "player_already_initialized") return true;
     scheduleAutoSessionSync(`setup-failed:${reason}`, true);
     return false;
   }

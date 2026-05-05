@@ -2,38 +2,33 @@ import TrackPlayer, {
   AppKilledPlaybackBehavior,
   Capability,
 } from "react-native-track-player";
+import { Platform } from "react-native";
 import { logger } from "@/lib/logger";
 
 let setupPromise: Promise<void> | null = null;
 let hasSetupPlayer = false;
-const PLAYER_SETUP_TIMEOUT_MS = 12000;
-const PLAYER_OPTIONS_TIMEOUT_MS = 6000;
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+const PLAYER_SETUP_TIMEOUT_MS  = 12_000;
+const PLAYER_OPTIONS_TIMEOUT_MS = 6_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`TrackPlayer ${label} timeout`));
-    }, timeoutMs);
-
-    promise
-      .then((value) => {
-        clearTimeout(timer);
-        resolve(value);
-      })
-      .catch((error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
+    const timer = setTimeout(
+      () => reject(new Error(`TrackPlayer ${label} timed out`)),
+      ms
+    );
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); }
+    );
   });
 }
 
-async function configurePlayerOptions() {
+async function configurePlayerOptions(): Promise<void> {
   try {
     await withTimeout(
       TrackPlayer.updateOptions({
         android: {
-          // Keep the native player alive when the phone UI is swiped away.
-          // Android Auto reconnects to this background session.
           appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
           alwaysPauseOnInterruption: true,
         },
@@ -54,9 +49,6 @@ async function configurePlayerOptions() {
           Capability.Pause,
           Capability.SkipToNext,
         ],
-        // Emit native progress often enough for smooth Android Auto/session sync
-        // without waiting a full second between updates.
-        progressUpdateEventInterval: 0.5,
         notificationCapabilities: [
           Capability.Play,
           Capability.Pause,
@@ -68,6 +60,7 @@ async function configurePlayerOptions() {
           Capability.PlayFromId,
           Capability.PlayFromSearch,
         ],
+        progressUpdateEventInterval: 0.5,
       }),
       PLAYER_OPTIONS_TIMEOUT_MS,
       "updateOptions"
@@ -78,35 +71,29 @@ async function configurePlayerOptions() {
 }
 
 /**
- * Setup Track Player - Call this once when app starts
- * This is the main setup function used by PlayerContext
+ * Idempotent player setup — safe to call multiple times.
+ * Subsequent calls return immediately once setup has completed.
  */
-export async function setupPlayer() {
-  if (hasSetupPlayer) {
-    return;
-  }
+export async function setupPlayer(): Promise<void> {
+  if (hasSetupPlayer) return;
 
   if (!setupPromise) {
     setupPromise = (async () => {
       try {
-        const playerOptions = {
-            maxCacheSize: 1024 * 50, // 50 MB cache
+        await withTimeout(
+          TrackPlayer.setupPlayer({
+            maxCacheSize: 1024 * 50, // 50 MB
             autoUpdateMetadata: true,
             autoHandleInterruptions: true,
-            // RNTP normally rejects Android setup while the app is backgrounded.
-            // Our patched native module permits this for Android Auto/headless playback.
-            allowBackgroundSetup: true,
-          } as any;
-
-        await withTimeout(
-          TrackPlayer.setupPlayer(playerOptions),
+            // allowBackgroundSetup is Android-only (patched native module).
+            // Do NOT pass it on iOS — it is not a valid option and can cause crashes.
+            ...(Platform.OS === "android" ? { allowBackgroundSetup: true } : {}),
+          } as Parameters<typeof TrackPlayer.setupPlayer>[0]),
           PLAYER_SETUP_TIMEOUT_MS,
           "setupPlayer"
         );
       } catch (error: any) {
-        if (error?.code !== "player_already_initialized") {
-          throw error;
-        }
+        if (error?.code !== "player_already_initialized") throw error;
       }
 
       await configurePlayerOptions();
@@ -117,8 +104,6 @@ export async function setupPlayer() {
   try {
     await setupPromise;
   } finally {
-    if (!hasSetupPlayer) {
-      setupPromise = null;
-    }
+    if (!hasSetupPlayer) setupPromise = null;
   }
 }

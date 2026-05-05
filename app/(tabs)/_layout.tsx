@@ -1020,20 +1020,11 @@ export default function TabLayout() {
 
   const shouldHideTabBar = pathname?.includes("/import-songs/file");
 
-  // Check if we're in a production build (not dev client)
-  // NativeTabs only work in production builds via App Store/TestFlight
-  const isProductionBuild = !__DEV__ && Platform.OS === "ios" && !isWeb;
-  
-  // Use native tabs only in production iOS builds
-  // For development/sideloaded builds, use custom tabs
-  if (isProductionBuild) {
-    return (
-      <View style={{ flex: 1, backgroundColor: Colors.background }}>
-        <IOSNativeTabLayout />
-        {!shouldHideTabBar ? <IOSMiniPlayerOverlay /> : null}
-      </View>
-    );
-  }
+  // NativeTabs only work correctly when distributed via App Store or TestFlight.
+  // Sideloaded / unsigned IPAs run with __DEV__ = false but lack the required
+  // entitlements, causing an immediate crash. Disable NativeTabs entirely until
+  // the app is properly signed and distributed through Apple channels.
+  const isProductionBuild = false; // TODO: re-enable when distributing via App Store
 
   useEffect(() => {
     if (isWeb) {
@@ -1062,6 +1053,15 @@ export default function TabLayout() {
       preloadTimersRef.current = [];
     };
   }, [isWeb]);
+
+  if (isProductionBuild) {
+    return (
+      <View style={{ flex: 1, backgroundColor: Colors.background }}>
+        <IOSNativeTabLayout />
+        {!shouldHideTabBar ? <IOSMiniPlayerOverlay /> : null}
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>

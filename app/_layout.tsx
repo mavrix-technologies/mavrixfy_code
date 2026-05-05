@@ -19,8 +19,11 @@ import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { getRecentlyPlayed } from "@/lib/storage";
 import { AppNavBar } from "@/app/(tabs)/_layout";
 
+// Screens where the nav bar must not appear
+const NAV_HIDDEN_SEGMENTS = new Set(["login", "onboarding"]);
+
 // Set navigation bar color on Android
-if (Platform.OS === 'android') {
+if (Platform.OS === "android") {
   SystemUI.setBackgroundColorAsync(Colors.background);
 }
 
@@ -63,6 +66,9 @@ function RootLayoutNav() {
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
   const { registerActivity } = useKeepAwake();
+
+  // Hide the nav bar on auth/onboarding screens
+  const hideNavBar = NAV_HIDDEN_SEGMENTS.has(segments[0] as string);
 
   useEffect(() => {
     if (loading) return;
@@ -170,6 +176,8 @@ function RootLayoutNav() {
           options={{ gestureEnabled: false }}
         />
       </Stack>
+      {/* Nav bar is hidden on login and onboarding screens */}
+      {!hideNavBar && <AppNavBar />}
     </View>
   );
 }
@@ -241,7 +249,6 @@ export default function RootLayout() {
                   <KeepAwakeProvider>
                   <StatusBar style="light" />
                   <RootLayoutNav />
-                  <AppNavBar />
                   <WakeOverlay />
                   </KeepAwakeProvider>
                 </PlayerProvider>

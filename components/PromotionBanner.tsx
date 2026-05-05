@@ -1,29 +1,29 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, Text, Pressable, StyleSheet, Dimensions, AppState, Linking, Alert } from "react-native";
+import { View, Text, Pressable, StyleSheet, Dimensions, AppState, Linking } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
+import { collection, getDocs, query, where, limit } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { usePlayer } from "@/contexts/PlayerContext";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const BANNER_WIDTH = SCREEN_WIDTH - 32;
+const BANNER_WIDTH  = SCREEN_WIDTH - 32;
 const BANNER_HEIGHT = 140;
+const ROTATION_INTERVAL_MS = 8_000;
 
-type MediaType = "image" | "gif" | "video" | "audio";
-type Platform = "web" | "app";
-type BannerLayout = "hero" | "card" | "full-width" | "sidebar";
-type ActionType = "none" | "external" | "song" | "playlist" | "artist" | "album";
+type MediaType   = "image" | "gif" | "video" | "audio";
+type AppPlatform = "web" | "app";
+type ActionType  = "none" | "external" | "song" | "playlist" | "artist";
 
 interface AttachedSong {
   id: string;
   title: string;
   artist: string;
-  imageUrl: string;
-  streamUrl: string;
+  coverUrl: string;   // was imageUrl — matches Song type
+  audioUrl: string;   // was streamUrl — matches Song type
 }
 
 interface Promotion {
@@ -32,11 +32,10 @@ interface Promotion {
   description: string;
   mediaUrl?: string;
   mediaType?: MediaType;
-  platforms?: Platform;
+  platforms?: AppPlatform;
   status: "active" | "scheduled" | "ended";
   startDate?: string;
   endDate?: string;
-  layout?: BannerLayout;
   actionType?: ActionType;
   actionUrl?: string;
   attachedSong?: AttachedSong;
@@ -44,186 +43,133 @@ interface Promotion {
 }
 
 const BRAND = {
-  blue: "#26E19A",
-  teal: "#26E19A",
-  green: "#00B87B",
-  ink900: "#10141A",
-  ink800: "#181C22",
-  ink700: "#262A31",
-  textPrimary: "#DFE2EB",
+  teal:          "#26E19A",
+  textPrimary:   "#DFE2EB",
   textSecondary: "rgba(223,226,235,0.9)",
-  textMuted: "rgba(188,203,185,0.76)",
 };
 
 export default function PromotionBanner() {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]     = useState(true);
   const [isVisible, setIsVisible] = useState(true);
-  const { playSong, addToQueue } = usePlayer();
+  const { playSong } = usePlayer();
 
+  // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    fetchActivePromotions();
+    const today = new Date().toISOString().split("T")[0];
+
+    // Query only on indexed fields (status + platforms).
+    // Sorting by priority is done client-side to avoid requiring a composite index.
+    const q = query(
+      collection(db, "promotions"),
+      where("status",    "==", "active"),
+      where("platforms", "==", "app"),
+      limit(10)
+    );
+
+    getDocs(q)
+      .then((snapshot) => {
+        const promos = snapshot.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() } as Promotion))
+          .filter((p) => {
+            const startOk = !p.startDate || p.startDate <= today;
+            const endOk   = !p.endDate   || p.endDate   >= today;
+            return startOk && endOk;
+          })
+          // Client-side sort by priority descending
+          .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+          .slice(0, 5);
+
+        setPromotions(promos);
+      })
+      .catch(() => {
+        // Silent fail — banner is non-critical
+      })
+      .finally(() => setLoading(false));
   }, []);
 
-  // Monitor app state to pause rotation when app is in background
+  // ── Pause rotation when app is backgrounded ────────────────────────────────
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextAppState) => {
-      setIsVisible(nextAppState === 'active');
+    const sub = AppState.addEventListener("change", (state) => {
+      setIsVisible(state === "active");
     });
-
-    return () => {
-      subscription.remove();
-    };
+    return () => sub.remove();
   }, []);
 
+  // ── Auto-rotate ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (promotions.length <= 1 || !isVisible) return;
-
-    const interval = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % promotions.length);
-    }, 8000); // Increased from 5s to 8s to reduce battery drain
-
-    return () => clearInterval(interval);
+    const id = setInterval(
+      () => setCurrentIndex((prev) => (prev + 1) % promotions.length),
+      ROTATION_INTERVAL_MS
+    );
+    return () => clearInterval(id);
   }, [promotions.length, isVisible]);
 
-  const fetchActivePromotions = async () => {
-    try {
-      const today = new Date().toISOString().split("T")[0];
-      
-      // Fetch active promotions for app platform, ordered by priority
-      const q = query(
-        collection(db, "promotions"),
-        where("status", "==", "active"),
-        where("platforms", "==", "app"),
-        orderBy("priority", "desc"),
-        limit(5)
-      );
+  // ── Action handler ─────────────────────────────────────────────────────────
+  const handlePress = useCallback(async (promo: Promotion) => {
+    switch (promo.actionType ?? "none") {
+      case "song":
+        if (promo.attachedSong) {
+          playSong({
+            id:       promo.attachedSong.id,
+            title:    promo.attachedSong.title,
+            artist:   promo.attachedSong.artist,
+            coverUrl: promo.attachedSong.coverUrl,
+            audioUrl: promo.attachedSong.audioUrl,
+            duration: 0,
+          } as any);
+        }
+        break;
 
-      const snapshot = await getDocs(q);
-      const promos = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Promotion[];
+      case "external":
+        if (promo.actionUrl) {
+          const ok = await Linking.canOpenURL(promo.actionUrl).catch(() => false);
+          if (ok) Linking.openURL(promo.actionUrl).catch(() => {});
+        }
+        break;
 
-      // Filter by date range if specified
-      const validPromos = promos.filter((promo) => {
-        const startValid = !promo.startDate || promo.startDate <= today;
-        const endValid = !promo.endDate || promo.endDate >= today;
-        return startValid && endValid;
-      });
+      case "playlist":
+        if (promo.actionUrl) {
+          const id = promo.actionUrl.split("/").pop() ?? promo.actionUrl;
+          router.push(`/playlist/${id}` as any);
+        }
+        break;
 
-      setPromotions(validPromos);
-    } catch (error) {
-      console.error("[PromotionBanner] Error fetching promotions:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      case "artist":
+        if (promo.actionUrl) {
+          const id = promo.actionUrl.split("/").pop() ?? promo.actionUrl;
+          router.push(`/artist/${id}` as any);
+        }
+        break;
 
-  const handleDotPress = useCallback((index: number) => {
-    setCurrentIndex(index);
-  }, []);
-
-  const handleBannerPress = useCallback(async (promo: Promotion) => {
-    const actionType = promo.actionType || "none";
-
-    try {
-      switch (actionType) {
-        case "song":
-          if (promo.attachedSong) {
-            // Play the attached song
-            await playSong({
-              id: promo.attachedSong.id,
-              title: promo.attachedSong.title,
-              artist: promo.attachedSong.artist,
-              imageUrl: promo.attachedSong.imageUrl,
-              streamUrl: promo.attachedSong.streamUrl,
-              duration: 0, // Duration not stored in promotion
-            });
-            console.log("[PromotionBanner] Playing song:", promo.attachedSong.title);
-          } else {
-            Alert.alert("Error", "No song attached to this promotion");
-          }
-          break;
-
-        case "external":
-          if (promo.actionUrl) {
-            const supported = await Linking.canOpenURL(promo.actionUrl);
-            if (supported) {
-              await Linking.openURL(promo.actionUrl);
-            } else {
-              Alert.alert("Error", "Cannot open this link");
-            }
-          }
-          break;
-
-        case "playlist":
-          if (promo.actionUrl) {
-            // Extract playlist ID from URL or use actionUrl as ID
-            const playlistId = promo.actionUrl.split("/").pop() || promo.actionUrl;
-            router.push(`/playlist/${playlistId}`);
-          }
-          break;
-
-        case "artist":
-          if (promo.actionUrl) {
-            // Extract artist ID from URL or use actionUrl as ID
-            const artistId = promo.actionUrl.split("/").pop() || promo.actionUrl;
-            router.push(`/artist/${artistId}`);
-          }
-          break;
-
-        case "album":
-          if (promo.actionUrl) {
-            // You can implement album navigation if you have album pages
-            console.log("[PromotionBanner] Album navigation:", promo.actionUrl);
-            Alert.alert("Album", "Album page coming soon!");
-          }
-          break;
-
-        case "none":
-        default:
-          // No action - just log
-          console.log("[PromotionBanner] Promotion clicked (no action):", promo.title);
-          break;
-      }
-    } catch (error) {
-      console.error("[PromotionBanner] Error handling banner action:", error);
-      Alert.alert("Error", "Failed to perform action");
+      default:
+        break;
     }
   }, [playSong]);
 
-  if (loading || promotions.length === 0) {
-    return null;
-  }
+  if (loading || promotions.length === 0) return null;
 
-  const currentPromo = promotions[currentIndex];
+  const promo = promotions[currentIndex];
 
   return (
     <View style={styles.container}>
       <Pressable
-        style={({ pressed }) => [
-          styles.banner,
-          pressed && styles.bannerPressed,
-        ]}
-        onPress={() => handleBannerPress(currentPromo)}
+        style={({ pressed }) => [styles.banner, pressed && styles.bannerPressed]}
+        onPress={() => handlePress(promo)}
       >
-        {currentPromo.mediaUrl ? (
+        {promo.mediaUrl ? (
           <>
             <Image
-              source={{ uri: currentPromo.mediaUrl }}
+              source={{ uri: promo.mediaUrl }}
               style={styles.bannerImage}
               contentFit="cover"
               transition={200}
               cachePolicy="memory-disk"
             />
             <LinearGradient
-              colors={[
-                "transparent",
-                "rgba(16,20,26,0.4)",
-                "rgba(16,20,26,0.85)",
-              ]}
+              colors={["transparent", "rgba(16,20,26,0.4)", "rgba(16,20,26,0.85)"]}
               locations={[0, 0.5, 1]}
               style={StyleSheet.absoluteFill}
             />
@@ -238,47 +184,32 @@ export default function PromotionBanner() {
         )}
 
         <View style={styles.content}>
-          <View style={styles.textContainer}>
-            <Text style={styles.title} numberOfLines={2}>
-              {currentPromo.title}
-            </Text>
-            {currentPromo.description && (
-              <Text style={styles.description} numberOfLines={2}>
-                {currentPromo.description}
-              </Text>
-            )}
-          </View>
-
-          {currentPromo.mediaType && (
-            <View style={styles.mediaTypeBadge}>
-              {currentPromo.mediaType === "video" && (
-                <Ionicons name="play-circle" size={14} color={BRAND.teal} />
-              )}
-              {currentPromo.mediaType === "audio" && (
-                <Ionicons name="musical-notes" size={14} color={BRAND.teal} />
-              )}
-              {currentPromo.mediaType === "gif" && (
-                <Ionicons name="images" size={14} color={BRAND.teal} />
-              )}
-            </View>
+          <Text style={styles.title} numberOfLines={2}>{promo.title}</Text>
+          {!!promo.description && (
+            <Text style={styles.description} numberOfLines={2}>{promo.description}</Text>
           )}
         </View>
+
+        {promo.mediaType && promo.mediaType !== "image" && (
+          <View style={styles.mediaTypeBadge}>
+            <Ionicons
+              name={
+                promo.mediaType === "video" ? "play-circle"
+                : promo.mediaType === "audio" ? "musical-notes"
+                : "images"
+              }
+              size={14}
+              color={BRAND.teal}
+            />
+          </View>
+        )}
       </Pressable>
 
       {promotions.length > 1 && (
         <View style={styles.dotsContainer}>
-          {promotions.map((_, index) => (
-            <Pressable
-              key={index}
-              onPress={() => handleDotPress(index)}
-              hitSlop={8}
-            >
-              <View
-                style={[
-                  styles.dot,
-                  index === currentIndex && styles.dotActive,
-                ]}
-              />
+          {promotions.map((_, i) => (
+            <Pressable key={i} onPress={() => setCurrentIndex(i)} hitSlop={8}>
+              <View style={[styles.dot, i === currentIndex && styles.dotActive]} />
             </Pressable>
           ))}
         </View>
@@ -297,7 +228,6 @@ const styles = StyleSheet.create({
     height: BANNER_HEIGHT,
     borderRadius: 12,
     overflow: "hidden",
-    position: "relative",
     borderWidth: 1,
     borderColor: Colors.cardBorder,
     backgroundColor: Colors.surface,
@@ -307,16 +237,12 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.98 }],
   },
   bannerImage: {
-    width: "100%",
-    height: "100%",
-    position: "absolute",
+    ...StyleSheet.absoluteFillObject,
   },
   content: {
     flex: 1,
     padding: 16,
     justifyContent: "flex-end",
-  },
-  textContainer: {
     gap: 4,
   },
   title: {
