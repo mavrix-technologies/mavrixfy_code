@@ -27,6 +27,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Fix expo-notifications iOS 26 API for Xcode 16.2
+        # DateComponentsSerializer.swift uses #available(iOS 26.0, *) which the
+        # Xcode 16.2 / iOS 18.2 SDK does not recognise, causing a compile error.
+        # Replace the availability-guarded block with a safe static false default.
+        run: |
+          FILE="node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift"
+          python3 - <<'EOF'
+          import pathlib, re
+          f = pathlib.Path("node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift")
+          text = f.read_text()
+          # Remove the #available(iOS 26.0, *) block and replace with a safe default
+          patched = re.sub(
+            r'\s*if #available\(iOS 26\.0, \*\) \{\s*serializedComponents\["isRepeatedDay"\] = dateComponents\.isRepeatedDay \?\? false\s*\}\s*',
+            '\n    // isRepeatedDay requires iOS 26.0 SDK — use false as safe default for Xcode 16.2\n    serializedComponents["isRepeatedDay"] = false\n',
+            text
+          )
+          f.write_text(patched)
+          print("Patched DateComponentsSerializer.swift" if patched != text else "WARNING: pattern not found — file may have changed")
+          EOF
+
       - name: Remove expo-dev-client before prebuild
         # expo-dev-client pulls in expo-dev-launcher whose Assets.xcassets
         # fails to compile with Xcode 16 in Release mode.
