@@ -14,6 +14,8 @@ import { triggerImpact } from "@/lib/haptics";
 import EqualizerBars from "@/components/EqualizerBars";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
 import DownloadButton from "@/components/DownloadButton";
+import OfflineBanner from "@/components/OfflineBanner";
+import { useNetwork } from "@/contexts/NetworkContext";
 
 const UI = {
   bg: "#10141a",
@@ -30,6 +32,7 @@ export default function LikedSongsScreen() {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const { isAuthenticated } = useAuth();
+  const { isOnline } = useNetwork();
   const { playSong, likedSongs, currentSong, isPlaying, togglePlay, toggleLike, queue } = usePlayerBrowse();
 
   const songs = useMemo(() => {
@@ -154,6 +157,7 @@ export default function LikedSongsScreen() {
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
       <LinearGradient colors={["#09111B", "#10141a", "#10141a"]} style={StyleSheet.absoluteFillObject} />
+      {!isOnline && <OfflineBanner />}
 
       <View style={styles.topBar}>
         <Pressable style={styles.topIconButton} onPress={safeGoBack} hitSlop={10}>

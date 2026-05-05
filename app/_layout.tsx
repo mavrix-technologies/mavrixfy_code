@@ -13,6 +13,7 @@ import { PlayerProvider } from "@/contexts/PlayerContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { KeepAwakeProvider, useKeepAwake } from "@/contexts/KeepAwakeContext";
 import { DownloadProvider } from "@/contexts/DownloadContext";
+import { NetworkProvider } from "@/contexts/NetworkContext";
 import Colors from "@/constants/colors";
 import { logAppOpen } from "@/lib/analytics";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
@@ -245,17 +246,19 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <ThemeProvider value={DarkTheme}>
-            <AuthProvider>
-              <DownloadProvider>
-                <PlayerProvider>
-                  <KeepAwakeProvider>
-                  <StatusBar style="light" />
-                  <RootLayoutNav />
-                  <WakeOverlay />
-                  </KeepAwakeProvider>
-                </PlayerProvider>
-              </DownloadProvider>
-            </AuthProvider>
+            <NetworkProvider>
+              <AuthProvider>
+                <DownloadProvider>
+                  <PlayerProvider>
+                    <KeepAwakeProvider>
+                    <StatusBar style="light" />
+                    <RootLayoutNav />
+                    <WakeOverlay />
+                    </KeepAwakeProvider>
+                  </PlayerProvider>
+                </DownloadProvider>
+              </AuthProvider>
+            </NetworkProvider>
           </ThemeProvider>
         </GestureHandlerRootView>
       </QueryClientProvider>

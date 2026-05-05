@@ -26,6 +26,9 @@ import {
   rankSongs,
   parseStructuredQuery
 } from "@/lib/searchUtils";
+import OfflineScreen from "@/components/OfflineScreen";
+import OfflineBanner from "@/components/OfflineBanner";
+import { useNetwork } from "@/contexts/NetworkContext";
 
 interface PlaylistResult {
   id: string;
@@ -205,6 +208,7 @@ function stableHash(input: string): number {
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { isOnline } = useNetwork();
   const [query, setQuery] = useState("");
   const [songResults, setSongResults] = useState<Song[]>([]);
   const [playlistResults, setPlaylistResults] = useState<PlaylistResult[]>([]);
@@ -633,6 +637,14 @@ export default function SearchScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
+      {/* Offline: show banner when searching, full screen when idle */}
+      {!isOnline && query.length === 0 && (
+        <OfflineScreen
+          message="Search requires an internet connection."
+          hideDownloadsButton={false}
+        />
+      )}
+      {!isOnline && query.length > 0 && <OfflineBanner />}
       {/* ── Search bar ── */}
       <View style={styles.searchBarRow}>
         <View style={styles.searchBar}>

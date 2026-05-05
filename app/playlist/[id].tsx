@@ -40,6 +40,8 @@ import { getJioSaavnPlaylistDetails } from "@/lib/jioSaavnService";
 import { useAuth } from "@/contexts/AuthContext";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
+import OfflineBanner from "@/components/OfflineBanner";
+import { useNetwork } from "@/contexts/NetworkContext";
 
 function pickFirstParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? "";
@@ -75,6 +77,7 @@ export default function PlaylistScreen() {
 
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { isOnline } = useNetwork();
   const { playSong, currentSong, isPlaying, queue, togglePlay } = usePlayer();
   const topInset  = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 132 : Math.max(150, insets.bottom + 126);
@@ -550,6 +553,8 @@ export default function PlaylistScreen() {
   // ── Main render ────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
+      {/* Slim offline banner — downloaded playlists still work offline */}
+      {!isOnline && <OfflineBanner />}
       <ScrollView
         contentContainerStyle={{ paddingBottom: bottomPad }}
         onScroll={handleScroll}

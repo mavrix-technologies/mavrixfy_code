@@ -34,6 +34,8 @@ import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import { triggerImpact } from "@/lib/haptics";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { getFollowedArtists, FollowedArtist } from "@/lib/followedArtists";
+import OfflineBanner from "@/components/OfflineBanner";
+import { useNetwork } from "@/contexts/NetworkContext";
 
 type Filter = "playlists" | "artists" | "favorite" | null;
 type ViewMode = "list" | "grid";
@@ -95,6 +97,7 @@ function getGridPattern(id: string, index: number) {
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { isOnline } = useNetwork();
   const { likedSongs } = usePlayerBrowse();
   const activeUserId = user?.id ?? null;
   const hasCachedPlaylists =
@@ -753,6 +756,8 @@ export default function LibraryScreen() {
         colors={[Colors.backgroundGradientStart, Colors.background, Colors.background]}
         style={StyleSheet.absoluteFillObject}
       />
+      {/* Slim offline banner — library still works offline with local playlists */}
+      {!isOnline && <OfflineBanner />}
       <FlatList
         key={`${viewMode}-${filter}`}
         data={listData}

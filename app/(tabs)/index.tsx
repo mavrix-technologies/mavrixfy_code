@@ -33,6 +33,9 @@ import {
 import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistService";
 import HomeSkeletonLoader from "@/components/HomeSkeletonLoader";
 import PromotionBanner from "@/components/PromotionBanner";
+import OfflineScreen from "@/components/OfflineScreen";
+import OfflineBanner from "@/components/OfflineBanner";
+import { useNetwork } from "@/contexts/NetworkContext";
 
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 
@@ -198,6 +201,7 @@ export default function HomeScreen() {
 function HomeScreenInner() {
   useScreenTracking("Home");
 
+  const { isOnline, isChecking } = useNetwork();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
@@ -1202,6 +1206,15 @@ function HomeScreenInner() {
 
   const shouldShowSkeleton = loading && sections.length === 0;
 
+  // Show full offline screen only when there's no cached content to display
+  if (!isOnline && !isChecking && sections.length === 0) {
+    return (
+      <View style={[styles.container, { paddingTop: topInset }]}>
+        <OfflineScreen message="Connect to the internet to discover music." />
+      </View>
+    );
+  }
+
   if (shouldShowSkeleton) {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
@@ -1212,6 +1225,8 @@ function HomeScreenInner() {
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
+      {/* Slim banner when offline but cached content is available */}
+      {!isOnline && <OfflineBanner />}
       <ScrollView
         refreshControl={
           <RefreshControl
