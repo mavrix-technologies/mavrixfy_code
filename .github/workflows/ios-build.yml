@@ -40,24 +40,26 @@ jobs:
         # Keep this patch defensive: newer branches may not install expo-notifications
         # at all, so the workflow must not fail just because that module is absent.
         run: |
-          python3 - <<'EOF'
-          import pathlib, re
-          f = pathlib.Path("node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift")
-          if not f.exists():
-            print("expo-notifications patch skipped: DateComponentsSerializer.swift not found")
-            raise SystemExit(0)
-          text = f.read_text()
-          patched = re.sub(
-            r'\s*if #available\(iOS 26\.0, \*\) \{\s*serializedComponents\["isRepeatedDay"\] = dateComponents\.isRepeatedDay \?\? false\s*\}\s*',
-            '\n    serializedComponents["isRepeatedDay"] = false\n',
-            text
-          )
-          if patched != text:
-            f.write_text(patched)
-            print("Patched DateComponentsSerializer.swift (removed iOS 26.0 availability guard)")
-          else:
-            print("DateComponentsSerializer.swift — no patch needed")
-          EOF
+          FILE="node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift"
+          if [ ! -f "$FILE" ]; then
+            echo "expo-notifications patch skipped: $FILE not found"
+          else
+            python3 - <<'EOF'
+            import pathlib, re
+            f = pathlib.Path("node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift")
+            text = f.read_text()
+            patched = re.sub(
+              r'\s*if #available\(iOS 26\.0, \*\) \{\s*serializedComponents\["isRepeatedDay"\] = dateComponents\.isRepeatedDay \?\? false\s*\}\s*',
+              '\n    serializedComponents["isRepeatedDay"] = false\n',
+              text
+            )
+            if patched != text:
+              f.write_text(patched)
+              print("Patched DateComponentsSerializer.swift (removed iOS 26.0 availability guard)")
+            else:
+              print("DateComponentsSerializer.swift — no patch needed")
+            EOF
+          fi
 
       - name: Remove expo-dev-client before prebuild
         # expo-dev-client pulls in expo-dev-launcher whose Assets.xcassets
