@@ -9,11 +9,19 @@ permissions:
 jobs:
   build-ios:
     name: 🎉 iOS Build
-    runs-on: macos-latest
-    
+    runs-on: macos-15
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+
+      - name: Show Xcode & SDK versions
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -30,17 +38,25 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.0'
+          ruby-version: '3.2'
+          bundler-cache: false
+
+      - name: Install CocoaPods
+        run: gem install cocoapods --no-document
+
+      - name: Install xcpretty
+        run: gem install xcpretty --no-document
 
       - name: Install CocoaPods dependencies
-        run: |
-          cd ios
-          pod install
+        working-directory: ios
+        run: pod install --repo-update
 
       - name: Build iOS app (no codesign)
+        working-directory: ios
         run: |
-          cd ios
-          xcodebuild -workspace Mavrixfy.xcworkspace \
+          set -o pipefail
+          xcodebuild \
+            -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
             -configuration Release \
             -sdk iphoneos \
@@ -49,19 +65,23 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
-            build
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
+            GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+            build \
+            2>&1 | tee build.log | xcpretty --color --simple || \
+            (echo "--- LAST 100 LINES OF RAW LOG ---" && tail -100 build.log && exit 1)
 
       - name: Create Payload directory
-        run: mkdir Payload
         working-directory: ios/build/Build/Products/Release-iphoneos
+        run: mkdir Payload
 
       - name: Move app to Payload
-        run: mv Mavrixfy.app Payload/
         working-directory: ios/build/Build/Products/Release-iphoneos
+        run: mv Mavrixfy.app Payload/
 
       - name: Zip output
-        run: zip -qq -r -9 MavrixfyIpaExport.ipa Payload
         working-directory: ios/build/Build/Products/Release-iphoneos
+        run: zip -qq -r -9 MavrixfyIpaExport.ipa Payload
 
       - name: Rename IPA for direct download
         run: |
@@ -75,6 +95,13 @@ jobs:
           path: ./Mavrixfy.ipa
           compression-level: 0
 
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: ios/build.log
+
       - name: Create Release and Upload IPA
         uses: softprops/action-gh-release@v2
         with:
@@ -82,7 +109,7 @@ jobs:
           name: iOS Build v${{ github.run_number }}
           body: |
             iOS IPA Build - Unsigned (No Code Signing)
-            
+
             **Build Details:**
             - Build Number: ${{ github.run_number }}
             - Commit: ${{ github.sha }}
