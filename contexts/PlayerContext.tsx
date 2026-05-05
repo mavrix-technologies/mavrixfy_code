@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useRef, ReactNode, useEffect } from "react";
-import { Alert, Platform, ToastAndroid } from "react-native";
+import { Alert, AppState, Platform, ToastAndroid } from "react-native";
 import { isRunningInExpoGo } from "expo";
 import { Song } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
@@ -25,15 +25,15 @@ let useProgress: any = () => ({ position: 0, duration: 0 });
 let setupPlayer: any = null;
 
 const isExpoGoRuntime = isRunningInExpoGo();
-// On a production IPA, both conditions must be true:
-// - not web
-// - not running inside Expo Go
-// We also guard with a try/catch at require time below.
-const isNativeTrackPlayerAvailable = Platform.OS !== "web" && !isExpoGoRuntime;
+// Keep TrackPlayer Android-only for now. iOS is using expo-audio because the
+// native TrackPlayer path is still unstable there and can terminate the app as
+// soon as playback is initialized.
+const isNativeTrackPlayerAvailable = Platform.OS === "android" && !isExpoGoRuntime;
+const canUseLightweightAudioFallback = Platform.OS === "ios" || isExpoGoRuntime;
 const shouldEagerlySetupNativePlayer = Platform.OS === "android";
 const nativePlayerUnavailableMessage = isExpoGoRuntime
   ? "Use the development build or installed APK. Expo Go does not include the native music player."
-  : "Native music player is not available in this runtime.";
+  : "Audio playback is not available in this runtime.";
 
 if (isNativeTrackPlayerAvailable) {
   try {
@@ -292,6 +292,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const queueRef = useRef<Song[]>([]);
   const queueIndexRef = useRef(0);
   const repeatModeRef = useRef<"off" | "all" | "one">("off");
+  const previewRepeatModeRef = useRef<"off" | "all" | "one">("off");
   const originalQueueRef = useRef<Song[]>([]);
   const playRequestIdRef = useRef(0);
   const seekOverrideRef = useRef<number | null>(null);
@@ -304,6 +305,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
   useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
+  useEffect(() => { previewRepeatModeRef.current = previewRepeatMode; }, [previewRepeatMode]);
 
   // ── Persist player state on every song change ─────────────────────────────
   useEffect(() => {
@@ -377,7 +379,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       : 0;
   const positionMillis = effectivePositionSeconds * 1000;
   const duration = effectiveTrackDurationSeconds * 1000;
-  const isPreviewSession = isExpoGoRuntime && !canUseNativePlayback && Boolean(currentSong);
+  const isPreviewSession = canUseLightweightAudioFallback && !canUseNativePlayback && Boolean(currentSong);
   const resolvedProgress = isPreviewSession ? previewProgress : progress;
   const resolvedDuration = isPreviewSession
     ? (previewDuration > 0 ? previewDuration : currentSongDurationSeconds * 1000)
@@ -402,9 +404,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setPreviewProgress(0);
   }, [currentSong?.id, isPreviewSession]);
 
-  // Wire expo-audio status + error callbacks (Expo Go only)
+  // Wire expo-audio status + error callbacks for runtimes using the lightweight fallback.
   useEffect(() => {
-    if (!isExpoGoRuntime) return;
+    if (!canUseLightweightAudioFallback) return;
 
     ExpoAvPlayer.onError((err) => {
       logger.warn("[ExpoAudio] Playback error", err);
@@ -422,7 +424,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (didJustFinish) {
         const cq = queueRef.current;
         const ci = queueIndexRef.current;
-        const rm = repeatModeRef.current;
+        const rm = previewRepeatModeRef.current;
         let ni = ci + 1;
         if (ni >= cq.length) {
           if (rm === "all") ni = 0;
@@ -449,7 +451,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     let mounted = true;
     // Only poll when app is in foreground — saves battery in background
     let appState = "active";
-    const appStateSub = require("react-native").AppState.addEventListener(
+    const appStateSub = AppState.addEventListener(
       "change",
       async (next: string) => {
         const prev = appState;
@@ -987,8 +989,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const playSong = useCallback((song: Song, newQueue?: Song[]) => {
     if (!TrackPlayer || !setupPlayer) {
-      if (isExpoGoRuntime) {
-        // Expo Go: use expo-av for real audio playback
+      if (canUseLightweightAudioFallback) {
+        // iOS / Expo Go: use expo-audio instead of the native TrackPlayer stack.
         const fallbackQueue = (newQueue || [song]).filter((item): item is Song => Boolean(item?.id));
         if (fallbackQueue.length === 0) {
           showPlaybackNotice("Could not play this song.");
@@ -1012,6 +1014,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setPreviewProgress(0);
         setPreviewIsShuffled(false);
         setPreviewRepeatMode("off");
+        previewIsPlayingRef.current = true;
+        setPreviewIsPlaying(true);
         // Play via expo-audio
         void ExpoAvPlayer.loadAndPlay(audioUrl);
         return;
@@ -1058,11 +1062,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const togglePlay = useCallback(async () => {
     try {
       if (!TrackPlayer || !setupPlayer) {
-        if (isExpoGoRuntime && currentSong) {
+        if (canUseLightweightAudioFallback && currentSong) {
           // Use ref — never stale, always reflects current playback state
           if (previewIsPlayingRef.current) {
+            previewIsPlayingRef.current = false;
+            setPreviewIsPlaying(false);
             ExpoAvPlayer.pause();
           } else {
+            previewIsPlayingRef.current = true;
+            setPreviewIsPlaying(true);
             // If no URL loaded yet (e.g. after app reopen), load first then play
             if (!ExpoAvPlayer.isLoaded()) {
               const url = resolveAudioUrl(currentSong as any);
@@ -1123,7 +1131,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const nextSong = useCallback(async () => {
     try {
       if (!TrackPlayer || !setupPlayer) {
-        if (isExpoGoRuntime) {
+        if (canUseLightweightAudioFallback) {
           const cq = queueRef.current;
           const ci = queueIndexRef.current;
           if (cq.length === 0) return;
@@ -1136,6 +1144,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           queueIndexRef.current = ni;
           setCurrentSong(cq[ni]);
           setPreviewProgress(0);
+          previewIsPlayingRef.current = true;
+          setPreviewIsPlaying(true);
           const url = resolveAudioUrl(cq[ni] as SongPlaybackSource);
           if (url) void ExpoAvPlayer.loadAndPlay(url);
         }
@@ -1170,7 +1180,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const prevSong = useCallback(async () => {
     try {
       if (!TrackPlayer || !setupPlayer) {
-        if (isExpoGoRuntime) {
+        if (canUseLightweightAudioFallback) {
           const cq = queueRef.current;
           const ci = queueIndexRef.current;
           if (cq.length === 0) return;
@@ -1188,6 +1198,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           queueIndexRef.current = pi;
           setCurrentSong(cq[pi]);
           setPreviewProgress(0);
+          previewIsPlayingRef.current = true;
+          setPreviewIsPlaying(true);
           const url = resolveAudioUrl(cq[pi] as SongPlaybackSource);
           if (url) void ExpoAvPlayer.loadAndPlay(url);
         }
@@ -1232,7 +1244,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     let seekRequestId = 0;
     try {
       if (!TrackPlayer || !setupPlayer) {
-        if (isExpoGoRuntime) {
+        if (canUseLightweightAudioFallback) {
           const normalizedProgress = Number.isFinite(p) ? Math.max(0, Math.min(1, p)) : 0;
           // Set progress immediately so the UI moves right away
           setPreviewProgress(normalizedProgress);
@@ -1284,11 +1296,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setSeekOverrideSeconds(null);
       }
     }
-  }, [effectiveTrackDurationSeconds, isPlayerReady]);
+  }, [currentSong?.duration, effectiveTrackDurationSeconds, isPlayerReady, previewDuration]);
 
   const toggleShuffle = useCallback(async () => {
     if (!TrackPlayer || !setupPlayer) {
-      if (isExpoGoRuntime) {
+      if (canUseLightweightAudioFallback) {
         setPreviewIsShuffled((prev) => !prev);
       }
       return;
@@ -1364,7 +1376,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const toggleRepeat = useCallback(async () => {
     if (!TrackPlayer || !setupPlayer) {
-      if (isExpoGoRuntime) {
+      if (canUseLightweightAudioFallback) {
         setPreviewRepeatMode((prev) => (prev === "off" ? "all" : prev === "all" ? "one" : "off"));
       }
       return;
@@ -1412,14 +1424,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const addToQueue = useCallback(async (song: Song) => {
     try {
-      if (!isPlayerReady) {
-        return;
-      }
       const normalizedSong = normalizePlayableSong(song);
       if (!normalizedSong) {
         return;
       }
-      
+
+      if (!TrackPlayer || !setupPlayer) {
+        if (!canUseLightweightAudioFallback) {
+          return;
+        }
+        setQueue(prev => {
+          const next = [...prev, normalizedSong];
+          queueRef.current = next;
+          setSourceQueue(next);
+          return next;
+        });
+        return;
+      }
+
+      if (!isPlayerReady) {
+        return;
+      }
       setQueue(prev => {
         const next = [...prev, normalizedSong];
         queueRef.current = next;
@@ -1434,14 +1459,29 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const playNext = useCallback(async (song: Song) => {
     try {
-      if (!isPlayerReady) {
-        return;
-      }
       const normalizedSong = normalizePlayableSong(song);
       if (!normalizedSong) {
         return;
       }
-      
+
+      if (!TrackPlayer || !setupPlayer) {
+        if (!canUseLightweightAudioFallback) {
+          return;
+        }
+        setQueue(prev => {
+          const ci = queueIndexRef.current;
+          const next = [...prev];
+          next.splice(ci + 1, 0, normalizedSong);
+          queueRef.current = next;
+          setSourceQueue(next);
+          return next;
+        });
+        return;
+      }
+
+      if (!isPlayerReady) {
+        return;
+      }
       setQueue(prev => {
         const ci = queueIndexRef.current;
         const next = [...prev];
