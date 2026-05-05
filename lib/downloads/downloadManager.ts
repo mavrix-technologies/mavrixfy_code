@@ -46,6 +46,7 @@ import {
   deleteAllTrackFiles,
   trackFileExists,
   getTrackFileSize,
+  getTrackFileUri,
 } from "@/lib/downloads/storagePolicy";
 import {
   removeCollectionRef,
@@ -221,18 +222,23 @@ export async function downloadCollection(
 // ─── Playback handoff ─────────────────────────────────────────────────────────
 
 /**
- * Returns the local file path for a song if it is fully downloaded and the
+ * Returns the local file URI for a song if it is fully downloaded and the
  * file exists on disk. Returns null otherwise (caller should stream).
+ *
+ * IMPORTANT: We always recompute the path from songId using getTrackFileUri()
+ * rather than trusting the stored localPath. On iOS the app container path
+ * changes on reinstall/update, making stored absolute paths stale.
  */
 export async function getLocalPlaybackUrl(songId: string): Promise<string | null> {
   try {
     const item = await loadDownload(songId);
-    if (!item || item.status !== "completed" || !item.localPath) return null;
+    if (!item || item.status !== "completed") return null;
 
+    // Always recompute from songId — never trust the stored absolute path
     const exists = await trackFileExists(songId);
     if (!exists) return null;
 
-    return item.localPath;
+    return getTrackFileUri(songId);
   } catch {
     return null;
   }

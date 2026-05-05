@@ -17,7 +17,6 @@ import {
 } from "expo-file-system/legacy";
 import { MIN_FREE_STORAGE_BYTES } from "@/types/downloads";
 import { logger } from "@/lib/logger";
-
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
 /** Root directory URI for all downloaded track files. Always ends with /. */
@@ -44,9 +43,24 @@ export function getTrackFileUri(songId: string): string {
 /** Ensure the downloads root directory exists. */
 export async function ensureDownloadsDir(): Promise<void> {
   try {
-    const info = await getInfoAsync(getDownloadsRootUri());
+    const root = getDownloadsRootUri();
+    const info = await getInfoAsync(root);
     if (!info.exists) {
-      await makeDirectoryAsync(getDownloadsRootUri(), { intermediates: true });
+      await makeDirectoryAsync(root, { intermediates: true });
+    }
+    // Exclude from iCloud backup on iOS — downloaded audio files can be large
+    // and should not be backed up. iOS will re-download them if needed.
+    if (Platform.OS === "ios") {
+      try {
+        // expo-file-system doesn't expose setExcludedFromBackup directly,
+        // but we can use the native module if available.
+        const ExpoFS = require("expo-file-system/legacy");
+        if (typeof ExpoFS.setExcludedFromBackupAsync === "function") {
+          await ExpoFS.setExcludedFromBackupAsync(root, true);
+        }
+      } catch {
+        // Not critical — just means files may be backed up to iCloud
+      }
     }
   } catch (err) {
     logger.error("[StoragePolicy] ensureDownloadsDir failed", err);

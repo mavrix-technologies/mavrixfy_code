@@ -158,13 +158,33 @@ async function executeDownload(songId: string): Promise<void> {
 
     const completedItem = await updateStatus(songId, "completed", {
       progress: 100,
-      localPath: result.uri,
-      totalBytes: (result as any).totalBytesExpectedToWrite ?? 0,
+      localPath: result.uri,          // kept for reference but not used for playback
+      totalBytes: result.headers?.["Content-Length"]
+        ? parseInt(result.headers["Content-Length"], 10)
+        : (result as any).totalBytesExpectedToWrite ?? 0,
       bytesDownloaded: (result as any).totalBytesWritten ?? 0,
       completedAt: new Date().toISOString(),
       failureReason: null,
       failedAt: null,
     });
+
+    // Verify the file actually has content — a 0-byte file means the URL was
+    // expired or the download silently failed (common with JioSaavn stream URLs)
+    const { getInfoAsync } = await import("expo-file-system/legacy");
+    const info = await getInfoAsync(result.uri);
+    const fileSize = (info as any).size ?? 0;
+    if (!info.exists || fileSize < 1024) {
+      // File is empty or missing — mark as failed so it can be retried
+      logger.warn("[DownloadQueue] Downloaded file is empty or too small", { songId, fileSize });
+      const { deleteAsync } = await import("expo-file-system/legacy");
+      await deleteAsync(result.uri, { idempotent: true }).catch(() => {});
+      await updateStatus(songId, "failed", {
+        failureReason: "Downloaded file was empty — stream URL may have expired",
+        failedAt: new Date().toISOString(),
+      });
+      releaseSlot(songId);
+      return;
+    }
 
     if (completedItem) emit("completed", songId, completedItem);
     releaseSlot(songId);
