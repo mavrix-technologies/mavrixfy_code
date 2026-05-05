@@ -25,6 +25,10 @@ let useProgress: any = () => ({ position: 0, duration: 0 });
 let setupPlayer: any = null;
 
 const isExpoGoRuntime = isRunningInExpoGo();
+// On a production IPA, both conditions must be true:
+// - not web
+// - not running inside Expo Go
+// We also guard with a try/catch at require time below.
 const isNativeTrackPlayerAvailable = Platform.OS !== "web" && !isExpoGoRuntime;
 const nativePlayerUnavailableMessage = isExpoGoRuntime
   ? "Use the development build or installed APK. Expo Go does not include the native music player."

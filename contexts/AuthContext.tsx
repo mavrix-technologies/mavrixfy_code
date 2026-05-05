@@ -88,16 +88,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
+        // Set Firebase user immediately so the app can navigate
         setFirebaseUser(fbUser);
-        const appUser = await buildAppUser(fbUser);
-        setUser(appUser);
+        // Set a minimal user object right away — don't wait for Firestore
+        setUser({
+          id: fbUser.uid,
+          email: fbUser.email || "",
+          name: fbUser.displayName || "",
+          picture: fbUser.photoURL || "",
+        });
         setIsGuest(false);
+        setLoading(false);
+        // Enrich with Firestore data in the background (non-blocking)
+        buildAppUser(fbUser).then(setUser).catch(() => {});
       } else {
         setFirebaseUser(null);
         setUser(null);
         setIsGuest(false);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return unsubscribe;

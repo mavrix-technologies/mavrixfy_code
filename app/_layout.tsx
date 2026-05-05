@@ -73,22 +73,24 @@ function RootLayoutNav() {
   useEffect(() => {
     if (loading) return;
 
-    const inProtected = PROTECTED_SEGMENTS.some((s) => segments[0] === s);
-    const inAuthOnly  = AUTH_ONLY_SEGMENTS.some((s) => segments[0] === s);
-    const inOnboarding = segments[0] === "onboarding";
+    const seg0 = segments[0] as string | undefined;
+    const inProtected  = seg0 === "(tabs)";
+    const inAuthOnly   = seg0 === "login";
+    const inOnboarding = seg0 === "onboarding";
 
     if (isAuthenticated && inAuthOnly) {
-      // Check if onboarding is needed
       if (firebaseUser) {
         import("firebase/firestore").then(({ doc, getDoc }) => {
           import("@/lib/firebase").then(({ db }) => {
-            getDoc(doc(db, "users", firebaseUser.uid)).then((snap) => {
-              if (snap.exists() && snap.data()?.onboardingCompleted) {
-                router.replace("/(tabs)");
-              } else {
-                router.replace("/onboarding");
-              }
-            }).catch(() => router.replace("/(tabs)"));
+            getDoc(doc(db, "users", firebaseUser.uid))
+              .then((snap) => {
+                if (snap.exists() && snap.data()?.onboardingCompleted) {
+                  router.replace("/(tabs)");
+                } else {
+                  router.replace("/onboarding");
+                }
+              })
+              .catch(() => router.replace("/(tabs)"));
           });
         });
       } else {
@@ -195,9 +197,9 @@ export default function RootLayout() {
   useEffect(() => {
     async function prepare() {
       try {
-        // Start cache pre-warm immediately — don't wait for it
+        // Pre-warm cache in background — do NOT await, never block startup
         preWarmHomeCache();
-        await logAppOpen();
+        logAppOpen(); // fire-and-forget, no await
       } catch {
         // Silent fail
       } finally {
