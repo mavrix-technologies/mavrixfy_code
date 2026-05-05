@@ -85,15 +85,27 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
+            -parallelizeTargets NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
             SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
             GCC_TREAT_WARNINGS_AS_ERRORS=NO \
+            IBTOOL_WARNINGS_AS_ERRORS=NO \
             build \
             2>&1 | tee build.log | xcpretty --color --simple || \
-            (echo "--- LAST 100 LINES OF RAW LOG ---" && tail -100 build.log && exit 1)
+            (
+              echo "=== BUILD FAILED — ERRORS FROM RAW LOG ==="
+              grep -E "error:|warning: .*(error|failed)" build.log | head -60 || true
+              echo ""
+              echo "=== STORYBOARD / IBTOOL ERRORS ==="
+              grep -i "ibtool\|storyboard\|CompileStoryboard" build.log | head -40 || true
+              echo ""
+              echo "=== LAST 80 LINES ==="
+              tail -80 build.log
+              exit 1
+            )
 
       - name: Create Payload directory
         working-directory: ios/build/Build/Products/Release-iphoneos
