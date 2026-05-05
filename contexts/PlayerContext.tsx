@@ -30,6 +30,7 @@ const isExpoGoRuntime = isRunningInExpoGo();
 // - not running inside Expo Go
 // We also guard with a try/catch at require time below.
 const isNativeTrackPlayerAvailable = Platform.OS !== "web" && !isExpoGoRuntime;
+const shouldEagerlySetupNativePlayer = Platform.OS === "android";
 const nativePlayerUnavailableMessage = isExpoGoRuntime
   ? "Use the development build or installed APK. Expo Go does not include the native music player."
   : "Native music player is not available in this runtime.";
@@ -316,11 +317,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // ── Restore player state on mount (show mini player with last song) ────────
   useEffect(() => {
-    // Wait until the native player is ready before restoring
-    if (!isPlayerReady && canUseNativePlayback) return;
+    let mounted = true;
 
     Storage.loadPlayerState().then(async (saved) => {
-      if (!saved?.currentSong) return;
+      if (!mounted || !saved?.currentSong) return;
 
       // Restore UI state
       setCurrentSong(saved.currentSong);
@@ -331,27 +331,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setQueueIndex(saved.queueIndex);
       queueIndexRef.current = saved.queueIndex;
 
-      // Pre-load the track into TrackPlayer so play works immediately
-      if (TrackPlayer && setupPlayer && isPlayerReady) {
-        try {
-          const playableQueue = saved.queue
-            .map(normalizePlayableSong)
-            .filter((s): s is Song => Boolean(s));
-          if (playableQueue.length > 0) {
-            await TrackPlayer.reset();
-            await TrackPlayer.add(playableQueue.map(songToTrack));
-            const idx = Math.max(0, Math.min(saved.queueIndex, playableQueue.length - 1));
-            if (idx > 0) await TrackPlayer.skip(idx);
-            // Don't call play() — just load so it's ready
-          }
-        } catch {
-          // Silent fail — UI state is still restored
-        }
-      } else if (isExpoGoRuntime) {
-        // Expo Go: UI state restored — play will load on first tap via togglePlay
-      }
     }).catch(() => {});
-  }, [isPlayerReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const playbackStateValue =
     playbackState && typeof playbackState === "object" && "state" in playbackState
@@ -579,7 +564,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    
+
+    if (!shouldEagerlySetupNativePlayer) {
+      return () => {
+        mounted = false;
+      };
+    }
+
     const setup = async () => {
       if (!TrackPlayer || !setupPlayer) {
         logger.warn("[Player] Native TrackPlayer is unavailable in this runtime.");
@@ -1087,8 +1078,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         showPlaybackNotice(nativePlayerUnavailableMessage);
         return;
       }
-      if (!isPlayerReady) {
-        return;
+
+      let ready = isPlayerReady;
+      if (!ready) {
+        ready = await ensurePlayerReady();
+        if (!ready) {
+          showPlaybackNotice("Player not ready yet. Please try again.");
+          return;
+        }
       }
 
       if (resolvedIsPlaying) {
@@ -1103,7 +1100,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      if (!TrackPlayer || !setupPlayer || !isPlayerReady) {
+      if (!TrackPlayer || !setupPlayer) {
         return;
       }
       const activeTrack = await TrackPlayer.getActiveTrack();
@@ -1121,7 +1118,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       // Silent fail
     }
-  }, [currentSong, isPlayerReady, loadAndPlaySong, resolvedIsPlaying, showPlaybackNotice]);
+  }, [currentSong, ensurePlayerReady, isPlayerReady, loadAndPlaySong, resolvedIsPlaying, showPlaybackNotice]);
 
   const nextSong = useCallback(async () => {
     try {
