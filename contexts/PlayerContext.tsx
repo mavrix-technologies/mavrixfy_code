@@ -25,15 +25,14 @@ let useProgress: any = () => ({ position: 0, duration: 0 });
 let setupPlayer: any = null;
 
 const isExpoGoRuntime = isRunningInExpoGo();
-// Keep TrackPlayer Android-only for now. iOS is using expo-audio because the
-// native TrackPlayer path is still unstable there and can terminate the app as
-// soon as playback is initialized.
-const isNativeTrackPlayerAvailable = Platform.OS === "android" && !isExpoGoRuntime;
-const canUseLightweightAudioFallback = Platform.OS === "ios" || isExpoGoRuntime;
+// Production/dev builds use the native TrackPlayer module on both iOS and Android.
+// Expo Go falls back to expo-audio because it does not include the native module.
+const isNativeTrackPlayerAvailable = Platform.OS !== "web" && !isExpoGoRuntime;
+const canUseLightweightAudioFallback = isExpoGoRuntime;
 const shouldEagerlySetupNativePlayer = Platform.OS === "android";
 const nativePlayerUnavailableMessage = isExpoGoRuntime
   ? "Use the development build or installed APK. Expo Go does not include the native music player."
-  : "Audio playback is not available in this runtime.";
+  : "Native music player is not available in this runtime.";
 
 if (isNativeTrackPlayerAvailable) {
   try {

@@ -5,7 +5,6 @@
     "version": "2.5.0",
     "orientation": "portrait",
     "icon": "./assets/images/mavrixfy_icone.png",
-    "scheme": "mavrixfy",
     "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/images/mavrixfy_icone.png",
@@ -13,6 +12,7 @@
       "backgroundColor": "#121212"
     },
     "ios": {
+      "scheme": "mavrixfy",
       "supportsTablet": true,
       "icon": "./assets/images/mavrixfy_icon_ios.png",
       "bundleIdentifier": "com.mavrixfy.app",
@@ -29,6 +29,7 @@
       }
     },
     "android": {
+      "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
       "versionCode": 20500,
       "googleServicesFile": "./android/app/google-services.json",
