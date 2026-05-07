@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Song, Playlist } from "./musicData";
+import { getAuthApiUrl } from "./api-config";
 
 const KEYS = {
   LIKED_SONGS: "@mavrixfy_liked_songs",
@@ -156,9 +157,10 @@ export async function saveUserPlaylists(playlists: UserPlaylist[]): Promise<void
  * Fetch synced Spotify liked songs from backend and update local cache
  * Call this after Spotify connection to load new songs
  */
-export async function syncSpotifyLikedSongsToLocal(userId: string, backendUrl: string = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://api.mavrixfy.site'): Promise<Song[]> {
+export async function syncSpotifyLikedSongsToLocal(userId: string, backendUrl: string = getAuthApiUrl()): Promise<Song[]> {
   try {
-    const response = await fetch(`${backendUrl}/spotify/liked-songs/${userId}`, {
+    const baseUrl = backendUrl.replace(/\/+$/, "");
+    const response = await fetch(`${baseUrl}/api/spotify/liked-songs/${userId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

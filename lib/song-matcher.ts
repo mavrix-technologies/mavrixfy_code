@@ -38,7 +38,7 @@ export async function searchSong(
 async function searchJioSaavn(baseUrl: string, title: string, artist: string): Promise<MatchResult | null> {
   try {
     const query = `${title} ${artist}`.trim();
-    const url = `${baseUrl}/api/jiosaavn/search/songs?query=${encodeURIComponent(query)}&limit=10`;
+    const url = `${baseUrl}/api/search/songs?query=${encodeURIComponent(query)}&limit=10`;
     
     const response = await fetch(url, { timeout: 10000 } as any);
     if (!response.ok) return null;

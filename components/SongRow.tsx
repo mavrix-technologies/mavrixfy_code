@@ -172,7 +172,6 @@ const SongRow = memo(function SongRow({
               contentFit="cover"
               cachePolicy="memory-disk"
               priority="normal"
-              recyclingKey={song.id}
             />
           )}
 

@@ -1341,7 +1341,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               const validSongs = shuffled
                 .map(normalizePlayableSong)
                 .filter((item): item is Song => Boolean(item));
-              await TrackPlayer.add(validSongs.map(songToTrack));
+              await TrackPlayer.add(validSongs.map((song) => songToTrack(song)));
               await TrackPlayer.skip(0);
               await TrackPlayer.play();
             } catch {
@@ -1364,7 +1364,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               const validSongs = orig
                 .map(normalizePlayableSong)
                 .filter((item): item is Song => Boolean(item));
-              await TrackPlayer.add(validSongs.map(songToTrack));
+              await TrackPlayer.add(validSongs.map((song) => songToTrack(song)));
               const validIdx = validSongs.findIndex(s => s.id === cs?.id);
               await TrackPlayer.skip(validIdx >= 0 ? validIdx : 0);
               await TrackPlayer.play();
@@ -1573,7 +1573,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
       const activeSongId = nextQueue[nextQueueIndex]?.id ?? currentSong?.id ?? validSongs[0].id;
       await TrackPlayer.reset();
-      await TrackPlayer.add(validSongs.map(songToTrack));
+      await TrackPlayer.add(validSongs.map((song) => songToTrack(song)));
       const activeIndex = validSongs.findIndex((song) => song.id === activeSongId);
       await TrackPlayer.skip(activeIndex >= 0 ? activeIndex : 0);
       if (isPlaying) {
@@ -1623,7 +1623,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const validSongs = newQ
         .map(normalizePlayableSong)
         .filter((item): item is Song => Boolean(item));
-      await TrackPlayer.add(validSongs.map(songToTrack));
+      await TrackPlayer.add(validSongs.map((song) => songToTrack(song)));
       
       const currentSongId = newQ[ci]?.id;
       const validIndex = validSongs.findIndex(s => s.id === currentSongId);

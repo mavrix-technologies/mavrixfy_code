@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
+import { getAuthApiUrl, getMusicApiUrl } from '../lib/api-config';
 
 interface CSVSong {
   trackUri: string;
@@ -167,7 +168,8 @@ async function searchSong(song: CSVSong): Promise<SearchResult | null> {
 async function searchJioSaavn(title: string, artist: string, originalSong: CSVSong): Promise<SearchResult | null> {
   try {
     const query = `${title} ${artist}`;
-    const response = await axios.get(`https://jiosaavn-api-privatecvc2.vercel.app/search/songs`, {
+    const apiBase = getMusicApiUrl().replace(/\/+$/, '');
+    const response = await axios.get(`${apiBase}/api/search/songs`, {
       params: { query, limit: 10 },
       timeout: 10000
     });
@@ -213,7 +215,7 @@ async function searchJioSaavn(title: string, artist: string, originalSong: CSVSo
 // Search Spotify
 async function searchSpotify(title: string, artist: string, originalSong: CSVSong): Promise<SearchResult | null> {
   try {
-    const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000';
+    const API_BASE = getAuthApiUrl().replace(/\/+$/, '');
     const query = `${title} ${artist}`;
     
     const response = await axios.get(`${API_BASE}/api/music/search`, {
@@ -262,7 +264,7 @@ async function searchSpotify(title: string, artist: string, originalSong: CSVSon
 // Search Deezer
 async function searchDeezer(title: string, artist: string, originalSong: CSVSong): Promise<SearchResult | null> {
   try {
-    const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000';
+    const API_BASE = getAuthApiUrl().replace(/\/+$/, '');
     const query = `${title} ${artist}`;
     
     const response = await axios.get(`${API_BASE}/api/deezer/search`, {

@@ -12,3 +12,12 @@
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # Add any project specific keep options here:
+
+# @generated begin expo-build-properties - expo prebuild (DO NOT MODIFY)
+-keep class com.facebook.hermes.unicode.** { *; }
+-keep class com.facebook.jni.** { *; }
+-keep class com.doublesymmetry.** { *; }
+-keep class expo.modules.updates.** { *; }
+-keep class kotlin.** { *; }
+-keep class kotlin.reflect.** { *; }
+# @generated end expo-build-properties

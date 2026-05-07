@@ -66,3 +66,6 @@ app.aab.json
 
 # Build artifacts
 server_dist/
+
+# Release keystore — never commit signing credentials
+android/app/mavrixfy-release.keystore

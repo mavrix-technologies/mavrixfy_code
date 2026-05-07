@@ -15,7 +15,7 @@ async function loadAnalyticsModule(): Promise<AnalyticsModule | null> {
   if (!analyticsModulePromise) {
     analyticsModulePromise = (async () => {
       try {
-        const [{ getAnalytics, isSupported, logEvent }, firebaseAppModule] = await Promise.all([
+        const [{ getAnalytics, isSupported, logEvent: firebaseLogEvent }, firebaseAppModule] = await Promise.all([
           import("firebase/analytics"),
           import("./firebase"),
         ]);
@@ -27,7 +27,9 @@ async function loadAnalyticsModule(): Promise<AnalyticsModule | null> {
 
         return {
           analytics: getAnalytics(firebaseAppModule.default),
-          logEvent,
+          logEvent: (analytics, eventName, params) => {
+            firebaseLogEvent(analytics as never, eventName, params as never);
+          },
         };
       } catch {
         return null;

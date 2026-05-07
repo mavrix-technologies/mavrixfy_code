@@ -764,7 +764,6 @@ export default function LibraryScreen() {
         keyExtractor={(item) =>
           isCreateTileItem(item) ? item.id : `${item.id}-${item.isFirestore ? "cloud" : "local"}`
         }
-        key={viewMode}
         renderItem={
           viewMode === "grid"
             ? renderGridPlaylistItem

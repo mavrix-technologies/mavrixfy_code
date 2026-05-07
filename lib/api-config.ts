@@ -1,49 +1,33 @@
-import { getExpoExtra } from "./expoExtra";
+const API_CONFIG = {
+  backendBaseUrl: "https://spotify-api-drab.vercel.app",
+  songBaseUrl: "https://mavrixfy-song-api.vercel.app",
+} as const;
 
-/**
- * API Configuration
- * Separates auth backend from music API backend
- */
+function normalizeBaseUrl(value: string): string {
+  return value.replace(/\/+$/, "");
+}
 
-/**
- * Gets the base URL for authentication and general API
- */
+export const BACKEND_API_BASE_URL = normalizeBaseUrl(API_CONFIG.backendBaseUrl);
+export const SONG_API_BASE_URL = normalizeBaseUrl(API_CONFIG.songBaseUrl);
+
 export function getAuthApiUrl(): string {
-  const expoExtra = getExpoExtra();
-  const host = (expoExtra.domain as string | undefined) || process.env.EXPO_PUBLIC_DOMAIN;
-  
-  if (!host) {
-    const fallbackHost = 'spotify-api-drab.vercel.app';
-    return `https://${fallbackHost}/`;
-  }
-
-  if (host.startsWith('http://') || host.startsWith('https://')) {
-    const finalUrl = host.endsWith('/') ? host : `${host}/`;
-    return finalUrl;
-  }
-
-  const isLocal = host.includes('localhost') || 
-                  host.includes('127.0.0.1') || 
-                  host.match(/^192\.168\.\d+\.\d+/) || 
-                  host.match(/^10\.\d+\.\d+\.\d+/);
-  
-  const protocol = isLocal ? 'http' : 'https';
-  const url = new URL(`${protocol}://${host}`);
-  
-  return url.href;
+  return `${BACKEND_API_BASE_URL}/`;
 }
 
-/**
- * Gets the base URL for music API (JioSaavn)
- */
 export function getMusicApiUrl(): string {
-  // Use the same backend for music API
-  return getAuthApiUrl();
+  return `${SONG_API_BASE_URL}/`;
 }
 
-/**
- * Gets the base API URL (alias for getAuthApiUrl for compatibility)
- */
 export function getApiUrl(): string {
-  return getAuthApiUrl();
+  return getMusicApiUrl();
+}
+
+export function buildMusicApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${SONG_API_BASE_URL}${normalizedPath}`;
+}
+
+export function buildAuthApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${BACKEND_API_BASE_URL}${normalizedPath}`;
 }

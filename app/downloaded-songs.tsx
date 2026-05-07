@@ -103,7 +103,6 @@ function DownloadedRow({ item, allSongs, onRemove, collectionId }: DownloadedRow
           style={styles.cover}
           contentFit="cover"
           cachePolicy="memory-disk"
-          recyclingKey={item.songId}
         />
       ) : (
         <View style={[styles.cover, styles.coverPlaceholder]}>

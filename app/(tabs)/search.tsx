@@ -257,7 +257,6 @@ export default function SearchScreen() {
 
     setIsLoading(true);
     const apiUrl = getApiUrl();
-    const freshnessKey = Math.floor(Date.now() / 60000);
     const parsedQuery = parseStructuredQuery(normalizedQuery);
     const searchTerm = parsedQuery.freeText || normalizedQuery;
 
@@ -285,7 +284,7 @@ export default function SearchScreen() {
       return (n.playCount || 0) > (e.playCount || 0);
     };
 
-    // Parse song from jiosaavn-api-privatecvc2 (uses .link and primaryArtists string)
+    // Parse song results that may use .link or .url media fields.
     const parseBackup = (s: any): Song | null => {
       if (!s?.id) return null;
       const dl: any[] = Array.isArray(s.downloadUrl) ? s.downloadUrl : [];
@@ -350,8 +349,8 @@ export default function SearchScreen() {
 
       // OPTIMIZATION: Fetch songs and playlists in parallel (network)
       const [songsData, playlistsData] = await Promise.all([
-        safeFetch(`https://jiosaavn-api-privatecvc2.vercel.app/search/songs?query=${encodeURIComponent(searchTerm)}&limit=12`),
-        safeFetch(`${apiUrl}api/jiosaavn/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=6&fresh=${freshnessKey}`),
+        safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=12`),
+        safeFetch(`${apiUrl}api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=6`),
       ]);
 
       if (requestId !== requestSeqRef.current) return;
@@ -381,7 +380,7 @@ export default function SearchScreen() {
       // Limit cache size to 20 entries
       if (searchCacheRef.current.size > 20) {
         const firstKey = searchCacheRef.current.keys().next().value;
-        searchCacheRef.current.delete(firstKey);
+        if (firstKey) searchCacheRef.current.delete(firstKey);
       }
 
       // Show final results with network data

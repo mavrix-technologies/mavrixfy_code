@@ -115,7 +115,8 @@ export default function ArtistMixScreen() {
             // 1. Song has audio URL
             // 2. Song hasn't been added yet
             // 3. Song's primary artist ID matches this selected artist (or is undefined, show all)
-            return s.audioUrl?.trim() && !seen.has(s.id) && (!s.artistId || s.artistId === selectedId);
+            const songArtistId = (s as Song & { artistId?: string }).artistId;
+            return s.audioUrl?.trim() && !seen.has(s.id) && (!songArtistId || songArtistId === selectedId);
           });
         
         artistSongs.forEach((s) => { seen.add(s.id); merged.push(s); });

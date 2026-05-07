@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetch } from "expo/fetch";
 import { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
+import { getApiUrl } from "@/lib/api-config";
 
 export interface JioSaavnPlaylistResult {
   id: string;
@@ -93,14 +94,10 @@ const CATEGORY_TTL_MS: Record<string, number> = {
   retro:         90 * 60 * 1000,
 };
 const JIOSAAVN_PLAYLIST_BASE_URLS = [
-  "https://saavn.sumit.co/api",
-  "https://jiosaavn-api-privatecvc2.vercel.app",
-  "https://saavn.me",
+  `${getApiUrl().replace(/\/$/, "")}/api`,
 ];
 const JIOSAAVN_SEARCH_BASE_URLS = [
-  "https://saavn.sumit.co/api",
-  "https://saavn.me",
-  "https://jiosaavn-api-privatecvc2.vercel.app",
+  `${getApiUrl().replace(/\/$/, "")}/api`,
 ];
 
 export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [

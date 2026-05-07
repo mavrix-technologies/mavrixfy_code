@@ -1,11 +1,14 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, initializeAuth } from "firebase/auth";
-import { getReactNativePersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import { getExpoExtra } from "./expoExtra";
+
+const { getReactNativePersistence } = require("firebase/auth") as {
+  getReactNativePersistence: (storage: typeof AsyncStorage) => unknown;
+};
 
 const expoExtra = getExpoExtra();
 
@@ -28,7 +31,7 @@ export const auth = (() => {
   if (Platform.OS === "web") return getAuth(app);
   try {
     return initializeAuth(app, {
-      persistence: getReactNativePersistence(AsyncStorage),
+      persistence: getReactNativePersistence(AsyncStorage) as never,
     });
   } catch {
     // Already initialized — return the existing instance

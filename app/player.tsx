@@ -766,7 +766,6 @@ function LegacyPlayerScreen() {
                   style={styles.albumArt}
                   contentFit="cover"
                   cachePolicy="memory-disk"
-                  recyclingKey={item.id}
                   priority={isActiveCard ? "high" : "normal"}
                   transition={80}
                 />

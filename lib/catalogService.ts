@@ -23,7 +23,7 @@ export async function getCatalogSongs(): Promise<Song[]> {
     console.log(`[CatalogService] Firestore returned ${snap.docs.length} raw documents`);
 
     const songs: Song[] = snap.docs
-      .map(d => {
+      .map((d): Song | null => {
         const data = d.data();
         const audioUrl = data.audioUrl || data.streamUrl || data.url || '';
         if (!audioUrl || !data.title) {

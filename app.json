@@ -2,7 +2,7 @@
   "expo": {
     "name": "Mavrixfy",
     "slug": "mavrixfy",
-    "version": "2.5.0",
+    "version": "2.5.1",
     "orientation": "portrait",
     "icon": "./assets/images/mavrixfy_icone.png",
     "userInterfaceStyle": "automatic",
@@ -16,7 +16,7 @@
       "supportsTablet": true,
       "icon": "./assets/images/mavrixfy_icon_ios.png",
       "bundleIdentifier": "com.mavrixfy.app",
-      "buildNumber": "20500",
+      "buildNumber": "20501",
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -31,8 +31,8 @@
     "android": {
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
-      "versionCode": 20500,
-      "googleServicesFile": "./android/app/google-services.json",
+      "versionCode": 20501,
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icone.png",
         "backgroundColor": "#121212"
@@ -117,12 +117,13 @@
     ],
     "updates": {
       "url": "https://u.expo.dev/93293119-93b7-4dbb-acdd-7241771254c4",
-      "checkAutomatically": "ON_ERROR_RECOVERY",
+      "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
     "runtimeVersion": "2.5.0",
     "extra": {
       "domain": "spotify-api-drab.vercel.app",
+      "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",
       "firebaseAuthDomain": "spotify-8fefc.firebaseapp.com",
       "firebaseProjectId": "spotify-8fefc",

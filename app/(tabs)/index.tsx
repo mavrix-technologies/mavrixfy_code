@@ -822,7 +822,6 @@ function HomeScreenInner() {
         onPress={() => handleRecentPress(item)}
       >
         <Image
-          recyclingKey={item.id}
           source={{ uri: item.imageUrl }}
           style={styles.recentImage}
           contentFit="cover"
@@ -861,7 +860,6 @@ function HomeScreenInner() {
       >
         <View style={styles.rectCardImageWrap}>
           <Image
-            recyclingKey={item.id}
             source={{ uri: item.imageUrl || undefined }}
             style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
             contentFit="contain"
@@ -899,7 +897,6 @@ function HomeScreenInner() {
         >
           <View style={styles.artistAvatarWrap}>
             <Image
-              recyclingKey={item.id}
               source={{ uri: img || undefined }}
               style={styles.artistAvatar}
               contentFit="cover"
@@ -937,7 +934,6 @@ function HomeScreenInner() {
           >
             <View style={styles.rectCardImageWrap}>
               <Image
-                recyclingKey={item.id}
                 source={{ uri: getThumbImageUrl(item.image) }}
                 style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
                 contentFit="contain"

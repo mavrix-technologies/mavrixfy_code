@@ -54,10 +54,7 @@ const FEATURED_ARTISTS_CACHE_KEY = "@mavrixfy_featured_artists_v3";
 const FEATURED_ARTISTS_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const TIMEOUT_MS = 6000;
 
-const BASE_URLS = [
-  "https://saavn.sumit.co/api",
-  "https://jiosaavn-api-privatecvc2.vercel.app",
-];
+const BASE_URLS: string[] = []; // All requests go through getApiUrl() — no fallbacks needed
 
 // Search queries used to discover popular artists dynamically
 // No fixed IDs — results come from the live API
@@ -99,10 +96,42 @@ function toStr(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
+function toNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v.replace(/,/g, "").trim());
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function firstArray(...values: unknown[]): any[] {
+  for (const value of values) {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") {
+      const obj = value as any;
+      if (Array.isArray(obj.results)) return obj.results;
+      if (Array.isArray(obj.songs)) return obj.songs;
+      if (Array.isArray(obj.albums)) return obj.albums;
+      if (Array.isArray(obj.artists)) return obj.artists;
+      if (Array.isArray(obj?.artists?.results)) return obj.artists.results;
+    }
+  }
+  return [];
+}
+
 function normalizeImage(raw: unknown): JioSaavnImage[] {
+  if (typeof raw === "string") {
+    const url = raw.trim();
+    return url ? [{ quality: "", url }] : [];
+  }
   if (!Array.isArray(raw)) return [];
   return raw
     .map((item: any) => {
+      if (typeof item === "string") {
+        const url = item.trim();
+        return url ? { quality: "", url } : null;
+      }
       const url = toStr(item?.url) || toStr(item?.link);
       return url ? { quality: toStr(item?.quality), url } : null;
     })
@@ -150,25 +179,25 @@ function normalizeSong(raw: any): JioSaavnSong | null {
 }
 
 function normalizeArtist(raw: any): JioSaavnArtist | null {
-  const id = toStr(raw?.id);
-  const name = toStr(raw?.name);
+  const source = raw?.data ?? raw;
+  const id = toStr(source?.id);
+  const name = toStr(source?.name) || toStr(source?.title);
   if (!id || !name) return null;
 
-  const topSongs: JioSaavnSong[] = Array.isArray(raw?.topSongs)
-    ? raw.topSongs.map(normalizeSong).filter(Boolean) as JioSaavnSong[]
-    : [];
+  const topSongs = firstArray(source?.topSongs, source?.top_songs, source?.songs)
+    .map(normalizeSong)
+    .filter((x): x is JioSaavnSong => Boolean(x));
 
-  const topAlbums: JioSaavnArtistAlbum[] = Array.isArray(raw?.topAlbums)
-    ? raw.topAlbums
+  const topAlbums = firstArray(source?.topAlbums, source?.top_albums, source?.albums)
         .map((a: any) => {
           const aid = toStr(a?.id);
-          const aname = toStr(a?.name);
+          const aname = toStr(a?.name) || toStr(a?.title);
           if (!aid || !aname) return null;
           return {
             id: aid,
             name: aname,
-            year: a?.year ?? null,
-            songCount: a?.songCount ?? null,
+            year: toNumber(a?.year),
+            songCount: toNumber(a?.songCount ?? a?.song_count),
             url: toStr(a?.url),
             image: normalizeImage(a?.image),
             songs: Array.isArray(a?.songs)
@@ -176,14 +205,12 @@ function normalizeArtist(raw: any): JioSaavnArtist | null {
               : [],
           };
         })
-        .filter(Boolean)
-    : [];
+        .filter(Boolean) as JioSaavnArtistAlbum[];
 
-  const similarArtists: JioSaavnSimilarArtist[] = Array.isArray(raw?.similarArtists)
-    ? raw.similarArtists
+  const similarArtists = firstArray(source?.similarArtists, source?.similar_artists)
         .map((a: any) => {
           const sid = toStr(a?.id);
-          const sname = toStr(a?.name);
+          const sname = toStr(a?.name) || toStr(a?.title);
           if (!sid || !sname) return null;
           return {
             id: sid,
@@ -192,22 +219,35 @@ function normalizeArtist(raw: any): JioSaavnArtist | null {
             image: normalizeImage(a?.image),
           };
         })
-        .filter(Boolean)
-    : [];
+        .filter(Boolean) as JioSaavnSimilarArtist[];
 
   return {
     id,
     name,
-    url: toStr(raw?.url),
-    image: normalizeImage(raw?.image),
-    followerCount: raw?.followerCount ?? null,
-    fanCount: raw?.fanCount ?? null,
-    isVerified: raw?.isVerified ?? null,
-    dominantLanguage: raw?.dominantLanguage ?? null,
-    bio: Array.isArray(raw?.bio) ? raw.bio : [],
+    url: toStr(source?.url),
+    image: normalizeImage(source?.image),
+    followerCount: toNumber(source?.followerCount ?? source?.follower_count),
+    fanCount: toNumber(source?.fanCount ?? source?.fan_count),
+    isVerified: typeof source?.isVerified === "boolean" ? source.isVerified : null,
+    dominantLanguage: toStr(source?.dominantLanguage ?? source?.dominant_language) || null,
+    bio: Array.isArray(source?.bio) ? source.bio : [],
     topSongs,
     topAlbums,
     similarArtists,
+  };
+}
+
+function normalizeArtistCard(raw: any): ArtistCard | null {
+  const source = raw?.data ?? raw;
+  const id = toStr(source?.id);
+  const name = toStr(source?.name) || toStr(source?.title);
+  if (!id || !name) return null;
+  return {
+    id,
+    name,
+    image: normalizeImage(source?.image),
+    followerCount: toNumber(source?.followerCount ?? source?.follower_count),
+    dominantLanguage: toStr(source?.dominantLanguage ?? source?.dominant_language) || null,
   };
 }
 
@@ -264,11 +304,7 @@ async function setCachedFeaturedArtists(artists: ArtistCard[]): Promise<void> {
 async function fetchArtistRaw(id: string, songCount = 20): Promise<JioSaavnArtist | null> {
   const appBase = getApiUrl().replace(/\/+$/, "");
   const urls = [
-    `${appBase}/api/jiosaavn/artists/${encodeURIComponent(id)}?songCount=${songCount}&albumCount=10&sortBy=popularity&sortOrder=desc`,
-    ...BASE_URLS.map(
-      (b) =>
-        `${b}/artists/${encodeURIComponent(id)}?songCount=${songCount}&albumCount=10&sortBy=popularity&sortOrder=desc`
-    ),
+    `${appBase}/api/artists/${encodeURIComponent(id)}?songCount=${songCount}&albumCount=10&sortBy=popularity&sortOrder=desc`,
   ];
 
   const results = await Promise.allSettled(
@@ -297,8 +333,7 @@ export async function searchArtists(query: string): Promise<ArtistCard[]> {
   const appBase = getApiUrl().replace(/\/+$/, "");
   const encoded = encodeURIComponent(q);
   const urls = [
-    `${appBase}/api/jiosaavn/search/artists?query=${encoded}&limit=20&page=1`,
-    ...BASE_URLS.map((b) => `${b}/search/artists?query=${encoded}&limit=20&page=1`),
+    `${appBase}/api/search/artists?query=${encoded}&limit=20&page=1`,
   ];
 
   const results = await Promise.allSettled(
@@ -306,33 +341,60 @@ export async function searchArtists(query: string): Promise<ArtistCard[]> {
       const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      // API returns { data: { results: [...] } } or { results: [...] }
-      const arr: any[] =
-        json?.data?.results ??
-        json?.data?.artists?.results ??
-        json?.results ??
-        [];
-      return arr
-        .map((a: any) => {
-          const id = toStr(a?.id);
-          const name = toStr(a?.name);
-          if (!id || !name) return null;
-          return {
-            id,
-            name,
-            image: normalizeImage(a?.image),
-            followerCount: a?.followerCount ?? null,
-            dominantLanguage: a?.dominantLanguage ?? null,
-          } as ArtistCard;
-        })
-        .filter((x): x is ArtistCard => Boolean(x));
+      const arr = firstArray(
+        json?.data?.results,
+        json?.data?.artists?.results,
+        json?.data?.artists,
+        json?.data,
+        json?.artists?.results,
+        json?.artists,
+        json?.results
+      );
+      return arr.map(normalizeArtistCard).filter((x): x is ArtistCard => Boolean(x));
     })
   );
 
   for (const r of results) {
     if (r.status === "fulfilled" && r.value.length > 0) return r.value;
   }
-  return [];
+
+  return searchArtistsFromSongs(appBase, encoded);
+}
+
+async function searchArtistsFromSongs(appBase: string, encodedQuery: string): Promise<ArtistCard[]> {
+  try {
+    const url = `${appBase}/api/search/songs?query=${encodedQuery}&limit=20&page=1`;
+    const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
+    if (!res.ok) return [];
+    const json = await res.json();
+    const songs = firstArray(
+      json?.data?.results,
+      json?.data?.songs,
+      json?.data,
+      json?.results,
+      json?.songs
+    );
+
+    const seen = new Set<string>();
+    const artists: ArtistCard[] = [];
+    for (const song of songs) {
+      const candidates = firstArray(
+        song?.artists?.primary,
+        song?.artists?.all,
+        song?.primaryArtists,
+        song?.primary_artists
+      );
+      for (const candidate of candidates) {
+        const artist = normalizeArtistCard(candidate);
+        if (!artist || seen.has(artist.id)) continue;
+        seen.add(artist.id);
+        artists.push(artist);
+      }
+    }
+    return artists;
+  } catch {
+    return [];
+  }
 }
 
 async function fetchFeaturedArtists(): Promise<ArtistCard[]> {
@@ -346,14 +408,14 @@ async function fetchFeaturedArtists(): Promise<ArtistCard[]> {
   );
 
   const seen = new Set<string>();
-  return results
-    .filter((r): r is PromiseFulfilledResult<ArtistCard | null> => r.status === "fulfilled")
-    .map((r) => r.value)
-    .filter((a): a is ArtistCard => {
-      if (!a?.id || seen.has(a.id)) return false;
-      seen.add(a.id);
-      return true;
-    });
+  const artists: ArtistCard[] = [];
+  for (const result of results) {
+    if (result.status !== "fulfilled" || !result.value?.id) continue;
+    if (seen.has(result.value.id)) continue;
+    seen.add(result.value.id);
+    artists.push(result.value);
+  }
+  return artists;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -406,11 +468,7 @@ export async function getArtistSongs(
 ): Promise<JioSaavnSong[]> {
   const appBase = getApiUrl().replace(/\/+$/, "");
   const urls = [
-    `${appBase}/api/jiosaavn/artists/${encodeURIComponent(id)}/songs?page=${page}&sortBy=${sortBy}&sortOrder=desc`,
-    ...BASE_URLS.map(
-      (b) =>
-        `${b}/artists/${encodeURIComponent(id)}/songs?page=${page}&sortBy=${sortBy}&sortOrder=desc`
-    ),
+    `${appBase}/api/artists/${encodeURIComponent(id)}/songs?page=${page}&sortBy=${sortBy}&sortOrder=desc`,
   ];
 
   const results = await Promise.allSettled(
@@ -418,7 +476,7 @@ export async function getArtistSongs(
       const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      const arr: any[] = json?.data?.songs ?? json?.songs ?? json?.data ?? [];
+      const arr = firstArray(json?.data?.songs, json?.songs, json?.data?.results, json?.data);
       if (!Array.isArray(arr)) throw new Error("no songs array");
       return arr.map(normalizeSong).filter(Boolean) as JioSaavnSong[];
     })
