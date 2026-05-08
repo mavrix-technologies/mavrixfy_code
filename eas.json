@@ -6,18 +6,30 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "RCT_NEW_ARCH_ENABLED": "0",
+        "EXPO_NEW_ARCH_ENABLED": "0"
+      }
     },
     "preview": {
       "distribution": "internal",
       "ios": {
         "simulator": false
+      },
+      "env": {
+        "RCT_NEW_ARCH_ENABLED": "0",
+        "EXPO_NEW_ARCH_ENABLED": "0"
       }
     },
     "ios-simulator": {
       "distribution": "internal",
       "ios": {
         "simulator": true
+      },
+      "env": {
+        "RCT_NEW_ARCH_ENABLED": "0",
+        "EXPO_NEW_ARCH_ENABLED": "0"
       }
     },
     "production": {
@@ -33,7 +45,9 @@
       "env": {
         "NODE_ENV": "production",
         "EXPO_USE_UPDATES": "1",
-        "EAS_NO_VCS": "1"
+        "EAS_NO_VCS": "1",
+        "RCT_NEW_ARCH_ENABLED": "0",
+        "EXPO_NEW_ARCH_ENABLED": "0"
       }
     },
     "production-arm": {

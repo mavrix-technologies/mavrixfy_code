@@ -10,6 +10,9 @@ jobs:
   build-ios:
     name: 🎉 iOS Build
     runs-on: macos-15
+    env:
+      RCT_NEW_ARCH_ENABLED: "0"
+      EXPO_NEW_ARCH_ENABLED: "0"
 
     steps:
       - name: Checkout repository
@@ -71,7 +74,13 @@ jobs:
           rm -rf node_modules/expo-dev-launcher node_modules/expo-dev-menu node_modules/expo-dev-client
 
       - name: Prebuild iOS
-        run: npx expo prebuild --platform ios --clean
+        run: |
+          npx expo prebuild --platform ios --clean
+          echo "=== New Architecture settings after prebuild ==="
+          grep -R "newArchEnabled\|RCT_NEW_ARCH_ENABLED" ios/Podfile ios/Podfile.properties.json || true
+          if [ -f ios/Podfile.properties.json ]; then
+            python3 -c 'import json, pathlib; path = pathlib.Path("ios/Podfile.properties.json"); data = json.loads(path.read_text()); data["newArchEnabled"] = "false"; path.write_text(json.dumps(data, indent=2) + "\n"); print(path.read_text())'
+          fi
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
@@ -87,7 +96,7 @@ jobs:
 
       - name: Install CocoaPods dependencies
         working-directory: ios
-        run: pod install --repo-update
+        run: RCT_NEW_ARCH_ENABLED=0 pod install --repo-update
 
       - name: Build iOS app (no codesign)
         working-directory: ios
@@ -104,6 +113,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
+            RCT_NEW_ARCH_ENABLED=0 \
             SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
             GCC_TREAT_WARNINGS_AS_ERRORS=NO \
             IBTOOL_WARNINGS_AS_ERRORS=NO \

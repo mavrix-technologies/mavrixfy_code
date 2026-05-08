@@ -13,6 +13,7 @@
       "backgroundColor": "#121212"
     },
     "ios": {
+      "newArchEnabled": false,
       "scheme": "mavrixfy",
       "supportsTablet": true,
       "icon": "./assets/images/mavrixfy_icon_ios.png",
@@ -30,6 +31,7 @@
       }
     },
     "android": {
+      "newArchEnabled": false,
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
       "versionCode": 20501,
@@ -74,7 +76,12 @@
       [
         "expo-build-properties",
         {
+          "ios": {
+            "newArchEnabled": false,
+            "deploymentTarget": "15.1"
+          },
           "android": {
+            "newArchEnabled": false,
             "minSdkVersion": 24,
             "targetSdkVersion": 35,
             "compileSdkVersion": 35,
