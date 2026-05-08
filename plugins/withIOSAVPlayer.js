@@ -14,6 +14,8 @@ final class MavrixfyAVPlayer: RCTEventEmitter {
   private var player: AVPlayer?
   private var timeObserver: Any?
   private var lastKnownDurationSeconds: Double = 0
+  private var hasListeners = false
+  private var didSendCloseEvent = false
 
   override static func requiresMainQueueSetup() -> Bool {
     true
@@ -21,6 +23,14 @@ final class MavrixfyAVPlayer: RCTEventEmitter {
 
   override func supportedEvents() -> [String]! {
     ["MavrixfyAVPlayerDidClose", "MavrixfyAVPlayerError"]
+  }
+
+  override func startObserving() {
+    hasListeners = true
+  }
+
+  override func stopObserving() {
+    hasListeners = false
   }
 
   @objc(present:resolver:rejecter:)
@@ -79,6 +89,7 @@ final class MavrixfyAVPlayer: RCTEventEmitter {
       self.playerViewController = controller
       self.player = player
       self.lastKnownDurationSeconds = 0
+      self.didSendCloseEvent = false
       self.attachTimeObserver(to: player)
 
       let shouldPlay = options["shouldPlay"] as? Bool ?? true
@@ -119,6 +130,13 @@ final class MavrixfyAVPlayer: RCTEventEmitter {
   }
 
   fileprivate func handleDismiss(reason: String) {
+    guard !didSendCloseEvent else {
+      cleanup()
+      return
+    }
+
+    didSendCloseEvent = true
+
     guard let player = player else {
       cleanup()
       return
@@ -128,7 +146,7 @@ final class MavrixfyAVPlayer: RCTEventEmitter {
     let durationSeconds = currentDurationSeconds()
     let isPlaying = player.rate > 0
 
-    sendEvent(
+    sendEventIfObserved(
       withName: "MavrixfyAVPlayerDidClose",
       body: [
         "reason": reason,
@@ -173,7 +191,7 @@ final class MavrixfyAVPlayer: RCTEventEmitter {
       try session.setCategory(.playback, mode: .default, options: [.allowAirPlay])
       try session.setActive(true)
     } catch {
-      sendEvent(
+      sendEventIfObserved(
         withName: "MavrixfyAVPlayerError",
         body: ["message": error.localizedDescription]
       )
@@ -205,6 +223,14 @@ final class MavrixfyAVPlayer: RCTEventEmitter {
     }
 
     return root
+  }
+
+  private func sendEventIfObserved(withName name: String, body: Any?) {
+    guard hasListeners else {
+      return
+    }
+
+    sendEvent(withName: name, body: body)
   }
 }
 

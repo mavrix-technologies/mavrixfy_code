@@ -11,6 +11,9 @@
 import TrackPlayer, {
   AppKilledPlaybackBehavior,
   Capability,
+  IOSCategory,
+  IOSCategoryMode,
+  IOSCategoryOptions,
 } from "react-native-track-player";
 import { Platform } from "react-native";
 import { logger } from "@/lib/logger";
@@ -117,6 +120,18 @@ export async function setupPlayer(): Promise<void> {
           TrackPlayer.setupPlayer({
             // 50 MB audio cache — avoids re-buffering recently played tracks.
             maxCacheSize: 1024 * 50,
+            // iOS must use a playback audio session for reliable lock-screen
+            // and background playback across longer sessions.
+            ...(Platform.OS === "ios"
+              ? {
+                  iosCategory: IOSCategory.Playback,
+                  iosCategoryMode: IOSCategoryMode.Default,
+                  iosCategoryOptions: [
+                    IOSCategoryOptions.AllowAirPlay,
+                    IOSCategoryOptions.AllowBluetoothA2DP,
+                  ],
+                }
+              : {}),
             // Automatically update MPNowPlayingInfoCenter / MediaSession metadata.
             autoUpdateMetadata: true,
             // Let RNTP handle audio interruptions (calls, alarms, etc.).

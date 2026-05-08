@@ -264,7 +264,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const { user: authUser } = useAuth();
 
   const playbackState = usePlaybackState();
-  const progressData = useProgress(250);
+  const progressData = useProgress(1000);
   const { position, duration: trackDuration } = progressData;
 
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
@@ -296,6 +296,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const queueRef = useRef<Song[]>([]);
   const queueIndexRef = useRef(0);
   const repeatModeRef = useRef<"off" | "all" | "one">("off");
+  const isShuffledRef = useRef(false);
   const previewRepeatModeRef = useRef<"off" | "all" | "one">("off");
   const originalQueueRef = useRef<Song[]>([]);
   const playRequestIdRef = useRef(0);
@@ -309,6 +310,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
   useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
+  useEffect(() => { isShuffledRef.current = isShuffled; }, [isShuffled]);
   useEffect(() => { previewRepeatModeRef.current = previewRepeatMode; }, [previewRepeatMode]);
 
   // ── Persist player state on every song change ─────────────────────────────
@@ -407,6 +409,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!isPreviewSession) return;
     setPreviewProgress(0);
   }, [currentSong?.id, isPreviewSession]);
+
+  const showPlaybackNotice = useCallback((message: string) => {
+    const now = Date.now();
+    if (now - lastPlaybackNoticeAtRef.current < 1500) return;
+    lastPlaybackNoticeAtRef.current = now;
+
+    if (Platform.OS === "android") {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+      return;
+    }
+    if (Platform.OS === "ios") {
+      Alert.alert("Playback", message);
+    }
+  }, []);
 
   // Wire expo-audio status + error callbacks for runtimes using the lightweight fallback.
   useEffect(() => {
@@ -692,14 +708,32 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const trackChangedSubscription = Event.PlaybackTrackChanged
       ? TrackPlayer.addEventListener(Event.PlaybackTrackChanged, syncFromTrackEvent)
       : null;
+    const playbackErrorSubscription = Event.PlaybackError
+      ? TrackPlayer.addEventListener(Event.PlaybackError, (event: any) => {
+          logger.warn("[Player] Native playback error", event);
+          setRuntimePlaybackStateSnapshot(State.Paused ?? "paused");
+          showPlaybackNotice("Playback stopped. Please try this song again.");
+        })
+      : null;
+    const queueEndedSubscription = Event.PlaybackQueueEnded
+      ? TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => {
+          setRuntimePlaybackStateSnapshot(State.Paused ?? "paused");
+        })
+      : null;
 
     return () => {
       activeTrackSubscription.remove();
       if (trackChangedSubscription) {
         trackChangedSubscription.remove();
       }
+      if (playbackErrorSubscription) {
+        playbackErrorSubscription.remove();
+      }
+      if (queueEndedSubscription) {
+        queueEndedSubscription.remove();
+      }
     };
-  }, [isPlayerReady]);
+  }, [isPlayerReady, showPlaybackNotice]);
 
   // Listen for Android Auto queue replacements so we can sync currentSong immediately
   // without waiting for PlaybackActiveTrackChanged (which fires after the queue is set)
@@ -801,20 +835,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [isPlayerReady]);
 
-  const showPlaybackNotice = useCallback((message: string) => {
-    const now = Date.now();
-    if (now - lastPlaybackNoticeAtRef.current < 1500) return;
-    lastPlaybackNoticeAtRef.current = now;
-
-    if (Platform.OS === "android") {
-      ToastAndroid.show(message, ToastAndroid.SHORT);
-      return;
-    }
-    if (Platform.OS === "ios") {
-      Alert.alert("Playback", message);
-    }
-  }, []);
-
   const runSerializedPlaybackSwitch = useCallback(async <T,>(task: () => Promise<T>): Promise<T> => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -853,6 +873,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       return false;
     }
   }, [isPlayerReady]);
+
+  const nativeQueueHasTrackAt = useCallback(async (index: number, songId: string): Promise<boolean> => {
+    if (!TrackPlayer || index < 0 || !songId) {
+      return false;
+    }
+
+    try {
+      const nativeQueue = await TrackPlayer.getQueue();
+      return String(nativeQueue?.[index]?.id ?? "") === String(songId);
+    } catch {
+      return false;
+    }
+  }, []);
 
   const loadAndPlaySong = useCallback(async (song: Song, newQueue?: Song[], newIndex?: number) => {
     const requestId = ++playRequestIdRef.current;
@@ -907,18 +940,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        if (queueIsSame) {
-          // Fast path: queue unchanged — update the track URL in case it was
-          // just downloaded since the queue was last built, then skip.
-          const localUrl = await resolvePlaybackUrl(targetSong).catch(() => null);
-          if (localUrl) {
-            try {
-              await TrackPlayer.remove(targetIndex);
-              await TrackPlayer.add(songToTrack(targetSong, localUrl), targetIndex);
-            } catch {
-              // If patching fails, just skip — stream will work as fallback.
-            }
-          }
+        const nativeQueueMatchesTarget = queueIsSame
+          ? await nativeQueueHasTrackAt(targetIndex, targetSong.id)
+          : false;
+
+        if (queueIsSame && nativeQueueMatchesTarget) {
+          // Fast path: queue unchanged and native queue is confirmed in sync.
+          // Do not remove/re-add the active track here; rebuilding is safer
+          // than indexed native mutation if the URL source needs to change.
           await TrackPlayer.skip(targetIndex);
           await TrackPlayer.play();
           return;
@@ -949,7 +978,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           await TrackPlayer.play();
 
           if (remainingTracks.length > 0 && requestId === playRequestIdRef.current) {
-            void TrackPlayer.add(remainingTracks).catch(() => {
+            void (async () => {
+              if (requestId !== playRequestIdRef.current) return;
+              await TrackPlayer.add(remainingTracks);
+            })().catch(() => {
               // Silent background queue append failure.
             });
           }
@@ -962,7 +994,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           await TrackPlayer.play();
 
           if (remainingTracks.length > 0 && requestId === playRequestIdRef.current) {
-            void TrackPlayer.add(remainingTracks).catch(() => {
+            void (async () => {
+              if (requestId !== playRequestIdRef.current) return;
+              await TrackPlayer.add(remainingTracks);
+            })().catch(() => {
               // Silent background queue append failure.
             });
           }
@@ -989,7 +1024,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }
       }
     });
-  }, [ensurePlayerReady, runSerializedPlaybackSwitch, showPlaybackNotice]);
+  }, [ensurePlayerReady, nativeQueueHasTrackAt, runSerializedPlaybackSwitch, showPlaybackNotice]);
 
   const playSong = useCallback((song: Song, newQueue?: Song[]) => {
     if (!TrackPlayer || !setupPlayer) {
@@ -1174,12 +1209,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setCurrentSong(cq[ni]);
 
       // Then perform TrackPlayer operations smoothly
+      const nativeQueueMatchesTarget = await nativeQueueHasTrackAt(ni, cq[ni].id);
+      if (!nativeQueueMatchesTarget) {
+        await loadAndPlaySong(cq[ni], cq, ni);
+        return;
+      }
       await TrackPlayer.skip(ni);
       await TrackPlayer.play();
     } catch (error) {
       // Silent fail
     }
-  }, [isPlayerReady, previewRepeatMode]);
+  }, [isPlayerReady, loadAndPlaySong, nativeQueueHasTrackAt, previewRepeatMode]);
 
   const prevSong = useCallback(async () => {
     try {
@@ -1237,12 +1277,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setCurrentSong(cq[pi]);
 
       // Then perform TrackPlayer operations smoothly
+      const nativeQueueMatchesTarget = await nativeQueueHasTrackAt(pi, cq[pi].id);
+      if (!nativeQueueMatchesTarget) {
+        await loadAndPlaySong(cq[pi], cq, pi);
+        return;
+      }
       await TrackPlayer.skip(pi);
       await TrackPlayer.play();
     } catch (error) {
       // Silent fail
     }
-  }, [isPlayerReady, previewProgress, previewRepeatMode, safePosition]);
+  }, [isPlayerReady, loadAndPlaySong, nativeQueueHasTrackAt, previewProgress, previewRepeatMode, safePosition]);
 
   const seekTo = useCallback(async (p: number) => {
     let seekRequestId = 0;
@@ -1314,67 +1359,44 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
     
     await runSerializedPlaybackSwitch(async () => {
-      setIsShuffled(prev => {
-        const next = !prev;
-        if (next) {
-          const cq = [...queueRef.current];
-          const ci = queueIndexRef.current;
-          const currentSongItem = cq[ci];
-          if (!currentSongItem) {
-            return prev;
-          }
-          const rest = cq.filter((_, i) => i !== ci);
-          for (let i = rest.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [rest[i], rest[j]] = [rest[j], rest[i]];
-          }
-          const shuffled = [currentSongItem, ...rest];
-          setQueue(shuffled);
-          queueRef.current = shuffled;
-          setQueueIndex(0);
-          queueIndexRef.current = 0;
-          
-          // Smooth queue rebuild
-          void (async () => {
-            try {
-              await TrackPlayer.reset();
-              const validSongs = shuffled
-                .map(normalizePlayableSong)
-                .filter((item): item is Song => Boolean(item));
-              await TrackPlayer.add(validSongs.map((song) => songToTrack(song)));
-              await TrackPlayer.skip(0);
-              await TrackPlayer.play();
-            } catch {
-              // Silent fail
+      const next = !isShuffledRef.current;
+      const currentQueue = [...queueRef.current];
+      const currentIndex = queueIndexRef.current;
+      const currentSongItem = currentQueue[currentIndex];
+      if (!currentSongItem) return;
+
+      const nextQueue = next
+        ? (() => {
+            const rest = currentQueue.filter((_, i) => i !== currentIndex);
+            for (let i = rest.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [rest[i], rest[j]] = [rest[j], rest[i]];
             }
-          })();
-        } else {
-          const orig = originalQueueRef.current;
-          const cs = queueRef.current[queueIndexRef.current];
-          const origIdx = orig.findIndex(s => s.id === cs?.id);
-          setQueue(orig);
-          queueRef.current = orig;
-          setQueueIndex(origIdx >= 0 ? origIdx : 0);
-          queueIndexRef.current = origIdx >= 0 ? origIdx : 0;
-          
-          // Smooth queue rebuild
-          void (async () => {
-            try {
-              await TrackPlayer.reset();
-              const validSongs = orig
-                .map(normalizePlayableSong)
-                .filter((item): item is Song => Boolean(item));
-              await TrackPlayer.add(validSongs.map((song) => songToTrack(song)));
-              const validIdx = validSongs.findIndex(s => s.id === cs?.id);
-              await TrackPlayer.skip(validIdx >= 0 ? validIdx : 0);
-              await TrackPlayer.play();
-            } catch {
-              // Silent fail
-            }
-          })();
-        }
-        return next;
-      });
+            return [currentSongItem, ...rest];
+          })()
+        : originalQueueRef.current;
+
+      const nextIndex = next
+        ? 0
+        : Math.max(0, nextQueue.findIndex((song) => song.id === currentSongItem.id));
+
+      setIsShuffled(next);
+      isShuffledRef.current = next;
+      setQueue(nextQueue);
+      queueRef.current = nextQueue;
+      setQueueIndex(nextIndex);
+      queueIndexRef.current = nextIndex;
+
+      const validSongs = nextQueue
+        .map(normalizePlayableSong)
+        .filter((item): item is Song => Boolean(item));
+      if (validSongs.length === 0) return;
+
+      const nativeIndex = Math.max(0, validSongs.findIndex((song) => song.id === currentSongItem.id));
+      await TrackPlayer.reset();
+      await TrackPlayer.add(validSongs.map((song) => songToTrack(song)));
+      await TrackPlayer.skip(nativeIndex);
+      await TrackPlayer.play();
     });
   }, [isPlayerReady, runSerializedPlaybackSwitch]);
 
@@ -1486,42 +1508,87 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (!isPlayerReady) {
         return;
       }
-      setQueue(prev => {
-        const ci = queueIndexRef.current;
-        const next = [...prev];
-        next.splice(ci + 1, 0, normalizedSong);
-        queueRef.current = next;
-        setSourceQueue(next);
-        return next;
-      });
+      const currentQueue = queueRef.current;
       const ci = queueIndexRef.current;
-      await TrackPlayer.add(songToTrack(normalizedSong), ci + 1);
+      const insertIndex = Math.max(0, Math.min(ci + 1, currentQueue.length));
+      const next = [...currentQueue];
+      next.splice(insertIndex, 0, normalizedSong);
+      setQueue(next);
+      queueRef.current = next;
+      setSourceQueue(next);
+
+      const canInsertNative =
+        currentQueue.length === 0 ||
+        (ci >= 0 && ci < currentQueue.length && await nativeQueueHasTrackAt(ci, currentQueue[ci].id));
+
+      if (canInsertNative) {
+        await TrackPlayer.add(songToTrack(normalizedSong), insertIndex);
+        return;
+      }
+
+      const activeSongId = currentQueue[ci]?.id ?? currentSongRef.current?.id ?? normalizedSong.id;
+      const validSongs = next
+        .map(normalizePlayableSong)
+        .filter((item): item is Song => Boolean(item));
+      const activeIndex = Math.max(0, validSongs.findIndex((song) => song.id === activeSongId));
+      await TrackPlayer.reset();
+      await TrackPlayer.add(validSongs.map((song) => songToTrack(song)));
+      await TrackPlayer.skip(activeIndex);
+      if (resolvedIsPlaying) {
+        await TrackPlayer.play();
+      }
     } catch (error) {
       // Silent fail
     }
-  }, [isPlayerReady]);
+  }, [isPlayerReady, nativeQueueHasTrackAt, resolvedIsPlaying]);
 
   const removeFromQueue = useCallback(async (index: number) => {
     try {
       if (!isPlayerReady) {
         return;
       }
-      setQueue(prev => {
-        const next = prev.filter((_, i) => i !== index);
-        queueRef.current = next;
-        setSourceQueue(next);
-        if (index < queueIndexRef.current) {
-          const ni = queueIndexRef.current - 1;
-          setQueueIndex(ni);
-          queueIndexRef.current = ni;
-        }
-        return next;
-      });
-      await TrackPlayer.remove(index);
+      const currentQueue = queueRef.current;
+      const removedSong = currentQueue[index];
+      if (!removedSong) return;
+
+      const currentIndex = queueIndexRef.current;
+      const next = currentQueue.filter((_, i) => i !== index);
+      let nextIndex = currentIndex;
+      if (index < currentIndex) {
+        nextIndex = currentIndex - 1;
+      } else if (index === currentIndex) {
+        nextIndex = Math.min(currentIndex, Math.max(0, next.length - 1));
+      }
+
+      setQueue(next);
+      queueRef.current = next;
+      setSourceQueue(next);
+      setQueueIndex(nextIndex);
+      queueIndexRef.current = nextIndex;
+
+      const nativeMatchesRemoved = await nativeQueueHasTrackAt(index, removedSong.id);
+      const removesActiveTrack = index === currentIndex;
+      if (nativeMatchesRemoved && !removesActiveTrack) {
+        await TrackPlayer.remove(index);
+        return;
+      }
+
+      const validSongs = next
+        .map(normalizePlayableSong)
+        .filter((item): item is Song => Boolean(item));
+      await TrackPlayer.reset();
+      if (validSongs.length === 0) return;
+      await TrackPlayer.add(validSongs.map((song) => songToTrack(song)));
+      const activeSongId = next[nextIndex]?.id ?? validSongs[0].id;
+      const nativeActiveIndex = Math.max(0, validSongs.findIndex((song) => song.id === activeSongId));
+      await TrackPlayer.skip(nativeActiveIndex);
+      if (resolvedIsPlaying) {
+        await TrackPlayer.play();
+      }
     } catch (error) {
       // Silent fail
     }
-  }, [isPlayerReady]);
+  }, [isPlayerReady, nativeQueueHasTrackAt, resolvedIsPlaying]);
 
   const reorderQueue = useCallback(async (fromIndex: number, toIndex: number) => {
     try {
