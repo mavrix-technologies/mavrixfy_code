@@ -1,18 +1,13 @@
-diff --git a/ios/RNCSliderComponentView.mm b/ios/RNCSliderComponentView.mm
-index abc1234..def5678 100644
---- a/ios/RNCSliderComponentView.mm
-+++ b/ios/RNCSliderComponentView.mm
-@@ -1,8 +1,13 @@
- #import <React/RCTViewComponentView.h>
- #import <UIKit/UIKit.h>
--#import <react/renderer/components/RNCSlider/RNCSliderComponentDescriptor.h>
- #import "RNCSliderManager.h"
+diff --git a/node_modules/@react-native-community/slider/react-native-slider.podspec b/node_modules/@react-native-community/slider/react-native-slider.podspec
+index 5b7a0cd..6d3379f 100644
+--- a/node_modules/@react-native-community/slider/react-native-slider.podspec
++++ b/node_modules/@react-native-community/slider/react-native-slider.podspec
+@@ -16,7 +16,7 @@ Pod::Spec.new do |s|
+   s.platforms    = { :ios => "9.0", :visionos => "1.0" }
  
-+// Note: RNCSliderComponentDescriptor is not available in this version of RN
-+// The component uses the legacy bridge API instead
-+// Commenting out the NewArch codegen include to maintain compatibility
-+// #import <react/renderer/components/RNCSlider/RNCSliderComponentDescriptor.h>
-+
- NS_ASSUME_NONNULL_BEGIN
+   s.source       = { :git => "https://github.com/callstack/react-native-slider.git", :tag => "v#{s.version}" }
+-  s.source_files = "ios/**/*.{h,m,mm}"
++  s.source_files = new_arch_enabled ? "ios/**/*.{h,m,mm}" : "ios/**/*.{h,m}"
  
- @interface RNCSliderComponentView : RCTViewComponentView
+   if new_arch_enabled
+     s.subspec "common" do |ss|
