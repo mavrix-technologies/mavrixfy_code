@@ -78,7 +78,13 @@
         {
           "ios": {
             "newArchEnabled": false,
-            "deploymentTarget": "15.1"
+            "deploymentTarget": "15.1",
+            "extraBuildProperties": {
+              "GCC_WARN_INHIBIT_ALL_WARNINGS": "YES",
+              "CLANG_WARN_DOCUMENTATION_COMMENTS": "NO",
+              "CLANG_WARN_STRICT_PROTOTYPES": "NO",
+              "SWIFT_SUPPRESS_WARNINGS": "YES"
+            }
           },
           "android": {
             "newArchEnabled": false,
