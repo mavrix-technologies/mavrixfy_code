@@ -27,6 +27,7 @@ import {
   getTrackFileUri,
   hasSufficientStorage,
 } from "@/lib/downloads/storagePolicy";
+import { getAudioUrlByQuality } from "@/lib/downloads/audioQuality";
 import { logger } from "@/lib/logger";
 
 // ─── Concurrency config ───────────────────────────────────────────────────────
@@ -117,8 +118,11 @@ async function executeDownload(songId: string): Promise<void> {
 
   await updateStatus(songId, "downloading");
 
+  // Select audio URL based on quality preference
+  const audioUrl = getAudioUrlByQuality(item.audioUrl, item.quality);
+
   const handle = createDownloadResumable(
-    item.audioUrl,
+    audioUrl,
     destUri,
     {},
     (progress) => {

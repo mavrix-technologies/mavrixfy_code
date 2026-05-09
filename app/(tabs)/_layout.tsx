@@ -344,7 +344,6 @@ export function AppNavBar() {
   const conceptText = "#dfe2eb";
   const conceptSubtext = "#bccbb9";
   const miniPlayerTheme = createSpotifyColorTheme(albumColor || Colors.primary);
-  const conceptAccent = miniPlayerTheme.accent;
 
   // Ensure title is always readable — if extracted textColor is too dark, use white
   const safeTextColor = (() => {
@@ -371,7 +370,7 @@ export function AppNavBar() {
   const containerGlassBase = isIOS ? "rgba(15,17,22,0.28)" : Colors.background;
   const playerSectionBg = isIOS ? "rgba(22,24,29,0.38)" : Colors.surface;
   const playerSectionDivider = colorToRgba(miniPlayerTheme.accent, 0.14, "rgba(223,226,235,0.08)");
-  const playerProgressFillColor = conceptAccent;
+  const playerProgressFillColor = Colors.primary;
   const navGlassTintColors: readonly [string, string, string] = isIOS
     ? [
         "rgba(255,255,255,0.14)",
@@ -415,7 +414,7 @@ export function AppNavBar() {
   const coverUrl = activeSong?.coverUrl?.trim();
   const miniPlayerHeight = 60;
   const miniCoverSize = 60;
-  const miniControlSize = 32;
+  const miniControlSize = 42;
   const miniControlRadius = Math.round(miniControlSize / 2);
   const trashShiftX = trashOpacity.interpolate({
     inputRange: [0, 1],
@@ -559,7 +558,7 @@ export function AppNavBar() {
                     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
                     togglePlay();
                   }}
-                  hitSlop={10}
+                  hitSlop={14}
                   style={[
                     styles.iconButton,
                     {
@@ -576,14 +575,14 @@ export function AppNavBar() {
                 >
                   <Ionicons
                     name={isPlaying ? "pause" : "play"}
-                    size={22}
+                    size={25}
                     color={playIconColor}
                     style={!isPlaying ? { marginLeft: 1 } : undefined}
                   />
                 </Pressable>
                 <Pressable
                   onPress={() => router.push("/queue")}
-                  hitSlop={10}
+                  hitSlop={14}
                   style={[
                     styles.iconButton,
                     { width: miniControlSize, height: miniControlSize, borderRadius: miniControlRadius },
@@ -594,13 +593,13 @@ export function AppNavBar() {
                     },
                   ]}
                 >
-                  <Ionicons name="list" size={21} color={miniSecondaryIconColor} />
+                  <Ionicons name="list" size={24} color={miniSecondaryIconColor} />
                 </Pressable>
                 {/* Re-open last artist mix — outside main Pressable to avoid conflict */}
               </View>
             </Pressable>
 
-            <View pointerEvents="none" style={[styles.playerProgressTrack, { left: 0 }]}>
+            <View pointerEvents="none" style={styles.playerProgressTrack}>
               <View
                 style={[
                   styles.playerProgressFill,
@@ -861,7 +860,7 @@ function IOSMiniPlayerOverlay() {
     return raw;
   })();
   const secondaryColor = colorToRgba(resolvedTextColor, 0.7, "rgba(235,235,245,0.7)");
-  const progressFillColor = colorToRgba(resolvedTextColor, 0.9, "rgba(255,255,255,0.9)");
+  const progressFillColor = Colors.primary;
   const progressWidth: DimensionValue = `${Math.max(
     0,
     Math.min(100, (Number.isFinite(progress) ? progress : 0) * 100)
@@ -994,22 +993,22 @@ function IOSMiniPlayerOverlay() {
                 void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
                 togglePlay();
               }}
-              hitSlop={12}
+              hitSlop={14}
               style={[styles.iosMiniPlayerButton, styles.iosMiniPlayerPrimaryButton]}
             >
               <Ionicons
                 name={isPlaying ? "pause" : "play"}
-                size={22}
+                size={25}
                 color="rgba(255,255,255,0.96)"
                 style={!isPlaying ? { marginLeft: 2 } : undefined}
               />
             </Pressable>
             <Pressable
               onPress={() => router.push("/queue")}
-              hitSlop={12}
+              hitSlop={14}
               style={[styles.iosMiniPlayerButton, styles.iosMiniPlayerSecondaryButton]}
             >
-              <Ionicons name="list" size={21} color="rgba(255,255,255,0.88)" />
+              <Ionicons name="list" size={24} color="rgba(255,255,255,0.88)" />
             </Pressable>
           </View>
         </View>
@@ -1176,17 +1175,19 @@ const styles = StyleSheet.create({
   iosMiniPlayerText: {
     flex: 1,
     minWidth: 0,
-    marginLeft: 8,
-    marginRight: 4,
+    marginLeft: 9,
+    marginRight: 6,
     justifyContent: "center",
   },
   iosMiniPlayerTitle: {
-    fontSize: 12.5,
-    fontFamily: "Inter_600SemiBold",
+    fontSize: 13.5,
+    lineHeight: 17,
+    fontFamily: "Inter_700Bold",
   },
   iosMiniPlayerArtist: {
     marginTop: 1,
-    fontSize: 9.5,
+    fontSize: 11,
+    lineHeight: 14,
     fontFamily: "Inter_500Medium",
   },
   iosMiniPlayerMixSimpleContent: {
@@ -1273,14 +1274,14 @@ const styles = StyleSheet.create({
   iosMiniPlayerControls: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 2,
+    gap: 4,
     marginLeft: 0,
     flexShrink: 0,
   },
   iosMiniPlayerButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "transparent",
@@ -1326,7 +1327,7 @@ const styles = StyleSheet.create({
   },
   iosMiniPlayerProgressTrack: {
     position: "absolute",
-    left: 0,
+    left: 50,
     right: 0,
     bottom: 0,
     height: 1.5,
@@ -1477,7 +1478,7 @@ const styles = StyleSheet.create({
   },
   playerProgressTrack: {
     position: "absolute",
-    left: 52,
+    left: 60,
     right: 10,
     bottom: 0,
     height: 2,
@@ -1591,35 +1592,37 @@ const styles = StyleSheet.create({
   songInfo: {
     flex: 1,
     minWidth: 0,
-    marginLeft: 12,
-    marginRight: 4,
+    marginLeft: 10,
+    marginRight: 6,
     justifyContent: "center",
   },
   songInfoDuringMixDrag: {
     opacity: 0.38,
   },
   songTitle: {
-    fontSize: 11.5,
+    fontSize: 13,
     fontFamily: "Inter_700Bold",
+    lineHeight: 17,
   },
   songArtist: {
-    fontSize: 9.5,
+    fontSize: 11,
     fontFamily: "Inter_500Medium",
-    marginTop: 0,
+    lineHeight: 14,
+    marginTop: 1,
   },
   playerControls: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
-    marginLeft: 2,
+    gap: 8,
+    marginLeft: 4,
     flexShrink: 0,
   },
   iconButton: {
-    width: 32,
-    height: 32,
+    minWidth: 42,
+    minHeight: 42,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 16,
+    borderRadius: 21,
     backgroundColor: "rgba(38, 42, 49, 0.72)",
     borderWidth: 1,
     borderColor: "rgba(61, 74, 61, 0.38)",

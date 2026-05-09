@@ -1,11 +1,10 @@
-import React, { useCallback, useMemo } from "react";
-import { FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { FlatList, Platform, Pressable, StyleSheet, Text, View, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
 import { safeGoBack } from "@/utils/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
@@ -34,11 +33,21 @@ export default function LikedSongsScreen() {
   const { isAuthenticated } = useAuth();
   const { isOnline } = useNetwork();
   const { playSong, likedSongs, currentSong, isPlaying, togglePlay, toggleLike, queue } = usePlayerBrowse();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchActive, setIsSearchActive] = useState(false);
 
   const songs = useMemo(() => {
     if (!Array.isArray(likedSongs)) return [];
     return likedSongs.filter((song) => song && song.id && song.title);
   }, [likedSongs]);
+
+  const filteredSongs = useMemo(() => {
+    if (!searchQuery.trim()) return songs;
+    const query = searchQuery.toLowerCase();
+    return songs.filter((song) =>
+      song.title.toLowerCase().includes(query) || song.artist.toLowerCase().includes(query)
+    );
+  }, [songs, searchQuery]);
 
   const isPlayingFromLikedSongs = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
@@ -130,18 +139,33 @@ export default function LikedSongsScreen() {
                 void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
                 toggleLike(item);
               }}
-              style={styles.likeButton}
+              style={({ pressed }) => [styles.likeButton, pressed && styles.likeButtonPressed]}
+              android_ripple={{ color: "rgba(38,225,154,0.2)", borderless: true }}
             >
               <Ionicons name={liked ? "heart" : "heart-outline"} size={19} color={UI.primaryA} />
             </Pressable>
-            <DownloadButton song={item} size={18} style={styles.downloadBtn} />
+            <Pressable
+              hitSlop={8}
+              onPress={(event) => {
+                event.stopPropagation();
+                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              style={styles.downloadBtn}
+              android_ripple={{ color: "rgba(255,255,255,0.1)", borderless: true }}
+            >
+              <DownloadButton song={item} size={18} style={styles.downloadBtnInner} />
+            </Pressable>
             <Text style={styles.trackDuration}>{formatDuration(item.duration)}</Text>
           </View>
 
           <Pressable
             hitSlop={8}
-            onPress={(event) => event.stopPropagation()}
-            style={styles.moreButton}
+            onPress={(event) => {
+              event.stopPropagation();
+              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+            }}
+            style={({ pressed }) => [styles.moreButton, pressed && styles.moreButtonPressed]}
+            android_ripple={{ color: "rgba(255,255,255,0.12)", borderless: true }}
           >
             <Ionicons name="ellipsis-horizontal" size={16} color={UI.subtext} />
           </Pressable>
@@ -160,7 +184,15 @@ export default function LikedSongsScreen() {
       {!isOnline && <OfflineBanner />}
 
       <View style={styles.topBar}>
-        <Pressable style={styles.topIconButton} onPress={safeGoBack} hitSlop={10}>
+        <Pressable 
+          style={({ pressed }) => [styles.topIconButton, pressed && styles.topIconButtonPressed]} 
+          onPress={() => {
+            void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+            safeGoBack();
+          }}
+          hitSlop={10}
+          android_ripple={{ color: "rgba(38,225,154,0.15)", borderless: true }}
+        >
           <Ionicons name="arrow-back" size={18} color={UI.primaryA} />
         </Pressable>
         <Text style={styles.topBarTitle}>Liked Songs</Text>
@@ -168,11 +200,34 @@ export default function LikedSongsScreen() {
       </View>
 
       <FlatList
-        data={songs}
+        data={filteredSongs}
         keyExtractor={(item) => item.id}
         renderItem={renderSong}
         ListHeaderComponent={
           <>
+            {isSearchActive && (
+              <View style={styles.searchContainer}>
+                <View style={styles.searchInputWrapper}>
+                  <Ionicons name="search" size={16} color={UI.subtext} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search liked songs..."
+                    placeholderTextColor={UI.subtext}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    selectionColor={UI.primaryA}
+                  />
+                  {searchQuery.length > 0 && (
+                    <Pressable
+                      onPress={() => setSearchQuery("")}
+                      hitSlop={8}
+                    >
+                      <Ionicons name="close-circle" size={16} color={UI.subtext} />
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            )}
             <View style={styles.heroSection}>
               <LinearGradient
                 colors={[UI.primaryA, UI.primaryB]}
@@ -188,7 +243,11 @@ export default function LikedSongsScreen() {
 
             <View style={styles.actionSection}>
               <View style={styles.leftActions}>
-                <Pressable onPress={handlePlayAll} style={styles.playAllButton}>
+                <Pressable 
+                onPress={handlePlayAll} 
+                style={({ pressed }) => [styles.playAllButton, pressed && styles.playAllButtonPressed]}
+                android_ripple={{ color: "rgba(0,0,0,0.15)", borderless: false }}
+              >
                   <Ionicons
                     name={isPlayingFromLikedSongs && isPlaying ? "pause" : "play"}
                     size={16}
@@ -200,7 +259,11 @@ export default function LikedSongsScreen() {
                   </Text>
                 </Pressable>
 
-                <Pressable onPress={handleShufflePlay} style={styles.shuffleButton}>
+                <Pressable 
+                  onPress={handleShufflePlay}
+                  style={({ pressed }) => [styles.shuffleButton, pressed && styles.shuffleButtonPressed]}
+                  android_ripple={{ color: "rgba(255,255,255,0.12)", borderless: false }}
+                >
                   <Ionicons name="shuffle" size={16} color={UI.text} />
                   <Text style={styles.shuffleText}>Shuffle</Text>
                 </Pressable>
@@ -208,15 +271,20 @@ export default function LikedSongsScreen() {
 
               <View style={styles.rightActions}>
                 <Pressable
-                  style={styles.utilityIcon}
+                  style={({ pressed }) => [styles.utilityIcon, pressed && styles.utilityIconPressed]}
                   onPress={() => {
-                    router.push("/search");
+                    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                    setIsSearchActive(!isSearchActive);
+                    if (isSearchActive) {
+                      setSearchQuery("");
+                    }
                   }}
+                  android_ripple={{ color: "rgba(255,255,255,0.1)", borderless: true }}
                 >
-                  <Ionicons name="search" size={17} color={UI.subtext} />
+                  <Ionicons name={isSearchActive ? "close" : "search"} size={22} color={UI.subtext} />
                 </Pressable>
                 <DownloadCollectionButton
-                  songs={songs}
+                  songs={filteredSongs}
                   collectionId="liked-songs"
                   collectionName="Liked Songs"
                   collectionImage=""
@@ -226,7 +294,7 @@ export default function LikedSongsScreen() {
               </View>
             </View>
 
-            {songs.length > 0 ? (
+            {filteredSongs.length > 0 ? (
               <View style={styles.tableHeader}>
                 <Text style={[styles.tableHeaderText, styles.tableIndexHeader]}>#</Text>
                 <Text style={[styles.tableHeaderText, styles.tableTitleHeader]}>TITLE</Text>
@@ -240,14 +308,20 @@ export default function LikedSongsScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
-            <Ionicons name="heart-outline" size={56} color={UI.subtext} />
+            <Ionicons name={searchQuery ? "search-outline" : "heart-outline"} size={56} color={UI.subtext} />
             <Text style={styles.emptyTitle}>
-              {isAuthenticated ? "No liked songs yet" : "Sign in to view liked songs"}
+              {searchQuery
+                ? "No songs found"
+                : isAuthenticated
+                  ? "No liked songs yet"
+                  : "Sign in to view liked songs"}
             </Text>
             <Text style={styles.emptySubtitle}>
-              {isAuthenticated
-                ? "Tap the heart on a song to save it here."
-                : "Liked songs now come only from your account in Firebase."}
+              {searchQuery
+                ? `No results for "${searchQuery}"`
+                : isAuthenticated
+                  ? "Tap the heart on a song to save it here."
+                  : "Liked songs now come only from your account in Firebase."}
             </Text>
           </View>
         }
@@ -278,11 +352,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  searchContainer: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(61,74,61,0.22)",
+  },
+  searchInputWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: UI.lowSurface,
+    borderWidth: 1,
+    borderColor: "rgba(61,74,61,0.34)",
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    color: UI.text,
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+  },
   topIconButton: {
     width: 28,
     height: 28,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: "rgba(38,225,154,0.08)",
+  },
+  topIconButtonPressed: {
+    backgroundColor: "rgba(38,225,154,0.2)",
+    transform: [{ scale: 0.92 }],
   },
   topBarTitle: {
     color: UI.primaryA,
@@ -359,8 +462,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     backgroundColor: UI.primaryA,
-    borderWidth: 1,
-    borderColor: "rgba(38,225,154,0.5)",
+    borderWidth: 1.5,
+    borderColor: "rgba(38,225,154,0.6)",
+  },
+  playAllButtonPressed: {
+    backgroundColor: UI.primaryB,
+    borderColor: "rgba(0,184,123,0.8)",
+    transform: [{ scale: 0.96 }],
   },
   playAllText: {
     color: "#06241a",
@@ -376,8 +484,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     backgroundColor: UI.highSurface,
-    borderWidth: 1,
-    borderColor: "rgba(61,74,61,0.34)",
+    borderWidth: 1.5,
+    borderColor: "rgba(61,74,61,0.48)",
+  },
+  shuffleButtonPressed: {
+    backgroundColor: UI.lowSurface,
+    borderColor: "rgba(61,74,61,0.72)",
+    transform: [{ scale: 0.96 }],
   },
   shuffleText: {
     color: UI.text,
@@ -387,15 +500,22 @@ const styles = StyleSheet.create({
   rightActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 10,
   },
   utilityIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(38,42,49,0.45)",
+    backgroundColor: "rgba(38,42,49,0.48)",
+    borderWidth: 1,
+    borderColor: "rgba(61,74,61,0.2)",
+  },
+  utilityIconPressed: {
+    backgroundColor: "rgba(38,42,49,0.68)",
+    borderColor: "rgba(61,74,61,0.45)",
+    transform: [{ scale: 0.92 }],
   },
   tableHeader: {
     flexDirection: "row",
@@ -513,12 +633,24 @@ const styles = StyleSheet.create({
     height: 28,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: "rgba(38,225,154,0.08)",
+  },
+  likeButtonPressed: {
+    backgroundColor: "rgba(38,225,154,0.22)",
+    transform: [{ scale: 0.92 }],
   },
   downloadBtn: {
     width: 28,
     height: 28,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: "rgba(38,42,49,0.3)",
+  },
+  downloadBtnInner: {
+    width: "100%",
+    height: "100%",
   },
   trackDuration: {
     color: UI.subtext,
@@ -532,6 +664,12 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: "rgba(188,203,185,0.06)",
+  },
+  moreButtonPressed: {
+    backgroundColor: "rgba(188,203,185,0.18)",
+    transform: [{ scale: 0.92 }],
   },
   emptyWrap: {
     flex: 1,

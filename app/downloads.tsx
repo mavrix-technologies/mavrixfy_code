@@ -404,6 +404,7 @@ export default function DownloadsScreen() {
 
   const handleQualityChange = useCallback(
     (quality: DownloadQuality) => {
+      void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
       updatePreferences({ quality });
     },
     [updatePreferences]
@@ -666,11 +667,14 @@ export default function DownloadsScreen() {
       {(["low", "medium", "high"] as const).map((q) => (
         <Pressable
           key={q}
-          style={[
+          style={({ pressed }) => [
             styles.qualityRow,
             preferences.quality === q && styles.qualityRowActive,
+            pressed && styles.qualityRowPressed,
           ]}
           onPress={() => handleQualityChange(q)}
+          android_ripple={{ color: "rgba(38,225,154,0.15)", borderless: false }}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <View style={styles.qualityInfo}>
             <Text style={styles.qualityLabel}>
@@ -1142,6 +1146,10 @@ const styles = StyleSheet.create({
   qualityRowActive: {
     borderColor: UI.primary,
     backgroundColor: "rgba(38,225,154,0.06)",
+  },
+  qualityRowPressed: {
+    backgroundColor: "rgba(38,225,154,0.12)",
+    transform: [{ scale: 0.98 }],
   },
   qualityInfo: {
     flex: 1,

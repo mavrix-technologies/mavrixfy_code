@@ -27,14 +27,13 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import { usePlayer } from "@/contexts/PlayerContext";
-import { formatDuration, Song } from "@/lib/musicData";
+import { formatDuration, getBestImageUrl, Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import { getRecentlyPlayed, getUserPlaylists } from "@/lib/storage";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { createSpotifyColorTheme, extractDominantColor } from "@/lib/colorExtractor";
 import EqualizerBars from "@/components/EqualizerBars";
 import { getArtistDetails, JioSaavnArtist, searchArtists } from "@/lib/artistService";
-import { getBestImageUrl } from "@/lib/musicData";
 import { isFollowingArtist, toggleFollowArtist } from "@/lib/followedArtists";
 
 function hexToRgba(color: string, alpha: number): string {
@@ -404,6 +403,9 @@ function LegacyPlayerScreen() {
     [albumColor]
   );
   const gradientColors = playerTheme.playerGradient;
+  const sheetTextColor = Colors.text;
+  const sheetMutedTextColor = Colors.subtext;
+  const sheetAccentColor = playerTheme.accent;
   const controlButtonBg = "rgba(16,23,33,0.76)";
   const controlButtonBorder = "rgba(223,226,235,0.24)";
   const controlIconColor = "rgba(236,240,247,0.96)";
@@ -809,7 +811,7 @@ function LegacyPlayerScreen() {
         >
           <View style={styles.queueLead}>
             {isCurrent ? (
-              <EqualizerBars isPlaying={playerIsPlaying} size={3} color={playerTheme.accent} />
+              <EqualizerBars isPlaying={playerIsPlaying} size={3} color={sheetAccentColor} />
             ) : (
               <Text style={styles.queueIndex}>{index + 1}</Text>
             )}
@@ -827,8 +829,9 @@ function LegacyPlayerScreen() {
             <Text
               style={[
                 styles.queueTitle,
+
                 isCurrent && styles.queueTitleActive,
-                isCurrent && { color: playerTheme.accent },
+                isCurrent && { color: sheetAccentColor },
               ]}
               numberOfLines={1}
             >
@@ -843,7 +846,7 @@ function LegacyPlayerScreen() {
             style={[
               styles.queueDuration,
               isCurrent && styles.queueDurationActive,
-              isCurrent && { color: playerTheme.accent },
+              isCurrent && { color: sheetAccentColor },
             ]}
           >
             {formatDuration(item.duration)}
@@ -851,7 +854,14 @@ function LegacyPlayerScreen() {
         </Pressable>
       );
     },
-    [activeQueueIndex, handleQueueSongPress, isDevPreviewActive, isShortScreen, playerIsPlaying, playerTheme.accent]
+    [
+      activeQueueIndex,
+      handleQueueSongPress,
+      isDevPreviewActive,
+      isShortScreen,
+      playerIsPlaying,
+      sheetAccentColor,
+    ]
   );
 
   if (!screenSong) {
@@ -905,13 +915,16 @@ function LegacyPlayerScreen() {
         ]}
       >
       <View style={[styles.topBar, { height: topBarHeight, paddingHorizontal: isShortScreen ? 14 : 18 }]}>
-        <Pressable style={styles.headerIconButton} onPress={safeGoBack} hitSlop={10}>
-          <Ionicons name="arrow-down" size={22} color={Colors.text} />
+        <Pressable
+          style={styles.headerIconButton}
+          onPress={safeGoBack}
+          hitSlop={10}
+        >
+          <Ionicons name="arrow-down" size={22} color={sheetTextColor} />
         </Pressable>
 
         <View style={styles.headerCenter}>
-          <Text style={styles.headerCaption}>Now Playing</Text>
-          <Text style={[styles.headerAlbum, { fontSize: isShortScreen ? 12 : 13 }]} numberOfLines={1}>
+          <Text style={[styles.headerAlbum, { color: sheetMutedTextColor, fontSize: isShortScreen ? 12 : 13 }]} numberOfLines={1}>
             {screenSong.album || "Single"}
           </Text>
         </View>
@@ -921,7 +934,7 @@ function LegacyPlayerScreen() {
           onPress={() => router.push("/queue")}
           hitSlop={10}
         >
-          <Ionicons name="list-outline" size={21} color={Colors.text} />
+          <Ionicons name="list-outline" size={21} color={sheetTextColor} />
         </Pressable>
       </View>
 
@@ -988,7 +1001,10 @@ function LegacyPlayerScreen() {
                     text={screenSong.title}
                     style={[
                       styles.songTitle,
-                      { fontSize: isVeryShortScreen ? 24 : isShortScreen ? 26 : 29 },
+                      {
+                        color: sheetTextColor,
+                        fontSize: isVeryShortScreen ? 24 : isShortScreen ? 26 : 29,
+                      },
                     ]}
                     velocity={14}
                   />
@@ -996,7 +1012,10 @@ function LegacyPlayerScreen() {
                     text={screenSong.artist}
                     style={[
                       styles.songArtist,
-                      { fontSize: isVeryShortScreen ? 12 : 14 },
+                      {
+                        color: sheetMutedTextColor,
+                        fontSize: isVeryShortScreen ? 12 : 14,
+                      },
                     ]}
                     velocity={12}
                   />
@@ -1020,7 +1039,7 @@ function LegacyPlayerScreen() {
                   <Ionicons
                     name={liked ? "heart" : "heart-outline"}
                     size={24}
-                  color={liked ? playerTheme.accent : Colors.subtext}
+                  color={liked ? sheetAccentColor : sheetMutedTextColor}
                 />
               </Pressable>
               </View>
@@ -1113,6 +1132,7 @@ function LegacyPlayerScreen() {
                   },
                 ]}
               >
+          {/* Shuffle Button */}
           <Pressable
             style={[
               styles.roundIconButton,
@@ -1120,31 +1140,27 @@ function LegacyPlayerScreen() {
                 width: controlButtonSize,
                 height: controlButtonSize,
                 borderRadius: controlButtonSize / 2,
-                backgroundColor: controlButtonBg,
-                borderColor: controlButtonBorder,
-              },
-              playerIsShuffled && styles.roundIconButtonActive,
-              playerIsShuffled && {
-                borderColor: controlButtonActiveBorder,
-                backgroundColor: controlButtonActiveBg,
+                backgroundColor: playerIsShuffled ? controlButtonActiveBg : controlButtonBg,
+                borderColor: playerIsShuffled ? controlButtonActiveBorder : controlButtonBorder,
               },
             ]}
             onPress={() => {
               haptic();
               if (isDevPreviewActive) {
-                setDevPreviewIsShuffled((prev) => !prev);
-                return;
+                setDevPreviewIsShuffled((p) => !p);
+              } else {
+                toggleShuffle();
               }
-              toggleShuffle();
             }}
           >
             <Ionicons
               name="shuffle"
               size={shuffleRepeatIconSize}
-              color={playerIsShuffled ? playerTheme.accent : controlIconColor}
+              color={playerIsShuffled ? sheetAccentColor : controlIconColor}
             />
           </Pressable>
 
+          {/* Previous Button */}
           <Pressable
             style={[
               styles.roundIconButton,
@@ -1159,16 +1175,17 @@ function LegacyPlayerScreen() {
             onPress={() => {
               haptic();
               if (isDevPreviewActive) {
-                setDevPreviewIndex((prev) => Math.max(0, prev - 1));
+                setDevPreviewIndex((p) => Math.max(0, p - 1));
                 setDevPreviewProgress(0.18);
-                return;
+              } else {
+                prevSong();
               }
-              prevSong();
             }}
           >
             <Ionicons name="play-skip-back" size={prevNextIconSize} color={controlIconColor} />
           </Pressable>
 
+          {/* Play Button */}
           <PlayerPlayButton
             isPlaying={playerIsPlaying}
             isLoading={isLoading}
@@ -1179,13 +1196,14 @@ function LegacyPlayerScreen() {
             onPress={() => {
               haptic();
               if (isDevPreviewActive) {
-                setDevPreviewIsPlaying((prev) => !prev);
-                return;
+                setDevPreviewIsPlaying((p) => !p);
+              } else {
+                togglePlay();
               }
-              togglePlay();
             }}
           />
 
+          {/* Next Button */}
           <Pressable
             style={[
               styles.roundIconButton,
@@ -1200,16 +1218,17 @@ function LegacyPlayerScreen() {
             onPress={() => {
               haptic();
               if (isDevPreviewActive) {
-                setDevPreviewIndex((prev) => Math.min(DEV_PREVIEW_SONGS.length - 1, prev + 1));
+                setDevPreviewIndex((p) => Math.min(DEV_PREVIEW_SONGS.length - 1, p + 1));
                 setDevPreviewProgress(0.18);
-                return;
+              } else {
+                nextSong();
               }
-              nextSong();
             }}
           >
             <Ionicons name="play-skip-forward" size={prevNextIconSize} color={controlIconColor} />
           </Pressable>
 
+          {/* Repeat Button */}
           <Pressable
             style={[
               styles.roundIconButton,
@@ -1217,32 +1236,25 @@ function LegacyPlayerScreen() {
                 width: controlButtonSize,
                 height: controlButtonSize,
                 borderRadius: controlButtonSize / 2,
-                backgroundColor: controlButtonBg,
-                borderColor: controlButtonBorder,
-              },
-              playerRepeatMode !== "off" && styles.roundIconButtonActive,
-              playerRepeatMode !== "off" && {
-                borderColor: controlButtonActiveBorder,
-                backgroundColor: controlButtonActiveBg,
+                backgroundColor: playerRepeatMode !== "off" ? controlButtonActiveBg : controlButtonBg,
+                borderColor: playerRepeatMode !== "off" ? controlButtonActiveBorder : controlButtonBorder,
               },
             ]}
             onPress={() => {
               haptic();
               if (isDevPreviewActive) {
-                setDevPreviewRepeatMode((prev) =>
-                  prev === "off" ? "all" : prev === "all" ? "one" : "off"
-                );
-                return;
+                setDevPreviewRepeatMode((p) => (p === "off" ? "all" : p === "all" ? "one" : "off"));
+              } else {
+                toggleRepeat();
               }
-              toggleRepeat();
             }}
           >
             <Ionicons
               name="repeat"
               size={shuffleRepeatIconSize}
-              color={playerRepeatMode !== "off" ? playerTheme.accent : controlIconColor}
+              color={playerRepeatMode !== "off" ? sheetAccentColor : controlIconColor}
             />
-            {playerRepeatMode === "one" ? <Text style={[styles.repeatOneBadge, { color: playerTheme.accent }]}>1</Text> : null}
+            {playerRepeatMode === "one" && <Text style={[styles.repeatOneBadge, { color: sheetAccentColor }]}>1</Text>}
           </Pressable>
           </View>
 
@@ -1353,7 +1365,12 @@ function LegacyPlayerScreen() {
                 setArtistFollowing(nowFollowing);
               }}
             >
-              <Text style={[styles.artistFollowBtnText, artistFollowing && styles.artistFollowBtnTextActive]}>
+              <Text
+                style={[
+                  styles.artistFollowBtnText,
+                  artistFollowing && styles.artistFollowBtnTextActive,
+                ]}
+              >
                 {artistFollowing ? "Following" : "Follow"}
               </Text>
             </Pressable>
@@ -1368,39 +1385,93 @@ function LegacyPlayerScreen() {
 
       {/* ── Credits ── */}
       {screenSong && !isDevPreviewActive ? (
-        <View style={styles.infoCard}>
-          <Text style={styles.infoCardLabel}>CREDITS</Text>
+        <View
+          style={[
+            styles.infoCard,
+            styles.trackDetailsCard,
+          ]}
+        >
+          <View style={styles.trackDetailsHeader}>
+            <Text
+              style={[
+                styles.infoCardLabel,
+                styles.trackDetailsLabel,
+              ]}
+            >
+              TRACK DETAILS
+            </Text>
+          </View>
           <View style={styles.creditsGrid}>
             <View style={styles.creditItem}>
               <Text style={styles.creditLabel}>Title</Text>
-              <Text style={styles.creditValue} numberOfLines={2}>{screenSong.title}</Text>
+              <View style={styles.creditValueWrap}>
+                <PingPongScroll
+                  text={screenSong.title}
+                  style={styles.creditValue}
+                  velocity={12}
+                />
+              </View>
             </View>
             <View style={styles.creditItem}>
               <Text style={styles.creditLabel}>Artist</Text>
-              <Text style={styles.creditValue} numberOfLines={2}>{screenSong.artist}</Text>
+              <View style={styles.creditValueWrap}>
+                <PingPongScroll
+                  text={screenSong.artist}
+                  style={styles.creditValue}
+                  velocity={11}
+                />
+              </View>
             </View>
             {screenSong.album ? (
               <View style={styles.creditItem}>
                 <Text style={styles.creditLabel}>Album</Text>
-                <Text style={styles.creditValue} numberOfLines={2}>{screenSong.album}</Text>
+                <View style={styles.creditValueWrap}>
+                  <PingPongScroll
+                    text={screenSong.album}
+                    style={styles.creditValue}
+                    velocity={11}
+                  />
+                </View>
               </View>
             ) : null}
             {screenSong.year ? (
               <View style={styles.creditItem}>
                 <Text style={styles.creditLabel}>Year</Text>
-                <Text style={styles.creditValue}>{screenSong.year}</Text>
+                <View style={styles.creditValueWrap}>
+                  <Text style={styles.creditValue}>{screenSong.year}</Text>
+                </View>
               </View>
             ) : null}
             {screenSong.language ? (
               <View style={styles.creditItem}>
                 <Text style={styles.creditLabel}>Language</Text>
-                <Text numberOfLines={1} style={[styles.creditValue, { textTransform: "capitalize" }]}>{screenSong.language}</Text>
+                <View style={styles.creditValueWrap}>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.creditValue,
+                      styles.creditValueCapitalized,
+                    ]}
+                  >
+                    {screenSong.language}
+                  </Text>
+                </View>
               </View>
             ) : null}
             {screenSong.genre ? (
               <View style={styles.creditItem}>
                 <Text style={styles.creditLabel}>Genre</Text>
-                <Text numberOfLines={1} style={[styles.creditValue, { textTransform: "capitalize" }]}>{screenSong.genre}</Text>
+                <View style={styles.creditValueWrap}>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.creditValue,
+                      styles.creditValueCapitalized,
+                    ]}
+                  >
+                    {screenSong.genre}
+                  </Text>
+                </View>
               </View>
             ) : null}
           </View>
@@ -1456,11 +1527,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.cardBorder,
   },
+
   headerCenter: {
     flex: 1,
     alignItems: "center",
     minWidth: 0,
   },
+
   headerCaption: {
     color: Colors.subtext,
     fontSize: 10,
@@ -1565,6 +1638,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.cardBorder,
   },
+
   progressCard: {
     marginTop: 14,
     marginHorizontal: 20,
@@ -1642,6 +1716,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Inter_500Medium",
   },
+
   controlsRow: {
     marginTop: 12,
     marginHorizontal: 20,
@@ -1663,6 +1738,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
   },
+
   playingListHeader: {
     height: 38,
     paddingHorizontal: 10,
@@ -1686,12 +1762,14 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     letterSpacing: 0.2,
   },
+
   playingListCount: {
     color: Colors.subtext,
     fontSize: 10,
     fontFamily: "Inter_500Medium",
     textAlign: "right",
   },
+
   playingList: {
     flex: 1,
   },
@@ -1729,6 +1807,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Inter_600SemiBold",
   },
+
   queueThumb: {
     width: 38,
     height: 38,
@@ -1749,6 +1828,7 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
     textAlign: "left",
   },
+
   queueTitleActive: {
     color: Colors.primary,
   },
@@ -1759,6 +1839,7 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
     textAlign: "left",
   },
+
   queueDuration: {
     color: Colors.subtext,
     fontSize: 10,
@@ -1766,6 +1847,7 @@ const styles = StyleSheet.create({
     width: 34,
     textAlign: "right",
   },
+
   queueDurationActive: {
     color: Colors.primary,
   },
@@ -1878,20 +1960,35 @@ const styles = StyleSheet.create({
   infoCard: {
     marginHorizontal: 16,
     marginTop: 20,
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderRadius: 16,
+    backgroundColor: "rgba(16,20,26,0.58)",
+    borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
+    borderColor: "rgba(223,226,235,0.08)",
+  },
+
+  trackDetailsCard: {
+    backgroundColor: "rgba(16,20,26,0.42)",
+    borderColor: "rgba(38,225,154,0.16)",
+  },
+  trackDetailsHeader: {
+    marginBottom: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
   },
   infoCardLabel: {
-    color: "rgba(255,255,255,0.35)",
+    color: Colors.primary,
     fontSize: 10,
     fontFamily: "Inter_700Bold",
-    letterSpacing: 1.4,
+    letterSpacing: 1.2,
     marginBottom: 14,
   },
 
+  trackDetailsLabel: {
+    marginBottom: 0,
+  },
   // Artist row
   artistInfoRow: {
     flexDirection: "row",
@@ -1919,11 +2016,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: "Inter_700Bold",
   },
+
   artistInfoSub: {
     color: "rgba(255,255,255,0.45)",
     fontSize: 12,
     fontFamily: "Inter_400Regular",
   },
+
   artistFollowBtn: {
     height: 30,
     paddingHorizontal: 16,
@@ -1943,6 +2042,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Inter_700Bold",
   },
+
   artistFollowBtnTextActive: {
     color: "#000",
   },
@@ -1954,22 +2054,42 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
+
   // Credits grid
   creditsGrid: {
-    gap: 14,
+    gap: 0,
   },
   creditItem: {
-    gap: 2,
+    minHeight: 44,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(223,226,235,0.07)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
   },
   creditLabel: {
-    color: "rgba(255,255,255,0.35)",
+    width: 82,
+    color: "rgba(223,226,235,0.52)",
     fontSize: 11,
-    fontFamily: "Inter_600SemiBold",
-    letterSpacing: 0.3,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+    flexShrink: 0,
+  },
+  creditValueWrap: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: "flex-end",
   },
   creditValue: {
-    color: "#fff",
+    color: Colors.text,
     fontSize: 14,
-    fontFamily: "Inter_500Medium",
+    lineHeight: 18,
+    fontFamily: "Inter_600SemiBold",
+    textAlign: "right",
+  },
+  creditValueCapitalized: {
+    textTransform: "capitalize",
   },
 });

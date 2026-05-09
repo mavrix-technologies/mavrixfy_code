@@ -6,8 +6,11 @@ import {
   Easing,
   StyleSheet,
   LayoutChangeEvent,
+  NativeSyntheticEvent,
+  Platform,
   StyleProp,
   TextStyle,
+  TextLayoutEventData,
 } from "react-native";
 
 interface PingPongScrollProps {
@@ -29,6 +32,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
   const animatedValue = useRef(new Animated.Value(0)).current;
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
   const GAP = 28;
+  const MEASURE_WIDTH = 10000;
 
   useEffect(() => {
     if (animationRef.current) {
@@ -53,14 +57,14 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
             toValue: -distance,
             duration,
             easing: Easing.linear,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== "web",
           }),
           Animated.delay(500),
           Animated.timing(animatedValue, {
             toValue: 0,
             duration,
             easing: Easing.linear,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== "web",
           }),
           Animated.delay(450),
         ])
@@ -87,10 +91,13 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
     }
   };
 
-  const handleTextLayout = (event: LayoutChangeEvent) => {
-    const { width } = event.nativeEvent.layout;
-    if (width > 0 && width !== textWidth) {
-      setTextWidth(width);
+  const handleTextLinesLayout = (event: NativeSyntheticEvent<TextLayoutEventData>) => {
+    const lineWidth = event.nativeEvent.lines[0]?.width;
+    if (typeof lineWidth === "number") {
+      const measuredWidth = Math.ceil(lineWidth);
+      if (measuredWidth > 0 && measuredWidth !== textWidth) {
+        setTextWidth(measuredWidth);
+      }
     }
   };
 
@@ -118,9 +125,9 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
   return (
     <View style={styles.container} onLayout={handleContainerLayout}>
       <Text
-        style={[styles.measureText, sanitizedTextStyle]}
+        style={[styles.measureText, sanitizedTextStyle, { width: MEASURE_WIDTH }]}
         numberOfLines={1}
-        onLayout={handleTextLayout}
+        onTextLayout={handleTextLinesLayout}
       >
         {text}
       </Text>
