@@ -102,6 +102,7 @@
           }
         }
       ],
+      "./plugins/withSliderBuildFix",
       "@react-native-community/datetimepicker",
       "expo-audio",
       "expo-brightness",
