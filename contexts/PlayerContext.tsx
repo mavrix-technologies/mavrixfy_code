@@ -304,6 +304,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const seekOverrideSinceRef = useRef(0);
   const seekRequestIdRef = useRef(0);
   const lastPlaybackNoticeAtRef = useRef(0);
+  const restoredPositionSecondsRef = useRef(0);
+  const latestPositionSecondsRef = useRef(0);
   const playbackSwitchChainRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
@@ -312,16 +314,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
   useEffect(() => { isShuffledRef.current = isShuffled; }, [isShuffled]);
   useEffect(() => { previewRepeatModeRef.current = previewRepeatMode; }, [previewRepeatMode]);
-
-  // ── Persist player state on every song change ─────────────────────────────
-  useEffect(() => {
-    if (!currentSong) return;
-    void Storage.savePlayerState({
-      currentSong,
-      queue,
-      queueIndex,
-    });
-  }, [currentSong?.id, queueIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Restore player state on mount (show mini player with last song) ────────
   useEffect(() => {
@@ -338,6 +330,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       originalQueueRef.current = saved.queue;
       setQueueIndex(saved.queueIndex);
       queueIndexRef.current = saved.queueIndex;
+      restoredPositionSecondsRef.current = Math.max(0, saved.positionSeconds ?? 0);
 
     }).catch(() => {});
 
@@ -404,6 +397,46 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     : Platform.OS === "android" && runtimePlaybackStateSnapshot !== undefined
       ? runtimeIsPlaying
       : isPlaying;
+
+  useEffect(() => {
+    latestPositionSecondsRef.current = Math.max(0, effectivePositionSeconds);
+  }, [effectivePositionSeconds]);
+
+  const persistCurrentPlayerState = useCallback(() => {
+    const song = currentSongRef.current;
+    if (!song) return;
+
+    void Storage.savePlayerState({
+      currentSong: song,
+      queue: queueRef.current.length > 0 ? queueRef.current : [song],
+      queueIndex: queueIndexRef.current,
+      positionSeconds: latestPositionSecondsRef.current,
+      updatedAt: Date.now(),
+    });
+  }, []);
+
+  // ── Persist restored mini-player state without writing on every progress tick
+  useEffect(() => {
+    if (!currentSong) return;
+    persistCurrentPlayerState();
+  }, [currentSong?.id, queueIndex, persistCurrentPlayerState]);
+
+  useEffect(() => {
+    if (!currentSong) return;
+
+    const interval = setInterval(persistCurrentPlayerState, 5000);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state !== "active") {
+        persistCurrentPlayerState();
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      sub.remove();
+      persistCurrentPlayerState();
+    };
+  }, [currentSong?.id, persistCurrentPlayerState]);
 
   useEffect(() => {
     if (!isPreviewSession) return;
@@ -1140,7 +1173,31 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      const currentQueue = (queueRef.current.length > 0 ? queueRef.current : currentSong ? [currentSong] : [])
+        .map(normalizePlayableSong)
+        .filter((item): item is Song => Boolean(item));
+      const targetSong = currentSong
+        ? normalizePlayableSong(currentSong)
+        : currentQueue[queueIndexRef.current] ?? currentQueue[0];
+      if (!targetSong) {
+        showPlaybackNotice("This song has no playable audio URL.");
+        return;
+      }
+
+      const targetIndex = Math.max(0, currentQueue.findIndex((song) => song.id === targetSong.id));
+      const nativeQueueReady = await nativeQueueHasTrackAt(targetIndex, targetSong.id);
+      if (!nativeQueueReady) {
+        await loadAndPlaySong(targetSong, currentQueue.length > 0 ? currentQueue : [targetSong], targetIndex);
+        const resumeAt = restoredPositionSecondsRef.current;
+        if (resumeAt > 1) {
+          await TrackPlayer.seekTo(resumeAt).catch(() => {});
+        }
+        restoredPositionSecondsRef.current = 0;
+        return;
+      }
+
       await TrackPlayer.play();
+      restoredPositionSecondsRef.current = 0;
       return;
     } catch {
       // Fallback path when no active track exists yet.
@@ -1159,13 +1216,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           const currentIndex = currentQueue.findIndex((s) => s.id === currentSong.id);
           const targetIndex = currentIndex >= 0 ? currentIndex : 0;
           await loadAndPlaySong(currentQueue[targetIndex], currentQueue, targetIndex);
+          const resumeAt = restoredPositionSecondsRef.current;
+          if (resumeAt > 1) {
+            await TrackPlayer.seekTo(resumeAt).catch(() => {});
+          }
+          restoredPositionSecondsRef.current = 0;
           return;
         }
       }
     } catch (error) {
       // Silent fail
     }
-  }, [currentSong, ensurePlayerReady, isPlayerReady, loadAndPlaySong, resolvedIsPlaying, showPlaybackNotice]);
+  }, [currentSong, ensurePlayerReady, isPlayerReady, loadAndPlaySong, nativeQueueHasTrackAt, resolvedIsPlaying, showPlaybackNotice]);
 
   const nextSong = useCallback(async () => {
     try {

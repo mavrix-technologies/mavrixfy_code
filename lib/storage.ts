@@ -325,6 +325,8 @@ export interface PersistedPlayerState {
   currentSong: Song | null;
   queue: Song[];
   queueIndex: number;
+  positionSeconds?: number;
+  updatedAt?: number;
 }
 
 export async function savePlayerState(state: PersistedPlayerState): Promise<void> {
