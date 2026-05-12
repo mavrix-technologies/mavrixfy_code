@@ -81,25 +81,6 @@ export const trackPlayerService = async () => {
     TrackPlayer.seekTo(e.position)
   );
 
-  // ── Jump forward / backward (iOS lock screen scrubber, Android notification)
-  TrackPlayer.addEventListener(Event.RemoteJumpForward, async (e) => {
-    try {
-      const p = await TrackPlayer.getProgress();
-      await TrackPlayer.seekTo(
-        Math.min((p?.position ?? 0) + (e.interval ?? 15), p?.duration ?? 0)
-      );
-    } catch { /* silent */ }
-  });
-
-  TrackPlayer.addEventListener(Event.RemoteJumpBackward, async (e) => {
-    try {
-      const p = await TrackPlayer.getProgress();
-      await TrackPlayer.seekTo(
-        Math.max((p?.position ?? 0) - (e.interval ?? 15), 0)
-      );
-    } catch { /* silent */ }
-  });
-
   // ── Audio focus / ducking (calls, navigation, alarms) ─────────────────────
   // Official RNTP duck handling: https://rntp.dev/docs/api/events#remoteduck
   TrackPlayer.addEventListener(Event.RemoteDuck, async (e) => {

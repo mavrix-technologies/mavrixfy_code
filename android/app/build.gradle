@@ -111,8 +111,9 @@ android {
                 keyAlias MAVRIXFY_KEY_ALIAS
                 keyPassword MAVRIXFY_KEY_PASSWORD
             } else {
-                // Fallback to debug keystore for local unsigned builds
-                storeFile file('debug.keystore')
+                // Fallback to the user debug keystore for local release builds.
+                // Its SHA-1 is registered in Firebase for Google Sign-In.
+                storeFile file("${System.getProperty('user.home')}/.android/debug.keystore")
                 storePassword 'android'
                 keyAlias 'androiddebugkey'
                 keyPassword 'android'

@@ -196,7 +196,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setFirebaseUser(fbUser);
       setIsGuest(false);
     } else {
-      throw new Error("Google Sign-In on native requires expo-auth-session. Use the mobile Google Sign-In button instead.");
+      throw new Error("Google Sign-In on native should use the mobile Google sign-in flow.");
     }
   }, [buildAppUser]);
 

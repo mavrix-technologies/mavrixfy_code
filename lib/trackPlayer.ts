@@ -63,8 +63,6 @@ async function configurePlayerOptions(): Promise<void> {
           Capability.SkipToNext,
           Capability.SkipToPrevious,
           Capability.SeekTo,
-          Capability.JumpForward,
-          Capability.JumpBackward,
           Capability.PlayFromId,
           Capability.PlayFromSearch,
         ],
@@ -88,10 +86,6 @@ async function configurePlayerOptions(): Promise<void> {
           Capability.SkipToPrevious,
           Capability.SeekTo,
         ],
-
-        // ── Jump intervals (shown on iOS lock screen and Android notification)
-        forwardJumpInterval:  15,
-        backwardJumpInterval: 15,
 
         // ── Progress update interval ──────────────────────────────────────
         // 1 second is the Apple-recommended interval for MPNowPlayingInfoCenter.

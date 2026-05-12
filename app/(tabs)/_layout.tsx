@@ -227,6 +227,11 @@ export function AppNavBar() {
     if (!raw) return [] as string[];
     return raw.split(",").map((id) => id.trim()).filter(Boolean);
   }, [lastMix?.songIds]);
+  const mixChipImages = useMemo(() => {
+    const raw = lastMix?.images ?? "";
+    if (!raw) return [] as string[];
+    return raw.split(",").map((image) => image.trim()).filter(Boolean);
+  }, [lastMix?.images]);
   const isPlayingFromLastMix = useMemo(() => {
     if (!isPlaying || !activeSongId || lastMixSongIds.length === 0) return false;
     if (!lastMixSongIds.includes(activeSongId)) return false;
@@ -234,6 +239,11 @@ export function AppNavBar() {
     const mixSet = new Set(lastMixSongIds);
     return queue.every((song) => mixSet.has(song.id));
   }, [activeSongId, isPlaying, lastMixSongIds, queue]);
+  const openLastMix = useCallback(() => {
+    if (!lastMix) return;
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    router.push({ pathname: "/artist-mix", params: lastMix });
+  }, [lastMix, router]);
 
   // ── Mix chip drag-to-delete ───────────────────────────────────────────────
   const [isDragging, setIsDragging] = useState(false);
@@ -553,6 +563,55 @@ export function AppNavBar() {
               </View>
 
               <View style={styles.playerControls}>
+                {lastMix ? (
+                  <Animated.View
+                    style={[
+                      styles.mixChipWrap,
+                      {
+                        opacity: chipOpacity,
+                        transform: [{ translateX: dragX }, { scale: chipScale }],
+                      },
+                    ]}
+                    {...panResponder.panHandlers}
+                  >
+                    <Pressable
+                      onPress={openLastMix}
+                      onLongPress={startMixDrag}
+                      delayLongPress={280}
+                      hitSlop={8}
+                      style={[
+                        styles.mixChip,
+                        isDragging && styles.mixChipDragging,
+                        overTrash && styles.mixChipDeleteReady,
+                      ]}
+                    >
+                      <View style={styles.mixChipAvatars}>
+                        {mixChipImages.slice(0, 3).map((image, index) => (
+                          <Image
+                            key={`${image}-${index}`}
+                            source={{ uri: image }}
+                            style={[
+                              styles.mixChipAvatar,
+                              index > 0 ? { marginLeft: -8 } : null,
+                            ]}
+                            contentFit="cover"
+                            cachePolicy="memory-disk"
+                          />
+                        ))}
+                        {mixChipImages.length === 0 ? (
+                          <View style={styles.mixChipAvatar}>
+                            <Ionicons name="people" size={12} color="rgba(255,255,255,0.82)" />
+                          </View>
+                        ) : null}
+                      </View>
+                      <Ionicons
+                        name={overTrash ? "trash" : "albums"}
+                        size={16}
+                        color={overTrash ? "#ff6b6b" : "rgba(255,255,255,0.9)"}
+                      />
+                    </Pressable>
+                  </Animated.View>
+                ) : null}
                 <Pressable
                   onPress={() => {
                     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
@@ -595,7 +654,6 @@ export function AppNavBar() {
                 >
                   <Ionicons name="list" size={24} color={miniSecondaryIconColor} />
                 </Pressable>
-                {/* Re-open last artist mix — outside main Pressable to avoid conflict */}
               </View>
             </Pressable>
 
@@ -611,6 +669,27 @@ export function AppNavBar() {
               />
             </View>
 
+            <Animated.View
+              pointerEvents={isDragging ? "auto" : "none"}
+              style={[
+                styles.mixTrashDock,
+                overTrash && styles.mixTrashDockActive,
+                {
+                  opacity: trashOpacity,
+                  transform: [
+                    { translateX: trashShiftX },
+                    { translateY: trashShiftY },
+                    { scale: trashScale },
+                  ],
+                },
+              ]}
+            >
+              <Ionicons
+                name={overTrash ? "trash" : "trash-outline"}
+                size={17}
+                color={overTrash ? "#ff6b6b" : "rgba(255,255,255,0.84)"}
+              />
+            </Animated.View>
           </View>
         ) : null}
 
@@ -1033,7 +1112,7 @@ export default function TabLayout() {
   const tabsNavigationRef = React.useRef<any>(null);
   const preloadTimersRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  const shouldHideTabBar = pathname?.includes("/import-songs/file");
+  const shouldHideTabBar = pathname?.startsWith("/import-songs");
 
   // NativeTabs only work correctly when distributed via App Store or TestFlight.
   // Sideloaded / unsigned IPAs run with __DEV__ = false but lack the required

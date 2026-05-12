@@ -19,19 +19,11 @@ import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
 import { setHapticsPreference } from "@/lib/haptics";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/storage";
 import { safeGoBack } from "@/utils/navigation";
-import { useKeepAwake, type SleepTimerMs } from "@/contexts/KeepAwakeContext";
 
 const QUALITY_OPTIONS: { label: string; value: "low" | "medium" | "high" }[] = [
   { label: "Low", value: "low" },
   { label: "Medium", value: "medium" },
   { label: "High", value: "high" },
-];
-
-const SLEEP_OPTIONS: { label: string; ms: SleepTimerMs }[] = [
-  { label: "Off",    ms: null },
-  { label: "1 min",  ms: 60_000 },
-  { label: "5 min",  ms: 300_000 },
-  { label: "10 min", ms: 600_000 },
 ];
 
 type SettingsRowProps = {
@@ -96,9 +88,6 @@ export default function ProfileScreen() {
     normalizeVolume: false,
   });
 
-  // ── Keep-awake & sleep timer — from global context ──────────────────────────
-  const { keepAwake, sleepMs, remainingMs, isDimmed, setKeepAwake, setSleepTimer } = useKeepAwake();
-
   useEffect(() => {
     let mounted = true;
     getSettings().then((s) => {
@@ -161,75 +150,6 @@ export default function ProfileScreen() {
           </Text>
           {user?.email ? (
             <Text style={styles.heroEmail}>{user.email}</Text>
-          ) : null}
-        </View>
-
-        {/* Display */}
-        <Text style={styles.sectionTitle}>Display</Text>
-        <View style={styles.rowsSurface}>
-          {/* Keep screen on */}
-          <SettingsRow
-            icon="sunny-outline"
-            title="Keep screen on"
-            subtitle="Screen stays awake while music plays"
-            first
-            trailing={
-              <Switch
-                value={keepAwake}
-                onValueChange={(v) => {
-                  setKeepAwake(v);
-                  if (!v) setSleepTimer(null);
-                }}
-                trackColor={{ false: Colors.inactive, true: Colors.primary }}
-                thumbColor={Colors.text}
-              />
-            }
-          />
-
-          {/* Sleep timer — only shown when keep-awake is on */}
-          {keepAwake ? (
-            <View style={[styles.controlBlock, styles.controlBlockBorder]}>
-              <View style={styles.controlHeader}>
-                <View style={styles.rowLeading}>
-                  <Ionicons name="moon-outline" size={20} color={Colors.primary} />
-                </View>
-                <Text style={styles.rowTitle}>Sleep timer</Text>
-                {remainingMs !== null ? (
-                  <Text style={styles.valuePill}>
-                    {Math.ceil(remainingMs / 1000)}s
-                  </Text>
-                ) : sleepMs !== null ? (
-                  <Text style={styles.valuePill}>
-                    {SLEEP_OPTIONS.find((o) => o.ms === sleepMs)?.label ?? "On"}
-                  </Text>
-                ) : null}
-              </View>
-              <View style={styles.segmentRow}>
-                {SLEEP_OPTIONS.map((opt) => {
-                  const active = sleepMs === opt.ms;
-                  return (
-                    <Pressable
-                      key={opt.label}
-                      style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-                      onPress={() => setSleepTimer(opt.ms)}
-                    >
-                      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                        {opt.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {remainingMs !== null ? (
-                <Text style={styles.sleepCountdown}>
-                  Screen dims in {Math.ceil(remainingMs / 1000)}s · music keeps playing
-                </Text>
-              ) : isDimmed ? (
-                <Text style={styles.sleepCountdown}>
-                  Screen dimmed · tap anywhere to wake
-                </Text>
-              ) : null}
-            </View>
           ) : null}
         </View>
 
@@ -477,14 +397,6 @@ const styles = StyleSheet.create({
     color: Colors.text, fontSize: 13, paddingHorizontal: 10, paddingVertical: 4,
     borderRadius: 999, backgroundColor: "rgba(255,255,255,0.06)",
     overflow: "hidden", fontFamily: "Inter_600SemiBold", marginLeft: "auto",
-  },
-
-  sleepCountdown: {
-    marginTop: 10,
-    color: "rgba(255,255,255,0.4)",
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
   },
 
   // Rows

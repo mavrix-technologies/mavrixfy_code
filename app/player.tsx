@@ -1053,7 +1053,10 @@ function LegacyPlayerScreen() {
                 ]}
               >
                 <View
-                  style={styles.progressTouch}
+                  style={[
+                    styles.progressTouch,
+                    Platform.OS === "ios" && styles.progressTouchIOS,
+                  ]}
                   onLayout={handleProgressLayout}
                 >
                   {usesResponderSeek ? (
@@ -1079,7 +1082,25 @@ function LegacyPlayerScreen() {
                       />
                     </View>
                   ) : null}
-                  {usesResponderSeek ? (
+                  {Platform.OS === "ios" ? (
+                    <Slider
+                      style={[
+                        styles.progressSliderNative,
+                        styles.progressSliderIOS,
+                      ]}
+                      minimumValue={0}
+                      maximumValue={1}
+                      value={visualProgress}
+                      disabled={!canSeek}
+                      minimumTrackTintColor={progressFillColor}
+                      maximumTrackTintColor={progressTrackColor}
+                      thumbTintColor={progressThumbColor}
+                      tapToSeek={true}
+                      onSlidingStart={handleSlidingStart}
+                      onValueChange={handleSliderValueChange}
+                      onSlidingComplete={handleSlidingComplete}
+                    />
+                  ) : usesResponderSeek ? (
                     <View
                       style={[
                         styles.progressGestureResponder,
@@ -1103,7 +1124,7 @@ function LegacyPlayerScreen() {
                       minimumTrackTintColor={progressFillColor}
                       maximumTrackTintColor={progressTrackColor}
                       thumbTintColor={progressThumbColor}
-                      tapToSeek={Platform.OS === "ios"}
+                      tapToSeek={false}
                       onSlidingStart={handleSlidingStart}
                       onValueChange={handleSliderValueChange}
                       onSlidingComplete={handleSlidingComplete}
@@ -1658,6 +1679,10 @@ const styles = StyleSheet.create({
     position: "relative",
     height: 28,
   },
+  progressTouchIOS: {
+    height: 44,
+    paddingVertical: 8,
+  },
   progressVisual: {
     position: "absolute",
     left: 0,
@@ -1695,6 +1720,9 @@ const styles = StyleSheet.create({
   progressSliderNative: {
     width: "100%",
     height: 28,
+  },
+  progressSliderIOS: {
+    height: 44,
   },
   progressGestureResponder: {
     position: "absolute",

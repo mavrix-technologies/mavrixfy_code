@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
+import Constants from "expo-constants";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import { triggerNotification } from "@/lib/haptics";
@@ -84,6 +85,7 @@ export default function LoginScreen() {
   const isUltraShort = screenHeight <= 690;
   const isWide = screenWidth >= 960 && screenHeight >= 640;
   const isNarrow = screenWidth <= 360;
+  const isExpoGo = Constants.appOwnership === "expo";
   const shellMaxWidth = Math.min(isWide ? 980 : 460, screenWidth - 32);
   const logoSize = isUltraShort ? 42 : 50;
   const cardPadding = isUltraShort ? 16 : isShort ? 18 : 24;
@@ -335,22 +337,24 @@ export default function LoginScreen() {
 
               {!isSignup ? (
                 <View style={styles.authActionStack}>
-                  <Pressable
-                    style={[styles.oauthButton, { height: primaryButtonHeight }]}
-                    onPress={handleGoogleSignIn}
-                    disabled={googleLoading}
-                  >
-                    {googleLoading ? (
-                      <ActivityIndicator size="small" color={Colors.black} />
-                    ) : (
-                      <>
-                        <View style={styles.oauthIconWrap}>
-                          <MaterialCommunityIcons name="google" size={18} color="#DB4437" />
-                        </View>
-                        <Text style={styles.oauthButtonText}>Continue with Google</Text>
-                      </>
-                    )}
-                  </Pressable>
+                  {!isExpoGo ? (
+                    <Pressable
+                      style={[styles.oauthButton, { height: primaryButtonHeight }]}
+                      onPress={handleGoogleSignIn}
+                      disabled={googleLoading}
+                    >
+                      {googleLoading ? (
+                        <ActivityIndicator size="small" color={Colors.black} />
+                      ) : (
+                        <>
+                          <View style={styles.oauthIconWrap}>
+                            <MaterialCommunityIcons name="google" size={18} color="#DB4437" />
+                          </View>
+                          <Text style={styles.oauthButtonText}>Continue with Google</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  ) : null}
 
                   <Pressable
                     style={[styles.secondaryButton, { height: primaryButtonHeight }]}
@@ -360,11 +364,13 @@ export default function LoginScreen() {
                     <Text style={styles.secondaryButtonText}>Continue As A Guest</Text>
                   </Pressable>
 
-                  <View style={styles.dividerRow}>
-                    <View style={styles.dividerLine} />
-                    <Text style={styles.dividerText}>or use email</Text>
-                    <View style={styles.dividerLine} />
-                  </View>
+                  {!isExpoGo ? (
+                    <View style={styles.dividerRow}>
+                      <View style={styles.dividerLine} />
+                      <Text style={styles.dividerText}>or use email</Text>
+                      <View style={styles.dividerLine} />
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
 

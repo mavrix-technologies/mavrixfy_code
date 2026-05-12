@@ -4,14 +4,13 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, StyleSheet, View, Text } from "react-native";
+import { ActivityIndicator, Platform, View, Text } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from "@expo-google-fonts/inter";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
 import { PlayerProvider } from "@/contexts/PlayerContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import { KeepAwakeProvider, useKeepAwake } from "@/contexts/KeepAwakeContext";
 import { DownloadProvider } from "@/contexts/DownloadContext";
 import { NetworkProvider } from "@/contexts/NetworkContext";
 import Colors from "@/constants/colors";
@@ -21,7 +20,7 @@ import { getRecentlyPlayed } from "@/lib/storage";
 import { AppNavBar } from "@/app/(tabs)/_layout";
 
 // Screens where the nav bar must not appear
-const NAV_HIDDEN_SEGMENTS = new Set(["login", "onboarding"]);
+const NAV_HIDDEN_SEGMENTS = new Set(["login", "onboarding", "import-songs"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
@@ -49,26 +48,12 @@ const PROTECTED_SEGMENTS = ["(tabs)"];
 // Routes that are only for unauthenticated users
 const AUTH_ONLY_SEGMENTS = ["login"];
 
-/** Invisible full-screen overlay — captures any tap to restore brightness */
-function WakeOverlay() {
-  const { isDimmed, wakeUp } = useKeepAwake();
-  if (!isDimmed) return null;
-  return (
-    <Pressable
-      style={[StyleSheet.absoluteFillObject, { backgroundColor: "#000", zIndex: 99999 }]}
-      onPress={wakeUp}
-      accessible={false}
-    />
-  );
-}
-
 function RootLayoutNav() {
   const router = useRouter();
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
-  const { registerActivity } = useKeepAwake();
 
-  // Hide the nav bar on auth/onboarding screens
+  // Hide the nav bar on full-screen auth/onboarding/import screens
   const hideNavBar = NAV_HIDDEN_SEGMENTS.has(segments[0] as string);
 
   useEffect(() => {
@@ -105,7 +90,7 @@ function RootLayoutNav() {
   }, [loading, isAuthenticated, isGuest, firebaseUser, segments, router]);
 
   return (
-    <View style={{ flex: 1 }} onTouchStart={registerActivity}>
+    <View style={{ flex: 1 }}>
       <Stack
         screenOptions={{
           headerShown: false,
@@ -155,8 +140,20 @@ function RootLayoutNav() {
         <Stack.Screen
           name="artist-mix"
           options={{
-            presentation: "modal",
-            gestureEnabled: false,
+            ...(Platform.OS === "android"
+              ? {
+                  presentation: "formSheet",
+                  sheetAllowedDetents: [1],
+                  sheetInitialDetentIndex: 0,
+                  sheetCornerRadius: 24,
+                  sheetGrabberVisible: true,
+                }
+              : {
+                  presentation: "modal",
+                  gestureEnabled: true,
+                  gestureDirection: "vertical",
+                  fullScreenGestureEnabled: true,
+                }),
           }}
         />
         <Stack.Screen
@@ -250,11 +247,8 @@ export default function RootLayout() {
               <AuthProvider>
                 <DownloadProvider>
                   <PlayerProvider>
-                    <KeepAwakeProvider>
                     <StatusBar style="light" />
                     <RootLayoutNav />
-                    <WakeOverlay />
-                    </KeepAwakeProvider>
                   </PlayerProvider>
                 </DownloadProvider>
               </AuthProvider>

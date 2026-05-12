@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Song, Playlist } from "./musicData";
-import { getAuthApiUrl } from "./api-config";
 
 const KEYS = {
   LIKED_SONGS: "@mavrixfy_liked_songs",
@@ -151,64 +150,6 @@ export async function getUserPlaylists(): Promise<UserPlaylist[]> {
 
 export async function saveUserPlaylists(playlists: UserPlaylist[]): Promise<void> {
   await setJSON(KEYS.USER_PLAYLISTS, playlists);
-}
-
-/**
- * Fetch synced Spotify liked songs from backend and update local cache
- * Call this after Spotify connection to load new songs
- */
-export async function syncSpotifyLikedSongsToLocal(userId: string, backendUrl: string = getAuthApiUrl()): Promise<Song[]> {
-  try {
-    const baseUrl = backendUrl.replace(/\/+$/, "");
-    const response = await fetch(`${baseUrl}/api/spotify/liked-songs/${userId}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Backend returned ${response.status}: ${response.statusText}`);
-    }
-
-    const spotifySongs = await response.json();
-    
-    const convertedSongs: Song[] = spotifySongs.map((song: any) => ({
-      id: song.id || song.songId || song.trackId,
-      title: song.title || song.name || 'Unknown',
-      artist: song.artist || 'Unknown Artist',
-      coverUrl: song.imageUrl || song.coverUrl || '',
-      audioUrl: song.audioUrl || song.previewUrl || '',
-      duration: song.duration || 0,
-      album: song.album || song.albumName || '',
-      source: 'spotify' as const,
-    }));
-
-    const existingData = await getLikedSongsData();
-    const existingMap = new Map(existingData.map(s => [s.id, s]));
-    
-    const newSongs: Song[] = [];
-    for (const song of convertedSongs) {
-      if (!existingMap.has(song.id)) {
-        newSongs.push(song);
-      }
-    }
-
-    const mergedSongs = [...newSongs, ...existingData];
-    const mergedIds = mergedSongs.map(s => s.id);
-
-    await Promise.all([
-      setJSON(KEYS.LIKED_SONGS, mergedIds),
-      setJSON(KEYS.LIKED_SONGS_DATA, mergedSongs),
-    ]);
-
-    memoryCache.delete(KEYS.LIKED_SONGS);
-    memoryCache.delete(KEYS.LIKED_SONGS_DATA);
-
-    return mergedSongs;
-  } catch {
-    return [];
-  }
 }
 
 export async function createUserPlaylist(name: string, description?: string): Promise<UserPlaylist> {

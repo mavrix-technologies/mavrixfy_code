@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import axios from 'axios';
-import { getAuthApiUrl, getMusicApiUrl } from '../lib/api-config';
+import { getMusicApiUrl } from '../lib/api-config';
 
 interface CSVSong {
   trackUri: string;
@@ -146,20 +146,6 @@ async function searchSong(song: CSVSong): Promise<SearchResult | null> {
     return jiosaavnResult;
   }
   
-  // Try Spotify API
-  const spotifyResult = await searchSpotify(song.trackName, primaryArtist, song);
-  if (spotifyResult) {
-    console.log(`✓ Found on Spotify: ${spotifyResult.title}`);
-    return spotifyResult;
-  }
-  
-  // Try Deezer
-  const deezerResult = await searchDeezer(song.trackName, primaryArtist, song);
-  if (deezerResult) {
-    console.log(`✓ Found on Deezer: ${deezerResult.title}`);
-    return deezerResult;
-  }
-  
   console.log(`✗ Not found: "${song.trackName}" by ${primaryArtist}`);
   return null;
 }
@@ -207,104 +193,6 @@ async function searchJioSaavn(title: string, artist: string, originalSong: CSVSo
     }
   } catch (error: any) {
     console.error('JioSaavn search error:', error.message);
-  }
-  
-  return null;
-}
-
-// Search Spotify
-async function searchSpotify(title: string, artist: string, originalSong: CSVSong): Promise<SearchResult | null> {
-  try {
-    const API_BASE = getAuthApiUrl().replace(/\/+$/, '');
-    const query = `${title} ${artist}`;
-    
-    const response = await axios.get(`${API_BASE}/api/music/search`, {
-      params: { q: query, limit: 10 },
-      timeout: 10000
-    });
-    
-    if (response.data?.songs) {
-      const results = response.data.songs;
-      let bestMatch: any = null;
-      let bestScore = 0;
-      
-      for (const result of results) {
-        const titleScore = calculateSimilarity(originalSong.trackName, result.title);
-        const artistScore = calculateSimilarity(artist, result.artist);
-        const durationDiff = Math.abs(originalSong.duration - (result.duration * 1000));
-        const durationScore = 1 - Math.min(durationDiff / originalSong.duration, 1);
-        
-        const totalScore = (titleScore * 0.5) + (artistScore * 0.3) + (durationScore * 0.2);
-        
-        if (totalScore > bestScore && totalScore > 0.7) {
-          bestScore = totalScore;
-          bestMatch = result;
-        }
-      }
-      
-      if (bestMatch) {
-        return {
-          id: bestMatch._id,
-          title: bestMatch.title,
-          artist: bestMatch.artist,
-          album: bestMatch.albumId?.title || '',
-          duration: bestMatch.duration,
-          imageUrl: bestMatch.imageUrl,
-          audioUrl: bestMatch.audioUrl
-        };
-      }
-    }
-  } catch (error: any) {
-    console.error('Spotify search error:', error.message);
-  }
-  
-  return null;
-}
-
-// Search Deezer
-async function searchDeezer(title: string, artist: string, originalSong: CSVSong): Promise<SearchResult | null> {
-  try {
-    const API_BASE = getAuthApiUrl().replace(/\/+$/, '');
-    const query = `${title} ${artist}`;
-    
-    const response = await axios.get(`${API_BASE}/api/deezer/search`, {
-      params: { q: query, limit: 10 },
-      timeout: 10000
-    });
-    
-    if (response.data?.data) {
-      const results = response.data.data;
-      let bestMatch: any = null;
-      let bestScore = 0;
-      
-      for (const result of results) {
-        const titleScore = calculateSimilarity(originalSong.trackName, result.title);
-        const artistScore = calculateSimilarity(artist, result.artist?.name || '');
-        const durationDiff = Math.abs(originalSong.duration - (result.duration * 1000));
-        const durationScore = 1 - Math.min(durationDiff / originalSong.duration, 1);
-        
-        const totalScore = (titleScore * 0.5) + (artistScore * 0.3) + (durationScore * 0.2);
-        
-        if (totalScore > bestScore && totalScore > 0.7) {
-          bestScore = totalScore;
-          bestMatch = result;
-        }
-      }
-      
-      if (bestMatch) {
-        return {
-          id: bestMatch.id.toString(),
-          title: bestMatch.title,
-          artist: bestMatch.artist?.name || '',
-          album: bestMatch.album?.title || '',
-          duration: bestMatch.duration,
-          imageUrl: bestMatch.album?.cover_medium || '',
-          audioUrl: bestMatch.preview || ''
-        };
-      }
-    }
-  } catch (error: any) {
-    console.error('Deezer search error:', error.message);
   }
   
   return null;

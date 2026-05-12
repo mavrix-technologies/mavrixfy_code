@@ -7,22 +7,64 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:816396705670:android:005e724df7139772521607",
+        "mobilesdk_app_id": "1:816396705670:android:ea77d3367daf1133521607",
         "android_client_info": {
           "package_name": "com.mavrixfy.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "816396705670-2le5dptffdhjf50t9vasqbnneq5eh94m.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mavrixfy.app",
+            "certificate_hash": "526e353a4f93c904f5e9025be8b5c94abb94dbae"
+          }
+        },
+        {
+          "client_id": "816396705670-j6c1b40flmigimggq6ci78gsm15q1v12.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mavrixfy.app",
+            "certificate_hash": "b1da1e239a360b6e6e8957a740b3adbe81599789"
+          }
+        },
+        {
+          "client_id": "816396705670-qaueofaov56n1qq5a8s8h5n72p61b8ut.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mavrixfy.app",
+            "certificate_hash": "64dc68b818d4722a3586a1601699dca090225ee6"
+          }
+        },
+        {
+          "client_id": "816396705670-upf8vphb0vfr52fk09qltluou7auemid.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
-          "current_key": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE"
+          "current_key": "AIzaSyDVOxJBYKBZP-uQsPn-zXu8sKuNq8Cd0Yk"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "816396705670-upf8vphb0vfr52fk09qltluou7auemid.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "816396705670-sqntkglrgh5s76vhn6k8q4j1c4orrplu.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.mavrixfy.app"
+              }
+            }
+          ]
         }
-      }
+      },
+      "admob_app_id": "ca-app-pub-6003470714469240~3819547231"
     }
   ],
   "configuration_version": "1"

@@ -6,14 +6,12 @@
     "orientation": "portrait",
     "icon": "./assets/images/mavrixfy_icone.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
     "splash": {
       "image": "./assets/images/mavrixfy_icone.png",
       "resizeMode": "contain",
       "backgroundColor": "#121212"
     },
     "ios": {
-      "newArchEnabled": false,
       "scheme": "mavrixfy",
       "supportsTablet": true,
       "icon": "./assets/images/mavrixfy_icon_ios.png",
@@ -31,7 +29,6 @@
       }
     },
     "android": {
-      "newArchEnabled": false,
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
       "versionCode": 20501,
@@ -111,8 +108,8 @@
       "./plugins/withSliderBuildFix",
       "@react-native-community/datetimepicker",
       "expo-audio",
-      "expo-brightness",
-      "expo-asset"
+      "expo-asset",
+      "@react-native-google-signin/google-signin"
     ],
     "experiments": {
       "typedRoutes": true
@@ -131,7 +128,6 @@
     },
     "runtimeVersion": "2.5.0",
     "extra": {
-      "domain": "spotify-api-drab.vercel.app",
       "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",
       "firebaseAuthDomain": "spotify-8fefc.firebaseapp.com",
@@ -140,6 +136,7 @@
       "firebaseMessagingSenderId": "816396705670",
       "firebaseAppId": "1:816396705670:web:005e724df7139772521607",
       "firebaseMeasurementId": "G-FQJS8LREP5",
+      "googleWebClientId": "816396705670-upf8vphb0vfr52fk09qltluou7auemid.apps.googleusercontent.com",
       "eas": {
         "projectId": "93293119-93b7-4dbb-acdd-7241771254c4"
       }
