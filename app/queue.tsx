@@ -1,260 +1,570 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  FlatList,
+  InteractionManager,
+  Platform,
   Pressable,
   StyleSheet,
-  Platform,
-  ListRenderItem,
+  Text,
+  View,
+  useWindowDimensions,
 } from "react-native";
 import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
+import DraggableFlatList, {
+  ScaleDecorator,
+  type RenderItemParams,
+} from "react-native-draggable-flatlist";
+import { Swipeable } from "react-native-gesture-handler";
 import Colors from "@/constants/colors";
 import { usePlayer } from "@/contexts/PlayerContext";
 import { Song } from "@/lib/musicData";
 
-type QueueItem = {
-  type: "header" | "now-playing" | "up-next-header" | "song" | "empty";
-  song?: Song;
-  index?: number;
+type DraggableQueueItem = {
+  song: Song;
+  index: number;
+  key: string;
 };
 
+const SHEET_BACKGROUND = "#1E1E1E";
+const CONTROL_BACKGROUND = "#333333";
+const HANDLE_COLOR = "#6D6D6D";
+const SWIPE_ACTION_WIDTH = 92;
+
+const QueueSwipeRow = React.memo(
+  ({
+    item,
+    onPress,
+    onRemove,
+    onSwipeOpen,
+    onDrag,
+    isDragging,
+  }: {
+    item: Song;
+    onPress: () => void;
+    onRemove: () => void;
+    onSwipeOpen: (ref: Swipeable | null) => void;
+    onDrag: () => void;
+    isDragging?: boolean;
+  }) => {
+    const swipeableRef = React.useRef<Swipeable | null>(null);
+
+    const handleRemove = React.useCallback(() => {
+      swipeableRef.current?.close();
+      onRemove();
+    }, [onRemove]);
+
+    const renderRightActions = React.useCallback(() => (
+      <Pressable style={styles.removeAction} onPress={handleRemove}>
+        <Ionicons name="trash" size={20} color="#FFFFFF" />
+        <Text style={styles.removeText}>Remove</Text>
+      </Pressable>
+    ), [handleRemove]);
+
+    return (
+      <ScaleDecorator activeScale={1.035}>
+        <View style={[styles.swipeWrap, isDragging && styles.draggingRow]}>
+          <Swipeable
+            ref={swipeableRef}
+            enabled={!isDragging}
+            friction={1.25}
+            rightThreshold={22}
+            dragOffsetFromRightEdge={8}
+            overshootRight={false}
+            enableTrackpadTwoFingerGesture
+            onSwipeableWillOpen={() => onSwipeOpen(swipeableRef.current)}
+            renderRightActions={renderRightActions}
+          >
+            <View style={styles.rowLayer}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.queueRow,
+                  pressed && styles.rowPressed,
+                ]}
+                onPress={() => {
+                  swipeableRef.current?.close();
+                  onPress();
+                }}
+              >
+                <Image
+                  recyclingKey={item.id}
+                  source={{ uri: item.coverUrl }}
+                  style={styles.queueArtwork}
+                  contentFit="cover"
+                />
+                <View style={styles.queueText}>
+                  <Text style={styles.queueTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <Text style={styles.queueArtist} numberOfLines={1}>
+                    {item.artist || "Unknown Artist"}
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.dragHandle}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  delayLongPress={120}
+                  onLongPress={onDrag}
+                >
+                  <Ionicons name="menu" size={24} color={isDragging ? Colors.primary : "#7A7A7A"} />
+                </Pressable>
+              </Pressable>
+            </View>
+          </Swipeable>
+        </View>
+      </ScaleDecorator>
+    );
+  }
+);
+
+QueueSwipeRow.displayName = "QueueSwipeRow";
 export default function QueueScreen() {
   const insets = useSafeAreaInsets();
-  const { queue, queueIndex, currentSong, playSong, removeFromQueue } = usePlayer();
+  const { height } = useWindowDimensions();
+  const {
+    queue,
+    queueIndex,
+    currentSong,
+    isShuffled,
+    playSong,
+    removeFromQueue,
+    reorderQueue,
+    shuffleQueue,
+    sleepTimer,
+  } = usePlayer();
+  const openSwipeableRef = useRef<Swipeable | null>(null);
+  const lastPlaceholderIndexRef = useRef<number | null>(null);
+  const [listReady, setListReady] = useState(false);
+  const isCompactHeight = height < 760;
+  const bottomListSpacer = isCompactHeight ? 40 : 56;
 
-  const topInset = Platform.OS === "web" ? 67 : insets.top;
+  useEffect(() => {
+    let mountTimer: ReturnType<typeof setTimeout> | null = null;
+    let didMountList = false;
+    const showList = () => {
+      if (didMountList) return;
+      didMountList = true;
+      setListReady(true);
+    };
 
-  const handleSongPress = useCallback((song: Song) => {
-    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    playSong(song, queue);
-  }, [playSong, queue]);
-
-  const handleRemove = useCallback((index: number) => {
-    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    removeFromQueue(index);
-  }, [removeFromQueue]);
-
-  const upNext = queue.slice(queueIndex + 1);
-
-  // Build flat data structure for FlatList
-  const data: QueueItem[] = [];
-  
-  if (currentSong) {
-    data.push({ type: "now-playing", song: currentSong });
-  }
-  
-  if (upNext.length > 0) {
-    data.push({ type: "up-next-header" });
-    upNext.forEach((song, idx) => {
-      data.push({ type: "song", song, index: queueIndex + 1 + idx });
+    const task = InteractionManager.runAfterInteractions(() => {
+      mountTimer = setTimeout(showList, 90);
     });
-  } else if (!currentSong) {
-    data.push({ type: "empty" });
-  }
+    const fallbackTimer = setTimeout(showList, 280);
 
-  const renderItem: ListRenderItem<QueueItem> = useCallback(({ item }) => {
-    if (item.type === "now-playing" && item.song) {
-      return (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Now Playing</Text>
-          <Pressable
-            style={styles.songRow}
-            onPress={() => router.push("/player")}
-          >
-            <Image
-              recyclingKey={item.song.id}
-              source={{ uri: item.song.coverUrl }}
-              style={styles.songImage}
-              contentFit="cover"
-            />
-            <View style={styles.songInfo}>
-              <Text style={styles.songTitle} numberOfLines={1}>
-                {item.song.title}
-              </Text>
-              <Text style={styles.songArtist} numberOfLines={1}>
-                {item.song.artist}
-              </Text>
-            </View>
-            <Ionicons name="musical-notes" size={20} color={Colors.primary} />
-          </Pressable>
-        </View>
-      );
-    }
-
-    if (item.type === "up-next-header") {
-      return (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Up Next ({upNext.length})</Text>
-        </View>
-      );
-    }
-
-    if (item.type === "song" && item.song && typeof item.index === "number") {
-      return (
-        <Pressable
-          style={[styles.songRow, styles.songRowPadded]}
-          onPress={() => handleSongPress(item.song!)}
-        >
-          <Image
-            recyclingKey={item.song.id}
-            source={{ uri: item.song.coverUrl }}
-            style={styles.songImage}
-            contentFit="cover"
-          />
-          <View style={styles.songInfo}>
-            <Text style={styles.songTitle} numberOfLines={1}>
-              {item.song.title}
-            </Text>
-            <Text style={styles.songArtist} numberOfLines={1}>
-              {item.song.artist}
-            </Text>
-          </View>
-          <Pressable
-            onPress={() => handleRemove(item.index!)}
-            hitSlop={10}
-            style={styles.removeBtn}
-          >
-            <Ionicons name="close-circle" size={24} color={Colors.subtext} />
-          </Pressable>
-        </Pressable>
-      );
-    }
-
-    if (item.type === "empty") {
-      return (
-        <View style={styles.emptyState}>
-          <Ionicons name="list-outline" size={64} color={Colors.inactive} />
-          <Text style={styles.emptyText}>Queue is empty</Text>
-          <Text style={styles.emptySubtext}>
-            Add songs to your queue to see them here
-          </Text>
-        </View>
-      );
-    }
-
-    return null;
-  }, [handleSongPress, handleRemove, upNext.length]);
-
-  const keyExtractor = useCallback((item: QueueItem, index: number) => {
-    if (item.type === "song" && item.song) {
-      return `song-${item.song.id}-${item.index}`;
-    }
-    return `${item.type}-${index}`;
+    return () => {
+      task.cancel();
+      clearTimeout(fallbackTimer);
+      if (mountTimer) {
+        clearTimeout(mountTimer);
+      }
+    };
   }, []);
 
-  return (
-    <View style={styles.container}>
-      <LinearGradient
-        colors={["#2a2a2a", "#1a1a1a", Colors.background]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={[styles.gradientHeader, { paddingTop: topInset }]}
-      >
-        <View style={styles.headerRow}>
-          <View style={styles.headerSideSlot}>
-            <Pressable onPress={() => router.back()} hitSlop={10}>
-              <Ionicons name="chevron-back" size={28} color={Colors.text} />
-            </Pressable>
-          </View>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            Queue
-          </Text>
-          <View style={styles.headerSideSlot} />
-        </View>
-      </LinearGradient>
+  const nowPlaying = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
+  const upcomingQueue = useMemo(
+    () => queue.slice(Math.max(0, queueIndex + 1)).filter((song) => Boolean(song?.id)),
+    [queue, queueIndex]
+  );
 
-      <FlatList
-        data={data}
-        renderItem={renderItem}
-        keyExtractor={keyExtractor}
-        contentContainerStyle={{ paddingBottom: 120 }}
-        showsVerticalScrollIndicator={false}
-        removeClippedSubviews={true}
-        maxToRenderPerBatch={10}
-        updateCellsBatchingPeriod={50}
-        windowSize={21}
-        initialNumToRender={15}
+  const data: DraggableQueueItem[] = useMemo(() => {
+    return upcomingQueue.map((song, idx) => ({
+      song,
+      index: queueIndex + 1 + idx,
+      key: `${song.id}-${queueIndex + 1 + idx}`,
+    }));
+  }, [queueIndex, upcomingQueue]);
+
+  const haptic = useCallback((style: Haptics.ImpactFeedbackStyle) => {
+    if (Platform.OS !== "web") {
+      void Haptics.impactAsync(style);
+    }
+  }, []);
+
+  const handleSongPress = useCallback((song: Song) => {
+    openSwipeableRef.current?.close();
+    haptic(Haptics.ImpactFeedbackStyle.Light);
+    playSong(song, queue);
+  }, [haptic, playSong, queue]);
+
+  const handleSwipeOpen = useCallback((ref: Swipeable | null) => {
+    if (openSwipeableRef.current && openSwipeableRef.current !== ref) {
+      openSwipeableRef.current.close();
+    }
+    openSwipeableRef.current = ref;
+  }, []);
+
+  const handleShuffle = useCallback(() => {
+    haptic(Haptics.ImpactFeedbackStyle.Medium);
+    void shuffleQueue();
+  }, [haptic, shuffleQueue]);
+
+  const handleTimer = useCallback(() => {
+    haptic(Haptics.ImpactFeedbackStyle.Light);
+    router.push("/sleep-timer");
+  }, [haptic]);
+
+  const handleDragBegin = useCallback(() => {
+    openSwipeableRef.current?.close();
+    lastPlaceholderIndexRef.current = null;
+    haptic(Haptics.ImpactFeedbackStyle.Medium);
+  }, [haptic]);
+
+  const handleDragEnd = useCallback(({ from, to }: { from: number; to: number }) => {
+    lastPlaceholderIndexRef.current = null;
+    if (from === to) return;
+    haptic(Haptics.ImpactFeedbackStyle.Heavy);
+    void reorderQueue(queueIndex + 1 + from, queueIndex + 1 + to);
+  }, [haptic, queueIndex, reorderQueue]);
+
+  const handlePlaceholderIndexChange = useCallback((placeholderIndex: number) => {
+    if (lastPlaceholderIndexRef.current === placeholderIndex) return;
+    lastPlaceholderIndexRef.current = placeholderIndex;
+    haptic(Haptics.ImpactFeedbackStyle.Light);
+  }, [haptic]);
+
+  const renderQueueSong = useCallback(({
+    item,
+    drag,
+    isActive,
+  }: RenderItemParams<DraggableQueueItem>) => {
+    return (
+      <QueueSwipeRow
+        item={item.song}
+        onPress={() => handleSongPress(item.song)}
+        onRemove={() => {
+          haptic(Haptics.ImpactFeedbackStyle.Medium);
+          void removeFromQueue(item.index);
+        }}
+        onSwipeOpen={handleSwipeOpen}
+        onDrag={drag}
+        isDragging={isActive}
       />
+    );
+  }, [handleSongPress, handleSwipeOpen, haptic, removeFromQueue]);
+
+  const keyExtractor = useCallback((item: DraggableQueueItem) => item.key, []);
+
+  return (
+    <View style={styles.root}>
+      <View style={styles.sheet}>
+        <View style={styles.headerContent}>
+          <View style={styles.grabber} />
+
+          <Text style={styles.title}>Queue</Text>
+          <Text style={styles.subtitle}>Playing Queue</Text>
+
+          {nowPlaying ? (
+            <Pressable
+              style={({ pressed }) => [styles.nowPlayingRow, pressed && styles.rowPressed]}
+              onPress={() => router.push("/player")}
+            >
+              <Image
+                recyclingKey={nowPlaying.id}
+                source={{ uri: nowPlaying.coverUrl }}
+                style={styles.nowArtwork}
+                contentFit="cover"
+              />
+              <View style={styles.nowText}>
+                <Text style={styles.nowTitle} numberOfLines={1}>
+                  {nowPlaying.title}
+                </Text>
+                <View style={styles.nowMetaRow}>
+                  <Ionicons name="list" size={20} color={Colors.primary} />
+                  <Text style={styles.nowArtist} numberOfLines={1}>
+                    {nowPlaying.artist || "Unknown Artist"}
+                  </Text>
+                </View>
+              </View>
+              <Pressable
+                onPress={() => router.push("/player")}
+                hitSlop={10}
+                style={styles.playButton}
+              >
+                <Ionicons name="play" size={34} color="#111111" />
+              </Pressable>
+            </Pressable>
+          ) : null}
+
+          {upcomingQueue.length > 0 ? (
+            <View style={styles.shufflingRow}>
+              <Ionicons name={isShuffled ? "shuffle" : "list"} size={23} color="#BEBEBE" />
+              <Text style={styles.shufflingText}>{isShuffled ? "Shuffling from:" : "Playing next"}</Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.listWrap}>
+          {listReady ? (
+            <DraggableFlatList
+              data={data}
+              renderItem={renderQueueSong}
+              keyExtractor={keyExtractor}
+              onDragBegin={handleDragBegin}
+              onDragEnd={handleDragEnd}
+              onPlaceholderIndexChange={handlePlaceholderIndexChange}
+              activationDistance={8}
+              autoscrollThreshold={148}
+              autoscrollSpeed={150}
+              dragItemOverflow
+              animationConfig={{
+                damping: 26,
+                mass: 0.55,
+                stiffness: 180,
+                overshootClamping: true,
+              }}
+              contentContainerStyle={styles.songListContent}
+              ListFooterComponent={<View style={{ height: bottomListSpacer }} />}
+              ListEmptyComponent={
+                nowPlaying ? null : (
+                  <View style={styles.emptyState}>
+                    <Ionicons name="list" size={42} color="#777777" />
+                    <Text style={styles.emptyTitle}>Queue is empty</Text>
+                    <Text style={styles.emptySubtitle}>Add songs to your queue to see them here</Text>
+                  </View>
+                )
+              }
+              showsVerticalScrollIndicator={false}
+              contentInsetAdjustmentBehavior="never"
+              removeClippedSubviews={false}
+              initialNumToRender={8}
+              maxToRenderPerBatch={6}
+              windowSize={9}
+            />
+          ) : (
+            <View style={styles.deferredListPlaceholder} />
+          )}
+        </View>
+
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          <Pressable
+            style={({ pressed }) => [styles.controlButton, pressed && styles.controlButtonPressed]}
+            onPress={handleShuffle}
+          >
+            <Ionicons name="shuffle" size={26} color={Colors.primary} />
+            <Text style={[styles.controlLabel, styles.controlLabelActive]}>Shuffle</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.controlButton, pressed && styles.controlButtonPressed]}
+            onPress={handleTimer}
+          >
+            <Ionicons name="timer-outline" size={28} color={sleepTimer ? Colors.primary : "#FFFFFF"} />
+            <Text style={[styles.controlLabel, sleepTimer && styles.controlLabelActive]}>
+              {sleepTimer ? sleepTimer.label : "Timer"}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: Colors.background,
+    justifyContent: "flex-end",
+    backgroundColor: "#000000",
   },
-  gradientHeader: {
-    paddingBottom: 16,
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  headerSideSlot: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerTitle: {
+  sheet: {
     flex: 1,
-    color: Colors.text,
-    fontSize: 17,
-    fontFamily: "Inter_600SemiBold",
-    textAlign: "center",
+    marginTop: 10,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    overflow: "hidden",
+    backgroundColor: SHEET_BACKGROUND,
   },
-  scrollView: {
+  headerContent: {
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  songListContent: {
+    paddingHorizontal: 18,
+  },
+  listWrap: {
+    flex: 1,
+    minHeight: 0,
+  },
+  deferredListPlaceholder: {
     flex: 1,
   },
-  section: {
-    marginTop: 16,
-    paddingHorizontal: 16,
+  grabber: {
+    alignSelf: "center",
+    width: 44,
+    height: 4,
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: HANDLE_COLOR,
   },
-  sectionTitle: {
-    color: Colors.text,
-    fontSize: 18,
+  title: {
+    color: "#FFFFFF",
+    fontSize: 19,
+    lineHeight: 24,
     fontFamily: "Inter_700Bold",
-    marginBottom: 12,
   },
-  songRow: {
+  subtitle: {
+    color: "#D4D4D4",
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Inter_400Regular",
+  },
+  nowPlayingRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 8,
-    gap: 12,
+    minHeight: 44,
+    marginTop: 10,
   },
-  songRowPadded: {
-    paddingHorizontal: 16,
+  rowPressed: {
+    opacity: 0.72,
   },
-  songImage: {
-    width: 48,
-    height: 48,
-    borderRadius: 4,
+  nowArtwork: {
+    width: 42,
+    height: 42,
+    borderRadius: 5,
+    backgroundColor: "#2A2A2A",
   },
-  songInfo: {
+  nowText: {
     flex: 1,
+    minWidth: 0,
+    marginLeft: 10,
+    marginRight: 8,
   },
-  songTitle: {
-    color: Colors.text,
+  nowTitle: {
+    color: Colors.primary,
     fontSize: 14,
+    lineHeight: 18,
     fontFamily: "Inter_500Medium",
   },
-  songArtist: {
-    color: Colors.subtext,
+  nowMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 2,
+  },
+  nowArtist: {
+    flex: 1,
+    color: "#D6D6D6",
     fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Inter_400Regular",
+  },
+  playButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F0F0F0",
+  },
+  shufflingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  shufflingText: {
+    color: "#BDBDBD",
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Inter_500Medium",
+  },
+  queueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 56,
+  },
+  swipeWrap: {
+    position: "relative",
+    overflow: "hidden",
+  },
+  draggingRow: {
+    zIndex: 20,
+    elevation: 8,
+    shadowColor: "#000000",
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  rowLayer: {
+    backgroundColor: SHEET_BACKGROUND,
+  },
+  removeAction: {
+    width: SWIPE_ACTION_WIDTH,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+    backgroundColor: "rgba(255,68,68,0.82)",
+  },
+  removeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    lineHeight: 13,
+    fontFamily: "Inter_700Bold",
+  },
+  queueArtwork: {
+    width: 48,
+    height: 48,
+    borderRadius: 5,
+    backgroundColor: "#2A2A2A",
+  },
+  queueText: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 12,
+    marginRight: 12,
+  },
+  queueTitle: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    lineHeight: 20,
+    fontFamily: "Inter_500Medium",
+  },
+  queueArtist: {
+    color: "#CFCFCF",
+    fontSize: 13,
+    lineHeight: 18,
     fontFamily: "Inter_400Regular",
     marginTop: 2,
   },
-  removeBtn: {
-    padding: 4,
+  dragHandle: {
+    width: 42,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  footer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 10,
+    paddingTop: 7,
+    paddingHorizontal: 18,
+    backgroundColor: SHEET_BACKGROUND,
+  },
+  controlButton: {
+    width: 96,
+    maxWidth: "46%",
+    minHeight: 46,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: CONTROL_BACKGROUND,
+  },
+  controlButtonPressed: {
+    opacity: 0.75,
+  },
+  controlLabel: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    lineHeight: 15,
+    fontFamily: "Inter_500Medium",
+    marginTop: 2,
+  },
+  controlLabelActive: {
+    color: Colors.primary,
   },
   emptyState: {
     alignItems: "center",
@@ -262,16 +572,15 @@ const styles = StyleSheet.create({
     paddingTop: 80,
     gap: 8,
   },
-  emptyText: {
-    color: Colors.text,
-    fontSize: 18,
-    fontFamily: "Inter_600SemiBold",
+  emptyTitle: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
   },
-  emptySubtext: {
-    color: Colors.subtext,
-    fontSize: 14,
+  emptySubtitle: {
+    color: "#BDBDBD",
+    fontSize: 15,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
-    paddingHorizontal: 32,
   },
 });

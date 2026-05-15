@@ -3,9 +3,11 @@ import { DarkTheme, ThemeProvider } from "@react-navigation/native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Platform, View, Text } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Animated, Platform, StyleSheet, View, Text } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from "@expo-google-fonts/inter";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
@@ -25,6 +27,97 @@ const NAV_HIDDEN_SEGMENTS = new Set(["login", "onboarding", "import-songs"]);
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
   SystemUI.setBackgroundColorAsync(Colors.background);
+}
+
+type GlobalToastListener = (message: string) => void;
+
+const globalToastListeners = new Set<GlobalToastListener>();
+const GLOBAL_TOAST_VISIBLE_MS = 1050;
+
+const IOS_VERTICAL_SHEET_OPTIONS = {
+  presentation: "modal" as const,
+  animation: "slide_from_bottom" as const,
+  gestureEnabled: true,
+  gestureDirection: "vertical" as const,
+  fullScreenGestureEnabled: true,
+  contentStyle: { backgroundColor: Colors.background },
+};
+
+const ANDROID_VERTICAL_SHEET_OPTIONS = {
+  presentation: "modal" as const,
+  animation: "slide_from_bottom" as const,
+  contentStyle: { backgroundColor: Colors.background },
+};
+
+export function showGlobalToast(message = "Added to queue") {
+  globalToastListeners.forEach((listener) => listener(message));
+}
+
+function subscribeGlobalToast(listener: GlobalToastListener) {
+  globalToastListeners.add(listener);
+  return () => {
+    globalToastListeners.delete(listener);
+  };
+}
+
+function GlobalToast() {
+  const insets = useSafeAreaInsets();
+  const opacity = useRef(new Animated.Value(0)).current;
+  const [message, setMessage] = useState("Added to queue");
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    return subscribeGlobalToast((nextMessage) => {
+      opacity.stopAnimation();
+      opacity.setValue(0);
+      setMessage(nextMessage);
+      setVisible(true);
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 120,
+          isInteraction: false,
+          useNativeDriver: true,
+        }),
+        Animated.delay(GLOBAL_TOAST_VISIBLE_MS),
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 160,
+          isInteraction: false,
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) {
+          setVisible(false);
+        }
+      });
+    });
+  }, [opacity]);
+
+  if (!visible) return null;
+
+  const translateY = opacity.interpolate({
+    inputRange: [0, 1],
+    outputRange: [10, 0],
+    extrapolate: "clamp",
+  });
+
+  return (
+    <View pointerEvents="none" style={[styles.toastHost, { bottom: Math.max(142, insets.bottom + 126) }]}>
+      <Animated.View
+        style={[
+          styles.toast,
+          {
+            opacity,
+            transform: [{ translateY }],
+          },
+        ]}
+      >
+        <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+        <Text style={styles.toastText}>{message}</Text>
+      </Animated.View>
+    </View>
+  );
 }
 
 
@@ -103,38 +196,32 @@ function RootLayoutNav() {
           name="player"
           options={{
             ...(Platform.OS === "android"
-              ? {
-                  presentation: "formSheet",
-                  sheetAllowedDetents: [1],
-                  sheetInitialDetentIndex: 0,
-                  sheetCornerRadius: 24,
-                }
-              : {
-                  presentation: "modal",
-                  gestureEnabled: true,
-                  gestureDirection: "vertical",
-                  fullScreenGestureEnabled: true,
-                }),
+              ? ANDROID_VERTICAL_SHEET_OPTIONS
+              : IOS_VERTICAL_SHEET_OPTIONS),
           }}
         />
         <Stack.Screen
           name="queue"
           options={{
             ...(Platform.OS === "ios"
-              ? {
-                  presentation: "formSheet",
-                  gestureEnabled: true,
-                  sheetAllowedDetents: [0.6, 1],
-                  sheetInitialDetentIndex: 0,
-                  sheetGrabberVisible: true,
-                  sheetExpandsWhenScrolledToEdge: true,
-                  sheetCornerRadius: 28,
-                  contentStyle: { backgroundColor: "transparent" },
-                }
+              ? IOS_VERTICAL_SHEET_OPTIONS
               : {
-                  presentation: "modal",
+                  ...ANDROID_VERTICAL_SHEET_OPTIONS,
                   gestureEnabled: false,
                 }),
+          }}
+        />
+        <Stack.Screen
+          name="sleep-timer"
+          options={{
+            presentation: "formSheet",
+            animation: "slide_from_bottom",
+            sheetAllowedDetents: [0.62],
+            sheetInitialDetentIndex: 0,
+            sheetCornerRadius: 24,
+            sheetGrabberVisible: false,
+            gestureEnabled: true,
+            contentStyle: { backgroundColor: Colors.background },
           }}
         />
         <Stack.Screen
@@ -143,17 +230,13 @@ function RootLayoutNav() {
             ...(Platform.OS === "android"
               ? {
                   presentation: "formSheet",
+                  animation: "slide_from_bottom",
                   sheetAllowedDetents: [1],
                   sheetInitialDetentIndex: 0,
                   sheetCornerRadius: 24,
                   sheetGrabberVisible: true,
                 }
-              : {
-                  presentation: "modal",
-                  gestureEnabled: true,
-                  gestureDirection: "vertical",
-                  fullScreenGestureEnabled: true,
-                }),
+              : IOS_VERTICAL_SHEET_OPTIONS),
           }}
         />
         <Stack.Screen
@@ -166,7 +249,7 @@ function RootLayoutNav() {
         <Stack.Screen
           name="downloads"
           options={{
-            presentation: "modal",
+            ...ANDROID_VERTICAL_SHEET_OPTIONS,
             gestureEnabled: true,
           }}
         />
@@ -249,6 +332,7 @@ export default function RootLayout() {
                   <PlayerProvider>
                     <StatusBar style="light" />
                     <RootLayoutNav />
+                    <GlobalToast />
                   </PlayerProvider>
                 </DownloadProvider>
               </AuthProvider>
@@ -259,3 +343,30 @@ export default function RootLayout() {
     </ErrorBoundary>
   );
 }
+
+const styles = StyleSheet.create({
+  toastHost: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 50,
+  },
+  toast: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    maxWidth: "78%",
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    backgroundColor: "rgba(24, 28, 34, 0.96)",
+    borderWidth: 1,
+    borderColor: Colors.cardBorderStrong,
+  },
+  toastText: {
+    color: Colors.text,
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+  },
+});

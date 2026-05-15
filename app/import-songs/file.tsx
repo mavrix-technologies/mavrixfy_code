@@ -11,6 +11,7 @@ import {
   Modal,
   TextInput,
   Animated,
+  Easing,
   PanResponder,
   Dimensions,
 } from "react-native";
@@ -144,10 +145,9 @@ export default function FileImportScreen() {
   // Pan responder for drag-to-dismiss
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only respond to vertical drags
-        return Math.abs(gestureState.dy) > 5;
+        return gestureState.dy > 8 && Math.abs(gestureState.dx) < Math.abs(gestureState.dy);
       },
       onPanResponderMove: (_, gestureState) => {
         // Only allow dragging down
@@ -164,8 +164,10 @@ export default function FileImportScreen() {
           Animated.spring(modalTranslateY, {
             toValue: 0,
             useNativeDriver: true,
-            tension: 50,
-            friction: 8,
+            damping: 30,
+            stiffness: 360,
+            mass: 0.78,
+            overshootClamping: true,
           }).start();
         }
       },
@@ -178,14 +180,18 @@ export default function FileImportScreen() {
       Animated.parallel([
         Animated.timing(modalOpacity, {
           toValue: 1,
-          duration: 250,
+          duration: 140,
+          easing: Easing.out(Easing.cubic),
+          isInteraction: false,
           useNativeDriver: true,
         }),
         Animated.spring(modalTranslateY, {
           toValue: 0,
           useNativeDriver: true,
-          tension: 50,
-          friction: 8,
+          damping: 30,
+          stiffness: 360,
+          mass: 0.78,
+          overshootClamping: true,
         }),
       ]).start();
     }
@@ -196,12 +202,16 @@ export default function FileImportScreen() {
     Animated.parallel([
       Animated.timing(modalOpacity, {
         toValue: 0,
-        duration: 200,
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+        isInteraction: false,
         useNativeDriver: true,
       }),
       Animated.timing(modalTranslateY, {
         toValue: screenHeight,
-        duration: 250,
+        duration: 210,
+        easing: Easing.out(Easing.cubic),
+        isInteraction: false,
         useNativeDriver: true,
       }),
     ]).start(() => {

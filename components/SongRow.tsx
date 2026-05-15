@@ -1,5 +1,6 @@
-import React, { memo, useRef } from "react";
-import { View, Text, Pressable, StyleSheet, Platform, Alert, Animated, PanResponder, ToastAndroid } from "react-native";
+import React, { memo, useCallback, useRef } from "react";
+import { View, Text, Pressable, StyleSheet, Platform, Alert, ToastAndroid, Animated as RNAnimated } from "react-native";
+import { Swipeable } from "react-native-gesture-handler";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
@@ -9,6 +10,7 @@ import { triggerImpact } from "@/lib/haptics";
 import { usePlayerRow } from "@/contexts/PlayerContext";
 import EqualizerBars from "@/components/EqualizerBars";
 import DownloadButton from "@/components/DownloadButton";
+import { showGlobalToast } from "@/app/_layout";
 
 interface Props {
   song: Song;
@@ -20,8 +22,62 @@ interface Props {
   onRemove?: () => void;
 }
 
-const SWIPE_ACTION_WIDTH = 92;
-const SWIPE_TRIGGER = 56;
+const SWIPE_ACTION_WIDTH = 184;
+const SWIPE_COMMIT_DISTANCE = 82;
+const SWIPE_SOFT_LIMIT = 214;
+
+function QueueSwipeAction({
+  dragX,
+}: {
+  dragX: RNAnimated.AnimatedInterpolation<number>;
+}) {
+  const actionOpacity = dragX.interpolate({
+    inputRange: [0, 10, 42],
+    outputRange: [0, 0.58, 1],
+    extrapolate: "clamp",
+  });
+
+  const commitOpacity = dragX.interpolate({
+    inputRange: [SWIPE_COMMIT_DISTANCE - 18, SWIPE_COMMIT_DISTANCE, SWIPE_SOFT_LIMIT],
+    outputRange: [0, 1, 1],
+    extrapolate: "clamp",
+  });
+
+  const contentTranslateX = dragX.interpolate({
+    inputRange: [0, SWIPE_COMMIT_DISTANCE],
+    outputRange: [-22, 0],
+    extrapolate: "clamp",
+  });
+
+  const contentScale = dragX.interpolate({
+    inputRange: [0, SWIPE_COMMIT_DISTANCE, SWIPE_SOFT_LIMIT],
+    outputRange: [0.82, 1, 1.08],
+    extrapolate: "clamp",
+  });
+
+  return (
+    <RNAnimated.View
+      pointerEvents="none"
+      style={[styles.queueAction, { opacity: actionOpacity }]}
+    >
+      <View style={styles.queueActionBase} />
+      <RNAnimated.View style={[styles.queueActionCommit, { opacity: commitOpacity }]} />
+      <RNAnimated.View
+        style={[
+          styles.queueActionContent,
+          { transform: [{ translateX: contentTranslateX }, { scale: contentScale }] },
+        ]}
+      >
+        <View style={styles.queueActionGlyph}>
+          <Ionicons name="list" size={38} color="#FFFFFF" />
+          <View style={styles.queueActionPlusBadge}>
+            <Ionicons name="add" size={15} color="#FFFFFF" />
+          </View>
+        </View>
+      </RNAnimated.View>
+    </RNAnimated.View>
+  );
+}
 
 const SongRow = memo(function SongRow({
   song,
@@ -32,80 +88,58 @@ const SongRow = memo(function SongRow({
   onRemove,
 }: Props) {
   const { playSong, currentSongId, isPlaying, toggleLike, isLiked, addToQueue, playNext } = usePlayerRow();
-  const translateX = useRef(new Animated.Value(0)).current;
-  const swipeInFlightRef = useRef(false);
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gesture) => {
-        const isHorizontal = Math.abs(gesture.dx) > Math.abs(gesture.dy);
-        const hasMovedEnough = Math.abs(gesture.dx) > 10;
-        return isHorizontal && hasMovedEnough;
-      },
-      onPanResponderGrant: () => {
-        translateX.stopAnimation();
-      },
-      onPanResponderMove: (_, gesture) => {
-        const nextX = Math.max(-SWIPE_ACTION_WIDTH, Math.min(0, gesture.dx));
-        translateX.setValue(nextX);
-      },
-      onPanResponderRelease: (_, gesture) => {
-        if (gesture.dx <= -SWIPE_TRIGGER) {
-          if (swipeInFlightRef.current) return;
-          swipeInFlightRef.current = true;
+  const queueCommittedRef = useRef(false);
+  const didSwipeRef = useRef(false);
+  const swipeableRef = useRef<Swipeable | null>(null);
 
-          void triggerImpact(ImpactFeedbackStyle.Medium);
-          addToQueue(song);
-          if (Platform.OS === "android") {
-            ToastAndroid.show("Added to queue", ToastAndroid.SHORT);
-          } else if (Platform.OS === "ios") {
-            Alert.alert("Mavrixfy", "Added to queue");
-          }
+  const showActionFeedback = useCallback((message: string) => {
+    if (Platform.OS === "android") {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+    }
+  }, []);
 
-          Animated.sequence([
-            Animated.timing(translateX, { toValue: -SWIPE_ACTION_WIDTH, duration: 90, useNativeDriver: true }),
-            Animated.timing(translateX, { toValue: 0, duration: 170, useNativeDriver: true }),
-          ]).start(() => { swipeInFlightRef.current = false; });
-          return;
-        }
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-          damping: 22,
-          stiffness: 220,
-          mass: 0.8,
-        }).start();
-      },
-      onPanResponderTerminate: () => {
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-          damping: 22,
-          stiffness: 220,
-          mass: 0.8,
-        }).start();
-      },
-    })
-  ).current;
+  const resetSwipeStateSoon = useCallback(() => {
+    setTimeout(() => {
+      didSwipeRef.current = false;
+      queueCommittedRef.current = false;
+    }, 80);
+  }, []);
 
-  const queueActionOpacity = translateX.interpolate({
-    inputRange: [-SWIPE_ACTION_WIDTH, -8, 0],
-    outputRange: [1, 0.35, 0],
-    extrapolate: "clamp",
-  });
+  const handleSwipeAddToQueue = useCallback(() => {
+    if (queueCommittedRef.current || onRemove) return;
+    queueCommittedRef.current = true;
+    didSwipeRef.current = true;
+    void triggerImpact(ImpactFeedbackStyle.Medium);
+    addToQueue(song);
+    showGlobalToast("Added to queue");
+    requestAnimationFrame(() => {
+      swipeableRef.current?.close();
+      resetSwipeStateSoon();
+    });
+  }, [addToQueue, onRemove, resetSwipeStateSoon, song]);
+
+  const handleSwipeWillOpen = useCallback((direction: "left" | "right") => {
+    if (direction === "left") {
+      handleSwipeAddToQueue();
+    }
+  }, [handleSwipeAddToQueue]);
+
+  const handleSwipeClose = useCallback(() => {
+    queueCommittedRef.current = false;
+    resetSwipeStateSoon();
+  }, [resetSwipeStateSoon]);
+
+  const renderLeftActions = useCallback((
+    _progress: RNAnimated.AnimatedInterpolation<number>,
+    dragX: RNAnimated.AnimatedInterpolation<number>,
+  ) => (
+    <QueueSwipeAction dragX={dragX} />
+  ), []);
 
   if (!song || !song.id || !song.title) return null;
 
   const isActive = currentSongId === song.id;
   const liked = isLiked(song.id);
-
-  const showActionFeedback = (message: string) => {
-    if (Platform.OS === "android") {
-      ToastAndroid.show(message, ToastAndroid.SHORT);
-    } else if (Platform.OS === "ios") {
-      Alert.alert("Mavrixfy", message);
-    }
-  };
 
   const handlePlayNext = () => {
     playNext(song);
@@ -114,10 +148,11 @@ const SongRow = memo(function SongRow({
 
   const handleAddToQueue = () => {
     addToQueue(song);
-    showActionFeedback("Added to queue");
+    showGlobalToast("Added to queue");
   };
 
   const handlePress = () => {
+    if (didSwipeRef.current) return;
     void triggerImpact(ImpactFeedbackStyle.Light);
     playSong(song, queue || [song]);
   };
@@ -143,12 +178,23 @@ const SongRow = memo(function SongRow({
 
   return (
     <View style={styles.swipeWrap}>
-      <Animated.View style={[styles.queueAction, { opacity: queueActionOpacity }]}>
-        <Ionicons name="add-circle-outline" size={20} color={Colors.primary} />
-        <Text style={styles.queueActionText}>Queue</Text>
-      </Animated.View>
-
-      <Animated.View style={[styles.rowLayer, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
+      <Swipeable
+        ref={swipeableRef}
+        enabled={!onRemove}
+        friction={1}
+        leftThreshold={SWIPE_COMMIT_DISTANCE}
+        dragOffsetFromLeftEdge={2}
+        overshootLeft
+        overshootFriction={8}
+        useNativeAnimations
+        animationOptions={{ bounciness: 0, speed: 32 }}
+        enableTrackpadTwoFingerGesture
+        renderLeftActions={renderLeftActions}
+        onSwipeableWillOpen={handleSwipeWillOpen}
+        onSwipeableClose={handleSwipeClose}
+        containerStyle={styles.swipeableContainer}
+        childrenContainerStyle={styles.rowLayer}
+      >
         <Pressable
           style={({ pressed }) => [styles.container, pressed && styles.pressed]}
           onPress={handlePress}
@@ -164,50 +210,51 @@ const SongRow = memo(function SongRow({
             </View>
           )}
 
-          {showCover && song.coverUrl && (
-            <Image
-              recyclingKey={song.id}
-              source={{ uri: song.coverUrl }}
-              style={styles.cover}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              priority="normal"
-            />
-          )}
+            {showCover && song.coverUrl && (
+              <Image
+                recyclingKey={song.id}
+                source={{ uri: song.coverUrl }}
+                style={styles.cover}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                priority="normal"
+              />
+            )}
 
-          <View style={styles.info}>
-            <Text style={[styles.title, isActive && styles.activeText]} numberOfLines={1}>
-              {song.title || "Unknown Title"}
-            </Text>
-            <Text style={styles.artist} numberOfLines={1}>
-              {song.artist || "Unknown Artist"}
-            </Text>
-          </View>
+            <View style={styles.info}>
+              <Text style={[styles.title, isActive && styles.activeText]} numberOfLines={1}>
+                {song.title || "Unknown Title"}
+              </Text>
+              <Text style={styles.artist} numberOfLines={1}>
+                {song.artist || "Unknown Artist"}
+              </Text>
+            </View>
 
-          {/* Like button */}
-          <Pressable onPress={handleLike} hitSlop={10} style={styles.likeBtn}>
-            <Ionicons
-              name={liked ? "heart" : "heart-outline"}
-              size={20}
-              color={liked ? Colors.primary : Colors.subtext}
-            />
-          </Pressable>
-
-          {/* Download button — hidden when a remove action is present */}
-          {showDownload && !onRemove && (
-            <DownloadButton song={song} size={20} style={styles.downloadBtn} />
-          )}
-
-          {/* Remove / duration */}
-          {onRemove ? (
-            <Pressable onPress={handleRemove} hitSlop={10} style={styles.removeBtn}>
-              <Ionicons name="trash" size={18} color={Colors.subtext} />
+            {/* Like button */}
+            <Pressable onPress={handleLike} hitSlop={10} style={styles.likeBtn}>
+              <Ionicons
+                name={liked ? "heart" : "heart-outline"}
+                size={20}
+                color={liked ? Colors.primary : Colors.subtext}
+              />
             </Pressable>
-          ) : (
-            <Text style={styles.duration}>{formatDuration(song.duration)}</Text>
-          )}
+
+            {/* Download button — hidden when a remove action is present */}
+            {showDownload && !onRemove && (
+              <DownloadButton song={song} size={20} style={styles.downloadBtn} />
+            )}
+
+            {/* Remove / duration */}
+            {onRemove ? (
+              <Pressable onPress={handleRemove} hitSlop={10} style={styles.removeBtn}>
+                <Ionicons name="trash" size={18} color={Colors.subtext} />
+              </Pressable>
+            ) : (
+              <Text style={styles.duration}>{formatDuration(song.duration)}</Text>
+            )}
         </Pressable>
-      </Animated.View>
+      </Swipeable>
+
     </View>
   );
 }, (prevProps, nextProps) => {
@@ -216,6 +263,7 @@ const SongRow = memo(function SongRow({
     prevProps.index === nextProps.index &&
     prevProps.showCover === nextProps.showCover &&
     prevProps.showDownload === nextProps.showDownload &&
+    Boolean(prevProps.onRemove) === Boolean(nextProps.onRemove) &&
     prevProps.queue?.length === nextProps.queue?.length
   );
 });
@@ -225,31 +273,55 @@ export default SongRow;
 const styles = StyleSheet.create({
   swipeWrap: {
     position: "relative",
-    overflow: "hidden",
     width: "100%",
     backgroundColor: Colors.background,
   },
   rowLayer: {
     width: "100%",
   },
+  swipeableContainer: {
+    width: "100%",
+    overflow: "hidden",
+    backgroundColor: Colors.background,
+  },
   queueAction: {
-    position: "absolute",
-    right: 0,
-    top: 0,
-    bottom: 0,
     width: SWIPE_ACTION_WIDTH,
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
-    backgroundColor: "rgba(37, 201, 231, 0.08)",
-    borderLeftWidth: 1,
-    borderLeftColor: Colors.cardBorder,
+    overflow: "hidden",
   },
-  queueActionText: {
-    color: Colors.primary,
-    fontSize: 11,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.1,
+  queueActionBase: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#565656",
+  },
+  queueActionCommit: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#1DB954",
+  },
+  queueActionContent: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    height: "100%",
+  },
+  queueActionGlyph: {
+    width: 58,
+    height: 52,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  queueActionPlusBadge: {
+    position: "absolute",
+    left: 4,
+    top: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.64)",
   },
   container: {
     flexDirection: "row",

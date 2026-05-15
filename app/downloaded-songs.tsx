@@ -5,15 +5,13 @@
  * Accessible from the Downloads screen header.
  */
 
-import React, { useCallback, useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   View,
   Text,
-  FlatList,
   Pressable,
   StyleSheet,
   Platform,
-  Alert,
   SectionList,
 } from "react-native";
 import { Image } from "expo-image";
@@ -27,9 +25,9 @@ import { triggerImpact } from "@/lib/haptics";
 import { useDownloads } from "@/contexts/DownloadContext";
 import { onQueueEvent } from "@/lib/downloads/downloadManager";
 import { DownloadItem } from "@/types/downloads";
-import { Song, formatDuration } from "@/lib/musicData";
+import { Song } from "@/lib/musicData";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
-import EqualizerBars from "@/components/EqualizerBars";
+import SongRow from "@/components/SongRow";
 
 const UI = {
   bg: Colors.background,
@@ -63,89 +61,19 @@ function downloadItemToSong(item: DownloadItem): Song {
 interface DownloadedRowProps {
   item: DownloadItem;
   allSongs: Song[];
-  onRemove: (songId: string) => void;
   collectionId?: string;
 }
 
-function DownloadedRow({ item, allSongs, onRemove, collectionId }: DownloadedRowProps) {
-  const { playSong, currentSong, isPlaying } = usePlayerBrowse();
-  const isActive = currentSong?.id === item.songId;
+function DownloadedRow({ item, allSongs }: DownloadedRowProps) {
   const song = downloadItemToSong(item);
 
-  const handlePress = useCallback(() => {
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-    playSong(song, allSongs);
-  }, [song, allSongs, playSong]);
-
-  const handleLongPress = useCallback(() => {
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(item.title, item.artist, [
-      {
-        text: "Remove Download",
-        style: "destructive",
-        onPress: () => onRemove(item.songId),
-      },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  }, [item, onRemove]);
-
-  return (
-    <Pressable
-      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-      onPress={handlePress}
-      onLongPress={handleLongPress}
-    >
-      {/* Cover */}
-      {item.coverUrl ? (
-        <Image
-          recyclingKey={item.songId}
-          source={{ uri: item.coverUrl }}
-          style={styles.cover}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-        />
-      ) : (
-        <View style={[styles.cover, styles.coverPlaceholder]}>
-          <Ionicons name="musical-note" size={20} color={UI.subtext} />
-        </View>
-      )}
-
-      {/* Info */}
-      <View style={styles.info}>
-        <Text
-          style={[styles.title, isActive && styles.titleActive]}
-          numberOfLines={1}
-        >
-          {item.title}
-        </Text>
-        <View style={styles.metaRow}>
-          <Ionicons
-            name="arrow-down-circle"
-            size={11}
-            color={UI.primary}
-            style={{ marginRight: 4 }}
-          />
-          <Text style={styles.artist} numberOfLines={1}>
-            {item.artist}
-          </Text>
-        </View>
-      </View>
-
-      {/* Right side */}
-      {isActive ? (
-        <EqualizerBars isPlaying={isPlaying} size={3} />
-      ) : (
-        <Text style={styles.duration}>{formatDuration(item.duration)}</Text>
-      )}
-    </Pressable>
-  );
+  return <SongRow song={song} queue={allSongs} showDownload={false} />;
 }
 
 // Memoize to prevent unnecessary re-renders
 const MemoizedDownloadedRow = React.memo(DownloadedRow, (prev, next) => {
   return (
     prev.item.songId === next.item.songId &&
-    prev.item.status === next.item.status &&
     prev.collectionId === next.collectionId
   );
 });
@@ -165,7 +93,7 @@ export default function DownloadedSongsScreen() {
   const insets = useSafeAreaInsets();
   const topPadding = Platform.OS === "web" ? 67 : insets.top + 8;
 
-  const { getAllDownloadItems, removeDownload, storageSummary } = useDownloads();
+  const { getAllDownloadItems, storageSummary } = useDownloads();
   const { playSong } = usePlayerBrowse();
 
   // Load collection metadata
@@ -253,35 +181,6 @@ export default function DownloadedSongsScreen() {
   }, [completedItems, collectionMetadata]);
 
   const allSongs = completedItems.map(downloadItemToSong);
-
-  const handleRemove = useCallback(
-    (songId: string) => {
-      const item = completedItems.find((i) => i.songId === songId);
-      Alert.alert(
-        "Remove Download",
-        `Remove "${item?.title ?? "this song"}" from offline storage?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Remove",
-            style: "destructive",
-            onPress: async () => {
-              await triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-              await removeDownload(songId);
-            },
-          },
-        ]
-      );
-    },
-    [completedItems, removeDownload]
-  );
-
-  const handlePlayAll = useCallback(() => {
-    if (allSongs.length === 0) return;
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-    // playSong is called from within DownloadedRow — here we just need the context
-    // We'll use the first song to kick off the full queue
-  }, [allSongs]);
 
   return (
     <View style={styles.container}>
@@ -394,7 +293,6 @@ export default function DownloadedSongsScreen() {
           <MemoizedDownloadedRow
             item={item}
             allSongs={section.data.map(downloadItemToSong)}
-            onRemove={handleRemove}
             collectionId={section.collectionId}
           />
         )}

@@ -2,18 +2,16 @@ import React, { useCallback, useMemo, useState } from "react";
 import { FlatList, Platform, Pressable, StyleSheet, Text, View, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { safeGoBack } from "@/utils/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
-import { formatDuration, Song } from "@/lib/musicData";
+import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
-import EqualizerBars from "@/components/EqualizerBars";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
-import DownloadButton from "@/components/DownloadButton";
 import OfflineBanner from "@/components/OfflineBanner";
+import SongRow from "@/components/SongRow";
 import { useNetwork } from "@/contexts/NetworkContext";
 
 const UI = {
@@ -32,7 +30,7 @@ export default function LikedSongsScreen() {
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const { isAuthenticated } = useAuth();
   const { isOnline } = useNetwork();
-  const { playSong, likedSongs, currentSong, isPlaying, togglePlay, toggleLike, queue } = usePlayerBrowse();
+  const { playSong, likedSongs, currentSong, isPlaying, togglePlay, queue } = usePlayerBrowse();
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchActive, setIsSearchActive] = useState(false);
 
@@ -85,94 +83,11 @@ export default function LikedSongsScreen() {
     playSong(shuffled[0], shuffled);
   }, [songs, playSong]);
 
-  const handleSongPress = useCallback(
-    (song: Song) => {
-      void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-      playSong(song, songs);
-    },
-    [playSong, songs]
-  );
-
   const renderSong = useCallback(
     ({ item, index }: { item: Song; index: number }) => {
-      const isCurrent = currentSong?.id === item.id;
-      const liked = true;
-
-      return (
-        <Pressable
-          onPress={() => handleSongPress(item)}
-          style={({ pressed }) => [styles.trackRow, pressed && styles.trackRowPressed]}
-        >
-          <View style={styles.indexCell}>
-            {isCurrent ? (
-              <EqualizerBars isPlaying={isPlaying} size={3} />
-            ) : (
-              <Text style={styles.indexText}>{index + 1}</Text>
-            )}
-          </View>
-
-          <View style={styles.trackMain}>
-            <View style={styles.coverWrap}>
-              {item.coverUrl ? (
-                <Image source={{ uri: item.coverUrl }} style={styles.cover} contentFit="cover" />
-              ) : (
-                <View style={[styles.cover, styles.coverFallback]}>
-                  <Ionicons name="musical-notes" size={12} color={UI.subtext} />
-                </View>
-              )}
-            </View>
-            <View style={styles.trackTextWrap}>
-              <Text numberOfLines={1} style={styles.trackTitle}>
-                {item.title}
-              </Text>
-              <Text numberOfLines={1} style={styles.trackArtist}>
-                {item.artist}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.metaCell}>
-            <Pressable
-              hitSlop={8}
-              onPress={(event) => {
-                event.stopPropagation();
-                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                toggleLike(item);
-              }}
-              style={({ pressed }) => [styles.likeButton, pressed && styles.likeButtonPressed]}
-              android_ripple={{ color: "rgba(38,225,154,0.2)", borderless: true }}
-            >
-              <Ionicons name={liked ? "heart" : "heart-outline"} size={19} color={UI.primaryA} />
-            </Pressable>
-            <Pressable
-              hitSlop={8}
-              onPress={(event) => {
-                event.stopPropagation();
-                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-              }}
-              style={styles.downloadBtn}
-              android_ripple={{ color: "rgba(255,255,255,0.1)", borderless: true }}
-            >
-              <DownloadButton song={item} size={18} style={styles.downloadBtnInner} />
-            </Pressable>
-            <Text style={styles.trackDuration}>{formatDuration(item.duration)}</Text>
-          </View>
-
-          <Pressable
-            hitSlop={8}
-            onPress={(event) => {
-              event.stopPropagation();
-              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-            }}
-            style={({ pressed }) => [styles.moreButton, pressed && styles.moreButtonPressed]}
-            android_ripple={{ color: "rgba(255,255,255,0.12)", borderless: true }}
-          >
-            <Ionicons name="ellipsis-horizontal" size={16} color={UI.subtext} />
-          </Pressable>
-        </Pressable>
-      );
+      return <SongRow song={item} index={index} queue={filteredSongs} />;
     },
-    [currentSong?.id, handleSongPress, isPlaying, toggleLike]
+    [filteredSongs]
   );
 
   const headerMeta = songs.length > 0 ? `${songs.length} songs` : "No songs";

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   Platform,
   Pressable,
   ScrollView,
@@ -468,14 +469,17 @@ export default function PlaylistScreen() {
             Animated.spring(modalTranslateY, {
               toValue: 0,
               useNativeDriver: true,
-              tension: 65,
-              friction: 10,
+              damping: 30,
+              stiffness: 360,
+              mass: 0.78,
+              overshootClamping: true,
             }),
-            Animated.spring(modalOpacity, {
+            Animated.timing(modalOpacity, {
               toValue: 1,
+              duration: 120,
+              easing: Easing.out(Easing.cubic),
+              isInteraction: false,
               useNativeDriver: true,
-              tension: 65,
-              friction: 10,
             }),
           ]).start();
         }
@@ -487,12 +491,16 @@ export default function PlaylistScreen() {
     Animated.parallel([
       Animated.timing(modalOpacity, {
         toValue: 0,
-        duration: 200,
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+        isInteraction: false,
         useNativeDriver: true,
       }),
       Animated.timing(modalTranslateY, {
         toValue: screenHeight,
-        duration: 250,
+        duration: 210,
+        easing: Easing.out(Easing.cubic),
+        isInteraction: false,
         useNativeDriver: true,
       }),
     ]).start(() => {
@@ -507,14 +515,18 @@ export default function PlaylistScreen() {
       Animated.parallel([
         Animated.timing(modalOpacity, {
           toValue: 1,
-          duration: 250,
+          duration: 140,
+          easing: Easing.out(Easing.cubic),
+          isInteraction: false,
           useNativeDriver: true,
         }),
         Animated.spring(modalTranslateY, {
           toValue: 0,
           useNativeDriver: true,
-          tension: 50,
-          friction: 8,
+          damping: 30,
+          stiffness: 360,
+          mass: 0.78,
+          overshootClamping: true,
         }),
       ]).start();
     }

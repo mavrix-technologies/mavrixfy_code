@@ -7,12 +7,6 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "buildHooks": [
-        {
-          "file": "eas-build-post-install.sh",
-          "trigger": "onPostInstall"
-        }
-      ],
       "env": {
         "RCT_NEW_ARCH_ENABLED": "0",
         "EXPO_NEW_ARCH_ENABLED": "0"
@@ -23,12 +17,6 @@
       "ios": {
         "simulator": false
       },
-      "buildHooks": [
-        {
-          "file": "eas-build-post-install.sh",
-          "trigger": "onPostInstall"
-        }
-      ],
       "env": {
         "RCT_NEW_ARCH_ENABLED": "0",
         "EXPO_NEW_ARCH_ENABLED": "0"
@@ -39,12 +27,6 @@
       "ios": {
         "simulator": true
       },
-      "buildHooks": [
-        {
-          "file": "eas-build-post-install.sh",
-          "trigger": "onPostInstall"
-        }
-      ],
       "env": {
         "RCT_NEW_ARCH_ENABLED": "0",
         "EXPO_NEW_ARCH_ENABLED": "0"
@@ -60,12 +42,6 @@
       },
       "channel": "production",
       "autoIncrement": false,
-      "buildHooks": [
-        {
-          "file": "eas-build-post-install.sh",
-          "trigger": "onPostInstall"
-        }
-      ],
       "env": {
         "NODE_ENV": "production",
         "EXPO_USE_UPDATES": "1",

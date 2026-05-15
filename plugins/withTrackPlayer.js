@@ -5,7 +5,7 @@
  * - TrackPlayer MusicService
  * - MediaBrowserService for Android Auto discovery
  * - Android Auto media metadata descriptor
- * - Automotive app descriptor metadata
+ * - Android Auto media app descriptor metadata
  */
 const fs = require("fs");
 const path = require("path");
@@ -112,21 +112,6 @@ function ensureAppMetaData(app, meta) {
   }
 }
 
-function ensureUsesFeature(manifest, featureName) {
-  if (!manifest["uses-feature"]) manifest["uses-feature"] = [];
-  const exists = manifest["uses-feature"].some(
-    (item) => item.$?.["android:name"] === featureName
-  );
-  if (!exists) {
-    manifest["uses-feature"].push({
-      $: {
-        "android:name": featureName,
-        "android:required": "false",
-      },
-    });
-  }
-}
-
 function ensureToolsNamespace(manifest) {
   manifest.$ = manifest.$ || {};
   if (!manifest.$["xmlns:tools"]) {
@@ -141,7 +126,6 @@ const withTrackPlayer = (config) => {
     if (!app) return config;
 
     ensureToolsNamespace(manifest);
-    ensureUsesFeature(manifest, "android.hardware.type.automotive");
 
     // Required on Android 14+ for media playback foreground service
     if (!manifest["uses-permission"]) manifest["uses-permission"] = [];

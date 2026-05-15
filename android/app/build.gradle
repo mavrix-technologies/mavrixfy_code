@@ -80,6 +80,7 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  * this variant is about 6MiB larger per architecture than default.
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
+def isBundleTask = gradle.startParameter.taskNames.any { it.toLowerCase().contains("bundle") }
 
 android {
     ndkVersion rootProject.ext.ndkVersion
@@ -137,7 +138,7 @@ android {
     splits {
         abi {
             reset()
-            enable true
+            enable !isBundleTask
             universalApk false
             include "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
         }
