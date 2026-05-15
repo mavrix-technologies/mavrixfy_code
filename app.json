@@ -74,7 +74,7 @@
         "expo-build-properties",
         {
           "ios": {
-            "newArchEnabled": false,
+            "newArchEnabled": true,
             "deploymentTarget": "15.1",
             "extraBuildProperties": {
               "GCC_WARN_INHIBIT_ALL_WARNINGS": "YES",
@@ -84,7 +84,7 @@
             }
           },
           "android": {
-            "newArchEnabled": false,
+            "newArchEnabled": true,
             "minSdkVersion": 24,
             "targetSdkVersion": 35,
             "compileSdkVersion": 35,
