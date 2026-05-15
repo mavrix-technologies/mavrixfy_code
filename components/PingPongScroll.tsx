@@ -18,6 +18,7 @@ interface PingPongScrollProps {
   className?: string;
   style?: StyleProp<TextStyle>;
   velocity?: number;
+  paused?: boolean;
 }
 
 export const PingPongScroll: React.FC<PingPongScrollProps> = ({
@@ -25,6 +26,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
   className,
   style,
   velocity = 15,
+  paused = false,
 }) => {
   const [needsScroll, setNeedsScroll] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -38,6 +40,12 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
     if (animationRef.current) {
       animationRef.current.stop();
       animationRef.current = null;
+    }
+
+    if (paused) {
+      animatedValue.setValue(0);
+      setNeedsScroll(false);
+      return;
     }
 
     const overflow = textWidth - containerWidth;
@@ -82,7 +90,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
         animationRef.current = null;
       }
     };
-  }, [animatedValue, containerWidth, text, textWidth, velocity]);
+  }, [animatedValue, containerWidth, paused, text, textWidth, velocity]);
 
   const handleContainerLayout = (event: LayoutChangeEvent) => {
     const { width } = event.nativeEvent.layout;

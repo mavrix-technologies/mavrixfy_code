@@ -12,6 +12,7 @@ import {
   ToastAndroid,
   ActivityIndicator,
   Animated,
+  InteractionManager,
   LayoutChangeEvent,
   GestureResponderEvent,
   NativeScrollEvent,
@@ -23,7 +24,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router, useNavigation } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { Swipeable } from "react-native-gesture-handler";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
@@ -189,125 +189,75 @@ const PlayerPlayButton = memo(
 
 PlayerPlayButton.displayName = "PlayerPlayButton";
 
-const QUEUE_SWIPE_ACTION_WIDTH = 92;
 
-const SwipeQueueRow = memo(
+const QueueSongRow = memo(
   ({
     item,
     index,
     isCurrent,
     isShortScreen,
     isPlaying,
-    accentColor,
-    canSwipe,
     onPress,
-    onRemove,
-    onSwipeOpen,
   }: {
     item: Song;
     index: number;
     isCurrent: boolean;
     isShortScreen: boolean;
     isPlaying: boolean;
-    accentColor: string;
-    canSwipe: boolean;
-    onPress: () => void;
-    onRemove: () => void;
-    onSwipeOpen: (ref: Swipeable | null) => void;
+    onPress: (item: Song) => void;
   }) => {
-    const swipeableRef = useRef<Swipeable | null>(null);
-
-    const handleRemove = useCallback(() => {
-      swipeableRef.current?.close();
-      onRemove();
-    }, [onRemove]);
-
-    const renderRightActions = useCallback(() => (
-      <Pressable style={styles.queueRemoveAction} onPress={handleRemove}>
-        <Ionicons name="trash" size={20} color="#FFFFFF" />
-        <Text style={styles.queueRemoveText}>Remove</Text>
-      </Pressable>
-    ), [handleRemove]);
+    const handlePress = useCallback(() => onPress(item), [item, onPress]);
+    const rowStyle = useMemo(
+      () => [
+        styles.queueRow,
+        isCurrent ? styles.queueRowActive : null,
+        isShortScreen ? styles.queueRowCompact : null,
+      ],
+      [isCurrent, isShortScreen]
+    );
 
     return (
-      <View style={styles.queueSwipeWrap}>
-        <Swipeable
-          ref={swipeableRef}
-          enabled={canSwipe}
-          friction={1.25}
-          rightThreshold={22}
-          dragOffsetFromRightEdge={8}
-          overshootRight={false}
-          enableTrackpadTwoFingerGesture
-          onSwipeableWillOpen={() => onSwipeOpen(swipeableRef.current)}
-          renderRightActions={renderRightActions}
-        >
-          <View style={styles.queueRowLayer}>
-            <Pressable
-              style={[
-                styles.queueRow,
-                isCurrent && styles.queueRowActive,
-                isShortScreen && styles.queueRowCompact,
-              ]}
-              onPress={() => {
-                swipeableRef.current?.close();
-                onPress();
-              }}
-            >
-              <View style={styles.queueLead}>
-                {isCurrent ? (
-                  <EqualizerBars isPlaying={isPlaying} size={3} color="#F7FAFF" />
-                ) : (
-                  <Text style={styles.queueIndex}>{index + 1}</Text>
-                )}
-              </View>
+      <Pressable style={rowStyle} onPress={handlePress}>
+        <View style={styles.queueLead}>
+          {isCurrent ? (
+            <EqualizerBars isPlaying={isPlaying} size={3} color="#F7FAFF" />
+          ) : (
+            <Text style={styles.queueIndex}>{index + 1}</Text>
+          )}
+        </View>
 
-              <Image
-                recyclingKey={item.id}
-                source={{ uri: item.coverUrl || undefined }}
-                style={[styles.queueThumb, isShortScreen && styles.queueThumbCompact]}
-                contentFit="cover"
-                transition={120}
-              />
+        <Image
+          recyclingKey={item.id}
+          source={{ uri: item.coverUrl || undefined }}
+          style={isShortScreen ? styles.queueThumbCompact : styles.queueThumb}
+          contentFit="cover"
+          transition={120}
+        />
 
-              <View style={styles.queueTextWrap}>
-                <Text
-                  style={[
-                    styles.queueTitle,
-                    isCurrent && styles.queueTitleActive,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {item.title}
-                </Text>
-                <Text
-                  style={[
-                    styles.queueMeta,
-                  isCurrent && styles.queueMetaActive,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {item.artist}
-                </Text>
-              </View>
+        <View style={styles.queueTextWrap}>
+          <Text
+            style={isCurrent ? styles.queueTitleActive : styles.queueTitle}
+            numberOfLines={1}
+          >
+            {item.title}
+          </Text>
+          <Text
+            style={isCurrent ? styles.queueMetaActive : styles.queueMeta}
+            numberOfLines={1}
+          >
+            {item.artist}
+          </Text>
+        </View>
 
-              <Text
-                style={[
-                  styles.queueDuration,
-                  isCurrent && styles.queueDurationActive,
-                ]}
-              >
-                {formatDuration(item.duration)}
-              </Text>
-            </Pressable>
-          </View>
-        </Swipeable>
-      </View>
+        <Text style={isCurrent ? styles.queueDurationActive : styles.queueDuration}>
+          {formatDuration(item.duration)}
+        </Text>
+      </Pressable>
     );
   }
 );
 
-SwipeQueueRow.displayName = "SwipeQueueRow";
+QueueSongRow.displayName = "QueueSongRow";
 
 const DEV_PREVIEW_SONGS: Song[] = [
   {
@@ -380,8 +330,6 @@ function LegacyPlayerScreen() {
   const [seekValue, setSeekValue] = useState<number | null>(null);
   const [isSeeking, setIsSeeking] = useState(false);
   const [isLoadingDevTrack, setIsLoadingDevTrack] = useState(false);
-  const [queueExpanded, setQueueExpanded] = useState(false);
-  const chevronAnim = useRef(new Animated.Value(0)).current;
   const [isDevPreviewEnabled, setIsDevPreviewEnabled] = useState(false);
   const [devPreviewIndex, setDevPreviewIndex] = useState(0);
   const [devPreviewIsPlaying, setDevPreviewIsPlaying] = useState(true);
@@ -391,15 +339,24 @@ function LegacyPlayerScreen() {
   const [devPreviewLikedSongIds, setDevPreviewLikedSongIds] = useState<string[]>([]);
   const [progressTrackWidth, setProgressTrackWidth] = useState(0);
   const androidSeekFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipCooldownRef = useRef(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const artScrollX = useRef(new Animated.Value(0)).current;
   const artCarouselRef = useRef<FlatList<Song> | null>(null);
-  const openQueueSwipeRef = useRef<Swipeable | null>(null);
   const hasAlignedArtCarouselRef = useRef(false);
   const pendingArtworkTargetIndexRef = useRef<number | null>(null);
   const didHandleSheetDismissRef = useRef(false);
   const sheetDetentReadyAtRef = useRef(0);
   const isDevPreviewActive = __DEV__ && !currentSong && isDevPreviewEnabled;
+
+  // ── Defer heavy work until after the open animation completes ───────────────
+  const [interactionReady, setInteractionReady] = useState(false);
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setInteractionReady(true);
+    });
+    return () => task.cancel();
+  }, []);
 
   // ── About the artist / Credits state ────────────────────────────────────────
   const [artistInfo, setArtistInfo] = useState<JioSaavnArtist | null>(null);
@@ -449,6 +406,7 @@ function LegacyPlayerScreen() {
   }, [navigation]);
 
   useEffect(() => {
+    if (!interactionReady) return;
     let active = true;
     const cover = screenSong?.coverUrl?.trim();
     if (!cover) return () => {};
@@ -464,10 +422,11 @@ function LegacyPlayerScreen() {
     return () => {
       active = false;
     };
-  }, [screenSong?.id, screenSong?.coverUrl, setAlbumColor, setTextColor]);
+  }, [interactionReady, screenSong?.id, screenSong?.coverUrl, setAlbumColor, setTextColor]);
 
   // Fetch artist info whenever the current song's artist changes
   useEffect(() => {
+    if (!interactionReady) return;
     const artistName = currentSong?.artist?.split(",")[0]?.trim();
     if (!artistName) { setArtistInfo(null); return; }
 
@@ -490,7 +449,7 @@ function LegacyPlayerScreen() {
       .catch(() => {});
 
     return () => { cancelled = true; };
-  }, [currentSong?.artist]);
+  }, [interactionReady, currentSong?.artist]);
 
   const rawTopInset = Platform.OS === "web" ? 67 : insets.top;
   const topInset = Platform.OS === "ios" ? Math.max(2, rawTopInset - 18) : rawTopInset;
@@ -588,16 +547,23 @@ function LegacyPlayerScreen() {
     () => createSpotifyColorTheme(albumColor || Colors.primary),
     [albumColor]
   );
-  const brightAlbumColor = brightenHexColor(playerTheme.accent, 1.5, 1.18);
-  const gradientColors = [
-    hexToRgba(brightAlbumColor, 0.9),
-    hexToRgba(brightAlbumColor, 0.52),
-    "#10141A",
-    "#070A10",
-  ] as const;
+  const brightAlbumColor = useMemo(
+    () => brightenHexColor(playerTheme.accent, 1.5, 1.18),
+    [playerTheme.accent]
+  );
+  const gradientColors = useMemo(
+    () => [
+      hexToRgba(brightAlbumColor, 0.9),
+      hexToRgba(brightAlbumColor, 0.52),
+      "#10141A",
+      "#070A10",
+    ] as const,
+    [brightAlbumColor]
+  );
   const sheetTextColor = Colors.text;
   const sheetMutedTextColor = "rgba(223,226,235,0.68)";
   const sheetAccentColor = brightAlbumColor;
+  // These are all static — define once outside the component (see bottom of file)
   const controlButtonBg = "rgba(223,226,235,0.07)";
   const controlButtonBorder = "rgba(223,226,235,0.14)";
   const controlIconColor = "rgba(236,240,247,0.96)";
@@ -609,6 +575,33 @@ function LegacyPlayerScreen() {
   const progressThumbColor = "#F7FAFF";
   const usesResponderSeek = Platform.OS === "web" || Platform.OS === "android";
   const showsCustomProgressVisual = usesResponderSeek;
+
+  // Memoize control button base styles to avoid new objects every render
+  const ctrlBtnBase = useMemo(
+    () => ({
+      width: controlButtonSize,
+      height: controlButtonSize,
+      borderRadius: controlButtonSize / 2,
+    }),
+    [controlButtonSize]
+  );
+  const ctrlBtnStyle = useMemo(
+    () => ({ ...ctrlBtnBase, backgroundColor: controlButtonBg, borderColor: controlButtonBorder }),
+    [ctrlBtnBase]
+  );
+  const ctrlBtnActiveStyle = useMemo(
+    () => ({ ...ctrlBtnBase, backgroundColor: controlButtonActiveBg, borderColor: controlButtonActiveBorder }),
+    [ctrlBtnBase, controlButtonActiveBg, controlButtonActiveBorder]
+  );
+
+  const artCarouselGetItemLayout = useCallback(
+    (_: Song[] | null | undefined, index: number) => ({
+      length: artCarouselSnapInterval,
+      offset: artCarouselSnapInterval * index,
+      index,
+    }),
+    [artCarouselSnapInterval]
+  );
 
   const clampProgress = useCallback((value: number) => {
     return Math.max(0, Math.min(1, value));
@@ -630,10 +623,8 @@ function LegacyPlayerScreen() {
   useEffect(() => {
     setIsSeeking(false);
     setSeekValue(null);
-    setQueueExpanded(false);
-    chevronAnim.setValue(0);
     clearAndroidSeekFallbackTimer();
-  }, [screenSong?.id, clearAndroidSeekFallbackTimer, chevronAnim]);
+  }, [screenSong?.id, clearAndroidSeekFallbackTimer]);
 
   useEffect(() => {
     return () => { clearAndroidSeekFallbackTimer(); };
@@ -710,12 +701,23 @@ function LegacyPlayerScreen() {
     [haptic, playSong, playingQueue]
   );
 
-  const handleQueueSwipeOpen = useCallback((ref: Swipeable | null) => {
-    if (openQueueSwipeRef.current && openQueueSwipeRef.current !== ref) {
-      openQueueSwipeRef.current.close();
-    }
-    openQueueSwipeRef.current = ref;
-  }, []);
+  const handleSkip = useCallback(
+    (direction: "next" | "prev") => {
+      if (skipCooldownRef.current) return;
+      skipCooldownRef.current = true;
+      haptic();
+      if (direction === "next") {
+        void nextSong();
+      } else {
+        void prevSong();
+      }
+      setTimeout(() => {
+        skipCooldownRef.current = false;
+      }, 400);
+    },
+    [haptic, nextSong, prevSong]
+  );
+
 
   const showDevLoadMessage = useCallback((message: string) => {
     if (Platform.OS === "android") {
@@ -796,6 +798,9 @@ function LegacyPlayerScreen() {
       if (targetIndex < 0 || targetIndex >= playingQueue.length || targetIndex === activeQueueIndex) {
         return;
       }
+      if (skipCooldownRef.current) return;
+      skipCooldownRef.current = true;
+      setTimeout(() => { skipCooldownRef.current = false; }, 400);
 
       haptic();
 
@@ -971,7 +976,6 @@ function LegacyPlayerScreen() {
                   contentFit="cover"
                   cachePolicy="memory-disk"
                   priority={isActiveCard ? "high" : "normal"}
-                  transition={80}
                 />
               ) : (
                 <View style={[styles.albumArt, styles.albumFallback]}>
@@ -995,50 +999,19 @@ function LegacyPlayerScreen() {
     ]
   );
 
-  const renderQueueSong = useCallback(
-    ({ item, index }: { item: Song; index: number }) => {
-      const isCurrent = index === activeQueueIndex;
-      const canSwipeQueueRow = !isDevPreviewActive && index < queue.length;
-
-      return (
-        <SwipeQueueRow
-          item={item}
-          index={index}
-          isCurrent={isCurrent}
-          isShortScreen={isShortScreen}
-          isPlaying={playerIsPlaying}
-          accentColor={sheetAccentColor}
-          canSwipe={canSwipeQueueRow}
-          onPress={() => {
-            openQueueSwipeRef.current?.close();
-            if (isDevPreviewActive) {
-              setDevPreviewIndex(index);
-              setDevPreviewProgress(0.18);
-              return;
-            }
-            handleQueueSongPress(item);
-          }}
-          onRemove={() => {
-            haptic();
-            void removeFromQueue(index);
-          }}
-          onSwipeOpen={handleQueueSwipeOpen}
-        />
-      );
+  const handleQueueItemPress = useCallback(
+    (item: Song) => {
+      if (isDevPreviewActive) {
+        const idx = playingQueue.findIndex((s) => s.id === item.id);
+        setDevPreviewIndex(idx >= 0 ? idx : 0);
+        setDevPreviewProgress(0.18);
+        return;
+      }
+      handleQueueSongPress(item);
     },
-    [
-      activeQueueIndex,
-      handleQueueSongPress,
-      haptic,
-      handleQueueSwipeOpen,
-      isDevPreviewActive,
-      isShortScreen,
-      playerIsPlaying,
-      queue.length,
-      removeFromQueue,
-      sheetAccentColor,
-    ]
+    [isDevPreviewActive, playingQueue, handleQueueSongPress]
   );
+
 
   if (!screenSong) {
     return (
@@ -1092,10 +1065,7 @@ function LegacyPlayerScreen() {
       >
       <View style={[styles.topBar, { height: topBarHeight, paddingHorizontal: isShortScreen ? 14 : 18 }]}>
         <Pressable
-          style={[
-            styles.headerIconButton,
-            { backgroundColor: controlButtonBg, borderColor: controlButtonBorder },
-          ]}
+          style={[styles.headerIconButton, ctrlBtnStyle]}
           onPress={safeGoBack}
           hitSlop={10}
         >
@@ -1109,10 +1079,7 @@ function LegacyPlayerScreen() {
         </View>
 
         <Pressable
-          style={[
-            styles.headerIconButton,
-            { backgroundColor: controlButtonBg, borderColor: controlButtonBorder },
-          ]}
+          style={[styles.headerIconButton, ctrlBtnStyle]}
           onPress={() => router.push("/queue")}
           hitSlop={10}
         >
@@ -1170,11 +1137,7 @@ function LegacyPlayerScreen() {
                   snapToInterval={artCarouselSnapInterval}
                   contentContainerStyle={styles.artCarouselContent}
                   style={styles.artCarousel}
-                  getItemLayout={(_: Song[] | null | undefined, index: number) => ({
-                    length: artCarouselSnapInterval,
-                    offset: artCarouselSnapInterval * index,
-                    index,
-                  })}
+                  getItemLayout={artCarouselGetItemLayout}
                   initialNumToRender={3}
                   maxToRenderPerBatch={5}
                   windowSize={5}
@@ -1202,6 +1165,7 @@ function LegacyPlayerScreen() {
                       },
                     ]}
                     velocity={14}
+                    paused={!interactionReady}
                   />
                   <PingPongScroll
                     text={screenSong.artist}
@@ -1213,6 +1177,7 @@ function LegacyPlayerScreen() {
                       },
                     ]}
                     velocity={12}
+                    paused={!interactionReady}
                   />
                 </View>
                 <Pressable
@@ -1352,13 +1317,8 @@ function LegacyPlayerScreen() {
           <Pressable
             style={[
               styles.roundIconButton,
-              {
-                width: controlButtonSize,
-                height: controlButtonSize,
-                borderRadius: controlButtonSize / 2,
-                backgroundColor: playerIsShuffled ? controlButtonActiveBg : controlButtonBg,
-                borderColor: playerIsShuffled ? controlButtonActiveBorder : controlButtonBorder,
-              },
+              ctrlBtnBase,
+              playerIsShuffled ? ctrlBtnActiveStyle : ctrlBtnStyle,
             ]}
             onPress={() => {
               haptic();
@@ -1378,23 +1338,13 @@ function LegacyPlayerScreen() {
 
           {/* Previous Button */}
           <Pressable
-            style={[
-              styles.roundIconButton,
-              {
-                width: controlButtonSize,
-                height: controlButtonSize,
-                borderRadius: controlButtonSize / 2,
-                backgroundColor: controlButtonBg,
-                borderColor: controlButtonBorder,
-              },
-            ]}
+            style={[styles.roundIconButton, ctrlBtnStyle]}
             onPress={() => {
-              haptic();
               if (isDevPreviewActive) {
                 setDevPreviewIndex((p) => Math.max(0, p - 1));
                 setDevPreviewProgress(0.18);
               } else {
-                prevSong();
+                handleSkip("prev");
               }
             }}
           >
@@ -1420,23 +1370,13 @@ function LegacyPlayerScreen() {
 
           {/* Next Button */}
           <Pressable
-            style={[
-              styles.roundIconButton,
-              {
-                width: controlButtonSize,
-                height: controlButtonSize,
-                borderRadius: controlButtonSize / 2,
-                backgroundColor: controlButtonBg,
-                borderColor: controlButtonBorder,
-              },
-            ]}
+            style={[styles.roundIconButton, ctrlBtnStyle]}
             onPress={() => {
-              haptic();
               if (isDevPreviewActive) {
                 setDevPreviewIndex((p) => Math.min(DEV_PREVIEW_SONGS.length - 1, p + 1));
                 setDevPreviewProgress(0.18);
               } else {
-                nextSong();
+                handleSkip("next");
               }
             }}
           >
@@ -1447,13 +1387,7 @@ function LegacyPlayerScreen() {
           <Pressable
             style={[
               styles.roundIconButton,
-              {
-                width: controlButtonSize,
-                height: controlButtonSize,
-                borderRadius: controlButtonSize / 2,
-                backgroundColor: playerRepeatMode !== "off" ? controlButtonActiveBg : controlButtonBg,
-                borderColor: playerRepeatMode !== "off" ? controlButtonActiveBorder : controlButtonBorder,
-              },
+              playerRepeatMode !== "off" ? ctrlBtnActiveStyle : ctrlBtnStyle,
             ]}
             onPress={() => {
               haptic();
@@ -1492,49 +1426,25 @@ function LegacyPlayerScreen() {
           </View>
         </View>
 
-        <FlatList
-          data={queueExpanded ? playingQueue : playingQueue.slice(0, 10)}
-          keyExtractor={(item, index) => `${item.id}-${index}`}
-            renderItem={renderQueueSong}
-          style={styles.playingList}
-          contentContainerStyle={styles.playingListContent}
+        <ScrollView
           showsVerticalScrollIndicator={false}
-          scrollEnabled={false}
-          initialNumToRender={10}
-          maxToRenderPerBatch={8}
-          updateCellsBatchingPeriod={80}
-          windowSize={4}
-          removeClippedSubviews={false}
-        />
-
-        {playingQueue.length > 10 ? (
-          <Pressable
-            style={styles.queueExpandBtn}
-            onPress={() => {
-              const next = !queueExpanded;
-              setQueueExpanded(next);
-              Animated.spring(chevronAnim, {
-                toValue: next ? 1 : 0,
-                useNativeDriver: true,
-                speed: 18,
-                bounciness: 4,
-              }).start();
-            }}
-          >
-            <Animated.View
-              style={{
-                transform: [{
-                  rotate: chevronAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ["0deg", "180deg"],
-                  }),
-                }],
-              }}
-            >
-              <Ionicons name="chevron-down" size={22} color="rgba(255,255,255,0.55)" />
-            </Animated.View>
-          </Pressable>
-        ) : null}
+          contentContainerStyle={styles.queueListContent}
+          nestedScrollEnabled
+          bounces={false}
+          overScrollMode="never"
+        >
+          {playingQueue.map((item, index) => (
+            <QueueSongRow
+              key={`${item.id}-${index}`}
+              item={item}
+              index={index}
+              isCurrent={index === activeQueueIndex}
+              isShortScreen={isShortScreen}
+              isPlaying={playerIsPlaying}
+              onPress={handleQueueItemPress}
+            />
+          ))}
+        </ScrollView>
       </View>
 
       {/* ── About the artist ── */}
@@ -1991,6 +1901,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#242424",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.04)",
+    maxHeight: 320,
   },
 
   playingListHeader: {
@@ -2024,23 +1935,13 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
 
-  playingList: {
-    flex: 1,
-  },
-  playingListContent: {
-    paddingBottom: 12,
-    paddingHorizontal: 16,
-  },
-  queueExpandBtn: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.08)",
+  queueListContent: {
+    paddingHorizontal: 12,
+    paddingBottom: 10,
   },
   queueRow: {
     height: 54,
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
@@ -2052,32 +1953,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderBottomColor: "transparent",
   },
-  queueSwipeWrap: {
-    position: "relative",
-    overflow: "hidden",
-  },
-  queueRowLayer: {
-    backgroundColor: "transparent",
-  },
-  queueRemoveAction: {
-    width: QUEUE_SWIPE_ACTION_WIDTH,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 2,
-    backgroundColor: "rgba(255,68,68,0.82)",
-  },
-  queueRemoveText: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    lineHeight: 13,
-    fontFamily: "Inter_700Bold",
-  },
   queueRowCompact: {
     height: 48,
     gap: 8,
   },
   queueLead: {
-    width: 18,
+    width: 24,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2085,8 +1966,8 @@ const styles = StyleSheet.create({
     color: Colors.inactive,
     fontSize: 11,
     fontFamily: "Inter_600SemiBold",
+    textAlign: "center",
   },
-
   queueThumb: {
     width: 38,
     height: 38,
@@ -2096,6 +1977,8 @@ const styles = StyleSheet.create({
   queueThumbCompact: {
     width: 34,
     height: 34,
+    borderRadius: 6,
+    backgroundColor: Colors.surfaceLight,
   },
   queueTextWrap: {
     flex: 1,
@@ -2105,11 +1988,10 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
-    textAlign: "left",
   },
-
   queueTitleActive: {
     color: "#F7FAFF",
+    fontSize: 12,
     fontFamily: "Inter_700Bold",
   },
   queueMeta: {
@@ -2117,12 +1999,13 @@ const styles = StyleSheet.create({
     color: "rgba(223,226,235,0.58)",
     fontSize: 10,
     fontFamily: "Inter_500Medium",
-    textAlign: "left",
   },
   queueMetaActive: {
+    marginTop: 1,
+    color: "rgba(223,226,235,0.75)",
+    fontSize: 10,
     fontFamily: "Inter_600SemiBold",
   },
-
   queueDuration: {
     color: "rgba(223,226,235,0.5)",
     fontSize: 10,
@@ -2130,10 +2013,14 @@ const styles = StyleSheet.create({
     width: 34,
     textAlign: "right",
   },
-
   queueDurationActive: {
+    color: "rgba(223,226,235,0.8)",
+    fontSize: 10,
     fontFamily: "Inter_700Bold",
+    width: 34,
+    textAlign: "right",
   },
+
   roundIconButton: {
     width: 42,
     height: 42,
@@ -2408,10 +2295,12 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   artistHero: {
-    height: 128,
+    height: 220,
     backgroundColor: "rgba(255,255,255,0.08)",
+    overflow: "hidden",
   },
   artistHeroImage: {
+    ...StyleSheet.absoluteFillObject,
     width: "100%",
     height: "100%",
   },
@@ -2420,7 +2309,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: 80,
+    height: 120,
   },
   artistCardBody: {
     paddingHorizontal: 28,

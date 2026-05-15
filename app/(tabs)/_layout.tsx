@@ -353,64 +353,82 @@ export function AppNavBar() {
   const navItemPaddingBottom = isIOS ? 3 : 1;
   const conceptText = "#dfe2eb";
   const conceptSubtext = "#bccbb9";
-  const miniPlayerTheme = createSpotifyColorTheme(albumColor || Colors.primary);
+  const miniPlayerTheme = useMemo(
+    () => createSpotifyColorTheme(albumColor || Colors.primary),
+    [albumColor]
+  );
 
   // Ensure title is always readable — if extracted textColor is too dark, use white
-  const safeTextColor = (() => {
+  const safeTextColor = useMemo(() => {
     const raw = textColor || conceptText;
-    // Parse hex brightness — if < 100 (out of 255) it's too dark for the dark bg
     const hex = raw.replace("#", "");
     if (hex.length === 6) {
       const r = parseInt(hex.slice(0, 2), 16);
       const g = parseInt(hex.slice(2, 4), 16);
       const b = parseInt(hex.slice(4, 6), 16);
-      // Perceived brightness (ITU-R BT.601)
       const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-      if (brightness < 100) return conceptText; // too dark — use light fallback
+      if (brightness < 100) return conceptText;
     }
     return raw;
-  })();
+  }, [textColor]);
 
   const playerTitleColor = safeTextColor;
-  const playerSecondaryColor = colorToRgba(safeTextColor, 0.72, conceptSubtext);
+  const playerSecondaryColor = useMemo(
+    () => colorToRgba(safeTextColor, 0.72, conceptSubtext),
+    [safeTextColor]
+  );
   const playIconColor = isIOS ? "#111317" : miniPlayerTheme.onAccent;
   const activeNavColor = isIOS ? "#F7F7FA" : "#FFFFFF";
   const navInactiveColor = isIOS ? "rgba(235,235,245,0.62)" : conceptSubtext;
   const navBaseBg = isIOS ? "rgba(22,24,29,0.32)" : Colors.surface;
   const containerGlassBase = isIOS ? "rgba(15,17,22,0.28)" : Colors.background;
   const playerSectionBg = isIOS ? "rgba(22,24,29,0.38)" : Colors.surface;
-  const playerSectionDivider = colorToRgba(miniPlayerTheme.accent, 0.14, "rgba(223,226,235,0.08)");
+  const playerSectionDivider = useMemo(
+    () => colorToRgba(miniPlayerTheme.accent, 0.14, "rgba(223,226,235,0.08)"),
+    [miniPlayerTheme.accent]
+  );
   const playerProgressFillColor = Colors.primary;
-  const navGlassTintColors: readonly [string, string, string] = isIOS
-    ? [
-        "rgba(255,255,255,0.14)",
-        "rgba(255,255,255,0.05)",
-        "rgba(255,255,255,0.08)",
-      ]
-    : [
-        "rgba(255,255,255,0.05)",
-        "rgba(255,255,255,0.02)",
-        "rgba(255,255,255,0.03)",
-      ];
-  const navGlowFillColors: readonly [string, string, string] = isIOS
-    ? [
-        colorToRgba(albumColor, 0.04, "rgba(255,255,255,0.08)"),
-        colorToRgba(albumColor, 0.02, "rgba(255,255,255,0.04)"),
-        "rgba(255,255,255,0.015)",
-      ]
-    : [
-        colorToRgba(albumColor, 0.07, "rgba(16,20,26,0.1)"),
-        colorToRgba(albumColor, 0.035, "rgba(16,20,26,0.07)"),
-        "rgba(16,20,26,0.015)",
-      ];
-  const coverAlbumTint = colorToRgba(albumColor, 0.26, "rgba(255,255,255,0.12)");
-  const coverAlbumTintBorder = colorToRgba(albumColor, 0.52, "rgba(255,255,255,0.24)");
-  const playerGradientStrong = colorToRgba(albumColor, 0.2, "rgba(255,255,255,0.08)");
-  const playerGradientSoft = colorToRgba(albumColor, 0.08, "rgba(255,255,255,0.03)");
-  const playerTopEdgeTint = colorToRgba(
-    miniPlayerTheme.accent,
-    0.14,
-    "rgba(255,255,255,0.12)"
+
+  // Static — never changes, defined once
+  const navGlassTintColors = useMemo<readonly [string, string, string]>(
+    () => isIOS
+      ? ["rgba(255,255,255,0.14)", "rgba(255,255,255,0.05)", "rgba(255,255,255,0.08)"]
+      : ["rgba(255,255,255,0.05)", "rgba(255,255,255,0.02)", "rgba(255,255,255,0.03)"],
+    [isIOS]
+  );
+  const navGlowFillColors = useMemo<readonly [string, string, string]>(
+    () => isIOS
+      ? [
+          colorToRgba(albumColor, 0.04, "rgba(255,255,255,0.08)"),
+          colorToRgba(albumColor, 0.02, "rgba(255,255,255,0.04)"),
+          "rgba(255,255,255,0.015)",
+        ]
+      : [
+          colorToRgba(albumColor, 0.07, "rgba(16,20,26,0.1)"),
+          colorToRgba(albumColor, 0.035, "rgba(16,20,26,0.07)"),
+          "rgba(16,20,26,0.015)",
+        ],
+    [albumColor, isIOS]
+  );
+  const coverAlbumTint = useMemo(
+    () => colorToRgba(albumColor, 0.26, "rgba(255,255,255,0.12)"),
+    [albumColor]
+  );
+  const coverAlbumTintBorder = useMemo(
+    () => colorToRgba(albumColor, 0.52, "rgba(255,255,255,0.24)"),
+    [albumColor]
+  );
+  const playerGradientColors = useMemo<readonly [string, string, string]>(
+    () => [
+      colorToRgba(albumColor, 0.2, "rgba(255,255,255,0.08)"),
+      colorToRgba(albumColor, 0.08, "rgba(255,255,255,0.03)"),
+      "transparent",
+    ],
+    [albumColor]
+  );
+  const playerTopEdgeTint = useMemo(
+    () => colorToRgba(miniPlayerTheme.accent, 0.14, "rgba(255,255,255,0.12)"),
+    [miniPlayerTheme.accent]
   );
   const miniButtonPrimaryBg = isIOS ? "rgba(255,255,255,0.96)" : miniPlayerTheme.accent;
   const miniButtonPrimaryBorder = isIOS
@@ -504,7 +522,7 @@ export function AppNavBar() {
             ) : null}
             <LinearGradient
               pointerEvents="none"
-              colors={[playerGradientStrong, playerGradientSoft, "transparent"]}
+              colors={playerGradientColors}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               style={styles.playerGradient}
@@ -520,7 +538,9 @@ export function AppNavBar() {
             />
             <Pressable
               style={[styles.playerRow, { height: miniPlayerHeight }]}
-              onPress={() => router.push("/player")}
+              onPress={() => {
+                requestAnimationFrame(() => router.push("/player"));
+              }}
             >
               <View style={styles.playerLeft}>
                 <View style={[styles.coverWrap, { width: miniCoverSize }]}>
@@ -955,7 +975,9 @@ function IOSMiniPlayerOverlay() {
         <View pointerEvents="none" style={styles.iosMiniPlayerTopHairline} />
 
         <View style={styles.iosMiniPlayerRow}>
-          <Pressable style={styles.iosMiniPlayerMain} onPress={() => router.push("/player")}>
+          <Pressable style={styles.iosMiniPlayerMain} onPress={() => {
+            requestAnimationFrame(() => router.push("/player"));
+          }}>
             <View style={styles.iosMiniPlayerArtworkShell}>
               {activeSong.coverUrl && !coverFailed ? (
                 <Image

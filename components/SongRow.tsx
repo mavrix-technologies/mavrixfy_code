@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useRef } from "react";
+import React, { memo, useCallback, useEffect, useRef } from "react";
 import { View, Text, Pressable, StyleSheet, Platform, Alert, ToastAndroid, Animated as RNAnimated } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
 import { Image } from "expo-image";
@@ -92,6 +92,13 @@ const SongRow = memo(function SongRow({
   const didSwipeRef = useRef(false);
   const swipeableRef = useRef<Swipeable | null>(null);
 
+  // Close swipeable on unmount — prevents stuck-open state when navigating back
+  useEffect(() => {
+    return () => {
+      swipeableRef.current?.close();
+    };
+  }, []);
+
   const showActionFeedback = useCallback((message: string) => {
     if (Platform.OS === "android") {
       ToastAndroid.show(message, ToastAndroid.SHORT);
@@ -118,7 +125,7 @@ const SongRow = memo(function SongRow({
     });
   }, [addToQueue, onRemove, resetSwipeStateSoon, song]);
 
-  const handleSwipeWillOpen = useCallback((direction: "left" | "right") => {
+  const handleSwipeOpen = useCallback((direction: "left" | "right") => {
     if (direction === "left") {
       handleSwipeAddToQueue();
     }
@@ -181,16 +188,17 @@ const SongRow = memo(function SongRow({
       <Swipeable
         ref={swipeableRef}
         enabled={!onRemove}
-        friction={1}
+        friction={1.6}
         leftThreshold={SWIPE_COMMIT_DISTANCE}
-        dragOffsetFromLeftEdge={2}
+        dragOffsetFromLeftEdge={Platform.OS === "ios" ? 28 : 8}
+        failOffsetY={[-10, 10]}
         overshootLeft
         overshootFriction={8}
         useNativeAnimations
         animationOptions={{ bounciness: 0, speed: 32 }}
         enableTrackpadTwoFingerGesture
         renderLeftActions={renderLeftActions}
-        onSwipeableWillOpen={handleSwipeWillOpen}
+        onSwipeableOpen={handleSwipeOpen}
         onSwipeableClose={handleSwipeClose}
         containerStyle={styles.swipeableContainer}
         childrenContainerStyle={styles.rowLayer}
