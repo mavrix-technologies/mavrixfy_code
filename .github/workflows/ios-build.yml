@@ -10,6 +10,9 @@ jobs:
   build-ios:
     name: 🎉 iOS Build
     runs-on: macos-15
+    env:
+      RCT_NEW_ARCH_ENABLED: "0"
+      EXPO_NEW_ARCH_ENABLED: "0"
 
     steps:
       - name: Checkout repository
@@ -87,7 +90,17 @@ jobs:
 
       - name: Install CocoaPods dependencies
         working-directory: ios
-        run: pod install --repo-update
+        run: |
+          set -o pipefail
+          pod install --repo-update 2>&1 | tee pod-install.log || \
+          (
+            echo "=== POD INSTALL FAILED — ERRORS FROM RAW LOG ==="
+            grep -E "error:|Error|ERROR|failed|Failed|Unable|undefined method" pod-install.log | head -80 || true
+            echo ""
+            echo "=== LAST 120 LINES ==="
+            tail -120 pod-install.log
+            exit 1
+          )
 
       - name: Build iOS app (no codesign)
         working-directory: ios
@@ -145,12 +158,15 @@ jobs:
           path: ./Mavrixfy.ipa
           compression-level: 0
 
-      - name: Upload build log on failure
+      - name: Upload failure logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: xcodebuild-log
-          path: ios/build.log
+          name: ios-build-failure-logs
+          path: |
+            ios/pod-install.log
+            ios/build.log
+          if-no-files-found: warn
 
       - name: Create Release and Upload IPA
         uses: softprops/action-gh-release@v2
