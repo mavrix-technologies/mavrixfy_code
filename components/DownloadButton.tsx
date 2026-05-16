@@ -43,11 +43,8 @@ function CircleProgress({ size, progress, strokeWidth = 2.5 }: CircleProgressPro
   const center = size / 2;
   const pauseSize = size * 0.38;
   const pauseBarW = pauseSize * 0.28;
-  const pauseBarH = pauseSize * 0.72;
   const pauseGap = pauseSize * 0.18;
   const pauseX1 = center - pauseGap / 2 - pauseBarW;
-  const pauseX2 = center + pauseGap / 2;
-  const pauseY = center - pauseBarH / 2;
 
   return (
     <Svg width={size} height={size}>

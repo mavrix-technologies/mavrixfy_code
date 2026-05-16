@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, Text, Pressable, StyleSheet, Dimensions, AppState, Linking } from "react-native";
+import { View, Text, Pressable, StyleSheet, AppState, Linking, useWindowDimensions } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,8 +9,6 @@ import { usePlayer } from "@/contexts/PlayerContext";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const BANNER_WIDTH  = SCREEN_WIDTH - 32;
 const BANNER_HEIGHT = 140;
 const ROTATION_INTERVAL_MS = 8_000;
 
@@ -54,9 +52,12 @@ export default function PromotionBanner() {
   const [loading, setLoading]     = useState(true);
   const [isVisible, setIsVisible] = useState(true);
   const { playSong } = usePlayer();
+  const { width } = useWindowDimensions();
+  const bannerWidth = Math.max(0, width - 32);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
+    let active = true;
     const today = new Date().toISOString().split("T")[0];
 
     // Query only on indexed fields (status + platforms).
@@ -70,6 +71,7 @@ export default function PromotionBanner() {
 
     getDocs(q)
       .then((snapshot) => {
+        if (!active) return;
         const promos = snapshot.docs
           .map((doc) => ({ id: doc.id, ...doc.data() } as Promotion))
           .filter((p) => {
@@ -86,7 +88,13 @@ export default function PromotionBanner() {
       .catch(() => {
         // Silent fail — banner is non-critical
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   // ── Pause rotation when app is backgrounded ────────────────────────────────
@@ -156,7 +164,7 @@ export default function PromotionBanner() {
   return (
     <View style={styles.container}>
       <Pressable
-        style={({ pressed }) => [styles.banner, pressed && styles.bannerPressed]}
+        style={({ pressed }) => [styles.banner, { width: bannerWidth }, pressed && styles.bannerPressed]}
         onPress={() => handlePress(promo)}
       >
         {promo.mediaUrl ? (
@@ -224,7 +232,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   banner: {
-    width: BANNER_WIDTH,
     height: BANNER_HEIGHT,
     borderRadius: 12,
     overflow: "hidden",

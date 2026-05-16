@@ -2,12 +2,11 @@ import { Tabs, router, usePathname, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, InteractionManager, PanResponder, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
-import type { BottomTabBarProps } from "@react-navigation/bottom-tabs"; // kept for type compat
 import Colors from "@/constants/colors";
 import { usePlayerLite } from "@/contexts/PlayerContext";
 import { PingPongScroll } from "@/components/PingPongScroll";
@@ -15,7 +14,6 @@ import { createSpotifyColorTheme, extractDominantColor } from "@/lib/colorExtrac
 import { triggerImpact } from "@/lib/haptics";
 import { useLastMix, clearLastMix } from "@/lib/lastMix";
 
-const TAB_BOTTOM = 0;
 const MIX_DELETE_THRESHOLD = -72;
 
 type NativeTabsModule = typeof import("expo-router/unstable-native-tabs");
@@ -218,27 +216,14 @@ export function AppNavBar() {
     setTextColor,
   } = usePlayerLite();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
-  const activeSongId = activeSong?.id ?? "";
   const hasActiveMiniPlayer = Boolean(activeSong);
   const [coverFailed, setCoverFailed] = useState(false);
   const lastMix = useLastMix();
-  const lastMixSongIds = useMemo(() => {
-    const raw = lastMix?.songIds ?? "";
-    if (!raw) return [] as string[];
-    return raw.split(",").map((id) => id.trim()).filter(Boolean);
-  }, [lastMix?.songIds]);
   const mixChipImages = useMemo(() => {
     const raw = lastMix?.images ?? "";
     if (!raw) return [] as string[];
     return raw.split(",").map((image) => image.trim()).filter(Boolean);
   }, [lastMix?.images]);
-  const isPlayingFromLastMix = useMemo(() => {
-    if (!isPlaying || !activeSongId || lastMixSongIds.length === 0) return false;
-    if (!lastMixSongIds.includes(activeSongId)) return false;
-    if (queue.length !== lastMixSongIds.length) return false;
-    const mixSet = new Set(lastMixSongIds);
-    return queue.every((song) => mixSet.has(song.id));
-  }, [activeSongId, isPlaying, lastMixSongIds, queue]);
   const openLastMix = useCallback(() => {
     if (!lastMix) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
@@ -334,7 +319,6 @@ export function AppNavBar() {
   }, [activeSong?.id, activeSong?.coverUrl]);
 
   const resolvedBottomInset = isWeb ? 0 : Math.max(bottomInset, 0);
-  const floatingBottom = 0;
   const containerBottomPadding = 0;
   const containerWidth: DimensionValue = isIOS && !isWeb
     ? Math.min(width - 14, 560)
@@ -863,13 +847,6 @@ function IOSMiniPlayerOverlay() {
       .filter(Boolean);
     return all;
   }, [lastMix?.images]);
-  const mixNames = useMemo(() => {
-    const all = (lastMix?.names ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-    return all;
-  }, [lastMix?.names]);
   const mixSongIds = useMemo(() => {
     const raw = lastMix?.songIds ?? "";
     if (!raw) return [] as string[];
@@ -1128,7 +1105,6 @@ function IOSMiniPlayerOverlay() {
 }
 
 export default function TabLayout() {
-  const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
   const pathname = usePathname();
   const tabsNavigationRef = React.useRef<any>(null);

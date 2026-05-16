@@ -103,5 +103,19 @@
     "typescript": "~5.9.2",
     "ws": "^8.18.0"
   },
+  "expo": {
+    "doctor": {
+      "appConfigFieldsNotSyncedCheck": {
+        "enabled": false
+      },
+      "reactNativeDirectoryCheck": {
+        "enabled": true,
+        "exclude": [
+          "react-native-track-player"
+        ],
+        "listUnknownPackages": true
+      }
+    }
+  },
   "private": true
 }

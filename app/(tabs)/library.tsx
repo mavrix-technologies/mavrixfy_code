@@ -276,7 +276,7 @@ export default function LibraryScreen() {
 
         setSelectedImage(asset.uri);
       }
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to select image");
     }
   };
@@ -318,7 +318,7 @@ export default function LibraryScreen() {
       resetCreateModal();
       await loadPlaylists({ silent: true });
       Alert.alert("Success", "Playlist created successfully!");
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to create playlist. Please try again.");
     } finally {
       setIsUploadingImage(false);

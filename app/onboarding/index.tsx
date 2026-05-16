@@ -316,15 +316,17 @@ function StepArtists({ genres, selectedIds, onToggle, onFinish, saving }: {
       speed: 18,
       bounciness: 8,
     }).start();
-  }, [metGoal]);
+  }, [btnAnim, metGoal]);
 
   // Load suggested artists from selected genres
   useEffect(() => {
+    let active = true;
     const queries = genres.flatMap((g) => SUGGESTED_ARTISTS_BY_GENRE[g] ?? []);
     const unique = [...new Set(queries)].slice(0, 15);
     setLoadingInitial(true);
     Promise.allSettled(unique.map((q) => searchArtists(q).then((r) => r[0]).catch(() => null)))
       .then((results) => {
+        if (!active) return;
         const seen = new Set<string>();
         const cards = results
           .filter((r): r is PromiseFulfilledResult<ArtistCard | null> => r.status === "fulfilled")
@@ -332,26 +334,40 @@ function StepArtists({ genres, selectedIds, onToggle, onFinish, saving }: {
           .filter((a): a is ArtistCard => { if (!a?.id || seen.has(a.id)) return false; seen.add(a.id); return true; });
         setAllArtists(cards);
       })
-      .finally(() => setLoadingInitial(false));
-  }, []);
+      .finally(() => {
+        if (active) setLoadingInitial(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [genres]);
 
   // Debounced search
   useEffect(() => {
+    let active = true;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const q = query.trim();
     if (!q) { setSearchResults([]); setLoadingSearch(false); return; }
     setLoadingSearch(true);
     debounceRef.current = setTimeout(() => {
-      searchArtists(q).then(setSearchResults).finally(() => setLoadingSearch(false));
+      searchArtists(q)
+        .then((results) => {
+          if (active) setSearchResults(results);
+        })
+        .finally(() => {
+          if (active) setLoadingSearch(false);
+        });
     }, 350);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+    return () => {
+      active = false;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [query]);
 
   const displayArtists = query.trim() ? searchResults : allArtists;
   const isSearching = query.trim().length > 0;
   const filters = ["For You", ...genres.map((g) => GENRES.find((x) => x.id === g)?.label ?? g)];
-  const remaining = Math.max(0, 3 - selectedIds.length);
-
   // Bottom bar height for FlatList padding
   const bottomBarH = Math.max(insets.bottom + 16, 28) + 52 + 12;
 
@@ -516,7 +532,7 @@ function StepFinding() {
     const a1 = pulse(d1, 0); const a2 = pulse(d2, 180); const a3 = pulse(d3, 360);
     a1.start(); a2.start(); a3.start();
     return () => { a1.stop(); a2.stop(); a3.stop(); };
-  }, []);
+  }, [d1, d2, d3]);
 
   return (
     <View style={s.center}>
@@ -540,7 +556,7 @@ function StepGreatPicks({ artists }: { artists: ArtistCard[] }) {
       Animated.spring(scale, { toValue: 1, speed: 14, bounciness: 10, useNativeDriver: true }),
       Animated.timing(opacity, { toValue: 1, duration: 300, useNativeDriver: true }),
     ]).start();
-  }, []);
+  }, [opacity, scale]);
 
   return (
     <View style={s.center}>
@@ -573,6 +589,14 @@ export default function OnboardingScreen() {
   const [gender, setGender] = useState("");
   const [genres, setGenres] = useState<string[]>([]);
   const [selectedArtists, setSelectedArtists] = useState<ArtistCard[]>([]);
+  const finishTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    return () => {
+      finishTimersRef.current.forEach(clearTimeout);
+      finishTimersRef.current = [];
+    };
+  }, []);
 
   const toggleGenre = useCallback((id: string) => {
     setGenres((p) => p.includes(id) ? p.filter((g) => g !== id) : [...p, id]);
@@ -605,11 +629,13 @@ export default function OnboardingScreen() {
   const handleFinish = useCallback(async () => {
     setStep(5);
     await saveToFirestore();
-    setTimeout(() => {
+    const findingTimer = setTimeout(() => {
       setStep(6);
       hapticSuccess();
-      setTimeout(() => router.replace("/(tabs)"), 2000);
+      const redirectTimer = setTimeout(() => router.replace("/(tabs)"), 2000);
+      finishTimersRef.current.push(redirectTimer);
     }, 1800);
+    finishTimersRef.current.push(findingTimer);
   }, [saveToFirestore]);
 
   const goBack = useCallback(() => {

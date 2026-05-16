@@ -32,8 +32,8 @@ import {
   JioSaavnSong,
 } from "@/lib/musicData";
 import { usePlayer } from "@/contexts/PlayerContext";
-import { getUserPlaylists, updateUserPlaylist, deleteUserPlaylist, removeSongFromPlaylist } from "@/lib/storage";
-import { firestorePlaylistToLocalSongs, getPlaylistById, updateFirestorePlaylist, deleteFirestorePlaylist, removeSongFromFirestorePlaylist } from "@/lib/firestore";
+import { getUserPlaylists, updateUserPlaylist, deleteUserPlaylist } from "@/lib/storage";
+import { firestorePlaylistToLocalSongs, getPlaylistById, updateFirestorePlaylist, deleteFirestorePlaylist } from "@/lib/firestore";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
@@ -321,7 +321,7 @@ export default function PlaylistScreen() {
         setEditCover(result.assets[0].uri);
         if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Failed to pick image');
     }
   }, []);
@@ -352,7 +352,7 @@ export default function PlaylistScreen() {
           if (!finalImageUrl) {
             throw new Error('Failed to upload image');
           }
-        } catch (error) {
+        } catch {
           setIsUploadingImage(false);
           Alert.alert("Upload Error", "Failed to upload image. Please try again.");
           setIsSaving(false);
@@ -385,7 +385,7 @@ export default function PlaylistScreen() {
       Alert.alert("Success", "Playlist updated successfully");
       
       if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to update playlist");
       if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
@@ -412,7 +412,7 @@ export default function PlaylistScreen() {
               }
               if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               safeGoBack();
-            } catch (error) {
+            } catch {
               Alert.alert("Error", "Failed to delete playlist");
               if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             }
@@ -421,21 +421,6 @@ export default function PlaylistScreen() {
       ]
     );
   }, [playlistName, playlistId, isFirestoreSource, user?.id]);
-
-  const handleRemoveSong = useCallback(async (songId: string) => {
-    try {
-      if (isFirestoreSource && user?.id) {
-        await removeSongFromFirestorePlaylist(playlistId, songId);
-      } else {
-        await removeSongFromPlaylist(playlistId, songId);
-      }
-      setSongs(prev => prev.filter(s => s.id !== songId));
-      if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
-      Alert.alert("Error", "Failed to remove song");
-      if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    }
-  }, [playlistId, isFirestoreSource, user?.id]);
 
   // Pan responder for drag-to-dismiss with improved gesture handling
   const panResponder = useRef(

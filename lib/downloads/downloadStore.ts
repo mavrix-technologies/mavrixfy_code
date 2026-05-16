@@ -137,6 +137,11 @@ export async function saveDownload(item: DownloadItem): Promise<void> {
   }
 }
 
+/** Update the in-memory cache only. Use for high-frequency progress ticks. */
+export function updateDownloadMemory(item: DownloadItem): void {
+  memCache.set(item.songId, item);
+}
+
 /** Remove from cache and storage. */
 export async function removeDownload(songId: string): Promise<void> {
   memCache.delete(songId);

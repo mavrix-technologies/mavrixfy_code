@@ -781,7 +781,7 @@ export default function SearchScreen() {
             </View>
           ) : !hasResults ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyText}>No results for "{searchDisplayQuery}"</Text>
+              <Text style={styles.emptyText}>{`No results for "${searchDisplayQuery}"`}</Text>
               <Text style={styles.emptySubtext}>Check the spelling, or search for something else.</Text>
             </View>
           ) : resultFilter === "playlists" ? (

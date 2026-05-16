@@ -13,7 +13,6 @@ import React, { useState, useCallback, useMemo, useEffect } from "react";
 import {
   View,
   Text,
-  FlatList,
   Pressable,
   StyleSheet,
   Alert,
@@ -330,24 +329,6 @@ export default function DownloadsScreen() {
 
     return sections;
   }, [allItems, collectionMetadata]);
-
-  // Sort: active first, then completed, then failed/revoked.
-  const sortedItems = useMemo(() => {
-    const items = allItems;
-    const order: Record<DownloadStatus, number> = {
-      downloading: 0,
-      queued: 1,
-      waiting_for_wifi: 2,
-      waiting_for_charging: 3,
-      paused: 4,
-      completed: 5,
-      failed: 6,
-      expired: 7,
-      revoked: 8,
-      deleted: 9,
-    };
-    return [...items].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
-  }, [allItems]);
 
   const handlePause = useCallback(async (songId: string) => {
     await triggerImpact(Haptics.ImpactFeedbackStyle.Light);

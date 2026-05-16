@@ -26,6 +26,10 @@ const SWIPE_ACTION_WIDTH = 184;
 const SWIPE_COMMIT_DISTANCE = 82;
 const SWIPE_SOFT_LIMIT = 214;
 
+function queueSignature(queue?: Song[]): string {
+  return queue?.map((item) => item.id).join("|") ?? "";
+}
+
 function QueueSwipeAction({
   dragX,
 }: {
@@ -94,8 +98,9 @@ const SongRow = memo(function SongRow({
 
   // Close swipeable on unmount — prevents stuck-open state when navigating back
   useEffect(() => {
+    const swipeable = swipeableRef.current;
     return () => {
-      swipeableRef.current?.close();
+      swipeable?.close();
     };
   }, []);
 
@@ -268,11 +273,15 @@ const SongRow = memo(function SongRow({
 }, (prevProps, nextProps) => {
   return (
     prevProps.song.id === nextProps.song.id &&
+    prevProps.song.title === nextProps.song.title &&
+    prevProps.song.artist === nextProps.song.artist &&
+    prevProps.song.coverUrl === nextProps.song.coverUrl &&
+    prevProps.song.audioUrl === nextProps.song.audioUrl &&
     prevProps.index === nextProps.index &&
     prevProps.showCover === nextProps.showCover &&
     prevProps.showDownload === nextProps.showDownload &&
     Boolean(prevProps.onRemove) === Boolean(nextProps.onRemove) &&
-    prevProps.queue?.length === nextProps.queue?.length
+    queueSignature(prevProps.queue) === queueSignature(nextProps.queue)
   );
 });
 

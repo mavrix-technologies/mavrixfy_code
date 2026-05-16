@@ -320,7 +320,6 @@ function LegacyPlayerScreen() {
     toggleRepeat,
     toggleLike,
     isLiked,
-    removeFromQueue,
     albumColor,
     setAlbumColor,
     setTextColor,
@@ -562,7 +561,6 @@ function LegacyPlayerScreen() {
   );
   const sheetTextColor = Colors.text;
   const sheetMutedTextColor = "rgba(223,226,235,0.68)";
-  const sheetAccentColor = brightAlbumColor;
   // These are all static — define once outside the component (see bottom of file)
   const controlButtonBg = "rgba(223,226,235,0.07)";
   const controlButtonBorder = "rgba(223,226,235,0.14)";

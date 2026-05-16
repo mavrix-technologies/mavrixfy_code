@@ -95,7 +95,7 @@ export default function DownloadCollectionButton({
   const ctx = useDownloadsSafe();
 
   // Derive per-collection download state from the store
-  const { completed, downloading, queued, failed, total } = useMemo(() => {
+  const { completed, downloading, queued, total } = useMemo(() => {
     if (!ctx || songs.length === 0) {
       return { completed: 0, downloading: 0, queued: 0, failed: 0, total: 0 };
     }
@@ -117,8 +117,6 @@ export default function DownloadCollectionButton({
 
   const allDone = total > 0 && completed === total;
   const isActive = downloading > 0 || queued > 0;
-  const notStarted = completed === 0 && !isActive;
-  const remaining = total - completed;
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
 
@@ -219,6 +217,8 @@ export default function DownloadCollectionButton({
     isActive,
     songs,
     collectionId,
+    collectionImage,
+    collectionName,
     total,
     completed,
     downloading,

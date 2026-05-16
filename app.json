@@ -74,7 +74,7 @@
         "expo-build-properties",
         {
           "ios": {
-            "newArchEnabled": true,
+            "newArchEnabled": false,
             "deploymentTarget": "15.1",
             "extraBuildProperties": {
               "GCC_WARN_INHIBIT_ALL_WARNINGS": "YES",
@@ -84,7 +84,7 @@
             }
           },
           "android": {
-            "newArchEnabled": true,
+            "newArchEnabled": false,
             "minSdkVersion": 24,
             "targetSdkVersion": 35,
             "compileSdkVersion": 35,
@@ -126,7 +126,7 @@
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": "2.5.0",
+    "runtimeVersion": "2.5.1-20501",
     "extra": {
       "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",

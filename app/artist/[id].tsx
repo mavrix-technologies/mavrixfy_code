@@ -231,41 +231,6 @@ export default function ArtistScreen() {
 
   // ── Render helpers ──────────────────────────────────────────────────────────
 
-  const renderAlbum = useCallback(({ item }: { item: JioSaavnArtistAlbum }) => (
-    <Pressable style={styles.albumCard} onPress={() => handleAlbumPress(item)}>
-      <Image
-        recyclingKey={item.id}
-        source={{ uri: getBestImageUrl(item.image) }}
-        style={styles.albumCover}
-        contentFit="cover"
-        transition={80}
-        cachePolicy="memory-disk"
-      />
-      <Text style={styles.albumName} numberOfLines={2}>{item.name}</Text>
-      {item.year ? <Text style={styles.albumYear}>{item.year}</Text> : null}
-    </Pressable>
-  ), [handleAlbumPress]);
-
-  const renderSimilar = useCallback(({ item }: { item: { id: string; name: string; url: string; image: any[] } }) => {
-    const img = getBestImageUrl(item.image);
-    return (
-      <Pressable
-        style={styles.similarCard}
-        onPress={() => handleSimilarArtistPress(item.id, item.name, img)}
-      >
-        <Image
-          recyclingKey={item.id}
-          source={{ uri: img }}
-          style={styles.similarAvatar}
-          contentFit="cover"
-          transition={80}
-          cachePolicy="memory-disk"
-        />
-        <Text style={styles.similarName} numberOfLines={2}>{item.name}</Text>
-      </Pressable>
-    );
-  }, [handleSimilarArtistPress]);
-
   // ── Loading / error states ──────────────────────────────────────────────────
 
   if (loading && !initName) {

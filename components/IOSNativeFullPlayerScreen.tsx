@@ -24,6 +24,17 @@ export default function IOSNativeFullPlayerScreen() {
   const [statusText, setStatusText] = useState("Opening native iOS player...");
   const launchedRef = useRef(false);
   const syncedRef = useRef(false);
+  const mountedRef = useRef(true);
+  const timeoutRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      timeoutRefs.current.forEach(clearTimeout);
+      timeoutRefs.current = [];
+    };
+  }, []);
 
   const activeQueue = useMemo(() => {
     if (queue.length > 0) {
@@ -60,20 +71,27 @@ export default function IOSNativeFullPlayerScreen() {
 
       playSong(currentSong, activeQueue);
 
-      setTimeout(() => {
+      const syncTimer = setTimeout(() => {
+        if (!mountedRef.current) return;
         seekTo(normalizedProgress);
 
         if (!shouldResumePlaying) {
-          setTimeout(() => {
+          const pauseTimer = setTimeout(() => {
+            if (!mountedRef.current) return;
             togglePlay();
+            router.back();
           }, 180);
+          timeoutRefs.current.push(pauseTimer);
+          return;
         }
-      }, 280);
 
-      router.back();
+        router.back();
+      }, 280);
+      timeoutRefs.current.push(syncTimer);
     };
 
     const handleError = (event: { message?: string }) => {
+      if (!mountedRef.current) return;
       setStatusText(event.message || "Could not open the native iOS player.");
       router.back();
     };
@@ -96,6 +114,7 @@ export default function IOSNativeFullPlayerScreen() {
             shouldPlay: isPlaying,
           });
         } catch (error) {
+          if (!mountedRef.current) return;
           setStatusText(error instanceof Error ? error.message : "Could not open native iOS player.");
           router.back();
         }

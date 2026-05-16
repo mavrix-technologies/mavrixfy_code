@@ -35,6 +35,10 @@ let errorCb: ErrorCallback | null = null;
 
 export function onStatusUpdate(cb: StatusCallback) { statusCb = cb; }
 export function onError(cb: ErrorCallback) { errorCb = cb; }
+export function clearListeners(): void {
+  statusCb = null;
+  errorCb = null;
+}
 
 // ─── internal helpers ─────────────────────────────────────────────────────────
 
@@ -137,6 +141,11 @@ export function stop(): void {
   activePlayer = null;
   currentUrl = null;
   killPlayer(p);
+}
+
+export function destroy(): void {
+  clearListeners();
+  stop();
 }
 
 export async function seekTo(seconds: number): Promise<void> {

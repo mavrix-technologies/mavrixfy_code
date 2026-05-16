@@ -14,7 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
-import { convertJioSaavnSong, getBestImageUrl, Song } from "@/lib/musicData";
+import { convertJioSaavnSong, Song } from "@/lib/musicData";
 import { getArtistDetails } from "@/lib/artistService";
 import { usePlayer } from "@/contexts/PlayerContext";
 import { triggerImpact } from "@/lib/haptics";
@@ -100,8 +100,6 @@ export default function ArtistMixScreen() {
 
       const seen = new Set<string>();
       const merged: Song[] = [];
-      const selectedArtistIds = new Set(ids);
-
       results.forEach((r, idx) => {
         if (r.status !== "fulfilled" || !r.value) return;
         const artist = r.value;

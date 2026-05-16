@@ -29,7 +29,7 @@ const isExpoGoRuntime = isRunningInExpoGo();
 // Expo Go falls back to expo-audio because it does not include the native module.
 const isNativeTrackPlayerAvailable = Platform.OS !== "web" && !isExpoGoRuntime;
 const canUseLightweightAudioFallback = isExpoGoRuntime;
-const shouldEagerlySetupNativePlayer = Platform.OS === "android";
+const shouldEagerlySetupNativePlayer = isNativeTrackPlayerAvailable;
 const nativePlayerUnavailableMessage = isExpoGoRuntime
   ? "Use the development build or installed APK. Expo Go does not include the native music player."
   : "Native music player is not available in this runtime.";
@@ -578,13 +578,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // Wire expo-audio status + error callbacks for runtimes using the lightweight fallback.
   useEffect(() => {
     if (!canUseLightweightAudioFallback) return;
+    let mounted = true;
 
     ExpoAvPlayer.onError((err) => {
+      if (!mounted) return;
       logger.warn("[ExpoAudio] Playback error", err);
       showPlaybackNotice("Could not play this song.");
     });
 
     ExpoAvPlayer.onStatusUpdate(({ isPlaying, position, duration, didJustFinish }) => {
+      if (!mounted) return;
       previewIsPlayingRef.current = isPlaying;
       setPreviewIsPlaying(isPlaying);
       if (duration > 0) {
@@ -619,6 +622,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         void ExpoAvPlayer.loadAndPlay(url);
       }
     });
+
+    return () => {
+      mounted = false;
+      ExpoAvPlayer.destroy();
+    };
   }, [clearSleepTimer, showPlaybackNotice]);
 
   useEffect(() => {

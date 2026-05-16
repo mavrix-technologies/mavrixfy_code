@@ -135,12 +135,6 @@ export function preWarmHomeCache() {
   ]).catch(() => {});
 }
 
-// ─── Auth guard ───────────────────────────────────────────────────────────────
-// Protected routes that require authentication
-const PROTECTED_SEGMENTS = ["(tabs)"];
-// Routes that are only for unauthenticated users
-const AUTH_ONLY_SEGMENTS = ["login"];
-
 function RootLayoutNav() {
   const router = useRouter();
   const segments = useSegments();

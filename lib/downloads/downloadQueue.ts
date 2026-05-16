@@ -21,6 +21,7 @@ import {
 import {
   saveDownload,
   loadDownload,
+  updateDownloadMemory,
 } from "@/lib/downloads/downloadStore";
 import {
   ensureTrackDir,
@@ -63,6 +64,8 @@ const pendingQueue: string[] = [];
 
 /** Guards against two concurrent startDownload calls for the same songId. */
 const startingSet = new Set<string>();
+const lastProgressPersistAt = new Map<string, number>();
+const PROGRESS_PERSIST_INTERVAL_MS = 1500;
 
 // ─── Slot management ──────────────────────────────────────────────────────────
 
@@ -74,6 +77,7 @@ function activeCount(): number {
 function releaseSlot(songId: string) {
   activeHandles.delete(songId);
   startingSet.delete(songId);
+  lastProgressPersistAt.delete(songId);
   drainQueue();
 }
 
@@ -142,8 +146,15 @@ async function executeDownload(songId: string): Promise<void> {
           bytesDownloaded: totalBytesWritten,
           totalBytes: totalBytesExpectedToWrite,
         };
-        saveDownload(patched);          // writes cache immediately, AsyncStorage async
+        updateDownloadMemory(patched);
         emit("progress", songId, patched);
+
+        const now = Date.now();
+        const lastPersistedAt = lastProgressPersistAt.get(songId) ?? 0;
+        if (now - lastPersistedAt >= PROGRESS_PERSIST_INTERVAL_MS || pct >= 100) {
+          lastProgressPersistAt.set(songId, now);
+          void saveDownload(patched);
+        }
       });
     }
   );
