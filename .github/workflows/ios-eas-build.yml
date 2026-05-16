@@ -7,9 +7,6 @@ jobs:
   build-ios:
     name: 🍎 iOS EAS Build
     runs-on: ubuntu-latest
-    env:
-      RCT_NEW_ARCH_ENABLED: "0"
-      EXPO_NEW_ARCH_ENABLED: "0"
     
     steps:
       - name: Checkout repository

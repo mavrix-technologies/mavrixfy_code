@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/mavrixfy_icone.png",
     "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/mavrixfy_icone.png",
       "resizeMode": "contain",
@@ -74,7 +75,6 @@
         "expo-build-properties",
         {
           "ios": {
-            "newArchEnabled": false,
             "deploymentTarget": "15.1",
             "extraBuildProperties": {
               "GCC_WARN_INHIBIT_ALL_WARNINGS": "YES",
@@ -84,7 +84,6 @@
             }
           },
           "android": {
-            "newArchEnabled": false,
             "minSdkVersion": 24,
             "targetSdkVersion": 35,
             "compileSdkVersion": 35,
