@@ -1,17 +1,21 @@
-import { Tabs, router, usePathname, useRouter } from "expo-router";
+import { Tabs, router, useNavigation, usePathname, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, InteractionManager, PanResponder, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
+import { Animated, Easing, InteractionManager, PanResponder, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
-import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
-import { usePlayerLite } from "@/contexts/PlayerContext";
+import { usePlayerActions, usePlayerProgress } from "@/contexts/PlayerContext";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { PingPongScroll } from "@/components/PingPongScroll";
-import { createSpotifyColorTheme, extractDominantColor } from "@/lib/colorExtractor";
-import { triggerImpact } from "@/lib/haptics";
+import {
+  createSpotifyColorTheme,
+  extractDominantColor,
+  getImmediateArtworkColor,
+  preloadDominantColors,
+} from "@/lib/colorExtractor";
 import { useLastMix, clearLastMix } from "@/lib/lastMix";
 
 const MIX_DELETE_THRESHOLD = -72;
@@ -68,6 +72,53 @@ function colorToRgba(input: string | undefined, alpha: number, fallback: string)
   return fallback;
 }
 
+function toProgressWidth(progress: number): DimensionValue {
+  return `${Math.max(0, Math.min(100, (Number.isFinite(progress) ? progress : 0) * 100))}%`;
+}
+
+const MiniPlayerProgressBar = React.memo(function MiniPlayerProgressBar({
+  fillColor,
+}: {
+  fillColor: string;
+}) {
+  const { progress } = usePlayerProgress();
+  const progressWidth = useMemo(() => toProgressWidth(progress), [progress]);
+
+  return (
+    <View pointerEvents="none" style={styles.playerProgressTrack}>
+      <View
+        style={[
+          styles.playerProgressFill,
+          {
+            width: progressWidth,
+            backgroundColor: fillColor,
+          },
+        ]}
+      />
+    </View>
+  );
+});
+
+const IOSMiniPlayerProgressBar = React.memo(function IOSMiniPlayerProgressBar({
+  fillColor,
+}: {
+  fillColor: string;
+}) {
+  const { progress } = usePlayerProgress();
+  const progressWidth = useMemo(() => toProgressWidth(progress), [progress]);
+
+  return (
+    <View pointerEvents="none" style={styles.iosMiniPlayerProgressTrack}>
+      <View
+        style={[
+          styles.iosMiniPlayerProgressFill,
+          { width: progressWidth, backgroundColor: fillColor },
+        ]}
+      />
+    </View>
+  );
+});
+
 type VisibleRoute = "index" | "search" | "library" | "liked-songs";
 
 type NavItem = {
@@ -84,12 +135,24 @@ const NAV_ITEMS: NavItem[] = [
   { route: "liked-songs", label: "Liked", icon: "heart-outline", iconActive: "heart-sharp" },
 ];
 
+const TAB_TRANSITION_SPEC = {
+  animation: "timing" as const,
+  config: {
+    duration: 170,
+    easing: Easing.out(Easing.cubic),
+  },
+};
+
+function getTabHref(route: VisibleRoute) {
+  return route === "index" ? "/" : `/${route}`;
+}
+
 type NavTabItemProps = {
   item: NavItem;
   isFocused: boolean;
   isAndroid: boolean;
   isIOS: boolean;
-  onPress: () => void;
+  onPress: (route: VisibleRoute, isFocused: boolean) => void;
   onLongPress: () => void;
   navIconSize: number;
   navLabelSize: number;
@@ -116,6 +179,17 @@ function NavTabItem({
   navInactiveColor,
 }: NavTabItemProps) {
   const scaleAnim = React.useRef(new Animated.Value(1)).current;
+  const focusAnim = React.useRef(new Animated.Value(isFocused ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.timing(focusAnim, {
+      toValue: isFocused ? 1 : 0,
+      duration: 155,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+      isInteraction: false,
+    }).start();
+  }, [focusAnim, isFocused]);
 
   const handlePressIn = React.useCallback(() => {
     Animated.spring(scaleAnim, {
@@ -135,12 +209,31 @@ function NavTabItem({
     }).start();
   }, [scaleAnim]);
 
+  const handlePress = React.useCallback(() => {
+    onPress(item.route, isFocused);
+  }, [isFocused, item.route, onPress]);
+
+  const inactiveIconOpacity = focusAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+    extrapolate: "clamp",
+  });
+  const activeIconOpacity = focusAnim;
+  const activeIconScale = focusAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.92, 1],
+    extrapolate: "clamp",
+  });
+
   return (
     <Animated.View style={[styles.navItemAnimWrap, { transform: [{ scale: scaleAnim }] }]}>
       <Pressable
+        android_disableSound
+        accessibilityRole="tab"
+        accessibilityState={{ selected: isFocused }}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
-        onPress={onPress}
+        onPress={handlePress}
         onLongPress={onLongPress}
         hitSlop={6}
         style={[
@@ -152,11 +245,28 @@ function NavTabItem({
         ]}
       >
         <View style={styles.navIconWrap}>
-          <Ionicons
-            name={(isFocused ? item.iconActive : item.icon) as any}
-            size={navIconSize}
-            color={isFocused ? activeNavColor : navInactiveColor}
-          />
+          <Animated.View style={[styles.navIconLayer, { opacity: inactiveIconOpacity }]}>
+            <Ionicons
+              name={item.icon as any}
+              size={navIconSize}
+              color={navInactiveColor}
+            />
+          </Animated.View>
+          <Animated.View
+            style={[
+              styles.navIconLayer,
+              {
+                opacity: activeIconOpacity,
+                transform: [{ scale: activeIconScale }],
+              },
+            ]}
+          >
+            <Ionicons
+              name={item.iconActive as any}
+              size={navIconSize}
+              color={activeNavColor}
+            />
+          </Animated.View>
         </View>
         <Text
           allowFontScaling={false}
@@ -187,13 +297,23 @@ const MemoizedNavTabItem = React.memo(NavTabItem, (prev, next) => {
   return (
     prev.isFocused === next.isFocused &&
     prev.item.route === next.item.route &&
+    prev.isAndroid === next.isAndroid &&
+    prev.isIOS === next.isIOS &&
     prev.navIconSize === next.navIconSize &&
+    prev.navLabelSize === next.navLabelSize &&
+    prev.navLabelLineHeight === next.navLabelLineHeight &&
+    prev.navItemPaddingTop === next.navItemPaddingTop &&
+    prev.navItemPaddingBottom === next.navItemPaddingBottom &&
     prev.activeNavColor === next.activeNavColor &&
     prev.navInactiveColor === next.navInactiveColor
   );
 });
 
-export function AppNavBar() {
+type AppNavBarProps = {
+  hidden?: boolean;
+};
+
+export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const isWeb = Platform.OS === "web";
@@ -203,21 +323,58 @@ export function AppNavBar() {
   const { width } = useWindowDimensions();
   const isAndroid = Platform.OS === "android";
   const isNarrowMobile = !isWeb && width <= 380;
+  const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
+  const playbackState = usePlaybackPlayState();
   const {
-    currentSong,
-    queue,
-    queueIndex,
-    isPlaying,
-    progress,
     textColor,
     togglePlay,
     albumColor,
     setAlbumColor,
     setTextColor,
-  } = usePlayerLite();
+  } = usePlayerActions();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const hasActiveMiniPlayer = Boolean(activeSong);
   const [coverFailed, setCoverFailed] = useState(false);
+  const routePressLockRef = useRef({ href: "", time: 0 });
+  const openPlayerLockRef = useRef(0);
+
+  const handleTabPress = useCallback(
+    (route: VisibleRoute, isFocused: boolean) => {
+      if (isFocused) return;
+
+      const href = getTabHref(route);
+      const now = Date.now();
+      const previous = routePressLockRef.current;
+      if (previous.href === href && now - previous.time < 280) return;
+
+      routePressLockRef.current = { href, time: now };
+      router.navigate(href as any);
+    },
+    [router]
+  );
+
+  const openPlayer = useCallback(() => {
+    const now = Date.now();
+    if (now - openPlayerLockRef.current < 420) return;
+
+    openPlayerLockRef.current = now;
+    requestAnimationFrame(() => router.push("/player"));
+  }, [router]);
+
+  useEffect(() => {
+    const urls = [
+      queue[queueIndex - 1]?.coverUrl,
+      activeSong?.coverUrl,
+      queue[queueIndex + 1]?.coverUrl,
+    ]
+      .map((url) => url?.trim())
+      .filter((url): url is string => Boolean(url));
+
+    if (urls.length === 0) return;
+    void Image.prefetch(urls, "memory-disk").catch(() => {});
+    preloadDominantColors(urls);
+  }, [activeSong?.coverUrl, queue, queueIndex]);
+
   const lastMix = useLastMix();
   const mixChipImages = useMemo(() => {
     const raw = lastMix?.images ?? "";
@@ -226,7 +383,6 @@ export function AppNavBar() {
   }, [lastMix?.images]);
   const openLastMix = useCallback(() => {
     if (!lastMix) return;
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
     router.push({ pathname: "/artist-mix", params: lastMix });
   }, [lastMix, router]);
 
@@ -263,7 +419,6 @@ export function AppNavBar() {
   }, [chipOpacity, chipScale, dragX, isDragging, trashOpacity]);
 
   const deleteMixWithAnimation = useCallback(() => {
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Heavy);
     Animated.parallel([
       Animated.timing(dragX, { toValue: -150, duration: 170, useNativeDriver: true }),
       Animated.timing(chipScale, { toValue: 0.8, duration: 170, useNativeDriver: true }),
@@ -305,13 +460,27 @@ export function AppNavBar() {
   );
 
   useEffect(() => {
-    if (!activeSong?.coverUrl) return;
+    if (!activeSong?.coverUrl) {
+      setAlbumColor("#25282E");
+      setTextColor("#F5FBFF");
+      return () => {};
+    }
+    let active = true;
+    const immediateColors = getImmediateArtworkColor(activeSong.coverUrl);
+    setAlbumColor(immediateColors.primary);
+    setTextColor(immediateColors.text);
+
     extractDominantColor(activeSong.coverUrl)
       .then((colors) => {
+        if (!active) return;
         setAlbumColor(colors.primary);
         setTextColor(colors.text);
       })
       .catch(() => {});
+
+    return () => {
+      active = false;
+    };
   }, [activeSong?.id, activeSong?.coverUrl, setAlbumColor, setTextColor]);
 
   useEffect(() => {
@@ -394,14 +563,6 @@ export function AppNavBar() {
         ],
     [albumColor, isIOS]
   );
-  const coverAlbumTint = useMemo(
-    () => colorToRgba(albumColor, 0.26, "rgba(255,255,255,0.12)"),
-    [albumColor]
-  );
-  const coverAlbumTintBorder = useMemo(
-    () => colorToRgba(albumColor, 0.52, "rgba(255,255,255,0.24)"),
-    [albumColor]
-  );
   const playerGradientColors = useMemo<readonly [string, string, string]>(
     () => [
       colorToRgba(albumColor, 0.2, "rgba(255,255,255,0.08)"),
@@ -425,7 +586,8 @@ export function AppNavBar() {
   const miniSecondaryIconColor = isIOS ? "rgba(255,255,255,0.88)" : playIconColor;
   const coverUrl = activeSong?.coverUrl?.trim();
   const miniPlayerHeight = 60;
-  const miniCoverSize = 60;
+  const miniCoverSlotSize = 60;
+  const miniCoverSize = 48;
   const miniControlSize = 42;
   const miniControlRadius = Math.round(miniControlSize / 2);
   const trashShiftX = trashOpacity.interpolate({
@@ -443,16 +605,17 @@ export function AppNavBar() {
     outputRange: [0.86, 1],
     extrapolate: "clamp",
   });
-  const miniProgressPercent: DimensionValue = `${Math.max(
-    0,
-    Math.min(100, (Number.isFinite(progress) ? progress : 0) * 100)
-  )}%`;
-
   return (
     <>
       <View
-        pointerEvents="box-none"
-        style={[styles.wrapper, { bottom: resolvedBottomInset }]}
+        pointerEvents={hidden ? "none" : "box-none"}
+        accessibilityElementsHidden={hidden}
+        importantForAccessibility={hidden ? "no-hide-descendants" : "auto"}
+        style={[
+          styles.wrapper,
+          { bottom: resolvedBottomInset },
+          hidden && styles.wrapperHidden,
+        ]}
       >
       <View
         style={[
@@ -521,20 +684,12 @@ export function AppNavBar() {
               style={[styles.playerCornerAccentRight, { borderColor: playerTopEdgeTint }]}
             />
             <Pressable
+              android_disableSound
               style={[styles.playerRow, { height: miniPlayerHeight }]}
-              onPress={() => {
-                requestAnimationFrame(() => router.push("/player"));
-              }}
+              onPress={openPlayer}
             >
               <View style={styles.playerLeft}>
-                <View style={[styles.coverWrap, { width: miniCoverSize }]}>
-                  <View
-                    pointerEvents="none"
-                    style={[
-                      styles.coverAlbumTint,
-                      { backgroundColor: coverAlbumTint, borderColor: coverAlbumTintBorder },
-                    ]}
-                  />
+                <View style={[styles.coverWrap, { width: miniCoverSlotSize }]}>
                   {coverUrl && !coverFailed ? (
                     <Image
                       source={{ uri: coverUrl }}
@@ -552,13 +707,11 @@ export function AppNavBar() {
                 </View>
                 <View style={[styles.songInfo, isDragging && styles.songInfoDuringMixDrag]}>
                   <PingPongScroll
-                    key={`mini-title-${activeSong.id}`}
                     text={activeSong.title}
                     style={[styles.songTitle, { color: playerTitleColor }]}
                     velocity={15}
                   />
                   <PingPongScroll
-                    key={`mini-artist-${activeSong.id}`}
                     text={activeSong.artist}
                     style={[styles.songArtist, { color: playerSecondaryColor }]}
                     velocity={12}
@@ -579,6 +732,7 @@ export function AppNavBar() {
                     {...panResponder.panHandlers}
                   >
                     <Pressable
+                      android_disableSound
                       onPress={openLastMix}
                       onLongPress={startMixDrag}
                       delayLongPress={280}
@@ -617,12 +771,12 @@ export function AppNavBar() {
                   </Animated.View>
                 ) : null}
                 <Pressable
+                  android_disableSound
                   onPress={() => {
-                    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
                     togglePlay();
                   }}
                   hitSlop={14}
-                  style={[
+                  style={({ pressed }) => [
                     styles.iconButton,
                     {
                       width: miniControlSize,
@@ -634,19 +788,21 @@ export function AppNavBar() {
                       backgroundColor: miniButtonPrimaryBg,
                       borderColor: miniButtonPrimaryBorder,
                     },
+                    pressed && styles.miniButtonPressed,
                   ]}
                 >
                   <Ionicons
-                    name={isPlaying ? "pause" : "play"}
+                    name={playbackState.isPlaying ? "pause" : "play"}
                     size={25}
                     color={playIconColor}
-                    style={!isPlaying ? { marginLeft: 1 } : undefined}
+                    style={!playbackState.isPlaying ? { marginLeft: 1 } : undefined}
                   />
                 </Pressable>
                 <Pressable
+                  android_disableSound
                   onPress={() => router.push("/queue")}
                   hitSlop={14}
-                  style={[
+                  style={({ pressed }) => [
                     styles.iconButton,
                     { width: miniControlSize, height: miniControlSize, borderRadius: miniControlRadius },
                     !isIOS && styles.iconButtonPrimary,
@@ -654,6 +810,7 @@ export function AppNavBar() {
                       backgroundColor: miniSecondaryButtonBg,
                       borderColor: miniSecondaryButtonBorder,
                     },
+                    pressed && styles.miniButtonPressed,
                   ]}
                 >
                   <Ionicons name="list" size={24} color={miniSecondaryIconColor} />
@@ -661,17 +818,7 @@ export function AppNavBar() {
               </View>
             </Pressable>
 
-            <View pointerEvents="none" style={styles.playerProgressTrack}>
-              <View
-                style={[
-                  styles.playerProgressFill,
-                  {
-                    width: miniProgressPercent,
-                    backgroundColor: playerProgressFillColor,
-                  },
-                ]}
-              />
-            </View>
+            <MiniPlayerProgressBar fillColor={playerProgressFillColor} />
 
             <Animated.View
               pointerEvents={isDragging ? "auto" : "none"}
@@ -754,12 +901,7 @@ export function AppNavBar() {
                 navItemPaddingBottom={navItemPaddingBottom}
                 activeNavColor={activeNavColor}
                 navInactiveColor={navInactiveColor}
-                onPress={() => {
-                  void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                  if (!isFocused) {
-                    router.push(item.route === "index" ? "/" : `/${item.route}` as any);
-                  }
-                }}
+                onPress={handleTabPress}
                 onLongPress={() => {}}
               />
             );
@@ -816,19 +958,41 @@ function IOSNativeTabLayout() {
 
 function IOSMiniPlayerOverlay() {
   const insets = useSafeAreaInsets();
+  const overlayRouter = useRouter();
+  const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
+  const playbackState = usePlaybackPlayState();
   const {
-    currentSong,
-    queue,
-    queueIndex,
-    isPlaying,
-    progress,
     togglePlay,
     textColor,
     setAlbumColor,
     setTextColor,
-  } = usePlayerLite();
+  } = usePlayerActions();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const [coverFailed, setCoverFailed] = useState(false);
+  const openPlayerLockRef = useRef(0);
+
+  const openPlayer = useCallback(() => {
+    const now = Date.now();
+    if (now - openPlayerLockRef.current < 420) return;
+
+    openPlayerLockRef.current = now;
+    requestAnimationFrame(() => overlayRouter.push("/player"));
+  }, [overlayRouter]);
+
+  useEffect(() => {
+    const urls = [
+      queue[queueIndex - 1]?.coverUrl,
+      activeSong?.coverUrl,
+      queue[queueIndex + 1]?.coverUrl,
+    ]
+      .map((url) => url?.trim())
+      .filter((url): url is string => Boolean(url));
+
+    if (urls.length === 0) return;
+    void Image.prefetch(urls, "memory-disk").catch(() => {});
+    preloadDominantColors(urls);
+  }, [activeSong?.coverUrl, queue, queueIndex]);
+
   const lastMix = useLastMix();
   const mixBarOne = useRef(new Animated.Value(0.32)).current;
   const mixBarTwo = useRef(new Animated.Value(0.58)).current;
@@ -854,21 +1018,35 @@ function IOSMiniPlayerOverlay() {
   }, [lastMix?.songIds]);
   const activeSongId = activeSong?.id ?? "";
   const isPlayingFromLastMix = useMemo(() => {
-    if (!isPlaying || !activeSongId || mixSongIds.length === 0) return false;
+    if (!playbackState.isPlaying || !activeSongId || mixSongIds.length === 0) return false;
     if (!mixSongIds.includes(activeSongId)) return false;
     if (queue.length !== mixSongIds.length) return false;
     const mixSet = new Set(mixSongIds);
     return queue.every((song) => mixSet.has(song.id));
-  }, [activeSongId, isPlaying, mixSongIds, queue]);
+  }, [activeSongId, playbackState.isPlaying, mixSongIds, queue]);
 
   useEffect(() => {
-    if (!activeSong?.coverUrl) return;
+    if (!activeSong?.coverUrl) {
+      setAlbumColor("#25282E");
+      setTextColor("#F5FBFF");
+      return () => {};
+    }
+    let active = true;
+    const immediateColors = getImmediateArtworkColor(activeSong.coverUrl);
+    setAlbumColor(immediateColors.primary);
+    setTextColor(immediateColors.text);
+
     extractDominantColor(activeSong.coverUrl)
       .then((colors) => {
+        if (!active) return;
         setAlbumColor(colors.primary);
         setTextColor(colors.text);
       })
       .catch(() => {});
+
+    return () => {
+      active = false;
+    };
   }, [activeSong?.id, activeSong?.coverUrl, setAlbumColor, setTextColor]);
 
   useEffect(() => {
@@ -878,9 +1056,9 @@ function IOSMiniPlayerOverlay() {
   useEffect(() => {
     const resetBars = () => {
       Animated.parallel([
-        Animated.timing(mixBarOne, { toValue: 0.32, duration: 180, useNativeDriver: true }),
-        Animated.timing(mixBarTwo, { toValue: 0.58, duration: 180, useNativeDriver: true }),
-        Animated.timing(mixBarThree, { toValue: 0.44, duration: 180, useNativeDriver: true }),
+        Animated.timing(mixBarOne, { toValue: 0.32, duration: 180, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(mixBarTwo, { toValue: 0.58, duration: 180, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(mixBarThree, { toValue: 0.44, duration: 180, useNativeDriver: true, isInteraction: false }),
       ]).start();
     };
 
@@ -891,20 +1069,20 @@ function IOSMiniPlayerOverlay() {
 
     const loopOne = Animated.loop(
       Animated.sequence([
-        Animated.timing(mixBarOne, { toValue: 0.96, duration: 230, useNativeDriver: true }),
-        Animated.timing(mixBarOne, { toValue: 0.24, duration: 280, useNativeDriver: true }),
+        Animated.timing(mixBarOne, { toValue: 0.96, duration: 230, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(mixBarOne, { toValue: 0.24, duration: 280, useNativeDriver: true, isInteraction: false }),
       ])
     );
     const loopTwo = Animated.loop(
       Animated.sequence([
-        Animated.timing(mixBarTwo, { toValue: 0.84, duration: 180, useNativeDriver: true }),
-        Animated.timing(mixBarTwo, { toValue: 0.3, duration: 240, useNativeDriver: true }),
+        Animated.timing(mixBarTwo, { toValue: 0.84, duration: 180, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(mixBarTwo, { toValue: 0.3, duration: 240, useNativeDriver: true, isInteraction: false }),
       ])
     );
     const loopThree = Animated.loop(
       Animated.sequence([
-        Animated.timing(mixBarThree, { toValue: 0.9, duration: 260, useNativeDriver: true }),
-        Animated.timing(mixBarThree, { toValue: 0.22, duration: 210, useNativeDriver: true }),
+        Animated.timing(mixBarThree, { toValue: 0.9, duration: 260, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(mixBarThree, { toValue: 0.22, duration: 210, useNativeDriver: true, isInteraction: false }),
       ])
     );
 
@@ -937,10 +1115,6 @@ function IOSMiniPlayerOverlay() {
   })();
   const secondaryColor = colorToRgba(resolvedTextColor, 0.7, "rgba(235,235,245,0.7)");
   const progressFillColor = Colors.primary;
-  const progressWidth: DimensionValue = `${Math.max(
-    0,
-    Math.min(100, (Number.isFinite(progress) ? progress : 0) * 100)
-  )}%`;
   const tabBarVisualHeight = 49;
   const tabBarGap = 6;
   const bottomOffset = Math.max(insets.bottom + tabBarVisualHeight + tabBarGap, 80);
@@ -952,9 +1126,7 @@ function IOSMiniPlayerOverlay() {
         <View pointerEvents="none" style={styles.iosMiniPlayerTopHairline} />
 
         <View style={styles.iosMiniPlayerRow}>
-          <Pressable style={styles.iosMiniPlayerMain} onPress={() => {
-            requestAnimationFrame(() => router.push("/player"));
-          }}>
+          <Pressable style={styles.iosMiniPlayerMain} onPress={openPlayer} android_disableSound>
             <View style={styles.iosMiniPlayerArtworkShell}>
               {activeSong.coverUrl && !coverFailed ? (
                 <Image
@@ -973,13 +1145,11 @@ function IOSMiniPlayerOverlay() {
 
             <View style={styles.iosMiniPlayerText}>
               <PingPongScroll
-                key={`ios-mini-title-${activeSong.id}`}
                 text={activeSong.title}
                 style={[styles.iosMiniPlayerTitle, { color: resolvedTextColor }]}
                 velocity={14}
               />
               <PingPongScroll
-                key={`ios-mini-artist-${activeSong.id}`}
                 text={activeSong.artist}
                 style={[styles.iosMiniPlayerArtist, { color: secondaryColor }]}
                 velocity={11}
@@ -989,8 +1159,8 @@ function IOSMiniPlayerOverlay() {
 
           {lastMix ? (
             <Pressable
+              android_disableSound
               onPress={() => {
-                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
                 router.push({ pathname: "/artist-mix", params: lastMix });
               }}
               hitSlop={8}
@@ -1067,38 +1237,40 @@ function IOSMiniPlayerOverlay() {
 
           <View style={styles.iosMiniPlayerControls}>
             <Pressable
+              android_disableSound
               onPress={() => {
-                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
                 togglePlay();
               }}
               hitSlop={14}
-              style={[styles.iosMiniPlayerButton, styles.iosMiniPlayerPrimaryButton]}
+              style={({ pressed }) => [
+                styles.iosMiniPlayerButton,
+                styles.iosMiniPlayerPrimaryButton,
+                pressed && styles.miniButtonPressed,
+              ]}
             >
               <Ionicons
-                name={isPlaying ? "pause" : "play"}
+                name={playbackState.isPlaying ? "pause" : "play"}
                 size={25}
                 color="rgba(255,255,255,0.96)"
-                style={!isPlaying ? { marginLeft: 2 } : undefined}
+                style={!playbackState.isPlaying ? { marginLeft: 2 } : undefined}
               />
             </Pressable>
             <Pressable
+              android_disableSound
               onPress={() => router.push("/queue")}
               hitSlop={14}
-              style={[styles.iosMiniPlayerButton, styles.iosMiniPlayerSecondaryButton]}
+              style={({ pressed }) => [
+                styles.iosMiniPlayerButton,
+                styles.iosMiniPlayerSecondaryButton,
+                pressed && styles.miniButtonPressed,
+              ]}
             >
               <Ionicons name="list" size={24} color="rgba(255,255,255,0.88)" />
             </Pressable>
           </View>
         </View>
 
-        <View pointerEvents="none" style={styles.iosMiniPlayerProgressTrack}>
-          <View
-            style={[
-              styles.iosMiniPlayerProgressFill,
-              { width: progressWidth, backgroundColor: progressFillColor },
-            ]}
-          />
-        </View>
+        <IOSMiniPlayerProgressBar fillColor={progressFillColor} />
       </View>
     </View>
   );
@@ -1107,7 +1279,7 @@ function IOSMiniPlayerOverlay() {
 export default function TabLayout() {
   const isWeb = Platform.OS === "web";
   const pathname = usePathname();
-  const tabsNavigationRef = React.useRef<any>(null);
+  const tabsNavigation = useNavigation();
   const preloadTimersRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const shouldHideTabBar = pathname?.startsWith("/import-songs");
@@ -1124,19 +1296,25 @@ export default function TabLayout() {
     }
 
     const interactionTask = InteractionManager.runAfterInteractions(() => {
-      const nav = tabsNavigationRef.current;
+      const nav = tabsNavigation as any;
       if (!nav || typeof nav.preload !== "function") {
         return;
       }
 
-      const timer = setTimeout(() => {
+      const currentRoute = pathname === "/" || pathname === "/index"
+        ? "index"
+        : NAV_ITEMS.find((item) => pathname === `/${item.route}` || pathname?.startsWith(`/${item.route}/`))?.route;
+      const routesToPreload = NAV_ITEMS
+        .map((item) => item.route)
+        .filter((route) => route !== currentRoute);
+
+      preloadTimersRef.current = routesToPreload.map((route, index) => setTimeout(() => {
         try {
-          nav.preload("search");
+          nav.preload(route);
         } catch {
           // Silent fail
         }
-      }, 1800);
-      preloadTimersRef.current = [timer];
+      }, 650 + index * 260));
     });
 
     return () => {
@@ -1144,7 +1322,7 @@ export default function TabLayout() {
       preloadTimersRef.current.forEach((timer) => clearTimeout(timer));
       preloadTimersRef.current = [];
     };
-  }, [isWeb]);
+  }, [isWeb, pathname, tabsNavigation]);
 
   if (isProductionBuild) {
     return (
@@ -1158,11 +1336,13 @@ export default function TabLayout() {
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <Tabs
-        detachInactiveScreens
+        detachInactiveScreens={false}
         screenOptions={{
           headerShown: false,
           lazy: true,
-          freezeOnBlur: true,
+          freezeOnBlur: false,
+          animation: "shift",
+          transitionSpec: TAB_TRANSITION_SPEC,
           sceneStyle: { backgroundColor: Colors.background },
         }}
         tabBar={() => null}
@@ -1229,21 +1409,17 @@ const styles = StyleSheet.create({
   iosMiniPlayerArtworkShell: {
     width: 50,
     height: "100%",
-    borderTopLeftRadius: 24,
-    borderBottomLeftRadius: 24,
-    borderTopRightRadius: 7,
-    borderBottomRightRadius: 7,
+    padding: 5,
+    alignItems: "center",
+    justifyContent: "center",
     overflow: "hidden",
     backgroundColor: "transparent",
   },
   iosMiniPlayerCover: {
-    width: "100%",
-    height: "100%",
-    borderTopLeftRadius: 24,
-    borderBottomLeftRadius: 24,
-    borderTopRightRadius: 7,
-    borderBottomRightRadius: 7,
-    backgroundColor: "rgba(24,24,26,0.9)",
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: "transparent",
   },
   iosMiniPlayerCoverFallback: {
     alignItems: "center",
@@ -1373,6 +1549,10 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.12)",
   },
+  miniButtonPressed: {
+    opacity: 0.88,
+    transform: [{ scale: 0.94 }],
+  },
   iosMiniPlayerInlineMixBtn: {
     width: 42,
     height: 42,
@@ -1404,7 +1584,7 @@ const styles = StyleSheet.create({
   },
   iosMiniPlayerProgressTrack: {
     position: "absolute",
-    left: 50,
+    left: 0,
     right: 0,
     bottom: 0,
     height: 1.5,
@@ -1422,6 +1602,9 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 999,
     alignItems: "center",
+  },
+  wrapperHidden: {
+    opacity: 0,
   },
   container: {
     width: "96%",
@@ -1555,11 +1738,11 @@ const styles = StyleSheet.create({
   },
   playerProgressTrack: {
     position: "absolute",
-    left: 60,
-    right: 10,
+    left: 0,
+    right: 0,
     bottom: 0,
     height: 2,
-    borderRadius: 999,
+    borderRadius: 0,
     overflow: "hidden",
     backgroundColor: "rgba(223, 226, 235, 0.18)",
   },
@@ -1649,18 +1832,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     position: "relative",
   },
-  coverAlbumTint: {
-    position: "absolute",
-    width: 60,
-    height: 60,
-    borderRadius: 0,
-    borderWidth: 0,
-  },
   cover: {
-    width: 60,
-    height: 60,
-    borderRadius: 0,
-    backgroundColor: "#111111",
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: "transparent",
   },
   coverFallback: {
     alignItems: "center",
@@ -1669,8 +1845,8 @@ const styles = StyleSheet.create({
   songInfo: {
     flex: 1,
     minWidth: 0,
-    marginLeft: 10,
-    marginRight: 6,
+    marginLeft: 12,
+    marginRight: 8,
     justifyContent: "center",
   },
   songInfoDuringMixDrag: {
@@ -1751,6 +1927,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 14,
+  },
+  navIconLayer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
   },
   navItem: {
     flex: 1,

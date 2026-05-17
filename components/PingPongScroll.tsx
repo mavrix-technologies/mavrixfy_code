@@ -28,13 +28,33 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
   velocity = 15,
   paused = false,
 }) => {
+  const [displayText, setDisplayText] = useState(text);
   const [needsScroll, setNeedsScroll] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
   const [textWidth, setTextWidth] = useState(0);
   const animatedValue = useRef(new Animated.Value(0)).current;
+  const contentOpacity = useRef(new Animated.Value(1)).current;
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const previousTextRef = useRef(text);
   const GAP = 28;
   const MEASURE_WIDTH = 10000;
+
+  useEffect(() => {
+    if (previousTextRef.current === text) return;
+
+    previousTextRef.current = text;
+    contentOpacity.stopAnimation();
+    contentOpacity.setValue(0.72);
+    setDisplayText(text);
+
+    Animated.timing(contentOpacity, {
+      toValue: 1,
+      duration: 160,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: Platform.OS !== "web",
+      isInteraction: false,
+    }).start();
+  }, [contentOpacity, text]);
 
   useEffect(() => {
     if (animationRef.current) {
@@ -66,6 +86,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
             duration,
             easing: Easing.linear,
             useNativeDriver: Platform.OS !== "web",
+            isInteraction: false,
           }),
           Animated.delay(500),
           Animated.timing(animatedValue, {
@@ -73,6 +94,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
             duration,
             easing: Easing.linear,
             useNativeDriver: Platform.OS !== "web",
+            isInteraction: false,
           }),
           Animated.delay(450),
         ])
@@ -90,7 +112,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
         animationRef.current = null;
       }
     };
-  }, [animatedValue, containerWidth, paused, text, textWidth, velocity]);
+  }, [animatedValue, containerWidth, displayText, paused, textWidth, velocity]);
 
   const handleContainerLayout = (event: LayoutChangeEvent) => {
     const { width } = event.nativeEvent.layout;
@@ -137,26 +159,43 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
         numberOfLines={1}
         onTextLayout={handleTextLinesLayout}
       >
-        {text}
+        {displayText}
       </Text>
 
-      {!needsScroll ? (
-        <Text style={[styles.text, sanitizedTextStyle]} numberOfLines={1}>
-          {text}
-        </Text>
-      ) : (
-        <Animated.View
-          style={[
-            styles.animatedTrack,
-            textWidth > 0 ? { width: textWidth } : undefined,
-            { transform: [{ translateX: animatedValue }] },
-          ]}
-        >
+      <Animated.View
+        style={[
+          styles.contentLayer,
+          {
+            opacity: contentOpacity,
+            transform: [
+              {
+                translateY: contentOpacity.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [2, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        {!needsScroll ? (
           <Text style={[styles.text, sanitizedTextStyle]} numberOfLines={1}>
-            {text}
+            {displayText}
           </Text>
-        </Animated.View>
-      )}
+        ) : (
+          <Animated.View
+            style={[
+              styles.animatedTrack,
+              textWidth > 0 ? { width: textWidth } : undefined,
+              { transform: [{ translateX: animatedValue }] },
+            ]}
+          >
+            <Text style={[styles.text, sanitizedTextStyle]} numberOfLines={1}>
+              {displayText}
+            </Text>
+          </Animated.View>
+        )}
+      </Animated.View>
 
       <Animated.Text
         style={styles.hiddenTextFix}
@@ -182,6 +221,9 @@ const styles = StyleSheet.create({
   },
   animatedTrack: {
     flexDirection: "row",
+  },
+  contentLayer: {
+    width: "100%",
   },
   text: {
     flexShrink: 0,

@@ -110,19 +110,34 @@ const SongRow = memo(function SongRow({
   const queueCommittedRef = useRef(false);
   const didSwipeRef = useRef(false);
   const swipeableRef = useRef<Swipeable | null>(null);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const optionOpenLockRef = useRef(false);
+  const optionOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Close swipeable on unmount — prevents stuck-open state when navigating back
   useEffect(() => {
     const swipeable = swipeableRef.current;
     return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+      if (optionOpenTimerRef.current) {
+        clearTimeout(optionOpenTimerRef.current);
+        optionOpenTimerRef.current = null;
+      }
       swipeable?.close();
     };
   }, []);
 
   const resetSwipeStateSoon = useCallback(() => {
-    setTimeout(() => {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+    }
+    resetTimerRef.current = setTimeout(() => {
       didSwipeRef.current = false;
       queueCommittedRef.current = false;
+      resetTimerRef.current = null;
     }, 80);
   }, []);
 
@@ -183,19 +198,45 @@ const SongRow = memo(function SongRow({
   };
 
   const openSongOptions = () => {
+    if (optionOpenLockRef.current) return;
+
+    optionOpenLockRef.current = true;
+    didSwipeRef.current = false;
+    queueCommittedRef.current = false;
+    swipeableRef.current?.close();
+
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+    if (optionOpenTimerRef.current) {
+      clearTimeout(optionOpenTimerRef.current);
+    }
+
     const canRemoveFromPlaylist = optionContext === "playlist" && Boolean(playlistId);
-    router.push({
-      pathname: "/song-options",
-      params: {
-        song: JSON.stringify(song),
-        showDownload: showDownload && !onRemove && !canRemoveFromPlaylist ? "1" : "0",
-        canRemove: onRemove || canRemoveFromPlaylist ? "1" : "0",
-        optionContext: optionContext ?? "",
-        playlistId: playlistId ?? "",
-        playlistSource: playlistSource ?? "",
-        playlistName: playlistName ?? "",
-      },
+
+    requestAnimationFrame(() => {
+      router.push(
+        {
+          pathname: "/song-options",
+          params: {
+            song: JSON.stringify(song),
+            showDownload: showDownload && !onRemove && !canRemoveFromPlaylist ? "1" : "0",
+            canRemove: onRemove || canRemoveFromPlaylist ? "1" : "0",
+            optionContext: optionContext ?? "",
+            playlistId: playlistId ?? "",
+            playlistSource: playlistSource ?? "",
+            playlistName: playlistName ?? "",
+          },
+        },
+        { dangerouslySingular: () => "song-options" }
+      );
     });
+
+    optionOpenTimerRef.current = setTimeout(() => {
+      optionOpenLockRef.current = false;
+      optionOpenTimerRef.current = null;
+    }, 650);
   };
 
   return (
@@ -251,12 +292,26 @@ const SongRow = memo(function SongRow({
 
             {/* Remove / duration */}
             {onRemove ? (
-              <Pressable onPress={handleRemove} hitSlop={10} style={styles.removeBtn}>
+              <Pressable
+                onPress={(event) => {
+                  event.stopPropagation();
+                  handleRemove();
+                }}
+                hitSlop={10}
+                style={styles.removeBtn}
+              >
                 <Ionicons name="trash" size={18} color={Colors.subtext} />
               </Pressable>
             ) : null}
 
-            <Pressable onPress={handleMorePress} hitSlop={10} style={styles.moreBtn}>
+            <Pressable
+              onPress={(event) => {
+                event.stopPropagation();
+                handleMorePress();
+              }}
+              hitSlop={10}
+              style={styles.moreBtn}
+            >
               <Ionicons name="ellipsis-horizontal" size={20} color={Colors.subtext} />
             </Pressable>
         </Pressable>

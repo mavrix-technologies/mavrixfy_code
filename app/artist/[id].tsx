@@ -17,7 +17,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import { convertJioSaavnSong, getBestImageUrl, Song } from "@/lib/musicData";
-import { usePlayer } from "@/contexts/PlayerContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import {
   getArtistDetails,
   getArtistSongs,
@@ -57,7 +58,9 @@ export default function ArtistScreen() {
 
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { playSong, currentSong, isPlaying, queue, togglePlay } = usePlayer();
+  const { currentSong, queue } = usePlaybackNowPlaying();
+  const { isPlaying } = usePlaybackPlayState();
+  const { playSong, togglePlay } = usePlayerActions();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Math.max(140, insets.bottom + 120);
 

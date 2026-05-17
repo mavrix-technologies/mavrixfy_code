@@ -16,7 +16,8 @@ import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import { convertJioSaavnSong, Song } from "@/lib/musicData";
 import { getArtistDetails } from "@/lib/artistService";
-import { usePlayer } from "@/contexts/PlayerContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { triggerImpact } from "@/lib/haptics";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
@@ -63,7 +64,9 @@ export default function ArtistMixScreen() {
   const names  = pickFirst(params.names).split(",").filter(Boolean);
   const images = pickFirst(params.images).split(",").filter(Boolean);
 
-  const { playSong, currentSong, isPlaying, queue, togglePlay } = usePlayer();
+  const { currentSong, queue } = usePlaybackNowPlaying();
+  const { isPlaying } = usePlaybackPlayState();
+  const { playSong, togglePlay } = usePlayerActions();
 
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);

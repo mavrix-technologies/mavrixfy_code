@@ -5,7 +5,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { collection, getDocs, query, where, limit } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { usePlayer } from "@/contexts/PlayerContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
 
@@ -51,7 +51,7 @@ export default function PromotionBanner() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading]     = useState(true);
   const [isVisible, setIsVisible] = useState(true);
-  const { playSong } = usePlayer();
+  const { playSong } = usePlayerActions();
   const { width } = useWindowDimensions();
   const bannerWidth = Math.max(0, width - 32);
 

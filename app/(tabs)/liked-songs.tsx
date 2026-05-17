@@ -6,7 +6,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { safeGoBack } from "@/utils/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { usePlayerBrowse } from "@/contexts/PlayerContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
@@ -30,7 +31,9 @@ export default function LikedSongsScreen() {
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const { isAuthenticated } = useAuth();
   const { isOnline } = useNetwork();
-  const { playSong, likedSongs, currentSong, isPlaying, togglePlay, queue } = usePlayerBrowse();
+  const { currentSong, queue } = usePlaybackNowPlaying();
+  const { isPlaying } = usePlaybackPlayState();
+  const { playSong, likedSongs, togglePlay } = usePlayerActions();
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchActive, setIsSearchActive] = useState(false);
 

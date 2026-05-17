@@ -17,7 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import DownloadButton from "@/components/DownloadButton";
 import { showGlobalToast } from "@/app/_layout";
-import { usePlayer } from "@/contexts/PlayerContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Song, getBestImageUrl } from "@/lib/musicData";
 import { addSongToPlaylist, getUserPlaylists, removeSongFromPlaylist, UserPlaylist } from "@/lib/storage";
@@ -393,7 +393,7 @@ export default function SongOptionsScreen() {
     playlistSource?: string;
     playlistName?: string;
   }>();
-  const { toggleLike, isLiked, addToQueue, playNext } = usePlayer();
+  const { toggleLike, isLiked, addToQueue, playNext } = usePlayerActions();
   const { user } = useAuth();
   const [subView, setSubView] = useState<SubView>("main");
 

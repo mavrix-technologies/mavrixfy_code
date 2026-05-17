@@ -26,7 +26,7 @@ import { useDownloads } from "@/contexts/DownloadContext";
 import { onQueueEvent } from "@/lib/downloads/downloadManager";
 import { DownloadItem } from "@/types/downloads";
 import { Song } from "@/lib/musicData";
-import { usePlayerBrowse } from "@/contexts/PlayerContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
 import SongRow from "@/components/SongRow";
 
 const UI = {
@@ -94,7 +94,7 @@ export default function DownloadedSongsScreen() {
   const topPadding = Platform.OS === "web" ? 67 : insets.top + 8;
 
   const { getAllDownloadItems, storageSummary } = useDownloads();
-  const { playSong } = usePlayerBrowse();
+  const { playSong } = usePlayerActions();
 
   // Load collection metadata
   const [collectionMetadata, setCollectionMetadata] = useState<Record<string, { name: string; imageUrl: string }>>({});
@@ -332,7 +332,7 @@ export default function DownloadedSongsScreen() {
 // ─── Play All button (needs player context) ───────────────────────────────────
 
 function DownloadedPlayAllButton({ songs }: { songs: Song[] }) {
-  const { playSong } = usePlayerBrowse();
+  const { playSong } = usePlayerActions();
 
   if (songs.length === 0) return null;
 

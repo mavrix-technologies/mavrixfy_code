@@ -6,8 +6,18 @@ function useShimmer() {
   useEffect(() => {
     const anim = Animated.loop(
       Animated.sequence([
-        Animated.timing(shimmer, { toValue: 1, duration: 850, useNativeDriver: false }),
-        Animated.timing(shimmer, { toValue: 0, duration: 850, useNativeDriver: false }),
+        Animated.timing(shimmer, {
+          toValue: 1,
+          duration: 850,
+          useNativeDriver: true,
+          isInteraction: false,
+        }),
+        Animated.timing(shimmer, {
+          toValue: 0,
+          duration: 850,
+          useNativeDriver: true,
+          isInteraction: false,
+        }),
       ])
     );
     anim.start();
@@ -19,12 +29,14 @@ function useShimmer() {
 function Block({
   w, h, r = 8, shimmer,
 }: { w: number | string; h: number; r?: number; shimmer: Animated.Value }) {
-  const bg = shimmer.interpolate({
+  const glowOpacity = shimmer.interpolate({
     inputRange: [0, 1],
-    outputRange: ["#1c2028", "#272d38"],
+    outputRange: [0.12, 0.38],
   });
   return (
-    <Animated.View style={{ width: w as any, height: h, borderRadius: r, backgroundColor: bg, marginBottom: 0 }} />
+    <View style={[styles.block, { width: w as any, height: h, borderRadius: r }]}>
+      <Animated.View style={[StyleSheet.absoluteFill, styles.blockGlow, { opacity: glowOpacity }]} />
+    </View>
   );
 }
 
@@ -148,5 +160,12 @@ const styles = StyleSheet.create({
   },
   cardItem: {
     gap: 0,
+  },
+  block: {
+    overflow: "hidden",
+    backgroundColor: "#1c2028",
+  },
+  blockGlow: {
+    backgroundColor: "#C8D4E6",
   },
 });

@@ -46,19 +46,22 @@ export interface SpotifyColorTheme {
 
 const COLOR_EXTRACTION_TIMEOUT_MS = 1400;
 const COLOR_CACHE_MAX_ENTRIES = 200;
-const DEFAULT_FALLBACK: ColorResult = { primary: "#1F7AE0", text: "#F5FBFF", isDark: true };
+const PALETTE_CACHE_VERSION = "mavrixfy-palette-v3";
+const DEFAULT_FALLBACK: ColorResult = { primary: "#25282E", text: "#F5FBFF", isDark: true };
 
-// Fallback brand-aware palette (blue/cyan/green family)
+// Neutral fallback palette. If extraction is unavailable, never invent a green/blue
+// background that can visibly mismatch monochrome album artwork.
 const fallbackPalettes: ColorResult[] = [
-  { primary: "#1F7AE0", text: "#F5FBFF", isDark: true },
-  { primary: "#169EDC", text: "#F5FBFF", isDark: true },
-  { primary: "#18B8D6", text: "#F5FBFF", isDark: true },
-  { primary: "#21CFA6", text: "#F5FBFF", isDark: true },
-  { primary: "#4BD768", text: "#0B141A", isDark: false },
-  { primary: "#2F6ED9", text: "#F5FBFF", isDark: true },
+  { primary: "#181B21", text: "#F5FBFF", isDark: true },
+  { primary: "#20232A", text: "#F5FBFF", isDark: true },
+  { primary: "#25282E", text: "#F5FBFF", isDark: true },
+  { primary: "#2B2E35", text: "#F5FBFF", isDark: true },
+  { primary: "#30343A", text: "#F5FBFF", isDark: true },
+  { primary: "#17191F", text: "#F5FBFF", isDark: true },
 ];
 
 const colorCache = new Map<string, ColorResult>();
+const pendingColorRequests = new Map<string, Promise<ColorResult>>();
 
 let getColorsFn: ((uri: string, config?: any) => Promise<PlatformPalette>) | null = null;
 let imageColorsLoadAttempted = false;
@@ -107,6 +110,20 @@ export async function extractDominantColor(imageUrl: string): Promise<ColorResul
     return cached;
   }
 
+  const pending = pendingColorRequests.get(cacheKey);
+  if (pending) {
+    return pending;
+  }
+
+  const request = extractDominantColorUncached(cacheKey).finally(() => {
+    pendingColorRequests.delete(cacheKey);
+  });
+  pendingColorRequests.set(cacheKey, request);
+  return request;
+}
+
+async function extractDominantColorUncached(cacheKey: string): Promise<ColorResult> {
+
   const getter = resolveImageColorsGetter();
   if (getter) {
     try {
@@ -114,18 +131,18 @@ export async function extractDominantColor(imageUrl: string): Promise<ColorResul
         getter(cacheKey, {
           fallback: DEFAULT_FALLBACK.primary,
           cache: true,
-          key: cacheKey,
+          key: `${PALETTE_CACHE_VERSION}:${cacheKey}`,
         }),
         COLOR_EXTRACTION_TIMEOUT_MS
       );
 
       const primary = pickPrimaryColor(palette);
       if (primary) {
-        const isDark = getHexLuminance(primary) < 0.5;
+        const mappedPrimary = toneMapForCinematicDarkTheme(primary);
         const result: ColorResult = {
-          primary,
-          text: isDark ? "#F5FBFF" : "#0B141A",
-          isDark,
+          primary: mappedPrimary,
+          text: "#F5FBFF",
+          isDark: true,
         };
         setCachedColor(cacheKey, result);
         return result;
@@ -137,11 +154,11 @@ export async function extractDominantColor(imageUrl: string): Promise<ColorResul
 
   const thumbhashPrimary = await getThumbhashAverageColor(cacheKey);
   if (thumbhashPrimary) {
-    const isDark = getHexLuminance(thumbhashPrimary) < 0.5;
+    const mappedPrimary = toneMapForCinematicDarkTheme(thumbhashPrimary);
     const thumbhashResult: ColorResult = {
-      primary: thumbhashPrimary,
-      text: isDark ? "#F5FBFF" : "#0B141A",
-      isDark,
+      primary: mappedPrimary,
+      text: "#F5FBFF",
+      isDark: true,
     };
     setCachedColor(cacheKey, thumbhashResult);
     return thumbhashResult;
@@ -150,6 +167,26 @@ export async function extractDominantColor(imageUrl: string): Promise<ColorResul
   const fallback = getStableFallbackColor(cacheKey);
   setCachedColor(cacheKey, fallback);
   return fallback;
+}
+
+export function preloadDominantColors(imageUrls: Array<string | null | undefined>): void {
+  for (const rawUrl of imageUrls) {
+    const url = rawUrl?.trim();
+    if (!url || colorCache.has(url) || pendingColorRequests.has(url)) continue;
+    void extractDominantColor(url).catch(() => {});
+  }
+}
+
+export function getImmediateArtworkColor(imageUrl: string | null | undefined): ColorResult {
+  const cacheKey = (imageUrl || "").trim();
+  if (!cacheKey) return DEFAULT_FALLBACK;
+
+  const cached = colorCache.get(cacheKey);
+  if (!cached) return DEFAULT_FALLBACK;
+
+  colorCache.delete(cacheKey);
+  colorCache.set(cacheKey, cached);
+  return cached;
 }
 
 function setCachedColor(key: string, value: ColorResult): void {
@@ -165,30 +202,106 @@ function setCachedColor(key: string, value: ColorResult): void {
 function pickPrimaryColor(palette: PlatformPalette): string | null {
   if (!palette || typeof palette !== "object") return null;
 
-  const candidates =
+  const rawCandidates =
     palette.platform === "ios"
-      ? [palette.primary, palette.detail, palette.secondary, palette.background]
+      ? [
+          { color: palette.primary, role: "primary", priority: 0 },
+          { color: palette.background, role: "background", priority: 1 },
+          { color: palette.secondary, role: "secondary", priority: 2 },
+          { color: palette.detail, role: "detail", priority: 3 },
+        ]
       : [
-          palette.dominant,
-          palette.vibrant,
-          palette.average,
-          palette.muted,
-          palette.darkVibrant,
-          palette.darkMuted,
-          palette.lightVibrant,
-          palette.lightMuted,
+          { color: palette.average, role: "average", priority: 0 },
+          { color: palette.dominant, role: "dominant", priority: 1 },
+          { color: palette.muted, role: "muted", priority: 2 },
+          { color: palette.darkMuted, role: "darkMuted", priority: 3 },
+          { color: palette.vibrant, role: "vibrant", priority: 4 },
+          { color: palette.darkVibrant, role: "darkVibrant", priority: 5 },
+          { color: palette.lightVibrant, role: "lightVibrant", priority: 6 },
+          { color: palette.lightMuted, role: "lightMuted", priority: 7 },
         ];
+
+  const candidates = rawCandidates
+    .map((candidate) => {
+      const normalized = normalizeHexColor(candidate.color);
+      if (!normalized) return null;
+      const { r, g, b } = toRgb(normalized);
+      const hsl = rgbToHsl(r, g, b);
+      return {
+        ...candidate,
+        normalized,
+        ...hsl,
+      };
+    })
+    .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+
+  if (candidates.length === 0) return null;
+
+  const anchorCandidate =
+    candidates.find((candidate) => candidate.role === "average") ??
+    candidates.find((candidate) => candidate.role === "dominant") ??
+    candidates.find((candidate) => candidate.role === "background") ??
+    candidates.find((candidate) => candidate.role === "primary") ??
+    null;
+
+  if (anchorCandidate) {
+    if (anchorCandidate.s <= 0.22) {
+      return pickBestNeutralColor(
+        candidates.filter((candidate) => candidate.s <= 0.22).length > 0
+          ? candidates.filter((candidate) => candidate.s <= 0.22)
+          : [anchorCandidate]
+      );
+    }
+
+    if (anchorCandidate.l >= 0.1 && anchorCandidate.l <= 0.86) {
+      return anchorCandidate.normalized;
+    }
+  }
+
+  const neutralCandidates = candidates.filter((candidate) => candidate.s <= 0.16);
+  const strongColorCandidates = candidates.filter(
+    (candidate) => candidate.s >= 0.28 && candidate.l >= 0.12 && candidate.l <= 0.78
+  );
+  const neutralAnchor = candidates.find(
+    (candidate) =>
+      ["average", "dominant", "background", "primary", "muted", "darkMuted"].includes(candidate.role) &&
+      candidate.s <= 0.16 &&
+      candidate.l >= 0.08 &&
+      candidate.l <= 0.88
+  );
+
+  if (
+    neutralCandidates.length === candidates.length ||
+    (neutralAnchor && neutralCandidates.length >= 3 && strongColorCandidates.length <= 1)
+  ) {
+    return pickBestNeutralColor(neutralCandidates.length > 0 ? neutralCandidates : candidates);
+  }
 
   let best: string | null = null;
   let bestScore = Number.NEGATIVE_INFINITY;
 
   for (const candidate of candidates) {
-    const normalized = normalizeHexColor(candidate);
-    if (!normalized) continue;
-
-    const score = scoreThemeCandidate(normalized);
+    const score = scoreThemeCandidate(candidate.normalized) - candidate.priority * 0.015;
     if (score > bestScore) {
-      best = normalized;
+      best = candidate.normalized;
+      bestScore = score;
+    }
+  }
+
+  return best;
+}
+
+function pickBestNeutralColor(
+  candidates: Array<{ normalized: string; l: number; priority: number }>
+): string {
+  let best = candidates[0]?.normalized ?? DEFAULT_FALLBACK.primary;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const candidate of candidates) {
+    const targetLuminanceScore = 1 - Math.abs(candidate.l - 0.34) * 1.9;
+    const score = targetLuminanceScore - candidate.priority * 0.02;
+    if (score > bestScore) {
+      best = candidate.normalized;
       bestScore = score;
     }
   }
@@ -199,11 +312,12 @@ function pickPrimaryColor(palette: PlatformPalette): string | null {
 function scoreThemeCandidate(hex: string): number {
   const { r, g, b } = toRgb(hex);
   const { s, l } = rgbToHsl(r, g, b);
-  const satScore = s * 1.25;
-  const lMidScore = 1 - Math.abs(l - 0.52);
-  const avoidExtremePenalty = l < 0.09 || l > 0.91 ? 0.45 : 0;
-  const avoidGrayPenalty = s < 0.12 ? 0.35 : 0;
-  return satScore + lMidScore - avoidExtremePenalty - avoidGrayPenalty;
+  const saturationTargetScore = 1 - Math.abs(s - 0.48);
+  const luminanceTargetScore = 1 - Math.abs(l - 0.38) * 1.8;
+  const avoidExtremePenalty = l < 0.08 || l > 0.86 ? 0.8 : 0;
+  const avoidNeonPenalty = s > 0.82 && l > 0.52 ? 0.55 : 0;
+  const avoidGrayPenalty = s < 0.1 ? 0.25 : 0;
+  return saturationTargetScore + luminanceTargetScore - avoidExtremePenalty - avoidNeonPenalty - avoidGrayPenalty;
 }
 
 function normalizeHexColor(value: unknown): string | null {
@@ -288,7 +402,12 @@ function rgbToHex(r: number, g: number, b: number): string {
 function getStableFallbackColor(imageUrl: string): ColorResult {
   if (!imageUrl) return DEFAULT_FALLBACK;
   const index = stableHash(imageUrl) % fallbackPalettes.length;
-  return fallbackPalettes[index];
+  const fallback = fallbackPalettes[index];
+  return {
+    primary: toneMapForCinematicDarkTheme(fallback.primary),
+    text: "#F5FBFF",
+    isDark: true,
+  };
 }
 
 async function getThumbhashAverageColor(imageUrl: string): Promise<string | null> {
@@ -378,7 +497,12 @@ function thumbHashToAverageRGBA(hash: Uint8Array): { r: number; g: number; b: nu
 
 export function getRandomMusicColor(): ColorResult {
   const randomIndex = Math.floor(Math.random() * fallbackPalettes.length);
-  return fallbackPalettes[randomIndex];
+  const fallback = fallbackPalettes[randomIndex];
+  return {
+    primary: toneMapForCinematicDarkTheme(fallback.primary),
+    text: "#F5FBFF",
+    isDark: true,
+  };
 }
 
 export function colorWithAlpha(hex: string, alpha: number, fallback = "rgba(255,255,255,1)"): string {
@@ -451,15 +575,31 @@ function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: n
   };
 }
 
-export function createSpotifyColorTheme(baseHex: string): SpotifyColorTheme {
-  const base = normalizeHexColor(baseHex) ?? DEFAULT_FALLBACK.primary;
+function toneMapForCinematicDarkTheme(hex: string): string {
+  const base = normalizeHexColor(hex) ?? DEFAULT_FALLBACK.primary;
   const { r, g, b } = toRgb(base);
   const { h, s, l } = rgbToHsl(r, g, b);
 
-  const accentS = clamp(Math.max(0.42, s * 1.05), 0.42, 0.86);
-  const accentL = clamp(Math.max(0.34, l), 0.34, 0.56);
-  const softS = clamp(Math.max(0.26, s * 0.78), 0.26, 0.62);
-  const softL = clamp(accentL * 0.82, 0.24, 0.46);
+  const naturalSaturation = s < 0.1
+    ? 0
+    : s < 0.18
+      ? clamp(s * 0.48, 0.02, 0.08)
+      : clamp(s * 0.76, 0.22, 0.58);
+  const cinematicLightness = clamp(l < 0.18 ? 0.28 : l * 0.72, 0.24, 0.42);
+  const mapped = hslToRgb(h, naturalSaturation, cinematicLightness);
+  return rgbToHex(mapped.r, mapped.g, mapped.b);
+}
+
+export function createSpotifyColorTheme(baseHex: string): SpotifyColorTheme {
+  const base = toneMapForCinematicDarkTheme(baseHex);
+  const { r, g, b } = toRgb(base);
+  const { h, s, l } = rgbToHsl(r, g, b);
+
+  const isNeutral = s < 0.1;
+  const accentS = isNeutral ? 0 : clamp(s * 0.95, 0.22, 0.62);
+  const accentL = clamp(l, 0.26, 0.44);
+  const softS = isNeutral ? 0 : clamp(s * 0.58, 0.14, 0.42);
+  const softL = clamp(accentL * 0.76, 0.18, 0.32);
 
   const accentRgb = hslToRgb(h, accentS, accentL);
   const softRgb = hslToRgb(h, softS, softL);
@@ -474,10 +614,10 @@ export function createSpotifyColorTheme(baseHex: string): SpotifyColorTheme {
     onAccent,
     border,
     playerGradient: [
-      "#040912",
-      colorWithAlpha(accentSoft, 0.62, "rgba(26,36,48,0.62)"),
-      colorWithAlpha(accent, 0.28, "rgba(31,122,224,0.28)"),
-      "#040912",
+      colorWithAlpha(accent, 0.88, "rgba(31,122,224,0.88)"),
+      colorWithAlpha(accentSoft, 0.54, "rgba(26,36,48,0.54)"),
+      "rgba(11,15,22,0.98)",
+      "#06090F",
     ],
     playlistBackdrop: [
       colorWithAlpha(accent, 0.96, "rgba(31,122,224,0.96)"),

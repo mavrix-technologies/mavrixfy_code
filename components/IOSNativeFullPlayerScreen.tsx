@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
-import { usePlayer } from "@/contexts/PlayerContext";
+import { usePlayerActions, usePlayerProgress } from "@/contexts/PlayerContext";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import {
   addIOSNativeFullPlayerCloseListener,
   addIOSNativeFullPlayerErrorListener,
@@ -12,20 +13,20 @@ import {
 } from "@/lib/iosNativeFullPlayer";
 
 export default function IOSNativeFullPlayerScreen() {
-  const {
-    currentSong,
-    queue,
-    isPlaying,
-    positionMillis,
-    playSong,
-    seekTo,
-    togglePlay,
-  } = usePlayer();
+  const { currentSong, queue } = usePlaybackNowPlaying();
+  const { isPlaying } = usePlaybackPlayState();
+  const { playSong, seekTo, togglePlay } = usePlayerActions();
+  const { positionMillis } = usePlayerProgress();
   const [statusText, setStatusText] = useState("Opening native iOS player...");
   const launchedRef = useRef(false);
   const syncedRef = useRef(false);
   const mountedRef = useRef(true);
+  const positionMillisRef = useRef(positionMillis);
   const timeoutRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    positionMillisRef.current = positionMillis;
+  }, [positionMillis]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -110,7 +111,7 @@ export default function IOSNativeFullPlayerScreen() {
 
           await presentIOSNativeFullPlayer({
             url: currentSong.audioUrl,
-            startPositionSeconds: Math.max(positionMillis / 1000, 0),
+            startPositionSeconds: Math.max(positionMillisRef.current / 1000, 0),
             shouldPlay: isPlaying,
           });
         } catch (error) {
@@ -132,7 +133,6 @@ export default function IOSNativeFullPlayerScreen() {
     currentSong,
     isPlaying,
     playSong,
-    positionMillis,
     seekTo,
     togglePlay,
   ]);

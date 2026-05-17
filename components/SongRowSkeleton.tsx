@@ -2,16 +2,22 @@ import React, { useEffect, useRef } from "react";
 import { Animated, StyleSheet, View } from "react-native";
 
 function SkeletonRow({ shimmer }: { shimmer: Animated.Value }) {
-  const bg = shimmer.interpolate({
+  const glowOpacity = shimmer.interpolate({
     inputRange: [0, 1],
-    outputRange: ["#1e2228", "#2a2f38"],
+    outputRange: [0.12, 0.36],
   });
   return (
     <View style={styles.row}>
-      <Animated.View style={[styles.thumb, { backgroundColor: bg }]} />
+      <View style={styles.thumb}>
+        <Animated.View style={[styles.glow, { opacity: glowOpacity }]} />
+      </View>
       <View style={styles.text}>
-        <Animated.View style={[styles.title, { backgroundColor: bg }]} />
-        <Animated.View style={[styles.sub, { backgroundColor: bg }]} />
+        <View style={styles.title}>
+          <Animated.View style={[styles.glow, { opacity: glowOpacity }]} />
+        </View>
+        <View style={styles.sub}>
+          <Animated.View style={[styles.glow, { opacity: glowOpacity }]} />
+        </View>
       </View>
     </View>
   );
@@ -23,8 +29,18 @@ export default function SongRowSkeleton({ count = 8 }: { count?: number }) {
   useEffect(() => {
     const anim = Animated.loop(
       Animated.sequence([
-        Animated.timing(shimmer, { toValue: 1, duration: 800, useNativeDriver: false }),
-        Animated.timing(shimmer, { toValue: 0, duration: 800, useNativeDriver: false }),
+        Animated.timing(shimmer, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+          isInteraction: false,
+        }),
+        Animated.timing(shimmer, {
+          toValue: 0,
+          duration: 800,
+          useNativeDriver: true,
+          isInteraction: false,
+        }),
       ])
     );
     anim.start();
@@ -52,6 +68,8 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 6,
+    overflow: "hidden",
+    backgroundColor: "#1e2228",
   },
   text: {
     flex: 1,
@@ -61,10 +79,18 @@ const styles = StyleSheet.create({
     height: 13,
     borderRadius: 6,
     width: "65%",
+    overflow: "hidden",
+    backgroundColor: "#1e2228",
   },
   sub: {
     height: 11,
     borderRadius: 6,
     width: "40%",
+    overflow: "hidden",
+    backgroundColor: "#1e2228",
+  },
+  glow: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#C8D4E6",
   },
 });

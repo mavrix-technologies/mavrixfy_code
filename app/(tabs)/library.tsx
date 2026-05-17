@@ -32,7 +32,7 @@ import {
 } from "@/lib/firestore";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import { triggerImpact } from "@/lib/haptics";
-import { usePlayerBrowse } from "@/contexts/PlayerContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
 import { getFollowedArtists, FollowedArtist } from "@/lib/followedArtists";
 import OfflineBanner from "@/components/OfflineBanner";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -98,7 +98,7 @@ export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { isOnline } = useNetwork();
-  const { likedSongs } = usePlayerBrowse();
+  const { likedSongs } = usePlayerActions();
   const activeUserId = user?.id ?? null;
   const hasCachedPlaylists =
     LIBRARY_SESSION_CACHE.hydrated && LIBRARY_SESSION_CACHE.userId === activeUserId;

@@ -36,7 +36,9 @@ function Bar({
   color: string;
   width: number;
 }) {
-  const height = useRef(new Animated.Value(minH)).current;
+  const minScale = minH / maxH;
+  const pausedScale = (minH + 1) / maxH;
+  const scale = useRef(new Animated.Value(minScale)).current;
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
@@ -49,15 +51,17 @@ function Bar({
       // Bounce between minH and maxH continuously
       const bounce = Animated.loop(
         Animated.sequence([
-          Animated.timing(height, {
-            toValue: maxH,
+          Animated.timing(scale, {
+            toValue: 1,
             duration: duration / 2,
-            useNativeDriver: false,
+            useNativeDriver: true,
+            isInteraction: false,
           }),
-          Animated.timing(height, {
-            toValue: minH,
+          Animated.timing(scale, {
+            toValue: minScale,
             duration: duration / 2,
-            useNativeDriver: false,
+            useNativeDriver: true,
+            isInteraction: false,
           }),
         ])
       );
@@ -65,10 +69,11 @@ function Bar({
       bounce.start();
     } else {
       // Settle to a low "paused" height
-      const settle = Animated.timing(height, {
-        toValue: minH + 1,
+      const settle = Animated.timing(scale, {
+        toValue: pausedScale,
         duration: 180,
-        useNativeDriver: false,
+        useNativeDriver: true,
+        isInteraction: false,
       });
       animRef.current = settle;
       settle.start();
@@ -77,16 +82,23 @@ function Bar({
     return () => {
       animRef.current?.stop();
     };
-  }, [isPlaying, height, minH, maxH, duration]);
+  }, [duration, isPlaying, maxH, minScale, pausedScale, scale]);
+
+  const translateY = scale.interpolate({
+    inputRange: [minScale, 1],
+    outputRange: [(maxH - minH) / 2, 0],
+    extrapolate: "clamp",
+  });
 
   return (
     <Animated.View
       style={{
         width,
-        height,
+        height: maxH,
         backgroundColor: color,
         borderRadius: 1.5,
         alignSelf: "flex-end",
+        transform: [{ translateY }, { scaleY: scale }],
       }}
     />
   );

@@ -6,7 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/images/mavrixfy_icone.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
     "splash": {
       "image": "./assets/images/mavrixfy_icone.png",
       "resizeMode": "contain",

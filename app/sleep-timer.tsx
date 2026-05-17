@@ -11,7 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
-import { usePlayer } from "@/contexts/PlayerContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
 import type { SleepTimerSelection } from "@/contexts/PlayerContext";
 
 const SHEET_BACKGROUND = "#1E1E1E";
@@ -29,7 +29,7 @@ const TIMER_OPTIONS: { label: string; value: SleepTimerSelection }[] = [
 
 export default function SleepTimerScreen() {
   const insets = useSafeAreaInsets();
-  const { sleepTimer, setSleepTimer, clearSleepTimer } = usePlayer();
+  const { sleepTimer, setSleepTimer, clearSleepTimer } = usePlayerActions();
 
   const haptic = useCallback((style: Haptics.ImpactFeedbackStyle) => {
     if (Platform.OS !== "web") {

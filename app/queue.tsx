@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   InteractionManager,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -12,14 +11,14 @@ import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import * as Haptics from "expo-haptics";
 import DraggableFlatList, {
   ScaleDecorator,
   type RenderItemParams,
 } from "react-native-draggable-flatlist";
 import { Swipeable } from "react-native-gesture-handler";
 import Colors from "@/constants/colors";
-import { usePlayer } from "@/contexts/PlayerContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
+import { usePlaybackQueueState } from "@/lib/playbackEngine";
 import { Song } from "@/lib/musicData";
 
 type DraggableQueueItem = {
@@ -125,18 +124,8 @@ QueueSwipeRow.displayName = "QueueSwipeRow";
 export default function QueueScreen() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const {
-    queue,
-    userQueuedSongIds,
-    queueIndex,
-    currentSong,
-    isShuffled,
-    playSong,
-    removeFromQueue,
-    reorderQueue,
-    shuffleQueue,
-    sleepTimer,
-  } = usePlayer();
+  const { queue, userQueuedSongIds, queueIndex, currentSong, isShuffled } = usePlaybackQueueState();
+  const { playSong, removeFromQueue, reorderQueue, shuffleQueue, sleepTimer } = usePlayerActions();
   const openSwipeableRef = useRef<Swipeable | null>(null);
   const lastPlaceholderIndexRef = useRef<number | null>(null);
   const [listReady, setListReady] = useState(false);
@@ -190,17 +179,10 @@ export default function QueueScreen() {
     }));
   }, [currentSong, queueIndex, upcomingQueue, userQueuedCount]);
 
-  const haptic = useCallback((style: Haptics.ImpactFeedbackStyle) => {
-    if (Platform.OS !== "web") {
-      void Haptics.impactAsync(style);
-    }
-  }, []);
-
   const handleSongPress = useCallback((song: Song) => {
     openSwipeableRef.current?.close();
-    haptic(Haptics.ImpactFeedbackStyle.Light);
     playSong(song, queue);
-  }, [haptic, playSong, queue]);
+  }, [playSong, queue]);
 
   const handleSwipeOpen = useCallback((ref: Swipeable | null) => {
     if (openSwipeableRef.current && openSwipeableRef.current !== ref) {
@@ -210,34 +192,29 @@ export default function QueueScreen() {
   }, []);
 
   const handleShuffle = useCallback(() => {
-    haptic(Haptics.ImpactFeedbackStyle.Medium);
     void shuffleQueue();
-  }, [haptic, shuffleQueue]);
+  }, [shuffleQueue]);
 
   const handleTimer = useCallback(() => {
-    haptic(Haptics.ImpactFeedbackStyle.Light);
     router.push("/sleep-timer");
-  }, [haptic]);
+  }, []);
 
   const handleDragBegin = useCallback(() => {
     openSwipeableRef.current?.close();
     lastPlaceholderIndexRef.current = null;
-    haptic(Haptics.ImpactFeedbackStyle.Medium);
-  }, [haptic]);
+  }, []);
 
   const handleDragEnd = useCallback(({ from, to }: { from: number; to: number }) => {
     lastPlaceholderIndexRef.current = null;
     if (from === to) return;
-    haptic(Haptics.ImpactFeedbackStyle.Heavy);
     const startFrom = currentSong ? Math.max(0, queueIndex + 1) : 0;
     void reorderQueue(startFrom + from, startFrom + to);
-  }, [currentSong, haptic, queueIndex, reorderQueue]);
+  }, [currentSong, queueIndex, reorderQueue]);
 
   const handlePlaceholderIndexChange = useCallback((placeholderIndex: number) => {
     if (lastPlaceholderIndexRef.current === placeholderIndex) return;
     lastPlaceholderIndexRef.current = placeholderIndex;
-    haptic(Haptics.ImpactFeedbackStyle.Light);
-  }, [haptic]);
+  }, []);
 
   const renderQueueSong = useCallback(({
     item,
@@ -257,7 +234,6 @@ export default function QueueScreen() {
           item={item.song}
           onPress={() => handleSongPress(item.song)}
           onRemove={() => {
-            haptic(Haptics.ImpactFeedbackStyle.Medium);
             void removeFromQueue(item.index);
           }}
           onSwipeOpen={handleSwipeOpen}
@@ -266,7 +242,7 @@ export default function QueueScreen() {
         />
       </View>
     );
-  }, [handleSongPress, handleSwipeOpen, haptic, removeFromQueue]);
+  }, [handleSongPress, handleSwipeOpen, removeFromQueue]);
 
   const keyExtractor = useCallback((item: DraggableQueueItem) => item.key, []);
 

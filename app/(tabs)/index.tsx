@@ -4,6 +4,7 @@ import {
   Text,
   Pressable,
   ScrollView,
+  FlatList,
   StyleSheet,
   Platform,
   RefreshControl,
@@ -35,6 +36,7 @@ import HomeSkeletonLoader from "@/components/HomeSkeletonLoader";
 import PromotionBanner from "@/components/PromotionBanner";
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
+import ShinyText from "@/components/ShinyText";
 import { useNetwork } from "@/contexts/NetworkContext";
 
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
@@ -1017,7 +1019,19 @@ function HomeScreenInner() {
             )}
           </Pressable>
 
-          {/* Spacer pushes downloads button to the right */}
+          <View pointerEvents="none" style={styles.headerBrandCenter}>
+            <ShinyText
+              text="MAVRIXFY"
+              speed={2.4}
+              delay={0.6}
+              color="#DDE7E3"
+              shineColor="#FFFFFF"
+              spread={130}
+              direction="left"
+              style={styles.headerBrandTitle}
+            />
+          </View>
+
           <View style={{ flex: 1 }} />
 
           <Pressable
@@ -1100,6 +1114,8 @@ function HomeScreenInner() {
     );
   }, []);
 
+  const renderRowSeparator = useCallback(() => <View style={styles.rowSeparator} />, []);
+
   const renderSection = useCallback(
     ({ item: section }: { item: HomeSection }) => {
       switch (section.type) {
@@ -1107,18 +1123,19 @@ function HomeScreenInner() {
           return (
             <View style={styles.section}>
               {renderSectionHeader("Jump Back In")}
-              <ScrollView
+              <FlatList
                 horizontal
+                data={recentlyPlayed}
+                keyExtractor={(item) => `recent-${item.id}`}
+                renderItem={renderRecentCard}
+                ItemSeparatorComponent={renderRowSeparator}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.rowContent}
-                nestedScrollEnabled
-              >
-                {recentlyPlayed.map((item) => (
-                  <React.Fragment key={`recent-${item.id}`}>
-                    {renderRecentCard({ item })}
-                  </React.Fragment>
-                ))}
-              </ScrollView>
+                initialNumToRender={4}
+                maxToRenderPerBatch={4}
+                windowSize={5}
+                removeClippedSubviews={Platform.OS === "android"}
+              />
             </View>
           );
 
@@ -1127,31 +1144,30 @@ function HomeScreenInner() {
             <View style={styles.section}>
               {renderSectionHeader("Made for You")}
               {publicPlaylistsForSection.length > 0 ? (
-                <ScrollView
+                <FlatList
                   horizontal
+                  data={publicPlaylistsForSection}
+                  keyExtractor={(item) => `public-${item.id}`}
+                  renderItem={renderPublicPlaylist}
+                  ItemSeparatorComponent={renderRowSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
-                  nestedScrollEnabled
-                >
-                  {publicPlaylistsForSection.map((item) => (
-                    <React.Fragment key={`public-${item.id}`}>
-                      {renderPublicPlaylist({ item })}
-                    </React.Fragment>
-                  ))}
-                </ScrollView>
+                  initialNumToRender={4}
+                  maxToRenderPerBatch={4}
+                  windowSize={5}
+                  removeClippedSubviews={Platform.OS === "android"}
+                />
               ) : (
-                <ScrollView
+                <FlatList
                   horizontal
+                  data={PLACEHOLDER_ROW_ITEMS}
+                  keyExtractor={(item) => `public-loading-${item}`}
+                  renderItem={renderRectPlaceholder}
+                  ItemSeparatorComponent={renderRowSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
                   scrollEnabled={false}
-                >
-                  {PLACEHOLDER_ROW_ITEMS.map((item) => (
-                    <React.Fragment key={`public-loading-${item}`}>
-                      {renderRectPlaceholder({ item })}
-                    </React.Fragment>
-                  ))}
-                </ScrollView>
+                />
               )}
             </View>
           );
@@ -1160,18 +1176,19 @@ function HomeScreenInner() {
           return (
             <View style={styles.section}>
               {renderSectionHeader("Featured Artists", () => router.push("/artists", { withAnchor: true }))}
-              <ScrollView
+              <FlatList
                 horizontal
+                data={featuredArtists}
+                keyExtractor={(item) => `artist-${item.id}`}
+                renderItem={renderArtistCard}
+                ItemSeparatorComponent={renderRowSeparator}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.rowContent}
-                nestedScrollEnabled
-              >
-                {featuredArtists.map((item) => (
-                  <React.Fragment key={`artist-${item.id}`}>
-                    {renderArtistCard({ item })}
-                  </React.Fragment>
-                ))}
-              </ScrollView>
+                initialNumToRender={5}
+                maxToRenderPerBatch={5}
+                windowSize={5}
+                removeClippedSubviews={Platform.OS === "android"}
+              />
             </View>
           );
 
@@ -1180,31 +1197,30 @@ function HomeScreenInner() {
             <View style={styles.section}>
               {renderSectionHeader(section.data.title)}
               {section.data.results.length > 0 ? (
-                <ScrollView
+                <FlatList
                   horizontal
+                  data={section.data.results}
+                  keyExtractor={(item) => `${section.data.id}-${item.id}`}
+                  renderItem={renderCategoryPlaylist(section.data.id, section.data.title)}
+                  ItemSeparatorComponent={renderRowSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
-                  nestedScrollEnabled
-                >
-                  {section.data.results.map((item) => (
-                    <React.Fragment key={`${section.data.id}-${item.id}`}>
-                      {renderCategoryPlaylist(section.data.id, section.data.title)({ item })}
-                    </React.Fragment>
-                  ))}
-                </ScrollView>
+                  initialNumToRender={4}
+                  maxToRenderPerBatch={4}
+                  windowSize={5}
+                  removeClippedSubviews={Platform.OS === "android"}
+                />
               ) : (
-                <ScrollView
+                <FlatList
                   horizontal
+                  data={PLACEHOLDER_ROW_ITEMS}
+                  keyExtractor={(item) => `${section.data.id}-loading-${item}`}
+                  renderItem={renderRectPlaceholder}
+                  ItemSeparatorComponent={renderRowSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
                   scrollEnabled={false}
-                >
-                  {PLACEHOLDER_ROW_ITEMS.map((item) => (
-                    <React.Fragment key={`${section.data.id}-loading-${item}`}>
-                      {renderRectPlaceholder({ item })}
-                    </React.Fragment>
-                  ))}
-                </ScrollView>
+                />
               )}
             </View>
           );
@@ -1223,6 +1239,7 @@ function HomeScreenInner() {
       renderArtistCard,
       renderCategoryPlaylist,
       renderSectionHeader,
+      renderRowSeparator,
       router,
     ]
   );
@@ -1309,11 +1326,27 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   topMenuRow: {
-    minHeight: 42,
+    minHeight: 46,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-start",
     gap: 8,
+    position: "relative",
+  },
+  headerBrandCenter: {
+    position: "absolute",
+    left: 58,
+    right: 58,
+    top: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerBrandTitle: {
+    fontSize: 20,
+    lineHeight: 24,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0,
   },
   topProfileButton: {
     width: 40,
@@ -1446,7 +1479,9 @@ const styles = StyleSheet.create({
   rowContent: {
     paddingLeft: 16,
     paddingRight: 16,
-    gap: HORIZONTAL_ROW_GAP,
+  },
+  rowSeparator: {
+    width: HORIZONTAL_ROW_GAP,
   },
   recentCard: {
     width: RECENT_CARD_SIZE,

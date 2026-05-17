@@ -21,8 +21,10 @@ import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { getRecentlyPlayed } from "@/lib/storage";
 import { AppNavBar } from "@/app/(tabs)/_layout";
 
-// Screens where the nav bar must not appear
-const NAV_HIDDEN_SEGMENTS = new Set(["login", "onboarding", "import-songs", "song-options"]);
+// Screens where the nav bar must not appear or should stay visually hidden.
+// Form sheets keep AppNavBar mounted to avoid mini-player/nav remount flicker on close.
+const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs"]);
+const NAV_VISUALLY_HIDDEN_SEGMENTS = new Set(["song-options"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
@@ -140,8 +142,11 @@ function RootLayoutNav() {
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
 
-  // Hide the nav bar on full-screen auth/onboarding/import screens
-  const hideNavBar = NAV_HIDDEN_SEGMENTS.has(segments[0] as string);
+  // Unmount only on full-screen auth/onboarding/import screens.
+  // Sheet routes only hide it visually so mini-player state and animations survive.
+  const activeSegment = segments[0] as string;
+  const unmountNavBar = NAV_UNMOUNT_SEGMENTS.has(activeSegment);
+  const visuallyHideNavBar = NAV_VISUALLY_HIDDEN_SEGMENTS.has(activeSegment);
 
   useEffect(() => {
     if (loading) return;
@@ -215,7 +220,7 @@ function RootLayoutNav() {
             sheetCornerRadius: 24,
             sheetGrabberVisible: false,
             sheetExpandsWhenScrolledToEdge: false,
-            gestureEnabled: false,
+            gestureEnabled: true,
             contentStyle: { backgroundColor: "#1E1E1E" },
           }}
         />
@@ -267,8 +272,8 @@ function RootLayoutNav() {
           options={{ gestureEnabled: false }}
         />
       </Stack>
-      {/* Nav bar is hidden on login and onboarding screens */}
-      {!hideNavBar && <AppNavBar />}
+      {/* Keep the nav mounted under sheets to avoid close-time mini-player flicker. */}
+      {!unmountNavBar && <AppNavBar hidden={visuallyHideNavBar} />}
     </View>
   );
 }

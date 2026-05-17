@@ -32,7 +32,8 @@ import {
   getBestImageUrl,
   JioSaavnSong,
 } from "@/lib/musicData";
-import { usePlayer } from "@/contexts/PlayerContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { getUserPlaylists, updateUserPlaylist, deleteUserPlaylist } from "@/lib/storage";
 import { firestorePlaylistToLocalSongs, getPlaylistById, updateFirestorePlaylist, deleteFirestorePlaylist } from "@/lib/firestore";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
@@ -80,7 +81,9 @@ export default function PlaylistScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { isOnline } = useNetwork();
-  const { playSong, currentSong, isPlaying, queue, togglePlay } = usePlayer();
+  const { currentSong, queue } = usePlaybackNowPlaying();
+  const { isPlaying } = usePlaybackPlayState();
+  const { playSong, togglePlay } = usePlayerActions();
   const topInset  = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 132 : Math.max(150, insets.bottom + 126);
 
