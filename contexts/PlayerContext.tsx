@@ -60,6 +60,7 @@ export interface SleepTimerState {
 interface PlayerState {
   currentSong: Song | null;
   queue: Song[];
+  userQueuedSongIds: string[];
   sourceQueue: Song[];
   queueIndex: number;
   isPlaying: boolean;
@@ -130,6 +131,7 @@ const PlayerBrowseContext = createContext<PlayerBrowseContextValue | null>(null)
 interface PlayerQueueContextValue {
   currentSong: Song | null;
   queue: Song[];
+  userQueuedSongIds: string[];
   queueIndex: number;
   playSong: (song: Song, queue?: Song[]) => void;
   removeFromQueue: (index: number) => void;
@@ -280,6 +282,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [queue, setQueue] = useState<Song[]>([]);
+  const [userQueuedSongIds, setUserQueuedSongIds] = useState<string[]>([]);
   const [sourceQueue, setSourceQueue] = useState<Song[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
   const [isShuffled, setIsShuffled] = useState(false);
@@ -307,6 +310,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const currentSongRef = useRef<Song | null>(null);
   const queueRef = useRef<Song[]>([]);
+  const userQueuedSongIdsRef = useRef<string[]>([]);
   const queueIndexRef = useRef(0);
   const repeatModeRef = useRef<"off" | "all" | "one">("off");
   const isShuffledRef = useRef(false);
@@ -325,11 +329,36 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
+  useEffect(() => { userQueuedSongIdsRef.current = userQueuedSongIds; }, [userQueuedSongIds]);
   useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
   useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
   useEffect(() => { isShuffledRef.current = isShuffled; }, [isShuffled]);
   useEffect(() => { previewRepeatModeRef.current = previewRepeatMode; }, [previewRepeatMode]);
   useEffect(() => { sleepTimerRef.current = sleepTimer; }, [sleepTimer]);
+
+  const replaceUserQueuedSongIds = useCallback((ids: string[]) => {
+    userQueuedSongIdsRef.current = ids;
+    setUserQueuedSongIds(ids);
+  }, []);
+
+  const clearUserQueuedSongIds = useCallback(() => {
+    replaceUserQueuedSongIds([]);
+  }, [replaceUserQueuedSongIds]);
+
+  const appendUserQueuedSongId = useCallback((songId: string) => {
+    replaceUserQueuedSongIds([...userQueuedSongIdsRef.current, songId]);
+  }, [replaceUserQueuedSongIds]);
+
+  const prependUserQueuedSongId = useCallback((songId: string) => {
+    replaceUserQueuedSongIds([songId, ...userQueuedSongIdsRef.current]);
+  }, [replaceUserQueuedSongIds]);
+
+  const removeFirstUserQueuedSongId = useCallback((songId: string) => {
+    const currentIds = userQueuedSongIdsRef.current;
+    const removeIndex = currentIds.findIndex((id) => id === songId);
+    if (removeIndex < 0) return;
+    replaceUserQueuedSongIds(currentIds.filter((_, index) => index !== removeIndex));
+  }, [replaceUserQueuedSongIds]);
 
   // ── Restore player state on mount (show mini player with last song) ────────
   useEffect(() => {
@@ -446,6 +475,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     latestPositionSecondsRef.current = Math.max(0, effectivePositionSeconds);
   }, [effectivePositionSeconds]);
+
+  useEffect(() => {
+    const songId = currentSong?.id;
+    if (!songId) return;
+    if (userQueuedSongIdsRef.current[0] === songId) {
+      replaceUserQueuedSongIds(userQueuedSongIdsRef.current.slice(1));
+    }
+  }, [currentSong?.id, replaceUserQueuedSongIds]);
 
   const persistCurrentPlayerState = useCallback(() => {
     const song = currentSongRef.current;
@@ -922,6 +959,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           setQueue(tracks);
           setSourceQueue(tracks);
           queueRef.current = tracks;
+          clearUserQueuedSongIds();
           originalQueueRef.current = tracks;
           setQueueIndex(safeIndex);
           queueIndexRef.current = safeIndex;
@@ -1056,6 +1094,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const appendRemainingTracksIfCurrent = useCallback((requestId: number, tracks: any[]) => {
+    if (!TrackPlayer || tracks.length === 0) return;
+
+    void runSerializedPlaybackSwitch(async () => {
+      if (requestId !== playRequestIdRef.current) return;
+      await TrackPlayer.add(tracks);
+    }).catch(() => {
+      // Silent background queue append failure.
+    });
+  }, [runSerializedPlaybackSwitch]);
+
   const loadAndPlaySong = useCallback(async (song: Song, newQueue?: Song[], newIndex?: number) => {
     const requestId = ++playRequestIdRef.current;
     setPlaybackIntent(true);
@@ -1087,6 +1136,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setQueue(playableQueue);
         setSourceQueue(playableQueue);
         queueRef.current = playableQueue;
+        clearUserQueuedSongIds();
         originalQueueRef.current = playableQueue;
         setQueueIndex(targetIndex);
         queueIndexRef.current = targetIndex;
@@ -1147,14 +1197,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           }
           await TrackPlayer.play();
 
-          if (remainingTracks.length > 0 && requestId === playRequestIdRef.current) {
-            void (async () => {
-              if (requestId !== playRequestIdRef.current) return;
-              await TrackPlayer.add(remainingTracks);
-            })().catch(() => {
-              // Silent background queue append failure.
-            });
-          }
+          appendRemainingTracksIfCurrent(requestId, remainingTracks);
         } else {
           await TrackPlayer.reset();
           await TrackPlayer.add(initialTracks);
@@ -1163,14 +1206,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           }
           await TrackPlayer.play();
 
-          if (remainingTracks.length > 0 && requestId === playRequestIdRef.current) {
-            void (async () => {
-              if (requestId !== playRequestIdRef.current) return;
-              await TrackPlayer.add(remainingTracks);
-            })().catch(() => {
-              // Silent background queue append failure.
-            });
-          }
+          appendRemainingTracksIfCurrent(requestId, remainingTracks);
         }
 
         if (RepeatMode) {
@@ -1195,7 +1231,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }
       }
     });
-  }, [ensurePlayerReady, nativeQueueHasTrackAt, runSerializedPlaybackSwitch, showPlaybackNotice]);
+  }, [appendRemainingTracksIfCurrent, clearUserQueuedSongIds, ensurePlayerReady, nativeQueueHasTrackAt, runSerializedPlaybackSwitch, showPlaybackNotice]);
 
   const playSong = useCallback((song: Song, newQueue?: Song[]) => {
     if (!TrackPlayer || !setupPlayer) {
@@ -1217,6 +1253,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setQueue(fallbackQueue);
         setSourceQueue(fallbackQueue);
         queueRef.current = fallbackQueue;
+        clearUserQueuedSongIds();
         originalQueueRef.current = fallbackQueue;
         setQueueIndex(targetIndex);
         queueIndexRef.current = targetIndex;
@@ -1267,7 +1304,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
     const targetIndex = idx;
     loadAndPlaySong(q[targetIndex], q, targetIndex);
-  }, [loadAndPlaySong, showPlaybackNotice]);
+  }, [clearUserQueuedSongIds, loadAndPlaySong, showPlaybackNotice]);
 
   const togglePlay = useCallback(async () => {
     try {
@@ -1422,12 +1459,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         await loadAndPlaySong(cq[ni], cq, ni);
         return;
       }
-      await TrackPlayer.skip(ni);
-      await TrackPlayer.play();
+      await runSerializedPlaybackSwitch(async () => {
+        if (queueRef.current[ni]?.id !== cq[ni].id) return;
+        await TrackPlayer.skip(ni);
+        await TrackPlayer.play();
+      });
     } catch (error) {
       // Silent fail
     }
-  }, [isPlayerReady, loadAndPlaySong, nativeQueueHasTrackAt, previewRepeatMode]);
+  }, [isPlayerReady, loadAndPlaySong, nativeQueueHasTrackAt, previewRepeatMode, runSerializedPlaybackSwitch]);
 
   const prevSong = useCallback(async () => {
     try {
@@ -1490,12 +1530,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         await loadAndPlaySong(cq[pi], cq, pi);
         return;
       }
-      await TrackPlayer.skip(pi);
-      await TrackPlayer.play();
+      await runSerializedPlaybackSwitch(async () => {
+        if (queueRef.current[pi]?.id !== cq[pi].id) return;
+        await TrackPlayer.skip(pi);
+        await TrackPlayer.play();
+      });
     } catch (error) {
       // Silent fail
     }
-  }, [isPlayerReady, loadAndPlaySong, nativeQueueHasTrackAt, previewProgress, previewRepeatMode, safePosition]);
+  }, [isPlayerReady, loadAndPlaySong, nativeQueueHasTrackAt, previewProgress, previewRepeatMode, runSerializedPlaybackSwitch, safePosition]);
 
   const seekTo = useCallback(async (p: number) => {
     let seekRequestId = 0;
@@ -1581,6 +1624,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       isShuffledRef.current = nextShuffleState;
       setQueue(nextQueue);
       queueRef.current = nextQueue;
+      clearUserQueuedSongIds();
       setQueueIndex(nextIndex);
       queueIndexRef.current = nextIndex;
       return { currentSongItem, nextQueue, nextIndex };
@@ -1616,7 +1660,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         await TrackPlayer.play();
       }
     });
-  }, [isPlayerReady, resolvedIsPlaying, runSerializedPlaybackSwitch]);
+  }, [clearUserQueuedSongIds, isPlayerReady, resolvedIsPlaying, runSerializedPlaybackSwitch]);
 
   const toggleRepeat = useCallback(async () => {
     if (!TrackPlayer || !setupPlayer) {
@@ -1678,28 +1722,39 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           return;
         }
         setQueue(prev => {
-          const next = [...prev, normalizedSong];
+          const ci = queueIndexRef.current;
+          const insertIndex = Math.max(
+            0,
+            Math.min(ci + 1 + userQueuedSongIdsRef.current.length, prev.length)
+          );
+          const next = [...prev];
+          next.splice(insertIndex, 0, normalizedSong);
           queueRef.current = next;
-          setSourceQueue(next);
           return next;
         });
+        appendUserQueuedSongId(normalizedSong.id);
         return;
       }
 
       if (!isPlayerReady) {
         return;
       }
-      setQueue(prev => {
-        const next = [...prev, normalizedSong];
-        queueRef.current = next;
-        setSourceQueue(next);
-        return next;
-      });
-      await TrackPlayer.add(songToTrack(normalizedSong));
+      const currentQueue = queueRef.current;
+      const ci = queueIndexRef.current;
+      const insertIndex = Math.max(
+        0,
+        Math.min(ci + 1 + userQueuedSongIdsRef.current.length, currentQueue.length)
+      );
+      const next = [...currentQueue];
+      next.splice(insertIndex, 0, normalizedSong);
+      setQueue(next);
+      queueRef.current = next;
+      appendUserQueuedSongId(normalizedSong.id);
+      await TrackPlayer.add(songToTrack(normalizedSong), insertIndex);
     } catch (error) {
       // Silent fail
     }
-  }, [isPlayerReady]);
+  }, [appendUserQueuedSongId, isPlayerReady]);
 
   const playNext = useCallback(async (song: Song) => {
     try {
@@ -1717,9 +1772,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           const next = [...prev];
           next.splice(ci + 1, 0, normalizedSong);
           queueRef.current = next;
-          setSourceQueue(next);
           return next;
         });
+        prependUserQueuedSongId(normalizedSong.id);
         return;
       }
 
@@ -1733,7 +1788,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       next.splice(insertIndex, 0, normalizedSong);
       setQueue(next);
       queueRef.current = next;
-      setSourceQueue(next);
+      prependUserQueuedSongId(normalizedSong.id);
 
       const canInsertNative =
         currentQueue.length === 0 ||
@@ -1759,7 +1814,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setPlaybackIntent(null);
       // Silent fail
     }
-  }, [isPlayerReady, nativeQueueHasTrackAt, resolvedIsPlaying]);
+  }, [isPlayerReady, nativeQueueHasTrackAt, prependUserQueuedSongId, resolvedIsPlaying]);
 
   const removeFromQueue = useCallback(async (index: number) => {
     try {
@@ -1771,6 +1826,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (!removedSong) return;
 
       const currentIndex = queueIndexRef.current;
+      const userQueueStartIndex = currentIndex + 1;
+      const userQueueEndIndex = userQueueStartIndex + userQueuedSongIdsRef.current.length;
+      const removesUserQueuedSong = index >= userQueueStartIndex && index < userQueueEndIndex;
       const next = currentQueue.filter((_, i) => i !== index);
       let nextIndex = currentIndex;
       if (index < currentIndex) {
@@ -1782,6 +1840,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setQueue(next);
       queueRef.current = next;
       setSourceQueue(next);
+      if (removesUserQueuedSong) {
+        removeFirstUserQueuedSongId(removedSong.id);
+      }
       setQueueIndex(nextIndex);
       queueIndexRef.current = nextIndex;
 
@@ -1807,7 +1868,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       // Silent fail
     }
-  }, [isPlayerReady, nativeQueueHasTrackAt, resolvedIsPlaying]);
+  }, [isPlayerReady, nativeQueueHasTrackAt, removeFirstUserQueuedSongId, resolvedIsPlaying]);
 
   const reorderQueue = useCallback(async (fromIndex: number, toIndex: number) => {
     try {
@@ -1879,6 +1940,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (cs) {
         setQueue([cs]);
         queueRef.current = [cs];
+        clearUserQueuedSongIds();
         setQueueIndex(0);
         queueIndexRef.current = 0;
         await TrackPlayer.reset();
@@ -1887,7 +1949,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       // Silent fail
     }
-  }, [currentSong, isPlayerReady]);
+  }, [clearUserQueuedSongIds, currentSong, isPlayerReady]);
 
   const shuffleQueue = useCallback(async () => {
     try {
@@ -1904,6 +1966,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const newQ = [...currentQueue.slice(0, ci + 1), ...upcoming];
       setQueue(newQ);
       queueRef.current = newQ;
+      clearUserQueuedSongIds();
       setIsShuffled(true);
       isShuffledRef.current = true;
       if (canUseLightweightAudioFallback && (!TrackPlayer || !setupPlayer)) {
@@ -1930,15 +1993,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       // Silent fail
     }
-  }, [isPlayerReady, resolvedIsPlaying]);
+  }, [clearUserQueuedSongIds, isPlayerReady, resolvedIsPlaying]);
 
   const value = useMemo(() => ({
-    currentSong, queue, sourceQueue, queueIndex, isPlaying: resolvedIsPlaying, progress: resolvedProgress, duration: resolvedDuration, positionMillis: resolvedPositionMillis,
+    currentSong, queue, userQueuedSongIds, sourceQueue, queueIndex, isPlaying: resolvedIsPlaying, progress: resolvedProgress, duration: resolvedDuration, positionMillis: resolvedPositionMillis,
     isShuffled: resolvedIsShuffled, repeatMode: resolvedRepeatMode, likedSongIds, likedSongs, isLoading, albumColor, textColor, sleepTimer,
     playSong, togglePlay, nextSong, prevSong, seekTo, toggleShuffle, toggleRepeat,
     toggleLike, isLiked, addToQueue, playNext, removeFromQueue, reorderQueue, clearQueue, shuffleQueue,
     setSleepTimer, clearSleepTimer, setAlbumColor, setTextColor,
-  }), [currentSong, queue, sourceQueue, queueIndex, resolvedIsPlaying, resolvedProgress, resolvedDuration, resolvedPositionMillis,
+  }), [currentSong, queue, userQueuedSongIds, sourceQueue, queueIndex, resolvedIsPlaying, resolvedProgress, resolvedDuration, resolvedPositionMillis,
     resolvedIsShuffled, resolvedRepeatMode, likedSongIds, likedSongs, isLoading, albumColor, textColor, sleepTimer, playSong, togglePlay, nextSong,
     prevSong, seekTo, toggleShuffle, toggleRepeat, toggleLike, isLiked, addToQueue,
     playNext, removeFromQueue, reorderQueue, clearQueue, shuffleQueue, setSleepTimer, clearSleepTimer]);
@@ -1947,6 +2010,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     () => ({
       currentSong,
       queue,
+      userQueuedSongIds,
       sourceQueue,
       queueIndex,
       isPlaying: resolvedIsPlaying,
@@ -1982,6 +2046,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [
       currentSong,
       queue,
+      userQueuedSongIds,
       sourceQueue,
       queueIndex,
       resolvedIsPlaying,
@@ -2046,13 +2111,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     () => ({
       currentSong,
       queue,
+      userQueuedSongIds,
       queueIndex,
       playSong,
       removeFromQueue,
       reorderQueue,
       clearQueue,
     }),
-    [currentSong, queue, queueIndex, playSong, removeFromQueue, reorderQueue, clearQueue]
+    [currentSong, queue, userQueuedSongIds, queueIndex, playSong, removeFromQueue, reorderQueue, clearQueue]
   );
 
   return (

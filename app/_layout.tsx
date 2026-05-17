@@ -22,7 +22,7 @@ import { getRecentlyPlayed } from "@/lib/storage";
 import { AppNavBar } from "@/app/(tabs)/_layout";
 
 // Screens where the nav bar must not appear
-const NAV_HIDDEN_SEGMENTS = new Set(["login", "onboarding", "import-songs"]);
+const NAV_HIDDEN_SEGMENTS = new Set(["login", "onboarding", "import-songs", "song-options"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
@@ -203,6 +203,15 @@ function RootLayoutNav() {
                   ...ANDROID_VERTICAL_SHEET_OPTIONS,
                   gestureEnabled: false,
                 }),
+          }}
+        />
+        <Stack.Screen
+          name="song-options"
+          options={{
+            presentation: "modal",
+            animation: "slide_from_bottom",
+            gestureEnabled: false,
+            contentStyle: { backgroundColor: "#1E1E1E" },
           }}
         />
         <Stack.Screen

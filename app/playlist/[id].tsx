@@ -13,6 +13,7 @@ import {
   TextInput,
   Alert,
   Dimensions,
+  DeviceEventEmitter,
   PanResponder,
 } from "react-native";
 import { Image } from "expo-image";
@@ -134,6 +135,23 @@ export default function PlaylistScreen() {
     if (len <= 48) return 23;
     return 20;
   }, [playlistName]);
+
+  const canRemoveSongsFromPlaylist = !isJioSaavnSource && (!isFirestoreSource || Boolean(user?.id));
+  const playlistRowSource = isFirestoreSource ? "firestore" : "local";
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      "PlaylistSongRemoved",
+      (event: { playlistId?: string; songId?: string }) => {
+        if (event?.playlistId !== playlistId || !event.songId) return;
+        setSongs((prev) => prev.filter((song) => song.id !== event.songId));
+      }
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, [playlistId]);
 
   // ── Normalizers ────────────────────────────────────────────────────────────
   const normalizeLoadedSongs = useCallback((rawSongs: JioSaavnSong[]): Song[] => {
@@ -662,7 +680,16 @@ export default function PlaylistScreen() {
           </View>
         ) : songs.length > 0 ? (
           songs.map((song, index) => (
-            <SongRow key={`${song.id}-${index}`} song={song} index={index} queue={songs} />
+            <SongRow
+              key={`${song.id}-${index}`}
+              song={song}
+              index={index}
+              queue={songs}
+              optionContext={canRemoveSongsFromPlaylist ? "playlist" : undefined}
+              playlistId={canRemoveSongsFromPlaylist ? playlistId : undefined}
+              playlistSource={canRemoveSongsFromPlaylist ? playlistRowSource : undefined}
+              playlistName={canRemoveSongsFromPlaylist ? playlistName : undefined}
+            />
           ))
         ) : loading ? (
           <SongRowSkeleton count={Math.max(4, Math.min(initialSongCount || 8, 10))} />

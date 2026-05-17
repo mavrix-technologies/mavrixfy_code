@@ -56,12 +56,6 @@ export default function LikedSongsScreen() {
     );
   }, [currentSong, queue, songs]);
 
-  const totalDuration = useMemo(() => songs.reduce((acc, song) => acc + (song?.duration || 0), 0), [songs]);
-  const totalMinutes = Math.floor(totalDuration / 60);
-  const totalHours = Math.floor(totalMinutes / 60);
-  const remainingMinutes = totalMinutes % 60;
-  const durationText = totalHours > 0 ? `${totalHours} hr ${remainingMinutes} min` : `${totalMinutes} min`;
-
   const handlePlayAll = useCallback(() => {
     if (songs.length === 0) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
@@ -84,14 +78,13 @@ export default function LikedSongsScreen() {
   }, [songs, playSong]);
 
   const renderSong = useCallback(
-    ({ item, index }: { item: Song; index: number }) => {
-      return <SongRow song={item} index={index} queue={filteredSongs} />;
+    ({ item }: { item: Song; index: number }) => {
+      return <SongRow song={item} queue={filteredSongs} />;
     },
     [filteredSongs]
   );
 
   const headerMeta = songs.length > 0 ? `${songs.length} songs` : "No songs";
-  const headerMetaDetail = songs.length > 0 && totalDuration > 0 ? `${headerMeta}  •  ${durationText}` : headerMeta;
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
@@ -153,7 +146,7 @@ export default function LikedSongsScreen() {
                 <Ionicons name="heart" size={38} color="#042115" />
               </LinearGradient>
               <Text style={styles.heroTitle}>Liked Songs</Text>
-              <Text style={styles.heroMeta}>{headerMetaDetail.toUpperCase()}</Text>
+              <Text style={styles.heroMeta}>{headerMeta.toUpperCase()}</Text>
             </View>
 
             <View style={styles.actionSection}>
@@ -209,16 +202,7 @@ export default function LikedSongsScreen() {
               </View>
             </View>
 
-            {filteredSongs.length > 0 ? (
-              <View style={styles.tableHeader}>
-                <Text style={[styles.tableHeaderText, styles.tableIndexHeader]}>#</Text>
-                <Text style={[styles.tableHeaderText, styles.tableTitleHeader]}>TITLE</Text>
-                <View style={styles.tableDurationHeader}>
-                  <Ionicons name="time-outline" size={13} color={UI.subtext} />
-                </View>
-                <View style={styles.tableMoreHeader} />
-              </View>
-            ) : null}
+            {filteredSongs.length > 0 ? <View style={styles.songListSpacer} /> : null}
           </>
         }
         ListEmptyComponent={
@@ -461,6 +445,9 @@ const styles = StyleSheet.create({
   },
   tableMoreHeader: {
     width: 28,
+  },
+  songListSpacer: {
+    height: 10,
   },
   trackRow: {
     flexDirection: "row",

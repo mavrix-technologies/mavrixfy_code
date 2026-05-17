@@ -12,6 +12,22 @@ import TrackPlayer, { Event, RepeatMode } from "react-native-track-player";
 import { setupPlayer } from "@/lib/trackPlayer";
 
 let pausedForDuck = false;
+let commandChain: Promise<void> = Promise.resolve();
+
+function runRemoteCommand(command: () => Promise<void> | void): void {
+  commandChain = commandChain
+    .catch(() => {
+      // Keep later remote controls working if an earlier native command fails.
+    })
+    .then(async () => {
+      try {
+        await command();
+      } catch {
+        // Remote commands can arrive while the JS app is rebuilding the queue.
+        // Dropping a failed command is safer than letting it reject through RNTP.
+      }
+    });
+}
 
 export const trackPlayerService = async () => {
   // Ensure player is fully set up with all capabilities before registering handlers.
@@ -23,13 +39,12 @@ export const trackPlayerService = async () => {
   }
 
   // ── Play / Pause / Stop ────────────────────────────────────────────────────
-  TrackPlayer.addEventListener(Event.RemotePlay, () => TrackPlayer.play());
-  TrackPlayer.addEventListener(Event.RemotePause, () => TrackPlayer.pause());
-  TrackPlayer.addEventListener(Event.RemoteStop, () => TrackPlayer.stop());
+  TrackPlayer.addEventListener(Event.RemotePlay, () => runRemoteCommand(() => TrackPlayer.play()));
+  TrackPlayer.addEventListener(Event.RemotePause, () => runRemoteCommand(() => TrackPlayer.pause()));
+  TrackPlayer.addEventListener(Event.RemoteStop, () => runRemoteCommand(() => TrackPlayer.pause()));
 
   // ── Next / Previous ────────────────────────────────────────────────────────
-  TrackPlayer.addEventListener(Event.RemoteNext, async () => {
-    try {
+  TrackPlayer.addEventListener(Event.RemoteNext, () => runRemoteCommand(async () => {
       const [queue, index] = await Promise.all([
         TrackPlayer.getQueue(),
         TrackPlayer.getActiveTrackIndex(),
@@ -45,11 +60,9 @@ export const trackPlayerService = async () => {
           await TrackPlayer.play();
         }
       }
-    } catch { /* silent */ }
-  });
+  }));
 
-  TrackPlayer.addEventListener(Event.RemotePrevious, async () => {
-    try {
+  TrackPlayer.addEventListener(Event.RemotePrevious, () => runRemoteCommand(async () => {
       const progress = await TrackPlayer.getProgress();
       // If more than 3 seconds in, restart the current track
       if ((progress?.position ?? 0) > 3) {
@@ -73,22 +86,21 @@ export const trackPlayerService = async () => {
           await TrackPlayer.seekTo(0);
         }
       }
-    } catch { /* silent */ }
-  });
+  }));
 
   // ── Seek ───────────────────────────────────────────────────────────────────
   TrackPlayer.addEventListener(Event.RemoteSeek, (e) =>
-    TrackPlayer.seekTo(e.position)
+    runRemoteCommand(() => TrackPlayer.seekTo(e.position))
   );
 
   // ── Audio focus / ducking (calls, navigation, alarms) ─────────────────────
   // Official RNTP duck handling: https://rntp.dev/docs/api/events#remoteduck
-  TrackPlayer.addEventListener(Event.RemoteDuck, async (e) => {
-    try {
+  TrackPlayer.addEventListener(Event.RemoteDuck, (e) => runRemoteCommand(async () => {
       if (e.permanent) {
-        // Permanent loss (e.g. another app took over) — stop
+        // Permanent loss (e.g. another app took over) — pause without tearing
+        // down the iOS AVPlayer session.
         pausedForDuck = false;
-        await TrackPlayer.stop();
+        await TrackPlayer.pause();
       } else if (e.paused) {
         // Transient loss (e.g. navigation prompt) — pause and remember
         pausedForDuck = true;
@@ -98,23 +110,19 @@ export const trackPlayerService = async () => {
         pausedForDuck = false;
         await TrackPlayer.play();
       }
-    } catch { /* silent */ }
-  });
+  }));
 
   // ── Search / ID playback (CarPlay, Android Auto, Siri, Google Assistant) ──
-  TrackPlayer.addEventListener(Event.RemotePlayId, async (e) => {
-    try {
+  TrackPlayer.addEventListener(Event.RemotePlayId, (e) => runRemoteCommand(async () => {
       const queue = await TrackPlayer.getQueue();
       const idx = queue.findIndex((t) => String(t.id) === String(e.id));
       if (idx >= 0) {
         await TrackPlayer.skip(idx);
         await TrackPlayer.play();
       }
-    } catch { /* silent */ }
-  });
+  }));
 
-  TrackPlayer.addEventListener(Event.RemotePlaySearch, async (e) => {
-    try {
+  TrackPlayer.addEventListener(Event.RemotePlaySearch, (e) => runRemoteCommand(async () => {
       const queue = await TrackPlayer.getQueue();
       if (queue.length === 0) return;
       const terms = [e.title, e.artist, e.album, e.query]
@@ -133,6 +141,5 @@ export const trackPlayerService = async () => {
       });
       await TrackPlayer.skip(idx >= 0 ? idx : 0);
       await TrackPlayer.play();
-    } catch { /* silent */ }
-  });
+  }));
 };

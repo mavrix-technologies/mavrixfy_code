@@ -26,6 +26,8 @@ type DraggableQueueItem = {
   song: Song;
   index: number;
   key: string;
+  section: "user" | "playlist";
+  isFirstInSection: boolean;
 };
 
 const SHEET_BACKGROUND = "#1E1E1E";
@@ -125,6 +127,7 @@ export default function QueueScreen() {
   const { height } = useWindowDimensions();
   const {
     queue,
+    userQueuedSongIds,
     queueIndex,
     currentSong,
     isShuffled,
@@ -164,18 +167,28 @@ export default function QueueScreen() {
   }, []);
 
   const nowPlaying = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
-  const upcomingQueue = useMemo(
-    () => queue.slice(Math.max(0, queueIndex + 1)).filter((song) => Boolean(song?.id)),
-    [queue, queueIndex]
-  );
+  const upcomingQueue = useMemo(() => {
+    // When nothing is playing yet (queueIndex === -1 or 0 with no currentSong),
+    // show all songs. Otherwise show only songs after the current index.
+    const startFrom = currentSong ? Math.max(0, queueIndex + 1) : 0;
+    return queue.slice(startFrom).filter((song) => Boolean(song?.id));
+  }, [currentSong, queue, queueIndex]);
+
+  const userQueuedCount = useMemo(() => {
+    const startFrom = currentSong ? Math.max(0, queueIndex + 1) : 0;
+    return Math.max(0, Math.min(userQueuedSongIds.length, queue.length - startFrom));
+  }, [currentSong, queue.length, queueIndex, userQueuedSongIds.length]);
 
   const data: DraggableQueueItem[] = useMemo(() => {
+    const startFrom = currentSong ? Math.max(0, queueIndex + 1) : 0;
     return upcomingQueue.map((song, idx) => ({
       song,
-      index: queueIndex + 1 + idx,
-      key: `${song.id}-${queueIndex + 1 + idx}`,
+      index: startFrom + idx,
+      key: `${song.id}-${startFrom + idx}`,
+      section: idx < userQueuedCount ? "user" : "playlist",
+      isFirstInSection: idx === 0 || idx === userQueuedCount,
     }));
-  }, [queueIndex, upcomingQueue]);
+  }, [currentSong, queueIndex, upcomingQueue, userQueuedCount]);
 
   const haptic = useCallback((style: Haptics.ImpactFeedbackStyle) => {
     if (Platform.OS !== "web") {
@@ -216,8 +229,9 @@ export default function QueueScreen() {
     lastPlaceholderIndexRef.current = null;
     if (from === to) return;
     haptic(Haptics.ImpactFeedbackStyle.Heavy);
-    void reorderQueue(queueIndex + 1 + from, queueIndex + 1 + to);
-  }, [haptic, queueIndex, reorderQueue]);
+    const startFrom = currentSong ? Math.max(0, queueIndex + 1) : 0;
+    void reorderQueue(startFrom + from, startFrom + to);
+  }, [currentSong, haptic, queueIndex, reorderQueue]);
 
   const handlePlaceholderIndexChange = useCallback((placeholderIndex: number) => {
     if (lastPlaceholderIndexRef.current === placeholderIndex) return;
@@ -231,17 +245,26 @@ export default function QueueScreen() {
     isActive,
   }: RenderItemParams<DraggableQueueItem>) => {
     return (
-      <QueueSwipeRow
-        item={item.song}
-        onPress={() => handleSongPress(item.song)}
-        onRemove={() => {
-          haptic(Haptics.ImpactFeedbackStyle.Medium);
-          void removeFromQueue(item.index);
-        }}
-        onSwipeOpen={handleSwipeOpen}
-        onDrag={drag}
-        isDragging={isActive}
-      />
+      <View>
+        {item.isFirstInSection ? (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>
+              {item.section === "user" ? "Added to queue" : "Playing next"}
+            </Text>
+          </View>
+        ) : null}
+        <QueueSwipeRow
+          item={item.song}
+          onPress={() => handleSongPress(item.song)}
+          onRemove={() => {
+            haptic(Haptics.ImpactFeedbackStyle.Medium);
+            void removeFromQueue(item.index);
+          }}
+          onSwipeOpen={handleSwipeOpen}
+          onDrag={drag}
+          isDragging={isActive}
+        />
+      </View>
     );
   }, [handleSongPress, handleSwipeOpen, haptic, removeFromQueue]);
 
@@ -288,10 +311,10 @@ export default function QueueScreen() {
             </Pressable>
           ) : null}
 
-          {upcomingQueue.length > 0 ? (
+          {upcomingQueue.length > 0 && isShuffled ? (
             <View style={styles.shufflingRow}>
-              <Ionicons name={isShuffled ? "shuffle" : "list"} size={23} color="#BEBEBE" />
-              <Text style={styles.shufflingText}>{isShuffled ? "Shuffling from:" : "Playing next"}</Text>
+              <Ionicons name="shuffle" size={23} color="#BEBEBE" />
+              <Text style={styles.shufflingText}>Shuffling from:</Text>
             </View>
           ) : null}
         </View>
@@ -365,14 +388,10 @@ export default function QueueScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "#000000",
+    backgroundColor: SHEET_BACKGROUND,
   },
   sheet: {
     flex: 1,
-    marginTop: 10,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
     overflow: "hidden",
     backgroundColor: SHEET_BACKGROUND,
   },
@@ -471,6 +490,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     fontFamily: "Inter_500Medium",
+  },
+  sectionHeader: {
+    paddingTop: 14,
+    paddingBottom: 6,
+  },
+  sectionTitle: {
+    color: "#BDBDBD",
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Inter_700Bold",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
   queueRow: {
     flexDirection: "row",

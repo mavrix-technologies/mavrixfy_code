@@ -1,15 +1,22 @@
 import React, { memo, useCallback, useEffect, useRef } from "react";
-import { View, Text, Pressable, StyleSheet, Platform, Alert, ToastAndroid, Animated as RNAnimated } from "react-native";
+import {
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  Platform,
+  Animated as RNAnimated,
+} from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
+import { router } from "expo-router";
 import Colors from "@/constants/colors";
-import { Song, formatDuration } from "@/lib/musicData";
+import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import { usePlayerRow } from "@/contexts/PlayerContext";
 import EqualizerBars from "@/components/EqualizerBars";
-import DownloadButton from "@/components/DownloadButton";
 import { showGlobalToast } from "@/app/_layout";
 
 interface Props {
@@ -19,6 +26,10 @@ interface Props {
   showCover?: boolean;
   /** Show the download button. Defaults to true. */
   showDownload?: boolean;
+  optionContext?: "playlist";
+  playlistId?: string;
+  playlistSource?: "local" | "firestore";
+  playlistName?: string;
   onRemove?: () => void;
 }
 
@@ -85,13 +96,17 @@ function QueueSwipeAction({
 
 const SongRow = memo(function SongRow({
   song,
-  index,
+  index: _index,
   queue,
   showCover = true,
   showDownload = true,
+  optionContext,
+  playlistId,
+  playlistSource,
+  playlistName,
   onRemove,
 }: Props) {
-  const { playSong, currentSongId, isPlaying, toggleLike, isLiked, addToQueue, playNext } = usePlayerRow();
+  const { playSong, currentSongId, isPlaying, addToQueue } = usePlayerRow();
   const queueCommittedRef = useRef(false);
   const didSwipeRef = useRef(false);
   const swipeableRef = useRef<Swipeable | null>(null);
@@ -102,12 +117,6 @@ const SongRow = memo(function SongRow({
     return () => {
       swipeable?.close();
     };
-  }, []);
-
-  const showActionFeedback = useCallback((message: string) => {
-    if (Platform.OS === "android") {
-      ToastAndroid.show(message, ToastAndroid.SHORT);
-    }
   }, []);
 
   const resetSwipeStateSoon = useCallback(() => {
@@ -151,17 +160,6 @@ const SongRow = memo(function SongRow({
   if (!song || !song.id || !song.title) return null;
 
   const isActive = currentSongId === song.id;
-  const liked = isLiked(song.id);
-
-  const handlePlayNext = () => {
-    playNext(song);
-    showActionFeedback("Will play next");
-  };
-
-  const handleAddToQueue = () => {
-    addToQueue(song);
-    showGlobalToast("Added to queue");
-  };
 
   const handlePress = () => {
     if (didSwipeRef.current) return;
@@ -171,21 +169,33 @@ const SongRow = memo(function SongRow({
 
   const handleLongPress = () => {
     void triggerImpact(ImpactFeedbackStyle.Medium);
-    Alert.alert("Queue Options", "What would you like to do?", [
-      { text: "Play Next", onPress: handlePlayNext },
-      { text: "Add to Queue", onPress: handleAddToQueue },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  };
-
-  const handleLike = () => {
-    void triggerImpact(ImpactFeedbackStyle.Light);
-    toggleLike(song);
+    openSongOptions();
   };
 
   const handleRemove = () => {
     void triggerImpact(ImpactFeedbackStyle.Light);
     onRemove?.();
+  };
+
+  const handleMorePress = () => {
+    void triggerImpact(ImpactFeedbackStyle.Light);
+    openSongOptions();
+  };
+
+  const openSongOptions = () => {
+    const canRemoveFromPlaylist = optionContext === "playlist" && Boolean(playlistId);
+    router.push({
+      pathname: "/song-options",
+      params: {
+        song: JSON.stringify(song),
+        showDownload: showDownload && !onRemove && !canRemoveFromPlaylist ? "1" : "0",
+        canRemove: onRemove || canRemoveFromPlaylist ? "1" : "0",
+        optionContext: optionContext ?? "",
+        playlistId: playlistId ?? "",
+        playlistSource: playlistSource ?? "",
+        playlistName: playlistName ?? "",
+      },
+    });
   };
 
   return (
@@ -213,15 +223,11 @@ const SongRow = memo(function SongRow({
           onPress={handlePress}
           onLongPress={handleLongPress}
         >
-          {index !== undefined && (
-            <View style={styles.indexWrap}>
-              {isActive ? (
-                <EqualizerBars isPlaying={isPlaying} size={3} />
-              ) : (
-                <Text style={styles.index}>{index + 1}</Text>
-              )}
+          {isActive ? (
+            <View style={styles.playingIndicator}>
+              <EqualizerBars isPlaying={isPlaying} size={3} />
             </View>
-          )}
+          ) : null}
 
             {showCover && song.coverUrl && (
               <Image
@@ -243,28 +249,16 @@ const SongRow = memo(function SongRow({
               </Text>
             </View>
 
-            {/* Like button */}
-            <Pressable onPress={handleLike} hitSlop={10} style={styles.likeBtn}>
-              <Ionicons
-                name={liked ? "heart" : "heart-outline"}
-                size={20}
-                color={liked ? Colors.primary : Colors.subtext}
-              />
-            </Pressable>
-
-            {/* Download button — hidden when a remove action is present */}
-            {showDownload && !onRemove && (
-              <DownloadButton song={song} size={20} style={styles.downloadBtn} />
-            )}
-
             {/* Remove / duration */}
             {onRemove ? (
               <Pressable onPress={handleRemove} hitSlop={10} style={styles.removeBtn}>
                 <Ionicons name="trash" size={18} color={Colors.subtext} />
               </Pressable>
-            ) : (
-              <Text style={styles.duration}>{formatDuration(song.duration)}</Text>
-            )}
+            ) : null}
+
+            <Pressable onPress={handleMorePress} hitSlop={10} style={styles.moreBtn}>
+              <Ionicons name="ellipsis-horizontal" size={20} color={Colors.subtext} />
+            </Pressable>
         </Pressable>
       </Swipeable>
 
@@ -280,6 +274,10 @@ const SongRow = memo(function SongRow({
     prevProps.index === nextProps.index &&
     prevProps.showCover === nextProps.showCover &&
     prevProps.showDownload === nextProps.showDownload &&
+    prevProps.optionContext === nextProps.optionContext &&
+    prevProps.playlistId === nextProps.playlistId &&
+    prevProps.playlistSource === nextProps.playlistSource &&
+    prevProps.playlistName === nextProps.playlistName &&
     Boolean(prevProps.onRemove) === Boolean(nextProps.onRemove) &&
     queueSignature(prevProps.queue) === queueSignature(nextProps.queue)
   );
@@ -343,8 +341,9 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
+    minHeight: 68,
     paddingVertical: 10,
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     width: "100%",
     backgroundColor: Colors.background,
   },
@@ -352,26 +351,22 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     backgroundColor: "rgba(255,255,255,0.05)",
   },
-  indexWrap: {
-    width: 28,
+  playingIndicator: {
+    width: 18,
+    marginRight: 10,
     alignItems: "center",
     justifyContent: "center",
-  },
-  index: {
-    color: Colors.subtext,
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
   },
   cover: {
     width: 48,
     height: 48,
     borderRadius: 4,
-    marginRight: 12,
+    marginRight: 14,
   },
   info: {
     flex: 1,
-    marginRight: 8,
+    minWidth: 0,
+    marginRight: 12,
   },
   title: {
     color: Colors.text,
@@ -387,23 +382,16 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     marginTop: 2,
   },
-  likeBtn: {
-    padding: 6,
-  },
-  downloadBtn: {
-    padding: 6,
-    marginLeft: 2,
-  },
   removeBtn: {
     padding: 6,
     marginLeft: 4,
   },
-  duration: {
-    color: Colors.subtext,
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    marginLeft: 4,
-    width: 36,
-    textAlign: "right",
+  moreBtn: {
+    width: 32,
+    height: 32,
+    marginLeft: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 16,
   },
 });
