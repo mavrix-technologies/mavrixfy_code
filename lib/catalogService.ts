@@ -5,29 +5,40 @@
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Song } from '@/lib/musicData';
+import { logger } from '@/lib/logger';
 
 let _cache: Song[] | null = null;
 let _cacheTime = 0;
-const CACHE_TTL = 30 * 1000; // 30 seconds
+let _inFlight: Promise<Song[]> | null = null;
+const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
 
 export async function getCatalogSongs(): Promise<Song[]> {
   const now = Date.now();
   if (_cache && now - _cacheTime < CACHE_TTL) {
-    console.log(`[CatalogService] Returning ${_cache.length} cached songs`);
     return _cache;
   }
 
+  if (_inFlight) {
+    return _inFlight;
+  }
+
+  _inFlight = fetchCatalogSongs();
   try {
-    console.log('[CatalogService] Fetching songs from Firestore...');
+    return await _inFlight;
+  } finally {
+    _inFlight = null;
+  }
+}
+
+async function fetchCatalogSongs(): Promise<Song[]> {
+  try {
     const snap = await getDocs(collection(db, 'songs'));
-    console.log(`[CatalogService] Firestore returned ${snap.docs.length} raw documents`);
 
     const songs: Song[] = snap.docs
       .map((d): Song | null => {
         const data = d.data();
         const audioUrl = data.audioUrl || data.streamUrl || data.url || '';
         if (!audioUrl || !data.title) {
-          console.log(`[CatalogService] Skipping doc ${d.id} — missing audioUrl or title`);
           return null;
         }
 
@@ -53,12 +64,11 @@ export async function getCatalogSongs(): Promise<Song[]> {
       })
       .filter((s): s is Song => s !== null);
 
-    console.log(`[CatalogService] Parsed ${songs.length} valid songs`);
     _cache = songs;
-    _cacheTime = now;
+    _cacheTime = Date.now();
     return songs;
   } catch (e) {
-    console.error('[CatalogService] Failed to fetch from Firestore:', e);
+    logger.warn('[CatalogService] Failed to fetch catalog songs.', e);
     return _cache || [];
   }
 }
@@ -72,6 +82,5 @@ export function searchCatalog(songs: Song[], query: string): Song[] {
     s.album.toLowerCase().includes(q) ||
     q.split(' ').some(w => w.length > 2 && s.title.toLowerCase().includes(w))
   );
-  console.log(`[CatalogService] searchCatalog("${query}") → ${results.length} matches from ${songs.length} songs`);
   return results;
 }

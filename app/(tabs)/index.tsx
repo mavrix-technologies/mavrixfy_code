@@ -233,10 +233,26 @@ function HomeScreenInner() {
   );
   const latestLoadIdRef = useRef(0);
   const hasHydratedRef = useRef(HOME_SESSION_CACHE.hydrated);
+  const prefetchStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPlaylistPrefetchRef = useRef<(() => void) | null>(null);
 
   const INITIAL_CATEGORY_LIMIT = 10;
   const REFRESH_CATEGORY_LIMIT = 12;
   const INITIAL_PUBLIC_LIMIT = 100; // Increased to show all playlists
+
+  const schedulePlaylistPrefetch = useCallback((categoryData: HomeJioSaavnCategoryData[], delayMs: number) => {
+    if (prefetchStartTimerRef.current) {
+      clearTimeout(prefetchStartTimerRef.current);
+      prefetchStartTimerRef.current = null;
+    }
+    cancelPlaylistPrefetchRef.current?.();
+    cancelPlaylistPrefetchRef.current = null;
+
+    prefetchStartTimerRef.current = setTimeout(() => {
+      prefetchStartTimerRef.current = null;
+      cancelPlaylistPrefetchRef.current = prefetchVisiblePlaylists(categoryData, 3);
+    }, delayMs);
+  }, []);
 
   const loadHomeData = useCallback(
     async (options?: {
@@ -327,7 +343,7 @@ function HomeScreenInner() {
             setCategories(validCategories);
             HOME_SESSION_CACHE.categories = validCategories;
             if (validCategories.length > 0) {
-              setTimeout(() => prefetchVisiblePlaylists(validCategories, 3), 1200);
+              schedulePlaylistPrefetch(validCategories, 1200);
             }
           }
 
@@ -443,7 +459,7 @@ function HomeScreenInner() {
         }
       }
     },
-    []
+    [schedulePlaylistPrefetch]
   );
 
   const resetHomeState = useCallback((options?: { clearUi?: boolean }) => {
@@ -510,7 +526,7 @@ function HomeScreenInner() {
           hasHomeContent(HOME_SESSION_CACHE) || HOME_SESSION_CACHE.featuredArtists.length > 0;
         setLoading(!hasVisibleFeed);
         if (HOME_SESSION_CACHE.categories.length > 0) {
-          setTimeout(() => prefetchVisiblePlaylists(HOME_SESSION_CACHE.categories, 3), 800);
+          schedulePlaylistPrefetch(HOME_SESSION_CACHE.categories, 800);
         }
         const hasFullFeed = HOME_SESSION_CACHE.categories.length > 0 &&
           HOME_SESSION_CACHE.featuredArtists.length > 0;
@@ -586,7 +602,18 @@ function HomeScreenInner() {
       cancelled = true;
       latestLoadIdRef.current += 1;
     };
-  }, [loadHomeData]);
+  }, [loadHomeData, schedulePlaylistPrefetch]);
+
+  useEffect(() => {
+    return () => {
+      if (prefetchStartTimerRef.current) {
+        clearTimeout(prefetchStartTimerRef.current);
+        prefetchStartTimerRef.current = null;
+      }
+      cancelPlaylistPrefetchRef.current?.();
+      cancelPlaylistPrefetchRef.current = null;
+    };
+  }, []);
 
   const orderedHomeCategories = useMemo<HomeJioSaavnCategoryData[]>(() => {
     const categoryById = new Map<string, HomeJioSaavnCategoryData>();

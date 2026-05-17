@@ -220,6 +220,7 @@ export default function SearchScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeqRef = useRef(0);
+  const activeSearchAbortRef = useRef<AbortController | null>(null);
   const resultsPlaylistsListRef = useRef<FlatList<PlaylistResult> | null>(null);
   const resultsSongsListRef = useRef<FlatList<Song> | null>(null);
   const searchCacheRef = useRef<Map<string, { songs: Song[]; playlists: PlaylistResult[]; timestamp: number }>>(new Map());
@@ -236,12 +237,18 @@ export default function SearchScreen() {
     const requestId = ++requestSeqRef.current;
     const normalizedQuery = searchQuery.trim();
     if (normalizedQuery.length < 2) {
+      activeSearchAbortRef.current?.abort();
+      activeSearchAbortRef.current = null;
       setSongResults([]);
       setPlaylistResults([]);
       setSearchDisplayQuery("");
       setIsLoading(false);
       return;
     }
+
+    activeSearchAbortRef.current?.abort();
+    const controller = new AbortController();
+    activeSearchAbortRef.current = controller;
 
     // Check cache first (5 minute TTL)
     const cacheKey = normalizedQuery.toLowerCase();
@@ -252,6 +259,9 @@ export default function SearchScreen() {
       setPlaylistResults(cached.playlists);
       setSearchDisplayQuery(normalizedQuery);
       setIsLoading(false);
+      if (activeSearchAbortRef.current === controller) {
+        activeSearchAbortRef.current = null;
+      }
       return;
     }
 
@@ -262,7 +272,9 @@ export default function SearchScreen() {
 
     // Safe fetch — returns parsed JSON or null, never throws
     const safeFetch = (url: string) =>
-      fetch(url).then(r => (r.ok ? r.json() : null)).catch(() => null);
+      fetch(url, { signal: controller.signal })
+        .then(r => (r.ok ? r.json() : null))
+        .catch(() => null);
 
     // Deduplication key: normalized title + first artist
     const mkKey = (title: string, artist: string) => {
@@ -333,7 +345,7 @@ export default function SearchScreen() {
       // OPTIMIZATION: Fetch catalog songs first (instant, local)
       const catalogSongs = await getCatalogSongs().catch(() => [] as Song[]);
       
-      if (requestId !== requestSeqRef.current) return;
+      if (requestId !== requestSeqRef.current || controller.signal.aborted) return;
 
       // Show catalog results immediately
       const songsMap = new Map<string, Song>();
@@ -353,7 +365,7 @@ export default function SearchScreen() {
         safeFetch(`${apiUrl}api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=6`),
       ]);
 
-      if (requestId !== requestSeqRef.current) return;
+      if (requestId !== requestSeqRef.current || controller.signal.aborted) return;
 
       // Merge network results with catalog results
       for (const s of (songsData?.data?.results || songsData?.results || [])) {
@@ -388,13 +400,19 @@ export default function SearchScreen() {
       setPlaylistResults(playlists);
       setSearchDisplayQuery(normalizedQuery);
       setIsLoading(false);
+      if (activeSearchAbortRef.current === controller) {
+        activeSearchAbortRef.current = null;
+      }
 
     } catch {
-      if (requestId !== requestSeqRef.current) return;
+      if (requestId !== requestSeqRef.current || controller.signal.aborted) return;
       setSongResults([]);
       setPlaylistResults([]);
       setSearchDisplayQuery(normalizedQuery);
       setIsLoading(false);
+      if (activeSearchAbortRef.current === controller) {
+        activeSearchAbortRef.current = null;
+      }
     }
   }, []);
 
@@ -465,6 +483,8 @@ export default function SearchScreen() {
 
   const handleClear = useCallback(() => {
     requestSeqRef.current += 1;
+    activeSearchAbortRef.current?.abort();
+    activeSearchAbortRef.current = null;
     setQuery("");
     setSongResults([]);
     setPlaylistResults([]);
@@ -483,6 +503,8 @@ export default function SearchScreen() {
     const trimmed = query.trim();
     if (trimmed.length < 2) {
       requestSeqRef.current += 1;
+      activeSearchAbortRef.current?.abort();
+      activeSearchAbortRef.current = null;
       setSongResults([]);
       setPlaylistResults([]);
       setSearchDisplayQuery("");
@@ -507,6 +529,8 @@ export default function SearchScreen() {
       if (debounceTimer.current) {
         clearTimeout(debounceTimer.current);
       }
+      activeSearchAbortRef.current?.abort();
+      activeSearchAbortRef.current = null;
     };
   }, []);
 

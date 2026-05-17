@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useRef, ReactNode, useEffect } from "react";
-import { Alert, AppState, Platform, ToastAndroid } from "react-native";
+import { Alert, AppState, InteractionManager, Platform, ToastAndroid } from "react-native";
 import { isRunningInExpoGo } from "expo";
 import { Song } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
@@ -818,10 +818,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }
     };
     
-    setup();
+    const setupTask = InteractionManager.runAfterInteractions(() => {
+      void setup();
+    });
 
     return () => {
       mounted = false;
+      setupTask.cancel?.();
     };
   }, []);
 
@@ -1697,14 +1700,26 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     const isCurrentlyLiked = likedSongIds.includes(song.id);
     
-    if (isCurrentlyLiked) {
-      setLikedSongIds(prev => prev.filter(id => id !== song.id));
-      setLikedSongs(prev => prev.filter(s => s.id !== song.id));
-      await removeLikedSongFromFirestore(authUser.id, song.id);
-    } else {
-      setLikedSongIds(prev => [song.id, ...prev]);
-      setLikedSongs(prev => [song, ...prev]);
-      await addLikedSongToFirestore(authUser.id, song);
+    try {
+      if (isCurrentlyLiked) {
+        setLikedSongIds(prev => prev.filter(id => id !== song.id));
+        setLikedSongs(prev => prev.filter(s => s.id !== song.id));
+        await removeLikedSongFromFirestore(authUser.id, song.id);
+      } else {
+        setLikedSongIds(prev => [song.id, ...prev]);
+        setLikedSongs(prev => [song, ...prev]);
+        await addLikedSongToFirestore(authUser.id, song);
+      }
+    } catch (error) {
+      logger.warn("[Player] Failed to sync liked song", { songId: song.id, error });
+      if (isCurrentlyLiked) {
+        setLikedSongIds(prev => prev.includes(song.id) ? prev : [song.id, ...prev]);
+        setLikedSongs(prev => prev.some((s) => s.id === song.id) ? prev : [song, ...prev]);
+      } else {
+        setLikedSongIds(prev => prev.filter(id => id !== song.id));
+        setLikedSongs(prev => prev.filter(s => s.id !== song.id));
+      }
+      showPlaybackNotice("Could not update liked songs. Please try again.");
     }
   }, [authUser?.id, likedSongIds, showPlaybackNotice]);
 

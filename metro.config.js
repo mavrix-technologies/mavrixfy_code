@@ -17,36 +17,13 @@ config.resolver = {
   platforms: ['ios', 'android'],
 };
 
-// Performance optimizations
+// Keep startup-friendly inline requires, but use Expo's default minifier.
+// Aggressive Terser options can hide production diagnostics and change runtime
+// names without proving a measurable performance gain.
 config.transformer = {
   ...config.transformer,
-  minifierConfig: {
-    compress: {
-      drop_console: true,
-      drop_debugger: true,
-      reduce_funcs: true,
-      dead_code: true,
-      collapse_vars: true,
-      reduce_vars: true,
-      warnings: false,
-      ecma: 2020,
-      module: true,
-      passes: 3,
-    },
-    mangle: {
-      keep_fnames: false,
-      keep_classnames: false,
-      toplevel: true,
-    },
-    output: {
-      comments: false,
-      beautify: false,
-      ascii_only: true,
-    },
-  },
   getTransformOptions: async () => ({
     transform: {
-      experimentalImportSupport: false,
       inlineRequires: true,
     },
   }),

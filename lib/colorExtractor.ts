@@ -45,6 +45,7 @@ export interface SpotifyColorTheme {
 }
 
 const COLOR_EXTRACTION_TIMEOUT_MS = 1400;
+const COLOR_CACHE_MAX_ENTRIES = 200;
 const DEFAULT_FALLBACK: ColorResult = { primary: "#1F7AE0", text: "#F5FBFF", isDark: true };
 
 // Fallback brand-aware palette (blue/cyan/green family)
@@ -100,7 +101,11 @@ export async function extractDominantColor(imageUrl: string): Promise<ColorResul
   if (!cacheKey) return DEFAULT_FALLBACK;
 
   const cached = colorCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    colorCache.delete(cacheKey);
+    colorCache.set(cacheKey, cached);
+    return cached;
+  }
 
   const getter = resolveImageColorsGetter();
   if (getter) {
@@ -122,7 +127,7 @@ export async function extractDominantColor(imageUrl: string): Promise<ColorResul
           text: isDark ? "#F5FBFF" : "#0B141A",
           isDark,
         };
-        colorCache.set(cacheKey, result);
+        setCachedColor(cacheKey, result);
         return result;
       }
     } catch {
@@ -138,13 +143,23 @@ export async function extractDominantColor(imageUrl: string): Promise<ColorResul
       text: isDark ? "#F5FBFF" : "#0B141A",
       isDark,
     };
-    colorCache.set(cacheKey, thumbhashResult);
+    setCachedColor(cacheKey, thumbhashResult);
     return thumbhashResult;
   }
 
   const fallback = getStableFallbackColor(cacheKey);
-  colorCache.set(cacheKey, fallback);
+  setCachedColor(cacheKey, fallback);
   return fallback;
+}
+
+function setCachedColor(key: string, value: ColorResult): void {
+  colorCache.set(key, value);
+
+  while (colorCache.size > COLOR_CACHE_MAX_ENTRIES) {
+    const oldestKey = colorCache.keys().next().value;
+    if (!oldestKey) break;
+    colorCache.delete(oldestKey);
+  }
 }
 
 function pickPrimaryColor(palette: PlatformPalette): string | null {

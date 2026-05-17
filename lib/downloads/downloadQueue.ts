@@ -65,6 +65,7 @@ const pendingQueue: string[] = [];
 /** Guards against two concurrent startDownload calls for the same songId. */
 const startingSet = new Set<string>();
 const lastProgressPersistAt = new Map<string, number>();
+const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const PROGRESS_PERSIST_INTERVAL_MS = 1500;
 
 // ─── Slot management ──────────────────────────────────────────────────────────
@@ -79,6 +80,14 @@ function releaseSlot(songId: string) {
   startingSet.delete(songId);
   lastProgressPersistAt.delete(songId);
   drainQueue();
+}
+
+function clearRetryTimer(songId: string): void {
+  const timer = retryTimers.get(songId);
+  if (timer) {
+    clearTimeout(timer);
+    retryTimers.delete(songId);
+  }
 }
 
 /** Start the next pending song if a slot is free. */
@@ -231,13 +240,18 @@ async function executeDownload(songId: string): Promise<void> {
         failedAt: new Date().toISOString(),
       });
       const delays = [2000, 5000, 10000];
-      setTimeout(() => {
+      clearRetryTimer(songId);
+      const retryTimer = setTimeout(async () => {
+        retryTimers.delete(songId);
+        const latest = await loadDownload(songId);
+        if (!latest || latest.status !== "queued") return;
         // Re-add to pending queue for the next available slot
         if (!pendingQueue.includes(songId) && !activeHandles.has(songId)) {
           pendingQueue.push(songId);
           drainQueue();
         }
       }, delays[retryCount - 1] ?? 10000);
+      retryTimers.set(songId, retryTimer);
     } else {
       const failedItem = await updateStatus(songId, "failed", {
         retryCount,
@@ -256,6 +270,7 @@ export async function enqueueDownload(
   _prefs: DownloadPreferences
 ): Promise<void> {
   const songId = item.songId;
+  clearRetryTimer(songId);
 
   // Idempotency: skip if already active or pending
   if (activeHandles.has(songId) || pendingQueue.includes(songId) || startingSet.has(songId)) {
@@ -282,6 +297,7 @@ export async function enqueueDownload(
 }
 
 export async function startDownload(songId: string): Promise<void> {
+  clearRetryTimer(songId);
   if (activeHandles.has(songId) || startingSet.has(songId)) return;
 
   if (activeCount() < MAX_CONCURRENT) {
@@ -296,6 +312,7 @@ export async function startDownload(songId: string): Promise<void> {
 }
 
 export async function pauseDownload(songId: string): Promise<void> {
+  clearRetryTimer(songId);
   // Remove from pending queue if waiting
   const pendingIdx = pendingQueue.indexOf(songId);
   if (pendingIdx !== -1) pendingQueue.splice(pendingIdx, 1);
@@ -314,6 +331,7 @@ export async function resumeDownload(
 ): Promise<void> {
   const item = await loadDownload(songId);
   if (!item) return;
+  clearRetryTimer(songId);
   if (item.status !== "paused" && item.status !== "queued" && item.status !== "failed") return;
   if (activeHandles.has(songId) || startingSet.has(songId)) return;
 
@@ -327,6 +345,7 @@ export async function resumeDownload(
 }
 
 export async function cancelDownload(songId: string): Promise<void> {
+  clearRetryTimer(songId);
   // Remove from pending queue
   const pendingIdx = pendingQueue.indexOf(songId);
   if (pendingIdx !== -1) pendingQueue.splice(pendingIdx, 1);
@@ -343,6 +362,7 @@ export async function retryDownload(
   songId: string,
   prefs: DownloadPreferences
 ): Promise<void> {
+  clearRetryTimer(songId);
   await updateStatus(songId, "queued", {
     retryCount: 0,
     failureReason: null,

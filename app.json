@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/mavrixfy_icone.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/images/mavrixfy_icone.png",
       "resizeMode": "contain",
@@ -22,7 +22,6 @@
         "UIBackgroundModes": [
           "audio"
         ],
-        "NSMicrophoneUsageDescription": "This app may use the microphone for voice features.",
         "NSCameraUsageDescription": "This app uses the camera to upload profile pictures.",
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to upload images.",
         "NSAppleMusicUsageDescription": "This app streams music content.",
@@ -55,6 +54,8 @@
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.WRITE_SETTINGS",
         "android.permission.SYSTEM_ALERT_WINDOW"
       ]
     },

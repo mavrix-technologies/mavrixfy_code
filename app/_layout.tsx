@@ -208,8 +208,13 @@ function RootLayoutNav() {
         <Stack.Screen
           name="song-options"
           options={{
-            presentation: "modal",
+            presentation: "formSheet",
             animation: "slide_from_bottom",
+            sheetAllowedDetents: [0.88, 1],
+            sheetInitialDetentIndex: 0,
+            sheetCornerRadius: 24,
+            sheetGrabberVisible: false,
+            sheetExpandsWhenScrolledToEdge: false,
             gestureEnabled: false,
             contentStyle: { backgroundColor: "#1E1E1E" },
           }}

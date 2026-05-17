@@ -93,12 +93,11 @@ function AddToPlaylistView({
   const [playlists, setPlaylists] = useState<MergedPlaylist[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState<string | null>(null);
-  const playlistBottomPad = Math.max(bottomPad + 120, 152);
+  const playlistBottomPad = Math.max(bottomPad + 72, 104);
 
   useEffect(() => {
     async function load() {
       try {
-        // Always load local playlists
         const local = await getUserPlaylists();
         const localMerged: MergedPlaylist[] = local.map((p) => ({
           ...p,
@@ -111,7 +110,6 @@ function AddToPlaylistView({
           return;
         }
 
-        // Authenticated: also load Firestore playlists and merge
         const firestoreRaw = await getUserFirestorePlaylists(userId);
         const firestoreIds = new Set(firestoreRaw.map((fp: FirestorePlaylist) => fp.id));
 
@@ -137,15 +135,12 @@ function AddToPlaylistView({
           })
         );
 
-        // Local-only playlists (not already in Firestore)
         const localOnly = localMerged.filter((p) => !firestoreIds.has(p.id));
-
         const merged = [...firestoreMerged, ...localOnly].sort(
           (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
         );
         setPlaylists(merged);
       } catch {
-        // Fallback to local only
         try {
           const local = await getUserPlaylists();
           setPlaylists(local.map((p) => ({ ...p, isFirestore: false })));
@@ -826,7 +821,6 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     marginTop: 2,
   },
-
   // Go to artists
   artistIcon: {
     width: 32,

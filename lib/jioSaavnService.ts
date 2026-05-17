@@ -1270,7 +1270,7 @@ export function prefetchPlaylistDetails(playlistId: string): void {
 export function prefetchVisiblePlaylists(
   categories: HomeJioSaavnCategoryData[],
   perSection = 3
-): void {
+): () => void {
   const ids: string[] = [];
   for (const cat of categories) {
     for (const p of cat.results.slice(0, perSection)) {
@@ -1279,9 +1279,13 @@ export function prefetchVisiblePlaylists(
   }
 
   // Stagger: one prefetch every 400ms so we don't flood the network
-  ids.forEach((id, i) => {
-    setTimeout(() => prefetchPlaylistDetails(id), i * 400);
+  const timers = ids.map((id, i) => {
+    return setTimeout(() => prefetchPlaylistDetails(id), i * 400);
   });
+
+  return () => {
+    timers.forEach(clearTimeout);
+  };
 }
 
 export async function getJioSaavnPlaylistDetails(

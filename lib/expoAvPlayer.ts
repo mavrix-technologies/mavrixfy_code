@@ -11,6 +11,8 @@ import type { AudioPlayer } from "expo-audio";
 let activePlayer: AudioPlayer | null = null;
 let currentUrl: string | null = null;
 let seekBlockUntil = 0;
+let seekResetTimer: ReturnType<typeof setTimeout> | null = null;
+const playerSubscriptions = new WeakMap<AudioPlayer, { remove?: () => void }>();
 
 // Monotonically increasing request id.
 // Every loadAndPlay increments this. Callbacks from older players are dropped.
@@ -48,8 +50,18 @@ export function clearListeners(): void {
  */
 function killPlayer(p: AudioPlayer | null): void {
   if (!p) return;
+  try { playerSubscriptions.get(p)?.remove?.(); } catch {}
+  playerSubscriptions.delete(p);
   try { p.pause(); } catch {}   // stop audio output immediately
   try { p.remove(); } catch {}  // release native resources
+}
+
+function clearSeekResetTimer(): void {
+  if (seekResetTimer) {
+    clearTimeout(seekResetTimer);
+    seekResetTimer = null;
+  }
+  seekBlockUntil = 0;
 }
 
 async function ensureAudioMode(): Promise<void> {
@@ -67,7 +79,7 @@ async function ensureAudioMode(): Promise<void> {
 }
 
 function attachListener(p: AudioPlayer, gen: number): void {
-  p.addListener("playbackStatusUpdate", (status) => {
+  const subscription = p.addListener("playbackStatusUpdate", (status) => {
     if (gen !== generation || !statusCb) return;
     if (Date.now() < seekBlockUntil && !status.didJustFinish) return;
     statusCb({
@@ -77,6 +89,7 @@ function attachListener(p: AudioPlayer, gen: number): void {
       didJustFinish: status.didJustFinish ?? false,
     });
   });
+  playerSubscriptions.set(p, subscription ?? {});
 }
 
 // ─── public API ───────────────────────────────────────────────────────────────
@@ -95,6 +108,7 @@ export async function loadAndPlay(url: string): Promise<void> {
   //    This stops audio output immediately and prevents two songs playing.
   const prev = activePlayer;
   activePlayer = null;
+  clearSeekResetTimer();
   killPlayer(prev);
 
   try {
@@ -140,6 +154,7 @@ export function stop(): void {
   const p = activePlayer;
   activePlayer = null;
   currentUrl = null;
+  clearSeekResetTimer();
   killPlayer(p);
 }
 
@@ -151,9 +166,15 @@ export function destroy(): void {
 export async function seekTo(seconds: number): Promise<void> {
   if (!activePlayer) return;
   try {
+    if (seekResetTimer) {
+      clearTimeout(seekResetTimer);
+    }
     seekBlockUntil = Date.now() + 700;
     await activePlayer.seekTo(seconds);
-    setTimeout(() => { seekBlockUntil = 0; }, 700);
+    seekResetTimer = setTimeout(() => {
+      seekBlockUntil = 0;
+      seekResetTimer = null;
+    }, 700);
   } catch {}
 }
 

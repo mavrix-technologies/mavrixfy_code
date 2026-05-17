@@ -92,6 +92,15 @@ docs/
 .expo-shared/
 attached_assets/
 
-# Local environment files (use EAS Secrets instead)
-.env.local
-.env.*.local
+# Local environment files and credentials (use EAS Secrets instead)
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*service-account*.json
+firebase-service-account.json
+app.aab.json
