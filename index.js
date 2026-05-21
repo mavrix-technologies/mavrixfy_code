@@ -38,6 +38,7 @@ if (!isRunningInExpoGo() && Platform.OS !== "web") {
     TrackPlayer.registerPlaybackService(
       () => require("./lib/trackPlayerService").trackPlayerService
     );
+    require("./lib/autoMediaRemoteService").registerAutoMediaRemoteService();
   } catch {
     // Native module unavailable in this runtime — silent fail.
   }

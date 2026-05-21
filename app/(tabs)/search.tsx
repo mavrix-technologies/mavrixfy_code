@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -208,6 +208,7 @@ function stableHash(input: string): number {
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams<{ q?: string | string[]; name?: string | string[] }>();
   const { isOnline } = useNetwork();
   const [query, setQuery] = useState("");
   const [songResults, setSongResults] = useState<Song[]>([]);
@@ -438,6 +439,21 @@ export default function SearchScreen() {
       return [nextItem, ...filtered].slice(0, 8);
     });
   }, []);
+
+  useEffect(() => {
+    const incomingQuery = Array.isArray(params.q)
+      ? params.q[0]
+      : params.q || (Array.isArray(params.name) ? params.name[0] : params.name);
+    const next = String(incomingQuery || "").trim();
+    if (next.length < 2 || next === query.trim()) return;
+
+    setQuery(next);
+    rememberRecentSearch(next);
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+    void performSearch(next);
+  }, [params.name, params.q, performSearch, query, rememberRecentSearch]);
 
   const handleGenrePress = useCallback(
     (genreName: string) => {

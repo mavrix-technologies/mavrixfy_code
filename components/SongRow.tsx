@@ -31,6 +31,7 @@ interface Props {
   playlistSource?: "local" | "firestore";
   playlistName?: string;
   onRemove?: () => void;
+  horizontalPadding?: number;
 }
 
 const SWIPE_ACTION_WIDTH = 184;
@@ -105,6 +106,7 @@ const SongRow = memo(function SongRow({
   playlistSource,
   playlistName,
   onRemove,
+  horizontalPadding,
 }: Props) {
   const { playSong, currentSongId, isPlaying, addToQueue } = usePlayerRow();
   const queueCommittedRef = useRef(false);
@@ -260,7 +262,11 @@ const SongRow = memo(function SongRow({
         childrenContainerStyle={styles.rowLayer}
       >
         <Pressable
-          style={({ pressed }) => [styles.container, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.container,
+            horizontalPadding !== undefined && { paddingHorizontal: horizontalPadding },
+            pressed && styles.pressed,
+          ]}
           onPress={handlePress}
           onLongPress={handleLongPress}
         >
@@ -333,6 +339,7 @@ const SongRow = memo(function SongRow({
     prevProps.playlistId === nextProps.playlistId &&
     prevProps.playlistSource === nextProps.playlistSource &&
     prevProps.playlistName === nextProps.playlistName &&
+    prevProps.horizontalPadding === nextProps.horizontalPadding &&
     Boolean(prevProps.onRemove) === Boolean(nextProps.onRemove) &&
     queueSignature(prevProps.queue) === queueSignature(nextProps.queue)
   );

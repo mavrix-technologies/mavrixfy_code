@@ -121,6 +121,7 @@
       "android"
     ],
     "updates": {
+      "enabled": false,
       "url": "https://u.expo.dev/93293119-93b7-4dbb-acdd-7241771254c4",
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0

@@ -69,3 +69,4 @@ server_dist/
 
 # Release keystore — never commit signing credentials
 android/app/mavrixfy-release.keystore
+android/keystore.properties

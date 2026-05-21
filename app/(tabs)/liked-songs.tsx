@@ -82,7 +82,7 @@ export default function LikedSongsScreen() {
 
   const renderSong = useCallback(
     ({ item }: { item: Song; index: number }) => {
-      return <SongRow song={item} queue={filteredSongs} />;
+      return <SongRow song={item} queue={filteredSongs} horizontalPadding={8} />;
     },
     [filteredSongs]
   );

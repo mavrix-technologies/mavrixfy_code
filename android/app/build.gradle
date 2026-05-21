@@ -81,6 +81,33 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 def isBundleTask = gradle.startParameter.taskNames.any { it.toLowerCase().contains("bundle") }
+def mavrixfySigningProperties = new Properties()
+def mavrixfySigningPropertiesFile = rootProject.file("keystore.properties")
+if (mavrixfySigningPropertiesFile.exists()) {
+    mavrixfySigningPropertiesFile.withInputStream { mavrixfySigningProperties.load(it) }
+}
+def signingProperty = { name ->
+    def gradleValue = findProperty(name)?.toString()?.trim()
+    return gradleValue ?: mavrixfySigningProperties.getProperty(name)?.toString()?.trim()
+}
+def signingStoreFile = { path ->
+    def storeFilePath = path.toString()
+    def candidate = new File(storeFilePath)
+    return candidate.isAbsolute() ? candidate : rootProject.file(storeFilePath)
+}
+def hasMavrixfyReleaseSigning = [
+    'MAVRIXFY_STORE_FILE',
+    'MAVRIXFY_STORE_PASSWORD',
+    'MAVRIXFY_KEY_ALIAS',
+    'MAVRIXFY_KEY_PASSWORD'
+].every { signingProperty(it) }
+def hasAndroidInjectedSigning = [
+    'android.injected.signing.store.file',
+    'android.injected.signing.store.password',
+    'android.injected.signing.key.alias',
+    'android.injected.signing.key.password'
+].every { signingProperty(it) }
+def allowDebugReleaseSigning = (findProperty('MAVRIXFY_ALLOW_DEBUG_RELEASE_SIGNING') ?: 'false').toString().toBoolean()
 
 android {
     ndkVersion rootProject.ext.ndkVersion
@@ -93,8 +120,8 @@ android {
         applicationId 'com.mavrixfy.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 20501
-        versionName "2.5.1"
+        versionCode 20503
+        versionName "2.5.3"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -106,18 +133,28 @@ android {
             keyPassword 'android'
         }
         release {
-            if (project.hasProperty('MAVRIXFY_STORE_FILE')) {
-                storeFile file(MAVRIXFY_STORE_FILE)
-                storePassword MAVRIXFY_STORE_PASSWORD
-                keyAlias MAVRIXFY_KEY_ALIAS
-                keyPassword MAVRIXFY_KEY_PASSWORD
-            } else {
-                // Fallback to the user debug keystore for local release builds.
-                // Its SHA-1 is registered in Firebase for Google Sign-In.
+            if (hasMavrixfyReleaseSigning) {
+                storeFile signingStoreFile(signingProperty('MAVRIXFY_STORE_FILE'))
+                storePassword signingProperty('MAVRIXFY_STORE_PASSWORD')
+                keyAlias signingProperty('MAVRIXFY_KEY_ALIAS')
+                keyPassword signingProperty('MAVRIXFY_KEY_PASSWORD')
+            } else if (hasAndroidInjectedSigning) {
+                storeFile file(signingProperty('android.injected.signing.store.file'))
+                storePassword signingProperty('android.injected.signing.store.password')
+                keyAlias signingProperty('android.injected.signing.key.alias')
+                keyPassword signingProperty('android.injected.signing.key.password')
+            } else if (!isBundleTask || allowDebugReleaseSigning) {
+                // Local release APKs can still be sideloaded for testing.
+                // Play upload bundles must use the real upload key instead.
+                if (isBundleTask) {
+                    logger.warn("MAVRIXFY_ALLOW_DEBUG_RELEASE_SIGNING=true is signing a release bundle with a debug key. Do not upload this bundle to Play.")
+                }
                 storeFile file("${System.getProperty('user.home')}/.android/debug.keystore")
                 storePassword 'android'
                 keyAlias 'androiddebugkey'
                 keyPassword 'android'
+            } else {
+                throw new GradleException("Play release bundle signing is not configured. Provide MAVRIXFY_STORE_FILE, MAVRIXFY_STORE_PASSWORD, MAVRIXFY_KEY_ALIAS, and MAVRIXFY_KEY_PASSWORD for the upload key with SHA1 B1:DA:1E:23:9A:36:0B:6E:6E:89:57:A7:40:B3:AD:BE:81:59:97:89.")
             }
         }
     }
