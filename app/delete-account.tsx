@@ -41,7 +41,7 @@ function getFriendlyDeleteError(message: string): string {
 
 export default function DeleteAccountScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { replace: routerReplace } = useRouter();
   const { user, firebaseUser, deleteAccount } = useAuth();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomScrollPadding = Platform.OS === "web" ? 110 : Math.max(118, insets.bottom + 112);
@@ -71,7 +71,7 @@ export default function DeleteAccountScreen() {
       });
 
       Alert.alert("Account deleted", "Your Mavrixfy account and app data have been deleted.");
-      router.replace("/login");
+      routerReplace("/login");
     } catch (error: any) {
       Alert.alert(
         "Unable to delete account",
@@ -121,7 +121,8 @@ export default function DeleteAccountScreen() {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={{ paddingBottom: bottomScrollPadding }}
+        contentInset={{ bottom: bottomScrollPadding }}
+        scrollIndicatorInsets={{ bottom: bottomScrollPadding }}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.heroCard}>

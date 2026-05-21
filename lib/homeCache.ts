@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { FirestorePlaylist } from "@/lib/firestore";
+import { mapFilter } from "@/lib/arrayUtils";
 
 const HOME_PUBLIC_PLAYLISTS_CACHE_KEY = "@mavrixfy_home_public_playlists_v1";
 const HOME_PUBLIC_PLAYLISTS_CACHE_TIME_KEY = "@mavrixfy_home_public_playlists_time_v1";
@@ -36,9 +37,7 @@ function normalizePublicPlaylist(raw: any): FirestorePlaylist | null {
 function normalizePublicPlaylistList(raw: unknown): FirestorePlaylist[] {
   if (!Array.isArray(raw)) return [];
 
-  const normalized = raw
-    .map((item) => normalizePublicPlaylist(item))
-    .filter((item): item is FirestorePlaylist => Boolean(item));
+  const normalized = mapFilter(raw, (item) => normalizePublicPlaylist(item), (item): item is FirestorePlaylist => Boolean(item));
 
   return normalized;
 }

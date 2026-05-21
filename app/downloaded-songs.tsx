@@ -5,7 +5,7 @@
  * Accessible from the Downloads screen header.
  */
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useCallback, useEffect, useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -85,6 +85,55 @@ interface PlaylistSection {
   collectionName: string;
   items: DownloadItem[];
   coverUrl?: string;
+}
+
+interface DownloadedSongSection {
+  title: string;
+  data: DownloadItem[];
+  collectionId: string;
+  coverUrl?: string;
+  songs: Song[];
+}
+
+function DownloadedSectionHeader({
+  section,
+  onPlay,
+}: {
+  section: DownloadedSongSection;
+  onPlay: (songs: Song[]) => void;
+}) {
+  const handlePlay = useCallback(() => onPlay(section.songs), [onPlay, section.songs]);
+
+  return (
+    <View style={styles.sectionHeader}>
+      {section.coverUrl ? (
+        <Image
+          recyclingKey={section.collectionId}
+          source={{ uri: section.coverUrl }}
+          style={styles.sectionCover}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+        />
+      ) : (
+        <View style={[styles.sectionCover, styles.sectionCoverPlaceholder]}>
+          <Ionicons name="musical-notes" size={20} color={UI.subtext} />
+        </View>
+      )}
+      <View style={styles.sectionInfo}>
+        <Text style={styles.sectionTitle}>{section.title}</Text>
+        <Text style={styles.sectionCount}>
+          {section.data.length} song{section.data.length !== 1 ? "s" : ""}
+        </Text>
+      </View>
+      <Pressable
+        style={styles.sectionPlayBtn}
+        onPress={handlePlay}
+        disabled={section.songs.length === 0}
+      >
+        <Ionicons name="play-circle" size={32} color={UI.primary} />
+      </Pressable>
+    </View>
+  );
 }
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
@@ -180,7 +229,45 @@ export default function DownloadedSongsScreen() {
     return sections;
   }, [completedItems, collectionMetadata]);
 
-  const allSongs = completedItems.map(downloadItemToSong);
+  const sectionListData = useMemo<DownloadedSongSection[]>(
+    () => playlistSections.map((section) => ({
+      title: section.collectionName,
+      data: section.items,
+      collectionId: section.collectionId,
+      coverUrl: section.coverUrl,
+      songs: section.items.map(downloadItemToSong),
+    })),
+    [playlistSections]
+  );
+
+  const allSongs = useMemo(() => completedItems.map(downloadItemToSong), [completedItems]);
+
+  const handleSectionPlay = useCallback(
+    (songs: Song[]) => {
+      if (songs.length === 0) return;
+      void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
+      playSong(songs[0], songs);
+    },
+    [playSong]
+  );
+
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: DownloadedSongSection }) => (
+      <DownloadedSectionHeader section={section} onPlay={handleSectionPlay} />
+    ),
+    [handleSectionPlay]
+  );
+
+  const renderDownloadedItem = useCallback(
+    ({ item, section }: { item: DownloadItem; section: DownloadedSongSection }) => (
+      <MemoizedDownloadedRow
+        item={item}
+        allSongs={section.songs}
+        collectionId={section.collectionId}
+      />
+    ),
+    []
+  );
 
   return (
     <View style={styles.container}>
@@ -229,7 +316,7 @@ export default function DownloadedSongsScreen() {
                   cachePolicy="memory-disk"
                 />
               ) : (
-                <View key={i} style={[styles.coverGridItem, styles.coverGridPlaceholder]}>
+                <View key={item.songId} style={[styles.coverGridItem, styles.coverGridPlaceholder]}>
                   <Ionicons name="musical-note" size={14} color={UI.subtext} />
                 </View>
               )
@@ -247,55 +334,10 @@ export default function DownloadedSongsScreen() {
 
       {/* Song list */}
       <SectionList
-        sections={playlistSections.map((section) => ({
-          title: section.collectionName,
-          data: section.items,
-          collectionId: section.collectionId,
-          coverUrl: section.coverUrl,
-        }))}
+        sections={sectionListData}
         keyExtractor={(item) => item.songId}
-        renderSectionHeader={({ section }) => (
-          <View style={styles.sectionHeader}>
-            {section.coverUrl ? (
-              <Image
-                recyclingKey={section.collectionId}
-                source={{ uri: section.coverUrl }}
-                style={styles.sectionCover}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-              />
-            ) : (
-              <View style={[styles.sectionCover, styles.sectionCoverPlaceholder]}>
-                <Ionicons name="musical-notes" size={20} color={UI.subtext} />
-              </View>
-            )}
-            <View style={styles.sectionInfo}>
-              <Text style={styles.sectionTitle}>{section.title}</Text>
-              <Text style={styles.sectionCount}>
-                {section.data.length} song{section.data.length !== 1 ? "s" : ""}
-              </Text>
-            </View>
-            <Pressable
-              style={styles.sectionPlayBtn}
-              onPress={() => {
-                if (section.data.length > 0) {
-                  void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-                  const songs = section.data.map(downloadItemToSong);
-                  playSong(songs[0], songs);
-                }
-              }}
-            >
-              <Ionicons name="play-circle" size={32} color={UI.primary} />
-            </Pressable>
-          </View>
-        )}
-        renderItem={({ item, section }) => (
-          <MemoizedDownloadedRow
-            item={item}
-            allSongs={section.data.map(downloadItemToSong)}
-            collectionId={section.collectionId}
-          />
-        )}
+        renderSectionHeader={renderSectionHeader}
+        renderItem={renderDownloadedItem}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="arrow-down-circle-outline" size={56} color={UI.subtext} />

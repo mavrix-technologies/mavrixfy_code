@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
@@ -11,6 +11,21 @@ import {
   presentIOSNativeFullPlayer,
   type IOSNativeFullPlayerCloseEvent,
 } from "@/lib/iosNativeFullPlayer";
+
+const subscribeIOSNativeFullPlayer = (
+  onClose: (event: IOSNativeFullPlayerCloseEvent) => void,
+  onError: (event: { message?: string }) => void
+) => {
+  const closeSubscription = addIOSNativeFullPlayerCloseListener(onClose);
+  const errorSubscription = addIOSNativeFullPlayerErrorListener(onError);
+  return () => {
+    closeSubscription.remove();
+    errorSubscription.remove();
+  };
+};
+
+const scheduleNativePlayerSync = (callback: () => void, delayMs: number) =>
+  setTimeout(callback, delayMs);
 
 export default function IOSNativeFullPlayerScreen() {
   const { currentSong, queue } = usePlaybackNowPlaying();
@@ -44,6 +59,10 @@ export default function IOSNativeFullPlayerScreen() {
 
     return currentSong ? [currentSong] : [];
   }, [currentSong, queue]);
+  const closeWithStatus = useCallback((message: string) => {
+    setStatusText(message);
+    router.back();
+  }, []);
 
   useEffect(() => {
     if (!currentSong) {
@@ -52,10 +71,16 @@ export default function IOSNativeFullPlayerScreen() {
     }
 
     if (!isIOSNativeFullPlayerAvailable()) {
-      setStatusText("Native player unavailable. Falling back...");
-      router.back();
+      closeWithStatus("Native player unavailable. Falling back...");
       return;
     }
+
+    const effectTimeouts: ReturnType<typeof setTimeout>[] = [];
+    const trackTimeout = (timer: ReturnType<typeof setTimeout>) => {
+      effectTimeouts.push(timer);
+      timeoutRefs.current.push(timer);
+      return timer;
+    };
 
     const handleClose = (event: IOSNativeFullPlayerCloseEvent) => {
       if (syncedRef.current || !currentSong) {
@@ -72,33 +97,29 @@ export default function IOSNativeFullPlayerScreen() {
 
       playSong(currentSong, activeQueue);
 
-      const syncTimer = setTimeout(() => {
+      trackTimeout(scheduleNativePlayerSync(() => {
         if (!mountedRef.current) return;
         seekTo(normalizedProgress);
 
         if (!shouldResumePlaying) {
-          const pauseTimer = setTimeout(() => {
+          trackTimeout(scheduleNativePlayerSync(() => {
             if (!mountedRef.current) return;
             togglePlay();
             router.back();
-          }, 180);
-          timeoutRefs.current.push(pauseTimer);
+          }, 180));
           return;
         }
 
         router.back();
-      }, 280);
-      timeoutRefs.current.push(syncTimer);
+      }, 280));
     };
 
     const handleError = (event: { message?: string }) => {
       if (!mountedRef.current) return;
-      setStatusText(event.message || "Could not open the native iOS player.");
-      router.back();
+      closeWithStatus(event.message || "Could not open the native iOS player.");
     };
 
-    const closeSub = addIOSNativeFullPlayerCloseListener(handleClose);
-    const errorSub = addIOSNativeFullPlayerErrorListener(handleError);
+    const unsubscribeFromNativePlayer = subscribeIOSNativeFullPlayer(handleClose, handleError);
 
     if (!launchedRef.current) {
       launchedRef.current = true;
@@ -116,8 +137,7 @@ export default function IOSNativeFullPlayerScreen() {
           });
         } catch (error) {
           if (!mountedRef.current) return;
-          setStatusText(error instanceof Error ? error.message : "Could not open native iOS player.");
-          router.back();
+          closeWithStatus(error instanceof Error ? error.message : "Could not open native iOS player.");
         }
       };
 
@@ -125,11 +145,12 @@ export default function IOSNativeFullPlayerScreen() {
     }
 
     return () => {
-      closeSub.remove();
-      errorSub.remove();
+      unsubscribeFromNativePlayer();
+      effectTimeouts.forEach(clearTimeout);
     };
   }, [
     activeQueue,
+    closeWithStatus,
     currentSong,
     isPlaying,
     playSong,

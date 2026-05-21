@@ -120,7 +120,7 @@ export function parseCSV(content: string): FileParseResult {
       artist = artist.replace(/,\s*$/, '').replace(/,\s+/g, ', ').trim();
       
       // Convert duration from ms to seconds if needed
-      if (duration && !duration.includes(':')) {
+      if (duration && !/:/.test(duration)) {
         const ms = parseInt(duration);
         if (!isNaN(ms)) {
           const seconds = Math.floor(ms / 1000);

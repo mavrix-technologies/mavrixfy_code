@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as Animated from "@/lib/nativeAnimated";
 import {
   ActivityIndicator,
-  Animated,
   Easing,
   Platform,
   Pressable,
@@ -12,9 +12,9 @@ import {
   Modal,
   TextInput,
   Alert,
-  Dimensions,
   DeviceEventEmitter,
   PanResponder,
+  useWindowDimensions
 } from "react-native";
 import { Image } from "expo-image";
 import { useLocalSearchParams } from "expo-router";
@@ -32,11 +32,13 @@ import {
   getBestImageUrl,
   JioSaavnSong,
 } from "@/lib/musicData";
+
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
-import { getUserPlaylists, updateUserPlaylist, deleteUserPlaylist } from "@/lib/storage";
+import { getUserPlaylists, updateUserPlaylist, deleteUserPlaylist, UserPlaylist } from "@/lib/storage";
 import { firestorePlaylistToLocalSongs, getPlaylistById, updateFirestorePlaylist, deleteFirestorePlaylist } from "@/lib/firestore";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
+import { sortedCopy } from "@/lib/arrayUtils";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { getJioSaavnPlaylistDetails } from "@/lib/jioSaavnService";
@@ -45,6 +47,13 @@ import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
 import OfflineBanner from "@/components/OfflineBanner";
 import { useNetwork } from "@/contexts/NetworkContext";
+
+const subscribeToPlaylistSongRemoved = (
+  listener: (event: { playlistId?: string; songId?: string }) => void
+) => {
+  const subscription = DeviceEventEmitter.addListener("PlaylistSongRemoved", listener);
+  return () => subscription.remove();
+};
 
 function pickFirstParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? "";
@@ -59,6 +68,10 @@ function delay(ms: number): Promise<void> {
 }
 
 export default function PlaylistScreen() {
+  return usePlaylistScreenView();
+}
+
+function usePlaylistScreenView() {
   const params = useLocalSearchParams<{
     id?: string | string[];
     jiosaavn?: string | string[];
@@ -114,15 +127,15 @@ export default function PlaylistScreen() {
   const stickyVisible = useRef(false);
 
   // Bottom sheet animation
-  const screenHeight = Dimensions.get('window').height;
+  const { height: screenHeight } = useWindowDimensions();
   const modalTranslateY = useRef(new Animated.Value(screenHeight)).current;
   const modalOpacity = useRef(new Animated.Value(0)).current;
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const totalDuration = useMemo(() => songs.reduce((a, s) => a + s.duration, 0), [songs]);
-  const totalDurationLabel = useMemo(() => totalDuration > 0 ? formatDuration(totalDuration) : "", [totalDuration]);
+  const totalDurationLabel = totalDuration > 0 ? formatDuration(totalDuration) : "";
   const totalMinutes = useMemo(() => Math.max(0, Math.floor(totalDuration / 60)), [totalDuration]);
-  const effectiveSongCount = useMemo(() => songs.length > 0 ? songs.length : initialSongCount, [songs.length, initialSongCount]);
+  const effectiveSongCount = songs.length > 0 ? songs.length : initialSongCount;
 
   const isPlayingFromThisPlaylist = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
@@ -143,17 +156,12 @@ export default function PlaylistScreen() {
   const playlistRowSource = isFirestoreSource ? "firestore" : "local";
 
   useEffect(() => {
-    const subscription = DeviceEventEmitter.addListener(
-      "PlaylistSongRemoved",
+    return subscribeToPlaylistSongRemoved(
       (event: { playlistId?: string; songId?: string }) => {
         if (event?.playlistId !== playlistId || !event.songId) return;
         setSongs((prev) => prev.filter((song) => song.id !== event.songId));
       }
     );
-
-    return () => {
-      subscription.remove();
-    };
   }, [playlistId]);
 
   // ── Normalizers ────────────────────────────────────────────────────────────
@@ -202,11 +210,7 @@ export default function PlaylistScreen() {
     setSongs(nextSongs);
   }, [initialCover, initialSongCount, initialTitle, playlistId]);
 
-  // ── Load ───────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    let cancelled = false;
-    if (!playlistId) { setNotFound(true); return; }
-
+  const resetPlaylistLoadState = useCallback(() => {
     setPlaylistName(initialTitle);
     setPlaylistDescription(initialDescription || (initialSongCount > 0 ? `${initialSongCount} songs` : ""));
     setPlaylistCover(initialCover);
@@ -214,63 +218,94 @@ export default function PlaylistScreen() {
     setNotFound(false);
     setLoadError("");
     setLoading(true);
+  }, [initialCover, initialDescription, initialSongCount, initialTitle]);
+
+  const applyLocalPlaylistData = useCallback((playlist: UserPlaylist) => {
+    setPlaylistName(playlist.name);
+    setPlaylistDescription(playlist.description);
+    setPlaylistCover(playlist.coverUrl);
+    setSongs(playlist.songs);
+  }, []);
+
+  const markPlaylistNotFound = useCallback(() => {
+    setNotFound(true);
+  }, []);
+
+  const markPlaylistLoadError = useCallback((message: string) => {
+    setLoadError(message);
+  }, []);
+
+  const finishPlaylistLoad = useCallback(() => {
+    setLoading(false);
+  }, []);
+
+  // ── Load ───────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    if (!playlistId) { markPlaylistNotFound(); return; }
+
+    resetPlaylistLoadState();
 
     const load = async () => {
       try {
         if (isFirestoreSource) {
           const playlist = await getPlaylistById(playlistId)
             ?? (await getCachedHomePublicPlaylists({ allowStale: true })).find((p) => p.id === playlistId);
-          if (cancelled) return;
-          if (playlist) applyFirestorePlaylistData(playlist);
-          else if (!hasPrefilledHeader) setNotFound(true);
-          else setLoadError("Playlist tracks could not load right now.");
+          if (!cancelled) {
+            if (playlist) applyFirestorePlaylistData(playlist);
+            else if (!hasPrefilledHeader) markPlaylistNotFound();
+            else markPlaylistLoadError("Playlist tracks could not load right now.");
+          }
           return;
         }
         if (isJioSaavnSource) {
-          let loadedCount = 0;
-          for (let attempt = 0; attempt < AUTO_RETRY_ATTEMPTS; attempt += 1) {
+          const loadJioPlaylistAttempt = async (attempt: number): Promise<number> => {
             try {
               const data = await getJioSaavnPlaylistDetails(playlistId);
-              if (cancelled) return;
-              loadedCount = applyJioPlaylistData(data);
-              if (loadedCount > 0) {
-                break;
+              if (!cancelled) {
+                const loadedCount = applyJioPlaylistData(data);
+                if (loadedCount > 0) {
+                  return loadedCount;
+                }
               }
             } catch {
               // Auto-retry below.
             }
 
-            if (attempt < AUTO_RETRY_ATTEMPTS - 1) {
-              await delay(AUTO_RETRY_DELAY_MS[Math.min(attempt, AUTO_RETRY_DELAY_MS.length - 1)]);
-              if (cancelled) return;
+            if (!cancelled && attempt < AUTO_RETRY_ATTEMPTS - 1) {
+              const retryDelay = AUTO_RETRY_DELAY_MS[Math.min(attempt, AUTO_RETRY_DELAY_MS.length - 1)];
+              return delay(retryDelay).then(() => (
+                cancelled ? 0 : loadJioPlaylistAttempt(attempt + 1)
+              ));
             }
-          }
 
-          if (loadedCount === 0) {
-            if (!hasPrefilledHeader) setNotFound(true);
-            else setLoadError("Songs are taking longer than expected to load.");
+            return 0;
+          };
+
+          const loadedCount = await loadJioPlaylistAttempt(0);
+          if (!cancelled && loadedCount === 0) {
+            if (!hasPrefilledHeader) markPlaylistNotFound();
+            else markPlaylistLoadError("Songs are taking longer than expected to load.");
           }
           return;
         }
         const playlists = await getUserPlaylists();
-        if (cancelled) return;
-        const found = playlists.find((p) => p.id === playlistId);
-        if (found) {
-          setPlaylistName(found.name);
-          setPlaylistDescription(found.description);
-          setPlaylistCover(found.coverUrl);
-          setSongs(found.songs);
-        } else if (!hasPrefilledHeader) {
-          setNotFound(true);
-        } else {
-          setLoadError("Playlist tracks could not load right now.");
+        if (!cancelled) {
+          const found = playlists.find((p) => p.id === playlistId);
+          if (found) {
+            applyLocalPlaylistData(found);
+          } else if (!hasPrefilledHeader) {
+            markPlaylistNotFound();
+          } else {
+            markPlaylistLoadError("Playlist tracks could not load right now.");
+          }
         }
       } catch {
         if (cancelled) return;
-        if (hasPrefilledHeader) setLoadError("Songs could not load right now.");
-        else setNotFound(true);
+        if (hasPrefilledHeader) markPlaylistLoadError("Songs could not load right now.");
+        else markPlaylistNotFound();
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) finishPlaylistLoad();
       }
     };
 
@@ -279,8 +314,9 @@ export default function PlaylistScreen() {
   }, [
     playlistId, isFirestoreSource, isJioSaavnSource,
     applyFirestorePlaylistData, applyJioPlaylistData,
-    hasPrefilledHeader, initialCover, initialDescription,
-    initialSongCount, initialTitle,
+    applyLocalPlaylistData, finishPlaylistLoad,
+    hasPrefilledHeader, markPlaylistLoadError, markPlaylistNotFound,
+    resetPlaylistLoadState,
   ]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
@@ -306,7 +342,7 @@ export default function PlaylistScreen() {
   const handleShufflePlay = useCallback(() => {
     if (!songs.length) return;
     if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const shuffled = [...songs].sort(() => Math.random() - 0.5);
+    const shuffled = sortedCopy(songs, () => Math.random() - 0.5);
     playSong(shuffled[0], shuffled);
   }, [songs, playSong]);
 
@@ -574,7 +610,8 @@ export default function PlaylistScreen() {
       {/* Slim offline banner — downloaded playlists still work offline */}
       {!isOnline && <OfflineBanner />}
       <ScrollView
-        contentContainerStyle={{ paddingBottom: bottomPad }}
+        contentInset={{ bottom: bottomPad }}
+        scrollIndicatorInsets={{ bottom: bottomPad }}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
@@ -684,7 +721,7 @@ export default function PlaylistScreen() {
         ) : songs.length > 0 ? (
           songs.map((song, index) => (
             <SongRow
-              key={`${song.id}-${index}`}
+              key={song.id}
               song={song}
               index={index}
               queue={songs}
@@ -1091,11 +1128,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: "85%",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 24,
+    boxShadow: "none",
   },
   modalDragHandle: {
     alignItems: "center",

@@ -1,11 +1,12 @@
 /**
- * Spotify-style animated equalizer bars.
- * 3 bars that bounce at different heights and speeds when playing,
- * freeze at a low height when paused.
+ * Compact now-playing equalizer.
+ * Real playback samples drive the bars when the active player exposes waveform data.
  */
 import React, { useEffect, useRef } from "react";
-import { Animated, StyleSheet, View } from "react-native";
+import * as Animated from "@/lib/nativeAnimated";
+import { StyleSheet, View } from "react-native";
 import Colors from "@/constants/colors";
+import { usePlaybackAudioLevels } from "@/lib/playbackAudioLevels";
 
 interface Props {
   isPlaying: boolean;
@@ -13,26 +14,26 @@ interface Props {
   size?: number; // width of each bar
 }
 
-// Each bar has its own animation config so they feel organic
-// Spotify-like: slow, gentle bounce — not fast
 const BAR_CONFIGS = [
-  { minH: 3, maxH: 14, duration: 900 },
-  { minH: 3, maxH: 18, duration: 700 },
-  { minH: 3, maxH: 11, duration: 1100 },
+  { minH: 3, maxH: 14, activeScale: 0.4 },
+  { minH: 3, maxH: 18, activeScale: 0.34 },
+  { minH: 3, maxH: 11, activeScale: 0.46 },
 ];
 
 function Bar({
   isPlaying,
   minH,
   maxH,
-  duration,
+  activeScale,
+  signalLevel,
   color,
   width,
 }: {
   isPlaying: boolean;
   minH: number;
   maxH: number;
-  duration: number;
+  activeScale: number;
+  signalLevel: number | null;
   color: string;
   width: number;
 }) {
@@ -47,42 +48,22 @@ function Bar({
       animRef.current = null;
     }
 
-    if (isPlaying) {
-      // Bounce between minH and maxH continuously
-      const bounce = Animated.loop(
-        Animated.sequence([
-          Animated.timing(scale, {
-            toValue: 1,
-            duration: duration / 2,
-            useNativeDriver: true,
-            isInteraction: false,
-          }),
-          Animated.timing(scale, {
-            toValue: minScale,
-            duration: duration / 2,
-            useNativeDriver: true,
-            isInteraction: false,
-          }),
-        ])
-      );
-      animRef.current = bounce;
-      bounce.start();
-    } else {
-      // Settle to a low "paused" height
-      const settle = Animated.timing(scale, {
-        toValue: pausedScale,
-        duration: 180,
-        useNativeDriver: true,
-        isInteraction: false,
-      });
-      animRef.current = settle;
-      settle.start();
-    }
+    const targetScale = isPlaying
+      ? Math.max(minScale, signalLevel ?? activeScale)
+      : pausedScale;
+    const settle = Animated.timing(scale, {
+      toValue: targetScale,
+      duration: signalLevel == null ? 180 : 72,
+      useNativeDriver: true,
+      isInteraction: false,
+    });
+    animRef.current = settle;
+    settle.start();
 
     return () => {
       animRef.current?.stop();
     };
-  }, [duration, isPlaying, maxH, minScale, pausedScale, scale]);
+  }, [activeScale, isPlaying, minScale, pausedScale, scale, signalLevel]);
 
   const translateY = scale.interpolate({
     inputRange: [minScale, 1],
@@ -106,16 +87,19 @@ function Bar({
 
 export default function EqualizerBars({ isPlaying, color, size = 3 }: Props) {
   const barColor = color ?? Colors.primary;
+  const audioLevels = usePlaybackAudioLevels();
+  const signalLevels = isPlaying && audioLevels.hasSignal ? audioLevels.levels : null;
 
   return (
     <View style={[styles.container, { width: size * 3 + 4, height: 20 }]}>
-      {BAR_CONFIGS.map((cfg, i) => (
+      {BAR_CONFIGS.map((cfg, index) => (
         <Bar
-          key={i}
+          key={`${cfg.minH}-${cfg.maxH}-${cfg.activeScale}`}
           isPlaying={isPlaying}
           minH={cfg.minH}
           maxH={cfg.maxH}
-          duration={cfg.duration}
+          activeScale={cfg.activeScale}
+          signalLevel={signalLevels?.[index] ?? null}
           color={barColor}
           width={size}
         />

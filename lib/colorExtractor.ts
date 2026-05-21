@@ -6,6 +6,7 @@
 
 import { Platform } from "react-native";
 import { Image as ExpoImage } from "expo-image";
+import { mapFilter } from "@/lib/arrayUtils";
 
 type IOSPalette = {
   platform: "ios";
@@ -221,8 +222,7 @@ function pickPrimaryColor(palette: PlatformPalette): string | null {
           { color: palette.lightMuted, role: "lightMuted", priority: 7 },
         ];
 
-  const candidates = rawCandidates
-    .map((candidate) => {
+  const candidates = mapFilter(rawCandidates, (candidate) => {
       const normalized = normalizeHexColor(candidate.color);
       if (!normalized) return null;
       const { r, g, b } = toRgb(normalized);
@@ -232,8 +232,7 @@ function pickPrimaryColor(palette: PlatformPalette): string | null {
         normalized,
         ...hsl,
       };
-    })
-    .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+    }, (candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
 
   if (candidates.length === 0) return null;
 

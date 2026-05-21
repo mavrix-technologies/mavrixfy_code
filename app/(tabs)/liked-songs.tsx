@@ -320,11 +320,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     transform: [{ rotate: "2deg" }],
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.35,
-    shadowRadius: 24,
-    elevation: 8,
+    boxShadow: "none",
   },
   heroTitle: {
     marginTop: 16,

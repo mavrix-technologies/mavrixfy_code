@@ -25,6 +25,10 @@ const QUALITY_OPTIONS: { label: string; value: "low" | "medium" | "high" }[] = [
   { label: "Medium", value: "medium" },
   { label: "High", value: "high" },
 ];
+const CROSSFADE_STEPS = Array.from({ length: 13 }, (_, value) => ({
+  key: `crossfade-${value}`,
+  value,
+}));
 
 type SettingsRowProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -72,7 +76,7 @@ function SettingsRow({
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { push: routerPush, replace: routerReplace } = useRouter();
   const { user, isAuthenticated, isGuest, logout } = useAuth();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomScrollPadding = Platform.OS === "web" ? 120 : Math.max(128, insets.bottom + 120);
@@ -113,10 +117,10 @@ export default function ProfileScreen() {
       {
         text: "Log Out",
         style: "destructive",
-        onPress: async () => { await logout(); router.replace("/login"); },
+        onPress: async () => { await logout(); routerReplace("/login"); },
       },
     ]);
-  }, [logout, router]);
+  }, [logout, routerReplace]);
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
@@ -131,7 +135,8 @@ export default function ProfileScreen() {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={{ paddingBottom: bottomScrollPadding }}
+        contentInset={{ bottom: bottomScrollPadding }}
+        scrollIndicatorInsets={{ bottom: bottomScrollPadding }}
         showsVerticalScrollIndicator={false}
       >
         {/* Profile hero */}
@@ -192,11 +197,11 @@ export default function ProfileScreen() {
               <Text style={styles.valuePill}>{settings.crossfade}s</Text>
             </View>
             <View style={styles.crossfadeRow}>
-              {Array.from({ length: 13 }, (_, i) => (
+              {CROSSFADE_STEPS.map((step) => (
                 <Pressable
-                  key={i}
-                  onPress={() => updateSettings({ crossfade: i })}
-                  style={[styles.crossfadeBar, i <= settings.crossfade && styles.crossfadeBarActive]}
+                  key={step.key}
+                  onPress={() => updateSettings({ crossfade: step.value })}
+                  style={[styles.crossfadeBar, step.value <= settings.crossfade && styles.crossfadeBarActive]}
                 />
               ))}
             </View>
@@ -261,7 +266,7 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="log-in-outline"
               title="Sign In"
-              onPress={() => router.replace("/login")}
+              onPress={() => routerReplace("/login")}
               first
             />
           )}
@@ -279,7 +284,7 @@ export default function ProfileScreen() {
             <SettingsRow
               icon="trash-outline"
               title="Delete Account"
-              onPress={() => router.push("/delete-account")}
+              onPress={() => routerPush("/delete-account")}
               danger
             />
           ) : null}
@@ -291,7 +296,7 @@ export default function ProfileScreen() {
           <SettingsRow
             icon="cloud-upload-outline"
             title="Import Songs"
-            onPress={() => router.push("/import-songs")}
+            onPress={() => routerPush("/import-songs")}
             first
           />
         </View>

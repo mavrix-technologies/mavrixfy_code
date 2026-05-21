@@ -1,5 +1,10 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, StyleSheet, View } from "react-native";
+import * as Animated from "@/lib/nativeAnimated";
+import { StyleSheet, View } from "react-native";
+
+const ARTIST_SKELETON_KEYS = ["artist-a", "artist-b", "artist-c", "artist-d", "artist-e"];
+const CHIP_SKELETON_KEYS = ["chip-a", "chip-b", "chip-c", "chip-d"];
+const CARD_SKELETON_KEYS = ["card-a", "card-b", "card-c", "card-d"];
 
 function useShimmer() {
   const shimmer = useRef(new Animated.Value(0)).current;
@@ -44,8 +49,8 @@ function Block({
 function ArtistRow({ shimmer }: { shimmer: Animated.Value }) {
   return (
     <View style={styles.artistRow}>
-      {[0, 1, 2, 3, 4].map((i) => (
-        <View key={i} style={styles.artistItem}>
+      {ARTIST_SKELETON_KEYS.map((key) => (
+        <View key={key} style={styles.artistItem}>
           <Block w={108} h={108} r={54} shimmer={shimmer} />
           <Block w={72} h={10} r={5} shimmer={shimmer} />
         </View>
@@ -58,8 +63,8 @@ function ArtistRow({ shimmer }: { shimmer: Animated.Value }) {
 function ChipsRow({ shimmer }: { shimmer: Animated.Value }) {
   return (
     <View style={styles.chipsRow}>
-      {[0, 1, 2, 3].map((i) => (
-        <Block key={i} w={90} h={90} r={8} shimmer={shimmer} />
+      {CHIP_SKELETON_KEYS.map((key) => (
+        <Block key={key} w={90} h={90} r={8} shimmer={shimmer} />
       ))}
     </View>
   );
@@ -69,8 +74,8 @@ function ChipsRow({ shimmer }: { shimmer: Animated.Value }) {
 function CardRow({ shimmer }: { shimmer: Animated.Value }) {
   return (
     <View style={styles.cardRow}>
-      {[0, 1, 2, 3].map((i) => (
-        <View key={i} style={styles.cardItem}>
+      {CARD_SKELETON_KEYS.map((key) => (
+        <View key={key} style={styles.cardItem}>
           <Block w={152} h={152} r={8} shimmer={shimmer} />
           <View style={{ height: 6 }} />
           <Block w={110} h={11} r={5} shimmer={shimmer} />

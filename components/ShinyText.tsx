@@ -128,6 +128,7 @@ export default function ShinyText({
   const [reducedMotion, setReducedMotion] = useState(false);
   const progress = useSharedValue(0);
   const displayText = useMemo(() => text.toUpperCase(), [text]);
+  const overlayTextStyle = useMemo(() => [styles.baseText, style], [style]);
   const shineWidth = useMemo(() => {
     if (textWidth <= 0) return 0;
     const spreadRatio = Math.max(0.22, Math.min(0.5, spread / 360));
@@ -216,7 +217,7 @@ export default function ShinyText({
           direction={direction}
           progress={progress}
           shineColor={shineColor}
-          textStyle={[styles.baseText, style]}
+          textStyle={overlayTextStyle}
         />
       ) : null}
     </View>

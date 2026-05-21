@@ -11,7 +11,7 @@
 
 import React, {
   createContext,
-  useContext,
+  use,
   useEffect,
   useState,
   useCallback,
@@ -19,6 +19,11 @@ import React, {
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import * as Network from "expo-network";
+
+const subscribeToAppStateChanges = (listener: (state: AppStateStatus) => void) => {
+  const subscription = AppState.addEventListener("change", listener);
+  return () => subscription.remove();
+};
 
 interface NetworkContextValue {
   isOnline: boolean;
@@ -59,10 +64,9 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
   // Re-check when app comes back to foreground
   useEffect(() => {
-    const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
+    return subscribeToAppStateChanges((state: AppStateStatus) => {
       if (state === "active") check();
     });
-    return () => sub.remove();
   }, [check]);
 
   // Poll every 10 seconds when offline to detect reconnection
@@ -80,5 +84,5 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 }
 
 export function useNetwork(): NetworkContextValue {
-  return useContext(NetworkContext);
+  return use(NetworkContext);
 }

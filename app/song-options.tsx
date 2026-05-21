@@ -4,7 +4,6 @@ import {
   DeviceEventEmitter,
   FlatList,
   Pressable,
-  ScrollView,
   Share,
   StyleSheet,
   Text,
@@ -29,9 +28,16 @@ import {
 } from "@/lib/firestore";
 import { searchArtists } from "@/lib/artistService";
 import { safeGoBack } from "@/utils/navigation";
+import { compactMap } from "@/lib/arrayUtils";
 
 type MenuIconName = React.ComponentProps<typeof Ionicons>["name"];
 type SubView = "main" | "add-to-playlist" | "go-to-artists" | "song-credits" | "mavrixfy-code";
+type SongOptionMenuItem = {
+  label: string;
+  icon: MenuIconName;
+  chevron?: boolean;
+  onPress: () => void;
+};
 
 const SHEET_BACKGROUND = "#1E1E1E";
 const HANDLE_COLOR = "#6D6D6D";
@@ -79,6 +85,105 @@ function SubHeader({ title, onBack }: { title: string; onBack: () => void }) {
 // ─── Sub-view: Add to playlist ────────────────────────────────────────────────
 type MergedPlaylist = UserPlaylist & { isFirestore?: boolean };
 
+function AddToPlaylistRow({
+  playlist,
+  addingId,
+  onAdd,
+}: {
+  playlist: MergedPlaylist;
+  addingId: string | null;
+  onAdd: (playlist: MergedPlaylist) => Promise<void>;
+}) {
+  const isAdding = addingId === playlist.id;
+  const handlePress = useCallback(() => {
+    void onAdd(playlist);
+  }, [onAdd, playlist]);
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.playlistRow, pressed && styles.rowPressed]}
+      onPress={handlePress}
+      disabled={isAdding}
+    >
+      {playlist.coverUrl ? (
+        <Image source={{ uri: playlist.coverUrl }} style={styles.playlistThumb} contentFit="cover" />
+      ) : (
+        <View style={[styles.playlistThumb, styles.playlistThumbFallback]}>
+          <Ionicons name="musical-notes" size={18} color="#777" />
+        </View>
+      )}
+      <View style={styles.playlistInfo}>
+        <Text style={styles.playlistName} numberOfLines={1}>{playlist.name}</Text>
+        <Text style={styles.playlistCount}>
+          {playlist.songs?.length ?? 0} {playlist.songs?.length === 1 ? "song" : "songs"}
+        </Text>
+      </View>
+      {isAdding ? (
+        <ActivityIndicator size="small" color={Colors.primary} />
+      ) : (
+        <Ionicons name="add-circle-outline" size={24} color={Colors.primary} />
+      )}
+    </Pressable>
+  );
+}
+
+function ArtistNameOptionRow({
+  name,
+  searching,
+  onPress,
+}: {
+  name: string;
+  searching: string | null;
+  onPress: (name: string) => void;
+}) {
+  const isSearching = searching === name;
+  const handlePress = useCallback(() => onPress(name), [name, onPress]);
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.menuRow, pressed && styles.rowPressed]}
+      onPress={handlePress}
+      disabled={isSearching}
+    >
+      <View style={styles.artistIcon}>
+        <Ionicons name="person-outline" size={22} color="#BDBDBD" />
+      </View>
+      <Text style={styles.menuText} numberOfLines={1}>{name}</Text>
+      {isSearching ? (
+        <ActivityIndicator size="small" color={Colors.primary} />
+      ) : (
+        <Ionicons name="chevron-forward" size={20} color="#555" />
+      )}
+    </Pressable>
+  );
+}
+
+function SongCreditRow({ row }: { row: { label: string; value: string } }) {
+  return (
+    <View style={styles.creditRow}>
+      <Text style={styles.creditLabel}>{row.label}</Text>
+      <Text style={styles.creditValue} selectable>{row.value}</Text>
+    </View>
+  );
+}
+
+function MainMenuOptionRow({ item }: { item: SongOptionMenuItem }) {
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.menuRow, pressed && styles.rowPressed]}
+      onPress={item.onPress}
+    >
+      <Ionicons name={item.icon} size={24} color="#BDBDBD" style={styles.menuIcon} />
+      <Text style={styles.menuText} numberOfLines={2}>{item.label}</Text>
+      {item.chevron ? <Ionicons name="chevron-forward" size={22} color="#BDBDBD" /> : null}
+    </Pressable>
+  );
+}
+
+function renderMainMenuOption({ item }: { item: SongOptionMenuItem }) {
+  return <MainMenuOptionRow item={item} />;
+}
+
 function AddToPlaylistView({
   song,
   onBack,
@@ -94,9 +199,17 @@ function AddToPlaylistView({
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState<string | null>(null);
   const playlistBottomPad = Math.max(bottomPad + 72, 104);
+  const startPlaylistLoad = useCallback(() => {
+    setLoading(true);
+  }, []);
+  const finishPlaylistLoad = useCallback((items: MergedPlaylist[]) => {
+    setPlaylists(items);
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     async function load() {
+      startPlaylistLoad();
       try {
         const local = await getUserPlaylists();
         const localMerged: MergedPlaylist[] = local.map((p) => ({
@@ -106,7 +219,7 @@ function AddToPlaylistView({
         }));
 
         if (!userId) {
-          setPlaylists(localMerged.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+          finishPlaylistLoad(localMerged.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
           return;
         }
 
@@ -139,20 +252,18 @@ function AddToPlaylistView({
         const merged = [...firestoreMerged, ...localOnly].sort(
           (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
         );
-        setPlaylists(merged);
+        finishPlaylistLoad(merged);
       } catch {
         try {
           const local = await getUserPlaylists();
-          setPlaylists(local.map((p) => ({ ...p, isFirestore: false })));
+          finishPlaylistLoad(local.map((p) => ({ ...p, isFirestore: false })));
         } catch {
-          setPlaylists([]);
+          finishPlaylistLoad([]);
         }
-      } finally {
-        setLoading(false);
       }
     }
     void load();
-  }, [userId]);
+  }, [finishPlaylistLoad, startPlaylistLoad, userId]);
 
   const handleAdd = useCallback(
     async (playlist: MergedPlaylist) => {
@@ -173,6 +284,13 @@ function AddToPlaylistView({
       }
     },
     [song, onBack]
+  );
+
+  const renderPlaylist = useCallback(
+    ({ item }: { item: MergedPlaylist }) => (
+      <AddToPlaylistRow playlist={item} addingId={adding} onAdd={handleAdd} />
+    ),
+    [adding, handleAdd]
   );
 
   return (
@@ -203,33 +321,8 @@ function AddToPlaylistView({
           alwaysBounceVertical={false}
           keyboardShouldPersistTaps="handled"
           removeClippedSubviews={false}
-          ListFooterComponent={<View style={{ height: playlistBottomPad }} />}
-          renderItem={({ item: pl }) => (
-            <Pressable
-              style={({ pressed }) => [styles.playlistRow, pressed && styles.rowPressed]}
-              onPress={() => void handleAdd(pl)}
-              disabled={adding === pl.id}
-            >
-              {pl.coverUrl ? (
-                <Image source={{ uri: pl.coverUrl }} style={styles.playlistThumb} contentFit="cover" />
-              ) : (
-                <View style={[styles.playlistThumb, styles.playlistThumbFallback]}>
-                  <Ionicons name="musical-notes" size={18} color="#777" />
-                </View>
-              )}
-              <View style={styles.playlistInfo}>
-                <Text style={styles.playlistName} numberOfLines={1}>{pl.name}</Text>
-                <Text style={styles.playlistCount}>
-                  {pl.songs?.length ?? 0} {pl.songs?.length === 1 ? "song" : "songs"}
-                </Text>
-              </View>
-              {adding === pl.id ? (
-                <ActivityIndicator size="small" color={Colors.primary} />
-              ) : (
-                <Ionicons name="add-circle-outline" size={24} color={Colors.primary} />
-              )}
-            </Pressable>
-          )}
+          ListFooterComponent={<View style={[styles.playlistFooter, { height: playlistBottomPad }]} />}
+          renderItem={renderPlaylist}
         />
       )}
     </View>
@@ -241,7 +334,7 @@ function GoToArtistsView({ song, onBack, bottomPad }: { song: Song; onBack: () =
   const [searching, setSearching] = useState<string | null>(null);
 
   const artists = useMemo(
-    () => (song.artist || "").split(",").map((a) => a.trim()).filter(Boolean),
+    () => compactMap((song.artist || "").split(","), (a) => a.trim()),
     [song.artist]
   );
 
@@ -269,40 +362,30 @@ function GoToArtistsView({ song, onBack, bottomPad }: { song: Song; onBack: () =
     }
   }, []);
 
+  const renderArtistName = useCallback(
+    ({ item }: { item: string }) => (
+      <ArtistNameOptionRow name={item} searching={searching} onPress={handleArtist} />
+    ),
+    [handleArtist, searching]
+  );
+
   return (
     <View style={styles.subView}>
       <SubHeader title="Go to artists" onBack={onBack} />
       <View style={styles.divider} />
-      <ScrollView
+      <FlatList
+        data={artists}
+        keyExtractor={(name) => name}
+        renderItem={renderArtistName}
         style={styles.menu}
         contentContainerStyle={[styles.menuContent, { paddingBottom: bottomPad }]}
         showsVerticalScrollIndicator={false}
-      >
-        {artists.length === 0 ? (
+        ListEmptyComponent={
           <View style={styles.centered}>
             <Text style={styles.emptyMsg}>No artist info available</Text>
           </View>
-        ) : (
-          artists.map((name) => (
-            <Pressable
-              key={name}
-              style={({ pressed }) => [styles.menuRow, pressed && styles.rowPressed]}
-              onPress={() => void handleArtist(name)}
-              disabled={searching === name}
-            >
-              <View style={styles.artistIcon}>
-                <Ionicons name="person-outline" size={22} color="#BDBDBD" />
-              </View>
-              <Text style={styles.menuText} numberOfLines={1}>{name}</Text>
-              {searching === name ? (
-                <ActivityIndicator size="small" color={Colors.primary} />
-              ) : (
-                <Ionicons name="chevron-forward" size={20} color="#555" />
-              )}
-            </Pressable>
-          ))
-        )}
-      </ScrollView>
+        }
+      />
     </View>
   );
 }
@@ -318,23 +401,23 @@ function SongCreditsView({ song, onBack, bottomPad }: { song: Song; onBack: () =
     song.language ? { label: "Language", value: song.language }        : null,
     song.duration ? { label: "Duration", value: formatDuration(song.duration) } : null,
   ].filter(Boolean) as { label: string; value: string }[], [song]);
+  const renderCredit = useCallback(
+    ({ item }: { item: { label: string; value: string } }) => <SongCreditRow row={item} />,
+    []
+  );
 
   return (
     <View style={styles.subView}>
       <SubHeader title="Song credits" onBack={onBack} />
       <View style={styles.divider} />
-      <ScrollView
+      <FlatList
+        data={rows}
+        keyExtractor={(row) => row.label}
+        renderItem={renderCredit}
         style={styles.menu}
         contentContainerStyle={[styles.menuContent, { paddingBottom: bottomPad }]}
         showsVerticalScrollIndicator={false}
-      >
-        {rows.map((row) => (
-          <View key={row.label} style={styles.creditRow}>
-            <Text style={styles.creditLabel}>{row.label}</Text>
-            <Text style={styles.creditValue} selectable>{row.value}</Text>
-          </View>
-        ))}
-      </ScrollView>
+      />
     </View>
   );
 }
@@ -516,12 +599,7 @@ export default function SongOptionsScreen() {
   }
 
   // ── Main menu ────────────────────────────────────────────────────────────
-  const menuItems: {
-    label: string;
-    icon: MenuIconName;
-    chevron?: boolean;
-    onPress: () => void;
-  }[] = [
+  const menuItems: SongOptionMenuItem[] = [
     {
       label: "Share",
       icon: "share-outline",
@@ -625,32 +703,24 @@ export default function SongOptionsScreen() {
 
         <View style={styles.divider} />
 
-        <ScrollView
+        <FlatList
+          data={menuItems}
+          keyExtractor={(item) => item.label}
+          renderItem={renderMainMenuOption}
           style={styles.menu}
           contentContainerStyle={[styles.menuContent, { paddingBottom: bottomPad }]}
           showsVerticalScrollIndicator={false}
           contentInsetAdjustmentBehavior="never"
           automaticallyAdjustContentInsets={false}
-        >
-          {showDownload ? (
-            <View style={styles.menuRow}>
-              <DownloadButton song={song} size={22} style={styles.menuIcon} />
-              <Text style={styles.menuText} numberOfLines={1}>Download</Text>
-            </View>
-          ) : null}
-
-          {menuItems.map((item) => (
-            <Pressable
-              key={item.label}
-              style={({ pressed }) => [styles.menuRow, pressed && styles.rowPressed]}
-              onPress={item.onPress}
-            >
-              <Ionicons name={item.icon} size={24} color="#BDBDBD" style={styles.menuIcon} />
-              <Text style={styles.menuText} numberOfLines={2}>{item.label}</Text>
-              {item.chevron ? <Ionicons name="chevron-forward" size={22} color="#BDBDBD" /> : null}
-            </Pressable>
-          ))}
-        </ScrollView>
+          ListHeaderComponent={
+            showDownload ? (
+              <View style={styles.menuRow}>
+                <DownloadButton song={song} size={22} style={styles.menuIcon} />
+                <Text style={styles.menuText} numberOfLines={1}>Download</Text>
+              </View>
+            ) : null
+          }
+        />
       </View>
     </View>
   );
@@ -781,6 +851,9 @@ const styles = StyleSheet.create({
   playlistListContent: {
     paddingTop: 6,
     paddingHorizontal: 16,
+  },
+  playlistFooter: {
+    width: 1,
   },
   playlistList: {
     flex: 1,

@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as Animated from "@/lib/nativeAnimated";
 import {
   ActivityIndicator,
-  Animated,
+  FlatList,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  View,
+  View
 } from "react-native";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -24,6 +25,7 @@ import {
   getArtistSongs,
   JioSaavnArtist,
   JioSaavnArtistAlbum,
+  JioSaavnSimilarArtist,
   prefetchArtist,
 } from "@/lib/artistService";
 import {
@@ -33,6 +35,7 @@ import {
 } from "@/lib/followedArtists";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
+import { mapFilter, sortedCopy } from "@/lib/arrayUtils";
 
 function pickFirst(v: string | string[] | undefined): string {
   if (Array.isArray(v)) return v[0] ?? "";
@@ -47,6 +50,10 @@ function formatFollowers(n: number | null | undefined): string {
 }
 
 export default function ArtistScreen() {
+  return useArtistScreenView();
+}
+
+function useArtistScreenView() {
   const params = useLocalSearchParams<{
     id?: string | string[];
     name?: string | string[];
@@ -57,7 +64,7 @@ export default function ArtistScreen() {
   const initImage  = pickFirst(params.image).trim();
 
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { push: routerPush } = useRouter();
   const { currentSong, queue } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
   const { playSong, togglePlay } = usePlayerActions();
@@ -70,16 +77,21 @@ export default function ArtistScreen() {
   const [following, setFollowing] = useState(false);
   const [extraSongs, setExtraSongs] = useState<Song[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [nextPage, setNextPage] = useState(2); // page 1 = initial 20, page 2+ = more
+  const nextPageRef = useRef(2); // page 1 = initial 20, page 2+ = more
   const [hasMore, setHasMore] = useState(true);
   const followScale = useRef(new Animated.Value(1)).current;
   const stickyOpacity = useRef(new Animated.Value(0)).current;
   const stickyVisible = useRef(false);
+  const topAlbums = artist?.topAlbums ?? [];
+  const visibleSimilarArtists = useMemo(
+    () => artist?.similarArtists?.slice(0, 10) ?? [],
+    [artist?.similarArtists]
+  );
 
   // All songs = initial topSongs + loaded extra pages
   const allSongs: Song[] = useMemo(() => {
     const base = artist?.topSongs
-      ? artist.topSongs.map((s) => convertJioSaavnSong(s)).filter((s) => s.audioUrl?.trim())
+      ? mapFilter(artist.topSongs, (s) => convertJioSaavnSong(s), (s) => s.audioUrl?.trim())
       : [];
     return [...base, ...extraSongs];
   }, [artist, extraSongs]);
@@ -103,36 +115,66 @@ export default function ArtistScreen() {
   }, [artist, initImage]);
 
   const displayName = artist?.name || initName || "Artist";
-
-  useEffect(() => {
-    if (!artistId) { setError("Artist not found"); setLoading(false); return; }
-
-    let cancelled = false;
+  const markArtistNotFound = useCallback(() => {
+    setError("Artist not found");
+    setLoading(false);
+  }, []);
+  const resetArtistLoadState = useCallback(() => {
     setLoading(true);
     setError("");
     setExtraSongs([]);
-    setNextPage(2);
+    nextPageRef.current = 2;
     setHasMore(true);
+  }, []);
+  const applyArtistFollowState = useCallback((nextFollowing: boolean) => {
+    setFollowing(nextFollowing);
+  }, []);
+  const applyArtistDetails = useCallback((data: JioSaavnArtist | null) => {
+    if (data) {
+      setArtist(data);
+    } else {
+      setError("Artist not found");
+    }
+  }, []);
+  const applyArtistLoadFailure = useCallback(() => {
+    setError("Could not load artist. Check your connection.");
+  }, []);
+  const finishArtistLoad = useCallback(() => {
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (!artistId) { markArtistNotFound(); return; }
+
+    let cancelled = false;
+    resetArtistLoadState();
 
     void isFollowingArtist(artistId).then((v) => {
-      if (!cancelled) setFollowing(v);
+      if (!cancelled) applyArtistFollowState(v);
     });
 
     getArtistDetails(artistId)
       .then((data) => {
         if (cancelled) return;
-        if (data) setArtist(data);
-        else setError("Artist not found");
+        applyArtistDetails(data);
       })
       .catch(() => {
-        if (!cancelled) setError("Could not load artist. Check your connection.");
+        if (!cancelled) applyArtistLoadFailure();
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) finishArtistLoad();
       });
 
     return () => { cancelled = true; };
-  }, [artistId]);
+  }, [
+    applyArtistDetails,
+    applyArtistFollowState,
+    applyArtistLoadFailure,
+    artistId,
+    finishArtistLoad,
+    markArtistNotFound,
+    resetArtistLoadState,
+  ]);
 
   // Prefetch similar artists in background
   useEffect(() => {
@@ -164,7 +206,7 @@ export default function ArtistScreen() {
 
   const handleShuffle = useCallback(() => {
     if (!songs.length) return;
-    const shuffled = [...songs].sort(() => Math.random() - 0.5);
+    const shuffled = sortedCopy(songs, () => Math.random() - 0.5);
     playSong(shuffled[0], shuffled);
   }, [songs, playSong]);
 
@@ -172,41 +214,39 @@ export default function ArtistScreen() {
     if (loadingMore || !hasMore || !artistId) return;
     setLoadingMore(true);
     try {
-      const newSongs = await getArtistSongs(artistId, nextPage);
+      const newSongs = await getArtistSongs(artistId, nextPageRef.current);
       if (newSongs.length === 0) {
         setHasMore(false);
         return;
       }
-      const converted = newSongs
-        .map((s) => convertJioSaavnSong(s))
-        .filter((s) => s.audioUrl?.trim());
+      const converted = mapFilter(newSongs, (s) => convertJioSaavnSong(s), (s) => s.audioUrl?.trim());
       setExtraSongs((prev) => {
         // Dedupe by id
         const existingIds = new Set(prev.map((s) => s.id));
         const unique = converted.filter((s) => !existingIds.has(s.id));
         return [...prev, ...unique];
       });
-      setNextPage((p) => p + 1);
+      nextPageRef.current += 1;
       if (newSongs.length < 10) setHasMore(false);
     } catch {
       setHasMore(false);
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, artistId, nextPage]);
+  }, [loadingMore, hasMore, artistId]);
 
   const handleSimilarArtistPress = useCallback((id: string, name: string, image: string) => {
     // Already inside the artist Stack — push directly.
     // dangerouslySingular ensures only one artist profile exists in the stack at a time.
-    router.push(
+    routerPush(
       { pathname: "/artist/[id]", params: { id, name, image } },
       { dangerouslySingular: () => "artist-profile" }
     );
-  }, [router]);
+  }, [routerPush]);
 
   const handleAlbumPress = useCallback((album: JioSaavnArtistAlbum) => {
     // Albums are treated as playlists — navigate to playlist screen
-    router.push({
+    routerPush({
       pathname: "/playlist/[id]",
       params: {
         id: album.id,
@@ -217,7 +257,48 @@ export default function ArtistScreen() {
         songCount: String(album.songCount ?? 0),
       },
     });
-  }, [router]);
+  }, [routerPush]);
+
+  const renderAlbumCard = useCallback(
+    ({ item }: { item: JioSaavnArtistAlbum }) => (
+      <Pressable style={styles.albumCard} onPress={() => handleAlbumPress(item)}>
+        <Image
+          recyclingKey={item.id}
+          source={{ uri: getBestImageUrl(item.image) }}
+          style={styles.albumCover}
+          contentFit="cover"
+          transition={80}
+          cachePolicy="memory-disk"
+        />
+        <Text style={styles.albumName} numberOfLines={2}>{item.name}</Text>
+        {item.year ? <Text style={styles.albumYear}>{item.year}</Text> : null}
+      </Pressable>
+    ),
+    [handleAlbumPress]
+  );
+
+  const renderSimilarArtist = useCallback(
+    ({ item }: { item: JioSaavnSimilarArtist }) => {
+      const img = getBestImageUrl(item.image);
+      return (
+        <Pressable
+          style={styles.similarCard}
+          onPress={() => handleSimilarArtistPress(item.id, item.name, img)}
+        >
+          <Image
+            recyclingKey={item.id}
+            source={{ uri: img }}
+            style={styles.similarAvatar}
+            contentFit="cover"
+            transition={80}
+            cachePolicy="memory-disk"
+          />
+          <Text style={styles.similarName} numberOfLines={2}>{item.name}</Text>
+        </Pressable>
+      );
+    },
+    [handleSimilarArtistPress]
+  );
 
   const handleScroll = useCallback((e: any) => {
     const y = e.nativeEvent.contentOffset.y;
@@ -266,7 +347,8 @@ export default function ArtistScreen() {
   return (
     <View style={styles.container}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: bottomPad }}
+        contentInset={{ bottom: bottomPad }}
+        scrollIndicatorInsets={{ bottom: bottomPad }}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
@@ -332,7 +414,7 @@ export default function ArtistScreen() {
           ) : songs.length > 0 ? (
             <>
               {songs.map((song, i) => (
-                <SongRow key={`${song.id}-${i}`} song={song} index={i} queue={songs} />
+                <SongRow key={song.id} song={song} index={i} queue={songs} />
               ))}
               {/* Load More button */}
               {hasMore ? (
@@ -355,64 +437,34 @@ export default function ArtistScreen() {
         </View>
 
         {/* ── Albums ── */}
-        {artist?.topAlbums?.length ? (
+        {topAlbums.length ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Albums</Text>
-            <ScrollView
+            <FlatList
+              data={topAlbums}
+              keyExtractor={(item) => item.id}
+              renderItem={renderAlbumCard}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.rowPad}
               nestedScrollEnabled={false}
-            >
-              {artist.topAlbums.map((item) => (
-                <Pressable key={item.id} style={styles.albumCard} onPress={() => handleAlbumPress(item)}>
-                  <Image
-                    recyclingKey={item.id}
-                    source={{ uri: getBestImageUrl(item.image) }}
-                    style={styles.albumCover}
-                    contentFit="cover"
-                    transition={80}
-                    cachePolicy="memory-disk"
-                  />
-                  <Text style={styles.albumName} numberOfLines={2}>{item.name}</Text>
-                  {item.year ? <Text style={styles.albumYear}>{item.year}</Text> : null}
-                </Pressable>
-              ))}
-            </ScrollView>
+            />
           </View>
         ) : null}
 
         {/* ── Similar Artists ── */}
-        {artist?.similarArtists?.length ? (
+        {visibleSimilarArtists.length ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Fans Also Like</Text>
-            <ScrollView
+            <FlatList
+              data={visibleSimilarArtists}
+              keyExtractor={(item) => item.id}
+              renderItem={renderSimilarArtist}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.rowPad}
               nestedScrollEnabled={false}
-            >
-              {artist.similarArtists.slice(0, 10).map((item) => {
-                const img = getBestImageUrl(item.image);
-                return (
-                  <Pressable
-                    key={item.id}
-                    style={styles.similarCard}
-                    onPress={() => handleSimilarArtistPress(item.id, item.name, img)}
-                  >
-                    <Image
-                      recyclingKey={item.id}
-                      source={{ uri: img }}
-                      style={styles.similarAvatar}
-                      contentFit="cover"
-                      transition={80}
-                      cachePolicy="memory-disk"
-                    />
-                    <Text style={styles.similarName} numberOfLines={2}>{item.name}</Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+            />
           </View>
         ) : null}
       </ScrollView>

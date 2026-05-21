@@ -10,8 +10,8 @@ import {
   KeyboardAvoidingView,
   Alert,
   useWindowDimensions,
-  Image,
 } from "react-native";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -67,9 +67,13 @@ function AuthField({
 }
 
 export default function LoginScreen() {
+  return useLoginScreenView();
+}
+
+function useLoginScreenView() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { replace: routerReplace } = useRouter();
   const {
     login,
     register,
@@ -132,7 +136,7 @@ export default function LoginScreen() {
         await login(email.trim(), password);
       }
       void triggerNotification(Haptics.NotificationFeedbackType.Success);
-      router.replace("/(tabs)");
+      routerReplace("/(tabs)");
     } catch (error: any) {
       const msg = error.message || "Something went wrong";
       const friendlyMsg = msg.includes("user-not-found")
@@ -155,7 +159,7 @@ export default function LoginScreen() {
       setGoogleLoading(true);
       try {
         await signInWithGoogle();
-        router.replace("/(tabs)");
+        routerReplace("/(tabs)");
       } catch (error: any) {
         Alert.alert("Error", error.message || "Google Sign-In failed");
       } finally {
@@ -169,7 +173,7 @@ export default function LoginScreen() {
       const idToken = await getGoogleMobileIdToken("Google Sign-In");
       await signInWithGoogleCredential(idToken);
       void triggerNotification(Haptics.NotificationFeedbackType.Success);
-      router.replace("/(tabs)");
+      routerReplace("/(tabs)");
     } catch (error: any) {
       Alert.alert("Error", error.message || "Google Sign-In failed");
     } finally {
@@ -203,7 +207,7 @@ export default function LoginScreen() {
 
   const handleContinueAsGuest = () => {
     continueAsGuest();
-    router.replace("/(tabs)");
+    routerReplace("/(tabs)");
   };
 
   const switchMode = (nextMode: AuthMode) => {
@@ -569,11 +573,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.cardBorder,
     backgroundColor: "rgba(17,23,31,0.9)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.24,
-    shadowRadius: 28,
-    elevation: 10,
+    boxShadow: "none",
     alignSelf: "center",
   },
   cardTop: {

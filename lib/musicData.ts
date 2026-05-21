@@ -1,3 +1,4 @@
+import { mapFilter, sortedCopy } from "@/lib/arrayUtils";
 export interface Song {
   id: string;
   title: string;
@@ -102,7 +103,7 @@ function qualityScore(quality: string | undefined, url: string | undefined): num
 
 export function getBestImageUrl(images: JioSaavnImage[]): string {
   if (!images || images.length === 0) return "";
-  const sorted = [...images].sort((a, b) => {
+  const sorted = sortedCopy(images, (a, b) => {
     return qualityScore(b.quality, b.url) - qualityScore(a.quality, a.url);
   });
   return normalizeJioSaavnImageUrl(sorted[0]?.url || "");
@@ -122,8 +123,7 @@ function normalizeAudioCandidates(downloadUrls: unknown): AudioCandidate[] {
   }
 
   if (Array.isArray(downloadUrls)) {
-    return downloadUrls
-      .map((item) => {
+    return mapFilter(downloadUrls, (item) => {
         if (typeof item === "string") {
           const url = item.trim();
           return url ? { quality: "", url } : null;
@@ -136,8 +136,7 @@ function normalizeAudioCandidates(downloadUrls: unknown): AudioCandidate[] {
         const url = urlValue.trim();
         if (!url) return null;
         return { quality: qualityValue, url };
-      })
-      .filter((item): item is AudioCandidate => Boolean(item));
+      }, (item): item is AudioCandidate => Boolean(item));
   }
 
   if (typeof downloadUrls === "object") {
@@ -154,7 +153,7 @@ export function getBestAudioUrl(downloadUrls: unknown): string {
   const candidates = normalizeAudioCandidates(downloadUrls);
   if (candidates.length === 0) return "";
 
-  const sorted = [...candidates].sort((a, b) => {
+  const sorted = sortedCopy(candidates, (a, b) => {
     const qualityOrder: Record<string, number> = { "320kbps": 4, "160kbps": 3, "96kbps": 2, "48kbps": 1, "12kbps": 0 };
     return (qualityOrder[b.quality] || 0) - (qualityOrder[a.quality] || 0);
   });

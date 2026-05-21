@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetch } from "expo/fetch";
 import { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
+import { compactMap, mapFilter } from "@/lib/arrayUtils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -126,16 +127,14 @@ function normalizeImage(raw: unknown): JioSaavnImage[] {
     return url ? [{ quality: "", url }] : [];
   }
   if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item: any) => {
+  return mapFilter(raw, (item: any) => {
       if (typeof item === "string") {
         const url = item.trim();
         return url ? { quality: "", url } : null;
       }
       const url = toStr(item?.url) || toStr(item?.link);
       return url ? { quality: toStr(item?.quality), url } : null;
-    })
-    .filter((x): x is JioSaavnImage => Boolean(x));
+    }, (x): x is JioSaavnImage => Boolean(x));
 }
 
 function normalizeSong(raw: any): JioSaavnSong | null {
@@ -184,12 +183,9 @@ function normalizeArtist(raw: any): JioSaavnArtist | null {
   const name = toStr(source?.name) || toStr(source?.title);
   if (!id || !name) return null;
 
-  const topSongs = firstArray(source?.topSongs, source?.top_songs, source?.songs)
-    .map(normalizeSong)
-    .filter((x): x is JioSaavnSong => Boolean(x));
+  const topSongs = mapFilter(firstArray(source?.topSongs, source?.top_songs, source?.songs), normalizeSong, (x): x is JioSaavnSong => Boolean(x));
 
-  const topAlbums = firstArray(source?.topAlbums, source?.top_albums, source?.albums)
-        .map((a: any) => {
+  const topAlbums = compactMap(firstArray(source?.topAlbums, source?.top_albums, source?.albums), (a: any) => {
           const aid = toStr(a?.id);
           const aname = toStr(a?.name) || toStr(a?.title);
           if (!aid || !aname) return null;
@@ -201,14 +197,12 @@ function normalizeArtist(raw: any): JioSaavnArtist | null {
             url: toStr(a?.url),
             image: normalizeImage(a?.image),
             songs: Array.isArray(a?.songs)
-              ? a.songs.map(normalizeSong).filter(Boolean)
+              ? compactMap(a.songs, normalizeSong)
               : [],
           };
-        })
-        .filter(Boolean) as JioSaavnArtistAlbum[];
+        }) as JioSaavnArtistAlbum[];
 
-  const similarArtists = firstArray(source?.similarArtists, source?.similar_artists)
-        .map((a: any) => {
+  const similarArtists = compactMap(firstArray(source?.similarArtists, source?.similar_artists), (a: any) => {
           const sid = toStr(a?.id);
           const sname = toStr(a?.name) || toStr(a?.title);
           if (!sid || !sname) return null;
@@ -218,8 +212,7 @@ function normalizeArtist(raw: any): JioSaavnArtist | null {
             url: toStr(a?.url),
             image: normalizeImage(a?.image),
           };
-        })
-        .filter(Boolean) as JioSaavnSimilarArtist[];
+        }) as JioSaavnSimilarArtist[];
 
   return {
     id,
@@ -350,7 +343,7 @@ export async function searchArtists(query: string): Promise<ArtistCard[]> {
         json?.artists,
         json?.results
       );
-      return arr.map(normalizeArtistCard).filter((x): x is ArtistCard => Boolean(x));
+      return mapFilter(arr, normalizeArtistCard, (x): x is ArtistCard => Boolean(x));
     })
   );
 
@@ -411,9 +404,11 @@ async function fetchFeaturedArtists(): Promise<ArtistCard[]> {
   const artists: ArtistCard[] = [];
   for (const result of results) {
     if (result.status !== "fulfilled" || !result.value?.id) continue;
-    if (seen.has(result.value.id)) continue;
-    seen.add(result.value.id);
-    artists.push(result.value);
+    const artist = result.value;
+    const artistId = artist.id;
+    if (seen.has(artistId)) continue;
+    seen.add(artistId);
+    artists.push(artist);
   }
   return artists;
 }
@@ -478,7 +473,7 @@ export async function getArtistSongs(
       const json = await res.json();
       const arr = firstArray(json?.data?.songs, json?.songs, json?.data?.results, json?.data);
       if (!Array.isArray(arr)) throw new Error("no songs array");
-      return arr.map(normalizeSong).filter(Boolean) as JioSaavnSong[];
+      return compactMap(arr, normalizeSong) as JioSaavnSong[];
     })
   );
 

@@ -38,6 +38,7 @@ import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
 import ShinyText from "@/components/ShinyText";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { filterMap, forEachFiltered, mapFilter } from "@/lib/arrayUtils";
 
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 
@@ -201,11 +202,15 @@ export default function HomeScreen() {
 }
 
 function HomeScreenInner() {
+  return useHomeScreenInnerView();
+}
+
+function useHomeScreenInnerView() {
   useScreenTracking("Home");
 
   const { isOnline, isChecking } = useNetwork();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { push: routerPush } = useRouter();
   const { user, isAuthenticated } = useAuth();
   const { playSong, currentSongId } = usePlayerRow();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
@@ -427,28 +432,26 @@ function HomeScreenInner() {
           categoryResultPromise,
         ]);
 
-        await artistsResultPromise;
+        if (loadId === latestLoadIdRef.current) {
+          await artistsResultPromise;
 
-        if (loadId !== latestLoadIdRef.current) {
-          return;
-        }
+          if (hasVisibleHomeSections(HOME_SESSION_CACHE)) {
+            hasHydratedRef.current = true;
+            HOME_SESSION_CACHE.hydrated = true;
+          }
 
-        if (hasVisibleHomeSections(HOME_SESSION_CACHE)) {
-          hasHydratedRef.current = true;
-          HOME_SESSION_CACHE.hydrated = true;
-        }
+          const nextFeedState = hasHomeContent(HOME_SESSION_CACHE)
+            ? "ready"
+            : publicPlaylistsResult.status === "rejected" || categoryResult.status === "rejected"
+              ? "network"
+              : "empty";
+          setHomeFeedState(nextFeedState);
 
-        const nextFeedState = hasHomeContent(HOME_SESSION_CACHE)
-          ? "ready"
-          : publicPlaylistsResult.status === "rejected" || categoryResult.status === "rejected"
-            ? "network"
-            : "empty";
-        setHomeFeedState(nextFeedState);
-
-        // Mark bootstrapped even on empty/offline response to avoid repeated heavy reloads.
-        if (!HOME_SESSION_CACHE.hydrated) {
-          HOME_SESSION_CACHE.hydrated = true;
-          hasHydratedRef.current = true;
+          // Mark bootstrapped even on empty/offline response to avoid repeated heavy reloads.
+          if (!HOME_SESSION_CACHE.hydrated) {
+            HOME_SESSION_CACHE.hydrated = true;
+            hasHydratedRef.current = true;
+          }
         }
       } finally {
         // Always clear loading — whether we set it or it was already true from bootstrap
@@ -512,26 +515,71 @@ function HomeScreenInner() {
     }
   }, [INITIAL_PUBLIC_LIMIT, REFRESH_CATEGORY_LIMIT, loadHomeData, resetHomeState]);
 
+  const applyHomeCacheSnapshot = useCallback(() => {
+    setRecentlyPlayed(HOME_SESSION_CACHE.recentlyPlayed);
+    setCategories(HOME_SESSION_CACHE.categories);
+    setPublicPlaylists(HOME_SESSION_CACHE.publicPlaylists);
+    setFeaturedArtists(HOME_SESSION_CACHE.featuredArtists);
+    setIsLoadingCategories(HOME_SESSION_CACHE.categories.length === 0);
+    setIsLoadingPublicPlaylists(HOME_SESSION_CACHE.publicPlaylists.length === 0);
+    setHomeFeedState(hasHomeContent(HOME_SESSION_CACHE) ? "ready" : "empty");
+    const hasVisibleFeed =
+      hasHomeContent(HOME_SESSION_CACHE) || HOME_SESSION_CACHE.featuredArtists.length > 0;
+    setLoading(!hasVisibleFeed);
+    if (HOME_SESSION_CACHE.categories.length > 0) {
+      schedulePlaylistPrefetch(HOME_SESSION_CACHE.categories, 800);
+    }
+    return HOME_SESSION_CACHE.categories.length > 0 &&
+      HOME_SESSION_CACHE.featuredArtists.length > 0;
+  }, [schedulePlaylistPrefetch]);
+
+  const applyWarmBootstrapResults = useCallback((
+    recentResult: PromiseSettledResult<RecentlyPlayedItem[]>,
+    cachedPublicResult: PromiseSettledResult<FirestorePlaylist[]>
+  ) => {
+    let hasWarmContent = false;
+    if (recentResult.status === "fulfilled") {
+      const trimmedRecent = recentResult.value.slice(0, 8);
+      setRecentlyPlayed(trimmedRecent);
+      HOME_SESSION_CACHE.recentlyPlayed = trimmedRecent;
+      hasWarmContent = hasWarmContent || trimmedRecent.length > 0;
+    } else {
+      setRecentlyPlayed([]);
+      HOME_SESSION_CACHE.recentlyPlayed = [];
+    }
+
+    if (cachedPublicResult.status === "fulfilled") {
+      const cachedPublic = cachedPublicResult.value.slice(0, INITIAL_PUBLIC_LIMIT);
+      if (cachedPublic.length > 0) {
+        setPublicPlaylists(cachedPublic);
+        HOME_SESSION_CACHE.publicPlaylists = cachedPublic;
+        setIsLoadingPublicPlaylists(false);
+        hasWarmContent = true;
+      }
+    }
+    return hasWarmContent;
+  }, [INITIAL_PUBLIC_LIMIT]);
+
+  const revealWarmHomeContent = useCallback(() => {
+    hasHydratedRef.current = true;
+    HOME_SESSION_CACHE.hydrated = true;
+    setLoading(false);
+    setHomeFeedState("ready");
+  }, []);
+
+  const applyHomeBootstrapFailure = useCallback((hasWarmContent: boolean) => {
+    setLoading(false);
+    setHomeFeedState(hasWarmContent ? "ready" : "network");
+    hasHydratedRef.current = true;
+    HOME_SESSION_CACHE.hydrated = true;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
     const bootstrap = async () => {
       if (HOME_SESSION_CACHE.hydrated) {
-        setRecentlyPlayed(HOME_SESSION_CACHE.recentlyPlayed);
-        setCategories(HOME_SESSION_CACHE.categories);
-        setPublicPlaylists(HOME_SESSION_CACHE.publicPlaylists);
-        setFeaturedArtists(HOME_SESSION_CACHE.featuredArtists);
-        setIsLoadingCategories(HOME_SESSION_CACHE.categories.length === 0);
-        setIsLoadingPublicPlaylists(HOME_SESSION_CACHE.publicPlaylists.length === 0);
-        setHomeFeedState(hasHomeContent(HOME_SESSION_CACHE) ? "ready" : "empty");
-        const hasVisibleFeed =
-          hasHomeContent(HOME_SESSION_CACHE) || HOME_SESSION_CACHE.featuredArtists.length > 0;
-        setLoading(!hasVisibleFeed);
-        if (HOME_SESSION_CACHE.categories.length > 0) {
-          schedulePlaylistPrefetch(HOME_SESSION_CACHE.categories, 800);
-        }
-        const hasFullFeed = HOME_SESSION_CACHE.categories.length > 0 &&
-          HOME_SESSION_CACHE.featuredArtists.length > 0;
+        const hasFullFeed = applyHomeCacheSnapshot();
         if (hasFullFeed) return;
         // Fall through to load missing data
       }
@@ -544,32 +592,11 @@ function HomeScreenInner() {
       let hasWarmContent = false;
 
       if (!cancelled) {
-        if (recentResult.status === "fulfilled") {
-          const trimmedRecent = recentResult.value.slice(0, 8);
-          setRecentlyPlayed(trimmedRecent);
-          HOME_SESSION_CACHE.recentlyPlayed = trimmedRecent;
-          hasWarmContent = hasWarmContent || trimmedRecent.length > 0;
-        } else {
-          setRecentlyPlayed([]);
-          HOME_SESSION_CACHE.recentlyPlayed = [];
-        }
-
-        if (cachedPublicResult.status === "fulfilled") {
-          const cachedPublic = cachedPublicResult.value.slice(0, INITIAL_PUBLIC_LIMIT);
-          if (cachedPublic.length > 0) {
-            setPublicPlaylists(cachedPublic);
-            HOME_SESSION_CACHE.publicPlaylists = cachedPublic;
-            setIsLoadingPublicPlaylists(false);
-            hasWarmContent = true;
-          }
-        }
+        hasWarmContent = applyWarmBootstrapResults(recentResult, cachedPublicResult);
 
         if (hasWarmContent) {
-          hasHydratedRef.current = true;
-          HOME_SESSION_CACHE.hydrated = true;
           // Show warm content immediately while live categories refresh in background.
-          setLoading(false);
-          setHomeFeedState("ready");
+          revealWarmHomeContent();
         }
       }
 
@@ -590,10 +617,7 @@ function HomeScreenInner() {
         );
       } catch {
         if (!cancelled) {
-          setLoading(false);
-          setHomeFeedState(hasWarmContent ? "ready" : "network");
-          hasHydratedRef.current = true;
-          HOME_SESSION_CACHE.hydrated = true;
+          applyHomeBootstrapFailure(hasWarmContent);
         }
       }
     };
@@ -604,7 +628,13 @@ function HomeScreenInner() {
       cancelled = true;
       latestLoadIdRef.current += 1;
     };
-  }, [loadHomeData, schedulePlaylistPrefetch]);
+  }, [
+    applyHomeBootstrapFailure,
+    applyHomeCacheSnapshot,
+    applyWarmBootstrapResults,
+    loadHomeData,
+    revealWarmHomeContent,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -622,29 +652,23 @@ function HomeScreenInner() {
     categories.forEach((cat) => categoryById.set(cat.id, cat));
 
     // Preferred order first, then any extras the service returned
-    const preferred = HOME_JIOSAAVN_SECTION_ORDER
-      .map((id) => {
+    const preferred = mapFilter(HOME_JIOSAAVN_SECTION_ORDER, (id) => {
         const cat = categoryById.get(id);
         if (!cat || cat.results.length === 0) return null;
         return { ...cat, title: HOME_JIOSAAVN_TITLES[id] ?? cat.title };
-      })
-      .filter((cat): cat is HomeJioSaavnCategoryData => Boolean(cat));
+      }, (cat): cat is HomeJioSaavnCategoryData => Boolean(cat));
 
     const preferredIds = new Set(preferred.map((c) => c.id));
-    const extras = categories
-      .filter((c) => !preferredIds.has(c.id) && c.results.length > 0)
-      .map((c) => ({ ...c, title: HOME_JIOSAAVN_TITLES[c.id] ?? c.title }));
+    const extras = filterMap(categories, (c) => !preferredIds.has(c.id) && c.results.length > 0, (c) => ({ ...c, title: HOME_JIOSAAVN_TITLES[c.id] ?? c.title }));
 
     return [...preferred, ...extras];
   }, [categories]);
 
   const allCategoryRows = useMemo(() => {
-    return orderedHomeCategories
-      .map((cat) => ({
+    return mapFilter(orderedHomeCategories, (cat) => ({
         ...cat,
         results: dedupeJioPlaylistsById(cat.results, MAX_ROW_ITEMS),
-      }))
-      .filter((cat) => cat.results.length > 0);
+      }), (cat) => cat.results.length > 0);
   }, [orderedHomeCategories]);
 
   const publicPlaylistsForSection = useMemo(
@@ -687,9 +711,7 @@ function HomeScreenInner() {
       }
     });
 
-    allCategoryRows
-      .filter((cat) => !HOME_PRIORITY_CATEGORY_IDS.includes(cat.id as (typeof HOME_PRIORITY_CATEGORY_IDS)[number]))
-      .forEach((cat) => data.push({ id: `category-${cat.id}`, type: "category", data: cat }));
+    forEachFiltered(allCategoryRows, (cat) => !HOME_PRIORITY_CATEGORY_IDS.includes(cat.id as (typeof HOME_PRIORITY_CATEGORY_IDS)[number]), (cat) => data.push({ id: `category-${cat.id}`, type: "category", data: cat }));
 
     // 4. Made for You — bottom
     if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS || isLoadingPublicPlaylists) {
@@ -701,7 +723,7 @@ function HomeScreenInner() {
 
   const openJioSaavnPlaylist = useCallback(
     (playlist: { id: string; name?: string; imageUrl?: string; songCount?: number }) => {
-      router.push({
+      routerPush({
         pathname: "/playlist/[id]",
         params: {
           id: playlist.id,
@@ -716,12 +738,12 @@ function HomeScreenInner() {
         dangerouslySingular: () => "playlist-details",
       });
     },
-    [router]
+    [routerPush]
   );
 
   const openFirestorePlaylist = useCallback(
     (playlist: { id: string; name?: string; imageUrl?: string; description?: string; songCount?: number }) => {
-      router.push({
+      routerPush({
         pathname: "/playlist/[id]",
         params: {
           id: playlist.id,
@@ -737,7 +759,7 @@ function HomeScreenInner() {
         dangerouslySingular: () => "playlist-details",
       });
     },
-    [router]
+    [routerPush]
   );
 
   const handleRecentPress = useCallback(
@@ -784,12 +806,12 @@ function HomeScreenInner() {
           };
           if (hydratedSong.audioUrl.trim().length > 0) {
             playSong(hydratedSong, [hydratedSong]);
-            router.push("/player");
+            routerPush("/player");
             return;
           }
         }
         if (currentSongId) {
-          router.push("/player");
+          routerPush("/player");
         }
         return;
       }
@@ -818,7 +840,7 @@ function HomeScreenInner() {
       }
 
       if (itemId.startsWith("user_")) {
-        router.push({
+        routerPush({
           pathname: "/playlist/[id]",
           params: {
             id: itemId,
@@ -841,7 +863,7 @@ function HomeScreenInner() {
         imageUrl: item.imageUrl,
       });
     },
-    [currentSongId, openFirestorePlaylist, openJioSaavnPlaylist, playSong, router]
+    [currentSongId, openFirestorePlaylist, openJioSaavnPlaylist, playSong, routerPush]
   );
 
   const renderRecentCard = useCallback(
@@ -918,7 +940,7 @@ function HomeScreenInner() {
         <Pressable
           style={({ pressed }) => [styles.artistCard, pressed && styles.cardPressed]}
           onPress={() =>
-            router.push(
+            routerPush(
               { pathname: "/artist/[id]", params: { id: item.id, name: item.name, image: img } },
               { withAnchor: true, dangerouslySingular: () => "artist-profile" }
             )
@@ -943,10 +965,10 @@ function HomeScreenInner() {
         </Pressable>
       );
     },
-    [router]
+    [routerPush]
   );
 
-  const renderCategoryPlaylist = useCallback(
+  const getCategoryPlaylistElement = useCallback(
     (categoryId: string, categoryTitle: string) =>
       function CategoryPlaylistCard({ item }: { item: HomeJioSaavnCategoryData["results"][number] }) {
         return (
@@ -999,7 +1021,7 @@ function HomeScreenInner() {
     []
   );
 
-  const renderHeader = useCallback(() => {
+  const getHeaderElement = useCallback(() => {
     return (
       <View style={styles.header}>
         <View style={styles.topMenuRow}>
@@ -1007,7 +1029,7 @@ function HomeScreenInner() {
             style={styles.topProfileButton}
             onPress={() => {
               void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/profile");
+              routerPush("/profile");
             }}
           >
             {isAuthenticated && user?.picture ? (
@@ -1038,7 +1060,7 @@ function HomeScreenInner() {
             style={styles.topDownloadButton}
             onPress={() => {
               void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/downloaded-songs");
+              routerPush("/downloaded-songs");
             }}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
@@ -1047,7 +1069,7 @@ function HomeScreenInner() {
         </View>
       </View>
     );
-  }, [isAuthenticated, router, user?.picture]);
+  }, [isAuthenticated, routerPush, user?.picture]);
 
   const renderEmptyState = useCallback(() => {
     const isNetworkIssue = homeFeedState === "network";
@@ -1082,7 +1104,7 @@ function HomeScreenInner() {
 
             <Pressable
               style={[styles.emptyActionButton, styles.emptyActionSecondary]}
-              onPress={() => router.push("/(tabs)/search")}
+              onPress={() => routerPush("/(tabs)/search")}
             >
               <Ionicons name="search" size={16} color={Colors.text} />
               <Text style={styles.emptyActionSecondaryText}>Search</Text>
@@ -1091,7 +1113,7 @@ function HomeScreenInner() {
 
           <Pressable
             style={[styles.emptyActionButton, styles.emptyActionTertiary]}
-            onPress={() => router.push("/import-songs")}
+            onPress={() => routerPush("/import-songs")}
           >
             <Ionicons name="cloud-upload-outline" size={16} color={Colors.text} />
             <Text style={styles.emptyActionSecondaryText}>Import Songs</Text>
@@ -1099,9 +1121,9 @@ function HomeScreenInner() {
         </View>
       </View>
     );
-  }, [handleRefresh, homeFeedState, router]);
+  }, [handleRefresh, homeFeedState, routerPush]);
 
-  const renderSectionHeader = useCallback((title: string, onViewAll?: () => void) => {
+  const getSectionHeaderElement = useCallback((title: string, onViewAll?: () => void) => {
     return (
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>{title}</Text>
@@ -1116,13 +1138,13 @@ function HomeScreenInner() {
 
   const renderRowSeparator = useCallback(() => <View style={styles.rowSeparator} />, []);
 
-  const renderSection = useCallback(
+  const getSectionElement = useCallback(
     ({ item: section }: { item: HomeSection }) => {
       switch (section.type) {
         case "recents":
           return (
             <View style={styles.section}>
-              {renderSectionHeader("Jump Back In")}
+              {getSectionHeaderElement("Jump Back In")}
               <FlatList
                 horizontal
                 data={recentlyPlayed}
@@ -1142,7 +1164,7 @@ function HomeScreenInner() {
         case "public-playlists":
           return (
             <View style={styles.section}>
-              {renderSectionHeader("Made for You")}
+              {getSectionHeaderElement("Made for You")}
               {publicPlaylistsForSection.length > 0 ? (
                 <FlatList
                   horizontal
@@ -1175,7 +1197,7 @@ function HomeScreenInner() {
         case "featured-artists":
           return (
             <View style={styles.section}>
-              {renderSectionHeader("Featured Artists", () => router.push("/artists", { withAnchor: true }))}
+              {getSectionHeaderElement("Featured Artists", () => routerPush("/artists", { withAnchor: true }))}
               <FlatList
                 horizontal
                 data={featuredArtists}
@@ -1195,13 +1217,13 @@ function HomeScreenInner() {
         case "category":
           return (
             <View style={styles.section}>
-              {renderSectionHeader(section.data.title)}
+              {getSectionHeaderElement(section.data.title)}
               {section.data.results.length > 0 ? (
                 <FlatList
                   horizontal
                   data={section.data.results}
                   keyExtractor={(item) => `${section.data.id}-${item.id}`}
-                  renderItem={renderCategoryPlaylist(section.data.id, section.data.title)}
+                  renderItem={getCategoryPlaylistElement(section.data.id, section.data.title)}
                   ItemSeparatorComponent={renderRowSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
@@ -1237,10 +1259,10 @@ function HomeScreenInner() {
       renderRectPlaceholder,
       featuredArtists,
       renderArtistCard,
-      renderCategoryPlaylist,
-      renderSectionHeader,
+      getCategoryPlaylistElement,
+      getSectionHeaderElement,
       renderRowSeparator,
-      router,
+      routerPush,
     ]
   );
 
@@ -1281,12 +1303,12 @@ function HomeScreenInner() {
         contentContainerStyle={[styles.scrollContent, sections.length === 0 && styles.scrollContentEmpty]}
         showsVerticalScrollIndicator={false}
       >
-        {renderHeader()}
+        {getHeaderElement()}
         <PromotionBanner />
         {sections.length === 0
           ? renderEmptyState()
           : sections.map((section) => (
-              <React.Fragment key={section.id}>{renderSection({ item: section })}</React.Fragment>
+              <React.Fragment key={section.id}>{getSectionElement({ item: section })}</React.Fragment>
             ))}
       </ScrollView>
       <LinearGradient

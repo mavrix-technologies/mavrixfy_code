@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import * as Animated from "@/lib/nativeAnimated";
 import {
   View,
   Text,
@@ -10,8 +11,7 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
-  Animated,
-  RefreshControl,
+  RefreshControl
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -36,6 +36,7 @@ import { usePlayerActions } from "@/contexts/PlayerContext";
 import { getFollowedArtists, FollowedArtist } from "@/lib/followedArtists";
 import OfflineBanner from "@/components/OfflineBanner";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { sortedCopy } from "@/lib/arrayUtils";
 
 type Filter = "playlists" | "artists" | "favorite" | null;
 type ViewMode = "list" | "grid";
@@ -95,6 +96,10 @@ function getGridPattern(id: string, index: number) {
 }
 
 export default function LibraryScreen() {
+  return useLibraryScreenView();
+}
+
+function useLibraryScreenView() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { isOnline } = useNetwork();
@@ -170,7 +175,8 @@ export default function LibraryScreen() {
 
         if (!activeUserId) {
           commitPlaylists(
-            [...formattedLocalPlaylists].sort(
+            sortedCopy(
+              formattedLocalPlaylists,
               (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
             )
           );
@@ -207,7 +213,8 @@ export default function LibraryScreen() {
           (p) => !firestoreIds.has(p.id)
         );
 
-        const merged = [...formattedFirestorePlaylists, ...localOnlyPlaylists].sort(
+        const merged = sortedCopy(
+          formattedFirestorePlaylists.concat(localOnlyPlaylists),
           (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
         );
         commitPlaylists(merged);
@@ -221,7 +228,8 @@ export default function LibraryScreen() {
           })
         );
         commitPlaylists(
-          [...formattedLocalPlaylists].sort(
+          sortedCopy(
+            formattedLocalPlaylists,
             (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
           )
         );
@@ -745,7 +753,7 @@ export default function LibraryScreen() {
           style={StyleSheet.absoluteFillObject}
         />
         <ActivityIndicator size="large" color={UI.primary} />
-        <Text style={styles.loadingText}>Loading your library...</Text>
+        <Text style={styles.loadingText}>Loading your library…</Text>
       </View>
     );
   }
@@ -818,7 +826,7 @@ export default function LibraryScreen() {
               {isUploadingImage && (
                 <View style={styles.uploadingOverlay}>
                   <ActivityIndicator size="large" color={UI.primary} />
-                  <Text style={styles.uploadingText}>Uploading...</Text>
+                  <Text style={styles.uploadingText}>Uploading…</Text>
                 </View>
               )}
             </Pressable>
@@ -829,7 +837,6 @@ export default function LibraryScreen() {
               placeholderTextColor={UI.subtext}
               value={newPlaylistName}
               onChangeText={setNewPlaylistName}
-              autoFocus
               selectionColor={UI.primary}
             />
 

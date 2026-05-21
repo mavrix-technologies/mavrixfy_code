@@ -1,6 +1,7 @@
-import { Tabs, router, useNavigation, usePathname, useRouter } from "expo-router";
+import { Tabs, useNavigation, usePathname, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Easing, InteractionManager, PanResponder, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
+import * as Animated from "@/lib/nativeAnimated";
+import { Easing, PanResponder, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -17,6 +18,7 @@ import {
   preloadDominantColors,
 } from "@/lib/colorExtractor";
 import { useLastMix, clearLastMix } from "@/lib/lastMix";
+import { compactMap, mapFilter } from "@/lib/arrayUtils";
 
 const MIX_DELETE_THRESHOLD = -72;
 
@@ -134,6 +136,7 @@ const NAV_ITEMS: NavItem[] = [
   { route: "library", label: "Library", icon: "library-outline", iconActive: "library-sharp" },
   { route: "liked-songs", label: "Liked", icon: "heart-outline", iconActive: "heart-sharp" },
 ];
+const noopLongPress = () => {};
 
 const TAB_TRANSITION_SPEC = {
   animation: "timing" as const,
@@ -145,6 +148,23 @@ const TAB_TRANSITION_SPEC = {
 
 function getTabHref(route: VisibleRoute) {
   return route === "index" ? "/" : `/${route}`;
+}
+
+type IdleScheduler = {
+  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
+const idleScheduler = globalThis as typeof globalThis & IdleScheduler;
+
+function scheduleIdleTask(task: () => void): () => void {
+  if (typeof idleScheduler.requestIdleCallback === "function") {
+    const handle = idleScheduler.requestIdleCallback(task, { timeout: 900 });
+    return () => idleScheduler.cancelIdleCallback?.(handle);
+  }
+
+  const timer = setTimeout(task, 1);
+  return () => clearTimeout(timer);
 }
 
 type NavTabItemProps = {
@@ -313,8 +333,12 @@ type AppNavBarProps = {
   hidden?: boolean;
 };
 
-export function AppNavBar({ hidden = false }: AppNavBarProps) {
-  const router = useRouter();
+export function AppNavBar(props: AppNavBarProps) {
+  return useAppNavBarView(props);
+}
+
+function useAppNavBarView({ hidden = false }: AppNavBarProps) {
+  const { push: routerPush, navigate: routerNavigate } = useRouter();
   const pathname = usePathname();
   const isWeb = Platform.OS === "web";
   const isIOS = Platform.OS === "ios";
@@ -348,9 +372,9 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
       if (previous.href === href && now - previous.time < 280) return;
 
       routePressLockRef.current = { href, time: now };
-      router.navigate(href as any);
+      routerNavigate(href as any);
     },
-    [router]
+    [routerNavigate]
   );
 
   const openPlayer = useCallback(() => {
@@ -358,17 +382,15 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     if (now - openPlayerLockRef.current < 420) return;
 
     openPlayerLockRef.current = now;
-    requestAnimationFrame(() => router.push("/player"));
-  }, [router]);
+    requestAnimationFrame(() => routerPush("/player"));
+  }, [routerPush]);
 
   useEffect(() => {
-    const urls = [
+    const urls = mapFilter([
       queue[queueIndex - 1]?.coverUrl,
       activeSong?.coverUrl,
       queue[queueIndex + 1]?.coverUrl,
-    ]
-      .map((url) => url?.trim())
-      .filter((url): url is string => Boolean(url));
+    ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
     void Image.prefetch(urls, "memory-disk").catch(() => {});
@@ -379,12 +401,12 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const mixChipImages = useMemo(() => {
     const raw = lastMix?.images ?? "";
     if (!raw) return [] as string[];
-    return raw.split(",").map((image) => image.trim()).filter(Boolean);
+    return compactMap(raw.split(","), (image) => image.trim());
   }, [lastMix?.images]);
   const openLastMix = useCallback(() => {
     if (!lastMix) return;
-    router.push({ pathname: "/artist-mix", params: lastMix });
-  }, [lastMix, router]);
+    routerPush({ pathname: "/artist-mix", params: lastMix });
+  }, [lastMix, routerPush]);
 
   // ── Mix chip drag-to-delete ───────────────────────────────────────────────
   const [isDragging, setIsDragging] = useState(false);
@@ -459,29 +481,31 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     [deleteMixWithAnimation, dragX, isDragging, resetMixChip]
   );
 
+  const applyMiniPlayerColors = useCallback((primary: string, text: string) => {
+    setAlbumColor(primary);
+    setTextColor(text);
+  }, [setAlbumColor, setTextColor]);
+
   useEffect(() => {
     if (!activeSong?.coverUrl) {
-      setAlbumColor("#25282E");
-      setTextColor("#F5FBFF");
+      applyMiniPlayerColors("#25282E", "#F5FBFF");
       return () => {};
     }
     let active = true;
     const immediateColors = getImmediateArtworkColor(activeSong.coverUrl);
-    setAlbumColor(immediateColors.primary);
-    setTextColor(immediateColors.text);
+    applyMiniPlayerColors(immediateColors.primary, immediateColors.text);
 
     extractDominantColor(activeSong.coverUrl)
       .then((colors) => {
         if (!active) return;
-        setAlbumColor(colors.primary);
-        setTextColor(colors.text);
+        applyMiniPlayerColors(colors.primary, colors.text);
       })
       .catch(() => {});
 
     return () => {
       active = false;
     };
-  }, [activeSong?.id, activeSong?.coverUrl, setAlbumColor, setTextColor]);
+  }, [activeSong?.id, activeSong?.coverUrl, applyMiniPlayerColors]);
 
   useEffect(() => {
     setCoverFailed(false);
@@ -746,7 +770,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                       <View style={styles.mixChipAvatars}>
                         {mixChipImages.slice(0, 3).map((image, index) => (
                           <Image
-                            key={`${image}-${index}`}
+                            key={image}
                             source={{ uri: image }}
                             style={[
                               styles.mixChipAvatar,
@@ -800,7 +824,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                 </Pressable>
                 <Pressable
                   android_disableSound
-                  onPress={() => router.push("/queue")}
+                  onPress={() => routerPush("/queue")}
                   hitSlop={14}
                   style={({ pressed }) => [
                     styles.iconButton,
@@ -902,7 +926,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                 activeNavColor={activeNavColor}
                 navInactiveColor={navInactiveColor}
                 onPress={handleTabPress}
-                onLongPress={() => {}}
+                onLongPress={noopLongPress}
               />
             );
           })}
@@ -957,8 +981,12 @@ function IOSNativeTabLayout() {
 }
 
 function IOSMiniPlayerOverlay() {
+  return useIOSMiniPlayerOverlayView();
+}
+
+function useIOSMiniPlayerOverlayView() {
   const insets = useSafeAreaInsets();
-  const overlayRouter = useRouter();
+  const { push: overlayRouterPush } = useRouter();
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
   const playbackState = usePlaybackPlayState();
   const {
@@ -976,17 +1004,15 @@ function IOSMiniPlayerOverlay() {
     if (now - openPlayerLockRef.current < 420) return;
 
     openPlayerLockRef.current = now;
-    requestAnimationFrame(() => overlayRouter.push("/player"));
-  }, [overlayRouter]);
+    requestAnimationFrame(() => overlayRouterPush("/player"));
+  }, [overlayRouterPush]);
 
   useEffect(() => {
-    const urls = [
+    const urls = mapFilter([
       queue[queueIndex - 1]?.coverUrl,
       activeSong?.coverUrl,
       queue[queueIndex + 1]?.coverUrl,
-    ]
-      .map((url) => url?.trim())
-      .filter((url): url is string => Boolean(url));
+    ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
     void Image.prefetch(urls, "memory-disk").catch(() => {});
@@ -998,23 +1024,19 @@ function IOSMiniPlayerOverlay() {
   const mixBarTwo = useRef(new Animated.Value(0.58)).current;
   const mixBarThree = useRef(new Animated.Value(0.44)).current;
   const mixImage = useMemo(() => {
-    const first = (lastMix?.images ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean)[0];
+    const first = compactMap((lastMix?.images ?? "")
+      .split(","), (value) => value.trim())[0];
     return first ?? "";
   }, [lastMix?.images]);
   const mixImages = useMemo(() => {
-    const all = (lastMix?.images ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
+    const all = compactMap((lastMix?.images ?? "")
+      .split(","), (value) => value.trim());
     return all;
   }, [lastMix?.images]);
   const mixSongIds = useMemo(() => {
     const raw = lastMix?.songIds ?? "";
     if (!raw) return [] as string[];
-    return raw.split(",").map((id) => id.trim()).filter(Boolean);
+    return compactMap(raw.split(","), (id) => id.trim());
   }, [lastMix?.songIds]);
   const activeSongId = activeSong?.id ?? "";
   const isPlayingFromLastMix = useMemo(() => {
@@ -1024,30 +1046,31 @@ function IOSMiniPlayerOverlay() {
     const mixSet = new Set(mixSongIds);
     return queue.every((song) => mixSet.has(song.id));
   }, [activeSongId, playbackState.isPlaying, mixSongIds, queue]);
+  const applyMiniPlayerColors = useCallback((primary: string, text: string) => {
+    setAlbumColor(primary);
+    setTextColor(text);
+  }, [setAlbumColor, setTextColor]);
 
   useEffect(() => {
     if (!activeSong?.coverUrl) {
-      setAlbumColor("#25282E");
-      setTextColor("#F5FBFF");
+      applyMiniPlayerColors("#25282E", "#F5FBFF");
       return () => {};
     }
     let active = true;
     const immediateColors = getImmediateArtworkColor(activeSong.coverUrl);
-    setAlbumColor(immediateColors.primary);
-    setTextColor(immediateColors.text);
+    applyMiniPlayerColors(immediateColors.primary, immediateColors.text);
 
     extractDominantColor(activeSong.coverUrl)
       .then((colors) => {
         if (!active) return;
-        setAlbumColor(colors.primary);
-        setTextColor(colors.text);
+        applyMiniPlayerColors(colors.primary, colors.text);
       })
       .catch(() => {});
 
     return () => {
       active = false;
     };
-  }, [activeSong?.id, activeSong?.coverUrl, setAlbumColor, setTextColor]);
+  }, [activeSong?.id, activeSong?.coverUrl, applyMiniPlayerColors]);
 
   useEffect(() => {
     setCoverFailed(false);
@@ -1161,7 +1184,7 @@ function IOSMiniPlayerOverlay() {
             <Pressable
               android_disableSound
               onPress={() => {
-                router.push({ pathname: "/artist-mix", params: lastMix });
+                overlayRouterPush({ pathname: "/artist-mix", params: lastMix });
               }}
               hitSlop={8}
               style={styles.iosMiniPlayerInlineMixBtn}
@@ -1172,7 +1195,7 @@ function IOSMiniPlayerOverlay() {
                 {mixImages.length > 1 ? (
                   <View style={styles.iosMiniPlayerMixGrid}>
                     {mixImages.slice(0, 4).map((img, idx) => (
-                      <View key={idx} style={styles.iosMiniPlayerMixGridCell}>
+                      <View key={img || `mix-slot-${idx + 1}`} style={styles.iosMiniPlayerMixGridCell}>
                         {img ? (
                           <Image
                             source={{ uri: img }}
@@ -1257,7 +1280,7 @@ function IOSMiniPlayerOverlay() {
             </Pressable>
             <Pressable
               android_disableSound
-              onPress={() => router.push("/queue")}
+              onPress={() => overlayRouterPush("/queue")}
               hitSlop={14}
               style={({ pressed }) => [
                 styles.iosMiniPlayerButton,
@@ -1281,6 +1304,7 @@ export default function TabLayout() {
   const pathname = usePathname();
   const tabsNavigation = useNavigation();
   const preloadTimersRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
+  const preloadedRoutesRef = React.useRef(new Set<VisibleRoute>());
 
   const shouldHideTabBar = pathname?.startsWith("/import-songs");
 
@@ -1295,7 +1319,7 @@ export default function TabLayout() {
       return;
     }
 
-    const interactionTask = InteractionManager.runAfterInteractions(() => {
+    const cancelIdlePreload = scheduleIdleTask(() => {
       const nav = tabsNavigation as any;
       if (!nav || typeof nav.preload !== "function") {
         return;
@@ -1304,21 +1328,28 @@ export default function TabLayout() {
       const currentRoute = pathname === "/" || pathname === "/index"
         ? "index"
         : NAV_ITEMS.find((item) => pathname === `/${item.route}` || pathname?.startsWith(`/${item.route}/`))?.route;
-      const routesToPreload = NAV_ITEMS
-        .map((item) => item.route)
-        .filter((route) => route !== currentRoute);
+      if (currentRoute) {
+        preloadedRoutesRef.current.add(currentRoute);
+      }
+
+      const routesToPreload = mapFilter(
+        NAV_ITEMS,
+        (item) => item.route,
+        (route) => route !== currentRoute && !preloadedRoutesRef.current.has(route)
+      );
 
       preloadTimersRef.current = routesToPreload.map((route, index) => setTimeout(() => {
         try {
           nav.preload(route);
+          preloadedRoutesRef.current.add(route);
         } catch {
           // Silent fail
         }
-      }, 650 + index * 260));
+      }, 520 + index * 220));
     });
 
     return () => {
-      interactionTask.cancel();
+      cancelIdlePreload();
       preloadTimersRef.current.forEach((timer) => clearTimeout(timer));
       preloadTimersRef.current = [];
     };
@@ -1336,11 +1367,11 @@ export default function TabLayout() {
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <Tabs
-        detachInactiveScreens={false}
+        detachInactiveScreens
         screenOptions={{
           headerShown: false,
           lazy: true,
-          freezeOnBlur: false,
+          freezeOnBlur: true,
           animation: "shift",
           transitionSpec: TAB_TRANSITION_SPEC,
           sceneStyle: { backgroundColor: Colors.background },
@@ -1376,10 +1407,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.16)",
     backgroundColor: "rgba(37,37,37,0.18)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 7,
+    boxShadow: "none",
   },
   iosMiniPlayerBlur: {
     ...StyleSheet.absoluteFillObject,
@@ -1600,7 +1628,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    zIndex: 999,
+    zIndex: 40,
     alignItems: "center",
   },
   wrapperHidden: {
@@ -1615,20 +1643,14 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 0,
     borderColor: "transparent",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.14,
-    shadowRadius: 10,
-    elevation: 0,
+    boxShadow: "none",
   },
   containerIOS: {
     borderTopLeftRadius: 14,
     borderTopRightRadius: 14,
     borderBottomLeftRadius: 14,
     borderBottomRightRadius: 14,
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.16,
-    shadowRadius: 22,
+    boxShadow: "none",
   },
   containerNavOnly: {
     borderTopLeftRadius: 14,
@@ -1803,7 +1825,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     zIndex: 50,
-    elevation: 12,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
   },
   mixTrashDockActive: {
     borderColor: "rgba(255, 92, 92, 0.9)",

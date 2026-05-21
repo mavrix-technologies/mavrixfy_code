@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, Text, Pressable, StyleSheet, AppState, Linking, useWindowDimensions } from "react-native";
+import { View, Text, Pressable, StyleSheet, AppState, Linking, useWindowDimensions, type AppStateStatus } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,9 +8,15 @@ import { db } from "@/lib/firebase";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
+import { mapFilter } from "@/lib/arrayUtils";
 
 const BANNER_HEIGHT = 140;
 const ROTATION_INTERVAL_MS = 8_000;
+
+const subscribeToAppStateChanges = (listener: (state: AppStateStatus) => void) => {
+  const subscription = AppState.addEventListener("change", listener);
+  return () => subscription.remove();
+};
 
 type MediaType   = "image" | "gif" | "video" | "audio";
 type AppPlatform = "web" | "app";
@@ -50,7 +56,7 @@ export default function PromotionBanner() {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading]     = useState(true);
-  const [isVisible, setIsVisible] = useState(true);
+  const isVisibleRef = React.useRef(true);
   const { playSong } = usePlayerActions();
   const { width } = useWindowDimensions();
   const bannerWidth = Math.max(0, width - 32);
@@ -72,9 +78,7 @@ export default function PromotionBanner() {
     getDocs(q)
       .then((snapshot) => {
         if (!active) return;
-        const promos = snapshot.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() } as Promotion))
-          .filter((p) => {
+        const promos = mapFilter(snapshot.docs, (doc) => ({ id: doc.id, ...doc.data() } as Promotion), (p) => {
             const startOk = !p.startDate || p.startDate <= today;
             const endOk   = !p.endDate   || p.endDate   >= today;
             return startOk && endOk;
@@ -99,21 +103,24 @@ export default function PromotionBanner() {
 
   // ── Pause rotation when app is backgrounded ────────────────────────────────
   useEffect(() => {
-    const sub = AppState.addEventListener("change", (state) => {
-      setIsVisible(state === "active");
+    return subscribeToAppStateChanges((state) => {
+      isVisibleRef.current = state === "active";
     });
-    return () => sub.remove();
   }, []);
 
   // ── Auto-rotate ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (promotions.length <= 1 || !isVisible) return;
+    if (promotions.length <= 1) return;
     const id = setInterval(
-      () => setCurrentIndex((prev) => (prev + 1) % promotions.length),
+      () => {
+        if (isVisibleRef.current) {
+          setCurrentIndex((prev) => (prev + 1) % promotions.length);
+        }
+      },
       ROTATION_INTERVAL_MS
     );
     return () => clearInterval(id);
-  }, [promotions.length, isVisible]);
+  }, [promotions.length]);
 
   // ── Action handler ─────────────────────────────────────────────────────────
   const handlePress = useCallback(async (promo: Promotion) => {
@@ -215,8 +222,8 @@ export default function PromotionBanner() {
 
       {promotions.length > 1 && (
         <View style={styles.dotsContainer}>
-          {promotions.map((_, i) => (
-            <Pressable key={i} onPress={() => setCurrentIndex(i)} hitSlop={8}>
+          {promotions.map((promotion, i) => (
+            <Pressable key={promotion.id} onPress={() => setCurrentIndex(i)} hitSlop={8}>
               <View style={[styles.dot, i === currentIndex && styles.dotActive]} />
             </Pressable>
           ))}

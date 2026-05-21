@@ -22,6 +22,7 @@ import { triggerImpact } from "@/lib/haptics";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { setLastMix } from "@/lib/lastMix";
+import { mapFilter, sortedCopy } from "@/lib/arrayUtils";
 
 function pickFirst(v: string | string[] | undefined): string {
   if (Array.isArray(v)) return v[0] ?? "";
@@ -74,6 +75,20 @@ export default function ArtistMixScreen() {
   const mixIds = ids.join(",");
   const mixNames = names.join(",");
   const mixImages = images.join(",");
+  const startMixLoad = useCallback(() => {
+    setLoading(true);
+    setLoadedCount(0);
+  }, []);
+  const incrementLoadedCount = useCallback(() => {
+    setLoadedCount((count) => count + 1);
+  }, []);
+  const finishMixLoad = useCallback((nextSongs: Song[]) => {
+    setSongs(nextSongs);
+    setLoading(false);
+  }, []);
+  const finishEmptyMixLoad = useCallback(() => {
+    setLoading(false);
+  }, []);
 
   // Persist so mini player can re-open this mix and accurately detect active mix playback.
   useEffect(() => {
@@ -88,18 +103,17 @@ export default function ArtistMixScreen() {
 
   // Fetch and filter songs - only include songs where the artist ID matches the selected artist
   useEffect(() => {
-    if (ids.length === 0) { setLoading(false); return; }
+    if (ids.length === 0) { finishEmptyMixLoad(); return; }
     let cancelled = false;
 
     const fetchAll = async () => {
-      setLoading(true);
-      setLoadedCount(0);
+      startMixLoad();
+
+      if (cancelled) return;
 
       const results = await Promise.allSettled(
         ids.map((id) => getArtistDetails(id))
       );
-
-      if (cancelled) return;
 
       const seen = new Set<string>();
       const merged: Song[] = [];
@@ -109,9 +123,7 @@ export default function ArtistMixScreen() {
         const selectedId = ids[idx];
         
         // Only include songs where the primary artist ID matches the selected artist ID
-        const artistSongs = (artist.topSongs ?? [])
-          .map(convertJioSaavnSong)
-          .filter((s) => {
+        const artistSongs = mapFilter((artist.topSongs ?? []), convertJioSaavnSong, (s) => {
             // Only include if:
             // 1. Song has audio URL
             // 2. Song hasn't been added yet
@@ -121,21 +133,20 @@ export default function ArtistMixScreen() {
           });
         
         artistSongs.forEach((s) => { seen.add(s.id); merged.push(s); });
-        if (!cancelled) setLoadedCount((c) => c + 1);
+        if (!cancelled) incrementLoadedCount();
       });
 
       if (!cancelled) {
         // Don't interleave for single artist - just show their songs directly
         const finalSongs = ids.length === 1 ? merged : interleave(merged, ids.length);
-        setSongs(finalSongs);
-        setLoading(false);
+        finishMixLoad(finalSongs);
       }
     };
 
     void fetchAll();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ids.join(",")]);
+  }, [finishEmptyMixLoad, finishMixLoad, incrementLoadedCount, mixIds, startMixLoad]);
 
   const isPlayingFromMix = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
@@ -156,7 +167,7 @@ export default function ArtistMixScreen() {
   const handleShuffle = useCallback(() => {
     if (!songs.length) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-    const shuffled = [...songs].sort(() => Math.random() - 0.5);
+    const shuffled = sortedCopy(songs, () => Math.random() - 0.5);
     playSong(shuffled[0], shuffled);
   }, [songs, playSong]);
 
@@ -176,7 +187,8 @@ export default function ArtistMixScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: bottomPad }}
+        contentInset={{ bottom: bottomPad }}
+        scrollIndicatorInsets={{ bottom: bottomPad }}
         showsVerticalScrollIndicator={false}
       >
         {/* Artist avatars row */}
@@ -197,8 +209,8 @@ export default function ArtistMixScreen() {
         {/* Artist names row - show all selected artists */}
         {ids.length > 1 && (
           <View style={styles.artistNamesContainer}>
-            {names.map((name, i) => (
-              <View key={i} style={styles.artistNameBadge}>
+            {names.map((name) => (
+              <View key={name} style={styles.artistNameBadge}>
                 <Text style={styles.artistNameText} numberOfLines={1}>{name}</Text>
               </View>
             ))}
@@ -238,7 +250,7 @@ export default function ArtistMixScreen() {
           <SongRowSkeleton count={10} />
         ) : songs.length > 0 ? (
           songs.map((song, i) => (
-            <SongRow key={`${song.id}-${i}`} song={song} index={i} queue={songs} />
+            <SongRow key={song.id} song={song} index={i} queue={songs} />
           ))
         ) : (
           <View style={styles.empty}>
@@ -291,11 +303,7 @@ const styles = StyleSheet.create({
     borderColor: "#000",
     overflow: "hidden",
     backgroundColor: "#1a1a1a",
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
+    boxShadow: "none",
   },
   avatar: { width: "100%", height: "100%" },
 

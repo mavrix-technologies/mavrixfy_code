@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import Slider from "@react-native-community/slider";
+import * as Animated from "@/lib/nativeAnimated";
 import {
   View,
   Text,
@@ -11,7 +12,6 @@ import {
   Alert,
   ToastAndroid,
   ActivityIndicator,
-  Animated,
   InteractionManager,
   LayoutChangeEvent,
   GestureResponderEvent,
@@ -19,7 +19,7 @@ import {
   NativeSyntheticEvent,
   StyleProp,
   useWindowDimensions,
-  ViewStyle,
+  ViewStyle
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -42,6 +42,9 @@ import {
 import EqualizerBars from "@/components/EqualizerBars";
 import { getArtistDetails, JioSaavnArtist, searchArtists } from "@/lib/artistService";
 import { isFollowingArtist, toggleFollowArtist } from "@/lib/followedArtists";
+import { mapFilter } from "@/lib/arrayUtils";
+
+const getCurrentTimestamp = () => Date.now();
 
 function hexToRgba(color: string, alpha: number): string {
   const safeAlpha = Math.max(0, Math.min(1, alpha));
@@ -108,7 +111,7 @@ type SmoothControlButtonProps = {
   scaleTo?: number;
 };
 
-const SmoothControlButton = memo(function SmoothControlButton({
+function SmoothControlButton({
   children,
   onPress,
   onPressIn,
@@ -164,7 +167,7 @@ const SmoothControlButton = memo(function SmoothControlButton({
       </Pressable>
     </Animated.View>
   );
-});
+}
 
 type CinematicGradientColors = readonly [string, string, string, string];
 type ArtworkQueueItem = {
@@ -173,7 +176,7 @@ type ArtworkQueueItem = {
 };
 
 function areGradientColorsEqual(a: CinematicGradientColors, b: CinematicGradientColors): boolean {
-  return a.every((color, index) => color === b[index]);
+  return a.length === b.length && a.every((color, index) => color === b[index]);
 }
 
 const CinematicPlayerBackground = memo(function CinematicPlayerBackground({
@@ -248,7 +251,8 @@ const StableArtworkImage = memo(function StableArtworkImage({
   recyclingKey: string;
   priority: "high" | "normal";
 }) {
-  const [visibleUri, setVisibleUri] = useState(uri);
+  const initialUriRef = useRef(uri);
+  const [visibleUri, setVisibleUri] = useState(initialUriRef.current);
   const [loadingUri, setLoadingUri] = useState<string | null>(null);
   const incomingOpacity = useRef(new Animated.Value(1)).current;
 
@@ -313,41 +317,43 @@ const StableArtworkImage = memo(function StableArtworkImage({
   );
 });
 
-const PlayerPlayButton = memo(
-  ({
-    isPlayingOverride,
-    isLoadingOverride,
-    buttonSize,
-    iconSize,
-    onAccentColor,
-    onPress,
-  }: {
-    isPlayingOverride?: boolean;
-    isLoadingOverride?: boolean;
-    buttonSize: number;
-    iconSize: number;
-    onAccentColor: string;
-    onPress: () => void;
-  }) => {
+function PlayerPlayButton({
+  isPlayingOverride,
+  isLoadingOverride,
+  buttonSize,
+  iconSize,
+  onAccentColor,
+  onPress,
+}: {
+  isPlayingOverride?: boolean;
+  isLoadingOverride?: boolean;
+  buttonSize: number;
+  iconSize: number;
+  onAccentColor: string;
+  onPress: () => void;
+}) {
     const playbackState = usePlaybackPlayState();
     const isPlaying = isPlayingOverride ?? playbackState.isPlaying;
     const isLoading = isLoadingOverride ?? (playbackState.isBuffering || playbackState.isLoading);
     const [showSpinner, setShowSpinner] = useState(false);
+    const updateSpinnerVisibility = useCallback((next: boolean) => {
+      setShowSpinner(next);
+    }, []);
 
     useEffect(() => {
       if (!isLoading) {
-        setShowSpinner(false);
+        updateSpinnerVisibility(false);
         return;
       }
 
       const timer = setTimeout(() => {
-        setShowSpinner(true);
+        updateSpinnerVisibility(true);
       }, 180);
 
       return () => {
         clearTimeout(timer);
       };
-    }, [isLoading]);
+    }, [isLoading, updateSpinnerVisibility]);
 
     return (
       <SmoothControlButton
@@ -377,7 +383,6 @@ const PlayerPlayButton = memo(
       </SmoothControlButton>
     );
   }
-);
 
 PlayerPlayButton.displayName = "PlayerPlayButton";
 
@@ -451,14 +456,9 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
     : playerProgress;
   const visualProgress = clampProgress(Number.isFinite(rawVisualProgress) ? rawVisualProgress : 0);
 
-  useEffect(() => {
-    onSeekingChange(isSeeking);
-  }, [isSeeking, onSeekingChange]);
-
-  useEffect(() => {
-    return () => {
-      onSeekingChange(false);
-    };
+  const updateSeeking = useCallback((next: boolean) => {
+    setIsSeeking(next);
+    onSeekingChange(next);
   }, [onSeekingChange]);
 
   useEffect(() => {
@@ -475,9 +475,9 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
 
   const handleSlidingStart = useCallback((value: number) => {
     clearAndroidSeekFallbackTimer();
-    setIsSeeking(true);
+    updateSeeking(true);
     setSeekValue(clampProgress(value));
-  }, [clearAndroidSeekFallbackTimer, clampProgress]);
+  }, [clearAndroidSeekFallbackTimer, clampProgress, updateSeeking]);
 
   const handleSliderValueChange = useCallback((value: number) => {
     setSeekValue(clampProgress(value));
@@ -487,7 +487,7 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
     clearAndroidSeekFallbackTimer();
     const next = clampProgress(value);
     setSeekValue(next);
-    setIsSeeking(false);
+    updateSeeking(false);
     if (isDevPreviewActive) {
       setDevPreviewProgress(next);
       return;
@@ -496,7 +496,7 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
     androidSeekFallbackTimerRef.current = setTimeout(() => {
       setSeekValue(null);
     }, 1500);
-  }, [clearAndroidSeekFallbackTimer, clampProgress, isDevPreviewActive, seekTo, setDevPreviewProgress]);
+  }, [clearAndroidSeekFallbackTimer, clampProgress, isDevPreviewActive, seekTo, setDevPreviewProgress, updateSeeking]);
 
   const handleProgressLayout = useCallback((event: LayoutChangeEvent) => {
     setProgressTrackWidth(event.nativeEvent.layout.width);
@@ -509,7 +509,7 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
   }, [clampProgress, progressTrackWidth, screenWidth]);
 
   const commitSeekProgress = useCallback((next: number) => {
-    setIsSeeking(false);
+    updateSeeking(false);
     setSeekValue(next);
     if (isDevPreviewActive) {
       setDevPreviewProgress(next);
@@ -520,14 +520,14 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
     androidSeekFallbackTimerRef.current = setTimeout(() => {
       setSeekValue(null);
     }, 1500);
-  }, [clearAndroidSeekFallbackTimer, isDevPreviewActive, seekTo, setDevPreviewProgress]);
+  }, [clearAndroidSeekFallbackTimer, isDevPreviewActive, seekTo, setDevPreviewProgress, updateSeeking]);
 
   const handleResponderSeekGrant = useCallback((event: GestureResponderEvent) => {
     if (!usesResponderSeek || !canSeek) return;
     clearAndroidSeekFallbackTimer();
-    setIsSeeking(true);
+    updateSeeking(true);
     setSeekValue(getResponderSeekProgress(event));
-  }, [canSeek, clearAndroidSeekFallbackTimer, getResponderSeekProgress, usesResponderSeek]);
+  }, [canSeek, clearAndroidSeekFallbackTimer, getResponderSeekProgress, updateSeeking, usesResponderSeek]);
 
   const handleResponderSeekMove = useCallback((event: GestureResponderEvent) => {
     if (!usesResponderSeek || !isSeeking) return;
@@ -703,6 +703,47 @@ const QueueSongRow = memo(
 
 QueueSongRow.displayName = "QueueSongRow";
 
+type ArtistExploreItem =
+  | { type: "song"; id: string; song: Song }
+  | { type: "artist"; id: string; name: string; image: string };
+
+function ArtistExploreTile({
+  item,
+  fallbackCoverUrl,
+  onSongPress,
+  onArtistPress,
+}: {
+  item: ArtistExploreItem;
+  fallbackCoverUrl: string;
+  onSongPress: (song: Song) => void;
+  onArtistPress: (artist: { id: string; name: string; image: string }) => void;
+}) {
+  const handlePress = useCallback(() => {
+    if (item.type === "song") {
+      onSongPress(item.song);
+      return;
+    }
+    onArtistPress({ id: item.id, name: item.name, image: item.image });
+  }, [item, onArtistPress, onSongPress]);
+
+  const imageUrl = item.type === "song" ? item.song.coverUrl : item.image || fallbackCoverUrl;
+  const title = item.type === "song" ? item.song.title : `Similar to ${item.name}`;
+
+  return (
+    <Pressable style={styles.exploreTile} onPress={handlePress}>
+      <Image
+        source={{ uri: imageUrl || undefined }}
+        style={styles.exploreTileImage}
+        contentFit="cover"
+        transition={120}
+      />
+      <LinearGradient colors={["transparent", "rgba(0,0,0,0.74)"]} style={styles.exploreTileShade} />
+      {item.type === "song" ? <Text style={styles.exploreTileEyebrow}>Song</Text> : null}
+      <Text style={styles.exploreTileText} numberOfLines={3}>{title}</Text>
+    </Pressable>
+  );
+}
+
 const DEV_PREVIEW_SONGS: Song[] = [
   {
     id: "dev-preview-1",
@@ -738,8 +779,13 @@ const DEV_PREVIEW_SONGS: Song[] = [
     source: "local",
   },
 ];
+const EMPTY_PLAYER_SCROLL_SONGS: Song[] = [];
 
 function LegacyPlayerScreen() {
+  return useLegacyPlayerScreenView();
+}
+
+function useLegacyPlayerScreenView() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -845,38 +891,47 @@ function LegacyPlayerScreen() {
     return unsubscribe;
   }, [navigation]);
 
+  const applyPlayerArtworkColors = useCallback((primary: string, text: string) => {
+    setAlbumColor(primary);
+    setTextColor(text);
+  }, [setAlbumColor, setTextColor]);
+  const clearArtistInfo = useCallback(() => {
+    setArtistInfo(null);
+  }, []);
+  const applyArtistInfoSnapshot = useCallback((details: JioSaavnArtist | null, following: boolean) => {
+    setArtistInfo(details);
+    setArtistFollowing(following);
+  }, []);
+
   useEffect(() => {
     if (!interactionReady) return;
     let active = true;
     const cover = screenSong?.coverUrl?.trim();
     if (!cover) {
-      setAlbumColor("#25282E");
-      setTextColor("#F5FBFF");
+      applyPlayerArtworkColors("#25282E", "#F5FBFF");
       return () => {};
     }
 
     const immediateColors = getImmediateArtworkColor(cover);
-    setAlbumColor(immediateColors.primary);
-    setTextColor(immediateColors.text);
+    applyPlayerArtworkColors(immediateColors.primary, immediateColors.text);
 
     extractDominantColor(cover)
       .then((colors) => {
         if (!active) return;
-        setAlbumColor(colors.primary);
-        setTextColor(colors.text);
+        applyPlayerArtworkColors(colors.primary, colors.text);
       })
       .catch(() => {});
 
     return () => {
       active = false;
     };
-  }, [interactionReady, screenSong?.id, screenSong?.coverUrl, setAlbumColor, setTextColor]);
+  }, [applyPlayerArtworkColors, interactionReady, screenSong?.id, screenSong?.coverUrl]);
 
   // Fetch artist info whenever the current song's artist changes
   useEffect(() => {
     if (!interactionReady) return;
     const artistName = currentSong?.artist?.split(",")[0]?.trim();
-    if (!artistName) { setArtistInfo(null); return; }
+    if (!artistName) { clearArtistInfo(); return; }
 
     let cancelled = false;
     const fetchId = artistName;
@@ -888,16 +943,18 @@ function LegacyPlayerScreen() {
         if (cancelled || artistFetchIdRef.current !== fetchId) return;
         const first = results[0];
         if (!first) return;
-        const details = await getArtistDetails(first.id);
-        if (cancelled || artistFetchIdRef.current !== fetchId) return;
-        setArtistInfo(details);
-        const following = await isFollowingArtist(first.id);
-        if (!cancelled) setArtistFollowing(following);
+        const [details, following] = await Promise.all([
+          getArtistDetails(first.id),
+          isFollowingArtist(first.id),
+        ]);
+        if (!cancelled && artistFetchIdRef.current === fetchId) {
+          applyArtistInfoSnapshot(details, following);
+        }
       })
       .catch(() => {});
 
     return () => { cancelled = true; };
-  }, [interactionReady, currentSong?.artist]);
+  }, [applyArtistInfoSnapshot, clearArtistInfo, interactionReady, currentSong?.artist]);
 
   const rawTopInset = Platform.OS === "web" ? 67 : insets.top;
   const topInset = Platform.OS === "ios" ? Math.max(2, rawTopInset - 18) : rawTopInset;
@@ -960,13 +1017,11 @@ function LegacyPlayerScreen() {
   const playerRepeatMode = isDevPreviewActive ? devPreviewRepeatMode : repeatMode;
 
   useEffect(() => {
-    const urls = [
+    const urls = mapFilter([
       playingQueue[activeQueueIndex - 1]?.coverUrl,
       playingQueue[activeQueueIndex]?.coverUrl,
       playingQueue[activeQueueIndex + 1]?.coverUrl,
-    ]
-      .map((url) => url?.trim())
-      .filter((url): url is string => Boolean(url));
+    ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
     void Image.prefetch(urls, "memory-disk").catch(() => {});
@@ -986,12 +1041,50 @@ function LegacyPlayerScreen() {
     }
     return songs;
   }, [artistInfo?.topSongs, screenSong?.id]);
+  const artistExploreItems = useMemo<ArtistExploreItem[]>(() => {
+    const items: ArtistExploreItem[] = artistTopSongs.slice(0, 5).map((song) => ({
+      type: "song",
+      id: `song-${song.id}`,
+      song,
+    }));
+
+    for (const artist of artistInfo?.similarArtists?.slice(0, 2) ?? []) {
+      items.push({
+        type: "artist",
+        id: `artist-${artist.id}`,
+        name: artist.name,
+        image: artist.image?.length ? getBestImageUrl(artist.image) : "",
+      });
+    }
+
+    return items;
+  }, [artistInfo?.similarArtists, artistTopSongs]);
+  const handleArtistFollowPress = useCallback(async () => {
+    if (!artistInfo) return;
+
+    const image = artistInfo.image?.length ? getBestImageUrl(artistInfo.image) : "";
+    const nowFollowing = await toggleFollowArtist({
+      id: artistInfo.id,
+      name: artistInfo.name,
+      image,
+      followedAt: getCurrentTimestamp(),
+    });
+    setArtistFollowing(nowFollowing);
+  }, [artistInfo]);
   const liked = screenSong
     ? isDevPreviewActive
       ? devPreviewLikedSongIds.includes(screenSong.id)
       : isLiked(screenSong.id)
     : false;
   const queueCountLabel = `${playingQueue.length} ${playingQueue.length === 1 ? "song" : "songs"}`;
+  const queueViewportHeight = Math.min(
+    playingQueue.length * (isShortScreen ? 48 : 54) + 10,
+    isShortScreen ? 286 : 274
+  );
+  const queueViewportStyle = useMemo(
+    () => ({ height: queueViewportHeight }),
+    [queueViewportHeight]
+  );
   const artWrapHorizontalPadding = isShortScreen ? 14 : 20;
   const artCarouselViewportWidth = Math.max(1, screenWidth - artWrapHorizontalPadding * 2);
   const artCarouselPageWidth = artCarouselViewportWidth;
@@ -1106,15 +1199,11 @@ function LegacyPlayerScreen() {
     setIsLoadingDevTrack(true);
     try {
       const recentItems = await getRecentlyPlayed();
-      const recentSongs = recentItems
-        .filter((item) => item.type === "song")
-        .map((item) => normalizePlayableSong(item.data as Partial<Song> | undefined))
-        .filter((song): song is Song => Boolean(song));
+      const recentSongs = mapFilter(recentItems
+        .filter((item) => item.type === "song"), (item) => normalizePlayableSong(item.data as Partial<Song> | undefined), (song): song is Song => Boolean(song));
 
-      const localPlaylistSongs = (await getUserPlaylists())
-        .flatMap((playlist) => playlist.songs || [])
-        .map((song) => normalizePlayableSong(song))
-        .filter((song): song is Song => Boolean(song));
+      const localPlaylistSongs = mapFilter((await getUserPlaylists())
+        .flatMap((playlist) => playlist.songs || []), (song) => normalizePlayableSong(song), (song): song is Song => Boolean(song));
 
       const candidateQueue = [recentSongs, localPlaylistSongs].find((songs) => songs.length > 0) || [];
 
@@ -1288,7 +1377,7 @@ function LegacyPlayerScreen() {
                 borderColor: isActiveCard
                   ? hexToRgba(playerTheme.accent, 0.54)
                   : hexToRgba(playerTheme.accent, decor.borderAlpha),
-                shadowColor: isActiveCard ? hexToRgba(playerTheme.accent, 0.74) : "#000",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
                 transform: [
                   { translateX: slideTranslateX },
                   { translateY: slideTranslateY },
@@ -1343,6 +1432,61 @@ function LegacyPlayerScreen() {
       handleQueueSongPress(item);
     },
     [isDevPreviewActive, playingQueue, handleQueueSongPress]
+  );
+  const queueRows = useMemo(() => {
+    const rows: React.ReactElement[] = [];
+    const occurrenceByKey = new Map<string, number>();
+
+    for (let index = 0; index < playingQueue.length; index += 1) {
+      const item = playingQueue[index];
+      const baseKey = String(item.id || item.audioUrl || item.title || "queue-song");
+      const occurrence = occurrenceByKey.get(baseKey) ?? 0;
+      occurrenceByKey.set(baseKey, occurrence + 1);
+
+      rows.push(
+        <QueueSongRow
+          key={occurrence === 0 ? baseKey : `${baseKey}-duplicate-${occurrence}`}
+          item={item}
+          index={index}
+          isCurrent={index === activeQueueIndex}
+          isShortScreen={isShortScreen}
+          isPlaying={playerIsPlaying}
+          onPress={handleQueueItemPress}
+        />
+      );
+    }
+
+    return rows;
+  }, [activeQueueIndex, handleQueueItemPress, isShortScreen, playerIsPlaying, playingQueue]);
+  const renderPlayerScrollItem = useCallback(() => null, []);
+
+  const handleExploreSongPress = useCallback(
+    (song: Song) => {
+      playSong(song, artistTopSongs);
+    },
+    [artistTopSongs, playSong]
+  );
+
+  const handleExploreArtistPress = useCallback(
+    (artist: { id: string; name: string; image: string }) => {
+      router.push(
+        { pathname: "/artist/[id]", params: { id: artist.id, name: artist.name, image: artist.image } },
+        { withAnchor: true, dangerouslySingular: () => "artist-profile" }
+      );
+    },
+    []
+  );
+
+  const renderExploreItem = useCallback(
+    ({ item }: { item: ArtistExploreItem }) => (
+      <ArtistExploreTile
+        item={item}
+        fallbackCoverUrl={screenSong?.coverUrl || ""}
+        onSongPress={handleExploreSongPress}
+        onArtistPress={handleExploreArtistPress}
+      />
+    ),
+    [handleExploreArtistPress, handleExploreSongPress, screenSong?.coverUrl]
   );
 
 
@@ -1414,17 +1558,20 @@ function LegacyPlayerScreen() {
         </Pressable>
       </View>
 
-      <ScrollView
+      <FlatList
         style={styles.playerScroll}
+        data={EMPTY_PLAYER_SCROLL_SONGS}
+        keyExtractor={(item) => item.id}
+        renderItem={renderPlayerScrollItem}
         contentContainerStyle={[styles.playerScrollContent, { paddingBottom: listBottomPadding }]}
         showsVerticalScrollIndicator={false}
         scrollEnabled={Platform.OS === "android" ? !isProgressSeeking : true}
         keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled={Platform.OS === "android"}
         bounces={Platform.OS === "ios"}
         alwaysBounceVertical={Platform.OS === "ios"}
         overScrollMode="never"
-      >
+        ListHeaderComponent={
+          <>
       <View
         pointerEvents="none"
         style={[
@@ -1667,27 +1814,21 @@ function LegacyPlayerScreen() {
             <Text style={styles.playingListCount}>{queueCountLabel}</Text>
           </View>
         </View>
-
         <ScrollView
+          style={[styles.queueListViewport, queueViewportStyle]}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.queueListContent}
           nestedScrollEnabled
           bounces={false}
           overScrollMode="never"
         >
-          {playingQueue.map((item, index) => (
-            <QueueSongRow
-              key={`${item.id}-${index}`}
-              item={item}
-              index={index}
-              isCurrent={index === activeQueueIndex}
-              isShortScreen={isShortScreen}
-              isPlaying={playerIsPlaying}
-              onPress={handleQueueItemPress}
-            />
-          ))}
+          {queueRows}
         </ScrollView>
       </View>
+          </>
+        }
+        ListFooterComponent={
+          <>
 
       {/* ── About the artist ── */}
       {artistInfo && !isDevPreviewActive ? (
@@ -1721,11 +1862,7 @@ function LegacyPlayerScreen() {
                 </Text>
                 <Pressable
                   style={[styles.artistFollowBtn, artistFollowing && styles.artistFollowBtnActive]}
-                  onPress={async () => {
-                    const img = artistInfo.image?.length ? getBestImageUrl(artistInfo.image) : "";
-                    const nowFollowing = await toggleFollowArtist({ id: artistInfo.id, name: artistInfo.name, image: img, followedAt: Date.now() });
-                    setArtistFollowing(nowFollowing);
-                  }}
+                  onPress={handleArtistFollowPress}
                 >
                   <Text
                     style={[
@@ -1763,62 +1900,20 @@ function LegacyPlayerScreen() {
       ) : null}
 
       {/* ── Explore ── */}
-      {artistInfo && !isDevPreviewActive && (artistTopSongs.length > 0 || artistInfo.similarArtists?.length > 0) ? (
+      {artistInfo && !isDevPreviewActive && artistExploreItems.length > 0 ? (
         <View style={styles.spotifyCard}>
           <View style={styles.exploreHeader}>
             <Text style={styles.exploreTitle}>Explore {artistInfo.name}</Text>
           </View>
 
-          <ScrollView
+          <FlatList
+            data={artistExploreItems}
+            keyExtractor={(item) => item.id}
+            renderItem={renderExploreItem}
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.exploreTileRow}
-          >
-            {artistTopSongs.slice(0, 5).map((song, index) => (
-              <Pressable
-                key={`${song.id}-${index}`}
-                style={styles.exploreTile}
-                onPress={() => {
-                  playSong(song, artistTopSongs);
-                }}
-              >
-                <Image
-                  source={{ uri: song.coverUrl || undefined }}
-                  style={styles.exploreTileImage}
-                  contentFit="cover"
-                  transition={120}
-                />
-                <LinearGradient colors={["transparent", "rgba(0,0,0,0.74)"]} style={styles.exploreTileShade} />
-                <Text style={styles.exploreTileEyebrow}>Song</Text>
-                <Text style={styles.exploreTileText} numberOfLines={3}>{song.title}</Text>
-              </Pressable>
-            ))}
-
-            {artistInfo.similarArtists?.slice(0, 2).map((artist) => {
-              const image = artist.image?.length ? getBestImageUrl(artist.image) : "";
-              return (
-                <Pressable
-                  key={artist.id}
-                  style={styles.exploreTile}
-                  onPress={() => {
-                    router.push(
-                      { pathname: "/artist/[id]", params: { id: artist.id, name: artist.name, image } },
-                      { withAnchor: true, dangerouslySingular: () => "artist-profile" }
-                    );
-                  }}
-                >
-                  <Image
-                    source={{ uri: image || screenSong.coverUrl || undefined }}
-                    style={styles.exploreTileImage}
-                    contentFit="cover"
-                    transition={120}
-                  />
-                  <LinearGradient colors={["transparent", "rgba(0,0,0,0.74)"]} style={styles.exploreTileShade} />
-                  <Text style={styles.exploreTileText} numberOfLines={3}>Similar to {artist.name}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+          />
         </View>
       ) : null}
 
@@ -1835,11 +1930,7 @@ function LegacyPlayerScreen() {
             </View>
             <Pressable
               style={[styles.artistFollowBtn, artistFollowing && styles.artistFollowBtnActive]}
-              onPress={async () => {
-                const img = artistInfo.image?.length ? getBestImageUrl(artistInfo.image) : "";
-                const nowFollowing = await toggleFollowArtist({ id: artistInfo.id, name: artistInfo.name, image: img, followedAt: Date.now() });
-                setArtistFollowing(nowFollowing);
-              }}
+              onPress={handleArtistFollowPress}
             >
               <Text
                 style={[
@@ -1861,8 +1952,9 @@ function LegacyPlayerScreen() {
           ) : null}
         </View>
       ) : null}
-
-      </ScrollView>
+          </>
+        }
+      />
 
       </View>
     </View>
@@ -1978,11 +2070,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(247,250,255,0.16)",
     backgroundColor: "rgba(223,226,235,0.08)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.26,
-    shadowRadius: 18,
-    elevation: 8,
+    boxShadow: "none",
   },
   artFrameDefault: {
     borderRadius: 16,
@@ -2080,7 +2168,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: "center",
     zIndex: 3,
-    elevation: 3,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
   },
   progressTrack: {
     height: 4,
@@ -2103,11 +2191,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     borderWidth: 2,
     transform: [{ translateX: -6 }, { translateY: -6 }],
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 3,
-    elevation: 2,
+    boxShadow: "none",
     zIndex: 4,
   },
   progressSliderNative: {
@@ -2161,6 +2245,13 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.04)",
     maxHeight: 320,
   },
+  queueListContent: {
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+  },
+  queueListViewport: {
+    flexGrow: 0,
+  },
 
   playingListHeader: {
     height: 46,
@@ -2193,10 +2284,6 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
 
-  queueListContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 10,
-  },
   queueRow: {
     height: 54,
     paddingHorizontal: 6,
@@ -2308,11 +2395,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F4F7FB",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.24,
-    shadowRadius: 18,
-    elevation: 8,
+    boxShadow: "none",
   },
   repeatOneBadge: {
     position: "absolute",

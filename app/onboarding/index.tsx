@@ -1,7 +1,17 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import * as Animated from "@/lib/nativeAnimated";
 import {
-  View, Text, TextInput, Pressable, StyleSheet, Platform,
-  ScrollView, ActivityIndicator, Animated, Modal, useWindowDimensions, FlatList,
+  View,
+  Text,
+  TextInput,
+  Pressable,
+  StyleSheet,
+  Platform,
+  ScrollView,
+  ActivityIndicator,
+  Modal,
+  useWindowDimensions,
+  FlatList
 } from "react-native";
 import { Picker } from "@react-native-picker/picker";
 import { Image } from "expo-image";
@@ -17,6 +27,7 @@ import Colors from "@/constants/colors";
 import { searchArtists, ArtistCard } from "@/lib/artistService";
 import { getBestImageUrl } from "@/lib/musicData";
 import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
+import { mapFilter } from "@/lib/arrayUtils";
 
 const GENRES = [
   { id: "hindi",         label: "Hindi",         color: "#E8472A" },
@@ -32,6 +43,7 @@ const GENRES = [
 ];
 
 const GENDERS = ["Male", "Female", "Non-binary", "Other", "Prefer not to say"];
+type GenreOption = typeof GENRES[number];
 
 const SUGGESTED_ARTISTS_BY_GENRE: Record<string, string[]> = {
   hindi:         ["arijit singh", "shreya ghoshal", "jubin nautiyal", "armaan malik", "darshan raval", "b praak"],
@@ -56,11 +68,68 @@ function hapticSuccess() {
   void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 }
 
+function GenreOptionCard({
+  genre,
+  width,
+  active,
+  onToggle,
+}: {
+  genre: GenreOption;
+  width: number;
+  active: boolean;
+  onToggle: (id: string) => void;
+}) {
+  const handlePress = useCallback(() => {
+    haptic();
+    onToggle(genre.id);
+  }, [genre.id, onToggle]);
+
+  return (
+    <Pressable
+      style={[s.genreCard, { width, backgroundColor: genre.color }, active && s.genreCardActive]}
+      onPress={handlePress}
+    >
+      <Text style={s.genreLabel}>{genre.label}</Text>
+      {active ? (
+        <View style={s.genreCheck}>
+          <Ionicons name="checkmark" size={14} color="#fff" />
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
+function ArtistFilterChip({
+  label,
+  activeFilter,
+  onSelect,
+}: {
+  label: string;
+  activeFilter: string;
+  onSelect: (filter: string) => void;
+}) {
+  const active = activeFilter === label;
+  const handlePress = useCallback(() => onSelect(label), [label, onSelect]);
+
+  return (
+    <Pressable
+      style={[s.filterChip, active && s.filterChipActive]}
+      onPress={handlePress}
+    >
+      <Text style={[s.filterChipText, active && s.filterChipTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 // ── Step: Date of Birth ───────────────────────────────────────────────────────
+const MINIMUM_BIRTH_DATE = new Date(1900, 0, 1);
+const FINDING_DOT_KEYS = ["finding-dot-a", "finding-dot-b", "finding-dot-c"] as const;
+
 function StepDOB({ value, onChange, onNext }: {
   value: Date; onChange: (d: Date) => void; onNext: () => void;
 }) {
   const [show, setShow] = useState(false);
+  const [maximumBirthDate] = useState(() => new Date());
   const formatted = value.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
   return (
@@ -75,8 +144,8 @@ function StepDOB({ value, onChange, onNext }: {
           value={value}
           mode="date"
           display="default"
-          maximumDate={new Date()}
-          minimumDate={new Date(1900, 0, 1)}
+          maximumDate={maximumBirthDate}
+          minimumDate={MINIMUM_BIRTH_DATE}
           onChange={(_, d) => { if (d) onChange(d); setShow(false); }}
           themeVariant="dark"
         />
@@ -93,8 +162,8 @@ function StepDOB({ value, onChange, onNext }: {
                 value={value}
                 mode="date"
                 display="spinner"
-                maximumDate={new Date()}
-                minimumDate={new Date(1900, 0, 1)}
+                maximumDate={maximumBirthDate}
+                minimumDate={MINIMUM_BIRTH_DATE}
                 onChange={(_, d) => { if (d) onChange(d); }}
                 themeVariant="dark"
                 style={{ height: 200 }}
@@ -135,7 +204,6 @@ function StepName({ value, onChange, onNext }: {
         placeholderTextColor="rgba(255,255,255,0.3)"
         autoCapitalize="words"
         selectionColor={Colors.primary}
-        autoFocus
       />
       <Text style={s.hint}>This appears on your Mavrixfy profile.</Text>
       <View style={s.divider} />
@@ -237,36 +305,32 @@ function StepGenres({ selected, onToggle, onNext }: {
   const insets = useSafeAreaInsets();
   const cardW = (width - 16 * 2 - 8) / 2;
   const bottomH = Math.max(insets.bottom + 16, 32) + 52 + 24; // padding + btn height + margin
+  const renderGenre = useCallback(
+    ({ item }: { item: GenreOption }) => (
+      <GenreOptionCard
+        genre={item}
+        width={cardW}
+        active={selected.includes(item.id)}
+        onToggle={onToggle}
+      />
+    ),
+    [cardW, onToggle, selected]
+  );
 
   return (
     <View style={{ flex: 1 }}>
       <Text style={[s.stepQ, { paddingHorizontal: 16, paddingTop: 8 }]}>What music do you like?</Text>
-      <ScrollView
-        contentContainerStyle={{
-          flexDirection: "row", flexWrap: "wrap",
-          paddingHorizontal: 16, gap: 8,
-          paddingBottom: bottomH + 16,
-        }}
+      <FlatList
+        data={GENRES}
+        keyExtractor={(genre) => genre.id}
+        renderItem={renderGenre}
+        numColumns={2}
+        columnWrapperStyle={s.genreGridRow}
+        contentContainerStyle={s.genreGrid}
+        contentInset={{ bottom: bottomH + 16 }}
+        scrollIndicatorInsets={{ bottom: bottomH + 16 }}
         showsVerticalScrollIndicator={false}
-      >
-        {GENRES.map((g) => {
-          const active = selected.includes(g.id);
-          return (
-            <Pressable
-              key={g.id}
-              style={[s.genreCard, { width: cardW, backgroundColor: g.color }, active && s.genreCardActive]}
-              onPress={() => { haptic(); onToggle(g.id); }}
-            >
-              <Text style={s.genreLabel}>{g.label}</Text>
-              {active ? (
-                <View style={s.genreCheck}>
-                  <Ionicons name="checkmark" size={14} color="#fff" />
-                </View>
-              ) : null}
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+      />
       <View style={[s.bottomBar, { paddingBottom: Math.max(insets.bottom + 16, 32) }]}>
         <Pressable
           style={[s.nextBtn, { opacity: selected.length > 0 ? 1 : 0.4, marginTop: 0 }]}
@@ -281,13 +345,19 @@ function StepGenres({ selected, onToggle, onNext }: {
 }
 
 // ── Step: Artists ─────────────────────────────────────────────────────────────
-function StepArtists({ genres, selectedIds, onToggle, onFinish, saving }: {
+type StepArtistsProps = {
   genres: string[];
   selectedIds: string[];
   onToggle: (a: ArtistCard) => void;
   onFinish: () => void;
   saving: boolean;
-}) {
+};
+
+function StepArtists(props: StepArtistsProps) {
+  return useStepArtistsView(props);
+}
+
+function useStepArtistsView({ genres, selectedIds, onToggle, onFinish, saving }: StepArtistsProps) {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
@@ -299,6 +369,26 @@ function StepArtists({ genres, selectedIds, onToggle, onFinish, saving }: {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const btnAnim = useRef(new Animated.Value(0)).current;
   const prevMet = useRef(false);
+  const startInitialArtistLoad = useCallback(() => {
+    setLoadingInitial(true);
+  }, []);
+  const applyInitialArtists = useCallback((artists: ArtistCard[]) => {
+    setAllArtists(artists);
+  }, []);
+  const finishInitialArtistLoad = useCallback(() => {
+    setLoadingInitial(false);
+  }, []);
+  const clearArtistSearch = useCallback(() => {
+    setSearchResults([]);
+    setLoadingSearch(false);
+  }, []);
+  const startArtistSearch = useCallback(() => {
+    setLoadingSearch(true);
+  }, []);
+  const finishArtistSearch = useCallback((artists: ArtistCard[]) => {
+    setSearchResults(artists);
+    setLoadingSearch(false);
+  }, []);
 
   // 3 columns: total width minus side padding (32) minus 2 gaps (24) divided by 3
   const colW = Math.floor((width - 32 - 24) / 3);
@@ -323,53 +413,66 @@ function StepArtists({ genres, selectedIds, onToggle, onFinish, saving }: {
     let active = true;
     const queries = genres.flatMap((g) => SUGGESTED_ARTISTS_BY_GENRE[g] ?? []);
     const unique = [...new Set(queries)].slice(0, 15);
-    setLoadingInitial(true);
+    startInitialArtistLoad();
     Promise.allSettled(unique.map((q) => searchArtists(q).then((r) => r[0]).catch(() => null)))
       .then((results) => {
         if (!active) return;
         const seen = new Set<string>();
-        const cards = results
-          .filter((r): r is PromiseFulfilledResult<ArtistCard | null> => r.status === "fulfilled")
-          .map((r) => r.value)
-          .filter((a): a is ArtistCard => { if (!a?.id || seen.has(a.id)) return false; seen.add(a.id); return true; });
-        setAllArtists(cards);
+        const cards = mapFilter(results
+          .filter((r): r is PromiseFulfilledResult<ArtistCard | null> => r.status === "fulfilled"), (r) => r.value, (a): a is ArtistCard => { if (!a?.id || seen.has(a.id)) return false; seen.add(a.id); return true; });
+        applyInitialArtists(cards);
       })
       .finally(() => {
-        if (active) setLoadingInitial(false);
+        if (active) finishInitialArtistLoad();
       });
 
     return () => {
       active = false;
     };
-  }, [genres]);
+  }, [applyInitialArtists, finishInitialArtistLoad, genres, startInitialArtistLoad]);
 
   // Debounced search
   useEffect(() => {
     let active = true;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const q = query.trim();
-    if (!q) { setSearchResults([]); setLoadingSearch(false); return; }
-    setLoadingSearch(true);
+    if (!q) { clearArtistSearch(); return; }
+    startArtistSearch();
     debounceRef.current = setTimeout(() => {
       searchArtists(q)
         .then((results) => {
-          if (active) setSearchResults(results);
+          if (active) finishArtistSearch(results);
         })
-        .finally(() => {
-          if (active) setLoadingSearch(false);
+        .catch(() => {
+          if (active) finishArtistSearch([]);
         });
     }, 350);
     return () => {
       active = false;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query]);
+  }, [clearArtistSearch, finishArtistSearch, query, startArtistSearch]);
 
   const displayArtists = query.trim() ? searchResults : allArtists;
   const isSearching = query.trim().length > 0;
-  const filters = ["For You", ...genres.map((g) => GENRES.find((x) => x.id === g)?.label ?? g)];
+  const filters = useMemo(
+    () => ["For You", ...genres.map((g) => GENRES.find((x) => x.id === g)?.label ?? g)],
+    [genres]
+  );
   // Bottom bar height for FlatList padding
   const bottomBarH = Math.max(insets.bottom + 16, 28) + 52 + 12;
+
+  const handleFilterSelect = useCallback((filter: string) => {
+    haptic();
+    setActiveFilter(filter);
+  }, []);
+
+  const renderFilter = useCallback(
+    ({ item }: { item: string }) => (
+      <ArtistFilterChip label={item} activeFilter={activeFilter} onSelect={handleFilterSelect} />
+    ),
+    [activeFilter, handleFilterSelect]
+  );
 
   const renderArtist = useCallback(({ item: a }: { item: ArtistCard }) => {
     const img = a.image?.length ? getBestImageUrl(a.image) : "";
@@ -442,22 +545,15 @@ function StepArtists({ genres, selectedIds, onToggle, onFinish, saving }: {
       </View>
 
       {/* Filter chips — fixed height, no overflow */}
-      <ScrollView
+      <FlatList
+        data={filters}
+        keyExtractor={(filter) => filter}
+        renderItem={renderFilter}
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={s.filterRow}
         style={{ flexGrow: 0, flexShrink: 0 }}
-      >
-        {filters.map((f) => (
-          <Pressable
-            key={f}
-            style={[s.filterChip, activeFilter === f && s.filterChipActive]}
-            onPress={() => { haptic(); setActiveFilter(f); }}
-          >
-            <Text style={[s.filterChipText, activeFilter === f && s.filterChipTextActive]}>{f}</Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+      />
 
       {/* Artist grid */}
       {loadingInitial || (isSearching && loadingSearch) ? (
@@ -481,7 +577,9 @@ function StepArtists({ genres, selectedIds, onToggle, onFinish, saving }: {
           keyExtractor={(a) => a.id}
           numColumns={3}
           columnWrapperStyle={{ gap: 12, paddingHorizontal: 16 }}
-          contentContainerStyle={{ gap: 24, paddingTop: 8, paddingBottom: metGoal ? bottomBarH + 16 : 24 }}
+          contentContainerStyle={{ gap: 24, paddingTop: 8 }}
+          contentInset={{ bottom: metGoal ? bottomBarH + 16 : 24 }}
+          scrollIndicatorInsets={{ bottom: metGoal ? bottomBarH + 16 : 24 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           style={{ flex: 1 }}
@@ -538,10 +636,10 @@ function StepFinding() {
     <View style={s.center}>
       <View style={{ flexDirection: "row", gap: 10, marginBottom: 20 }}>
         {[d1, d2, d3].map((d, i) => (
-          <Animated.View key={i} style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: "#fff", opacity: d }} />
+          <Animated.View key={FINDING_DOT_KEYS[i]} style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: "#fff", opacity: d }} />
         ))}
       </View>
-      <Text style={s.findingText}>Finding music for you...</Text>
+      <Text style={s.findingText}>Finding music for you…</Text>
     </View>
   );
 }
@@ -579,6 +677,10 @@ function StepGreatPicks({ artists }: { artists: ArtistCard[] }) {
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function OnboardingScreen() {
+  return useOnboardingScreenView();
+}
+
+function useOnboardingScreenView() {
   const insets = useSafeAreaInsets();
   const { user, firebaseUser } = useAuth();
 
@@ -733,6 +835,13 @@ const s = StyleSheet.create({
   pickerItem: { color: "#fff", fontSize: 18, fontFamily: "Inter_400Regular" },
 
   // Genres
+  genreGrid: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  genreGridRow: {
+    gap: 8,
+  },
   genreCard: {
     height: 100, borderRadius: 10, overflow: "hidden",
     justifyContent: "flex-end", padding: 10,

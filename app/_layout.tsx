@@ -1,10 +1,24 @@
-import { QueryClientProvider } from "@tanstack/react-query";
-import { DarkTheme, ThemeProvider } from "@react-navigation/native";
-import { Stack, useRouter, useSegments } from "expo-router";
+import * as Animated from "@/lib/nativeAnimated";
+import {
+  QueryClientProvider } from "@tanstack/react-query";
+import { DarkTheme,
+  ThemeProvider } from "@react-navigation/native";
+import { Stack,
+  useRouter,
+  useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
-import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Platform, StyleSheet, View, Text } from "react-native";
+import React,
+  { useCallback,
+  useEffect,
+  useRef,
+  useState } from "react";
+import { ActivityIndicator,
+  Platform,
+  StyleSheet,
+  View,
+  Text
+} from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -68,33 +82,35 @@ function GlobalToast() {
   const [message, setMessage] = useState("Added to queue");
   const [visible, setVisible] = useState(false);
 
-  useEffect(() => {
-    return subscribeGlobalToast((nextMessage) => {
-      opacity.stopAnimation();
-      opacity.setValue(0);
-      setMessage(nextMessage);
-      setVisible(true);
-      Animated.sequence([
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: 120,
-          isInteraction: false,
-          useNativeDriver: true,
-        }),
-        Animated.delay(GLOBAL_TOAST_VISIBLE_MS),
-        Animated.timing(opacity, {
-          toValue: 0,
-          duration: 160,
-          isInteraction: false,
-          useNativeDriver: true,
-        }),
-      ]).start(({ finished }) => {
-        if (finished) {
-          setVisible(false);
-        }
-      });
+  const showToast = useCallback((nextMessage: string) => {
+    opacity.stopAnimation();
+    opacity.setValue(0);
+    setMessage(nextMessage);
+    setVisible(true);
+    Animated.sequence([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 120,
+        isInteraction: false,
+        useNativeDriver: true,
+      }),
+      Animated.delay(GLOBAL_TOAST_VISIBLE_MS),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 160,
+        isInteraction: false,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        setVisible(false);
+      }
     });
   }, [opacity]);
+
+  useEffect(() => {
+    return subscribeGlobalToast(showToast);
+  }, [showToast]);
 
   if (!visible) return null;
 
@@ -138,7 +154,7 @@ export function preWarmHomeCache() {
 }
 
 function RootLayoutNav() {
-  const router = useRouter();
+  const { replace: routerReplace } = useRouter();
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
 
@@ -163,23 +179,23 @@ function RootLayoutNav() {
             getDoc(doc(db, "users", firebaseUser.uid))
               .then((snap) => {
                 if (snap.exists() && snap.data()?.onboardingCompleted) {
-                  router.replace("/(tabs)");
+                  routerReplace("/(tabs)");
                 } else {
-                  router.replace("/onboarding");
+                  routerReplace("/onboarding");
                 }
               })
-              .catch(() => router.replace("/(tabs)"));
+              .catch(() => routerReplace("/(tabs)"));
           });
         });
       } else {
-        router.replace("/(tabs)");
+        routerReplace("/(tabs)");
       }
     } else if (!isAuthenticated && !isGuest && inProtected) {
-      router.replace("/login");
+      routerReplace("/login");
     } else if (!isAuthenticated && !isGuest && inOnboarding) {
-      router.replace("/login");
+      routerReplace("/login");
     }
-  }, [loading, isAuthenticated, isGuest, firebaseUser, segments, router]);
+  }, [loading, isAuthenticated, isGuest, firebaseUser, segments, routerReplace]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -308,7 +324,7 @@ export default function RootLayout() {
 
   if (error) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', padding: 20 }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#05070A', padding: 20 }}>
         <Text style={{ color: '#ff0000', fontSize: 20, marginBottom: 10 }}>Error Loading App</Text>
         <Text style={{ color: '#fff', fontSize: 14 }}>{error.message}</Text>
       </View>

@@ -10,6 +10,7 @@
 
 import TrackPlayer, { Event, RepeatMode } from "react-native-track-player";
 import { setupPlayer } from "@/lib/trackPlayer";
+import { compactMap } from "@/lib/arrayUtils";
 
 let pausedForDuck = false;
 let commandChain: Promise<void> = Promise.resolve();
@@ -125,9 +126,7 @@ export const trackPlayerService = async () => {
   TrackPlayer.addEventListener(Event.RemotePlaySearch, (e) => runRemoteCommand(async () => {
       const queue = await TrackPlayer.getQueue();
       if (queue.length === 0) return;
-      const terms = [e.title, e.artist, e.album, e.query]
-        .map((v) => String(v ?? "").toLowerCase().trim())
-        .filter(Boolean);
+      const terms = compactMap([e.title, e.artist, e.album, e.query], (v) => String(v ?? "").toLowerCase().trim());
       if (terms.length === 0) {
         await TrackPlayer.skip(0);
         await TrackPlayer.play();

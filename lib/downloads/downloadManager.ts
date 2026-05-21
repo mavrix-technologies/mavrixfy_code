@@ -195,11 +195,7 @@ export async function downloadCollection(
   prefs: DownloadPreferences,
   options?: { userCountry?: string | null }
 ): Promise<{ queued: number; skipped: number; failed: number }> {
-  let queued = 0;
-  let skipped = 0;
-  let failed = 0;
-
-  for (const song of songs) {
+  const results = await Promise.all(songs.map(async (song) => {
     const result = await downloadSong(song, uid, prefs, {
       collectionId,
       userCountry: options?.userCountry,
@@ -207,16 +203,18 @@ export async function downloadCollection(
     if (result.ok) {
       const item = await loadDownload(song.id);
       if (item?.status === "completed") {
-        skipped++;
-      } else {
-        queued++;
+        return "skipped" as const;
       }
-    } else {
-      failed++;
+      return "queued" as const;
     }
-  }
+    return "failed" as const;
+  }));
 
-  return { queued, skipped, failed };
+  return {
+    queued: results.filter((result) => result === "queued").length,
+    skipped: results.filter((result) => result === "skipped").length,
+    failed: results.filter((result) => result === "failed").length,
+  };
 }
 
 // ─── Playback handoff ─────────────────────────────────────────────────────────
@@ -279,9 +277,11 @@ export async function removeSongDownload(
       if (!noRefs) return; // other collections still reference this track
     }
 
-    await cancelDownload(songId);
-    await deleteTrackFiles(songId);
-    await removeDownload(songId);
+    await Promise.all([
+      cancelDownload(songId),
+      deleteTrackFiles(songId),
+      removeDownload(songId),
+    ]);
   } catch (err) {
     logger.error("[DownloadManager] removeSongDownload failed", err);
   }
@@ -290,15 +290,15 @@ export async function removeSongDownload(
 /** Remove all downloads and delete all local files. */
 export async function removeAllDownloads(): Promise<void> {
   try {
-    const all = await loadAllDownloads();
-    for (const item of all) {
-      await cancelDownload(item.songId);
-    }
-    await deleteAllTrackFiles();
-    // Clear the store by removing each item.
-    for (const item of all) {
-      await removeDownload(item.songId);
-    }
+    await loadAllDownloads().then((all) =>
+      Promise.all(all.map((item) => cancelDownload(item.songId))).then(() =>
+        Promise.all([
+          deleteAllTrackFiles(),
+          // Clear the store after queued jobs have stopped touching these entries.
+          Promise.all(all.map((item) => removeDownload(item.songId))),
+        ])
+      )
+    );
   } catch (err) {
     logger.error("[DownloadManager] removeAllDownloads failed", err);
   }
@@ -314,12 +314,10 @@ export async function syncLicenses(uid: string): Promise<void> {
   try {
     const revokedIds = await refreshLicenses(uid);
 
-    for (const songId of revokedIds) {
-      await patchDownload(songId, {
+    await Promise.all([...revokedIds].map((songId) => patchDownload(songId, {
         status: "revoked",
         licenseExpiresAt: null,
-      });
-    }
+      })));
   } catch (err) {
     logger.error("[DownloadManager] syncLicenses failed", err);
   }
@@ -353,18 +351,30 @@ export async function getStorageSummary(): Promise<StorageSummary> {
     let pending = 0;
     let failed = 0;
 
-    for (const item of all) {
+    const completedSizes = await Promise.all(all.map(async (item) => {
       if (item.status === "completed") {
-        completed++;
-        const size = await getTrackFileSize(item.songId);
-        totalBytes += size;
-      } else if (
+        return { status: "completed" as const, size: await getTrackFileSize(item.songId) };
+      }
+      if (
         item.status === "queued" ||
         item.status === "downloading" ||
         item.status === "paused" ||
         item.status === "waiting_for_wifi" ||
         item.status === "waiting_for_charging"
       ) {
+        return { status: "pending" as const, size: 0 };
+      }
+      if (item.status === "failed") {
+        return { status: "failed" as const, size: 0 };
+      }
+      return { status: "other" as const, size: 0 };
+    }));
+
+    for (const item of completedSizes) {
+      if (item.status === "completed") {
+        completed++;
+        totalBytes += item.size;
+      } else if (item.status === "pending") {
         pending++;
       } else if (item.status === "failed") {
         failed++;

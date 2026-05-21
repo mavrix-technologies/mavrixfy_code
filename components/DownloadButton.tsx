@@ -215,14 +215,14 @@ export default function DownloadButton({
       accessibilityLabel={getA11yLabel(status, song.title)}
       accessibilityRole="button"
     >
-      {renderIcon(status, size, progress)}
+      {getIconElement(status, size, progress)}
     </Pressable>
   );
 }
 
 // ─── Icon renderer ────────────────────────────────────────────────────────────
 
-function renderIcon(status: DownloadStatus | "none", size: number, progress: number) {
+function getIconElement(status: DownloadStatus | "none", size: number, progress: number) {
   switch (status) {
 
     case "completed":

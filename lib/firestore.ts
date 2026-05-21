@@ -14,6 +14,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "./firebase";
+import { sortedCopy } from "@/lib/arrayUtils";
 
 export interface FirestorePlaylist {
   id: string;
@@ -60,7 +61,7 @@ function getTimestampMillis(value: any): number {
 }
 
 function sortPlaylistsByNewest(playlists: FirestorePlaylist[]): FirestorePlaylist[] {
-  return [...playlists].sort((a, b) => {
+  return sortedCopy(playlists, (a, b) => {
     const aTime = getTimestampMillis(a.updatedAt) || getTimestampMillis(a.createdAt);
     const bTime = getTimestampMillis(b.updatedAt) || getTimestampMillis(b.createdAt);
     return bTime - aTime;

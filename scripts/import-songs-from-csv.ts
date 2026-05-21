@@ -215,7 +215,10 @@ async function importSongs(csvPath: string, limit?: number) {
     total: songsToImport.length
   };
   
-  for (const song of songsToImport) {
+  const importSongAt = async (index: number): Promise<void> => {
+    if (index >= songsToImport.length) return;
+
+    const song = songsToImport[index];
     const result = await searchSong(song);
     
     if (result) {
@@ -226,7 +229,10 @@ async function importSongs(csvPath: string, limit?: number) {
     
     // Rate limiting
     await new Promise(resolve => setTimeout(resolve, 500));
-  }
+    return importSongAt(index + 1);
+  };
+
+  await importSongAt(0);
   
   console.log('\n' + '='.repeat(60));
   console.log('IMPORT SUMMARY');

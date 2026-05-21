@@ -25,8 +25,12 @@ const SEARCH_DEBOUNCE_MS = 350;
 const NUM_COLUMNS = 3;
 
 export default function AllArtistsScreen() {
+  return useAllArtistsScreenView();
+}
+
+function useAllArtistsScreenView() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { push: routerPush } = useRouter();
   const { width } = useWindowDimensions();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomInset = Math.max(120, insets.bottom + 100);
@@ -45,11 +49,23 @@ export default function AllArtistsScreen() {
   // ── Multi-select state ────────────────────────────────────────────────────
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [selectedArtists, setSelectedArtists] = useState<Map<string, ArtistCard>>(new Map());
+  const selectedArtistsRef = useRef<Map<string, ArtistCard>>(new Map());
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchIdRef = useRef(0);
   const navigatingRef = useRef(false);
+  const clearArtistSearch = useCallback(() => {
+    setSearchResults([]);
+    setLoadingSearch(false);
+  }, []);
+  const startArtistSearch = useCallback(() => {
+    setLoadingSearch(true);
+  }, []);
+  const finishArtistSearch = useCallback((id: number, results: ArtistCard[]) => {
+    if (searchIdRef.current !== id) return;
+    setSearchResults(results);
+    setLoadingSearch(false);
+  }, []);
 
   useEffect(() => {
     getFeaturedArtists()
@@ -60,22 +76,22 @@ export default function AllArtistsScreen() {
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const trimmed = query.trim();
-    if (!trimmed) { setSearchResults([]); setLoadingSearch(false); return; }
-    setLoadingSearch(true);
+    if (!trimmed) { clearArtistSearch(); return; }
+    startArtistSearch();
     const id = ++searchIdRef.current;
     debounceRef.current = setTimeout(async () => {
       try {
-        const results = await searchArtists(trimmed);
         if (searchIdRef.current !== id) return;
-        setSearchResults(results);
+        const results = await searchArtists(trimmed);
+        if (searchIdRef.current === id) {
+          finishArtistSearch(id, results);
+        }
       } catch {
-        if (searchIdRef.current === id) setSearchResults([]);
-      } finally {
-        if (searchIdRef.current === id) setLoadingSearch(false);
+        finishArtistSearch(id, []);
       }
     }, SEARCH_DEBOUNCE_MS);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [query]);
+  }, [clearArtistSearch, finishArtistSearch, query, startArtistSearch]);
 
   const toggleSelect = useCallback((artist: ArtistCard) => {
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
@@ -85,27 +101,25 @@ export default function AllArtistsScreen() {
       else next.add(artist.id);
       return next;
     });
-    setSelectedArtists((prev) => {
-      const next = new Map(prev);
-      if (next.has(artist.id)) {
-        next.delete(artist.id);
-      } else {
-        next.set(artist.id, artist);
-      }
-      return next;
-    });
+    const nextArtists = new Map(selectedArtistsRef.current);
+    if (nextArtists.has(artist.id)) {
+      nextArtists.delete(artist.id);
+    } else {
+      nextArtists.set(artist.id, artist);
+    }
+    selectedArtistsRef.current = nextArtists;
   }, []);
 
   const openArtist = useCallback((artist: ArtistCard) => {
     if (navigatingRef.current) return;
     navigatingRef.current = true;
     const img = artist.image?.length ? getBestImageUrl(artist.image) : "";
-    router.push(
+    routerPush(
       { pathname: "/artist/[id]", params: { id: artist.id, name: artist.name, image: img } },
       { withAnchor: true, dangerouslySingular: () => "artist-profile" }
     );
     setTimeout(() => { navigatingRef.current = false; }, 600);
-  }, [router]);
+  }, [routerPush]);
 
   const handleCardPress = useCallback((artist: ArtistCard) => {
     if (selectMode) {
@@ -119,24 +133,24 @@ export default function AllArtistsScreen() {
     void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
     setSelectMode(true);
     setSelectedIds(new Set([artist.id]));
-    setSelectedArtists(new Map([[artist.id, artist]]));
+    selectedArtistsRef.current = new Map([[artist.id, artist]]);
   }, []);
 
   const cancelSelect = useCallback(() => {
     setSelectMode(false);
     setSelectedIds(new Set());
-    setSelectedArtists(new Map());
+    selectedArtistsRef.current = new Map();
   }, []);
 
   const openMix = useCallback(() => {
-    const selected = Array.from(selectedArtists.values());
+    const selected = Array.from(selectedArtistsRef.current.values());
     if (selected.length === 0) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
     const ids    = selected.map((a) => a.id).join(",");
     const names  = selected.map((a) => a.name).join(",");
     const images = selected.map((a) => getBestImageUrl(a.image)).join(",");
-    router.push({ pathname: "/artist-mix", params: { ids, names, images } });
-  }, [selectedArtists, router]);
+    routerPush({ pathname: "/artist-mix", params: { ids, names, images } });
+  }, [routerPush]);
 
   const renderCard = useCallback(({ item }: { item: ArtistCard }) => {
     const img = item.image?.length ? getBestImageUrl(item.image) : "";
@@ -445,7 +459,7 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: 20,
     zIndex: 50,
-    elevation: 50,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
   },
   floatingMixBtn: {
     height: 52,

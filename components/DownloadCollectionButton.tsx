@@ -120,9 +120,9 @@ export default function DownloadCollectionButton({
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
 
-  const handlePress = useCallback(async () => {
+  const handlePress = useCallback(() => {
     if (!ctx) return;
-    await triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
 
     // ── All downloaded → confirm remove ──────────────────────────────────────
     if (allDone) {
@@ -135,9 +135,7 @@ export default function DownloadCollectionButton({
             text: "Remove All",
             style: "destructive",
             onPress: async () => {
-              for (const song of songs) {
-                await ctx.removeDownload(song.id, collectionId);
-              }
+              await Promise.all(songs.map((song) => ctx.removeDownload(song.id, collectionId)));
             },
           },
         ]
@@ -156,17 +154,16 @@ export default function DownloadCollectionButton({
           {
             text: "Pause All",
             onPress: async () => {
-              for (const song of songs) {
+              const pauseableSongs = songs.filter((song) => {
                 const item = ctx.getDownload(song.id);
-                if (
+                return (
                   item?.status === "downloading" ||
                   item?.status === "queued" ||
                   item?.status === "waiting_for_wifi" ||
                   item?.status === "waiting_for_charging"
-                ) {
-                  await ctx.pauseDownload(song.id);
-                }
-              }
+                );
+              });
+              await Promise.all(pauseableSongs.map((song) => ctx.pauseDownload(song.id)));
             },
           },
         ]

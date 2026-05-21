@@ -3,7 +3,8 @@
  * Uses expo-audio (SDK 54+), the modern replacement for expo-av.
  */
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
-import type { AudioPlayer } from "expo-audio";
+import type { AudioPlayer, AudioSample } from "expo-audio";
+import { publishPlaybackAudioSample, resetPlaybackAudioLevels } from "@/lib/playbackAudioLevels";
 
 // ─── singletons ───────────────────────────────────────────────────────────────
 
@@ -12,7 +13,16 @@ let activePlayer: AudioPlayer | null = null;
 let currentUrl: string | null = null;
 let seekBlockUntil = 0;
 let seekResetTimer: ReturnType<typeof setTimeout> | null = null;
-const playerSubscriptions = new WeakMap<AudioPlayer, { remove?: () => void }>();
+type PlayerSubscription = {
+  remove?: () => void;
+};
+
+type PlayerSubscriptions = {
+  status?: PlayerSubscription;
+  sample?: PlayerSubscription;
+};
+
+const playerSubscriptions = new WeakMap<AudioPlayer, PlayerSubscriptions>();
 
 // Monotonically increasing request id.
 // Every loadAndPlay increments this. Callbacks from older players are dropped.
@@ -50,10 +60,14 @@ export function clearListeners(): void {
  */
 function killPlayer(p: AudioPlayer | null): void {
   if (!p) return;
-  try { playerSubscriptions.get(p)?.remove?.(); } catch {}
+  const subscriptions = playerSubscriptions.get(p);
+  try { subscriptions?.status?.remove?.(); } catch {}
+  try { subscriptions?.sample?.remove?.(); } catch {}
   playerSubscriptions.delete(p);
+  try { p.setAudioSamplingEnabled(false); } catch {}
   try { p.pause(); } catch {}   // stop audio output immediately
   try { p.remove(); } catch {}  // release native resources
+  resetPlaybackAudioLevels();
 }
 
 function clearSeekResetTimer(): void {
@@ -79,7 +93,7 @@ async function ensureAudioMode(): Promise<void> {
 }
 
 function attachListener(p: AudioPlayer, gen: number): void {
-  const subscription = p.addListener("playbackStatusUpdate", (status) => {
+  const status = p.addListener("playbackStatusUpdate", (status) => {
     if (gen !== generation || !statusCb) return;
     if (Date.now() < seekBlockUntil && !status.didJustFinish) return;
     statusCb({
@@ -89,7 +103,21 @@ function attachListener(p: AudioPlayer, gen: number): void {
       didJustFinish: status.didJustFinish ?? false,
     });
   });
-  playerSubscriptions.set(p, subscription ?? {});
+
+  let sample: PlayerSubscription | undefined;
+  if (p.isAudioSamplingSupported) {
+    try {
+      p.setAudioSamplingEnabled(true);
+      sample = p.addListener("audioSampleUpdate", (audioSample: AudioSample) => {
+        if (gen !== generation) return;
+        publishPlaybackAudioSample(audioSample);
+      });
+    } catch {
+      resetPlaybackAudioLevels();
+    }
+  }
+
+  playerSubscriptions.set(p, { status: status ?? {}, sample });
 }
 
 // ─── public API ───────────────────────────────────────────────────────────────
@@ -112,28 +140,29 @@ export async function loadAndPlay(url: string): Promise<void> {
   killPlayer(prev);
 
   try {
+    if (myGen !== generation) return;
+
     // 3. Set audio mode once (cached after first call).
     await ensureAudioMode();
 
-    // 4. If another loadAndPlay fired while we awaited, bail — it already
-    //    killed whatever we would have created.
-    if (myGen !== generation) return;
+    // 4. If another loadAndPlay fired while we awaited, it already owns playback.
+    if (myGen === generation) {
+      // 5. Create the new player (synchronous in expo-audio).
+      currentUrl = url;
+      seekBlockUntil = 0;
+      const p = createAudioPlayer(url, { updateInterval: 500 });
 
-    // 5. Create the new player (synchronous in expo-audio).
-    currentUrl = url;
-    seekBlockUntil = 0;
-    const p = createAudioPlayer(url, { updateInterval: 500 });
+      // 6. Guard again — another call may have arrived during createAudioPlayer.
+      if (myGen !== generation) {
+        killPlayer(p);
+        return;
+      }
 
-    // 6. Guard again — another call may have arrived during createAudioPlayer.
-    if (myGen !== generation) {
-      killPlayer(p);
-      return;
+      // 7. Register as the active player, wire events, start playback.
+      activePlayer = p;
+      attachListener(p, myGen);
+      p.play();
     }
-
-    // 7. Register as the active player, wire events, start playback.
-    activePlayer = p;
-    attachListener(p, myGen);
-    p.play();
   } catch (err: any) {
     if (myGen === generation) {
       errorCb?.(err?.message || String(err) || "Playback failed");
@@ -156,6 +185,7 @@ export function stop(): void {
   currentUrl = null;
   clearSeekResetTimer();
   killPlayer(p);
+  resetPlaybackAudioLevels();
 }
 
 export function destroy(): void {

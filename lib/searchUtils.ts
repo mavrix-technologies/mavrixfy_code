@@ -20,6 +20,7 @@
  */
 
 import { Song } from "./musicData";
+import { mapFilter } from "@/lib/arrayUtils";
 
 export function normalizeText(text: string): string {
   if (!text) return "";
@@ -184,7 +185,7 @@ export function rankSongs(
 ): Array<{ song: Song; score: number; isBestMatch: boolean }> {
   const queryIntent = detectQueryIntent(query);
 
-  const scored = songs.map(song => {
+  const scored = mapFilter(songs, song => {
     return {
       song,
       score:      calculateFinalScore(song, query, queryIntent),
@@ -192,7 +193,7 @@ export function rankSongs(
       textMatch:  calculateTextMatchScore(song.title, song.artist, query),
       jiosaavnPop: calculatePopularityScore(song),
     };
-  }).filter(item => item.score >= minScore);
+  }, item => item.score >= minScore);
 
   scored.sort((a, b) => {
     // 1. Clear score gap

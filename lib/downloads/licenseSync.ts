@@ -197,15 +197,15 @@ export async function refreshLicenses(uid: string): Promise<Set<string>> {
     const now = Date.now();
     const graceCutoff = now - LICENSE_GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
 
-    for (const docSnap of snap.docs) {
+    await Promise.all(snap.docs.map(async (docSnap) => {
       const license = docSnap.data() as OfflineLicense;
 
       // Only process licenses for this device.
-      if (license.deviceId !== deviceId) continue;
+      if (license.deviceId !== deviceId) return;
 
       if (license.status === "revoked") {
         revoked.add(license.songId);
-        continue;
+        return;
       }
 
       if (license.status === "expired") {
@@ -214,7 +214,7 @@ export async function refreshLicenses(uid: string): Promise<Set<string>> {
         if (failedMs < graceCutoff) {
           revoked.add(license.songId);
         }
-        continue;
+        return;
       }
 
       // Check expiry.
@@ -245,7 +245,7 @@ export async function refreshLicenses(uid: string): Promise<Set<string>> {
           revoked.add(license.songId);
         }
       }
-    }
+    }));
 
     // Update last sync time on the device document.
     await setDoc(

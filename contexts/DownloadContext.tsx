@@ -12,7 +12,7 @@
 
 import React, {
   createContext,
-  useContext,
+  use,
   useState,
   useEffect,
   useCallback,
@@ -53,6 +53,11 @@ import {
 import { getDownloadEntitlement } from "@/lib/downloads/entitlement";
 import { useAuth } from "@/contexts/AuthContext";
 import { logger } from "@/lib/logger";
+
+const subscribeToAppStateChanges = (listener: (state: AppStateStatus) => void) => {
+  const subscription = AppState.addEventListener("change", listener);
+  return () => subscription.remove();
+};
 
 // ─── External store for per-song download items ───────────────────────────────
 // Components subscribe to individual song IDs, not the whole map.
@@ -248,8 +253,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         .catch(() => {});
     };
 
-    const sub = AppState.addEventListener("change", handleAppState);
-    return () => sub.remove();
+    return subscribeToAppStateChanges(handleAppState);
   }, [uid]);
 
   // ─── Storage summary ────────────────────────────────────────────────────────
@@ -406,13 +410,13 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 
 export function useDownloads(): DownloadContextValue {
-  const ctx = useContext(DownloadContext);
+  const ctx = use(DownloadContext);
   if (!ctx) throw new Error("useDownloads must be used within DownloadProvider");
   return ctx;
 }
 
 export function useDownloadsSafe(): DownloadContextValue | null {
-  return useContext(DownloadContext);
+  return use(DownloadContext);
 }
 
 /**

@@ -118,8 +118,10 @@ export async function getLikedSongsData(): Promise<Song[]> {
 }
 
 export async function addLikedSong(song: Song): Promise<void> {
-  const ids = await getLikedSongIds();
-  const data = await getLikedSongsData();
+  const [ids, data] = await Promise.all([
+    getLikedSongIds(),
+    getLikedSongsData(),
+  ]);
   if (!ids.includes(song.id)) {
     ids.unshift(song.id);
     data.unshift(song);
@@ -131,8 +133,10 @@ export async function addLikedSong(song: Song): Promise<void> {
 }
 
 export async function removeLikedSong(songId: string): Promise<void> {
-  const ids = await getLikedSongIds();
-  const data = await getLikedSongsData();
+  const [ids, data] = await Promise.all([
+    getLikedSongIds(),
+    getLikedSongsData(),
+  ]);
   await Promise.all([
     setJSON(KEYS.LIKED_SONGS, ids.filter(id => id !== songId)),
     setJSON(KEYS.LIKED_SONGS_DATA, data.filter(s => s.id !== songId)),

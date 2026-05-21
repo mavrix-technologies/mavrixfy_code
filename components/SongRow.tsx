@@ -1,11 +1,11 @@
 import React, { memo, useCallback, useEffect, useRef } from "react";
+import * as Animated from "@/lib/nativeAnimated";
 import {
   View,
   Text,
   Pressable,
   StyleSheet,
-  Platform,
-  Animated as RNAnimated,
+  Platform
 } from "react-native";
 import { Swipeable } from "react-native-gesture-handler";
 import { Image } from "expo-image";
@@ -45,7 +45,7 @@ function queueSignature(queue?: Song[]): string {
 function QueueSwipeAction({
   dragX,
 }: {
-  dragX: RNAnimated.AnimatedInterpolation<number>;
+  dragX: Animated.AnimatedInterpolation<number>;
 }) {
   const actionOpacity = dragX.interpolate({
     inputRange: [0, 10, 42],
@@ -72,13 +72,13 @@ function QueueSwipeAction({
   });
 
   return (
-    <RNAnimated.View
+    <Animated.View
       pointerEvents="none"
       style={[styles.queueAction, { opacity: actionOpacity }]}
     >
       <View style={styles.queueActionBase} />
-      <RNAnimated.View style={[styles.queueActionCommit, { opacity: commitOpacity }]} />
-      <RNAnimated.View
+      <Animated.View style={[styles.queueActionCommit, { opacity: commitOpacity }]} />
+      <Animated.View
         style={[
           styles.queueActionContent,
           { transform: [{ translateX: contentTranslateX }, { scale: contentScale }] },
@@ -90,8 +90,8 @@ function QueueSwipeAction({
             <Ionicons name="add" size={15} color="#FFFFFF" />
           </View>
         </View>
-      </RNAnimated.View>
-    </RNAnimated.View>
+      </Animated.View>
+    </Animated.View>
   );
 }
 
@@ -168,8 +168,8 @@ const SongRow = memo(function SongRow({
   }, [resetSwipeStateSoon]);
 
   const renderLeftActions = useCallback((
-    _progress: RNAnimated.AnimatedInterpolation<number>,
-    dragX: RNAnimated.AnimatedInterpolation<number>,
+    _progress: Animated.AnimatedInterpolation<number>,
+    dragX: Animated.AnimatedInterpolation<number>,
   ) => (
     <QueueSwipeAction dragX={dragX} />
   ), []);

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from "react";
+import React, { createContext, use, useState, useEffect, useCallback, useMemo, ReactNode } from "react";
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -22,6 +22,7 @@ import { Platform } from "react-native";
 import { deleteUserFirestoreData } from "@/lib/firestore";
 import { clearAppStorage } from "@/lib/storage";
 import { clearUserCache } from "@/lib/cache";
+import { compactMap } from "@/lib/arrayUtils";
 
 interface AppUser {
   id: string;
@@ -85,32 +86,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsGuest(false);
   }, []);
 
+  const applyAuthenticatedSnapshot = useCallback((fbUser: FirebaseUser) => {
+    setFirebaseUser(fbUser);
+    setUser({
+      id: fbUser.uid,
+      email: fbUser.email || "",
+      name: fbUser.displayName || "",
+      picture: fbUser.photoURL || "",
+    });
+    setIsGuest(false);
+    setLoading(false);
+  }, []);
+
+  const applySignedOutSnapshot = useCallback(() => {
+    setFirebaseUser(null);
+    setUser(null);
+    setIsGuest(false);
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
-        // Set Firebase user immediately so the app can navigate
-        setFirebaseUser(fbUser);
-        // Set a minimal user object right away — don't wait for Firestore
-        setUser({
-          id: fbUser.uid,
-          email: fbUser.email || "",
-          name: fbUser.displayName || "",
-          picture: fbUser.photoURL || "",
-        });
-        setIsGuest(false);
-        setLoading(false);
+        applyAuthenticatedSnapshot(fbUser);
         // Enrich with Firestore data in the background (non-blocking)
         buildAppUser(fbUser).then(setUser).catch(() => {});
       } else {
-        setFirebaseUser(null);
-        setUser(null);
-        setIsGuest(false);
-        setLoading(false);
+        applySignedOutSnapshot();
       }
     });
 
     return unsubscribe;
-  }, [buildAppUser]);
+  }, [applyAuthenticatedSnapshot, applySignedOutSnapshot, buildAppUser]);
 
   const login = useCallback(async (email: string, password: string) => {
     const cred = await signInWithEmailAndPassword(auth, email, password);
@@ -133,22 +140,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const normalizedEmail = email.trim();
     const displayName = fullName.trim();
     const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
-    await updateProfile(cred.user, { displayName });
-    // Create user doc WITHOUT onboardingCompleted — the onboarding flow sets it
-    await setDoc(doc(db, "users", cred.user.uid), {
-      uid: cred.user.uid,
-      email: normalizedEmail,
-      emailLower: normalizedEmail.toLowerCase(),
-      displayName,
-      fullName: displayName,
-      imageUrl: null,
-      photoURL: null,
-      provider: "password",
-      onboardingCompleted: false,
-      schemaVersion: 2,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    await Promise.all([
+      updateProfile(cred.user, { displayName }),
+      // Create user doc WITHOUT onboardingCompleted — the onboarding flow sets it
+      setDoc(doc(db, "users", cred.user.uid), {
+        uid: cred.user.uid,
+        email: normalizedEmail,
+        emailLower: normalizedEmail.toLowerCase(),
+        displayName,
+        fullName: displayName,
+        imageUrl: null,
+        photoURL: null,
+        provider: "password",
+        onboardingCompleted: false,
+        schemaVersion: 2,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }),
+    ]);
     const appUser: AppUser = {
       id: cred.user.uid,
       email: normalizedEmail,
@@ -251,9 +260,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error("No signed-in account was found.");
     }
 
-    const providerIds = currentUser.providerData
-      .map((provider) => provider.providerId)
-      .filter(Boolean);
+    const providerIds = compactMap(currentUser.providerData, (provider) => provider.providerId);
     const primaryProviderId = providerIds[0] || currentUser.providerId;
 
     if (primaryProviderId === "password") {
@@ -285,8 +292,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    await deleteUserFirestoreData(currentUser.uid);
-    await clearAppStorage();
+    await Promise.all([
+      deleteUserFirestoreData(currentUser.uid),
+      clearAppStorage(),
+    ]);
     await deleteUser(currentUser);
     clearAuthState(currentUser.uid);
   }, [clearAuthState]);
@@ -327,7 +336,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
+  const ctx = use(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }

@@ -2,6 +2,7 @@ import { DeviceEventEmitter, Platform } from "react-native";
 import TrackPlayer, { Event, RepeatMode } from "react-native-track-player";
 import { setupPlayer } from "@/lib/trackPlayer";
 import type { Song } from "@/lib/musicData";
+import { mapFilter } from "@/lib/arrayUtils";
 
 type AutoRemoteEvent = {
   command?: string;
@@ -78,7 +79,7 @@ function emitAutoQueueApplied(tracks: Song[], startIndex: number): void {
 function playableQueueFromEvent(event: AutoRemoteEvent): Song[] {
   const selectedSong = toPlayableSong(event.song);
   const queue = Array.isArray(event.queue)
-    ? event.queue.map(toPlayableSong).filter((song): song is Song => Boolean(song))
+    ? mapFilter(event.queue, toPlayableSong, (song): song is Song => Boolean(song))
     : [];
 
   if (!selectedSong) return queue;
@@ -93,7 +94,7 @@ async function emitCurrentNativeQueue(): Promise<void> {
     TrackPlayer.getActiveTrackIndex(),
   ]);
   const songs = Array.isArray(queue)
-    ? queue.map(trackToSong).filter((song): song is Song => Boolean(song))
+    ? mapFilter(queue, trackToSong, (song): song is Song => Boolean(song))
     : [];
   if (songs.length === 0) return;
   emitAutoQueueApplied(

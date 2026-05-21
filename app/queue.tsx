@@ -37,15 +37,17 @@ const SWIPE_ACTION_WIDTH = 92;
 const QueueSwipeRow = React.memo(
   ({
     item,
-    onPress,
-    onRemove,
+    itemIndex,
+    onSongPress,
+    onRemoveAt,
     onSwipeOpen,
     onDrag,
     isDragging,
   }: {
     item: Song;
-    onPress: () => void;
-    onRemove: () => void;
+    itemIndex: number;
+    onSongPress: (song: Song) => void;
+    onRemoveAt: (index: number) => void;
     onSwipeOpen: (ref: Swipeable | null) => void;
     onDrag: () => void;
     isDragging?: boolean;
@@ -54,8 +56,13 @@ const QueueSwipeRow = React.memo(
 
     const handleRemove = React.useCallback(() => {
       swipeableRef.current?.close();
-      onRemove();
-    }, [onRemove]);
+      onRemoveAt(itemIndex);
+    }, [itemIndex, onRemoveAt]);
+
+    const handlePress = React.useCallback(() => {
+      swipeableRef.current?.close();
+      onSongPress(item);
+    }, [item, onSongPress]);
 
     const renderRightActions = React.useCallback(() => (
       <Pressable style={styles.removeAction} onPress={handleRemove}>
@@ -84,10 +91,7 @@ const QueueSwipeRow = React.memo(
                   styles.queueRow,
                   pressed && styles.rowPressed,
                 ]}
-                onPress={() => {
-                  swipeableRef.current?.close();
-                  onPress();
-                }}
+                onPress={handlePress}
               >
                 <Image
                   recyclingKey={item.id}
@@ -128,18 +132,20 @@ export default function QueueScreen() {
   const { playSong, removeFromQueue, reorderQueue, shuffleQueue, sleepTimer } = usePlayerActions();
   const openSwipeableRef = useRef<Swipeable | null>(null);
   const lastPlaceholderIndexRef = useRef<number | null>(null);
+  const didMountListRef = useRef(false);
   const [listReady, setListReady] = useState(false);
   const isCompactHeight = height < 760;
   const bottomListSpacer = isCompactHeight ? 40 : 56;
 
+  const showList = useCallback(() => {
+    if (didMountListRef.current) return;
+    didMountListRef.current = true;
+    setListReady(true);
+  }, []);
+
   useEffect(() => {
     let mountTimer: ReturnType<typeof setTimeout> | null = null;
-    let didMountList = false;
-    const showList = () => {
-      if (didMountList) return;
-      didMountList = true;
-      setListReady(true);
-    };
+    didMountListRef.current = false;
 
     const task = InteractionManager.runAfterInteractions(() => {
       mountTimer = setTimeout(showList, 90);
@@ -153,7 +159,7 @@ export default function QueueScreen() {
         clearTimeout(mountTimer);
       }
     };
-  }, []);
+  }, [showList]);
 
   const nowPlaying = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const upcomingQueue = useMemo(() => {
@@ -232,10 +238,9 @@ export default function QueueScreen() {
         ) : null}
         <QueueSwipeRow
           item={item.song}
-          onPress={() => handleSongPress(item.song)}
-          onRemove={() => {
-            void removeFromQueue(item.index);
-          }}
+          itemIndex={item.index}
+          onSongPress={handleSongPress}
+          onRemoveAt={removeFromQueue}
           onSwipeOpen={handleSwipeOpen}
           onDrag={drag}
           isDragging={isActive}
@@ -490,11 +495,7 @@ const styles = StyleSheet.create({
   },
   draggingRow: {
     zIndex: 20,
-    elevation: 8,
-    shadowColor: "#000000",
-    shadowOpacity: 0.28,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
+    boxShadow: "none",
   },
   rowLayer: {
     backgroundColor: SHEET_BACKGROUND,

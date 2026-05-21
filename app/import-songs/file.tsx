@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import * as Animated from "@/lib/nativeAnimated";
 import {
   View,
   Text,
+  FlatList,
   ScrollView,
   Pressable,
   StyleSheet,
@@ -10,10 +12,9 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
-  Animated,
   Easing,
   PanResponder,
-  Dimensions,
+  useWindowDimensions
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -33,13 +34,113 @@ import { triggerImpact } from "@/lib/haptics";
 import { createUserPlaylist, addSongToPlaylist, getUserPlaylists, UserPlaylist } from "@/lib/storage";
 import { createFirestorePlaylist, addLikedSongToFirestore, getUserFirestorePlaylists, FirestorePlaylist, addSongToFirestorePlaylist } from "@/lib/firestore";
 
+function getParsedSongKey(song: ParsedSong): string {
+  return song.spotifyUri || song.isrc || `${song.title}-${song.artist}`;
+}
+
+function ImportedSongRow({
+  song,
+  index,
+  onRemove,
+}: {
+  song: ParsedSong;
+  index: number;
+  onRemove: (index: number) => void;
+}) {
+  const handleRemove = useCallback(() => onRemove(index), [index, onRemove]);
+
+  return (
+    <View style={styles.songItem}>
+      {song.imageUrl ? (
+        <Image
+          source={{ uri: song.imageUrl }}
+          style={styles.songIconPlaceholder}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+        />
+      ) : (
+        <View style={styles.songIconPlaceholder}>
+          <Ionicons name="musical-note" size={20} color={Colors.subtext} />
+        </View>
+      )}
+
+      <View style={styles.songInfo}>
+        <Text style={styles.songTitle} numberOfLines={1}>{song.title}</Text>
+        <View style={styles.songMetaRow}>
+          <Text style={styles.songArtist} numberOfLines={1}>{song.artist}</Text>
+          {song.matchConfidence ? (
+            <View style={[
+              styles.matchBadge,
+              song.matchConfidence === "high" && styles.matchBadgeHigh,
+              song.matchConfidence === "medium" && styles.matchBadgeMedium,
+              song.matchConfidence === "low" && styles.matchBadgeLow,
+            ]}>
+              <Text style={styles.matchBadgeText}>
+                {song.matchConfidence === "high" ? "High" :
+                 song.matchConfidence === "medium" ? "Good" :
+                 "Low"}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+
+      <Pressable
+        onPress={handleRemove}
+        hitSlop={8}
+        style={styles.removeButton}
+      >
+        <Ionicons name="close-circle" size={22} color={Colors.inactive} />
+      </Pressable>
+    </View>
+  );
+}
+
+type ImportDestinationPlaylist = UserPlaylist | FirestorePlaylist;
+
+function ImportPlaylistChoiceRow({
+  playlist,
+  selectedPlaylistId,
+  onSelect,
+}: {
+  playlist: ImportDestinationPlaylist;
+  selectedPlaylistId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const selected = selectedPlaylistId === playlist.id;
+  const handlePress = useCallback(() => onSelect(playlist.id), [onSelect, playlist.id]);
+  const songCount = ("songs" in playlist ? playlist.songs?.length : 0) || 0;
+
+  return (
+    <Pressable
+      style={[
+        styles.playlistItem,
+        selected && styles.playlistItemSelected,
+      ]}
+      onPress={handlePress}
+    >
+      <Ionicons
+        name={selected ? "checkmark-circle" : "ellipse-outline"}
+        size={20}
+        color={selected ? Colors.primary : Colors.subtext}
+      />
+      <Text style={styles.playlistItemText}>{playlist.name}</Text>
+      <Text style={styles.playlistItemCount}>{songCount} songs</Text>
+    </Pressable>
+  );
+}
+
 export default function FileImportScreen() {
+  return useFileImportScreenView();
+}
+
+function useFileImportScreenView() {
   const insets = useSafeAreaInsets();
   const { fileUri, fileName } = useLocalSearchParams<{ fileUri: string; fileName: string }>();
   const { user } = useAuth();
   
   const [parsedSongs, setParsedSongs] = useState<ParsedSong[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [fileLoading, setFileLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentStep, setCurrentStep] = useState<'parse' | 'searching' | 'review' | 'importing' | 'complete'>('parse');
@@ -51,13 +152,17 @@ export default function FileImportScreen() {
   const [importDestination, setImportDestination] = useState<'liked' | 'new-playlist' | 'existing-playlist'>('liked');
   const [showDestinationModal, setShowDestinationModal] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState("");
-  const [createdPlaylistId, setCreatedPlaylistId] = useState<string | null>(null);
+  const createdPlaylistIdRef = useRef<string | null>(null);
   const [userPlaylists, setUserPlaylists] = useState<(UserPlaylist | FirestorePlaylist)[]>([]);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
-  const [isFirestorePlaylist, setIsFirestorePlaylist] = useState(false);
+  const isFirestorePlaylistRef = useRef(false);
+  const readySongCount = useMemo(
+    () => parsedSongs.reduce((count, song) => count + (song.audioUrl ? 1 : 0), 0),
+    [parsedSongs]
+  );
   
   // Bottom sheet animation
-  const screenHeight = Dimensions.get('window').height;
+  const { height: screenHeight } = useWindowDimensions();
   const modalTranslateY = useRef(new Animated.Value(screenHeight)).current;
   const modalOpacity = useRef(new Animated.Value(0)).current;
   
@@ -85,7 +190,7 @@ export default function FileImportScreen() {
     }
 
     try {
-      setIsLoading(true);
+      setFileLoading(true);
       setCurrentStep('parse');
       
       // Get file info first
@@ -120,7 +225,7 @@ export default function FileImportScreen() {
       }
 
       setParsedSongs(result.songs);
-      setIsLoading(false);
+      setFileLoading(false);
       
       // Automatically start searching for songs
       await searchAllSongs(result.songs);
@@ -138,7 +243,7 @@ export default function FileImportScreen() {
       );
       router.back();
     } finally {
-      setIsLoading(false);
+      setFileLoading(false);
     }
   }, [fileName, fileUri]);
 
@@ -252,10 +357,12 @@ export default function FileImportScreen() {
     let found = 0;
     let processed = 0;
 
-    for (let batchStart = 0; batchStart < updatedSongs.length; batchStart += batchSize) {
+    const processBatch = async (batchStart: number): Promise<void> => {
+      if (batchStart >= updatedSongs.length) return;
+
       const batchEnd = Math.min(batchStart + batchSize, updatedSongs.length);
       const batch = updatedSongs.slice(batchStart, batchEnd);
-      
+
       // Process batch in parallel
       await Promise.all(
         batch.map(async (song, batchIndex) => {
@@ -269,26 +376,29 @@ export default function FileImportScreen() {
             const matchResult = await searchSong(song.title, song.artist, song.album, song);
 
             if (matchResult && matchResult.song) {
+              const matchedSong = matchResult.song;
               // Extract media URLs
               let audioUrl = "";
-              if (matchResult.song.downloadUrl) {
-                if (Array.isArray(matchResult.song.downloadUrl)) {
-                  const urls = matchResult.song.downloadUrl;
+              const downloadUrls = matchedSong.downloadUrl;
+              if (downloadUrls) {
+                if (Array.isArray(downloadUrls)) {
+                  const urls = downloadUrls;
                   const downloadUrl = urls[urls.length - 1] || urls[4] || urls[3] || urls[2] || urls[1] || urls[0];
                   audioUrl = downloadUrl?.url || downloadUrl?.link || downloadUrl || "";
-                } else if (typeof matchResult.song.downloadUrl === 'string') {
-                  audioUrl = matchResult.song.downloadUrl;
+                } else if (typeof downloadUrls === 'string') {
+                  audioUrl = downloadUrls;
                 }
               }
               
               let imageUrl = "";
-              if (matchResult.song.image) {
-                if (Array.isArray(matchResult.song.image)) {
-                  const images = matchResult.song.image;
+              const matchedImages = matchedSong.image;
+              if (matchedImages) {
+                if (Array.isArray(matchedImages)) {
+                  const images = matchedImages;
                   const image = images[images.length - 1] || images[2] || images[1] || images[0];
                   imageUrl = image?.url || image?.link || image || "";
-                } else if (typeof matchResult.song.image === 'string') {
-                  imageUrl = matchResult.song.image;
+                } else if (typeof matchedImages === 'string') {
+                  imageUrl = matchedImages;
                 }
               }
               
@@ -336,8 +446,11 @@ export default function FileImportScreen() {
       // Small delay between batches
       if (batchEnd < updatedSongs.length) {
         await new Promise(resolve => setTimeout(resolve, 200));
+        await processBatch(batchEnd);
       }
-    }
+    };
+
+    await processBatch(0);
 
     setIsSearching(false);
     setCurrentStep('review');
@@ -379,14 +492,14 @@ export default function FileImportScreen() {
             ""
           );
           playlistId = result?.id || null;
-          setCreatedPlaylistId(playlistId);
-          setIsFirestorePlaylist(true);
+          createdPlaylistIdRef.current = playlistId;
+          isFirestorePlaylistRef.current = true;
           isNewPlaylistFirestore = true;
         } else {
           const result = await createUserPlaylist(newPlaylistName || "Imported Playlist");
           playlistId = result.id;
-          setCreatedPlaylistId(playlistId);
-          setIsFirestorePlaylist(false);
+          createdPlaylistIdRef.current = playlistId;
+          isFirestorePlaylistRef.current = false;
           isNewPlaylistFirestore = false;
         }
       } catch {
@@ -396,17 +509,19 @@ export default function FileImportScreen() {
       }
     } else if (importDestination === 'existing-playlist') {
       playlistId = selectedPlaylistId;
-      setCreatedPlaylistId(playlistId);
+      createdPlaylistIdRef.current = playlistId;
       const selectedPlaylist = userPlaylists.find(p => p.id === playlistId);
       const isFirestore = selectedPlaylist ? 'createdBy' in selectedPlaylist : false;
-      setIsFirestorePlaylist(isFirestore);
+      isFirestorePlaylistRef.current = isFirestore;
       isNewPlaylistFirestore = isFirestore;
     }
 
     const updatedSongs = [...parsedSongs];
     
-    // Process songs sequentially to avoid race conditions
-    for (let i = 0; i < updatedSongs.length; i++) {
+    // Process songs sequentially to avoid race conditions.
+    const processSongAt = async (i: number): Promise<void> => {
+      if (i >= updatedSongs.length) return;
+
       const song = updatedSongs[i];
       
       // Skip songs without audio
@@ -416,7 +531,7 @@ export default function FileImportScreen() {
         const currentProgress = Math.floor(((i + 1) / updatedSongs.length) * 100);
         setProgress(currentProgress);
         setParsedSongs([...updatedSongs]);
-        continue;
+        return processSongAt(i + 1);
       }
 
       try {
@@ -466,7 +581,7 @@ export default function FileImportScreen() {
           const currentProgress = Math.floor(((i + 1) / updatedSongs.length) * 100);
           setProgress(currentProgress);
           setParsedSongs([...updatedSongs]);
-          continue;
+          return processSongAt(i + 1);
         }
 
         updatedSongs[i] = {
@@ -488,7 +603,10 @@ export default function FileImportScreen() {
       const currentProgress = Math.floor(((i + 1) / updatedSongs.length) * 100);
       setProgress(currentProgress);
       setParsedSongs([...updatedSongs]);
-    }
+      return processSongAt(i + 1);
+    };
+
+    await processSongAt(0);
 
     // Wait for Firestore writes to complete
     if (isNewPlaylistFirestore) {
@@ -499,14 +617,30 @@ export default function FileImportScreen() {
     setCurrentStep('complete');
   };
 
-  const removeSong = (index: number) => {
-    const newSongs = [...parsedSongs];
-    newSongs.splice(index, 1);
-    setParsedSongs(newSongs);
-  };
+  const removeSong = useCallback((index: number) => {
+    setParsedSongs((currentSongs) => currentSongs.filter((_, songIndex) => songIndex !== index));
+  }, []);
+
+  const renderParsedSong = useCallback(
+    ({ item, index }: { item: ParsedSong; index: number }) => (
+      <ImportedSongRow song={item} index={index} onRemove={removeSong} />
+    ),
+    [removeSong]
+  );
+
+  const renderImportPlaylistChoice = useCallback(
+    ({ item }: { item: ImportDestinationPlaylist }) => (
+      <ImportPlaylistChoiceRow
+        playlist={item}
+        selectedPlaylistId={selectedPlaylistId}
+        onSelect={setSelectedPlaylistId}
+      />
+    ),
+    [selectedPlaylistId]
+  );
 
   // Loading state
-  if (isLoading || currentStep === 'parse') {
+  if (fileLoading || currentStep === 'parse') {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
         <LinearGradient
@@ -515,7 +649,7 @@ export default function FileImportScreen() {
         />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.loadingText}>Parsing file...</Text>
+          <Text style={styles.loadingText}>Parsing file…</Text>
         </View>
       </View>
     );
@@ -620,6 +754,7 @@ export default function FileImportScreen() {
           <Pressable
             style={styles.completeButton}
             onPress={() => {
+              const createdPlaylistId = createdPlaylistIdRef.current;
               if ((importDestination === 'new-playlist' || importDestination === 'existing-playlist') && createdPlaylistId) {
                 const selectedPlaylist = userPlaylists.find((playlist) => playlist.id === selectedPlaylistId);
                 const playlistTitle =
@@ -627,7 +762,7 @@ export default function FileImportScreen() {
                     ? newPlaylistName.trim() || "Imported Playlist"
                     : selectedPlaylist?.name || "Imported Playlist";
 
-                if (isFirestorePlaylist) {
+                if (isFirestorePlaylistRef.current) {
                   router.replace({
                     pathname: "/playlist/[id]",
                     params: {
@@ -685,91 +820,49 @@ export default function FileImportScreen() {
         <View style={{ width: 28 }} />
       </View>
 
-      <ScrollView
+      <FlatList
+        data={parsedSongs}
+        keyExtractor={getParsedSongKey}
+        renderItem={renderParsedSong}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        {/* File Info Card */}
-        <View style={styles.fileInfoCard}>
-          <View style={styles.fileIconContainer}>
-            <Ionicons name="document-text" size={24} color={Colors.primary} />
-          </View>
-          <View style={styles.fileInfo}>
-            <Text style={styles.fileName} numberOfLines={1}>{fileName}</Text>
-            <Text style={styles.songCount}>
-              {parsedSongs.filter(s => s.audioUrl).length} of {parsedSongs.length} songs ready to import
-            </Text>
-          </View>
-        </View>
-
-        {/* Song List */}
-        <View style={styles.songListHeader}>
-          <Text style={styles.songListTitle}>Songs</Text>
-        </View>
-
-        {parsedSongs.map((song, index) => (
-          <View key={index} style={styles.songItem}>
-            {song.imageUrl ? (
-              <Image 
-                source={{ uri: song.imageUrl }} 
-                style={styles.songIconPlaceholder}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-              />
-            ) : (
-              <View style={styles.songIconPlaceholder}>
-                <Ionicons name="musical-note" size={20} color={Colors.subtext} />
+        ListHeaderComponent={
+          <>
+            <View style={styles.fileInfoCard}>
+              <View style={styles.fileIconContainer}>
+                <Ionicons name="document-text" size={24} color={Colors.primary} />
               </View>
-            )}
-            
-            <View style={styles.songInfo}>
-              <Text style={styles.songTitle} numberOfLines={1}>{song.title}</Text>
-              <View style={styles.songMetaRow}>
-                <Text style={styles.songArtist} numberOfLines={1}>{song.artist}</Text>
-                {song.matchConfidence && (
-                  <View style={[
-                    styles.matchBadge,
-                    song.matchConfidence === 'high' && styles.matchBadgeHigh,
-                    song.matchConfidence === 'medium' && styles.matchBadgeMedium,
-                    song.matchConfidence === 'low' && styles.matchBadgeLow,
-                  ]}>
-                    <Text style={styles.matchBadgeText}>
-                      {song.matchConfidence === 'high' ? 'High' : 
-                       song.matchConfidence === 'medium' ? 'Good' : 
-                       'Low'}
-                    </Text>
-                  </View>
-                )}
+              <View style={styles.fileInfo}>
+                <Text style={styles.fileName} numberOfLines={1}>{fileName}</Text>
+                <Text style={styles.songCount}>
+                  {readySongCount} of {parsedSongs.length} songs ready to import
+                </Text>
               </View>
             </View>
 
-            <Pressable
-              onPress={() => removeSong(index)}
-              hitSlop={8}
-              style={styles.removeButton}
-            >
-              <Ionicons name="close-circle" size={22} color={Colors.inactive} />
-            </Pressable>
-          </View>
-        ))}
-      </ScrollView>
+            <View style={styles.songListHeader}>
+              <Text style={styles.songListTitle}>Songs</Text>
+            </View>
+          </>
+        }
+      />
 
       {/* Bottom Button */}
       <View style={styles.bottomContainer}>
         <Pressable
-          style={[styles.importButton, parsedSongs.filter(s => s.audioUrl).length === 0 && styles.importButtonDisabled]}
+          style={[styles.importButton, readySongCount === 0 && styles.importButtonDisabled]}
           onPress={handleStartImport}
-          disabled={parsedSongs.filter(s => s.audioUrl).length === 0}
+          disabled={readySongCount === 0}
         >
           <LinearGradient
-            colors={parsedSongs.filter(s => s.audioUrl).length === 0 ? ["#444", "#555"] : [Colors.primary, "#84E655"]}
+            colors={readySongCount === 0 ? ["#444", "#555"] : [Colors.primary, "#84E655"]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.importButtonGradient}
           >
             <Text style={styles.importButtonText}>
-              Import {parsedSongs.filter(s => s.audioUrl).length} {parsedSongs.filter(s => s.audioUrl).length === 1 ? 'Song' : 'Songs'}
+              Import {readySongCount} {readySongCount === 1 ? "Song" : "Songs"}
             </Text>
             <Ionicons name="arrow-forward" size={20} color="#fff" />
           </LinearGradient>
@@ -877,32 +970,16 @@ export default function FileImportScreen() {
               </Pressable>
 
               {importDestination === 'existing-playlist' && (
-                <ScrollView style={styles.playlistList} nestedScrollEnabled>
-                  {userPlaylists.length === 0 ? (
+                <FlatList
+                  data={userPlaylists}
+                  keyExtractor={(playlist) => playlist.id}
+                  renderItem={renderImportPlaylistChoice}
+                  style={styles.playlistList}
+                  nestedScrollEnabled
+                  ListEmptyComponent={
                     <Text style={styles.noPlaylistsText}>No playlists found. Create one first!</Text>
-                  ) : (
-                    userPlaylists.map((playlist) => (
-                      <Pressable
-                        key={playlist.id}
-                        style={[
-                          styles.playlistItem,
-                          selectedPlaylistId === playlist.id && styles.playlistItemSelected
-                        ]}
-                        onPress={() => setSelectedPlaylistId(playlist.id)}
-                      >
-                        <Ionicons 
-                          name={selectedPlaylistId === playlist.id ? "checkmark-circle" : "ellipse-outline"} 
-                          size={20} 
-                          color={selectedPlaylistId === playlist.id ? Colors.primary : Colors.subtext} 
-                        />
-                        <Text style={styles.playlistItemText}>{playlist.name}</Text>
-                        <Text style={styles.playlistItemCount}>
-                          {('songs' in playlist ? playlist.songs?.length : 0) || 0} songs
-                        </Text>
-                      </Pressable>
-                    ))
-                  )}
-                </ScrollView>
+                  }
+                />
               )}
 
               <View style={styles.modalButtons}>
@@ -1097,15 +1174,11 @@ const styles = StyleSheet.create({
   actionButton: {
     borderRadius: 24,
     overflow: "hidden",
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
+    boxShadow: "none",
   },
   actionButtonDisabled: {
     opacity: 0.5,
-    shadowOpacity: 0,
+    boxShadow: "none",
   },
   actionButtonGradient: {
     flexDirection: "row",
@@ -1423,11 +1496,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: "90%",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 20,
+    boxShadow: "none",
   },
   modalDragHandle: {
     alignItems: "center",
@@ -1695,15 +1764,11 @@ const styles = StyleSheet.create({
   importButton: {
     borderRadius: 24,
     overflow: "hidden",
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
+    boxShadow: "none",
   },
   importButtonDisabled: {
     opacity: 0.5,
-    shadowOpacity: 0,
+    boxShadow: "none",
   },
   importButtonGradient: {
     flexDirection: "row",
@@ -1737,11 +1802,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 8,
+    boxShadow: "none",
   },
   simpleSearchTitle: {
     fontSize: 26,
@@ -1798,5 +1859,3 @@ const styles = StyleSheet.create({
     borderRadius: 24,
   },
 });
-
-

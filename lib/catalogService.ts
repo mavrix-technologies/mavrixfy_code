@@ -6,6 +6,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Song } from '@/lib/musicData';
 import { logger } from '@/lib/logger';
+import { mapFilter } from "@/lib/arrayUtils";
 
 let _cache: Song[] | null = null;
 let _cacheTime = 0;
@@ -34,8 +35,7 @@ async function fetchCatalogSongs(): Promise<Song[]> {
   try {
     const snap = await getDocs(collection(db, 'songs'));
 
-    const songs: Song[] = snap.docs
-      .map((d): Song | null => {
+    const songs: Song[] = mapFilter(snap.docs, (d): Song | null => {
         const data = d.data();
         const audioUrl = data.audioUrl || data.streamUrl || data.url || '';
         if (!audioUrl || !data.title) {
@@ -61,8 +61,7 @@ async function fetchCatalogSongs(): Promise<Song[]> {
           hasLyrics: false,
           source: 'local' as const,
         };
-      })
-      .filter((s): s is Song => s !== null);
+      }, (s): s is Song => s !== null);
 
     _cache = songs;
     _cacheTime = Date.now();

@@ -29,6 +29,7 @@ import {
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { filterMap, sortedCopy } from "@/lib/arrayUtils";
 
 interface PlaylistResult {
   id: string;
@@ -64,6 +65,64 @@ const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
 
 const CARD_ROTATION_PATTERN = [-11, 8, -7, 10, -5, 6] as const;
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
+
+function BrowseCategoryCard({
+  category,
+  index,
+  onPress,
+}: {
+  category: BrowseCategory;
+  index: number;
+  onPress: (title: string) => void;
+}) {
+  const handlePress = useCallback(() => onPress(category.title), [category.title, onPress]);
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.browseCard,
+        { backgroundColor: category.color },
+        pressed && styles.browseCardPressed,
+      ]}
+      onPress={handlePress}
+    >
+      <Text style={styles.browseCardTitle}>{category.title}</Text>
+      <Image
+        source={{ uri: category.imageUrl }}
+        style={[
+          styles.browseCardImage,
+          { transform: [{ rotate: `${CARD_ROTATION_PATTERN[index % CARD_ROTATION_PATTERN.length]}deg` }] },
+        ]}
+        contentFit="cover"
+        transition={100}
+      />
+    </Pressable>
+  );
+}
+
+function ResultFilterChip({
+  filter,
+  activeFilter,
+  onSelect,
+}: {
+  filter: { key: ResultFilter; label: string };
+  activeFilter: ResultFilter;
+  onSelect: (filter: ResultFilter) => void;
+}) {
+  const active = activeFilter === filter.key;
+  const handlePress = useCallback(() => onSelect(filter.key), [filter.key, onSelect]);
+
+  return (
+    <Pressable
+      style={[styles.filterChip, active && styles.filterChipActive]}
+      onPress={handlePress}
+    >
+      <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+        {filter.label}
+      </Text>
+    </Pressable>
+  );
+}
 
 const STITCH_RECENT_SEARCHES: RecentSearchItem[] = [
   {
@@ -206,8 +265,12 @@ function stableHash(input: string): number {
 }
 
 export default function SearchScreen() {
+  return useSearchScreenView();
+}
+
+function useSearchScreenView() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { push: routerPush } = useRouter();
   const params = useLocalSearchParams<{ q?: string | string[]; name?: string | string[] }>();
   const { isOnline } = useNetwork();
   const [query, setQuery] = useState("");
@@ -218,7 +281,7 @@ export default function SearchScreen() {
     STITCH_RECENT_SEARCHES
   );
   const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
-  const [isLoading, setIsLoading] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeqRef = useRef(0);
   const activeSearchAbortRef = useRef<AbortController | null>(null);
@@ -230,9 +293,13 @@ export default function SearchScreen() {
   const shuffledBrowseCategories = useMemo(() => {
     const hero = STITCH_BROWSE_CATEGORIES.find((item) => item.isHero);
     const rest = STITCH_BROWSE_CATEGORIES.filter((item) => !item.isHero);
-    const randomized = [...rest].sort(() => Math.random() - 0.5);
+    const randomized = sortedCopy(rest, () => Math.random() - 0.5);
     return hero ? [hero, ...randomized] : randomized;
   }, []);
+  const browseCategories = useMemo(
+    () => filterMap(shuffledBrowseCategories, (category) => !category.isHero, (category) => category),
+    [shuffledBrowseCategories]
+  );
 
   const performSearch = useCallback(async (searchQuery: string) => {
     const requestId = ++requestSeqRef.current;
@@ -243,7 +310,7 @@ export default function SearchScreen() {
       setSongResults([]);
       setPlaylistResults([]);
       setSearchDisplayQuery("");
-      setIsLoading(false);
+      setSearchLoading(false);
       return;
     }
 
@@ -259,14 +326,14 @@ export default function SearchScreen() {
       setSongResults(cached.songs);
       setPlaylistResults(cached.playlists);
       setSearchDisplayQuery(normalizedQuery);
-      setIsLoading(false);
+      setSearchLoading(false);
       if (activeSearchAbortRef.current === controller) {
         activeSearchAbortRef.current = null;
       }
       return;
     }
 
-    setIsLoading(true);
+    setSearchLoading(true);
     const apiUrl = getApiUrl();
     const parsedQuery = parseStructuredQuery(normalizedQuery);
     const searchTerm = parsedQuery.freeText || normalizedQuery;
@@ -341,76 +408,80 @@ export default function SearchScreen() {
     // Fast rank using JioSaavn playCount only — no network wait
     const fastRank = (songs: Song[]) =>
       rankSongs(songs, normalizedQuery, 5).map(r => r.song).slice(0, 15);
+    const requestIsActive = () =>
+      requestId === requestSeqRef.current && !controller.signal.aborted;
 
     try {
+      if (!requestIsActive()) return;
+
       // OPTIMIZATION: Fetch catalog songs first (instant, local)
       const catalogSongs = await getCatalogSongs().catch(() => [] as Song[]);
-      
-      if (requestId !== requestSeqRef.current || controller.signal.aborted) return;
 
-      // Show catalog results immediately
-      const songsMap = new Map<string, Song>();
-      for (const s of searchCatalog(catalogSongs, normalizedQuery)) {
-        mergeInto(songsMap, s);
-      }
-      
-      const catalogResults = toFinalList(songsMap);
-      if (catalogResults.length > 0) {
-        setSongResults(fastRank(catalogResults));
-        setSearchDisplayQuery(normalizedQuery);
-      }
+      if (requestIsActive()) {
+        // Show catalog results immediately
+        const songsMap = new Map<string, Song>();
+        for (const s of searchCatalog(catalogSongs, normalizedQuery)) {
+          mergeInto(songsMap, s);
+        }
 
-      // OPTIMIZATION: Fetch songs and playlists in parallel (network)
-      const [songsData, playlistsData] = await Promise.all([
-        safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=12`),
-        safeFetch(`${apiUrl}api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=6`),
-      ]);
+        const catalogResults = toFinalList(songsMap);
+        if (catalogResults.length > 0) {
+          setSongResults(fastRank(catalogResults));
+          setSearchDisplayQuery(normalizedQuery);
+        }
 
-      if (requestId !== requestSeqRef.current || controller.signal.aborted) return;
+        // OPTIMIZATION: Fetch songs and playlists in parallel (network)
+        const [songsData, playlistsData] = await Promise.all([
+          safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=12`),
+          safeFetch(`${apiUrl}api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=6`),
+        ]);
 
-      // Merge network results with catalog results
-      for (const s of (songsData?.data?.results || songsData?.results || [])) {
-        const song = parseBackup(s);
-        if (song) mergeInto(songsMap, song);
-      }
+        if (requestIsActive()) {
+          // Merge network results with catalog results
+          for (const s of (songsData?.data?.results || songsData?.results || [])) {
+            const song = parseBackup(s);
+            if (song) mergeInto(songsMap, song);
+          }
 
-      const playlists = playlistsData?.success
-        ? normalizePlaylistResults(playlistsData.data?.results)
-        : Array.isArray(playlistsData?.results)
-          ? normalizePlaylistResults(playlistsData.results)
-          : [];
+          const playlists = playlistsData?.success
+            ? normalizePlaylistResults(playlistsData.data?.results)
+            : Array.isArray(playlistsData?.results)
+              ? normalizePlaylistResults(playlistsData.results)
+              : [];
 
-      const songs = toFinalList(songsMap);
-      const rankedSongs = fastRank(songs);
+          const songs = toFinalList(songsMap);
+          const rankedSongs = fastRank(songs);
 
-      // Cache results
-      searchCacheRef.current.set(cacheKey, {
-        songs: rankedSongs,
-        playlists,
-        timestamp: now
-      });
+          // Cache results
+          searchCacheRef.current.set(cacheKey, {
+            songs: rankedSongs,
+            playlists,
+            timestamp: now
+          });
 
-      // Limit cache size to 20 entries
-      if (searchCacheRef.current.size > 20) {
-        const firstKey = searchCacheRef.current.keys().next().value;
-        if (firstKey) searchCacheRef.current.delete(firstKey);
-      }
+          // Limit cache size to 20 entries
+          if (searchCacheRef.current.size > 20) {
+            const firstKey = searchCacheRef.current.keys().next().value;
+            if (firstKey) searchCacheRef.current.delete(firstKey);
+          }
 
-      // Show final results with network data
-      setSongResults(rankedSongs);
-      setPlaylistResults(playlists);
-      setSearchDisplayQuery(normalizedQuery);
-      setIsLoading(false);
-      if (activeSearchAbortRef.current === controller) {
-        activeSearchAbortRef.current = null;
+          // Show final results with network data
+          setSongResults(rankedSongs);
+          setPlaylistResults(playlists);
+          setSearchDisplayQuery(normalizedQuery);
+          setSearchLoading(false);
+          if (activeSearchAbortRef.current === controller) {
+            activeSearchAbortRef.current = null;
+          }
+        }
       }
 
     } catch {
-      if (requestId !== requestSeqRef.current || controller.signal.aborted) return;
+      if (!requestIsActive()) return;
       setSongResults([]);
       setPlaylistResults([]);
       setSearchDisplayQuery(normalizedQuery);
-      setIsLoading(false);
+      setSearchLoading(false);
       if (activeSearchAbortRef.current === controller) {
         activeSearchAbortRef.current = null;
       }
@@ -469,6 +540,13 @@ export default function SearchScreen() {
     [performSearch, rememberRecentSearch]
   );
 
+  const renderBrowseCategory = useCallback(
+    ({ item, index }: { item: BrowseCategory; index: number }) => (
+      <BrowseCategoryCard category={item} index={index} onPress={handleGenrePress} />
+    ),
+    [handleGenrePress]
+  );
+
   const handleRecentSearchPress = useCallback(
     (label: string) => {
       const next = label.trim();
@@ -487,6 +565,32 @@ export default function SearchScreen() {
     setRecentSearches((prev) => prev.filter((item) => item.id !== id));
   }, []);
 
+  const handleResultFilterSelect = useCallback((filter: ResultFilter) => {
+    setResultFilter(filter);
+  }, []);
+
+  const renderResultFilter = useCallback(
+    ({ item }: { item: { key: ResultFilter; label: string } }) => (
+      <ResultFilterChip
+        filter={item}
+        activeFilter={resultFilter}
+        onSelect={handleResultFilterSelect}
+      />
+    ),
+    [handleResultFilterSelect, resultFilter]
+  );
+
+  const applyEmptySearchState = useCallback((displayQuery = "") => {
+    setSongResults([]);
+    setPlaylistResults([]);
+    setSearchDisplayQuery(displayQuery);
+    setSearchLoading(false);
+  }, []);
+
+  const startSearchLoading = useCallback(() => {
+    setSearchLoading(true);
+  }, []);
+
   const handleSubmitSearch = useCallback(() => {
     const trimmed = query.trim();
     if (trimmed.length < 2) return;
@@ -502,14 +606,11 @@ export default function SearchScreen() {
     activeSearchAbortRef.current?.abort();
     activeSearchAbortRef.current = null;
     setQuery("");
-    setSongResults([]);
-    setPlaylistResults([]);
-    setSearchDisplayQuery("");
-    setIsLoading(false);
+    applyEmptySearchState();
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
-  }, []);
+  }, [applyEmptySearchState]);
 
   useEffect(() => {
     if (debounceTimer.current) {
@@ -521,14 +622,11 @@ export default function SearchScreen() {
       requestSeqRef.current += 1;
       activeSearchAbortRef.current?.abort();
       activeSearchAbortRef.current = null;
-      setSongResults([]);
-      setPlaylistResults([]);
-      setSearchDisplayQuery("");
-      setIsLoading(false);
+      applyEmptySearchState();
       return;
     }
 
-    setIsLoading(true);
+    startSearchLoading();
     debounceTimer.current = setTimeout(() => {
       void performSearch(trimmed);
     }, 300); // Increased from 150ms to 300ms for better performance
@@ -538,7 +636,7 @@ export default function SearchScreen() {
         clearTimeout(debounceTimer.current);
       }
     };
-  }, [performSearch, query]);
+  }, [applyEmptySearchState, performSearch, query, startSearchLoading]);
 
   useEffect(() => {
     return () => {
@@ -570,14 +668,11 @@ export default function SearchScreen() {
 
   const hasResults = songResults.length > 0 || playlistResults.length > 0;
   const showBrowse = query.length < 2;
-  const resultDataKey = useMemo(
-    () =>
-      `${query.trim()}-${resultFilter}-${songResults.length}-${playlistResults.length}-${isLoading ? 1 : 0}`,
-    [isLoading, playlistResults.length, query, resultFilter, songResults.length]
-  );
+  const resultDataKey =
+    `${query.trim()}-${resultFilter}-${songResults.length}-${playlistResults.length}-${searchLoading ? 1 : 0}`;
 
   useEffect(() => {
-    if (showBrowse || isLoading) return;
+    if (showBrowse || searchLoading) return;
 
     requestAnimationFrame(() => {
       if (resultFilter === "playlists") {
@@ -586,7 +681,7 @@ export default function SearchScreen() {
         resultsSongsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       }
     });
-  }, [isLoading, resultFilter, showBrowse, songResults.length, playlistResults.length]);
+  }, [searchLoading, resultFilter, showBrowse, songResults.length, playlistResults.length]);
 
   const showPlaylistResults = resultFilter !== "songs" && playlistResults.length > 0;
   const showSongResults = resultFilter !== "playlists" && songResults.length > 0;
@@ -610,7 +705,7 @@ export default function SearchScreen() {
     [songResults]
   );
 
-  const renderPlaylistCard = useCallback(
+  const getPlaylistCardElement = useCallback(
     (playlist: PlaylistResult, index: number) => {
       const seed = stableHash(`${playlist.id}-${index}`);
       const staggerPattern = [0, 8, 4, 10, 2, 6] as const;
@@ -626,7 +721,7 @@ export default function SearchScreen() {
             pressed && styles.playlistClassicCardPressed,
           ]}
           onPress={() =>
-            router.push({
+            routerPush({
               pathname: "/playlist/[id]",
               params: {
                 id: String(playlist.id).trim(),
@@ -671,7 +766,14 @@ export default function SearchScreen() {
         </Pressable>
       );
     },
-    [router]
+    [routerPush]
+  );
+
+  const renderPlaylistResult = useCallback(
+    ({ item, index }: { item: PlaylistResult; index: number }) => (
+      <View style={styles.playlistGridItemWrap}>{getPlaylistCardElement(item, index)}</View>
+    ),
+    [getPlaylistCardElement]
   );
 
   return (
@@ -769,30 +871,15 @@ export default function SearchScreen() {
           {/* ── Browse All ── */}
           <View style={styles.browseSection}>
             <Text style={styles.browseTitle}>Browse all</Text>
-            <View style={styles.browseGrid}>
-              {shuffledBrowseCategories.filter(c => !c.isHero).map((category, index) => (
-                <Pressable
-                  key={category.id}
-                  style={({ pressed }) => [
-                    styles.browseCard,
-                    { backgroundColor: category.color },
-                    pressed && styles.browseCardPressed,
-                  ]}
-                  onPress={() => handleGenrePress(category.title)}
-                >
-                  <Text style={styles.browseCardTitle}>{category.title}</Text>
-                  <Image
-                    source={{ uri: category.imageUrl }}
-                    style={[
-                      styles.browseCardImage,
-                      { transform: [{ rotate: `${CARD_ROTATION_PATTERN[index % CARD_ROTATION_PATTERN.length]}deg` }] },
-                    ]}
-                    contentFit="cover"
-                    transition={100}
-                  />
-                </Pressable>
-              ))}
-            </View>
+            <FlatList
+              data={browseCategories}
+              keyExtractor={(category) => category.id}
+              renderItem={renderBrowseCategory}
+              numColumns={2}
+              scrollEnabled={false}
+              contentContainerStyle={styles.browseGridList}
+              columnWrapperStyle={styles.browseGridRow}
+            />
           </View>
         </ScrollView>
       ) : (
@@ -800,22 +887,17 @@ export default function SearchScreen() {
         <View style={styles.resultsWrap}>
           {/* Filter chips */}
           <View style={styles.filterRow}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRowContent}>
-              {RESULT_FILTERS.map((f) => (
-                <Pressable
-                  key={f.key}
-                  style={[styles.filterChip, resultFilter === f.key && styles.filterChipActive]}
-                  onPress={() => setResultFilter(f.key)}
-                >
-                  <Text style={[styles.filterChipText, resultFilter === f.key && styles.filterChipTextActive]}>
-                    {f.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
+            <FlatList
+              data={RESULT_FILTERS}
+              keyExtractor={(filter) => filter.key}
+              renderItem={renderResultFilter}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRowContent}
+            />
           </View>
 
-          {isLoading ? (
+          {searchLoading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#FFFFFF" />
             </View>
@@ -830,9 +912,7 @@ export default function SearchScreen() {
               key={`pl-${resultDataKey}`}
               data={showPlaylistResults ? playlistResults : []}
               keyExtractor={(item) => item.id}
-              renderItem={({ item, index }) => (
-                <View style={styles.playlistGridItemWrap}>{renderPlaylistCard(item, index)}</View>
-              )}
+              renderItem={renderPlaylistResult}
               style={styles.scrollView}
               contentContainerStyle={[styles.playlistGridContentContainer, { paddingBottom: 146 }]}
               showsVerticalScrollIndicator={false}
@@ -872,7 +952,7 @@ export default function SearchScreen() {
                     <View style={styles.playlistGridWrap}>
                       {featuredPlaylists.map((playlist, index) => (
                         <View key={playlist.id} style={styles.playlistGridItemWrap}>
-                          {renderPlaylistCard(playlist, index)}
+                          {getPlaylistCardElement(playlist, index)}
                         </View>
                       ))}
                     </View>
@@ -1010,6 +1090,12 @@ const styles = StyleSheet.create({
   browseGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
+    gap: 8,
+  },
+  browseGridList: {
+    gap: 8,
+  },
+  browseGridRow: {
     gap: 8,
   },
   browseCard: {

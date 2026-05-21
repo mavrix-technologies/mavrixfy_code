@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { fetch } from "expo/fetch";
 import { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/api-config";
+import { compactMap, mapFilter, sortedCopy } from "@/lib/arrayUtils";
 
 export interface JioSaavnPlaylistResult {
   id: string;
@@ -271,8 +272,7 @@ function parseBoolean(value: unknown): boolean {
 
 function normalizeImageList(raw: unknown): JioSaavnImage[] {
   if (Array.isArray(raw)) {
-    const normalized = raw
-      .map((item) => {
+    const normalized = mapFilter(raw, (item) => {
         if (typeof item === "string") {
           const url = item.trim();
           return url ? { quality: "", url } : null;
@@ -286,8 +286,7 @@ function normalizeImageList(raw: unknown): JioSaavnImage[] {
           quality: toTrimmedString(image.quality),
           url,
         };
-      })
-      .filter((item): item is JioSaavnImage => Boolean(item));
+      }, (item): item is JioSaavnImage => Boolean(item));
 
     if (normalized.length > 0) return normalized;
   }
@@ -321,8 +320,7 @@ function parseSongCountValue(raw: any): number {
 function normalizePlaylistList(raw: unknown): JioSaavnPlaylistResult[] {
   if (!Array.isArray(raw)) return [];
 
-  return raw
-    .map((playlist: any) => {
+  return mapFilter(raw, (playlist: any) => {
       const id =
         toTrimmedString(playlist?.id) ||
         toTrimmedString(playlist?.listid) ||
@@ -339,8 +337,7 @@ function normalizePlaylistList(raw: unknown): JioSaavnPlaylistResult[] {
         image,
         songCount,
       };
-    })
-    .filter((playlist) => playlist.id && playlist.name && playlist.songCount > 0);
+    }, (playlist) => playlist.id && playlist.name && playlist.songCount > 0);
 }
 
 function parsePlaylistSearchResponse(json: any): JioSaavnPlaylistResult[] {
@@ -371,8 +368,7 @@ function normalizeArtistList(
 ): Array<{ id: string; name: string; image: JioSaavnImage[]; url: string; role: string }> {
   if (!Array.isArray(raw)) return [];
 
-  return raw
-    .map((artist: any, index) => {
+  return mapFilter(raw, (artist: any, index) => {
       const name = toTrimmedString(artist?.name);
       if (!name) return null;
 
@@ -384,11 +380,8 @@ function normalizeArtistList(
         url: toTrimmedString(artist?.url),
         role: toTrimmedString(artist?.role),
       };
-    })
-    .filter(
-      (artist): artist is { id: string; name: string; image: JioSaavnImage[]; url: string; role: string } =>
-        Boolean(artist)
-    );
+    }, (artist): artist is { id: string; name: string; image: JioSaavnImage[]; url: string; role: string } =>
+        Boolean(artist));
 }
 
 function normalizeArtists(raw: any): JioSaavnSong["artists"] {
@@ -430,22 +423,14 @@ function normalizeArtists(raw: any): JioSaavnSong["artists"] {
   }
 
   const fallbackNames = [
-    ...toTrimmedString(raw?.primaryArtists)
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
-    ...toTrimmedString(raw?.primary_artists)
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
-    ...toTrimmedString(raw?.artist)
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
-    ...toTrimmedString(raw?.singers)
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
+    ...compactMap(toTrimmedString(raw?.primaryArtists)
+      .split(","), (entry) => entry.trim()),
+    ...compactMap(toTrimmedString(raw?.primary_artists)
+      .split(","), (entry) => entry.trim()),
+    ...compactMap(toTrimmedString(raw?.artist)
+      .split(","), (entry) => entry.trim()),
+    ...compactMap(toTrimmedString(raw?.singers)
+      .split(","), (entry) => entry.trim()),
   ];
 
   const fallbackUnique = Array.from(new Set(fallbackNames));
@@ -564,9 +549,7 @@ function normalizePlaylistDetailsData(raw: any): JioSaavnPlaylistDetailsData | n
     }
   }
 
-  const songs = selectedSongArray
-    .map((song) => normalizePlaylistSong(song))
-    .filter((song): song is JioSaavnSong => Boolean(song));
+  const songs = mapFilter(selectedSongArray, (song) => normalizePlaylistSong(song), (song): song is JioSaavnSong => Boolean(song));
   const songCount = parseSongCountValue(raw) || songs.length;
   const imageValue = raw?.image ?? raw?.images ?? raw?.imageUrl ?? raw?.image_url;
   const normalizedImage = normalizeImageList(imageValue);
@@ -679,37 +662,36 @@ async function searchPlaylistsRaw(
     );
   });
 
-  for (const requestUrl of requestUrls) {
-    try {
-      const response = await withTimeout(
-        fetch(requestUrl, {
-          headers: { Accept: "application/json" },
-        })
-      );
+  const providerResults = await Promise.all(
+    requestUrls.map(async (requestUrl) => {
+      try {
+        const response = await withTimeout(
+          fetch(requestUrl, {
+            headers: { Accept: "application/json" },
+          })
+        );
 
-      if (!response.ok) {
-        await consumeResponseBody(response);
-        continue;
+        if (!response.ok) {
+          await consumeResponseBody(response);
+          return [] as JioSaavnPlaylistResult[];
+        }
+
+        const json = await response.json();
+        return parsePlaylistSearchResponse(json);
+      } catch {
+        return [] as JioSaavnPlaylistResult[];
       }
+    })
+  );
 
-      const json = await response.json();
-      const parsed = parsePlaylistSearchResponse(json);
-      if (parsed.length > 0) {
-        return parsed;
-      }
-    } catch {
-      // Try the next provider.
-    }
-  }
-
-  return [];
+  return providerResults.find((parsed) => parsed.length > 0) ?? [];
 }
 
 function sortPlaylists(playlists: JioSaavnPlaylistResult[], categoryId: string): JioSaavnPlaylistResult[] {
   const trendingKeywords = ["trending", "top", "hit", "superhit", "chart", "viral"];
   const freshKeywords = ["latest", "new", "fresh", "updated", String(CURRENT_YEAR)];
 
-  return [...playlists].sort((a, b) => {
+  return sortedCopy(playlists, (a, b) => {
     const aName = a.name.toLowerCase();
     const bName = b.name.toLowerCase();
 
@@ -885,7 +867,7 @@ function rankByKeywords(
   categoryId: string,
   keywords: string[]
 ): JioSaavnPlaylistResult[] {
-  return [...playlists].sort((a, b) => {
+  return sortedCopy(playlists, (a, b) => {
     const aName = a.name.toLowerCase();
     const bName = b.name.toLowerCase();
 
@@ -1156,31 +1138,34 @@ async function fetchPlaylistDetailsPage(
     (base) => `${base.replace(/\/+$/, "")}/playlists?${query}`
   );
 
-  let allNotFound = true;
-  for (const url of candidateUrls) {
-    try {
-      const response = await withTimeout(
-        fetch(url, { headers: { Accept: "application/json" } }),
-        6000
-      );
-      if (!response.ok) {
-        if (response.status !== 404) {
-          allNotFound = false;
+  const providerResults = await Promise.all(
+    candidateUrls.map(async (url) => {
+      try {
+        const response = await withTimeout(
+          fetch(url, { headers: { Accept: "application/json" } }),
+          6000
+        );
+        if (!response.ok) {
+          const notFound = response.status === 404;
+          await consumeResponseBody(response);
+          return { data: null, notFound };
         }
-        await consumeResponseBody(response);
-        continue;
+
+        const json = await response.json();
+        const normalized = parsePlaylistDetailsResponse(json);
+        return { data: normalized, notFound: false };
+      } catch {
+        return { data: null, notFound: false };
       }
-      const json = await response.json();
-      const normalized = parsePlaylistDetailsResponse(json);
-      if (normalized) {
-        return { data: normalized, reason: "network" };
-      }
-      allNotFound = false;
-    } catch {
-      allNotFound = false;
-    }
+    })
+  );
+
+  const networkResult = providerResults.find((result) => result.data);
+  if (networkResult?.data) {
+    return { data: networkResult.data, reason: "network" };
   }
 
+  const allNotFound = providerResults.every((result) => result.notFound);
   return { data: null, reason: allNotFound ? "not_found" : "network" };
 }
 
@@ -1416,7 +1401,7 @@ function rankPlaylists(
 // Each day the order shifts deterministically — no backend needed.
 function applyFreshnessRotation(playlists: JioSaavnPlaylistResult[]): JioSaavnPlaylistResult[] {
   const todaySeed = new Date().getDate(); // 1–31
-  return [...playlists].sort((a, b) => {
+  return sortedCopy(playlists, (a, b) => {
     const hashA = (a.id.charCodeAt(0) + todaySeed) % 13;
     const hashB = (b.id.charCodeAt(0) + todaySeed) % 13;
     return hashB - hashA;
@@ -1465,24 +1450,27 @@ async function fetchCategoryFast(
     return `${trimmed}/search/playlists?query=${encodeURIComponent(term)}&limit=${apiLimit}&page=1`;
   });
 
-  for (const url of urls) {
-    try {
-      const res = await withTimeout(
-        fetch(url, { headers: { Accept: "application/json" } }),
-        FAST_TIMEOUT_MS
-      );
-      if (!res.ok) {
-        await consumeResponseBody(res);
-        continue;
+  const providerResults = await Promise.all(
+    urls.map(async (url) => {
+      try {
+        const res = await withTimeout(
+          fetch(url, { headers: { Accept: "application/json" } }),
+          FAST_TIMEOUT_MS
+        );
+        if (!res.ok) {
+          await consumeResponseBody(res);
+          return [] as JioSaavnPlaylistResult[];
+        }
+
+        const json = await res.json();
+        return parsePlaylistSearchResponse(json);
+      } catch {
+        return [] as JioSaavnPlaylistResult[];
       }
-      const json = await res.json();
-      const parsed = parsePlaylistSearchResponse(json);
-      if (parsed.length > 0) return parsed;
-    } catch {
-      // Try next provider.
-    }
-  }
-  return [];
+    })
+  );
+
+  return providerResults.find((parsed) => parsed.length > 0) ?? [];
 }
 
 async function runWithConcurrencyLimit<T, R>(
@@ -1494,14 +1482,16 @@ async function runWithConcurrencyLimit<T, R>(
   const results: R[] = new Array(items.length);
   let nextIndex = 0;
 
-  const workers = Array.from({ length: maxWorkers }, async () => {
-    while (true) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      if (currentIndex >= items.length) break;
-      results[currentIndex] = await worker(items[currentIndex]);
-    }
-  });
+  const runWorker = async (): Promise<void> => {
+    const currentIndex = nextIndex;
+    nextIndex += 1;
+    if (currentIndex >= items.length) return;
+
+    results[currentIndex] = await worker(items[currentIndex]);
+    return runWorker();
+  };
+
+  const workers = Array.from({ length: maxWorkers }, () => runWorker());
 
   await Promise.all(workers);
   return results;

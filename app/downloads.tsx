@@ -13,6 +13,7 @@ import React, { useState, useCallback, useMemo, useEffect } from "react";
 import {
   View,
   Text,
+  FlatList,
   Pressable,
   StyleSheet,
   Alert,
@@ -46,6 +47,8 @@ const UI = {
   error: Colors.error,
   border: Colors.cardBorder,
 };
+
+const DOWNLOAD_QUALITY_OPTIONS: DownloadQuality[] = ["low", "medium", "high"];
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
 
@@ -193,9 +196,170 @@ function DownloadRow({ item, onPause, onResume, onRetry, onRemove }: DownloadRow
   );
 }
 
+function PlaylistDownloadCard({
+  section,
+  expandedPlaylistId,
+  onToggle,
+  onPause,
+  onResume,
+  onRetry,
+  onRemove,
+}: {
+  section: PlaylistDownloadSection;
+  expandedPlaylistId: string | null;
+  onToggle: (collectionId: string) => void;
+  onPause: (id: string) => void;
+  onResume: (id: string) => void;
+  onRetry: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const expanded = expandedPlaylistId === section.collectionId;
+  const handleToggle = useCallback(() => onToggle(section.collectionId), [onToggle, section.collectionId]);
+  const renderDownloadItem = useCallback(
+    ({ item }: { item: DownloadItem }) => (
+      <DownloadRow
+        item={item}
+        onPause={onPause}
+        onResume={onResume}
+        onRetry={onRetry}
+        onRemove={onRemove}
+      />
+    ),
+    [onPause, onRemove, onResume, onRetry]
+  );
+
+  return (
+    <View style={styles.playlistCardContainer}>
+      <Pressable
+        style={({ pressed }) => [
+          styles.playlistCard,
+          pressed && styles.playlistCardPressed,
+          expanded && styles.playlistCardExpanded,
+        ]}
+        onPress={handleToggle}
+      >
+        {section.coverUrl ? (
+          <Image
+            recyclingKey={section.collectionId}
+            source={{ uri: section.coverUrl }}
+            style={styles.playlistCardCover}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+          />
+        ) : (
+          <View style={[styles.playlistCardCover, styles.playlistCardCoverPlaceholder]}>
+            <Ionicons name="musical-notes" size={32} color={UI.subtext} />
+          </View>
+        )}
+
+        <View style={styles.playlistCardInfo}>
+          <Text style={styles.playlistCardTitle} numberOfLines={2}>
+            {section.collectionName}
+          </Text>
+          <View style={styles.playlistCardStats}>
+            {section.completedCount > 0 ? (
+              <View style={styles.playlistCardStat}>
+                <Ionicons name="checkmark-circle" size={12} color={UI.primary} />
+                <Text style={styles.playlistCardStatText}>{section.completedCount}</Text>
+              </View>
+            ) : null}
+            {section.downloadingCount > 0 ? (
+              <View style={styles.playlistCardStat}>
+                <Ionicons name="arrow-down-circle" size={12} color={UI.primary} />
+                <Text style={styles.playlistCardStatText}>{section.downloadingCount}</Text>
+              </View>
+            ) : null}
+            {section.failedCount > 0 ? (
+              <View style={styles.playlistCardStat}>
+                <Ionicons name="alert-circle" size={12} color={UI.error} />
+                <Text style={[styles.playlistCardStatText, { color: UI.error }]}>
+                  {section.failedCount}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={styles.playlistCardSize}>{formatBytes(section.totalSize)}</Text>
+        </View>
+
+        <Ionicons
+          name={expanded ? "chevron-up" : "chevron-down"}
+          size={20}
+          color={UI.subtext}
+          style={styles.playlistCardChevron}
+        />
+      </Pressable>
+
+      {expanded ? (
+        <FlatList
+          data={section.items}
+          keyExtractor={(item) => item.songId}
+          renderItem={renderDownloadItem}
+          scrollEnabled={false}
+          style={styles.expandedSongList}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function QualityOptionRow({
+  quality,
+  selectedQuality,
+  onChange,
+}: {
+  quality: DownloadQuality;
+  selectedQuality: DownloadQuality;
+  onChange: (quality: DownloadQuality) => void;
+}) {
+  const selected = selectedQuality === quality;
+  const handlePress = useCallback(() => onChange(quality), [onChange, quality]);
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.qualityRow,
+        selected && styles.qualityRowActive,
+        pressed && styles.qualityRowPressed,
+      ]}
+      onPress={handlePress}
+      android_ripple={{ color: "rgba(38,225,154,0.15)", borderless: false }}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+    >
+      <View style={styles.qualityInfo}>
+        <Text style={styles.qualityLabel}>{getQualityLabel(quality)}</Text>
+        <Text style={styles.qualityDesc}>{getQualityDescription(quality)}</Text>
+      </View>
+      {selected ? (
+        <Ionicons name="checkmark-circle" size={20} color={UI.primary} />
+      ) : null}
+    </Pressable>
+  );
+}
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function DownloadsScreen() {
+  return useDownloadsScreenView();
+}
+
+function getQualityLabel(quality: DownloadQuality): string {
+  return quality.charAt(0).toUpperCase() + quality.slice(1);
+}
+
+function getQualityDescription(quality: DownloadQuality): string {
+  switch (quality) {
+    case "low":
+      return "~48 kbps · Saves storage";
+    case "medium":
+      return "~128 kbps · Balanced";
+    case "high":
+      return "~320 kbps · Best quality";
+    default:
+      return "";
+  }
+}
+
+function useDownloadsScreenView() {
   const insets = useSafeAreaInsets();
   const topPadding = Platform.OS === "web" ? 67 : insets.top + 8;
 
@@ -215,14 +379,18 @@ export default function DownloadsScreen() {
 
   // Re-render this screen when any download status changes (not on progress ticks).
   const [, setStatusTick] = useState(0);
+  const bumpStatusTick = useCallback(() => {
+    setStatusTick((n) => n + 1);
+  }, []);
+
   useEffect(() => {
     const unsubs = [
-      onQueueEvent("status", () => setStatusTick((n) => n + 1)),
-      onQueueEvent("completed", () => setStatusTick((n) => n + 1)),
-      onQueueEvent("failed", () => setStatusTick((n) => n + 1)),
+      onQueueEvent("status", bumpStatusTick),
+      onQueueEvent("completed", bumpStatusTick),
+      onQueueEvent("failed", bumpStatusTick),
     ];
     return () => unsubs.forEach((fn) => fn());
-  }, []);
+  }, [bumpStatusTick]);
 
   const allItems = getAllDownloadItems();
 
@@ -391,6 +559,40 @@ export default function DownloadsScreen() {
     [updatePreferences]
   );
 
+  const handleTogglePlaylistSection = useCallback(
+    (collectionId: string) => {
+      void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+      setExpandedPlaylistId((currentId) => currentId === collectionId ? null : collectionId);
+    },
+    []
+  );
+
+  const renderPlaylistDownloadSection = useCallback(
+    ({ item }: { item: PlaylistDownloadSection }) => (
+      <PlaylistDownloadCard
+        section={item}
+        expandedPlaylistId={expandedPlaylistId}
+        onToggle={handleTogglePlaylistSection}
+        onPause={handlePause}
+        onResume={handleResume}
+        onRetry={handleRetry}
+        onRemove={handleRemove}
+      />
+    ),
+    [expandedPlaylistId, handlePause, handleRemove, handleResume, handleRetry, handleTogglePlaylistSection]
+  );
+
+  const renderQualityOption = useCallback(
+    ({ item }: { item: DownloadQuality }) => (
+      <QualityOptionRow
+        quality={item}
+        selectedQuality={preferences.quality}
+        onChange={handleQualityChange}
+      />
+    ),
+    [handleQualityChange, preferences.quality]
+  );
+
   // ─── Header ───────────────────────────────────────────────────────────────
 
   const Header = (
@@ -474,11 +676,13 @@ export default function DownloadsScreen() {
   // ─── Downloads list ───────────────────────────────────────────────────────
 
   const DownloadsList = (
-    <ScrollView
+    <FlatList
+      data={playlistSections}
+      keyExtractor={(section) => section.collectionId}
+      renderItem={renderPlaylistDownloadSection}
       contentContainerStyle={styles.listContent}
       showsVerticalScrollIndicator={false}
-    >
-      {playlistSections.length === 0 ? (
+      ListEmptyComponent={
         <View style={styles.emptyState}>
           <Ionicons name="arrow-down-circle-outline" size={48} color={UI.subtext} />
           <Text style={styles.emptyTitle}>No downloads yet</Text>
@@ -486,107 +690,16 @@ export default function DownloadsScreen() {
             Tap the download icon on any song to save it for offline playback.
           </Text>
         </View>
-      ) : (
-        <>
-          {/* Playlist Cards */}
-          {playlistSections.map((section) => (
-            <View key={section.collectionId} style={styles.playlistCardContainer}>
-              {/* Playlist Card */}
-              <Pressable
-                style={({ pressed }) => [
-                  styles.playlistCard,
-                  pressed && styles.playlistCardPressed,
-                  expandedPlaylistId === section.collectionId && styles.playlistCardExpanded,
-                ]}
-                onPress={() => {
-                  void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                  setExpandedPlaylistId(
-                    expandedPlaylistId === section.collectionId ? null : section.collectionId
-                  );
-                }}
-              >
-                {/* Cover Image */}
-                {section.coverUrl ? (
-                  <Image
-                    recyclingKey={section.collectionId}
-                    source={{ uri: section.coverUrl }}
-                    style={styles.playlistCardCover}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                  />
-                ) : (
-                  <View style={[styles.playlistCardCover, styles.playlistCardCoverPlaceholder]}>
-                    <Ionicons name="musical-notes" size={32} color={UI.subtext} />
-                  </View>
-                )}
-
-                {/* Info */}
-                <View style={styles.playlistCardInfo}>
-                  <Text style={styles.playlistCardTitle} numberOfLines={2}>
-                    {section.collectionName}
-                  </Text>
-                  <View style={styles.playlistCardStats}>
-                    {section.completedCount > 0 && (
-                      <View style={styles.playlistCardStat}>
-                        <Ionicons name="checkmark-circle" size={12} color={UI.primary} />
-                        <Text style={styles.playlistCardStatText}>{section.completedCount}</Text>
-                      </View>
-                    )}
-                    {section.downloadingCount > 0 && (
-                      <View style={styles.playlistCardStat}>
-                        <Ionicons name="arrow-down-circle" size={12} color={UI.primary} />
-                        <Text style={styles.playlistCardStatText}>{section.downloadingCount}</Text>
-                      </View>
-                    )}
-                    {section.failedCount > 0 && (
-                      <View style={styles.playlistCardStat}>
-                        <Ionicons name="alert-circle" size={12} color={UI.error} />
-                        <Text style={[styles.playlistCardStatText, { color: UI.error }]}>
-                          {section.failedCount}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.playlistCardSize}>{formatBytes(section.totalSize)}</Text>
-                </View>
-
-                {/* Expand Icon */}
-                <Ionicons
-                  name={expandedPlaylistId === section.collectionId ? "chevron-up" : "chevron-down"}
-                  size={20}
-                  color={UI.subtext}
-                  style={styles.playlistCardChevron}
-                />
-              </Pressable>
-
-              {/* Expanded Song List */}
-              {expandedPlaylistId === section.collectionId && (
-                <View style={styles.expandedSongList}>
-                  {section.items.map((item) => (
-                    <DownloadRow
-                      key={item.songId}
-                      item={item}
-                      onPause={handlePause}
-                      onResume={handleResume}
-                      onRetry={handleRetry}
-                      onRemove={handleRemove}
-                    />
-                  ))}
-                </View>
-              )}
-            </View>
-          ))}
-
-          {/* Remove All Button */}
-          {allItems.length > 0 && (
-            <Pressable style={styles.removeAllBtn} onPress={handleRemoveAll}>
-              <Ionicons name="trash-outline" size={16} color={UI.error} />
-              <Text style={styles.removeAllText}>Remove All Downloads</Text>
-            </Pressable>
-          )}
-        </>
-      )}
-    </ScrollView>
+      }
+      ListFooterComponent={
+        allItems.length > 0 ? (
+          <Pressable style={styles.removeAllBtn} onPress={handleRemoveAll}>
+            <Ionicons name="trash-outline" size={16} color={UI.error} />
+            <Text style={styles.removeAllText}>Remove All Downloads</Text>
+          </Pressable>
+        ) : null
+      }
+    />
   );
 
   // ─── Settings panel ───────────────────────────────────────────────────────
@@ -602,7 +715,7 @@ export default function DownloadsScreen() {
         <View style={styles.settingInfo}>
           <Text style={styles.settingLabel}>Wi-Fi only</Text>
           <Text style={styles.settingDesc}>
-            Preference only — network detection requires a future update
+            Preference only, network detection requires a future update
           </Text>
         </View>
         <Switch
@@ -645,35 +758,12 @@ export default function DownloadsScreen() {
 
       <Text style={[styles.settingsSection, { marginTop: 24 }]}>Download Quality</Text>
 
-      {(["low", "medium", "high"] as const).map((q) => (
-        <Pressable
-          key={q}
-          style={({ pressed }) => [
-            styles.qualityRow,
-            preferences.quality === q && styles.qualityRowActive,
-            pressed && styles.qualityRowPressed,
-          ]}
-          onPress={() => handleQualityChange(q)}
-          android_ripple={{ color: "rgba(38,225,154,0.15)", borderless: false }}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <View style={styles.qualityInfo}>
-            <Text style={styles.qualityLabel}>
-              {q.charAt(0).toUpperCase() + q.slice(1)}
-            </Text>
-            <Text style={styles.qualityDesc}>
-              {q === "low"
-                ? "~48 kbps · Saves storage"
-                : q === "medium"
-                ? "~128 kbps · Balanced"
-                : "~320 kbps · Best quality"}
-            </Text>
-          </View>
-          {preferences.quality === q && (
-            <Ionicons name="checkmark-circle" size={20} color={UI.primary} />
-          )}
-        </Pressable>
-      ))}
+      <FlatList
+        data={DOWNLOAD_QUALITY_OPTIONS}
+        keyExtractor={(quality) => quality}
+        renderItem={renderQualityOption}
+        scrollEnabled={false}
+      />
 
       <Text style={[styles.settingsSection, { marginTop: 24 }]}>Storage</Text>
 
