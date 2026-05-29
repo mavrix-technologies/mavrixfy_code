@@ -158,11 +158,43 @@ function RootLayoutNav() {
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
 
-  // Unmount only on full-screen auth/onboarding/import screens.
-  // Sheet routes only hide it visually so mini-player state and animations survive.
-  const activeSegment = segments[0] as string;
-  const unmountNavBar = NAV_UNMOUNT_SEGMENTS.has(activeSegment);
-  const visuallyHideNavBar = NAV_VISUALLY_HIDDEN_SEGMENTS.has(activeSegment);
+  // 1. Request notification permission on mount (Guest or User)
+  useEffect(() => {
+    import("@/services/notificationService").then(({ requestNotificationPermission }) => {
+      requestNotificationPermission();
+    }).catch(err => console.error("Failed to request permission:", err));
+  }, []);
+
+  // 2. Register push tokens in Firestore when user is authenticated or in Guest Mode
+  useEffect(() => {
+    const targetUserId = firebaseUser?.uid || "guest_emulator";
+    import("@/services/notificationService").then(
+      ({ registerForPushNotificationsAsync, registerNotificationListeners }) => {
+        registerForPushNotificationsAsync(targetUserId);
+
+          const cleanup = registerNotificationListeners(
+            (notification) => {
+              // Notification received in foreground
+              console.log("Foreground notification received:", notification);
+            },
+            (response) => {
+              // Notification tapped/clicked
+              const data = response.notification.request.content.data;
+              if (data?.route) {
+                try {
+                  routerReplace(data.route as any);
+                } catch (err) {
+                  console.error("Navigation from notification failed:", err);
+                }
+              }
+            }
+          );
+          return cleanup;
+        }
+      ).catch((err) => {
+        console.error("Failed to load notification service:", err);
+      });
+  }, [firebaseUser?.uid, isGuest]);
 
   useEffect(() => {
     if (loading) return;
@@ -196,6 +228,10 @@ function RootLayoutNav() {
       routerReplace("/login");
     }
   }, [loading, isAuthenticated, isGuest, firebaseUser, segments, routerReplace]);
+
+  const activeSegment = segments[0] as string;
+  const unmountNavBar = NAV_UNMOUNT_SEGMENTS.has(activeSegment);
+  const visuallyHideNavBar = NAV_VISUALLY_HIDDEN_SEGMENTS.has(activeSegment);
 
   return (
     <View style={{ flex: 1 }}>

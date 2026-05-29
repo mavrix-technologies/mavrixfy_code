@@ -10,7 +10,7 @@ import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { mapFilter } from "@/lib/arrayUtils";
 
-const BANNER_HEIGHT = 140;
+const BANNER_HEIGHT = 128;
 const ROTATION_INTERVAL_MS = 8_000;
 
 const subscribeToAppStateChanges = (listener: (state: AppStateStatus) => void) => {
@@ -20,14 +20,17 @@ const subscribeToAppStateChanges = (listener: (state: AppStateStatus) => void) =
 
 type MediaType   = "image" | "gif" | "video" | "audio";
 type AppPlatform = "web" | "app";
-type ActionType  = "none" | "external" | "song" | "playlist" | "artist";
+type ActionType  = "none" | "external" | "song" | "playlist" | "artist" | "album";
+type VisibilityMode = "public" | "dev";
 
 interface AttachedSong {
   id: string;
   title: string;
   artist: string;
-  coverUrl: string;   // was imageUrl — matches Song type
-  audioUrl: string;   // was streamUrl — matches Song type
+  coverUrl?: string;
+  imageUrl?: string;
+  audioUrl?: string;
+  streamUrl?: string;
 }
 
 interface Promotion {
@@ -36,14 +39,20 @@ interface Promotion {
   description: string;
   mediaUrl?: string;
   mediaType?: MediaType;
-  platforms?: AppPlatform;
+  platforms?: AppPlatform | AppPlatform[] | "both";
   status: "active" | "scheduled" | "ended";
   startDate?: string;
   endDate?: string;
   actionType?: ActionType;
   actionUrl?: string;
   attachedSong?: AttachedSong;
+  targetTitle?: string;
+  targetSubtitle?: string;
+  targetImageUrl?: string;
   priority?: number;
+  placement?: string;
+  layout?: string;
+  visibilityMode?: VisibilityMode;
 }
 
 const BRAND = {
@@ -52,26 +61,43 @@ const BRAND = {
   textSecondary: "rgba(223,226,235,0.9)",
 };
 
+function getRouteId(value?: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!raw.startsWith("http")) return raw;
+  try {
+    const url = new URL(raw);
+    return url.pathname.split("/").filter(Boolean).pop() || raw;
+  } catch {
+    return raw.split("/").filter(Boolean).pop() || raw;
+  }
+}
+
+function isForApp(platforms: Promotion["platforms"]): boolean {
+  if (!platforms) return true;
+  if (Array.isArray(platforms)) return platforms.includes("app");
+  return platforms === "app" || platforms === "both";
+}
+
 export default function PromotionBanner() {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading]     = useState(true);
+  const [failedMediaIds, setFailedMediaIds] = useState<Record<string, boolean>>({});
   const isVisibleRef = React.useRef(true);
   const { playSong } = usePlayerActions();
   const { width } = useWindowDimensions();
-  const bannerWidth = Math.max(0, width - 32);
+  const bannerWidth = Math.max(0, width - 16);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     let active = true;
     const today = new Date().toISOString().split("T")[0];
 
-    // Query only on indexed fields (status + platforms).
-    // Sorting by priority is done client-side to avoid requiring a composite index.
+    // Query only on status; platform filtering is client-side so "both" works for app and web.
     const q = query(
       collection(db, "promotions"),
       where("status",    "==", "active"),
-      where("platforms", "==", "app"),
       limit(10)
     );
 
@@ -81,11 +107,14 @@ export default function PromotionBanner() {
         const promos = mapFilter(snapshot.docs, (doc) => ({ id: doc.id, ...doc.data() } as Promotion), (p) => {
             const startOk = !p.startDate || p.startDate <= today;
             const endOk   = !p.endDate   || p.endDate   >= today;
-            return startOk && endOk;
+            const platformOk = isForApp(p.platforms);
+            const isModal = p.placement === "home_modal" || p.layout === "modal";
+            const visibleInBuild = (p.visibilityMode || "public") !== "dev" || __DEV__;
+            return startOk && endOk && platformOk && !isModal && visibleInBuild;
           })
           // Client-side sort by priority descending
           .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
-          .slice(0, 5);
+          .slice(0, 1);
 
         setPromotions(promos);
       })
@@ -131,8 +160,8 @@ export default function PromotionBanner() {
             id:       promo.attachedSong.id,
             title:    promo.attachedSong.title,
             artist:   promo.attachedSong.artist,
-            coverUrl: promo.attachedSong.coverUrl,
-            audioUrl: promo.attachedSong.audioUrl,
+            coverUrl: promo.attachedSong.coverUrl || promo.attachedSong.imageUrl || "",
+            audioUrl: promo.attachedSong.audioUrl || promo.attachedSong.streamUrl || "",
             duration: 0,
           } as any);
         }
@@ -147,15 +176,22 @@ export default function PromotionBanner() {
 
       case "playlist":
         if (promo.actionUrl) {
-          const id = promo.actionUrl.split("/").pop() ?? promo.actionUrl;
+          const id = getRouteId(promo.actionUrl);
           router.push(`/playlist/${id}` as any);
         }
         break;
 
       case "artist":
         if (promo.actionUrl) {
-          const id = promo.actionUrl.split("/").pop() ?? promo.actionUrl;
+          const id = getRouteId(promo.actionUrl);
           router.push(`/artist/${id}` as any);
+        }
+        break;
+
+      case "album":
+        if (promo.actionUrl?.startsWith("http")) {
+          const ok = await Linking.canOpenURL(promo.actionUrl).catch(() => false);
+          if (ok) Linking.openURL(promo.actionUrl).catch(() => {});
         }
         break;
 
@@ -167,6 +203,10 @@ export default function PromotionBanner() {
   if (loading || promotions.length === 0) return null;
 
   const promo = promotions[currentIndex];
+  const mediaUrl = (promo.mediaUrl || promo.targetImageUrl || promo.attachedSong?.coverUrl || promo.attachedSong?.imageUrl || "").trim();
+  const showMedia = Boolean(mediaUrl) && !failedMediaIds[promo.id];
+  const title = promo.targetTitle || promo.attachedSong?.title || promo.title;
+  const subtitle = promo.description || promo.targetSubtitle || promo.attachedSong?.artist;
 
   return (
     <View style={styles.container}>
@@ -174,18 +214,20 @@ export default function PromotionBanner() {
         style={({ pressed }) => [styles.banner, { width: bannerWidth }, pressed && styles.bannerPressed]}
         onPress={() => handlePress(promo)}
       >
-        {promo.mediaUrl ? (
+        {showMedia ? (
           <>
             <Image
-              source={{ uri: promo.mediaUrl }}
+              source={{ uri: mediaUrl }}
               style={styles.bannerImage}
               contentFit="cover"
               transition={200}
               cachePolicy="memory-disk"
+              recyclingKey={`${promo.id}:${mediaUrl}`}
+              onError={() => setFailedMediaIds((prev) => ({ ...prev, [promo.id]: true }))}
             />
             <LinearGradient
-              colors={["transparent", "rgba(16,20,26,0.4)", "rgba(16,20,26,0.85)"]}
-              locations={[0, 0.5, 1]}
+              colors={["rgba(17,22,29,0.02)", "rgba(17,22,29,0.48)", "rgba(17,22,29,0.94)"]}
+              locations={[0, 0.48, 1]}
               style={StyleSheet.absoluteFill}
             />
           </>
@@ -199,9 +241,10 @@ export default function PromotionBanner() {
         )}
 
         <View style={styles.content}>
-          <Text style={styles.title} numberOfLines={2}>{promo.title}</Text>
-          {!!promo.description && (
-            <Text style={styles.description} numberOfLines={2}>{promo.description}</Text>
+          <Text style={styles.eyebrow} numberOfLines={1}>{promo.title}</Text>
+          <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          {!!subtitle && (
+            <Text style={styles.description} numberOfLines={1}>{subtitle}</Text>
           )}
         </View>
 
@@ -218,6 +261,10 @@ export default function PromotionBanner() {
             />
           </View>
         )}
+        <View style={styles.openPill}>
+          <Text style={styles.openPillText}>Open</Text>
+          <Ionicons name="chevron-forward" size={13} color={Colors.black} />
+        </View>
       </Pressable>
 
       {promotions.length > 1 && (
@@ -236,15 +283,20 @@ export default function PromotionBanner() {
 const styles = StyleSheet.create({
   container: {
     marginTop: 16,
-    paddingHorizontal: 16,
+    paddingHorizontal: 8,
   },
   banner: {
     height: BANNER_HEIGHT,
-    borderRadius: 12,
+    borderRadius: 14,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    backgroundColor: Colors.surface,
+    borderColor: "rgba(38,225,154,0.24)",
+    backgroundColor: "#11161D",
+    shadowColor: "#000",
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
   },
   bannerPressed: {
     opacity: 0.85,
@@ -252,17 +304,27 @@ const styles = StyleSheet.create({
   },
   bannerImage: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: Colors.background,
   },
   content: {
     flex: 1,
-    padding: 16,
+    padding: 14,
     justifyContent: "flex-end",
-    gap: 4,
+    gap: 3,
+    paddingRight: 86,
+  },
+  eyebrow: {
+    color: BRAND.teal,
+    fontSize: 10,
+    lineHeight: 13,
+    fontFamily: "Inter_700Bold",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
   title: {
     color: BRAND.textPrimary,
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 17,
+    lineHeight: 22,
     fontFamily: "Inter_700Bold",
     letterSpacing: -0.2,
   },
@@ -284,6 +346,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(38,225,154,0.3)",
+  },
+  openPill: {
+    position: "absolute",
+    right: 12,
+    bottom: 14,
+    height: 32,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    backgroundColor: BRAND.teal,
+  },
+  openPillText: {
+    color: Colors.black,
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
   },
   dotsContainer: {
     flexDirection: "row",

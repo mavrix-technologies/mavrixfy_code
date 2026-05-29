@@ -31,8 +31,16 @@ import {
   HomeJioSaavnCategoryData,
   prefetchVisiblePlaylists,
 } from "@/lib/jioSaavnService";
+import {
+  getRecommendationHomeFeed,
+  recommendationFeedEnabled,
+  RecommendationFeed,
+  RecommendationItem,
+  RecommendationSection,
+} from "@/lib/recommendationService";
 import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistService";
 import HomeSkeletonLoader from "@/components/HomeSkeletonLoader";
+import AppPromotionModal from "@/components/AppPromotionModal";
 import PromotionBanner from "@/components/PromotionBanner";
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
@@ -46,6 +54,7 @@ type HomeSection =
   | { id: "recents"; type: "recents" }
   | { id: "public-playlists"; type: "public-playlists" }
   | { id: "featured-artists"; type: "featured-artists" }
+  | { id: string; type: "recommendation"; data: RecommendationSection }
   | { id: string; type: "category"; data: HomeJioSaavnCategoryData };
 
 type HomeSessionCache = {
@@ -175,6 +184,33 @@ function dedupeFirestorePlaylistsById(items: FirestorePlaylist[], limit: number)
   return unique;
 }
 
+function canonicalPlaylistKey(item: Pick<RecommendationItem, "contentId" | "title" | "source">): string {
+  const title = String(item.title || "")
+    .toLowerCase()
+    .replace(/&amp;/g, "&")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return title ? `playlist:${title}` : `playlist:${item.source}:${item.contentId}`;
+}
+
+function dedupeRecommendationFeed(feed: RecommendationFeed | null): RecommendationFeed | null {
+  if (!feed) return null;
+  const shown = new Set<string>();
+  const sections = feed.sections.flatMap((section) => {
+    const items = section.items.filter((item) => {
+      if (item.kind !== "playlist") return false;
+      const key = canonicalPlaylistKey(item);
+      if (shown.has(key)) return false;
+      shown.add(key);
+      return true;
+    });
+
+    return items.length > 0 ? [{ ...section, items }] : [];
+  });
+
+  return { ...feed, sections, sectionOrder: sections.map((section) => section.id) };
+}
+
 function withPromiseTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -238,7 +274,11 @@ function useHomeScreenInnerView() {
   const [isLoadingPublicPlaylists, setIsLoadingPublicPlaylists] = useState(
     !HOME_SESSION_CACHE.hydrated && HOME_SESSION_CACHE.publicPlaylists.length === 0
   );
+  const [recommendationFeed, setRecommendationFeed] = useState<RecommendationFeed | null>(null);
+  const [isRecommendationFeedLoading, setIsRecommendationFeedLoading] = useState(false);
+  const [hasRecommendationFeedFailed, setHasRecommendationFeedFailed] = useState(false);
   const latestLoadIdRef = useRef(0);
+  const latestRecommendationLoadIdRef = useRef(0);
   const hasHydratedRef = useRef(HOME_SESSION_CACHE.hydrated);
   const prefetchStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelPlaylistPrefetchRef = useRef<(() => void) | null>(null);
@@ -246,6 +286,38 @@ function useHomeScreenInnerView() {
   const INITIAL_CATEGORY_LIMIT = 10;
   const REFRESH_CATEGORY_LIMIT = 12;
   const INITIAL_PUBLIC_LIMIT = 100; // Increased to show all playlists
+  const shouldUseRecommendationFeed = isAuthenticated && recommendationFeedEnabled();
+
+  const loadRecommendationFeed = useCallback(async () => {
+    const recommendationLoadId = ++latestRecommendationLoadIdRef.current;
+
+    if (!shouldUseRecommendationFeed) {
+      setRecommendationFeed(null);
+      setHasRecommendationFeedFailed(false);
+      setIsRecommendationFeedLoading(false);
+      return;
+    }
+
+    setIsRecommendationFeedLoading(true);
+    setHasRecommendationFeedFailed(false);
+    try {
+      const feed = await getRecommendationHomeFeed();
+      if (recommendationLoadId !== latestRecommendationLoadIdRef.current) return;
+      setRecommendationFeed(dedupeRecommendationFeed(feed));
+    } catch {
+      if (recommendationLoadId !== latestRecommendationLoadIdRef.current) return;
+      setRecommendationFeed(null);
+      setHasRecommendationFeedFailed(true);
+    } finally {
+      if (recommendationLoadId === latestRecommendationLoadIdRef.current) {
+        setIsRecommendationFeedLoading(false);
+      }
+    }
+  }, [shouldUseRecommendationFeed]);
+
+  useEffect(() => {
+    void loadRecommendationFeed();
+  }, [loadRecommendationFeed]);
 
   const schedulePlaylistPrefetch = useCallback((categoryData: HomeJioSaavnCategoryData[], delayMs: number) => {
     if (prefetchStartTimerRef.current) {
@@ -493,6 +565,10 @@ function useHomeScreenInnerView() {
     try {
       resetHomeState();
       await clearJioSaavnPlaylistCache();
+      const recommendationPromise = shouldUseRecommendationFeed ? loadRecommendationFeed() : Promise.resolve();
+      if (shouldUseRecommendationFeed) {
+        setHasRecommendationFeedFailed(false);
+      }
       try {
         const recent = await getRecentlyPlayed();
         const trimmedRecent = recent.slice(0, 8);
@@ -510,10 +586,11 @@ function useHomeScreenInnerView() {
         limitPerCategory: REFRESH_CATEGORY_LIMIT,
         publicLimit: INITIAL_PUBLIC_LIMIT,
       });
+      await recommendationPromise;
     } finally {
       setRefreshing(false);
     }
-  }, [INITIAL_PUBLIC_LIMIT, REFRESH_CATEGORY_LIMIT, loadHomeData, resetHomeState]);
+  }, [INITIAL_PUBLIC_LIMIT, REFRESH_CATEGORY_LIMIT, loadHomeData, loadRecommendationFeed, resetHomeState, shouldUseRecommendationFeed]);
 
   const applyHomeCacheSnapshot = useCallback(() => {
     setRecentlyPlayed(HOME_SESSION_CACHE.recentlyPlayed);
@@ -676,8 +753,30 @@ function useHomeScreenInnerView() {
     [publicPlaylists]
   );
 
+  const recommendationSections = useMemo(
+    () => recommendationFeed?.sections.filter((section) => section.items.length > 0) ?? [],
+    [recommendationFeed]
+  );
+
   const sections = useMemo<HomeSection[]>(() => {
     const data: HomeSection[] = [];
+
+    if (shouldUseRecommendationFeed && recommendationSections.length > 0) {
+      recommendationSections.forEach((section) => {
+        data.push({ id: `recommendation-${section.id}`, type: "recommendation", data: section });
+      });
+      return data;
+    }
+
+    const hasFallbackContent =
+      featuredArtists.length > 0 ||
+      recentlyPlayed.length > 0 ||
+      allCategoryRows.length > 0 ||
+      publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS;
+
+    if (shouldUseRecommendationFeed && isRecommendationFeedLoading && !hasRecommendationFeedFailed && !hasFallbackContent) {
+      return data;
+    }
 
     // 1. Featured Artists — very top
     if (featuredArtists.length > 0) {
@@ -719,7 +818,18 @@ function useHomeScreenInnerView() {
     }
 
     return data;
-  }, [recentlyPlayed, publicPlaylistsForSection, featuredArtists, allCategoryRows, isLoadingCategories, isLoadingPublicPlaylists]);
+  }, [
+    recentlyPlayed,
+    publicPlaylistsForSection,
+    featuredArtists,
+    allCategoryRows,
+    isLoadingCategories,
+    isLoadingPublicPlaylists,
+    recommendationSections,
+    shouldUseRecommendationFeed,
+    isRecommendationFeedLoading,
+    hasRecommendationFeedFailed,
+  ]);
 
   const openJioSaavnPlaylist = useCallback(
     (playlist: { id: string; name?: string; imageUrl?: string; songCount?: number }) => {
@@ -760,6 +870,36 @@ function useHomeScreenInnerView() {
       });
     },
     [routerPush]
+  );
+
+  const openRecommendationPlaylist = useCallback(
+    (item: RecommendationItem) => {
+      const isJioSaavn =
+        item.source === "jiosaavn" ||
+        item.source === "trending" ||
+        item.source === "fresh" ||
+        item.source === "regional" ||
+        item.playlist?.type === "jiosaavn-playlist";
+
+      if (isJioSaavn) {
+        openJioSaavnPlaylist({
+          id: item.contentId,
+          name: item.title,
+          imageUrl: item.imageUrl,
+          songCount: Number(item.playlist?.songCount || 0),
+        });
+        return;
+      }
+
+      openFirestorePlaylist({
+        id: item.contentId,
+        name: item.title,
+        imageUrl: item.imageUrl,
+        description: item.subtitle,
+        songCount: Number(item.playlist?.songCount || 0),
+      });
+    },
+    [openFirestorePlaylist, openJioSaavnPlaylist]
   );
 
   const handleRecentPress = useCallback(
@@ -1008,6 +1148,36 @@ function useHomeScreenInnerView() {
     [openJioSaavnPlaylist]
   );
 
+  const renderRecommendationPlaylist = useCallback(
+    ({ item }: { item: RecommendationItem }) => (
+      <Pressable
+        style={({ pressed }) => [styles.rectCard, pressed && styles.cardPressed]}
+        onPress={() => openRecommendationPlaylist(item)}
+      >
+        <View style={styles.rectCardImageWrap}>
+          <Image
+            source={{ uri: item.imageUrl || undefined }}
+            style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
+            contentFit="contain"
+            transition={80}
+            cachePolicy="memory-disk"
+            recyclingKey={`recommendation-${item.id}`}
+          />
+          <View pointerEvents="none" style={styles.brandCoverBadge}>
+            <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
+          </View>
+        </View>
+        <Text style={styles.rectCardTitle} numberOfLines={2}>
+          {item.title}
+        </Text>
+        <Text style={styles.rectCardMeta} numberOfLines={1}>
+          {item.subtitle || "Playlist"}
+        </Text>
+      </Pressable>
+    ),
+    [openRecommendationPlaylist]
+  );
+
   const renderRectPlaceholder = useCallback(
     ({ item }: { item: number }) => (
       <View style={styles.rectCard}>
@@ -1247,6 +1417,26 @@ function useHomeScreenInnerView() {
             </View>
           );
 
+        case "recommendation":
+          return (
+            <View style={styles.section}>
+              {getSectionHeaderElement(section.data.title)}
+              <FlatList
+                horizontal
+                data={section.data.items}
+                keyExtractor={(item) => `recommendation-${section.data.id}-${item.id}`}
+                renderItem={renderRecommendationPlaylist}
+                ItemSeparatorComponent={renderRowSeparator}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.rowContent}
+                initialNumToRender={4}
+                maxToRenderPerBatch={4}
+                windowSize={5}
+                removeClippedSubviews={Platform.OS === "android"}
+              />
+            </View>
+          );
+
         default:
           return null;
       }
@@ -1260,13 +1450,14 @@ function useHomeScreenInnerView() {
       featuredArtists,
       renderArtistCard,
       getCategoryPlaylistElement,
+      renderRecommendationPlaylist,
       getSectionHeaderElement,
       renderRowSeparator,
       routerPush,
     ]
   );
 
-  const shouldShowSkeleton = loading && sections.length === 0;
+  const shouldShowSkeleton = (loading || isRecommendationFeedLoading) && sections.length === 0;
 
   // Show full offline screen only when there's no cached content to display
   if (!isOnline && !isChecking && sections.length === 0) {
@@ -1305,6 +1496,7 @@ function useHomeScreenInnerView() {
       >
         {getHeaderElement()}
         <PromotionBanner />
+        <AppPromotionModal />
         {sections.length === 0
           ? renderEmptyState()
           : sections.map((section) => (

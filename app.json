@@ -42,7 +42,8 @@
         "WAKE_LOCK",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-        "VIBRATE"
+        "VIBRATE",
+        "POST_NOTIFICATIONS"
       ],
       "blockedPermissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -63,6 +64,7 @@
       "expo-font",
       "expo-web-browser",
       "expo-system-ui",
+      "expo-notifications",
       [
         "expo-updates",
         {
