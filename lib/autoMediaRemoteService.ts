@@ -279,9 +279,11 @@ async function skipPrevious(event?: AutoRemoteEvent): Promise<void> {
 export function registerAutoMediaRemoteService(): void {
   if (isRegistered || Platform.OS !== "android") return;
   isRegistered = true;
+  console.log("[AutoMediaRemoteService] Registering auto media remote service listener");
 
   DeviceEventEmitter.addListener("MavrixfyAutoRemoteCommand", (event: AutoRemoteEvent) => {
     const command = event?.command;
+    console.log("[AutoMediaRemoteService] Received remote command event:", command, event);
     if (command === "playFromMediaId") {
       runAutoCommand(() => playAutoSong(event));
       return;

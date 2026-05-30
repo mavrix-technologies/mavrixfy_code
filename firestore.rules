@@ -52,6 +52,14 @@ service cloud.firestore {
       match /spotifyLikedSongs/{songId} {
         allow read, create, update, delete: if isOwner(userId) || isAdmin();
       }
+
+      match /offlineLicenses/{songId} {
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      }
+
+      match /downloadDevices/{deviceId} {
+        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+      }
     }
 
     // Legacy mobile format. New clients must use users/{uid}/likedSongs/{songId}.

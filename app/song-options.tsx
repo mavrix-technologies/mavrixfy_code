@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   DeviceEventEmitter,
   FlatList,
+  PanResponder,
+  Platform,
   Pressable,
   Share,
   StyleSheet,
@@ -672,11 +674,31 @@ export default function SongOptionsScreen() {
     });
   }
 
+  const androidSwipeResponder = useRef(
+    Platform.OS === "android"
+      ? PanResponder.create({
+          onStartShouldSetPanResponder: () => false,
+          onMoveShouldSetPanResponder: (_, gestureState) => {
+            const { dx, dy } = gestureState;
+            return dy > 10 && Math.abs(dy) > Math.abs(dx) * 1.5;
+          },
+          onPanResponderRelease: (_, gestureState) => {
+            if (gestureState.dy > 80 || (gestureState.dy > 40 && gestureState.vy > 0.5)) {
+              safeGoBack();
+            }
+          },
+        })
+      : null
+  ).current;
+
   return (
     <View style={styles.root}>
       <View style={styles.sheet}>
         {/* Grabber + song header */}
-        <View style={styles.headerContent}>
+        <View
+          style={styles.headerContent}
+          {...(androidSwipeResponder ? androidSwipeResponder.panHandlers : {})}
+        >
           <View style={styles.grabber} />
           <View style={styles.songHeader}>
             {song.coverUrl ? (

@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   InteractionManager,
+  PanResponder,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -249,12 +251,32 @@ export default function QueueScreen() {
     );
   }, [handleSongPress, handleSwipeOpen, removeFromQueue]);
 
+  const androidSwipeResponder = useRef(
+    Platform.OS === "android"
+      ? PanResponder.create({
+          onStartShouldSetPanResponder: () => false,
+          onMoveShouldSetPanResponder: (_, gestureState) => {
+            const { dx, dy } = gestureState;
+            return dy > 10 && Math.abs(dy) > Math.abs(dx) * 1.5;
+          },
+          onPanResponderRelease: (_, gestureState) => {
+            if (gestureState.dy > 80 || (gestureState.dy > 40 && gestureState.vy > 0.5)) {
+              router.back();
+            }
+          },
+        })
+      : null
+  ).current;
+
   const keyExtractor = useCallback((item: DraggableQueueItem) => item.key, []);
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, Platform.OS === "android" && { maxHeight: height * 0.85 }]}>
       <View style={styles.sheet}>
-        <View style={styles.headerContent}>
+        <View
+          style={styles.headerContent}
+          {...(androidSwipeResponder ? androidSwipeResponder.panHandlers : {})}
+        >
           <View style={styles.grabber} />
 
           <Text style={styles.title}>Queue</Text>
@@ -304,6 +326,8 @@ export default function QueueScreen() {
           {listReady ? (
             <DraggableFlatList
               data={data}
+              containerStyle={styles.list}
+              style={styles.list}
               renderItem={renderQueueSong}
               keyExtractor={keyExtractor}
               onDragBegin={handleDragBegin}
@@ -342,7 +366,7 @@ export default function QueueScreen() {
           )}
         </View>
 
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom + 10, Platform.OS === "ios" ? 34 : 20) }]}>
           <Pressable
             style={({ pressed }) => [styles.controlButton, pressed && styles.controlButtonPressed]}
             onPress={handleShuffle}
@@ -387,6 +411,9 @@ const styles = StyleSheet.create({
   listWrap: {
     flex: 1,
     minHeight: 0,
+  },
+  list: {
+    flex: 1,
   },
   deferredListPlaceholder: {
     flex: 1,

@@ -19,7 +19,8 @@ import {
   NativeSyntheticEvent,
   StyleProp,
   useWindowDimensions,
-  ViewStyle
+  ViewStyle,
+  PanResponder
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -850,8 +851,15 @@ function useLegacyPlayerScreenView() {
     const task = InteractionManager.runAfterInteractions(() => {
       setInteractionReady(true);
     });
-    return () => task.cancel();
+    const fallbackTimer = setTimeout(() => {
+      setInteractionReady(true);
+    }, 300);
+    return () => {
+      task.cancel();
+      clearTimeout(fallbackTimer);
+    };
   }, []);
+
 
   // ── About the artist / Credits state ────────────────────────────────────────
   const [artistInfo, setArtistInfo] = useState<JioSaavnArtist | null>(null);
@@ -1534,7 +1542,9 @@ function useLegacyPlayerScreenView() {
     <View style={styles.container}>
       <CinematicPlayerBackground colors={gradientColors} />
       <View style={[styles.playerForeground, { paddingTop: topInset, paddingBottom: 0 }]}>
-      <View style={[styles.topBar, { height: topBarHeight, paddingHorizontal: isShortScreen ? 14 : 18 }]}>
+      <View
+        style={[styles.topBar, { height: topBarHeight, paddingHorizontal: isShortScreen ? 14 : 18 }]}
+      >
         <Pressable
           style={[styles.headerIconButton, ctrlBtnStyle]}
           onPress={safeGoBack}
@@ -1601,7 +1611,7 @@ function useLegacyPlayerScreenView() {
                   keyExtractor={(item: ArtworkQueueItem) => item.artworkKey}
                   renderItem={renderArtworkCard}
                   horizontal
-                  pagingEnabled
+                  pagingEnabled={Platform.OS === "ios"}
                   showsHorizontalScrollIndicator={false}
                   bounces={false}
                   scrollEnabled={playingQueue.length > 1 && !isProgressSeeking}
@@ -1854,26 +1864,37 @@ function useLegacyPlayerScreenView() {
                 style={styles.artistHeroShade}
               />
             </View>
+          </Pressable>
 
-            <View style={styles.artistCardBody}>
-              <View style={styles.artistRankRow}>
-                <Text style={styles.artistRankText}>
-                  {artistInfo.dominantLanguage ? `${artistInfo.dominantLanguage} artist` : "Featured artist"}
-                </Text>
-                <Pressable
-                  style={[styles.artistFollowBtn, artistFollowing && styles.artistFollowBtnActive]}
-                  onPress={handleArtistFollowPress}
+          <View style={styles.artistCardBody}>
+            <View style={styles.artistRankRow}>
+              <Text style={styles.artistRankText}>
+                {artistInfo.dominantLanguage ? `${artistInfo.dominantLanguage} artist` : "Featured artist"}
+              </Text>
+              <Pressable
+                style={[styles.artistFollowBtn, artistFollowing && styles.artistFollowBtnActive]}
+                onPress={handleArtistFollowPress}
+              >
+                <Text
+                  style={[
+                    styles.artistFollowBtnText,
+                    artistFollowing && styles.artistFollowBtnTextActive,
+                  ]}
                 >
-                  <Text
-                    style={[
-                      styles.artistFollowBtnText,
-                      artistFollowing && styles.artistFollowBtnTextActive,
-                    ]}
-                  >
-                    {artistFollowing ? "Following" : "Follow"}
-                  </Text>
-                </Pressable>
-              </View>
+                  {artistFollowing ? "Following" : "Follow"}
+                </Text>
+              </Pressable>
+            </View>
+
+            <Pressable
+              onPress={() => {
+                const img = artistInfo.image?.length ? getBestImageUrl(artistInfo.image) : "";
+                router.push(
+                  { pathname: "/artist/[id]", params: { id: artistInfo.id, name: artistInfo.name, image: img } },
+                  { withAnchor: true, dangerouslySingular: () => "artist-profile" }
+                );
+              }}
+            >
               <View style={styles.artistNameRow}>
                 <Text style={styles.artistCardName} numberOfLines={1}>{artistInfo.name}</Text>
                 {artistInfo.isVerified ? (
@@ -1894,8 +1915,8 @@ function useLegacyPlayerScreenView() {
                   {artistInfo.bio[0]?.text?.replace(/<[^>]*>/g, "").trim() ?? ""}
                 </Text>
               ) : null}
-            </View>
-          </Pressable>
+            </Pressable>
+          </View>
         </View>
       ) : null}
 

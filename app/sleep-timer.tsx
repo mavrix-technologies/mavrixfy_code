@@ -1,5 +1,6 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useRef } from "react";
 import {
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -49,10 +50,30 @@ export default function SleepTimerScreen() {
     router.back();
   }, [clearSleepTimer, haptic]);
 
+  const androidSwipeResponder = useRef(
+    Platform.OS === "android"
+      ? PanResponder.create({
+          onStartShouldSetPanResponder: () => false,
+          onMoveShouldSetPanResponder: (_, gestureState) => {
+            const { dx, dy } = gestureState;
+            return dy > 10 && Math.abs(dy) > Math.abs(dx) * 1.5;
+          },
+          onPanResponderRelease: (_, gestureState) => {
+            if (gestureState.dy > 80 || (gestureState.dy > 40 && gestureState.vy > 0.5)) {
+              router.back();
+            }
+          },
+        })
+      : null
+  ).current;
+
   return (
     <View style={styles.root}>
       <View style={styles.sheet}>
-        <View style={styles.headerContent}>
+        <View
+          style={styles.headerContent}
+          {...(androidSwipeResponder ? androidSwipeResponder.panHandlers : {})}
+        >
           <View style={styles.grabber} />
           <View style={styles.titleRow}>
             <View>
@@ -67,7 +88,7 @@ export default function SleepTimerScreen() {
           </View>
         </View>
 
-        <View style={[styles.options, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}>
+        <View style={[styles.options, { paddingBottom: Math.max(insets.bottom + 8, Platform.OS === "ios" ? 34 : 20) }]}>
           {TIMER_OPTIONS.map((option) => {
             const selected =
               sleepTimer?.mode === "end-of-stack"

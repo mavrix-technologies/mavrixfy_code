@@ -721,7 +721,7 @@ function usePlaylistScreenView() {
         ) : songs.length > 0 ? (
           songs.map((song, index) => (
             <SongRow
-              key={song.id}
+              key={`${song.id}-${index}`}
               song={song}
               index={index}
               queue={songs}

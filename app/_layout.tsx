@@ -14,11 +14,17 @@ import React,
   useRef,
   useState } from "react";
 import { ActivityIndicator,
+  LogBox,
   Platform,
   StyleSheet,
   View,
   Text
 } from "react-native";
+
+LogBox.ignoreLogs([
+  "expo-notifications functionality is not fully supported in Expo Go",
+  "expo-notifications: Android Push notifications",
+]);
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -38,7 +44,7 @@ import { AppNavBar } from "@/app/(tabs)/_layout";
 // Screens where the nav bar must not appear or should stay visually hidden.
 // Form sheets keep AppNavBar mounted to avoid mini-player/nav remount flicker on close.
 const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs"]);
-const NAV_VISUALLY_HIDDEN_SEGMENTS = new Set(["song-options"]);
+const NAV_VISUALLY_HIDDEN_SEGMENTS = new Set(["song-options", "player", "queue", "sleep-timer"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
@@ -60,8 +66,14 @@ const IOS_VERTICAL_SHEET_OPTIONS = {
 };
 
 const ANDROID_VERTICAL_SHEET_OPTIONS = {
-  presentation: "modal" as const,
+  presentation: "formSheet" as const,
   animation: "slide_from_bottom" as const,
+  sheetAllowedDetents: [1.0],
+  sheetInitialDetentIndex: 0,
+  sheetCornerRadius: 32,
+  sheetGrabberVisible: false,
+  sheetExpandsWhenScrolledToEdge: false,
+  gestureEnabled: true,
   contentStyle: { backgroundColor: Colors.background },
 };
 
@@ -165,36 +177,38 @@ function RootLayoutNav() {
     }).catch(err => console.error("Failed to request permission:", err));
   }, []);
 
-  // 2. Register push tokens in Firestore when user is authenticated or in Guest Mode
+  // 2. Register push tokens in Firestore only for authenticated users
   useEffect(() => {
-    const targetUserId = firebaseUser?.uid || "guest_emulator";
     import("@/services/notificationService").then(
       ({ registerForPushNotificationsAsync, registerNotificationListeners }) => {
-        registerForPushNotificationsAsync(targetUserId);
+        // Only save to Firestore when a real user is signed in
+        if (firebaseUser?.uid) {
+          registerForPushNotificationsAsync(firebaseUser.uid);
+        }
 
-          const cleanup = registerNotificationListeners(
-            (notification) => {
-              // Notification received in foreground
-              console.log("Foreground notification received:", notification);
-            },
-            (response) => {
-              // Notification tapped/clicked
-              const data = response.notification.request.content.data;
-              if (data?.route) {
-                try {
-                  routerReplace(data.route as any);
-                } catch (err) {
-                  console.error("Navigation from notification failed:", err);
-                }
+        const cleanup = registerNotificationListeners(
+          (notification) => {
+            // Notification received in foreground
+            console.log("Foreground notification received:", notification);
+          },
+          (response) => {
+            // Notification tapped/clicked
+            const data = response.notification.request.content.data;
+            if (data?.route) {
+              try {
+                routerReplace(data.route as any);
+              } catch (err) {
+                console.error("Navigation from notification failed:", err);
               }
             }
-          );
-          return cleanup;
-        }
-      ).catch((err) => {
-        console.error("Failed to load notification service:", err);
-      });
-  }, [firebaseUser?.uid, isGuest]);
+          }
+        );
+        return cleanup;
+      }
+    ).catch((err) => {
+      console.error("Failed to load notification service:", err);
+    });
+  }, [firebaseUser?.uid]);
 
   useEffect(() => {
     if (loading) return;
@@ -254,12 +268,15 @@ function RootLayoutNav() {
         <Stack.Screen
           name="queue"
           options={{
-            ...(Platform.OS === "ios"
-              ? IOS_VERTICAL_SHEET_OPTIONS
-              : {
-                  ...ANDROID_VERTICAL_SHEET_OPTIONS,
-                  gestureEnabled: false,
-                }),
+            presentation: "formSheet",
+            animation: "slide_from_bottom",
+            sheetAllowedDetents: [0.88, 1],
+            sheetInitialDetentIndex: 0,
+            sheetCornerRadius: 24,
+            sheetGrabberVisible: false,
+            sheetExpandsWhenScrolledToEdge: false,
+            gestureEnabled: true,
+            contentStyle: { backgroundColor: "#1E1E1E" },
           }}
         />
         <Stack.Screen

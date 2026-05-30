@@ -250,7 +250,7 @@ export default function ArtistMixScreen() {
           <SongRowSkeleton count={10} />
         ) : songs.length > 0 ? (
           songs.map((song, i) => (
-            <SongRow key={song.id} song={song} index={i} queue={songs} />
+            <SongRow key={`${song.id}-${i}`} song={song} index={i} queue={songs} />
           ))
         ) : (
           <View style={styles.empty}>

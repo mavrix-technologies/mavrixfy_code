@@ -762,6 +762,12 @@ function useHomeScreenInnerView() {
     const data: HomeSection[] = [];
 
     if (shouldUseRecommendationFeed && recommendationSections.length > 0) {
+      if (featuredArtists.length > 0) {
+        data.push({ id: "featured-artists", type: "featured-artists" });
+      }
+      if (recentlyPlayed.length > 0) {
+        data.push({ id: "recents", type: "recents" });
+      }
       recommendationSections.forEach((section) => {
         data.push({ id: `recommendation-${section.id}`, type: "recommendation", data: section });
       });

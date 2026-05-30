@@ -10,6 +10,10 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.content.Intent
+import android.content.ComponentName
+import android.content.ServiceConnection
+import android.content.Context
+import android.os.IBinder
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -19,11 +23,10 @@ import android.text.Html
 import android.util.Log
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaDescriptionCompat
-import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
-import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
 import com.mavrixfy.app.R
+import com.doublesymmetry.trackplayer.service.MusicService
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -366,8 +369,23 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
     private val generatedArtCache = ConcurrentHashMap<String, Bitmap>()
     private var likedSongCache: List<AutoSong> = emptyList()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private lateinit var mediaSession: MediaSessionCompat
-    private var currentState = PlaybackStateCompat.STATE_STOPPED
+    private var sessionHookRetryCount = 0
+    private var musicService: MusicService? = null
+    private var originalMediaCallback: android.support.v4.media.session.MediaSessionCompat.Callback? = null
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as? MusicService.MusicBinder ?: return
+            musicService = binder.service
+            Log.d(TAG, "MusicService bound — extracting session token")
+            extractAndSetSessionToken()
+        }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            Log.d(TAG, "MusicService unbound")
+            musicService = null
+        }
+    }
+
     private var phonePlaybackActive = false
     private var phonePlaybackMediaId = ""
     private var phonePlaybackTitle = ""
@@ -376,108 +394,204 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
     private var phonePlaybackArtUrl = ""
     private var phonePlaybackDurationMs = 0L
     private var phonePlaybackPositionMs = 0L
-    private var isShuffleEnabled = false
     private var currentAutoQueue: List<AutoSong> = emptyList()
     private var currentAutoQueueIndex = -1
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         Log.d(TAG, "onCreate")
         AutoMediaModule.warmReactRuntime(applicationContext)
+        // Delay to let RNTP's MusicService start, then bind to read session token only
+        mainHandler.postDelayed({ setupMediaSessionHook() }, 1000)
+    }
 
-        mediaSession = MediaSessionCompat(this, "MavrixfyAutoService").apply {
-            setFlags(
-                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
-                    MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
-            )
-            setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlayFromMediaId(mediaId: String, extras: Bundle?) {
-                    val song = songCache[mediaId]
-                    if (song == null) {
-                        playDefaultPlaylist()
-                        return
-                    }
-
-                    val categoryId = mediaId.removePrefix(SONG_PREFIX).substringBefore(":")
-                    val queue = categoryCache[categoryId].orEmpty().ifEmpty { listOf(song) }
-                    playSongQueue(song, queue)
-                }
-
-                override fun onPlay() {
-                    if (phonePlaybackActive) {
-                        setPhonePlaybackState(PlaybackStateCompat.STATE_PLAYING)
-                        emitCurrentAutoCommand("play")
-                    } else {
-                        playDefaultPlaylist()
-                    }
-                }
-
-                override fun onPause() {
-                    AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
-                    if (phonePlaybackActive) setPhonePlaybackState(PlaybackStateCompat.STATE_PAUSED)
-                }
-
-                override fun onStop() {
-                    AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
-                    if (phonePlaybackActive) setPhonePlaybackState(PlaybackStateCompat.STATE_PAUSED)
-                }
-
-                override fun onSkipToNext() {
-                    if (moveAutoQueueBy(1)) {
-                        emitCurrentAutoCommand("next")
-                    } else {
-                        AutoMediaModule.emitRemoteCommand(applicationContext, "next")
-                    }
-                }
-
-                override fun onSkipToPrevious() {
-                    if (moveAutoQueueBy(-1)) {
-                        emitCurrentAutoCommand("previous")
-                    } else {
-                        AutoMediaModule.emitRemoteCommand(applicationContext, "previous")
-                    }
-                }
-
-                override fun onSkipToQueueItem(id: Long) {
-                    val index = id.toInt()
-                    if (index !in currentAutoQueue.indices) return
-                    val nextSong = currentAutoQueue[index]
-                    publishAutoPlayback(nextSong, currentAutoQueue, index)
-                    AutoMediaModule.emitRemoteCommand(
-                        context = applicationContext,
-                        command = "skipToQueueItem",
-                        queueIndex = index,
-                        song = nextSong.toBridgeBundle(),
-                        queue = currentAutoQueue.map { it.toBridgeBundle() }
-                    )
-                }
-
-                override fun onSeekTo(pos: Long) {
-                    phonePlaybackPositionMs = pos.coerceAtLeast(0L)
-                    AutoMediaModule.emitRemoteCommand(applicationContext, "seek", phonePlaybackPositionMs)
-                    if (phonePlaybackActive) setPhonePlaybackState(currentState)
-                }
-
-                override fun onSetShuffleMode(shuffleMode: Int) {
-                    isShuffleEnabled = shuffleMode == PlaybackStateCompat.SHUFFLE_MODE_ALL
-                    if (phonePlaybackActive) {
-                        setPhonePlaybackState(currentState)
-                    } else {
-                        setIdlePlaybackState()
-                    }
-                }
-            })
-            isActive = false
+    private fun setupMediaSessionHook() {
+        // Bind WITHOUT BIND_AUTO_CREATE (flag 0) so we don't start a fresh MusicService.
+        // If RNTP's service isn't running yet, bindService returns false and we retry.
+        val intent = Intent(this, MusicService::class.java)
+        val bound = try {
+            bindService(intent, serviceConnection, 0)
+        } catch (e: Exception) {
+            Log.w(TAG, "bindService failed: ${e.message}")
+            false
         }
+        if (!bound) {
+            Log.d(TAG, "MusicService not running yet, retrying (attempt $sessionHookRetryCount)")
+            scheduleSessionHookRetry()
+        }
+    }
 
-        sessionToken = mediaSession.sessionToken
-        mediaSession.setMetadata(
-            MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, "Mavrixfy")
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "Ready to browse")
-                .build()
-        )
-        setIdlePlaybackState()
+    private fun extractAndSetSessionToken() {
+        val service = musicService ?: return
+        try {
+            // Walk the class hierarchy to find the mediaSession field on the ExoPlayer wrapper
+            var playerObj: Any? = null
+            var clazz: Class<*>? = service.javaClass
+            while (clazz != null && playerObj == null) {
+                try {
+                    val f = clazz.getDeclaredField("player")
+                    f.isAccessible = true
+                    playerObj = f.get(service)
+                } catch (_: NoSuchFieldException) { clazz = clazz.superclass }
+            }
+            if (playerObj == null) {
+                Log.w(TAG, "player field not found — Android Auto will use default")
+                return
+            }
+            var mediaSession: android.support.v4.media.session.MediaSessionCompat? = null
+            var pClazz: Class<*>? = playerObj.javaClass
+            while (pClazz != null && mediaSession == null) {
+                try {
+                    val f = pClazz.getDeclaredField("mediaSession")
+                    f.isAccessible = true
+                    mediaSession = f.get(playerObj) as? android.support.v4.media.session.MediaSessionCompat
+                } catch (_: NoSuchFieldException) { pClazz = pClazz.superclass }
+            }
+            if (mediaSession != null) {
+                sessionToken = mediaSession.sessionToken
+                sessionHookRetryCount = 0
+                Log.i(TAG, "MediaSession token set — Android Auto ready")
+
+                // Try to extract original callback set by kotlinaudio/RNTP via reflection
+                originalMediaCallback = getOriginalCallback(mediaSession)
+                if (originalMediaCallback != null) {
+                    Log.i(TAG, "Successfully extracted original MediaSessionCallback")
+                } else {
+                    Log.w(TAG, "Original MediaSessionCallback not found, will rely on module fallback")
+                }
+
+                // Register a callback wrapper to forward notifications/remote events
+                mediaSession.setCallback(object : android.support.v4.media.session.MediaSessionCompat.Callback() {
+                    private fun getActiveReactContext(): com.facebook.react.bridge.ReactContext? {
+                        val app = application as? com.facebook.react.ReactApplication ?: return null
+                        return app.reactNativeHost.reactInstanceManager.currentReactContext
+                    }
+
+                    override fun onPlay() {
+                        Log.d(TAG, "MediaCallback: onPlay")
+                        val orig = originalMediaCallback
+                        val activeCtx = getActiveReactContext()
+                        if (orig != null && activeCtx != null) {
+                            Log.d(TAG, "Active React context found, delegating onPlay to original callback")
+                            orig.onPlay()
+                        } else {
+                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
+                            AutoMediaModule.emitRemoteCommand(applicationContext, "play")
+                        }
+                    }
+
+                    override fun onPause() {
+                        Log.d(TAG, "MediaCallback: onPause")
+                        val orig = originalMediaCallback
+                        val activeCtx = getActiveReactContext()
+                        if (orig != null && activeCtx != null) {
+                            Log.d(TAG, "Active React context found, delegating onPause to original callback")
+                            orig.onPause()
+                        } else {
+                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
+                            AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
+                        }
+                    }
+
+                    override fun onSkipToNext() {
+                        Log.d(TAG, "MediaCallback: onSkipToNext")
+                        val orig = originalMediaCallback
+                        val activeCtx = getActiveReactContext()
+                        if (orig != null && activeCtx != null) {
+                            Log.d(TAG, "Active React context found, delegating onSkipToNext to original callback")
+                            orig.onSkipToNext()
+                        } else {
+                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
+                            AutoMediaModule.emitRemoteCommand(applicationContext, "next")
+                        }
+                    }
+
+                    override fun onSkipToPrevious() {
+                        Log.d(TAG, "MediaCallback: onSkipToPrevious")
+                        val orig = originalMediaCallback
+                        val activeCtx = getActiveReactContext()
+                        if (orig != null && activeCtx != null) {
+                            Log.d(TAG, "Active React context found, delegating onSkipToPrevious to original callback")
+                            orig.onSkipToPrevious()
+                        } else {
+                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
+                            AutoMediaModule.emitRemoteCommand(applicationContext, "previous")
+                        }
+                    }
+
+                    override fun onStop() {
+                        Log.d(TAG, "MediaCallback: onStop")
+                        val orig = originalMediaCallback
+                        val activeCtx = getActiveReactContext()
+                        if (orig != null && activeCtx != null) {
+                            Log.d(TAG, "Active React context found, delegating onStop to original callback")
+                            orig.onStop()
+                        } else {
+                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
+                            AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
+                        }
+                    }
+
+                    override fun onSeekTo(pos: Long) {
+                        Log.d(TAG, "MediaCallback: onSeekTo $pos")
+                        val orig = originalMediaCallback
+                        val activeCtx = getActiveReactContext()
+                        if (orig != null && activeCtx != null) {
+                            Log.d(TAG, "Active React context found, delegating onSeekTo to original callback")
+                            orig.onSeekTo(pos)
+                        } else {
+                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
+                            AutoMediaModule.emitRemoteCommand(applicationContext, "seek", positionMs = pos)
+                        }
+                    }
+                })
+                Log.i(TAG, "Notification media callback registered")
+            } else {
+                Log.w(TAG, "mediaSession not found on player — Android Auto may not connect")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "extractAndSetSessionToken failed", e)
+        }
+    }
+
+    private fun scheduleSessionHookRetry() {
+        if (sessionHookRetryCount < 20) {
+            sessionHookRetryCount++
+            val delayMs = if (sessionHookRetryCount <= 5) 800L else 2000L
+            mainHandler.postDelayed({ setupMediaSessionHook() }, delayMs)
+        } else {
+            Log.w(TAG, "Could not hook MediaSession after $sessionHookRetryCount attempts")
+        }
+    }
+
+    private fun getOriginalCallback(mediaSession: android.support.v4.media.session.MediaSessionCompat): android.support.v4.media.session.MediaSessionCompat.Callback? {
+        try {
+            val mImplField = mediaSession.javaClass.getDeclaredField("mImpl")
+            mImplField.isAccessible = true
+            val mImpl = mImplField.get(mediaSession) ?: return null
+            
+            var clazz: Class<*>? = mImpl.javaClass
+            while (clazz != null) {
+                try {
+                    val mCallbackField = clazz.getDeclaredField("mCallback")
+                    mCallbackField.isAccessible = true
+                    val cb = mCallbackField.get(mImpl)
+                    if (cb != null) {
+                        val cbClassName = cb.javaClass.name
+                        if (!cbClassName.contains("MavrixfyAutoService")) {
+                            return cb as? android.support.v4.media.session.MediaSessionCompat.Callback
+                        }
+                    }
+                } catch (_: NoSuchFieldException) {
+                    // Suppress
+                }
+                clazz = clazz.superclass
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get original MediaSessionCallback", e)
+        }
+        return null
     }
 
     override fun onGetRoot(
@@ -567,11 +681,57 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         return START_STICKY
     }
 
+    fun syncPlaybackDirect(
+        songId: String?,
+        title: String?,
+        artist: String?,
+        album: String?,
+        artUrl: String?,
+        durationMs: Double,
+        positionMs: Double,
+        isPlaying: Boolean
+    ) {
+        mainHandler.post {
+            performPhonePlaybackSync(
+                songId = songId.orEmpty(),
+                title = title.orEmpty(),
+                artist = artist.orEmpty(),
+                album = album.orEmpty(),
+                artUrl = artUrl.orEmpty(),
+                durationMs = durationMs.toLong(),
+                positionMs = positionMs.toLong(),
+                isPlaying = isPlaying
+            )
+        }
+    }
+
+    fun clearPlaybackDirect() {
+        mainHandler.post {
+            clearPhonePlayback()
+        }
+    }
+
+    fun syncQueueDirect(queueSongs: ArrayList<Bundle>, activeIndex: Int) {
+        mainHandler.post {
+            performPhoneQueueSync(queueSongs, activeIndex)
+        }
+    }
+
+    fun syncLikedSongsDirect(likedSongs: ArrayList<Bundle>) {
+        mainHandler.post {
+            performLikedSongsSync(likedSongs)
+        }
+    }
+
     override fun onDestroy() {
+        instance = null
         browserExecutor.shutdownNow()
         artExecutor.shutdownNow()
         mainHandler.removeCallbacksAndMessages(null)
-        mediaSession.release()
+        if (musicService != null) {
+            try { unbindService(serviceConnection) } catch (_: Exception) {}
+            musicService = null
+        }
         super.onDestroy()
     }
 
@@ -608,16 +768,16 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
 
         result.detach()
         browserExecutor.execute {
-            sectionPlaylists.forEach { playlist ->
-                if (!categoryCache.containsKey(playlist.id)) {
-                    val songs = fetchSongs(playlist)
-                    Log.d(TAG, "loaded ${songs.size} card songs for ${playlist.id}")
-                    categoryCache[playlist.id] = songs
-                    songs.forEach { songCache[it.mediaId] = it }
-                    preloadPlaylistArt(playlist.id, songs.firstOrNull()?.artUrl)
+            sectionPlaylists.forEach { pl ->
+                if (!categoryCache.containsKey(pl.id)) {
+                    val fetchedSongs = fetchSongs(pl)
+                    Log.d(TAG, "loaded ${fetchedSongs.size} card songs for ${pl.id}")
+                    categoryCache[pl.id] = fetchedSongs
+                    fetchedSongs.forEach { s -> songCache[s.mediaId] = s }
+                    preloadPlaylistArt(pl.id, fetchedSongs.firstOrNull()?.artUrl)
                 }
             }
-            result.sendResult(sectionPlaylists.map { it.toMediaItem() })
+            result.sendResult(sectionPlaylists.map { pl -> pl.toMediaItem() })
         }
     }
 
@@ -665,22 +825,150 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
 
     private fun playDefaultPlaylist() {
         browserExecutor.execute {
-            val playlist = playlists.firstOrNull { "home" in it.navIds } ?: playlists.firstOrNull()
+            val playlist = playlists.firstOrNull { pl -> "home" in pl.navIds } ?: playlists.firstOrNull()
             if (playlist == null) {
                 AutoMediaModule.emitRemoteCommand(applicationContext, "play")
                 return@execute
             }
-            val songs = categoryCache[playlist.id] ?: fetchSongs(playlist).also { fetchedSongs ->
-                categoryCache[playlist.id] = fetchedSongs
-                fetchedSongs.forEach { songCache[it.mediaId] = it }
+            val cachedSongs: List<AutoSong>? = categoryCache[playlist.id]
+            val songsToPlay: List<AutoSong> = if (cachedSongs != null) {
+                cachedSongs
+            } else {
+                val fetched = fetchSongs(playlist)
+                categoryCache[playlist.id] = fetched
+                fetched.forEach { s -> songCache[s.mediaId] = s }
+                fetched
             }
-            val firstSong = songs.firstOrNull { it.audioUrl.isNotBlank() }
+            val firstSong = songsToPlay.firstOrNull { s -> s.audioUrl.isNotBlank() }
             if (firstSong == null) {
                 AutoMediaModule.emitRemoteCommand(applicationContext, "play")
                 return@execute
             }
-            playSongQueue(firstSong, songs)
+            playSongQueue(firstSong, songsToPlay)
         }
+    }
+
+    private fun fetchSongs(playlist: AutoPlaylist): List<AutoSong> {
+        return try {
+            val encodedQuery = URLEncoder.encode(playlist.query, "UTF-8")
+            val url = URL("$API_BASE/search?q=$encodedQuery&limit=30")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.connectTimeout = 8000
+            connection.readTimeout = 12000
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept", "application/json")
+            val responseCode = connection.responseCode
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                Log.w(TAG, "fetchSongs HTTP $responseCode for ${playlist.id}")
+                connection.disconnect()
+                return emptyList()
+            }
+            val json = connection.inputStream.bufferedReader().use { reader -> reader.readText() }
+            connection.disconnect()
+            parseSongsFromJson(json, playlist.id)
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchSongs error for ${playlist.id}", e)
+            emptyList()
+        }
+    }
+
+    private fun parseSongsFromJson(json: String, playlistId: String): List<AutoSong> {
+        val songs = mutableListOf<AutoSong>()
+        try {
+            val root = JSONObject(json)
+            val dataArray: JSONArray = when {
+                root.has("data") && root.get("data") is JSONArray -> root.getJSONArray("data")
+                root.has("results") && root.get("results") is JSONArray -> root.getJSONArray("results")
+                root.has("songs") && root.get("songs") is JSONArray -> root.getJSONArray("songs")
+                else -> return emptyList()
+            }
+            for (i in 0 until dataArray.length()) {
+                try {
+                    val item = dataArray.getJSONObject(i)
+                    val id = item.optString("id", "song-$i")
+                    val title = cleanText(item.optString("name", item.optString("title", "")))
+                    if (title.isBlank()) continue
+                    val audioUrl = extractAudioUrl(item)
+                    if (audioUrl.isBlank()) continue
+                    val artist = cleanText(
+                        item.optString("primaryArtists",
+                        item.optString("artist",
+                        item.optString("singers", "Mavrixfy")))
+                    ).ifBlank { "Mavrixfy" }
+                    val album = cleanText(item.optString("album", ""))
+                    val duration = item.optLong("duration", 0L)
+                    val artUrl = extractArtUrl(item)
+                    songs.add(
+                        AutoSong(
+                            mediaId = "$SONG_PREFIX$playlistId:$id",
+                            title = title,
+                            artist = artist,
+                            album = album,
+                            durationSeconds = duration,
+                            audioUrl = audioUrl,
+                            artUrl = artUrl.takeIf { it.isNotBlank() }
+                        )
+                    )
+                } catch (e: Exception) {
+                    Log.d(TAG, "parseSongsFromJson item error", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "parseSongsFromJson error", e)
+        }
+        return songs
+    }
+
+    private fun extractAudioUrl(item: JSONObject): String {
+        // Try downloadUrl array first (JioSaavn style)
+        if (item.has("downloadUrl")) {
+            try {
+                val arr = item.getJSONArray("downloadUrl")
+                // prefer highest quality
+                for (q in listOf("320kbps", "160kbps", "96kbps", "48kbps")) {
+                    for (j in arr.length() - 1 downTo 0) {
+                        val entry = arr.getJSONObject(j)
+                        if (entry.optString("quality") == q) {
+                            val u = entry.optString("url", "")
+                            if (u.isNotBlank()) return cleanUrl(u)
+                        }
+                    }
+                }
+                // fallback: last entry
+                val u = arr.getJSONObject(arr.length() - 1).optString("url", "")
+                if (u.isNotBlank()) return cleanUrl(u)
+            } catch (_: Exception) {}
+        }
+        // Try direct audio fields
+        for (key in listOf("audio_url", "audioUrl", "stream_url", "previewUrl", "url")) {
+            val u = item.optString(key, "")
+            if (u.isNotBlank()) return cleanUrl(u)
+        }
+        return ""
+    }
+
+    private fun extractArtUrl(item: JSONObject): String {
+        if (item.has("image")) {
+            try {
+                val arr = item.getJSONArray("image")
+                for (q in listOf("500x500", "150x150", "50x50")) {
+                    for (j in arr.length() - 1 downTo 0) {
+                        val entry = arr.getJSONObject(j)
+                        if (entry.optString("quality") == q) {
+                            val u = entry.optString("url", "")
+                            if (u.isNotBlank()) return cleanUrl(u)
+                        }
+                    }
+                }
+                val u = arr.getJSONObject(arr.length() - 1).optString("url", "")
+                if (u.isNotBlank()) return cleanUrl(u)
+            } catch (_: Exception) {}
+        }
+        for (key in listOf("image_url", "imageUrl", "artwork", "thumbnail", "cover")) {
+            val u = item.optString(key, "")
+            if (u.isNotBlank()) return cleanUrl(u)
+        }
+        return ""
     }
 
     private fun playSongQueue(selectedSong: AutoSong, queue: List<AutoSong>) {
@@ -691,14 +979,19 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
             return
         }
 
-        val orderedQueue = if (isShuffleEnabled) {
-            listOf(selectedSong) + playableQueue
-                .filterNot { it.mediaId == selectedSong.mediaId }
-                .shuffled()
-        } else {
-            playableQueue
-        }
-        publishAutoPlayback(selectedSong, orderedQueue)
+        val orderedQueue = playableQueue
+
+        currentAutoQueue = orderedQueue
+        currentAutoQueueIndex = orderedQueue.indexOfFirst { it.mediaId == selectedSong.mediaId }.coerceAtLeast(0)
+        phonePlaybackActive = true
+        phonePlaybackMediaId = selectedSong.mediaId
+        phonePlaybackTitle = selectedSong.title
+        phonePlaybackArtist = selectedSong.artist
+        phonePlaybackAlbum = selectedSong.album
+        phonePlaybackArtUrl = selectedSong.artUrl.orEmpty()
+        phonePlaybackDurationMs = selectedSong.durationSeconds.coerceAtLeast(0L) * 1000L
+        phonePlaybackPositionMs = 0L
+
         AutoMediaModule.emitRemoteCommand(
             context = applicationContext,
             command = "playFromMediaId",
@@ -708,52 +1001,161 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         )
     }
 
-    private fun moveAutoQueueBy(delta: Int): Boolean {
-        if (currentAutoQueue.isEmpty()) return false
-        val nextIndex = (currentAutoQueueIndex + delta).coerceIn(0, currentAutoQueue.lastIndex)
-        if (nextIndex == currentAutoQueueIndex) return false
-        val nextSong = currentAutoQueue[nextIndex]
-        publishAutoPlayback(nextSong, currentAutoQueue, nextIndex)
-        return true
+    private fun AutoSong.toBridgeBundle(): Bundle {
+        return Bundle().apply {
+            putString("id", mediaId)
+            putString("title", title)
+            putString("artist", artist)
+            putString("album", album)
+            putDouble("duration", durationSeconds.toDouble())
+            putString("coverUrl", artUrl.orEmpty())
+            putString("genre", "Mavrixfy")
+            putString("audioUrl", audioUrl)
+            putString("source", "jiosaavn")
+        }
     }
 
-    private fun publishAutoPlayback(
-        selectedSong: AutoSong,
-        queue: List<AutoSong>,
-        selectedIndex: Int = queue.indexOfFirst { it.mediaId == selectedSong.mediaId }.coerceAtLeast(0)
+    private fun bundleToAutoSong(bundle: Bundle, index: Int): AutoSong? {
+        val mediaId = bundle.getString("id").orEmpty().ifBlank { "phone-$index" }
+        val title = cleanText(bundle.getString("title").orEmpty())
+        val audioUrl = bundle.getString("audioUrl").orEmpty()
+        if (title.isBlank() || audioUrl.isBlank()) return null
+
+        return AutoSong(
+            mediaId = mediaId,
+            title = title,
+            artist = cleanText(bundle.getString("artist").orEmpty()).ifBlank { "Mavrixfy" },
+            album = cleanText(bundle.getString("album").orEmpty()),
+            durationSeconds = bundle.getDouble("duration", 0.0).toLong(),
+            audioUrl = audioUrl,
+            artUrl = cleanUrl(bundle.getString("coverUrl").orEmpty()).takeIf { it.isNotBlank() }
+        )
+    }
+
+    private fun fetchBitmap(url: String): Bitmap? {
+        return try {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = true
+            connection.connectTimeout = 3000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept", "image/*,*/*")
+            connection.inputStream.use { stream ->
+                BitmapFactory.decodeStream(stream)
+            }.also {
+                connection.disconnect()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun performPhonePlaybackSync(
+        songId: String,
+        title: String,
+        artist: String,
+        album: String,
+        artUrl: String,
+        durationMs: Long,
+        positionMs: Long,
+        isPlaying: Boolean
     ) {
-        currentAutoQueue = queue
-        currentAutoQueueIndex = selectedIndex.coerceIn(0, queue.lastIndex.coerceAtLeast(0))
-        phonePlaybackActive = true
-        mediaSession.isActive = true
-        phonePlaybackMediaId = selectedSong.mediaId
-        phonePlaybackTitle = selectedSong.title
-        phonePlaybackArtist = selectedSong.artist
-        phonePlaybackAlbum = selectedSong.album
-        phonePlaybackArtUrl = selectedSong.artUrl.orEmpty()
-        phonePlaybackDurationMs = selectedSong.durationSeconds.coerceAtLeast(0L) * 1000L
-        phonePlaybackPositionMs = 0L
-        updateSessionQueue(queue)
-        setPhonePlaybackMetadata(albumArtCache[phoneArtCacheKey(phonePlaybackMediaId, phonePlaybackArtUrl)])
-        loadPhoneAlbumArt(phonePlaybackMediaId, phonePlaybackArtUrl)
-        setPhonePlaybackState(PlaybackStateCompat.STATE_PLAYING)
+        phonePlaybackMediaId = songId.ifBlank { "phone" }
+        phonePlaybackTitle = cleanText(title).ifBlank { "Mavrixfy" }
+        phonePlaybackArtist = cleanText(artist).ifBlank { "Phone playback" }
+        phonePlaybackAlbum = cleanText(album)
+        phonePlaybackArtUrl = cleanUrl(artUrl)
+        phonePlaybackDurationMs = durationMs.coerceAtLeast(0L)
+        phonePlaybackPositionMs = positionMs.coerceAtLeast(0L)
     }
 
-    private fun emitCurrentAutoCommand(command: String) {
-        val selectedSong = currentAutoQueue.getOrNull(currentAutoQueueIndex)
-            ?: songCache[phonePlaybackMediaId]
-        if (selectedSong == null || currentAutoQueue.isEmpty()) {
-            AutoMediaModule.emitRemoteCommand(applicationContext, command)
-            return
+    private fun handlePhonePlaybackSync(intent: Intent) {
+        performPhonePlaybackSync(
+            songId = intent.getStringExtra(EXTRA_SONG_ID).orEmpty(),
+            title = intent.getStringExtra(EXTRA_TITLE).orEmpty(),
+            artist = intent.getStringExtra(EXTRA_ARTIST).orEmpty(),
+            album = intent.getStringExtra(EXTRA_ALBUM).orEmpty(),
+            artUrl = intent.getStringExtra(EXTRA_ART_URL).orEmpty(),
+            durationMs = intent.getLongExtra(EXTRA_DURATION_MS, 0L),
+            positionMs = intent.getLongExtra(EXTRA_POSITION_MS, 0L),
+            isPlaying = intent.getBooleanExtra(EXTRA_IS_PLAYING, false)
+        )
+    }
+
+    private fun performPhoneQueueSync(bundles: ArrayList<Bundle>, requestedIndex: Int) {
+        val songs = bundles.mapIndexedNotNull { index, bundle -> bundleToAutoSong(bundle, index) }
+        if (songs.isEmpty()) return
+
+        currentAutoQueueIndex = when {
+            requestedIndex in songs.indices -> requestedIndex
+            phonePlaybackMediaId.isNotBlank() -> songs.indexOfFirst { it.mediaId == phonePlaybackMediaId }
+            else -> 0
+        }.coerceAtLeast(0)
+        songs.forEach { songCache[it.mediaId] = it }
+        currentAutoQueue = songs
+        Log.i(TAG, "synced playback queue size=${songs.size} activeIndex=$currentAutoQueueIndex mediaId=$phonePlaybackMediaId")
+    }
+
+    private fun handlePhoneQueueSync(intent: Intent) {
+        @Suppress("DEPRECATION")
+        val bundles: ArrayList<Bundle> =
+            intent.getParcelableArrayListExtra(EXTRA_QUEUE_SONGS) ?: arrayListOf()
+        val requestedIndex = intent.getIntExtra(EXTRA_QUEUE_INDEX, -1)
+        performPhoneQueueSync(bundles, requestedIndex)
+    }
+
+    private fun clearPhonePlayback() {
+        phonePlaybackActive = false
+        phonePlaybackMediaId = ""
+        phonePlaybackTitle = ""
+        phonePlaybackArtist = ""
+        phonePlaybackAlbum = ""
+        phonePlaybackArtUrl = ""
+        phonePlaybackDurationMs = 0L
+        phonePlaybackPositionMs = 0L
+    }
+
+    private fun performLikedSongsSync(bundles: ArrayList<Bundle>) {
+        val songs = mutableListOf<AutoSong>()
+
+        for (index in bundles.indices) {
+            val bundle = bundles[index]
+            val id = bundle.getString("id").orEmpty().ifBlank { "liked-$index" }
+            val title = cleanText(bundle.getString("title").orEmpty())
+            val audioUrl = bundle.getString("audioUrl").orEmpty()
+            if (title.isBlank() || audioUrl.isBlank()) continue
+
+            songs.add(
+                AutoSong(
+                    mediaId = "$SONG_PREFIX$LIKED_PLAYLIST_ID:$id",
+                    title = title,
+                    artist = cleanText(bundle.getString("artist").orEmpty()).ifBlank { "Mavrixfy" },
+                    album = cleanText(bundle.getString("album").orEmpty()),
+                    durationSeconds = bundle.getDouble("duration", 0.0).toLong(),
+                    audioUrl = audioUrl,
+                    artUrl = cleanUrl(bundle.getString("coverUrl").orEmpty()).takeIf { it.isNotBlank() }
+                )
+            )
         }
 
-        AutoMediaModule.emitRemoteCommand(
-            context = applicationContext,
-            command = command,
-            queueIndex = currentAutoQueueIndex,
-            song = selectedSong.toBridgeBundle(),
-            queue = currentAutoQueue.map { it.toBridgeBundle() }
-        )
+        likedSongCache = songs
+        categoryCache[LIKED_PLAYLIST_ID] = songs
+        songs.forEach { songCache[it.mediaId] = it }
+        songs.firstOrNull()?.artUrl?.let { artUrl ->
+            artExecutor.execute {
+                fetchBitmap(artUrl)?.let { bitmap ->
+                    albumArtCache[playlistArtCacheKey(LIKED_PLAYLIST_ID)] = bitmap
+                }
+            }
+        }
+        Log.d(TAG, "synced ${songs.size} liked songs")
+    }
+
+    private fun handleLikedSongsSync(intent: Intent) {
+        @Suppress("DEPRECATION")
+        val bundles: ArrayList<Bundle> =
+            intent.getParcelableArrayListExtra(EXTRA_LIKED_SONGS) ?: arrayListOf()
+        performLikedSongsSync(bundles)
     }
 
     private fun generatedTileBitmap(key: String, title: String, accentColor: Int, tag: String? = null): Bitmap {
@@ -857,375 +1259,6 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         }
     }
 
-    private fun AutoSong.toBridgeBundle(): Bundle {
-        return Bundle().apply {
-            putString("id", mediaId)
-            putString("title", title)
-            putString("artist", artist)
-            putString("album", album)
-            putDouble("duration", durationSeconds.toDouble())
-            putString("coverUrl", artUrl.orEmpty())
-            putString("genre", "Mavrixfy")
-            putString("audioUrl", audioUrl)
-            putString("source", "jiosaavn")
-        }
-    }
-
-    private fun AutoSong.toQueueItem(index: Int): MediaSessionCompat.QueueItem {
-        val description = MediaDescriptionCompat.Builder()
-            .setMediaId(mediaId)
-            .setTitle(title)
-            .setSubtitle(artist.ifBlank { album })
-            .setDescription(album)
-            .apply {
-                artUrl?.takeIf { it.isNotBlank() }?.let { setIconUri(Uri.parse(it)) }
-            }
-            .build()
-        return MediaSessionCompat.QueueItem(description, index.toLong())
-    }
-
-    private fun updateSessionQueue(queue: List<AutoSong>, title: String = "Mavrixfy") {
-        currentAutoQueue = queue
-        val indexByMediaId = queue.indexOfFirst { it.mediaId == phonePlaybackMediaId }
-        if (indexByMediaId >= 0) {
-            currentAutoQueueIndex = indexByMediaId
-        } else if (currentAutoQueueIndex !in queue.indices) {
-            currentAutoQueueIndex = if (queue.isNotEmpty()) 0 else -1
-        }
-        mediaSession.setQueue(queue.mapIndexed { index, song -> song.toQueueItem(index) })
-        mediaSession.setQueueTitle(title)
-    }
-
-    private fun currentActiveQueueItemId(): Long {
-        val indexByMediaId = currentAutoQueue.indexOfFirst { it.mediaId == phonePlaybackMediaId }
-        val resolvedIndex = if (indexByMediaId >= 0) indexByMediaId else currentAutoQueueIndex
-        if (resolvedIndex in currentAutoQueue.indices) {
-            currentAutoQueueIndex = resolvedIndex
-            return resolvedIndex.toLong()
-        }
-        currentAutoQueueIndex = -1
-        return MediaSessionCompat.QueueItem.UNKNOWN_ID.toLong()
-    }
-
-    private fun bundleToAutoSong(bundle: Bundle, index: Int): AutoSong? {
-        val mediaId = bundle.getString("id").orEmpty().ifBlank { "phone-$index" }
-        val title = cleanText(bundle.getString("title").orEmpty())
-        val audioUrl = bundle.getString("audioUrl").orEmpty()
-        if (title.isBlank() || audioUrl.isBlank()) return null
-
-        return AutoSong(
-            mediaId = mediaId,
-            title = title,
-            artist = cleanText(bundle.getString("artist").orEmpty()).ifBlank { "Mavrixfy" },
-            album = cleanText(bundle.getString("album").orEmpty()),
-            durationSeconds = bundle.getDouble("duration", 0.0).toLong(),
-            audioUrl = audioUrl,
-            artUrl = cleanUrl(bundle.getString("coverUrl").orEmpty()).takeIf { it.isNotBlank() }
-        )
-    }
-
-    private fun fetchBitmap(url: String): Bitmap? {
-        return try {
-            val connection = URL(url).openConnection() as HttpURLConnection
-            connection.instanceFollowRedirects = true
-            connection.connectTimeout = 3000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("User-Agent", USER_AGENT)
-            connection.setRequestProperty("Accept", "image/*,*/*")
-            connection.inputStream.use { stream ->
-                BitmapFactory.decodeStream(stream)
-            }.also {
-                connection.disconnect()
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun setIdlePlaybackState() {
-        currentState = PlaybackStateCompat.STATE_STOPPED
-        val actions = PlaybackStateCompat.ACTION_PLAY or
-            PlaybackStateCompat.ACTION_PAUSE or
-            PlaybackStateCompat.ACTION_STOP or
-            PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
-            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-            PlaybackStateCompat.ACTION_SKIP_TO_QUEUE_ITEM or
-            PlaybackStateCompat.ACTION_SEEK_TO or
-            PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE
-
-        mediaSession.setPlaybackState(
-            PlaybackStateCompat.Builder()
-                .setActions(actions)
-                .setState(PlaybackStateCompat.STATE_STOPPED, 0L, 0f)
-                .build()
-        )
-    }
-
-    private fun handlePhonePlaybackSync(intent: Intent) {
-        val title = cleanText(intent.getStringExtra(EXTRA_TITLE).orEmpty()).ifBlank { "Mavrixfy" }
-        val artist = cleanText(intent.getStringExtra(EXTRA_ARTIST).orEmpty()).ifBlank { "Phone playback" }
-        val album = cleanText(intent.getStringExtra(EXTRA_ALBUM).orEmpty())
-        val mediaId = intent.getStringExtra(EXTRA_SONG_ID).orEmpty().ifBlank { "phone" }
-        val artUrl = cleanUrl(intent.getStringExtra(EXTRA_ART_URL).orEmpty())
-        val durationMs = intent.getLongExtra(EXTRA_DURATION_MS, 0L).coerceAtLeast(0L)
-        phonePlaybackPositionMs = intent.getLongExtra(EXTRA_POSITION_MS, 0L).coerceAtLeast(0L)
-        val state = if (intent.getBooleanExtra(EXTRA_IS_PLAYING, false)) {
-            PlaybackStateCompat.STATE_PLAYING
-        } else {
-            PlaybackStateCompat.STATE_PAUSED
-        }
-
-        phonePlaybackActive = true
-        mediaSession.isActive = true
-        val metadataChanged = mediaId != phonePlaybackMediaId ||
-            title != phonePlaybackTitle ||
-            artist != phonePlaybackArtist ||
-            album != phonePlaybackAlbum ||
-            artUrl != phonePlaybackArtUrl ||
-            durationMs != phonePlaybackDurationMs
-
-        if (metadataChanged) {
-            phonePlaybackMediaId = mediaId
-            phonePlaybackTitle = title
-            phonePlaybackArtist = artist
-            phonePlaybackAlbum = album
-            phonePlaybackArtUrl = artUrl
-            phonePlaybackDurationMs = durationMs
-            val syncedQueueIndex = currentAutoQueue.indexOfFirst { it.mediaId == mediaId }
-            if (syncedQueueIndex >= 0) {
-                currentAutoQueueIndex = syncedQueueIndex
-                mediaSession.setQueueTitle("Mavrixfy")
-            } else {
-                updateSessionQueue(
-                    listOf(
-                        AutoSong(
-                            mediaId = mediaId,
-                            title = title,
-                            artist = artist,
-                            album = album,
-                            durationSeconds = durationMs / 1000L,
-                            audioUrl = "",
-                            artUrl = artUrl.takeIf { it.isNotBlank() }
-                        )
-                    ),
-                    "Mavrixfy"
-                )
-                mediaSession.setQueueTitle("Mavrixfy phone")
-            }
-            setPhonePlaybackMetadata(albumArtCache[phoneArtCacheKey(mediaId, artUrl)])
-            loadPhoneAlbumArt(mediaId, artUrl)
-        }
-        setPhonePlaybackState(state)
-    }
-
-    private fun handlePhoneQueueSync(intent: Intent) {
-        @Suppress("DEPRECATION")
-        val bundles: ArrayList<Bundle> =
-            intent.getParcelableArrayListExtra(EXTRA_QUEUE_SONGS) ?: arrayListOf()
-        val songs = bundles.mapIndexedNotNull { index, bundle -> bundleToAutoSong(bundle, index) }
-        if (songs.isEmpty()) return
-
-        val requestedIndex = intent.getIntExtra(EXTRA_QUEUE_INDEX, -1)
-        currentAutoQueueIndex = when {
-            requestedIndex in songs.indices -> requestedIndex
-            phonePlaybackMediaId.isNotBlank() -> songs.indexOfFirst { it.mediaId == phonePlaybackMediaId }
-            else -> 0
-        }.coerceAtLeast(0)
-        songs.forEach { songCache[it.mediaId] = it }
-        updateSessionQueue(songs)
-        if (phonePlaybackActive) {
-            setPhonePlaybackState(currentState)
-        }
-        Log.i(TAG, "synced playback queue size=${songs.size} activeIndex=$currentAutoQueueIndex mediaId=$phonePlaybackMediaId")
-    }
-
-    private fun clearPhonePlayback() {
-        if (!phonePlaybackActive) return
-        phonePlaybackActive = false
-        phonePlaybackMediaId = ""
-        phonePlaybackTitle = ""
-        phonePlaybackArtist = ""
-        phonePlaybackAlbum = ""
-        phonePlaybackArtUrl = ""
-        phonePlaybackDurationMs = 0L
-        phonePlaybackPositionMs = 0L
-        setIdlePlaybackState()
-        mediaSession.isActive = false
-    }
-
-    private fun handleLikedSongsSync(intent: Intent) {
-        @Suppress("DEPRECATION")
-        val bundles: ArrayList<Bundle> =
-            intent.getParcelableArrayListExtra(EXTRA_LIKED_SONGS) ?: arrayListOf()
-        val songs = mutableListOf<AutoSong>()
-
-        for (index in bundles.indices) {
-            val bundle = bundles[index]
-            val id = bundle.getString("id").orEmpty().ifBlank { "liked-$index" }
-            val title = cleanText(bundle.getString("title").orEmpty())
-            val audioUrl = bundle.getString("audioUrl").orEmpty()
-            if (title.isBlank() || audioUrl.isBlank()) continue
-
-            songs.add(
-                AutoSong(
-                    mediaId = "$SONG_PREFIX$LIKED_PLAYLIST_ID:$id",
-                    title = title,
-                    artist = cleanText(bundle.getString("artist").orEmpty()).ifBlank { "Mavrixfy" },
-                    album = cleanText(bundle.getString("album").orEmpty()),
-                    durationSeconds = bundle.getDouble("duration", 0.0).toLong(),
-                    audioUrl = audioUrl,
-                    artUrl = cleanUrl(bundle.getString("coverUrl").orEmpty()).takeIf { it.isNotBlank() }
-                )
-            )
-        }
-
-        likedSongCache = songs
-        categoryCache[LIKED_PLAYLIST_ID] = songs
-        songs.forEach { songCache[it.mediaId] = it }
-        songs.firstOrNull()?.artUrl?.let { artUrl ->
-            artExecutor.execute {
-                fetchBitmap(artUrl)?.let { bitmap ->
-                    albumArtCache[playlistArtCacheKey(LIKED_PLAYLIST_ID)] = bitmap
-                }
-            }
-        }
-        Log.d(TAG, "synced ${songs.size} liked songs")
-    }
-
-    private fun setPhonePlaybackMetadata(albumArt: Bitmap?) {
-        val builder = MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, phonePlaybackMediaId)
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, phonePlaybackTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, phonePlaybackArtist)
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, phonePlaybackAlbum)
-            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, phonePlaybackDurationMs)
-
-        phonePlaybackArtUrl.takeIf { it.isNotBlank() }?.let {
-            builder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, it)
-            builder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, it)
-            builder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, it)
-        }
-
-        albumArt?.let {
-            builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it)
-            builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, it)
-        }
-
-        mediaSession.setMetadata(builder.build())
-    }
-
-    private fun loadPhoneAlbumArt(mediaId: String, artUrl: String) {
-        if (artUrl.isBlank()) return
-        val cacheKey = phoneArtCacheKey(mediaId, artUrl)
-        if (albumArtCache.containsKey(cacheKey)) return
-
-        artExecutor.execute {
-            val bitmap = fetchBitmap(artUrl) ?: return@execute
-            albumArtCache[cacheKey] = bitmap
-            mainHandler.post {
-                if (phonePlaybackActive &&
-                    phonePlaybackMediaId == mediaId &&
-                    phonePlaybackArtUrl == artUrl
-                ) {
-                    setPhonePlaybackMetadata(bitmap)
-                }
-            }
-        }
-    }
-
-    private fun setPhonePlaybackState(state: Int) {
-        currentState = state
-        val actions = PlaybackStateCompat.ACTION_PLAY or
-            PlaybackStateCompat.ACTION_PAUSE or
-            PlaybackStateCompat.ACTION_STOP or
-            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-            PlaybackStateCompat.ACTION_SKIP_TO_QUEUE_ITEM or
-            PlaybackStateCompat.ACTION_SEEK_TO or
-            PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE
-
-        mediaSession.setPlaybackState(
-            PlaybackStateCompat.Builder()
-                .setActions(actions)
-                .setActiveQueueItemId(currentActiveQueueItemId())
-                .setState(state, phonePlaybackPositionMs, if (state == PlaybackStateCompat.STATE_PLAYING) 1f else 0f)
-                .build()
-        )
-    }
-
-    private fun phoneArtCacheKey(mediaId: String, artUrl: String) = "phone:$mediaId:$artUrl"
-
-    private fun fetchSongs(playlist: AutoPlaylist): List<AutoSong> {
-        return try {
-            val encodedQuery = URLEncoder.encode(playlist.query, "UTF-8")
-            val connection = URL("$API_BASE/api/search/songs?query=$encodedQuery&limit=20")
-                .openConnection() as HttpURLConnection
-            connection.connectTimeout = 10000
-            connection.readTimeout = 15000
-            connection.requestMethod = "GET"
-            connection.setRequestProperty("Accept", "application/json")
-
-            connection.inputStream.bufferedReader().use { reader ->
-                parseSongs(playlist.id, JSONObject(reader.readText()))
-            }.also {
-                connection.disconnect()
-            }
-        } catch (_: Exception) {
-            Log.w(TAG, "fetchSongs failed for ${playlist.id}")
-            emptyList()
-        }
-    }
-
-    private fun parseSongs(categoryId: String, json: JSONObject): List<AutoSong> {
-        val data = json.optJSONObject("data")
-        val songs = firstArray(
-            data?.optJSONArray("results"),
-            data?.optJSONArray("songs"),
-            json.optJSONArray("results"),
-            json.optJSONArray("songs")
-        ) ?: return emptyList()
-
-        val seenSongs = mutableSetOf<String>()
-        return buildList {
-            for (index in 0 until songs.length()) {
-                val item = songs.optJSONObject(index) ?: continue
-                val audioUrl = bestDownloadUrl(item) ?: continue
-                val id = item.optString("id", "song-$index")
-                val title = cleanText(item.optString("name", item.optString("title", "Unknown song")))
-                val artist = cleanText(primaryArtists(item)).ifBlank { "Mavrixfy" }
-                val uniqueKey = id.takeIf { it.isNotBlank() } ?: "$title|$artist|$audioUrl"
-                if (!seenSongs.add(uniqueKey)) continue
-
-                add(
-                    AutoSong(
-                        mediaId = "$SONG_PREFIX$categoryId:$id",
-                        title = title,
-                        artist = artist,
-                        album = cleanText(item.optJSONObject("album")?.optString("name").orEmpty()),
-                        durationSeconds = item.optLong("duration", 0L),
-                        audioUrl = audioUrl,
-                        artUrl = bestImageUrl(item)
-                    )
-                )
-            }
-        }
-    }
-
-    private fun firstArray(vararg arrays: JSONArray?): JSONArray? {
-        return arrays.firstOrNull { it != null && it.length() > 0 }
-    }
-
-    private fun primaryArtists(item: JSONObject): String {
-        val primary = item.optJSONObject("artists")?.optJSONArray("primary") ?: return ""
-        return buildList {
-            for (index in 0 until primary.length()) {
-                val name = cleanText(primary.optJSONObject(index)?.optString("name").orEmpty())
-                if (name.isNotBlank()) add(name)
-            }
-        }.joinToString(", ")
-    }
-
     private fun cleanText(value: String): String {
         val decoded = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             Html.fromHtml(value, Html.FROM_HTML_MODE_LEGACY).toString()
@@ -1240,36 +1273,13 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         return cleanText(value).trim()
     }
 
-    private fun bestDownloadUrl(item: JSONObject): String? {
-        val downloads = item.optJSONArray("downloadUrl") ?: return item.optString("audioUrl").takeIf { it.isNotBlank() }
-        var fallback: String? = null
-        for (index in 0 until downloads.length()) {
-            val entry = downloads.optJSONObject(index) ?: continue
-            val url = cleanUrl(entry.optString("url"))
-            if (url.isBlank()) continue
-            fallback = url
-            if (entry.optString("quality").contains("320")) return url
-        }
-        return fallback
-    }
-
-    private fun bestImageUrl(item: JSONObject): String? {
-        val images = item.optJSONArray("image") ?: return cleanUrl(item.optString("imageUrl")).takeIf { it.isNotBlank() }
-        var fallback: String? = null
-        for (index in 0 until images.length()) {
-            val entry = images.optJSONObject(index) ?: continue
-            val url = cleanUrl(entry.optString("url"))
-            if (url.isBlank()) continue
-            fallback = url
-            if (entry.optString("quality").contains("500")) return url
-        }
-        return fallback
-    }
-
     private fun playlistParentId(id: String) = "$PLAYLIST_PREFIX$id"
     private fun navParentId(id: String) = "$NAV_PREFIX$id"
 
     companion object {
+        @Volatile
+        var instance: MavrixfyAutoService? = null
+
         const val ROOT_ID = "root"
         const val NAV_PREFIX = "nav:"
         const val PLAYLIST_PREFIX = "playlist:"

@@ -38,26 +38,44 @@ class AutoMediaModule(private val reactContext: ReactApplicationContext) :
         positionMs: Double,
         isPlaying: Boolean
     ) {
-        val intent = Intent(reactContext, MavrixfyAutoService::class.java).apply {
-            action = MavrixfyAutoService.ACTION_SYNC_PHONE_PLAYBACK
-            putExtra(MavrixfyAutoService.EXTRA_SONG_ID, songId.orEmpty())
-            putExtra(MavrixfyAutoService.EXTRA_TITLE, title.orEmpty())
-            putExtra(MavrixfyAutoService.EXTRA_ARTIST, artist.orEmpty())
-            putExtra(MavrixfyAutoService.EXTRA_ALBUM, album.orEmpty())
-            putExtra(MavrixfyAutoService.EXTRA_ART_URL, artUrl.orEmpty())
-            putExtra(MavrixfyAutoService.EXTRA_DURATION_MS, durationMs.toLong())
-            putExtra(MavrixfyAutoService.EXTRA_POSITION_MS, positionMs.toLong())
-            putExtra(MavrixfyAutoService.EXTRA_IS_PLAYING, isPlaying)
+        val service = MavrixfyAutoService.instance
+        if (service != null) {
+            service.syncPlaybackDirect(songId, title, artist, album, artUrl, durationMs, positionMs, isPlaying)
+        } else {
+            try {
+                val intent = Intent(reactContext, MavrixfyAutoService::class.java).apply {
+                    action = MavrixfyAutoService.ACTION_SYNC_PHONE_PLAYBACK
+                    putExtra(MavrixfyAutoService.EXTRA_SONG_ID, songId.orEmpty())
+                    putExtra(MavrixfyAutoService.EXTRA_TITLE, title.orEmpty())
+                    putExtra(MavrixfyAutoService.EXTRA_ARTIST, artist.orEmpty())
+                    putExtra(MavrixfyAutoService.EXTRA_ALBUM, album.orEmpty())
+                    putExtra(MavrixfyAutoService.EXTRA_ART_URL, artUrl.orEmpty())
+                    putExtra(MavrixfyAutoService.EXTRA_DURATION_MS, durationMs.toLong())
+                    putExtra(MavrixfyAutoService.EXTRA_POSITION_MS, positionMs.toLong())
+                    putExtra(MavrixfyAutoService.EXTRA_IS_PLAYING, isPlaying)
+                }
+                reactContext.startService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start service for syncPlayback", e)
+            }
         }
-        reactContext.startService(intent)
     }
 
     @ReactMethod
     fun clearPlayback() {
-        val intent = Intent(reactContext, MavrixfyAutoService::class.java).apply {
-            action = MavrixfyAutoService.ACTION_CLEAR_PHONE_PLAYBACK
+        val service = MavrixfyAutoService.instance
+        if (service != null) {
+            service.clearPlaybackDirect()
+        } else {
+            try {
+                val intent = Intent(reactContext, MavrixfyAutoService::class.java).apply {
+                    action = MavrixfyAutoService.ACTION_CLEAR_PHONE_PLAYBACK
+                }
+                reactContext.startService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start service for clearPlayback", e)
+            }
         }
-        reactContext.startService(intent)
     }
 
     @ReactMethod
@@ -82,12 +100,21 @@ class AutoMediaModule(private val reactContext: ReactApplicationContext) :
             queueSongs.add(bundle)
         }
 
-        val intent = Intent(reactContext, MavrixfyAutoService::class.java).apply {
-            action = MavrixfyAutoService.ACTION_SYNC_PHONE_QUEUE
-            putParcelableArrayListExtra(MavrixfyAutoService.EXTRA_QUEUE_SONGS, queueSongs)
-            putExtra(MavrixfyAutoService.EXTRA_QUEUE_INDEX, activeIndex.toInt())
+        val service = MavrixfyAutoService.instance
+        if (service != null) {
+            service.syncQueueDirect(queueSongs, activeIndex.toInt())
+        } else {
+            try {
+                val intent = Intent(reactContext, MavrixfyAutoService::class.java).apply {
+                    action = MavrixfyAutoService.ACTION_SYNC_PHONE_QUEUE
+                    putParcelableArrayListExtra(MavrixfyAutoService.EXTRA_QUEUE_SONGS, queueSongs)
+                    putExtra(MavrixfyAutoService.EXTRA_QUEUE_INDEX, activeIndex.toInt())
+                }
+                reactContext.startService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start service for syncQueue", e)
+            }
         }
-        reactContext.startService(intent)
     }
 
     @ReactMethod
@@ -107,11 +134,20 @@ class AutoMediaModule(private val reactContext: ReactApplicationContext) :
             likedSongs.add(bundle)
         }
 
-        val intent = Intent(reactContext, MavrixfyAutoService::class.java).apply {
-            action = MavrixfyAutoService.ACTION_SYNC_LIKED_SONGS
-            putParcelableArrayListExtra(MavrixfyAutoService.EXTRA_LIKED_SONGS, likedSongs)
+        val service = MavrixfyAutoService.instance
+        if (service != null) {
+            service.syncLikedSongsDirect(likedSongs)
+        } else {
+            try {
+                val intent = Intent(reactContext, MavrixfyAutoService::class.java).apply {
+                    action = MavrixfyAutoService.ACTION_SYNC_LIKED_SONGS
+                    putParcelableArrayListExtra(MavrixfyAutoService.EXTRA_LIKED_SONGS, likedSongs)
+                }
+                reactContext.startService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start service for syncLikedSongs", e)
+            }
         }
-        reactContext.startService(intent)
     }
 
     companion object {
