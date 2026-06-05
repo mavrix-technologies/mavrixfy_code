@@ -10,6 +10,7 @@
 
 import TrackPlayer, { Event, RepeatMode } from "react-native-track-player";
 import { setupPlayer } from "@/lib/trackPlayer";
+import { registerAutoMediaRemoteService } from "@/lib/autoMediaRemoteService";
 import { compactMap } from "@/lib/arrayUtils";
 
 let pausedForDuck = false;
@@ -38,6 +39,8 @@ export const trackPlayerService = async () => {
   } catch {
     // player_already_initialized is fine — just means the app already set it up
   }
+
+  registerAutoMediaRemoteService();
 
   // ── Play / Pause / Stop ────────────────────────────────────────────────────
   TrackPlayer.addEventListener(Event.RemotePlay, () => runRemoteCommand(() => TrackPlayer.play()));

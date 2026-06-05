@@ -19,8 +19,7 @@ import {
   NativeSyntheticEvent,
   StyleProp,
   useWindowDimensions,
-  ViewStyle,
-  PanResponder
+  ViewStyle
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";

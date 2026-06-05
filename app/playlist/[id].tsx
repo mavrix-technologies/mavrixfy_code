@@ -623,6 +623,7 @@ function usePlaylistScreenView() {
               source={{ uri: playlistCover }}
               style={StyleSheet.absoluteFill}
               contentFit="cover"
+              contentPosition={{ left: "50%", top: "28%" }}
               transition={120}
             />
           ) : (

@@ -496,6 +496,22 @@ export default function SongOptionsScreen() {
   const liked = song ? isLiked(song.id) : false;
 
   const bottomPad = Math.max(insets.bottom + 8, 20);
+  const androidSwipeResponder = useRef(
+    Platform.OS === "android"
+      ? PanResponder.create({
+          onStartShouldSetPanResponder: () => false,
+          onMoveShouldSetPanResponder: (_, gestureState) => {
+            const { dx, dy } = gestureState;
+            return dy > 10 && Math.abs(dy) > Math.abs(dx) * 1.5;
+          },
+          onPanResponderRelease: (_, gestureState) => {
+            if (gestureState.dy > 80 || (gestureState.dy > 40 && gestureState.vy > 0.5)) {
+              safeGoBack();
+            }
+          },
+        })
+      : null
+  ).current;
 
   const closeThen = useCallback((action: () => void | Promise<void>) => {
     safeGoBack();
@@ -673,23 +689,6 @@ export default function SongOptionsScreen() {
       onPress: isPlaylistContext ? () => void handleRemoveFromPlaylist() : safeGoBack,
     });
   }
-
-  const androidSwipeResponder = useRef(
-    Platform.OS === "android"
-      ? PanResponder.create({
-          onStartShouldSetPanResponder: () => false,
-          onMoveShouldSetPanResponder: (_, gestureState) => {
-            const { dx, dy } = gestureState;
-            return dy > 10 && Math.abs(dy) > Math.abs(dx) * 1.5;
-          },
-          onPanResponderRelease: (_, gestureState) => {
-            if (gestureState.dy > 80 || (gestureState.dy > 40 && gestureState.vy > 0.5)) {
-              safeGoBack();
-            }
-          },
-        })
-      : null
-  ).current;
 
   return (
     <View style={styles.root}>

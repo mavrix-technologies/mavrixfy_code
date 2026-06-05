@@ -555,11 +555,11 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     [safeTextColor]
   );
   const playIconColor = isIOS ? "#111317" : miniPlayerTheme.onAccent;
+  const playerSectionBg = isIOS ? "rgba(22,24,29,0.38)" : Colors.surface;
   const activeNavColor = isIOS ? "#F7F7FA" : "#FFFFFF";
   const navInactiveColor = isIOS ? "rgba(235,235,245,0.62)" : conceptSubtext;
-  const navBaseBg = isIOS ? "rgba(22,24,29,0.32)" : Colors.surface;
+  const navBaseBg = playerSectionBg;
   const containerGlassBase = isIOS ? "rgba(15,17,22,0.28)" : Colors.background;
-  const playerSectionBg = isIOS ? "rgba(22,24,29,0.38)" : Colors.surface;
   const playerSectionDivider = useMemo(
     () => colorToRgba(miniPlayerTheme.accent, 0.14, "rgba(223,226,235,0.08)"),
     [miniPlayerTheme.accent]
@@ -569,21 +569,21 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   // Static — never changes, defined once
   const navGlassTintColors = useMemo<readonly [string, string, string]>(
     () => isIOS
-      ? ["rgba(255,255,255,0.14)", "rgba(255,255,255,0.05)", "rgba(255,255,255,0.08)"]
-      : ["rgba(255,255,255,0.05)", "rgba(255,255,255,0.02)", "rgba(255,255,255,0.03)"],
+      ? ["rgba(255,255,255,0.08)", "rgba(255,255,255,0.025)", "rgba(255,255,255,0.04)"]
+      : ["rgba(255,255,255,0.035)", "rgba(255,255,255,0.015)", "rgba(255,255,255,0.02)"],
     [isIOS]
   );
   const navGlowFillColors = useMemo<readonly [string, string, string]>(
     () => isIOS
       ? [
-          colorToRgba(albumColor, 0.04, "rgba(255,255,255,0.08)"),
-          colorToRgba(albumColor, 0.02, "rgba(255,255,255,0.04)"),
-          "rgba(255,255,255,0.015)",
+          colorToRgba(albumColor, 0.018, "rgba(255,255,255,0.035)"),
+          colorToRgba(albumColor, 0.01, "rgba(255,255,255,0.02)"),
+          "rgba(255,255,255,0.008)",
         ]
       : [
-          colorToRgba(albumColor, 0.07, "rgba(16,20,26,0.1)"),
-          colorToRgba(albumColor, 0.035, "rgba(16,20,26,0.07)"),
-          "rgba(16,20,26,0.015)",
+          colorToRgba(albumColor, 0.035, "rgba(16,20,26,0.06)"),
+          colorToRgba(albumColor, 0.018, "rgba(16,20,26,0.04)"),
+          "rgba(16,20,26,0.01)",
         ],
     [albumColor, isIOS]
   );

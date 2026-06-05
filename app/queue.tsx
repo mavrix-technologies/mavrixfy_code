@@ -366,7 +366,7 @@ export default function QueueScreen() {
           )}
         </View>
 
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom + 10, Platform.OS === "ios" ? 34 : 20) }]}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <Pressable
             style={({ pressed }) => [styles.controlButton, pressed && styles.controlButtonPressed]}
             onPress={handleShuffle}

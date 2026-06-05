@@ -20,11 +20,6 @@ import { ActivityIndicator,
   View,
   Text
 } from "react-native";
-
-LogBox.ignoreLogs([
-  "expo-notifications functionality is not fully supported in Expo Go",
-  "expo-notifications: Android Push notifications",
-]);
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -41,10 +36,14 @@ import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { getRecentlyPlayed } from "@/lib/storage";
 import { AppNavBar } from "@/app/(tabs)/_layout";
 
-// Screens where the nav bar must not appear or should stay visually hidden.
-// Form sheets keep AppNavBar mounted to avoid mini-player/nav remount flicker on close.
+LogBox.ignoreLogs([
+  "expo-notifications functionality is not fully supported in Expo Go",
+  "expo-notifications: Android Push notifications",
+]);
+
+// Screens where the nav bar must not appear.
+// Sheets keep AppNavBar visible so the mini-player/nav do not flicker during transitions.
 const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs"]);
-const NAV_VISUALLY_HIDDEN_SEGMENTS = new Set(["song-options", "player", "queue", "sleep-timer"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
@@ -172,21 +171,30 @@ function RootLayoutNav() {
 
   // 1. Request notification permission on mount (Guest or User)
   useEffect(() => {
-    import("@/services/notificationService").then(({ requestNotificationPermission }) => {
-      requestNotificationPermission();
-    }).catch(err => console.error("Failed to request permission:", err));
+    import("@/services/notificationService")
+      .then(({ requestNotificationPermission }) => {
+        requestNotificationPermission();
+      })
+      .catch(err => console.error("Failed to request permission:", err));
   }, []);
 
   // 2. Register push tokens in Firestore only for authenticated users
   useEffect(() => {
-    import("@/services/notificationService").then(
-      ({ registerForPushNotificationsAsync, registerNotificationListeners }) => {
+    let cleanupNotificationListeners: (() => void) | undefined;
+    let isActive = true;
+
+    import("@/services/notificationService")
+      .then(({ registerForPushNotificationsAsync, registerNotificationListeners }) => {
+        if (!isActive) {
+          return;
+        }
+
         // Only save to Firestore when a real user is signed in
         if (firebaseUser?.uid) {
           registerForPushNotificationsAsync(firebaseUser.uid);
         }
 
-        const cleanup = registerNotificationListeners(
+        cleanupNotificationListeners = registerNotificationListeners(
           (notification) => {
             // Notification received in foreground
             console.log("Foreground notification received:", notification);
@@ -203,12 +211,16 @@ function RootLayoutNav() {
             }
           }
         );
-        return cleanup;
-      }
-    ).catch((err) => {
-      console.error("Failed to load notification service:", err);
-    });
-  }, [firebaseUser?.uid]);
+      })
+      .catch((err) => {
+        console.error("Failed to load notification service:", err);
+      });
+
+    return () => {
+      isActive = false;
+      cleanupNotificationListeners?.();
+    };
+  }, [firebaseUser?.uid, routerReplace]);
 
   useEffect(() => {
     if (loading) return;
@@ -245,7 +257,6 @@ function RootLayoutNav() {
 
   const activeSegment = segments[0] as string;
   const unmountNavBar = NAV_UNMOUNT_SEGMENTS.has(activeSegment);
-  const visuallyHideNavBar = NAV_VISUALLY_HIDDEN_SEGMENTS.has(activeSegment);
 
   return (
     <View style={{ flex: 1 }}>
@@ -268,15 +279,12 @@ function RootLayoutNav() {
         <Stack.Screen
           name="queue"
           options={{
-            presentation: "formSheet",
-            animation: "slide_from_bottom",
-            sheetAllowedDetents: [0.88, 1],
-            sheetInitialDetentIndex: 0,
-            sheetCornerRadius: 24,
-            sheetGrabberVisible: false,
-            sheetExpandsWhenScrolledToEdge: false,
-            gestureEnabled: true,
-            contentStyle: { backgroundColor: "#1E1E1E" },
+            ...(Platform.OS === "ios"
+              ? IOS_VERTICAL_SHEET_OPTIONS
+              : {
+                  ...ANDROID_VERTICAL_SHEET_OPTIONS,
+                  gestureEnabled: false,
+                }),
           }}
         />
         <Stack.Screen
@@ -341,8 +349,8 @@ function RootLayoutNav() {
           options={{ gestureEnabled: false }}
         />
       </Stack>
-      {/* Keep the nav mounted under sheets to avoid close-time mini-player flicker. */}
-      {!unmountNavBar && <AppNavBar hidden={visuallyHideNavBar} />}
+      {/* Keep the nav visible under sheets to avoid mini-player/nav flicker. */}
+      {!unmountNavBar && <AppNavBar />}
     </View>
   );
 }

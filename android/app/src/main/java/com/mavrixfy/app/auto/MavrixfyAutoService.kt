@@ -24,6 +24,7 @@ import android.util.Log
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
 import com.mavrixfy.app.R
 import com.doublesymmetry.trackplayer.service.MusicService
@@ -361,7 +362,7 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         )
     )
 
-    private val browserExecutor = Executors.newSingleThreadExecutor()
+    private val browserExecutor = Executors.newFixedThreadPool(4)
     private val artExecutor = Executors.newFixedThreadPool(2)
     private val categoryCache = ConcurrentHashMap<String, List<AutoSong>>()
     private val songCache = ConcurrentHashMap<String, AutoSong>()
@@ -371,7 +372,7 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var sessionHookRetryCount = 0
     private var musicService: MusicService? = null
-    private var originalMediaCallback: android.support.v4.media.session.MediaSessionCompat.Callback? = null
+    private lateinit var autoMediaSession: MediaSessionCompat
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -402,8 +403,85 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         instance = this
         Log.d(TAG, "onCreate")
         AutoMediaModule.warmReactRuntime(applicationContext)
-        // Delay to let RNTP's MusicService start, then bind to read session token only
-        mainHandler.postDelayed({ setupMediaSessionHook() }, 1000)
+        setupAutoMediaSession()
+        warmHomeContent()
+    }
+
+    private fun setupAutoMediaSession() {
+        autoMediaSession = MediaSessionCompat(this, TAG).apply {
+            setFlags(
+                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+                    MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onPlay() {
+                    Log.d(TAG, "AutoSession: onPlay")
+                    playDefaultPlaylist()
+                }
+
+                override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+                    Log.d(TAG, "AutoSession: onPlayFromMediaId $mediaId")
+                    playFromMediaId(mediaId.orEmpty())
+                }
+
+                override fun onPause() {
+                    Log.d(TAG, "AutoSession: onPause")
+                    AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
+                }
+
+                override fun onSkipToNext() {
+                    Log.d(TAG, "AutoSession: onSkipToNext")
+                    AutoMediaModule.emitRemoteCommand(applicationContext, "next")
+                }
+
+                override fun onSkipToPrevious() {
+                    Log.d(TAG, "AutoSession: onSkipToPrevious")
+                    AutoMediaModule.emitRemoteCommand(applicationContext, "previous")
+                }
+
+                override fun onStop() {
+                    Log.d(TAG, "AutoSession: onStop")
+                    AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
+                }
+
+                override fun onSeekTo(pos: Long) {
+                    Log.d(TAG, "AutoSession: onSeekTo $pos")
+                    AutoMediaModule.emitRemoteCommand(applicationContext, "seek", positionMs = pos)
+                }
+
+                override fun onSkipToQueueItem(id: Long) {
+                    val index = id.toInt()
+                    Log.d(TAG, "AutoSession: onSkipToQueueItem $index")
+                    val song = currentAutoQueue.getOrNull(index)
+                    if (song != null) {
+                        AutoMediaModule.emitRemoteCommand(
+                            context = applicationContext,
+                            command = "skipToQueueItem",
+                            queueIndex = index,
+                            song = song.toBridgeBundle(),
+                            queue = currentAutoQueue.map { it.toBridgeBundle() }
+                        )
+                    }
+                }
+            })
+            setPlaybackState(
+                PlaybackStateCompat.Builder()
+                    .setActions(
+                        PlaybackStateCompat.ACTION_PLAY or
+                            PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
+                            PlaybackStateCompat.ACTION_PAUSE or
+                            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                            PlaybackStateCompat.ACTION_SEEK_TO or
+                            PlaybackStateCompat.ACTION_SKIP_TO_QUEUE_ITEM
+                    )
+                    .setState(PlaybackStateCompat.STATE_NONE, 0L, 1f)
+                    .build()
+            )
+            isActive = true
+        }
+        sessionToken = autoMediaSession.sessionToken
+        Log.i(TAG, "Android Auto MediaSession ready")
     }
 
     private fun setupMediaSessionHook() {
@@ -453,97 +531,37 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
                 sessionHookRetryCount = 0
                 Log.i(TAG, "MediaSession token set — Android Auto ready")
 
-                // Try to extract original callback set by kotlinaudio/RNTP via reflection
-                originalMediaCallback = getOriginalCallback(mediaSession)
-                if (originalMediaCallback != null) {
-                    Log.i(TAG, "Successfully extracted original MediaSessionCallback")
-                } else {
-                    Log.w(TAG, "Original MediaSessionCallback not found, will rely on module fallback")
-                }
-
-                // Register a callback wrapper to forward notifications/remote events
+                // Forward Android Auto transport controls through the JS bridge.
+                // TrackPlayer's background service registers the matching listener.
                 mediaSession.setCallback(object : android.support.v4.media.session.MediaSessionCompat.Callback() {
-                    private fun getActiveReactContext(): com.facebook.react.bridge.ReactContext? {
-                        val app = application as? com.facebook.react.ReactApplication ?: return null
-                        return app.reactNativeHost.reactInstanceManager.currentReactContext
-                    }
-
                     override fun onPlay() {
                         Log.d(TAG, "MediaCallback: onPlay")
-                        val orig = originalMediaCallback
-                        val activeCtx = getActiveReactContext()
-                        if (orig != null && activeCtx != null) {
-                            Log.d(TAG, "Active React context found, delegating onPlay to original callback")
-                            orig.onPlay()
-                        } else {
-                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
-                            AutoMediaModule.emitRemoteCommand(applicationContext, "play")
-                        }
+                        AutoMediaModule.emitRemoteCommand(applicationContext, "play")
                     }
 
                     override fun onPause() {
                         Log.d(TAG, "MediaCallback: onPause")
-                        val orig = originalMediaCallback
-                        val activeCtx = getActiveReactContext()
-                        if (orig != null && activeCtx != null) {
-                            Log.d(TAG, "Active React context found, delegating onPause to original callback")
-                            orig.onPause()
-                        } else {
-                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
-                            AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
-                        }
+                        AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
                     }
 
                     override fun onSkipToNext() {
                         Log.d(TAG, "MediaCallback: onSkipToNext")
-                        val orig = originalMediaCallback
-                        val activeCtx = getActiveReactContext()
-                        if (orig != null && activeCtx != null) {
-                            Log.d(TAG, "Active React context found, delegating onSkipToNext to original callback")
-                            orig.onSkipToNext()
-                        } else {
-                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
-                            AutoMediaModule.emitRemoteCommand(applicationContext, "next")
-                        }
+                        AutoMediaModule.emitRemoteCommand(applicationContext, "next")
                     }
 
                     override fun onSkipToPrevious() {
                         Log.d(TAG, "MediaCallback: onSkipToPrevious")
-                        val orig = originalMediaCallback
-                        val activeCtx = getActiveReactContext()
-                        if (orig != null && activeCtx != null) {
-                            Log.d(TAG, "Active React context found, delegating onSkipToPrevious to original callback")
-                            orig.onSkipToPrevious()
-                        } else {
-                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
-                            AutoMediaModule.emitRemoteCommand(applicationContext, "previous")
-                        }
+                        AutoMediaModule.emitRemoteCommand(applicationContext, "previous")
                     }
 
                     override fun onStop() {
                         Log.d(TAG, "MediaCallback: onStop")
-                        val orig = originalMediaCallback
-                        val activeCtx = getActiveReactContext()
-                        if (orig != null && activeCtx != null) {
-                            Log.d(TAG, "Active React context found, delegating onStop to original callback")
-                            orig.onStop()
-                        } else {
-                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
-                            AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
-                        }
+                        AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
                     }
 
                     override fun onSeekTo(pos: Long) {
                         Log.d(TAG, "MediaCallback: onSeekTo $pos")
-                        val orig = originalMediaCallback
-                        val activeCtx = getActiveReactContext()
-                        if (orig != null && activeCtx != null) {
-                            Log.d(TAG, "Active React context found, delegating onSeekTo to original callback")
-                            orig.onSeekTo(pos)
-                        } else {
-                            Log.d(TAG, "React context inactive or original callback null, emitting via AutoMediaModule")
-                            AutoMediaModule.emitRemoteCommand(applicationContext, "seek", positionMs = pos)
-                        }
+                        AutoMediaModule.emitRemoteCommand(applicationContext, "seek", positionMs = pos)
                     }
                 })
                 Log.i(TAG, "Notification media callback registered")
@@ -563,35 +581,6 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         } else {
             Log.w(TAG, "Could not hook MediaSession after $sessionHookRetryCount attempts")
         }
-    }
-
-    private fun getOriginalCallback(mediaSession: android.support.v4.media.session.MediaSessionCompat): android.support.v4.media.session.MediaSessionCompat.Callback? {
-        try {
-            val mImplField = mediaSession.javaClass.getDeclaredField("mImpl")
-            mImplField.isAccessible = true
-            val mImpl = mImplField.get(mediaSession) ?: return null
-            
-            var clazz: Class<*>? = mImpl.javaClass
-            while (clazz != null) {
-                try {
-                    val mCallbackField = clazz.getDeclaredField("mCallback")
-                    mCallbackField.isAccessible = true
-                    val cb = mCallbackField.get(mImpl)
-                    if (cb != null) {
-                        val cbClassName = cb.javaClass.name
-                        if (!cbClassName.contains("MavrixfyAutoService")) {
-                            return cb as? android.support.v4.media.session.MediaSessionCompat.Callback
-                        }
-                    }
-                } catch (_: NoSuchFieldException) {
-                    // Suppress
-                }
-                clazz = clazz.superclass
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to get original MediaSessionCallback", e)
-        }
-        return null
     }
 
     override fun onGetRoot(
@@ -626,19 +615,9 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
             return
         }
 
-        categoryCache[playlist.id]?.let { cachedSongs ->
-            result.sendResult(playlist.toChildren(cachedSongs))
-            return
-        }
-
-        result.detach()
-        browserExecutor.execute {
-            val songs = fetchSongs(playlist)
-            Log.d(TAG, "loaded ${songs.size} songs for ${playlist.id}")
-            categoryCache[playlist.id] = songs
-            songs.forEach { songCache[it.mediaId] = it }
-            result.sendResult(playlist.toChildren(songs))
-        }
+        val songs = playableCachedSongs(playlist)
+        result.sendResult(playlist.toChildren(songs))
+        refreshPlaylistAsync(playlist)
     }
 
     override fun onSearch(
@@ -732,6 +711,10 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
             try { unbindService(serviceConnection) } catch (_: Exception) {}
             musicService = null
         }
+        if (::autoMediaSession.isInitialized) {
+            autoMediaSession.isActive = false
+            autoMediaSession.release()
+        }
         super.onDestroy()
     }
 
@@ -760,25 +743,8 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
             return
         }
 
-        val allPlaylistsReady = sectionPlaylists.all { categoryCache.containsKey(it.id) }
-        if (allPlaylistsReady) {
-            result.sendResult(sectionPlaylists.map { it.toMediaItem() })
-            return
-        }
-
-        result.detach()
-        browserExecutor.execute {
-            sectionPlaylists.forEach { pl ->
-                if (!categoryCache.containsKey(pl.id)) {
-                    val fetchedSongs = fetchSongs(pl)
-                    Log.d(TAG, "loaded ${fetchedSongs.size} card songs for ${pl.id}")
-                    categoryCache[pl.id] = fetchedSongs
-                    fetchedSongs.forEach { s -> songCache[s.mediaId] = s }
-                    preloadPlaylistArt(pl.id, fetchedSongs.firstOrNull()?.artUrl)
-                }
-            }
-            result.sendResult(sectionPlaylists.map { pl -> pl.toMediaItem() })
-        }
+        result.sendResult(sectionPlaylists.map { it.toMediaItem() })
+        sectionPlaylists.take(6).forEach { refreshPlaylistAsync(it) }
     }
 
     private fun AutoPlaylist.toMediaItem(): MediaBrowserCompat.MediaItem {
@@ -830,15 +796,8 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
                 AutoMediaModule.emitRemoteCommand(applicationContext, "play")
                 return@execute
             }
-            val cachedSongs: List<AutoSong>? = categoryCache[playlist.id]
-            val songsToPlay: List<AutoSong> = if (cachedSongs != null) {
-                cachedSongs
-            } else {
-                val fetched = fetchSongs(playlist)
-                categoryCache[playlist.id] = fetched
-                fetched.forEach { s -> songCache[s.mediaId] = s }
-                fetched
-            }
+            val songsToPlay = playableCachedSongs(playlist)
+            refreshPlaylistAsync(playlist)
             val firstSong = songsToPlay.firstOrNull { s -> s.audioUrl.isNotBlank() }
             if (firstSong == null) {
                 AutoMediaModule.emitRemoteCommand(applicationContext, "play")
@@ -848,10 +807,94 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         }
     }
 
+    private fun playFromMediaId(mediaId: String) {
+        browserExecutor.execute {
+            val song = songCache[mediaId]
+            val playlistId = mediaId
+                .takeIf { it.startsWith(SONG_PREFIX) }
+                ?.removePrefix(SONG_PREFIX)
+                ?.substringBefore(":")
+            val playlist = playlists.firstOrNull { it.id == playlistId }
+            val queue = when {
+                playlist != null -> playableCachedSongs(playlist)
+                currentAutoQueue.isNotEmpty() -> currentAutoQueue
+                else -> song?.let { listOf(it) } ?: playableCachedSongs(playlists.first())
+            }
+            val selectedSong = song ?: queue.firstOrNull { it.mediaId == mediaId } ?: queue.firstOrNull()
+            if (selectedSong == null) {
+                AutoMediaModule.emitRemoteCommand(applicationContext, "play")
+                return@execute
+            }
+            playSongQueue(selectedSong, queue)
+            if (playlist != null) refreshPlaylistAsync(playlist)
+        }
+    }
+
+    private fun fallbackSongsFor(playlist: AutoPlaylist): List<AutoSong> {
+        val fallback = listOf(
+            AutoSong(
+                mediaId = "$SONG_PREFIX${playlist.id}:YiVML4Zo",
+                title = "Gehra Hua",
+                artist = "Shashwat Sachdev, Arijit Singh",
+                album = "Gehra Hua",
+                durationSeconds = 362,
+                audioUrl = "https://aac.saavncdn.com/450/f467e05e2825cec2203546333e0d0550_320.mp4",
+                artUrl = "https://c.saavncdn.com/450/Gehra-Hua-From-Dhurandhar-Hindi-2025-20251205154217-500x500.jpg"
+            ),
+            AutoSong(
+                mediaId = "$SONG_PREFIX${playlist.id}:fallback-2",
+                title = playlist.title,
+                artist = "Mavrixfy",
+                album = playlist.subtitle,
+                durationSeconds = 0,
+                audioUrl = "https://aac.saavncdn.com/450/f467e05e2825cec2203546333e0d0550_160.mp4",
+                artUrl = null
+            ),
+            AutoSong(
+                mediaId = "$SONG_PREFIX${playlist.id}:fallback-3",
+                title = "${playlist.tag.lowercase().replaceFirstChar { it.uppercase() }} Mix",
+                artist = "Mavrixfy",
+                album = playlist.title,
+                durationSeconds = 0,
+                audioUrl = "https://aac.saavncdn.com/450/f467e05e2825cec2203546333e0d0550_96.mp4",
+                artUrl = null
+            )
+        )
+        return fallback.map { song ->
+            song.copy(mediaId = song.mediaId.replace(" ", "_"))
+        }
+    }
+
+    private fun warmHomeContent() {
+        playlists.filter { "home" in it.navIds }.take(6).forEach { refreshPlaylistAsync(it) }
+    }
+
+    private fun playableCachedSongs(playlist: AutoPlaylist): List<AutoSong> {
+        val cachedSongs = categoryCache[playlist.id].orEmpty().filter { it.audioUrl.isNotBlank() }
+        if (cachedSongs.isNotEmpty()) return cachedSongs
+
+        val fallbackSongs = fallbackSongsFor(playlist)
+        categoryCache.putIfAbsent(playlist.id, fallbackSongs)
+        fallbackSongs.forEach { songCache[it.mediaId] = it }
+        preloadPlaylistArt(playlist.id, fallbackSongs.firstOrNull()?.artUrl)
+        return fallbackSongs
+    }
+
+    private fun refreshPlaylistAsync(playlist: AutoPlaylist) {
+        browserExecutor.execute {
+            val fetchedSongs = fetchSongs(playlist)
+            if (fetchedSongs.isEmpty()) return@execute
+            categoryCache[playlist.id] = fetchedSongs
+            fetchedSongs.forEach { s -> songCache[s.mediaId] = s }
+            preloadPlaylistArt(playlist.id, fetchedSongs.firstOrNull()?.artUrl)
+            Log.d(TAG, "refreshed ${fetchedSongs.size} songs for ${playlist.id}")
+        }
+    }
+
     private fun fetchSongs(playlist: AutoPlaylist): List<AutoSong> {
         return try {
             val encodedQuery = URLEncoder.encode(playlist.query, "UTF-8")
-            val url = URL("$API_BASE/search?q=$encodedQuery&limit=30")
+            val url = URL("$API_BASE/api/search/songs?query=$encodedQuery&limit=30")
             val connection = url.openConnection() as HttpURLConnection
             connection.connectTimeout = 8000
             connection.readTimeout = 12000
@@ -865,7 +908,9 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
             }
             val json = connection.inputStream.bufferedReader().use { reader -> reader.readText() }
             connection.disconnect()
-            parseSongsFromJson(json, playlist.id)
+            val songs = parseSongsFromJson(json, playlist.id)
+            Log.d(TAG, "fetchSongs parsed ${songs.size} songs for ${playlist.id}")
+            songs
         } catch (e: Exception) {
             Log.e(TAG, "fetchSongs error for ${playlist.id}", e)
             emptyList()
@@ -876,10 +921,14 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         val songs = mutableListOf<AutoSong>()
         try {
             val root = JSONObject(json)
+            val dataObject = root.optJSONObject("data")
             val dataArray: JSONArray = when {
-                root.has("data") && root.get("data") is JSONArray -> root.getJSONArray("data")
-                root.has("results") && root.get("results") is JSONArray -> root.getJSONArray("results")
-                root.has("songs") && root.get("songs") is JSONArray -> root.getJSONArray("songs")
+                root.optJSONArray("data") != null -> root.getJSONArray("data")
+                root.optJSONArray("results") != null -> root.getJSONArray("results")
+                root.optJSONArray("songs") != null -> root.getJSONArray("songs")
+                dataObject?.optJSONArray("results") != null -> dataObject.getJSONArray("results")
+                dataObject?.optJSONArray("songs") != null -> dataObject.getJSONArray("songs")
+                dataObject?.optJSONArray("data") != null -> dataObject.getJSONArray("data")
                 else -> return emptyList()
             }
             for (i in 0 until dataArray.length()) {
@@ -893,9 +942,9 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
                     val artist = cleanText(
                         item.optString("primaryArtists",
                         item.optString("artist",
-                        item.optString("singers", "Mavrixfy")))
+                        item.optString("singers", artistNames(item))))
                     ).ifBlank { "Mavrixfy" }
-                    val album = cleanText(item.optString("album", ""))
+                    val album = cleanText(albumName(item))
                     val duration = item.optLong("duration", 0L)
                     val artUrl = extractArtUrl(item)
                     songs.add(
@@ -929,13 +978,14 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
                     for (j in arr.length() - 1 downTo 0) {
                         val entry = arr.getJSONObject(j)
                         if (entry.optString("quality") == q) {
-                            val u = entry.optString("url", "")
+                            val u = entry.optString("url", entry.optString("link", ""))
                             if (u.isNotBlank()) return cleanUrl(u)
                         }
                     }
                 }
                 // fallback: last entry
-                val u = arr.getJSONObject(arr.length() - 1).optString("url", "")
+                val fallbackEntry = arr.getJSONObject(arr.length() - 1)
+                val u = fallbackEntry.optString("url", fallbackEntry.optString("link", ""))
                 if (u.isNotBlank()) return cleanUrl(u)
             } catch (_: Exception) {}
         }
@@ -945,6 +995,29 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
             if (u.isNotBlank()) return cleanUrl(u)
         }
         return ""
+    }
+
+    private fun artistNames(item: JSONObject): String {
+        return try {
+            val primary = item.optJSONObject("artists")?.optJSONArray("primary") ?: return ""
+            val names = mutableListOf<String>()
+            for (i in 0 until primary.length()) {
+                val name = primary.optJSONObject(i)?.optString("name", "").orEmpty()
+                if (name.isNotBlank()) names.add(name)
+            }
+            names.joinToString(", ")
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun albumName(item: JSONObject): String {
+        val albumValue = item.opt("album")
+        return when (albumValue) {
+            is JSONObject -> albumValue.optString("name", "")
+            is String -> albumValue
+            else -> ""
+        }
     }
 
     private fun extractArtUrl(item: JSONObject): String {

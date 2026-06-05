@@ -40,8 +40,6 @@ import {
 } from "@/lib/recommendationService";
 import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistService";
 import HomeSkeletonLoader from "@/components/HomeSkeletonLoader";
-import AppPromotionModal from "@/components/AppPromotionModal";
-import PromotionBanner from "@/components/PromotionBanner";
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
 import ShinyText from "@/components/ShinyText";
@@ -1501,8 +1499,6 @@ function useHomeScreenInnerView() {
         showsVerticalScrollIndicator={false}
       >
         {getHeaderElement()}
-        <PromotionBanner />
-        <AppPromotionModal />
         {sections.length === 0
           ? renderEmptyState()
           : sections.map((section) => (
