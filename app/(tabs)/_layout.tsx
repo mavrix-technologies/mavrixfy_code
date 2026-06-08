@@ -340,6 +340,27 @@ export function AppNavBar(props: AppNavBarProps) {
 function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   const { push: routerPush, navigate: routerNavigate } = useRouter();
   const pathname = usePathname();
+  const [activeTab, setActiveTab] = useState<VisibleRoute>(() => {
+    if (!pathname) return "index";
+    if (pathname === "/" || pathname === "/index") return "index";
+    if (pathname === "/search" || pathname.startsWith("/search/")) return "search";
+    if (pathname === "/library" || pathname.startsWith("/library/")) return "library";
+    if (pathname === "/liked-songs" || pathname.startsWith("/liked-songs/")) return "liked-songs";
+    return "index";
+  });
+
+  useEffect(() => {
+    if (!pathname) return;
+    if (pathname === "/" || pathname === "/index") {
+      setActiveTab("index");
+    } else if (pathname === "/search" || pathname.startsWith("/search/")) {
+      setActiveTab("search");
+    } else if (pathname === "/library" || pathname.startsWith("/library/")) {
+      setActiveTab("library");
+    } else if (pathname === "/liked-songs" || pathname.startsWith("/liked-songs/")) {
+      setActiveTab("liked-songs");
+    }
+  }, [pathname]);
   const isWeb = Platform.OS === "web";
   const isIOS = Platform.OS === "ios";
   const safeInsets = useSafeAreaInsets();
@@ -906,10 +927,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
             style={styles.navGlowFill}
           />
           {NAV_ITEMS.map((item) => {
-            const isFocused =
-              item.route === "index"
-                ? pathname === "/" || pathname === "/index"
-                : pathname === `/${item.route}` || pathname?.startsWith(`/${item.route}/`);
+            const isFocused = item.route === activeTab;
 
             return (
               <MemoizedNavTabItem

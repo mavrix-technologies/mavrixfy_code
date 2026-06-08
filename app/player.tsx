@@ -1093,7 +1093,7 @@ function useLegacyPlayerScreenView() {
     [queueViewportHeight]
   );
   const artWrapHorizontalPadding = isShortScreen ? 14 : 20;
-  const artCarouselViewportWidth = Math.max(1, screenWidth - artWrapHorizontalPadding * 2);
+  const artCarouselViewportWidth = screenWidth;
   const artCarouselPageWidth = artCarouselViewportWidth;
   const artCarouselSnapInterval = artCarouselPageWidth;
 
@@ -1381,9 +1381,6 @@ function useLegacyPlayerScreenView() {
               { width: artSize, height: artSize },
               {
                 opacity: slideOpacity,
-                borderColor: isActiveCard
-                  ? hexToRgba(playerTheme.accent, 0.54)
-                  : hexToRgba(playerTheme.accent, decor.borderAlpha),
                 boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
                 transform: [
                   { translateX: slideTranslateX },
@@ -1397,7 +1394,10 @@ function useLegacyPlayerScreenView() {
               style={[
                 styles.albumArtParallax,
                 {
-                  transform: [{ translateX: imageParallaxX }],
+                  transform: [
+                    { scale: 1.06 },
+                    { translateX: imageParallaxX }
+                  ],
                 },
               ]}
             >
@@ -1413,6 +1413,21 @@ function useLegacyPlayerScreenView() {
                 </View>
               )}
             </Animated.View>
+
+            {/* Perfect overlay border to prevent clipping/bleeding issues on Android/iOS */}
+            <View
+              style={[
+                StyleSheet.absoluteFillObject,
+                {
+                  borderWidth: 1,
+                  borderColor: isActiveCard
+                    ? hexToRgba(playerTheme.accent, 0.54)
+                    : hexToRgba(playerTheme.accent, decor.borderAlpha),
+                  borderRadius: 16,
+                },
+              ]}
+              pointerEvents="none"
+            />
           </Animated.View>
         </Pressable>
       );
@@ -1599,7 +1614,7 @@ function useLegacyPlayerScreenView() {
               <View
                 style={[
                   styles.artWrap,
-                  { marginTop: isShortScreen ? 4 : 8, paddingHorizontal: artWrapHorizontalPadding },
+                  { marginTop: isShortScreen ? 4 : 8, paddingHorizontal: 0 },
                 ]}
               >
                 <AnimatedSongFlatList
@@ -2067,7 +2082,7 @@ const styles = StyleSheet.create({
   artWrap: {
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: 0,
     marginTop: 8,
   },
   artCarousel: {
@@ -2087,8 +2102,6 @@ const styles = StyleSheet.create({
   artFrame: {
     borderRadius: 16,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(247,250,255,0.16)",
     backgroundColor: "rgba(223,226,235,0.08)",
     boxShadow: "none",
   },

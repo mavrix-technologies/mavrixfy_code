@@ -20,7 +20,7 @@ import DraggableFlatList, {
 import { Swipeable } from "react-native-gesture-handler";
 import Colors from "@/constants/colors";
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import { usePlaybackQueueState } from "@/lib/playbackEngine";
+import { usePlaybackQueueState, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { Song } from "@/lib/musicData";
 
 type DraggableQueueItem = {
@@ -127,11 +127,13 @@ const QueueSwipeRow = React.memo(
 );
 
 QueueSwipeRow.displayName = "QueueSwipeRow";
+
 export default function QueueScreen() {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const { queue, userQueuedSongIds, queueIndex, currentSong, isShuffled } = usePlaybackQueueState();
-  const { playSong, removeFromQueue, reorderQueue, shuffleQueue, sleepTimer } = usePlayerActions();
+  const { isPlaying } = usePlaybackPlayState();
+  const { playSong, removeFromQueue, reorderQueue, shuffleQueue, sleepTimer, togglePlay } = usePlayerActions();
   const openSwipeableRef = useRef<Swipeable | null>(null);
   const lastPlaceholderIndexRef = useRef<number | null>(null);
   const didMountListRef = useRef(false);
@@ -164,9 +166,8 @@ export default function QueueScreen() {
   }, [showList]);
 
   const nowPlaying = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
+
   const upcomingQueue = useMemo(() => {
-    // When nothing is playing yet (queueIndex === -1 or 0 with no currentSong),
-    // show all songs. Otherwise show only songs after the current index.
     const startFrom = currentSong ? Math.max(0, queueIndex + 1) : 0;
     return queue.slice(startFrom).filter((song) => Boolean(song?.id));
   }, [currentSong, queue, queueIndex]);
@@ -305,11 +306,16 @@ export default function QueueScreen() {
                 </View>
               </View>
               <Pressable
-                onPress={() => router.push("/player")}
+                onPress={togglePlay}
                 hitSlop={10}
                 style={styles.playButton}
               >
-                <Ionicons name="play" size={34} color="#111111" />
+                <Ionicons
+                  name={isPlaying ? "pause" : "play"}
+                  size={34}
+                  color="#111111"
+                  style={!isPlaying ? { marginLeft: 2 } : undefined}
+                />
               </Pressable>
             </Pressable>
           ) : null}
@@ -522,7 +528,6 @@ const styles = StyleSheet.create({
   },
   draggingRow: {
     zIndex: 20,
-    boxShadow: "none",
   },
   rowLayer: {
     backgroundColor: SHEET_BACKGROUND,

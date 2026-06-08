@@ -287,7 +287,10 @@ function useSearchScreenView() {
   const activeSearchAbortRef = useRef<AbortController | null>(null);
   const resultsPlaylistsListRef = useRef<FlatList<PlaylistResult> | null>(null);
   const resultsSongsListRef = useRef<FlatList<Song> | null>(null);
-  const searchCacheRef = useRef<Map<string, { songs: Song[]; playlists: PlaylistResult[]; timestamp: number }>>(new Map());
+  const searchCacheRef = useRef<Map<string, { songs: Song[]; playlists: PlaylistResult[]; timestamp: number }> | null>(null);
+  if (searchCacheRef.current === null) {
+    searchCacheRef.current = new Map();
+  }
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const shuffledBrowseCategories = useMemo(() => {

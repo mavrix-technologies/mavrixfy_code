@@ -124,7 +124,7 @@ function usePlaylistScreenView() {
 
   // Sticky header
   const stickyOpacity = useRef(new Animated.Value(0)).current;
-  const stickyVisible = useRef(false);
+  const [isStickyVisible, setIsStickyVisible] = useState(false);
 
   // Bottom sheet animation
   const { height: screenHeight } = useWindowDimensions();
@@ -323,13 +323,15 @@ function usePlaylistScreenView() {
   const handleScroll = useCallback((e: any) => {
     const y = e.nativeEvent.contentOffset.y;
     const shouldShow = y > 260;
-    if (stickyVisible.current === shouldShow) return;
-    stickyVisible.current = shouldShow;
-    Animated.timing(stickyOpacity, {
-      toValue: shouldShow ? 1 : 0,
-      duration: 160,
-      useNativeDriver: true,
-    }).start();
+    setIsStickyVisible((prev) => {
+      if (prev === shouldShow) return prev;
+      Animated.timing(stickyOpacity, {
+        toValue: shouldShow ? 1 : 0,
+        duration: 160,
+        useNativeDriver: true,
+      }).start();
+      return shouldShow;
+    });
   }, [stickyOpacity]);
 
   const handlePlayAll = useCallback(() => {
@@ -743,7 +745,7 @@ function usePlaylistScreenView() {
 
       {/* ── Sticky header — always mounted, fades in/out ── */}
       <Animated.View
-        pointerEvents={stickyVisible.current ? "auto" : "none"}
+        pointerEvents={isStickyVisible ? "auto" : "none"}
         style={[styles.sticky, { paddingTop: topInset, opacity: stickyOpacity }]}
       >
         <Pressable onPress={safeGoBack} style={styles.stickyBack}>

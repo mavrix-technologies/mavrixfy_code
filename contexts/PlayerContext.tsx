@@ -427,7 +427,10 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const latestPositionSecondsRef = useRef(0);
   const sleepTimerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sleepTimerRef = useRef<SleepTimerState | null>(null);
-  const playbackSwitchChainRef = useRef<Promise<void>>(Promise.resolve());
+  const playbackSwitchChainRef = useRef<Promise<void> | null>(null);
+  if (playbackSwitchChainRef.current === null) {
+    playbackSwitchChainRef.current = Promise.resolve();
+  }
   const lastAutoQueueSyncRef = useRef("");
   const lastAutoPlaybackSyncRef = useRef("");
   const pendingNativeTrackRef = useRef<{

@@ -8,10 +8,16 @@ import {
   StyleSheet,
   Platform,
   RefreshControl,
+  useWindowDimensions,
+  Linking,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
+import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,7 +27,7 @@ import { getRecentlyPlayed, RecentlyPlayedItem } from "@/lib/storage";
 import { getPublicPlaylists, FirestorePlaylist } from "@/lib/firestore";
 import { getCachedHomePublicPlaylists, setCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { useAuth } from "@/contexts/AuthContext";
-import { usePlayerRow } from "@/contexts/PlayerContext";
+import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { useScreenTracking } from "@/hooks/useScreenTracking";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { triggerImpact } from "@/lib/haptics";
@@ -45,6 +51,7 @@ import OfflineBanner from "@/components/OfflineBanner";
 import ShinyText from "@/components/ShinyText";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { filterMap, forEachFiltered, mapFilter } from "@/lib/arrayUtils";
+import { DEFAULT_HOME_HERO_CONFIG, subscribeHomeHeroConfig, type HomeHeroVideoItem } from "@/lib/homeHeroConfig";
 
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 
@@ -122,6 +129,10 @@ const HORIZONTAL_ROW_GAP = 12;
 const RECENT_CARD_SIZE = 90;
 const RECT_CARD_WIDTH = 152;
 const ARTIST_CARD_WIDTH = 120;
+const HOME_VIDEO_CARD_GAP = 10;
+const CLOUDINARY_VIDEO_UPLOAD_PATH = "/video/upload/";
+const HOME_HERO_VIDEO_TRANSFORM = "f_mp4,vc_h264,c_crop,g_center,w_1440,h_810/c_fill,w_1080,h_608,q_auto:good";
+const HOME_HERO_POSTER_TRANSFORM = "so_2,c_crop,g_center,w_1440,h_810/c_fill,w_1080,h_608,q_auto,f_jpg";
 
 function hasHomeContent(source: {
   categories: HomeJioSaavnCategoryData[];
@@ -227,6 +238,189 @@ function withPromiseTimeout<T>(promise: Promise<T>, timeoutMs: number, message: 
   });
 }
 
+function withCloudinaryHomeVideoTransform(url: string, transform: string, forceJpg = false): string {
+  const trimmedUrl = url.trim();
+  const uploadIndex = trimmedUrl.indexOf(CLOUDINARY_VIDEO_UPLOAD_PATH);
+  if (uploadIndex < 0) return trimmedUrl;
+
+  const prefixEnd = uploadIndex + CLOUDINARY_VIDEO_UPLOAD_PATH.length;
+  const prefix = trimmedUrl.slice(0, prefixEnd);
+  const suffixWithTail = trimmedUrl.slice(prefixEnd);
+  const tailIndex = suffixWithTail.search(/[?#]/);
+  const suffix = tailIndex >= 0 ? suffixWithTail.slice(0, tailIndex) : suffixWithTail;
+  const tail = tailIndex >= 0 ? suffixWithTail.slice(tailIndex) : "";
+  const segments = suffix.split("/").filter(Boolean);
+  const versionIndex = segments.findIndex((segment) => /^v\d+$/.test(segment));
+  const publicSegments = versionIndex >= 0 ? segments.slice(versionIndex) : segments;
+  if (publicSegments.length === 0) return trimmedUrl;
+
+  let publicPath = publicSegments.join("/");
+  if (forceJpg) {
+    publicPath = publicPath.replace(/\.[^/.]+$/, ".jpg");
+  }
+
+  return `${prefix}${transform}/${publicPath}${tail}`;
+}
+
+function getHomeHeroPlaybackUrl(videoUrl: string): string {
+  return withCloudinaryHomeVideoTransform(videoUrl, HOME_HERO_VIDEO_TRANSFORM);
+}
+
+function getHomeHeroPosterPreviewUrl(posterUrlValue: string, videoUrl: string): string {
+  const posterUrl = posterUrlValue.trim();
+  if (posterUrl) return withCloudinaryHomeVideoTransform(posterUrl, HOME_HERO_POSTER_TRANSFORM, true);
+  return withCloudinaryHomeVideoTransform(videoUrl, HOME_HERO_POSTER_TRANSFORM, true);
+}
+
+function getHomeHeroPlayableSong(item: HomeHeroVideoItem): Song | null {
+  const linkedSong = item.song;
+  if (!linkedSong?.id || !linkedSong.title || !linkedSong.audioUrl) return null;
+
+  return {
+    id: linkedSong.id,
+    title: linkedSong.title,
+    artist: linkedSong.artist || "Unknown Artist",
+    album: linkedSong.album || "",
+    duration: linkedSong.duration || 0,
+    coverUrl: linkedSong.coverUrl || item.posterUrl,
+    genre: linkedSong.genre || "",
+    audioUrl: linkedSong.audioUrl,
+    source: "local",
+  };
+}
+
+function HomeHeroVideoCard({
+  item,
+  isActive,
+  isMuted,
+  width,
+  height,
+  onPress,
+  onToggleMute,
+  onPlaybackEnd,
+  loop,
+}: {
+  item: HomeHeroVideoItem;
+  isActive: boolean;
+  isMuted: boolean;
+  width: number;
+  height: number;
+  onPress: (item: HomeHeroVideoItem) => void;
+  onToggleMute: () => void;
+  onPlaybackEnd: () => void;
+  loop: boolean;
+}) {
+  const playbackUrl = useMemo(() => getHomeHeroPlaybackUrl(item.videoUrl), [item.videoUrl]);
+  const posterPreviewUrl = useMemo(
+    () => getHomeHeroPosterPreviewUrl(item.posterUrl, item.videoUrl),
+    [item.posterUrl, item.videoUrl]
+  );
+  const hasPlayedToEndRef = useRef(false);
+  const onPlaybackEndRef = useRef(onPlaybackEnd);
+  const player = useVideoPlayer(playbackUrl, (videoPlayer) => {
+    videoPlayer.loop = loop;
+    videoPlayer.muted = isMuted;
+    videoPlayer.volume = isMuted ? 0 : 1;
+    videoPlayer.audioMixingMode = "auto";
+    videoPlayer.showNowPlayingNotification = false;
+    if (isActive) {
+      videoPlayer.play();
+    }
+  });
+
+  useEffect(() => {
+    onPlaybackEndRef.current = onPlaybackEnd;
+  }, [onPlaybackEnd]);
+
+  useEffect(() => {
+    player.loop = loop;
+    player.muted = isMuted;
+    player.volume = isMuted ? 0 : 1;
+    if (isActive) {
+      hasPlayedToEndRef.current = false;
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [isActive, isMuted, loop, player]);
+
+  useEffect(() => {
+    const subscription = player.addListener("playToEnd", () => {
+      if (!isActive || hasPlayedToEndRef.current) return;
+
+      hasPlayedToEndRef.current = true;
+      player.pause();
+      player.currentTime = 0;
+      onPlaybackEndRef.current();
+    });
+
+    return () => subscription.remove();
+  }, [isActive, player]);
+
+  const playableSong = getHomeHeroPlayableSong(item);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={playableSong ? `Play ${playableSong.title}` : item.title}
+      style={[styles.liveVideoSlide, { width, height }]}
+      onPress={() => onPress(item)}
+    >
+      <Image
+        source={{ uri: posterPreviewUrl }}
+        style={[styles.liveVideoPoster, styles.liveVideoMediaFill]}
+        contentFit="cover"
+      />
+      {isActive ? (
+        <VideoView
+          pointerEvents="none"
+          player={player}
+          style={[styles.liveVideoPlayer, styles.liveVideoMediaFill]}
+          nativeControls={false}
+          contentFit="cover"
+          playsInline
+          allowsPictureInPicture={false}
+          startsPictureInPictureAutomatically={false}
+          fullscreenOptions={{ enable: false }}
+          surfaceType="textureView"
+          useExoShutter={false}
+        />
+      ) : null}
+      <View pointerEvents="none" style={styles.liveVideoCardCopy}>
+        <View style={styles.liveVideoBadgeRow}>
+          <View style={styles.liveVideoLiveBadge}>
+            <Text style={styles.liveVideoLiveBadgeText}>LIVE</Text>
+          </View>
+          {playableSong ? <Ionicons name="musical-note" size={11} color="#F8FBF9" /> : null}
+        </View>
+        <Text style={styles.liveVideoCardTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+        {playableSong ? (
+          <Text style={styles.liveVideoSongTitle} numberOfLines={1}>
+            {playableSong.title}
+          </Text>
+        ) : null}
+      </View>
+      {isActive ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isMuted ? "Unmute video" : "Mute video"}
+          style={styles.liveVideoMuteButton}
+          onPress={onToggleMute}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons
+            name={isMuted ? "volume-mute-outline" : "volume-high-outline"}
+            size={14}
+            color="#F8FBF9"
+          />
+        </Pressable>
+      ) : null}
+    </Pressable>
+  );
+}
+
 export default function HomeScreen() {
   return (
     <ErrorBoundary>
@@ -244,10 +438,39 @@ function useHomeScreenInnerView() {
 
   const { isOnline, isChecking } = useNetwork();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const { push: routerPush } = useRouter();
   const { user, isAuthenticated } = useAuth();
-  const { playSong, currentSongId } = usePlayerRow();
+  const { playSong, currentSong, isPlaying } = usePlayerBrowse();
+  const currentSongId = currentSong?.id || null;
   const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const videoSafeTopInset = Platform.OS === "web" ? 0 : insets.top;
+  const [homeHeroConfig, setHomeHeroConfig] = useState(DEFAULT_HOME_HERO_CONFIG);
+  const homeHeroVideos = useMemo(
+    () => (homeHeroConfig.enabled ? homeHeroConfig.items.filter((item) => item.enabled && item.videoUrl.trim()) : []),
+    [homeHeroConfig.enabled, homeHeroConfig.items]
+  );
+  const liveVideoCardWidth = useMemo(() => Math.round(Math.max(280, windowWidth - 28)), [windowWidth]);
+  const liveVideoCardHeight = useMemo(() => Math.round(liveVideoCardWidth * 9 / 16), [liveVideoCardWidth]);
+  const liveVideoHeight = useMemo(
+    () => Math.round(videoSafeTopInset + (homeHeroVideos.length > 0 ? liveVideoCardHeight + 96 : 72)),
+    [homeHeroVideos.length, liveVideoCardHeight, videoSafeTopInset]
+  );
+  const [isLiveVideoMuted, setIsLiveVideoMuted] = useState(true);
+  const [activeHomeVideoIndex, setActiveHomeVideoIndex] = useState(0);
+  const visibleActiveHomeVideoIndex = homeHeroVideos.length === 0
+    ? 0
+    : Math.min(activeHomeVideoIndex, homeHeroVideos.length - 1);
+  const homeVideoListRef = useRef<FlatList<HomeHeroVideoItem> | null>(null);
+
+  useEffect(() => subscribeHomeHeroConfig(setHomeHeroConfig), []);
+
+  // Auto-mute video card when a song is playing
+  useEffect(() => {
+    if (isPlaying) {
+      setIsLiveVideoMuted(true);
+    }
+  }, [isPlaying]);
 
   const [recentlyPlayed, setRecentlyPlayed] = useState<RecentlyPlayedItem[]>(
     HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.recentlyPlayed : []
@@ -266,6 +489,7 @@ function useHomeScreenInnerView() {
     hasHomeContent(HOME_SESSION_CACHE) ? "ready" : "empty"
   );
   const [refreshing, setRefreshing] = useState(false);
+  const [showScrolledHeader, setShowScrolledHeader] = useState(false);
   const [isLoadingCategories, setIsLoadingCategories] = useState(
     !HOME_SESSION_CACHE.hydrated && HOME_SESSION_CACHE.categories.length === 0
   );
@@ -1195,12 +1419,216 @@ function useHomeScreenInnerView() {
     []
   );
 
-  const getHeaderElement = useCallback(() => {
+  const handleHomeScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const yOffset = event.nativeEvent.contentOffset.y;
+      const contentStartOffset = Math.max(1, liveVideoHeight - topInset);
+      const shouldShowHeader = yOffset >= contentStartOffset;
+      setShowScrolledHeader((current) => (current === shouldShowHeader ? current : shouldShowHeader));
+    },
+    [liveVideoHeight, topInset]
+  );
+
+  const handleHomeVideoScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const xOffset = event.nativeEvent.contentOffset.x;
+      const interval = liveVideoCardWidth + HOME_VIDEO_CARD_GAP;
+      const nextIndex = Math.max(0, Math.min(homeHeroVideos.length - 1, Math.round(xOffset / interval)));
+      setActiveHomeVideoIndex(nextIndex);
+    },
+    [homeHeroVideos.length, liveVideoCardWidth]
+  );
+
+  const advanceHomeVideo = useCallback(() => {
+    if (homeHeroVideos.length <= 1) return;
+
+    setActiveHomeVideoIndex((currentIndex) => {
+      const boundedIndex = Math.min(currentIndex, homeHeroVideos.length - 1);
+      const nextIndex = (boundedIndex + 1) % homeHeroVideos.length;
+      const offset = nextIndex * (liveVideoCardWidth + HOME_VIDEO_CARD_GAP);
+
+      requestAnimationFrame(() => {
+        homeVideoListRef.current?.scrollToOffset({ offset, animated: true });
+      });
+
+      return nextIndex;
+    });
+  }, [homeHeroVideos.length, liveVideoCardWidth]);
+
+  const handleHomeVideoPress = useCallback(
+    (item: HomeHeroVideoItem) => {
+      void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+
+      if (item.linkType === "album" && item.album) {
+        routerPush({
+          pathname: "/playlist/[id]",
+          params: {
+            id: item.album.saavnId || item.album.id,
+            jiosaavn: "true",
+            firestore: "false",
+            title: item.album.title,
+            cover: item.album.coverUrl,
+            songCount: String(item.album.songCount ?? 0),
+          },
+        });
+        return;
+      }
+
+      if (item.linkType === "playlist" && item.playlist) {
+        routerPush({
+          pathname: "/playlist/[id]",
+          params: {
+            id: item.playlist.saavnId || item.playlist.id,
+            jiosaavn: "true",
+            firestore: "false",
+            title: item.playlist.title,
+            cover: item.playlist.coverUrl,
+            songCount: String(item.playlist.songCount ?? 0),
+          },
+        });
+        return;
+      }
+
+      const playableSong = getHomeHeroPlayableSong(item);
+      if (playableSong) {
+        playSong(playableSong, [playableSong]);
+        routerPush("/player");
+        return;
+      }
+
+      if (item.linkUrl) {
+        void Linking.openURL(item.linkUrl);
+      }
+    },
+    [playSong, routerPush]
+  );
+
+  const toggleLiveVideoMute = useCallback(() => {
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    setIsLiveVideoMuted((current) => !current);
+  }, []);
+
+  const renderHomeVideoSeparator = useCallback(() => <View style={styles.liveVideoSeparator} />, []);
+
+  const renderHomeVideoItem = useCallback(
+    ({ item, index }: { item: HomeHeroVideoItem; index: number }) => (
+      <HomeHeroVideoCard
+        item={item}
+        isActive={index === visibleActiveHomeVideoIndex}
+        isMuted={isLiveVideoMuted}
+        width={liveVideoCardWidth}
+        height={liveVideoCardHeight}
+        onPress={handleHomeVideoPress}
+        onToggleMute={toggleLiveVideoMute}
+        onPlaybackEnd={advanceHomeVideo}
+        loop={homeHeroVideos.length <= 1}
+      />
+    ),
+    [
+      advanceHomeVideo,
+      handleHomeVideoPress,
+      homeHeroVideos.length,
+      isLiveVideoMuted,
+      liveVideoCardHeight,
+      liveVideoCardWidth,
+      toggleLiveVideoMute,
+      visibleActiveHomeVideoIndex,
+    ]
+  );
+
+  const getLiveVideoElement = useCallback(() => {
     return (
-      <View style={styles.header}>
-        <View style={styles.topMenuRow}>
+      <View style={styles.liveVideoWrap}>
+        <View style={[styles.liveVideoSurface, { height: liveVideoHeight }]}>
+          <View style={[styles.liveVideoHeader, { top: videoSafeTopInset + 10 }]}>
+            <Pressable
+              style={styles.liveVideoProfileButton}
+              onPress={() => {
+                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                routerPush("/profile");
+              }}
+            >
+              {isAuthenticated && user?.picture ? (
+                <Image source={{ uri: user.picture }} style={styles.avatarImage} contentFit="cover" />
+              ) : (
+                <View style={styles.avatarFallback}>
+                  <Ionicons name="person" size={16} color={Colors.black} />
+                </View>
+              )}
+            </Pressable>
+
+            <View pointerEvents="none" style={styles.liveVideoBrandCenter}>
+              <ShinyText
+                text="MAVRIXFY"
+                speed={2.4}
+                delay={0.6}
+                color="#F8FBF9"
+                shineColor="#FFFFFF"
+                spread={130}
+                direction="left"
+                style={styles.headerBrandTitle}
+              />
+            </View>
+
+            <Pressable
+              style={styles.liveVideoDownloadButton}
+              onPress={() => {
+                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                routerPush("/downloaded-songs");
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="arrow-down-circle-outline" size={20} color="#F8FBF9" />
+            </Pressable>
+          </View>
+
+          {homeHeroVideos.length > 0 ? (
+            <FlatList
+              ref={homeVideoListRef}
+              horizontal
+              data={homeHeroVideos}
+              keyExtractor={(item) => item.id}
+              renderItem={renderHomeVideoItem}
+              ItemSeparatorComponent={renderHomeVideoSeparator}
+              showsHorizontalScrollIndicator={false}
+              style={[styles.liveVideoRail, { top: videoSafeTopInset + 72, height: liveVideoCardHeight }]}
+              contentContainerStyle={styles.liveVideoRailContent}
+              snapToInterval={liveVideoCardWidth + HOME_VIDEO_CARD_GAP}
+              decelerationRate="fast"
+              disableIntervalMomentum
+              onMomentumScrollEnd={handleHomeVideoScrollEnd}
+              onScrollEndDrag={handleHomeVideoScrollEnd}
+              scrollEventThrottle={16}
+              initialNumToRender={2}
+              maxToRenderPerBatch={2}
+              windowSize={3}
+              removeClippedSubviews={Platform.OS === "android"}
+            />
+          ) : null}
+        </View>
+      </View>
+    );
+  }, [
+    handleHomeVideoScrollEnd,
+    homeHeroVideos,
+    isAuthenticated,
+    liveVideoCardHeight,
+    liveVideoCardWidth,
+    liveVideoHeight,
+    renderHomeVideoItem,
+    renderHomeVideoSeparator,
+    routerPush,
+    user?.picture,
+    videoSafeTopInset,
+  ]);
+
+  const getScrolledHeaderElement = useCallback(() => {
+    return (
+      <View pointerEvents="box-none" style={[styles.scrolledHeader, { paddingTop: topInset }]}>
+        <BlurView intensity={72} tint="dark" style={StyleSheet.absoluteFill} />
+        <View style={styles.scrolledHeaderContent}>
           <Pressable
-            style={styles.topProfileButton}
+            style={styles.scrolledHeaderButton}
             onPress={() => {
               void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
               routerPush("/profile");
@@ -1215,12 +1643,12 @@ function useHomeScreenInnerView() {
             )}
           </Pressable>
 
-          <View pointerEvents="none" style={styles.headerBrandCenter}>
+          <View pointerEvents="none" style={styles.scrolledHeaderBrand}>
             <ShinyText
               text="MAVRIXFY"
               speed={2.4}
               delay={0.6}
-              color="#DDE7E3"
+              color="#F8FBF9"
               shineColor="#FFFFFF"
               spread={130}
               direction="left"
@@ -1228,22 +1656,20 @@ function useHomeScreenInnerView() {
             />
           </View>
 
-          <View style={{ flex: 1 }} />
-
           <Pressable
-            style={styles.topDownloadButton}
+            style={styles.scrolledHeaderButton}
             onPress={() => {
               void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
               routerPush("/downloaded-songs");
             }}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <Ionicons name="arrow-down-circle-outline" size={20} color={Colors.subtext} />
+            <Ionicons name="arrow-down-circle-outline" size={20} color="#F8FBF9" />
           </Pressable>
         </View>
       </View>
     );
-  }, [isAuthenticated, routerPush, user?.picture]);
+  }, [isAuthenticated, routerPush, topInset, user?.picture]);
 
   const renderEmptyState = useCallback(() => {
     const isNetworkIssue = homeFeedState === "network";
@@ -1461,6 +1887,19 @@ function useHomeScreenInnerView() {
     ]
   );
 
+  const refreshControlElement = useMemo(
+    () => (
+      <RefreshControl
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
+        tintColor={BRAND.teal}
+        colors={[BRAND.teal]}
+        progressBackgroundColor="rgba(255,255,255,0.12)"
+      />
+    ),
+    [handleRefresh, refreshing]
+  );
+
   const shouldShowSkeleton = (loading || isRecommendationFeedLoading) && sections.length === 0;
 
   // Show full offline screen only when there's no cached content to display
@@ -1481,30 +1920,25 @@ function useHomeScreenInnerView() {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: topInset }]}>
+    <View style={styles.container}>
       {/* Slim banner when offline but cached content is available */}
       {!isOnline && <OfflineBanner />}
       <ScrollView
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={BRAND.teal}
-            colors={[BRAND.teal]}
-            progressBackgroundColor="rgba(255,255,255,0.12)"
-          />
-        }
+        refreshControl={refreshControlElement}
         style={styles.scrollView}
         contentContainerStyle={[styles.scrollContent, sections.length === 0 && styles.scrollContentEmpty]}
         showsVerticalScrollIndicator={false}
+        onScroll={handleHomeScroll}
+        scrollEventThrottle={16}
       >
-        {getHeaderElement()}
+        {getLiveVideoElement()}
         {sections.length === 0
           ? renderEmptyState()
           : sections.map((section) => (
               <React.Fragment key={section.id}>{getSectionElement({ item: section })}</React.Fragment>
             ))}
       </ScrollView>
+      {showScrolledHeader ? getScrolledHeaderElement() : null}
       <LinearGradient
         pointerEvents="none"
         colors={["rgba(16,20,26,0)", "rgba(16,20,26,0.52)", "rgba(16,20,26,0.84)", Colors.background]}
@@ -1536,20 +1970,143 @@ const styles = StyleSheet.create({
     bottom: 0,
     height: 176,
   },
-  header: {
-    paddingHorizontal: 14,
-    paddingTop: 4,
-    paddingBottom: 6,
+  headerBrandTitle: {
+    fontSize: 20,
+    lineHeight: 24,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0,
   },
-  topMenuRow: {
-    minHeight: 46,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-start",
-    gap: 8,
+  liveVideoWrap: {
+    width: "100%",
+    marginTop: 0,
+    backgroundColor: Colors.background,
+  },
+  liveVideoSurface: {
+    width: "100%",
+    backgroundColor: Colors.background,
+    overflow: "hidden",
     position: "relative",
   },
-  headerBrandCenter: {
+  liveVideoRail: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+  },
+  liveVideoRailContent: {
+    paddingHorizontal: 8,
+  },
+  liveVideoSeparator: {
+    width: HOME_VIDEO_CARD_GAP,
+  },
+  liveVideoSlide: {
+    borderRadius: 10,
+    backgroundColor: "transparent",
+    overflow: "hidden",
+    position: "relative",
+    shadowColor: "#1DB954",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  liveVideoPoster: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: "100%",
+    height: "100%",
+    backgroundColor: "transparent",
+  },
+  liveVideoPlayer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: "100%",
+    height: "100%",
+    backgroundColor: "transparent",
+    zIndex: 1,
+  },
+  liveVideoMediaFill: {
+    transform: [{ scale: 1.015 }],
+  },
+  liveVideoHeader: {
+    position: "absolute",
+    top: 10,
+    left: 14,
+    right: 14,
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    zIndex: 3,
+  },
+  liveVideoCardCopy: {
+    position: "absolute",
+    left: 14,
+    right: 50,
+    bottom: 14,
+    zIndex: 3,
+  },
+  liveVideoBadgeRow: {
+    minHeight: 17,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 5,
+  },
+  liveVideoLiveBadge: {
+    borderRadius: 4,
+    backgroundColor: "#E11D2E",
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  liveVideoLiveBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    lineHeight: 11,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0,
+  },
+  liveVideoCardTitle: {
+    color: "#F8FBF9",
+    fontSize: 15,
+    lineHeight: 19,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0,
+    textShadowColor: "rgba(0,0,0,0.72)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  liveVideoSongTitle: {
+    marginTop: 2,
+    color: "rgba(248,251,249,0.82)",
+    fontSize: 11,
+    lineHeight: 14,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0,
+    textShadowColor: "rgba(0,0,0,0.72)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  liveVideoMuteButton: {
+    position: "absolute",
+    right: 8,
+    bottom: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(18,24,30,0.78)",
+    borderWidth: 1,
+    borderColor: "rgba(248,251,249,0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 3,
+  },
+  liveVideoBrandCenter: {
     position: "absolute",
     left: 58,
     right: 58,
@@ -1558,30 +2115,63 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerBrandTitle: {
-    fontSize: 20,
-    lineHeight: 24,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0,
-  },
-  topProfileButton: {
+  liveVideoProfileButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: Colors.surfaceLight,
+    backgroundColor: "rgba(7,9,12,0.58)",
     borderWidth: 1,
-    borderColor: Colors.cardBorder,
+    borderColor: "rgba(248,251,249,0.2)",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
-  topDownloadButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  liveVideoDownloadButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(38,42,49,0.45)",
+    backgroundColor: "rgba(7,9,12,0.58)",
+    borderWidth: 1,
+    borderColor: "rgba(248,251,249,0.18)",
+  },
+  scrolledHeader: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    overflow: "hidden",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(223,226,235,0.1)",
+    zIndex: 20,
+  },
+  scrolledHeaderContent: {
+    minHeight: 56,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  scrolledHeaderButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(16,20,26,0.56)",
+    borderWidth: 1,
+    borderColor: "rgba(248,251,249,0.14)",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  scrolledHeaderBrand: {
+    position: "absolute",
+    left: 58,
+    right: 58,
+    top: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
   },
   avatarFallback: {
     width: 36,

@@ -7,7 +7,11 @@ const CHIP_SKELETON_KEYS = ["chip-a", "chip-b", "chip-c", "chip-d"];
 const CARD_SKELETON_KEYS = ["card-a", "card-b", "card-c", "card-d"];
 
 function useShimmer() {
-  const shimmer = useRef(new Animated.Value(0)).current;
+  const shimmerRef = useRef<Animated.Value | null>(null);
+  if (shimmerRef.current === null) {
+    shimmerRef.current = new Animated.Value(0);
+  }
+  const shimmer = shimmerRef.current;
   useEffect(() => {
     const anim = Animated.loop(
       Animated.sequence([

@@ -81,7 +81,7 @@ function useArtistScreenView() {
   const [hasMore, setHasMore] = useState(true);
   const followScale = useRef(new Animated.Value(1)).current;
   const stickyOpacity = useRef(new Animated.Value(0)).current;
-  const stickyVisible = useRef(false);
+  const [isStickyVisible, setIsStickyVisible] = useState(false);
   const topAlbums = artist?.topAlbums ?? [];
   const visibleSimilarArtists = useMemo(
     () => artist?.similarArtists?.slice(0, 10) ?? [],
@@ -304,13 +304,15 @@ function useArtistScreenView() {
     const y = e.nativeEvent.contentOffset.y;
     // Show sticky after scrolling past the hero (320px)
     const shouldShow = y > 260;
-    if (stickyVisible.current === shouldShow) return;
-    stickyVisible.current = shouldShow;
-    Animated.timing(stickyOpacity, {
-      toValue: shouldShow ? 1 : 0,
-      duration: 160,
-      useNativeDriver: true,
-    }).start();
+    setIsStickyVisible((prev) => {
+      if (prev === shouldShow) return prev;
+      Animated.timing(stickyOpacity, {
+        toValue: shouldShow ? 1 : 0,
+        duration: 160,
+        useNativeDriver: true,
+      }).start();
+      return shouldShow;
+    });
   }, [stickyOpacity]);
 
   // ── Render helpers ──────────────────────────────────────────────────────────
@@ -471,7 +473,7 @@ function useArtistScreenView() {
 
       {/* ── Sticky header — always mounted, fades in/out via opacity ── */}
       <Animated.View
-        pointerEvents={stickyVisible.current ? "auto" : "none"}
+        pointerEvents={isStickyVisible ? "auto" : "none"}
         style={[styles.sticky, { paddingTop: topInset, opacity: stickyOpacity }]}
       >
         <Pressable onPress={safeGoBack} style={styles.stickyBack}>
