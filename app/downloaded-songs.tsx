@@ -5,7 +5,7 @@
  * Accessible from the Downloads screen header.
  */
 
-import React, { useCallback, useEffect, useState, useMemo } from "react";
+import React, { useCallback, useEffect, useState, useMemo, useSyncExternalStore } from "react";
 import {
   View,
   Text,
@@ -28,6 +28,11 @@ import { DownloadItem } from "@/types/downloads";
 import { Song } from "@/lib/musicData";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import SongRow from "@/components/SongRow";
+import {
+  getCollectionMetadataSnapshot,
+  loadAllCollectionMetadata,
+  subscribeCollectionMetadata,
+} from "@/lib/downloads/collectionMetadata";
 
 const UI = {
   bg: Colors.background,
@@ -39,6 +44,15 @@ const UI = {
   error: Colors.error,
   border: Colors.cardBorder,
 };
+type CollectionMetadataSummary = Record<string, { name: string; imageUrl: string }>;
+
+function toCollectionMetadataSummary(metadata: ReturnType<typeof getCollectionMetadataSnapshot>): CollectionMetadataSummary {
+  const mapped: CollectionMetadataSummary = {};
+  for (const [id, data] of Object.entries(metadata)) {
+    mapped[id] = { name: data.name, imageUrl: data.imageUrl };
+  }
+  return mapped;
+}
 
 // Convert a DownloadItem to a Song for the player.
 // audioUrl must be the REMOTE url — the player resolves the local file
@@ -146,20 +160,19 @@ export default function DownloadedSongsScreen() {
   const { playSong } = usePlayerActions();
 
   // Load collection metadata
-  const [collectionMetadata, setCollectionMetadata] = useState<Record<string, { name: string; imageUrl: string }>>({});
+  const collectionMetadataSnapshot = useSyncExternalStore(
+    subscribeCollectionMetadata,
+    getCollectionMetadataSnapshot,
+    getCollectionMetadataSnapshot
+  );
 
   useEffect(() => {
-    async function loadMetadata() {
-      const { loadAllCollectionMetadata } = await import("@/lib/downloads/collectionMetadata");
-      const metadata = await loadAllCollectionMetadata();
-      const mapped: Record<string, { name: string; imageUrl: string }> = {};
-      for (const [id, data] of Object.entries(metadata)) {
-        mapped[id] = { name: data.name, imageUrl: data.imageUrl };
-      }
-      setCollectionMetadata(mapped);
-    }
-    loadMetadata();
+    void loadAllCollectionMetadata();
   }, []);
+  const collectionMetadata = useMemo(
+    () => toCollectionMetadataSummary(collectionMetadataSnapshot),
+    [collectionMetadataSnapshot]
+  );
 
   // Re-render when download statuses change
   const [, setTick] = useState(0);

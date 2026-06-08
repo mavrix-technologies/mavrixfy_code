@@ -300,7 +300,7 @@ export async function enqueueDownload(
   }
 }
 
-export async function startDownload(songId: string): Promise<void> {
+async function startDownload(songId: string): Promise<void> {
   clearRetryTimer(songId);
   if (activeHandles.has(songId) || startingSet.has(songId)) return;
 
@@ -376,11 +376,11 @@ export async function retryDownload(
 }
 
 /** How many downloads are currently active (for debug/UI). */
-export function getActiveDownloadCount(): number {
+function getActiveDownloadCount(): number {
   return activeHandles.size;
 }
 
 /** How many downloads are waiting for a slot (for debug/UI). */
-export function getPendingQueueLength(): number {
+function getPendingQueueLength(): number {
   return pendingQueue.length;
 }

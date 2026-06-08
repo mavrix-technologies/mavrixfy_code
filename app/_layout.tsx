@@ -43,7 +43,7 @@ LogBox.ignoreLogs([
 
 // Screens where the nav bar must not appear.
 // Sheets keep AppNavBar visible so the mini-player/nav do not flicker during transitions.
-const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs"]);
+const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
@@ -89,7 +89,9 @@ function subscribeGlobalToast(listener: GlobalToastListener) {
 
 function GlobalToast() {
   const insets = useSafeAreaInsets();
-  const opacity = useRef(new Animated.Value(0)).current;
+  const opacityRef = useRef<Animated.Value | null>(null);
+  if (opacityRef.current === null) opacityRef.current = new Animated.Value(0);
+  const opacity = opacityRef.current;
   const [message, setMessage] = useState("Added to queue");
   const [visible, setVisible] = useState(false);
 
@@ -339,8 +341,10 @@ function RootLayoutNav() {
         <Stack.Screen
           name="downloads"
           options={{
-            ...ANDROID_VERTICAL_SHEET_OPTIONS,
+            presentation: "card",
+            animation: "default",
             gestureEnabled: true,
+            contentStyle: { backgroundColor: Colors.background },
           }}
         />
         <Stack.Screen name="login" options={{ gestureEnabled: false }} />

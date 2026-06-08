@@ -44,7 +44,7 @@ export const logger = {
 };
 
 // Performance monitoring helper
-export const perfMonitor = {
+const perfMonitor = {
   start: (label: string) => {
     if (isDev) {
       performance.mark(`${label}-start`);

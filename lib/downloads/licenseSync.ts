@@ -92,7 +92,7 @@ export async function registerDevice(uid: string): Promise<string> {
 }
 
 /** Remove a device registration from Firestore. */
-export async function unregisterDevice(uid: string, deviceId: string): Promise<void> {
+async function unregisterDevice(uid: string, deviceId: string): Promise<void> {
   if (!db) return;
   try {
     await deleteDoc(deviceRef(uid, deviceId));
@@ -168,7 +168,7 @@ export async function writeLicenseFailed(
 }
 
 /** Revoke a license (e.g. rights removed by admin). */
-export async function revokeLicense(uid: string, songId: string): Promise<void> {
+async function revokeLicense(uid: string, songId: string): Promise<void> {
   if (!db) return;
   try {
     await setDoc(
@@ -261,7 +261,7 @@ export async function refreshLicenses(uid: string): Promise<Set<string>> {
 }
 
 /** Check whether a specific license is valid (active and not expired). */
-export async function isLicenseValid(uid: string, songId: string): Promise<boolean> {
+async function isLicenseValid(uid: string, songId: string): Promise<boolean> {
   if (!db) return false;
   try {
     const snap = await getDoc(licenseRef(uid, songId));

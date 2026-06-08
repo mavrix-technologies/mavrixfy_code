@@ -149,7 +149,7 @@ function normalizeAudioCandidates(downloadUrls: unknown): AudioCandidate[] {
   return [];
 }
 
-export function getBestAudioUrl(downloadUrls: unknown): string {
+function getBestAudioUrl(downloadUrls: unknown): string {
   const candidates = normalizeAudioCandidates(downloadUrls);
   if (candidates.length === 0) return "";
 
@@ -178,7 +178,7 @@ export function convertJioSaavnSong(song: JioSaavnSong): Song {
   };
 }
 
-export function convertJioSaavnPlaylist(playlist: JioSaavnPlaylist): Playlist {
+function convertJioSaavnPlaylist(playlist: JioSaavnPlaylist): Playlist {
   const convertedSongs = playlist.songs?.map(convertJioSaavnSong) || [];
   return {
     id: `jiosaavn_${playlist.id}`,
@@ -193,7 +193,7 @@ export function convertJioSaavnPlaylist(playlist: JioSaavnPlaylist): Playlist {
   };
 }
 
-export const genres: Genre[] = [
+const genres: Genre[] = [
   { id: "bollywood", name: "Bollywood", color: "#E13300" },
   { id: "punjabi", name: "Punjabi", color: "#BA5D07" },
   { id: "romantic", name: "Romantic", color: "#DC148C" },

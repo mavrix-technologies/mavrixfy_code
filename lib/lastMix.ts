@@ -24,7 +24,7 @@ export function setLastMix(params: LastMixParams): void {
   _notify();
 }
 
-export function getLastMix(): LastMixParams | null {
+function getLastMix(): LastMixParams | null {
   return _lastMix;
 }
 

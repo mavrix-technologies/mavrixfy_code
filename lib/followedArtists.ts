@@ -40,13 +40,13 @@ export async function isFollowingArtist(id: string): Promise<boolean> {
   return list.some((a) => a.id === id);
 }
 
-export async function followArtist(artist: FollowedArtist): Promise<void> {
+async function followArtist(artist: FollowedArtist): Promise<void> {
   const list = await read();
   if (list.some((a) => a.id === artist.id)) return; // already following
   await write([{ ...artist, followedAt: Date.now() }, ...list]);
 }
 
-export async function unfollowArtist(id: string): Promise<void> {
+async function unfollowArtist(id: string): Promise<void> {
   const list = await read();
   await write(list.filter((a) => a.id !== id));
 }
@@ -64,6 +64,6 @@ export async function toggleFollowArtist(artist: FollowedArtist): Promise<boolea
 }
 
 /** Invalidate in-memory cache — call after logout */
-export function clearFollowedArtistsCache(): void {
+function clearFollowedArtistsCache(): void {
   memCache = null;
 }

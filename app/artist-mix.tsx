@@ -61,9 +61,9 @@ export default function ArtistMixScreen() {
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Math.max(140, insets.bottom + 120);
 
-  const ids    = pickFirst(params.ids).split(",").filter(Boolean);
-  const names  = pickFirst(params.names).split(",").filter(Boolean);
-  const images = pickFirst(params.images).split(",").filter(Boolean);
+  const ids = useMemo(() => pickFirst(params.ids).split(",").filter(Boolean), [params.ids]);
+  const names = useMemo(() => pickFirst(params.names).split(",").filter(Boolean), [params.names]);
+  const images = useMemo(() => pickFirst(params.images).split(",").filter(Boolean), [params.images]);
 
   const { currentSong, queue } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
@@ -72,9 +72,9 @@ export default function ArtistMixScreen() {
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadedCount, setLoadedCount] = useState(0);
-  const mixIds = ids.join(",");
-  const mixNames = names.join(",");
-  const mixImages = images.join(",");
+  const mixIds = useMemo(() => ids.join(","), [ids]);
+  const mixNames = useMemo(() => names.join(","), [names]);
+  const mixImages = useMemo(() => images.join(","), [images]);
   const startMixLoad = useCallback(() => {
     setLoading(true);
     setLoadedCount(0);
@@ -145,8 +145,7 @@ export default function ArtistMixScreen() {
 
     void fetchAll();
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finishEmptyMixLoad, finishMixLoad, incrementLoadedCount, mixIds, startMixLoad]);
+  }, [finishEmptyMixLoad, finishMixLoad, ids, incrementLoadedCount, startMixLoad]);
 
   const isPlayingFromMix = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;

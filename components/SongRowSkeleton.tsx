@@ -25,7 +25,9 @@ function SkeletonRow({ shimmer }: { shimmer: Animated.Value }) {
 }
 
 export default function SongRowSkeleton({ count = 8 }: { count?: number }) {
-  const shimmer = useRef(new Animated.Value(0)).current;
+  const shimmerRef = useRef<Animated.Value | null>(null);
+  if (shimmerRef.current === null) shimmerRef.current = new Animated.Value(0);
+  const shimmer = shimmerRef.current;
 
   useEffect(() => {
     const anim = Animated.loop(

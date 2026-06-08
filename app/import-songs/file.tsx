@@ -13,9 +13,9 @@ import {
   Modal,
   TextInput,
   Easing,
-  PanResponder,
   useWindowDimensions
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -33,6 +33,8 @@ import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import { createUserPlaylist, addSongToPlaylist, getUserPlaylists, UserPlaylist } from "@/lib/storage";
 import { createFirestorePlaylist, addLikedSongToFirestore, getUserFirestorePlaylists, FirestorePlaylist, addSongToFirestorePlaylist } from "@/lib/firestore";
+
+type IsScreenActive = () => boolean;
 
 function getParsedSongKey(song: ParsedSong): string {
   return song.spotifyUri || song.isrc || `${song.title}-${song.artist}`;
@@ -140,7 +142,6 @@ function useFileImportScreenView() {
   const { user } = useAuth();
   
   const [parsedSongs, setParsedSongs] = useState<ParsedSong[]>([]);
-  const [fileLoading, setFileLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentStep, setCurrentStep] = useState<'parse' | 'searching' | 'review' | 'importing' | 'complete'>('parse');
@@ -163,8 +164,12 @@ function useFileImportScreenView() {
   
   // Bottom sheet animation
   const { height: screenHeight } = useWindowDimensions();
-  const modalTranslateY = useRef(new Animated.Value(screenHeight)).current;
-  const modalOpacity = useRef(new Animated.Value(0)).current;
+  const modalTranslateYRef = useRef<Animated.Value | null>(null);
+  if (modalTranslateYRef.current === null) modalTranslateYRef.current = new Animated.Value(screenHeight);
+  const modalTranslateY = modalTranslateYRef.current;
+  const modalOpacityRef = useRef<Animated.Value | null>(null);
+  if (modalOpacityRef.current === null) modalOpacityRef.current = new Animated.Value(0);
+  const modalOpacity = modalOpacityRef.current;
   
   const topInset = Platform.OS === "web" ? 67 : insets.top;
 
@@ -182,7 +187,7 @@ function useFileImportScreenView() {
     }
   }, [user?.id]);
 
-  const loadFile = useCallback(async () => {
+  const loadFile = useCallback(async (isScreenActive: IsScreenActive = () => true) => {
     if (!fileUri) {
       Alert.alert("Error", "No file selected");
       router.back();
@@ -190,11 +195,11 @@ function useFileImportScreenView() {
     }
 
     try {
-      setFileLoading(true);
-      setCurrentStep('parse');
-      
       // Get file info first
+      if (!isScreenActive()) return;
       const fileInfo = await FileSystem.getInfoAsync(fileUri);
+      const canUseFileInfo = isScreenActive();
+      if (!canUseFileInfo) return;
       
       if (!fileInfo.exists) {
         Alert.alert("Error", "File not found at the specified location");
@@ -203,9 +208,12 @@ function useFileImportScreenView() {
       }
 
       // Read file content with proper encoding
+      if (!isScreenActive()) return;
       const content = await FileSystem.readAsStringAsync(fileUri, {
         encoding: FileSystem.EncodingType.UTF8,
       });
+      const canUseFileContent = isScreenActive();
+      if (!canUseFileContent) return;
 
       if (!content || content.trim().length === 0) {
         Alert.alert("Error", "File is empty or could not be read");
@@ -214,6 +222,7 @@ function useFileImportScreenView() {
       }
 
       const result = parseFile(content, fileName || "file.txt");
+      if (!isScreenActive()) return;
 
       if (result.errors.length > 0 && result.songs.length === 0) {
         Alert.alert(
@@ -225,10 +234,12 @@ function useFileImportScreenView() {
       }
 
       setParsedSongs(result.songs);
-      setFileLoading(false);
       
       // Automatically start searching for songs
-      await searchAllSongs(result.songs);
+      if (!isScreenActive()) return;
+      await searchAllSongs(result.songs, isScreenActive);
+      const canShowParseErrors = isScreenActive();
+      if (!canShowParseErrors) return;
       
       if (result.errors.length > 0) {
         Alert.alert(
@@ -242,68 +253,11 @@ function useFileImportScreenView() {
         `Failed to read file.\n\nDetails: ${error.message || "Unknown error"}`
       );
       router.back();
-    } finally {
-      setFileLoading(false);
     }
   }, [fileName, fileUri]);
 
-  // Pan responder for drag-to-dismiss
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return gestureState.dy > 8 && Math.abs(gestureState.dx) < Math.abs(gestureState.dy);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        // Only allow dragging down
-        if (gestureState.dy > 0) {
-          modalTranslateY.setValue(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        // If dragged down more than 150px or velocity is high, close modal
-        if (gestureState.dy > 150 || gestureState.vy > 0.5) {
-          closeModal();
-        } else {
-          // Otherwise, snap back to open position
-          Animated.spring(modalTranslateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            damping: 30,
-            stiffness: 360,
-            mass: 0.78,
-            overshootClamping: true,
-          }).start();
-        }
-      },
-    })
-  ).current;
-
-  // Open modal animation
-  useEffect(() => {
-    if (showDestinationModal) {
-      Animated.parallel([
-        Animated.timing(modalOpacity, {
-          toValue: 1,
-          duration: 140,
-          easing: Easing.out(Easing.cubic),
-          isInteraction: false,
-          useNativeDriver: true,
-        }),
-        Animated.spring(modalTranslateY, {
-          toValue: 0,
-          useNativeDriver: true,
-          damping: 30,
-          stiffness: 360,
-          mass: 0.78,
-          overshootClamping: true,
-        }),
-      ]).start();
-    }
-  }, [showDestinationModal, modalOpacity, modalTranslateY]);
-
   // Close modal animation
-  const closeModal = () => {
+  const closeModal = useCallback(() => {
     Animated.parallel([
       Animated.timing(modalOpacity, {
         toValue: 0,
@@ -323,29 +277,84 @@ function useFileImportScreenView() {
       setShowDestinationModal(false);
       modalTranslateY.setValue(screenHeight);
     });
-  };
+  }, [modalOpacity, modalTranslateY, screenHeight]);
+
+  const snapDestinationModalOpen = useCallback(() => {
+    Animated.spring(modalTranslateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      damping: 30,
+      stiffness: 360,
+      mass: 0.78,
+      overshootClamping: true,
+    }).start();
+  }, [modalTranslateY]);
+
+  const destinationModalPanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .runOnJS(true)
+        .onUpdate((event) => {
+          if (event.translationY > 0 && Math.abs(event.translationX) < Math.abs(event.translationY)) {
+            modalTranslateY.setValue(event.translationY);
+          }
+        })
+        .onEnd((event) => {
+          if (event.translationY > 150 || event.velocityY > 500) {
+            closeModal();
+            return;
+          }
+          snapDestinationModalOpen();
+        }),
+    [closeModal, modalTranslateY, snapDestinationModalOpen]
+  );
+
+  const openDestinationModal = useCallback(() => {
+    modalOpacity.setValue(0);
+    modalTranslateY.setValue(screenHeight);
+    setShowDestinationModal(true);
+    void loadUserPlaylists();
+    Animated.parallel([
+      Animated.timing(modalOpacity, {
+        toValue: 1,
+        duration: 140,
+        easing: Easing.out(Easing.cubic),
+        isInteraction: false,
+        useNativeDriver: true,
+      }),
+      Animated.spring(modalTranslateY, {
+        toValue: 0,
+        useNativeDriver: true,
+        damping: 30,
+        stiffness: 360,
+        mass: 0.78,
+        overshootClamping: true,
+      }),
+    ]).start();
+  }, [loadUserPlaylists, modalOpacity, modalTranslateY, screenHeight]);
 
   // Load and parse file
   useEffect(() => {
+    let isMounted = true;
+    const isScreenActive = () => isMounted;
+
     if (fileUri) {
-      loadFile();
+      void loadFile(isScreenActive);
     } else {
       // If no fileUri, show error and go back
       Alert.alert("Error", "No file selected");
       router.back();
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [fileUri, loadFile]);
 
-  // Load user playlists when modal opens
-  useEffect(() => {
-    if (showDestinationModal) {
-      loadUserPlaylists();
-    }
-  }, [showDestinationModal, loadUserPlaylists]);
-
   // Search all songs after parsing
-  const searchAllSongs = async (songs: ParsedSong[]) => {
+  const searchAllSongs = async (songs: ParsedSong[], isScreenActive: IsScreenActive = () => true) => {
     if (songs.length === 0) return;
+    if (!isScreenActive()) return;
     
     setIsSearching(true);
     setCurrentStep('searching');
@@ -358,6 +367,7 @@ function useFileImportScreenView() {
     let processed = 0;
 
     const processBatch = async (batchStart: number): Promise<void> => {
+      if (!isScreenActive()) return;
       if (batchStart >= updatedSongs.length) return;
 
       const batchEnd = Math.min(batchStart + batchSize, updatedSongs.length);
@@ -369,11 +379,15 @@ function useFileImportScreenView() {
           const i = batchStart + batchIndex;
           
           try {
+            if (!isScreenActive()) return;
             updatedSongs[i] = { ...song, status: 'searching', message: 'Searching...' };
             setParsedSongs([...updatedSongs]);
 
             // Search for the song (calls 3 APIs in parallel)
+            if (!isScreenActive()) return;
             const matchResult = await searchSong(song.title, song.artist, song.album, song);
+            const canUseMatchResult = isScreenActive();
+            if (!canUseMatchResult) return;
 
             if (matchResult && matchResult.song) {
               const matchedSong = matchResult.song;
@@ -437,6 +451,7 @@ function useFileImportScreenView() {
 
           processed++;
           const currentProgress = Math.floor((processed / updatedSongs.length) * 100);
+          if (!isScreenActive()) return;
           setFoundCount(found);
           setProgress(currentProgress);
           setParsedSongs([...updatedSongs]);
@@ -450,7 +465,10 @@ function useFileImportScreenView() {
       }
     };
 
+    if (!isScreenActive()) return;
     await processBatch(0);
+    const canFinishSearch = isScreenActive();
+    if (!canFinishSearch) return;
 
     setIsSearching(false);
     setCurrentStep('review');
@@ -460,8 +478,7 @@ function useFileImportScreenView() {
   const handleStartImport = async () => {
     if (parsedSongs.length === 0) return;
     
-    // Show destination modal first
-    setShowDestinationModal(true);
+    openDestinationModal();
   };
 
   // Start the actual import process (no search needed, already done)
@@ -640,7 +657,7 @@ function useFileImportScreenView() {
   );
 
   // Loading state
-  if (fileLoading || currentStep === 'parse') {
+  if (currentStep === 'parse') {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
         <LinearGradient
@@ -901,9 +918,11 @@ function useFileImportScreenView() {
               },
             ]}
           >
-            <View {...panResponder.panHandlers} style={styles.modalDragHandle}>
-              <View style={styles.modalDragIndicator} />
-            </View>
+            <GestureDetector gesture={destinationModalPanGesture}>
+              <View style={styles.modalDragHandle}>
+                <View style={styles.modalDragIndicator} />
+              </View>
+            </GestureDetector>
 
             <ScrollView 
               style={styles.modalScrollView}

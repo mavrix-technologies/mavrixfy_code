@@ -49,7 +49,8 @@ function useAllArtistsScreenView() {
   // ── Multi-select state ────────────────────────────────────────────────────
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const selectedArtistsRef = useRef<Map<string, ArtistCard>>(new Map());
+  const selectedArtistsRef = useRef<Map<string, ArtistCard> | null>(null);
+  if (selectedArtistsRef.current === null) selectedArtistsRef.current = new Map<string, ArtistCard>();
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchIdRef = useRef(0);
@@ -101,7 +102,7 @@ function useAllArtistsScreenView() {
       else next.add(artist.id);
       return next;
     });
-    const nextArtists = new Map(selectedArtistsRef.current);
+    const nextArtists = new Map(selectedArtistsRef.current!);
     if (nextArtists.has(artist.id)) {
       nextArtists.delete(artist.id);
     } else {
@@ -143,7 +144,7 @@ function useAllArtistsScreenView() {
   }, []);
 
   const openMix = useCallback(() => {
-    const selected = Array.from(selectedArtistsRef.current.values());
+    const selected = Array.from(selectedArtistsRef.current!.values());
     if (selected.length === 0) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
     const ids    = selected.map((a) => a.id).join(",");

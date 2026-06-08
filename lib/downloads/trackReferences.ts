@@ -56,7 +56,7 @@ export async function removeCollectionRef(
  * Returns true if the track has no collection references.
  * A track with no references can have its bytes safely deleted.
  */
-export async function hasNoReferences(songId: string): Promise<boolean> {
+async function hasNoReferences(songId: string): Promise<boolean> {
   try {
     const item = await loadDownload(songId);
     if (!item) return true;

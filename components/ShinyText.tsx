@@ -165,28 +165,19 @@ export default function ShinyText({
       easing: Easing.inOut(Easing.cubic),
     };
 
-    if (yoyo) {
-      progress.value = withRepeat(
-        withSequence(
+    const animation = yoyo
+      ? withSequence(
           withTiming(1, timingConfig),
           withDelay(delayMs, withTiming(1, HOLD_CONFIG)),
           withTiming(0, timingConfig),
           withDelay(delayMs, withTiming(0, HOLD_CONFIG))
-        ),
-        -1,
-        false
-      );
-      return;
-    }
+        )
+      : withSequence(
+          withTiming(1, timingConfig),
+          withDelay(delayMs, withTiming(0, HOLD_CONFIG))
+        );
 
-    progress.value = withRepeat(
-      withSequence(
-        withTiming(1, timingConfig),
-        withDelay(delayMs, withTiming(0, HOLD_CONFIG))
-      ),
-      -1,
-      false
-    );
+    progress.value = withRepeat(animation, -1, false);
   }, [delay, disabled, progress, reducedMotion, speed, textWidth, yoyo]);
 
   const handleTextLayout = (event: LayoutChangeEvent) => {

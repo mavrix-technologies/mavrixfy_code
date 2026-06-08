@@ -494,7 +494,7 @@ function thumbHashToAverageRGBA(hash: Uint8Array): { r: number; g: number; b: nu
   };
 }
 
-export function getRandomMusicColor(): ColorResult {
+function getRandomMusicColor(): ColorResult {
   const randomIndex = Math.floor(Math.random() * fallbackPalettes.length);
   const fallback = fallbackPalettes[randomIndex];
   return {
@@ -504,7 +504,7 @@ export function getRandomMusicColor(): ColorResult {
   };
 }
 
-export function colorWithAlpha(hex: string, alpha: number, fallback = "rgba(255,255,255,1)"): string {
+function colorWithAlpha(hex: string, alpha: number, fallback = "rgba(255,255,255,1)"): string {
   const normalized = normalizeHexColor(hex);
   if (!normalized) return fallback;
   const r = parseInt(normalized.slice(1, 3), 16);
@@ -628,6 +628,6 @@ export function createSpotifyColorTheme(baseHex: string): SpotifyColorTheme {
   };
 }
 
-export function clearColorCache(): void {
+function clearColorCache(): void {
   colorCache.clear();
 }

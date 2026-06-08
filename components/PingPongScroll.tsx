@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as Animated from "@/lib/nativeAnimated";
 import {
   View,
@@ -28,30 +28,31 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
   velocity = 15,
   paused = false,
 }) => {
-  const initialTextRef = useRef(text);
-  const [displayText, setDisplayText] = useState(initialTextRef.current);
-  const [needsScroll, setNeedsScroll] = useState(false);
+  const displayText = text;
   const containerWidthRef = useRef(0);
   const [layoutVersion, bumpLayoutVersion] = useReducer((value: number) => value + 1, 0);
   const [textWidth, setTextWidth] = useState(0);
-  const animatedValue = useRef(new Animated.Value(0)).current;
-  const contentOpacity = useRef(new Animated.Value(1)).current;
+  const animatedValueRef = useRef<Animated.Value | null>(null);
+  if (animatedValueRef.current === null) {
+    animatedValueRef.current = new Animated.Value(0);
+  }
+  const animatedValue = animatedValueRef.current;
+
+  const contentOpacityRef = useRef<Animated.Value | null>(null);
+  if (contentOpacityRef.current === null) {
+    contentOpacityRef.current = new Animated.Value(1);
+  }
+  const contentOpacity = contentOpacityRef.current;
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
-  const previousTextRef = useRef(text);
   const GAP = 28;
   const MEASURE_WIDTH = 10000;
-  const updateNeedsScroll = useCallback((next: boolean) => {
-    setNeedsScroll(next);
-  }, []);
+
+  // Derive needsScroll during render — no state needed
+  const containerWidth = containerWidthRef.current;
+  const overflow = textWidth - containerWidth;
+  const needsScroll = !paused && overflow > 6 && containerWidth > 0 && textWidth > 0;
 
   useEffect(() => {
-    if (previousTextRef.current === text) return;
-
-    previousTextRef.current = text;
-    contentOpacity.stopAnimation();
-    contentOpacity.setValue(0.72);
-    setDisplayText(text);
-
     Animated.timing(contentOpacity, {
       toValue: 1,
       duration: 160,
@@ -67,50 +68,44 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
       animationRef.current = null;
     }
 
-    if (paused) {
-      animatedValue.setValue(0);
-      updateNeedsScroll(false);
-      return;
-    }
-
-    const containerWidth = containerWidthRef.current;
-    const overflow = textWidth - containerWidth;
-    const shouldScroll = overflow > 6 && containerWidth > 0 && textWidth > 0;
-
     animatedValue.setValue(0);
 
-    if (shouldScroll) {
-      updateNeedsScroll(true);
-      const distance = overflow + GAP;
-      const duration = Math.max(900, Math.round((distance / Math.max(8, velocity)) * 1000));
-
-      const animation = Animated.loop(
-        Animated.sequence([
-          Animated.delay(850),
-          Animated.timing(animatedValue, {
-            toValue: -distance,
-            duration,
-            easing: Easing.linear,
-            useNativeDriver: Platform.OS !== "web",
-            isInteraction: false,
-          }),
-          Animated.delay(500),
-          Animated.timing(animatedValue, {
-            toValue: 0,
-            duration,
-            easing: Easing.linear,
-            useNativeDriver: Platform.OS !== "web",
-            isInteraction: false,
-          }),
-          Animated.delay(450),
-        ])
-      );
-
-      animationRef.current = animation;
-      animation.start();
-    } else {
-      updateNeedsScroll(false);
+    if (!needsScroll) {
+      return () => {
+        if (animationRef.current) {
+          animationRef.current.stop();
+          animationRef.current = null;
+        }
+      };
     }
+
+    const distance = overflow + GAP;
+    const duration = Math.max(900, Math.round((distance / Math.max(8, velocity)) * 1000));
+
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.delay(850),
+        Animated.timing(animatedValue, {
+          toValue: -distance,
+          duration,
+          easing: Easing.linear,
+          useNativeDriver: Platform.OS !== "web",
+          isInteraction: false,
+        }),
+        Animated.delay(500),
+        Animated.timing(animatedValue, {
+          toValue: 0,
+          duration,
+          easing: Easing.linear,
+          useNativeDriver: Platform.OS !== "web",
+          isInteraction: false,
+        }),
+        Animated.delay(450),
+      ])
+    );
+
+    animationRef.current = animation;
+    animation.start();
 
     return () => {
       if (animationRef.current) {
@@ -118,7 +113,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
         animationRef.current = null;
       }
     };
-  }, [animatedValue, displayText, layoutVersion, paused, textWidth, updateNeedsScroll, velocity]);
+  }, [animatedValue, displayText, layoutVersion, needsScroll, overflow, velocity]);
 
   const handleContainerLayout = (event: LayoutChangeEvent) => {
     const { width } = event.nativeEvent.layout;

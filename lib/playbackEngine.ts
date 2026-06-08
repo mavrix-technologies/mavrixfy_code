@@ -106,11 +106,11 @@ function emit(): void {
   listeners.forEach((listener) => listener());
 }
 
-export function getPlaybackEngineSnapshot(): PlaybackEngineSnapshot {
+function getPlaybackEngineSnapshot(): PlaybackEngineSnapshot {
   return snapshot;
 }
 
-export function subscribePlaybackEngine(listener: Listener): () => void {
+function subscribePlaybackEngine(listener: Listener): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -164,7 +164,7 @@ export function beginPlaybackTransaction({
   };
 }
 
-export function isPlaybackTransactionCurrent(id: number, targetSongId?: string | null): boolean {
+function isPlaybackTransactionCurrent(id: number, targetSongId?: string | null): boolean {
   const current = getPlaybackEngineSnapshot();
   return (
     current.transitionId === id &&
@@ -199,7 +199,7 @@ export function failPlaybackTransaction(id: number, error: string): void {
   });
 }
 
-export function usePlaybackEngineSelector<T>(
+function usePlaybackEngineSelector<T>(
   selector: (snapshot: PlaybackEngineSnapshot) => T,
   isEqual: (left: T, right: T) => boolean = Object.is
 ): T {

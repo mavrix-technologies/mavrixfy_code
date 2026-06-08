@@ -120,7 +120,7 @@ export const cache = new CacheManager();
 /**
  * Cache key generators
  */
-export const CacheKeys = {
+const CacheKeys = {
   // User-specific
   userPlaylists: (userId: string) => `user:${userId}:playlists`,
   userLikedSongs: (userId: string) => `user:${userId}:liked`,
@@ -139,7 +139,7 @@ export const CacheKeys = {
 /**
  * Cache TTL configurations (in minutes)
  */
-export const CacheTTL = {
+const CacheTTL = {
   // User data - shorter TTL for freshness
   userPlaylists: 2,
   userLikedSongs: 1,
@@ -158,7 +158,7 @@ export const CacheTTL = {
 /**
  * Cached fetch wrapper
  */
-export async function cachedFetch<T>(
+async function cachedFetch<T>(
   key: string,
   fetcher: () => Promise<T>,
   ttlMinutes: number = 5
@@ -181,6 +181,6 @@ export function clearUserCache(userId: string): void {
   cache.clearPattern(`user:${userId}:*`);
 }
 
-export function clearAllCache(): void {
+function clearAllCache(): void {
   cache.clearAll();
 }

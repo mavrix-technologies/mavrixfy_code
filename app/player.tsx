@@ -121,7 +121,9 @@ function SmoothControlButton({
   disabled,
   scaleTo = 0.94,
 }: SmoothControlButtonProps) {
-  const scale = useRef(new Animated.Value(1)).current;
+  const scaleRef = useRef<Animated.Value | null>(null);
+  if (scaleRef.current === null) scaleRef.current = new Animated.Value(1);
+  const scale = scaleRef.current;
 
   const animateTo = useCallback(
     (value: number, duration: number) => {
@@ -184,7 +186,9 @@ const CinematicPlayerBackground = memo(function CinematicPlayerBackground({
 }: {
   colors: CinematicGradientColors;
 }) {
-  const fadeIn = useRef(new Animated.Value(1)).current;
+  const fadeInRef = useRef<Animated.Value | null>(null);
+  if (fadeInRef.current === null) fadeInRef.current = new Animated.Value(1);
+  const fadeIn = fadeInRef.current;
   const [layers, setLayers] = useState<{
     current: CinematicGradientColors;
     previous: CinematicGradientColors | null;
@@ -253,20 +257,20 @@ const StableArtworkImage = memo(function StableArtworkImage({
 }) {
   const initialUriRef = useRef(uri);
   const [visibleUri, setVisibleUri] = useState(initialUriRef.current);
-  const [loadingUri, setLoadingUri] = useState<string | null>(null);
-  const incomingOpacity = useRef(new Animated.Value(1)).current;
+  const loadingUri = uri === visibleUri ? null : uri;
+  const incomingOpacityRef = useRef<Animated.Value | null>(null);
+  if (incomingOpacityRef.current === null) incomingOpacityRef.current = new Animated.Value(1);
+  const incomingOpacity = incomingOpacityRef.current;
 
   useEffect(() => {
-    if (uri === visibleUri) {
-      setLoadingUri(null);
+    if (!loadingUri) {
       incomingOpacity.setValue(1);
       return;
     }
 
     incomingOpacity.stopAnimation();
     incomingOpacity.setValue(0);
-    setLoadingUri(uri);
-  }, [incomingOpacity, uri, visibleUri]);
+  }, [incomingOpacity, loadingUri]);
 
   const handleIncomingLoad = useCallback(() => {
     Animated.timing(incomingOpacity, {
@@ -277,14 +281,12 @@ const StableArtworkImage = memo(function StableArtworkImage({
     }).start(({ finished }) => {
       if (!finished) return;
       setVisibleUri(uri);
-      setLoadingUri(null);
     });
   }, [incomingOpacity, uri]);
 
   const handleIncomingError = useCallback(() => {
     incomingOpacity.setValue(1);
     setVisibleUri(uri);
-    setLoadingUri(null);
   }, [incomingOpacity, uri]);
 
   return (
@@ -336,24 +338,36 @@ function PlayerPlayButton({
     const isPlaying = isPlayingOverride ?? playbackState.isPlaying;
     const isLoading = isLoadingOverride ?? (playbackState.isBuffering || playbackState.isLoading);
     const [showSpinner, setShowSpinner] = useState(false);
-    const updateSpinnerVisibility = useCallback((next: boolean) => {
-      setShowSpinner(next);
-    }, []);
+    const prevIsLoadingRef = useRef(isLoading);
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Inline adjustment when isLoading transitions to false — avoids routing
+    // through a useEffect which causes an extra stale render.
+    if (!isLoading && prevIsLoadingRef.current !== isLoading) {
+      prevIsLoadingRef.current = isLoading;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      setShowSpinner(false);
+    } else if (isLoading && prevIsLoadingRef.current !== isLoading) {
+      prevIsLoadingRef.current = isLoading;
+    }
 
     useEffect(() => {
-      if (!isLoading) {
-        updateSpinnerVisibility(false);
-        return;
-      }
+      if (!isLoading) return;
 
-      const timer = setTimeout(() => {
-        updateSpinnerVisibility(true);
+      timerRef.current = setTimeout(() => {
+        setShowSpinner(true);
       }, 180);
 
       return () => {
-        clearTimeout(timer);
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
       };
-    }, [isLoading, updateSpinnerVisibility]);
+    }, [isLoading]);
 
     return (
       <SmoothControlButton
@@ -824,7 +838,9 @@ function useLegacyPlayerScreenView() {
   const [devPreviewLikedSongIds, setDevPreviewLikedSongIds] = useState<string[]>([]);
   const skipCooldownRef = useRef(false);
   const skipCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const artScrollX = useRef(new Animated.Value(0)).current;
+  const artScrollXRef = useRef<Animated.Value | null>(null);
+  if (artScrollXRef.current === null) artScrollXRef.current = new Animated.Value(0);
+  const artScrollX = artScrollXRef.current;
   const artCarouselRef = useRef<FlatList<ArtworkQueueItem> | null>(null);
   const hasAlignedArtCarouselRef = useRef(false);
   const pendingArtworkTargetIndexRef = useRef<number | null>(null);
@@ -876,7 +892,7 @@ function useLegacyPlayerScreenView() {
 
   useEffect(() => {
     if (Platform.OS !== "android") {
-      return;
+      return () => {};
     }
 
     const unsubscribe = navigation.addListener("sheetDetentChange" as never, ((event: any) => {
@@ -895,7 +911,9 @@ function useLegacyPlayerScreenView() {
       safeGoBack();
     }) as never);
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+    };
   }, [navigation]);
 
   const applyPlayerArtworkColors = useCallback((primary: string, text: string) => {
@@ -1092,7 +1110,6 @@ function useLegacyPlayerScreenView() {
     () => ({ height: queueViewportHeight }),
     [queueViewportHeight]
   );
-  const artWrapHorizontalPadding = isShortScreen ? 14 : 20;
   const artCarouselViewportWidth = screenWidth;
   const artCarouselPageWidth = artCarouselViewportWidth;
   const artCarouselSnapInterval = artCarouselPageWidth;

@@ -29,6 +29,7 @@ interface AppUser {
   email: string;
   name: string;
   picture: string;
+  isAdmin: boolean;
 }
 
 interface AuthContextValue {
@@ -66,6 +67,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const data = userDoc.data();
         name = data.fullName || data.displayName || name;
         picture = data.imageUrl || data.photoURL || picture;
+        const isAdmin =
+          data.isAdmin === true ||
+          data.admin === true ||
+          String(data.role || "").toLowerCase() === "admin";
+        return {
+          id: fbUser.uid,
+          email: fbUser.email || "",
+          name,
+          picture,
+          isAdmin,
+        };
       }
     } catch {}
 
@@ -74,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: fbUser.email || "",
       name,
       picture,
+      isAdmin: false,
     };
   }, []);
 
@@ -93,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: fbUser.email || "",
       name: fbUser.displayName || "",
       picture: fbUser.photoURL || "",
+      isAdmin: false,
     });
     setIsGuest(false);
     setLoading(false);
@@ -163,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: normalizedEmail,
       name: displayName,
       picture: "",
+      isAdmin: false,
     };
     setUser(appUser);
     setFirebaseUser(cred.user);

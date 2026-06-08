@@ -47,7 +47,7 @@ let errorCb: ErrorCallback | null = null;
 
 export function onStatusUpdate(cb: StatusCallback) { statusCb = cb; }
 export function onError(cb: ErrorCallback) { errorCb = cb; }
-export function clearListeners(): void {
+function clearListeners(): void {
   statusCb = null;
   errorCb = null;
 }
@@ -178,7 +178,7 @@ export function pause(): void {
   try { activePlayer?.pause(); } catch {}
 }
 
-export function stop(): void {
+function stop(): void {
   generation += 1;
   const p = activePlayer;
   activePlayer = null;
@@ -209,4 +209,4 @@ export async function seekTo(seconds: number): Promise<void> {
 }
 
 export function isLoaded(): boolean { return activePlayer !== null; }
-export function getCurrentUrl(): string | null { return currentUrl; }
+function getCurrentUrl(): string | null { return currentUrl; }

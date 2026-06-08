@@ -13,9 +13,9 @@ import {
   TextInput,
   Alert,
   DeviceEventEmitter,
-  PanResponder,
   useWindowDimensions
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Image } from "expo-image";
 import { useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -123,13 +123,19 @@ function usePlaylistScreenView() {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   // Sticky header
-  const stickyOpacity = useRef(new Animated.Value(0)).current;
+  const stickyOpacityRef = useRef<Animated.Value | null>(null);
+  if (stickyOpacityRef.current === null) stickyOpacityRef.current = new Animated.Value(0);
+  const stickyOpacity = stickyOpacityRef.current;
   const [isStickyVisible, setIsStickyVisible] = useState(false);
 
   // Bottom sheet animation
   const { height: screenHeight } = useWindowDimensions();
-  const modalTranslateY = useRef(new Animated.Value(screenHeight)).current;
-  const modalOpacity = useRef(new Animated.Value(0)).current;
+  const modalTranslateYRef = useRef<Animated.Value | null>(null);
+  if (modalTranslateYRef.current === null) modalTranslateYRef.current = new Animated.Value(screenHeight);
+  const modalTranslateY = modalTranslateYRef.current;
+  const modalOpacityRef = useRef<Animated.Value | null>(null);
+  if (modalOpacityRef.current === null) modalOpacityRef.current = new Animated.Value(0);
+  const modalOpacity = modalOpacityRef.current;
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const totalDuration = useMemo(() => songs.reduce((a, s) => a + s.duration, 0), [songs]);
@@ -354,9 +360,28 @@ function usePlaylistScreenView() {
     setEditDescription(playlistDescription);
     setEditCover(playlistCover);
     setEditIsPublic(playlistIsPublic);
+    modalOpacity.setValue(0);
+    modalTranslateY.setValue(screenHeight);
     setShowEditModal(true);
+    Animated.parallel([
+      Animated.timing(modalOpacity, {
+        toValue: 1,
+        duration: 140,
+        easing: Easing.out(Easing.cubic),
+        isInteraction: false,
+        useNativeDriver: true,
+      }),
+      Animated.spring(modalTranslateY, {
+        toValue: 0,
+        useNativeDriver: true,
+        damping: 30,
+        stiffness: 360,
+        mass: 0.78,
+        overshootClamping: true,
+      }),
+    ]).start();
     if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [playlistName, playlistDescription, playlistCover, playlistIsPublic]);
+  }, [modalOpacity, modalTranslateY, playlistName, playlistDescription, playlistCover, playlistIsPublic, screenHeight]);
 
   const handlePickImage = useCallback(async () => {
     try {
@@ -481,56 +506,6 @@ function usePlaylistScreenView() {
     );
   }, [playlistName, playlistId, isFirestoreSource, user?.id]);
 
-  // Pan responder for drag-to-dismiss with improved gesture handling
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only respond to downward drags with minimal horizontal movement
-        return gestureState.dy > 10 && Math.abs(gestureState.dx) < Math.abs(gestureState.dy);
-      },
-      onPanResponderGrant: () => {
-        // Add haptic feedback when drag starts
-        if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        // Only allow dragging down
-        if (gestureState.dy > 0) {
-          modalTranslateY.setValue(gestureState.dy);
-          // Reduce opacity as user drags down
-          const progress = Math.min(gestureState.dy / 200, 1);
-          modalOpacity.setValue(1 - progress * 0.5);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        // Close if dragged down more than 120px or with high velocity
-        if (gestureState.dy > 120 || gestureState.vy > 0.8) {
-          if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          closeEditModal();
-        } else {
-          // Snap back to open position with spring animation
-          Animated.parallel([
-            Animated.spring(modalTranslateY, {
-              toValue: 0,
-              useNativeDriver: true,
-              damping: 30,
-              stiffness: 360,
-              mass: 0.78,
-              overshootClamping: true,
-            }),
-            Animated.timing(modalOpacity, {
-              toValue: 1,
-              duration: 120,
-              easing: Easing.out(Easing.cubic),
-              isInteraction: false,
-              useNativeDriver: true,
-            }),
-          ]).start();
-        }
-      },
-    })
-  ).current;
-
   const closeEditModal = useCallback(() => {
     Animated.parallel([
       Animated.timing(modalOpacity, {
@@ -553,28 +528,50 @@ function usePlaylistScreenView() {
     });
   }, [modalOpacity, modalTranslateY, screenHeight]);
 
-  // Open modal animation
-  useEffect(() => {
-    if (showEditModal) {
-      Animated.parallel([
-        Animated.timing(modalOpacity, {
-          toValue: 1,
-          duration: 140,
-          easing: Easing.out(Easing.cubic),
-          isInteraction: false,
-          useNativeDriver: true,
+  const snapEditModalOpen = useCallback(() => {
+    Animated.parallel([
+      Animated.spring(modalTranslateY, {
+        toValue: 0,
+        useNativeDriver: true,
+        damping: 30,
+        stiffness: 360,
+        mass: 0.78,
+        overshootClamping: true,
+      }),
+      Animated.timing(modalOpacity, {
+        toValue: 1,
+        duration: 120,
+        easing: Easing.out(Easing.cubic),
+        isInteraction: false,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [modalOpacity, modalTranslateY]);
+
+  const editModalPanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .runOnJS(true)
+        .onBegin(() => {
+          if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        })
+        .onUpdate((event) => {
+          if (event.translationY > 0 && Math.abs(event.translationX) < Math.abs(event.translationY)) {
+            modalTranslateY.setValue(event.translationY);
+            const progress = Math.min(event.translationY / 200, 1);
+            modalOpacity.setValue(1 - progress * 0.5);
+          }
+        })
+        .onEnd((event) => {
+          if (event.translationY > 120 || event.velocityY > 800) {
+            if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            closeEditModal();
+            return;
+          }
+          snapEditModalOpen();
         }),
-        Animated.spring(modalTranslateY, {
-          toValue: 0,
-          useNativeDriver: true,
-          damping: 30,
-          stiffness: 360,
-          mass: 0.78,
-          overshootClamping: true,
-        }),
-      ]).start();
-    }
-  }, [showEditModal, modalOpacity, modalTranslateY]);
+    [closeEditModal, modalOpacity, modalTranslateY, snapEditModalOpen]
+  );
 
   // Check if user can edit (only local or owned Firestore playlists)
   const canEdit = !isJioSaavnSource && (!isFirestoreSource || user?.id);
@@ -793,9 +790,11 @@ function usePlaylistScreenView() {
               },
             ]}
           >
-            <View {...panResponder.panHandlers} style={styles.modalDragHandle}>
-              <View style={styles.modalDragIndicator} />
-            </View>
+            <GestureDetector gesture={editModalPanGesture}>
+              <View style={styles.modalDragHandle}>
+                <View style={styles.modalDragIndicator} />
+              </View>
+            </GestureDetector>
 
             <ScrollView 
               style={styles.modalScrollView}

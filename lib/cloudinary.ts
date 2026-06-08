@@ -95,7 +95,7 @@ export const uploadImageToCloudinary = async (
  * @param height Optional height
  * @returns Optimized image URL
  */
-export const getOptimizedImageUrl = (
+const getOptimizedImageUrl = (
   publicIdOrUrl: string,
   width?: number,
   height?: number
@@ -140,7 +140,7 @@ const getRandomColor = (): string => {
  * @param text The text to show in the placeholder
  * @returns URL to the generated placeholder image
  */
-export const getPlaceholderImageUrl = (text: string = 'Playlist'): string => {
+const getPlaceholderImageUrl = (text: string = 'Playlist'): string => {
   const color = getRandomColor();
   const letter = text.charAt(0).toUpperCase();
   
@@ -163,7 +163,7 @@ export const getPlaceholderImageUrl = (text: string = 'Playlist'): string => {
  * @param maxSizeMB Maximum file size in MB
  * @returns Validation result
  */
-export const validateImage = async (
+const validateImage = async (
   uri: string,
   maxSizeMB: number = 5
 ): Promise<{ valid: boolean; error?: string }> => {

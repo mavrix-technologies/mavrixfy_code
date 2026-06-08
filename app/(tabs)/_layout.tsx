@@ -1,7 +1,8 @@
 import { Tabs, useNavigation, usePathname, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import { Easing, PanResponder, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
+import { Easing, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -198,8 +199,12 @@ function NavTabItem({
   activeNavColor,
   navInactiveColor,
 }: NavTabItemProps) {
-  const scaleAnim = React.useRef(new Animated.Value(1)).current;
-  const focusAnim = React.useRef(new Animated.Value(isFocused ? 1 : 0)).current;
+  const scaleAnimRef = React.useRef<Animated.Value | null>(null);
+  if (scaleAnimRef.current === null) scaleAnimRef.current = new Animated.Value(1);
+  const scaleAnim = scaleAnimRef.current;
+  const focusAnimRef = React.useRef<Animated.Value | null>(null);
+  if (focusAnimRef.current === null) focusAnimRef.current = new Animated.Value(isFocused ? 1 : 0);
+  const focusAnim = focusAnimRef.current;
 
   useEffect(() => {
     Animated.timing(focusAnim, {
@@ -432,10 +437,18 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   // ── Mix chip drag-to-delete ───────────────────────────────────────────────
   const [isDragging, setIsDragging] = useState(false);
   const [overTrash, setOverTrash] = useState(false);
-  const dragX = useRef(new Animated.Value(0)).current;
-  const trashOpacity = useRef(new Animated.Value(0)).current;
-  const chipScale = useRef(new Animated.Value(1)).current;
-  const chipOpacity = useRef(new Animated.Value(1)).current;
+  const dragXRef = useRef<Animated.Value | null>(null);
+  if (dragXRef.current === null) dragXRef.current = new Animated.Value(0);
+  const dragX = dragXRef.current;
+  const trashOpacityRef = useRef<Animated.Value | null>(null);
+  if (trashOpacityRef.current === null) trashOpacityRef.current = new Animated.Value(0);
+  const trashOpacity = trashOpacityRef.current;
+  const chipScaleRef = useRef<Animated.Value | null>(null);
+  if (chipScaleRef.current === null) chipScaleRef.current = new Animated.Value(1);
+  const chipScale = chipScaleRef.current;
+  const chipOpacityRef = useRef<Animated.Value | null>(null);
+  if (chipOpacityRef.current === null) chipOpacityRef.current = new Animated.Value(1);
+  const chipOpacity = chipOpacityRef.current;
 
   const resetMixChip = useCallback(() => {
     Animated.parallel([
@@ -477,28 +490,24 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     });
   }, [chipOpacity, chipScale, dragX, trashOpacity]);
 
-  const panResponder = useMemo(
+  const mixDragGesture = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_, g) => isDragging && Math.abs(g.dx) > 4,
-        onPanResponderMove: (_, g) => {
-          const nextDx = Math.max(-170, Math.min(12, g.dx));
+      Gesture.Pan()
+        .enabled(isDragging)
+        .runOnJS(true)
+        .onUpdate((event) => {
+          const nextDx = Math.max(-170, Math.min(12, event.translationX));
           dragX.setValue(nextDx);
           const nextOverTrash = nextDx <= MIX_DELETE_THRESHOLD;
           setOverTrash((prev) => (prev === nextOverTrash ? prev : nextOverTrash));
-        },
-        onPanResponderRelease: (_, g) => {
-          if (g.dx <= MIX_DELETE_THRESHOLD) {
+        })
+        .onEnd((event) => {
+          if (event.translationX <= MIX_DELETE_THRESHOLD) {
             deleteMixWithAnimation();
             return;
           }
           resetMixChip();
-        },
-        onPanResponderTerminate: () => {
-          resetMixChip();
-        },
-      }),
+        }),
     [deleteMixWithAnimation, dragX, isDragging, resetMixChip]
   );
 
@@ -766,54 +775,55 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
 
               <View style={styles.playerControls}>
                 {lastMix ? (
-                  <Animated.View
-                    style={[
-                      styles.mixChipWrap,
-                      {
-                        opacity: chipOpacity,
-                        transform: [{ translateX: dragX }, { scale: chipScale }],
-                      },
-                    ]}
-                    {...panResponder.panHandlers}
-                  >
-                    <Pressable
-                      android_disableSound
-                      onPress={openLastMix}
-                      onLongPress={startMixDrag}
-                      delayLongPress={280}
-                      hitSlop={8}
+                  <GestureDetector gesture={mixDragGesture}>
+                    <Animated.View
                       style={[
-                        styles.mixChip,
-                        isDragging && styles.mixChipDragging,
-                        overTrash && styles.mixChipDeleteReady,
+                        styles.mixChipWrap,
+                        {
+                          opacity: chipOpacity,
+                          transform: [{ translateX: dragX }, { scale: chipScale }],
+                        },
                       ]}
                     >
-                      <View style={styles.mixChipAvatars}>
-                        {mixChipImages.slice(0, 3).map((image, index) => (
-                          <Image
-                            key={image}
-                            source={{ uri: image }}
-                            style={[
-                              styles.mixChipAvatar,
-                              index > 0 ? { marginLeft: -8 } : null,
-                            ]}
-                            contentFit="cover"
-                            cachePolicy="memory-disk"
-                          />
-                        ))}
-                        {mixChipImages.length === 0 ? (
-                          <View style={styles.mixChipAvatar}>
-                            <Ionicons name="people" size={12} color="rgba(255,255,255,0.82)" />
-                          </View>
-                        ) : null}
-                      </View>
-                      <Ionicons
-                        name={overTrash ? "trash" : "albums"}
-                        size={16}
-                        color={overTrash ? "#ff6b6b" : "rgba(255,255,255,0.9)"}
-                      />
-                    </Pressable>
-                  </Animated.View>
+                      <Pressable
+                        android_disableSound
+                        onPress={openLastMix}
+                        onLongPress={startMixDrag}
+                        delayLongPress={280}
+                        hitSlop={8}
+                        style={[
+                          styles.mixChip,
+                          isDragging && styles.mixChipDragging,
+                          overTrash && styles.mixChipDeleteReady,
+                        ]}
+                      >
+                        <View style={styles.mixChipAvatars}>
+                          {mixChipImages.slice(0, 3).map((image, index) => (
+                            <Image
+                              key={image}
+                              source={{ uri: image }}
+                              style={[
+                                styles.mixChipAvatar,
+                                index > 0 ? { marginLeft: -8 } : null,
+                              ]}
+                              contentFit="cover"
+                              cachePolicy="memory-disk"
+                            />
+                          ))}
+                          {mixChipImages.length === 0 ? (
+                            <View style={styles.mixChipAvatar}>
+                              <Ionicons name="people" size={12} color="rgba(255,255,255,0.82)" />
+                            </View>
+                          ) : null}
+                        </View>
+                        <Ionicons
+                          name={overTrash ? "trash" : "albums"}
+                          size={16}
+                          color={overTrash ? "#ff6b6b" : "rgba(255,255,255,0.9)"}
+                        />
+                      </Pressable>
+                    </Animated.View>
+                  </GestureDetector>
                 ) : null}
                 <Pressable
                   android_disableSound
@@ -1038,9 +1048,15 @@ function useIOSMiniPlayerOverlayView() {
   }, [activeSong?.coverUrl, queue, queueIndex]);
 
   const lastMix = useLastMix();
-  const mixBarOne = useRef(new Animated.Value(0.32)).current;
-  const mixBarTwo = useRef(new Animated.Value(0.58)).current;
-  const mixBarThree = useRef(new Animated.Value(0.44)).current;
+  const mixBarOneRef = useRef<Animated.Value | null>(null);
+  if (mixBarOneRef.current === null) mixBarOneRef.current = new Animated.Value(0.32);
+  const mixBarOne = mixBarOneRef.current;
+  const mixBarTwoRef = useRef<Animated.Value | null>(null);
+  if (mixBarTwoRef.current === null) mixBarTwoRef.current = new Animated.Value(0.58);
+  const mixBarTwo = mixBarTwoRef.current;
+  const mixBarThreeRef = useRef<Animated.Value | null>(null);
+  if (mixBarThreeRef.current === null) mixBarThreeRef.current = new Animated.Value(0.44);
+  const mixBarThree = mixBarThreeRef.current;
   const mixImage = useMemo(() => {
     const first = compactMap((lastMix?.images ?? "")
       .split(","), (value) => value.trim())[0];
@@ -1321,8 +1337,8 @@ export default function TabLayout() {
   const isWeb = Platform.OS === "web";
   const pathname = usePathname();
   const tabsNavigation = useNavigation();
-  const preloadTimersRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
-  const preloadedRoutesRef = React.useRef(new Set<VisibleRoute>());
+  const preloadedRoutesRef = React.useRef<Set<VisibleRoute> | null>(null);
+  if (preloadedRoutesRef.current === null) preloadedRoutesRef.current = new Set<VisibleRoute>();
 
   const shouldHideTabBar = pathname?.startsWith("/import-songs");
 
@@ -1337,6 +1353,7 @@ export default function TabLayout() {
       return;
     }
 
+    let preloadTimers: ReturnType<typeof setTimeout>[] = [];
     const cancelIdlePreload = scheduleIdleTask(() => {
       const nav = tabsNavigation as any;
       if (!nav || typeof nav.preload !== "function") {
@@ -1347,19 +1364,19 @@ export default function TabLayout() {
         ? "index"
         : NAV_ITEMS.find((item) => pathname === `/${item.route}` || pathname?.startsWith(`/${item.route}/`))?.route;
       if (currentRoute) {
-        preloadedRoutesRef.current.add(currentRoute);
+        preloadedRoutesRef.current!.add(currentRoute);
       }
 
       const routesToPreload = mapFilter(
         NAV_ITEMS,
         (item) => item.route,
-        (route) => route !== currentRoute && !preloadedRoutesRef.current.has(route)
+        (route) => route !== currentRoute && !preloadedRoutesRef.current!.has(route)
       );
 
-      preloadTimersRef.current = routesToPreload.map((route, index) => setTimeout(() => {
+      preloadTimers = routesToPreload.map((route, index) => setTimeout(() => {
         try {
           nav.preload(route);
-          preloadedRoutesRef.current.add(route);
+          preloadedRoutesRef.current!.add(route);
         } catch {
           // Silent fail
         }
@@ -1368,8 +1385,8 @@ export default function TabLayout() {
 
     return () => {
       cancelIdlePreload();
-      preloadTimersRef.current.forEach((timer) => clearTimeout(timer));
-      preloadTimersRef.current = [];
+      preloadTimers.forEach((timer) => clearTimeout(timer));
+      preloadTimers = [];
     };
   }, [isWeb, pathname, tabsNavigation]);
 

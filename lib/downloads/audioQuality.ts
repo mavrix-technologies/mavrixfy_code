@@ -61,7 +61,7 @@ export function getAudioUrlByQuality(baseUrl: string, quality: DownloadQuality):
 /**
  * Get the bitrate for a download quality for UI display
  */
-export function getQualityLabel(quality: DownloadQuality): string {
+function getQualityLabel(quality: DownloadQuality): string {
   switch (quality) {
     case "low":
       return "~48 kbps";

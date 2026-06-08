@@ -15,6 +15,7 @@ import React, {
   useEffect,
   useState,
   useCallback,
+  useMemo,
   ReactNode,
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
@@ -77,7 +78,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   }, [isOnline, check]);
 
   return (
-    <NetworkContext.Provider value={{ isOnline, isChecking, recheck: check }}>
+    <NetworkContext.Provider value={useMemo(() => ({ isOnline, isChecking, recheck: check }), [isOnline, isChecking, check])}>
       {children}
     </NetworkContext.Provider>
   );

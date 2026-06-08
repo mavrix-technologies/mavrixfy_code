@@ -79,8 +79,12 @@ function useArtistScreenView() {
   const [loadingMore, setLoadingMore] = useState(false);
   const nextPageRef = useRef(2); // page 1 = initial 20, page 2+ = more
   const [hasMore, setHasMore] = useState(true);
-  const followScale = useRef(new Animated.Value(1)).current;
-  const stickyOpacity = useRef(new Animated.Value(0)).current;
+  const followScaleRef = useRef<Animated.Value | null>(null);
+  if (followScaleRef.current === null) followScaleRef.current = new Animated.Value(1);
+  const followScale = followScaleRef.current;
+  const stickyOpacityRef = useRef<Animated.Value | null>(null);
+  if (stickyOpacityRef.current === null) stickyOpacityRef.current = new Animated.Value(0);
+  const stickyOpacity = stickyOpacityRef.current;
   const [isStickyVisible, setIsStickyVisible] = useState(false);
   const topAlbums = artist?.topAlbums ?? [];
   const visibleSimilarArtists = useMemo(

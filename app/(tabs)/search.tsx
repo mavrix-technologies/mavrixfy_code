@@ -2,7 +2,6 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import {
   View,
   Text,
-  TextInput,
   ScrollView,
   FlatList,
   Pressable,
@@ -28,8 +27,24 @@ import {
 } from "@/lib/searchUtils";
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
+import AppTopHeader, {
+  APP_TOP_HEADER_HEIGHT,
+  AppTopHeaderDownloadButton,
+  AppTopHeaderProfileButton,
+  useAppTopHeaderScrollElevation,
+} from "@/components/AppTopHeader";
+import SearchHeaderField from "@/components/SearchHeaderField";
+import SearchResultFilterChip from "@/components/SearchResultFilterChip";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
 import { filterMap, sortedCopy } from "@/lib/arrayUtils";
+import {
+  addSongSearchHistoryItem,
+  addSearchHistoryItem,
+  getSearchHistory,
+  removeSearchHistoryItem,
+  type SearchHistoryItem,
+} from "@/lib/storage";
 
 interface PlaylistResult {
   id: string;
@@ -45,6 +60,7 @@ interface RecentSearchItem {
   imageUrl?: string;
   icon?: keyof typeof Ionicons.glyphMap;
   type?: "song" | "playlist" | "artist" | "query";
+  song?: Song;
 }
 
 interface BrowseCategory {
@@ -65,6 +81,41 @@ const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
 
 const CARD_ROTATION_PATTERN = [-11, 8, -7, 10, -5, 6] as const;
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
+
+function getRouteSearchQuery(params: { q?: string | string[]; name?: string | string[] }) {
+  const incomingQuery = Array.isArray(params.q)
+    ? params.q[0]
+    : params.q || (Array.isArray(params.name) ? params.name[0] : params.name);
+  return String(incomingQuery || "").trim();
+}
+
+function normalizeRecentSearchLabel(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function toRecentSearchItem(item: SearchHistoryItem): RecentSearchItem {
+  if (item.type === "song" && item.song) {
+    return {
+      id: item.id,
+      label: item.label,
+      subtitle: item.subtitle,
+      imageUrl: item.imageUrl || item.song.coverUrl,
+      type: "song",
+      song: item.song,
+    };
+  }
+
+  return {
+    id: item.id,
+    label: item.label,
+    type: "query",
+    icon: "search",
+  };
+}
+
+function toRecentSearchItems(items: SearchHistoryItem[]): RecentSearchItem[] {
+  return items.map(toRecentSearchItem);
+}
 
 function BrowseCategoryCard({
   category,
@@ -99,64 +150,6 @@ function BrowseCategoryCard({
     </Pressable>
   );
 }
-
-function ResultFilterChip({
-  filter,
-  activeFilter,
-  onSelect,
-}: {
-  filter: { key: ResultFilter; label: string };
-  activeFilter: ResultFilter;
-  onSelect: (filter: ResultFilter) => void;
-}) {
-  const active = activeFilter === filter.key;
-  const handlePress = useCallback(() => onSelect(filter.key), [filter.key, onSelect]);
-
-  return (
-    <Pressable
-      style={[styles.filterChip, active && styles.filterChipActive]}
-      onPress={handlePress}
-    >
-      <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
-        {filter.label}
-      </Text>
-    </Pressable>
-  );
-}
-
-const STITCH_RECENT_SEARCHES: RecentSearchItem[] = [
-  {
-    id: "midnight-city",
-    label: "Midnight City",
-    subtitle: "Song • M83",
-    type: "song",
-    imageUrl:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCqB9ybv3HO8eHYX6bQVSEyicyS_SlOfwKehM-c1kpTsDSV_5n4MoNQKRuiLVqFKvl2ZG5cLdNV-cCJFBXinik9HqbxpeRZrt7lXngNX-5TGleoJYrumblrEw0tacOx7eLVQ8p9g9BcyWFRUPZIl9VR0NDUf1HF3cwjfVayM8TF6WSKSdOvu-ENf_z8FpFsOAlwNIvBB4LOGds41GdDZRAfm6LGWNCRFuxpnSc6WBHo9QuzulYUqG2oqzMOwvxggwk12uT0FOft_Wk",
-  },
-  {
-    id: "techno-bloom",
-    label: "Techno Bloom",
-    subtitle: "Playlist",
-    type: "playlist",
-    imageUrl:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuChTYl4xH3ZLJ4ARFgn-rbApfKx9tJbZROrKLiLUdfQiUDfWNAQkFvf4geu4s_aOHEIhe35l0Ohs0QovMiD9sXnnLsGEGxoe6S1gvgj9MwmJZNQC84g13alq3Nq_NlbifmxN654WcJC-YPxnjQVhu59HB9RHT5QZiQrEG_P2JSWmccfT6Y21RdKCurdSNKeU0Vhp2vaO6zSjJGrXEa6xPMWP9XtXjXM-bXcnautbSLYBTmKZfnS-cJVReNH9HoclyFpocsBZsGk72Y",
-  },
-  {
-    id: "the-weeknd",
-    label: "The Weeknd",
-    subtitle: "Artist",
-    type: "artist",
-    icon: "person",
-  },
-  {
-    id: "coffee-jazz",
-    label: "Coffee & Jazz",
-    subtitle: "Playlist",
-    type: "playlist",
-    imageUrl:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuDF65iTajyxJ3pY_3UEgaEW904AIU2tgjMxR5nFVYA-a4pMW61Kv8YDwfMgptSw3ucmCvM1KahK-8SJ1uh3RB_pXxlJbGvdq6-zw277CJj1UUhPTeUNpmTYkdwKvLKpFcricdxCBw8Z6UTISEL6keZa5GWMv4vjHlGOpMuTw8_GZF-pmQvE3_kEQSk5RIrhD6dB5uDLIPrxgpgh8fBQk2z9ORzDfj1FqWnlXAl9DqmYpuygexks2zhfYCb2Pm8NIgCA8ga2fOz9Tok",
-  },
-];
 
 const STITCH_BROWSE_CATEGORIES: BrowseCategory[] = [
   {
@@ -273,17 +266,24 @@ function useSearchScreenView() {
   const { push: routerPush } = useRouter();
   const params = useLocalSearchParams<{ q?: string | string[]; name?: string | string[] }>();
   const { isOnline } = useNetwork();
-  const [query, setQuery] = useState("");
+  const { playSong } = usePlayerActions();
+  const routeSearchQuery = getRouteSearchQuery(params);
+  const [query, setQuery] = useState(routeSearchQuery);
   const [songResults, setSongResults] = useState<Song[]>([]);
   const [playlistResults, setPlaylistResults] = useState<PlaylistResult[]>([]);
   const [searchDisplayQuery, setSearchDisplayQuery] = useState("");
-  const [recentSearches, setRecentSearches] = useState<RecentSearchItem[]>(
-    STITCH_RECENT_SEARCHES
-  );
+  const [recentSearches, setRecentSearches] = useState<RecentSearchItem[]>([]);
   const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
   const [searchLoading, setSearchLoading] = useState(false);
+  const [isSearchMode, setIsSearchMode] = useState(routeSearchQuery.length > 0);
+  const {
+    isHeaderElevated,
+    handleHeaderScroll,
+    resetHeaderElevation,
+  } = useAppTopHeaderScrollElevation();
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeqRef = useRef(0);
+  const appliedRouteSearchQueryRef = useRef(routeSearchQuery);
   const activeSearchAbortRef = useRef<AbortController | null>(null);
   const resultsPlaylistsListRef = useRef<FlatList<PlaylistResult> | null>(null);
   const resultsSongsListRef = useRef<FlatList<Song> | null>(null);
@@ -291,6 +291,7 @@ function useSearchScreenView() {
   if (searchCacheRef.current === null) {
     searchCacheRef.current = new Map();
   }
+  const searchCache = searchCacheRef.current;
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const shuffledBrowseCategories = useMemo(() => {
@@ -323,7 +324,7 @@ function useSearchScreenView() {
 
     // Check cache first (5 minute TTL)
     const cacheKey = normalizedQuery.toLowerCase();
-    const cached = searchCacheRef.current.get(cacheKey);
+    const cached = searchCache.get(cacheKey);
     const now = Date.now();
     if (cached && (now - cached.timestamp) < 300000) { // 5 minutes
       setSongResults(cached.songs);
@@ -456,16 +457,16 @@ function useSearchScreenView() {
           const rankedSongs = fastRank(songs);
 
           // Cache results
-          searchCacheRef.current.set(cacheKey, {
+          searchCache.set(cacheKey, {
             songs: rankedSongs,
             playlists,
             timestamp: now
           });
 
           // Limit cache size to 20 entries
-          if (searchCacheRef.current.size > 20) {
-            const firstKey = searchCacheRef.current.keys().next().value;
-            if (firstKey) searchCacheRef.current.delete(firstKey);
+          if (searchCache.size > 20) {
+            const firstKey = searchCache.keys().next().value;
+            if (firstKey) searchCache.delete(firstKey);
           }
 
           // Show final results with network data
@@ -489,50 +490,75 @@ function useSearchScreenView() {
         activeSearchAbortRef.current = null;
       }
     }
-  }, []);
+  }, [searchCache]);
 
 
 
   const handleChangeText = useCallback((text: string) => {
     setQuery(text);
+    if (text.trim().length < 2) {
+      setResultFilter("all");
+    }
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    void getSearchHistory()
+      .then((items) => {
+        if (isActive) {
+          setRecentSearches(toRecentSearchItems(items));
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
   const rememberRecentSearch = useCallback((label: string) => {
-    const normalized = label.trim();
+    const normalized = normalizeRecentSearchLabel(label);
     if (normalized.length < 2) return;
 
     setRecentSearches((prev) => {
       const nextItem: RecentSearchItem = {
-        id: `q-${normalized.toLowerCase().replace(/\s+/g, "-")}`,
+        id: `q_${encodeURIComponent(normalized.toLowerCase()).slice(0, 100)}`,
         label: normalized,
         type: "query",
+        icon: "time-outline",
       };
       const filtered = prev.filter(
         (item) => item.label.toLowerCase() !== normalized.toLowerCase()
       );
-      return [nextItem, ...filtered].slice(0, 8);
+      return [nextItem, ...filtered].slice(0, 12);
     });
+
+    void addSearchHistoryItem(normalized)
+      .then((items) => setRecentSearches(toRecentSearchItems(items)))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
-    const incomingQuery = Array.isArray(params.q)
-      ? params.q[0]
-      : params.q || (Array.isArray(params.name) ? params.name[0] : params.name);
-    const next = String(incomingQuery || "").trim();
-    if (next.length < 2 || next === query.trim()) return;
+    const next = routeSearchQuery;
+    if (next.length < 2 || next === appliedRouteSearchQueryRef.current) return;
 
+    appliedRouteSearchQueryRef.current = next;
+    setIsSearchMode(true);
     setQuery(next);
     rememberRecentSearch(next);
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
     void performSearch(next);
-  }, [params.name, params.q, performSearch, query, rememberRecentSearch]);
+  }, [performSearch, rememberRecentSearch, routeSearchQuery]);
 
   const handleGenrePress = useCallback(
     (genreName: string) => {
       const next = genreName.trim();
       if (!next) return;
+      resetHeaderElevation();
+      setIsSearchMode(true);
       setQuery(next);
       rememberRecentSearch(next);
       if (debounceTimer.current) {
@@ -540,7 +566,7 @@ function useSearchScreenView() {
       }
       void performSearch(next);
     },
-    [performSearch, rememberRecentSearch]
+    [performSearch, rememberRecentSearch, resetHeaderElevation]
   );
 
   const renderBrowseCategory = useCallback(
@@ -551,9 +577,19 @@ function useSearchScreenView() {
   );
 
   const handleRecentSearchPress = useCallback(
-    (label: string) => {
-      const next = label.trim();
+    (item: RecentSearchItem) => {
+      if (item.type === "song" && item.song) {
+        playSong(item.song, [item.song]);
+        void addSongSearchHistoryItem(item.song)
+          .then((items) => setRecentSearches(toRecentSearchItems(items)))
+          .catch(() => undefined);
+        return;
+      }
+
+      const next = item.label.trim();
       if (next.length < 2) return;
+      resetHeaderElevation();
+      setIsSearchMode(true);
       setQuery(next);
       rememberRecentSearch(next);
       if (debounceTimer.current) {
@@ -561,20 +597,24 @@ function useSearchScreenView() {
       }
       void performSearch(next);
     },
-    [performSearch, rememberRecentSearch]
+    [performSearch, playSong, rememberRecentSearch, resetHeaderElevation]
   );
 
   const handleRemoveRecentSearch = useCallback((id: string) => {
     setRecentSearches((prev) => prev.filter((item) => item.id !== id));
+    void removeSearchHistoryItem(id)
+      .then((items) => setRecentSearches(toRecentSearchItems(items)))
+      .catch(() => undefined);
   }, []);
 
   const handleResultFilterSelect = useCallback((filter: ResultFilter) => {
-    setResultFilter(filter);
-  }, []);
+    resetHeaderElevation();
+    setResultFilter(query.trim().length < 2 ? "all" : filter);
+  }, [query, resetHeaderElevation]);
 
   const renderResultFilter = useCallback(
     ({ item }: { item: { key: ResultFilter; label: string } }) => (
-      <ResultFilterChip
+      <SearchResultFilterChip
         filter={item}
         activeFilter={resultFilter}
         onSelect={handleResultFilterSelect}
@@ -594,6 +634,15 @@ function useSearchScreenView() {
     setSearchLoading(true);
   }, []);
 
+  const cancelActiveSearchWork = useCallback(() => {
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+      debounceTimer.current = null;
+    }
+    activeSearchAbortRef.current?.abort();
+    activeSearchAbortRef.current = null;
+  }, []);
+
   const handleSubmitSearch = useCallback(() => {
     const trimmed = query.trim();
     if (trimmed.length < 2) return;
@@ -606,14 +655,21 @@ function useSearchScreenView() {
 
   const handleClear = useCallback(() => {
     requestSeqRef.current += 1;
-    activeSearchAbortRef.current?.abort();
-    activeSearchAbortRef.current = null;
+    cancelActiveSearchWork();
     setQuery("");
     applyEmptySearchState();
-    if (debounceTimer.current) {
-      clearTimeout(debounceTimer.current);
-    }
-  }, [applyEmptySearchState]);
+  }, [applyEmptySearchState, cancelActiveSearchWork]);
+
+  const handleActivateSearchMode = useCallback(() => {
+    resetHeaderElevation();
+    setIsSearchMode(true);
+  }, [resetHeaderElevation]);
+
+  const handleCancelSearchMode = useCallback(() => {
+    handleClear();
+    resetHeaderElevation();
+    setIsSearchMode(false);
+  }, [handleClear, resetHeaderElevation]);
 
   useEffect(() => {
     if (debounceTimer.current) {
@@ -630,32 +686,19 @@ function useSearchScreenView() {
     }
 
     startSearchLoading();
-    debounceTimer.current = setTimeout(() => {
+    const searchTimer = setTimeout(() => {
       void performSearch(trimmed);
     }, 300); // Increased from 150ms to 300ms for better performance
+    debounceTimer.current = searchTimer;
 
     return () => {
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
+      clearTimeout(searchTimer);
     };
   }, [applyEmptySearchState, performSearch, query, startSearchLoading]);
 
   useEffect(() => {
-    return () => {
-      if (debounceTimer.current) {
-        clearTimeout(debounceTimer.current);
-      }
-      activeSearchAbortRef.current?.abort();
-      activeSearchAbortRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (query.trim().length < 2 && resultFilter !== "all") {
-      setResultFilter("all");
-    }
-  }, [query, resultFilter]);
+    return cancelActiveSearchWork;
+  }, [cancelActiveSearchWork]);
 
   useEffect(() => {
     if (query.trim().length < 2) return;
@@ -670,12 +713,39 @@ function useSearchScreenView() {
   }, [query, resultFilter]);
 
   const hasResults = songResults.length > 0 || playlistResults.length > 0;
-  const showBrowse = query.length < 2;
+  const showFocusedRecentSearches = isSearchMode && query.trim().length < 2;
+  const showBrowse = !isSearchMode && query.trim().length < 2;
   const resultDataKey =
     `${query.trim()}-${resultFilter}-${songResults.length}-${playlistResults.length}-${searchLoading ? 1 : 0}`;
+  const searchHeaderNode = useMemo(
+    () => (
+      <SearchHeaderField
+        value={query}
+        onChangeText={handleChangeText}
+        onSubmit={handleSubmitSearch}
+        onClear={handleClear}
+        autoFocus={isSearchMode}
+      />
+    ),
+    [handleChangeText, handleClear, handleSubmitSearch, isSearchMode, query]
+  );
+  const cancelSearchNode = useMemo(
+    () => (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Cancel search"
+        onPress={handleCancelSearchMode}
+        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+        style={({ pressed }) => [styles.searchCancelButton, pressed && styles.searchCancelButtonPressed]}
+      >
+        <Text style={styles.searchCancelText}>Cancel</Text>
+      </Pressable>
+    ),
+    [handleCancelSearchMode]
+  );
 
   useEffect(() => {
-    if (showBrowse || searchLoading) return;
+    if (showBrowse || showFocusedRecentSearches || searchLoading) return;
 
     requestAnimationFrame(() => {
       if (resultFilter === "playlists") {
@@ -684,12 +754,18 @@ function useSearchScreenView() {
         resultsSongsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       }
     });
-  }, [searchLoading, resultFilter, showBrowse, songResults.length, playlistResults.length]);
+  }, [searchLoading, resultFilter, showBrowse, showFocusedRecentSearches, songResults.length, playlistResults.length]);
 
   const showPlaylistResults = resultFilter !== "songs" && playlistResults.length > 0;
   const showSongResults = resultFilter !== "playlists" && songResults.length > 0;
   const displayedSongs = showSongResults ? songResults : [];
   const featuredPlaylists = useMemo(() => playlistResults.slice(0, 6), [playlistResults]);
+
+  const handleSongResultPress = useCallback((song: Song) => {
+    void addSongSearchHistoryItem(song)
+      .then((items) => setRecentSearches(toRecentSearchItems(items)))
+      .catch(() => undefined);
+  }, []);
 
   const renderSong = useCallback(
     ({ item }: { item: Song; index: number }) => {
@@ -703,9 +779,9 @@ function useSearchScreenView() {
           s => s.id !== item.id && normalizeText(s.title) !== normalizedItemTitle
         ),
       ];
-      return <SongRow song={item} queue={relatedQueue} />;
+      return <SongRow song={item} queue={relatedQueue} onSongPress={handleSongResultPress} />;
     },
-    [songResults]
+    [handleSongResultPress, songResults]
   );
 
   const getPlaylistCardElement = useCallback(
@@ -780,7 +856,7 @@ function useSearchScreenView() {
   );
 
   return (
-    <View style={[styles.container, { paddingTop: topInset }]}>
+    <View style={styles.container}>
       {/* Offline: show banner when searching, full screen when idle */}
       {!isOnline && query.length === 0 && (
         <OfflineScreen
@@ -789,50 +865,60 @@ function useSearchScreenView() {
         />
       )}
       {!isOnline && query.length > 0 && <OfflineBanner />}
-      {/* ── Search bar ── */}
-      <View style={styles.searchBarRow}>
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={16} color="#6A6A6A" />
-          <TextInput
-            style={styles.input}
-            placeholder="What do you want to listen to?"
-            placeholderTextColor="#6A6A6A"
-            value={query}
-            onChangeText={handleChangeText}
-            onSubmitEditing={handleSubmitSearch}
-            returnKeyType="search"
-            autoCorrect={false}
-            autoCapitalize="none"
-          />
-          {query.length > 0 ? (
-            <Pressable onPress={handleClear} hitSlop={10}>
-              <Ionicons name="close-circle" size={18} color="#6A6A6A" />
-            </Pressable>
-          ) : null}
-        </View>
-        {query.length > 0 ? (
-          <Pressable onPress={handleClear} style={styles.cancelBtn}>
-            <Text style={styles.cancelText}>Cancel</Text>
+      {isSearchMode ? (
+        <AppTopHeader
+          topInset={topInset}
+          elevated={isHeaderElevated}
+          titleNode={searchHeaderNode}
+          leftWidth={0}
+          rightWidth={68}
+          right={cancelSearchNode}
+        />
+      ) : (
+        <AppTopHeader
+          topInset={topInset}
+          elevated={isHeaderElevated}
+          title="Search"
+          left={<AppTopHeaderProfileButton />}
+          right={<AppTopHeaderDownloadButton />}
+        />
+      )}
+      {!isSearchMode ? (
+        <View style={[styles.searchBarRow, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 10 }]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Search songs, artists, playlists"
+            style={({ pressed }) => [styles.searchBar, pressed && styles.searchBarPressed]}
+            onPress={handleActivateSearchMode}
+          >
+            <Ionicons name="search" size={17} color="#6A6A6A" />
+            <Text style={styles.inactiveSearchText} numberOfLines={1}>
+              What do you want to listen to?
+            </Text>
           </Pressable>
-        ) : null}
-      </View>
+        </View>
+      ) : null}
 
-      {showBrowse ? (
+      {showFocusedRecentSearches ? (
         <ScrollView
           style={styles.scrollView}
-          contentContainerStyle={[styles.content, { paddingBottom: 146 }]}
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 14, paddingBottom: 146 },
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          onScroll={handleHeaderScroll}
+          scrollEventThrottle={16}
         >
-          {/* ── Recent searches ── */}
-          {recentSearches.length > 0 ? (
-            <View style={styles.recentSection}>
-              <Text style={styles.recentTitle}>Recent searches</Text>
-              {recentSearches.map((item) => (
+          <View style={styles.recentSection}>
+            <Text style={styles.recentTitle}>Recent searches</Text>
+            {recentSearches.length > 0 ? (
+              recentSearches.map((item) => (
                 <Pressable
                   key={item.id}
                   style={({ pressed }) => [styles.recentRow, pressed && styles.recentRowPressed]}
-                  onPress={() => handleRecentSearchPress(item.label)}
+                  onPress={() => handleRecentSearchPress(item)}
                 >
                   {item.imageUrl ? (
                     <Image
@@ -843,7 +929,7 @@ function useSearchScreenView() {
                     />
                   ) : (
                     <View style={[styles.recentThumb, styles.recentThumbRound, styles.recentThumbFallback]}>
-                      <Ionicons name={item.icon ?? "person"} size={24} color={Colors.subtext} />
+                      <Ionicons name={item.icon ?? "search"} size={24} color={Colors.subtext} />
                     </View>
                   )}
                   <View style={styles.recentInfo}>
@@ -852,25 +938,35 @@ function useSearchScreenView() {
                       <Text style={styles.recentSubtitle} numberOfLines={1}>{item.subtitle}</Text>
                     ) : null}
                   </View>
-                  <View style={styles.recentActions}>
-                    {item.type !== "artist" && item.type !== "query" ? (
-                      <Pressable hitSlop={10} style={styles.recentActionBtn} onPress={(e) => e.stopPropagation()}>
-                        <Ionicons name="add-circle-outline" size={22} color={Colors.subtext} />
-                      </Pressable>
-                    ) : null}
-                    <Pressable
-                      hitSlop={10}
-                      style={styles.recentActionBtn}
-                      onPress={(e) => { e.stopPropagation(); handleRemoveRecentSearch(item.id); }}
-                    >
-                      <Ionicons name="close" size={18} color={Colors.subtext} />
-                    </Pressable>
-                  </View>
+                  <Pressable
+                    hitSlop={10}
+                    style={styles.recentActionBtn}
+                    onPress={(e) => { e.stopPropagation(); handleRemoveRecentSearch(item.id); }}
+                  >
+                    <Ionicons name="close" size={18} color={Colors.subtext} />
+                  </Pressable>
                 </Pressable>
-              ))}
-            </View>
-          ) : null}
-
+              ))
+            ) : (
+              <View style={styles.recentEmpty}>
+                <Ionicons name="search-outline" size={34} color={Colors.subtext} />
+                <Text style={styles.recentEmptyText}>No recent searches</Text>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      ) : showBrowse ? (
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: 146 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          onScroll={handleHeaderScroll}
+          scrollEventThrottle={16}
+        >
           {/* ── Browse All ── */}
           <View style={styles.browseSection}>
             <Text style={styles.browseTitle}>Browse all</Text>
@@ -887,7 +983,7 @@ function useSearchScreenView() {
         </ScrollView>
       ) : (
         /* ── Results ── */
-        <View style={styles.resultsWrap}>
+        <View style={[styles.resultsWrap, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 8 }]}>
           {/* Filter chips */}
           <View style={styles.filterRow}>
             <FlatList
@@ -919,6 +1015,8 @@ function useSearchScreenView() {
               style={styles.scrollView}
               contentContainerStyle={[styles.playlistGridContentContainer, { paddingBottom: 146 }]}
               showsVerticalScrollIndicator={false}
+              onScroll={handleHeaderScroll}
+              scrollEventThrottle={16}
               numColumns={2}
               columnWrapperStyle={styles.playlistGridRow}
               initialNumToRender={8}
@@ -938,6 +1036,8 @@ function useSearchScreenView() {
               contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
+              onScroll={handleHeaderScroll}
+              scrollEventThrottle={16}
               initialNumToRender={20}
               maxToRenderPerBatch={20}
               windowSize={11}
@@ -947,7 +1047,7 @@ function useSearchScreenView() {
                     <View style={styles.sectionHeaderRow}>
                       <Text style={styles.sectionTitle}>Playlists</Text>
                       {resultFilter === "all" ? (
-                        <Pressable onPress={() => setResultFilter("playlists")}>
+                        <Pressable onPress={() => handleResultFilterSelect("playlists")}>
                           <Text style={styles.sectionActionText}>See all</Text>
                         </Pressable>
                       ) : null}
@@ -977,44 +1077,52 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
 
-  // ── Search bar ──────────────────────────────────────────────────────────────
+  // ── Search entry ────────────────────────────────────────────────────────────
   searchBarRow: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: 10,
     paddingBottom: 12,
-    gap: 12,
   },
   searchBar: {
     flex: 1,
+    height: 42,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#FFFFFF",
     borderRadius: 4,
-    paddingHorizontal: 10,
-    height: 40,
-    gap: 8,
+    paddingHorizontal: 12,
+    gap: 9,
   },
-  input: {
+  searchBarPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.99 }],
+  },
+  inactiveSearchText: {
     flex: 1,
-    color: "#000000",
+    minWidth: 0,
+    color: "#121212",
     fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    padding: 0,
+    fontFamily: "Inter_600SemiBold",
   },
-  clearButton: { padding: 2 },
-  clearButtonPressed: { opacity: 0.6 },
-  cancelBtn: { paddingVertical: 4 },
-  cancelText: {
-    color: Colors.text,
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
+  searchCancelButton: {
+    minHeight: 40,
+    minWidth: 58,
+    alignItems: "flex-end",
+    justifyContent: "center",
+  },
+  searchCancelButtonPressed: {
+    opacity: 0.72,
+  },
+  searchCancelText: {
+    color: "#F8FBF9",
+    fontSize: 15,
+    fontFamily: "Inter_500Medium",
   },
 
   // ── Scroll / shared ─────────────────────────────────────────────────────────
   scrollView: { flex: 1 },
-  content: { paddingTop: 4 },
+  content: {},
 
   // ── Recent searches ─────────────────────────────────────────────────────────
   recentSection: {
@@ -1065,6 +1173,18 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   recentActionBtn: { padding: 8 },
+  recentEmpty: {
+    minHeight: 170,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingHorizontal: 24,
+  },
+  recentEmptyText: {
+    color: Colors.subtext,
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+  },
 
   // legacy stubs (unused but referenced nowhere — safe to keep empty)
   recentHeaderRow: {},
@@ -1139,29 +1259,6 @@ const styles = StyleSheet.create({
   filterRowContent: {
     paddingHorizontal: 16,
     gap: 8,
-  },
-  filterChip: {
-    height: 32,
-    borderRadius: 4,
-    paddingHorizontal: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    backgroundColor: Colors.surface,
-  },
-  filterChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  filterChipText: {
-    color: Colors.subtext,
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-  },
-  filterChipTextActive: {
-    color: Colors.background,
-    fontFamily: "Inter_700Bold",
   },
   resultsContent: { paddingTop: 8 },
   sectionBlock: {

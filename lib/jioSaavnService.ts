@@ -48,7 +48,7 @@ interface PlaylistDetailsPageResult {
   reason: "not_found" | "network";
 }
 
-export class JioSaavnPlaylistDetailsError extends Error {
+class JioSaavnPlaylistDetailsError extends Error {
   code: "NOT_FOUND" | "NETWORK";
 
   constructor(code: "NOT_FOUND" | "NETWORK", message: string) {
@@ -82,7 +82,7 @@ const PLAYLIST_MAX_PAGES = 10;
 const PLAYLIST_DETAILS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CATEGORY_STALE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const HOME_FETCH_CATEGORY_CONCURRENCY = 3;
-export const AUTO_REFRESH_POLL_INTERVAL_MS = 30 * 1000;
+const AUTO_REFRESH_POLL_INTERVAL_MS = 30 * 1000;
 export const JIOSAAVN_CATEGORY_CACHE_TTL_MS = 30 * 60 * 1000;
 const CATEGORY_TTL_MS: Record<string, number> = {
   trending:      30 * 60 * 1000,
@@ -200,7 +200,7 @@ function getCategoryTtlMs(categoryId: string): number {
   return CATEGORY_TTL_MS[categoryId] ?? JIOSAAVN_CATEGORY_CACHE_TTL_MS;
 }
 
-export function getCurrentRefreshContext(now: Date = new Date()): AutoRefreshContext {
+function getCurrentRefreshContext(now: Date = new Date()): AutoRefreshContext {
   const hour = now.getHours();
   let slot: AutoRefreshTimeSlot = "night";
 
@@ -1223,7 +1223,7 @@ const prefetchInFlight = new Set<string>();
  * Safe to call multiple times — deduped by playlist ID.
  * Never throws.
  */
-export function prefetchPlaylistDetails(playlistId: string): void {
+function prefetchPlaylistDetails(playlistId: string): void {
   const id = String(playlistId || "").trim();
   if (!id || prefetchInFlight.has(id)) return;
 
@@ -1357,17 +1357,18 @@ function calculatePlaylistScore(
   const prevY = String(CURRENT_YEAR - 1);
 
   // Freshness
-  if (name.includes(year))   score += 30;
-  if (name.includes("latest") || name.includes("new") || name.includes("fresh")) score += 20;
-  if (name.includes(prevY))  score -= 10;
+  if (name.includes(year))   score += 45;
+  if (name.includes("latest") || name.includes("new") || name.includes("fresh")) score += 35;
+  if (name.includes(prevY))  score -= 15;
 
   // Popularity proxy (capped)
-  score += Math.min(playlist.songCount * 0.5, 50);
+  score += Math.min(playlist.songCount * 0.75, 75);
 
   // Generic trend keywords
-  if (name.includes("trending") || name.includes("viral"))  score += 15;
-  if (name.includes("top") || name.includes("chart"))       score += 8;
-  if (name.includes("hit") || name.includes("superhit"))    score += 6;
+  if (name.includes("trending") || name.includes("viral"))  score += 24;
+  if (name.includes("popular") || name.includes("most played")) score += 24;
+  if (name.includes("top") || name.includes("chart"))       score += 18;
+  if (name.includes("hit") || name.includes("superhit"))    score += 16;
 
   // Time-of-day context
   if (context.slot === "morning"   && (name.includes("morning") || name.includes("workout"))) score += 15;
@@ -1376,7 +1377,7 @@ function calculatePlaylistScore(
   if (context.slot === "afternoon" && (name.includes("afternoon")|| name.includes("relax")))  score += 10;
 
   // Language context
-  if (context.languageBias === "hindi"   && (name.includes("hindi")   || name.includes("bollywood"))) score += 10;
+  if (context.languageBias === "hindi"   && (name.includes("hindi")   || name.includes("bollywood"))) score += 30;
   if (context.languageBias === "punjabi" && (name.includes("punjabi")  || name.includes("bhangra")))  score += 10;
   if (context.isWeekend && (name.includes("weekend") || name.includes("party"))) score += 8;
 
@@ -1638,7 +1639,7 @@ export async function getHomeJioSaavnCategories(options?: {
 }
 
 // Exported so the home screen can use the mixed feed as a "For You" section
-export function buildMixedFeed(
+function buildMixedFeed(
   categories: HomeJioSaavnCategoryData[],
   limit = 15
 ): JioSaavnPlaylistResult[] {

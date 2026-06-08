@@ -6,6 +6,7 @@ const KEYS = {
   LIKED_SONGS_DATA: "@mavrixfy_liked_songs_data",
   USER_PLAYLISTS: "@mavrixfy_user_playlists",
   RECENTLY_PLAYED: "@mavrixfy_recently_played",
+  SEARCH_HISTORY: "@mavrixfy_search_history",
   SETTINGS: "@mavrixfy_settings",
   PLAYER_STATE: "@mavrixfy_player_state",
 } as const;
@@ -21,6 +22,16 @@ export interface RecentlyPlayedItem {
   type: "playlist" | "jiosaavn-playlist" | "song";
   lastPlayed: number;
   data?: any;
+}
+
+export interface SearchHistoryItem {
+  id: string;
+  label: string;
+  type: "query" | "song";
+  subtitle?: string;
+  imageUrl?: string;
+  song?: Song;
+  lastSearched: number;
 }
 
 export interface UserPlaylist {
@@ -62,7 +73,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   normalizeVolume: false,
 };
 
-export const EQUALIZER_PRESETS: Record<string, Record<string, number>> = {
+const EQUALIZER_PRESETS: Record<string, Record<string, number>> = {
   Flat: { "60Hz": 0, "150Hz": 0, "400Hz": 0, "1KHz": 0, "2.4KHz": 0, "15KHz": 0 },
   Bass: { "60Hz": 6, "150Hz": 5, "400Hz": 2, "1KHz": 0, "2.4KHz": -1, "15KHz": -2 },
   Treble: { "60Hz": -2, "150Hz": -1, "400Hz": 0, "1KHz": 2, "2.4KHz": 5, "15KHz": 6 },
@@ -76,6 +87,64 @@ export const EQUALIZER_PRESETS: Record<string, Record<string, number>> = {
   "Late Night": { "60Hz": 3, "150Hz": 2, "400Hz": 1, "1KHz": -1, "2.4KHz": -2, "15KHz": -3 },
   Bollywood: { "60Hz": 4, "150Hz": 3, "400Hz": 1, "1KHz": 2, "2.4KHz": 4, "15KHz": 3 },
 };
+
+const SEARCH_HISTORY_LIMIT = 12;
+
+function normalizeSearchLabel(value: unknown): string {
+  return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+}
+
+function getSearchHistoryId(label: string): string {
+  return `q_${encodeURIComponent(label.toLowerCase()).slice(0, 100)}`;
+}
+
+function getSongSearchHistoryId(song: Pick<Song, "id">): string {
+  return `song_${encodeURIComponent(song.id).slice(0, 120)}`;
+}
+
+function getSearchHistoryKey(item: Pick<SearchHistoryItem, "label" | "type" | "song">): string {
+  if (item.type === "song" && item.song?.id) {
+    return `song:${item.song.id}`;
+  }
+
+  return `query:${item.label.toLowerCase()}`;
+}
+
+function normalizeSearchHistoryItems(items: Array<Partial<SearchHistoryItem>>): SearchHistoryItem[] {
+  const seen = new Set<string>();
+  const normalized: SearchHistoryItem[] = [];
+
+  for (const item of items) {
+    const song = item.type === "song" && item.song?.id && item.song?.title ? item.song : undefined;
+    const type = song ? "song" : "query";
+    const label = normalizeSearchLabel(type === "song" ? song?.title || item.label : item.label);
+    if (label.length < 2) continue;
+
+    const key = getSearchHistoryKey({ label, type, song });
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    normalized.push({
+      id: typeof item.id === "string" && item.id
+        ? item.id
+        : song
+          ? getSongSearchHistoryId(song)
+          : getSearchHistoryId(label),
+      label,
+      type,
+      subtitle: type === "song"
+        ? normalizeSearchLabel(item.subtitle || (song?.artist ? `Song • ${song.artist}` : "Song"))
+        : undefined,
+      imageUrl: type === "song" ? item.imageUrl || song?.coverUrl || "" : undefined,
+      song,
+      lastSearched: typeof item.lastSearched === "number" ? item.lastSearched : Date.now(),
+    });
+
+    if (normalized.length >= SEARCH_HISTORY_LIMIT) break;
+  }
+
+  return normalized;
+}
 
 async function getJSON<T>(key: string, fallback: T): Promise<T> {
   try {
@@ -109,15 +178,15 @@ async function setJSON(key: string, value: unknown): Promise<void> {
 
 export { setJSON };
 
-export async function getLikedSongIds(): Promise<string[]> {
+async function getLikedSongIds(): Promise<string[]> {
   return getJSON<string[]>(KEYS.LIKED_SONGS, []);
 }
 
-export async function getLikedSongsData(): Promise<Song[]> {
+async function getLikedSongsData(): Promise<Song[]> {
   return getJSON<Song[]>(KEYS.LIKED_SONGS_DATA, []);
 }
 
-export async function addLikedSong(song: Song): Promise<void> {
+async function addLikedSong(song: Song): Promise<void> {
   const [ids, data] = await Promise.all([
     getLikedSongIds(),
     getLikedSongsData(),
@@ -132,7 +201,7 @@ export async function addLikedSong(song: Song): Promise<void> {
   }
 }
 
-export async function removeLikedSong(songId: string): Promise<void> {
+async function removeLikedSong(songId: string): Promise<void> {
   const [ids, data] = await Promise.all([
     getLikedSongIds(),
     getLikedSongsData(),
@@ -143,7 +212,7 @@ export async function removeLikedSong(songId: string): Promise<void> {
   ]);
 }
 
-export async function isLikedSong(songId: string): Promise<boolean> {
+async function isLikedSong(songId: string): Promise<boolean> {
   const ids = await getLikedSongIds();
   return ids.includes(songId);
 }
@@ -152,7 +221,7 @@ export async function getUserPlaylists(): Promise<UserPlaylist[]> {
   return getJSON<UserPlaylist[]>(KEYS.USER_PLAYLISTS, []);
 }
 
-export async function saveUserPlaylists(playlists: UserPlaylist[]): Promise<void> {
+async function saveUserPlaylists(playlists: UserPlaylist[]): Promise<void> {
   await setJSON(KEYS.USER_PLAYLISTS, playlists);
 }
 
@@ -226,6 +295,61 @@ export async function addRecentlyPlayed(item: Omit<RecentlyPlayedItem, "lastPlay
   const filtered = items.filter(i => i.id !== item.id);
   filtered.unshift({ ...item, lastPlayed: Date.now() });
   await setJSON(KEYS.RECENTLY_PLAYED, filtered.slice(0, 30));
+}
+
+export async function getSearchHistory(): Promise<SearchHistoryItem[]> {
+  const items = await getJSON<Array<Partial<SearchHistoryItem>>>(KEYS.SEARCH_HISTORY, []);
+  return normalizeSearchHistoryItems(items);
+}
+
+export async function addSearchHistoryItem(labelValue: string): Promise<SearchHistoryItem[]> {
+  const label = normalizeSearchLabel(labelValue);
+  if (label.length < 2) {
+    return getSearchHistory();
+  }
+
+  const items = await getSearchHistory();
+  const nextItem: SearchHistoryItem = {
+    id: getSearchHistoryId(label),
+    label,
+    type: "query",
+    lastSearched: Date.now(),
+  };
+  const nextKey = getSearchHistoryKey(nextItem);
+  const filtered = items.filter((item) => getSearchHistoryKey(item) !== nextKey);
+  const nextItems = [nextItem, ...filtered].slice(0, SEARCH_HISTORY_LIMIT);
+  await setJSON(KEYS.SEARCH_HISTORY, nextItems);
+  return nextItems;
+}
+
+export async function addSongSearchHistoryItem(song: Song): Promise<SearchHistoryItem[]> {
+  const label = normalizeSearchLabel(song.title);
+  if (!song.id || label.length < 2) {
+    return getSearchHistory();
+  }
+
+  const items = await getSearchHistory();
+  const nextItem: SearchHistoryItem = {
+    id: getSongSearchHistoryId(song),
+    label,
+    type: "song",
+    subtitle: normalizeSearchLabel(song.artist) ? `Song • ${normalizeSearchLabel(song.artist)}` : "Song",
+    imageUrl: song.coverUrl || "",
+    song,
+    lastSearched: Date.now(),
+  };
+  const nextKey = getSearchHistoryKey(nextItem);
+  const filtered = items.filter((item) => getSearchHistoryKey(item) !== nextKey);
+  const nextItems = [nextItem, ...filtered].slice(0, SEARCH_HISTORY_LIMIT);
+  await setJSON(KEYS.SEARCH_HISTORY, nextItems);
+  return nextItems;
+}
+
+export async function removeSearchHistoryItem(id: string): Promise<SearchHistoryItem[]> {
+  const items = await getSearchHistory();
+  const nextItems = items.filter((item) => item.id !== id);
+  await setJSON(KEYS.SEARCH_HISTORY, nextItems);
+  return nextItems;
 }
 
 export async function getSettings(): Promise<AppSettings> {

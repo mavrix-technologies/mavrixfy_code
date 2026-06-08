@@ -2,11 +2,11 @@ import { Platform } from "react-native";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 
-export const PRIVACY_POLICY_URL = "https://mavrixfy.site/privacy";
-export const TERMS_OF_SERVICE_URL = "https://mavrixfy.site/terms";
-export const PRIVACY_SUPPORT_EMAIL = "privacy@mavrixfy.site";
+const PRIVACY_POLICY_URL = "https://mavrixfy.site/privacy";
+const TERMS_OF_SERVICE_URL = "https://mavrixfy.site/terms";
+const PRIVACY_SUPPORT_EMAIL = "privacy@mavrixfy.site";
 
-export async function openExternalUrl(url: string): Promise<void> {
+async function openExternalUrl(url: string): Promise<void> {
   if (Platform.OS === "web") {
     await Linking.openURL(url);
     return;

@@ -51,6 +51,12 @@ const SESSION_STARTED_KEY = "@mavrixfy_recommendation_session_started_v1";
 const SESSION_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const LOCAL_FEED_LIMIT = 12;
 const LOCAL_SECTION_MIN_ITEMS = 4;
+const CURRENT_YEAR = new Date().getFullYear();
+const PREVIOUS_YEAR = CURRENT_YEAR - 1;
+
+export type RecommendationHomeFeedOptions = {
+  forceRefresh?: boolean;
+};
 
 const LOCAL_SECTION_QUERIES: Array<{
   id: RecommendationSectionId;
@@ -62,42 +68,78 @@ const LOCAL_SECTION_QUERIES: Array<{
   {
     id: "recommendedForYou",
     title: "Recommended For You",
-    subtitle: "Hindi, Punjabi, Gujarati, and English audience picks",
+    subtitle: "Popular Hindi and Bollywood picks with fresh momentum",
     source: "jiosaavn",
-    queries: ["hindi bollywood top playlists", "punjabi hits playlist", "english pop india playlist", "gujarati hits playlist"],
+    queries: [
+      `popular hindi songs ${CURRENT_YEAR} playlist`,
+      `top bollywood songs ${CURRENT_YEAR} playlist`,
+      "hindi bollywood hits playlist",
+      "trending hindi songs playlist",
+      "bollywood most played playlist",
+    ],
   },
   {
     id: "freshDiscoveries",
     title: "Fresh Discoveries",
-    subtitle: "Fresh high-audience language playlists",
+    subtitle: "New Hindi and Bollywood playlists with strong audience signals",
     source: "fresh",
-    queries: ["new hindi songs playlist", "new punjabi songs playlist", "latest english songs playlist", "new gujarati songs playlist"],
+    queries: [
+      `new hindi songs ${CURRENT_YEAR} playlist`,
+      `latest bollywood songs ${CURRENT_YEAR} playlist`,
+      `new bollywood movie songs ${CURRENT_YEAR}`,
+      "latest hindi movie songs playlist",
+      "fresh hindi hits playlist",
+    ],
   },
   {
     id: "popularNearYou",
     title: "Popular Near You",
-    subtitle: "Popular Hindi, Punjabi, Gujarati, and English playlists",
+    subtitle: "Popular Hindi, Bollywood, and viral India playlists",
     source: "regional",
-    queries: ["hindi reels playlist", "punjabi trending playlist", "gujarati trending playlist", "english trending playlist india"],
+    queries: [
+      "popular hindi playlist",
+      "bollywood most played playlist",
+      "hindi reels trending playlist",
+      "viral bollywood songs playlist",
+      "india top hindi playlist",
+    ],
   },
   {
     id: "basedOnActivity",
     title: "Based On Your Activity",
-    subtitle: "Familiar moods in your main languages",
+    subtitle: "High-scoring Hindi and Bollywood moods",
     source: "trending",
-    queries: ["hindi romance playlist", "punjabi party playlist", "gujarati garba playlist", "english workout playlist"],
+    queries: [
+      "hindi romantic hits playlist",
+      "bollywood party hits playlist",
+      "arijit singh hindi hits playlist",
+      "hindi workout hits playlist",
+      "bollywood dance hits playlist",
+    ],
   },
   {
     id: "newReleases",
     title: "New Releases",
-    subtitle: "Latest Hindi, Punjabi, Gujarati, and English drops",
+    subtitle: "Latest Hindi and Bollywood drops",
     source: "fresh",
-    queries: ["latest hindi songs playlist", "latest punjabi songs playlist", "gujarati hits playlist", "latest english songs playlist"],
+    queries: [
+      `latest hindi songs ${CURRENT_YEAR} playlist`,
+      `new bollywood songs ${CURRENT_YEAR} playlist`,
+      `latest bollywood movie songs ${CURRENT_YEAR}`,
+      "new hindi movie songs playlist",
+      "latest hindi hits playlist",
+    ],
   },
 ];
 
 const LOCAL_BACKUP_QUERIES = [
-  "hindi bollywood evergreen playlist",
+  `popular hindi songs ${CURRENT_YEAR} playlist`,
+  `top bollywood songs ${CURRENT_YEAR} playlist`,
+  `new bollywood songs ${CURRENT_YEAR} playlist`,
+  `latest hindi songs ${CURRENT_YEAR} playlist`,
+  "bollywood most played playlist",
+  "hindi top hits playlist",
+  "hindi bollywood hits playlist",
   "arijit singh hindi playlist",
   "bollywood party playlist",
   "hindi romantic playlist",
@@ -182,6 +224,111 @@ function normalizePlaylistCandidate(raw: any, source: RecommendationSource): Rec
   };
 }
 
+function getTextScore(text: string, terms: Array<[string, number]>): number {
+  return terms.reduce((score, [term, value]) => score + (text.includes(term) ? value : 0), 0);
+}
+
+function getNumericPlaylistSignal(item: RecommendationItem): number {
+  const raw = item.playlist || {};
+  const values: unknown[] = [
+    raw.songCount,
+    raw.song_count,
+    raw.listCount,
+    raw.list_count,
+    raw.playCount,
+    raw.play_count,
+    raw.followerCount,
+    raw.follower_count,
+    raw.fanCount,
+    raw.fan_count,
+    raw.viewCount,
+    raw.view_count,
+  ];
+
+  return values.reduce<number>((highest, value) => {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? Math.max(highest, numericValue) : highest;
+  }, 0);
+}
+
+function scoreRecommendationItem(item: RecommendationItem, sectionId: RecommendationSectionId): number {
+  const text = `${item.title} ${item.subtitle || ""}`.toLowerCase();
+  const popularitySignal = getNumericPlaylistSignal(item);
+  let score = 0;
+
+  score += getTextScore(text, [
+    ["hindi", 80],
+    ["bollywood", 80],
+    ["movie", 28],
+    ["arijit", 24],
+    ["india", 18],
+    ["punjabi", 12],
+    ["gujarati", 8],
+  ]);
+
+  score += getTextScore(text, [
+    [String(CURRENT_YEAR), 70],
+    ["latest", 54],
+    ["new", 50],
+    ["fresh", 42],
+    ["trending", 48],
+    ["viral", 44],
+    ["reels", 34],
+    ["popular", 46],
+    ["most played", 46],
+    ["top", 34],
+    ["chart", 30],
+    ["hit", 26],
+    ["superhit", 28],
+  ]);
+
+  score += Math.min(Math.log10(Math.max(popularitySignal, 1)) * 28, 95);
+
+  if (sectionId === "freshDiscoveries" || sectionId === "newReleases") {
+    score += getTextScore(text, [
+      ["latest", 28],
+      ["new", 28],
+      ["fresh", 22],
+      [String(CURRENT_YEAR), 32],
+    ]);
+  }
+
+  if (sectionId === "popularNearYou" || sectionId === "recommendedForYou") {
+    score += getTextScore(text, [
+      ["popular", 24],
+      ["most played", 24],
+      ["top", 18],
+      ["trending", 18],
+      ["viral", 18],
+    ]);
+  }
+
+  if (text.includes(String(PREVIOUS_YEAR))) score -= 12;
+  if (text.includes("old") || text.includes("retro") || text.includes("classic") || text.includes("evergreen")) {
+    score -= 34;
+  }
+
+  return score;
+}
+
+function rankRecommendationItems(
+  items: RecommendationItem[],
+  sectionId: RecommendationSectionId
+): RecommendationItem[] {
+  return items
+    .map((item, index) => ({ item, index, score: scoreRecommendationItem(item, sectionId) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(({ item }) => item);
+}
+
+function createRecommendationHomeUrl(sessionId: string, options?: RecommendationHomeFeedOptions): string {
+  const params = [`sessionId=${encodeURIComponent(sessionId)}`];
+  if (options?.forceRefresh) {
+    params.push("refresh=1", `ts=${Date.now()}`);
+  }
+  return `${buildAppApiUrl("/recommendations/home")}?${params.join("&")}`;
+}
+
 async function searchMavrixfyPlaylists(query: string, source: RecommendationSource): Promise<RecommendationItem[]> {
   const url = `${buildAppApiUrl("/search/playlists")}?query=${encodeURIComponent(query)}&limit=18&page=1`;
   const response = await fetch(url, { headers: { Accept: "application/json" } });
@@ -228,14 +375,21 @@ async function getLocalPlaylistRecommendationFeed(): Promise<RecommendationFeed>
   const backupCandidates = (await backupResultsPromise).flat();
 
   for (const { sectionConfig, candidates } of sectionResults) {
-    const items = takeUniquePlaylists(candidates, shown, LOCAL_FEED_LIMIT);
+    const items = takeUniquePlaylists(
+      rankRecommendationItems(candidates, sectionConfig.id),
+      shown,
+      LOCAL_FEED_LIMIT
+    );
 
     if (items.length < LOCAL_SECTION_MIN_ITEMS) {
-      const sectionBackup = backupCandidates.map((item) => ({
-        ...item,
-        source: sectionConfig.source,
-        id: `${sectionConfig.source}:${item.contentId}`,
-      }));
+      const sectionBackup = rankRecommendationItems(
+        backupCandidates.map((item) => ({
+          ...item,
+          source: sectionConfig.source,
+          id: `${sectionConfig.source}:${item.contentId}`,
+        })),
+        sectionConfig.id
+      );
       items.push(...takeUniquePlaylists(sectionBackup, shown, LOCAL_FEED_LIMIT - items.length));
     }
 
@@ -261,7 +415,7 @@ async function getLocalPlaylistRecommendationFeed(): Promise<RecommendationFeed>
   };
 }
 
-export async function getRecommendationSessionId(): Promise<string> {
+async function getRecommendationSessionId(): Promise<string> {
   const [current, startedAtRaw] = await Promise.all([
     AsyncStorage.getItem(SESSION_KEY),
     AsyncStorage.getItem(SESSION_STARTED_KEY),
@@ -280,7 +434,7 @@ export async function getRecommendationSessionId(): Promise<string> {
   return next;
 }
 
-export async function getRecommendationHomeFeed(): Promise<RecommendationFeed> {
+export async function getRecommendationHomeFeed(options?: RecommendationHomeFeedOptions): Promise<RecommendationFeed> {
   const currentUser = auth.currentUser;
   if (!currentUser) {
     throw new Error("Recommendation feed requires an authenticated user.");
@@ -290,7 +444,7 @@ export async function getRecommendationHomeFeed(): Promise<RecommendationFeed> {
     currentUser.getIdToken(),
     getRecommendationSessionId(),
   ]);
-  const url = `${buildAppApiUrl("/recommendations/home")}?sessionId=${encodeURIComponent(sessionId)}`;
+  const url = createRecommendationHomeUrl(sessionId, options);
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
@@ -310,13 +464,14 @@ export async function getRecommendationHomeFeed(): Promise<RecommendationFeed> {
 
   return {
     ...feed,
-    sections: feed.sections
-      .map((section) => ({
-        ...section,
-        items: Array.isArray(section.items)
-          ? section.items.filter((item) => item?.kind === "playlist")
-          : [],
-      }))
-      .filter((section) => section.items.length > 0),
+    sections: feed.sections.reduce<RecommendationSection[]>((sections, section) => {
+      const items = Array.isArray(section.items)
+        ? section.items.filter((item) => item?.kind === "playlist")
+        : [];
+      if (items.length > 0) {
+        sections.push({ ...section, items: rankRecommendationItems(items, section.id) });
+      }
+      return sections;
+    }, []),
   };
 }

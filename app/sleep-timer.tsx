@@ -1,12 +1,12 @@
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useMemo } from "react";
 import {
-  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -50,43 +50,42 @@ export default function SleepTimerScreen() {
     router.back();
   }, [clearSleepTimer, haptic]);
 
-  const androidSwipeResponder = useRef(
-    Platform.OS === "android"
-      ? PanResponder.create({
-          onStartShouldSetPanResponder: () => false,
-          onMoveShouldSetPanResponder: (_, gestureState) => {
-            const { dx, dy } = gestureState;
-            return dy > 10 && Math.abs(dy) > Math.abs(dx) * 1.5;
-          },
-          onPanResponderRelease: (_, gestureState) => {
-            if (gestureState.dy > 80 || (gestureState.dy > 40 && gestureState.vy > 0.5)) {
-              router.back();
-            }
-          },
-        })
-      : null
-  ).current;
+  const androidSheetSwipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(Platform.OS === "android")
+        .runOnJS(true)
+        .onEnd((event) => {
+          const isDownwardSwipe =
+            event.translationY > 80 ||
+            (event.translationY > 40 && event.velocityY > 500);
+          const isMostlyVertical = Math.abs(event.translationY) > Math.abs(event.translationX) * 1.5;
+          if (isDownwardSwipe && isMostlyVertical) {
+            router.back();
+          }
+        }),
+    []
+  );
 
   return (
     <View style={styles.root}>
       <View style={styles.sheet}>
-        <View
-          style={styles.headerContent}
-          {...(androidSwipeResponder ? androidSwipeResponder.panHandlers : {})}
-        >
-          <View style={styles.grabber} />
-          <View style={styles.titleRow}>
-            <View>
-              <Text style={styles.title}>Sleep Timer</Text>
-              <Text style={styles.subtitle}>Stop playback automatically</Text>
+        <GestureDetector gesture={androidSheetSwipeGesture}>
+          <View style={styles.headerContent}>
+            <View style={styles.grabber} />
+            <View style={styles.titleRow}>
+              <View>
+                <Text style={styles.title}>Sleep Timer</Text>
+                <Text style={styles.subtitle}>Stop playback automatically</Text>
+              </View>
+              {sleepTimer ? (
+                <Pressable hitSlop={10} onPress={handleClear} style={styles.clearButton}>
+                  <Text style={styles.clearText}>Clear</Text>
+                </Pressable>
+              ) : null}
             </View>
-            {sleepTimer ? (
-              <Pressable hitSlop={10} onPress={handleClear} style={styles.clearButton}>
-                <Text style={styles.clearText}>Clear</Text>
-              </Pressable>
-            ) : null}
           </View>
-        </View>
+        </GestureDetector>
 
         <View style={[styles.options, { paddingBottom: Math.max(insets.bottom + 8, Platform.OS === "ios" ? 34 : 20) }]}>
           {TIMER_OPTIONS.map((option) => {

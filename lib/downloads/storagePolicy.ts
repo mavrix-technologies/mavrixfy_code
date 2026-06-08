@@ -20,13 +20,13 @@ import { logger } from "@/lib/logger";
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
 /** Root directory URI for all downloaded track files. Always ends with /. */
-export function getDownloadsRootUri(): string {
+function getDownloadsRootUri(): string {
   const base = documentDirectory ?? "";
   return `${base}mavrixfy_downloads/`;
 }
 
 /** Directory URI for a specific track. */
-export function getTrackDirUri(songId: string): string {
+function getTrackDirUri(songId: string): string {
   return `${getDownloadsRootUri()}tracks/${songId}/`;
 }
 
@@ -41,7 +41,7 @@ export function getTrackFileUri(songId: string): string {
 // ─── Directory setup ──────────────────────────────────────────────────────────
 
 /** Ensure the downloads root directory exists. */
-export async function ensureDownloadsDir(): Promise<void> {
+async function ensureDownloadsDir(): Promise<void> {
   try {
     const root = getDownloadsRootUri();
     const info = await getInfoAsync(root);
@@ -94,7 +94,7 @@ export async function hasSufficientStorage(): Promise<boolean> {
 }
 
 /** Returns free disk space in bytes, or -1 if unavailable. */
-export async function getFreeDiskSpace(): Promise<number> {
+async function getFreeDiskSpace(): Promise<number> {
   if (Platform.OS === "web") return -1;
   try {
     return await getFreeDiskStorageAsync();

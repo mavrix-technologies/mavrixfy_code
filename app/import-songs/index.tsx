@@ -18,50 +18,50 @@ import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import { triggerImpact } from "@/lib/haptics";
 
+async function handleFileImport() {
+  void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
+  
+  try {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ["text/plain", "text/csv", "application/csv", "text/comma-separated-values"],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+
+    if (result.canceled || !result.assets || result.assets.length === 0) {
+      return;
+    }
+
+    const file = result.assets[0];
+    
+    if (!file.uri) {
+      Alert.alert("Error", "Invalid file selected");
+      return;
+    }
+
+    const fileName = file.name || "file.txt";
+    const extension = fileName.toLowerCase().split('.').pop();
+    
+    if (extension !== 'txt' && extension !== 'csv') {
+      Alert.alert("Error", "Please select a TXT or CSV file");
+      return;
+    }
+
+    router.push({
+      pathname: "/import-songs/file",
+      params: { 
+        fileUri: file.uri,
+        fileName: fileName,
+      },
+    });
+  } catch (error: any) {
+    Alert.alert("Error", `Failed to pick file: ${error.message || "Unknown error"}`);
+  }
+}
+
 export default function ImportSongsScreen() {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
-
-  const handleFileImport = async () => {
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-    
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ["text/plain", "text/csv", "application/csv", "text/comma-separated-values"],
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
-
-      if (result.canceled || !result.assets || result.assets.length === 0) {
-        return;
-      }
-
-      const file = result.assets[0];
-      
-      if (!file.uri) {
-        Alert.alert("Error", "Invalid file selected");
-        return;
-      }
-
-      const fileName = file.name || "file.txt";
-      const extension = fileName.toLowerCase().split('.').pop();
-      
-      if (extension !== 'txt' && extension !== 'csv') {
-        Alert.alert("Error", "Please select a TXT or CSV file");
-        return;
-      }
-
-      router.push({
-        pathname: "/import-songs/file",
-        params: { 
-          fileUri: file.uri,
-          fileName: fileName,
-        },
-      });
-    } catch (error: any) {
-      Alert.alert("Error", `Failed to pick file: ${error.message || "Unknown error"}`);
-    }
-  };
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
@@ -332,5 +332,4 @@ const styles = StyleSheet.create({
     color: Colors.subtext,
   },
 });
-
 

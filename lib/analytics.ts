@@ -80,11 +80,11 @@ export function logSignUp(method: string) {
   logEvent("sign_up", { method });
 }
 
-export function logSearch(searchTerm: string) {
+function logSearch(searchTerm: string) {
   logEvent("search", { search_term: searchTerm });
 }
 
-export function logSelectContent(contentType: string, itemId: string) {
+function logSelectContent(contentType: string, itemId: string) {
   logEvent("select_content", {
     content_type: contentType,
     item_id: itemId,

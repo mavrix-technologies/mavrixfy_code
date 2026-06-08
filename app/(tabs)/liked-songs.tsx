@@ -4,7 +4,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import { safeGoBack } from "@/utils/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
@@ -13,6 +12,12 @@ import { triggerImpact } from "@/lib/haptics";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
 import OfflineBanner from "@/components/OfflineBanner";
 import SongRow from "@/components/SongRow";
+import AppTopHeader, {
+  APP_TOP_HEADER_HEIGHT,
+  AppTopHeaderDownloadButton,
+  AppTopHeaderProfileButton,
+  useAppTopHeaderScrollElevation,
+} from "@/components/AppTopHeader";
 import { useNetwork } from "@/contexts/NetworkContext";
 
 const UI = {
@@ -36,6 +41,10 @@ export default function LikedSongsScreen() {
   const { playSong, likedSongs, togglePlay } = usePlayerActions();
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchActive, setIsSearchActive] = useState(false);
+  const {
+    isHeaderElevated,
+    handleHeaderScroll,
+  } = useAppTopHeaderScrollElevation();
 
   const songs = useMemo(() => {
     if (!Array.isArray(likedSongs)) return [];
@@ -90,25 +99,16 @@ export default function LikedSongsScreen() {
   const headerMeta = songs.length > 0 ? `${songs.length} songs` : "No songs";
 
   return (
-    <View style={[styles.container, { paddingTop: topInset }]}>
+    <View style={styles.container}>
       <LinearGradient colors={["#09111B", "#10141a", "#10141a"]} style={StyleSheet.absoluteFillObject} />
       {!isOnline && <OfflineBanner />}
-
-      <View style={styles.topBar}>
-        <Pressable 
-          style={({ pressed }) => [styles.topIconButton, pressed && styles.topIconButtonPressed]} 
-          onPress={() => {
-            void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-            safeGoBack();
-          }}
-          hitSlop={10}
-          android_ripple={{ color: "rgba(38,225,154,0.15)", borderless: true }}
-        >
-          <Ionicons name="arrow-back" size={18} color={UI.primaryA} />
-        </Pressable>
-        <Text style={styles.topBarTitle}>Liked Songs</Text>
-        <View style={styles.topBarSpacer} />
-      </View>
+      <AppTopHeader
+        topInset={topInset}
+        elevated={isHeaderElevated}
+        title="Liked Songs"
+        left={<AppTopHeaderProfileButton />}
+        right={<AppTopHeaderDownloadButton />}
+      />
 
       <FlatList
         data={filteredSongs}
@@ -230,9 +230,12 @@ export default function LikedSongsScreen() {
         style={styles.list}
         contentContainerStyle={[
           styles.listContent,
+          { paddingTop: topInset + APP_TOP_HEADER_HEIGHT },
           songs.length === 0 ? styles.listContentEmpty : undefined,
         ]}
         showsVerticalScrollIndicator={false}
+        onScroll={handleHeaderScroll}
+        scrollEventThrottle={16}
         removeClippedSubviews={false}
         initialNumToRender={12}
         maxToRenderPerBatch={12}

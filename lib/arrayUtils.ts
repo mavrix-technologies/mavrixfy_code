@@ -55,7 +55,7 @@ export function forEachFiltered<T>(
   }
 }
 
-export function flatMapMap<T, U, V>(
+function flatMapMap<T, U, V>(
   items: readonly T[],
   flatMapper: (item: T, index: number) => readonly U[],
   mapper: (item: U, index: number) => V

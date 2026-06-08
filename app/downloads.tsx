@@ -9,7 +9,7 @@
  * - Remove all downloads
  */
 
-import React, { useState, useCallback, useMemo, useEffect } from "react";
+import React, { useState, useCallback, useMemo, useEffect, useSyncExternalStore } from "react";
 import {
   View,
   Text,
@@ -18,11 +18,9 @@ import {
   StyleSheet,
   Alert,
   Switch,
-  ScrollView,
   ActivityIndicator,
   Platform,
 } from "react-native";
-import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -32,8 +30,18 @@ import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
 import { useDownloads } from "@/contexts/DownloadContext";
 import { onQueueEvent } from "@/lib/downloads/downloadManager";
-import { DownloadItem, DownloadStatus, DownloadQuality } from "@/types/downloads";
+import { DownloadItem, DownloadQuality } from "@/types/downloads";
 import { formatBytes } from "@/lib/downloads/storagePolicy";
+import {
+  getCollectionMetadataSnapshot,
+  loadAllCollectionMetadata,
+  subscribeCollectionMetadata,
+} from "@/lib/downloads/collectionMetadata";
+import {
+  PlaylistDownloadCard,
+  QualityOptionRow,
+  type PlaylistDownloadSection,
+} from "@/components/downloads/DownloadRows";
 
 // ─── UI constants ─────────────────────────────────────────────────────────────
 
@@ -49,314 +57,22 @@ const UI = {
 };
 
 const DOWNLOAD_QUALITY_OPTIONS: DownloadQuality[] = ["low", "medium", "high"];
+type CollectionMetadataSummary = Record<string, { name: string; imageUrl: string }>;
+
+function toCollectionMetadataSummary(metadata: ReturnType<typeof getCollectionMetadataSnapshot>): CollectionMetadataSummary {
+  const mapped: CollectionMetadataSummary = {};
+  for (const [id, data] of Object.entries(metadata)) {
+    mapped[id] = { name: data.name, imageUrl: data.imageUrl };
+  }
+  return mapped;
+}
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
-
-function statusLabel(status: DownloadStatus): string {
-  switch (status) {
-    case "queued": return "Queued";
-    case "waiting_for_wifi": return "Waiting for Wi-Fi";
-    case "waiting_for_charging": return "Waiting for charger";
-    case "downloading": return "Downloading";
-    case "paused": return "Paused";
-    case "completed": return "Downloaded";
-    case "failed": return "Failed";
-    case "expired": return "Expired";
-    case "revoked": return "Revoked";
-    case "deleted": return "Deleted";
-    default: return status;
-  }
-}
-
-function statusColor(status: DownloadStatus): string {
-  switch (status) {
-    case "completed": return Colors.primary;
-    case "downloading": return Colors.primary;
-    case "failed": return Colors.error;
-    case "expired":
-    case "revoked": return Colors.error;
-    default: return Colors.subtext;
-  }
-}
-
-// ─── Download Row ─────────────────────────────────────────────────────────────
-
-interface DownloadRowProps {
-  item: DownloadItem;
-  onPause: (id: string) => void;
-  onResume: (id: string) => void;
-  onRetry: (id: string) => void;
-  onRemove: (id: string) => void;
-}
-
-// ─── Playlist/Collection Section ──────────────────────────────────────────────
-
-interface PlaylistDownloadSection {
-  collectionId: string;
-  collectionName: string;
-  items: DownloadItem[];
-  coverUrl?: string;
-  totalSize: number;
-  completedCount: number;
-  downloadingCount: number;
-  failedCount: number;
-}
-
-function DownloadRow({ item, onPause, onResume, onRetry, onRemove }: DownloadRowProps) {
-  const isActive =
-    item.status === "downloading" ||
-    item.status === "queued" ||
-    item.status === "waiting_for_wifi" ||
-    item.status === "waiting_for_charging";
-
-  const canPause = item.status === "downloading";
-  const canResume = item.status === "paused" || item.status === "waiting_for_wifi" || item.status === "waiting_for_charging";
-  const canRetry = item.status === "failed" || item.status === "expired" || item.status === "revoked";
-
-  return (
-    <View style={styles.row}>
-      {/* Cover art */}
-      {item.coverUrl ? (
-        <Image
-          recyclingKey={item.songId}
-          source={{ uri: item.coverUrl }}
-          style={styles.rowCover}
-          contentFit="cover"
-          transition={80}
-          cachePolicy="memory-disk"
-        />
-      ) : (
-        <View style={[styles.rowCover, styles.rowCoverPlaceholder]}>
-          <Ionicons name="musical-note" size={18} color={UI.subtext} />
-        </View>
-      )}
-
-      {/* Info */}
-      <View style={styles.rowInfo}>
-        <Text style={styles.rowTitle} numberOfLines={1}>{item.title}</Text>
-        <Text style={styles.rowArtist} numberOfLines={1}>{item.artist}</Text>
-
-        {/* Progress bar for active downloads */}
-        {item.status === "downloading" && (
-          <View style={styles.progressBarTrack}>
-            <View
-              style={[styles.progressBarFill, { width: `${item.progress}%` }]}
-            />
-          </View>
-        )}
-
-        <Text style={[styles.rowStatus, { color: statusColor(item.status) }]}>
-          {item.status === "downloading"
-            ? `${item.progress}% · ${formatBytes(item.bytesDownloaded)}`
-            : statusLabel(item.status)}
-        </Text>
-      </View>
-
-      {/* Actions */}
-      <View style={styles.rowActions}>
-        {canPause && (
-          <Pressable
-            onPress={() => onPause(item.songId)}
-            style={styles.actionBtn}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="pause" size={18} color={UI.subtext} />
-          </Pressable>
-        )}
-        {canResume && (
-          <Pressable
-            onPress={() => onResume(item.songId)}
-            style={styles.actionBtn}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="play" size={18} color={UI.primary} />
-          </Pressable>
-        )}
-        {canRetry && (
-          <Pressable
-            onPress={() => onRetry(item.songId)}
-            style={styles.actionBtn}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="refresh" size={18} color={UI.error} />
-          </Pressable>
-        )}
-        {isActive && (
-          <ActivityIndicator size="small" color={UI.primary} style={styles.spinner} />
-        )}
-        <Pressable
-          onPress={() => onRemove(item.songId)}
-          style={styles.actionBtn}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ionicons name="trash-outline" size={18} color={UI.subtext} />
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function PlaylistDownloadCard({
-  section,
-  expandedPlaylistId,
-  onToggle,
-  onPause,
-  onResume,
-  onRetry,
-  onRemove,
-}: {
-  section: PlaylistDownloadSection;
-  expandedPlaylistId: string | null;
-  onToggle: (collectionId: string) => void;
-  onPause: (id: string) => void;
-  onResume: (id: string) => void;
-  onRetry: (id: string) => void;
-  onRemove: (id: string) => void;
-}) {
-  const expanded = expandedPlaylistId === section.collectionId;
-  const handleToggle = useCallback(() => onToggle(section.collectionId), [onToggle, section.collectionId]);
-  const renderDownloadItem = useCallback(
-    ({ item }: { item: DownloadItem }) => (
-      <DownloadRow
-        item={item}
-        onPause={onPause}
-        onResume={onResume}
-        onRetry={onRetry}
-        onRemove={onRemove}
-      />
-    ),
-    [onPause, onRemove, onResume, onRetry]
-  );
-
-  return (
-    <View style={styles.playlistCardContainer}>
-      <Pressable
-        style={({ pressed }) => [
-          styles.playlistCard,
-          pressed && styles.playlistCardPressed,
-          expanded && styles.playlistCardExpanded,
-        ]}
-        onPress={handleToggle}
-      >
-        {section.coverUrl ? (
-          <Image
-            recyclingKey={section.collectionId}
-            source={{ uri: section.coverUrl }}
-            style={styles.playlistCardCover}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-          />
-        ) : (
-          <View style={[styles.playlistCardCover, styles.playlistCardCoverPlaceholder]}>
-            <Ionicons name="musical-notes" size={32} color={UI.subtext} />
-          </View>
-        )}
-
-        <View style={styles.playlistCardInfo}>
-          <Text style={styles.playlistCardTitle} numberOfLines={2}>
-            {section.collectionName}
-          </Text>
-          <View style={styles.playlistCardStats}>
-            {section.completedCount > 0 ? (
-              <View style={styles.playlistCardStat}>
-                <Ionicons name="checkmark-circle" size={12} color={UI.primary} />
-                <Text style={styles.playlistCardStatText}>{section.completedCount}</Text>
-              </View>
-            ) : null}
-            {section.downloadingCount > 0 ? (
-              <View style={styles.playlistCardStat}>
-                <Ionicons name="arrow-down-circle" size={12} color={UI.primary} />
-                <Text style={styles.playlistCardStatText}>{section.downloadingCount}</Text>
-              </View>
-            ) : null}
-            {section.failedCount > 0 ? (
-              <View style={styles.playlistCardStat}>
-                <Ionicons name="alert-circle" size={12} color={UI.error} />
-                <Text style={[styles.playlistCardStatText, { color: UI.error }]}>
-                  {section.failedCount}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-          <Text style={styles.playlistCardSize}>{formatBytes(section.totalSize)}</Text>
-        </View>
-
-        <Ionicons
-          name={expanded ? "chevron-up" : "chevron-down"}
-          size={20}
-          color={UI.subtext}
-          style={styles.playlistCardChevron}
-        />
-      </Pressable>
-
-      {expanded ? (
-        <FlatList
-          data={section.items}
-          keyExtractor={(item) => item.songId}
-          renderItem={renderDownloadItem}
-          scrollEnabled={false}
-          style={styles.expandedSongList}
-        />
-      ) : null}
-    </View>
-  );
-}
-
-function QualityOptionRow({
-  quality,
-  selectedQuality,
-  onChange,
-}: {
-  quality: DownloadQuality;
-  selectedQuality: DownloadQuality;
-  onChange: (quality: DownloadQuality) => void;
-}) {
-  const selected = selectedQuality === quality;
-  const handlePress = useCallback(() => onChange(quality), [onChange, quality]);
-
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.qualityRow,
-        selected && styles.qualityRowActive,
-        pressed && styles.qualityRowPressed,
-      ]}
-      onPress={handlePress}
-      android_ripple={{ color: "rgba(38,225,154,0.15)", borderless: false }}
-      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-    >
-      <View style={styles.qualityInfo}>
-        <Text style={styles.qualityLabel}>{getQualityLabel(quality)}</Text>
-        <Text style={styles.qualityDesc}>{getQualityDescription(quality)}</Text>
-      </View>
-      {selected ? (
-        <Ionicons name="checkmark-circle" size={20} color={UI.primary} />
-      ) : null}
-    </Pressable>
-  );
-}
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function DownloadsScreen() {
   return useDownloadsScreenView();
-}
-
-function getQualityLabel(quality: DownloadQuality): string {
-  return quality.charAt(0).toUpperCase() + quality.slice(1);
-}
-
-function getQualityDescription(quality: DownloadQuality): string {
-  switch (quality) {
-    case "low":
-      return "~48 kbps · Saves storage";
-    case "medium":
-      return "~128 kbps · Balanced";
-    case "high":
-      return "~320 kbps · Best quality";
-    default:
-      return "";
-  }
 }
 
 function useDownloadsScreenView() {
@@ -398,20 +114,19 @@ function useDownloadsScreenView() {
   const [expandedPlaylistId, setExpandedPlaylistId] = useState<string | null>(null);
 
   // Load collection metadata
-  const [collectionMetadata, setCollectionMetadata] = useState<Record<string, { name: string; imageUrl: string }>>({});
+  const collectionMetadataSnapshot = useSyncExternalStore(
+    subscribeCollectionMetadata,
+    getCollectionMetadataSnapshot,
+    getCollectionMetadataSnapshot
+  );
 
   useEffect(() => {
-    async function loadMetadata() {
-      const { loadAllCollectionMetadata } = await import("@/lib/downloads/collectionMetadata");
-      const metadata = await loadAllCollectionMetadata();
-      const mapped: Record<string, { name: string; imageUrl: string }> = {};
-      for (const [id, data] of Object.entries(metadata)) {
-        mapped[id] = { name: data.name, imageUrl: data.imageUrl };
-      }
-      setCollectionMetadata(mapped);
-    }
-    loadMetadata();
+    void loadAllCollectionMetadata();
   }, []);
+  const collectionMetadata = useMemo(
+    () => toCollectionMetadataSummary(collectionMetadataSnapshot),
+    [collectionMetadataSnapshot]
+  );
 
   // Group downloads by collection/playlist
   const playlistSections = useMemo<PlaylistDownloadSection[]>(() => {
@@ -559,6 +274,17 @@ function useDownloadsScreenView() {
     [updatePreferences]
   );
 
+  const renderQualityOption = useCallback(
+    ({ item }: { item: DownloadQuality }) => (
+      <QualityOptionRow
+        quality={item}
+        selectedQuality={preferences.quality}
+        onChange={handleQualityChange}
+      />
+    ),
+    [handleQualityChange, preferences.quality]
+  );
+
   const handleTogglePlaylistSection = useCallback(
     (collectionId: string) => {
       void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
@@ -580,17 +306,6 @@ function useDownloadsScreenView() {
       />
     ),
     [expandedPlaylistId, handlePause, handleRemove, handleResume, handleRetry, handleTogglePlaylistSection]
-  );
-
-  const renderQualityOption = useCallback(
-    ({ item }: { item: DownloadQuality }) => (
-      <QualityOptionRow
-        quality={item}
-        selectedQuality={preferences.quality}
-        onChange={handleQualityChange}
-      />
-    ),
-    [handleQualityChange, preferences.quality]
   );
 
   // ─── Header ───────────────────────────────────────────────────────────────
@@ -619,18 +334,29 @@ function useDownloadsScreenView() {
 
   const StorageCard = (
     <View style={styles.storageCard}>
-      <View style={styles.storageRow}>
+      <View style={styles.storageHeader}>
         <View style={styles.storageIconWrap}>
-          <Ionicons name="folder-open-outline" size={20} color={UI.primary} />
+          <Ionicons name="file-tray-full-outline" size={22} color={UI.primary} />
         </View>
         <View style={styles.storageInfo}>
-          <Text style={styles.storageTitle}>Storage Used</Text>
+          <Text style={styles.storageEyebrow}>Offline storage</Text>
           <Text style={styles.storageValue}>
             {formatBytes(storageSummary.totalDownloadedBytes)}
           </Text>
+          <Text style={styles.storageCaption}>
+            {storageSummary.completedTracks} downloaded · {storageSummary.pendingTracks} pending
+          </Text>
         </View>
+        <Pressable
+          onPress={() => router.push("/downloaded-songs")}
+          style={styles.storageAction}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="musical-notes-outline" size={18} color={UI.primary} />
+          <Text style={styles.storageActionText}>Songs</Text>
+        </Pressable>
       </View>
-      <View style={styles.storageDivider} />
+
       <View style={styles.storageStats}>
         <View style={styles.storageStat}>
           <Text style={styles.storageStatNum}>{storageSummary.completedTracks}</Text>
@@ -682,6 +408,14 @@ function useDownloadsScreenView() {
       renderItem={renderPlaylistDownloadSection}
       contentContainerStyle={styles.listContent}
       showsVerticalScrollIndicator={false}
+      ListHeaderComponent={
+        playlistSections.length > 0 ? (
+          <View style={styles.listHeader}>
+            <Text style={styles.listTitle}>Saved groups</Text>
+            <Text style={styles.listSubtext}>{allItems.length} track{allItems.length !== 1 ? "s" : ""}</Text>
+          </View>
+        ) : null
+      }
       ListEmptyComponent={
         <View style={styles.emptyState}>
           <Ionicons name="arrow-down-circle-outline" size={48} color={UI.subtext} />
@@ -691,24 +425,13 @@ function useDownloadsScreenView() {
           </Text>
         </View>
       }
-      ListFooterComponent={
-        allItems.length > 0 ? (
-          <Pressable style={styles.removeAllBtn} onPress={handleRemoveAll}>
-            <Ionicons name="trash-outline" size={16} color={UI.error} />
-            <Text style={styles.removeAllText}>Remove All Downloads</Text>
-          </Pressable>
-        ) : null
-      }
     />
   );
 
   // ─── Settings panel ───────────────────────────────────────────────────────
 
-  const SettingsPanel = (
-    <ScrollView
-      contentContainerStyle={styles.settingsContent}
-      showsVerticalScrollIndicator={false}
-    >
+  const SettingsHeader = (
+    <>
       <Text style={styles.settingsSection}>Download Constraints</Text>
 
       <View style={styles.settingRow}>
@@ -757,21 +480,45 @@ function useDownloadsScreenView() {
       </View>
 
       <Text style={[styles.settingsSection, { marginTop: 24 }]}>Download Quality</Text>
+    </>
+  );
 
-      <FlatList
-        data={DOWNLOAD_QUALITY_OPTIONS}
-        keyExtractor={(quality) => quality}
-        renderItem={renderQualityOption}
-        scrollEnabled={false}
-      />
-
+  const SettingsFooter = (
+    <>
       <Text style={[styles.settingsSection, { marginTop: 24 }]}>Storage</Text>
 
-      <Pressable style={styles.dangerRow} onPress={handleRemoveAll}>
+      <View style={styles.storageSettingCard}>
+        <View style={styles.storageSettingIcon}>
+          <Ionicons name="shield-checkmark-outline" size={18} color={UI.primary} />
+        </View>
+        <View style={styles.storageSettingInfo}>
+          <Text style={styles.settingLabel}>Offline library</Text>
+          <Text style={styles.settingDesc}>
+            {formatBytes(storageSummary.totalDownloadedBytes)} used by {storageSummary.completedTracks} saved track{storageSummary.completedTracks !== 1 ? "s" : ""}
+          </Text>
+        </View>
+      </View>
+
+      <Pressable
+        style={({ pressed }) => [styles.dangerRow, pressed && styles.dangerRowPressed]}
+        onPress={handleRemoveAll}
+      >
         <Ionicons name="trash-outline" size={18} color={UI.error} />
         <Text style={styles.dangerLabel}>Remove All Downloads</Text>
       </Pressable>
-    </ScrollView>
+    </>
+  );
+
+  const SettingsPanel = (
+    <FlatList
+      data={DOWNLOAD_QUALITY_OPTIONS}
+      keyExtractor={(quality) => quality}
+      renderItem={renderQualityOption}
+      ListHeaderComponent={SettingsHeader}
+      ListFooterComponent={SettingsFooter}
+      contentContainerStyle={styles.settingsContent}
+      showsVerticalScrollIndicator={false}
+    />
   );
 
   // ─── Loading state ────────────────────────────────────────────────────────
@@ -824,7 +571,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingBottom: 10,
   },
   backBtn: {
     width: 40,
@@ -847,56 +594,86 @@ const styles = StyleSheet.create({
   // Storage card
   storageCard: {
     marginHorizontal: 16,
-    marginBottom: 12,
-    backgroundColor: UI.surface,
-    borderRadius: 12,
-    padding: 14,
+    marginBottom: 14,
+    backgroundColor: "rgba(24,28,34,0.92)",
+    borderRadius: 18,
+    padding: 16,
     borderWidth: 1,
-    borderColor: Colors.cardBorder,
+    borderColor: "rgba(61,74,61,0.42)",
+    overflow: "hidden",
   },
-  storageRow: {
+  storageHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 14,
   },
   storageIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(38,225,154,0.12)",
+    width: 50,
+    height: 50,
+    borderRadius: 16,
+    backgroundColor: "rgba(38,225,154,0.14)",
     alignItems: "center",
     justifyContent: "center",
   },
   storageInfo: {
     flex: 1,
+    minWidth: 0,
   },
-  storageTitle: {
+  storageEyebrow: {
     color: UI.subtext,
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
   },
   storageValue: {
     color: UI.text,
-    fontSize: 20,
+    fontSize: 28,
     fontFamily: "Inter_700Bold",
+    marginTop: 3,
+  },
+  storageCaption: {
+    color: UI.subtext,
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
     marginTop: 2,
   },
-  storageDivider: {
-    height: 1,
-    backgroundColor: Colors.cardBorder,
-    marginVertical: 12,
+  storageAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(38,225,154,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(38,225,154,0.18)",
+  },
+  storageActionText: {
+    color: UI.primary,
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
   },
   storageStats: {
     flexDirection: "row",
-    justifyContent: "space-around",
+    gap: 8,
+    marginTop: 16,
   },
   storageStat: {
+    flex: 1,
     alignItems: "center",
+    justifyContent: "center",
+    minHeight: 64,
+    borderRadius: 14,
+    backgroundColor: "rgba(38,42,49,0.68)",
+    borderWidth: 1,
+    borderColor: "rgba(61,74,61,0.28)",
   },
   storageStatNum: {
     color: UI.text,
-    fontSize: 18,
+    fontSize: 20,
     fontFamily: "Inter_700Bold",
+    fontVariant: ["tabular-nums"],
   },
   storageStatLabel: {
     color: UI.subtext,
@@ -908,16 +685,19 @@ const styles = StyleSheet.create({
   tabBar: {
     flexDirection: "row",
     marginHorizontal: 16,
-    marginBottom: 8,
-    backgroundColor: UI.surface,
-    borderRadius: 10,
-    padding: 3,
+    marginBottom: 0,
+    backgroundColor: "rgba(24,28,34,0.9)",
+    borderRadius: 16,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: "rgba(61,74,61,0.28)",
   },
   tabBtn: {
     flex: 1,
-    paddingVertical: 8,
+    minHeight: 44,
     alignItems: "center",
-    borderRadius: 8,
+    justifyContent: "center",
+    borderRadius: 12,
   },
   tabBtnActive: {
     backgroundColor: UI.surfaceLight,
@@ -1062,7 +842,25 @@ const styles = StyleSheet.create({
   // Download list
   listContent: {
     paddingHorizontal: 16,
-    paddingBottom: 40,
+    paddingTop: 14,
+    paddingBottom: 56,
+  },
+  listHeader: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    paddingHorizontal: 2,
+    marginBottom: 10,
+  },
+  listTitle: {
+    color: UI.text,
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+  },
+  listSubtext: {
+    color: UI.subtext,
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
   },
   row: {
     flexDirection: "row",
@@ -1146,28 +944,11 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
-  // Remove all
-  removeAllBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    marginTop: 24,
-    paddingVertical: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "rgba(255,107,107,0.3)",
-  },
-  removeAllText: {
-    color: UI.error,
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
-  },
-
   // Settings
   settingsContent: {
     paddingHorizontal: 16,
-    paddingBottom: 40,
+    paddingTop: 14,
+    paddingBottom: 56,
   },
   settingsSection: {
     color: UI.subtext,
@@ -1181,9 +962,9 @@ const styles = StyleSheet.create({
   settingRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: UI.surface,
-    borderRadius: 10,
-    padding: 14,
+    backgroundColor: "rgba(24,28,34,0.92)",
+    borderRadius: 14,
+    padding: 15,
     marginBottom: 8,
     borderWidth: 1,
     borderColor: Colors.cardBorder,
@@ -1236,15 +1017,42 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_500Medium",
     marginTop: 2,
   },
+  storageSettingCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(24,28,34,0.92)",
+    borderRadius: 14,
+    padding: 15,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: Colors.cardBorder,
+  },
+  storageSettingIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    backgroundColor: "rgba(38,225,154,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  storageSettingInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
   dangerRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    backgroundColor: "rgba(255,107,107,0.08)",
-    borderRadius: 10,
-    padding: 14,
+    justifyContent: "center",
+    backgroundColor: "rgba(255,107,107,0.09)",
+    borderRadius: 14,
+    padding: 15,
     borderWidth: 1,
-    borderColor: "rgba(255,107,107,0.2)",
+    borderColor: "rgba(255,107,107,0.28)",
+  },
+  dangerRowPressed: {
+    backgroundColor: "rgba(255,107,107,0.15)",
   },
   dangerLabel: {
     color: UI.error,

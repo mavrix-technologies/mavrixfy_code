@@ -396,7 +396,11 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const [albumColor, setAlbumColor] = useState("#282828");
   const [textColor, setTextColor] = useState("#FFFFFF");
   const [sleepTimer, setSleepTimerState] = useState<SleepTimerState | null>(null);
-  const [seekOverrideSeconds, setSeekOverrideSeconds] = useState<number | null>(null);
+  const [seekOverride, setSeekOverride] = useState<{
+    songId: string | null;
+    seconds: number;
+    startedAt: number;
+  } | null>(null);
   const [previewIsPlaying, setPreviewIsPlaying] = useState(false);
   const previewIsPlayingRef = useRef(false); // ref so togglePlay never has stale closure
   const [previewProgress, setPreviewProgress] = useState(0);
@@ -419,8 +423,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const previewRepeatModeRef = useRef<"off" | "all" | "one">("off");
   const originalQueueRef = useRef<Song[]>([]);
   const playRequestIdRef = useRef(0);
-  const seekOverrideRef = useRef<number | null>(null);
-  const seekOverrideSinceRef = useRef(0);
   const seekRequestIdRef = useRef(0);
   const lastPlaybackNoticeAtRef = useRef(0);
   const restoredPositionSecondsRef = useRef(0);
@@ -471,6 +473,12 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     const removeIndex = currentIds.findIndex((id) => id === songId);
     if (removeIndex < 0) return;
     replaceUserQueuedSongIds(currentIds.filter((_, index) => index !== removeIndex));
+  }, [replaceUserQueuedSongIds]);
+
+  const consumeLeadingUserQueuedSongId = useCallback((songId: string | null | undefined) => {
+    if (!songId) return;
+    if (userQueuedSongIdsRef.current[0] !== songId) return;
+    replaceUserQueuedSongIds(userQueuedSongIdsRef.current.slice(1));
   }, [replaceUserQueuedSongIds]);
 
   const markPendingNativeTrack = useCallback((
@@ -537,6 +545,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       queueIndexRef.current = nextIndex;
     }
     setCurrentSong((prev) => (prev?.id === nextSong.id ? prev : nextSong));
+    consumeLeadingUserQueuedSongId(nextSong.id);
     updatePlaybackEngineSnapshot({
       currentSong: nextSong,
       queue: cq,
@@ -545,7 +554,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       isBuffering: false,
     });
     return true;
-  }, [shouldAcceptNativeTrackSync]);
+  }, [consumeLeadingUserQueuedSongId, shouldAcceptNativeTrackSync]);
 
   const applyNativeQueueSnapshot = useCallback((tracks: Song[], startIndex: number) => {
     const playableTracks = tracks.filter(isPlayableSong);
@@ -633,8 +642,9 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     setQueueIndex(nextIndex);
     queueIndexRef.current = nextIndex;
     setCurrentSong(nextTrack);
+    consumeLeadingUserQueuedSongId(nextTrack.id);
     setPreviewProgress(0);
-  }, []);
+  }, [consumeLeadingUserQueuedSongId]);
 
   const applyPlayerReadyState = useCallback((ready: boolean) => {
     setIsPlayerReady(ready);
@@ -811,7 +821,20 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     currentSongDurationSeconds || queueSongDurationSeconds || sourceQueueSongDurationSeconds;
   const effectiveTrackDurationSeconds =
     safeTrackDuration > 0 ? safeTrackDuration : fallbackDurationSeconds;
-  const effectivePositionSeconds = seekOverrideSeconds ?? safePosition;
+  const activeSeekOverrideSeconds = useMemo(() => {
+    if (!seekOverride || seekOverride.songId !== (currentSong?.id ?? null)) {
+      return null;
+    }
+
+    const drift = Math.abs(safePosition - seekOverride.seconds);
+    const age = Date.now() - seekOverride.startedAt;
+    if (drift <= 0.35 || age > 2200) {
+      return null;
+    }
+
+    return seekOverride.seconds;
+  }, [currentSong?.id, safePosition, seekOverride]);
+  const effectivePositionSeconds = activeSeekOverrideSeconds ?? safePosition;
   const progress =
     effectiveTrackDurationSeconds > 0
       ? Math.max(0, Math.min(1, effectivePositionSeconds / effectiveTrackDurationSeconds))
@@ -1032,17 +1055,13 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [
+    applyNativeQueueSnapshot,
     autoSyncPositionMs,
-    currentSong?.album,
-    currentSong?.artist,
-    currentSong?.coverUrl,
-    currentSong?.id,
-    currentSong?.title,
+    currentSong,
     isPreviewSession,
     isPlayerReady,
     queue,
     queueIndex,
-    applyNativeQueueSnapshot,
     resolvedDuration,
     resolvedIsPlaying,
   ]);
@@ -1096,14 +1115,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     latestPositionSecondsRef.current = Math.max(0, effectivePositionSeconds);
   }, [effectivePositionSeconds]);
 
-  useEffect(() => {
-    const songId = currentSong?.id;
-    if (!songId) return;
-    if (userQueuedSongIdsRef.current[0] === songId) {
-      replaceUserQueuedSongIds(userQueuedSongIdsRef.current.slice(1));
-    }
-  }, [currentSong?.id, replaceUserQueuedSongIds]);
-
   const persistCurrentPlayerState = useCallback(() => {
     const song = currentSongRef.current;
     if (!song) return;
@@ -1121,7 +1132,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!currentSong) return;
     persistCurrentPlayerState();
-  }, [currentSong?.id, queueIndex, persistCurrentPlayerState]);
+  }, [currentSong, queueIndex, persistCurrentPlayerState]);
 
   useEffect(() => {
     if (!currentSong) return;
@@ -1138,12 +1149,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       sub.remove();
       persistCurrentPlayerState();
     };
-  }, [currentSong?.id, persistCurrentPlayerState]);
-
-  useEffect(() => {
-    if (!isPreviewSession) return;
-    setPreviewProgress(0);
-  }, [currentSong?.id, isPreviewSession]);
+  }, [currentSong, persistCurrentPlayerState]);
 
   const showPlaybackNotice = useCallback((message: string) => {
     const now = Date.now();
@@ -1168,11 +1174,15 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     setSleepTimerState(null);
   }, []);
 
-  const pauseForSleepTimer = useCallback(async () => {
+  const clearSleepTimerTimeout = useCallback(() => {
     if (sleepTimerTimeoutRef.current) {
       clearTimeout(sleepTimerTimeoutRef.current);
       sleepTimerTimeoutRef.current = null;
     }
+  }, []);
+
+  const pauseForSleepTimer = useCallback(async () => {
+    clearSleepTimerTimeout();
     sleepTimerRef.current = null;
     setSleepTimerState(null);
     setRuntimePlaybackStateSnapshot(State.Paused ?? "paused");
@@ -1191,13 +1201,10 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     } catch {
       // Silent fail.
     }
-  }, []);
+  }, [clearSleepTimerTimeout]);
 
   const setSleepTimer = useCallback((selection: SleepTimerSelection) => {
-    if (sleepTimerTimeoutRef.current) {
-      clearTimeout(sleepTimerTimeoutRef.current);
-      sleepTimerTimeoutRef.current = null;
-    }
+    clearSleepTimerTimeout();
 
     if (selection === "end-of-stack") {
       const nextTimer: SleepTimerState = {
@@ -1222,15 +1229,11 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     sleepTimerTimeoutRef.current = setTimeout(() => {
       void pauseForSleepTimer();
     }, Math.max(0, endsAt - Date.now()));
-  }, [pauseForSleepTimer]);
+  }, [clearSleepTimerTimeout, pauseForSleepTimer]);
 
   useEffect(() => {
-    return () => {
-      if (sleepTimerTimeoutRef.current) {
-        clearTimeout(sleepTimerTimeoutRef.current);
-      }
-    };
-  }, []);
+    return clearSleepTimerTimeout;
+  }, [clearSleepTimerTimeout]);
 
   // Wire expo-audio status + error callbacks for runtimes using the lightweight fallback.
   useEffect(() => {
@@ -1393,21 +1396,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   }, [applyNativeQueueSnapshot, applyNativeTrackIndex, applyRuntimeProgressAndState, currentSong?.id, isPlayerReady]);
 
   useEffect(() => {
-    if (seekOverrideSeconds == null) return;
-    const drift = Math.abs(safePosition - seekOverrideSeconds);
-    const age = Date.now() - seekOverrideSinceRef.current;
-    if (drift <= 0.35 || age > 2200) {
-      seekOverrideRef.current = null;
-      setSeekOverrideSeconds(null);
-    }
-  }, [safePosition, seekOverrideSeconds]);
-
-  useEffect(() => {
-    seekOverrideRef.current = null;
-    setSeekOverrideSeconds(null);
-  }, [currentSong?.id]);
-
-  useEffect(() => {
     let mounted = true;
 
     if (!shouldEagerlySetupNativePlayer) {
@@ -1564,7 +1552,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       release = resolve;
     });
 
-    const previous = playbackSwitchChainRef.current;
+    const previous = playbackSwitchChainRef.current ?? Promise.resolve();
     playbackSwitchChainRef.current = previous
       .catch(() => {
         // Keep the chain alive even if a previous switch failed.
@@ -1972,6 +1960,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           setQueueIndex(ni);
           queueIndexRef.current = ni;
           setCurrentSong(cq[ni]);
+          consumeLeadingUserQueuedSongId(cq[ni]?.id);
           updatePlaybackEngineSnapshot({
             currentSong: cq[ni],
             queue: cq,
@@ -2005,6 +1994,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       setQueueIndex(ni);
       queueIndexRef.current = ni;
       setCurrentSong(cq[ni]);
+      consumeLeadingUserQueuedSongId(cq[ni]?.id);
       updatePlaybackEngineSnapshot({
         currentSong: cq[ni],
         queue: cq,
@@ -2040,7 +2030,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       failPendingNativeTrack("Could not skip to next track.");
       // Silent fail
     }
-  }, [ensurePlayerReady, failPendingNativeTrack, isPlayerReady, loadAndPlaySong, markPendingNativeTrack, nativeQueueHasTrackAt, previewRepeatMode, runSerializedPlaybackSwitch]);
+  }, [consumeLeadingUserQueuedSongId, ensurePlayerReady, failPendingNativeTrack, isPlayerReady, loadAndPlaySong, markPendingNativeTrack, nativeQueueHasTrackAt, previewRepeatMode, runSerializedPlaybackSwitch]);
 
   const prevSong = useCallback(async () => {
     try {
@@ -2063,6 +2053,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           setQueueIndex(pi);
           queueIndexRef.current = pi;
           setCurrentSong(cq[pi]);
+          consumeLeadingUserQueuedSongId(cq[pi]?.id);
           updatePlaybackEngineSnapshot({
             currentSong: cq[pi],
             queue: cq,
@@ -2105,6 +2096,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       setQueueIndex(pi);
       queueIndexRef.current = pi;
       setCurrentSong(cq[pi]);
+      consumeLeadingUserQueuedSongId(cq[pi]?.id);
       updatePlaybackEngineSnapshot({
         currentSong: cq[pi],
         queue: cq,
@@ -2140,7 +2132,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       failPendingNativeTrack("Could not skip to previous track.");
       // Silent fail
     }
-  }, [ensurePlayerReady, failPendingNativeTrack, isPlayerReady, loadAndPlaySong, markPendingNativeTrack, nativeQueueHasTrackAt, previewProgress, previewRepeatMode, runSerializedPlaybackSwitch, safePosition]);
+  }, [consumeLeadingUserQueuedSongId, ensurePlayerReady, failPendingNativeTrack, isPlayerReady, loadAndPlaySong, markPendingNativeTrack, nativeQueueHasTrackAt, previewProgress, previewRepeatMode, runSerializedPlaybackSwitch, safePosition]);
 
   const seekTo = useCallback(async (p: number) => {
     let seekRequestId = 0;
@@ -2187,18 +2179,19 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       const posSeconds = Math.max(0, Math.min(seekableDuration, normalizedProgress * seekableDuration));
       seekRequestId = ++seekRequestIdRef.current;
 
-      seekOverrideRef.current = posSeconds;
-      seekOverrideSinceRef.current = Date.now();
-      setSeekOverrideSeconds(posSeconds);
+      setSeekOverride({
+        songId: currentSong?.id ?? null,
+        seconds: posSeconds,
+        startedAt: Date.now(),
+      });
 
       await TrackPlayer.seekTo(posSeconds);
     } catch (error) {
       if (seekRequestId === seekRequestIdRef.current) {
-        seekOverrideRef.current = null;
-        setSeekOverrideSeconds(null);
+        setSeekOverride(null);
       }
     }
-  }, [currentSong?.duration, effectiveTrackDurationSeconds, isPlayerReady, previewDuration]);
+  }, [currentSong?.duration, currentSong?.id, effectiveTrackDurationSeconds, isPlayerReady, previewDuration]);
 
   const toggleShuffle = useCallback(async () => {
     const applyShuffleState = (nextShuffleState: boolean) => {
@@ -2821,13 +2814,13 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   );
 }
 
-export function usePlayer() {
+function usePlayer() {
   const ctx = use(PlayerContext);
   if (!ctx) throw new Error("usePlayer must be used within PlayerProvider");
   return ctx;
 }
 
-export function usePlayerLite() {
+function usePlayerLite() {
   const ctx = use(PlayerLiteContext);
   if (!ctx) throw new Error("usePlayerLite must be used within PlayerProvider");
   return ctx;
@@ -2857,7 +2850,7 @@ export function usePlayerBrowse() {
   return ctx;
 }
 
-export function usePlayerQueue() {
+function usePlayerQueue() {
   const ctx = use(PlayerQueueContext);
   if (!ctx) throw new Error("usePlayerQueue must be used within PlayerProvider");
   return ctx;

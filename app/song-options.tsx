@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   DeviceEventEmitter,
   FlatList,
-  PanResponder,
   Platform,
   Pressable,
   Share,
@@ -11,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -209,63 +209,64 @@ function AddToPlaylistView({
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    async function load() {
-      startPlaylistLoad();
+  const loadPlaylists = useCallback(async () => {
+    startPlaylistLoad();
+    try {
+      const local = await getUserPlaylists();
+      const localMerged: MergedPlaylist[] = local.map((p) => ({
+        ...p,
+        isFirestore: false,
+        coverUrl: p.coverUrl || p.songs?.[0]?.coverUrl || "",
+      }));
+
+      if (!userId) {
+        finishPlaylistLoad(localMerged.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+        return;
+      }
+
+      const firestoreRaw = await getUserFirestorePlaylists(userId);
+      const firestoreIds = new Set(firestoreRaw.map((fp: FirestorePlaylist) => fp.id));
+
+      const firestoreMerged: MergedPlaylist[] = firestoreRaw.map(
+        (fp: FirestorePlaylist): MergedPlaylist => ({
+          id: fp.id,
+          name: fp.name,
+          description: fp.description || "",
+          coverUrl: fp.imageUrl || (fp.songs?.[0] as any)?.imageUrl || "",
+          songs: (fp.songs || []).map((fs: any) => ({
+            id: fs.id,
+            title: fs.title,
+            artist: fs.artist,
+            coverUrl: fs.imageUrl || "",
+            audioUrl: fs.audioUrl || "",
+            duration: fs.duration || 0,
+            album: fs.album || "",
+            genre: "",
+          })),
+          createdAt: 0,
+          updatedAt: 0,
+          isFirestore: true,
+        })
+      );
+
+      const localOnly = localMerged.filter((p) => !firestoreIds.has(p.id));
+      const merged = [...firestoreMerged, ...localOnly].sort(
+        (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
+      );
+      finishPlaylistLoad(merged);
+    } catch {
       try {
         const local = await getUserPlaylists();
-        const localMerged: MergedPlaylist[] = local.map((p) => ({
-          ...p,
-          isFirestore: false,
-          coverUrl: p.coverUrl || p.songs?.[0]?.coverUrl || "",
-        }));
-
-        if (!userId) {
-          finishPlaylistLoad(localMerged.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
-          return;
-        }
-
-        const firestoreRaw = await getUserFirestorePlaylists(userId);
-        const firestoreIds = new Set(firestoreRaw.map((fp: FirestorePlaylist) => fp.id));
-
-        const firestoreMerged: MergedPlaylist[] = firestoreRaw.map(
-          (fp: FirestorePlaylist): MergedPlaylist => ({
-            id: fp.id,
-            name: fp.name,
-            description: fp.description || "",
-            coverUrl: fp.imageUrl || (fp.songs?.[0] as any)?.imageUrl || "",
-            songs: (fp.songs || []).map((fs: any) => ({
-              id: fs.id,
-              title: fs.title,
-              artist: fs.artist,
-              coverUrl: fs.imageUrl || "",
-              audioUrl: fs.audioUrl || "",
-              duration: fs.duration || 0,
-              album: fs.album || "",
-              genre: "",
-            })),
-            createdAt: 0,
-            updatedAt: 0,
-            isFirestore: true,
-          })
-        );
-
-        const localOnly = localMerged.filter((p) => !firestoreIds.has(p.id));
-        const merged = [...firestoreMerged, ...localOnly].sort(
-          (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
-        );
-        finishPlaylistLoad(merged);
+        finishPlaylistLoad(local.map((p) => ({ ...p, isFirestore: false })));
       } catch {
-        try {
-          const local = await getUserPlaylists();
-          finishPlaylistLoad(local.map((p) => ({ ...p, isFirestore: false })));
-        } catch {
-          finishPlaylistLoad([]);
-        }
+        finishPlaylistLoad([]);
       }
     }
-    void load();
   }, [finishPlaylistLoad, startPlaylistLoad, userId]);
+
+  useEffect(() => {
+    void loadPlaylists();
+  }, [loadPlaylists]);
 
   const handleAdd = useCallback(
     async (playlist: MergedPlaylist) => {
@@ -496,22 +497,22 @@ export default function SongOptionsScreen() {
   const liked = song ? isLiked(song.id) : false;
 
   const bottomPad = Math.max(insets.bottom + 8, 20);
-  const androidSwipeResponder = useRef(
-    Platform.OS === "android"
-      ? PanResponder.create({
-          onStartShouldSetPanResponder: () => false,
-          onMoveShouldSetPanResponder: (_, gestureState) => {
-            const { dx, dy } = gestureState;
-            return dy > 10 && Math.abs(dy) > Math.abs(dx) * 1.5;
-          },
-          onPanResponderRelease: (_, gestureState) => {
-            if (gestureState.dy > 80 || (gestureState.dy > 40 && gestureState.vy > 0.5)) {
-              safeGoBack();
-            }
-          },
-        })
-      : null
-  ).current;
+  const androidSheetSwipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(Platform.OS === "android")
+        .runOnJS(true)
+        .onEnd((event) => {
+          const isDownwardSwipe =
+            event.translationY > 80 ||
+            (event.translationY > 40 && event.velocityY > 500);
+          const isMostlyVertical = Math.abs(event.translationY) > Math.abs(event.translationX) * 1.5;
+          if (isDownwardSwipe && isMostlyVertical) {
+            safeGoBack();
+          }
+        }),
+    []
+  );
 
   const closeThen = useCallback((action: () => void | Promise<void>) => {
     safeGoBack();
@@ -694,33 +695,32 @@ export default function SongOptionsScreen() {
     <View style={styles.root}>
       <View style={styles.sheet}>
         {/* Grabber + song header */}
-        <View
-          style={styles.headerContent}
-          {...(androidSwipeResponder ? androidSwipeResponder.panHandlers : {})}
-        >
-          <View style={styles.grabber} />
-          <View style={styles.songHeader}>
-            {song.coverUrl ? (
-              <Image
-                recyclingKey={`options-${song.id}`}
-                source={{ uri: song.coverUrl }}
-                style={styles.artwork}
-                contentFit="cover"
-              />
-            ) : (
-              <View style={[styles.artwork, styles.artworkFallback]}>
-                <Ionicons name="musical-note" size={22} color="#AFAFAF" />
+        <GestureDetector gesture={androidSheetSwipeGesture}>
+          <View style={styles.headerContent}>
+            <View style={styles.grabber} />
+            <View style={styles.songHeader}>
+              {song.coverUrl ? (
+                <Image
+                  recyclingKey={`options-${song.id}`}
+                  source={{ uri: song.coverUrl }}
+                  style={styles.artwork}
+                  contentFit="cover"
+                />
+              ) : (
+                <View style={[styles.artwork, styles.artworkFallback]}>
+                  <Ionicons name="musical-note" size={22} color="#AFAFAF" />
+                </View>
+              )}
+              <View style={styles.songText}>
+                <Text style={styles.songTitle} numberOfLines={1}>{song.title}</Text>
+                <Text style={styles.songSubtitle} numberOfLines={1}>
+                  {song.artist || "Unknown Artist"}
+                  {song.album ? ` • ${song.album}` : ""}
+                </Text>
               </View>
-            )}
-            <View style={styles.songText}>
-              <Text style={styles.songTitle} numberOfLines={1}>{song.title}</Text>
-              <Text style={styles.songSubtitle} numberOfLines={1}>
-                {song.artist || "Unknown Artist"}
-                {song.album ? ` • ${song.album}` : ""}
-              </Text>
             </View>
           </View>
-        </View>
+        </GestureDetector>
 
         <View style={styles.divider} />
 

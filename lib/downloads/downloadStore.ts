@@ -185,7 +185,7 @@ export async function saveDownloadPreferences(prefs: DownloadPreferences): Promi
 
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
 
-export async function clearAllDownloads(): Promise<void> {
+async function clearAllDownloads(): Promise<void> {
   try {
     const ids = await readIndex();
     const keys = ids.map(itemKey);

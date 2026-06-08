@@ -35,6 +35,12 @@ import { triggerImpact } from "@/lib/haptics";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { getFollowedArtists, FollowedArtist } from "@/lib/followedArtists";
 import OfflineBanner from "@/components/OfflineBanner";
+import AppTopHeader, {
+  APP_TOP_HEADER_HEIGHT,
+  AppTopHeaderIconButton,
+  AppTopHeaderProfileButton,
+  useAppTopHeaderScrollElevation,
+} from "@/components/AppTopHeader";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { sortedCopy } from "@/lib/arrayUtils";
 
@@ -95,6 +101,35 @@ function getGridPattern(id: string, index: number) {
   return seed % 5;
 }
 
+function openLibrarySearch() {
+  void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+  router.push("/(tabs)/search");
+}
+
+function openLikedSongs() {
+  void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+  router.push("/(tabs)/liked-songs");
+}
+
+function openLibraryPlaylist(playlist: DisplayPlaylist) {
+  void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+  router.push({
+    pathname: "/playlist/[id]",
+    params: {
+      id: playlist.id,
+      firestore: playlist.isFirestore ? "true" : "false",
+      jiosaavn: "false",
+      title: playlist.name,
+      description: playlist.description || "",
+      cover: playlist.coverUrl || "",
+      songCount: String(playlist.songs?.length || 0),
+    },
+  }, {
+    withAnchor: true,
+    dangerouslySingular: () => "playlist-details",
+  });
+}
+
 export default function LibraryScreen() {
   return useLibraryScreenView();
 }
@@ -121,9 +156,15 @@ function useLibraryScreenView() {
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const {
+    isHeaderElevated,
+    handleHeaderScroll,
+  } = useAppTopHeaderScrollElevation();
 
   // Animated opacity for the chip row — fades when a filter is active
-  const chipRowOpacity = useRef(new Animated.Value(1)).current;
+  const chipRowOpacityRef = useRef<Animated.Value | null>(null);
+  if (chipRowOpacityRef.current === null) chipRowOpacityRef.current = new Animated.Value(1);
+  const chipRowOpacity = chipRowOpacityRef.current;
   const prevFilter = useRef<Filter>(null);
 
   // Animate chip row on filter change
@@ -356,39 +397,10 @@ function useLibraryScreenView() {
     ]);
   };
 
-  const handleAddPress = () => {
+  const handleAddPress = useCallback(() => {
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
     setShowCreateModal(true);
-  };
-
-  const handleSearchPress = () => {
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-    router.push("/(tabs)/search");
-  };
-
-  const handleLikedPress = () => {
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-    router.push("/(tabs)/liked-songs");
-  };
-
-  const handlePlaylistPress = (playlist: DisplayPlaylist) => {
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-    router.push({
-      pathname: "/playlist/[id]",
-      params: {
-        id: playlist.id,
-        firestore: playlist.isFirestore ? "true" : "false",
-        jiosaavn: "false",
-        title: playlist.name,
-        description: playlist.description || "",
-        cover: playlist.coverUrl || "",
-        songCount: String(playlist.songs?.length || 0),
-      },
-    }, {
-      withAnchor: true,
-      dangerouslySingular: () => "playlist-details",
-    });
-  };
+  }, []);
 
   const filteredPlaylists = useMemo(() => playlists, [playlists]);
   const totalTrackCount = useMemo(
@@ -425,7 +437,7 @@ function useLibraryScreenView() {
     return (
       <Pressable
         style={({ pressed }) => [styles.playlistCard, pressed && styles.pressed]}
-        onPress={() => handlePlaylistPress(item)}
+        onPress={() => openLibraryPlaylist(item)}
         onLongPress={() => handleDeletePlaylist(item)}
       >
         {item.coverUrl ? (
@@ -510,7 +522,7 @@ function useLibraryScreenView() {
           rotationStyle,
           pressed && styles.pressed,
         ]}
-        onPress={() => handlePlaylistPress(item)}
+        onPress={() => openLibraryPlaylist(item)}
         onLongPress={() => handleDeletePlaylist(item)}
       >
         {item.coverUrl ? (
@@ -541,37 +553,27 @@ function useLibraryScreenView() {
     );
   };
 
-  const ListHeaderComponent = (
-    <View style={[styles.headerBlock, { paddingTop: topInset + 2 }]}>
-      <View style={styles.headerRow}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.headerTitle}>Your Library</Text>
-        </View>
-        <View style={styles.headerActions}>
-          <Pressable 
-            style={({ pressed }) => [
-              styles.headerActionButton,
-              pressed && styles.headerActionButtonPressed
-            ]}
-            onPress={handleSearchPress} 
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Ionicons name="search-outline" size={20} color={UI.text} />
-          </Pressable>
-          <Pressable 
-            style={({ pressed }) => [
-              styles.headerActionButton, 
-              styles.headerActionButtonPrimary,
-              pressed && styles.headerActionButtonPressed
-            ]}
-            onPress={handleAddPress} 
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Ionicons name="add" size={22} color={UI.onPrimary} />
-          </Pressable>
-        </View>
-      </View>
+  const libraryHeaderActions = (
+    <View style={styles.topHeaderActions}>
+      <AppTopHeaderIconButton
+        iconName="search-outline"
+        accessibilityLabel="Search library"
+        onPress={openLibrarySearch}
+        haptic={false}
+      />
+      <AppTopHeaderIconButton
+        iconName="add"
+        accessibilityLabel="Create playlist"
+        onPress={handleAddPress}
+        iconSize={22}
+        variant="primary"
+        haptic={false}
+      />
+    </View>
+  );
 
+  const ListHeaderComponent = (
+    <View style={[styles.headerBlock, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 12 }]}>
       <Animated.View style={[styles.filterAndToggleRow, { opacity: chipRowOpacity }]}>
         {/* Chips — show × on left when active, tap active chip to deselect */}
         <View style={styles.filterRow}>
@@ -603,7 +605,7 @@ function useLibraryScreenView() {
             onPress={() => {
               if (filter === "favorite") { setFilter(null); return; }
               setFilter("favorite");
-              handleLikedPress();
+              openLikedSongs();
             }}
           >
             {filter === "favorite" ? (
@@ -630,7 +632,7 @@ function useLibraryScreenView() {
         </View>
       </Animated.View>
 
-      <Pressable style={styles.likedCard} onPress={handleLikedPress}>
+      <Pressable style={styles.likedCard} onPress={openLikedSongs}>
         <LinearGradient colors={[UI.likedFrom, UI.likedTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.likedCardGradient}>
           <Ionicons name="heart" size={82} color="rgba(223, 226, 235, 0.18)" style={styles.likedHeartBackdrop} />
           <Text style={styles.likedTitle}>Liked Songs</Text>
@@ -691,14 +693,17 @@ function useLibraryScreenView() {
     </View>
   );
 
-  const ListEmptyComponent = (
-    <View style={styles.emptyState}>
-      <Ionicons name="albums-outline" size={40} color={UI.subtext} />
-      <Text style={styles.emptyTitle}>No playlists yet</Text>
-      <Pressable style={styles.emptyButton} onPress={handleAddPress}>
-        <Text style={styles.emptyButtonText}>Create Playlist</Text>
-      </Pressable>
-    </View>
+  const ListEmptyComponent = useMemo(
+    () => (
+      <View style={styles.emptyState}>
+        <Ionicons name="albums-outline" size={40} color={UI.subtext} />
+        <Text style={styles.emptyTitle}>No playlists yet</Text>
+        <Pressable style={styles.emptyButton} onPress={handleAddPress}>
+          <Text style={styles.emptyButtonText}>Create Playlist</Text>
+        </Pressable>
+      </View>
+    ),
+    [handleAddPress]
   );
 
   const ListFooterComponent = (
@@ -745,12 +750,34 @@ function useLibraryScreenView() {
     </View>
   );
 
+  const refreshControl = useMemo(
+    () => (
+      <RefreshControl
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
+        tintColor={UI.primary}
+        colors={[UI.primary]}
+        progressViewOffset={topInset + APP_TOP_HEADER_HEIGHT}
+      />
+    ),
+    [handleRefresh, refreshing, topInset]
+  );
+
   if (isLoading && playlists.length === 0) {
     return (
-      <View style={[styles.container, styles.loadingScreen, { paddingTop: topInset + 20 }]}>
+      <View style={[styles.container, styles.loadingScreen, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 20 }]}>
         <LinearGradient
           colors={[Colors.backgroundGradientStart, Colors.background, Colors.background]}
           style={StyleSheet.absoluteFillObject}
+        />
+        <AppTopHeader
+          topInset={topInset}
+          elevated={isHeaderElevated}
+          title="Your Library"
+          left={<AppTopHeaderProfileButton />}
+          leftWidth={88}
+          rightWidth={88}
+          right={libraryHeaderActions}
         />
         <ActivityIndicator size="large" color={UI.primary} />
         <Text style={styles.loadingText}>Loading your library…</Text>
@@ -785,18 +812,22 @@ function useLibraryScreenView() {
         ListHeaderComponent={ListHeaderComponent}
         ListEmptyComponent={ListEmptyComponent}
         ListFooterComponent={ListFooterComponent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={UI.primary}
-            colors={[UI.primary]}
-          />
-        }
+        refreshControl={refreshControl}
+        onScroll={handleHeaderScroll}
+        scrollEventThrottle={16}
         initialNumToRender={8}
         maxToRenderPerBatch={8}
         windowSize={7}
         removeClippedSubviews={false}
+      />
+      <AppTopHeader
+        topInset={topInset}
+        elevated={isHeaderElevated}
+        title="Your Library"
+        left={<AppTopHeaderProfileButton />}
+        leftWidth={88}
+        rightWidth={88}
+        right={libraryHeaderActions}
       />
 
       <Modal
@@ -927,6 +958,11 @@ const styles = StyleSheet.create({
     lineHeight: 36,
     letterSpacing: -0.6,
     fontFamily: "Inter_800ExtraBold",
+  },
+  topHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   headerActions: {
     flexDirection: "row",

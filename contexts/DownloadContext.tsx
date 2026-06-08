@@ -163,24 +163,35 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
 
   // ─── Initialization ─────────────────────────────────────────────────────────
 
-  const initialize = useCallback(async () => {
-    try {
-      const [allItems, prefs] = await Promise.all([
-        getAllDownloads(),
-        loadDownloadPreferences(),
-      ]);
-      downloadItemStore.seed(allItems);
-      setPreferences(prefs);
-      setIsInitialized(true);
-    } catch (err) {
-      logger.error("[DownloadContext] initialize failed", err);
-      setIsInitialized(true);
-    }
-  }, []);
-
   useEffect(() => {
-    initialize();
-  }, [initialize]);
+    let isMounted = true;
+
+    const initialize = async () => {
+      try {
+        const [allItems, prefs, summary] = await Promise.all([
+          getAllDownloads(),
+          loadDownloadPreferences(),
+          getStorageSummary(),
+        ]);
+
+        if (!isMounted) return;
+        downloadItemStore.seed(allItems);
+        setPreferences(prefs);
+        setStorageSummary(summary);
+        setIsInitialized(true);
+      } catch (err) {
+        if (!isMounted) return;
+        logger.error("[DownloadContext] initialize failed", err);
+        setIsInitialized(true);
+      }
+    };
+
+    void initialize();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // ─── Entitlement refresh ────────────────────────────────────────────────────
 
@@ -262,10 +273,6 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     const summary = await getStorageSummary();
     setStorageSummary(summary);
   }, []);
-
-  useEffect(() => {
-    if (isInitialized) refreshSummary();
-  }, [isInitialized, refreshSummary]);
 
   // ─── Actions ────────────────────────────────────────────────────────────────
 

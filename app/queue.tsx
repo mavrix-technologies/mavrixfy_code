@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   InteractionManager,
-  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -17,7 +16,7 @@ import DraggableFlatList, {
   ScaleDecorator,
   type RenderItemParams,
 } from "react-native-draggable-flatlist";
-import { Swipeable } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, Swipeable } from "react-native-gesture-handler";
 import Colors from "@/constants/colors";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackQueueState, usePlaybackPlayState } from "@/lib/playbackEngine";
@@ -252,81 +251,80 @@ export default function QueueScreen() {
     );
   }, [handleSongPress, handleSwipeOpen, removeFromQueue]);
 
-  const androidSwipeResponder = useRef(
-    Platform.OS === "android"
-      ? PanResponder.create({
-          onStartShouldSetPanResponder: () => false,
-          onMoveShouldSetPanResponder: (_, gestureState) => {
-            const { dx, dy } = gestureState;
-            return dy > 10 && Math.abs(dy) > Math.abs(dx) * 1.5;
-          },
-          onPanResponderRelease: (_, gestureState) => {
-            if (gestureState.dy > 80 || (gestureState.dy > 40 && gestureState.vy > 0.5)) {
-              router.back();
-            }
-          },
-        })
-      : null
-  ).current;
+  const androidSheetSwipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(Platform.OS === "android")
+        .runOnJS(true)
+        .onEnd((event) => {
+          const isDownwardSwipe =
+            event.translationY > 80 ||
+            (event.translationY > 40 && event.velocityY > 500);
+          const isMostlyVertical = Math.abs(event.translationY) > Math.abs(event.translationX) * 1.5;
+          if (isDownwardSwipe && isMostlyVertical) {
+            router.back();
+          }
+        }),
+    []
+  );
 
   const keyExtractor = useCallback((item: DraggableQueueItem) => item.key, []);
 
   return (
     <View style={[styles.root, Platform.OS === "android" && { maxHeight: height * 0.85 }]}>
       <View style={styles.sheet}>
-        <View
-          style={styles.headerContent}
-          {...(androidSwipeResponder ? androidSwipeResponder.panHandlers : {})}
-        >
-          <View style={styles.grabber} />
+        <GestureDetector gesture={androidSheetSwipeGesture}>
+          <View style={styles.headerContent}>
+            <View style={styles.grabber} />
 
-          <Text style={styles.title}>Queue</Text>
-          <Text style={styles.subtitle}>Playing Queue</Text>
+            <Text style={styles.title}>Queue</Text>
+            <Text style={styles.subtitle}>Playing Queue</Text>
 
-          {nowPlaying ? (
-            <Pressable
-              style={({ pressed }) => [styles.nowPlayingRow, pressed && styles.rowPressed]}
-              onPress={() => router.push("/player")}
-            >
-              <Image
-                recyclingKey={nowPlaying.id}
-                source={{ uri: nowPlaying.coverUrl }}
-                style={styles.nowArtwork}
-                contentFit="cover"
-              />
-              <View style={styles.nowText}>
-                <Text style={styles.nowTitle} numberOfLines={1}>
-                  {nowPlaying.title}
-                </Text>
-                <View style={styles.nowMetaRow}>
-                  <Ionicons name="list" size={20} color={Colors.primary} />
-                  <Text style={styles.nowArtist} numberOfLines={1}>
-                    {nowPlaying.artist || "Unknown Artist"}
-                  </Text>
-                </View>
-              </View>
+            {nowPlaying ? (
               <Pressable
-                onPress={togglePlay}
-                hitSlop={10}
-                style={styles.playButton}
+                style={({ pressed }) => [styles.nowPlayingRow, pressed && styles.rowPressed]}
+                onPress={() => router.push("/player")}
               >
-                <Ionicons
-                  name={isPlaying ? "pause" : "play"}
-                  size={34}
-                  color="#111111"
-                  style={!isPlaying ? { marginLeft: 2 } : undefined}
+                <Image
+                  recyclingKey={nowPlaying.id}
+                  source={{ uri: nowPlaying.coverUrl }}
+                  style={styles.nowArtwork}
+                  contentFit="cover"
                 />
+                <View style={styles.nowText}>
+                  <Text style={styles.nowTitle} numberOfLines={1}>
+                    {nowPlaying.title}
+                  </Text>
+                  <View style={styles.nowMetaRow}>
+                    <Ionicons name="list" size={20} color={Colors.primary} />
+                    <Text style={styles.nowArtist} numberOfLines={1}>
+                      {nowPlaying.artist || "Unknown Artist"}
+                    </Text>
+                  </View>
+                </View>
+                <Pressable
+                  onPress={togglePlay}
+                  hitSlop={10}
+                  style={styles.playButton}
+                >
+                  <Ionicons
+                    name={isPlaying ? "pause" : "play"}
+                    size={34}
+                    color="#111111"
+                    style={!isPlaying ? { marginLeft: 2 } : undefined}
+                  />
+                </Pressable>
               </Pressable>
-            </Pressable>
-          ) : null}
+            ) : null}
 
-          {upcomingQueue.length > 0 && isShuffled ? (
-            <View style={styles.shufflingRow}>
-              <Ionicons name="shuffle" size={23} color="#BEBEBE" />
-              <Text style={styles.shufflingText}>Shuffling from:</Text>
+            {upcomingQueue.length > 0 && isShuffled ? (
+              <View style={styles.shufflingRow}>
+                <Ionicons name="shuffle" size={23} color="#BEBEBE" />
+                <Text style={styles.shufflingText}>Shuffling from:</Text>
+              </View>
+            ) : null}
             </View>
-          ) : null}
-        </View>
+        </GestureDetector>
 
         <View style={styles.listWrap}>
           {listReady ? (

@@ -114,7 +114,7 @@ function normalizeVideoItem(value: unknown, index: number): HomeHeroVideoItem | 
   };
 }
 
-export function normalizeHomeHeroConfig(data: unknown): HomeHeroConfig {
+function normalizeHomeHeroConfig(data: unknown): HomeHeroConfig {
   const record = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
   const title = toTrimmedString(record.title) || DEFAULT_HOME_HERO_CONFIG.title;
   const videoUrl = toTrimmedString(record.videoUrl) || DEFAULT_HOME_HERO_CONFIG.videoUrl;

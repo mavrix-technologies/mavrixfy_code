@@ -36,7 +36,7 @@ export function normalizeText(text: string): string {
   return normalized;
 }
 
-export function detectVersionType(title: string): {
+function detectVersionType(title: string): {
   isOriginal: boolean;
   penalty: number;
   versionType: string;
@@ -60,7 +60,7 @@ export function detectVersionType(title: string): {
   return { isOriginal: true, penalty: 0, versionType: "original" };
 }
 
-export function detectQueryIntent(query: string): {
+function detectQueryIntent(query: string): {
   intent: "exact_lookup" | "broad_search";
   isModified: boolean;
 } {
@@ -73,7 +73,7 @@ export function detectQueryIntent(query: string): {
   return { intent: "broad_search", isModified: hasModifiers };
 }
 
-export function calculateTextMatchScore(
+function calculateTextMatchScore(
   songTitle: string,
   songArtist: string,
   query: string
@@ -117,7 +117,7 @@ export function calculateTextMatchScore(
  *   10K  plays → 15
  *   1K   plays → 7
  */
-export function calculatePopularityScore(song: Song): number {
+function calculatePopularityScore(song: Song): number {
   if (song.playCount && song.playCount > 0) {
     return Math.min(50, Math.max(0, (Math.log10(song.playCount) / 9) * 50));
   }
@@ -139,7 +139,7 @@ export function calculatePopularityScore(song: Song): number {
  * Uses JioSaavn playCount as the primary popularity signal and
  * title pattern matching for version-type detection.
  */
-export function calculateFinalScore(
+function calculateFinalScore(
   song: Song,
   query: string,
   queryIntent: ReturnType<typeof detectQueryIntent>
@@ -255,7 +255,7 @@ export function parseStructuredQuery(query: string): ParsedQuery {
   return parsed;
 }
 
-export const DEFAULT_WEIGHTS = {
+const DEFAULT_WEIGHTS = {
   exactMatch: 100, startsWithMatch: 50, containsMatch: 20,
   originalBoost: 30, remixPenalty: -25, lofiPenalty: -25,
   slowedPenalty: -25, coverPenalty: -20, livePenalty: -12,

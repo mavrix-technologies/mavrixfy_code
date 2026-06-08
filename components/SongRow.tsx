@@ -31,6 +31,7 @@ interface Props {
   playlistSource?: "local" | "firestore";
   playlistName?: string;
   onRemove?: () => void;
+  onSongPress?: (song: Song) => void;
   horizontalPadding?: number;
 }
 
@@ -106,6 +107,7 @@ const SongRow = memo(function SongRow({
   playlistSource,
   playlistName,
   onRemove,
+  onSongPress,
   horizontalPadding,
 }: Props) {
   const { playSong, currentSongId, isPlaying, addToQueue } = usePlayerRow();
@@ -116,21 +118,25 @@ const SongRow = memo(function SongRow({
   const optionOpenLockRef = useRef(false);
   const optionOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const clearPendingTimers = useCallback(() => {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+    if (optionOpenTimerRef.current) {
+      clearTimeout(optionOpenTimerRef.current);
+      optionOpenTimerRef.current = null;
+    }
+  }, []);
+
   // Close swipeable on unmount — prevents stuck-open state when navigating back
   useEffect(() => {
     const swipeable = swipeableRef.current;
     return () => {
-      if (resetTimerRef.current) {
-        clearTimeout(resetTimerRef.current);
-        resetTimerRef.current = null;
-      }
-      if (optionOpenTimerRef.current) {
-        clearTimeout(optionOpenTimerRef.current);
-        optionOpenTimerRef.current = null;
-      }
+      clearPendingTimers();
       swipeable?.close();
     };
-  }, []);
+  }, [clearPendingTimers]);
 
   const resetSwipeStateSoon = useCallback(() => {
     if (resetTimerRef.current) {
@@ -181,6 +187,7 @@ const SongRow = memo(function SongRow({
   const handlePress = () => {
     if (didSwipeRef.current) return;
     void triggerImpact(ImpactFeedbackStyle.Light);
+    onSongPress?.(song);
     playSong(song, queue || [song]);
   };
 
@@ -340,6 +347,7 @@ const SongRow = memo(function SongRow({
     prevProps.playlistSource === nextProps.playlistSource &&
     prevProps.playlistName === nextProps.playlistName &&
     prevProps.horizontalPadding === nextProps.horizontalPadding &&
+    prevProps.onSongPress === nextProps.onSongPress &&
     Boolean(prevProps.onRemove) === Boolean(nextProps.onRemove) &&
     queueSignature(prevProps.queue) === queueSignature(nextProps.queue)
   );

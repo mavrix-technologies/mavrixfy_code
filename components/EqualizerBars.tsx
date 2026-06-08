@@ -39,7 +39,9 @@ function Bar({
 }) {
   const minScale = minH / maxH;
   const pausedScale = (minH + 1) / maxH;
-  const scale = useRef(new Animated.Value(minScale)).current;
+  const scaleRef = useRef<Animated.Value | null>(null);
+  if (scaleRef.current === null) scaleRef.current = new Animated.Value(minScale);
+  const scale = scaleRef.current;
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {

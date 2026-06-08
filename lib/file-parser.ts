@@ -5,7 +5,7 @@ import { ParsedSong, FileParseResult } from "@/types/import";
  * Handles quoted fields, multiple formats, and headers
  * Enhanced to support Spotify export format with Track URI, ISRC, etc.
  */
-export function parseCSV(content: string): FileParseResult {
+function parseCSV(content: string): FileParseResult {
   const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
   const songs: ParsedSong[] = [];
   const errors: string[] = [];
@@ -157,7 +157,7 @@ export function parseCSV(content: string): FileParseResult {
  * Parse TXT file content
  * Handles multiple separators: -, by, tab
  */
-export function parseTXT(content: string): FileParseResult {
+function parseTXT(content: string): FileParseResult {
   const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
   const songs: ParsedSong[] = [];
   const errors: string[] = [];
