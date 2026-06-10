@@ -22,9 +22,6 @@ export function isExpoGoRuntime() {
 }
 
 async function getNotifications(): Promise<NotificationsModule | null> {
-  if (isExpoGoRuntime()) {
-    return null;
-  }
 
   notificationsPromise ??= import("expo-notifications");
   const Notifications = await notificationsPromise;

@@ -23,6 +23,7 @@ import android.text.Html
 import android.util.Log
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaDescriptionCompat
+import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
@@ -395,6 +396,7 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
     private var phonePlaybackArtUrl = ""
     private var phonePlaybackDurationMs = 0L
     private var phonePlaybackPositionMs = 0L
+    private var phonePlaybackIsPlaying = false
     private var currentAutoQueue: List<AutoSong> = emptyList()
     private var currentAutoQueueIndex = -1
 
@@ -416,7 +418,13 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
                     Log.d(TAG, "AutoSession: onPlay")
-                    playDefaultPlaylist()
+                    if (phonePlaybackActive) {
+                        phonePlaybackIsPlaying = true
+                        updatePlaybackState(isPlaying = true, positionMs = phonePlaybackPositionMs)
+                        AutoMediaModule.emitRemoteCommand(applicationContext, "play")
+                    } else {
+                        playDefaultPlaylist()
+                    }
                 }
 
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
@@ -426,6 +434,8 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
 
                 override fun onPause() {
                     Log.d(TAG, "AutoSession: onPause")
+                    phonePlaybackIsPlaying = false
+                    updatePlaybackState(isPlaying = false, positionMs = phonePlaybackPositionMs)
                     AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
                 }
 
@@ -441,6 +451,8 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
 
                 override fun onStop() {
                     Log.d(TAG, "AutoSession: onStop")
+                    phonePlaybackIsPlaying = false
+                    updatePlaybackState(isPlaying = false, positionMs = phonePlaybackPositionMs)
                     AutoMediaModule.emitRemoteCommand(applicationContext, "pause")
                 }
 
@@ -466,15 +478,7 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
             })
             setPlaybackState(
                 PlaybackStateCompat.Builder()
-                    .setActions(
-                        PlaybackStateCompat.ACTION_PLAY or
-                            PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
-                            PlaybackStateCompat.ACTION_PAUSE or
-                            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                            PlaybackStateCompat.ACTION_SEEK_TO or
-                            PlaybackStateCompat.ACTION_SKIP_TO_QUEUE_ITEM
-                    )
+                    .setActions(playbackActions())
                     .setState(PlaybackStateCompat.STATE_NONE, 0L, 1f)
                     .build()
             )
@@ -766,7 +770,7 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         return MediaBrowserCompat.MediaItem(description, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE)
     }
 
-    private fun AutoSong.toMediaItem(): MediaBrowserCompat.MediaItem {
+    private fun AutoSong.toSessionDescription(): MediaDescriptionCompat {
         val extras = Bundle().apply {
             putInt(
                 DESCRIPTION_EXTRAS_KEY_CONTENT_STYLE_PLAYABLE,
@@ -782,7 +786,11 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
 
         artUrl?.takeIf { it.isNotBlank() }?.let { builder.setIconUri(Uri.parse(it)) }
 
-        return MediaBrowserCompat.MediaItem(builder.build(), MediaBrowserCompat.MediaItem.FLAG_PLAYABLE)
+        return builder.build()
+    }
+
+    private fun AutoSong.toMediaItem(): MediaBrowserCompat.MediaItem {
+        return MediaBrowserCompat.MediaItem(toSessionDescription(), MediaBrowserCompat.MediaItem.FLAG_PLAYABLE)
     }
 
     private fun AutoPlaylist.toChildren(songs: List<AutoSong>): List<MediaBrowserCompat.MediaItem> {
@@ -1064,6 +1072,15 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         phonePlaybackArtUrl = selectedSong.artUrl.orEmpty()
         phonePlaybackDurationMs = selectedSong.durationSeconds.coerceAtLeast(0L) * 1000L
         phonePlaybackPositionMs = 0L
+        phonePlaybackIsPlaying = true
+
+        updateAutoSessionForSong(
+            song = selectedSong,
+            queue = orderedQueue,
+            activeIndex = currentAutoQueueIndex,
+            isPlaying = true,
+            positionMs = 0L
+        )
 
         AutoMediaModule.emitRemoteCommand(
             context = applicationContext,
@@ -1140,6 +1157,9 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         phonePlaybackArtUrl = cleanUrl(artUrl)
         phonePlaybackDurationMs = durationMs.coerceAtLeast(0L)
         phonePlaybackPositionMs = positionMs.coerceAtLeast(0L)
+        phonePlaybackIsPlaying = isPlaying
+        phonePlaybackActive = phonePlaybackTitle.isNotBlank()
+        updateAutoSessionFromPhonePlayback()
     }
 
     private fun handlePhonePlaybackSync(intent: Intent) {
@@ -1167,6 +1187,7 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         songs.forEach { songCache[it.mediaId] = it }
         currentAutoQueue = songs
         Log.i(TAG, "synced playback queue size=${songs.size} activeIndex=$currentAutoQueueIndex mediaId=$phonePlaybackMediaId")
+        if (phonePlaybackActive) updateAutoSessionFromPhonePlayback()
     }
 
     private fun handlePhoneQueueSync(intent: Intent) {
@@ -1186,6 +1207,104 @@ class MavrixfyAutoService : MediaBrowserServiceCompat() {
         phonePlaybackArtUrl = ""
         phonePlaybackDurationMs = 0L
         phonePlaybackPositionMs = 0L
+        phonePlaybackIsPlaying = false
+        updatePlaybackState(isPlaying = false, positionMs = 0L)
+    }
+
+    private fun updateAutoSessionFromPhonePlayback() {
+        if (!phonePlaybackActive || phonePlaybackTitle.isBlank()) return
+        val activeSong = currentAutoQueue.firstOrNull { it.mediaId == phonePlaybackMediaId }
+        val song = activeSong ?: AutoSong(
+            mediaId = phonePlaybackMediaId.ifBlank { "phone" },
+            title = phonePlaybackTitle,
+            artist = phonePlaybackArtist.ifBlank { "Mavrixfy" },
+            album = phonePlaybackAlbum,
+            durationSeconds = phonePlaybackDurationMs.coerceAtLeast(0L) / 1000L,
+            audioUrl = "",
+            artUrl = phonePlaybackArtUrl.takeIf { it.isNotBlank() }
+        )
+        val queue = currentAutoQueue.takeIf { it.isNotEmpty() } ?: listOf(song)
+        val activeIndex = queue.indexOfFirst { it.mediaId == song.mediaId }.takeIf { it >= 0 }
+            ?: currentAutoQueueIndex.coerceAtLeast(0)
+
+        updateAutoSessionForSong(
+            song = song,
+            queue = queue,
+            activeIndex = activeIndex,
+            isPlaying = phonePlaybackIsPlaying,
+            positionMs = phonePlaybackPositionMs
+        )
+    }
+
+    private fun updateAutoSessionForSong(
+        song: AutoSong,
+        queue: List<AutoSong>,
+        activeIndex: Int,
+        isPlaying: Boolean,
+        positionMs: Long
+    ) {
+        if (!::autoMediaSession.isInitialized) return
+        mainHandler.post {
+            val durationMs = song.durationSeconds.coerceAtLeast(0L) * 1000L
+            val metadata = MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, song.mediaId)
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, song.title)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, song.artist)
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, song.album)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, song.title)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, song.artist)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, song.album)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs)
+                .apply {
+                    song.artUrl?.takeIf { it.isNotBlank() }?.let { artUrl ->
+                        putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, artUrl)
+                        putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, artUrl)
+                    }
+                }
+                .build()
+            val queueItems = queue
+                .ifEmpty { listOf(song) }
+                .mapIndexed { index, item ->
+                    MediaSessionCompat.QueueItem(item.toSessionDescription(), index.toLong())
+                }
+
+            autoMediaSession.setQueueTitle("Mavrixfy")
+            autoMediaSession.setQueue(queueItems)
+            autoMediaSession.setMetadata(metadata)
+            updatePlaybackState(isPlaying, positionMs, activeIndex)
+            autoMediaSession.isActive = true
+            Log.d(TAG, "AutoSession metadata updated song=${song.mediaId} playing=$isPlaying")
+        }
+    }
+
+    private fun updatePlaybackState(
+        isPlaying: Boolean,
+        positionMs: Long,
+        activeIndex: Int = currentAutoQueueIndex.coerceAtLeast(0)
+    ) {
+        if (!::autoMediaSession.isInitialized) return
+        val state = if (isPlaying) {
+            PlaybackStateCompat.STATE_PLAYING
+        } else {
+            PlaybackStateCompat.STATE_PAUSED
+        }
+        autoMediaSession.setPlaybackState(
+            PlaybackStateCompat.Builder()
+                .setActions(playbackActions())
+                .setActiveQueueItemId(activeIndex.coerceAtLeast(0).toLong())
+                .setState(state, positionMs.coerceAtLeast(0L), if (isPlaying) 1f else 0f)
+                .build()
+        )
+    }
+
+    private fun playbackActions(): Long {
+        return PlaybackStateCompat.ACTION_PLAY or
+            PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
+            PlaybackStateCompat.ACTION_PAUSE or
+            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+            PlaybackStateCompat.ACTION_SEEK_TO or
+            PlaybackStateCompat.ACTION_SKIP_TO_QUEUE_ITEM
     }
 
     private fun performLikedSongsSync(bundles: ArrayList<Bundle>) {

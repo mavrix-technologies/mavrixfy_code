@@ -2,7 +2,7 @@
   "expo": {
     "name": "Mavrixfy",
     "slug": "mavrixfy",
-    "version": "2.5.1",
+    "version": "2.6.0",
     "orientation": "portrait",
     "icon": "./assets/images/mavrixfy_icone.png",
     "userInterfaceStyle": "automatic",
@@ -16,7 +16,7 @@
       "supportsTablet": true,
       "icon": "./assets/images/mavrixfy_icon_ios.png",
       "bundleIdentifier": "com.mavrixfy.app",
-      "buildNumber": "20501",
+      "buildNumber": "20600",
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -24,13 +24,14 @@
         "NSCameraUsageDescription": "This app uses the camera to upload profile pictures.",
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to upload images.",
         "NSAppleMusicUsageDescription": "This app streams music content.",
+        "NSUserTrackingUsageDescription": "This identifier will be used to deliver personalized ads to you.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
-      "versionCode": 20501,
+      "versionCode": 20600,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icone.png",
@@ -61,6 +62,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-tracking-transparency",
       "expo-font",
       "expo-web-browser",
       "expo-system-ui",
@@ -129,7 +131,7 @@
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": "2.5.1-20501",
+    "runtimeVersion": "2.6.0-20600",
     "extra": {
       "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",
@@ -145,5 +147,9 @@
       }
     },
     "owner": "satvik1234"
+  },
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-6003470714469240~2133470244",
+    "ios_app_id": "ca-app-pub-6003470714469240~2133470244"
   }
 }

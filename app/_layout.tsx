@@ -35,15 +35,42 @@ import { logAppOpen } from "@/lib/analytics";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { getRecentlyPlayed } from "@/lib/storage";
 import { AppNavBar } from "@/app/(tabs)/_layout";
+import QueueBottomSheet from "@/components/QueueBottomSheet";
+import { globalQueueSheetRef } from "@/lib/queueRef";
+
+// Filter out noisy expo-notifications warnings in the terminal console when testing in Expo Go
+const originalWarn = console.warn;
+console.warn = (...args) => {
+  if (
+    args[0] &&
+    typeof args[0] === "string" &&
+    args[0].includes("expo-notifications")
+  ) {
+    return;
+  }
+  originalWarn(...args);
+};
+
+const originalError = console.error;
+console.error = (...args) => {
+  if (
+    args[0] &&
+    typeof args[0] === "string" &&
+    args[0].includes("expo-notifications")
+  ) {
+    return;
+  }
+  originalError(...args);
+};
 
 LogBox.ignoreLogs([
   "expo-notifications functionality is not fully supported in Expo Go",
   "expo-notifications: Android Push notifications",
 ]);
 
-// Screens where the nav bar must not appear.
-// Sheets keep AppNavBar visible so the mini-player/nav do not flicker during transitions.
-const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads"]);
+// Screens where the nav bar must not appear. Most utility sheets keep AppNavBar
+// visible to avoid flicker, but the full player owns the bottom controls.
+const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "player"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
@@ -281,12 +308,13 @@ function RootLayoutNav() {
         <Stack.Screen
           name="queue"
           options={{
-            ...(Platform.OS === "ios"
-              ? IOS_VERTICAL_SHEET_OPTIONS
-              : {
-                  ...ANDROID_VERTICAL_SHEET_OPTIONS,
-                  gestureEnabled: false,
-                }),
+            presentation: Platform.OS === "android" ? "transparentModal" : "modal",
+            animation: "slide_from_bottom",
+            gestureEnabled: true,
+            gestureDirection: "vertical",
+            headerShown: false,
+            fullScreenGestureEnabled: true,
+            contentStyle: { backgroundColor: Platform.OS === "android" ? "transparent" : "#1E1E1E" },
           }}
         />
         <Stack.Screen
@@ -353,8 +381,11 @@ function RootLayoutNav() {
           options={{ gestureEnabled: false }}
         />
       </Stack>
-      {/* Keep the nav visible under sheets to avoid mini-player/nav flicker. */}
+      {/* Keep the nav visible under utility sheets; full-screen routes unmount it. */}
       {!unmountNavBar && <AppNavBar />}
+      <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
+        <QueueBottomSheet ref={globalQueueSheetRef} />
+      </View>
     </View>
   );
 }

@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { fetch } from "expo/fetch";
+
 import { auth } from "@/lib/firebase";
 import { buildAppApiUrl } from "@/lib/api-config";
 

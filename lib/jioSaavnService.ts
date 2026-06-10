@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { fetch } from "expo/fetch";
+
 import { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/api-config";
 import { compactMap, mapFilter, sortedCopy } from "@/lib/arrayUtils";

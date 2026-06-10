@@ -15,8 +15,12 @@ import * as Haptics from "expo-haptics";
 import * as DocumentPicker from "expo-document-picker";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
-import { safeGoBack } from "@/utils/navigation";
 import { triggerImpact } from "@/lib/haptics";
+import AppTopHeader, {
+  APP_TOP_HEADER_HEIGHT,
+  AppTopHeaderProfileButton,
+  useAppTopHeaderScrollElevation,
+} from "@/components/AppTopHeader";
 
 async function handleFileImport() {
   void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
@@ -48,7 +52,7 @@ async function handleFileImport() {
     }
 
     router.push({
-      pathname: "/import-songs/file",
+      pathname: "/import-songs-file",
       params: { 
         fileUri: file.uri,
         fileName: fileName,
@@ -62,27 +66,31 @@ async function handleFileImport() {
 export default function ImportSongsScreen() {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const { isHeaderElevated, handleHeaderScroll } = useAppTopHeaderScrollElevation();
 
   return (
-    <View style={[styles.container, { paddingTop: topInset }]}>
+    <View style={styles.container}>
       <LinearGradient
         colors={[Colors.background, "#1a1a1a"]}
         style={StyleSheet.absoluteFill}
       />
 
-      {/* Header */}
-      <View style={styles.header}>
-        <Pressable onPress={safeGoBack} hitSlop={10}>
-          <Ionicons name="chevron-back" size={28} color={Colors.text} />
-        </Pressable>
-        <Text style={styles.headerTitle}>Import Songs</Text>
-        <View style={{ width: 28 }} />
-      </View>
+      <AppTopHeader
+        topInset={topInset}
+        elevated={isHeaderElevated}
+        title="Import Songs"
+        left={<AppTopHeaderProfileButton />}
+      />
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 12 },
+        ]}
         showsVerticalScrollIndicator={false}
+        onScroll={handleHeaderScroll}
+        scrollEventThrottle={16}
       >
         {/* Main Content */}
         <View style={styles.mainContent}>
@@ -203,7 +211,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     paddingHorizontal: 24,
-    paddingTop: 40,
+    paddingTop: 16,
   },
   iconWrapper: {
     marginBottom: 24,
@@ -332,4 +340,3 @@ const styles = StyleSheet.create({
     color: Colors.subtext,
   },
 });
-

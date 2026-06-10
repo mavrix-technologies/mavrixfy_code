@@ -1,5 +1,5 @@
-import { DeviceEventEmitter, Platform } from "react-native";
-import TrackPlayer, { Event, RepeatMode } from "react-native-track-player";
+import { DeviceEventEmitter, NativeModules, Platform } from "react-native";
+import TrackPlayer, { Event, RepeatMode, State } from "react-native-track-player";
 import { setupPlayer } from "@/lib/trackPlayer";
 import type { Song } from "@/lib/musicData";
 import { mapFilter } from "@/lib/arrayUtils";
@@ -14,6 +14,12 @@ type AutoRemoteEvent = {
 
 let isRegistered = false;
 let commandChain: Promise<void> = Promise.resolve();
+let autoSyncChain: Promise<void> = Promise.resolve();
+let lastNativeAutoQueueSignature = "";
+let lastNativeAutoPlaybackSignature = "";
+
+const MavrixfyAutoMedia =
+  Platform.OS === "android" ? NativeModules.MavrixfyAutoMedia : null;
 
 function toDurationSeconds(raw: unknown): number {
   const value = Number(raw || 0);
@@ -68,6 +74,18 @@ function trackToSong(track: any): Song | null {
   };
 }
 
+function nativePlaybackStateValue(value: unknown): unknown {
+  if (value && typeof value === "object" && "state" in value) {
+    return (value as { state?: unknown }).state;
+  }
+  return value;
+}
+
+function isNativePlaybackActive(value: unknown): boolean {
+  const state = nativePlaybackStateValue(value);
+  return state === State.Playing || state === State.Buffering || state === State.Loading;
+}
+
 function emitAutoQueueApplied(tracks: Song[], startIndex: number): void {
   DeviceEventEmitter.emit("AutoQueueApplied", {
     tracks,
@@ -103,6 +121,105 @@ async function emitCurrentNativeQueue(): Promise<void> {
   );
 }
 
+async function syncNativePlaybackToAuto(): Promise<void> {
+  if (Platform.OS !== "android" || !MavrixfyAutoMedia) return;
+
+  const [
+    activeTrack,
+    playbackState,
+    progress,
+    nativeQueue,
+    activeTrackIndex,
+  ] = await Promise.all([
+    TrackPlayer.getActiveTrack(),
+    TrackPlayer.getPlaybackState(),
+    TrackPlayer.getProgress(),
+    TrackPlayer.getQueue(),
+    typeof TrackPlayer.getActiveTrackIndex === "function"
+      ? TrackPlayer.getActiveTrackIndex()
+      : Promise.resolve(undefined),
+  ]);
+
+  const activeSong = trackToSong(activeTrack);
+  if (!activeSong) return;
+
+  const queueSongs = Array.isArray(nativeQueue)
+    ? mapFilter(nativeQueue, trackToSong, (song): song is Song => Boolean(song))
+    : [];
+  const safeQueueSongs = (queueSongs.length > 0 ? queueSongs : [activeSong]).slice(0, 100);
+  const fallbackIndex = safeQueueSongs.findIndex((song) => String(song.id) === String(activeSong.id));
+  const safeActiveIndex =
+    typeof activeTrackIndex === "number" && Number.isFinite(activeTrackIndex)
+      ? Math.max(0, Math.min(activeTrackIndex, safeQueueSongs.length - 1))
+      : Math.max(0, fallbackIndex);
+
+  const queueSignature = [
+    safeActiveIndex,
+    safeQueueSongs.length,
+    safeQueueSongs.map((song) => String(song.id || "")).join("|"),
+  ].join(":");
+
+  if (lastNativeAutoQueueSignature !== queueSignature) {
+    lastNativeAutoQueueSignature = queueSignature;
+    MavrixfyAutoMedia.syncQueue?.(
+      safeQueueSongs.map((song) => ({
+        id: String(song.id || ""),
+        title: String(song.title || ""),
+        artist: String(song.artist || ""),
+        album: String(song.album || ""),
+        coverUrl: String(song.coverUrl || ""),
+        audioUrl: String(song.audioUrl || ""),
+        duration: Number(song.duration || 0),
+      })),
+      safeActiveIndex
+    );
+  }
+
+  const durationMs =
+    (Number.isFinite(progress?.duration) && Number(progress.duration) > 0
+      ? Number(progress.duration)
+      : toDurationSeconds(activeSong.duration)) * 1000;
+  const positionMs =
+    Math.floor(Math.max(0, Number(progress?.position ?? 0)) * 1000 / 1000) * 1000;
+  const isPlaying = isNativePlaybackActive(playbackState);
+  const playbackSignature = [
+    activeSong.id,
+    activeSong.title,
+    activeSong.artist,
+    activeSong.album,
+    activeSong.coverUrl,
+    Math.floor(durationMs),
+    positionMs,
+    isPlaying ? "1" : "0",
+  ].join("|");
+
+  if (lastNativeAutoPlaybackSignature !== playbackSignature) {
+    lastNativeAutoPlaybackSignature = playbackSignature;
+    MavrixfyAutoMedia.syncPlayback?.(
+      activeSong.id,
+      activeSong.title,
+      activeSong.artist,
+      activeSong.album,
+      activeSong.coverUrl,
+      durationMs,
+      positionMs,
+      isPlaying
+    );
+  }
+}
+
+function runAutoSync(): void {
+  autoSyncChain = autoSyncChain
+    .catch(() => {})
+    .then(async () => {
+      try {
+        await syncNativePlaybackToAuto();
+      } catch {
+        // Background service events can arrive while RNTP is changing tracks.
+      }
+    });
+}
+
 function runAutoCommand(command: () => Promise<void> | void): void {
   commandChain = commandChain
     .catch(() => {})
@@ -136,6 +253,7 @@ async function playAutoSong(event: AutoRemoteEvent): Promise<void> {
   await TrackPlayer.skip(selectedIndex);
   await TrackPlayer.play();
   emitAutoQueueApplied(playableQueue, selectedIndex);
+  await syncNativePlaybackToAuto();
 }
 
 async function hasPlayableNativeQueue(): Promise<boolean> {
@@ -180,6 +298,7 @@ async function playOrHydrate(event: AutoRemoteEvent): Promise<void> {
 
   if (await hasPlayableNativeQueue()) {
     await TrackPlayer.play();
+    await syncNativePlaybackToAuto();
     return;
   }
   await playAutoSong(event);
@@ -200,6 +319,7 @@ async function skipToEventQueueIndex(event: AutoRemoteEvent): Promise<boolean> {
   await TrackPlayer.skip(targetIndex);
   await TrackPlayer.play();
   await emitCurrentNativeQueue();
+  await syncNativePlaybackToAuto();
   return true;
 }
 
@@ -220,6 +340,7 @@ async function skipNext(event?: AutoRemoteEvent): Promise<void> {
     await TrackPlayer.skip(nextIndex);
     await TrackPlayer.play();
     await emitCurrentNativeQueue();
+    await syncNativePlaybackToAuto();
     return;
   }
 
@@ -227,6 +348,7 @@ async function skipNext(event?: AutoRemoteEvent): Promise<void> {
     await TrackPlayer.skip(0);
     await TrackPlayer.play();
     await emitCurrentNativeQueue();
+    await syncNativePlaybackToAuto();
     return;
   }
 
@@ -239,6 +361,7 @@ async function skipToQueueItem(index: number): Promise<void> {
   await TrackPlayer.skip(index);
   await TrackPlayer.play();
   await emitCurrentNativeQueue();
+  await syncNativePlaybackToAuto();
 }
 
 async function skipPrevious(event?: AutoRemoteEvent): Promise<void> {
@@ -264,6 +387,7 @@ async function skipPrevious(event?: AutoRemoteEvent): Promise<void> {
     await TrackPlayer.skip(previousIndex);
     await TrackPlayer.play();
     await emitCurrentNativeQueue();
+    await syncNativePlaybackToAuto();
     return;
   }
 
@@ -271,8 +395,10 @@ async function skipPrevious(event?: AutoRemoteEvent): Promise<void> {
     await TrackPlayer.skip(queue.length - 1);
     await TrackPlayer.play();
     await emitCurrentNativeQueue();
+    await syncNativePlaybackToAuto();
   } else {
     await TrackPlayer.seekTo(0);
+    await syncNativePlaybackToAuto();
   }
 }
 
@@ -317,10 +443,14 @@ export function registerAutoMediaRemoteService(): void {
 
   TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, () => {
     runAutoCommand(emitCurrentNativeQueue);
+    runAutoSync();
   });
   if (Event.PlaybackTrackChanged) {
     TrackPlayer.addEventListener(Event.PlaybackTrackChanged, () => {
       runAutoCommand(emitCurrentNativeQueue);
+      runAutoSync();
     });
   }
+  TrackPlayer.addEventListener(Event.PlaybackState, runAutoSync);
+  TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, runAutoSync);
 }

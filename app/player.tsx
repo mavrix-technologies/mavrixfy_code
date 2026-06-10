@@ -22,11 +22,19 @@ import {
   ViewStyle
 } from "react-native";
 import { Image } from "expo-image";
+import mobileAds, {
+  NativeAd,
+  NativeAdView,
+  NativeAsset,
+  NativeAssetType,
+  NativeMediaView,
+} from "react-native-google-mobile-ads";
 import { LinearGradient } from "expo-linear-gradient";
-import { router, useNavigation } from "expo-router";
+import { router, useNavigation, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { AD_UNITS } from "@/constants/admob";
 import { safeGoBack } from "@/utils/navigation";
 import { usePlayerActions, usePlayerProgress } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
@@ -43,6 +51,7 @@ import EqualizerBars from "@/components/EqualizerBars";
 import { getArtistDetails, JioSaavnArtist, searchArtists } from "@/lib/artistService";
 import { isFollowingArtist, toggleFollowArtist } from "@/lib/followedArtists";
 import { mapFilter } from "@/lib/arrayUtils";
+import { globalQueueSheetRef } from "@/lib/queueRef";
 
 const getCurrentTimestamp = () => Date.now();
 
@@ -828,6 +837,14 @@ function useLegacyPlayerScreenView() {
   } = usePlayerActions();
 
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
+  const [playerAd, setPlayerAd] = useState<NativeAd | null>(null);
+  const [playerAdLoaded, setPlayerAdLoaded] = useState(false);
+  const [showAdInPlayer, setShowAdInPlayer] = useState(false);
+  const [prevSongId, setPrevSongId] = useState(currentSong?.id);
+  if (currentSong?.id !== prevSongId) {
+    setPrevSongId(currentSong?.id);
+    setShowAdInPlayer(playerAdLoaded && playerAd ? Math.random() < 0.35 : false);
+  }
   const [isLoadingDevTrack, setIsLoadingDevTrack] = useState(false);
   const [isDevPreviewEnabled, setIsDevPreviewEnabled] = useState(false);
   const [devPreviewIndex, setDevPreviewIndex] = useState(0);
@@ -846,6 +863,7 @@ function useLegacyPlayerScreenView() {
   const pendingArtworkTargetIndexRef = useRef<number | null>(null);
   const didHandleSheetDismissRef = useRef(false);
   const sheetDetentReadyAtRef = useRef(0);
+  const queuePressLockRef = useRef(false);
   const isDevPreviewActive = __DEV__ && !currentSong && isDevPreviewEnabled;
 
   const clearSkipCooldownTimer = useCallback(() => {
@@ -920,6 +938,16 @@ function useLegacyPlayerScreenView() {
     setAlbumColor(primary);
     setTextColor(text);
   }, [setAlbumColor, setTextColor]);
+  
+  const handleQueuePress = useCallback(() => {
+    if (queuePressLockRef.current) return;
+    queuePressLockRef.current = true;
+    globalQueueSheetRef.current?.expand();
+    setTimeout(() => {
+      queuePressLockRef.current = false;
+    }, 600);
+  }, []);
+  
   const clearArtistInfo = useCallback(() => {
     setArtistInfo(null);
   }, []);
@@ -1040,6 +1068,56 @@ function useLegacyPlayerScreenView() {
   const playerIsPlaying = isDevPreviewActive ? devPreviewIsPlaying : playbackState.isPlaying;
   const playerIsShuffled = isDevPreviewActive ? devPreviewIsShuffled : isShuffled;
   const playerRepeatMode = isDevPreviewActive ? devPreviewRepeatMode : repeatMode;
+
+  useEffect(() => {
+    let active = true;
+    let loadedAd: NativeAd | null = null;
+
+    const loadPlayerNativeAd = async () => {
+      try {
+        if (Platform.OS === "ios") {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { requestTrackingPermissionsAsync } = require("expo-tracking-transparency");
+            await requestTrackingPermissionsAsync();
+          } catch {
+            // Ignore tracking permission errors if unsupported
+          }
+        }
+
+        await mobileAds().initialize();
+        if (!active) return;
+
+        // Using centrally configured static native ad unit ID
+        const ad = await NativeAd.createForAdRequest(AD_UNITS.NATIVE, {
+          requestNonPersonalizedAdsOnly: true,
+        });
+
+        if (!active) {
+          ad.destroy();
+          return;
+        }
+
+        loadedAd = ad;
+        setPlayerAd(ad);
+        setPlayerAdLoaded(true);
+        // Randomly decide (e.g. 35% chance) whether to show the ad automatically when loaded
+        setShowAdInPlayer(Math.random() < 0.35);
+      } catch (err) {
+        console.warn("Player screen native ad failed to load:", err);
+      }
+    };
+
+    loadPlayerNativeAd();
+
+    return () => {
+      active = false;
+      if (loadedAd) {
+        loadedAd.destroy();
+      }
+    };
+  }, []);
+
 
   useEffect(() => {
     const urls = mapFilter([
@@ -1418,7 +1496,42 @@ function useLegacyPlayerScreenView() {
                 },
               ]}
             >
-              {song.coverUrl?.trim() ? (
+              {showAdInPlayer && isActiveCard && playerAd ? (
+                <NativeAdView
+                  nativeAd={playerAd}
+                  style={[styles.albumArt, styles.adCardContainer]}
+                >
+                  <NativeMediaView resizeMode="cover" style={styles.adCardMedia} />
+                  
+                  <View style={styles.adCardOverlay}>
+                    <View style={styles.adCardTextWrap}>
+                      <View style={styles.adCardBadgeRow}>
+                        <View style={styles.adCardBadge}>
+                          <Text style={styles.adCardBadgeText}>AD</Text>
+                        </View>
+                        <NativeAsset assetType={NativeAssetType.HEADLINE}>
+                          <Text style={styles.adCardHeadline} numberOfLines={1}>
+                            {playerAd.headline}
+                          </Text>
+                        </NativeAsset>
+                      </View>
+                      {playerAd.body && (
+                        <NativeAsset assetType={NativeAssetType.BODY}>
+                          <Text style={styles.adCardBody} numberOfLines={1}>
+                            {playerAd.body}
+                          </Text>
+                        </NativeAsset>
+                      )}
+                    </View>
+                    
+                    {playerAd.callToAction && (
+                      <NativeAsset assetType={NativeAssetType.CALL_TO_ACTION}>
+                        <Text style={styles.adCardCtaButton}>{playerAd.callToAction}</Text>
+                      </NativeAsset>
+                    )}
+                  </View>
+                </NativeAdView>
+              ) : song.coverUrl?.trim() ? (
                 <StableArtworkImage
                   uri={song.coverUrl.trim()}
                   recyclingKey={item.artworkKey}
@@ -1430,6 +1543,37 @@ function useLegacyPlayerScreenView() {
                 </View>
               )}
             </Animated.View>
+
+            {/* Toggle ad/artwork overlay button */}
+            {isActiveCard && playerAdLoaded && (
+              <Pressable
+                style={[
+                  styles.adBadgeOverlay,
+                  {
+                    backgroundColor: showAdInPlayer ? "rgba(38, 225, 154, 0.9)" : "rgba(11, 13, 16, 0.82)",
+                    borderColor: showAdInPlayer ? "#26e19a" : "rgba(255, 255, 255, 0.12)",
+                  }
+                ]}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  setShowAdInPlayer(prev => !prev);
+                }}
+              >
+                <Ionicons
+                  name={showAdInPlayer ? "image-outline" : "megaphone-outline"}
+                  size={12}
+                  color={showAdInPlayer ? "#10141a" : "#FFFFFF"}
+                />
+                <Text
+                  style={[
+                    styles.adBadgeText,
+                    { color: showAdInPlayer ? "#10141a" : "#FFFFFF" }
+                  ]}
+                >
+                  {showAdInPlayer ? "Show Cover" : "Show Ad"}
+                </Text>
+              </Pressable>
+            )}
 
             {/* Perfect overlay border to prevent clipping/bleeding issues on Android/iOS */}
             <View
@@ -1457,6 +1601,9 @@ function useLegacyPlayerScreenView() {
       artSize,
       handleArtworkSongChange,
       playerTheme.accent,
+      playerAd,
+      playerAdLoaded,
+      showAdInPlayer,
     ]
   );
 
@@ -1592,7 +1739,7 @@ function useLegacyPlayerScreenView() {
 
         <Pressable
           style={[styles.headerIconButton, ctrlBtnStyle]}
-          onPress={() => router.push("/queue")}
+          onPress={handleQueuePress}
           hitSlop={10}
         >
           <Ionicons name="list-outline" size={21} color={sheetTextColor} />
@@ -2014,6 +2161,14 @@ function useLegacyPlayerScreenView() {
 }
 
 export default function PlayerScreen() {
+  const { fromQueue } = useLocalSearchParams<{ fromQueue?: string }>();
+
+  useEffect(() => {
+    if (fromQueue !== "true") {
+      globalQueueSheetRef.current?.close();
+    }
+  }, [fromQueue]);
+
   return <LegacyPlayerScreen />;
 }
 
@@ -2141,6 +2296,90 @@ const styles = StyleSheet.create({
   albumFallback: {
     alignItems: "center",
     justifyContent: "center",
+  },
+  adCardContainer: {
+    backgroundColor: "#11141a",
+    overflow: "hidden",
+    position: "relative",
+  },
+  adCardMedia: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#000000",
+  },
+  adCardOverlay: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(17, 20, 26, 0.82)",
+    padding: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderTopWidth: 0.5,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  adCardTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  adCardBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  adCardBadge: {
+    backgroundColor: "rgba(38, 225, 154, 0.15)",
+    borderWidth: 0.5,
+    borderColor: "#26e19a",
+    borderRadius: 3,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+  },
+  adCardBadgeText: {
+    color: "#26e19a",
+    fontSize: 7.5,
+    fontFamily: "Inter_700Bold",
+  },
+  adCardHeadline: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    flexShrink: 1,
+  },
+  adCardBody: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 10,
+    fontFamily: "Inter_400Regular",
+  },
+  adCardCtaButton: {
+    color: "#10141a",
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    backgroundColor: "#26e19a",
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4.5,
+    overflow: "hidden",
+    textAlign: "center",
+  },
+  adBadgeOverlay: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    zIndex: 10,
+    borderRadius: 12,
+    borderWidth: 0.5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  adBadgeText: {
+    fontSize: 9.5,
+    fontFamily: "Inter_700Bold",
   },
   songBlock: {
     marginTop: 18,

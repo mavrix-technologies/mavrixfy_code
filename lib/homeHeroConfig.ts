@@ -6,6 +6,7 @@ export type HomeHeroConfig = {
   title: string;
   videoUrl: string;
   posterUrl: string;
+  adUnitId?: string;
   items: HomeHeroVideoItem[];
 };
 
@@ -26,6 +27,7 @@ export type HomeHeroVideoItem = {
   title: string;
   videoUrl: string;
   posterUrl: string;
+  adUnitId?: string;
   linkUrl: string;
   songId: string;
   song: HomeHeroLinkedSong | null;
@@ -94,7 +96,8 @@ function normalizeLinkedSong(value: unknown): HomeHeroLinkedSong | null {
 function normalizeVideoItem(value: unknown, index: number): HomeHeroVideoItem | null {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const videoUrl = toTrimmedString(record.videoUrl);
-  if (!videoUrl) return null;
+  const adUnitId = toTrimmedString(record.adUnitId);
+  if (!videoUrl && !adUnitId) return null;
 
   const linkedSong = normalizeLinkedSong(record.song);
   const songId = toTrimmedString(record.songId) || linkedSong?.id || "";
@@ -105,6 +108,7 @@ function normalizeVideoItem(value: unknown, index: number): HomeHeroVideoItem | 
     title: toTrimmedString(record.title) || DEFAULT_HOME_HERO_CONFIG.title,
     videoUrl,
     posterUrl: toTrimmedString(record.posterUrl),
+    adUnitId,
     linkUrl: toTrimmedString(record.linkUrl),
     songId,
     song: linkedSong,
@@ -119,6 +123,7 @@ function normalizeHomeHeroConfig(data: unknown): HomeHeroConfig {
   const title = toTrimmedString(record.title) || DEFAULT_HOME_HERO_CONFIG.title;
   const videoUrl = toTrimmedString(record.videoUrl) || DEFAULT_HOME_HERO_CONFIG.videoUrl;
   const posterUrl = toTrimmedString(record.posterUrl) || DEFAULT_HOME_HERO_CONFIG.posterUrl;
+  const adUnitId = toTrimmedString(record.adUnitId);
   const configuredItems = Array.isArray(record.items)
     ? record.items
         .map((item, index) => normalizeVideoItem(item, index))
@@ -131,6 +136,7 @@ function normalizeHomeHeroConfig(data: unknown): HomeHeroConfig {
       title,
       videoUrl,
       posterUrl,
+      adUnitId,
     },
   ];
   const items = configuredItems.length > 0 ? configuredItems : fallbackItems;
@@ -141,6 +147,7 @@ function normalizeHomeHeroConfig(data: unknown): HomeHeroConfig {
     title: firstVisibleItem.title || title,
     videoUrl: firstVisibleItem.videoUrl || videoUrl,
     posterUrl: firstVisibleItem.posterUrl || posterUrl,
+    adUnitId: firstVisibleItem.adUnitId || adUnitId,
     items,
   };
 }

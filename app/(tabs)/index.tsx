@@ -2,23 +2,27 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import {
   View,
   Text,
+  ActivityIndicator,
   Pressable,
   ScrollView,
   FlatList,
   StyleSheet,
   Platform,
+  AppState,
   RefreshControl,
   useWindowDimensions,
   Linking,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type AppStateStatus,
+  type ViewToken,
 } from "react-native";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { getBestImageUrl, JioSaavnImage, Song } from "@/lib/musicData";
@@ -54,6 +58,14 @@ import AppTopHeader, {
   useAppTopHeaderScrollElevation,
 } from "@/components/AppTopHeader";
 import ShinyText from "@/components/ShinyText";
+import AdMobBanner from "@/components/AdMobBanner";
+import mobileAds, {
+  NativeAd,
+  NativeAdView,
+  NativeAsset,
+  NativeAssetType,
+  NativeMediaView,
+} from "react-native-google-mobile-ads";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { filterMap, forEachFiltered, mapFilter } from "@/lib/arrayUtils";
 import { DEFAULT_HOME_HERO_CONFIG, subscribeHomeHeroConfig, type HomeHeroVideoItem } from "@/lib/homeHeroConfig";
@@ -305,6 +317,87 @@ function getHomeHeroPlayableSong(item: HomeHeroVideoItem): Song | null {
   };
 }
 
+function ActiveHomeHeroVideo({
+  playbackUrl,
+  isMuted,
+  loop,
+  onPlaybackEnd,
+}: {
+  playbackUrl: string;
+  isMuted: boolean;
+  loop: boolean;
+  onPlaybackEnd: () => void;
+}) {
+  const hasPlayedToEndRef = useRef(false);
+  const onPlaybackEndRef = useRef(onPlaybackEnd);
+  const player = useVideoPlayer(playbackUrl, (videoPlayer) => {
+    videoPlayer.loop = loop;
+    videoPlayer.muted = isMuted;
+    videoPlayer.volume = isMuted ? 0 : 1;
+    videoPlayer.audioMixingMode = "auto";
+    videoPlayer.showNowPlayingNotification = false;
+    videoPlayer.play();
+  });
+
+  useEffect(() => {
+    onPlaybackEndRef.current = onPlaybackEnd;
+  }, [onPlaybackEnd]);
+
+  useEffect(() => {
+    hasPlayedToEndRef.current = false;
+    player.loop = loop;
+    player.muted = isMuted;
+    player.volume = isMuted ? 0 : 1;
+    player.play();
+  }, [isMuted, loop, player]);
+
+  useEffect(() => {
+    const subscription = player.addListener("playToEnd", () => {
+      if (hasPlayedToEndRef.current) return;
+
+      hasPlayedToEndRef.current = true;
+      try {
+        player.pause();
+        player.currentTime = 0;
+      } catch {
+        // Native player object may have already been deallocated
+      }
+      onPlaybackEndRef.current();
+    });
+
+    return () => subscription.remove();
+  }, [player]);
+
+  useEffect(() => {
+    const activePlayer = player;
+    return () => {
+      try {
+        activePlayer.pause();
+        activePlayer.currentTime = 0;
+      } catch {
+        // Native player object may have already been deallocated
+        // This is expected during unmount and can be safely ignored
+      }
+    };
+  }, [player]);
+
+  return (
+    <VideoView
+      pointerEvents="none"
+      player={player}
+      style={[styles.liveVideoPlayer, styles.liveVideoMediaFill]}
+      nativeControls={false}
+      contentFit="cover"
+      playsInline
+      allowsPictureInPicture={false}
+      startsPictureInPictureAutomatically={false}
+      fullscreenOptions={{ enable: false }}
+      surfaceType="textureView"
+      useExoShutter={false}
+    />
+  );
+}
+
 function HomeHeroVideoCard({
   item,
   isActive,
@@ -326,54 +419,126 @@ function HomeHeroVideoCard({
   onPlaybackEnd: () => void;
   loop: boolean;
 }) {
+  const [ad, setAd] = useState<NativeAd | null>(null);
+  const [adLoaded, setAdLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!item.adUnitId) return;
+
+    let active = true;
+    let loadedAd: NativeAd | null = null;
+
+    const loadHeroNativeAd = async () => {
+      try {
+        await mobileAds().initialize();
+        if (!active) return;
+
+        const nativeAd = await NativeAd.createForAdRequest(item.adUnitId!, {
+          requestNonPersonalizedAdsOnly: true,
+        });
+
+        if (!active) {
+          nativeAd.destroy();
+          return;
+        }
+
+        loadedAd = nativeAd;
+        setAd(nativeAd);
+        setAdLoaded(true);
+      } catch (err) {
+        console.warn("Home Hero video ad failed to load:", err);
+      }
+    };
+
+    loadHeroNativeAd();
+
+    return () => {
+      active = false;
+      if (loadedAd) {
+        loadedAd.destroy();
+      }
+    };
+  }, [item.adUnitId]);
+
   const playbackUrl = useMemo(() => getHomeHeroPlaybackUrl(item.videoUrl), [item.videoUrl]);
   const posterPreviewUrl = useMemo(
     () => getHomeHeroPosterPreviewUrl(item.posterUrl, item.videoUrl),
     [item.posterUrl, item.videoUrl]
   );
-  const hasPlayedToEndRef = useRef(false);
-  const onPlaybackEndRef = useRef(onPlaybackEnd);
-  const player = useVideoPlayer(playbackUrl, (videoPlayer) => {
-    videoPlayer.loop = loop;
-    videoPlayer.muted = isMuted;
-    videoPlayer.volume = isMuted ? 0 : 1;
-    videoPlayer.audioMixingMode = "auto";
-    videoPlayer.showNowPlayingNotification = false;
-    if (isActive) {
-      videoPlayer.play();
-    }
-  });
-
-  useEffect(() => {
-    onPlaybackEndRef.current = onPlaybackEnd;
-  }, [onPlaybackEnd]);
-
-  useEffect(() => {
-    player.loop = loop;
-    player.muted = isMuted;
-    player.volume = isMuted ? 0 : 1;
-    if (isActive) {
-      hasPlayedToEndRef.current = false;
-      player.play();
-    } else {
-      player.pause();
-    }
-  }, [isActive, isMuted, loop, player]);
-
-  useEffect(() => {
-    const subscription = player.addListener("playToEnd", () => {
-      if (!isActive || hasPlayedToEndRef.current) return;
-
-      hasPlayedToEndRef.current = true;
-      player.pause();
-      player.currentTime = 0;
-      onPlaybackEndRef.current();
-    });
-
-    return () => subscription.remove();
-  }, [isActive, player]);
 
   const playableSong = getHomeHeroPlayableSong(item);
+
+  if (item.adUnitId) {
+    return (
+      <View style={[styles.liveVideoSlide, { width, height, overflow: "hidden", borderRadius: 12 }]}>
+        {adLoaded && ad ? (
+          <NativeAdView
+            nativeAd={ad}
+            style={[styles.liveVideoMediaFill, { backgroundColor: "#11141a", position: "relative" }]}
+          >
+            <NativeMediaView resizeMode="cover" style={styles.liveVideoMediaFill} />
+            
+            <View style={styles.adOverlayContainer}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                    <View style={{
+                      borderRadius: 4,
+                      backgroundColor: "#26e19a",
+                      paddingHorizontal: 5,
+                      paddingVertical: 2,
+                    }}>
+                      <Text style={{
+                        color: "#10141a",
+                        fontSize: 12,
+                        fontFamily: "Inter_700Bold",
+                      }}>AD</Text>
+                    </View>
+                    <NativeAsset assetType={NativeAssetType.HEADLINE}>
+                      <Text style={{ fontSize: 13, fontFamily: "Inter_700Bold", color: "#FFFFFF" }} numberOfLines={1}>
+                        {ad.headline}
+                      </Text>
+                    </NativeAsset>
+                  </View>
+                  
+                  {ad.body && (
+                    <NativeAsset assetType={NativeAssetType.BODY}>
+                      <Text style={{ fontSize: 12, fontFamily: "Inter_500Medium", color: "rgba(255,255,255,0.6)" }} numberOfLines={1}>
+                        {ad.body}
+                      </Text>
+                    </NativeAsset>
+                  )}
+                </View>
+
+                {ad.callToAction && (
+                  <NativeAsset assetType={NativeAssetType.CALL_TO_ACTION}>
+                    <View style={{
+                      backgroundColor: "#26e19a",
+                      borderRadius: 8,
+                      paddingHorizontal: 12,
+                      paddingVertical: 7,
+                    }}>
+                      <Text style={{
+                        color: "#10141a",
+                        fontSize: 12,
+                        fontFamily: "Inter_700Bold",
+                      }}>
+                        {ad.callToAction}
+                      </Text>
+                    </View>
+                  </NativeAsset>
+                )}
+              </View>
+            </View>
+          </NativeAdView>
+        ) : (
+          <View style={[styles.liveVideoMediaFill, { alignItems: "center", justifyContent: "center", backgroundColor: "#11141a" }]}>
+            <ActivityIndicator size="small" color="#26e19a" />
+          </View>
+        )}
+      </View>
+    );
+  }
 
   return (
     <Pressable
@@ -388,18 +553,12 @@ function HomeHeroVideoCard({
         contentFit="cover"
       />
       {isActive ? (
-        <VideoView
-          pointerEvents="none"
-          player={player}
-          style={[styles.liveVideoPlayer, styles.liveVideoMediaFill]}
-          nativeControls={false}
-          contentFit="cover"
-          playsInline
-          allowsPictureInPicture={false}
-          startsPictureInPictureAutomatically={false}
-          fullscreenOptions={{ enable: false }}
-          surfaceType="textureView"
-          useExoShutter={false}
+        <ActiveHomeHeroVideo
+          key={playbackUrl}
+          playbackUrl={playbackUrl}
+          isMuted={isMuted}
+          loop={loop}
+          onPlaybackEnd={onPlaybackEnd}
         />
       ) : null}
       <View pointerEvents="none" style={styles.liveVideoCardCopy}>
@@ -463,7 +622,7 @@ function useHomeScreenInnerView() {
   const videoSafeTopInset = Platform.OS === "web" ? 0 : insets.top;
   const [homeHeroConfig, setHomeHeroConfig] = useState(DEFAULT_HOME_HERO_CONFIG);
   const homeHeroVideos = useMemo(
-    () => (homeHeroConfig.enabled ? homeHeroConfig.items.filter((item) => item.enabled && item.videoUrl.trim()) : []),
+    () => (homeHeroConfig.enabled ? homeHeroConfig.items.filter((item) => item.enabled && (item.videoUrl.trim() || item.adUnitId?.trim())) : []),
     [homeHeroConfig.enabled, homeHeroConfig.items]
   );
   const liveVideoCardWidth = useMemo(() => Math.round(Math.max(280, windowWidth - 28)), [windowWidth]);
@@ -474,12 +633,67 @@ function useHomeScreenInnerView() {
   );
   const [isLiveVideoMuted, setIsLiveVideoMuted] = useState(true);
   const [activeHomeVideoIndex, setActiveHomeVideoIndex] = useState(0);
+  const [isHomeScreenFocused, setIsHomeScreenFocused] = useState(true);
+  const [isHomeHeroOnScreen, setIsHomeHeroOnScreen] = useState(true);
+  const [isAppStateActive, setIsAppStateActive] = useState(() => AppState.currentState === "active");
   const visibleActiveHomeVideoIndex = homeHeroVideos.length === 0
     ? 0
     : Math.min(activeHomeVideoIndex, homeHeroVideos.length - 1);
   const homeVideoListRef = useRef<FlatList<HomeHeroVideoItem> | null>(null);
+  const homeHeroVideoCountRef = useRef(homeHeroVideos.length);
+  const latestHomeScrollYRef = useRef(0);
+  const liveVideoVerticalVisibilityCutoff = useMemo(
+    () => Math.max(24, liveVideoHeight - 96),
+    [liveVideoHeight]
+  );
+  const isHomeHeroPlaybackAllowed =
+    isAppStateActive && isHomeScreenFocused && isHomeHeroOnScreen && homeHeroVideos.length > 0;
 
   useEffect(() => subscribeHomeHeroConfig(setHomeHeroConfig), []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState: AppStateStatus) => {
+      setIsAppStateActive(nextState === "active");
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setIsHomeScreenFocused(true);
+
+      return () => {
+        setIsHomeScreenFocused(false);
+      };
+    }, [])
+  );
+
+  homeHeroVideoCountRef.current = homeHeroVideos.length;
+
+  const homeVideoViewabilityConfigRef = useRef({
+    itemVisiblePercentThreshold: 70,
+    minimumViewTime: 80,
+  });
+  const handleHomeVideoViewableItemsChangedRef = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      let nextVisibleIndex: number | null = null;
+
+      for (const viewableItem of viewableItems) {
+        if (!viewableItem.isViewable || typeof viewableItem.index !== "number") continue;
+        nextVisibleIndex =
+          nextVisibleIndex === null ? viewableItem.index : Math.min(nextVisibleIndex, viewableItem.index);
+      }
+
+      if (nextVisibleIndex === null) return;
+
+      const maxIndex = homeHeroVideoCountRef.current - 1;
+      if (maxIndex < 0) return;
+
+      const nextIndex = Math.max(0, Math.min(maxIndex, nextVisibleIndex));
+      setActiveHomeVideoIndex((currentIndex) => (currentIndex === nextIndex ? currentIndex : nextIndex));
+    }
+  );
 
   // Auto-mute video card when a song is playing
   useEffect(() => {
@@ -512,6 +726,19 @@ function useHomeScreenInnerView() {
     isHeaderElevated: isHomeHeaderElevated,
     handleHeaderScroll: handleHomeScroll,
   } = useAppTopHeaderScrollElevation();
+  const handleHomeScrollEvent = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const yOffset = event.nativeEvent.contentOffset.y;
+      latestHomeScrollYRef.current = yOffset;
+      handleHomeScroll(event);
+
+      const shouldKeepHeroPlaying = homeHeroVideos.length > 0 && yOffset < liveVideoVerticalVisibilityCutoff;
+      setIsHomeHeroOnScreen((current) => (
+        current === shouldKeepHeroPlaying ? current : shouldKeepHeroPlaying
+      ));
+    },
+    [handleHomeScroll, homeHeroVideos.length, liveVideoVerticalVisibilityCutoff]
+  );
   const [isLoadingCategories, setIsLoadingCategories] = useState(
     !HOME_SESSION_CACHE.hydrated && HOME_SESSION_CACHE.categories.length === 0
   );
@@ -1642,7 +1869,7 @@ function useHomeScreenInnerView() {
     ({ item, index }: { item: HomeHeroVideoItem; index: number }) => (
       <HomeHeroVideoCard
         item={item}
-        isActive={index === visibleActiveHomeVideoIndex}
+        isActive={isHomeHeroPlaybackAllowed && index === visibleActiveHomeVideoIndex}
         isMuted={isLiveVideoMuted}
         width={liveVideoCardWidth}
         height={liveVideoCardHeight}
@@ -1656,6 +1883,7 @@ function useHomeScreenInnerView() {
       advanceHomeVideo,
       handleHomeVideoPress,
       homeHeroVideos.length,
+      isHomeHeroPlaybackAllowed,
       isLiveVideoMuted,
       liveVideoCardHeight,
       liveVideoCardWidth,
@@ -1663,6 +1891,9 @@ function useHomeScreenInnerView() {
       visibleActiveHomeVideoIndex,
     ]
   );
+  const homeVideoPlaybackStateKey = `${visibleActiveHomeVideoIndex}:${isHomeHeroPlaybackAllowed ? "active" : "paused"}:${
+    isLiveVideoMuted ? "muted" : "sound"
+  }`;
 
   const getLiveVideoElement = useCallback(() => {
     return (
@@ -1674,6 +1905,7 @@ function useHomeScreenInnerView() {
               horizontal
               data={homeHeroVideos}
               keyExtractor={(item) => item.id}
+              extraData={homeVideoPlaybackStateKey}
               renderItem={renderHomeVideoItem}
               ItemSeparatorComponent={renderHomeVideoSeparator}
               showsHorizontalScrollIndicator={false}
@@ -1682,6 +1914,8 @@ function useHomeScreenInnerView() {
               snapToInterval={liveVideoCardWidth + HOME_VIDEO_CARD_GAP}
               decelerationRate="fast"
               disableIntervalMomentum
+              onViewableItemsChanged={handleHomeVideoViewableItemsChangedRef.current}
+              viewabilityConfig={homeVideoViewabilityConfigRef.current}
               onMomentumScrollEnd={handleHomeVideoScrollEnd}
               onScrollEndDrag={handleHomeVideoScrollEnd}
               scrollEventThrottle={16}
@@ -1697,6 +1931,7 @@ function useHomeScreenInnerView() {
   }, [
     handleHomeVideoScrollEnd,
     homeHeroVideos,
+    homeVideoPlaybackStateKey,
     liveVideoCardHeight,
     liveVideoCardWidth,
     liveVideoHeight,
@@ -2027,14 +2262,17 @@ function useHomeScreenInnerView() {
         style={styles.scrollView}
         contentContainerStyle={[styles.scrollContent, sections.length === 0 && styles.scrollContentEmpty]}
         showsVerticalScrollIndicator={false}
-        onScroll={handleHomeScroll}
+        onScroll={handleHomeScrollEvent}
         scrollEventThrottle={16}
       >
         {getLiveVideoElement()}
         {sections.length === 0
           ? renderEmptyState()
-          : sections.map((section) => (
-              <React.Fragment key={section.id}>{getSectionElement({ item: section })}</React.Fragment>
+          : sections.map((section, index) => (
+              <React.Fragment key={section.id}>
+                {getSectionElement({ item: section })}
+                {index === 0 && <AdMobBanner />}
+              </React.Fragment>
             ))}
       </ScrollView>
       {getTopHeaderElement()}
@@ -2052,6 +2290,19 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  adOverlayContainer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(11, 13, 16, 0.85)",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+    zIndex: 3,
   },
   scrollView: {
     flex: 1,
@@ -2321,6 +2572,7 @@ const styles = StyleSheet.create({
   },
   rectCard: {
     width: RECT_CARD_WIDTH,
+    alignItems: "center",
   },
   artistCard: {
     width: ARTIST_CARD_WIDTH,
@@ -2370,13 +2622,14 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontFamily: "Inter_600SemiBold",
     marginTop: 8,
-    paddingRight: 4,
+    textAlign: "center",
   },
   rectCardMeta: {
     color: BRAND.textMuted,
     fontSize: 10,
     fontFamily: "Inter_500Medium",
     marginTop: 3,
+    textAlign: "center",
   },
   brandCoverBadge: {
     position: "absolute",
@@ -2401,7 +2654,7 @@ const styles = StyleSheet.create({
   },
   placeholderLine: {
     marginTop: 8,
-    marginLeft: 1,
+    alignSelf: "center",
     borderRadius: 4,
     backgroundColor: "rgba(223,226,235,0.2)",
   },

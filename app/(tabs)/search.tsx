@@ -14,7 +14,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { fetch } from "expo/fetch";
+
 import Colors from "@/constants/colors";
 import { getBestImageUrl, Song } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
@@ -45,6 +45,7 @@ import {
   removeSearchHistoryItem,
   type SearchHistoryItem,
 } from "@/lib/storage";
+import AdMobNativeVideo from "@/components/AdMobNativeVideo";
 
 interface PlaylistResult {
   id: string;
@@ -967,6 +968,9 @@ function useSearchScreenView() {
           onScroll={handleHeaderScroll}
           scrollEventThrottle={16}
         >
+          {/* Native Video Ad */}
+          <AdMobNativeVideo />
+
           {/* ── Browse All ── */}
           <View style={styles.browseSection}>
             <Text style={styles.browseTitle}>Browse all</Text>

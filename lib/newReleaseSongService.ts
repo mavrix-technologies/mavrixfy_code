@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { fetch } from "expo/fetch";
+
 import { buildAppApiUrl } from "@/lib/api-config";
 import { getBestImageUrl, Song, type JioSaavnImage } from "@/lib/musicData";
 import { sortedCopy } from "@/lib/arrayUtils";
@@ -196,15 +196,17 @@ function getArtistName(raw: any): string {
   if (primaryArtists) return primaryArtists;
 
   const primary = Array.isArray(raw?.artists?.primary) ? raw.artists.primary : [];
-  const primaryNames = primary
-    .map((artist: any) => cleanText(artist?.name))
-    .filter(Boolean);
+  const primaryNames = primary.flatMap((artist: any) => {
+    const name = cleanText(artist?.name);
+    return name ? [name] : [];
+  });
   if (primaryNames.length > 0) return primaryNames.join(", ");
 
   const all = Array.isArray(raw?.artists?.all) ? raw.artists.all : [];
-  const allNames = all
-    .map((artist: any) => cleanText(artist?.name))
-    .filter(Boolean);
+  const allNames = all.flatMap((artist: any) => {
+    const name = cleanText(artist?.name);
+    return name ? [name] : [];
+  });
   return allNames.length > 0 ? Array.from(new Set(allNames)).slice(0, 3).join(", ") : "Unknown Artist";
 }
 

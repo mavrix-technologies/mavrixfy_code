@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import * as Animated from "@/lib/nativeAnimated";
 import { Easing, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
@@ -20,6 +20,7 @@ import {
 } from "@/lib/colorExtractor";
 import { useLastMix, clearLastMix } from "@/lib/lastMix";
 import { compactMap, mapFilter } from "@/lib/arrayUtils";
+import { globalQueueSheetRef } from "@/lib/queueRef";
 
 const MIX_DELETE_THRESHOLD = -72;
 
@@ -122,7 +123,7 @@ const IOSMiniPlayerProgressBar = React.memo(function IOSMiniPlayerProgressBar({
   );
 });
 
-type VisibleRoute = "index" | "search" | "library" | "liked-songs";
+type VisibleRoute = "index" | "search" | "library" | "liked-songs" | "import-songs";
 
 type NavItem = {
   route: VisibleRoute;
@@ -136,6 +137,7 @@ const NAV_ITEMS: NavItem[] = [
   { route: "search", label: "Search", icon: "search-outline", iconActive: "search-sharp" },
   { route: "library", label: "Library", icon: "library-outline", iconActive: "library-sharp" },
   { route: "liked-songs", label: "Liked", icon: "heart-outline", iconActive: "heart-sharp" },
+  { route: "import-songs", label: "Import", icon: "cloud-upload-outline", iconActive: "cloud-upload" },
 ];
 const noopLongPress = () => {};
 
@@ -166,6 +168,28 @@ function scheduleIdleTask(task: () => void): () => void {
 
   const timer = setTimeout(task, 1);
   return () => clearTimeout(timer);
+}
+
+function TabIcon({ route, name, size, color }: { route: VisibleRoute; name: string; size: number; color: string }) {
+  if (route === "liked-songs") {
+    const iconName = name.includes("sharp") || name.includes("heart") || name.includes("Active") || name === "heart-sharp"
+      ? "favorite"
+      : "favorite-border";
+    return <MaterialIcons name={iconName as any} size={size} color={color} />;
+  }
+  if (route === "library") {
+    const iconName = name.includes("sharp") || name.includes("library") || name.includes("Active") || name === "library-sharp"
+      ? "music-box-multiple"
+      : "music-box-multiple-outline";
+    return <MaterialCommunityIcons name={iconName as any} size={size} color={color} />;
+  }
+  if (route === "import-songs") {
+    const iconName = name.includes("sharp") || name.includes("Active") || name === "cloud-upload"
+      ? "cloud-upload"
+      : "cloud-upload-outline";
+    return <MaterialCommunityIcons name={iconName as any} size={size} color={color} />;
+  }
+  return <Ionicons name={name as any} size={size} color={color} />;
 }
 
 type NavTabItemProps = {
@@ -271,11 +295,7 @@ function NavTabItem({
       >
         <View style={styles.navIconWrap}>
           <Animated.View style={[styles.navIconLayer, { opacity: inactiveIconOpacity }]}>
-            <Ionicons
-              name={item.icon as any}
-              size={navIconSize}
-              color={navInactiveColor}
-            />
+            <TabIcon route={item.route} name={item.icon} size={navIconSize} color={navInactiveColor} />
           </Animated.View>
           <Animated.View
             style={[
@@ -286,11 +306,7 @@ function NavTabItem({
               },
             ]}
           >
-            <Ionicons
-              name={item.iconActive as any}
-              size={navIconSize}
-              color={activeNavColor}
-            />
+            <TabIcon route={item.route} name={item.iconActive} size={navIconSize} color={activeNavColor} />
           </Animated.View>
         </View>
         <Text
@@ -351,6 +367,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     if (pathname === "/search" || pathname.startsWith("/search/")) return "search";
     if (pathname === "/library" || pathname.startsWith("/library/")) return "library";
     if (pathname === "/liked-songs" || pathname.startsWith("/liked-songs/")) return "liked-songs";
+    if (pathname === "/import-songs" || pathname.startsWith("/import-songs/") || pathname === "/import-songs-file" || pathname.startsWith("/import-songs-file")) return "import-songs";
     return "index";
   });
 
@@ -364,6 +381,8 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
       setActiveTab("library");
     } else if (pathname === "/liked-songs" || pathname.startsWith("/liked-songs/")) {
       setActiveTab("liked-songs");
+    } else if (pathname === "/import-songs" || pathname.startsWith("/import-songs/") || pathname === "/import-songs-file" || pathname.startsWith("/import-songs-file")) {
+      setActiveTab("import-songs");
     }
   }, [pathname]);
   const isWeb = Platform.OS === "web";
@@ -855,7 +874,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
                 </Pressable>
                 <Pressable
                   android_disableSound
-                  onPress={() => routerPush("/queue")}
+                  onPress={() => globalQueueSheetRef.current?.expand()}
                   hitSlop={14}
                   style={({ pressed }) => [
                     styles.iconButton,
@@ -1003,6 +1022,11 @@ function IOSNativeTabLayout() {
       <NativeTabs.Trigger name="liked-songs">
         <Icon sf={{ default: "heart", selected: "heart.fill" }} />
         <Label>Liked</Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="import-songs">
+        <Icon sf={{ default: "square.and.arrow.down", selected: "square.and.arrow.down.fill" }} />
+        <Label>Import</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -1314,7 +1338,7 @@ function useIOSMiniPlayerOverlayView() {
             </Pressable>
             <Pressable
               android_disableSound
-              onPress={() => overlayRouterPush("/queue")}
+              onPress={() => globalQueueSheetRef.current?.expand()}
               hitSlop={14}
               style={({ pressed }) => [
                 styles.iosMiniPlayerButton,
@@ -1340,7 +1364,7 @@ export default function TabLayout() {
   const preloadedRoutesRef = React.useRef<Set<VisibleRoute> | null>(null);
   if (preloadedRoutesRef.current === null) preloadedRoutesRef.current = new Set<VisibleRoute>();
 
-  const shouldHideTabBar = pathname?.startsWith("/import-songs");
+  const shouldHideTabBar = pathname === "/import-songs-file" || pathname?.startsWith("/import-songs-file");
 
   // NativeTabs only work correctly when distributed via App Store or TestFlight.
   // Sideloaded / unsigned IPAs run with __DEV__ = false but lack the required
@@ -1417,6 +1441,7 @@ export default function TabLayout() {
         <Tabs.Screen name="search" options={{ title: "Search" }} />
         <Tabs.Screen name="library" options={{ title: "Library" }} />
         <Tabs.Screen name="liked-songs" options={{ title: "Liked" }} />
+        <Tabs.Screen name="import-songs" options={{ title: "Import" }} />
       </Tabs>
     </View>
   );

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { FlatList, Platform, Pressable, StyleSheet, Text, View, TextInput } from "react-native";
+import { FlatList, Platform, Pressable, StyleSheet, Text, View, TextInput, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -36,15 +36,26 @@ export default function LikedSongsScreen() {
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const { isAuthenticated } = useAuth();
   const { isOnline } = useNetwork();
-  const { currentSong, queue } = usePlaybackNowPlaying();
+  const { currentSong, queue, isShuffled } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
-  const { playSong, likedSongs, togglePlay } = usePlayerActions();
+  const { playSong, likedSongs, togglePlay, toggleShuffle } = usePlayerActions();
   const [searchQuery, setSearchQuery] = useState("");
-  const [isSearchActive, setIsSearchActive] = useState(false);
+  const [isSearchMode, setIsSearchMode] = useState(false);
   const {
     isHeaderElevated,
     handleHeaderScroll,
   } = useAppTopHeaderScrollElevation();
+  const [showStickyPlay, setShowStickyPlay] = useState(false);
+
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      handleHeaderScroll(event);
+      const offsetY = event.nativeEvent.contentOffset.y;
+      const shouldShowSticky = offsetY > 240;
+      setShowStickyPlay((prev) => (prev === shouldShowSticky ? prev : shouldShowSticky));
+    },
+    [handleHeaderScroll]
+  );
 
   const songs = useMemo(() => {
     if (!Array.isArray(likedSongs)) return [];
@@ -60,12 +71,9 @@ export default function LikedSongsScreen() {
   }, [songs, searchQuery]);
 
   const isPlayingFromLikedSongs = useMemo(() => {
-    if (!currentSong || songs.length === 0) return false;
-    return (
-      songs.some((song) => song.id === currentSong.id) &&
-      queue.length === songs.length &&
-      queue.every((queuedSong, index) => queuedSong.id === songs[index]?.id)
-    );
+    if (!currentSong || songs.length === 0 || queue.length !== songs.length) return false;
+    const songIds = new Set(songs.map((s) => s.id));
+    return queue.every((qs) => songIds.has(qs.id));
   }, [currentSong, queue, songs]);
 
   const handlePlayAll = useCallback(() => {
@@ -76,18 +84,30 @@ export default function LikedSongsScreen() {
       return;
     }
     playSong(songs[0], songs);
-  }, [songs, isPlayingFromLikedSongs, togglePlay, playSong]);
+    if (isShuffled) {
+      void toggleShuffle();
+    }
+  }, [songs, isPlayingFromLikedSongs, togglePlay, playSong, isShuffled, toggleShuffle]);
 
   const handleShufflePlay = useCallback(() => {
     if (songs.length === 0) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    
+    if (isPlayingFromLikedSongs) {
+      void toggleShuffle();
+      return;
+    }
+
     const shuffled = [...songs];
     for (let index = shuffled.length - 1; index > 0; index -= 1) {
       const rand = Math.floor(Math.random() * (index + 1));
       [shuffled[index], shuffled[rand]] = [shuffled[rand], shuffled[index]];
     }
     playSong(shuffled[0], shuffled);
-  }, [songs, playSong]);
+    if (!isShuffled) {
+      void toggleShuffle();
+    }
+  }, [songs, isPlayingFromLikedSongs, playSong, isShuffled, toggleShuffle]);
 
   const renderSong = useCallback(
     ({ item }: { item: Song; index: number }) => {
@@ -98,6 +118,72 @@ export default function LikedSongsScreen() {
 
   const headerMeta = songs.length > 0 ? `${songs.length} songs` : "No songs";
 
+  if (isSearchMode) {
+    return (
+      <View style={styles.searchModeContainer}>
+        <LinearGradient colors={["#09111B", "#10141a", "#10141a"]} style={StyleSheet.absoluteFillObject} />
+        
+        {/* Search Header */}
+        <View style={[styles.searchModeHeader, { paddingTop: topInset + 10 }]}>
+          <View style={styles.searchModeInputWrapper}>
+            <Ionicons name="search" size={18} color={UI.subtext} />
+            <TextInput
+              style={styles.searchModeInput}
+              placeholder="Search liked songs..."
+              placeholderTextColor={UI.subtext}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+              selectionColor={UI.primaryA}
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
+              <Pressable
+                onPress={() => setSearchQuery("")}
+                hitSlop={8}
+                style={{ padding: 4 }}
+              >
+                <Ionicons name="close-circle" size={18} color={UI.subtext} />
+              </Pressable>
+            )}
+          </View>
+          <Pressable 
+            onPress={() => {
+              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+              setIsSearchMode(false);
+              setSearchQuery("");
+            }}
+            hitSlop={12}
+            style={styles.searchModeCancelButton}
+          >
+            <Text style={styles.searchModeCancelText}>Cancel</Text>
+          </Pressable>
+        </View>
+
+        {/* Results List */}
+        <FlatList
+          data={filteredSongs}
+          keyExtractor={(item) => item.id}
+          renderItem={renderSong}
+          contentContainerStyle={styles.searchModeListContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={
+            searchQuery ? (
+              <View style={styles.searchModeEmptyWrap}>
+                <Ionicons name="search-outline" size={48} color={UI.subtext} style={{ opacity: 0.7 }} />
+                <Text style={styles.searchModeEmptyTitle}>No results found</Text>
+                <Text style={styles.searchModeEmptySubtitle}>
+                  {`No liked songs matched "${searchQuery}"`}
+                </Text>
+              </View>
+            ) : null
+          }
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <LinearGradient colors={["#09111B", "#10141a", "#10141a"]} style={StyleSheet.absoluteFillObject} />
@@ -107,7 +193,28 @@ export default function LikedSongsScreen() {
         elevated={isHeaderElevated}
         title="Liked Songs"
         left={<AppTopHeaderProfileButton />}
-        right={<AppTopHeaderDownloadButton />}
+        rightWidth={showStickyPlay ? 84 : 40}
+        right={
+          <View style={styles.headerRightContainer}>
+            <AppTopHeaderDownloadButton />
+            {showStickyPlay && (
+              <Pressable
+                onPress={handlePlayAll}
+                style={({ pressed }) => [
+                  styles.stickyPlayButton,
+                  pressed && styles.stickyPlayButtonPressed,
+                ]}
+              >
+                <Ionicons
+                  name={isPlayingFromLikedSongs && isPlaying ? "pause" : "play"}
+                  size={15}
+                  color="#06241a"
+                  style={!isPlayingFromLikedSongs || !isPlaying ? { marginLeft: 1 } : undefined}
+                />
+              </Pressable>
+            )}
+          </View>
+        }
       />
 
       <FlatList
@@ -116,29 +223,18 @@ export default function LikedSongsScreen() {
         renderItem={renderSong}
         ListHeaderComponent={
           <>
-            {isSearchActive && (
-              <View style={styles.searchContainer}>
-                <View style={styles.searchInputWrapper}>
-                  <Ionicons name="search" size={16} color={UI.subtext} />
-                  <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search liked songs..."
-                    placeholderTextColor={UI.subtext}
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                    selectionColor={UI.primaryA}
-                  />
-                  {searchQuery.length > 0 && (
-                    <Pressable
-                      onPress={() => setSearchQuery("")}
-                      hitSlop={8}
-                    >
-                      <Ionicons name="close-circle" size={16} color={UI.subtext} />
-                    </Pressable>
-                  )}
-                </View>
+            <Pressable 
+              onPress={() => {
+                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                setIsSearchMode(true);
+              }}
+              style={styles.searchContainer}
+            >
+              <View style={styles.searchInputWrapper}>
+                <Ionicons name="search" size={16} color={UI.subtext} />
+                <Text style={styles.searchPlaceholderText}>Search liked songs...</Text>
               </View>
-            )}
+            </Pressable>
             <View style={styles.heroSection}>
               <LinearGradient
                 colors={[UI.primaryA, UI.primaryB]}
@@ -154,46 +250,6 @@ export default function LikedSongsScreen() {
 
             <View style={styles.actionSection}>
               <View style={styles.leftActions}>
-                <Pressable 
-                onPress={handlePlayAll} 
-                style={({ pressed }) => [styles.playAllButton, pressed && styles.playAllButtonPressed]}
-                android_ripple={{ color: "rgba(0,0,0,0.15)", borderless: false }}
-              >
-                  <Ionicons
-                    name={isPlayingFromLikedSongs && isPlaying ? "pause" : "play"}
-                    size={16}
-                    color="#06241a"
-                    style={!isPlayingFromLikedSongs || !isPlaying ? { marginLeft: 1 } : undefined}
-                  />
-                  <Text style={styles.playAllText}>
-                    {isPlayingFromLikedSongs && isPlaying ? "Pause" : "Play All"}
-                  </Text>
-                </Pressable>
-
-                <Pressable 
-                  onPress={handleShufflePlay}
-                  style={({ pressed }) => [styles.shuffleButton, pressed && styles.shuffleButtonPressed]}
-                  android_ripple={{ color: "rgba(255,255,255,0.12)", borderless: false }}
-                >
-                  <Ionicons name="shuffle" size={16} color={UI.text} />
-                  <Text style={styles.shuffleText}>Shuffle</Text>
-                </Pressable>
-              </View>
-
-              <View style={styles.rightActions}>
-                <Pressable
-                  style={({ pressed }) => [styles.utilityIcon, pressed && styles.utilityIconPressed]}
-                  onPress={() => {
-                    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                    setIsSearchActive(!isSearchActive);
-                    if (isSearchActive) {
-                      setSearchQuery("");
-                    }
-                  }}
-                  android_ripple={{ color: "rgba(255,255,255,0.1)", borderless: true }}
-                >
-                  <Ionicons name={isSearchActive ? "close" : "search"} size={22} color={UI.subtext} />
-                </Pressable>
                 <DownloadCollectionButton
                   songs={filteredSongs}
                   collectionId="liked-songs"
@@ -202,6 +258,37 @@ export default function LikedSongsScreen() {
                   compact
                   style={styles.utilityIcon}
                 />
+              </View>
+
+              <View style={styles.rightActions}>
+                <Pressable 
+                  onPress={handleShufflePlay}
+                  style={({ pressed }) => [
+                    styles.shuffleButton,
+                    isShuffled && isPlayingFromLikedSongs && styles.shuffleButtonActive,
+                    pressed && styles.shuffleButtonPressed
+                  ]}
+                  android_ripple={{ color: "rgba(255,255,255,0.12)", borderless: false }}
+                >
+                  <Ionicons 
+                    name="shuffle" 
+                    size={24} 
+                    color={isShuffled && isPlayingFromLikedSongs ? UI.primaryA : UI.text} 
+                  />
+                </Pressable>
+
+                <Pressable 
+                  onPress={handlePlayAll} 
+                  style={({ pressed }) => [styles.playAllButton, pressed && styles.playAllButtonPressed]}
+                  android_ripple={{ color: "rgba(0,0,0,0.15)", borderless: false }}
+                >
+                  <Ionicons
+                    name={isPlayingFromLikedSongs && isPlaying ? "pause" : "play"}
+                    size={28}
+                    color="#06241a"
+                    style={!isPlayingFromLikedSongs || !isPlaying ? { marginLeft: 3 } : undefined}
+                  />
+                </Pressable>
               </View>
             </View>
 
@@ -234,7 +321,7 @@ export default function LikedSongsScreen() {
           songs.length === 0 ? styles.listContentEmpty : undefined,
         ]}
         showsVerticalScrollIndicator={false}
-        onScroll={handleHeaderScroll}
+        onScroll={handleScroll}
         scrollEventThrottle={16}
         removeClippedSubviews={false}
         initialNumToRender={12}
@@ -356,12 +443,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   playAllButton: {
-    borderRadius: 999,
-    paddingHorizontal: 20,
-    height: 42,
-    flexDirection: "row",
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
     backgroundColor: UI.primaryA,
     borderWidth: 1.5,
     borderColor: "rgba(38,225,154,0.6)",
@@ -371,32 +457,24 @@ const styles = StyleSheet.create({
     borderColor: "rgba(0,184,123,0.8)",
     transform: [{ scale: 0.96 }],
   },
-  playAllText: {
-    color: "#06241a",
-    fontSize: 14,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.2,
-  },
   shuffleButton: {
-    borderRadius: 999,
-    paddingHorizontal: 18,
-    height: 42,
-    flexDirection: "row",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
     backgroundColor: UI.highSurface,
     borderWidth: 1.5,
     borderColor: "rgba(61,74,61,0.48)",
+  },
+  shuffleButtonActive: {
+    backgroundColor: "rgba(38,225,154,0.08)",
+    borderColor: UI.primaryA,
   },
   shuffleButtonPressed: {
     backgroundColor: UI.lowSurface,
     borderColor: "rgba(61,74,61,0.72)",
     transform: [{ scale: 0.96 }],
-  },
-  shuffleText: {
-    color: UI.text,
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
   },
   rightActions: {
     flexDirection: "row",
@@ -593,5 +671,92 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
+  },
+  searchPlaceholderText: {
+    color: UI.subtext,
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+  },
+  searchModeContainer: {
+    flex: 1,
+    backgroundColor: UI.bg,
+  },
+  searchModeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(61,74,61,0.22)",
+    gap: 12,
+  },
+  searchModeInputWrapper: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: UI.lowSurface,
+    borderWidth: 1,
+    borderColor: "rgba(61,74,61,0.34)",
+    gap: 8,
+  },
+  searchModeInput: {
+    flex: 1,
+    color: UI.text,
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+  },
+  searchModeCancelButton: {
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 6,
+  },
+  searchModeCancelText: {
+    color: UI.primaryA,
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+  },
+  searchModeListContent: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 100,
+  },
+  searchModeEmptyWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 100,
+    gap: 8,
+  },
+  searchModeEmptyTitle: {
+    color: UI.text,
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    textAlign: "center",
+  },
+  searchModeEmptySubtitle: {
+    color: UI.subtext,
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+  },
+  headerRightContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  stickyPlayButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: UI.primaryA,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 8,
+  },
+  stickyPlayButtonPressed: {
+    backgroundColor: UI.primaryB,
+    transform: [{ scale: 0.94 }],
   },
 });

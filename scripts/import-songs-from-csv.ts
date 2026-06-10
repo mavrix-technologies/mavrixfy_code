@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import axios from 'axios';
 import { getMusicApiUrl } from '../lib/api-config';
 
 interface CSVSong {
@@ -155,13 +154,26 @@ async function searchJioSaavn(title: string, artist: string, originalSong: CSVSo
   try {
     const query = `${title} ${artist}`;
     const apiBase = getMusicApiUrl().replace(/\/+$/, '');
-    const response = await axios.get(`${apiBase}/api/search/songs`, {
-      params: { query, limit: 10 },
-      timeout: 10000
+    const url = new URL(`${apiBase}/api/search/songs`);
+    url.searchParams.append('query', query);
+    url.searchParams.append('limit', '10');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    const response = await fetch(url.toString(), {
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const json = await response.json();
     
-    if (response.data?.data?.results) {
-      const results = response.data.data.results;
+    if (json?.data?.results) {
+      const results = json.data.results;
       let bestMatch: any = null;
       let bestScore = 0;
       

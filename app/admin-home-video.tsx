@@ -65,20 +65,23 @@ export default function AdminHomeVideoScreen() {
     const title = config.title.trim();
     const videoUrl = config.videoUrl.trim();
     const posterUrl = config.posterUrl.trim();
+    const adUnitId = (config.adUnitId || "").trim();
 
     if (!title) {
       Alert.alert("Title required", "Add a short title for the home video.");
       return;
     }
 
-    if (!isHttpUrl(videoUrl)) {
-      Alert.alert("Video URL required", "Add a valid HTTP or HTTPS MP4 video URL.");
-      return;
-    }
+    if (!adUnitId) {
+      if (!isHttpUrl(videoUrl)) {
+        Alert.alert("Video URL required", "Add a valid HTTP or HTTPS MP4 video URL or Ad Unit ID.");
+        return;
+      }
 
-    if (!isHttpUrl(posterUrl)) {
-      Alert.alert("Poster URL required", "Add a valid HTTP or HTTPS poster image URL.");
-      return;
+      if (!isHttpUrl(posterUrl)) {
+        Alert.alert("Poster URL required", "Add a valid HTTP or HTTPS poster image URL or Ad Unit ID.");
+        return;
+      }
     }
 
     setSaving(true);
@@ -91,6 +94,7 @@ export default function AdminHomeVideoScreen() {
           title,
           videoUrl,
           posterUrl,
+          adUnitId,
         },
         ...config.items.slice(1),
       ];
@@ -100,11 +104,12 @@ export default function AdminHomeVideoScreen() {
           title,
           videoUrl,
           posterUrl,
+          adUnitId,
           items: nextItems,
         },
         user?.id
       );
-      setConfig({ enabled: config.enabled, title, videoUrl, posterUrl, items: nextItems });
+      setConfig({ enabled: config.enabled, title, videoUrl, posterUrl, adUnitId, items: nextItems });
       Alert.alert("Saved", "Home video updated.");
     } catch (error: any) {
       Alert.alert("Could not save", error?.message || "Try again in a moment.");
@@ -203,6 +208,17 @@ export default function AdminHomeVideoScreen() {
             autoCapitalize="none"
             autoCorrect={false}
             multiline
+          />
+
+          <Text style={styles.fieldLabel}>Native Video Ad Unit ID (Optional)</Text>
+          <TextInput
+            value={config.adUnitId || ""}
+            onChangeText={(adUnitId) => updateConfig({ adUnitId })}
+            style={styles.input}
+            placeholder="ca-app-pub-3940256099942544/1044960115"
+            placeholderTextColor={Colors.inactive}
+            autoCapitalize="none"
+            autoCorrect={false}
           />
         </View>
 
