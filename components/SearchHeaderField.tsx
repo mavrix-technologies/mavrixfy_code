@@ -22,7 +22,7 @@ export default function SearchHeaderField({
       <Ionicons name="search" size={16} color="#8E949B" />
       <TextInput
         style={styles.input}
-        placeholder="Search songs, artists, playlists"
+        placeholder="Search songs, albums, artists, playlists"
         placeholderTextColor="#8E949B"
         value={value}
         onChangeText={onChangeText}

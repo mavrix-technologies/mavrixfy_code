@@ -59,16 +59,10 @@ import AppTopHeader, {
 } from "@/components/AppTopHeader";
 import ShinyText from "@/components/ShinyText";
 import AdMobBanner from "@/components/AdMobBanner";
-import mobileAds, {
-  NativeAd,
-  NativeAdView,
-  NativeAsset,
-  NativeAssetType,
-  NativeMediaView,
-} from "react-native-google-mobile-ads";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { filterMap, forEachFiltered, mapFilter } from "@/lib/arrayUtils";
 import { DEFAULT_HOME_HERO_CONFIG, subscribeHomeHeroConfig, type HomeHeroVideoItem } from "@/lib/homeHeroConfig";
+import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
 
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 
@@ -153,6 +147,8 @@ const RECT_CARD_WIDTH = 152;
 const ARTIST_CARD_WIDTH = 120;
 const PINNED_HOME_HEADER_HEIGHT = 56;
 const HOME_VIDEO_CARD_GAP = 10;
+const HOME_HERO_AD_INIT_TIMEOUT_MS = 3000;
+const HOME_HERO_AD_LOAD_TIMEOUT_MS = 5500;
 const CLOUDINARY_VIDEO_UPLOAD_PATH = "/video/upload/";
 const HOME_HERO_VIDEO_TRANSFORM = "f_mp4,vc_h264,c_crop,g_center,w_1440,h_810/c_fill,w_1080,h_608,q_auto:good";
 const HOME_HERO_POSTER_TRANSFORM = "so_2,c_crop,g_center,w_1440,h_810/c_fill,w_1080,h_608,q_auto,f_jpg";
@@ -407,6 +403,7 @@ function HomeHeroVideoCard({
   onPress,
   onToggleMute,
   onPlaybackEnd,
+  onAdUnavailable,
   loop,
 }: {
   item: HomeHeroVideoItem;
@@ -417,25 +414,63 @@ function HomeHeroVideoCard({
   onPress: (item: HomeHeroVideoItem) => void;
   onToggleMute: () => void;
   onPlaybackEnd: () => void;
+  onAdUnavailable: (itemId: string) => void;
   loop: boolean;
 }) {
-  const [ad, setAd] = useState<NativeAd | null>(null);
+  const [ad, setAd] = useState<GoogleNativeAd | null>(null);
   const [adLoaded, setAdLoaded] = useState(false);
+  const [adUnavailable, setAdUnavailable] = useState(false);
+  const isNativeAdItem = item.kind === "ad" || Boolean(item.adUnitId?.trim() && !item.videoUrl.trim());
+  const adUnitId = item.adUnitId?.trim() || "";
 
   useEffect(() => {
-    if (!item.adUnitId) return;
+    if (!isNativeAdItem || !adUnitId) return;
 
     let active = true;
-    let loadedAd: NativeAd | null = null;
+    let loadedAd: GoogleNativeAd | null = null;
+    let shouldDestroyLateAd = false;
 
     const loadHeroNativeAd = async () => {
       try {
-        await mobileAds().initialize();
+        setAd(null);
+        setAdLoaded(false);
+        setAdUnavailable(false);
+
+        const adsModule = getGoogleMobileAdsModule();
+        if (!adsModule) {
+          if (active) {
+            setAdUnavailable(true);
+          }
+          return;
+        }
+
+        const { default: mobileAds, NativeAd } = adsModule;
+
+        await withPromiseTimeout(
+          mobileAds().initialize(),
+          HOME_HERO_AD_INIT_TIMEOUT_MS,
+          "Home Hero video ad SDK init timed out"
+        );
         if (!active) return;
 
-        const nativeAd = await NativeAd.createForAdRequest(item.adUnitId!, {
+        const nativeAdRequest = NativeAd.createForAdRequest(adUnitId, {
           requestNonPersonalizedAdsOnly: true,
+          startVideoMuted: true,
         });
+
+        nativeAdRequest
+          .then((lateAd) => {
+            if (shouldDestroyLateAd || !active) {
+              lateAd.destroy();
+            }
+          })
+          .catch(() => {});
+
+        const nativeAd = await withPromiseTimeout(
+          nativeAdRequest,
+          HOME_HERO_AD_LOAD_TIMEOUT_MS,
+          "Home Hero video ad request timed out"
+        );
 
         if (!active) {
           nativeAd.destroy();
@@ -447,6 +482,13 @@ function HomeHeroVideoCard({
         setAdLoaded(true);
       } catch (err) {
         console.warn("Home Hero video ad failed to load:", err);
+        if (active) {
+          shouldDestroyLateAd = true;
+          setAdUnavailable(true);
+          if (!__DEV__) {
+            onAdUnavailable(item.id);
+          }
+        }
       }
     };
 
@@ -458,25 +500,55 @@ function HomeHeroVideoCard({
         loadedAd.destroy();
       }
     };
-  }, [item.adUnitId]);
+  }, [adUnitId, isNativeAdItem, item.id, onAdUnavailable]);
 
-  const playbackUrl = useMemo(() => getHomeHeroPlaybackUrl(item.videoUrl), [item.videoUrl]);
+  const playbackUrl = useMemo(
+    () => (isNativeAdItem ? "" : getHomeHeroPlaybackUrl(item.videoUrl)),
+    [isNativeAdItem, item.videoUrl]
+  );
   const posterPreviewUrl = useMemo(
-    () => getHomeHeroPosterPreviewUrl(item.posterUrl, item.videoUrl),
-    [item.posterUrl, item.videoUrl]
+    () => (isNativeAdItem ? "" : getHomeHeroPosterPreviewUrl(item.posterUrl, item.videoUrl)),
+    [isNativeAdItem, item.posterUrl, item.videoUrl]
   );
 
   const playableSong = getHomeHeroPlayableSong(item);
 
-  if (item.adUnitId) {
+  if (isNativeAdItem) {
+    if (adUnavailable) {
+      if (__DEV__) {
+        return (
+          <View style={[styles.liveVideoSlide, styles.liveVideoAdUnavailableCard, { width, height }]}>
+            <View style={styles.liveVideoAdUnavailableBadge}>
+              <Text style={styles.liveVideoAdUnavailableBadgeText}>AD</Text>
+            </View>
+            <Text style={styles.liveVideoAdUnavailableTitle}>Native video ad slot</Text>
+            <Text style={styles.liveVideoAdUnavailableText}>
+              Ad unit saved. It appears after AdMob returns fill in a dev or release build.
+            </Text>
+          </View>
+        );
+      }
+
+      return null;
+    }
+
+    const adsModule = ad ? getGoogleMobileAdsModule() : null;
+    const NativeAdView = adsModule?.NativeAdView;
+    const NativeAsset = adsModule?.NativeAsset;
+    const NativeAssetType = adsModule?.NativeAssetType;
+    const NativeMediaView = adsModule?.NativeMediaView;
+
     return (
       <View style={[styles.liveVideoSlide, { width, height, overflow: "hidden", borderRadius: 12 }]}>
-        {adLoaded && ad ? (
+        {adLoaded && ad && NativeAdView && NativeAsset && NativeAssetType && NativeMediaView ? (
           <NativeAdView
             nativeAd={ad}
-            style={[styles.liveVideoMediaFill, { backgroundColor: "#11141a", position: "relative" }]}
+            style={styles.liveVideoAdView}
           >
-            <NativeMediaView resizeMode="cover" style={styles.liveVideoMediaFill} />
+            <NativeMediaView
+              resizeMode="cover"
+              style={[StyleSheet.absoluteFillObject, styles.liveVideoMediaFill]}
+            />
             
             <View style={styles.adOverlayContainer}>
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
@@ -532,8 +604,9 @@ function HomeHeroVideoCard({
             </View>
           </NativeAdView>
         ) : (
-          <View style={[styles.liveVideoMediaFill, { alignItems: "center", justifyContent: "center", backgroundColor: "#11141a" }]}>
+          <View style={styles.liveVideoAdLoading}>
             <ActivityIndicator size="small" color="#26e19a" />
+            <Text style={styles.liveVideoAdLoadingText}>Loading sponsored card</Text>
           </View>
         )}
       </View>
@@ -621,9 +694,20 @@ function useHomeScreenInnerView() {
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const videoSafeTopInset = Platform.OS === "web" ? 0 : insets.top;
   const [homeHeroConfig, setHomeHeroConfig] = useState(DEFAULT_HOME_HERO_CONFIG);
+  const [unavailableHomeAdItemIds, setUnavailableHomeAdItemIds] = useState<string[]>([]);
   const homeHeroVideos = useMemo(
-    () => (homeHeroConfig.enabled ? homeHeroConfig.items.filter((item) => item.enabled && (item.videoUrl.trim() || item.adUnitId?.trim())) : []),
-    [homeHeroConfig.enabled, homeHeroConfig.items]
+    () => (
+      homeHeroConfig.enabled
+        ? homeHeroConfig.items.filter((item) => {
+            if (!item.enabled) return false;
+            if (item.kind === "ad") {
+              return Boolean(item.adUnitId?.trim()) && !unavailableHomeAdItemIds.includes(item.id);
+            }
+            return Boolean(item.videoUrl.trim());
+          })
+        : []
+    ),
+    [homeHeroConfig.enabled, homeHeroConfig.items, unavailableHomeAdItemIds]
   );
   const liveVideoCardWidth = useMemo(() => Math.round(Math.max(280, windowWidth - 28)), [windowWidth]);
   const liveVideoCardHeight = useMemo(() => Math.round(liveVideoCardWidth * 9 / 16), [liveVideoCardWidth]);
@@ -649,7 +733,13 @@ function useHomeScreenInnerView() {
   const isHomeHeroPlaybackAllowed =
     isAppStateActive && isHomeScreenFocused && isHomeHeroOnScreen && homeHeroVideos.length > 0;
 
-  useEffect(() => subscribeHomeHeroConfig(setHomeHeroConfig), []);
+  useEffect(
+    () => subscribeHomeHeroConfig((nextConfig) => {
+      setHomeHeroConfig(nextConfig);
+      setUnavailableHomeAdItemIds([]);
+    }),
+    []
+  );
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState: AppStateStatus) => {
@@ -1366,13 +1456,14 @@ function useHomeScreenInnerView() {
   ]);
 
   const openJioSaavnPlaylist = useCallback(
-    (playlist: { id: string; name?: string; imageUrl?: string; songCount?: number }) => {
+    (playlist: { id: string; name?: string; imageUrl?: string; songCount?: number; url?: string }) => {
       routerPush({
         pathname: "/playlist/[id]",
         params: {
           id: playlist.id,
           jiosaavn: "true",
           firestore: "false",
+          link: playlist.url || "",
           title: playlist.name || "",
           cover: playlist.imageUrl || "",
           songCount: playlist.songCount ? String(playlist.songCount) : "",
@@ -1421,6 +1512,7 @@ function useHomeScreenInnerView() {
           name: item.title,
           imageUrl: item.imageUrl,
           songCount: Number(item.playlist?.songCount || 0),
+          url: String(item.playlist?.url || item.playlist?.link || ""),
         });
         return;
       }
@@ -1626,6 +1718,8 @@ function useHomeScreenInnerView() {
       const img = item.image?.length ? getBestImageUrl(item.image) : "";
       return (
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={item.name}
           style={({ pressed }) => [styles.artistCard, pressed && styles.cardPressed]}
           onPress={() =>
             routerPush(
@@ -1815,14 +1909,20 @@ function useHomeScreenInnerView() {
       void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
 
       if (item.linkType === "album" && item.album) {
+        const albumId = String(item.album.saavnId || item.album.id || item.album.albumId || "").trim();
+        const albumLink = String(item.album.url || item.album.link || item.linkUrl || "").trim();
+        const albumTitle = String(item.album.title || item.album.name || item.title || "").trim();
+        const albumCover = String(item.album.coverUrl || item.album.imageUrl || item.album.cover || "").trim();
         routerPush({
           pathname: "/playlist/[id]",
           params: {
-            id: item.album.saavnId || item.album.id,
+            id: albumId || item.id,
             jiosaavn: "true",
+            album: "true",
             firestore: "false",
-            title: item.album.title,
-            cover: item.album.coverUrl,
+            link: albumLink,
+            title: albumTitle,
+            cover: albumCover,
             songCount: String(item.album.songCount ?? 0),
           },
         });
@@ -1863,6 +1963,12 @@ function useHomeScreenInnerView() {
     setIsLiveVideoMuted((current) => !current);
   }, []);
 
+  const handleHomeVideoAdUnavailable = useCallback((itemId: string) => {
+    setUnavailableHomeAdItemIds((current) => (
+      current.includes(itemId) ? current : [...current, itemId]
+    ));
+  }, []);
+
   const renderHomeVideoSeparator = useCallback(() => <View style={styles.liveVideoSeparator} />, []);
 
   const renderHomeVideoItem = useCallback(
@@ -1876,11 +1982,13 @@ function useHomeScreenInnerView() {
         onPress={handleHomeVideoPress}
         onToggleMute={toggleLiveVideoMute}
         onPlaybackEnd={advanceHomeVideo}
+        onAdUnavailable={handleHomeVideoAdUnavailable}
         loop={homeHeroVideos.length <= 1}
       />
     ),
     [
       advanceHomeVideo,
+      handleHomeVideoAdUnavailable,
       handleHomeVideoPress,
       homeHeroVideos.length,
       isHomeHeroPlaybackAllowed,
@@ -2127,7 +2235,7 @@ function useHomeScreenInnerView() {
         case "featured-artists":
           return (
             <View style={styles.section}>
-              {getSectionHeaderElement("Featured Artists", () => routerPush("/artists", { withAnchor: true }))}
+              {getSectionHeaderElement("Top Featured Artists", () => routerPush("/artists", { withAnchor: true }))}
               <FlatList
                 horizontal
                 data={featuredArtists}
@@ -2304,6 +2412,65 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 12,
     zIndex: 3,
   },
+  liveVideoAdView: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#11141a",
+    overflow: "hidden",
+  },
+  liveVideoAdLoading: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#11141a",
+    gap: 8,
+  },
+  liveVideoAdLoadingText: {
+    color: "rgba(248,251,249,0.68)",
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0,
+  },
+  liveVideoAdUnavailableCard: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#11141a",
+    borderWidth: 1,
+    borderColor: "rgba(38,225,154,0.22)",
+    paddingHorizontal: 24,
+  },
+  liveVideoAdUnavailableBadge: {
+    borderRadius: 4,
+    backgroundColor: "#26e19a",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginBottom: 10,
+  },
+  liveVideoAdUnavailableBadgeText: {
+    color: "#10141a",
+    fontSize: 10,
+    lineHeight: 12,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0,
+  },
+  liveVideoAdUnavailableTitle: {
+    color: "#F8FBF9",
+    fontSize: 16,
+    lineHeight: 21,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0,
+    textAlign: "center",
+  },
+  liveVideoAdUnavailableText: {
+    maxWidth: 260,
+    color: "rgba(248,251,249,0.66)",
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: "Inter_500Medium",
+    letterSpacing: 0,
+    textAlign: "center",
+    marginTop: 6,
+  },
   scrollView: {
     flex: 1,
   },
@@ -2353,7 +2520,6 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     overflow: "hidden",
     position: "relative",
-    boxShadow: "0 0 8px rgba(29, 185, 84, 0.25)",
   },
   liveVideoPoster: {
     position: "absolute",
@@ -2580,6 +2746,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   artistAvatarWrap: {
+    width: 108,
+    height: 108,
     position: "relative",
   },
   artistAvatar: {

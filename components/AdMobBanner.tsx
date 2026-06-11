@@ -1,30 +1,35 @@
 import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, Platform } from "react-native";
 import { Image } from "expo-image";
-import mobileAds, {
-  NativeAd,
-  NativeAdView,
-  NativeAsset,
-  NativeAssetType,
-} from "react-native-google-mobile-ads";
 
 import { AD_UNITS } from "@/constants/admob";
+import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
 
 const NATIVE_AD_UNIT_ID = AD_UNITS.NATIVE;
 
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 
 export default function AdMobBanner() {
-  const [nativeAd, setNativeAd] = useState<NativeAd | null>(null);
+  const [nativeAd, setNativeAd] = useState<GoogleNativeAd | null>(null);
   const [adLoaded, setAdLoaded] = useState(false);
   const [adError, setAdError] = useState(false);
 
   useEffect(() => {
     let active = true;
-    let loadedAd: NativeAd | null = null;
+    let loadedAd: GoogleNativeAd | null = null;
 
     const loadNativeAd = async () => {
       try {
+        const adsModule = getGoogleMobileAdsModule();
+        if (!adsModule || !NATIVE_AD_UNIT_ID) {
+          if (active) {
+            setAdError(true);
+          }
+          return;
+        }
+
+        const { default: mobileAds, NativeAd } = adsModule;
+
         if (Platform.OS === "ios") {
           try {
             // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -69,9 +74,13 @@ export default function AdMobBanner() {
     };
   }, []);
 
-  if (adError || !NATIVE_AD_UNIT_ID || !nativeAd) {
+  const adsModule = nativeAd ? getGoogleMobileAdsModule() : null;
+
+  if (adError || !NATIVE_AD_UNIT_ID || !nativeAd || !adsModule) {
     return null; // Return nothing if native ad fails to load
   }
+
+  const { NativeAdView, NativeAsset, NativeAssetType } = adsModule;
 
   return (
     <NativeAdView nativeAd={nativeAd} style={[styles.container, !adLoaded && styles.loading]}>

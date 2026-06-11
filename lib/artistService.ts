@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
-import { compactMap, mapFilter } from "@/lib/arrayUtils";
+import { compactMap, mapFilter, sortedCopy } from "@/lib/arrayUtils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,15 +44,22 @@ export interface ArtistCard {
   name: string;
   image: JioSaavnImage[];
   followerCount?: number | null;
+  fanCount?: number | null;
+  isVerified?: boolean | null;
   dominantLanguage?: string | null;
+  rank?: number;
+  rankingScore?: number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const ARTIST_CACHE_PREFIX = "@mavrixfy_artist";
 const ARTIST_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
-const FEATURED_ARTISTS_CACHE_KEY = "@mavrixfy_featured_artists_v3";
+const FEATURED_ARTISTS_CACHE_KEY = "@mavrixfy_featured_artists_v5";
 const FEATURED_ARTISTS_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const FEATURED_ARTIST_QUERY_LIMIT = 40;
+const FEATURED_ARTIST_SHOWCASE_LIMIT = 12;
+const FEATURED_ARTIST_ROTATION_WINDOW_MS = 6 * 60 * 60 * 1000;
 const TIMEOUT_MS = 6000;
 
 const BASE_URLS: string[] = []; // All requests go through getApiUrl() — no fallbacks needed
@@ -80,6 +87,26 @@ const POPULAR_ARTIST_QUERIES = [
   "shubh",
   "ed sheeran",
   "weeknd",
+  "neha kakkar",
+  "yo yo honey singh",
+  "diljit dosanjh",
+  "sidhu moose wala",
+  "atif aslam",
+  "rahat fateh ali khan",
+  "kk",
+  "mohit chauhan",
+  "ar rahman",
+  "amit trivedi",
+  "sachin-jigar",
+  "sunidhi chauhan",
+  "shilpa rao",
+  "jonita gandhi",
+  "asees kaur",
+  "tulsi kumar",
+  "king",
+  "divine",
+  "raftaar",
+  "emiway bantai",
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -240,8 +267,71 @@ function normalizeArtistCard(raw: any): ArtistCard | null {
     name,
     image: normalizeImage(source?.image),
     followerCount: toNumber(source?.followerCount ?? source?.follower_count),
+    fanCount: toNumber(source?.fanCount ?? source?.fan_count),
+    isVerified: typeof source?.isVerified === "boolean" ? source.isVerified : null,
     dominantLanguage: toStr(source?.dominantLanguage ?? source?.dominant_language) || null,
   };
+}
+
+function scoreCountSignal(value: number | null | undefined, maxScore: number): number {
+  if (!value || value <= 0) return 0;
+  return Math.min(Math.log10(value + 1) * 11.5, maxScore);
+}
+
+function calculateArtistRankingScore(artist: ArtistCard, sourceIndex: number): number {
+  const language = artist.dominantLanguage?.toLowerCase() ?? "";
+  const hasRegionalPull = /^(hindi|punjabi|tamil|telugu|malayalam|kannada|bengali|marathi|gujarati|urdu)$/.test(language);
+  const followerScore = scoreCountSignal(artist.followerCount, 74);
+  const fanScore = scoreCountSignal(artist.fanCount, 70);
+  const popularityScore = Math.max(followerScore, fanScore);
+  const seedScore = Math.max(32, 76 - sourceIndex * 1.8);
+
+  const rawScore =
+    (popularityScore > 0 ? popularityScore : seedScore) +
+    (artist.isVerified ? 12 : 0) +
+    (hasRegionalPull ? 7 : 0) +
+    (artist.image.length > 0 ? 4 : 0) +
+    Math.max(0, 10 - sourceIndex * 0.35);
+
+  return Math.max(1, Math.min(100, Math.round(rawScore)));
+}
+
+function rankFeaturedArtists(artists: ArtistCard[]): ArtistCard[] {
+  const scoredArtists = artists.map((artist, index) => ({
+    artist,
+    index,
+    score: calculateArtistRankingScore(artist, index),
+  }));
+
+  return sortedCopy(scoredArtists, (left, right) => right.score - left.score || left.index - right.index)
+    .map(({ artist, score }, index) => ({
+      ...artist,
+      rank: index + 1,
+      rankingScore: score,
+    }));
+}
+
+function getFeaturedArtistShowcaseWindow(): number {
+  return Math.floor(Date.now() / FEATURED_ARTIST_ROTATION_WINDOW_MS);
+}
+
+function buildFeaturedArtistShowcase(artists: ArtistCard[]): ArtistCard[] {
+  const ranked = rankFeaturedArtists(artists);
+  const limit = Math.min(FEATURED_ARTIST_SHOWCASE_LIMIT, ranked.length);
+  if (limit === 0) return [];
+
+  const chunkCount = Math.max(1, Math.ceil(ranked.length / limit));
+  const chunkIndex = getFeaturedArtistShowcaseWindow() % chunkCount;
+  const start = chunkIndex * limit;
+  const selected = ranked.slice(start, start + limit);
+  if (selected.length < limit) {
+    selected.push(...ranked.slice(0, limit - selected.length));
+  }
+
+  return selected.map((artist, index) => ({
+    ...artist,
+    rank: index + 1,
+  }));
 }
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
@@ -391,8 +481,8 @@ async function searchArtistsFromSongs(appBase: string, encodedQuery: string): Pr
 }
 
 async function fetchFeaturedArtists(): Promise<ArtistCard[]> {
-  // Search for each popular artist name in parallel, take the top result
-  const queries = POPULAR_ARTIST_QUERIES.slice(0, 20);
+  // Search a broad pool, then the public API rotates a ranked slice for variety.
+  const queries = POPULAR_ARTIST_QUERIES.slice(0, FEATURED_ARTIST_QUERY_LIMIT);
   const results = await Promise.allSettled(
     queries.map(async (q) => {
       const found = await searchArtists(q);
@@ -410,7 +500,7 @@ async function fetchFeaturedArtists(): Promise<ArtistCard[]> {
     seen.add(artistId);
     artists.push(artist);
   }
-  return artists;
+  return rankFeaturedArtists(artists);
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -434,11 +524,11 @@ export async function getFeaturedArtists(): Promise<ArtistCard[]> {
     void fetchFeaturedArtists().then((fresh) => {
       if (fresh.length > 0) void setCachedFeaturedArtists(fresh);
     });
-    return cached;
+    return buildFeaturedArtistShowcase(cached);
   }
   const fresh = await fetchFeaturedArtists();
   if (fresh.length > 0) void setCachedFeaturedArtists(fresh);
-  return fresh;
+  return buildFeaturedArtistShowcase(fresh);
 }
 
 /** Fire-and-forget prefetch for an artist */

@@ -223,9 +223,6 @@ function NavTabItem({
   activeNavColor,
   navInactiveColor,
 }: NavTabItemProps) {
-  const scaleAnimRef = React.useRef<Animated.Value | null>(null);
-  if (scaleAnimRef.current === null) scaleAnimRef.current = new Animated.Value(1);
-  const scaleAnim = scaleAnimRef.current;
   const focusAnimRef = React.useRef<Animated.Value | null>(null);
   if (focusAnimRef.current === null) focusAnimRef.current = new Animated.Value(isFocused ? 1 : 0);
   const focusAnim = focusAnimRef.current;
@@ -239,24 +236,6 @@ function NavTabItem({
       isInteraction: false,
     }).start();
   }, [focusAnim, isFocused]);
-
-  const handlePressIn = React.useCallback(() => {
-    Animated.spring(scaleAnim, {
-      toValue: 0.965,
-      speed: 35,
-      bounciness: 0,
-      useNativeDriver: true,
-    }).start();
-  }, [scaleAnim]);
-
-  const handlePressOut = React.useCallback(() => {
-    Animated.spring(scaleAnim, {
-      toValue: 1,
-      speed: 25,
-      bounciness: 8,
-      useNativeDriver: true,
-    }).start();
-  }, [scaleAnim]);
 
   const handlePress = React.useCallback(() => {
     onPress(item.route, isFocused);
@@ -275,22 +254,21 @@ function NavTabItem({
   });
 
   return (
-    <Animated.View style={[styles.navItemAnimWrap, { transform: [{ scale: scaleAnim }] }]}>
+    <View style={styles.navItemAnimWrap}>
       <Pressable
         android_disableSound
         accessibilityRole="tab"
         accessibilityState={{ selected: isFocused }}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
         onPress={handlePress}
         onLongPress={onLongPress}
         hitSlop={6}
-        style={[
+        style={({ pressed }) => [
           styles.navItem,
           isIOS && styles.navItemIOS,
           { paddingTop: navItemPaddingTop, paddingBottom: navItemPaddingBottom },
           isFocused && styles.navItemActive,
           isFocused && isIOS && styles.navItemIOSActive,
+          pressed && styles.navItemPressed,
         ]}
       >
         <View style={styles.navIconWrap}>
@@ -329,7 +307,7 @@ function NavTabItem({
           {item.label}
         </Text>
       </Pressable>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -424,10 +402,10 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
 
   const openPlayer = useCallback(() => {
     const now = Date.now();
-    if (now - openPlayerLockRef.current < 420) return;
+    if (now - openPlayerLockRef.current < 240) return;
 
     openPlayerLockRef.current = now;
-    requestAnimationFrame(() => routerPush("/player"));
+    routerPush("/player");
   }, [routerPush]);
 
   useEffect(() => {
@@ -1053,10 +1031,10 @@ function useIOSMiniPlayerOverlayView() {
 
   const openPlayer = useCallback(() => {
     const now = Date.now();
-    if (now - openPlayerLockRef.current < 420) return;
+    if (now - openPlayerLockRef.current < 240) return;
 
     openPlayerLockRef.current = now;
-    requestAnimationFrame(() => overlayRouterPush("/player"));
+    overlayRouterPush("/player");
   }, [overlayRouterPush]);
 
   useEffect(() => {
@@ -1638,8 +1616,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.12)",
   },
   miniButtonPressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.94 }],
+    opacity: 0.9,
   },
   iosMiniPlayerInlineMixBtn: {
     width: 42,
@@ -2022,6 +1999,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderRadius: 14,
     zIndex: 1,
+  },
+  navItemPressed: {
+    opacity: 0.9,
   },
   navItemIOS: {
     borderRadius: 18,

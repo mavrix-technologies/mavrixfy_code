@@ -41,7 +41,7 @@ import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { sortedCopy } from "@/lib/arrayUtils";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
-import { getJioSaavnPlaylistDetails } from "@/lib/jioSaavnService";
+import { getJioSaavnAlbumDetails, getJioSaavnPlaylistDetails } from "@/lib/jioSaavnService";
 import { useAuth } from "@/contexts/AuthContext";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
@@ -75,6 +75,8 @@ function usePlaylistScreenView() {
   const params = useLocalSearchParams<{
     id?: string | string[];
     jiosaavn?: string | string[];
+    album?: string | string[];
+    link?: string | string[];
     firestore?: string | string[];
     title?: string | string[];
     description?: string | string[];
@@ -83,8 +85,10 @@ function usePlaylistScreenView() {
   }>();
 
   const playlistId       = pickFirstParam(params.id).trim();
-  const isJioSaavnSource = pickFirstParam(params.jiosaavn) === "true";
+  const isAlbumSource    = pickFirstParam(params.album) === "true";
+  const isJioSaavnSource = pickFirstParam(params.jiosaavn) === "true" || isAlbumSource;
   const isFirestoreSource = pickFirstParam(params.firestore) === "true";
+  const sourceLink       = pickFirstParam(params.link).trim();
   const initialTitle     = pickFirstParam(params.title).trim();
   const initialCover     = pickFirstParam(params.cover).trim();
   const initialDescription = pickFirstParam(params.description).trim();
@@ -142,6 +146,9 @@ function usePlaylistScreenView() {
   const totalDurationLabel = totalDuration > 0 ? formatDuration(totalDuration) : "";
   const totalMinutes = useMemo(() => Math.max(0, Math.floor(totalDuration / 60)), [totalDuration]);
   const effectiveSongCount = songs.length > 0 ? songs.length : initialSongCount;
+  const collectionKind = isAlbumSource ? "Album" : "Playlist";
+  const collectionKindLower = isAlbumSource ? "album" : "playlist";
+  const downloadCollectionId = isAlbumSource ? `album:${playlistId}` : playlistId;
 
   const isPlayingFromThisPlaylist = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
@@ -265,9 +272,11 @@ function usePlaylistScreenView() {
           return;
         }
         if (isJioSaavnSource) {
-          const loadJioPlaylistAttempt = async (attempt: number): Promise<number> => {
+          const loadJioCollectionAttempt = async (attempt: number): Promise<number> => {
             try {
-              const data = await getJioSaavnPlaylistDetails(playlistId);
+              const data = isAlbumSource
+                ? await getJioSaavnAlbumDetails(playlistId, { link: sourceLink })
+                : await getJioSaavnPlaylistDetails(playlistId, { link: sourceLink });
               if (!cancelled) {
                 const loadedCount = applyJioPlaylistData(data);
                 if (loadedCount > 0) {
@@ -281,14 +290,14 @@ function usePlaylistScreenView() {
             if (!cancelled && attempt < AUTO_RETRY_ATTEMPTS - 1) {
               const retryDelay = AUTO_RETRY_DELAY_MS[Math.min(attempt, AUTO_RETRY_DELAY_MS.length - 1)];
               return delay(retryDelay).then(() => (
-                cancelled ? 0 : loadJioPlaylistAttempt(attempt + 1)
+                cancelled ? 0 : loadJioCollectionAttempt(attempt + 1)
               ));
             }
 
             return 0;
           };
 
-          const loadedCount = await loadJioPlaylistAttempt(0);
+          const loadedCount = await loadJioCollectionAttempt(0);
           if (!cancelled && loadedCount === 0) {
             if (!hasPrefilledHeader) markPlaylistNotFound();
             else markPlaylistLoadError("Songs are taking longer than expected to load.");
@@ -318,7 +327,7 @@ function usePlaylistScreenView() {
     void load();
     return () => { cancelled = true; };
   }, [
-    playlistId, isFirestoreSource, isJioSaavnSource,
+    playlistId, isAlbumSource, sourceLink, isFirestoreSource, isJioSaavnSource,
     applyFirestorePlaylistData, applyJioPlaylistData,
     applyLocalPlaylistData, finishPlaylistLoad,
     hasPrefilledHeader, markPlaylistLoadError, markPlaylistNotFound,
@@ -597,7 +606,7 @@ function usePlaylistScreenView() {
           <Ionicons name="arrow-back" size={22} color={Colors.text} />
         </Pressable>
         <View style={styles.center}>
-          <Text style={styles.emptyText}>Playlist not found</Text>
+          <Text style={styles.emptyText}>{collectionKind} not found</Text>
         </View>
       </View>
     );
@@ -694,9 +703,10 @@ function usePlaylistScreenView() {
               {songs.length > 0 && (
                 <DownloadCollectionButton
                   songs={songs}
-                  collectionId={playlistId}
+                  collectionId={downloadCollectionId}
                   collectionName={playlistName}
                   collectionImage={playlistCover}
+                  collectionType={isAlbumSource ? "album" : "playlist"}
                   compact
                 />
               )}
@@ -735,7 +745,7 @@ function usePlaylistScreenView() {
           <SongRowSkeleton count={Math.max(4, Math.min(initialSongCount || 8, 10))} />
         ) : (
           <View style={styles.inlineWrap}>
-            <Text style={styles.inlineText}>No songs available in this playlist.</Text>
+            <Text style={styles.inlineText}>No songs available in this {collectionKindLower}.</Text>
           </View>
         )}
       </ScrollView>

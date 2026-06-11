@@ -23,6 +23,8 @@ import {
 } from "@/lib/homeHeroConfig";
 import { safeGoBack } from "@/utils/navigation";
 
+type HomeVideoEditorMode = "video" | "ad";
+
 function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value.trim());
@@ -32,6 +34,188 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function EditorModeTabs({
+  editorMode,
+  onChange,
+}: {
+  editorMode: HomeVideoEditorMode;
+  onChange: (mode: HomeVideoEditorMode) => void;
+}) {
+  return (
+    <View style={styles.modeTabs}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ selected: editorMode === "video" }}
+        style={[styles.modeTab, editorMode === "video" && styles.modeTabActive]}
+        onPress={() => onChange("video")}
+      >
+        <Ionicons
+          name="film-outline"
+          size={16}
+          color={editorMode === "video" ? Colors.black : Colors.subtext}
+        />
+        <Text style={[styles.modeTabText, editorMode === "video" && styles.modeTabTextActive]}>
+          Home video
+        </Text>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ selected: editorMode === "ad" }}
+        style={[styles.modeTab, editorMode === "ad" && styles.modeTabActive]}
+        onPress={() => onChange("ad")}
+      >
+        <Ionicons
+          name="megaphone-outline"
+          size={16}
+          color={editorMode === "ad" ? Colors.black : Colors.subtext}
+        />
+        <Text style={[styles.modeTabText, editorMode === "ad" && styles.modeTabTextActive]}>
+          Native ad
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function HomeVideoFieldsSection({
+  config,
+  onUpdate,
+}: {
+  config: HomeHeroConfig;
+  onUpdate: (partial: Partial<HomeHeroConfig>) => void;
+}) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.switchRow}>
+        <View>
+          <Text style={styles.fieldLabel}>Active</Text>
+          <Text style={styles.fieldHint}>Show this video at the top of Home.</Text>
+        </View>
+        <Switch
+          value={config.enabled}
+          onValueChange={(enabled) => onUpdate({ enabled })}
+          trackColor={{ false: Colors.inactive, true: Colors.primary }}
+          thumbColor={Colors.text}
+        />
+      </View>
+
+      <Text style={styles.fieldLabel}>Small title</Text>
+      <TextInput
+        value={config.title}
+        onChangeText={(title) => onUpdate({ title })}
+        style={styles.input}
+        placeholder="COCKTAIL 2"
+        placeholderTextColor={Colors.inactive}
+        autoCapitalize="words"
+      />
+
+      <Text style={styles.fieldLabel}>MP4 video URL</Text>
+      <TextInput
+        value={config.videoUrl}
+        onChangeText={(videoUrl) => onUpdate({ videoUrl })}
+        style={[styles.input, styles.multilineInput]}
+        placeholder="https://..."
+        placeholderTextColor={Colors.inactive}
+        autoCapitalize="none"
+        autoCorrect={false}
+        multiline
+      />
+
+      <Text style={styles.fieldLabel}>Poster image URL</Text>
+      <TextInput
+        value={config.posterUrl}
+        onChangeText={(posterUrl) => onUpdate({ posterUrl })}
+        style={[styles.input, styles.multilineInput]}
+        placeholder="https://..."
+        placeholderTextColor={Colors.inactive}
+        autoCapitalize="none"
+        autoCorrect={false}
+        multiline
+      />
+    </View>
+  );
+}
+
+function NativeAdFieldsSection({
+  adSlotEnabled,
+  adUnitId,
+  onUpdate,
+}: {
+  adSlotEnabled: boolean;
+  adUnitId: string;
+  onUpdate: (partial: Partial<HomeHeroConfig>) => void;
+}) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.switchRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.fieldLabel}>Native video ad slot</Text>
+          <Text style={styles.fieldHint}>Adds one sponsored card to the home video carousel.</Text>
+        </View>
+        <Switch
+          value={adSlotEnabled}
+          onValueChange={(nextAdSlotEnabled) => onUpdate({ adSlotEnabled: nextAdSlotEnabled })}
+          trackColor={{ false: Colors.inactive, true: Colors.primary }}
+          thumbColor={Colors.text}
+        />
+      </View>
+
+      {adSlotEnabled ? (
+        <>
+          <Text style={styles.fieldLabel}>Native video ad unit ID</Text>
+          <TextInput
+            value={adUnitId}
+            onChangeText={(nextAdUnitId) => onUpdate({ adUnitId: nextAdUnitId })}
+            style={styles.input}
+            placeholder="ca-app-pub-3940256099942544/1044960115"
+            placeholderTextColor={Colors.inactive}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text style={styles.fieldHint}>Use an AdMob Native Video placement. Do not paste the regular Native unit here.</Text>
+        </>
+      ) : (
+        <View style={styles.adSlotOffHint}>
+          <Ionicons name="information-circle-outline" size={18} color={Colors.subtext} />
+          <Text style={styles.fieldHint}>Turn this on to add or edit the native video ad unit.</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function AdminHomeVideoActions({
+  editorMode,
+  loading,
+  saving,
+  onReset,
+  onSave,
+}: {
+  editorMode: HomeVideoEditorMode;
+  loading: boolean;
+  saving: boolean;
+  onReset: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <View style={styles.actions}>
+      <Pressable style={styles.secondaryBtn} onPress={onReset} disabled={saving || loading}>
+        <Text style={styles.secondaryBtnText}>Reset default</Text>
+      </Pressable>
+      <Pressable style={[styles.primaryBtn, saving && styles.primaryBtnDisabled]} onPress={onSave} disabled={saving || loading}>
+        {saving ? (
+          <ActivityIndicator color={Colors.black} />
+        ) : (
+          <>
+            <Ionicons name="save-outline" size={18} color={Colors.black} />
+            <Text style={styles.primaryBtnText}>{editorMode === "ad" ? "Save ad" : "Save video"}</Text>
+          </>
+        )}
+      </Pressable>
+    </View>
+  );
+}
+
 export default function AdminHomeVideoScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -39,6 +223,7 @@ export default function AdminHomeVideoScreen() {
   const bottomScrollPadding = Platform.OS === "web" ? 110 : Math.max(118, insets.bottom + 112);
 
   const [config, setConfig] = useState<HomeHeroConfig>(DEFAULT_HOME_HERO_CONFIG);
+  const [editorMode, setEditorMode] = useState<HomeVideoEditorMode>("video");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -62,64 +247,101 @@ export default function AdminHomeVideoScreen() {
   }, []);
 
   const handleSave = useCallback(async () => {
+    const isEditingAd = editorMode === "ad";
     const title = config.title.trim();
     const videoUrl = config.videoUrl.trim();
     const posterUrl = config.posterUrl.trim();
     const adUnitId = (config.adUnitId || "").trim();
+    const adSlotEnabled = config.adSlotEnabled ?? Boolean(adUnitId);
 
-    if (!title) {
-      Alert.alert("Title required", "Add a short title for the home video.");
-      return;
-    }
+    if (!isEditingAd) {
+      if (!title) {
+        Alert.alert("Title required", "Add a short title for the home video.");
+        return;
+      }
 
-    if (!adUnitId) {
       if (!isHttpUrl(videoUrl)) {
-        Alert.alert("Video URL required", "Add a valid HTTP or HTTPS MP4 video URL or Ad Unit ID.");
+        Alert.alert("Video URL required", "Add a valid HTTP or HTTPS MP4 video URL.");
         return;
       }
 
       if (!isHttpUrl(posterUrl)) {
-        Alert.alert("Poster URL required", "Add a valid HTTP or HTTPS poster image URL or Ad Unit ID.");
+        Alert.alert("Poster URL required", "Add a valid HTTP or HTTPS poster image URL.");
         return;
       }
     }
 
+    if (adSlotEnabled && !adUnitId) {
+      Alert.alert("Ad unit required", "Add a native video ad unit ID or turn off the ad slot.");
+      return;
+    }
+
     setSaving(true);
     try {
-      const firstItem = config.items[0] || DEFAULT_HOME_HERO_CONFIG.items[0];
+      const firstItem = config.items.find((item) => item.kind !== "ad") || DEFAULT_HOME_HERO_CONFIG.items[0];
+      const preservedVideoItems = config.items.filter((item) => item.id !== firstItem.id && item.kind !== "ad");
+      const existingAdItem = config.items.find((item) => item.kind === "ad" || (!item.videoUrl && item.adUnitId));
+      const nextTitle = isEditingAd ? firstItem.title || title || DEFAULT_HOME_HERO_CONFIG.title : title;
+      const nextVideoUrl = isEditingAd ? firstItem.videoUrl || videoUrl || DEFAULT_HOME_HERO_CONFIG.videoUrl : videoUrl;
+      const nextPosterUrl = isEditingAd ? firstItem.posterUrl || posterUrl || DEFAULT_HOME_HERO_CONFIG.posterUrl : posterUrl;
       const nextItems = [
         {
           ...firstItem,
-          enabled: true,
-          title,
-          videoUrl,
-          posterUrl,
-          adUnitId,
+          kind: "video" as const,
+          enabled: isEditingAd ? firstItem.enabled : true,
+          title: nextTitle,
+          videoUrl: nextVideoUrl,
+          posterUrl: nextPosterUrl,
+          adUnitId: "",
         },
-        ...config.items.slice(1),
+        ...preservedVideoItems,
       ];
-      await saveHomeHeroConfig(
-        {
-          enabled: config.enabled,
-          title,
-          videoUrl,
-          posterUrl,
+
+      if (adSlotEnabled && adUnitId) {
+        nextItems.push({
+          ...(existingAdItem || DEFAULT_HOME_HERO_CONFIG.items[0]),
+          id: existingAdItem?.id || "home-native-video-ad",
+          kind: "ad" as const,
+          enabled: true,
+          title: "Sponsored",
+          videoUrl: "",
+          posterUrl: "",
           adUnitId,
-          items: nextItems,
-        },
+          linkUrl: "",
+          songId: "",
+          song: null,
+          linkType: "song" as const,
+          album: null,
+          playlist: null,
+        });
+      }
+
+      const nextConfig = {
+        enabled: config.enabled,
+        title: nextTitle,
+        videoUrl: nextVideoUrl,
+        posterUrl: nextPosterUrl,
+        adUnitId,
+        adSlotEnabled,
+        items: nextItems,
+      };
+
+      await saveHomeHeroConfig(
+        nextConfig,
         user?.id
       );
-      setConfig({ enabled: config.enabled, title, videoUrl, posterUrl, adUnitId, items: nextItems });
-      Alert.alert("Saved", "Home video updated.");
+      setConfig(nextConfig);
+      Alert.alert("Saved", isEditingAd ? "Native video ad slot updated." : "Home video updated.");
     } catch (error: any) {
       Alert.alert("Could not save", error?.message || "Try again in a moment.");
     } finally {
       setSaving(false);
     }
-  }, [config, user?.id]);
+  }, [config, editorMode, user?.id]);
 
   const handleReset = useCallback(() => {
     setConfig(DEFAULT_HOME_HERO_CONFIG);
+    setEditorMode("video");
   }, []);
 
   if (!user?.isAdmin) {
@@ -141,6 +363,8 @@ export default function AdminHomeVideoScreen() {
     );
   }
 
+  const adSlotEnabled = config.adSlotEnabled ?? Boolean(config.adUnitId);
+
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
       <View style={styles.header}>
@@ -159,84 +383,33 @@ export default function AdminHomeVideoScreen() {
       >
         <View style={styles.previewCard}>
           <Text style={styles.previewTitle}>{config.title.trim() || DEFAULT_HOME_HERO_CONFIG.title}</Text>
-          <Text style={styles.previewMeta}>{config.enabled ? "Visible on Home" : "Hidden on Home"}</Text>
+          <Text style={styles.previewMeta}>
+            {config.enabled ? "Visible on Home" : "Hidden on Home"}
+            {adSlotEnabled ? " · Native video ad slot on" : " · Ad slot off"}
+          </Text>
         </View>
 
-        <View style={styles.section}>
-          <View style={styles.switchRow}>
-            <View>
-              <Text style={styles.fieldLabel}>Active</Text>
-              <Text style={styles.fieldHint}>Show this video at the top of Home.</Text>
-            </View>
-            <Switch
-              value={config.enabled}
-              onValueChange={(enabled) => updateConfig({ enabled })}
-              trackColor={{ false: Colors.inactive, true: Colors.primary }}
-              thumbColor={Colors.text}
-            />
-          </View>
+        <EditorModeTabs editorMode={editorMode} onChange={setEditorMode} />
 
-          <Text style={styles.fieldLabel}>Small title</Text>
-          <TextInput
-            value={config.title}
-            onChangeText={(title) => updateConfig({ title })}
-            style={styles.input}
-            placeholder="COCKTAIL 2"
-            placeholderTextColor={Colors.inactive}
-            autoCapitalize="words"
+        {editorMode === "video" ? (
+          <HomeVideoFieldsSection config={config} onUpdate={updateConfig} />
+        ) : null}
+
+        {editorMode === "ad" ? (
+          <NativeAdFieldsSection
+            adSlotEnabled={adSlotEnabled}
+            adUnitId={config.adUnitId || ""}
+            onUpdate={updateConfig}
           />
+        ) : null}
 
-          <Text style={styles.fieldLabel}>MP4 video URL</Text>
-          <TextInput
-            value={config.videoUrl}
-            onChangeText={(videoUrl) => updateConfig({ videoUrl })}
-            style={[styles.input, styles.multilineInput]}
-            placeholder="https://..."
-            placeholderTextColor={Colors.inactive}
-            autoCapitalize="none"
-            autoCorrect={false}
-            multiline
-          />
-
-          <Text style={styles.fieldLabel}>Poster image URL</Text>
-          <TextInput
-            value={config.posterUrl}
-            onChangeText={(posterUrl) => updateConfig({ posterUrl })}
-            style={[styles.input, styles.multilineInput]}
-            placeholder="https://..."
-            placeholderTextColor={Colors.inactive}
-            autoCapitalize="none"
-            autoCorrect={false}
-            multiline
-          />
-
-          <Text style={styles.fieldLabel}>Native Video Ad Unit ID (Optional)</Text>
-          <TextInput
-            value={config.adUnitId || ""}
-            onChangeText={(adUnitId) => updateConfig({ adUnitId })}
-            style={styles.input}
-            placeholder="ca-app-pub-3940256099942544/1044960115"
-            placeholderTextColor={Colors.inactive}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        </View>
-
-        <View style={styles.actions}>
-          <Pressable style={styles.secondaryBtn} onPress={handleReset} disabled={saving || loading}>
-            <Text style={styles.secondaryBtnText}>Reset default</Text>
-          </Pressable>
-          <Pressable style={[styles.primaryBtn, saving && styles.primaryBtnDisabled]} onPress={handleSave} disabled={saving || loading}>
-            {saving ? (
-              <ActivityIndicator color={Colors.black} />
-            ) : (
-              <>
-                <Ionicons name="save-outline" size={18} color={Colors.black} />
-                <Text style={styles.primaryBtnText}>Save</Text>
-              </>
-            )}
-          </Pressable>
-        </View>
+        <AdminHomeVideoActions
+          editorMode={editorMode}
+          loading={loading}
+          saving={saving}
+          onReset={handleReset}
+          onSave={handleSave}
+        />
       </ScrollView>
     </View>
   );
@@ -291,6 +464,37 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
     marginTop: 4,
   },
+  modeTabs: {
+    marginHorizontal: 16,
+    marginTop: 18,
+    padding: 5,
+    borderRadius: 8,
+    backgroundColor: Colors.surface,
+    flexDirection: "row",
+    gap: 6,
+  },
+  modeTab: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 7,
+  },
+  modeTabActive: {
+    backgroundColor: Colors.primary,
+  },
+  modeTabText: {
+    color: Colors.subtext,
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0,
+  },
+  modeTabTextActive: {
+    color: Colors.black,
+  },
   section: {
     marginHorizontal: 16,
     marginTop: 18,
@@ -338,6 +542,17 @@ const styles = StyleSheet.create({
   multilineInput: {
     minHeight: 86,
     textAlignVertical: "top",
+  },
+  adSlotOffHint: {
+    minHeight: 44,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceLight,
+    borderWidth: 1,
+    borderColor: "rgba(248,251,249,0.08)",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   actions: {
     marginHorizontal: 16,

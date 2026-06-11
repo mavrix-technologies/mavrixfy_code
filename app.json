@@ -16,7 +16,7 @@
       "supportsTablet": true,
       "icon": "./assets/images/mavrixfy_icon_ios.png",
       "bundleIdentifier": "com.mavrixfy.app",
-      "buildNumber": "20600",
+      "buildNumber": "20601",
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -31,7 +31,7 @@
     "android": {
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
-      "versionCode": 20600,
+      "versionCode": 20601,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icone.png",
@@ -44,7 +44,8 @@
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "VIBRATE",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "com.google.android.gms.permission.AD_ID"
       ],
       "blockedPermissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -126,12 +127,12 @@
       "android"
     ],
     "updates": {
-      "enabled": false,
+      "enabled": true,
       "url": "https://u.expo.dev/93293119-93b7-4dbb-acdd-7241771254c4",
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": "2.6.0-20600",
+    "runtimeVersion": "2.6.0-20601",
     "extra": {
       "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",

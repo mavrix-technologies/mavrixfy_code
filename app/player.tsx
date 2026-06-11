@@ -22,13 +22,6 @@ import {
   ViewStyle
 } from "react-native";
 import { Image } from "expo-image";
-import mobileAds, {
-  NativeAd,
-  NativeAdView,
-  NativeAsset,
-  NativeAssetType,
-  NativeMediaView,
-} from "react-native-google-mobile-ads";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useNavigation, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -52,8 +45,10 @@ import { getArtistDetails, JioSaavnArtist, searchArtists } from "@/lib/artistSer
 import { isFollowingArtist, toggleFollowArtist } from "@/lib/followedArtists";
 import { mapFilter } from "@/lib/arrayUtils";
 import { globalQueueSheetRef } from "@/lib/queueRef";
+import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
 
 const getCurrentTimestamp = () => Date.now();
+const PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING = 136;
 
 function hexToRgba(color: string, alpha: number): string {
   const safeAlpha = Math.max(0, Math.min(1, alpha));
@@ -117,7 +112,6 @@ type SmoothControlButtonProps = {
   style?: StyleProp<ViewStyle>;
   hitSlop?: React.ComponentProps<typeof Pressable>["hitSlop"];
   disabled?: boolean;
-  scaleTo?: number;
 };
 
 function SmoothControlButton({
@@ -128,55 +122,33 @@ function SmoothControlButton({
   style,
   hitSlop,
   disabled,
-  scaleTo = 0.94,
 }: SmoothControlButtonProps) {
-  const scaleRef = useRef<Animated.Value | null>(null);
-  if (scaleRef.current === null) scaleRef.current = new Animated.Value(1);
-  const scale = scaleRef.current;
-
-  const animateTo = useCallback(
-    (value: number, duration: number) => {
-      scale.stopAnimation();
-      Animated.timing(scale, {
-        toValue: value,
-        duration,
-        useNativeDriver: true,
-        isInteraction: false,
-      }).start();
-    },
-    [scale]
-  );
-
   const handlePressIn = useCallback(
     (event: GestureResponderEvent) => {
-      animateTo(scaleTo, 70);
       onPressIn?.(event);
     },
-    [animateTo, onPressIn, scaleTo]
+    [onPressIn]
   );
 
   const handlePressOut = useCallback(
     (event: GestureResponderEvent) => {
-      animateTo(1, 105);
       onPressOut?.(event);
     },
-    [animateTo, onPressOut]
+    [onPressOut]
   );
 
   return (
-    <Animated.View style={{ transform: [{ scale }] }}>
-      <Pressable
-        android_disableSound
-        disabled={disabled}
-        hitSlop={hitSlop}
-        onPress={onPress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        style={style}
-      >
-        {children}
-      </Pressable>
-    </Animated.View>
+    <Pressable
+      android_disableSound
+      disabled={disabled}
+      hitSlop={hitSlop}
+      onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={({ pressed }) => [style, pressed && styles.quickButtonPressed]}
+    >
+      {children}
+    </Pressable>
   );
 }
 
@@ -837,7 +809,7 @@ function useLegacyPlayerScreenView() {
   } = usePlayerActions();
 
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
-  const [playerAd, setPlayerAd] = useState<NativeAd | null>(null);
+  const [playerAd, setPlayerAd] = useState<GoogleNativeAd | null>(null);
   const [playerAdLoaded, setPlayerAdLoaded] = useState(false);
   const [showAdInPlayer, setShowAdInPlayer] = useState(false);
   const [prevSongId, setPrevSongId] = useState(currentSong?.id);
@@ -863,7 +835,7 @@ function useLegacyPlayerScreenView() {
   const pendingArtworkTargetIndexRef = useRef<number | null>(null);
   const didHandleSheetDismissRef = useRef(false);
   const sheetDetentReadyAtRef = useRef(0);
-  const queuePressLockRef = useRef(false);
+  const optionsPressLockRef = useRef(false);
   const isDevPreviewActive = __DEV__ && !currentSong && isDevPreviewEnabled;
 
   const clearSkipCooldownTimer = useCallback(() => {
@@ -939,14 +911,30 @@ function useLegacyPlayerScreenView() {
     setTextColor(text);
   }, [setAlbumColor, setTextColor]);
   
-  const handleQueuePress = useCallback(() => {
-    if (queuePressLockRef.current) return;
-    queuePressLockRef.current = true;
-    globalQueueSheetRef.current?.expand();
+  const handleSongOptionsPress = useCallback(() => {
+    if (!screenSong || optionsPressLockRef.current) return;
+
+    optionsPressLockRef.current = true;
+    router.push(
+      {
+        pathname: "/song-options",
+        params: {
+          song: JSON.stringify(screenSong),
+          showDownload: isDevPreviewActive ? "0" : "1",
+          canRemove: "0",
+          optionContext: "",
+          playlistId: "",
+          playlistSource: "",
+          playlistName: "",
+        },
+      },
+      { dangerouslySingular: () => "song-options" }
+    );
+
     setTimeout(() => {
-      queuePressLockRef.current = false;
+      optionsPressLockRef.current = false;
     }, 600);
-  }, []);
+  }, [isDevPreviewActive, screenSong]);
   
   const clearArtistInfo = useCallback(() => {
     setArtistInfo(null);
@@ -1021,7 +1009,10 @@ function useLegacyPlayerScreenView() {
   const shuffleRepeatIconSize = isVeryShortScreen ? 16 : isShortScreen ? 17 : 19;
   const playButtonSize = isVeryShortScreen ? 56 : isShortScreen ? 62 : 74;
   const playIconSize = isVeryShortScreen ? 28 : isShortScreen ? 30 : 34;
-  const listBottomPadding = Platform.OS === "web" ? 16 : Math.max(32, bottomInset + 28);
+  const listBottomPadding =
+    Platform.OS === "web"
+      ? 16
+      : Math.max(PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING, bottomInset + PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING);
   const defaultArtByWidth = Math.min(screenWidth - 62, 336);
   const defaultArtByHeight = Math.max(192, Math.floor(screenHeight * (isVeryShortScreen ? 0.3 : 0.34)));
   const artSize = Math.min(defaultArtByWidth, defaultArtByHeight);
@@ -1071,10 +1062,17 @@ function useLegacyPlayerScreenView() {
 
   useEffect(() => {
     let active = true;
-    let loadedAd: NativeAd | null = null;
+    let loadedAd: GoogleNativeAd | null = null;
 
     const loadPlayerNativeAd = async () => {
       try {
+        const adsModule = getGoogleMobileAdsModule();
+        if (!adsModule || !AD_UNITS.NATIVE) {
+          return;
+        }
+
+        const { default: mobileAds, NativeAd } = adsModule;
+
         if (Platform.OS === "ios") {
           try {
             // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1117,6 +1115,12 @@ function useLegacyPlayerScreenView() {
       }
     };
   }, []);
+
+  const adsModule = playerAd ? getGoogleMobileAdsModule() : null;
+  const NativeAdView = adsModule?.NativeAdView;
+  const NativeAsset = adsModule?.NativeAsset;
+  const NativeAssetType = adsModule?.NativeAssetType;
+  const NativeMediaView = adsModule?.NativeMediaView;
 
 
   useEffect(() => {
@@ -1496,7 +1500,7 @@ function useLegacyPlayerScreenView() {
                 },
               ]}
             >
-              {showAdInPlayer && isActiveCard && playerAd ? (
+              {showAdInPlayer && isActiveCard && playerAd && NativeAdView && NativeMediaView && NativeAsset && NativeAssetType ? (
                 <NativeAdView
                   nativeAd={playerAd}
                   style={[styles.albumArt, styles.adCardContainer]}
@@ -1600,6 +1604,10 @@ function useLegacyPlayerScreenView() {
       artScrollX,
       artSize,
       handleArtworkSongChange,
+      NativeAdView,
+      NativeAsset,
+      NativeAssetType,
+      NativeMediaView,
       playerTheme.accent,
       playerAd,
       playerAdLoaded,
@@ -1738,11 +1746,13 @@ function useLegacyPlayerScreenView() {
         </View>
 
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open song options"
           style={[styles.headerIconButton, ctrlBtnStyle]}
-          onPress={handleQueuePress}
+          onPress={handleSongOptionsPress}
           hitSlop={10}
         >
-          <Ionicons name="list-outline" size={21} color={sheetTextColor} />
+          <Ionicons name="ellipsis-horizontal" size={22} color={sheetTextColor} />
         </Pressable>
       </View>
 
@@ -2665,6 +2675,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(223,226,235,0.14)",
     position: "relative",
+  },
+  quickButtonPressed: {
+    opacity: 0.9,
   },
   prevNextButton: {
     alignItems: "center",

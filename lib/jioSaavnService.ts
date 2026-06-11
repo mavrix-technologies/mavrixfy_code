@@ -11,6 +11,18 @@ export interface JioSaavnPlaylistResult {
   songCount: number;
 }
 
+export interface JioSaavnAlbumResult {
+  id: string;
+  name: string;
+  image: JioSaavnImage[];
+  songCount: number;
+  year?: string;
+  language?: string;
+  url?: string;
+  artist?: string;
+  description?: string;
+}
+
 export interface HomeJioSaavnCategory {
   id: string;
   title: string;
@@ -61,6 +73,12 @@ class JioSaavnPlaylistDetailsError extends Error {
 export interface GetJioSaavnPlaylistDetailsOptions {
   loadAllPages?: boolean;
   preferCache?: boolean;
+  link?: string;
+}
+
+export interface GetJioSaavnAlbumDetailsOptions {
+  link?: string;
+  preferCache?: boolean;
 }
 
 export type AutoRefreshTimeSlot = "morning" | "afternoon" | "evening" | "night";
@@ -76,6 +94,7 @@ export interface AutoRefreshContext {
 const CURRENT_YEAR = new Date().getFullYear();
 const CACHE_PREFIX = "@mavrixfy_jiosaavn_home";
 const PLAYLIST_DETAILS_CACHE_PREFIX = "@mavrixfy_jiosaavn_playlist_details";
+const ALBUM_DETAILS_CACHE_PREFIX = "@mavrixfy_jiosaavn_album_details";
 const REQUEST_TIMEOUT_MS = 8500;
 const PLAYLIST_FETCH_LIMIT = 50;
 const PLAYLIST_MAX_PAGES = 10;
@@ -260,7 +279,9 @@ function dedupeByPlaylistId(playlists: JioSaavnPlaylistResult[]): JioSaavnPlayli
 }
 
 function toTrimmedString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
 }
 
 function parseBoolean(value: unknown): boolean {
@@ -314,7 +335,19 @@ function parseSongCountValue(raw: any): number {
     }
   }
 
+  if (typeof raw?.songIds === "string") {
+    let count = 0;
+    for (const id of raw.songIds.split(",")) {
+      if (id.trim()) count += 1;
+    }
+    return count;
+  }
+
   return 0;
+}
+
+function getArtistNames(artists: ReturnType<typeof normalizeArtistList>): string[] {
+  return compactMap(artists, (artist) => artist.name || null);
 }
 
 function normalizePlaylistList(raw: unknown): JioSaavnPlaylistResult[] {
@@ -355,6 +388,75 @@ function parsePlaylistSearchResponse(json: any): JioSaavnPlaylistResult[] {
 
   for (const candidate of candidates) {
     const normalized = normalizePlaylistList(candidate);
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+
+  return [];
+}
+
+function getAlbumArtistLabel(raw: any): string {
+  const direct = [
+    toTrimmedString(raw?.primaryArtists),
+    toTrimmedString(raw?.primary_artists),
+    toTrimmedString(raw?.artist),
+    toTrimmedString(raw?.subtitle),
+  ].find(Boolean);
+  if (direct) return direct;
+
+  const primary = normalizeArtistList(raw?.artists?.primary);
+  const primaryNames = getArtistNames(primary);
+  if (primaryNames.length > 0) return primaryNames.join(", ");
+
+  const all = normalizeArtistList(raw?.artists?.all);
+  const allNames = Array.from(new Set(getArtistNames(all)));
+  return allNames.slice(0, 3).join(", ");
+}
+
+function normalizeAlbumList(raw: unknown): JioSaavnAlbumResult[] {
+  if (!Array.isArray(raw)) return [];
+
+  return mapFilter(raw, (album: any) => {
+      const id =
+        toTrimmedString(album?.id) ||
+        toTrimmedString(album?.albumId) ||
+        toTrimmedString(album?.albumid) ||
+        toTrimmedString(album?._id);
+      const name = toTrimmedString(album?.name) || toTrimmedString(album?.title);
+      const image = normalizeImageList(
+        album?.image ?? album?.images ?? album?.imageUrl ?? album?.image_url
+      );
+
+      return {
+        id,
+        name,
+        image,
+        songCount: parseSongCountValue(album),
+        year: toTrimmedString(album?.year) || undefined,
+        language: toTrimmedString(album?.language) || toTrimmedString(album?.lang) || undefined,
+        url: toTrimmedString(album?.url) || toTrimmedString(album?.perma_url) || undefined,
+        artist: getAlbumArtistLabel(album) || undefined,
+        description: toTrimmedString(album?.description) || undefined,
+      };
+    }, (album) => Boolean(album.id && album.name));
+}
+
+function parseAlbumSearchResponse(json: any): JioSaavnAlbumResult[] {
+  if (!json) return [];
+
+  const candidates = [
+    json?.data?.results,
+    json?.data?.albums?.results,
+    json?.data?.albums,
+    json?.results,
+    json?.albums?.results,
+    json?.albums,
+    json?.data,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeAlbumList(candidate);
     if (normalized.length > 0) {
       return normalized;
     }
@@ -685,6 +787,57 @@ async function searchPlaylistsRaw(
   );
 
   return providerResults.find((parsed) => parsed.length > 0) ?? [];
+}
+
+export async function searchJioSaavnAlbums(
+  query: string,
+  limit = 8,
+  signal?: AbortSignal
+): Promise<JioSaavnAlbumResult[]> {
+  const searchQuery = query.trim();
+  if (!searchQuery) return [];
+
+  const requestUrls = JIOSAAVN_SEARCH_BASE_URLS.map((endpointBase) => {
+    const trimmed = endpointBase.replace(/\/+$/, "");
+    return (
+      `${trimmed}/search/albums?` +
+      `query=${encodeURIComponent(searchQuery)}&limit=${Math.max(1, limit)}&page=1`
+    );
+  });
+
+  const providerResults = await Promise.all(
+    requestUrls.map(async (requestUrl) => {
+      try {
+        const response = await withTimeout(
+          fetch(requestUrl, {
+            headers: { Accept: "application/json" },
+            signal,
+          })
+        );
+
+        if (!response.ok) {
+          await consumeResponseBody(response);
+          return [] as JioSaavnAlbumResult[];
+        }
+
+        const json = await response.json();
+        return parseAlbumSearchResponse(json);
+      } catch {
+        return [] as JioSaavnAlbumResult[];
+      }
+    })
+  );
+
+  const seen = new Set<string>();
+  const albums: JioSaavnAlbumResult[] = [];
+  for (const album of providerResults.flat()) {
+    if (!album.id || seen.has(album.id)) continue;
+    seen.add(album.id);
+    albums.push(album);
+    if (albums.length >= limit) break;
+  }
+
+  return albums;
 }
 
 function sortPlaylists(playlists: JioSaavnPlaylistResult[], categoryId: string): JioSaavnPlaylistResult[] {
@@ -1129,13 +1282,68 @@ export async function clearJioSaavnPlaylistCache(categoryId?: string): Promise<v
 async function fetchPlaylistDetailsPage(
   playlistId: string,
   page: number,
-  limit: number
+  limit: number,
+  playlistLink?: string
 ): Promise<PlaylistDetailsPageResult> {
-  const encodedId = encodeURIComponent(playlistId);
-  const query = `id=${encodedId}&limit=${limit}&page=${page}`;
+  const sourceQuery = playlistLink
+    ? `link=${encodeURIComponent(playlistLink)}`
+    : `id=${encodeURIComponent(playlistId)}`;
+  const query = `${sourceQuery}&limit=${limit}&page=${page}`;
 
   const candidateUrls = JIOSAAVN_PLAYLIST_BASE_URLS.map(
     (base) => `${base.replace(/\/+$/, "")}/playlists?${query}`
+  );
+
+  const providerResults = await Promise.all(
+    candidateUrls.map(async (url) => {
+      try {
+        const response = await withTimeout(
+          fetch(url, { headers: { Accept: "application/json" } }),
+          6000
+        );
+        if (!response.ok) {
+          const notFound = response.status === 404;
+          await consumeResponseBody(response);
+          return { data: null, notFound };
+        }
+
+        const json = await response.json();
+        const normalized = parsePlaylistDetailsResponse(json);
+        return { data: normalized, notFound: false };
+      } catch {
+        return { data: null, notFound: false };
+      }
+    })
+  );
+
+  const networkResult = providerResults.find((result) => result.data);
+  if (networkResult?.data) {
+    return { data: networkResult.data, reason: "network" };
+  }
+
+  const allNotFound = providerResults.every((result) => result.notFound);
+  return { data: null, reason: allNotFound ? "not_found" : "network" };
+}
+
+function buildAlbumDetailsQuery(albumId: string, albumLink?: string): string {
+  if (albumLink) {
+    return `link=${encodeURIComponent(albumLink)}`;
+  }
+
+  const params: string[] = [];
+  if (albumId) params.push(`id=${encodeURIComponent(albumId)}`);
+  return params.join("&");
+}
+
+async function fetchAlbumDetails(
+  albumId: string,
+  albumLink?: string
+): Promise<PlaylistDetailsPageResult> {
+  const query = buildAlbumDetailsQuery(albumId, albumLink);
+  if (!query) return { data: null, reason: "not_found" };
+
+  const candidateUrls = JIOSAAVN_PLAYLIST_BASE_URLS.map(
+    (base) => `${base.replace(/\/+$/, "")}/albums?${query}`
   );
 
   const providerResults = await Promise.all(
@@ -1177,6 +1385,14 @@ function buildPlaylistDetailsCacheTimeKey(playlistId: string): string {
   return `${PLAYLIST_DETAILS_CACHE_PREFIX}:${playlistId}:time`;
 }
 
+function buildAlbumDetailsCacheKey(albumKey: string): string {
+  return `${ALBUM_DETAILS_CACHE_PREFIX}:${albumKey}`;
+}
+
+function buildAlbumDetailsCacheTimeKey(albumKey: string): string {
+  return `${ALBUM_DETAILS_CACHE_PREFIX}:${albumKey}:time`;
+}
+
 async function getCachedPlaylistDetails(
   playlistId: string
 ): Promise<JioSaavnPlaylistDetailsData | null> {
@@ -1208,6 +1424,43 @@ async function setCachedPlaylistDetails(
     await AsyncStorage.multiSet([
       [buildPlaylistDetailsCacheKey(playlistId), JSON.stringify(playlist)],
       [buildPlaylistDetailsCacheTimeKey(playlistId), String(Date.now())],
+    ]);
+  } catch {
+    // Silent cache write failure
+  }
+}
+
+async function getCachedAlbumDetails(
+  albumKey: string
+): Promise<JioSaavnPlaylistDetailsData | null> {
+  try {
+    const [[, rawData], [, rawTime]] = await AsyncStorage.multiGet([
+      buildAlbumDetailsCacheKey(albumKey),
+      buildAlbumDetailsCacheTimeKey(albumKey),
+    ]);
+
+    if (!rawData || !rawTime) return null;
+    const cachedAt = Number(rawTime);
+    if (!Number.isFinite(cachedAt)) return null;
+    if (Date.now() - cachedAt > PLAYLIST_DETAILS_CACHE_TTL_MS) return null;
+
+    const parsed = JSON.parse(rawData);
+    const normalized = normalizePlaylistDetailsData(parsed);
+    if (!normalized || !Array.isArray(normalized.songs)) return null;
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
+async function setCachedAlbumDetails(
+  albumKey: string,
+  album: JioSaavnPlaylistDetailsData
+): Promise<void> {
+  try {
+    await AsyncStorage.multiSet([
+      [buildAlbumDetailsCacheKey(albumKey), JSON.stringify(album)],
+      [buildAlbumDetailsCacheTimeKey(albumKey), String(Date.now())],
     ]);
   } catch {
     // Silent cache write failure
@@ -1278,18 +1531,23 @@ export async function getJioSaavnPlaylistDetails(
   options?: GetJioSaavnPlaylistDetailsOptions
 ): Promise<JioSaavnPlaylistDetailsData> {
   const normalizedId = String(playlistId || "").trim();
-  if (!normalizedId) {
+  const playlistLink = String(options?.link || "").trim();
+  const cacheKey = normalizedId || playlistLink;
+  if (!cacheKey) {
     throw new JioSaavnPlaylistDetailsError("NOT_FOUND", "Playlist not found");
   }
 
   // 1. Serve cache immediately — instant render for returning users
-  const cached = await getCachedPlaylistDetails(normalizedId);
+  const cached = await getCachedPlaylistDetails(cacheKey);
   if (cached?.songs?.length) {
     // Silently refresh cache in background
-    void fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT)
+    void fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT, playlistLink)
       .then((res) => {
         if (res.data?.songs?.length) {
-          void setCachedPlaylistDetails(normalizedId, res.data);
+          void setCachedPlaylistDetails(cacheKey, res.data);
+          if (res.data.id && res.data.id !== cacheKey) {
+            void setCachedPlaylistDetails(res.data.id, res.data);
+          }
         }
       })
       .catch(() => {});
@@ -1297,19 +1555,25 @@ export async function getJioSaavnPlaylistDetails(
   }
 
   // 2. Fetch — all URLs raced in parallel (fast)
-  const firstPage = await fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT);
+  const firstPage = await fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT, playlistLink);
 
   if (firstPage.data?.songs?.length) {
-    void setCachedPlaylistDetails(normalizedId, firstPage.data);
+    void setCachedPlaylistDetails(cacheKey, firstPage.data);
+    if (firstPage.data.id && firstPage.data.id !== cacheKey) {
+      void setCachedPlaylistDetails(firstPage.data.id, firstPage.data);
+    }
     return firstPage.data;
   }
 
   // 3. Got a response but songs array was empty — the API sometimes returns
   //    playlist metadata without songs on first hit. Retry once.
   if (firstPage.data && !firstPage.data.songs?.length) {
-    const retry = await fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT);
+    const retry = await fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT, playlistLink);
     if (retry.data?.songs?.length) {
-      void setCachedPlaylistDetails(normalizedId, retry.data);
+      void setCachedPlaylistDetails(cacheKey, retry.data);
+      if (retry.data.id && retry.data.id !== cacheKey) {
+        void setCachedPlaylistDetails(retry.data.id, retry.data);
+      }
       return retry.data;
     }
     // Return the metadata-only response so the screen can at least show the header
@@ -1322,6 +1586,61 @@ export async function getJioSaavnPlaylistDetails(
     throw new JioSaavnPlaylistDetailsError("NOT_FOUND", "Playlist not found");
   }
   throw new JioSaavnPlaylistDetailsError("NETWORK", "Unable to fetch playlist details");
+}
+
+export async function getJioSaavnAlbumDetails(
+  albumId: string,
+  options?: GetJioSaavnAlbumDetailsOptions
+): Promise<JioSaavnPlaylistDetailsData> {
+  const normalizedId = String(albumId || "").trim();
+  const albumLink = String(options?.link || "").trim();
+  const cacheKey = normalizedId || albumLink;
+  if (!cacheKey) {
+    throw new JioSaavnPlaylistDetailsError("NOT_FOUND", "Album not found");
+  }
+
+  const cached = await getCachedAlbumDetails(cacheKey);
+  if (cached?.songs?.length) {
+    void fetchAlbumDetails(normalizedId, albumLink)
+      .then((res) => {
+        if (res.data?.songs?.length) {
+          void setCachedAlbumDetails(cacheKey, res.data);
+          if (res.data.id && res.data.id !== cacheKey) {
+            void setCachedAlbumDetails(res.data.id, res.data);
+          }
+        }
+      })
+      .catch(() => {});
+    return cached;
+  }
+
+  const first = await fetchAlbumDetails(normalizedId, albumLink);
+
+  if (first.data?.songs?.length) {
+    void setCachedAlbumDetails(cacheKey, first.data);
+    if (first.data.id && first.data.id !== cacheKey) {
+      void setCachedAlbumDetails(first.data.id, first.data);
+    }
+    return first.data;
+  }
+
+  if (first.data && !first.data.songs?.length) {
+    const retry = await fetchAlbumDetails(normalizedId, albumLink);
+    if (retry.data?.songs?.length) {
+      void setCachedAlbumDetails(cacheKey, retry.data);
+      if (retry.data.id && retry.data.id !== cacheKey) {
+        void setCachedAlbumDetails(retry.data.id, retry.data);
+      }
+      return retry.data;
+    }
+    if (retry.data) return retry.data;
+    return first.data;
+  }
+
+  if (first.reason === "not_found") {
+    throw new JioSaavnPlaylistDetailsError("NOT_FOUND", "Album not found");
+  }
+  throw new JioSaavnPlaylistDetailsError("NETWORK", "Unable to fetch album details");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

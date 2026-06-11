@@ -120,8 +120,8 @@ android {
         applicationId 'com.mavrixfy.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 20503
-        versionName "2.5.3"
+        versionCode 20601
+        versionName "2.6.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

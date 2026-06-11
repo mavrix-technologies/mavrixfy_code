@@ -76,6 +76,7 @@ interface Props {
   collectionName?: string;
   /** Playlist/collection cover image URL */
   collectionImage?: string;
+  collectionType?: "playlist" | "album";
   /** Label shown next to the icon in full mode. Defaults to "Download All" */
   label?: string;
   style?: object;
@@ -88,6 +89,7 @@ export default function DownloadCollectionButton({
   collectionId,
   collectionName,
   collectionImage,
+  collectionType = "playlist",
   label = "Download All",
   style,
   compact = false,
@@ -195,7 +197,7 @@ export default function DownloadCollectionButton({
               await saveCollectionMetadata(collectionId, {
                 name: collectionName || "Playlist",
                 imageUrl: collectionImage || "",
-                type: "playlist",
+                type: collectionType,
                 songCount: songsToDownload.length,
               });
             }
@@ -216,6 +218,7 @@ export default function DownloadCollectionButton({
     collectionId,
     collectionImage,
     collectionName,
+    collectionType,
     total,
     completed,
     downloading,

@@ -1,34 +1,34 @@
 {
-  "latestVersion": "2.0.0",
+  "latestVersion": "2.6.0",
   "minimumSupportedVersion": "1.0.0",
   "forceUpdate": false,
   "updateUrl": {
     "android": "https://play.google.com/store/apps/details?id=com.mavrixfy.app&pcampaignid=web_share",
     "ios": "https://apps.apple.com/app/mavrixfy/id123456789"
   },
-  "message": "🎉 New update available! Optimized performance and reduced app size. Play Store visibility is currently limited to testers who joined the Google Group.",
+  "message": "Mavrixfy 2.6.0 is available with a refreshed Home experience, improved discovery, smoother playback controls, and better overall stability.",
   "changelog": [
-    "Play Store listing is visible only for users who joined the Google Group testing program",
-    "Optimized APK size - smaller and faster downloads",
-    "Enhanced audio streaming performance",
-    "Fixed JioSaavn playlist loading issues",
-    "Improved compatibility with Android 14",
-    "Better error handling and stability",
-    "Reduced memory usage for smoother experience"
+    "Refreshed Home experience with improved music discovery",
+    "Improved search results for songs, albums, artists, and playlists",
+    "Enhanced player, queue, and song option controls",
+    "Improved artist and playlist pages for easier browsing",
+    "More reliable downloads and offline listening flows",
+    "Better Android Auto playback and media navigation",
+    "Performance, stability, and navigation improvements"
   ],
-  "releaseDate": "2026-04-01",
+  "releaseDate": "2026-06-11",
   "features": [
     {
-      "title": "Optimized Build",
-      "description": "Reduced app size by 30% with armeabi-v7a architecture"
+      "title": "Improved Discovery",
+      "description": "A refreshed Home screen, better featured artists, new releases, and stronger recommendations."
     },
     {
-      "title": "Better Performance",
-      "description": "Faster startup and improved audio playback stability"
+      "title": "Smoother Playback",
+      "description": "Cleaner player controls, improved queue handling, and better Android Auto support."
     },
     {
-      "title": "Enhanced Compatibility",
-      "description": "Full support for Android 14 with improved stability"
+      "title": "More Reliable Experience",
+      "description": "Search, downloads, navigation, and overall app stability have been improved."
     }
   ]
 }

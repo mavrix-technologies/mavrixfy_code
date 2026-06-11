@@ -403,7 +403,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     // Expose imperative handle
     React.useImperativeHandle(ref, () => ({
       expand: () => sheetRef.current?.expand(),
-      collapse: () => sheetRef.current?.collapse(),
+      collapse: () => sheetRef.current?.close(),
       close: () => sheetRef.current?.close(),
     }));
 
@@ -512,10 +512,10 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
       (props: BottomSheetBackdropProps) => (
         <BottomSheetBackdrop
           {...props}
-          disappearsOnIndex={0}
-          appearsOnIndex={1}
+          disappearsOnIndex={-1}
+          appearsOnIndex={0}
           opacity={0.52}
-          pressBehavior="collapse"
+          pressBehavior="close"
         />
       ),
       []
@@ -537,8 +537,8 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     );
 
     // ── Snap points ──────────────────────────────────────────────────────────
-    // 0 = collapsed handle-only, 1 = 92% screen height (full queue)
-    const snapPoints = useMemo(() => ["8%", "92%"], []);
+    // Keep a single open state so swipe-down never leaves a small collapsed strip.
+    const snapPoints = useMemo(() => ["92%"], []);
 
     const bottomPad = Math.max(insets.bottom, 12);
 

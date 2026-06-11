@@ -7,6 +7,7 @@ export type HomeHeroConfig = {
   videoUrl: string;
   posterUrl: string;
   adUnitId?: string;
+  adSlotEnabled?: boolean;
   items: HomeHeroVideoItem[];
 };
 
@@ -23,6 +24,7 @@ export type HomeHeroLinkedSong = {
 
 export type HomeHeroVideoItem = {
   id: string;
+  kind?: "video" | "ad";
   enabled: boolean;
   title: string;
   videoUrl: string;
@@ -43,9 +45,12 @@ export const DEFAULT_HOME_HERO_CONFIG: HomeHeroConfig = {
     "https://res.cloudinary.com/djqq8kba8/video/upload/f_mp4,vc_h264,c_crop,g_center,w_1440,h_810/c_fill,w_1080,h_608,q_auto:good/v1780900137/Cocktail_2_Official_Trailer___Shahid_Kapoor_Kriti_Sanon_Rashmika_Mandanna___In_Cinemas_19th_June_1440p_dwlaum.mp4",
   posterUrl:
     "https://res.cloudinary.com/djqq8kba8/video/upload/so_2,c_crop,g_center,w_1440,h_810/c_fill,w_1080,h_608,q_auto,f_jpg/v1780900137/Cocktail_2_Official_Trailer___Shahid_Kapoor_Kriti_Sanon_Rashmika_Mandanna___In_Cinemas_19th_June_1440p_dwlaum.jpg",
+  adUnitId: "",
+  adSlotEnabled: false,
   items: [
     {
       id: "default-home-video",
+      kind: "video",
       enabled: true,
       title: "COCKTAIL 2",
       videoUrl:
@@ -97,24 +102,45 @@ function normalizeVideoItem(value: unknown, index: number): HomeHeroVideoItem | 
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const videoUrl = toTrimmedString(record.videoUrl);
   const adUnitId = toTrimmedString(record.adUnitId);
-  if (!videoUrl && !adUnitId) return null;
+  const kind = record.kind === "ad" || (!videoUrl && adUnitId) ? "ad" : "video";
+  if (kind === "ad" && !adUnitId) return null;
+  if (kind === "video" && !videoUrl) return null;
 
   const linkedSong = normalizeLinkedSong(record.song);
   const songId = toTrimmedString(record.songId) || linkedSong?.id || "";
 
   return {
     id: toTrimmedString(record.id) || `home-video-${index + 1}`,
+    kind,
     enabled: typeof record.enabled === "boolean" ? record.enabled : true,
-    title: toTrimmedString(record.title) || DEFAULT_HOME_HERO_CONFIG.title,
-    videoUrl,
-    posterUrl: toTrimmedString(record.posterUrl),
-    adUnitId,
+    title: toTrimmedString(record.title) || (kind === "ad" ? "Sponsored" : DEFAULT_HOME_HERO_CONFIG.title),
+    videoUrl: kind === "ad" ? "" : videoUrl,
+    posterUrl: kind === "ad" ? "" : toTrimmedString(record.posterUrl),
+    adUnitId: kind === "ad" ? adUnitId : "",
     linkUrl: toTrimmedString(record.linkUrl),
-    songId,
-    song: linkedSong,
+    songId: kind === "ad" ? "" : songId,
+    song: kind === "ad" ? null : linkedSong,
     linkType: (record.linkType === 'song' || record.linkType === 'album' || record.linkType === 'playlist') ? record.linkType : 'song',
-    album: record.album || null,
-    playlist: record.playlist || null,
+    album: kind === "ad" ? null : record.album || null,
+    playlist: kind === "ad" ? null : record.playlist || null,
+  };
+}
+
+function buildHomeHeroAdItem(adUnitId: string, enabled = true): HomeHeroVideoItem {
+  return {
+    id: "home-native-video-ad",
+    kind: "ad",
+    enabled,
+    title: "Sponsored",
+    videoUrl: "",
+    posterUrl: "",
+    adUnitId,
+    linkUrl: "",
+    songId: "",
+    song: null,
+    linkType: "song",
+    album: null,
+    playlist: null,
   };
 }
 
@@ -123,7 +149,13 @@ function normalizeHomeHeroConfig(data: unknown): HomeHeroConfig {
   const title = toTrimmedString(record.title) || DEFAULT_HOME_HERO_CONFIG.title;
   const videoUrl = toTrimmedString(record.videoUrl) || DEFAULT_HOME_HERO_CONFIG.videoUrl;
   const posterUrl = toTrimmedString(record.posterUrl) || DEFAULT_HOME_HERO_CONFIG.posterUrl;
-  const adUnitId = toTrimmedString(record.adUnitId);
+  const rawItems = Array.isArray(record.items) ? record.items : [];
+  const legacyItemAdUnitId = rawItems
+    .map((item) => (item && typeof item === "object" ? toTrimmedString((item as Record<string, unknown>).adUnitId) : ""))
+    .find(Boolean) || "";
+  const adUnitId = toTrimmedString(record.adUnitId) || legacyItemAdUnitId;
+  const adSlotEnabled =
+    typeof record.adSlotEnabled === "boolean" ? record.adSlotEnabled : Boolean(adUnitId);
   const configuredItems = Array.isArray(record.items)
     ? record.items
         .map((item, index) => normalizeVideoItem(item, index))
@@ -133,21 +165,33 @@ function normalizeHomeHeroConfig(data: unknown): HomeHeroConfig {
     {
       ...DEFAULT_HOME_HERO_CONFIG.items[0],
       id: "home-video-1",
+      kind: "video" as const,
       title,
       videoUrl,
       posterUrl,
-      adUnitId,
+      adUnitId: "",
     },
   ];
-  const items = configuredItems.length > 0 ? configuredItems : fallbackItems;
-  const firstVisibleItem = items.find((item) => item.enabled) || items[0] || fallbackItems[0];
+  const baseItems = configuredItems.length > 0 ? configuredItems : fallbackItems;
+  const adFilteredBaseItems = adSlotEnabled ? baseItems : baseItems.filter((item) => item.kind !== "ad");
+  const sourceItems = adFilteredBaseItems.length > 0 ? adFilteredBaseItems : fallbackItems;
+  const hasAdItem = sourceItems.some((item) => item.kind === "ad");
+  const items =
+    adSlotEnabled && adUnitId && !hasAdItem
+      ? [...sourceItems, buildHomeHeroAdItem(adUnitId)]
+      : sourceItems;
+  const firstVisibleVideoItem =
+    items.find((item) => item.enabled && item.kind !== "ad") ||
+    items.find((item) => item.kind !== "ad") ||
+    fallbackItems[0];
 
   return {
     enabled: typeof record.enabled === "boolean" ? record.enabled : DEFAULT_HOME_HERO_CONFIG.enabled,
-    title: firstVisibleItem.title || title,
-    videoUrl: firstVisibleItem.videoUrl || videoUrl,
-    posterUrl: firstVisibleItem.posterUrl || posterUrl,
-    adUnitId: firstVisibleItem.adUnitId || adUnitId,
+    title: firstVisibleVideoItem.title || title,
+    videoUrl: firstVisibleVideoItem.videoUrl || videoUrl,
+    posterUrl: firstVisibleVideoItem.posterUrl || posterUrl,
+    adUnitId,
+    adSlotEnabled,
     items,
   };
 }
@@ -179,7 +223,7 @@ export async function saveHomeHeroConfig(config: HomeHeroConfig, updatedBy?: str
     HOME_HERO_CONFIG_REF,
     {
       ...normalized,
-      schemaVersion: 2,
+      schemaVersion: 3,
       updatedAt: serverTimestamp(),
       updatedBy: updatedBy || null,
     },

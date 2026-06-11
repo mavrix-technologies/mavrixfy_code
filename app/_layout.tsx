@@ -68,9 +68,9 @@ LogBox.ignoreLogs([
   "expo-notifications: Android Push notifications",
 ]);
 
-// Screens where the nav bar must not appear. Most utility sheets keep AppNavBar
-// visible to avoid flicker, but the full player owns the bottom controls.
-const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "player"]);
+// Screens where the nav bar must not appear. Keep player mounted underneath so
+// the mini player and nav do not bump when opening or dismissing details.
+const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
@@ -381,7 +381,7 @@ function RootLayoutNav() {
           options={{ gestureEnabled: false }}
         />
       </Stack>
-      {/* Keep the nav visible under utility sheets; full-screen routes unmount it. */}
+      {/* Keep the nav visible under utility sheets and player details. */}
       {!unmountNavBar && <AppNavBar />}
       <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
         <QueueBottomSheet ref={globalQueueSheetRef} />

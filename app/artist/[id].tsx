@@ -249,13 +249,14 @@ function useArtistScreenView() {
   }, [routerPush]);
 
   const handleAlbumPress = useCallback((album: JioSaavnArtistAlbum) => {
-    // Albums are treated as playlists — navigate to playlist screen
     routerPush({
       pathname: "/playlist/[id]",
       params: {
         id: album.id,
         jiosaavn: "true",
+        album: "true",
         firestore: "false",
+        link: album.url,
         title: album.name,
         cover: getBestImageUrl(album.image),
         songCount: String(album.songCount ?? 0),
