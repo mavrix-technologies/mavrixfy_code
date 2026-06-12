@@ -148,25 +148,23 @@ export default function AppPromotionModal() {
             isVisibleInThisBuild(promo)
         ).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 
-        // Query the dismissal status of all promotions concurrently to avoid loop blocking
-        const results = await Promise.all(
-          promotions.map(async (promo) => {
-            const dismissed = await isDismissed(promo);
-            return { promo, dismissed };
-          })
+        // Check all dismissals in parallel instead of sequentially
+        const dismissalChecks = await Promise.all(
+          promotions.map(async (promo) => ({
+            promo,
+            dismissed: await isDismissed(promo),
+          }))
         );
 
-        const firstActivePromo = results.find((r) => !r.dismissed)?.promo;
-
-        if (firstActivePromo) {
-          if (!active) return;
-          setImageFailed(false);
-          setPromotion(firstActivePromo);
+        // Find first non-dismissed promotion
+        const firstAvailable = dismissalChecks.find((check) => !check.dismissed);
+        if (firstAvailable && active) {
+          setPromotion(firstAvailable.promo);
           setVisible(true);
+          setImageFailed(false);
         }
       })
       .catch(() => {
-        setImageFailed(false);
         setPromotion(null);
       });
 

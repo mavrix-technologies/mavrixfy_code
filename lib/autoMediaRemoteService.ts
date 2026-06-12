@@ -43,10 +43,6 @@ function toPlayableSong(value?: Partial<Song>): Song | null {
 }
 
 function songToTrack(song: Song) {
-  const coverUrlClean = song.coverUrl && typeof song.coverUrl === "string" && song.coverUrl.trim().startsWith("http")
-    ? song.coverUrl.trim()
-    : "";
-
   return {
     id: song.id,
     url: song.audioUrl,
@@ -54,7 +50,7 @@ function songToTrack(song: Song) {
     artist: song.artist,
     album: song.album || "",
     genre: song.genre || "",
-    ...(coverUrlClean ? { artwork: coverUrlClean } : {}),
+    artwork: song.coverUrl,
     duration: toDurationSeconds(song.duration),
   };
 }

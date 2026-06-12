@@ -9,7 +9,6 @@
  */
 
 import TrackPlayer, { Event, RepeatMode } from "react-native-track-player";
-import { Platform } from "react-native";
 import { setupPlayer } from "@/lib/trackPlayer";
 import { registerAutoMediaRemoteService } from "@/lib/autoMediaRemoteService";
 import { compactMap } from "@/lib/arrayUtils";
@@ -57,11 +56,39 @@ export const trackPlayerService = async () => {
       const next = (index ?? 0) + 1;
       if (next < queue.length) {
         await TrackPlayer.skip(next);
+        // Update metadata after skip to ensure lock screen shows correct song
+        if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[next]) {
+          try {
+            await TrackPlayer.updateNowPlayingMetadata({
+              title: queue[next].title,
+              artist: queue[next].artist,
+              album: queue[next].album,
+              artwork: queue[next].artwork,
+              duration: queue[next].duration,
+            });
+          } catch {
+            // Ignore — will fall back to automatic metadata
+          }
+        }
         await TrackPlayer.play();
       } else {
         const mode = await TrackPlayer.getRepeatMode();
         if (mode === RepeatMode.Queue) {
           await TrackPlayer.skip(0);
+          // Update metadata for first track
+          if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[0]) {
+            try {
+              await TrackPlayer.updateNowPlayingMetadata({
+                title: queue[0].title,
+                artist: queue[0].artist,
+                album: queue[0].album,
+                artwork: queue[0].artwork,
+                duration: queue[0].duration,
+              });
+            } catch {
+              // Ignore — will fall back to automatic metadata
+            }
+          }
           await TrackPlayer.play();
         }
       }
@@ -81,11 +108,39 @@ export const trackPlayerService = async () => {
       const prev = (index ?? 0) - 1;
       if (prev >= 0) {
         await TrackPlayer.skip(prev);
+        // Update metadata after skip to ensure lock screen shows correct song
+        if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[prev]) {
+          try {
+            await TrackPlayer.updateNowPlayingMetadata({
+              title: queue[prev].title,
+              artist: queue[prev].artist,
+              album: queue[prev].album,
+              artwork: queue[prev].artwork,
+              duration: queue[prev].duration,
+            });
+          } catch {
+            // Ignore — will fall back to automatic metadata
+          }
+        }
         await TrackPlayer.play();
       } else {
         const mode = await TrackPlayer.getRepeatMode();
         if (mode === RepeatMode.Queue) {
           await TrackPlayer.skip(queue.length - 1);
+          // Update metadata for last track
+          if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[queue.length - 1]) {
+            try {
+              await TrackPlayer.updateNowPlayingMetadata({
+                title: queue[queue.length - 1].title,
+                artist: queue[queue.length - 1].artist,
+                album: queue[queue.length - 1].album,
+                artwork: queue[queue.length - 1].artwork,
+                duration: queue[queue.length - 1].duration,
+              });
+            } catch {
+              // Ignore — will fall back to automatic metadata
+            }
+          }
           await TrackPlayer.play();
         } else {
           await TrackPlayer.seekTo(0);
@@ -123,6 +178,20 @@ export const trackPlayerService = async () => {
       const idx = queue.findIndex((t) => String(t.id) === String(e.id));
       if (idx >= 0) {
         await TrackPlayer.skip(idx);
+        // Update metadata after skip to ensure lock screen shows correct song
+        if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[idx]) {
+          try {
+            await TrackPlayer.updateNowPlayingMetadata({
+              title: queue[idx].title,
+              artist: queue[idx].artist,
+              album: queue[idx].album,
+              artwork: queue[idx].artwork,
+              duration: queue[idx].duration,
+            });
+          } catch {
+            // Ignore — will fall back to automatic metadata
+          }
+        }
         await TrackPlayer.play();
       }
   }));
@@ -133,6 +202,20 @@ export const trackPlayerService = async () => {
       const terms = compactMap([e.title, e.artist, e.album, e.query], (v) => String(v ?? "").toLowerCase().trim());
       if (terms.length === 0) {
         await TrackPlayer.skip(0);
+        // Update metadata after skip
+        if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[0]) {
+          try {
+            await TrackPlayer.updateNowPlayingMetadata({
+              title: queue[0].title,
+              artist: queue[0].artist,
+              album: queue[0].album,
+              artwork: queue[0].artwork,
+              duration: queue[0].duration,
+            });
+          } catch {
+            // Ignore — will fall back to automatic metadata
+          }
+        }
         await TrackPlayer.play();
         return;
       }
@@ -142,55 +225,22 @@ export const trackPlayerService = async () => {
           .join(" ");
         return terms.every((term) => hay.includes(term));
       });
-      await TrackPlayer.skip(idx >= 0 ? idx : 0);
+      const targetIdx = idx >= 0 ? idx : 0;
+      await TrackPlayer.skip(targetIdx);
+      // Update metadata after skip
+      if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[targetIdx]) {
+        try {
+          await TrackPlayer.updateNowPlayingMetadata({
+            title: queue[targetIdx].title,
+            artist: queue[targetIdx].artist,
+            album: queue[targetIdx].album,
+            artwork: queue[targetIdx].artwork,
+            duration: queue[targetIdx].duration,
+          });
+        } catch {
+          // Ignore — will fall back to automatic metadata
+        }
+      }
       await TrackPlayer.play();
   }));
-
-  // ── iOS lockscreen progress bar fix ────────────────────────────────────────
-  // iOS shows a non-seekable dot instead of a progress bar when
-  // MPMediaItemPropertyPlaybackDuration is 0 or missing.  The track's
-  // `duration` field can be 0 if the song metadata doesn't include it
-  // (common with streaming sources).  After the native player buffers the
-  // stream it knows the real duration — we push it to the lockscreen here.
-  if (Platform.OS === "ios") {
-    let durationFixTimer: ReturnType<typeof setTimeout> | null = null;
-
-    TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, () => {
-      if (durationFixTimer) clearTimeout(durationFixTimer);
-
-      // Wait for the stream to buffer so the real duration is available.
-      durationFixTimer = setTimeout(async () => {
-        durationFixTimer = null;
-        try {
-          const [track, progress] = await Promise.all([
-            TrackPlayer.getActiveTrack(),
-            TrackPlayer.getProgress(),
-          ]);
-          if (!track) return;
-
-          // Prefer the buffered stream duration; fall back to track metadata.
-          const streamDuration = progress?.duration ?? 0;
-          const trackDuration = Number(track.duration) || 0;
-          const bestDuration = streamDuration > 0 ? streamDuration : trackDuration;
-          if (bestDuration <= 0) return;
-
-          // Only update if the lockscreen likely has the wrong duration.
-          if (trackDuration > 0 && Math.abs(trackDuration - bestDuration) < 1) return;
-
-          if (typeof TrackPlayer.updateNowPlayingMetadata === "function") {
-            await TrackPlayer.updateNowPlayingMetadata({
-              title: String(track.title ?? ""),
-              artist: String(track.artist ?? ""),
-              album: String(track.album ?? ""),
-              duration: bestDuration,
-              artwork: track.artwork || undefined,
-            });
-          }
-        } catch {
-          // Non-critical — the lockscreen will still show track info,
-          // just potentially without a seekable progress bar.
-        }
-      }, 1500);
-    });
-  }
 };
