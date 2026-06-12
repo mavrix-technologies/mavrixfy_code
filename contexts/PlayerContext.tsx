@@ -340,7 +340,13 @@ async function publishNativeNowPlaying(track: NowPlayingMetadataSource, trackInd
 
   const metadata = getNowPlayingMetadata(track);
 
+  // According to Apple's MPNowPlayingInfoCenter documentation and react-native-track-player best practices:
+  // 1. Update metadata synchronously when track changes
+  // 2. Let autoUpdateMetadata handle routine updates
+  // 3. Only manual update when autoUpdateMetadata doesn't cover the case (remote controls, manual skips)
+  
   try {
+    // Update the specific track in the queue (preferred method per RNTP docs)
     if (
       typeof trackIndex === "number" &&
       trackIndex >= 0 &&
@@ -353,6 +359,8 @@ async function publishNativeNowPlaying(track: NowPlayingMetadataSource, trackInd
   }
 
   try {
+    // Update the current now playing info (required for immediate lock screen update)
+    // This is the official Apple MPNowPlayingInfoCenter pattern via RNTP
     if (typeof TrackPlayer.updateNowPlayingMetadata === "function") {
       await TrackPlayer.updateNowPlayingMetadata(metadata);
     }
@@ -1197,9 +1205,21 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     if (!currentSong) return;
 
     const interval = setInterval(persistCurrentPlayerState, 5000);
-    const sub = AppState.addEventListener("change", (state) => {
+    const sub = AppState.addEventListener("change", async (state) => {
       if (state !== "active") {
         persistCurrentPlayerState();
+      } else {
+        // App became active — refresh iOS lock screen metadata
+        if (Platform.OS === "ios" && TrackPlayer && currentSongRef.current) {
+          try {
+            const trackIndex = typeof TrackPlayer.getActiveTrackIndex === "function"
+              ? await TrackPlayer.getActiveTrackIndex()
+              : queueIndexRef.current;
+            await publishNativeNowPlaying(currentSongRef.current, trackIndex);
+          } catch {
+            // Silent fail
+          }
+        }
       }
     });
 
