@@ -9,6 +9,7 @@
  */
 
 import TrackPlayer, { Event, RepeatMode } from "react-native-track-player";
+import { Platform } from "react-native";
 import { setupPlayer } from "@/lib/trackPlayer";
 import { registerAutoMediaRemoteService } from "@/lib/autoMediaRemoteService";
 import { compactMap } from "@/lib/arrayUtils";
@@ -144,4 +145,52 @@ export const trackPlayerService = async () => {
       await TrackPlayer.skip(idx >= 0 ? idx : 0);
       await TrackPlayer.play();
   }));
+
+  // ── iOS lockscreen progress bar fix ────────────────────────────────────────
+  // iOS shows a non-seekable dot instead of a progress bar when
+  // MPMediaItemPropertyPlaybackDuration is 0 or missing.  The track's
+  // `duration` field can be 0 if the song metadata doesn't include it
+  // (common with streaming sources).  After the native player buffers the
+  // stream it knows the real duration — we push it to the lockscreen here.
+  if (Platform.OS === "ios") {
+    let durationFixTimer: ReturnType<typeof setTimeout> | null = null;
+
+    TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, () => {
+      if (durationFixTimer) clearTimeout(durationFixTimer);
+
+      // Wait for the stream to buffer so the real duration is available.
+      durationFixTimer = setTimeout(async () => {
+        durationFixTimer = null;
+        try {
+          const [track, progress] = await Promise.all([
+            TrackPlayer.getActiveTrack(),
+            TrackPlayer.getProgress(),
+          ]);
+          if (!track) return;
+
+          // Prefer the buffered stream duration; fall back to track metadata.
+          const streamDuration = progress?.duration ?? 0;
+          const trackDuration = Number(track.duration) || 0;
+          const bestDuration = streamDuration > 0 ? streamDuration : trackDuration;
+          if (bestDuration <= 0) return;
+
+          // Only update if the lockscreen likely has the wrong duration.
+          if (trackDuration > 0 && Math.abs(trackDuration - bestDuration) < 1) return;
+
+          if (typeof TrackPlayer.updateNowPlayingMetadata === "function") {
+            await TrackPlayer.updateNowPlayingMetadata({
+              title: String(track.title ?? ""),
+              artist: String(track.artist ?? ""),
+              album: String(track.album ?? ""),
+              duration: bestDuration,
+              artwork: track.artwork || undefined,
+            });
+          }
+        } catch {
+          // Non-critical — the lockscreen will still show track info,
+          // just potentially without a seekable progress bar.
+        }
+      }, 1500);
+    });
+  }
 };

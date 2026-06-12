@@ -56,16 +56,26 @@ async function configurePlayerOptions(): Promise<void> {
         // These map to:
         //   iOS  → MPRemoteCommandCenter buttons
         //   Android → MediaSession actions + notification buttons
-        capabilities: [
-          Capability.Play,
-          Capability.Pause,
-          Capability.Stop,
-          Capability.SkipToNext,
-          Capability.SkipToPrevious,
-          Capability.SeekTo,
-          Capability.PlayFromId,
-          Capability.PlayFromSearch,
-        ],
+        capabilities: Platform.select({
+          ios: [
+            Capability.Play,
+            Capability.Pause,
+            Capability.Stop,
+            Capability.SkipToNext,
+            Capability.SkipToPrevious,
+            Capability.SeekTo,
+          ],
+          default: [
+            Capability.Play,
+            Capability.Pause,
+            Capability.Stop,
+            Capability.SkipToNext,
+            Capability.SkipToPrevious,
+            Capability.SeekTo,
+            Capability.PlayFromId,
+            Capability.PlayFromSearch,
+          ],
+        }),
 
         // ── Android compact notification (3 buttons max) ──────────────────
         compactCapabilities: [
@@ -122,6 +132,7 @@ export async function setupPlayer(): Promise<void> {
                   iosCategoryMode: IOSCategoryMode.Default,
                   iosCategoryOptions: [
                     IOSCategoryOptions.AllowAirPlay,
+                    IOSCategoryOptions.AllowBluetooth,
                     IOSCategoryOptions.AllowBluetoothA2DP,
                   ],
                 }

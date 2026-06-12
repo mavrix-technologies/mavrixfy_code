@@ -148,16 +148,25 @@ export default function AppPromotionModal() {
             isVisibleInThisBuild(promo)
         ).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 
-        for (const promo of promotions) {
-          if (!(await isDismissed(promo))) {
-            if (!active) return;
-            setPromotion(promo);
-            setVisible(true);
-            return;
-          }
+        // Query the dismissal status of all promotions concurrently to avoid loop blocking
+        const results = await Promise.all(
+          promotions.map(async (promo) => {
+            const dismissed = await isDismissed(promo);
+            return { promo, dismissed };
+          })
+        );
+
+        const firstActivePromo = results.find((r) => !r.dismissed)?.promo;
+
+        if (firstActivePromo) {
+          if (!active) return;
+          setImageFailed(false);
+          setPromotion(firstActivePromo);
+          setVisible(true);
         }
       })
       .catch(() => {
+        setImageFailed(false);
         setPromotion(null);
       });
 
@@ -165,10 +174,6 @@ export default function AppPromotionModal() {
       active = false;
     };
   }, []);
-
-  useEffect(() => {
-    setImageFailed(false);
-  }, [promotion?.id, promotion?.mediaUrl]);
 
   const close = useCallback(async () => {
     if (promotion) {
