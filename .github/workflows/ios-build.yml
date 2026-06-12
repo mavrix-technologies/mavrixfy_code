@@ -73,6 +73,78 @@ jobs:
       - name: Prebuild iOS
         run: npx expo prebuild --platform ios --clean
 
+      - name: Fix Podfile for modular headers
+        # Add modular headers for GoogleUtilities and Firebase dependencies
+        # to fix "does not define modules" error with Swift pods
+        run: |
+          PODFILE="ios/Podfile"
+          if [ ! -f "$PODFILE" ]; then
+            echo "❌ ERROR: Podfile not found at $PODFILE"
+            exit 1
+          fi
+
+          echo "📝 Patching Podfile to add modular headers..."
+          
+          # Create backup
+          cp "$PODFILE" "${PODFILE}.backup"
+          
+          # Insert modular headers after use_expo_modules! line
+          python3 -c '
+          import sys
+          
+          with open("ios/Podfile", "r") as f:
+              lines = f.readlines()
+          
+          patched_lines = []
+          inserted = False
+          
+          for line in lines:
+              patched_lines.append(line)
+              # Insert after use_expo_modules! line
+              if "use_expo_modules!" in line and not inserted:
+                  patched_lines.append("\n")
+                  patched_lines.append("  # Fix for AppCheckCore modular headers issue\n")
+                  patched_lines.append("  # Swift pods require module maps when building as static libraries\n")
+                  patched_lines.append("  pod '\''GoogleUtilities'\'', :modular_headers => true\n")
+                  patched_lines.append("  pod '\''RecaptchaInterop'\'', :modular_headers => true\n")
+                  patched_lines.append("  pod '\''AppCheckCore'\'', :modular_headers => true\n")
+                  patched_lines.append("\n")
+                  inserted = True
+                  print("✅ Inserted modular headers configuration after use_expo_modules!")
+          
+          if not inserted:
+              print("⚠️  WARNING: Could not find use_expo_modules! line, appending to target block")
+              # Try to insert after "target 'Mavrixfy' do" line
+              patched_lines = []
+              for line in lines:
+                  patched_lines.append(line)
+                  if "target '\''Mavrixfy'\'' do" in line or "target \"Mavrixfy\" do" in line:
+                      patched_lines.append("\n")
+                      patched_lines.append("  # Fix for AppCheckCore modular headers issue\n")
+                      patched_lines.append("  pod '\''GoogleUtilities'\'', :modular_headers => true\n")
+                      patched_lines.append("  pod '\''RecaptchaInterop'\'', :modular_headers => true\n")
+                      patched_lines.append("  pod '\''AppCheckCore'\'', :modular_headers => true\n")
+                      patched_lines.append("\n")
+                      inserted = True
+                      break
+          
+          with open("ios/Podfile", "w") as f:
+              f.writelines(patched_lines)
+          
+          print("\n📄 Patched Podfile (showing relevant lines):")
+          for i, line in enumerate(patched_lines):
+              if "GoogleUtilities" in line or "use_expo_modules" in line or "target" in line:
+                  # Show context around the match
+                  start = max(0, i-2)
+                  end = min(len(patched_lines), i+5)
+                  for j in range(start, end):
+                      print(f"  {j+1:3d}: {patched_lines[j]}", end="")
+                  break
+          '
+          
+          echo ""
+          echo "✅ Podfile patched successfully!"
+
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:

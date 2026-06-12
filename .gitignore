@@ -59,10 +59,17 @@ attached_assets/
 *.tmp
 *.log
 app.aab.json
+*.png.log
+dhu-*.png
+PODFILE_FIX.txt
 
 # Local tooling / editor artifacts
 .vscode/
 .gradle-local/
+.idea/
+.windsurf/
+.agents/
+.claude/
 
 # Build artifacts
 server_dist/
