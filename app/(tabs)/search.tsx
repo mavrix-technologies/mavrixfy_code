@@ -350,6 +350,159 @@ function mergeUniqueById<T extends { id: string }>(items: T[], limit: number): T
   return out;
 }
 
+const SONG_METADATA_TITLE_WORDS = new Set([
+  "from",
+  "original",
+  "motion",
+  "picture",
+  "soundtrack",
+  "ost",
+  "movie",
+  "film",
+  "album",
+  "official",
+  "full",
+  "song",
+  "video",
+  "audio",
+  "lyrics",
+  "lyrical",
+]);
+
+const SONG_VERSION_TITLE_WORDS = new Set([
+  "remix",
+  "remixed",
+  "rmx",
+  "lofi",
+  "lo",
+  "fi",
+  "slowed",
+  "reverb",
+  "cover",
+  "live",
+  "acoustic",
+  "instrumental",
+  "karaoke",
+  "8d",
+  "nightcore",
+  "mashup",
+  "version",
+]);
+
+const SONG_METADATA_PATTERN =
+  "from|original|motion\\s+picture|soundtrack|ost|movie|film|album|official|full\\s+song|video|audio|lyrics?|lyrical";
+const SONG_VERSION_PATTERN =
+  "remix|remixed|rmx|lofi|lo-fi|lo\\s+fi|slowed|reverb|cover|live|acoustic|instrumental|karaoke|8d|nightcore|mashup|version";
+
+function hasSongVersionIntent(query: string): boolean {
+  return new RegExp(`\\b(${SONG_VERSION_PATTERN})\\b`, "i").test(query);
+}
+
+function decodeSongText(value: string): string {
+  return value
+    .replace(/&amp;/gi, " and ")
+    .replace(/&quot;/gi, " ")
+    .replace(/&#039;|&apos;/gi, " ")
+    .replace(/&nbsp;/gi, " ");
+}
+
+function normalizeSongDuplicateTitle(title: string, keepVersionWords = false): string {
+  let raw = decodeSongText(String(title || ""));
+  const bracketNoise = keepVersionWords
+    ? SONG_METADATA_PATTERN
+    : `${SONG_METADATA_PATTERN}|${SONG_VERSION_PATTERN}`;
+
+  raw = raw
+    .replace(new RegExp(`\\([^)]*\\b(${bracketNoise})\\b[^)]*\\)`, "gi"), " ")
+    .replace(new RegExp(`\\[[^\\]]*\\b(${bracketNoise})\\b[^\\]]*\\]`, "gi"), " ")
+    .replace(new RegExp(`\\{[^}]*\\b(${bracketNoise})\\b[^}]*\\}`, "gi"), " ")
+    .replace(new RegExp(`\\s[-–—:|]\\s*(${SONG_METADATA_PATTERN}).*$`, "i"), " ");
+
+  if (!keepVersionWords) {
+    raw = raw.replace(new RegExp(`\\s[-–—:|]\\s*(${SONG_VERSION_PATTERN}).*$`, "i"), " ");
+  }
+
+  if (!/^\s*from\b/i.test(raw)) {
+    raw = raw.replace(/\s+\bfrom\b.*$/i, " ");
+  }
+
+  const normalized = normalizeText(raw);
+  const words = normalized.split(/\s+/).filter(Boolean);
+  return words
+    .filter((word) =>
+      !SONG_METADATA_TITLE_WORDS.has(word)
+      && (keepVersionWords || !SONG_VERSION_TITLE_WORDS.has(word))
+    )
+    .join(" ");
+}
+
+function normalizeSongPeopleKey(artist: string): string {
+  const normalized = normalizeText(artist);
+  if (!normalized || normalized === "unknown artist") return "unknown";
+
+  const parts = normalized
+    .split(/\s*,\s*|\s+\b(?:feat|ft|featuring|and|x)\b\s+|\s*&\s+/i)
+    .map((part) => part.trim())
+    .filter((part) => part && part !== "unknown artist");
+
+  const uniqueParts = Array.from(new Set(parts.length > 0 ? parts : [normalized]));
+  return uniqueParts.sort().slice(0, 3).join("|") || "unknown";
+}
+
+function normalizeSongAlbumKey(album: string): string {
+  return normalizeSongDuplicateTitle(album, true);
+}
+
+function getStableSongIdKey(song: Song): string {
+  const id = normalizeText(String(song.id || ""));
+  return id ? `${song.source || "song"}:${id}` : "";
+}
+
+function areDuplicateSearchSongs(next: Song, existing: Song, keepVersionWords: boolean): boolean {
+  const nextId = getStableSongIdKey(next);
+  const existingId = getStableSongIdKey(existing);
+  if (nextId && nextId === existingId) return true;
+
+  const nextTitle = normalizeSongDuplicateTitle(next.title, keepVersionWords);
+  const existingTitle = normalizeSongDuplicateTitle(existing.title, keepVersionWords);
+  if (!nextTitle || nextTitle !== existingTitle) return false;
+
+  const nextArtist = normalizeSongPeopleKey(next.artist);
+  const existingArtist = normalizeSongPeopleKey(existing.artist);
+  if (nextArtist !== "unknown" && existingArtist !== "unknown" && nextArtist === existingArtist) {
+    return true;
+  }
+
+  const nextAlbum = normalizeSongAlbumKey(next.album);
+  const existingAlbum = normalizeSongAlbumKey(existing.album);
+  if (nextAlbum && existingAlbum && nextAlbum === existingAlbum) {
+    return true;
+  }
+
+  const nextDuration = Number(next.duration) || 0;
+  const existingDuration = Number(existing.duration) || 0;
+  return nextTitle.length >= 4
+    && nextDuration > 30
+    && existingDuration > 30
+    && Math.abs(nextDuration - existingDuration) <= 5;
+}
+
+function uniqueSongResultIds(songs: Song[]): Song[] {
+  const seen = new Set<string>();
+  return songs.map((song, index) => {
+    const fallbackId = `${normalizeSongDuplicateTitle(song.title, true)}-${normalizeSongPeopleKey(song.artist)}-${index}`;
+    const baseId = String(song.id || fallbackId).trim() || fallbackId;
+    let nextId = baseId;
+    let suffix = 1;
+    while (seen.has(nextId)) {
+      nextId = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(nextId);
+    return nextId === song.id ? song : { ...song, id: nextId };
+  });
+}
+
 function stableHash(input: string): number {
   let hash = 0;
   for (let i = 0; i < input.length; i += 1) {
@@ -458,17 +611,10 @@ function useSearchScreenView() {
         .then(r => (r.ok ? r.json() : null))
         .catch(() => null);
 
-    // Deduplication key: normalized title + first artist
-    const mkKey = (title: string, artist: string) => {
-      const t = normalizeText(title);
-      const a = artist === 'Unknown Artist'
-        ? 'unknown'
-        : normalizeText(artist.split(',')[0].trim());
-      return `${t}|||${a}`;
-    };
-
     // Which version of a song is better?
     const isBetter = (n: Song, e: Song): boolean => {
+      if (n.source === "local" && e.source !== "local") return true;
+      if (n.source !== "local" && e.source === "local") return false;
       if (n.artist === 'Unknown Artist' && e.artist !== 'Unknown Artist') return false;
       if (n.artist !== 'Unknown Artist' && e.artist === 'Unknown Artist') return true;
       const remix = /\b(remix|lofi|slowed|cover|live|acoustic|instrumental|8d|nightcore)\b/i;
@@ -508,15 +654,25 @@ function useSearchScreenView() {
       };
     };
 
-    const mergeInto = (map: Map<string, Song>, song: Song) => {
-      const k = mkKey(song.title, song.artist);
-      const ex = map.get(k);
-      if (!ex || isBetter(song, ex)) map.set(k, song);
+    const keepVersionWords = hasSongVersionIntent(normalizedQuery);
+
+    const mergeInto = (items: Song[], song: Song) => {
+      const duplicateIndex = items.findIndex((existing) =>
+        areDuplicateSearchSongs(song, existing, keepVersionWords)
+      );
+
+      if (duplicateIndex === -1) {
+        items.push(song);
+        return;
+      }
+
+      if (isBetter(song, items[duplicateIndex])) {
+        items[duplicateIndex] = song;
+      }
     };
 
-    const toFinalList = (map: Map<string, Song>) => {
-      const ts = Date.now();
-      return Array.from(map.values()).map((s, i) => ({ ...s, id: `${s.id}-${i}-${ts}` }));
+    const toFinalList = (songs: Song[]) => {
+      return uniqueSongResultIds(songs);
     };
 
     // Fast rank using JioSaavn playCount only — no network wait
@@ -533,12 +689,12 @@ function useSearchScreenView() {
 
       if (requestIsActive()) {
         // Show catalog results immediately
-        const songsMap = new Map<string, Song>();
+        const mergedSongs: Song[] = [];
         for (const s of searchCatalog(catalogSongs, normalizedQuery)) {
-          mergeInto(songsMap, s);
+          mergeInto(mergedSongs, s);
         }
 
-        const catalogResults = toFinalList(songsMap);
+        const catalogResults = toFinalList(mergedSongs);
         if (catalogResults.length > 0) {
           setSongResults(fastRank(catalogResults));
           setSearchDisplayQuery(normalizedQuery);
@@ -557,7 +713,7 @@ function useSearchScreenView() {
           // Merge network results with catalog results
           for (const s of (songsData?.data?.results || songsData?.results || [])) {
             const song = parseBackup(s);
-            if (song) mergeInto(songsMap, song);
+            if (song) mergeInto(mergedSongs, song);
           }
 
           const playlists = playlistsData?.success
@@ -582,7 +738,7 @@ function useSearchScreenView() {
             ...normalizeArtistResults(artistsData?.results),
           ], 8);
 
-          const songs = toFinalList(songsMap);
+          const songs = toFinalList(mergedSongs);
           const rankedSongs = fastRank(songs);
 
           // Cache results
@@ -921,11 +1077,11 @@ function useSearchScreenView() {
       // Queue = tapped song first, then other results that have a DIFFERENT title.
       // This means "next song" will be a related but differently-named track,
       // not another "Starter Boy" variant from the same search.
-      const normalizedItemTitle = normalizeText(item.title);
+      const normalizedItemTitle = normalizeSongDuplicateTitle(item.title);
       const relatedQueue = [
         item,
         ...songResults.filter(
-          s => s.id !== item.id && normalizeText(s.title) !== normalizedItemTitle
+          s => s.id !== item.id && normalizeSongDuplicateTitle(s.title) !== normalizedItemTitle
         ),
       ];
       return <SongRow song={item} queue={relatedQueue} onSongPress={handleSongResultPress} />;

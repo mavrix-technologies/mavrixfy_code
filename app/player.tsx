@@ -13,7 +13,6 @@ import {
   ToastAndroid,
   ActivityIndicator,
   InteractionManager,
-  LayoutChangeEvent,
   GestureResponderEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -387,14 +386,10 @@ type PlayerProgressCardProps = {
   screenSongId: string;
   songDurationSeconds: number;
   isShortScreen: boolean;
-  screenWidth: number;
   isDevPreviewActive: boolean;
   devPreviewProgress: number;
   setDevPreviewProgress: React.Dispatch<React.SetStateAction<number>>;
   seekTo: (progress: number) => void;
-  progressTrackColor: string;
-  progressFillColor: string;
-  progressThumbColor: string;
   onSeekingChange: (isSeeking: boolean) => void;
 };
 
@@ -402,26 +397,16 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
   screenSongId,
   songDurationSeconds,
   isShortScreen,
-  screenWidth,
   isDevPreviewActive,
   devPreviewProgress,
   setDevPreviewProgress,
   seekTo,
-  progressTrackColor,
-  progressFillColor,
-  progressThumbColor,
   onSeekingChange,
 }: PlayerProgressCardProps) {
   const { progress, duration, positionMillis } = usePlayerProgress();
   const [seekValue, setSeekValue] = useState<number | null>(null);
   const [isSeeking, setIsSeeking] = useState(false);
-  const [progressTrackWidth, setProgressTrackWidth] = useState(0);
   const androidSeekFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const usesResponderSeek = Platform.OS === "web";
-  const showsCustomProgressVisual = usesResponderSeek;
-  const nativeFillTintColor = showsCustomProgressVisual ? "transparent" : progressFillColor;
-  const nativeTrackTintColor = showsCustomProgressVisual ? "transparent" : progressTrackColor;
-  const nativeThumbTintColor = showsCustomProgressVisual ? "transparent" : progressThumbColor;
   const playerProgress = isDevPreviewActive ? devPreviewProgress : progress;
   const safeSongDuration = Number.isFinite(songDurationSeconds) ? Math.max(0, songDurationSeconds) : 0;
   const playerDuration = isDevPreviewActive ? safeSongDuration * 1000 : duration;
@@ -437,6 +422,9 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
     (Platform.OS === "android" && Boolean(screenSongId));
   const displayDuration =
     totalDurationSec > 0 ? formatDuration(totalDurationSec) : formatDuration(safeSongDuration);
+  const progressFillColor = Colors.primary;
+  const progressTrackColor = "rgba(247,250,255,0.24)";
+  const androidThumbTintColor = Platform.OS === "android" ? "#F7FAFF" : undefined;
 
   const clampProgress = useCallback((value: number) => {
     return Math.max(0, Math.min(1, value));
@@ -495,47 +483,6 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
     }, 1500);
   }, [clearAndroidSeekFallbackTimer, clampProgress, isDevPreviewActive, seekTo, setDevPreviewProgress, updateSeeking]);
 
-  const handleProgressLayout = useCallback((event: LayoutChangeEvent) => {
-    setProgressTrackWidth(event.nativeEvent.layout.width);
-  }, []);
-
-  const getResponderSeekProgress = useCallback((event: GestureResponderEvent) => {
-    const nativeX = event.nativeEvent.locationX;
-    const safeWidth = progressTrackWidth > 0 ? progressTrackWidth : Math.max(1, screenWidth - 48);
-    return clampProgress(nativeX / safeWidth);
-  }, [clampProgress, progressTrackWidth, screenWidth]);
-
-  const commitSeekProgress = useCallback((next: number) => {
-    updateSeeking(false);
-    setSeekValue(next);
-    if (isDevPreviewActive) {
-      setDevPreviewProgress(next);
-      return;
-    }
-    seekTo(next);
-    clearAndroidSeekFallbackTimer();
-    androidSeekFallbackTimerRef.current = setTimeout(() => {
-      setSeekValue(null);
-    }, 1500);
-  }, [clearAndroidSeekFallbackTimer, isDevPreviewActive, seekTo, setDevPreviewProgress, updateSeeking]);
-
-  const handleResponderSeekGrant = useCallback((event: GestureResponderEvent) => {
-    if (!usesResponderSeek || !canSeek) return;
-    clearAndroidSeekFallbackTimer();
-    updateSeeking(true);
-    setSeekValue(getResponderSeekProgress(event));
-  }, [canSeek, clearAndroidSeekFallbackTimer, getResponderSeekProgress, updateSeeking, usesResponderSeek]);
-
-  const handleResponderSeekMove = useCallback((event: GestureResponderEvent) => {
-    if (!usesResponderSeek || !isSeeking) return;
-    setSeekValue(getResponderSeekProgress(event));
-  }, [getResponderSeekProgress, isSeeking, usesResponderSeek]);
-
-  const handleResponderSeekRelease = useCallback((event: GestureResponderEvent) => {
-    if (!usesResponderSeek) return;
-    commitSeekProgress(getResponderSeekProgress(event));
-  }, [commitSeekProgress, getResponderSeekProgress, usesResponderSeek]);
-
   return (
     <View
       style={[
@@ -543,76 +490,29 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
         { marginTop: isShortScreen ? 8 : 14, marginHorizontal: isShortScreen ? 14 : 20 },
       ]}
     >
-      <View
-        style={[
-          styles.progressTouch,
-          Platform.OS === "ios" && styles.progressTouchIOS,
-        ]}
-        onLayout={handleProgressLayout}
-      >
-        {Platform.OS === "ios" ? (
-          <Slider
-            style={[
-              styles.progressSliderNative,
-              styles.progressSliderIOS,
-            ]}
-            minimumValue={0}
-            maximumValue={1}
-            value={visualProgress}
-            disabled={!canSeek}
-            minimumTrackTintColor={nativeFillTintColor}
-            maximumTrackTintColor={nativeTrackTintColor}
-            thumbTintColor={nativeThumbTintColor}
-            tapToSeek={true}
-            onSlidingStart={handleSlidingStart}
-            onValueChange={handleSliderValueChange}
-            onSlidingComplete={handleSlidingComplete}
-          />
-        ) : usesResponderSeek ? (
-          <View
-            style={[
-              styles.progressGestureResponder,
-              Platform.OS === "web" && styles.progressWebResponder,
-            ]}
-            onStartShouldSetResponder={() => canSeek}
-            onMoveShouldSetResponder={() => canSeek}
-            onResponderTerminationRequest={() => false}
-            onResponderGrant={handleResponderSeekGrant}
-            onResponderMove={handleResponderSeekMove}
-            onResponderRelease={handleResponderSeekRelease}
-            onResponderTerminate={handleResponderSeekRelease}
-          />
-        ) : (
-          <Slider
-            style={styles.progressSliderNative}
-            minimumValue={0}
-            maximumValue={1}
-            value={visualProgress}
-            disabled={!canSeek}
-            minimumTrackTintColor={nativeFillTintColor}
-            maximumTrackTintColor={nativeTrackTintColor}
-            thumbTintColor={nativeThumbTintColor}
-            tapToSeek={false}
-            onSlidingStart={handleSlidingStart}
-            onValueChange={handleSliderValueChange}
-            onSlidingComplete={handleSlidingComplete}
-          />
-        )}
-        {showsCustomProgressVisual ? (
-          <View pointerEvents="none" style={styles.progressVisual}>
-            <View style={[styles.progressTrack, { backgroundColor: progressTrackColor }]}>
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    width: `${visualProgress * 100}%`,
-                    backgroundColor: progressFillColor,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-        ) : null}
+      <View style={styles.progressTouch}>
+        <Slider
+          style={styles.progressSliderNative}
+          minimumValue={0}
+          maximumValue={1}
+          value={visualProgress}
+          disabled={!canSeek}
+          tapToSeek={Platform.OS === "ios"}
+          minimumTrackTintColor={progressFillColor}
+          maximumTrackTintColor={progressTrackColor}
+          thumbTintColor={androidThumbTintColor}
+          accessibilityLabel="Playback position"
+          accessibilityValue={{
+            text: `${formatDuration(
+              seekValue !== null
+                ? Math.floor(Math.max(0, effectiveDurationSec) * visualProgress)
+                : currentTimeSec
+            )} of ${displayDuration}`,
+          }}
+          onSlidingStart={handleSlidingStart}
+          onValueChange={handleSliderValueChange}
+          onSlidingComplete={handleSlidingComplete}
+        />
       </View>
       <View style={styles.timeRow}>
         <Text style={styles.timeText}>
@@ -1023,12 +923,12 @@ function useLegacyPlayerScreenView() {
   const isShortScreen = screenHeight <= 760;
   const isVeryShortScreen = screenHeight <= 700;
   const topBarHeight = isShortScreen ? 50 : 54;
-  const controlButtonSize = isVeryShortScreen ? 34 : isShortScreen ? 38 : 42;
-  const prevNextButtonSize = isVeryShortScreen ? 52 : isShortScreen ? 58 : 64;
-  const prevNextIconSize = isVeryShortScreen ? 34 : isShortScreen ? 38 : 42;
-  const shuffleRepeatIconSize = isVeryShortScreen ? 16 : isShortScreen ? 17 : 19;
-  const playButtonSize = isVeryShortScreen ? 56 : isShortScreen ? 62 : 74;
-  const playIconSize = isVeryShortScreen ? 28 : isShortScreen ? 30 : 34;
+  const controlButtonSize = isVeryShortScreen ? 38 : isShortScreen ? 40 : 42;
+  const prevNextButtonSize = isVeryShortScreen ? 46 : isShortScreen ? 50 : 54;
+  const prevNextIconSize = isVeryShortScreen ? 24 : isShortScreen ? 27 : 30;
+  const shuffleRepeatIconSize = isVeryShortScreen ? 18 : isShortScreen ? 19 : 20;
+  const playButtonSize = isVeryShortScreen ? 60 : isShortScreen ? 64 : 68;
+  const playIconSize = isVeryShortScreen ? 28 : isShortScreen ? 31 : 34;
   const listBottomPadding =
     Platform.OS === "web"
       ? 16
@@ -1224,13 +1124,9 @@ function useLegacyPlayerScreenView() {
   // These are all static — define once outside the component (see bottom of file)
   const controlButtonBg = "rgba(223,226,235,0.07)";
   const controlButtonBorder = "rgba(223,226,235,0.14)";
-  const controlIconColor = "rgba(236,240,247,0.96)";
+  const controlIconColor = "rgba(236,240,247,0.72)";
   const activeControlIconColor = "#F7FAFF";
-  const controlButtonActiveBg = "rgba(247,250,255,0.12)";
-  const controlButtonActiveBorder = "rgba(247,250,255,0.22)";
-  const progressTrackColor = "rgba(223,226,235,0.16)";
-  const progressFillColor = Colors.primary;
-  const progressThumbColor = "#F7FAFF";
+  const selectedControlIconColor = Colors.primary;
 
   // Memoize control button base styles to avoid new objects every render
   const ctrlBtnBase = useMemo(
@@ -1245,9 +1141,9 @@ function useLegacyPlayerScreenView() {
     () => ({ ...ctrlBtnBase, backgroundColor: controlButtonBg, borderColor: controlButtonBorder }),
     [ctrlBtnBase]
   );
-  const ctrlBtnActiveStyle = useMemo(
-    () => ({ ...ctrlBtnBase, backgroundColor: controlButtonActiveBg, borderColor: controlButtonActiveBorder }),
-    [ctrlBtnBase, controlButtonActiveBg, controlButtonActiveBorder]
+  const playerIconBtnStyle = useMemo(
+    () => ({ ...ctrlBtnBase, backgroundColor: "transparent", borderColor: "transparent" }),
+    [ctrlBtnBase]
   );
   const prevNextBtnSizeStyle = useMemo(
     () => ({
@@ -1863,10 +1759,11 @@ function useLegacyPlayerScreenView() {
                       styles.songTitle,
                       {
                         color: sheetTextColor,
-                        fontSize: isVeryShortScreen ? 24 : isShortScreen ? 26 : 29,
+                        fontSize: isVeryShortScreen ? 21 : isShortScreen ? 23 : 25,
+                        lineHeight: isVeryShortScreen ? 25 : isShortScreen ? 27 : 30,
                       },
                     ]}
-                    velocity={14}
+                    velocity={12}
                     paused={!interactionReady}
                   />
                   <PingPongScroll
@@ -1875,14 +1772,15 @@ function useLegacyPlayerScreenView() {
                       styles.songArtist,
                       {
                         color: sheetMutedTextColor,
-                        fontSize: isVeryShortScreen ? 12 : 14,
+                        fontSize: isVeryShortScreen ? 12 : 13,
+                        lineHeight: isVeryShortScreen ? 16 : 18,
                       },
                     ]}
-                    velocity={12}
+                    velocity={10}
                     paused={!interactionReady}
                   />
                 </View>
-                <Pressable
+                <SmoothControlButton
                   onPress={() => {
                     if (isDevPreviewActive) {
                       setDevPreviewLikedSongIds((prev) =>
@@ -1895,30 +1793,29 @@ function useLegacyPlayerScreenView() {
                     toggleLike(screenSong);
                   }}
                   hitSlop={10}
-                  style={styles.likeButton}
+                  style={[
+                    styles.likeButton,
+                    playerIconBtnStyle,
+                  ]}
                 >
                   <Ionicons
                     name={liked ? "heart" : "heart-outline"}
-                    size={22}
-                  color={controlIconColor}
-                />
-              </Pressable>
+                    size={shuffleRepeatIconSize + 3}
+                    color={liked ? selectedControlIconColor : controlIconColor}
+                  />
+                </SmoothControlButton>
               </View>
             </View>
 
-        <View style={styles.playerActionStack}>
+            <View style={styles.playerActionStack}>
               <PlayerProgressCard
                 screenSongId={screenSong.id}
                 songDurationSeconds={screenSong.duration}
                 isShortScreen={isShortScreen}
-                screenWidth={screenWidth}
                 isDevPreviewActive={isDevPreviewActive}
                 devPreviewProgress={devPreviewProgress}
                 setDevPreviewProgress={setDevPreviewProgress}
                 seekTo={seekTo}
-                progressTrackColor={progressTrackColor}
-                progressFillColor={progressFillColor}
-                progressThumbColor={progressThumbColor}
                 onSeekingChange={setIsProgressSeeking}
               />
 
@@ -1928,130 +1825,126 @@ function useLegacyPlayerScreenView() {
                   {
                     marginTop: isShortScreen ? 6 : 12,
                     marginHorizontal: isShortScreen ? 14 : 20,
-                    gap: isShortScreen ? 5 : 8,
+                    gap: isVeryShortScreen ? 8 : isShortScreen ? 10 : 12,
                   },
                 ]}
               >
-          {/* Shuffle Button */}
-          <SmoothControlButton
-            style={[
-              styles.roundIconButton,
-              ctrlBtnBase,
-              playerIsShuffled ? ctrlBtnActiveStyle : ctrlBtnStyle,
-            ]}
-            onPress={() => {
-              if (isDevPreviewActive) {
-                setDevPreviewIsShuffled((p) => !p);
-              } else {
-                toggleShuffle();
-              }
-            }}
-          >
-            <Ionicons
-              name="shuffle"
-              size={shuffleRepeatIconSize}
-              color={playerIsShuffled ? activeControlIconColor : controlIconColor}
-            />
-          </SmoothControlButton>
+                <SmoothControlButton
+                  style={[
+                    styles.roundIconButton,
+                    playerIconBtnStyle,
+                  ]}
+                  onPress={() => {
+                    if (isDevPreviewActive) {
+                      setDevPreviewIsShuffled((p) => !p);
+                    } else {
+                      toggleShuffle();
+                    }
+                  }}
+                >
+                  <Ionicons
+                    name="shuffle"
+                    size={shuffleRepeatIconSize}
+                    color={playerIsShuffled ? selectedControlIconColor : controlIconColor}
+                  />
+                </SmoothControlButton>
 
-          {/* Previous Button */}
-          <SmoothControlButton
-            style={[styles.prevNextButton, prevNextBtnSizeStyle]}
-            onPressIn={() => {
-              if (isDevPreviewActive) {
-                setDevPreviewIndex((p) => Math.max(0, p - 1));
-                setDevPreviewProgress(0.18);
-              } else {
-                handleSkip("prev");
-              }
-            }}
-          >
-            <Ionicons name="play-skip-back" size={prevNextIconSize} color={activeControlIconColor} />
-          </SmoothControlButton>
+                <SmoothControlButton
+                  style={[styles.prevNextButton, prevNextBtnSizeStyle]}
+                  onPressIn={() => {
+                    if (isDevPreviewActive) {
+                      setDevPreviewIndex((p) => Math.max(0, p - 1));
+                      setDevPreviewProgress(0.18);
+                    } else {
+                      handleSkip("prev");
+                    }
+                  }}
+                >
+                  <Ionicons name="play-skip-back" size={prevNextIconSize} color={activeControlIconColor} />
+                </SmoothControlButton>
 
-          {/* Play Button */}
-          <PlayerPlayButton
-            isPlayingOverride={isDevPreviewActive ? devPreviewIsPlaying : undefined}
-            isLoadingOverride={isDevPreviewActive ? false : undefined}
-            buttonSize={playButtonSize}
-            iconSize={playIconSize}
-            onAccentColor="#060A0F"
-            onPress={() => {
-              if (isDevPreviewActive) {
-                setDevPreviewIsPlaying((p) => !p);
-              } else {
-                togglePlay();
-              }
-            }}
-          />
+                <PlayerPlayButton
+                  isPlayingOverride={isDevPreviewActive ? devPreviewIsPlaying : undefined}
+                  isLoadingOverride={isDevPreviewActive ? false : undefined}
+                  buttonSize={playButtonSize}
+                  iconSize={playIconSize}
+                  onAccentColor="#060A0F"
+                  onPress={() => {
+                    if (isDevPreviewActive) {
+                      setDevPreviewIsPlaying((p) => !p);
+                    } else {
+                      togglePlay();
+                    }
+                  }}
+                />
 
-          {/* Next Button */}
-          <SmoothControlButton
-            style={[styles.prevNextButton, prevNextBtnSizeStyle]}
-            onPressIn={() => {
-              if (isDevPreviewActive) {
-                setDevPreviewIndex((p) => Math.min(DEV_PREVIEW_SONGS.length - 1, p + 1));
-                setDevPreviewProgress(0.18);
-              } else {
-                handleSkip("next");
-              }
-            }}
-          >
-            <Ionicons name="play-skip-forward" size={prevNextIconSize} color={activeControlIconColor} />
-          </SmoothControlButton>
+                <SmoothControlButton
+                  style={[styles.prevNextButton, prevNextBtnSizeStyle]}
+                  onPressIn={() => {
+                    if (isDevPreviewActive) {
+                      setDevPreviewIndex((p) => Math.min(DEV_PREVIEW_SONGS.length - 1, p + 1));
+                      setDevPreviewProgress(0.18);
+                    } else {
+                      handleSkip("next");
+                    }
+                  }}
+                >
+                  <Ionicons name="play-skip-forward" size={prevNextIconSize} color={activeControlIconColor} />
+                </SmoothControlButton>
 
-          {/* Repeat Button */}
-          <SmoothControlButton
-            style={[
-              styles.roundIconButton,
-              playerRepeatMode !== "off" ? ctrlBtnActiveStyle : ctrlBtnStyle,
-            ]}
-            onPress={() => {
-              if (isDevPreviewActive) {
-                setDevPreviewRepeatMode((p) => (p === "off" ? "all" : p === "all" ? "one" : "off"));
-              } else {
-                toggleRepeat();
-              }
-            }}
-          >
-            <Ionicons
-              name="repeat"
-              size={shuffleRepeatIconSize}
-              color={playerRepeatMode !== "off" ? activeControlIconColor : controlIconColor}
-            />
-            {playerRepeatMode === "one" && <Text style={[styles.repeatOneBadge, { color: activeControlIconColor }]}>1</Text>}
-          </SmoothControlButton>
+                <SmoothControlButton
+                  style={[
+                    styles.roundIconButton,
+                    playerIconBtnStyle,
+                  ]}
+                  onPress={() => {
+                    if (isDevPreviewActive) {
+                      setDevPreviewRepeatMode((p) => (p === "off" ? "all" : p === "all" ? "one" : "off"));
+                    } else {
+                      toggleRepeat();
+                    }
+                  }}
+                >
+                  <Ionicons
+                    name="repeat"
+                    size={shuffleRepeatIconSize}
+                    color={playerRepeatMode !== "off" ? selectedControlIconColor : controlIconColor}
+                  />
+                  {playerRepeatMode === "one" && (
+                    <Text style={[styles.repeatOneBadge, { color: selectedControlIconColor }]}>1</Text>
+                  )}
+                </SmoothControlButton>
+              </View>
+
+            </View>
           </View>
 
-      </View>
-      </View>
-
-      <View
-        style={[
-          styles.playingListSection,
-          {
-            marginTop: isShortScreen ? 4 : 8,
-            marginHorizontal: isShortScreen ? 14 : 20,
-          },
-        ]}
-      >
-        <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
-          <Text style={styles.playingListTitle}>Playlist Songs</Text>
-          <View style={styles.playingListHeaderRight}>
-            <Text style={styles.playingListCount}>{queueCountLabel}</Text>
+          <View
+            style={[
+              styles.playingListSection,
+              {
+                marginTop: isShortScreen ? 4 : 8,
+                marginHorizontal: isShortScreen ? 14 : 20,
+              },
+            ]}
+          >
+            <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
+              <Text style={styles.playingListTitle}>Playlist Songs</Text>
+              <View style={styles.playingListHeaderRight}>
+                <Text style={styles.playingListCount}>{queueCountLabel}</Text>
+              </View>
+            </View>
+            <ScrollView
+              style={[styles.queueListViewport, queueViewportStyle]}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.queueListContent}
+              nestedScrollEnabled
+              bounces={false}
+              overScrollMode="never"
+            >
+              {queueRows}
+            </ScrollView>
           </View>
-        </View>
-        <ScrollView
-          style={[styles.queueListViewport, queueViewportStyle]}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.queueListContent}
-          nestedScrollEnabled
-          bounces={false}
-          overScrollMode="never"
-        >
-          {queueRows}
-        </ScrollView>
-      </View>
           </>
         }
         ListFooterComponent={
@@ -2437,111 +2330,56 @@ const styles = StyleSheet.create({
   },
   songTitle: {
     color: Colors.text,
-    fontSize: 29,
-    fontFamily: "Inter_800ExtraBold",
+    fontSize: 25,
+    lineHeight: 30,
+    fontFamily: "Inter_600SemiBold",
     letterSpacing: 0,
   },
   songTitleCompact: {
     fontSize: 23,
+    lineHeight: 27,
   },
   songArtist: {
-    marginTop: 3,
+    marginTop: 2,
     color: Colors.subtext,
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: "Inter_400Regular",
   },
   songArtistCompact: {
     marginTop: 2,
-    fontSize: 11,
+    fontSize: 12,
+    lineHeight: 16,
   },
   likeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(223,226,235,0.07)",
-    borderWidth: 1,
-    borderColor: "rgba(223,226,235,0.14)",
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    borderColor: "transparent",
+    flexShrink: 0,
+    overflow: "hidden",
   },
 
   progressCard: {
     marginTop: 14,
     marginHorizontal: 20,
-    paddingHorizontal: 2,
-    paddingVertical: 4,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     borderRadius: 0,
     backgroundColor: "transparent",
     borderWidth: 0,
   },
-  progressCardCompact: {
-    marginTop: 2,
-    paddingVertical: 4,
-  },
   progressTouch: {
-    paddingVertical: 8,
     justifyContent: "center",
-    position: "relative",
-    height: 28,
-  },
-  progressTouchIOS: {
-    height: 44,
-    paddingVertical: 8,
-  },
-  progressVisual: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    justifyContent: "center",
-    zIndex: 3,
-    boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
-  },
-  progressTrack: {
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.16)",
-    overflow: "hidden",
-    zIndex: 1,
-  },
-  progressFill: {
-    width: "0%",
-    height: 4,
-    borderRadius: 999,
-    zIndex: 2,
-  },
-  progressThumb: {
-    position: "absolute",
-    top: "50%",
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 2,
-    transform: [{ translateX: -6 }, { translateY: -6 }],
-    boxShadow: "none",
-    zIndex: 4,
+    minHeight: Platform.OS === "ios" ? 38 : 40,
   },
   progressSliderNative: {
     width: "100%",
-    height: 28,
-    zIndex: 2,
-  },
-  progressSliderIOS: {
-    height: 44,
-  },
-  progressGestureResponder: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-  },
-  progressWebResponder: {
-    cursor: "pointer",
+    height: Platform.OS === "ios" ? 38 : 40,
   },
   timeRow: {
-    marginTop: 8,
+    marginTop: 3,
     flexDirection: "row",
     justifyContent: "space-between",
   },
@@ -2556,7 +2394,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "center",
     gap: 8,
   },
   controlsRowCompact: {
@@ -2700,20 +2538,25 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(223,226,235,0.07)",
-    borderWidth: 1,
-    borderColor: "rgba(223,226,235,0.14)",
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    borderColor: "transparent",
     position: "relative",
+    flexShrink: 0,
+    overflow: "hidden",
   },
   quickButtonPressed: {
-    opacity: 0.9,
+    opacity: 0.58,
   },
   prevNextButton: {
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "transparent",
     borderWidth: 0,
+    borderColor: "transparent",
     position: "relative",
+    flexShrink: 0,
+    overflow: "hidden",
   },
   roundIconButtonActive: {
     borderColor: Colors.primary,
@@ -2727,6 +2570,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#F4F7FB",
     boxShadow: "none",
+    flexShrink: 0,
+    overflow: "hidden",
   },
   repeatOneBadge: {
     position: "absolute",
