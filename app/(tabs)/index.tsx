@@ -59,6 +59,8 @@ import AppTopHeader, {
 } from "@/components/AppTopHeader";
 import ShinyText from "@/components/ShinyText";
 import AdMobBanner from "@/components/AdMobBanner";
+import AppPromotionModal from "@/components/AppPromotionModal";
+import PromotionBanner from "@/components/PromotionBanner";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { filterMap, forEachFiltered, mapFilter } from "@/lib/arrayUtils";
 import { DEFAULT_HOME_HERO_CONFIG, subscribeHomeHeroConfig, type HomeHeroVideoItem } from "@/lib/homeHeroConfig";
@@ -2374,6 +2376,8 @@ function useHomeScreenInnerView() {
         scrollEventThrottle={16}
       >
         {getLiveVideoElement()}
+        <PromotionBanner />
+        <AppPromotionModal />
         {sections.length === 0
           ? renderEmptyState()
           : sections.map((section, index) => (

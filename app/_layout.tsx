@@ -23,6 +23,7 @@ import { ActivityIndicator,
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MD3DarkTheme, PaperProvider } from "react-native-paper";
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from "@expo-google-fonts/inter";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
@@ -100,6 +101,19 @@ const ANDROID_VERTICAL_SHEET_OPTIONS = {
   sheetExpandsWhenScrolledToEdge: false,
   gestureEnabled: true,
   contentStyle: { backgroundColor: Colors.background },
+};
+
+const paperTheme = {
+  ...MD3DarkTheme,
+  colors: {
+    ...MD3DarkTheme.colors,
+    primary: Colors.primary,
+    background: Colors.background,
+    surface: Colors.surface,
+    surfaceVariant: Colors.surfaceLight,
+    onSurface: Colors.text,
+    onSurfaceVariant: Colors.subtext,
+  },
 };
 
 export function showGlobalToast(message = "Added to queue") {
@@ -450,17 +464,19 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <ThemeProvider value={DarkTheme}>
-            <NetworkProvider>
-              <AuthProvider>
-                <DownloadProvider>
-                  <PlayerProvider>
-                    <StatusBar style="light" />
-                    <RootLayoutNav />
-                    <GlobalToast />
-                  </PlayerProvider>
-                </DownloadProvider>
-              </AuthProvider>
-            </NetworkProvider>
+            <PaperProvider theme={paperTheme}>
+              <NetworkProvider>
+                <AuthProvider>
+                  <DownloadProvider>
+                    <PlayerProvider>
+                      <StatusBar style="light" />
+                      <RootLayoutNav />
+                      <GlobalToast />
+                    </PlayerProvider>
+                  </DownloadProvider>
+                </AuthProvider>
+              </NetworkProvider>
+            </PaperProvider>
           </ThemeProvider>
         </GestureHandlerRootView>
       </QueryClientProvider>

@@ -21,6 +21,7 @@ import {
   ViewStyle
 } from "react-native";
 import { Image } from "expo-image";
+import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useNavigation, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -165,12 +166,15 @@ function areGradientColorsEqual(a: CinematicGradientColors, b: CinematicGradient
 
 const CinematicPlayerBackground = memo(function CinematicPlayerBackground({
   colors,
+  coverUrl,
 }: {
   colors: CinematicGradientColors;
+  coverUrl: string;
 }) {
   const fadeInRef = useRef<Animated.Value | null>(null);
   if (fadeInRef.current === null) fadeInRef.current = new Animated.Value(1);
   const fadeIn = fadeInRef.current;
+  const artworkUri = coverUrl.trim();
   const [layers, setLayers] = useState<{
     current: CinematicGradientColors;
     previous: CinematicGradientColors | null;
@@ -205,23 +209,40 @@ const CinematicPlayerBackground = memo(function CinematicPlayerBackground({
 
   return (
     <View pointerEvents="none" style={styles.backgroundLayer}>
+      {artworkUri ? (
+        <Image
+          recyclingKey={`player-bg-${artworkUri}`}
+          source={{ uri: artworkUri }}
+          style={styles.backgroundArtworkImage}
+          contentFit="cover"
+          blurRadius={42}
+          cachePolicy="memory-disk"
+          transition={0}
+        />
+      ) : null}
       {layers.previous ? (
         <LinearGradient
           colors={layers.previous}
           locations={[0, 0.34, 0.72, 1]}
-          style={StyleSheet.absoluteFillObject}
+          style={[
+            StyleSheet.absoluteFillObject,
+            styles.backgroundColorWash,
+          ]}
         />
       ) : null}
       <Animated.View style={[StyleSheet.absoluteFillObject, { opacity: fadeIn }]}>
         <LinearGradient
           colors={layers.current}
           locations={[0, 0.34, 0.72, 1]}
-          style={StyleSheet.absoluteFillObject}
+          style={[
+            StyleSheet.absoluteFillObject,
+            styles.backgroundColorWash,
+          ]}
         />
       </Animated.View>
       <LinearGradient
-        colors={["rgba(0,0,0,0.04)", "rgba(7,10,16,0.38)", "#070A10"]}
-        locations={[0, 0.52, 1]}
+        colors={["rgba(7,10,16,0.28)", "rgba(7,10,16,0.62)", "rgba(7,10,16,0.9)", "#070A10"]}
+        locations={[0, 0.5, 0.86, 1]}
         style={StyleSheet.absoluteFillObject}
       />
     </View>
@@ -1651,18 +1672,23 @@ function useLegacyPlayerScreenView() {
 
   return (
     <View style={styles.container}>
-      <CinematicPlayerBackground colors={gradientColors} />
+      <CinematicPlayerBackground
+        colors={gradientColors}
+        coverUrl={screenSong.coverUrl || ""}
+      />
       <View style={[styles.playerForeground, { paddingTop: topInset, paddingBottom: 0 }]}>
       <View
         style={[styles.topBar, { height: topBarHeight, paddingHorizontal: isShortScreen ? 14 : 18 }]}
       >
-        <Pressable
-          style={[styles.headerIconButton, ctrlBtnStyle]}
-          onPress={safeGoBack}
-          hitSlop={10}
-        >
-          <Ionicons name="arrow-down" size={22} color={sheetTextColor} />
-        </Pressable>
+        <View style={styles.headerSideGroup}>
+          <Pressable
+            style={[styles.headerIconButton, ctrlBtnStyle]}
+            onPress={safeGoBack}
+            hitSlop={10}
+          >
+            <Ionicons name="arrow-down" size={22} color={sheetTextColor} />
+          </Pressable>
+        </View>
 
         <View style={styles.headerCenter}>
           <Text style={[styles.headerAlbum, { fontSize: isShortScreen ? 12 : 13 }]} numberOfLines={1}>
@@ -1670,15 +1696,17 @@ function useLegacyPlayerScreenView() {
           </Text>
         </View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open song options"
-          style={[styles.headerIconButton, ctrlBtnStyle]}
-          onPress={handleSongOptionsPress}
-          hitSlop={10}
-        >
-          <Ionicons name="ellipsis-horizontal" size={22} color={sheetTextColor} />
-        </Pressable>
+        <View style={[styles.headerSideGroup, styles.headerRightGroup]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open song options"
+            style={[styles.headerIconButton, ctrlBtnStyle]}
+            onPress={handleSongOptionsPress}
+            hitSlop={10}
+          >
+            <Ionicons name="ellipsis-horizontal" size={22} color={sheetTextColor} />
+          </Pressable>
+        </View>
       </View>
 
       <FlatList
@@ -1695,19 +1723,6 @@ function useLegacyPlayerScreenView() {
         overScrollMode="never"
         ListHeaderComponent={
           <>
-      <View
-        pointerEvents="none"
-        style={[
-          styles.lowerDarkBackdrop,
-          { top: Math.max(360, topInset + topBarHeight + artSize + (isShortScreen ? 92 : 116)) },
-        ]}
-      >
-        <LinearGradient
-          pointerEvents="none"
-          colors={["rgba(11,13,16,0)", "rgba(11,13,16,0.88)", "#0B0D10"]}
-          style={styles.lowerDarkFade}
-        />
-      </View>
       <View style={[styles.playerContent, { paddingBottom: isShortScreen ? 10 : 14 }]}>
         <View style={styles.playerPrimaryStack}>
               <View
@@ -1928,6 +1943,19 @@ function useLegacyPlayerScreenView() {
               },
             ]}
           >
+            <BlurView
+              pointerEvents="none"
+              intensity={Platform.OS === "ios" ? 26 : 18}
+              tint="dark"
+              experimentalBlurMethod={Platform.OS === "android" ? "dimezisBlurView" : "none"}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <LinearGradient
+              pointerEvents="none"
+              colors={["rgba(35,38,45,0.5)", "rgba(13,16,22,0.74)"]}
+              locations={[0, 1]}
+              style={StyleSheet.absoluteFillObject}
+            />
             <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
               <Text style={styles.playingListTitle}>Playlist Songs</Text>
               <View style={styles.playingListHeaderRight}>
@@ -2112,6 +2140,19 @@ const styles = StyleSheet.create({
   backgroundLayer: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "#070A10",
+    overflow: "hidden",
+  },
+  backgroundArtworkImage: {
+    position: "absolute",
+    top: -96,
+    right: -96,
+    bottom: -96,
+    left: -96,
+    opacity: 0.36,
+    transform: [{ scale: 1.18 }],
+  },
+  backgroundColorWash: {
+    opacity: 0.2,
   },
   playerForeground: {
     flex: 1,
@@ -2131,20 +2172,6 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     position: "relative",
   },
-  lowerDarkBackdrop: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "#0B0D10",
-  },
-  lowerDarkFade: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: -132,
-    height: 132,
-  },
   playerContent: {
     flexGrow: 0,
   },
@@ -2163,6 +2190,15 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(223,226,235,0.07)",
     borderWidth: 1,
     borderColor: "rgba(223,226,235,0.14)",
+  },
+  headerSideGroup: {
+    width: 84,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerRightGroup: {
+    justifyContent: "flex-end",
   },
 
   headerCenter: {
@@ -2406,9 +2442,9 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 22,
     borderBottomLeftRadius: 22,
     borderBottomRightRadius: 22,
-    backgroundColor: "#242424",
+    backgroundColor: "rgba(20,23,30,0.5)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.04)",
+    borderColor: "rgba(255,255,255,0.08)",
     maxHeight: 320,
   },
   queueListContent: {
