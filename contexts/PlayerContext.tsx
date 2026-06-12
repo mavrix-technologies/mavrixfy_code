@@ -309,10 +309,63 @@ function songToTrack(song: Song, localUrl?: string | null): any {
   };
 }
 
+type NowPlayingMetadataSource = {
+  title?: unknown;
+  artist?: unknown;
+  album?: unknown;
+  genre?: unknown;
+  duration?: unknown;
+  artwork?: unknown;
+  coverUrl?: unknown;
+};
+
+function getNowPlayingMetadata(track: NowPlayingMetadataSource) {
+  const title = readNonEmptyString(track.title) || "Mavrixfy";
+  const artist = readNonEmptyString(track.artist) || "Mavrixfy";
+  const duration = toDurationSeconds(track.duration);
+  const artwork = readNonEmptyString(track.artwork) || readNonEmptyString(track.coverUrl);
+
+  return {
+    title,
+    artist,
+    album: readNonEmptyString(track.album),
+    genre: readNonEmptyString(track.genre) || "Mavrixfy",
+    duration: duration > 0 ? duration : undefined,
+    artwork: artwork || undefined,
+  };
+}
+
+async function publishNativeNowPlaying(track: NowPlayingMetadataSource, trackIndex?: number): Promise<void> {
+  if (Platform.OS !== "ios" || !TrackPlayer) return;
+
+  const metadata = getNowPlayingMetadata(track);
+
+  try {
+    if (
+      typeof trackIndex === "number" &&
+      trackIndex >= 0 &&
+      typeof TrackPlayer.updateMetadataForTrack === "function"
+    ) {
+      await TrackPlayer.updateMetadataForTrack(trackIndex, metadata);
+    }
+  } catch {
+    // The active queue can change while the user is skipping quickly.
+  }
+
+  try {
+    if (typeof TrackPlayer.updateNowPlayingMetadata === "function") {
+      await TrackPlayer.updateNowPlayingMetadata(metadata);
+    }
+  } catch {
+    // iOS will still fall back to RNTP's automatic metadata publishing.
+  }
+}
+
 function rebuildNativeQueue(tracks: any[], activeIndex: number, shouldPlay: boolean): Promise<void> {
   return TrackPlayer.reset()
     .then(() => TrackPlayer.add(tracks))
     .then(() => TrackPlayer.skip(activeIndex))
+    .then(() => publishNativeNowPlaying(tracks[activeIndex] ?? tracks[0], activeIndex))
     .then(() => (shouldPlay ? TrackPlayer.play() : undefined))
     .then(() => undefined);
 }
@@ -1684,6 +1737,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           // Do not remove/re-add the active track here; rebuilding is safer
           // than indexed native mutation if the URL source needs to change.
           await TrackPlayer.skip(targetIndex);
+          await publishNativeNowPlaying(targetSong, targetIndex);
           await TrackPlayer.play();
           return;
         }
@@ -1710,6 +1764,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           if (targetIndex > 0) {
             await TrackPlayer.skip(targetIndex);
           }
+          await publishNativeNowPlaying(targetSong, targetIndex);
           await TrackPlayer.play();
 
           appendRemainingTracksIfCurrent(requestId, remainingTracks);
@@ -1719,6 +1774,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           if (targetIndex > 0) {
             await TrackPlayer.skip(targetIndex);
           }
+          await publishNativeNowPlaying(targetSong, targetIndex);
           await TrackPlayer.play();
 
           appendRemainingTracksIfCurrent(requestId, remainingTracks);
@@ -1909,6 +1965,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         return;
       }
 
+      await publishNativeNowPlaying(targetSong, targetIndex);
       await TrackPlayer.play();
       restoredPositionSecondsRef.current = 0;
       return;
@@ -2024,6 +2081,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       await runSerializedPlaybackSwitch(async () => {
         if (queueIndexRef.current !== ni || queueRef.current[ni]?.id !== cq[ni].id) return;
         await TrackPlayer.skip(ni);
+        await publishNativeNowPlaying(cq[ni], ni);
         await TrackPlayer.play();
       });
     } catch (error) {
@@ -2126,6 +2184,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       await runSerializedPlaybackSwitch(async () => {
         if (queueIndexRef.current !== pi || queueRef.current[pi]?.id !== cq[pi].id) return;
         await TrackPlayer.skip(pi);
+        await publishNativeNowPlaying(cq[pi], pi);
         await TrackPlayer.play();
       });
     } catch (error) {
@@ -2523,7 +2582,9 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       await TrackPlayer.reset();
       await TrackPlayer.add(validSongs.map((song) => songToTrack(song)));
       const activeIndex = validSongs.findIndex((song) => song.id === activeSongId);
-      await TrackPlayer.skip(activeIndex >= 0 ? activeIndex : 0);
+      const safeActiveIndex = activeIndex >= 0 ? activeIndex : 0;
+      await TrackPlayer.skip(safeActiveIndex);
+      await publishNativeNowPlaying(validSongs[safeActiveIndex], safeActiveIndex);
       if (isPlaying) {
         await TrackPlayer.play();
       }
@@ -2544,8 +2605,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         clearUserQueuedSongIds();
         setQueueIndex(0);
         queueIndexRef.current = 0;
-        await TrackPlayer.reset();
-        await TrackPlayer.add(songToTrack(cs));
+        await rebuildNativeQueue([songToTrack(cs)], 0, false);
       }
     } catch (error) {
       // Silent fail
@@ -2581,11 +2641,14 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       await TrackPlayer.reset();
       
       const validSongs = mapFilter(newQ, normalizePlayableSong, (item): item is Song => Boolean(item));
+      if (validSongs.length === 0) return;
       await TrackPlayer.add(validSongs.map((song) => songToTrack(song)));
       
       const currentSongId = newQ[ci]?.id;
       const validIndex = validSongs.findIndex(s => s.id === currentSongId);
-      await TrackPlayer.skip(validIndex >= 0 ? validIndex : 0);
+      const safeValidIndex = validIndex >= 0 ? validIndex : 0;
+      await TrackPlayer.skip(safeValidIndex);
+      await publishNativeNowPlaying(validSongs[safeValidIndex], safeValidIndex);
       if (resolvedIsPlaying) {
         await TrackPlayer.play();
       }

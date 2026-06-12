@@ -49,6 +49,8 @@ import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobil
 
 const getCurrentTimestamp = () => Date.now();
 const PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING = 136;
+const PLAYER_AD_COVER_COOLDOWN_MS = 8 * 60 * 1000;
+const PLAYER_AD_COVER_COOLDOWN_SONGS = 4;
 
 function hexToRgba(color: string, alpha: number): string {
   const safeAlpha = Math.max(0, Math.min(1, alpha));
@@ -811,12 +813,10 @@ function useLegacyPlayerScreenView() {
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
   const [playerAd, setPlayerAd] = useState<GoogleNativeAd | null>(null);
   const [playerAdLoaded, setPlayerAdLoaded] = useState(false);
-  const [showAdInPlayer, setShowAdInPlayer] = useState(false);
-  const [prevSongId, setPrevSongId] = useState(currentSong?.id);
-  if (currentSong?.id !== prevSongId) {
-    setPrevSongId(currentSong?.id);
-    setShowAdInPlayer(playerAdLoaded && playerAd ? Math.random() < 0.35 : false);
-  }
+  const [manualPlayerAdSongId, setManualPlayerAdSongId] = useState<string | null>(null);
+  const playerAdCoverCooldownUntilRef = useRef(0);
+  const playerAdSongsSinceCoverRef = useRef(PLAYER_AD_COVER_COOLDOWN_SONGS);
+  const lastPlayerAdSongIdRef = useRef<string | null>(currentSong?.id ?? null);
   const [isLoadingDevTrack, setIsLoadingDevTrack] = useState(false);
   const [isDevPreviewEnabled, setIsDevPreviewEnabled] = useState(false);
   const [devPreviewIndex, setDevPreviewIndex] = useState(0);
@@ -874,6 +874,26 @@ function useLegacyPlayerScreenView() {
     DEV_PREVIEW_SONGS[Math.max(0, Math.min(devPreviewIndex, DEV_PREVIEW_SONGS.length - 1))] ??
     DEV_PREVIEW_SONGS[0];
   const screenSong = currentSong ?? (isDevPreviewActive ? devPreviewSong : null);
+  const currentPlayerAdSongId = screenSong?.id ?? null;
+  if (currentPlayerAdSongId !== lastPlayerAdSongIdRef.current) {
+    if (lastPlayerAdSongIdRef.current) {
+      playerAdSongsSinceCoverRef.current = Math.min(
+        PLAYER_AD_COVER_COOLDOWN_SONGS,
+        playerAdSongsSinceCoverRef.current + 1
+      );
+    }
+    lastPlayerAdSongIdRef.current = currentPlayerAdSongId;
+  }
+  const isPlayerAdCoverCooldownActive =
+    Date.now() < playerAdCoverCooldownUntilRef.current ||
+    playerAdSongsSinceCoverRef.current < PLAYER_AD_COVER_COOLDOWN_SONGS;
+  const showAdInPlayer = Boolean(
+    currentPlayerAdSongId &&
+      playerAdLoaded &&
+      playerAd &&
+      !isDevPreviewActive &&
+      (manualPlayerAdSongId === currentPlayerAdSongId || !isPlayerAdCoverCooldownActive)
+  );
 
   useEffect(() => {
     didHandleSheetDismissRef.current = false;
@@ -1099,8 +1119,6 @@ function useLegacyPlayerScreenView() {
         loadedAd = ad;
         setPlayerAd(ad);
         setPlayerAdLoaded(true);
-        // Randomly decide (e.g. 35% chance) whether to show the ad automatically when loaded
-        setShowAdInPlayer(Math.random() < 0.35);
       } catch (err) {
         console.warn("Player screen native ad failed to load:", err);
       }
@@ -1376,6 +1394,19 @@ function useLegacyPlayerScreenView() {
     [activeQueueIndex, clearSkipCooldownTimer, isDevPreviewActive, nextSong, playSong, playingQueue, prevSong]
   );
 
+  const handlePlayerAdToggle = useCallback((event: GestureResponderEvent) => {
+    event.stopPropagation();
+
+    if (showAdInPlayer) {
+      playerAdCoverCooldownUntilRef.current = Date.now() + PLAYER_AD_COVER_COOLDOWN_MS;
+      playerAdSongsSinceCoverRef.current = 0;
+      setManualPlayerAdSongId(null);
+      return;
+    }
+
+    setManualPlayerAdSongId(currentPlayerAdSongId);
+  }, [currentPlayerAdSongId, showAdInPlayer]);
+
   useEffect(() => {
     pendingArtworkTargetIndexRef.current = activeQueueIndex;
   }, [activeQueueIndex]);
@@ -1558,10 +1589,7 @@ function useLegacyPlayerScreenView() {
                     borderColor: showAdInPlayer ? "#26e19a" : "rgba(255, 255, 255, 0.12)",
                   }
                 ]}
-                onPress={(e) => {
-                  e.stopPropagation();
-                  setShowAdInPlayer(prev => !prev);
-                }}
+                onPress={handlePlayerAdToggle}
               >
                 <Ionicons
                   name={showAdInPlayer ? "image-outline" : "megaphone-outline"}
@@ -1604,6 +1632,7 @@ function useLegacyPlayerScreenView() {
       artScrollX,
       artSize,
       handleArtworkSongChange,
+      handlePlayerAdToggle,
       NativeAdView,
       NativeAsset,
       NativeAssetType,
