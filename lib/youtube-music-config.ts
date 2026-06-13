@@ -1,28 +1,37 @@
+import Constants from 'expo-constants';
+
 /**
  * YouTube Music API Configuration
  * 
- * Configured via .env file:
+ * Configured via .env file or app.json extra config:
  * - Development: EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL=http://localhost:8000 (or your local IP)
  * - Production: EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL=https://mavrixfy-api-drab.vercel.app/api/youtube-music
+ * - Standalone builds: app.json extra.youtubeMusicApiUrl
  * 
- * All configuration is controlled through .env - no hardcoded URLs!
+ * Priority: Environment variable > app.json extra > hardcoded fallback
  */
 
 /**
- * YouTube Music API URL - reads from environment variable only
+ * YouTube Music API URL - reads from environment variable or app.json extra config
  */
 export function getYouTubeMusicApiUrlForPlatform(): string {
-  // Always use environment variable
+  // Try environment variable first (works in development and if embedded in build)
   const envUrl = process.env.EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL;
   
-  if (!envUrl) {
-    throw new Error(
-      'EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL is not set in .env file. ' +
-      'Please add it to your .env file.'
-    );
+  if (envUrl) {
+    return envUrl;
   }
   
-  return envUrl;
+  // Fallback to app.json extra config for standalone builds
+  const configUrl = Constants.expoConfig?.extra?.youtubeMusicApiUrl;
+  
+  if (configUrl) {
+    return configUrl;
+  }
+  
+  // Final fallback to production URL
+  console.warn('[YouTube Music Config] Using fallback production URL. Consider setting EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL in .env');
+  return 'https://mavrixfy-api-drab.vercel.app/api/youtube-music';
 }
 
 /**

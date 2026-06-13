@@ -1,4 +1,5 @@
 import { getYouTubeMusicApiUrlForPlatform } from "./youtube-music-config";
+import Constants from 'expo-constants';
 
 const API_CONFIG = {
   songBaseUrl: "https://mavrixfy-song-api.vercel.app",
@@ -15,7 +16,7 @@ const APP_API_BASE_URL = normalizeBaseUrl(process.env.EXPO_PUBLIC_APP_API_URL ||
 function getYouTubeMusicBaseUrl(): string {
   const url = getYouTubeMusicApiUrlForPlatform();
   
-  // Debug logging
+  // Debug logging in development
   if (__DEV__) {
     console.log(`[API Config] YouTube Music URL: ${url}`);
   }
