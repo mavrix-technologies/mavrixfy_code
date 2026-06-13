@@ -11,8 +11,12 @@ export interface Song {
   year?: string;
   language?: string;
   hasLyrics?: boolean;
-  source?: "jiosaavn" | "local";
+  source?: "jiosaavn" | "local" | "youtube";
   playCount?: number; // JioSaavn real play count
+  videoId?: string;
+  youtubeVideoId?: string;
+  youtubeVisualVideoId?: string;
+  youtubeVideoType?: string;
 }
 
 export interface JioSaavnImage {

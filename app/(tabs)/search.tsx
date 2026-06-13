@@ -38,7 +38,7 @@ import SearchResultFilterChip from "@/components/SearchResultFilterChip";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { filterMap, sortedCopy } from "@/lib/arrayUtils";
-import { searchJioSaavnAlbums, type JioSaavnAlbumResult } from "@/lib/jioSaavnService";
+import { searchJioSaavnAlbums, type JioSaavnAlbumResult, type JioSaavnPlaylistResult } from "@/lib/jioSaavnService";
 import type { ArtistCard } from "@/lib/artistService";
 import {
   addSongSearchHistoryItem,
@@ -48,6 +48,13 @@ import {
   type SearchHistoryItem,
 } from "@/lib/storage";
 import AdMobNativeVideo from "@/components/AdMobNativeVideo";
+import {
+  searchYouTubeMusic,
+  searchYouTubeMusicAlbums,
+  searchYouTubeMusicPlaylists,
+  searchYouTubeMusicArtists,
+  searchYouTubeMusicVideos
+} from "@/lib/youtubeMusicService";
 
 interface PlaylistResult {
   id: string;
@@ -525,6 +532,7 @@ function useSearchScreenView() {
   const routeSearchQuery = getRouteSearchQuery(params);
   const [query, setQuery] = useState(routeSearchQuery);
   const [songResults, setSongResults] = useState<Song[]>([]);
+  const [youtubeMusicResults, setYoutubeMusicResults] = useState<Song[]>([]);
   const [albumResults, setAlbumResults] = useState<AlbumResult[]>([]);
   const [artistResults, setArtistResults] = useState<ArtistResult[]>([]);
   const [playlistResults, setPlaylistResults] = useState<PlaylistResult[]>([]);
@@ -533,6 +541,8 @@ function useSearchScreenView() {
   const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
   const [searchLoading, setSearchLoading] = useState(false);
   const [isSearchMode, setIsSearchMode] = useState(routeSearchQuery.length > 0);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const {
     isHeaderElevated,
     handleHeaderScroll,
@@ -565,6 +575,7 @@ function useSearchScreenView() {
   );
 
   const performSearch = useCallback(async (searchQuery: string) => {
+    setSuggestions([]);
     const requestId = ++requestSeqRef.current;
     const normalizedQuery = searchQuery.trim();
     if (normalizedQuery.length < 2) {
@@ -701,12 +712,43 @@ function useSearchScreenView() {
         }
 
         // OPTIMIZATION: Fetch global search plus dedicated sections in parallel (network)
-        const [globalData, songsData, albumSectionResults, artistsData, playlistsData] = await Promise.all([
+        const [
+          globalData,
+          songsData,
+          albumSectionResults,
+          artistsData,
+          playlistsData,
+          ytMusicSongs,
+          ytMusicVideos,
+          ytMusicAlbums,
+          ytMusicArtists,
+          ytMusicPlaylists
+        ] = await Promise.all([
           safeFetch(`${apiUrl}api/search?query=${encodeURIComponent(searchTerm)}`),
           safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=12`),
           searchJioSaavnAlbums(searchTerm, 8, controller.signal),
           safeFetch(`${apiUrl}api/search/artists?query=${encodeURIComponent(searchTerm)}&limit=8&page=1`),
           safeFetch(`${apiUrl}api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=6`),
+          searchYouTubeMusic(searchTerm, "song", 15).catch((error) => {
+            console.warn('[Search] YouTube Music songs failed:', error?.message || error);
+            return [] as Song[];
+          }),
+          searchYouTubeMusicVideos(searchTerm, 10).catch((error) => {
+            console.warn('[Search] YouTube Music videos failed:', error?.message || error);
+            return [] as Song[];
+          }),
+          searchYouTubeMusicAlbums(searchTerm, 8).catch((error) => {
+            console.warn('[Search] YouTube Music albums failed:', error?.message || error);
+            return [] as JioSaavnAlbumResult[];
+          }),
+          searchYouTubeMusicArtists(searchTerm, 8).catch((error) => {
+            console.warn('[Search] YouTube Music artists failed:', error?.message || error);
+            return [] as ArtistCard[];
+          }),
+          searchYouTubeMusicPlaylists(searchTerm, 8).catch((error) => {
+            console.warn('[Search] YouTube Music playlists failed:', error?.message || error);
+            return [] as JioSaavnPlaylistResult[];
+          }),
         ]);
 
         if (requestIsActive()) {
@@ -716,27 +758,49 @@ function useSearchScreenView() {
             if (song) mergeInto(mergedSongs, song);
           }
 
+          // Keep YouTube Music results separate
+          const youtubeSongs: Song[] = [];
+          const seenYtIds = new Set<string>();
+          for (const ytSong of [...ytMusicSongs, ...ytMusicVideos]) {
+            if (ytSong && !seenYtIds.has(ytSong.id)) {
+              seenYtIds.add(ytSong.id);
+              youtubeSongs.push(ytSong);
+            }
+          }
+          
+          console.log(`[Search] YouTube Music results: ${youtubeSongs.length} songs`);
+          if (youtubeSongs.length > 0) {
+            console.log(`[Search] First YT song: ${youtubeSongs[0].title} by ${youtubeSongs[0].artist}`);
+          }
+
           const playlists = playlistsData?.success
             ? mergeUniqueById([
                 ...normalizePlaylistResults(globalData?.data?.playlists?.results),
                 ...normalizePlaylistResults(playlistsData.data?.results),
-              ], 8)
+                ...ytMusicPlaylists,
+              ], 12)
             : Array.isArray(playlistsData?.results)
               ? mergeUniqueById([
                   ...normalizePlaylistResults(globalData?.data?.playlists?.results),
                   ...normalizePlaylistResults(playlistsData.results),
-                ], 8)
-              : normalizePlaylistResults(globalData?.data?.playlists?.results).slice(0, 8);
+                  ...ytMusicPlaylists,
+                ], 12)
+              : mergeUniqueById([
+                  ...normalizePlaylistResults(globalData?.data?.playlists?.results),
+                  ...ytMusicPlaylists,
+                ], 12);
 
           const albums = mergeUniqueById([
             ...normalizeAlbumResults(globalData?.data?.albums?.results),
             ...albumSectionResults,
-          ], 8);
+            ...ytMusicAlbums,
+          ], 12);
           const artists = mergeUniqueById([
             ...normalizeArtistResults(globalData?.data?.artists?.results),
             ...normalizeArtistResults(artistsData?.data?.results),
             ...normalizeArtistResults(artistsData?.results),
-          ], 8);
+            ...ytMusicArtists,
+          ], 12);
 
           const songs = toFinalList(mergedSongs);
           const rankedSongs = fastRank(songs);
@@ -758,6 +822,7 @@ function useSearchScreenView() {
 
           // Show final results with network data
           setSongResults(rankedSongs);
+          setYoutubeMusicResults(youtubeSongs);
           setAlbumResults(albums);
           setArtistResults(artists);
           setPlaylistResults(playlists);
@@ -789,6 +854,7 @@ function useSearchScreenView() {
     setQuery(text);
     if (text.trim().length < 2) {
       setResultFilter("all");
+      setSuggestions([]);
     }
   }, []);
 
@@ -807,6 +873,29 @@ function useSearchScreenView() {
       isActive = false;
     };
   }, []);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setSuggestionsLoading(true);
+      try {
+        const { getYouTubeMusicSearchSuggestions } = await import("@/lib/youtubeMusicService");
+        const list = await getYouTubeMusicSearchSuggestions(trimmed);
+        setSuggestions(list);
+      } catch (error) {
+        console.error("Failed to fetch suggestions:", error);
+      } finally {
+        setSuggestionsLoading(false);
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [query]);
 
   const rememberRecentSearch = useCallback((label: string) => {
     const normalized = normalizeRecentSearchLabel(label);
@@ -939,6 +1028,7 @@ function useSearchScreenView() {
   const handleSubmitSearch = useCallback(() => {
     const trimmed = query.trim();
     if (trimmed.length < 2) return;
+    setSuggestions([]);
     rememberRecentSearch(trimmed);
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
@@ -950,6 +1040,7 @@ function useSearchScreenView() {
     requestSeqRef.current += 1;
     cancelActiveSearchWork();
     setQuery("");
+    setSuggestions([]);
     applyEmptySearchState();
   }, [applyEmptySearchState, cancelActiveSearchWork]);
 
@@ -1170,12 +1261,14 @@ function useSearchScreenView() {
             { marginTop: staggerOffset },
             pressed && styles.playlistClassicCardPressed,
           ]}
-          onPress={() =>
+          onPress={() => {
+            const isYt = album.id.startsWith("MPREI_") || album.id.startsWith("PL") || album.id.startsWith("VL") || String(album.url).includes("youtube") || String(album.id).length > 20;
             routerPush({
               pathname: "/playlist/[id]",
               params: {
                 id: String(album.id).trim(),
-                jiosaavn: "true",
+                jiosaavn: isYt ? "false" : "true",
+                youtube: isYt ? "true" : "false",
                 album: "true",
                 firestore: "false",
                 link: album.url || "",
@@ -1187,8 +1280,8 @@ function useSearchScreenView() {
             }, {
               withAnchor: true,
               dangerouslySingular: () => "playlist-details",
-            })
-          }
+            });
+          }}
         >
           <View style={[styles.playlistGridImageWrap, { transform: [{ rotate: `${tilt}deg` }] }]}>
             <Image
@@ -1247,12 +1340,14 @@ function useSearchScreenView() {
             { marginTop: staggerOffset },
             pressed && styles.playlistClassicCardPressed,
           ]}
-          onPress={() =>
+          onPress={() => {
+            const isYt = playlist.id.startsWith("PL") || playlist.id.startsWith("VL") || String(playlist.url).includes("youtube") || String(playlist.id).length > 20;
             routerPush({
               pathname: "/playlist/[id]",
               params: {
                 id: String(playlist.id).trim(),
-                jiosaavn: "true",
+                jiosaavn: isYt ? "false" : "true",
+                youtube: isYt ? "true" : "false",
                 firestore: "false",
                 link: playlist.url || "",
                 title: playlist.name,
@@ -1263,8 +1358,8 @@ function useSearchScreenView() {
             }, {
               withAnchor: true,
               dangerouslySingular: () => "playlist-details",
-            })
-          }
+            });
+          }}
         >
           <View style={[styles.playlistGridImageWrap, { transform: [{ rotate: `${tilt}deg` }] }]}>
             <Image
@@ -1348,6 +1443,30 @@ function useSearchScreenView() {
           </Pressable>
         </View>
       ) : null}
+
+      {isSearchMode && suggestions.length > 0 && query !== searchDisplayQuery && (
+        <View style={[styles.suggestionsDropdown, { top: topInset + APP_TOP_HEADER_HEIGHT + 8 }]}>
+          <ScrollView keyboardShouldPersistTaps="handled">
+            {suggestions.map((suggestion, index) => (
+              <Pressable
+                key={`suggestion-${index}`}
+                style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]}
+                onPress={() => {
+                  setQuery(suggestion);
+                  setSuggestions([]);
+                  rememberRecentSearch(suggestion);
+                  void performSearch(suggestion);
+                }}
+              >
+                <Ionicons name="search-outline" size={18} color={Colors.subtext} style={{ marginRight: 12 }} />
+                <Text style={styles.suggestionText} numberOfLines={1}>
+                  {suggestion}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       {showFocusedRecentSearches ? (
         <ScrollView
@@ -1529,8 +1648,39 @@ function useSearchScreenView() {
               maxToRenderPerBatch={20}
               windowSize={11}
               ListFooterComponent={
-                showAlbumResults || showArtistResults || showPlaylistResults ? (
+                showAlbumResults || showArtistResults || showPlaylistResults || youtubeMusicResults.length > 0 ? (
                   <>
+                    {/* YouTube Music Section */}
+                    {youtubeMusicResults.length > 0 ? (
+                      <View style={styles.sectionBlock}>
+                        <View style={styles.sectionHeaderRow}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Ionicons name="logo-youtube" size={20} color="#FF0000" />
+                            <Text style={styles.sectionTitle}>YouTube Music</Text>
+                            <View style={{ backgroundColor: '#FF0000', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '600' }}>LIVE</Text>
+                            </View>
+                          </View>
+                          <Text style={[styles.sectionActionText, { color: Colors.subtext }]}>
+                            {youtubeMusicResults.length} songs
+                          </Text>
+                        </View>
+                        <Text style={{ color: Colors.subtext, fontSize: 12, marginBottom: 12, paddingHorizontal: 16 }}>
+                          Tap any song to play directly from YouTube Music.
+                        </Text>
+                        <View>
+                          {youtubeMusicResults.slice(0, 5).map((song) => (
+                            <SongRow 
+                              key={song.id} 
+                              song={song} 
+                              queue={[song, ...youtubeMusicResults.filter(s => s.id !== song.id)]} 
+                              onSongPress={handleSongResultPress} 
+                            />
+                          ))}
+                        </View>
+                      </View>
+                    ) : null}
+                    
                     {showAlbumResults ? (
                       <View style={styles.sectionBlock}>
                         <View style={styles.sectionHeaderRow}>
@@ -1958,4 +2108,31 @@ const styles = StyleSheet.create({
   filterTabChipPressed: {},
   filterTabChipText: {},
   filterTabChipTextActive: {},
+
+  // ── Suggestions Dropdown ──────────────────────────────────────────────────
+  suggestionsDropdown: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: Colors.background,
+    zIndex: 99,
+  },
+  suggestionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  suggestionRowPressed: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  suggestionText: {
+    flex: 1,
+    color: Colors.text,
+    fontSize: 16,
+    fontFamily: "Inter_500Medium",
+  },
 });

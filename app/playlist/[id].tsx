@@ -42,6 +42,7 @@ import { sortedCopy } from "@/lib/arrayUtils";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { getJioSaavnAlbumDetails, getJioSaavnPlaylistDetails } from "@/lib/jioSaavnService";
+import { getYouTubeMusicPlaylist, getYouTubeMusicAlbum, convertYouTubeMusicTrack } from "@/lib/youtubeMusicService";
 import { useAuth } from "@/contexts/AuthContext";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
@@ -75,6 +76,7 @@ function usePlaylistScreenView() {
   const params = useLocalSearchParams<{
     id?: string | string[];
     jiosaavn?: string | string[];
+    youtube?: string | string[];
     album?: string | string[];
     link?: string | string[];
     firestore?: string | string[];
@@ -86,7 +88,8 @@ function usePlaylistScreenView() {
 
   const playlistId       = pickFirstParam(params.id).trim();
   const isAlbumSource    = pickFirstParam(params.album) === "true";
-  const isJioSaavnSource = pickFirstParam(params.jiosaavn) === "true" || isAlbumSource;
+  const isYouTubeSource  = pickFirstParam(params.youtube) === "true";
+  const isJioSaavnSource = (pickFirstParam(params.jiosaavn) === "true" || isAlbumSource) && !isYouTubeSource;
   const isFirestoreSource = pickFirstParam(params.firestore) === "true";
   const sourceLink       = pickFirstParam(params.link).trim();
   const initialTitle     = pickFirstParam(params.title).trim();
@@ -165,7 +168,7 @@ function usePlaylistScreenView() {
     return 20;
   }, [playlistName]);
 
-  const canRemoveSongsFromPlaylist = !isJioSaavnSource && (!isFirestoreSource || Boolean(user?.id));
+  const canRemoveSongsFromPlaylist = !isJioSaavnSource && !isYouTubeSource && (!isFirestoreSource || Boolean(user?.id));
   const playlistRowSource = isFirestoreSource ? "firestore" : "local";
 
   useEffect(() => {
@@ -268,6 +271,31 @@ function usePlaylistScreenView() {
             if (playlist) applyFirestorePlaylistData(playlist);
             else if (!hasPrefilledHeader) markPlaylistNotFound();
             else markPlaylistLoadError("Playlist tracks could not load right now.");
+          }
+          return;
+        }
+        if (isYouTubeSource) {
+          const data = isAlbumSource
+            ? await getYouTubeMusicAlbum(playlistId)
+            : await getYouTubeMusicPlaylist(playlistId);
+          if (!cancelled) {
+            if (data) {
+              setPlaylistName(data.title);
+              const cover = data.thumbnails && data.thumbnails.length > 0
+                ? data.thumbnails[data.thumbnails.length - 1].url.replace(/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?$/, "=w500-h500-l90-rj")
+                : "";
+              setPlaylistCover(cover);
+              const description = ("description" in data && typeof data.description === "string") ? data.description : `${data.trackCount || data.tracks?.length || 0} tracks`;
+              setPlaylistDescription(description);
+              const finalSongs = (data.tracks || [])
+                .map(convertYouTubeMusicTrack)
+                .filter((s): s is Song => s !== null);
+              setSongs(finalSongs);
+            } else if (!hasPrefilledHeader) {
+              markPlaylistNotFound();
+            } else {
+              markPlaylistLoadError("YouTube Music tracks could not load right now.");
+            }
           }
           return;
         }

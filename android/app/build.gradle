@@ -66,7 +66,7 @@ react {
 /**
  * Set this to true in release builds to optimize the app using [R8](https://developer.android.com/topic/performance/app-optimization/enable-app-optimization).
  */
-def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBuilds') ?: true).toBoolean()
+def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBuilds') ?: false).toBoolean()
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -80,34 +80,6 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  * this variant is about 6MiB larger per architecture than default.
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
-def isBundleTask = gradle.startParameter.taskNames.any { it.toLowerCase().contains("bundle") }
-def mavrixfySigningProperties = new Properties()
-def mavrixfySigningPropertiesFile = rootProject.file("keystore.properties")
-if (mavrixfySigningPropertiesFile.exists()) {
-    mavrixfySigningPropertiesFile.withInputStream { mavrixfySigningProperties.load(it) }
-}
-def signingProperty = { name ->
-    def gradleValue = findProperty(name)?.toString()?.trim()
-    return gradleValue ?: mavrixfySigningProperties.getProperty(name)?.toString()?.trim()
-}
-def signingStoreFile = { path ->
-    def storeFilePath = path.toString()
-    def candidate = new File(storeFilePath)
-    return candidate.isAbsolute() ? candidate : rootProject.file(storeFilePath)
-}
-def hasMavrixfyReleaseSigning = [
-    'MAVRIXFY_STORE_FILE',
-    'MAVRIXFY_STORE_PASSWORD',
-    'MAVRIXFY_KEY_ALIAS',
-    'MAVRIXFY_KEY_PASSWORD'
-].every { signingProperty(it) }
-def hasAndroidInjectedSigning = [
-    'android.injected.signing.store.file',
-    'android.injected.signing.store.password',
-    'android.injected.signing.key.alias',
-    'android.injected.signing.key.password'
-].every { signingProperty(it) }
-def allowDebugReleaseSigning = (findProperty('MAVRIXFY_ALLOW_DEBUG_RELEASE_SIGNING') ?: 'false').toString().toBoolean()
 
 android {
     ndkVersion rootProject.ext.ndkVersion
@@ -132,52 +104,21 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        release {
-            if (hasMavrixfyReleaseSigning) {
-                storeFile signingStoreFile(signingProperty('MAVRIXFY_STORE_FILE'))
-                storePassword signingProperty('MAVRIXFY_STORE_PASSWORD')
-                keyAlias signingProperty('MAVRIXFY_KEY_ALIAS')
-                keyPassword signingProperty('MAVRIXFY_KEY_PASSWORD')
-            } else if (hasAndroidInjectedSigning) {
-                storeFile file(signingProperty('android.injected.signing.store.file'))
-                storePassword signingProperty('android.injected.signing.store.password')
-                keyAlias signingProperty('android.injected.signing.key.alias')
-                keyPassword signingProperty('android.injected.signing.key.password')
-            } else if (!isBundleTask || allowDebugReleaseSigning) {
-                // Local release APKs can still be sideloaded for testing.
-                // Play upload bundles must use the real upload key instead.
-                if (isBundleTask) {
-                    logger.warn("MAVRIXFY_ALLOW_DEBUG_RELEASE_SIGNING=true is signing a release bundle with a debug key. Do not upload this bundle to Play.")
-                }
-                storeFile file("${System.getProperty('user.home')}/.android/debug.keystore")
-                storePassword 'android'
-                keyAlias 'androiddebugkey'
-                keyPassword 'android'
-            } else {
-                throw new GradleException("Play release bundle signing is not configured. Provide MAVRIXFY_STORE_FILE, MAVRIXFY_STORE_PASSWORD, MAVRIXFY_KEY_ALIAS, and MAVRIXFY_KEY_PASSWORD for the upload key with SHA1 B1:DA:1E:23:9A:36:0B:6E:6E:89:57:A7:40:B3:AD:BE:81:59:97:89.")
-            }
-        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.release
-            def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'true'
-            shrinkResources enableShrinkResources.toBoolean() && enableMinifyInReleaseBuilds
+            // Caution! In production, you need to generate your own keystore file.
+            // see https://reactnative.dev/docs/signed-apk-android.
+            signingConfig signingConfigs.debug
+            def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
+            shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
             crunchPngs enablePngCrunchInRelease.toBoolean()
-        }
-    }
-    splits {
-        abi {
-            reset()
-            enable !isBundleTask
-            universalApk false
-            include "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
         }
     }
     packagingOptions {

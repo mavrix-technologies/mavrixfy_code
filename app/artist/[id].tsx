@@ -18,6 +18,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import { convertJioSaavnSong, getBestImageUrl, Song } from "@/lib/musicData";
+import { getYouTubeMusicArtist, convertYouTubeMusicTrack } from "@/lib/youtubeMusicService";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import {
@@ -40,6 +41,14 @@ import { mapFilter, sortedCopy } from "@/lib/arrayUtils";
 function pickFirst(v: string | string[] | undefined): string {
   if (Array.isArray(v)) return v[0] ?? "";
   return v ?? "";
+}
+
+function getYtImage(thumbnails?: any[]) {
+  if (!thumbnails || thumbnails.length === 0) return [];
+  return thumbnails.map((t) => ({
+    quality: "500x500",
+    url: t.url ? t.url.replace(/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?$/, "=w500-h500-l90-rj") : "",
+  }));
 }
 
 function formatFollowers(n: number | null | undefined): string {
@@ -94,11 +103,16 @@ function useArtistScreenView() {
 
   // All songs = initial topSongs + loaded extra pages
   const allSongs: Song[] = useMemo(() => {
+    if (!artist) return [];
+    const isYt = artistId.startsWith("youtube_") || artistId.startsWith("UC") || artistId.length > 20;
+    if (isYt) {
+      return [...(artist.topSongs as unknown as Song[]), ...extraSongs];
+    }
     const base = artist?.topSongs
       ? mapFilter(artist.topSongs, (s) => convertJioSaavnSong(s), (s) => s.audioUrl?.trim())
       : [];
     return [...base, ...extraSongs];
-  }, [artist, extraSongs]);
+  }, [artist, extraSongs, artistId]);
 
   // songs alias kept for play/shuffle handlers
   const songs = allSongs;
@@ -156,6 +170,54 @@ function useArtistScreenView() {
     void isFollowingArtist(artistId).then((v) => {
       if (!cancelled) applyArtistFollowState(v);
     });
+
+    const isYt = artistId.startsWith("youtube_") || artistId.startsWith("UC") || artistId.length > 20;
+
+    if (isYt) {
+      setHasMore(false);
+      getYouTubeMusicArtist(artistId)
+        .then((data) => {
+          if (cancelled) return;
+          if (data) {
+            const mappedTracks = (data.tracks || [])
+              .map(convertYouTubeMusicTrack)
+              .filter((t): t is Song => t !== null);
+              
+            const mappedAlbums = (data.albums || []).map((album) => ({
+              id: album.browseId,
+              name: album.title,
+              year: album.year ? Number(album.year) : undefined,
+              songCount: album.trackCount || 0,
+              url: "",
+              image: getYtImage(album.thumbnails),
+            }));
+
+            setArtist({
+              id: data.browseId,
+              name: data.name,
+              url: "",
+              image: getYtImage(data.thumbnails),
+              followerCount: data.subscribers ? Number(data.subscribers.replace(/[^0-9]/g, "")) || null : null,
+              fanCount: null,
+              isVerified: true,
+              dominantLanguage: "YouTube Music",
+              bio: data.description ? [{ text: data.description, title: "Biography" }] : [],
+              topSongs: mappedTracks as unknown as any[],
+              topAlbums: mappedAlbums as any[],
+              similarArtists: [],
+            });
+          } else {
+            setError("Artist not found");
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setError("Could not load YouTube Music artist.");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return;
+    }
 
     getArtistDetails(artistId)
       .then((data) => {
@@ -249,11 +311,13 @@ function useArtistScreenView() {
   }, [routerPush]);
 
   const handleAlbumPress = useCallback((album: JioSaavnArtistAlbum) => {
+    const isYt = album.id.startsWith("MPREI_") || album.id.startsWith("PL") || album.id.startsWith("VL") || String(album.id).length > 20;
     routerPush({
       pathname: "/playlist/[id]",
       params: {
         id: album.id,
-        jiosaavn: "true",
+        jiosaavn: isYt ? "false" : "true",
+        youtube: isYt ? "true" : "false",
         album: "true",
         firestore: "false",
         link: album.url,
