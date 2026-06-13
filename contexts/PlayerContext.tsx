@@ -1626,6 +1626,17 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       return;
     }
 
+    // Set adaptive quality based on device/network
+    if (youtubePlayerRef.current) {
+      try {
+        // Let YouTube auto-select quality based on network conditions
+        // This prevents buffering on slow connections
+        youtubePlayerRef.current.setPlaybackQuality?.('auto');
+      } catch (error) {
+        console.warn('[YouTube] Failed to set playback quality:', error);
+      }
+    }
+
     setYoutubePlaying(false);
     setTimeout(() => {
       if (!youtubeShouldAutoPlayRef.current) return;
@@ -3552,6 +3563,12 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
                             preventFullScreen: true,
                             showClosedCaptions: false,
                             iv_load_policy: 3,
+                            disablekb: true,
+                            fs: false,
+                            playsinline: true,
+                            cc_load_policy: 0,
+                            enablejsapi: 1,
+                            origin: 'https://www.youtube.com',
                           }}
                           webViewProps={{
                             javaScriptEnabled: true,

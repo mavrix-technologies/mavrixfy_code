@@ -434,6 +434,16 @@ const VisibleYoutubeVideo = memo(function VisibleYoutubeVideo({
     setIsReady(true);
     setHasError(false);
 
+    // Set adaptive quality for better performance
+    if (playerRef.current) {
+      try {
+        // Auto quality adapts to network/device performance
+        playerRef.current.setPlaybackQuality?.('auto');
+      } catch (error) {
+        console.warn('[YouTube Detail] Failed to set quality:', error);
+      }
+    }
+
     const targetSeconds = latestPositionSecondsRef.current;
     if (targetSeconds <= 0) return;
 
@@ -500,6 +510,12 @@ const VisibleYoutubeVideo = memo(function VisibleYoutubeVideo({
               showClosedCaptions: false,
               iv_load_policy: 3,
               start: initialPositionSeconds,
+              disablekb: true,
+              fs: false,
+              playsinline: true,
+              cc_load_policy: 0,
+              enablejsapi: 1,
+              origin: 'https://www.youtube.com',
             }}
             webViewProps={youtubeWebViewProps}
           />
@@ -613,6 +629,11 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
             showClosedCaptions: false,
             iv_load_policy: 3,
             start: initialPositionSeconds,
+            disablekb: true,
+            fs: false,
+            playsinline: true,
+            cc_load_policy: 0,
+            enablejsapi: 1,
           }}
           webViewProps={{
             javaScriptEnabled: true,
