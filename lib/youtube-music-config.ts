@@ -1,65 +1,28 @@
 /**
  * YouTube Music API Configuration
  * 
- * IMPORTANT: Update YOUTUBE_MUSIC_API_URL based on your setup:
+ * Configured via .env file:
+ * - Development: EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL=http://localhost:8000 (or your local IP)
+ * - Production: EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL=https://mavrixfy-api-drab.vercel.app/api/youtube-music
  * 
- * - Physical Device (Android/iOS): Use your computer's network IP
- *   Example: "http://192.168.1.6:8000"
- *   Find your IP: Run `ipconfig` (Windows) or `ifconfig` (Mac/Linux)
- * 
- * - Android Emulator: Use "http://10.0.2.2:8000"
- * 
- * - iOS Simulator: Use "http://localhost:8000"
- * 
- * - Web: Use "http://localhost:8000"
+ * All configuration is controlled through .env - no hardcoded URLs!
  */
 
-import { Platform } from "react-native";
-import * as Device from "expo-device";
-
 /**
- * Get your computer's IP address:
- * Windows: ipconfig | findstr /i "IPv4"
- * Mac/Linux: ifconfig | grep "inet "
- */
-const YOUR_COMPUTER_IP = "192.168.1.6"; // UPDATE THIS IF YOUR IP CHANGES
-
-/**
- * Backend port (Python FastAPI runs on 8000)
- */
-const BACKEND_PORT = 8000;
-
-/**
- * YouTube Music API URL - automatically selects based on platform
+ * YouTube Music API URL - reads from environment variable only
  */
 export function getYouTubeMusicApiUrlForPlatform(): string {
-  // Check environment variable first
+  // Always use environment variable
   const envUrl = process.env.EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL;
-  if (envUrl) {
-    return envUrl;
+  
+  if (!envUrl) {
+    throw new Error(
+      'EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL is not set in .env file. ' +
+      'Please add it to your .env file.'
+    );
   }
-
-  // Platform-specific defaults
-  if (Platform.OS === "android") {
-    // Check if running on emulator or physical device
-    // Emulators need 10.0.2.2, physical devices need network IP
-    const isPhysical = Device.isDevice;
-    return !isPhysical 
-      ? `http://10.0.2.2:${BACKEND_PORT}`  // Android Emulator
-      : `http://${YOUR_COMPUTER_IP}:${BACKEND_PORT}`; // Physical Android device
-  }
-
-  if (Platform.OS === "ios") {
-    // iOS Simulator can use localhost
-    return `http://localhost:${BACKEND_PORT}`;
-  }
-
-  if (Platform.OS === "web") {
-    return `http://localhost:${BACKEND_PORT}`;
-  }
-
-  // Fallback for physical devices
-  return `http://${YOUR_COMPUTER_IP}:${BACKEND_PORT}`;
+  
+  return envUrl;
 }
 
 /**
