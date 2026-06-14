@@ -161,6 +161,7 @@ function useArtistScreenView() {
     setLoading(false);
   }, []);
 
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- loading an artist resets several independent UI fields at once before async fetches start.
   useEffect(() => {
     if (!artistId) { markArtistNotFound(); return; }
 

@@ -390,6 +390,7 @@ const VisibleYoutubeVideo = memo(function VisibleYoutubeVideo({
     };
   }, []);
 
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- video id changes reset iframe readiness/error state together.
   useEffect(() => {
     setVideoId(initialVideoId);
     // Reset ready state when video ID changes to ensure proper initialization
@@ -424,8 +425,11 @@ const VisibleYoutubeVideo = memo(function VisibleYoutubeVideo({
     lastPositionRef.current = targetSeconds;
   }, [positionMillis]);
 
+  // react-doctor-disable-next-line react-doctor/no-derived-state-effect -- iframe readiness/error are imperative player state, not render-derived values.
   useEffect(() => {
+    // react-doctor-disable-next-line react-doctor/no-chain-state-updates -- both flags reset together when a new resolved video id loads.
     setIsReady(false);
+    // react-doctor-disable-next-line react-doctor/no-chain-state-updates -- both flags reset together when a new resolved video id loads.
     setHasError(false);
   }, [videoId]);
 
@@ -1183,6 +1187,7 @@ function useLegacyPlayerScreenView() {
 
   const [backgroundVideoId, setBackgroundVideoId] = useState<string | null>(null);
 
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- background video id follows the current song, then upgrades to a visual-video id when available.
   useEffect(() => {
     if (!screenSong) {
       setBackgroundVideoId(null);
@@ -1378,8 +1383,6 @@ function useLegacyPlayerScreenView() {
   const defaultArtByWidth = Math.min(screenWidth - 62, 336);
   const defaultArtByHeight = Math.max(192, Math.floor(screenHeight * (isVeryShortScreen ? 0.3 : 0.34)));
   const artSize = Math.min(defaultArtByWidth, defaultArtByHeight);
-  const youtubeVideoWidth = screenWidth;
-  const youtubeVideoHeight = Math.round(youtubeVideoWidth * 9 / 16);
 
   const livePlayingQueue = useMemo(() => {
     const hasFullActiveQueue = queue.length > 1;
@@ -1577,7 +1580,6 @@ function useLegacyPlayerScreenView() {
       ? devPreviewLikedSongIds.includes(screenSong.id)
       : isLiked(screenSong.id)
     : false;
-  const queueCountLabel = `${playingQueue.length} ${playingQueue.length === 1 ? "song" : "songs"}`;
   const queueViewportHeight = Math.min(
     playingQueue.length * (isShortScreen ? 48 : 54) + 10,
     isShortScreen ? 286 : 274
@@ -1840,8 +1842,6 @@ function useLegacyPlayerScreenView() {
       const isActiveCard = index === activeQueueIndex;
       const isYouTubeTrack = song.id?.startsWith("youtube_") || song.source === "youtube";
       const isActiveYouTubeTrack = isYouTubeTrack && isActiveCard;
-      const mediaWidth = isActiveYouTubeTrack ? youtubeVideoWidth : artSize;
-      const mediaHeight = isActiveYouTubeTrack ? youtubeVideoHeight : artSize;
       const decor = getArtworkCardDecor(item.artworkKey);
       const inputRange = [
         (index - 1) * artCarouselSnapInterval,
@@ -2028,10 +2028,7 @@ function useLegacyPlayerScreenView() {
       playerTheme.accent,
       playerAd,
       playerAdLoaded,
-      publishYoutubeVideoFrame,
       showAdInPlayer,
-      youtubeVideoHeight,
-      youtubeVideoWidth,
     ]
   );
 
@@ -2215,24 +2212,21 @@ function useLegacyPlayerScreenView() {
               return (
                 <Animated.View
                   pointerEvents="none"
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    height: containerH,
-                    overflow: "hidden",
-                    zIndex: -1,
-                    opacity: artScrollX.interpolate({
-                      inputRange: [
-                        (activeQueueIndex - 1) * artCarouselSnapInterval,
-                        activeQueueIndex * artCarouselSnapInterval,
-                        (activeQueueIndex + 1) * artCarouselSnapInterval,
-                      ],
-                      outputRange: [0, 1, 0],
-                      extrapolate: "clamp",
-                    }),
-                  }}
+                  style={[
+                    styles.backgroundYoutubeContainer,
+                    {
+                      height: containerH,
+                      opacity: artScrollX.interpolate({
+                        inputRange: [
+                          (activeQueueIndex - 1) * artCarouselSnapInterval,
+                          activeQueueIndex * artCarouselSnapInterval,
+                          (activeQueueIndex + 1) * artCarouselSnapInterval,
+                        ],
+                        outputRange: [0, 1, 0],
+                        extrapolate: "clamp",
+                      }),
+                    },
+                  ]}
                 >
                   <BackgroundYoutubeVideo
                     key={`bg-video-${backgroundVideoId}`}
@@ -2700,6 +2694,14 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "#070A10",
     overflow: "hidden",
+  },
+  backgroundYoutubeContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    overflow: "hidden",
+    zIndex: -1,
   },
   backgroundArtworkImage: {
     position: "absolute",

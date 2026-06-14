@@ -542,7 +542,6 @@ function useSearchScreenView() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [isSearchMode, setIsSearchMode] = useState(routeSearchQuery.length > 0);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const {
     isHeaderElevated,
     handleHeaderScroll,
@@ -882,15 +881,12 @@ function useSearchScreenView() {
     }
 
     const timer = setTimeout(async () => {
-      setSuggestionsLoading(true);
       try {
         const { getYouTubeMusicSearchSuggestions } = await import("@/lib/youtubeMusicService");
         const list = await getYouTubeMusicSearchSuggestions(trimmed);
         setSuggestions(list);
       } catch (error) {
         console.error("Failed to fetch suggestions:", error);
-      } finally {
-        setSuggestionsLoading(false);
       }
     }, 200);
 
@@ -978,6 +974,28 @@ function useSearchScreenView() {
       void performSearch(next);
     },
     [performSearch, playSong, rememberRecentSearch, resetHeaderElevation]
+  );
+
+  const handleSuggestionPress = useCallback((suggestion: string) => {
+    setQuery(suggestion);
+    setSuggestions([]);
+    rememberRecentSearch(suggestion);
+    void performSearch(suggestion);
+  }, [performSearch, rememberRecentSearch]);
+
+  const renderSuggestion = useCallback(
+    ({ item: suggestion }: { item: string }) => (
+      <Pressable
+        style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]}
+        onPress={() => handleSuggestionPress(suggestion)}
+      >
+        <Ionicons name="search-outline" size={18} color={Colors.subtext} style={styles.suggestionIcon} />
+        <Text style={styles.suggestionText} numberOfLines={1}>
+          {suggestion}
+        </Text>
+      </Pressable>
+    ),
+    [handleSuggestionPress]
   );
 
   const handleRemoveRecentSearch = useCallback((id: string) => {
@@ -1446,25 +1464,12 @@ function useSearchScreenView() {
 
       {isSearchMode && suggestions.length > 0 && query !== searchDisplayQuery && (
         <View style={[styles.suggestionsDropdown, { top: topInset + APP_TOP_HEADER_HEIGHT + 8 }]}>
-          <ScrollView keyboardShouldPersistTaps="handled">
-            {suggestions.map((suggestion, index) => (
-              <Pressable
-                key={`suggestion-${index}`}
-                style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]}
-                onPress={() => {
-                  setQuery(suggestion);
-                  setSuggestions([]);
-                  rememberRecentSearch(suggestion);
-                  void performSearch(suggestion);
-                }}
-              >
-                <Ionicons name="search-outline" size={18} color={Colors.subtext} style={{ marginRight: 12 }} />
-                <Text style={styles.suggestionText} numberOfLines={1}>
-                  {suggestion}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+          <FlatList
+            data={suggestions}
+            keyboardShouldPersistTaps="handled"
+            keyExtractor={(suggestion) => `suggestion-${suggestion}`}
+            renderItem={renderSuggestion}
+          />
         </View>
       )}
 
@@ -1658,7 +1663,7 @@ function useSearchScreenView() {
                             <Ionicons name="logo-youtube" size={20} color="#FF0000" />
                             <Text style={styles.sectionTitle}>YouTube Music</Text>
                             <View style={{ backgroundColor: '#FF0000', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                              <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '600' }}>LIVE</Text>
+                              <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '600' }}>LIVE</Text>
                             </View>
                           </View>
                           <Text style={[styles.sectionActionText, { color: Colors.subtext }]}>
@@ -2128,6 +2133,9 @@ const styles = StyleSheet.create({
   },
   suggestionRowPressed: {
     backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  suggestionIcon: {
+    marginRight: 12,
   },
   suggestionText: {
     flex: 1,

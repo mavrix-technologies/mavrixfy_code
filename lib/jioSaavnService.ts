@@ -88,7 +88,7 @@ export interface AutoRefreshContext {
   slot: AutoRefreshTimeSlot;
   isWeekend: boolean;
   languageBias: "hindi" | "punjabi" | "english";
-  signature: string;
+  cacheFingerprint: string;
 }
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -211,8 +211,8 @@ function buildCategoryCacheTimeKey(categoryId: string): string {
   return `${CACHE_PREFIX}:${categoryId}:time`;
 }
 
-function buildCategoryCacheSignatureKey(categoryId: string): string {
-  return `${CACHE_PREFIX}:${categoryId}:signature`;
+function buildCategoryCacheFingerprintKey(categoryId: string): string {
+  return `${CACHE_PREFIX}:${categoryId}:fingerprint`;
 }
 
 function getCategoryTtlMs(categoryId: string): number {
@@ -244,15 +244,15 @@ function getCurrentRefreshContext(now: Date = new Date()): AutoRefreshContext {
     languageBias = "hindi";
   }
 
-  // Keep cache signatures aligned with web home algorithm.
-  const signature = `v5|${slot}|${isWeekend ? "weekend" : "weekday"}|${languageBias}`;
+  // Keep cache fingerprints aligned with web home algorithm.
+  const cacheFingerprint = `v5|${slot}|${isWeekend ? "weekend" : "weekday"}|${languageBias}`;
 
   return {
     timestamp: now.getTime(),
     slot,
     isWeekend,
     languageBias,
-    signature,
+    cacheFingerprint,
   };
 }
 
@@ -1169,32 +1169,32 @@ async function fetchNewArrivalPlaylists(
 async function getCategoryCache(
   categoryId: string,
   context: AutoRefreshContext,
-  options?: { allowSignatureMismatch?: boolean }
+  options?: { allowFingerprintMismatch?: boolean }
 ): Promise<JioSaavnPlaylistResult[] | null> {
-  const allowSignatureMismatch = options?.allowSignatureMismatch ?? false;
+  const allowFingerprintMismatch = options?.allowFingerprintMismatch ?? false;
   const cacheKey = buildCategoryCacheKey(categoryId);
   const cacheTimeKey = buildCategoryCacheTimeKey(categoryId);
-  const cacheSignatureKey = buildCategoryCacheSignatureKey(categoryId);
+  const cacheFingerprintKey = buildCategoryCacheFingerprintKey(categoryId);
 
   try {
-    const [[, rawData], [, rawTime], [, rawSignature]] = await AsyncStorage.multiGet([
+    const [[, rawData], [, rawTime], [, rawFingerprint]] = await AsyncStorage.multiGet([
       cacheKey,
       cacheTimeKey,
-      cacheSignatureKey,
+      cacheFingerprintKey,
     ]);
-    if (!rawData || !rawTime || !rawSignature) return null;
+    if (!rawData || !rawTime || !rawFingerprint) return null;
 
     const cachedAt = Number(rawTime);
     if (!Number.isFinite(cachedAt)) return null;
 
     const age = Date.now() - cachedAt;
     const ttlMs = getCategoryTtlMs(categoryId);
-    const maxAgeMs = allowSignatureMismatch ? Math.max(ttlMs, CATEGORY_STALE_MAX_AGE_MS) : ttlMs;
+    const maxAgeMs = allowFingerprintMismatch ? Math.max(ttlMs, CATEGORY_STALE_MAX_AGE_MS) : ttlMs;
     if (age > maxAgeMs) return null;
 
     // If context changed (time-slot / weekend / language), prefer fresh content
     // but allow stale fallback when explicitly requested.
-    if (!allowSignatureMismatch && rawSignature !== context.signature) return null;
+    if (!allowFingerprintMismatch && rawFingerprint !== context.cacheFingerprint) return null;
 
     const parsed = JSON.parse(rawData);
     const normalized = normalizePlaylistList(parsed);
@@ -1207,19 +1207,19 @@ async function getCategoryCache(
 async function setCategoryCache(
   categoryId: string,
   playlists: JioSaavnPlaylistResult[],
-  contextSignature: string
+  contextFingerprint: string
 ): Promise<void> {
   if (playlists.length === 0) return;
 
   const cacheKey = buildCategoryCacheKey(categoryId);
   const cacheTimeKey = buildCategoryCacheTimeKey(categoryId);
-  const cacheSignatureKey = buildCategoryCacheSignatureKey(categoryId);
+  const cacheFingerprintKey = buildCategoryCacheFingerprintKey(categoryId);
 
   try {
     await AsyncStorage.multiSet([
       [cacheKey, JSON.stringify(playlists)],
       [cacheTimeKey, String(Date.now())],
-      [cacheSignatureKey, contextSignature],
+      [cacheFingerprintKey, contextFingerprint],
     ]);
   } catch {
     // Silent cache write failure
@@ -1264,7 +1264,7 @@ export async function clearJioSaavnPlaylistCache(categoryId?: string): Promise<v
       await AsyncStorage.multiRemove([
         buildCategoryCacheKey(categoryId),
         buildCategoryCacheTimeKey(categoryId),
-        buildCategoryCacheSignatureKey(categoryId),
+        buildCategoryCacheFingerprintKey(categoryId),
       ]);
       return;
     }
@@ -1856,9 +1856,9 @@ function mixForFeed(
   return shuffleArray(deduped).slice(0, limit);
 }
 
-// ── 8. Day-keyed cache signature ──────────────────────────────────────────────
+// ── 8. Day-keyed cache fingerprint ────────────────────────────────────────────
 // Bumping to v6 + day ensures daily auto-refresh without manual invalidation.
-function buildDaySignature(context: AutoRefreshContext): string {
+function buildDayFingerprint(context: AutoRefreshContext): string {
   const day = new Date().getDate();
   return `v6|${context.slot}|${context.isWeekend ? "weekend" : "weekday"}|${context.languageBias}|day${day}`;
 }
@@ -1876,7 +1876,7 @@ export async function getHomeJioSaavnCategories(options?: {
   const forceRefresh = options?.forceRefresh ?? false;
   const limit        = Math.min(options?.limitPerCategory ?? 10, 12);
   const context      = getCurrentRefreshContext();
-  const daySig       = buildDaySignature(context);
+  const dayFingerprint = buildDayFingerprint(context);
   const categoryIdFilter = new Set(options?.categoryIds ?? []);
   const categoriesToFetch =
     categoryIdFilter.size > 0
@@ -1900,7 +1900,7 @@ export async function getHomeJioSaavnCategories(options?: {
       const fetchLimit = limit + 8;
 
       if (!forceRefresh) {
-        const cached = await getCategoryCache(cat.id, context, { allowSignatureMismatch: false });
+        const cached = await getCategoryCache(cat.id, context, { allowFingerprintMismatch: false });
         if (cached && cached.length > 0) {
           const ranked = rankPlaylists(cached, context);
           const rotated = applyFreshnessRotation(ranked);
@@ -1916,12 +1916,12 @@ export async function getHomeJioSaavnCategories(options?: {
       }
 
       if (fresh.length > 0) {
-        void setCategoryCache(cat.id, fresh, daySig);
+        void setCategoryCache(cat.id, fresh, dayFingerprint);
         return { cat, pool: fresh };
       }
 
       // Stale fallback
-      const stale = await getCategoryCache(cat.id, context, { allowSignatureMismatch: true });
+      const stale = await getCategoryCache(cat.id, context, { allowFingerprintMismatch: true });
       if (stale && stale.length > 0) {
         const rotated = applyFreshnessRotation(rankPlaylists(stale, context));
         return { cat, pool: rotated };

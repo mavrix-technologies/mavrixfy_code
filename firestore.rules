@@ -28,6 +28,47 @@ service cloud.firestore {
         );
     }
 
+    function userCreateFieldsAreValid(userId) {
+      return (!request.resource.data.keys().hasAny(['uid']) || request.resource.data.uid == userId) &&
+        (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role in ['user']) &&
+        (!request.resource.data.keys().hasAny(['isAdmin']) || request.resource.data.isAdmin == false) &&
+        (!request.resource.data.keys().hasAny(['admin']) || request.resource.data.admin == false);
+    }
+
+    function userAuthFieldsAreImmutable() {
+      return (!resource.data.keys().hasAny(['uid']) || request.resource.data.uid == resource.data.uid) &&
+        (!resource.data.keys().hasAny(['email']) || request.resource.data.email == resource.data.email) &&
+        (!resource.data.keys().hasAny(['emailLower']) || request.resource.data.emailLower == resource.data.emailLower) &&
+        (!resource.data.keys().hasAny(['provider']) || request.resource.data.provider == resource.data.provider) &&
+        (!resource.data.keys().hasAny(['schemaVersion']) || request.resource.data.schemaVersion == resource.data.schemaVersion) &&
+        (!resource.data.keys().hasAny(['role']) || request.resource.data.role == resource.data.role) &&
+        (!resource.data.keys().hasAny(['isAdmin']) || request.resource.data.isAdmin == resource.data.isAdmin) &&
+        (!resource.data.keys().hasAny(['admin']) || request.resource.data.admin == resource.data.admin);
+    }
+
+    function isPublicCatalogDocument(data) {
+      return (!data.keys().hasAny(['visibility']) || data.visibility == 'public') &&
+        (!data.keys().hasAny(['isPublic']) || data.isPublic == true) &&
+        (!data.keys().hasAny(['status']) || data.status in ['published', 'active']) &&
+        (
+          data.keys().hasAny(['name']) ||
+          data.keys().hasAny(['title']) ||
+          data.keys().hasAny(['songId']) ||
+          data.keys().hasAny(['albumId'])
+        );
+    }
+
+    function isPublicPromotionDocument(data) {
+      return (!data.keys().hasAny(['visibility']) || data.visibility == 'public') &&
+        (!data.keys().hasAny(['isPublic']) || data.isPublic == true) &&
+        (!data.keys().hasAny(['status']) || data.status in ['published', 'active']) &&
+        (
+          data.keys().hasAny(['title']) ||
+          data.keys().hasAny(['message']) ||
+          data.keys().hasAny(['imageUrl'])
+        );
+    }
+
     match /admins/{adminId} {
       allow get: if isOwner(adminId) || isAdmin();
       allow list, create, update, delete: if isAdmin();
@@ -35,8 +76,9 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId);
-      allow update, delete: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && userCreateFieldsAreValid(userId);
+      allow update: if isAdmin() || (isOwner(userId) && userAuthFieldsAreImmutable());
+      allow delete: if isOwner(userId) || isAdmin();
 
       match /likedSongs/{songId} {
         allow read, create, update, delete: if isOwner(userId) || isAdmin();
@@ -86,24 +128,33 @@ service cloud.firestore {
     }
 
     match /playlist_shares/{shareId} {
-      allow read: if true;
-      allow create: if signedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow get: if isAdmin() ||
+        (signedIn() && resource.data.createdBy == request.auth.uid) ||
+        (
+          resource.data.isPublic == true &&
+          resource.data.keys().hasAny(['playlistId']) &&
+          get(/databases/$(database)/documents/playlists/$(resource.data.playlistId)).data.isPublic == true
+        );
+      allow list: if isAdmin();
+      allow create: if signedIn() &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.isPublic == true;
       allow update, delete: if isAdmin() ||
         (signedIn() && resource.data.createdBy == request.auth.uid);
     }
 
     match /songs/{songId} {
-      allow read: if true;
+      allow read: if isPublicCatalogDocument(resource.data);
       allow create, update, delete: if isAdmin();
     }
 
     match /albums/{albumId} {
-      allow read: if true;
+      allow read: if isPublicCatalogDocument(resource.data);
       allow create, update, delete: if isAdmin();
     }
 
     match /trendingSongs/{songId} {
-      allow read: if true;
+      allow read: if isPublicCatalogDocument(resource.data);
       allow create, update, delete: if isAdmin();
     }
 
@@ -128,7 +179,7 @@ service cloud.firestore {
     }
 
     match /promotions/{promotionId} {
-      allow read: if true;
+      allow read: if isPublicPromotionDocument(resource.data);
       allow create, update, delete: if isAdmin();
     }
 

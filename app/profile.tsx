@@ -135,8 +135,14 @@ export default function ProfileScreen() {
 
       <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: bottomScrollPadding },
+        ]}
         contentInset={{ bottom: bottomScrollPadding }}
         scrollIndicatorInsets={{ bottom: bottomScrollPadding }}
+        contentInsetAdjustmentBehavior="automatic"
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         {/* Profile hero */}
@@ -337,6 +343,7 @@ const styles = StyleSheet.create({
   },
 
   scrollView: { flex: 1 },
+  scrollContent: { paddingBottom: 128 },
 
   // Hero
   heroSection: {

@@ -355,7 +355,7 @@ function usePlaylistScreenView() {
     void load();
     return () => { cancelled = true; };
   }, [
-    playlistId, isAlbumSource, sourceLink, isFirestoreSource, isJioSaavnSource,
+    playlistId, isAlbumSource, isYouTubeSource, sourceLink, isFirestoreSource, isJioSaavnSource,
     applyFirestorePlaylistData, applyJioPlaylistData,
     applyLocalPlaylistData, finishPlaylistLoad,
     hasPrefilledHeader, markPlaylistLoadError, markPlaylistNotFound,

@@ -117,6 +117,13 @@
       }
     }
   },
+  "reactDoctor": {
+    "ignore": {
+      "files": [
+        "youtube-music-api/venv/**"
+      ]
+    }
+  },
   "overrides": {
     "@xmldom/xmldom": "0.8.13",
     "fast-uri": "3.1.2",

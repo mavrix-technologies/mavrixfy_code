@@ -34,8 +34,7 @@
         "NODE_ENV": "production",
         "EXPO_USE_UPDATES": "1",
         "EAS_NO_VCS": "1"
-      },
-      "dotenv": ".env"
+      }
     },
     "production-arm": {
       "android": {

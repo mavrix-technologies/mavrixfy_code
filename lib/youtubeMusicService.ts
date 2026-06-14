@@ -69,8 +69,6 @@ export interface YouTubeMusicWatchPlaylist {
   lyrics?: string | null;
 }
 
-type YouTubeMusicEndpointStyle = "pythonApi" | "pythonRoot";
-
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const YOUTUBE_MUSIC_CACHE_PREFIX = "@mavrixfy_youtube_music";
@@ -282,7 +280,7 @@ export function convertYouTubeMusicTrack(track: any): Song | null {
 
   // Handle artists array from ytmusicapi
   const artistsArray = normalizedTrack.artists || [];
-  const artistNames = artistsArray.map((a: any) => a?.name).filter(Boolean);
+  const artistNames = compactMap(artistsArray, (a: any) => a?.name || null);
   const artist = artistNames.join(", ") || "Unknown Artist";
   
   // Duration: use duration_seconds if available, otherwise parse duration string
@@ -323,7 +321,7 @@ export function convertYouTubeMusicTrack(track: any): Song | null {
 export function convertYouTubeMusicTrackToJioSaavn(track: YouTubeMusicTrack): JioSaavnSong | null {
   if (!track.videoId || !track.title) return null;
 
-  const artistNames = track.artists?.map((a) => a.name).filter(Boolean) || [];
+  const artistNames = compactMap(track.artists || [], (a) => a.name || null);
   const images = normalizeYouTubeThumbnails(track.thumbnails);
 
   return {
@@ -380,17 +378,20 @@ async function fetchJson<T>(url: string): Promise<T | null> {
 }
 
 async function fetchFirstJson<T>(urls: string[]): Promise<T | null> {
-  let lastError: unknown = null;
-
-  for (const url of urls) {
+  const results = await Promise.all(urls.map(async (url) => {
     try {
       const json = await fetchJson<T>(url);
-      if (json !== null) return json;
+      return { json, error: null };
     } catch (error) {
-      lastError = error;
+      return { json: null, error };
     }
+  }));
+
+  for (const result of results) {
+    if (result.json !== null) return result.json;
   }
 
+  const lastError = results.findLast((result) => result.error !== null)?.error;
   if (lastError) throw lastError;
   return null;
 }
@@ -398,16 +399,40 @@ async function fetchFirstJson<T>(urls: string[]): Promise<T | null> {
 function getEndpointCandidates(
   path: string,
   _legacyNodePath?: string,
-  query: string = ""
+  query: string | string[] = ""
 ): string[] {
   const appBase = getYouTubeMusicApiUrl().replace(/\/+$/, "");
-  const suffix = query ? `?${query}` : "";
-  const styles: YouTubeMusicEndpointStyle[] = ["pythonApi", "pythonRoot"];
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const pathCandidates = appBase.includes("/api/youtube-music")
+    ? [`${appBase}${normalizedPath}`, `${appBase}/api${normalizedPath}`]
+    : [
+        `${appBase}${normalizedPath}`,
+        `${appBase}/api/youtube-music${normalizedPath}`,
+        `${appBase}/api${normalizedPath}`,
+      ];
+  const queryCandidates = Array.isArray(query) ? query : [query];
+  const seen = new Set<string>();
+  const candidates: string[] = [];
 
-  return styles.map((style) => {
-    if (style === "pythonApi") return `${appBase}/api${path}${suffix}`;
-    return `${appBase}${path}${suffix}`;
-  });
+  for (const queryCandidate of queryCandidates) {
+    const suffix = queryCandidate ? `?${queryCandidate}` : "";
+    for (const pathCandidate of pathCandidates) {
+      const candidate = `${pathCandidate}${suffix}`;
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      candidates.push(candidate);
+    }
+  }
+
+  return candidates;
+}
+
+function getSearchQueryCandidates(query: string, filter: string, limit: number): string[] {
+  const encodedQuery = encodeURIComponent(query);
+  return [
+    `query=${encodedQuery}&filter=${filter}&limit=${limit}`,
+    `q=${encodedQuery}&filter=${filter}&limit=${limit}`,
+  ];
 }
 
 function getSearchResultItems(json: any): any[] {
@@ -416,6 +441,91 @@ function getSearchResultItems(json: any): any[] {
   if (Array.isArray(json?.results)) return json.results;
   if (Array.isArray(json?.data)) return json.data;
   return [];
+}
+
+function getSearchSuggestionItems(json: any): string[] {
+  if (Array.isArray(json)) return compactMap(json, (item: unknown) => (typeof item === "string" ? item : null));
+  if (Array.isArray(json?.suggestions)) return compactMap(json.suggestions, (item: unknown) => (typeof item === "string" ? item : null));
+  if (Array.isArray(json?.data?.suggestions)) return compactMap(json.data.suggestions, (item: unknown) => (typeof item === "string" ? item : null));
+  if (Array.isArray(json?.data)) return compactMap(json.data, (item: unknown) => (typeof item === "string" ? item : null));
+  return [];
+}
+
+function getChartsPayload(json: any): any {
+  if (json?.charts && typeof json.charts === "object") return json.charts;
+  if (json?.data?.charts && typeof json.data.charts === "object") return json.data.charts;
+  if (json?.data && typeof json.data === "object") return json.data;
+  return json;
+}
+
+function getChartPlaylistItems(json: any): any[] {
+  const charts = getChartsPayload(json);
+  const playlists: any[] = [];
+  const append = (value: any) => {
+    if (Array.isArray(value)) {
+      playlists.push(...value);
+      return;
+    }
+
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value.playlists)) playlists.push(...value.playlists);
+    if (Array.isArray(value.items)) playlists.push(...value.items);
+    if (value.playlistId || value.browseId) playlists.push(value);
+  };
+
+  append(charts?.daily);
+  append(charts?.videos);
+  append(charts?.weekly);
+  append(charts?.trending);
+  append(charts?.playlists);
+  append(charts?.songs);
+
+  return playlists;
+}
+
+function getResponsePayload(json: any, ...keys: string[]): any {
+  if (!json || typeof json !== "object") return json;
+
+  for (const key of keys) {
+    if (json[key] && typeof json[key] === "object") {
+      return json[key];
+    }
+  }
+
+  if (json.data && typeof json.data === "object") {
+    return json.data;
+  }
+
+  return json;
+}
+
+function normalizePlaylistPayload(playlist: any, fallbackId: string): YouTubeMusicPlaylist {
+  return {
+    ...playlist,
+    browseId: readString(playlist?.browseId || playlist?.id || playlist?.playlistId) || fallbackId,
+    tracks: Array.isArray(playlist?.tracks) ? playlist.tracks : [],
+  };
+}
+
+function normalizeAlbumPayload(album: any, fallbackId: string): YouTubeMusicAlbum {
+  return {
+    ...album,
+    browseId: readString(album?.browseId || album?.id || album?.playlistId) || fallbackId,
+    tracks: Array.isArray(album?.tracks) ? album.tracks : [],
+  };
+}
+
+function normalizeArtistPayload(artist: any, fallbackId: string): YouTubeMusicArtist {
+  return {
+    ...artist,
+    browseId: readString(artist?.browseId || artist?.channelId || artist?.id) || fallbackId,
+    tracks: Array.isArray(artist?.tracks)
+      ? artist.tracks
+      : Array.isArray(artist?.songs)
+        ? artist.songs
+        : [],
+    albums: Array.isArray(artist?.albums) ? artist.albums : [],
+  };
 }
 
 // ─── API Functions ────────────────────────────────────────────────────────────
@@ -442,12 +552,11 @@ export async function searchYouTubeMusic(
   }
 
   try {
-    const encodedQuery = encodeURIComponent(q);
     const filterType = type === 'song' ? 'songs' : type === 'album' ? 'albums' : type === 'artist' ? 'artists' : type === 'playlist' ? 'playlists' : 'songs';
     const urls = getEndpointCandidates(
       "/search",
       "/search",
-      `q=${encodedQuery}&filter=${filterType}&limit=${limit}`
+      getSearchQueryCandidates(q, filterType, limit)
     );
 
     const json = await fetchFirstJson<any>(urls);
@@ -500,7 +609,7 @@ export async function searchYouTubeMusicAlbums(
       getEndpointCandidates(
         "/search",
         "/search",
-        `q=${encodeURIComponent(q)}&filter=albums&limit=${limit}`
+        getSearchQueryCandidates(q, "albums", limit)
       )
     );
     const results = getSearchResultItems(json);
@@ -554,7 +663,7 @@ export async function searchYouTubeMusicPlaylists(
       getEndpointCandidates(
         "/search",
         "/search",
-        `q=${encodeURIComponent(q)}&filter=playlists&limit=${limit}`
+        getSearchQueryCandidates(q, "playlists", limit)
       )
     );
     const results = getSearchResultItems(json);
@@ -604,7 +713,7 @@ export async function searchYouTubeMusicArtists(
       getEndpointCandidates(
         "/search",
         "/search",
-        `q=${encodeURIComponent(q)}&filter=artists&limit=${limit}`
+        getSearchQueryCandidates(q, "artists", limit)
       )
     );
     const results = getSearchResultItems(json);
@@ -658,7 +767,7 @@ export async function searchYouTubeMusicVideos(
       getEndpointCandidates(
         "/search",
         "/search",
-        `q=${encodeURIComponent(q)}&filter=videos&limit=${limit}`
+        getSearchQueryCandidates(q, "videos", limit)
       )
     );
     const results = getSearchResultItems(json);
@@ -701,7 +810,7 @@ export async function getYouTubeMusicPlaylist(playlistId: string): Promise<YouTu
       )
     );
     if (!json) return null;
-    const playlist = json?.data || json;
+    const playlist = normalizePlaylistPayload(getResponsePayload(json, "playlist"), playlistId);
 
     await setCache(cacheKey, playlist);
     return playlist;
@@ -727,7 +836,7 @@ export async function getYouTubeMusicArtist(artistId: string): Promise<YouTubeMu
       )
     );
     if (!json) return null;
-    const artist = json?.data || json;
+    const artist = normalizeArtistPayload(getResponsePayload(json, "artist"), artistId);
 
     await setCache(cacheKey, artist);
     return artist;
@@ -753,7 +862,7 @@ export async function getYouTubeMusicAlbum(albumId: string): Promise<YouTubeMusi
       )
     );
     if (!json) return null;
-    const album = json?.data || json;
+    const album = normalizeAlbumPayload(getResponsePayload(json, "album"), albumId);
 
     await setCache(cacheKey, album);
     return album;
@@ -865,10 +974,7 @@ export async function getYouTubeMusicTrending(country: string = "IN"): Promise<S
       getEndpointCandidates("/charts", "/charts", `country=${encodeURIComponent(country)}`)
     );
     if (!json) return [];
-    const candidates: any[] = [];
-    if (json.daily && Array.isArray(json.daily)) candidates.push(...json.daily);
-    if (json.videos && Array.isArray(json.videos)) candidates.push(...json.videos);
-    if (json.weekly && Array.isArray(json.weekly)) candidates.push(...json.weekly);
+    const candidates = getChartPlaylistItems(json);
 
     let playlistId = "";
     const trendingPlaylist = candidates.find(p => p && p.playlistId && String(p.title || "").toLowerCase().includes("trending"));
@@ -917,10 +1023,7 @@ export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): 
     );
     if (!json) return [];
 
-    const rawPlaylists: any[] = [];
-    if (json.daily && Array.isArray(json.daily)) rawPlaylists.push(...json.daily);
-    if (json.videos && Array.isArray(json.videos)) rawPlaylists.push(...json.videos);
-    if (json.weekly && Array.isArray(json.weekly)) rawPlaylists.push(...json.weekly);
+    const rawPlaylists = getChartPlaylistItems(json);
 
     const playlists = mapFilter(
       rawPlaylists,
@@ -968,11 +1071,13 @@ export async function getYouTubeMusicSearchSuggestions(query: string): Promise<s
 
   try {
     const json = await fetchFirstJson<any>(
-      getEndpointCandidates("/search/suggestions", "/search/suggestions", `q=${encodeURIComponent(q)}`)
-        .slice(0, 2)
+      getEndpointCandidates("/search/suggestions", "/search/suggestions", [
+        `query=${encodeURIComponent(q)}`,
+        `q=${encodeURIComponent(q)}`,
+      ])
     );
     if (!json) return [];
-    return Array.isArray(json) ? json : [];
+    return getSearchSuggestionItems(json);
   } catch (error) {
     console.error("YouTube Music suggestions error:", error);
     return [];

@@ -15,8 +15,8 @@ type AutoRemoteEvent = {
 let isRegistered = false;
 let commandChain: Promise<void> = Promise.resolve();
 let autoSyncChain: Promise<void> = Promise.resolve();
-let lastNativeAutoQueueSignature = "";
-let lastNativeAutoPlaybackSignature = "";
+let lastNativeAutoQueueSnapshotKey = "";
+let lastNativeAutoPlaybackSnapshotKey = "";
 
 const MavrixfyAutoMedia =
   Platform.OS === "android" ? NativeModules.MavrixfyAutoMedia : null;
@@ -153,14 +153,14 @@ async function syncNativePlaybackToAuto(): Promise<void> {
       ? Math.max(0, Math.min(activeTrackIndex, safeQueueSongs.length - 1))
       : Math.max(0, fallbackIndex);
 
-  const queueSignature = [
+  const queueSnapshotKey = [
     safeActiveIndex,
     safeQueueSongs.length,
     safeQueueSongs.map((song) => String(song.id || "")).join("|"),
   ].join(":");
 
-  if (lastNativeAutoQueueSignature !== queueSignature) {
-    lastNativeAutoQueueSignature = queueSignature;
+  if (lastNativeAutoQueueSnapshotKey !== queueSnapshotKey) {
+    lastNativeAutoQueueSnapshotKey = queueSnapshotKey;
     MavrixfyAutoMedia.syncQueue?.(
       safeQueueSongs.map((song) => ({
         id: String(song.id || ""),
@@ -182,7 +182,7 @@ async function syncNativePlaybackToAuto(): Promise<void> {
   const positionMs =
     Math.floor(Math.max(0, Number(progress?.position ?? 0)) * 1000 / 1000) * 1000;
   const isPlaying = isNativePlaybackActive(playbackState);
-  const playbackSignature = [
+  const playbackSnapshotKey = [
     activeSong.id,
     activeSong.title,
     activeSong.artist,
@@ -193,8 +193,8 @@ async function syncNativePlaybackToAuto(): Promise<void> {
     isPlaying ? "1" : "0",
   ].join("|");
 
-  if (lastNativeAutoPlaybackSignature !== playbackSignature) {
-    lastNativeAutoPlaybackSignature = playbackSignature;
+  if (lastNativeAutoPlaybackSnapshotKey !== playbackSnapshotKey) {
+    lastNativeAutoPlaybackSnapshotKey = playbackSnapshotKey;
     MavrixfyAutoMedia.syncPlayback?.(
       activeSong.id,
       activeSong.title,

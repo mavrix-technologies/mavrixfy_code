@@ -1188,7 +1188,7 @@ function useHomeScreenInnerView() {
         }
       }
     },
-    [schedulePlaylistPrefetch]
+    [schedulePlaylistPrefetch, youtubeTrendingPlaylists.length]
   );
 
   const resetHomeState = useCallback((options?: { clearUi?: boolean }) => {
@@ -2474,6 +2474,8 @@ function useHomeScreenInnerView() {
       featuredArtists,
       renderArtistCard,
       getCategoryPlaylistElement,
+      youtubeTrendingPlaylists,
+      renderYouTubeTrendingPlaylist,
       renderRecommendationPlaylist,
       getSectionHeaderElement,
       renderRowSeparator,

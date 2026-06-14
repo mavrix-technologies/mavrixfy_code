@@ -1428,6 +1428,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // react-doctor-disable-next-line react-doctor/no-derived-state -- overlay frame comes from native measurement, not render-derived props.
     measureYoutubeOverlayRoot();
   }, [measureYoutubeOverlayRoot, pathname, screenHeight, screenWidth]);
 
@@ -1751,6 +1752,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   }, [youtubePlaying, youtubeVideoId, applyPreviewPlaybackStatus]);
 
   // Wire expo-audio status + error callbacks for runtimes using the lightweight fallback.
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- cleanup intentionally resets mutable playback refs without treating ref.current as a render dependency.
   useEffect(() => {
     if (!canUseLightweightAudioFallback) return;
     let mounted = true;
@@ -1777,7 +1779,8 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       setYoutubePlaying(false);
       setYoutubeVideoId(null);
     };
-  }, [applyPreviewPlaybackStatus, advancePreviewPlayback, showPlaybackNotice]);
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- cleanup deliberately writes the latest ref value when tearing down fallback playback.
+  }, [applyPreviewPlaybackStatus, advancePreviewPlayback, canUseLightweightAudioFallback, showPlaybackNotice]);
 
   useEffect(() => {
     if (!TrackPlayer || !setupPlayer || !isPlayerReady || Platform.OS === "web") {
@@ -2220,6 +2223,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           Math.min(playableQueue.length, PRELOAD_QUEUE_SIZE),
           targetIndex + 1
         );
+        // react-doctor-disable-next-line react-doctor/async-defer-await -- requestId can become stale while resolving native tracks, so the guard below must run after this await.
         const initialEntries = await resolveNativeTrackEntries(playableQueue.slice(0, preloadCount), 0);
         const targetNativeIndex = initialEntries.findIndex((entry) => entry.appIndex === targetIndex);
 

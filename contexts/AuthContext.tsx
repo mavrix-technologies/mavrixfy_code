@@ -157,8 +157,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await Promise.all([
       updateProfile(cred.user, { displayName }),
       // Create user doc WITHOUT onboardingCompleted — the onboarding flow sets it
+      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
       setDoc(doc(db, "users", cred.user.uid), {
-        uid: cred.user.uid,
         email: normalizedEmail,
         emailLower: normalizedEmail.toLowerCase(),
         displayName,
@@ -193,7 +193,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userDocRef = doc(db, "users", fbUser.uid);
       const userDocSnap = await getDoc(userDocRef);
       const googleUserData = {
-        uid: fbUser.uid,
         email: fbUser.email || "",
         emailLower: (fbUser.email || "").toLowerCase(),
         displayName: fbUser.displayName || "",
@@ -206,12 +205,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         lastLoginAt: serverTimestamp(),
       };
       if (!userDocSnap.exists()) {
+        // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
         await setDoc(userDocRef, {
           ...googleUserData,
           createdAt: serverTimestamp(),
         });
         logSignUp("google");
       } else {
+        // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
         await setDoc(userDocRef, googleUserData, { merge: true });
         logLogin("google");
       }
@@ -231,7 +232,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const userDocRef = doc(db, "users", fbUser.uid);
     const userDocSnap = await getDoc(userDocRef);
     const googleUserData = {
-      uid: fbUser.uid,
       email: fbUser.email || "",
       emailLower: (fbUser.email || "").toLowerCase(),
       displayName: fbUser.displayName || "",
@@ -244,12 +244,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       lastLoginAt: serverTimestamp(),
     };
     if (!userDocSnap.exists()) {
+      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
       await setDoc(userDocRef, {
         ...googleUserData,
         createdAt: serverTimestamp(),
       });
       logSignUp("google");
     } else {
+      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
       await setDoc(userDocRef, googleUserData, { merge: true });
       logLogin("google");
     }

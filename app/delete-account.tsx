@@ -121,8 +121,14 @@ export default function DeleteAccountScreen() {
 
       <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: bottomScrollPadding },
+        ]}
         contentInset={{ bottom: bottomScrollPadding }}
         scrollIndicatorInsets={{ bottom: bottomScrollPadding }}
+        contentInsetAdjustmentBehavior="automatic"
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.heroCard}>
@@ -250,6 +256,9 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 118,
   },
   heroCard: {
     marginHorizontal: 16,

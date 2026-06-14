@@ -353,6 +353,7 @@ type Props = {
   ref?: React.Ref<QueueBottomSheetRef>;
 };
 
+// react-doctor-disable-next-line react-doctor/no-giant-component -- queue gestures, sheet index state, and playback actions are tightly coordinated in this bottom sheet.
 const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     const insets = useSafeAreaInsets();
     const sheetRef = useRef<BottomSheet>(null);
@@ -377,6 +378,12 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
 
     const openSwipeRef = useRef<Swipeable | null>(null);
     const lastPlaceholderRef = useRef<number | null>(null);
+    const currentSheetIndexRef = useRef(-1);
+    const isClosingRef = useRef(false);
+    const openAfterCloseRef = useRef(false);
+    const closeFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const openRetryRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
+    const [isSheetMounted, setIsSheetMounted] = useState(false);
     const [listReady, setListReady] = useState(false);
     const didMountRef = useRef(false);
 
@@ -388,24 +395,139 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     }, []);
 
     useEffect(() => {
+      if (!isSheetMounted) {
+        didMountRef.current = false;
+        setListReady(false);
+        return;
+      }
+
       didMountRef.current = false;
       setListReady(false);
+      let listTimer: ReturnType<typeof setTimeout> | null = null;
       const task = InteractionManager.runAfterInteractions(() => {
-        setTimeout(showList, 60);
+        listTimer = setTimeout(showList, 60);
       });
       const fallback = setTimeout(showList, 240);
       return () => {
         task.cancel();
+        if (listTimer) clearTimeout(listTimer);
         clearTimeout(fallback);
       };
-    }, [showList]);
+    }, [isSheetMounted, showList]);
+
+    const clearCloseFallback = useCallback(() => {
+      if (closeFallbackRef.current) {
+        clearTimeout(closeFallbackRef.current);
+        closeFallbackRef.current = null;
+      }
+    }, []);
+
+    const clearOpenRetries = useCallback(() => {
+      openRetryRefs.current.forEach(clearTimeout);
+      openRetryRefs.current = [];
+    }, []);
+
+    const queueOpenRetries = useCallback(() => {
+      clearOpenRetries();
+
+      [120, 280, 560, 1000].forEach((delay) => {
+        const timer = setTimeout(() => {
+          openRetryRefs.current = openRetryRefs.current.filter((item) => item !== timer);
+          if (isSheetMounted && currentSheetIndexRef.current < 0) {
+            sheetRef.current?.snapToIndex(0);
+          }
+        }, delay);
+        openRetryRefs.current.push(timer);
+      });
+    }, [clearOpenRetries, isSheetMounted]);
+
+    useEffect(() => {
+      return () => {
+        clearCloseFallback();
+        clearOpenRetries();
+      };
+    }, [clearCloseFallback, clearOpenRetries]);
+
+    const remountOpenSheet = useCallback(() => {
+      currentSheetIndexRef.current = -1;
+      setListReady(false);
+      setIsSheetMounted(false);
+
+      requestAnimationFrame(() => {
+        setIsSheetMounted(true);
+      });
+    }, []);
+
+    const finishClosedSheet = useCallback(() => {
+      clearCloseFallback();
+      clearOpenRetries();
+      isClosingRef.current = false;
+      currentSheetIndexRef.current = -1;
+      openSwipeRef.current?.close();
+      setListReady(false);
+
+      if (openAfterCloseRef.current) {
+        openAfterCloseRef.current = false;
+        remountOpenSheet();
+        return;
+      }
+
+      setIsSheetMounted(false);
+    }, [clearCloseFallback, clearOpenRetries, remountOpenSheet]);
+
+    const expandSheet = useCallback(() => {
+      if (isClosingRef.current) {
+        openAfterCloseRef.current = true;
+        return;
+      }
+
+      clearCloseFallback();
+      clearOpenRetries();
+      openSwipeRef.current?.close();
+
+      if (isSheetMounted && sheetRef.current) {
+        sheetRef.current.snapToIndex(0);
+        queueOpenRetries();
+        return;
+      }
+
+      setIsSheetMounted(true);
+    }, [clearCloseFallback, clearOpenRetries, isSheetMounted, queueOpenRetries]);
+
+    useEffect(() => {
+      if (!isSheetMounted) return;
+      queueOpenRetries();
+    }, [isSheetMounted, queueOpenRetries]);
+
+    const closeSheet = useCallback(() => {
+      openAfterCloseRef.current = false;
+      openSwipeRef.current?.close();
+      clearCloseFallback();
+      clearOpenRetries();
+
+      if (sheetRef.current && currentSheetIndexRef.current >= 0) {
+        isClosingRef.current = true;
+        sheetRef.current.forceClose();
+        closeFallbackRef.current = setTimeout(() => {
+          closeFallbackRef.current = null;
+          finishClosedSheet();
+        }, 360);
+        return;
+      }
+
+      sheetRef.current?.forceClose();
+      isClosingRef.current = false;
+      currentSheetIndexRef.current = -1;
+      setIsSheetMounted(false);
+      setListReady(false);
+    }, [clearCloseFallback, clearOpenRetries, finishClosedSheet]);
 
     // Expose imperative handle
     React.useImperativeHandle(ref, () => ({
-      expand: () => sheetRef.current?.expand(),
-      collapse: () => sheetRef.current?.close(),
-      close: () => sheetRef.current?.close(),
-    }));
+      expand: expandSheet,
+      collapse: closeSheet,
+      close: closeSheet,
+    }), [closeSheet, expandSheet]);
 
     // ── Derived queue data ───────────────────────────────────────────────────
     const nowPlaying = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
@@ -474,9 +596,9 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
 
     const handleTimer = useCallback(() => {
       triggerImpact(ImpactFeedbackStyle.Light);
-      sheetRef.current?.close();
+      closeSheet();
       router.push("/sleep-timer");
-    }, []);
+    }, [closeSheet]);
 
     // ── Render item ──────────────────────────────────────────────────────────
     const renderItem = useCallback(
@@ -523,8 +645,8 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
 
     const handleClose = useCallback(() => {
       triggerImpact(ImpactFeedbackStyle.Light);
-      sheetRef.current?.close();
-    }, []);
+      closeSheet();
+    }, [closeSheet]);
 
     const renderHandle = useCallback(
       () => (
@@ -543,21 +665,39 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     const bottomPad = Math.max(insets.bottom, 12);
 
     const handleNowPlayingPress = useCallback(() => {
-      sheetRef.current?.close();
+      closeSheet();
       router.push("/player");
-    }, []);
+    }, [closeSheet]);
+
+    const handleSheetChange = useCallback(
+      (index: number) => {
+        currentSheetIndexRef.current = index;
+        if (index >= 0) {
+          isClosingRef.current = false;
+          clearOpenRetries();
+        }
+        onSheetChange?.(index);
+      },
+      [clearOpenRetries, onSheetChange]
+    );
+
+    if (!isSheetMounted) {
+      return null;
+    }
 
     return (
       <BottomSheet
         ref={sheetRef}
-        index={-1}
+        index={0}
         snapPoints={snapPoints}
+        animateOnMount
         enablePanDownToClose
         enableDynamicSizing={false}
         handleComponent={renderHandle}
         backdropComponent={renderBackdrop}
         backgroundStyle={s.sheetBg}
-        onChange={onSheetChange}
+        onChange={handleSheetChange}
+        onClose={finishClosedSheet}
         style={{ zIndex: 999 }}
         // Native spring physics identical to Spotify feel
         animationConfigs={{

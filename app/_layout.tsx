@@ -70,7 +70,7 @@ LogBox.ignoreLogs([
 ]);
 
 // Screens where the docked mini player and tab bar must not cover the route.
-const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "player"]);
+const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "player", "profile", "delete-account"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
@@ -300,6 +300,13 @@ function RootLayoutNav() {
   const activeSegment = segments[0] as string;
   const unmountNavBar = NAV_UNMOUNT_SEGMENTS.has(activeSegment);
 
+  // Close queue sheet when navigating to screens where it shouldn't appear
+  useEffect(() => {
+    if (unmountNavBar) {
+      globalQueueSheetRef.current?.collapse();
+    }
+  }, [unmountNavBar]);
+
   return (
     <View style={{ flex: 1 }}>
       <Stack
@@ -396,6 +403,7 @@ function RootLayoutNav() {
       </Stack>
       {/* Keep the nav visible under utility sheets, but not over full player details. */}
       {!unmountNavBar && <AppNavBar />}
+      {/* Queue sheet is always mounted but closed by default (index: -1) */}
       <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
         <QueueBottomSheet ref={globalQueueSheetRef} />
       </View>
