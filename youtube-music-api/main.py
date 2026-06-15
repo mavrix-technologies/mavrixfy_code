@@ -11,7 +11,8 @@ import yt_dlp
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="YouTube Music API", root_path="/api")
+# Remove root_path for Vercel deployment - routes will be /api/* via vercel.json
+app = FastAPI(title="YouTube Music API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -160,6 +161,7 @@ def get_download_url(videoId: str):
     Returns audio stream URL that can be downloaded to device
     """
     try:
+        logger.info(f"[Download] Processing request for videoId: {videoId}")
         url = f"https://www.youtube.com/watch?v={videoId}"
         
         ydl_opts = {
@@ -167,19 +169,26 @@ def get_download_url(videoId: str):
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
+            'nocheckcertificate': True,
         }
+        
+        logger.info(f"[Download] Extracting info for: {url}")
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
             if not info:
+                logger.error(f"[Download] No info returned for {videoId}")
                 raise HTTPException(status_code=404, detail="Video not found")
             
             # Get the direct download URL
             download_url = info.get('url')
             
             if not download_url:
+                logger.error(f"[Download] No download URL in info for {videoId}")
                 raise HTTPException(status_code=500, detail="Could not extract download URL")
+            
+            logger.info(f"[Download] Successfully extracted URL for {videoId}")
             
             return {
                 "success": True,
@@ -198,11 +207,16 @@ def get_download_url(videoId: str):
             }
             
     except yt_dlp.utils.DownloadError as e:
-        logger.error(f"yt-dlp download error for {videoId}: {e}")
-        raise HTTPException(status_code=404, detail=f"Video not available: {str(e)}")
+        error_msg = str(e)
+        logger.error(f"[Download] yt-dlp DownloadError for {videoId}: {error_msg}")
+        raise HTTPException(status_code=404, detail=f"Video not available: {error_msg}")
+    except HTTPException:
+        # Re-raise HTTPExceptions as-is
+        raise
     except Exception as e:
-        logger.error(f"Error getting download URL for {videoId}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e)
+        logger.error(f"[Download] Unexpected error for {videoId}: {error_msg}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {error_msg}")
 
 
 if __name__ == "__main__":
