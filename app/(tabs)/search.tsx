@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
+  InteractionManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -38,7 +39,7 @@ import SearchResultFilterChip from "@/components/SearchResultFilterChip";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { filterMap, sortedCopy } from "@/lib/arrayUtils";
-import { searchJioSaavnAlbums, type JioSaavnAlbumResult, type JioSaavnPlaylistResult } from "@/lib/jioSaavnService";
+import { searchJioSaavnAlbums, type JioSaavnAlbumResult } from "@/lib/jioSaavnService";
 import type { ArtistCard } from "@/lib/artistService";
 import {
   addSongSearchHistoryItem,
@@ -55,6 +56,7 @@ import {
   searchYouTubeMusicArtists,
   searchYouTubeMusicVideos
 } from "@/lib/youtubeMusicService";
+import { logger } from "@/lib/logger";
 
 interface PlaylistResult {
   id: string;
@@ -81,6 +83,15 @@ interface RecentSearchItem {
   type?: "song" | "playlist" | "artist" | "query";
   song?: Song;
 }
+
+type SearchCacheEntry = {
+  songs: Song[];
+  youtubeSongs: Song[];
+  albums: AlbumResult[];
+  artists: ArtistResult[];
+  playlists: PlaylistResult[];
+  timestamp: number;
+};
 
 interface BrowseCategory {
   id: string;
@@ -549,13 +560,14 @@ function useSearchScreenView() {
   } = useAppTopHeaderScrollElevation();
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeqRef = useRef(0);
+  const suggestionsSeqRef = useRef(0);
   const appliedRouteSearchQueryRef = useRef(routeSearchQuery);
   const activeSearchAbortRef = useRef<AbortController | null>(null);
   const resultsPlaylistsListRef = useRef<FlatList<PlaylistResult> | null>(null);
   const resultsAlbumsListRef = useRef<FlatList<AlbumResult> | null>(null);
   const resultsArtistsListRef = useRef<FlatList<ArtistResult> | null>(null);
   const resultsSongsListRef = useRef<FlatList<Song> | null>(null);
-  const searchCacheRef = useRef<Map<string, { songs: Song[]; albums: AlbumResult[]; artists: ArtistResult[]; playlists: PlaylistResult[]; timestamp: number }> | null>(null);
+  const searchCacheRef = useRef<Map<string, SearchCacheEntry> | null>(null);
   if (searchCacheRef.current === null) {
     searchCacheRef.current = new Map();
   }
@@ -581,6 +593,7 @@ function useSearchScreenView() {
       activeSearchAbortRef.current?.abort();
       activeSearchAbortRef.current = null;
       setSongResults([]);
+      setYoutubeMusicResults([]);
       setAlbumResults([]);
       setArtistResults([]);
       setPlaylistResults([]);
@@ -599,6 +612,7 @@ function useSearchScreenView() {
     const now = Date.now();
     if (cached && (now - cached.timestamp) < 300000) { // 5 minutes
       setSongResults(cached.songs || []);
+      setYoutubeMusicResults(cached.youtubeSongs || []);
       setAlbumResults(cached.albums || []);
       setArtistResults(cached.artists || []);
       setPlaylistResults(cached.playlists || []);
@@ -611,6 +625,7 @@ function useSearchScreenView() {
     }
 
     setSearchLoading(true);
+    setYoutubeMusicResults([]);
     const apiUrl = getApiUrl();
     const parsedQuery = parseStructuredQuery(normalizedQuery);
     const searchTerm = parsedQuery.freeText || normalizedQuery;
@@ -710,44 +725,19 @@ function useSearchScreenView() {
           setSearchDisplayQuery(normalizedQuery);
         }
 
-        // OPTIMIZATION: Fetch global search plus dedicated sections in parallel (network)
+        // Fetch primary app/API sections first so the UI can settle before YouTube enrichment.
         const [
           globalData,
           songsData,
           albumSectionResults,
           artistsData,
-          playlistsData,
-          ytMusicSongs,
-          ytMusicVideos,
-          ytMusicAlbums,
-          ytMusicArtists,
-          ytMusicPlaylists
+          playlistsData
         ] = await Promise.all([
           safeFetch(`${apiUrl}api/search?query=${encodeURIComponent(searchTerm)}`),
           safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=12`),
           searchJioSaavnAlbums(searchTerm, 8, controller.signal),
           safeFetch(`${apiUrl}api/search/artists?query=${encodeURIComponent(searchTerm)}&limit=8&page=1`),
           safeFetch(`${apiUrl}api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=6`),
-          searchYouTubeMusic(searchTerm, "song", 15).catch((error) => {
-            console.warn('[Search] YouTube Music songs failed:', error?.message || error);
-            return [] as Song[];
-          }),
-          searchYouTubeMusicVideos(searchTerm, 10).catch((error) => {
-            console.warn('[Search] YouTube Music videos failed:', error?.message || error);
-            return [] as Song[];
-          }),
-          searchYouTubeMusicAlbums(searchTerm, 8).catch((error) => {
-            console.warn('[Search] YouTube Music albums failed:', error?.message || error);
-            return [] as JioSaavnAlbumResult[];
-          }),
-          searchYouTubeMusicArtists(searchTerm, 8).catch((error) => {
-            console.warn('[Search] YouTube Music artists failed:', error?.message || error);
-            return [] as ArtistCard[];
-          }),
-          searchYouTubeMusicPlaylists(searchTerm, 8).catch((error) => {
-            console.warn('[Search] YouTube Music playlists failed:', error?.message || error);
-            return [] as JioSaavnPlaylistResult[];
-          }),
         ]);
 
         if (requestIsActive()) {
@@ -757,85 +747,123 @@ function useSearchScreenView() {
             if (song) mergeInto(mergedSongs, song);
           }
 
-          // Keep YouTube Music results separate
-          const youtubeSongs: Song[] = [];
-          const seenYtIds = new Set<string>();
-          for (const ytSong of [...ytMusicSongs, ...ytMusicVideos]) {
-            if (ytSong && !seenYtIds.has(ytSong.id)) {
-              seenYtIds.add(ytSong.id);
-              youtubeSongs.push(ytSong);
-            }
-          }
-          
-          console.log(`[Search] YouTube Music results: ${youtubeSongs.length} songs`);
-          if (youtubeSongs.length > 0) {
-            console.log(`[Search] First YT song: ${youtubeSongs[0].title} by ${youtubeSongs[0].artist}`);
-          }
-
           const playlists = playlistsData?.success
             ? mergeUniqueById([
                 ...normalizePlaylistResults(globalData?.data?.playlists?.results),
                 ...normalizePlaylistResults(playlistsData.data?.results),
-                ...ytMusicPlaylists,
               ], 12)
             : Array.isArray(playlistsData?.results)
               ? mergeUniqueById([
                   ...normalizePlaylistResults(globalData?.data?.playlists?.results),
                   ...normalizePlaylistResults(playlistsData.results),
-                  ...ytMusicPlaylists,
                 ], 12)
               : mergeUniqueById([
                   ...normalizePlaylistResults(globalData?.data?.playlists?.results),
-                  ...ytMusicPlaylists,
                 ], 12);
 
           const albums = mergeUniqueById([
             ...normalizeAlbumResults(globalData?.data?.albums?.results),
             ...albumSectionResults,
-            ...ytMusicAlbums,
           ], 12);
           const artists = mergeUniqueById([
             ...normalizeArtistResults(globalData?.data?.artists?.results),
             ...normalizeArtistResults(artistsData?.data?.results),
             ...normalizeArtistResults(artistsData?.results),
-            ...ytMusicArtists,
           ], 12);
 
           const songs = toFinalList(mergedSongs);
           const rankedSongs = fastRank(songs);
 
-          // Cache results
-          searchCache.set(cacheKey, {
-            songs: rankedSongs,
-            albums,
-            artists,
-            playlists,
-            timestamp: now
-          });
-
-          // Limit cache size to 20 entries
-          if (searchCache.size > 20) {
-            const firstKey = searchCache.keys().next().value;
-            if (firstKey) searchCache.delete(firstKey);
-          }
-
-          // Show final results with network data
+          // Show primary results without waiting for YouTube secondary sections.
           setSongResults(rankedSongs);
-          setYoutubeMusicResults(youtubeSongs);
+          setYoutubeMusicResults([]);
           setAlbumResults(albums);
           setArtistResults(artists);
           setPlaylistResults(playlists);
           setSearchDisplayQuery(normalizedQuery);
           setSearchLoading(false);
-          if (activeSearchAbortRef.current === controller) {
-            activeSearchAbortRef.current = null;
-          }
+
+          const writeCache = (entry: SearchCacheEntry) => {
+            searchCache.set(cacheKey, entry);
+            if (searchCache.size > 20) {
+              const firstKey = searchCache.keys().next().value;
+              if (firstKey) searchCache.delete(firstKey);
+            }
+          };
+
+          const loadYouTubeSections = async () => {
+            try {
+              const [
+                ytMusicSongs,
+                ytMusicVideos,
+                ytMusicAlbums,
+                ytMusicArtists,
+                ytMusicPlaylists
+              ] = await Promise.all([
+                searchYouTubeMusic(searchTerm, "song", 15, controller.signal),
+                searchYouTubeMusicVideos(searchTerm, 10, controller.signal),
+                searchYouTubeMusicAlbums(searchTerm, 8, controller.signal),
+                searchYouTubeMusicArtists(searchTerm, 8, controller.signal),
+                searchYouTubeMusicPlaylists(searchTerm, 8, controller.signal),
+              ]);
+
+              if (!requestIsActive()) return;
+
+              const youtubeSongs: Song[] = [];
+              const seenYtIds = new Set<string>();
+              for (const ytSong of [...ytMusicSongs, ...ytMusicVideos]) {
+                if (ytSong && !seenYtIds.has(ytSong.id)) {
+                  seenYtIds.add(ytSong.id);
+                  youtubeSongs.push(ytSong);
+                }
+              }
+
+              const enrichedAlbums = mergeUniqueById([...albums, ...ytMusicAlbums], 12);
+              const enrichedArtists = mergeUniqueById([...artists, ...ytMusicArtists], 12);
+              const enrichedPlaylists = mergeUniqueById([...playlists, ...ytMusicPlaylists], 12);
+
+              logger.debug("[Search] YouTube Music results", { songCount: youtubeSongs.length });
+              setYoutubeMusicResults(youtubeSongs);
+              setAlbumResults(enrichedAlbums);
+              setArtistResults(enrichedArtists);
+              setPlaylistResults(enrichedPlaylists);
+              writeCache({
+                songs: rankedSongs,
+                youtubeSongs,
+                albums: enrichedAlbums,
+                artists: enrichedArtists,
+                playlists: enrichedPlaylists,
+                timestamp: Date.now(),
+              });
+            } catch (error) {
+              if (!controller.signal.aborted) {
+                logger.warn("[Search] YouTube Music enrichment failed:", error);
+                writeCache({
+                  songs: rankedSongs,
+                  youtubeSongs: [],
+                  albums,
+                  artists,
+                  playlists,
+                  timestamp: Date.now(),
+                });
+              }
+            } finally {
+              if (activeSearchAbortRef.current === controller) {
+                activeSearchAbortRef.current = null;
+              }
+            }
+          };
+
+          InteractionManager.runAfterInteractions(() => {
+            void loadYouTubeSections();
+          });
         }
       }
 
     } catch {
       if (!requestIsActive()) return;
       setSongResults([]);
+      setYoutubeMusicResults([]);
       setAlbumResults([]);
       setArtistResults([]);
       setPlaylistResults([]);
@@ -876,21 +904,31 @@ function useSearchScreenView() {
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed.length < 2) {
+      suggestionsSeqRef.current += 1;
       setSuggestions([]);
       return;
     }
 
+    const requestId = ++suggestionsSeqRef.current;
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
         const { getYouTubeMusicSearchSuggestions } = await import("@/lib/youtubeMusicService");
-        const list = await getYouTubeMusicSearchSuggestions(trimmed);
-        setSuggestions(list);
+        const list = await getYouTubeMusicSearchSuggestions(trimmed, controller.signal);
+        if (requestId === suggestionsSeqRef.current && !controller.signal.aborted) {
+          setSuggestions(list);
+        }
       } catch (error) {
-        console.error("Failed to fetch suggestions:", error);
+        if (!controller.signal.aborted) {
+          logger.warn("Failed to fetch suggestions:", error);
+        }
       }
     }, 200);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [query]);
 
   const rememberRecentSearch = useCallback((label: string) => {
@@ -1170,10 +1208,18 @@ function useSearchScreenView() {
   const showArtistResults = resultFilter !== "songs" && resultFilter !== "albums" && resultFilter !== "playlists" && artistResults.length > 0;
   const showPlaylistResults = resultFilter !== "songs" && resultFilter !== "albums" && resultFilter !== "artists" && playlistResults.length > 0;
   const showSongResults = resultFilter !== "albums" && resultFilter !== "artists" && resultFilter !== "playlists" && songResults.length > 0;
-  const displayedSongs = showSongResults ? songResults : [];
+  const displayedSongs = useMemo(() => (showSongResults ? songResults : []), [showSongResults, songResults]);
   const featuredAlbums = useMemo(() => albumResults.slice(0, 6), [albumResults]);
   const featuredArtists = useMemo(() => artistResults.slice(0, 5), [artistResults]);
   const featuredPlaylists = useMemo(() => playlistResults.slice(0, 6), [playlistResults]);
+  const displayedSongsQueueKey = useMemo(
+    () => displayedSongs.map((song) => song.id).join("|"),
+    [displayedSongs]
+  );
+  const youtubeMusicQueueKey = useMemo(
+    () => youtubeMusicResults.map((song) => song.id).join("|"),
+    [youtubeMusicResults]
+  );
 
   const handleSongResultPress = useCallback((song: Song) => {
     void addSongSearchHistoryItem(song)
@@ -1183,19 +1229,16 @@ function useSearchScreenView() {
 
   const renderSong = useCallback(
     ({ item }: { item: Song; index: number }) => {
-      // Queue = tapped song first, then other results that have a DIFFERENT title.
-      // This means "next song" will be a related but differently-named track,
-      // not another "Starter Boy" variant from the same search.
-      const normalizedItemTitle = normalizeSongDuplicateTitle(item.title);
-      const relatedQueue = [
-        item,
-        ...songResults.filter(
-          s => s.id !== item.id && normalizeSongDuplicateTitle(s.title) !== normalizedItemTitle
-        ),
-      ];
-      return <SongRow song={item} queue={relatedQueue} onSongPress={handleSongResultPress} />;
+      return (
+        <SongRow
+          song={item}
+          queue={displayedSongs}
+          queueKey={displayedSongsQueueKey}
+          onSongPress={handleSongResultPress}
+        />
+      );
     },
-    [handleSongResultPress, songResults]
+    [displayedSongs, displayedSongsQueueKey, handleSongResultPress]
   );
 
   const handleArtistPress = useCallback(
@@ -1649,9 +1692,9 @@ function useSearchScreenView() {
               showsVerticalScrollIndicator={false}
               onScroll={handleHeaderScroll}
               scrollEventThrottle={16}
-              initialNumToRender={20}
-              maxToRenderPerBatch={20}
-              windowSize={11}
+              initialNumToRender={10}
+              maxToRenderPerBatch={8}
+              windowSize={7}
               ListFooterComponent={
                 showAlbumResults || showArtistResults || showPlaylistResults || youtubeMusicResults.length > 0 ? (
                   <>
@@ -1678,7 +1721,8 @@ function useSearchScreenView() {
                             <SongRow 
                               key={song.id} 
                               song={song} 
-                              queue={[song, ...youtubeMusicResults.filter(s => s.id !== song.id)]} 
+                              queue={youtubeMusicResults}
+                              queueKey={youtubeMusicQueueKey}
                               onSongPress={handleSongResultPress} 
                             />
                           ))}

@@ -1,8 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { JioSaavnImage, JioSaavnSong, Song, getBestImageUrl } from "@/lib/musicData";
+import { JioSaavnImage, JioSaavnSong, Song } from "@/lib/musicData";
 import { getYouTubeMusicApiUrl } from "@/lib/api-config";
 import { compactMap, mapFilter, sortedCopy } from "@/lib/arrayUtils";
+import { logger } from "@/lib/logger";
 import type { JioSaavnAlbumResult, JioSaavnPlaylistResult } from "./jioSaavnService";
 import type { ArtistCard } from "./artistService";
 
@@ -75,6 +76,9 @@ const YOUTUBE_MUSIC_CACHE_PREFIX = "@mavrixfy_youtube_music";
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const REQUEST_TIMEOUT_MS = 30000;
+const CURRENT_YEAR = new Date().getFullYear();
+const HOME_YOUTUBE_CATEGORY_CONCURRENCY = 2;
+const PREVIOUS_YEAR = CURRENT_YEAR - 1;
 
 // ─── Cache Helpers ────────────────────────────────────────────────────────────
 
@@ -362,36 +366,60 @@ export function convertYouTubeMusicTrackToJioSaavn(track: YouTubeMusicTrack): Ji
 
 // ─── Timeout Wrapper ──────────────────────────────────────────────────────────
 
-function withTimeout<T>(promise: Promise<T>, ms: number = REQUEST_TIMEOUT_MS): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error("Request timeout")), ms)
-    ),
-  ]);
-}
+function createTimeoutSignal(ms: number = REQUEST_TIMEOUT_MS, parentSignal?: AbortSignal) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  const abort = () => controller.abort();
 
-async function fetchJson<T>(url: string): Promise<T | null> {
-  const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
-  if (!res.ok) return null;
-  return res.json();
-}
-
-async function fetchFirstJson<T>(urls: string[]): Promise<T | null> {
-  const results = await Promise.all(urls.map(async (url) => {
-    try {
-      const json = await fetchJson<T>(url);
-      return { json, error: null };
-    } catch (error) {
-      return { json: null, error };
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      controller.abort();
+    } else {
+      parentSignal.addEventListener("abort", abort, { once: true });
     }
-  }));
-
-  for (const result of results) {
-    if (result.json !== null) return result.json;
   }
 
-  const lastError = results.findLast((result) => result.error !== null)?.error;
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", abort);
+    },
+  };
+}
+
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T | null> {
+  const timeout = createTimeoutSignal(REQUEST_TIMEOUT_MS, signal);
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: timeout.signal,
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } finally {
+    timeout.cleanup();
+  }
+}
+
+async function fetchFirstJson<T>(urls: string[], signal?: AbortSignal): Promise<T | null> {
+  let lastError: unknown = null;
+
+  for (const url of urls) {
+    if (signal?.aborted) {
+      throw new Error("Request aborted");
+    }
+    try {
+      const json = await fetchJson<T>(url, signal);
+      if (json !== null) return json;
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted) {
+        throw error;
+      }
+    }
+  }
+
   if (lastError) throw lastError;
   return null;
 }
@@ -536,11 +564,12 @@ function normalizeArtistPayload(artist: any, fallbackId: string): YouTubeMusicAr
 export async function searchYouTubeMusic(
   query: string,
   type: "song" | "album" | "artist" | "playlist" = "song",
-  limit: number = 20
+  limit: number = 20,
+  signal?: AbortSignal
 ): Promise<Song[]> {
   const q = query.trim();
   if (!q) {
-    console.log('[YouTube Music] Empty query, returning empty array');
+    logger.debug("[YouTube Music] Empty query, returning empty array");
     return [];
   }
 
@@ -559,9 +588,9 @@ export async function searchYouTubeMusic(
       getSearchQueryCandidates(q, filterType, limit)
     );
 
-    const json = await fetchFirstJson<any>(urls);
+    const json = await fetchFirstJson<any>(urls, signal);
     if (!json) {
-      console.warn("[YouTube Music] Search returned no response");
+      logger.warn("[YouTube Music] Search returned no response");
       return [];
     }
     
@@ -585,7 +614,11 @@ export async function searchYouTubeMusic(
     
     return songs;
   } catch (error: any) {
-    console.warn("[YouTube Music] Search failed (continuing without YouTube results):", error?.message || error);
+    // Abort errors are expected when user types quickly - don't log them
+    if (error?.message === "Request aborted" || signal?.aborted) {
+      return [];
+    }
+    logger.warn("[YouTube Music] Search failed (continuing without YouTube results):", error?.message || error);
     return [];
   }
 }
@@ -595,7 +628,8 @@ export async function searchYouTubeMusic(
  */
 export async function searchYouTubeMusicAlbums(
   query: string,
-  limit = 8
+  limit = 8,
+  signal?: AbortSignal
 ): Promise<JioSaavnAlbumResult[]> {
   const q = query.trim();
   if (!q) return [];
@@ -610,7 +644,8 @@ export async function searchYouTubeMusicAlbums(
         "/search",
         "/search",
         getSearchQueryCandidates(q, "albums", limit)
-      )
+      ),
+      signal
     );
     const results = getSearchResultItems(json);
     const albums: JioSaavnAlbumResult[] = mapFilter(
@@ -638,8 +673,12 @@ export async function searchYouTubeMusicAlbums(
       await setCache(cacheKey, albums);
     }
     return albums;
-  } catch (error) {
-    console.warn("[YouTube Music] Album search failed:", error);
+  } catch (error: any) {
+    // Abort errors are expected when user types quickly - don't log them
+    if (error?.message === "Request aborted" || signal?.aborted) {
+      return [];
+    }
+    logger.warn("[YouTube Music] Album search failed:", error);
     return [];
   }
 }
@@ -649,7 +688,8 @@ export async function searchYouTubeMusicAlbums(
  */
 export async function searchYouTubeMusicPlaylists(
   query: string,
-  limit = 8
+  limit = 8,
+  signal?: AbortSignal
 ): Promise<JioSaavnPlaylistResult[]> {
   const q = query.trim();
   if (!q) return [];
@@ -664,7 +704,8 @@ export async function searchYouTubeMusicPlaylists(
         "/search",
         "/search",
         getSearchQueryCandidates(q, "playlists", limit)
-      )
+      ),
+      signal
     );
     const results = getSearchResultItems(json);
     const playlists: JioSaavnPlaylistResult[] = mapFilter(
@@ -672,13 +713,19 @@ export async function searchYouTubeMusicPlaylists(
       (item: any) => {
         const id = readString(item.browseId || item.playlistId);
         const name = readString(item.title || item.name);
+        const resultType = readString(item.resultType || item.type || item.category).toLowerCase();
+        const isPlaylist =
+          resultType.includes("playlist") ||
+          Boolean(item.playlistId) ||
+          id.startsWith("VL");
+        if (!isPlaylist) return null;
         if (!id || !name) return null;
 
         return {
           id,
           name,
           image: normalizeYouTubeThumbnails(item.thumbnails),
-          songCount: Number(item.trackCount) || 0,
+          songCount: Number(item.trackCount || item.itemCount || item.count) || 0,
         };
       },
       (playlist): playlist is JioSaavnPlaylistResult => playlist !== null
@@ -688,8 +735,12 @@ export async function searchYouTubeMusicPlaylists(
       await setCache(cacheKey, playlists);
     }
     return playlists;
-  } catch (error) {
-    console.warn("[YouTube Music] Playlist search failed:", error);
+  } catch (error: any) {
+    // Abort errors are expected when user types quickly - don't log them
+    if (error?.message === "Request aborted" || signal?.aborted) {
+      return [];
+    }
+    logger.warn("[YouTube Music] Playlist search failed:", error);
     return [];
   }
 }
@@ -699,7 +750,8 @@ export async function searchYouTubeMusicPlaylists(
  */
 export async function searchYouTubeMusicArtists(
   query: string,
-  limit = 8
+  limit = 8,
+  signal?: AbortSignal
 ): Promise<ArtistCard[]> {
   const q = query.trim();
   if (!q) return [];
@@ -714,7 +766,8 @@ export async function searchYouTubeMusicArtists(
         "/search",
         "/search",
         getSearchQueryCandidates(q, "artists", limit)
-      )
+      ),
+      signal
     );
     const results = getSearchResultItems(json);
     const artists: ArtistCard[] = mapFilter(
@@ -742,8 +795,12 @@ export async function searchYouTubeMusicArtists(
       await setCache(cacheKey, artists);
     }
     return artists;
-  } catch (error) {
-    console.warn("[YouTube Music] Artist search failed:", error);
+  } catch (error: any) {
+    // Abort errors are expected when user types quickly - don't log them
+    if (error?.message === "Request aborted" || signal?.aborted) {
+      return [];
+    }
+    logger.warn("[YouTube Music] Artist search failed:", error);
     return [];
   }
 }
@@ -753,7 +810,8 @@ export async function searchYouTubeMusicArtists(
  */
 export async function searchYouTubeMusicVideos(
   query: string,
-  limit = 8
+  limit = 8,
+  signal?: AbortSignal
 ): Promise<Song[]> {
   const q = query.trim();
   if (!q) return [];
@@ -768,7 +826,8 @@ export async function searchYouTubeMusicVideos(
         "/search",
         "/search",
         getSearchQueryCandidates(q, "videos", limit)
-      )
+      ),
+      signal
     );
     const results = getSearchResultItems(json);
     const songs: Song[] = mapFilter(
@@ -787,8 +846,12 @@ export async function searchYouTubeMusicVideos(
       await setCache(cacheKey, songs);
     }
     return songs;
-  } catch (error) {
-    console.warn("[YouTube Music] Video search failed:", error);
+  } catch (error: any) {
+    // Abort errors are expected when user types quickly - don't log them
+    if (error?.message === "Request aborted" || signal?.aborted) {
+      return [];
+    }
+    logger.warn("[YouTube Music] Video search failed:", error);
     return [];
   }
 }
@@ -815,7 +878,7 @@ export async function getYouTubeMusicPlaylist(playlistId: string): Promise<YouTu
     await setCache(cacheKey, playlist);
     return playlist;
   } catch (error) {
-    console.error("YouTube Music playlist error:", error);
+    logger.error("YouTube Music playlist error:", error);
     return null;
   }
 }
@@ -841,7 +904,7 @@ export async function getYouTubeMusicArtist(artistId: string): Promise<YouTubeMu
     await setCache(cacheKey, artist);
     return artist;
   } catch (error) {
-    console.error("YouTube Music artist error:", error);
+    logger.error("YouTube Music artist error:", error);
     return null;
   }
 }
@@ -867,7 +930,7 @@ export async function getYouTubeMusicAlbum(albumId: string): Promise<YouTubeMusi
     await setCache(cacheKey, album);
     return album;
   } catch (error) {
-    console.error("YouTube Music album error:", error);
+    logger.error("YouTube Music album error:", error);
     return null;
   }
 }
@@ -915,7 +978,7 @@ export async function getYouTubeMusicWatchPlaylist(
     await setCache(cacheKey, watchPlaylist);
     return watchPlaylist;
   } catch (error) {
-    console.warn("YouTube Music watch playlist error:", error);
+    logger.warn("YouTube Music watch playlist error:", error);
     return null;
   }
 }
@@ -954,7 +1017,7 @@ export async function getYouTubeMusicVisualVideoId(song: Song): Promise<string |
         }
       }
     } catch (err) {
-      console.warn("[YouTube Music] Visual fallback search failed:", err);
+      logger.warn("[YouTube Music] Visual fallback search failed:", err);
     }
   }
 
@@ -1000,7 +1063,7 @@ export async function getYouTubeMusicTrending(country: string = "IN"): Promise<S
     await setCache(cacheKey, songs);
     return songs;
   } catch (error) {
-    console.error("YouTube Music trending error:", error);
+    logger.error("YouTube Music trending error:", error);
     return [];
   }
 }
@@ -1010,12 +1073,370 @@ export interface YouTubeMusicPlaylistCard {
   name: string;
   imageUrl: string;
   songCount?: number;
+  author?: string;
+  category?: string;
+  kind?: YouTubeMusicPlaylistKind;
+}
+
+export type YouTubeMusicPlaylistKind = "chart" | "editorial" | "featured" | "community";
+
+export interface YouTubeMusicHomeCategoryData {
+  id: string;
+  title: string;
+  results: YouTubeMusicPlaylistCard[];
+}
+
+type HomeYouTubeMusicCategoryConfig = {
+  id: string;
+  title: string;
+  searchTerms: string[];
+  requiredAny: string[];
+  preferredAny: string[];
+  blockedAny?: string[];
+  useCharts?: boolean;
+};
+
+const HINDI_CATEGORY_BLOCKED_TERMS = [
+  "kannada",
+  "malayalam",
+  "tamil",
+  "telugu",
+  "bhojpuri",
+];
+
+const STALE_YEAR_TERMS = Array.from({ length: Math.max(0, CURRENT_YEAR - 2016) }, (_, index) => String(2016 + index))
+  .filter((year) => year !== String(PREVIOUS_YEAR) && year !== String(CURRENT_YEAR));
+
+const HOME_YOUTUBE_MUSIC_CATEGORIES: HomeYouTubeMusicCategoryConfig[] = [
+  {
+    id: "trending",
+    title: "Trending Now",
+    useCharts: true,
+    searchTerms: [
+      `trending hindi songs ${CURRENT_YEAR}`,
+      `india top songs ${CURRENT_YEAR} playlist`,
+    ],
+    requiredAny: ["trending", "top", "chart", "hits", "hindi", "bollywood", "india"],
+    preferredAny: ["trending", "top", "chart", String(CURRENT_YEAR), "hindi", "bollywood"],
+  },
+  {
+    id: "new-arrivals",
+    title: "New Releases",
+    searchTerms: [
+      `latest bollywood songs ${CURRENT_YEAR}`,
+      `new hindi songs ${CURRENT_YEAR} playlist`,
+    ],
+    requiredAny: ["new", "latest", String(CURRENT_YEAR), "fresh"],
+    preferredAny: ["new", "latest", String(CURRENT_YEAR), "bollywood", "hindi"],
+    blockedAny: [...STALE_YEAR_TERMS],
+  },
+  {
+    id: "most-viral",
+    title: "Viral Hits",
+    searchTerms: [
+      "reels viral songs",
+      "youtube shorts trending songs",
+    ],
+    requiredAny: ["viral", "reels", "instagram", "shorts", "trending"],
+    preferredAny: ["viral", "reels", "instagram", String(CURRENT_YEAR), "hindi"],
+    blockedAny: STALE_YEAR_TERMS,
+  },
+  {
+    id: "party-mix",
+    title: "Party Mix",
+    searchTerms: [
+      "party songs hindi",
+      "bollywood dance hits playlist",
+    ],
+    requiredAny: ["party", "dance", "dj", "remix", "sangeet", "wedding", "item"],
+    preferredAny: ["party", "dance", "bollywood", "hindi", "dj", "remix"],
+    blockedAny: [...HINDI_CATEGORY_BLOCKED_TERMS, ...STALE_YEAR_TERMS],
+  },
+  {
+    id: "chill-vibes",
+    title: "Chill Vibes",
+    searchTerms: [
+      "lofi bollywood",
+      "chill hindi songs playlist",
+    ],
+    requiredAny: ["lofi", "chill", "sukoon", "slowed", "reverb", "soft"],
+    preferredAny: ["lofi", "chill", "bollywood", "hindi", "sukoon"],
+  },
+  {
+    id: "romance",
+    title: "Love & Romance",
+    searchTerms: [
+      "romantic hindi songs",
+      "hindi love songs playlist",
+    ],
+    requiredAny: ["romantic", "romance", "love", "heart", "melodies"],
+    preferredAny: ["romantic", "love", "hindi", "bollywood", "top"],
+  },
+  {
+    id: "workout",
+    title: "Workout & Energy",
+    searchTerms: [
+      "workout songs hindi",
+      "hindi gym songs playlist",
+    ],
+    requiredAny: ["workout", "gym", "motivation", "motivational", "zumba", "energy"],
+    preferredAny: ["workout", "gym", "bollywood", "hindi", "energy"],
+    blockedAny: HINDI_CATEGORY_BLOCKED_TERMS,
+  },
+  {
+    id: "retro",
+    title: "Retro Classics",
+    searchTerms: [
+      "retro hindi songs",
+      "bollywood retro essentials",
+    ],
+    requiredAny: ["retro", "old", "classic", "evergreen", "rewind", "70", "80", "90"],
+    preferredAny: ["retro", "old", "classic", "evergreen", "bollywood", "hindi", "essentials"],
+  },
+];
+
+function dedupeYouTubePlaylistCards(playlists: YouTubeMusicPlaylistCard[]): YouTubeMusicPlaylistCard[] {
+  const seen = new Set<string>();
+  const unique: YouTubeMusicPlaylistCard[] = [];
+
+  for (const playlist of playlists) {
+    const id = readString(playlist.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    unique.push({ ...playlist, id });
+  }
+
+  return unique;
+}
+
+function includesAnyTerm(text: string, terms: string[] | undefined): boolean {
+  return Boolean(terms?.some((term) => text.includes(term.toLowerCase())));
+}
+
+function countTermMatches(text: string, terms: string[] | undefined): number {
+  if (!terms) return 0;
+  return terms.reduce((count, term) => count + (text.includes(term.toLowerCase()) ? 1 : 0), 0);
+}
+
+function normalizeYouTubePlaylistKind(raw: any, fallbackKind?: YouTubeMusicPlaylistKind): YouTubeMusicPlaylistKind {
+  if (fallbackKind) return fallbackKind;
+
+  const category = readString(raw?.category).toLowerCase();
+  const author = readString(raw?.author || raw?.owner || raw?.channel?.name).toLowerCase();
+  const id = readString(raw?.browseId || raw?.playlistId || raw?.id);
+
+  if (category.includes("chart")) return "chart";
+  if (author === "youtube music" || id.startsWith("VLRDCLAK5uy_")) return "editorial";
+  if (category.includes("featured")) return "featured";
+  return "community";
+}
+
+function normalizeYouTubePlaylistCard(raw: any, fallbackKind?: YouTubeMusicPlaylistKind): YouTubeMusicPlaylistCard | null {
+  const id = readString(raw?.browseId || raw?.playlistId || raw?.id);
+  const name = readString(raw?.title || raw?.name);
+  if (!id || !name) return null;
+
+  const thumbnails = normalizeThumbnails(raw?.thumbnails || raw?.thumbnail || raw?.image);
+  const imageUrl = getBestThumbnailUrl(thumbnails);
+
+  return {
+    id,
+    name,
+    imageUrl,
+    songCount: Number(raw?.trackCount || raw?.itemCount || raw?.count) || undefined,
+    author: readString(raw?.author || raw?.owner || raw?.channel?.name) || undefined,
+    category: readString(raw?.category) || undefined,
+    kind: normalizeYouTubePlaylistKind(raw, fallbackKind),
+  };
+}
+
+function isPlaylistLikeTitle(text: string): boolean {
+  return includesAnyTerm(text, [
+    "playlist",
+    "songs",
+    "hits",
+    "mix",
+    "essentials",
+    "top",
+    "best",
+    "chart",
+    "jukebox",
+    "nonstop",
+  ]);
+}
+
+function isRelevantYouTubeHomePlaylist(
+  playlist: YouTubeMusicPlaylistCard,
+  category: HomeYouTubeMusicCategoryConfig
+): boolean {
+  const text = `${playlist.name} ${playlist.author || ""} ${playlist.category || ""}`.toLowerCase();
+
+  if (includesAnyTerm(text, category.blockedAny)) return false;
+  if (!includesAnyTerm(text, category.requiredAny)) return false;
+
+  const isOfficial = playlist.kind === "chart" || playlist.kind === "editorial" || playlist.kind === "featured";
+  if (isOfficial) return true;
+
+  return isPlaylistLikeTitle(text) && countTermMatches(text, category.requiredAny) >= 1;
+}
+
+async function searchYouTubeMusicPlaylistCards(
+  query: string,
+  limit: number
+): Promise<YouTubeMusicPlaylistCard[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:search:playlist_cards:${limit}:${q.toLowerCase()}`;
+  const cached = await getCached<YouTubeMusicPlaylistCard[]>(cacheKey, SEARCH_CACHE_TTL_MS);
+  if (cached) return cached;
+
+  const json = await fetchFirstJson<any>(
+    getEndpointCandidates(
+      "/search",
+      "/search",
+      getSearchQueryCandidates(q, "playlists", limit)
+    )
+  );
+  const results = getSearchResultItems(json);
+
+  const cards = mapFilter(
+    results,
+    (item: any) => {
+      const id = readString(item?.browseId || item?.playlistId);
+      const resultType = readString(item?.resultType || item?.type || item?.category).toLowerCase();
+      const isPlaylist =
+        resultType.includes("playlist") ||
+        Boolean(item?.playlistId) ||
+        id.startsWith("VL");
+      if (!isPlaylist) return null;
+      return normalizeYouTubePlaylistCard(item);
+    },
+    (playlist): playlist is YouTubeMusicPlaylistCard => Boolean(playlist)
+  );
+
+  if (cards.length > 0) {
+    await setCache(cacheKey, cards);
+  }
+
+  return cards;
+}
+
+function scoreYouTubeHomePlaylist(
+  playlist: YouTubeMusicPlaylistCard,
+  category: HomeYouTubeMusicCategoryConfig
+): number {
+  const text = playlist.name.toLowerCase();
+  let score = 0;
+
+  if (playlist.kind === "chart") score += 90;
+  if (playlist.kind === "editorial") score += 80;
+  if (playlist.kind === "featured") score += 55;
+  if (playlist.author?.toLowerCase() === "youtube music") score += 30;
+
+  score += countTermMatches(text, category.requiredAny) * 26;
+  score += countTermMatches(text, category.preferredAny) * 14;
+
+  if (text.includes(String(CURRENT_YEAR))) score += 32;
+  if (text.includes("hindi") || text.includes("bollywood") || text.includes("india")) score += 24;
+  if (text.includes("playlist") || text.includes("mix") || text.includes("essentials")) score += 16;
+  if (text.includes("latest") || text.includes("new")) score += category.id === "new-arrivals" ? 32 : 14;
+  if (text.includes("trending") || text.includes("viral") || text.includes("reels")) score += 24;
+  if (text.includes("party") || text.includes("dance")) score += category.id === "party-mix" ? 30 : 10;
+  if (text.includes("lofi") || text.includes("chill") || text.includes("sukoon")) score += category.id === "chill-vibes" ? 30 : 10;
+  if (text.includes("romantic") || text.includes("love") || text.includes("romance")) score += category.id === "romance" ? 30 : 10;
+  if (text.includes("workout") || text.includes("gym")) score += category.id === "workout" ? 30 : 10;
+  if (text.includes("retro") || text.includes("classic") || text.includes("old")) score += category.id === "retro" ? 30 : -8;
+
+  score += Math.min(Number(playlist.songCount || 0), 40);
+  return score;
+}
+
+async function runYouTubeHomeCategoryLimit<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const maxWorkers = Math.max(1, Math.min(concurrency, items.length));
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  const runWorker = async (): Promise<void> => {
+    const currentIndex = nextIndex;
+    nextIndex += 1;
+    if (currentIndex >= items.length) return;
+
+    results[currentIndex] = await worker(items[currentIndex]);
+    return runWorker();
+  };
+
+  await Promise.all(Array.from({ length: maxWorkers }, () => runWorker()));
+  return results;
+}
+
+async function getYouTubeHomeCategoryPlaylists(
+  category: HomeYouTubeMusicCategoryConfig,
+  limit: number
+): Promise<YouTubeMusicPlaylistCard[]> {
+  const searchLimit = Math.max(limit, 8);
+  const chartPlaylists = category.useCharts
+    ? await getYouTubeMusicTrendingPlaylists("IN").catch(() => [] as YouTubeMusicPlaylistCard[])
+    : [];
+  const results = await Promise.all(
+    category.searchTerms.slice(0, 2).map(async (term) => {
+      try {
+        return await searchYouTubeMusicPlaylistCards(term, searchLimit);
+      } catch {
+        return [];
+      }
+    })
+  );
+
+  const playlists = [...chartPlaylists, ...results.flat()];
+
+  return dedupeYouTubePlaylistCards(playlists)
+    .filter((playlist) => isRelevantYouTubeHomePlaylist(playlist, category))
+    .sort((a, b) => scoreYouTubeHomePlaylist(b, category) - scoreYouTubeHomePlaylist(a, category))
+    .slice(0, limit);
+}
+
+export async function getHomeYouTubeMusicCategories(options?: {
+  limitPerCategory?: number;
+  categoryIds?: string[];
+}): Promise<YouTubeMusicHomeCategoryData[]> {
+  const limit = Math.min(options?.limitPerCategory ?? 5, 8);
+  const categoryIdFilter = new Set(options?.categoryIds ?? []);
+  const categoriesToFetch =
+    categoryIdFilter.size > 0
+      ? HOME_YOUTUBE_MUSIC_CATEGORIES.filter((category) => categoryIdFilter.has(category.id))
+      : HOME_YOUTUBE_MUSIC_CATEGORIES;
+
+  if (categoriesToFetch.length === 0) return [];
+
+  const categoryResults = await runYouTubeHomeCategoryLimit(
+    categoriesToFetch,
+    HOME_YOUTUBE_CATEGORY_CONCURRENCY,
+    async (category) => ({
+      id: category.id,
+      title: category.title,
+      results: await getYouTubeHomeCategoryPlaylists(category, limit),
+    })
+  );
+
+  return categoryResults.filter((category) => category.results.length > 0);
 }
 
 export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): Promise<YouTubeMusicPlaylistCard[]> {
   const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:trending_playlists:${country}`;
   const cached = await getCached<YouTubeMusicPlaylistCard[]>(cacheKey, CACHE_TTL_MS);
-  if (cached) return cached;
+  if (cached) {
+    return cached.map((playlist) => ({
+      ...playlist,
+      author: playlist.author || "YouTube Music",
+      category: playlist.category || "Charts",
+      kind: playlist.kind || "chart",
+    }));
+  }
 
   try {
     const json = await fetchFirstJson<any>(
@@ -1041,6 +1462,9 @@ export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): 
           name,
           imageUrl: bestImage,
           songCount: Number(item.trackCount) || 20,
+          author: "YouTube Music",
+          category: "Charts",
+          kind: "chart",
         };
         return result;
       },
@@ -1057,7 +1481,7 @@ export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): 
     await setCache(cacheKey, uniquePlaylists);
     return uniquePlaylists;
   } catch (error) {
-    console.error("YouTube Music trending playlists error:", error);
+    logger.error("YouTube Music trending playlists error:", error);
     return [];
   }
 }
@@ -1065,7 +1489,7 @@ export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): 
 /**
  * Get search suggestions from YouTube Music
  */
-export async function getYouTubeMusicSearchSuggestions(query: string): Promise<string[]> {
+export async function getYouTubeMusicSearchSuggestions(query: string, signal?: AbortSignal): Promise<string[]> {
   const q = query.trim();
   if (!q) return [];
 
@@ -1074,12 +1498,17 @@ export async function getYouTubeMusicSearchSuggestions(query: string): Promise<s
       getEndpointCandidates("/search/suggestions", "/search/suggestions", [
         `query=${encodeURIComponent(q)}`,
         `q=${encodeURIComponent(q)}`,
-      ])
+      ]),
+      signal
     );
     if (!json) return [];
     return getSearchSuggestionItems(json);
-  } catch (error) {
-    console.error("YouTube Music suggestions error:", error);
+  } catch (error: any) {
+    // Abort errors are expected when user types quickly - don't log them as errors
+    if (error?.message === "Request aborted" || signal?.aborted) {
+      return [];
+    }
+    logger.error("YouTube Music suggestions error:", error);
     return [];
   }
 }
@@ -1090,6 +1519,6 @@ export async function clearYouTubeMusicCache(): Promise<void> {
     const ytMusicKeys = keys.filter((key) => key.startsWith(YOUTUBE_MUSIC_CACHE_PREFIX));
     await AsyncStorage.multiRemove(ytMusicKeys);
   } catch (error) {
-    console.error("Failed to clear YouTube Music cache:", error);
+    logger.error("Failed to clear YouTube Music cache:", error);
   }
 }

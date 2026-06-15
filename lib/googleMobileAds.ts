@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import Constants, { ExecutionEnvironment } from "expo-constants";
+import { logger } from "@/lib/logger";
 
 export type GoogleMobileAdsModule = typeof import("react-native-google-mobile-ads");
 export type GoogleNativeAd = import("react-native-google-mobile-ads").NativeAd;
@@ -28,7 +29,7 @@ export function getGoogleMobileAdsModule(): GoogleMobileAdsModule | null {
 
     if (__DEV__ && !warnedMissingModule) {
       warnedMissingModule = true;
-      console.warn(
+      logger.warn(
         "Google Mobile Ads native module is unavailable in this build. Ads will be hidden until a dev or release build includes react-native-google-mobile-ads."
       );
     }

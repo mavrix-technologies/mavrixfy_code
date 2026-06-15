@@ -14,6 +14,7 @@ import React,
   useRef,
   useState } from "react";
 import { ActivityIndicator,
+  InteractionManager,
   LogBox,
   Platform,
   StyleSheet,
@@ -38,31 +39,34 @@ import { getRecentlyPlayed } from "@/lib/storage";
 import { AppNavBar } from "@/app/(tabs)/_layout";
 import QueueBottomSheet from "@/components/QueueBottomSheet";
 import { globalQueueSheetRef } from "@/lib/queueRef";
+import { logger } from "@/lib/logger";
 
 // Filter out noisy expo-notifications warnings in the terminal console when testing in Expo Go
-const originalWarn = console.warn;
-console.warn = (...args) => {
-  if (
-    args[0] &&
-    typeof args[0] === "string" &&
-    args[0].includes("expo-notifications")
-  ) {
-    return;
-  }
-  originalWarn(...args);
-};
+if (__DEV__) {
+  const originalWarn = console.warn;
+  console.warn = (...args) => {
+    if (
+      args[0] &&
+      typeof args[0] === "string" &&
+      args[0].includes("expo-notifications")
+    ) {
+      return;
+    }
+    originalWarn(...args);
+  };
 
-const originalError = console.error;
-console.error = (...args) => {
-  if (
-    args[0] &&
-    typeof args[0] === "string" &&
-    args[0].includes("expo-notifications")
-  ) {
-    return;
-  }
-  originalError(...args);
-};
+  const originalError = console.error;
+  console.error = (...args) => {
+    if (
+      args[0] &&
+      typeof args[0] === "string" &&
+      args[0].includes("expo-notifications")
+    ) {
+      return;
+    }
+    originalError(...args);
+  };
+}
 
 LogBox.ignoreLogs([
   "expo-notifications functionality is not fully supported in Expo Go",
@@ -211,14 +215,29 @@ function RootLayoutNav() {
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
 
-  // 1. Request notification permission on mount (Guest or User)
+  // 1. Request notification permission after first paint so startup is not blocked.
   useEffect(() => {
-    import("@/services/notificationService")
-      .then(({ requestNotificationPermission }) => {
-        requestNotificationPermission();
-      })
-      .catch(err => console.error("Failed to request permission:", err));
-  }, []);
+    if (loading) return;
+
+    let active = true;
+    const timer = setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
+        if (!active) return;
+        import("@/services/notificationService")
+          .then(({ requestNotificationPermission }) => {
+            if (active) {
+              requestNotificationPermission();
+            }
+          })
+          .catch(err => logger.error("Failed to request permission:", err));
+      });
+    }, 5000);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [loading]);
 
   // 2. Register push tokens in Firestore only for authenticated users
   useEffect(() => {
@@ -239,7 +258,9 @@ function RootLayoutNav() {
         cleanupNotificationListeners = registerNotificationListeners(
           (notification) => {
             // Notification received in foreground
-            console.log("Foreground notification received:", notification);
+            logger.debug("Foreground notification received", {
+              identifier: notification.request.identifier,
+            });
           },
           (response) => {
             // Notification tapped/clicked
@@ -248,14 +269,14 @@ function RootLayoutNav() {
               try {
                 routerReplace(data.route as any);
               } catch (err) {
-                console.error("Navigation from notification failed:", err);
+                logger.error("Navigation from notification failed:", err);
               }
             }
           }
         );
       })
       .catch((err) => {
-        console.error("Failed to load notification service:", err);
+        logger.error("Failed to load notification service:", err);
       });
 
     return () => {
@@ -424,9 +445,7 @@ export default function RootLayout() {
   useEffect(() => {
     async function prepare() {
       try {
-        // Pre-warm cache in background — do NOT await, never block startup
-        preWarmHomeCache();
-        logAppOpen(); // fire-and-forget, no await
+        void logAppOpen(); // fire-and-forget, no await
       } catch {
         // Silent fail
       } finally {

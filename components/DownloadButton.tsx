@@ -1,330 +1,192 @@
 /**
- * DownloadButton — per-song download state button.
- *
- * Downloading state shows a circular SVG progress ring that fills clockwise,
- * with a pause icon in the center. Tap while downloading → pause immediately.
+ * Download Button Component
+ * 
+ * Shows download/delete button for YouTube Music songs
+ * Supports offline playback
  */
 
-import React, { useCallback } from "react";
-import { Pressable, View, Text, StyleSheet, Alert } from "react-native";
-import Svg, { Circle, G } from "react-native-svg";
-import { Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
-import { Song } from "@/lib/musicData";
-import { useDownloadsSafe, useSongDownload } from "@/contexts/DownloadContext";
-import { DownloadStatus } from "@/types/downloads";
-import Colors from "@/constants/colors";
-import { triggerImpact } from "@/lib/haptics";
-import { formatBytes } from "@/lib/downloads/storagePolicy";
-
-const AVG_BYTES_PER_SECOND = 25_000; // ~200 kbps estimate
+import React, { useState, useEffect } from 'react';
+import { Pressable, ActivityIndicator, StyleSheet, View, Alert } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import Colors from '@/constants/colors';
+import type { Song } from '@/lib/musicData';
+import {
+  downloadAudioFile,
+  isDownloaded,
+  deleteDownload,
+  type DownloadedSong,
+} from '@/lib/offlineDownloadService';
+import { logger } from '@/lib/logger';
 
 interface DownloadButtonProps {
   song: Song;
   size?: number;
-  collectionId?: string;
-  style?: object;
+  color?: string;
+  onDownloadComplete?: (localUri: string) => void;
+  onDownloadDeleted?: () => void;
 }
-
-// ─── Circular progress ring ───────────────────────────────────────────────────
-
-interface CircleProgressProps {
-  size: number;       // outer diameter
-  progress: number;   // 0–100
-  strokeWidth?: number;
-}
-
-function CircleProgress({ size, progress, strokeWidth = 2.5 }: CircleProgressProps) {
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  // clamp 0–100, start from top (rotate -90°)
-  const pct = Math.max(0, Math.min(100, progress));
-  const strokeDashoffset = circumference - (pct / 100) * circumference;
-  const center = size / 2;
-  const pauseSize = size * 0.38;
-  const pauseBarW = pauseSize * 0.28;
-  const pauseGap = pauseSize * 0.18;
-  const pauseX1 = center - pauseGap / 2 - pauseBarW;
-
-  return (
-    <Svg width={size} height={size}>
-      {/* Track ring */}
-      <Circle
-        cx={center}
-        cy={center}
-        r={radius}
-        stroke="rgba(38,225,154,0.18)"
-        strokeWidth={strokeWidth}
-        fill="none"
-      />
-      {/* Progress arc — rotated so it starts at 12 o'clock */}
-      <G rotation="-90" origin={`${center}, ${center}`}>
-        <Circle
-          cx={center}
-          cy={center}
-          r={radius}
-          stroke={Colors.primary}
-          strokeWidth={strokeWidth}
-          fill="none"
-          strokeDasharray={`${circumference} ${circumference}`}
-          strokeDashoffset={strokeDashoffset}
-          strokeLinecap="round"
-        />
-      </G>
-      {/* Pause bars in center */}
-      {/* Left bar */}
-      <G>
-        <Circle
-          cx={pauseX1 + pauseBarW / 2}
-          cy={center}
-          r={0}
-          fill="none"
-        />
-      </G>
-    </Svg>
-  );
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
 
 export default function DownloadButton({
   song,
-  size = 22,
-  collectionId,
-  style,
+  size = 24,
+  color = Colors.text.primary,
+  onDownloadComplete,
+  onDownloadDeleted,
 }: DownloadButtonProps) {
-  const item = useSongDownload(song.id);
-  const ctx = useDownloadsSafe();
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadedInfo, setDownloadedInfo] = useState<DownloadedSong | null>(null);
 
-  const status: DownloadStatus | "none" = item?.status ?? "none";
-  const progress = item?.progress ?? 0;
-  const totalBytes = item?.totalBytes ?? 0;
+  useEffect(() => {
+    checkDownloadStatus();
+  }, [song.id]);
 
-  const handlePress = useCallback(async () => {
-    if (!ctx) return;
-    const { downloadSong, pauseDownload, resumeDownload, retryDownload, removeDownload } = ctx;
-    await triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-
-    switch (status) {
-      case "none":
-      case "deleted": {
-        const estimatedBytes = (song.duration ?? 0) * AVG_BYTES_PER_SECOND;
-        Alert.alert(
-          "Download Song",
-          `Download "${song.title}" for offline playback?\n\nEstimated size: ~${formatBytes(estimatedBytes)}`,
-          [
-            { text: "Cancel", style: "cancel" },
-            {
-              text: "Download",
-              onPress: async () => {
-                const result = await downloadSong(song, { collectionId });
-                if (!result.ok) Alert.alert("Download Failed", result.reason);
-              },
-            },
-          ]
-        );
-        break;
-      }
-
-      case "downloading":
-        // Tap pauses immediately — no alert needed
-        await pauseDownload(song.id);
-        break;
-
-      case "queued":
-      case "waiting_for_wifi":
-      case "waiting_for_charging":
-        Alert.alert(
-          "Queued",
-          status === "waiting_for_wifi"
-            ? "Waiting for Wi-Fi connection."
-            : status === "waiting_for_charging"
-            ? "Waiting for device to charge."
-            : "Queued — will start shortly.",
-          [
-            { text: "Keep Queued", style: "cancel" },
-            {
-              text: "Cancel",
-              style: "destructive",
-              onPress: () => removeDownload(song.id, collectionId),
-            },
-          ]
-        );
-        break;
-
-      case "paused":
-        await resumeDownload(song.id);
-        break;
-
-      case "failed":
-        Alert.alert(
-          "Download Failed",
-          item?.failureReason ? `Error: ${item.failureReason}\n\nRetry?` : "Retry this download?",
-          [
-            { text: "Cancel", style: "cancel" },
-            { text: "Retry", onPress: () => retryDownload(song.id) },
-          ]
-        );
-        break;
-
-      case "completed": {
-        const sizeLabel = totalBytes > 0 ? ` (${formatBytes(totalBytes)})` : "";
-        Alert.alert(
-          "Remove Download",
-          `Remove "${song.title}"${sizeLabel} from offline storage?`,
-          [
-            { text: "Cancel", style: "cancel" },
-            {
-              text: "Remove",
-              style: "destructive",
-              onPress: () => removeDownload(song.id, collectionId),
-            },
-          ]
-        );
-        break;
-      }
-
-      case "revoked":
-      case "expired":
-        Alert.alert(
-          "License Expired",
-          "Re-download to listen offline.",
-          [
-            { text: "Cancel", style: "cancel" },
-            {
-              text: "Re-download",
-              onPress: async () => {
-                await removeDownload(song.id);
-                const result = await downloadSong(song, { collectionId });
-                if (!result.ok) Alert.alert("Download Failed", result.reason);
-              },
-            },
-          ]
-        );
-        break;
+  async function checkDownloadStatus() {
+    if (song.source === 'youtube' && song.youtubeVideoId) {
+      const info = await isDownloaded(song.youtubeVideoId);
+      setDownloadedInfo(info);
     }
-  }, [ctx, status, song, collectionId, item?.failureReason, totalBytes]);
+  }
 
-  if (!ctx) return null;
+  async function handleDownload() {
+    if (!song.youtubeVideoId) {
+      Alert.alert('Error', 'This song cannot be downloaded');
+      return;
+    }
+
+    if (isDownloading) {
+      return; // Already downloading
+    }
+
+    setIsDownloading(true);
+    setDownloadProgress(0);
+
+    try {
+      const localUri = await downloadAudioFile(
+        song,
+        (progress) => {
+          setDownloadProgress(progress);
+        }
+      );
+
+      if (localUri) {
+        // Refresh download status
+        await checkDownloadStatus();
+        onDownloadComplete?.(localUri);
+        
+        Alert.alert(
+          'Download Complete',
+          `"${song.title}" is now available offline`,
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Download Failed',
+          'Could not download this song. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error: any) {
+      logger.error('[DownloadButton] Download error:', error);
+      Alert.alert(
+        'Download Failed',
+        error.message || 'An error occurred during download',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setIsDownloading(false);
+      setDownloadProgress(0);
+    }
+  }
+
+  async function handleDelete() {
+    if (!song.youtubeVideoId) {
+      return;
+    }
+
+    Alert.alert(
+      'Delete Download',
+      `Remove "${song.title}" from downloads?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const success = await deleteDownload(song.youtubeVideoId!);
+            if (success) {
+              setDownloadedInfo(null);
+              onDownloadDeleted?.();
+            } else {
+              Alert.alert('Error', 'Failed to delete download');
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  // Only show for YouTube songs
+  if (song.source !== 'youtube' || !song.youtubeVideoId) {
+    return null;
+  }
 
   return (
     <Pressable
-      onPress={handlePress}
-      style={({ pressed }) => [styles.button, pressed && styles.pressed, style]}
-      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      accessibilityLabel={getA11yLabel(status, song.title)}
-      accessibilityRole="button"
+      onPress={downloadedInfo ? handleDelete : handleDownload}
+      disabled={isDownloading}
+      style={({ pressed }) => [
+        styles.button,
+        pressed && styles.buttonPressed,
+      ]}
     >
-      {getIconElement(status, size, progress)}
+      {isDownloading ? (
+        <View style={styles.progressContainer}>
+          <ActivityIndicator size="small" color={Colors.accent.primary} />
+          {downloadProgress > 0 && (
+            <View style={styles.progressBar}>
+              <View style={[styles.progressFill, { width: `${downloadProgress * 100}%` }]} />
+            </View>
+          )}
+        </View>
+      ) : (
+        <Ionicons
+          name={downloadedInfo ? 'checkmark-circle' : 'download-outline'}
+          size={size}
+          color={downloadedInfo ? Colors.accent.primary : color}
+        />
+      )}
     </Pressable>
   );
 }
 
-// ─── Icon renderer ────────────────────────────────────────────────────────────
-
-function getIconElement(status: DownloadStatus | "none", size: number, progress: number) {
-  switch (status) {
-
-    case "completed":
-      return <Ionicons name="arrow-down-circle" size={size} color={Colors.primary} />;
-
-    case "downloading": {
-      // Circular progress ring with pause icon in center
-      const ringSize = size + 6;
-      const pauseBarH = size * 0.34;
-      const pauseBarW = size * 0.13;
-      const gap = size * 0.1;
-      return (
-        <View style={{ width: ringSize, height: ringSize, alignItems: "center", justifyContent: "center" }}>
-          {/* SVG ring */}
-          <CircleProgress size={ringSize} progress={progress} strokeWidth={2.2} />
-          {/* Pause icon overlay */}
-          <View style={[StyleSheet.absoluteFill, styles.ringCenter]}>
-            <View style={[styles.pauseBar, { width: pauseBarW, height: pauseBarH, marginRight: gap }]} />
-            <View style={[styles.pauseBar, { width: pauseBarW, height: pauseBarH }]} />
-          </View>
-          {/* % label below ring */}
-          {progress > 0 && (
-            <Text style={[styles.progressPct, { fontSize: Math.max(7, size * 0.32) }]}>
-              {progress}%
-            </Text>
-          )}
-        </View>
-      );
-    }
-
-    case "queued":
-    case "waiting_for_wifi":
-    case "waiting_for_charging": {
-      // Indeterminate ring (empty arc) + clock icon
-      const ringSize = size + 6;
-      return (
-        <View style={{ width: ringSize, height: ringSize, alignItems: "center", justifyContent: "center" }}>
-          <CircleProgress size={ringSize} progress={15} strokeWidth={2.2} />
-          <View style={[StyleSheet.absoluteFill, styles.ringCenter]}>
-            <Ionicons name="time-outline" size={size * 0.7} color={Colors.subtext} />
-          </View>
-        </View>
-      );
-    }
-
-    case "paused": {
-      // Ring frozen at current progress + play icon
-      const ringSize = size + 6;
-      return (
-        <View style={{ width: ringSize, height: ringSize, alignItems: "center", justifyContent: "center" }}>
-          <CircleProgress size={ringSize} progress={progress > 0 ? progress : 30} strokeWidth={2.2} />
-          <View style={[StyleSheet.absoluteFill, styles.ringCenter]}>
-            <Ionicons name="play" size={size * 0.55} color={Colors.primary} style={{ marginLeft: size * 0.08 }} />
-          </View>
-        </View>
-      );
-    }
-
-    case "failed":
-      return <Ionicons name="refresh-circle-outline" size={size} color={Colors.error} />;
-
-    case "revoked":
-    case "expired":
-      return <Ionicons name="lock-closed-outline" size={size} color={Colors.subtext} />;
-
-    default:
-      return <Ionicons name="arrow-down-circle-outline" size={size} color={Colors.subtext} />;
-  }
-}
-
-function getA11yLabel(status: DownloadStatus | "none", title: string): string {
-  switch (status) {
-    case "completed":   return `${title} downloaded. Tap to remove.`;
-    case "downloading": return `Downloading ${title}. Tap to pause.`;
-    case "paused":      return `${title} paused. Tap to resume.`;
-    case "queued":      return `${title} queued.`;
-    case "failed":      return `${title} failed. Tap to retry.`;
-    default:            return `Download ${title}`;
-  }
-}
-
 const styles = StyleSheet.create({
   button: {
-    alignItems: "center",
-    justifyContent: "center",
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  pressed: { opacity: 0.6 },
-  ringCenter: {
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
+  buttonPressed: {
+    opacity: 0.6,
   },
-  pauseBar: {
-    backgroundColor: Colors.primary,
-    borderRadius: 2,
+  progressContainer: {
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  progressPct: {
-    color: Colors.primary,
-    fontFamily: "Inter_600SemiBold",
-    marginTop: 1,
-    lineHeight: 10,
-    position: "absolute",
-    bottom: -10,
+  progressBar: {
+    position: 'absolute',
+    bottom: -4,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 1,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: Colors.accent.primary,
+    borderRadius: 1,
   },
 });

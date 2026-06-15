@@ -386,6 +386,7 @@ function useArtistScreenView() {
   }, [stickyOpacity]);
 
   // ── Render helpers ──────────────────────────────────────────────────────────
+  const songsQueueKey = useMemo(() => songs.map((song) => song.id).join("|"), [songs]);
 
   // ── Loading / error states ──────────────────────────────────────────────────
 
@@ -486,7 +487,7 @@ function useArtistScreenView() {
           ) : songs.length > 0 ? (
             <>
               {songs.map((song, i) => (
-                <SongRow key={`${song.id}-${i}`} song={song} index={i} queue={songs} />
+                <SongRow key={`${song.id}-${i}`} song={song} index={i} queue={songs} queueKey={songsQueueKey} />
               ))}
               {/* Load More button */}
               {hasMore ? (

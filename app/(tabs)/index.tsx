@@ -4,7 +4,6 @@ import {
   Text,
   ActivityIndicator,
   Pressable,
-  ScrollView,
   FlatList,
   StyleSheet,
   Platform,
@@ -50,10 +49,12 @@ import {
 import { getDailyNewReleaseSongs } from "@/lib/newReleaseSongService";
 import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistService";
 import {
-  getYouTubeMusicTrending,
   clearYouTubeMusicCache,
+  getHomeYouTubeMusicCategories,
   getYouTubeMusicTrendingPlaylists,
+  YouTubeMusicHomeCategoryData,
   YouTubeMusicPlaylistCard,
+  type YouTubeMusicPlaylistKind,
 } from "@/lib/youtubeMusicService";
 import HomeSkeletonLoader from "@/components/HomeSkeletonLoader";
 import OfflineScreen from "@/components/OfflineScreen";
@@ -69,8 +70,9 @@ import AppPromotionModal from "@/components/AppPromotionModal";
 import PromotionBanner from "@/components/PromotionBanner";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { filterMap, forEachFiltered, mapFilter } from "@/lib/arrayUtils";
-import { DEFAULT_HOME_HERO_CONFIG, subscribeHomeHeroConfig, type HomeHeroVideoItem } from "@/lib/homeHeroConfig";
+import { DISABLED_HOME_HERO_CONFIG, subscribeHomeHeroConfig, type HomeHeroVideoItem } from "@/lib/homeHeroConfig";
 import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
+import { logger } from "@/lib/logger";
 
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 
@@ -81,11 +83,31 @@ type HomeSection =
   | { id: "public-playlists"; type: "public-playlists" }
   | { id: "featured-artists"; type: "featured-artists" }
   | { id: string; type: "recommendation"; data: RecommendationSection }
-  | { id: string; type: "category"; data: HomeJioSaavnCategoryData };
+  | { id: string; type: "category"; data: HomeCategoryData };
+
+type HomeContentSource = "jiosaavn" | "youtube";
+
+type HomeCategoryItem = {
+  id: string;
+  name: string;
+  image: JioSaavnImage[];
+  songCount: number;
+  source: HomeContentSource;
+  imageUrl?: string;
+  url?: string;
+  playlistKind?: YouTubeMusicPlaylistKind;
+  playlistAuthor?: string;
+};
+
+type HomeCategoryData = {
+  id: string;
+  title: string;
+  results: HomeCategoryItem[];
+};
 
 type HomeSessionCache = {
   hydrated: boolean;
-  categories: HomeJioSaavnCategoryData[];
+  categories: HomeCategoryData[];
   publicPlaylists: FirestorePlaylist[];
   recentlyPlayed: RecentlyPlayedItem[];
   featuredArtists: ArtistCard[];
@@ -166,9 +188,17 @@ const HOME_HERO_POSTER_TRANSFORM = "so_2,c_crop,g_center,w_1440,h_810/c_fill,w_1
 const INITIAL_CATEGORY_LIMIT = 10;
 const REFRESH_CATEGORY_LIMIT = 12;
 const INITIAL_PUBLIC_LIMIT = 100; // Increased to show all playlists
+const INLINE_AD_SCROLL_GATE_Y = 1800;
+const INLINE_AD_LOAD_DELAY_MS = 6000;
+const HOME_IMAGE_TRANSITION_MS = 0;
+const HOME_ROW_INITIAL_RENDER_COUNT = 3;
+const HOME_ROW_WINDOW_SIZE = 3;
+const HOME_VERTICAL_INITIAL_RENDER_COUNT = 2;
+const HOME_VERTICAL_MAX_RENDER_BATCH = 1;
+const HOME_VERTICAL_WINDOW_SIZE = 3;
 
 function hasHomeContent(source: {
-  categories: HomeJioSaavnCategoryData[];
+  categories: HomeCategoryData[];
   publicPlaylists: FirestorePlaylist[];
   recentlyPlayed: RecentlyPlayedItem[];
   newReleaseSongs: Song[];
@@ -192,27 +222,181 @@ function getThumbImageUrl(images: JioSaavnImage[] | undefined): string {
   return getBestImageUrl(images);
 }
 
+function getHomeCategoryItemImageUrl(item: HomeCategoryItem): string {
+  return item.imageUrl || getThumbImageUrl(item.image);
+}
+
+function getHomeCategorySourceLabel(item: HomeCategoryItem): string {
+  if (item.source !== "youtube") return "JioSaavn";
+
+  if (item.playlistKind === "chart") return "YouTube Chart";
+  if (item.playlistKind === "editorial" || item.playlistKind === "featured") return "YouTube Editorial";
+  return "YouTube Community";
+}
+
 function normalizeId(value: unknown): string {
   if (typeof value !== "string") return "";
   return value.trim();
 }
 
-function dedupeJioPlaylistsById(
-  items: HomeJioSaavnCategoryData["results"],
+function dedupeHomeCategoryItemsBySource(
+  items: HomeCategoryItem[],
   limit: number
-): HomeJioSaavnCategoryData["results"] {
+): HomeCategoryItem[] {
   const seen = new Set<string>();
-  const unique: HomeJioSaavnCategoryData["results"] = [];
+  const unique: HomeCategoryItem[] = [];
 
   for (const item of items) {
     const id = normalizeId(item?.id);
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
+    const source = item?.source || "jiosaavn";
+    const key = `${source}:${id}`;
+    if (!id || seen.has(key)) continue;
+    seen.add(key);
     unique.push(item);
     if (unique.length >= limit) break;
   }
 
   return unique;
+}
+
+function toJioSaavnHomeCategoryItem(item: HomeJioSaavnCategoryData["results"][number]): HomeCategoryItem {
+  return {
+    id: item.id,
+    name: item.name,
+    image: item.image,
+    songCount: Number(item.songCount || 0),
+    source: "jiosaavn",
+  };
+}
+
+function toYouTubeHomeCategoryItem(item: YouTubeMusicPlaylistCard): HomeCategoryItem {
+  return {
+    id: item.id,
+    name: item.name,
+    image: item.imageUrl ? [{ quality: "500x500", url: item.imageUrl }] : [],
+    imageUrl: item.imageUrl,
+    songCount: Number(item.songCount || 0),
+    source: "youtube",
+    playlistKind: item.kind,
+    playlistAuthor: item.author,
+  };
+}
+
+function interleaveHomeCategoryItems(
+  jioItems: HomeCategoryItem[],
+  youtubeItems: HomeCategoryItem[],
+  limit: number
+): HomeCategoryItem[] {
+  const merged: HomeCategoryItem[] = [];
+  const seen = new Set<string>();
+
+  const append = (item: HomeCategoryItem | undefined) => {
+    if (!item || merged.length >= limit) return;
+    const id = normalizeId(item.id);
+    if (!id) return;
+    const key = `${item.source}:${id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(item);
+  };
+
+  const longest = Math.max(jioItems.length, youtubeItems.length);
+  for (let index = 0; index < longest && merged.length < limit; index += 1) {
+    append(jioItems[index]);
+    append(youtubeItems[index]);
+  }
+
+  if (merged.length < limit) {
+    [...jioItems, ...youtubeItems].forEach(append);
+  }
+
+  return merged;
+}
+
+function mergeHomeCategorySources(
+  jioCategories: HomeJioSaavnCategoryData[],
+  youtubeCategories: YouTubeMusicHomeCategoryData[],
+  limit: number
+): HomeCategoryData[] {
+  const rowsById = new Map<string, {
+    id: string;
+    title: string;
+    jio: HomeCategoryItem[];
+    youtube: HomeCategoryItem[];
+  }>();
+
+  const ensureRow = (id: string, title: string) => {
+    const existing = rowsById.get(id);
+    if (existing) {
+      if (!existing.title && title) existing.title = title;
+      return existing;
+    }
+    const row = { id, title, jio: [] as HomeCategoryItem[], youtube: [] as HomeCategoryItem[] };
+    rowsById.set(id, row);
+    return row;
+  };
+
+  jioCategories.forEach((category) => {
+    const row = ensureRow(category.id, HOME_JIOSAAVN_TITLES[category.id] ?? category.title);
+    row.jio = category.results.map(toJioSaavnHomeCategoryItem);
+  });
+
+  youtubeCategories.forEach((category) => {
+    const row = ensureRow(category.id, HOME_JIOSAAVN_TITLES[category.id] ?? category.title);
+    row.youtube = category.results.map(toYouTubeHomeCategoryItem);
+  });
+
+  const orderedIds = [
+    ...HOME_JIOSAAVN_SECTION_ORDER,
+    ...jioCategories.map((category) => category.id),
+    ...youtubeCategories.map((category) => category.id),
+  ];
+  const seenRows = new Set<string>();
+
+  return mapFilter(
+    orderedIds,
+    (id) => {
+      if (seenRows.has(id)) return null;
+      seenRows.add(id);
+
+      const row = rowsById.get(id);
+      if (!row) return null;
+      const results = interleaveHomeCategoryItems(row.jio, row.youtube, limit);
+      if (results.length === 0) return null;
+
+      return {
+        id: row.id,
+        title: row.title,
+        results,
+      };
+    },
+    (category): category is HomeCategoryData => Boolean(category)
+  );
+}
+
+function getJioSaavnPrefetchCategories(categories: HomeCategoryData[]): HomeJioSaavnCategoryData[] {
+  return mapFilter(
+    categories,
+    (category) => {
+      const results = mapFilter(
+        category.results,
+        (item) => (
+          item.source === "jiosaavn"
+            ? {
+                id: item.id,
+                name: item.name,
+                image: item.image,
+                songCount: item.songCount,
+              }
+            : null
+        ),
+        (item): item is HomeJioSaavnCategoryData["results"][number] => Boolean(item)
+      );
+
+      return results.length > 0 ? { id: category.id, title: category.title, results } : null;
+    },
+    (category): category is HomeJioSaavnCategoryData => Boolean(category)
+  );
 }
 
 function dedupeFirestorePlaylistsById(items: FirestorePlaylist[], limit: number): FirestorePlaylist[] {
@@ -273,6 +457,49 @@ function withPromiseTimeout<T>(promise: Promise<T>, timeoutMs: number, message: 
         reject(error);
       });
   });
+}
+
+async function getHomeMixedCategories(options: {
+  forceRefresh: boolean;
+  limitPerCategory: number;
+  realtime: boolean;
+  categoryIds?: string[];
+  youtubeTimeoutMs?: number;
+}): Promise<HomeCategoryData[]> {
+  const youtubeLimit = Math.max(3, Math.ceil(options.limitPerCategory / 2));
+  const youtubeTimeoutMs = options.youtubeTimeoutMs ?? 4500;
+  const jioPromise = getHomeJioSaavnCategories({
+    forceRefresh: options.forceRefresh,
+    limitPerCategory: options.limitPerCategory,
+    realtime: options.realtime,
+    categoryIds: options.categoryIds,
+  });
+  const youtubePromise = withPromiseTimeout(
+    getHomeYouTubeMusicCategories({
+      limitPerCategory: youtubeLimit,
+      categoryIds: options.categoryIds,
+    }),
+    youtubeTimeoutMs,
+    "Home YouTube Music categories timeout"
+  );
+
+  const [jioResult, youtubeResult] = await Promise.allSettled([jioPromise, youtubePromise]);
+  const jioCategories = jioResult.status === "fulfilled" ? jioResult.value : [];
+  const youtubeCategories = youtubeResult.status === "fulfilled" ? youtubeResult.value : [];
+
+  if (jioResult.status === "rejected") {
+    logger.warn("[Home] JioSaavn category fetch failed:", jioResult.reason);
+  }
+  if (youtubeResult.status === "rejected") {
+    logger.warn("[Home] YouTube Music category fetch failed:", youtubeResult.reason);
+  }
+
+  const merged = mergeHomeCategorySources(jioCategories, youtubeCategories, options.limitPerCategory);
+  if (merged.length === 0 && jioResult.status === "rejected" && youtubeResult.status === "rejected") {
+    throw new Error("Home music categories unavailable");
+  }
+
+  return merged;
 }
 
 function withCloudinaryHomeVideoTransform(url: string, transform: string, forceJpg = false): string {
@@ -494,7 +721,7 @@ function HomeHeroVideoCard({
         setAd(nativeAd);
         setAdLoaded(true);
       } catch (err) {
-        console.warn("Home Hero video ad failed to load:", err);
+        logger.warn("Home Hero video ad failed to load:", err);
         if (active) {
           shouldDestroyLateAd = true;
           setAdUnavailable(true);
@@ -701,12 +928,17 @@ function useHomeScreenInnerView() {
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const { push: routerPush } = useRouter();
-  const { isAuthenticated } = useAuth();
+  const {
+    loading: authLoading,
+    isAuthenticated,
+    isGuest,
+    firebaseUser,
+  } = useAuth();
   const { playSong, currentSong, isPlaying } = usePlayerBrowse();
   const currentSongId = currentSong?.id || null;
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const videoSafeTopInset = Platform.OS === "web" ? 0 : insets.top;
-  const [homeHeroConfig, setHomeHeroConfig] = useState(DEFAULT_HOME_HERO_CONFIG);
+  const [homeHeroConfig, setHomeHeroConfig] = useState(DISABLED_HOME_HERO_CONFIG);
   const [unavailableHomeAdItemIds, setUnavailableHomeAdItemIds] = useState<string[]>([]);
   const homeHeroVideos = useMemo(
     () => (
@@ -733,12 +965,14 @@ function useHomeScreenInnerView() {
   const [isHomeScreenFocused, setIsHomeScreenFocused] = useState(true);
   const [isHomeHeroOnScreen, setIsHomeHeroOnScreen] = useState(true);
   const [isAppStateActive, setIsAppStateActive] = useState(() => AppState.currentState === "active");
+  const [shouldRenderInlineAd, setShouldRenderInlineAd] = useState(false);
   const visibleActiveHomeVideoIndex = homeHeroVideos.length === 0
     ? 0
     : Math.min(activeHomeVideoIndex, homeHeroVideos.length - 1);
   const homeVideoListRef = useRef<FlatList<HomeHeroVideoItem> | null>(null);
   const homeHeroVideoCountRef = useRef(homeHeroVideos.length);
   const latestHomeScrollYRef = useRef(0);
+  const inlineAdUnlockedRef = useRef(false);
   const liveVideoVerticalVisibilityCutoff = useMemo(
     () => Math.max(24, liveVideoHeight - 96),
     [liveVideoHeight]
@@ -808,7 +1042,7 @@ function useHomeScreenInnerView() {
   const [recentlyPlayed, setRecentlyPlayed] = useState<RecentlyPlayedItem[]>(
     HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.recentlyPlayed : []
   );
-  const [categories, setCategories] = useState<HomeJioSaavnCategoryData[]>(
+  const [categories, setCategories] = useState<HomeCategoryData[]>(
     HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.categories : []
   );
   const [publicPlaylists, setPublicPlaylists] = useState<FirestorePlaylist[]>(
@@ -840,6 +1074,11 @@ function useHomeScreenInnerView() {
       const yOffset = event.nativeEvent.contentOffset.y;
       latestHomeScrollYRef.current = yOffset;
       handleHomeScroll(event);
+
+      if (!inlineAdUnlockedRef.current && yOffset > INLINE_AD_SCROLL_GATE_Y) {
+        inlineAdUnlockedRef.current = true;
+        setShouldRenderInlineAd(true);
+      }
 
       const shouldKeepHeroPlaying = homeHeroVideos.length > 0 && yOffset < liveVideoVerticalVisibilityCutoff;
       setIsHomeHeroOnScreen((current) => (
@@ -879,7 +1118,12 @@ function useHomeScreenInnerView() {
     cancelPlaylistPrefetchRef.current = null;
   }, []);
 
-  const shouldUseRecommendationFeed = isAuthenticated && recommendationFeedEnabled();
+  const shouldUseRecommendationFeed =
+    !authLoading &&
+    isAuthenticated &&
+    !isGuest &&
+    Boolean(firebaseUser) &&
+    recommendationFeedEnabled();
 
   const loadRecommendationFeed = useCallback(async (options?: { forceRefresh?: boolean }) => {
     if (!shouldUseRecommendationFeed) {
@@ -895,7 +1139,7 @@ function useHomeScreenInnerView() {
     setHasRecommendationFeedFailed(false);
     try {
       if (recommendationLoadId !== latestRecommendationLoadIdRef.current) return;
-      const feed = await getRecommendationHomeFeed(options);
+      const feed = await getRecommendationHomeFeed({ ...options, authUser: firebaseUser });
       const isLatestRecommendationLoad = recommendationLoadId === latestRecommendationLoadIdRef.current;
       if (!isLatestRecommendationLoad) return;
       setRecommendationFeed(dedupeRecommendationFeed(feed));
@@ -908,18 +1152,21 @@ function useHomeScreenInnerView() {
         setIsRecommendationFeedLoading(false);
       }
     }
-  }, [shouldUseRecommendationFeed]);
+  }, [firebaseUser, shouldUseRecommendationFeed]);
 
   useEffect(() => {
     void loadRecommendationFeed();
   }, [loadRecommendationFeed]);
 
-  const schedulePlaylistPrefetch = useCallback((categoryData: HomeJioSaavnCategoryData[], delayMs: number) => {
+  const schedulePlaylistPrefetch = useCallback((categoryData: HomeCategoryData[], delayMs: number) => {
     cancelScheduledPlaylistPrefetch();
 
     prefetchStartTimerRef.current = setTimeout(() => {
       prefetchStartTimerRef.current = null;
-      cancelPlaylistPrefetchRef.current = prefetchVisiblePlaylists(categoryData, 3);
+      cancelPlaylistPrefetchRef.current = prefetchVisiblePlaylists(
+        getJioSaavnPrefetchCategories(categoryData),
+        3
+      );
     }, delayMs);
   }, [cancelScheduledPlaylistPrefetch]);
 
@@ -986,7 +1233,7 @@ function useHomeScreenInnerView() {
         );
 
         const youtubeTrendingPromise = getYouTubeMusicTrendingPlaylists("IN").catch((err) => {
-          console.warn("[Home] YouTube trending fetch failed:", err);
+          logger.warn("[Home] YouTube trending fetch failed:", err);
           return [] as YouTubeMusicPlaylistCard[];
         });
 
@@ -1059,7 +1306,7 @@ function useHomeScreenInnerView() {
           })
           .catch((reason) => ({ status: "rejected" as const, reason }));
 
-        const applyCategorySnapshot = (categoryData: HomeJioSaavnCategoryData[]) => {
+        const applyCategorySnapshot = (categoryData: HomeCategoryData[]) => {
           const validCategories = categoryData.filter((cat) => cat.results.length > 0);
           const hasPreviousCategories = HOME_SESSION_CACHE.categories.length > 0;
           const shouldReplaceCategories = validCategories.length > 0 || !hasPreviousCategories;
@@ -1078,16 +1325,17 @@ function useHomeScreenInnerView() {
         };
 
         const categoryResultPromise = (async () => {
-          let partialCategories: HomeJioSaavnCategoryData[] = [];
+          let partialCategories: HomeCategoryData[] = [];
           let hasPartialCategories = false;
 
           try {
             const priorityCategoryData = await withPromiseTimeout(
-              getHomeJioSaavnCategories({
+              getHomeMixedCategories({
                 forceRefresh,
                 limitPerCategory: Math.min(limitPerCategory, 8),
                 realtime: realtimeRefresh,
                 categoryIds: [...HOME_PRIORITY_CATEGORY_IDS],
+                youtubeTimeoutMs: 3600,
               }),
               HOME_PRIORITY_CATEGORY_TIMEOUT_MS,
               "Home priority categories timeout"
@@ -1105,10 +1353,11 @@ function useHomeScreenInnerView() {
 
           try {
             const fullCategoryData = await withPromiseTimeout(
-              getHomeJioSaavnCategories({
+              getHomeMixedCategories({
                 forceRefresh,
                 limitPerCategory,
                 realtime: realtimeRefresh,
+                youtubeTimeoutMs: 5200,
               }),
               HOME_CATEGORY_FETCH_TIMEOUT_MS,
               "Home categories timeout"
@@ -1145,7 +1394,7 @@ function useHomeScreenInnerView() {
           })
           .catch((reason) => ({ status: "rejected" as const, reason }));
 
-        const [publicPlaylistsResult, categoryResult, newReleaseSongsResult, youtubeTrendingResult] = await Promise.all([
+        const [publicPlaylistsResult, categoryResult, newReleaseSongsResult] = await Promise.all([
           publicPlaylistsResultPromise,
           categoryResultPromise,
           newReleaseSongsResultPromise,
@@ -1385,8 +1634,8 @@ function useHomeScreenInnerView() {
     return cancelScheduledPlaylistPrefetch;
   }, [cancelScheduledPlaylistPrefetch]);
 
-  const orderedHomeCategories = useMemo<HomeJioSaavnCategoryData[]>(() => {
-    const categoryById = new Map<string, HomeJioSaavnCategoryData>();
+  const orderedHomeCategories = useMemo<HomeCategoryData[]>(() => {
+    const categoryById = new Map<string, HomeCategoryData>();
     categories.forEach((cat) => categoryById.set(cat.id, cat));
 
     // Preferred order first, then any extras the service returned
@@ -1394,7 +1643,7 @@ function useHomeScreenInnerView() {
         const cat = categoryById.get(id);
         if (!cat || cat.results.length === 0) return null;
         return { ...cat, title: HOME_JIOSAAVN_TITLES[id] ?? cat.title };
-      }, (cat): cat is HomeJioSaavnCategoryData => Boolean(cat));
+      }, (cat): cat is HomeCategoryData => Boolean(cat));
 
     const preferredIds = new Set(preferred.map((c) => c.id));
     const extras = filterMap(categories, (c) => !preferredIds.has(c.id) && c.results.length > 0, (c) => ({ ...c, title: HOME_JIOSAAVN_TITLES[c.id] ?? c.title }));
@@ -1405,7 +1654,7 @@ function useHomeScreenInnerView() {
   const allCategoryRows = useMemo(() => {
     return mapFilter(orderedHomeCategories, (cat) => ({
         ...cat,
-        results: dedupeJioPlaylistsById(cat.results, MAX_ROW_ITEMS),
+        results: dedupeHomeCategoryItemsBySource(cat.results, MAX_ROW_ITEMS),
       }), (cat) => cat.results.length > 0);
   }, [orderedHomeCategories]);
 
@@ -1421,6 +1670,34 @@ function useHomeScreenInnerView() {
 
   const sections = useMemo<HomeSection[]>(() => {
     const data: HomeSection[] = [];
+    const appendCategorySections = () => {
+      const rowById = new Map(allCategoryRows.map((cat) => [cat.id, cat]));
+
+      HOME_PRIORITY_CATEGORY_IDS.forEach((priorityId) => {
+        const existing = rowById.get(priorityId);
+        if (existing) {
+          data.push({ id: `category-${existing.id}`, type: "category", data: existing });
+          return;
+        }
+        if (isLoadingCategories) {
+          data.push({
+            id: `category-loading-${priorityId}`,
+            type: "category",
+            data: {
+              id: priorityId,
+              title: HOME_JIOSAAVN_TITLES[priorityId] ?? priorityId,
+              results: [],
+            },
+          });
+        }
+      });
+
+      forEachFiltered(
+        allCategoryRows,
+        (cat) => !HOME_PRIORITY_CATEGORY_IDS.includes(cat.id as (typeof HOME_PRIORITY_CATEGORY_IDS)[number]),
+        (cat) => data.push({ id: `category-${cat.id}`, type: "category", data: cat })
+      );
+    };
 
     if (shouldUseRecommendationFeed && recommendationSections.length > 0) {
       if (featuredArtists.length > 0) {
@@ -1438,6 +1715,10 @@ function useHomeScreenInnerView() {
       recommendationSections.forEach((section) => {
         data.push({ id: `recommendation-${section.id}`, type: "recommendation", data: section });
       });
+      appendCategorySections();
+      if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS || isLoadingPublicPlaylists) {
+        data.push({ id: "public-playlists", type: "public-playlists" });
+      }
       return data;
     }
 
@@ -1473,28 +1754,7 @@ function useHomeScreenInnerView() {
     }
 
     // 4. Stable category slots: priority rows are always reserved while loading.
-    const rowById = new Map(allCategoryRows.map((cat) => [cat.id, cat]));
-
-    HOME_PRIORITY_CATEGORY_IDS.forEach((priorityId) => {
-      const existing = rowById.get(priorityId);
-      if (existing) {
-        data.push({ id: `category-${existing.id}`, type: "category", data: existing });
-        return;
-      }
-      if (isLoadingCategories) {
-        data.push({
-          id: `category-loading-${priorityId}`,
-          type: "category",
-          data: {
-            id: priorityId,
-            title: HOME_JIOSAAVN_TITLES[priorityId] ?? priorityId,
-            results: [],
-          },
-        });
-      }
-    });
-
-    forEachFiltered(allCategoryRows, (cat) => !HOME_PRIORITY_CATEGORY_IDS.includes(cat.id as (typeof HOME_PRIORITY_CATEGORY_IDS)[number]), (cat) => data.push({ id: `category-${cat.id}`, type: "category", data: cat }));
+    appendCategorySections();
 
     // 5. Made for You — bottom
     if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS || isLoadingPublicPlaylists) {
@@ -1742,7 +2002,7 @@ function useHomeScreenInnerView() {
           source={{ uri: item.imageUrl }}
           style={styles.recentImage}
           contentFit="cover"
-          transition={80}
+          transition={HOME_IMAGE_TRANSITION_MS}
           cachePolicy="memory-disk"
           recyclingKey={`recent-${item.id}`}
         />
@@ -1780,7 +2040,7 @@ function useHomeScreenInnerView() {
             source={{ uri: item.imageUrl || undefined }}
             style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
             contentFit="contain"
-            transition={80}
+            transition={HOME_IMAGE_TRANSITION_MS}
             cachePolicy="memory-disk"
             recyclingKey={`public-${item.id}`}
           />
@@ -1819,7 +2079,7 @@ function useHomeScreenInnerView() {
               source={{ uri: img || undefined }}
               style={styles.artistAvatar}
               contentFit="cover"
-              transition={80}
+              transition={HOME_IMAGE_TRANSITION_MS}
               cachePolicy="memory-disk"
               recyclingKey={`artist-${item.id}`}
             />
@@ -1838,25 +2098,39 @@ function useHomeScreenInnerView() {
 
   const getCategoryPlaylistElement = useCallback(
     (categoryId: string, categoryTitle: string) =>
-      function CategoryPlaylistCard({ item }: { item: HomeJioSaavnCategoryData["results"][number] }) {
+      function CategoryPlaylistCard({ item }: { item: HomeCategoryData["results"][number] }) {
+        const imageUrl = getHomeCategoryItemImageUrl(item);
+        const sourceLabel = getHomeCategorySourceLabel(item);
+
         return (
           <Pressable
             style={({ pressed }) => [styles.rectCard, pressed && styles.cardPressed]}
-            onPress={() =>
+            onPress={() => {
+              if (item.source === "youtube") {
+                openYouTubeMusicPlaylist({
+                  id: item.id,
+                  name: item.name,
+                  imageUrl,
+                  songCount: Number(item.songCount || 0),
+                });
+                return;
+              }
+
               openJioSaavnPlaylist({
                 id: item.id,
                 name: item.name,
-                imageUrl: getThumbImageUrl(item.image),
+                imageUrl,
                 songCount: Number(item.songCount || 0),
-              })
-            }
+                url: item.url,
+              });
+            }}
           >
             <View style={styles.rectCardImageWrap}>
               <Image
-                source={{ uri: getThumbImageUrl(item.image) }}
+                source={{ uri: imageUrl }}
                 style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
                 contentFit="contain"
-                transition={80}
+                transition={HOME_IMAGE_TRANSITION_MS}
                 cachePolicy="memory-disk"
                 recyclingKey={`${categoryId}-${item.id}`}
               />
@@ -1868,12 +2142,12 @@ function useHomeScreenInnerView() {
               {item.name}
             </Text>
             <Text style={styles.rectCardMeta} numberOfLines={1}>
-              {item.songCount > 0 ? `${item.songCount} songs` : categoryTitle}
+              {item.songCount > 0 ? `${sourceLabel} - ${item.songCount} songs` : sourceLabel || categoryTitle}
             </Text>
           </Pressable>
         );
       },
-    [openJioSaavnPlaylist]
+    [openJioSaavnPlaylist, openYouTubeMusicPlaylist]
   );
 
   const renderRecommendationPlaylist = useCallback(
@@ -1887,7 +2161,7 @@ function useHomeScreenInnerView() {
             source={{ uri: item.imageUrl || undefined }}
             style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
             contentFit="contain"
-            transition={80}
+            transition={HOME_IMAGE_TRANSITION_MS}
             cachePolicy="memory-disk"
             recyclingKey={`recommendation-${item.id}`}
           />
@@ -1919,7 +2193,7 @@ function useHomeScreenInnerView() {
             source={{ uri: item.coverUrl || undefined }}
             style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
             contentFit="contain"
-            transition={80}
+            transition={HOME_IMAGE_TRANSITION_MS}
             cachePolicy="memory-disk"
             recyclingKey={`new-release-song-${item.id}`}
           />
@@ -1956,7 +2230,7 @@ function useHomeScreenInnerView() {
             source={{ uri: item.imageUrl || undefined }}
             style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
             contentFit="cover"
-            transition={80}
+            transition={HOME_IMAGE_TRANSITION_MS}
             cachePolicy="memory-disk"
             recyclingKey={`yt-trending-${item.id}`}
           />
@@ -2278,9 +2552,9 @@ function useHomeScreenInnerView() {
                 ItemSeparatorComponent={renderRowSeparator}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.rowContent}
-                initialNumToRender={4}
-                maxToRenderPerBatch={4}
-                windowSize={5}
+                initialNumToRender={HOME_ROW_INITIAL_RENDER_COUNT}
+                maxToRenderPerBatch={HOME_ROW_INITIAL_RENDER_COUNT}
+                windowSize={HOME_ROW_WINDOW_SIZE}
                 removeClippedSubviews={Platform.OS === "android"}
               />
             </View>
@@ -2299,9 +2573,9 @@ function useHomeScreenInnerView() {
                   ItemSeparatorComponent={renderRowSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
-                  initialNumToRender={5}
-                  maxToRenderPerBatch={5}
-                  windowSize={5}
+                  initialNumToRender={HOME_ROW_INITIAL_RENDER_COUNT}
+                  maxToRenderPerBatch={HOME_ROW_INITIAL_RENDER_COUNT}
+                  windowSize={HOME_ROW_WINDOW_SIZE}
                   removeClippedSubviews={Platform.OS === "android"}
                 />
               ) : (
@@ -2332,9 +2606,9 @@ function useHomeScreenInnerView() {
                   ItemSeparatorComponent={renderRowSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
-                  initialNumToRender={4}
-                  maxToRenderPerBatch={4}
-                  windowSize={5}
+                  initialNumToRender={HOME_ROW_INITIAL_RENDER_COUNT}
+                  maxToRenderPerBatch={HOME_ROW_INITIAL_RENDER_COUNT}
+                  windowSize={HOME_ROW_WINDOW_SIZE}
                   removeClippedSubviews={Platform.OS === "android"}
                 />
               ) : (
@@ -2365,9 +2639,9 @@ function useHomeScreenInnerView() {
                   ItemSeparatorComponent={renderRowSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
-                  initialNumToRender={4}
-                  maxToRenderPerBatch={4}
-                  windowSize={5}
+                  initialNumToRender={HOME_ROW_INITIAL_RENDER_COUNT}
+                  maxToRenderPerBatch={HOME_ROW_INITIAL_RENDER_COUNT}
+                  windowSize={HOME_ROW_WINDOW_SIZE}
                   removeClippedSubviews={Platform.OS === "android"}
                 />
               ) : (
@@ -2397,9 +2671,9 @@ function useHomeScreenInnerView() {
                 ItemSeparatorComponent={renderRowSeparator}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.rowContent}
-                initialNumToRender={5}
-                maxToRenderPerBatch={5}
-                windowSize={5}
+                initialNumToRender={HOME_ROW_INITIAL_RENDER_COUNT}
+                maxToRenderPerBatch={HOME_ROW_INITIAL_RENDER_COUNT}
+                windowSize={HOME_ROW_WINDOW_SIZE}
                 removeClippedSubviews={Platform.OS === "android"}
               />
             </View>
@@ -2418,9 +2692,9 @@ function useHomeScreenInnerView() {
                   ItemSeparatorComponent={renderRowSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
-                  initialNumToRender={4}
-                  maxToRenderPerBatch={4}
-                  windowSize={5}
+                  initialNumToRender={HOME_ROW_INITIAL_RENDER_COUNT}
+                  maxToRenderPerBatch={HOME_ROW_INITIAL_RENDER_COUNT}
+                  windowSize={HOME_ROW_WINDOW_SIZE}
                   removeClippedSubviews={Platform.OS === "android"}
                 />
               ) : (
@@ -2450,9 +2724,9 @@ function useHomeScreenInnerView() {
                 ItemSeparatorComponent={renderRowSeparator}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.rowContent}
-                initialNumToRender={4}
-                maxToRenderPerBatch={4}
-                windowSize={5}
+                initialNumToRender={HOME_ROW_INITIAL_RENDER_COUNT}
+                maxToRenderPerBatch={HOME_ROW_INITIAL_RENDER_COUNT}
+                windowSize={HOME_ROW_WINDOW_SIZE}
                 removeClippedSubviews={Platform.OS === "android"}
               />
             </View>
@@ -2498,6 +2772,18 @@ function useHomeScreenInnerView() {
   );
 
   const shouldShowSkeleton = (loading || isRecommendationFeedLoading) && sections.length === 0;
+  const inlineAdSectionIndex = useMemo(() => Math.min(5, Math.max(0, sections.length - 1)), [sections.length]);
+  const renderHomeSection = useCallback(
+    ({ item, index }: { item: HomeSection; index: number }) => (
+      <>
+        {getSectionElement({ item })}
+        {shouldRenderInlineAd && index === inlineAdSectionIndex ? (
+          <AdMobBanner loadDelayMs={INLINE_AD_LOAD_DELAY_MS} />
+        ) : null}
+      </>
+    ),
+    [getSectionElement, inlineAdSectionIndex, shouldRenderInlineAd]
+  );
 
   // Show full offline screen only when there's no cached content to display
   if (!isOnline && !isChecking && sections.length === 0) {
@@ -2520,26 +2806,30 @@ function useHomeScreenInnerView() {
     <View style={styles.container}>
       {/* Slim banner when offline but cached content is available */}
       {!isOnline && <OfflineBanner />}
-      <ScrollView
+      <FlatList
+        data={sections}
+        keyExtractor={(section) => section.id}
+        renderItem={renderHomeSection}
         refreshControl={refreshControlElement}
         style={styles.scrollView}
         contentContainerStyle={[styles.scrollContent, sections.length === 0 && styles.scrollContentEmpty]}
         showsVerticalScrollIndicator={false}
         onScroll={handleHomeScrollEvent}
         scrollEventThrottle={16}
-      >
-        {getLiveVideoElement()}
-        <PromotionBanner />
-        <AppPromotionModal />
-        {sections.length === 0
-          ? renderEmptyState()
-          : sections.map((section, index) => (
-              <React.Fragment key={section.id}>
-                {getSectionElement({ item: section })}
-                {index === 0 && <AdMobBanner />}
-              </React.Fragment>
-            ))}
-      </ScrollView>
+        initialNumToRender={HOME_VERTICAL_INITIAL_RENDER_COUNT}
+        maxToRenderPerBatch={HOME_VERTICAL_MAX_RENDER_BATCH}
+        updateCellsBatchingPeriod={50}
+        windowSize={HOME_VERTICAL_WINDOW_SIZE}
+        removeClippedSubviews={Platform.OS === "android"}
+        ListHeaderComponent={
+          <>
+            {getLiveVideoElement()}
+            <PromotionBanner />
+            <AppPromotionModal />
+          </>
+        }
+        ListEmptyComponent={renderEmptyState}
+      />
       {getTopHeaderElement()}
       <LinearGradient
         pointerEvents="none"

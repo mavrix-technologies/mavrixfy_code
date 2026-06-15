@@ -109,11 +109,16 @@ export default function LikedSongsScreen() {
     }
   }, [songs, isPlayingFromLikedSongs, playSong, isShuffled, toggleShuffle]);
 
+  const filteredSongsQueueKey = useMemo(
+    () => filteredSongs.map((song) => song.id).join("|"),
+    [filteredSongs]
+  );
+
   const renderSong = useCallback(
     ({ item }: { item: Song; index: number }) => {
-      return <SongRow song={item} queue={filteredSongs} horizontalPadding={8} />;
+      return <SongRow song={item} queue={filteredSongs} queueKey={filteredSongsQueueKey} horizontalPadding={8} />;
     },
-    [filteredSongs]
+    [filteredSongs, filteredSongsQueueKey]
   );
 
   const headerMeta = songs.length > 0 ? `${songs.length} songs` : "No songs";

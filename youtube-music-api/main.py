@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 from typing import Optional, List, Any
 import logging
+import yt_dlp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -150,6 +151,58 @@ def get_home(limit: int = Query(default=3, ge=1, le=10)):
         if isinstance(shelf, dict):
             shelves.append(shelf)
     return shelves
+
+
+@app.get("/download/{videoId}")
+def get_download_url(videoId: str):
+    """
+    Get direct download URL for offline playback
+    Returns audio stream URL that can be downloaded to device
+    """
+    try:
+        url = f"https://www.youtube.com/watch?v={videoId}"
+        
+        ydl_opts = {
+            'format': 'bestaudio[ext=m4a]/bestaudio',
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            
+            if not info:
+                raise HTTPException(status_code=404, detail="Video not found")
+            
+            # Get the direct download URL
+            download_url = info.get('url')
+            
+            if not download_url:
+                raise HTTPException(status_code=500, detail="Could not extract download URL")
+            
+            return {
+                "success": True,
+                "data": {
+                    "videoId": videoId,
+                    "title": info.get('title', ''),
+                    "artist": info.get('artist') or info.get('uploader') or info.get('channel', ''),
+                    "duration": info.get('duration', 0),
+                    "thumbnail": info.get('thumbnail', ''),
+                    "downloadUrl": download_url,
+                    "format": info.get('ext', 'm4a'),
+                    "filesize": info.get('filesize'),
+                    "bitrate": info.get('abr'),
+                    "sampleRate": info.get('asr'),
+                }
+            }
+            
+    except yt_dlp.utils.DownloadError as e:
+        logger.error(f"yt-dlp download error for {videoId}: {e}")
+        raise HTTPException(status_code=404, detail=f"Video not available: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error getting download URL for {videoId}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

@@ -56,6 +56,7 @@ const PREVIOUS_YEAR = CURRENT_YEAR - 1;
 
 export type RecommendationHomeFeedOptions = {
   forceRefresh?: boolean;
+  authUser?: { getIdToken: () => Promise<string> } | null;
 };
 
 const LOCAL_SECTION_QUERIES: Array<{
@@ -435,9 +436,9 @@ async function getRecommendationSessionId(): Promise<string> {
 }
 
 export async function getRecommendationHomeFeed(options?: RecommendationHomeFeedOptions): Promise<RecommendationFeed> {
-  const currentUser = auth.currentUser;
+  const currentUser = options?.authUser ?? auth.currentUser;
   if (!currentUser) {
-    throw new Error("Recommendation feed requires an authenticated user.");
+    return getLocalPlaylistRecommendationFeed();
   }
 
   const [token, sessionId] = await Promise.all([

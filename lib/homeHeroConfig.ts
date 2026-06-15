@@ -67,6 +67,14 @@ export const DEFAULT_HOME_HERO_CONFIG: HomeHeroConfig = {
   ],
 };
 
+export const DISABLED_HOME_HERO_CONFIG: HomeHeroConfig = {
+  ...DEFAULT_HOME_HERO_CONFIG,
+  enabled: false,
+  adUnitId: "",
+  adSlotEnabled: false,
+  items: [],
+};
+
 const HOME_HERO_CONFIG_REF = doc(db, "appConfig", "homeHero");
 
 function toTrimmedString(value: unknown): string {
@@ -209,10 +217,10 @@ export function subscribeHomeHeroConfig(onChange: (config: HomeHeroConfig) => vo
   return onSnapshot(
     HOME_HERO_CONFIG_REF,
     (snapshot) => {
-      onChange(snapshot.exists() ? normalizeHomeHeroConfig(snapshot.data()) : DEFAULT_HOME_HERO_CONFIG);
+      onChange(snapshot.exists() ? normalizeHomeHeroConfig(snapshot.data()) : DISABLED_HOME_HERO_CONFIG);
     },
     () => {
-      onChange(DEFAULT_HOME_HERO_CONFIG);
+      onChange(DISABLED_HOME_HERO_CONFIG);
     }
   );
 }

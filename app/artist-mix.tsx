@@ -173,6 +173,7 @@ export default function ArtistMixScreen() {
   const title = names.length > 0
     ? names.length === 1 ? names[0] : `${names.slice(0, 2).join(" & ")}${names.length > 2 ? ` +${names.length - 2}` : ""}`
     : "Artist Mix";
+  const songsQueueKey = useMemo(() => songs.map((song) => song.id).join("|"), [songs]);
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
@@ -249,7 +250,7 @@ export default function ArtistMixScreen() {
           <SongRowSkeleton count={10} />
         ) : songs.length > 0 ? (
           songs.map((song, i) => (
-            <SongRow key={`${song.id}-${i}`} song={song} index={i} queue={songs} />
+            <SongRow key={`${song.id}-${i}`} song={song} index={i} queue={songs} queueKey={songsQueueKey} />
           ))
         ) : (
           <View style={styles.empty}>

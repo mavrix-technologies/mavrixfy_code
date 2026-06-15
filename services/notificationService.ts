@@ -3,6 +3,7 @@ import Constants from "expo-constants";
 import { Platform } from "react-native";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { logger } from "@/lib/logger";
 
 type NotificationsModule = typeof import("expo-notifications");
 type Notification = import("expo-notifications").Notification;
@@ -64,20 +65,20 @@ export async function requestNotificationPermission(): Promise<boolean> {
 export async function registerForPushNotificationsAsync(userId: string): Promise<{ expoPushToken?: string; nativePushToken?: string } | null> {
   const Notifications = await getNotifications();
   if (!Notifications) {
-    console.log("Push notifications require a development build; skipping Expo Go registration.");
+    logger.info("Push notifications require a development build; skipping Expo Go registration.");
     return null;
   }
 
   // Allow Android emulators but block iOS simulators (since iOS simulator has no FCM/APNs support out of the box)
   if (!Device.isDevice && Platform.OS === "ios") {
-    console.log("Must use physical device for Push Notifications on iOS");
+    logger.info("Must use physical device for Push Notifications on iOS");
     return null;
   }
 
   try {
     const hasPermission = await requestNotificationPermission();
     if (!hasPermission) {
-      console.log("Failed to get push token: permission not granted");
+      logger.info("Failed to get push token: permission not granted");
       return null;
     }
 
@@ -92,11 +93,13 @@ export async function registerForPushNotificationsAsync(userId: string): Promise
       const nativeTokenObj = await Notifications.getDevicePushTokenAsync();
       nativePushToken = nativeTokenObj.data;
     } catch (err) {
-      console.log("Error fetching native device push token:", err);
+      logger.warn("Error fetching native device push token:", err);
     }
 
-    console.log("Expo Push Token:", expoPushToken);
-    console.log("Native Push Token:", nativePushToken);
+    logger.debug("Push tokens resolved", {
+      hasExpoPushToken: Boolean(expoPushToken),
+      hasNativePushToken: Boolean(nativePushToken),
+    });
 
     // 4. Save to Firestore under users/{userId}/pushTokens/{tokenId}
     if (expoPushToken && userId) {
@@ -114,7 +117,7 @@ export async function registerForPushNotificationsAsync(userId: string): Promise
         updatedAt: serverTimestamp(),
       }, { merge: true });
 
-      console.log("Successfully registered push token in Firestore");
+      logger.debug("Successfully registered push token in Firestore");
     }
 
     // 5. Configure Android channel (crucial for high priority / sound)
@@ -129,7 +132,7 @@ export async function registerForPushNotificationsAsync(userId: string): Promise
 
     return { expoPushToken, nativePushToken };
   } catch (error) {
-    console.error("Error registering push notifications:", error);
+    logger.error("Error registering push notifications:", error);
     return null;
   }
 }
@@ -150,14 +153,18 @@ export function registerNotificationListeners(
     }
 
     const receivedSubscription = Notifications.addNotificationReceivedListener(notification => {
-      console.log("Notification received in foreground:", notification);
+      logger.debug("Notification received in foreground", {
+        identifier: notification.request.identifier,
+      });
       if (onNotificationReceived) {
         onNotificationReceived(notification);
       }
     });
 
     const responseSubscription = Notifications.addNotificationResponseReceivedListener(response => {
-      console.log("Notification clicked:", response);
+      logger.debug("Notification clicked", {
+        identifier: response.notification.request.identifier,
+      });
       if (onNotificationResponse) {
         onNotificationResponse(response);
       }
@@ -168,7 +175,7 @@ export function registerNotificationListeners(
       responseSubscription.remove();
     };
   }).catch((error) => {
-    console.error("Failed to register notification listeners:", error);
+    logger.error("Failed to register notification listeners:", error);
   });
 
   return () => {

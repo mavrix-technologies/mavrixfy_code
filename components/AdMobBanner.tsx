@@ -1,20 +1,41 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, Platform } from "react-native";
+import { InteractionManager, View, Text, StyleSheet, Platform } from "react-native";
 import { Image } from "expo-image";
 
 import { AD_UNITS } from "@/constants/admob";
 import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
+import { logger } from "@/lib/logger";
 
 const NATIVE_AD_UNIT_ID = AD_UNITS.NATIVE;
+const DEFAULT_LOAD_DELAY_MS = 2500;
 
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 
-export default function AdMobBanner() {
+export default function AdMobBanner({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }: { loadDelayMs?: number }) {
   const [nativeAd, setNativeAd] = useState<GoogleNativeAd | null>(null);
   const [adLoaded, setAdLoaded] = useState(false);
   const [adError, setAdError] = useState(false);
+  const [shouldLoad, setShouldLoad] = useState(loadDelayMs <= 0);
 
   useEffect(() => {
+    if (shouldLoad) return;
+
+    let active = true;
+    const timer = setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
+        if (active) setShouldLoad(true);
+      });
+    }, loadDelayMs);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [loadDelayMs, shouldLoad]);
+
+  useEffect(() => {
+    if (!shouldLoad) return;
+
     let active = true;
     let loadedAd: GoogleNativeAd | null = null;
 
@@ -57,7 +78,7 @@ export default function AdMobBanner() {
         setNativeAd(ad);
         setAdLoaded(true);
       } catch (err) {
-        console.warn("Failed to load native ad:", err);
+        logger.warn("Failed to load native ad:", err);
         if (active) {
           setAdError(true);
         }
@@ -72,7 +93,7 @@ export default function AdMobBanner() {
         loadedAd.destroy();
       }
     };
-  }, []);
+  }, [shouldLoad]);
 
   const adsModule = nativeAd ? getGoogleMobileAdsModule() : null;
 
@@ -83,7 +104,8 @@ export default function AdMobBanner() {
   const { NativeAdView, NativeAsset, NativeAssetType } = adsModule;
 
   return (
-    <NativeAdView nativeAd={nativeAd} style={[styles.container, !adLoaded && styles.loading]}>
+    <View style={[styles.container, !adLoaded && styles.loading]}>
+      <NativeAdView nativeAd={nativeAd} style={styles.nativeAdView}>
       <View style={styles.contentRow}>
         {nativeAd.icon ? (
           <NativeAsset assetType={NativeAssetType.ICON}>
@@ -129,7 +151,8 @@ export default function AdMobBanner() {
           </NativeAsset>
         )}
       </View>
-    </NativeAdView>
+      </NativeAdView>
+    </View>
   );
 }
 
@@ -141,6 +164,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
     padding: 12,
+    backgroundColor: "#11141a",
+  },
+  nativeAdView: {
+    width: "100%",
     backgroundColor: "#11141a",
   },
   loading: {

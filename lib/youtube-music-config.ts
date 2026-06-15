@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { logger } from "@/lib/logger";
 
 /**
  * YouTube Music API Configuration
@@ -47,6 +48,6 @@ export function getYouTubeMusicApiUrlForPlatform(): string {
   }
   
   // Final fallback to production URL
-  console.warn('[YouTube Music Config] Using fallback production URL. Consider setting EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL in .env');
+  logger.warn('[YouTube Music Config] Using fallback production URL. Consider setting EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL in .env');
   return 'https://mavrixfy-api-drab.vercel.app/api/youtube-music';
 }

@@ -3,6 +3,7 @@ import TrackPlayer, { Event, RepeatMode, State } from "react-native-track-player
 import { setupPlayer } from "@/lib/trackPlayer";
 import type { Song } from "@/lib/musicData";
 import { mapFilter } from "@/lib/arrayUtils";
+import { logger } from "@/lib/logger";
 
 type AutoRemoteEvent = {
   command?: string;
@@ -405,11 +406,11 @@ async function skipPrevious(event?: AutoRemoteEvent): Promise<void> {
 export function registerAutoMediaRemoteService(): void {
   if (isRegistered || Platform.OS !== "android") return;
   isRegistered = true;
-  console.log("[AutoMediaRemoteService] Registering auto media remote service listener");
+  logger.debug("[AutoMediaRemoteService] Registering auto media remote service listener");
 
   DeviceEventEmitter.addListener("MavrixfyAutoRemoteCommand", (event: AutoRemoteEvent) => {
     const command = event?.command;
-    console.log("[AutoMediaRemoteService] Received remote command event:", command, event);
+    logger.debug("[AutoMediaRemoteService] Received remote command event", { command });
     if (command === "playFromMediaId") {
       runAutoCommand(() => playAutoSong(event));
       return;

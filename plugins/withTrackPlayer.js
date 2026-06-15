@@ -1,11 +1,8 @@
 /**
- * withTrackPlayer — Expo config plugin for react-native-track-player + Android Auto.
+ * withTrackPlayer — Expo config plugin for react-native-track-player.
  *
  * Ensures required Android manifest entries are present after prebuild/EAS:
  * - TrackPlayer MusicService
- * - MediaBrowserService for Android Auto discovery
- * - Android Auto media metadata descriptor
- * - Android Auto media app descriptor metadata
  */
 const fs = require("fs");
 const path = require("path");
@@ -101,6 +98,11 @@ function ensureService(app, serviceDef) {
   }
 }
 
+function removeService(app, serviceName) {
+  if (!app.service) return;
+  app.service = app.service.filter((item) => item.$?.["android:name"] !== serviceName);
+}
+
 function ensureAppMetaData(app, meta) {
   if (!app["meta-data"]) app["meta-data"] = [];
   const name = meta.$["android:name"];
@@ -110,6 +112,11 @@ function ensureAppMetaData(app, meta) {
   } else {
     app["meta-data"].push(meta);
   }
+}
+
+function removeAppMetaData(app, name) {
+  if (!app["meta-data"]) return;
+  app["meta-data"] = app["meta-data"].filter((item) => item.$?.["android:name"] !== name);
 }
 
 function ensureToolsNamespace(manifest) {
@@ -137,13 +144,6 @@ const withTrackPlayer = (config) => {
         $: { "android:name": "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" },
       });
     }
-    ensureAppMetaData(app, {
-      $: {
-        "android:name": "com.google.android.gms.car.application",
-        "android:resource": "@xml/automotive_app_desc",
-      },
-    });
-
     ensureService(app, {
       $: {
         "android:name": "com.doublesymmetry.trackplayer.service.MusicService",
@@ -163,19 +163,12 @@ const withTrackPlayer = (config) => {
       ],
     });
 
-    ensureService(app, {
-      $: {
-        "android:name": ".auto.MavrixfyAutoService",
-        "android:enabled": "true",
-        "android:exported": "true",
-        "android:foregroundServiceType": "mediaPlayback",
-      },
-      "intent-filter": [
-        {
-          action: [{ $: { "android:name": "android.media.browse.MediaBrowserService" } }],
-        },
-      ],
-    });
+    // Remove stale Android Auto declarations until a native MediaBrowserService
+    // implementation exists. Leaving the service in the manifest crashes
+    // playback when Android tries to bind it for media resume.
+    removeAppMetaData(app, "com.google.android.gms.car.application");
+    removeService(app, ".auto.MavrixfyAutoService");
+    removeService(app, "com.mavrixfy.app.auto.MavrixfyAutoService");
 
     return config;
   });
@@ -184,10 +177,10 @@ const withTrackPlayer = (config) => {
     "android",
     async (config) => {
       const xmlDir = path.join(config.modRequest.projectRoot, "android", "app", "src", "main", "res", "xml");
-      fs.mkdirSync(xmlDir, { recursive: true });
       const automotiveDescPath = path.join(xmlDir, "automotive_app_desc.xml");
-      const content = `<?xml version="1.0" encoding="utf-8"?>\n<automotiveApp>\n  <uses name="media"/>\n</automotiveApp>\n`;
-      fs.writeFileSync(automotiveDescPath, content, "utf8");
+      if (fs.existsSync(automotiveDescPath)) {
+        fs.unlinkSync(automotiveDescPath);
+      }
       return config;
     },
   ]);

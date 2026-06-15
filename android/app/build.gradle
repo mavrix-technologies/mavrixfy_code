@@ -104,15 +104,22 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            def uploadStoreFile = findProperty('MAVRIXFY_UPLOAD_STORE_FILE') ?: System.getenv('MAVRIXFY_UPLOAD_STORE_FILE')
+            if (uploadStoreFile) {
+                storeFile file(uploadStoreFile)
+            }
+            storePassword findProperty('MAVRIXFY_UPLOAD_STORE_PASSWORD') ?: System.getenv('MAVRIXFY_UPLOAD_STORE_PASSWORD')
+            keyAlias findProperty('MAVRIXFY_UPLOAD_KEY_ALIAS') ?: System.getenv('MAVRIXFY_UPLOAD_KEY_ALIAS')
+            keyPassword findProperty('MAVRIXFY_UPLOAD_KEY_PASSWORD') ?: System.getenv('MAVRIXFY_UPLOAD_KEY_PASSWORD')
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

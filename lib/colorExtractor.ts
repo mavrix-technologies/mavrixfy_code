@@ -1,34 +1,11 @@
 /**
  * Extract dominant color from image URL for player gradients.
- * Uses react-native-image-colors (platform-native palette extraction)
- * with stable fallback colors when native module is unavailable.
+ * Uses expo-image thumbhashes with stable fallback colors when
+ * image metadata is unavailable.
  */
 
 import { Platform } from "react-native";
 import { Image as ExpoImage } from "expo-image";
-import { mapFilter } from "@/lib/arrayUtils";
-
-type IOSPalette = {
-  platform: "ios";
-  primary?: string;
-  background?: string;
-  secondary?: string;
-  detail?: string;
-};
-
-type AndroidOrWebPalette = {
-  platform: "android" | "web";
-  dominant?: string;
-  vibrant?: string;
-  muted?: string;
-  darkVibrant?: string;
-  lightVibrant?: string;
-  darkMuted?: string;
-  lightMuted?: string;
-  average?: string;
-};
-
-type PlatformPalette = IOSPalette | AndroidOrWebPalette;
 
 interface ColorResult {
   primary: string;
@@ -47,7 +24,6 @@ export interface SpotifyColorTheme {
 
 const COLOR_EXTRACTION_TIMEOUT_MS = 1400;
 const COLOR_CACHE_MAX_ENTRIES = 200;
-const PALETTE_CACHE_VERSION = "mavrixfy-palette-v3";
 const DEFAULT_FALLBACK: ColorResult = { primary: "#25282E", text: "#F5FBFF", isDark: true };
 
 // Neutral fallback palette. If extraction is unavailable, never invent a green/blue
@@ -63,42 +39,6 @@ const fallbackPalettes: ColorResult[] = [
 
 const colorCache = new Map<string, ColorResult>();
 const pendingColorRequests = new Map<string, Promise<ColorResult>>();
-
-let getColorsFn: ((uri: string, config?: any) => Promise<PlatformPalette>) | null = null;
-let imageColorsLoadAttempted = false;
-
-function hasImageColorsNativeModule(): boolean {
-  if (Platform.OS === "web") return true;
-  try {
-    const expoCore = require("expo-modules-core");
-    const nativeProxy = expoCore?.NativeModulesProxy;
-    const expoGlobalModules = (globalThis as any)?.expo?.modules;
-    return Boolean(nativeProxy?.ImageColors || expoGlobalModules?.ImageColors);
-  } catch {
-    return false;
-  }
-}
-
-function resolveImageColorsGetter() {
-  if (imageColorsLoadAttempted) return getColorsFn;
-  imageColorsLoadAttempted = true;
-
-  // Expo Go doesn't ship the ImageColors native module.
-  // Skip require to avoid runtime crash: "Cannot find native module 'ImageColors'".
-  if (!hasImageColorsNativeModule()) {
-    getColorsFn = null;
-    return getColorsFn;
-  }
-
-  try {
-    const mod = require("react-native-image-colors");
-    getColorsFn = mod?.getColors ?? mod?.default?.getColors ?? null;
-  } catch {
-    getColorsFn = null;
-  }
-
-  return getColorsFn;
-}
 
 export async function extractDominantColor(imageUrl: string): Promise<ColorResult> {
   const cacheKey = (imageUrl || "").trim();
@@ -124,35 +64,6 @@ export async function extractDominantColor(imageUrl: string): Promise<ColorResul
 }
 
 async function extractDominantColorUncached(cacheKey: string): Promise<ColorResult> {
-
-  const getter = resolveImageColorsGetter();
-  if (getter) {
-    try {
-      const palette = await withTimeout(
-        getter(cacheKey, {
-          fallback: DEFAULT_FALLBACK.primary,
-          cache: true,
-          key: `${PALETTE_CACHE_VERSION}:${cacheKey}`,
-        }),
-        COLOR_EXTRACTION_TIMEOUT_MS
-      );
-
-      const primary = pickPrimaryColor(palette);
-      if (primary) {
-        const mappedPrimary = toneMapForCinematicDarkTheme(primary);
-        const result: ColorResult = {
-          primary: mappedPrimary,
-          text: "#F5FBFF",
-          isDark: true,
-        };
-        setCachedColor(cacheKey, result);
-        return result;
-      }
-    } catch {
-      // Continue to thumbhash fallback.
-    }
-  }
-
   const thumbhashPrimary = await getThumbhashAverageColor(cacheKey);
   if (thumbhashPrimary) {
     const mappedPrimary = toneMapForCinematicDarkTheme(thumbhashPrimary);
@@ -198,125 +109,6 @@ function setCachedColor(key: string, value: ColorResult): void {
     if (!oldestKey) break;
     colorCache.delete(oldestKey);
   }
-}
-
-function pickPrimaryColor(palette: PlatformPalette): string | null {
-  if (!palette || typeof palette !== "object") return null;
-
-  const rawCandidates =
-    palette.platform === "ios"
-      ? [
-          { color: palette.primary, role: "primary", priority: 0 },
-          { color: palette.background, role: "background", priority: 1 },
-          { color: palette.secondary, role: "secondary", priority: 2 },
-          { color: palette.detail, role: "detail", priority: 3 },
-        ]
-      : [
-          { color: palette.average, role: "average", priority: 0 },
-          { color: palette.dominant, role: "dominant", priority: 1 },
-          { color: palette.muted, role: "muted", priority: 2 },
-          { color: palette.darkMuted, role: "darkMuted", priority: 3 },
-          { color: palette.vibrant, role: "vibrant", priority: 4 },
-          { color: palette.darkVibrant, role: "darkVibrant", priority: 5 },
-          { color: palette.lightVibrant, role: "lightVibrant", priority: 6 },
-          { color: palette.lightMuted, role: "lightMuted", priority: 7 },
-        ];
-
-  const candidates = mapFilter(rawCandidates, (candidate) => {
-      const normalized = normalizeHexColor(candidate.color);
-      if (!normalized) return null;
-      const { r, g, b } = toRgb(normalized);
-      const hsl = rgbToHsl(r, g, b);
-      return {
-        ...candidate,
-        normalized,
-        ...hsl,
-      };
-    }, (candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
-
-  if (candidates.length === 0) return null;
-
-  const anchorCandidate =
-    candidates.find((candidate) => candidate.role === "average") ??
-    candidates.find((candidate) => candidate.role === "dominant") ??
-    candidates.find((candidate) => candidate.role === "background") ??
-    candidates.find((candidate) => candidate.role === "primary") ??
-    null;
-
-  if (anchorCandidate) {
-    if (anchorCandidate.s <= 0.22) {
-      return pickBestNeutralColor(
-        candidates.filter((candidate) => candidate.s <= 0.22).length > 0
-          ? candidates.filter((candidate) => candidate.s <= 0.22)
-          : [anchorCandidate]
-      );
-    }
-
-    if (anchorCandidate.l >= 0.1 && anchorCandidate.l <= 0.86) {
-      return anchorCandidate.normalized;
-    }
-  }
-
-  const neutralCandidates = candidates.filter((candidate) => candidate.s <= 0.16);
-  const strongColorCandidates = candidates.filter(
-    (candidate) => candidate.s >= 0.28 && candidate.l >= 0.12 && candidate.l <= 0.78
-  );
-  const neutralAnchor = candidates.find(
-    (candidate) =>
-      ["average", "dominant", "background", "primary", "muted", "darkMuted"].includes(candidate.role) &&
-      candidate.s <= 0.16 &&
-      candidate.l >= 0.08 &&
-      candidate.l <= 0.88
-  );
-
-  if (
-    neutralCandidates.length === candidates.length ||
-    (neutralAnchor && neutralCandidates.length >= 3 && strongColorCandidates.length <= 1)
-  ) {
-    return pickBestNeutralColor(neutralCandidates.length > 0 ? neutralCandidates : candidates);
-  }
-
-  let best: string | null = null;
-  let bestScore = Number.NEGATIVE_INFINITY;
-
-  for (const candidate of candidates) {
-    const score = scoreThemeCandidate(candidate.normalized) - candidate.priority * 0.015;
-    if (score > bestScore) {
-      best = candidate.normalized;
-      bestScore = score;
-    }
-  }
-
-  return best;
-}
-
-function pickBestNeutralColor(
-  candidates: Array<{ normalized: string; l: number; priority: number }>
-): string {
-  let best = candidates[0]?.normalized ?? DEFAULT_FALLBACK.primary;
-  let bestScore = Number.NEGATIVE_INFINITY;
-
-  for (const candidate of candidates) {
-    const targetLuminanceScore = 1 - Math.abs(candidate.l - 0.34) * 1.9;
-    const score = targetLuminanceScore - candidate.priority * 0.02;
-    if (score > bestScore) {
-      best = candidate.normalized;
-      bestScore = score;
-    }
-  }
-
-  return best;
-}
-
-function scoreThemeCandidate(hex: string): number {
-  const { r, g, b } = toRgb(hex);
-  const { s, l } = rgbToHsl(r, g, b);
-  const saturationTargetScore = 1 - Math.abs(s - 0.48);
-  const luminanceTargetScore = 1 - Math.abs(l - 0.38) * 1.8;
-  const avoidExtremePenalty = l < 0.08 || l > 0.86 ? 0.8 : 0;
-  const avoidNeonPenalty = s > 0.82 && l > 0.52 ? 0.55 : 0;
-  const avoidGrayPenalty = s < 0.1 ? 0.25 : 0;
-  return saturationTargetScore + luminanceTargetScore - avoidExtremePenalty - avoidNeonPenalty - avoidGrayPenalty;
 }
 
 function normalizeHexColor(value: unknown): string | null {

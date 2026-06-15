@@ -33,6 +33,7 @@ import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import { createUserPlaylist, addSongToPlaylist, getUserPlaylists, UserPlaylist } from "@/lib/storage";
 import { createFirestorePlaylist, addLikedSongToFirestore, getUserFirestorePlaylists, FirestorePlaylist, addSongToFirestorePlaylist } from "@/lib/firestore";
+import { logger } from "@/lib/logger";
 
 type IsScreenActive = () => boolean;
 
@@ -608,7 +609,10 @@ function useFileImportScreenView() {
         };
         setAddedCount(prev => prev + 1);
       } catch (error) {
-        console.error(`Failed to add song "${song.title}":`, error);
+        logger.error("Failed to add imported song", {
+          title: song.title,
+          error,
+        });
         updatedSongs[i] = {
           ...song,
           status: 'error',

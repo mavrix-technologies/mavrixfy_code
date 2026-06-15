@@ -75,20 +75,22 @@ function downloadItemToSong(item: DownloadItem): Song {
 interface DownloadedRowProps {
   item: DownloadItem;
   allSongs: Song[];
+  queueKey: string;
   collectionId?: string;
 }
 
-function DownloadedRow({ item, allSongs }: DownloadedRowProps) {
+function DownloadedRow({ item, allSongs, queueKey }: DownloadedRowProps) {
   const song = downloadItemToSong(item);
 
-  return <SongRow song={song} queue={allSongs} showDownload={false} />;
+  return <SongRow song={song} queue={allSongs} queueKey={queueKey} showDownload={false} />;
 }
 
 // Memoize to prevent unnecessary re-renders
 const MemoizedDownloadedRow = React.memo(DownloadedRow, (prev, next) => {
   return (
     prev.item.songId === next.item.songId &&
-    prev.collectionId === next.collectionId
+    prev.collectionId === next.collectionId &&
+    prev.queueKey === next.queueKey
   );
 });
 
@@ -107,6 +109,7 @@ interface DownloadedSongSection {
   collectionId: string;
   coverUrl?: string;
   songs: Song[];
+  queueKey: string;
 }
 
 function DownloadedSectionHeader({
@@ -249,6 +252,7 @@ export default function DownloadedSongsScreen() {
       collectionId: section.collectionId,
       coverUrl: section.coverUrl,
       songs: section.items.map(downloadItemToSong),
+      queueKey: section.items.map((item) => item.songId).join("|"),
     })),
     [playlistSections]
   );
@@ -276,6 +280,7 @@ export default function DownloadedSongsScreen() {
       <MemoizedDownloadedRow
         item={item}
         allSongs={section.songs}
+        queueKey={section.queueKey}
         collectionId={section.collectionId}
       />
     ),

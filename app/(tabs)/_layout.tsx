@@ -1,7 +1,7 @@
-import { Tabs, useNavigation, usePathname, useRouter } from "expo-router";
+import { Redirect, Tabs, usePathname, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import { Easing, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
+import { ActivityIndicator, Easing, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,6 +21,7 @@ import {
 import { useLastMix, clearLastMix } from "@/lib/lastMix";
 import { compactMap, mapFilter } from "@/lib/arrayUtils";
 import { globalQueueSheetRef } from "@/lib/queueRef";
+import { useAuth } from "@/contexts/AuthContext";
 
 const MIX_DELETE_THRESHOLD = -72;
 
@@ -151,23 +152,6 @@ const TAB_TRANSITION_SPEC = {
 
 function getTabHref(route: VisibleRoute) {
   return route === "index" ? "/" : `/${route}`;
-}
-
-type IdleScheduler = {
-  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-  cancelIdleCallback?: (handle: number) => void;
-};
-
-const idleScheduler = globalThis as typeof globalThis & IdleScheduler;
-
-function scheduleIdleTask(task: () => void): () => void {
-  if (typeof idleScheduler.requestIdleCallback === "function") {
-    const handle = idleScheduler.requestIdleCallback(task, { timeout: 900 });
-    return () => idleScheduler.cancelIdleCallback?.(handle);
-  }
-
-  const timer = setTimeout(task, 1);
-  return () => clearTimeout(timer);
 }
 
 function TabIcon({ route, name, size, color }: { route: VisibleRoute; name: string; size: number; color: string }) {
@@ -1335,62 +1319,33 @@ function useIOSMiniPlayerOverlayView() {
   );
 }
 
+function AuthRouteFallback() {
+  return (
+    <View style={styles.authRouteFallback}>
+      <ActivityIndicator size="large" color={Colors.primary} />
+    </View>
+  );
+}
+
 export default function TabLayout() {
-  const isWeb = Platform.OS === "web";
   const pathname = usePathname();
-  const tabsNavigation = useNavigation();
-  const preloadedRoutesRef = React.useRef<Set<VisibleRoute> | null>(null);
-  if (preloadedRoutesRef.current === null) preloadedRoutesRef.current = new Set<VisibleRoute>();
+  const { loading, isAuthenticated, isGuest } = useAuth();
 
   const shouldHideTabBar = pathname === "/import-songs-file" || pathname?.startsWith("/import-songs-file");
+
+  if (loading) {
+    return <AuthRouteFallback />;
+  }
+
+  if (!isAuthenticated && !isGuest) {
+    return <Redirect href="/login" />;
+  }
 
   // NativeTabs only work correctly when distributed via App Store or TestFlight.
   // Sideloaded / unsigned IPAs run with __DEV__ = false but lack the required
   // entitlements, causing an immediate crash. Disable NativeTabs entirely until
   // the app is properly signed and distributed through Apple channels.
   const isProductionBuild = false; // TODO: re-enable when distributing via App Store
-
-  useEffect(() => {
-    if (isWeb) {
-      return;
-    }
-
-    let preloadTimers: ReturnType<typeof setTimeout>[] = [];
-    const cancelIdlePreload = scheduleIdleTask(() => {
-      const nav = tabsNavigation as any;
-      if (!nav || typeof nav.preload !== "function") {
-        return;
-      }
-
-      const currentRoute = pathname === "/" || pathname === "/index"
-        ? "index"
-        : NAV_ITEMS.find((item) => pathname === `/${item.route}` || pathname?.startsWith(`/${item.route}/`))?.route;
-      if (currentRoute) {
-        preloadedRoutesRef.current!.add(currentRoute);
-      }
-
-      const routesToPreload = mapFilter(
-        NAV_ITEMS,
-        (item) => item.route,
-        (route) => route !== currentRoute && !preloadedRoutesRef.current!.has(route)
-      );
-
-      preloadTimers = routesToPreload.map((route, index) => setTimeout(() => {
-        try {
-          nav.preload(route);
-          preloadedRoutesRef.current!.add(route);
-        } catch {
-          // Silent fail
-        }
-      }, 520 + index * 220));
-    });
-
-    return () => {
-      cancelIdlePreload();
-      preloadTimers.forEach((timer) => clearTimeout(timer));
-      preloadTimers = [];
-    };
-  }, [isWeb, pathname, tabsNavigation]);
 
   if (isProductionBuild) {
     return (
@@ -1426,6 +1381,12 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
+  authRouteFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.background,
+  },
   iosMiniPlayerRoot: {
     position: "absolute",
     left: 19,

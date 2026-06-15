@@ -5,7 +5,6 @@ import {
   View,
   Text,
   FlatList,
-  ScrollView,
   Pressable,
   StyleSheet,
   Platform,
@@ -34,6 +33,7 @@ import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngin
 import { convertJioSaavnSong, formatDuration, getBestImageUrl, Song } from "@/lib/musicData";
 import { getRecentlyPlayed, getUserPlaylists } from "@/lib/storage";
 import { PingPongScroll } from "@/components/PingPongScroll";
+import { logger } from "@/lib/logger";
 import {
   createSpotifyColorTheme,
   extractDominantColor,
@@ -444,7 +444,7 @@ const VisibleYoutubeVideo = memo(function VisibleYoutubeVideo({
         // Auto quality adapts to network/device performance
         playerRef.current.setPlaybackQuality?.('auto');
       } catch (error) {
-        console.warn('[YouTube Detail] Failed to set quality:', error);
+        logger.warn('[YouTube Detail] Failed to set quality:', error);
       }
     }
 
@@ -1499,7 +1499,7 @@ function useLegacyPlayerScreenView() {
         setPlayerAd(ad);
         setPlayerAdLoaded(true);
       } catch (err) {
-        console.warn("Player screen native ad failed to load:", err);
+        logger.warn("Player screen native ad failed to load:", err);
       }
     };
 
@@ -2044,31 +2044,24 @@ function useLegacyPlayerScreenView() {
     },
     [isDevPreviewActive, playingQueue, handleQueueSongPress]
   );
-  const queueRows = useMemo(() => {
-    const rows: React.ReactElement[] = [];
-    const occurrenceByKey = new Map<string, number>();
+  const renderQueueItem = useCallback(
+    ({ item, index }: { item: Song; index: number }) => (
+      <QueueSongRow
+        item={item}
+        index={index}
+        isCurrent={index === activeQueueIndex}
+        isShortScreen={isShortScreen}
+        isPlaying={playerIsPlaying}
+        onPress={handleQueueItemPress}
+      />
+    ),
+    [activeQueueIndex, handleQueueItemPress, isShortScreen, playerIsPlaying]
+  );
 
-    for (let index = 0; index < playingQueue.length; index += 1) {
-      const item = playingQueue[index];
-      const baseKey = String(item.id || item.audioUrl || item.title || "queue-song");
-      const occurrence = occurrenceByKey.get(baseKey) ?? 0;
-      occurrenceByKey.set(baseKey, occurrence + 1);
-
-      rows.push(
-        <QueueSongRow
-          key={occurrence === 0 ? baseKey : `${baseKey}-duplicate-${occurrence}`}
-          item={item}
-          index={index}
-          isCurrent={index === activeQueueIndex}
-          isShortScreen={isShortScreen}
-          isPlaying={playerIsPlaying}
-          onPress={handleQueueItemPress}
-        />
-      );
-    }
-
-    return rows;
-  }, [activeQueueIndex, handleQueueItemPress, isShortScreen, playerIsPlaying, playingQueue]);
+  const queueKeyExtractor = useCallback((item: Song, index: number) => {
+    const baseKey = String(item.id || item.audioUrl || item.title || "queue-song");
+    return `${baseKey}-${index}`;
+  }, []);
   const renderPlayerScrollItem = useCallback(() => null, []);
 
   const handleExploreSongPress = useCallback(
@@ -2497,13 +2490,17 @@ function useLegacyPlayerScreenView() {
           >
             {!(backgroundVideoId && screenSongIsYouTube) && (
               <>
-                <BlurView
-                  pointerEvents="none"
-                  intensity={Platform.OS === "ios" ? 26 : 18}
-                  tint="dark"
-                  experimentalBlurMethod={Platform.OS === "android" ? "dimezisBlurView" : "none"}
-                  style={StyleSheet.absoluteFillObject}
-                />
+                {Platform.OS === "ios" ? (
+                  <BlurView
+                    pointerEvents="none"
+                    intensity={26}
+                    tint="dark"
+                    experimentalBlurMethod="none"
+                    style={StyleSheet.absoluteFillObject}
+                  />
+                ) : (
+                  <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(20,23,30,0.9)" }]} />
+                )}
                 <LinearGradient
                   pointerEvents="none"
                   colors={["rgba(35,38,45,0.5)", "rgba(13,16,22,0.74)"]}
@@ -2515,16 +2512,22 @@ function useLegacyPlayerScreenView() {
             <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
               <Text style={styles.playingListTitle}>Queue</Text>
             </View>
-            <ScrollView
+            <FlatList
+              data={playingQueue}
+              keyExtractor={queueKeyExtractor}
+              renderItem={renderQueueItem}
               style={[styles.queueListViewport, queueViewportStyle]}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.queueListContent}
               nestedScrollEnabled
               bounces={false}
               overScrollMode="never"
-            >
-              {queueRows}
-            </ScrollView>
+              initialNumToRender={8}
+              maxToRenderPerBatch={6}
+              updateCellsBatchingPeriod={40}
+              windowSize={5}
+              removeClippedSubviews={Platform.OS === "android"}
+            />
           </View>
           </>
         }

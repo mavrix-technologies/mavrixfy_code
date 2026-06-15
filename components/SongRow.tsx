@@ -18,11 +18,13 @@ import { triggerImpact } from "@/lib/haptics";
 import { usePlayerRow } from "@/contexts/PlayerContext";
 import EqualizerBars from "@/components/EqualizerBars";
 import { showGlobalToast } from "@/app/_layout";
+import DownloadButton from "@/components/DownloadButton";
 
 interface Props {
   song: Song;
   index?: number;
   queue?: Song[];
+  queueKey?: string;
   showCover?: boolean;
   /** Show the download button. Defaults to true. */
   showDownload?: boolean;
@@ -38,10 +40,6 @@ interface Props {
 const SWIPE_ACTION_WIDTH = 184;
 const SWIPE_COMMIT_DISTANCE = 82;
 const SWIPE_SOFT_LIMIT = 214;
-
-function queueSignature(queue?: Song[]): string {
-  return queue?.map((item) => item.id).join("|") ?? "";
-}
 
 function QueueSwipeAction({
   dragX,
@@ -100,6 +98,7 @@ const SongRow = memo(function SongRow({
   song,
   index: _index,
   queue,
+  queueKey: _queueKey,
   showCover = true,
   showDownload = true,
   optionContext,
@@ -317,6 +316,20 @@ const SongRow = memo(function SongRow({
               </Pressable>
             ) : null}
 
+            {/* Download button - only for YouTube songs */}
+            {showDownload && !onRemove && song.source === 'youtube' && song.youtubeVideoId ? (
+              <View
+                onTouchStart={(e) => e.stopPropagation()}
+                style={styles.downloadBtnWrapper}
+              >
+                <DownloadButton
+                  song={song}
+                  size={20}
+                  color={Colors.subtext}
+                />
+              </View>
+            ) : null}
+
             <Pressable
               onPress={(event) => {
                 event.stopPropagation();
@@ -349,7 +362,8 @@ const SongRow = memo(function SongRow({
     prevProps.horizontalPadding === nextProps.horizontalPadding &&
     prevProps.onSongPress === nextProps.onSongPress &&
     Boolean(prevProps.onRemove) === Boolean(nextProps.onRemove) &&
-    queueSignature(prevProps.queue) === queueSignature(nextProps.queue)
+    prevProps.queueKey === nextProps.queueKey &&
+    prevProps.queue === nextProps.queue
   );
 });
 
@@ -455,6 +469,10 @@ const styles = StyleSheet.create({
   removeBtn: {
     padding: 6,
     marginLeft: 4,
+  },
+  downloadBtnWrapper: {
+    marginLeft: 2,
+    marginRight: 2,
   },
   moreBtn: {
     width: 32,

@@ -3,6 +3,7 @@ import * as Animated from "@/lib/nativeAnimated";
 import {
   ActivityIndicator,
   Easing,
+  FlatList,
   Platform,
   Pressable,
   ScrollView,
@@ -612,6 +613,33 @@ function usePlaylistScreenView() {
 
   // Check if user can edit (only local or owned Firestore playlists)
   const canEdit = !isJioSaavnSource && (!isFirestoreSource || user?.id);
+  const songsQueueKey = useMemo(() => songs.map((song) => song.id).join("|"), [songs]);
+  const renderPlaylistSong = useCallback(
+    ({ item, index }: { item: Song; index: number }) => (
+      <SongRow
+        song={item}
+        index={index}
+        queue={songs}
+        queueKey={songsQueueKey}
+        optionContext={canRemoveSongsFromPlaylist ? "playlist" : undefined}
+        playlistId={canRemoveSongsFromPlaylist ? playlistId : undefined}
+        playlistSource={canRemoveSongsFromPlaylist ? playlistRowSource : undefined}
+        playlistName={canRemoveSongsFromPlaylist ? playlistName : undefined}
+      />
+    ),
+    [
+      canRemoveSongsFromPlaylist,
+      playlistId,
+      playlistName,
+      playlistRowSource,
+      songs,
+      songsQueueKey,
+    ]
+  );
+  const playlistSongKeyExtractor = useCallback(
+    (item: Song, index: number) => `${item.id}-${index}`,
+    []
+  );
 
   // ── Error / not-found screens ──────────────────────────────────────────────
   if (loading && !hasPrefilledHeader) {
@@ -645,138 +673,138 @@ function usePlaylistScreenView() {
     <View style={styles.container}>
       {/* Slim offline banner — downloaded playlists still work offline */}
       {!isOnline && <OfflineBanner />}
-      <ScrollView
-        contentInset={{ bottom: bottomPad }}
+      <FlatList
+        data={loadError ? [] : songs}
+        keyExtractor={playlistSongKeyExtractor}
+        renderItem={renderPlaylistSong}
+        contentContainerStyle={{ paddingBottom: bottomPad }}
         scrollIndicatorInsets={{ bottom: bottomPad }}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
-      >
-        {/* ── Hero — same pattern as artist page ── */}
-        <View style={[styles.hero, { paddingTop: topInset + 8 }]}>
-          {playlistCover ? (
-            <Image
-              source={{ uri: playlistCover }}
-              style={StyleSheet.absoluteFill}
-              contentFit="cover"
-              contentPosition={{ left: "50%", top: "28%" }}
-              transition={120}
-            />
-          ) : (
-            <View style={[StyleSheet.absoluteFill, styles.heroFallback]}>
-              <Ionicons name="musical-notes" size={72} color="rgba(255,255,255,0.15)" />
-            </View>
-          )}
-          {/* Dark gradient — title readable on any cover */}
-          <LinearGradient
-            colors={["transparent", "rgba(16,20,26,0.55)", Colors.background]}
-            locations={[0.25, 0.65, 1]}
-            style={StyleSheet.absoluteFill}
-          />
-          {/* Back button */}
-          <Pressable onPress={safeGoBack} style={[styles.heroBack, { top: topInset + 8 }]}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
-          </Pressable>
-          {/* Edit button - only for editable playlists */}
-          {canEdit && (
-            <Pressable onPress={handleOpenEdit} style={[styles.heroEdit, { top: topInset + 8 }]}>
-              <Ionicons name="create-outline" size={20} color="#fff" />
-            </Pressable>
-          )}
-          {/* Info overlay */}
-          <View style={styles.heroInfo}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <Text
-                numberOfLines={3}
-                style={[styles.heroTitle, { fontSize: playlistTitleSize, flex: 1 }]}
-              >
-                {playlistName}
-              </Text>
-              {isFirestoreSource && (
-                <View style={[styles.visibilityBadge, playlistIsPublic ? styles.visibilityBadgePublic : styles.visibilityBadgePrivate]}>
-                  <Ionicons 
-                    name={playlistIsPublic ? "globe-outline" : "lock-closed-outline"} 
-                    size={12} 
-                    color="#fff" 
-                  />
-                  <Text style={styles.visibilityBadgeText}>
-                    {playlistIsPublic ? "Public" : "Private"}
-                  </Text>
+        initialNumToRender={10}
+        maxToRenderPerBatch={8}
+        updateCellsBatchingPeriod={40}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS === "android"}
+        ListHeaderComponent={
+          <>
+            {/* ── Hero — same pattern as artist page ── */}
+            <View style={[styles.hero, { paddingTop: topInset + 8 }]}>
+              {playlistCover ? (
+                <Image
+                  source={{ uri: playlistCover }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                  contentPosition={{ left: "50%", top: "28%" }}
+                  transition={120}
+                />
+              ) : (
+                <View style={[StyleSheet.absoluteFill, styles.heroFallback]}>
+                  <Ionicons name="musical-notes" size={72} color="rgba(255,255,255,0.15)" />
                 </View>
               )}
-            </View>
-            {playlistDescription && !/^\d+\s+songs?$/i.test(playlistDescription) ? (
-              <Text numberOfLines={1} style={styles.heroSub}>{playlistDescription}</Text>
-            ) : null}
-            <Text style={styles.heroMeta}>
-              {effectiveSongCount > 0 ? `${effectiveSongCount} songs` : ""}
-              {totalMinutes > 0 ? `  ·  ${totalMinutes} min` : ""}
-            </Text>
-            {/* Action buttons */}
-            <View style={styles.heroActions}>
-              <Pressable style={styles.shuffleBtn} onPress={handleShufflePlay} disabled={!songs.length}>
-                <Ionicons name="shuffle" size={17} color={Colors.text} />
-                <Text style={styles.shuffleBtnText}>Shuffle</Text>
+              {/* Dark gradient — title readable on any cover */}
+              <LinearGradient
+                colors={["transparent", "rgba(16,20,26,0.55)", Colors.background]}
+                locations={[0.25, 0.65, 1]}
+                style={StyleSheet.absoluteFill}
+              />
+              {/* Back button */}
+              <Pressable onPress={safeGoBack} style={[styles.heroBack, { top: topInset + 8 }]}>
+                <Ionicons name="arrow-back" size={22} color="#fff" />
               </Pressable>
-              <Pressable style={styles.playBtn} onPress={handlePlayAll} disabled={!songs.length}>
-                <Ionicons
-                  name={isPlayingFromThisPlaylist && isPlaying ? "pause" : "play"}
-                  size={18}
-                  color="#000"
-                />
-                <Text style={styles.playBtnText}>
-                  {isPlayingFromThisPlaylist && isPlaying ? "Pause" : "Play All"}
-                </Text>
-              </Pressable>
-              {songs.length > 0 && (
-                <DownloadCollectionButton
-                  songs={songs}
-                  collectionId={downloadCollectionId}
-                  collectionName={playlistName}
-                  collectionImage={playlistCover}
-                  collectionType={isAlbumSource ? "album" : "playlist"}
-                  compact
-                />
+              {/* Edit button - only for editable playlists */}
+              {canEdit && (
+                <Pressable onPress={handleOpenEdit} style={[styles.heroEdit, { top: topInset + 8 }]}>
+                  <Ionicons name="create-outline" size={20} color="#fff" />
+                </Pressable>
               )}
+              {/* Info overlay */}
+              <View style={styles.heroInfo}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <Text
+                    numberOfLines={3}
+                    style={[styles.heroTitle, { fontSize: playlistTitleSize, flex: 1 }]}
+                  >
+                    {playlistName}
+                  </Text>
+                  {isFirestoreSource && (
+                    <View style={[styles.visibilityBadge, playlistIsPublic ? styles.visibilityBadgePublic : styles.visibilityBadgePrivate]}>
+                      <Ionicons 
+                        name={playlistIsPublic ? "globe-outline" : "lock-closed-outline"} 
+                        size={12} 
+                        color="#fff" 
+                      />
+                      <Text style={styles.visibilityBadgeText}>
+                        {playlistIsPublic ? "Public" : "Private"}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                {playlistDescription && !/^\d+\s+songs?$/i.test(playlistDescription) ? (
+                  <Text numberOfLines={1} style={styles.heroSub}>{playlistDescription}</Text>
+                ) : null}
+                <Text style={styles.heroMeta}>
+                  {effectiveSongCount > 0 ? `${effectiveSongCount} songs` : ""}
+                  {totalMinutes > 0 ? `  ·  ${totalMinutes} min` : ""}
+                </Text>
+                {/* Action buttons */}
+                <View style={styles.heroActions}>
+                  <Pressable style={styles.shuffleBtn} onPress={handleShufflePlay} disabled={!songs.length}>
+                    <Ionicons name="shuffle" size={17} color={Colors.text} />
+                    <Text style={styles.shuffleBtnText}>Shuffle</Text>
+                  </Pressable>
+                  <Pressable style={styles.playBtn} onPress={handlePlayAll} disabled={!songs.length}>
+                    <Ionicons
+                      name={isPlayingFromThisPlaylist && isPlaying ? "pause" : "play"}
+                      size={18}
+                      color="#000"
+                    />
+                    <Text style={styles.playBtnText}>
+                      {isPlayingFromThisPlaylist && isPlaying ? "Pause" : "Play All"}
+                    </Text>
+                  </Pressable>
+                  {songs.length > 0 && (
+                    <DownloadCollectionButton
+                      songs={songs}
+                      collectionId={downloadCollectionId}
+                      collectionName={playlistName}
+                      collectionImage={playlistCover}
+                      collectionType={isAlbumSource ? "album" : "playlist"}
+                      compact
+                    />
+                  )}
+                </View>
+              </View>
             </View>
-          </View>
-        </View>
 
-        {/* ── Tracks header ── */}
-        <View style={styles.tracksHeader}>
-          <Text style={styles.tracksTitle}>Tracks</Text>
-          {totalDurationLabel ? (
-            <Text style={styles.tracksMeta}>{effectiveSongCount} · {totalDurationLabel}</Text>
-          ) : null}
-        </View>
+            {/* ── Tracks header ── */}
+            <View style={styles.tracksHeader}>
+              <Text style={styles.tracksTitle}>Tracks</Text>
+              {totalDurationLabel ? (
+                <Text style={styles.tracksMeta}>{effectiveSongCount} · {totalDurationLabel}</Text>
+              ) : null}
+            </View>
 
-        {/* ── Song list ── */}
-        {loadError ? (
-          <View style={styles.inlineWrap}>
-            <Ionicons name="cloud-offline-outline" size={28} color={Colors.subtext} />
-            <Text style={styles.inlineText}>{loadError}</Text>
-          </View>
-        ) : songs.length > 0 ? (
-          songs.map((song, index) => (
-            <SongRow
-              key={`${song.id}-${index}`}
-              song={song}
-              index={index}
-              queue={songs}
-              optionContext={canRemoveSongsFromPlaylist ? "playlist" : undefined}
-              playlistId={canRemoveSongsFromPlaylist ? playlistId : undefined}
-              playlistSource={canRemoveSongsFromPlaylist ? playlistRowSource : undefined}
-              playlistName={canRemoveSongsFromPlaylist ? playlistName : undefined}
-            />
-          ))
-        ) : loading ? (
-          <SongRowSkeleton count={Math.max(4, Math.min(initialSongCount || 8, 10))} />
-        ) : (
-          <View style={styles.inlineWrap}>
-            <Text style={styles.inlineText}>No songs available in this {collectionKindLower}.</Text>
-          </View>
-        )}
-      </ScrollView>
+            {loadError ? (
+              <View style={styles.inlineWrap}>
+                <Ionicons name="cloud-offline-outline" size={28} color={Colors.subtext} />
+                <Text style={styles.inlineText}>{loadError}</Text>
+              </View>
+            ) : null}
+          </>
+        }
+        ListEmptyComponent={
+          loadError ? null : loading ? (
+            <SongRowSkeleton count={Math.max(4, Math.min(initialSongCount || 8, 10))} />
+          ) : (
+            <View style={styles.inlineWrap}>
+              <Text style={styles.inlineText}>No songs available in this {collectionKindLower}.</Text>
+            </View>
+          )
+        }
+      />
 
       {/* ── Sticky header — always mounted, fades in/out ── */}
       <Animated.View

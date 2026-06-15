@@ -9,6 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
 import { logger } from "@/lib/logger";
 import * as ExpoAvPlayer from "@/lib/expoAvPlayer";
+import { getYouTubeMusicVisualVideoId } from "@/lib/youtubeMusicService";
 import YoutubePlayer from "react-native-youtube-iframe";
 import {
   beginPlaybackTransaction,
@@ -63,7 +64,7 @@ const isExpoGoRuntime = isRunningInExpoGo();
 // If that native module is unavailable at runtime, use expo-audio as a native fallback.
 const isNativeTrackPlayerAvailable = Platform.OS !== "web" && !isExpoGoRuntime;
 const canUseLightweightAudioFallback = Platform.OS !== "web";
-const shouldEagerlySetupNativePlayer = isNativeTrackPlayerAvailable;
+const shouldEagerlySetupNativePlayer = false;
 const nativePlayerUnavailableMessage = isExpoGoRuntime
   ? "Use the development build or installed APK. Expo Go does not include the native music player."
   : "Native music player is not available in this runtime.";
@@ -321,11 +322,15 @@ function getYouTubeVideoIdFromSong(song: Song | null | undefined): string {
     video_id?: unknown;
     youtubeId?: unknown;
     youtube_id?: unknown;
+    youtubeVideoId?: unknown;
+    youtubeVisualVideoId?: unknown;
     url?: unknown;
     watchUrl?: unknown;
     videoUrl?: unknown;
   };
   const candidates = [
+    source.youtubeVisualVideoId,
+    source.youtubeVideoId,
     source.videoId,
     source.video_id,
     source.youtubeId,
@@ -545,6 +550,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const youtubePlayerRef = useRef<any>(null);
   const youtubeShouldAutoPlayRef = useRef(false);
   const youtubeHostedRetryRef = useRef(false);
+  const youtubeVisualRetrySongIdRef = useRef<string | null>(null);
 
   // Get auth context properly
   const { user: authUser } = useAuth();
@@ -1454,6 +1460,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
     youtubeShouldAutoPlayRef.current = true;
     youtubeHostedRetryRef.current = false;
+    youtubeVisualRetrySongIdRef.current = null;
 
     try {
       if (TrackPlayer && setupPlayer) {
@@ -1634,7 +1641,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         // This prevents buffering on slow connections
         youtubePlayerRef.current.setPlaybackQuality?.('auto');
       } catch (error) {
-        console.warn('[YouTube] Failed to set playback quality:', error);
+        logger.warn("[YouTube] Failed to set playback quality:", error);
       }
     }
 
@@ -1711,6 +1718,43 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     }
 
     if (SKIPPABLE_YOUTUBE_ERRORS.has(errCode)) {
+      const activeSong = currentSongRef.current;
+      const activeSongId = activeSong?.id || null;
+      if (activeSong && isYouTubeSong(activeSong) && activeSongId && youtubeVisualRetrySongIdRef.current !== activeSongId) {
+        youtubeVisualRetrySongIdRef.current = activeSongId;
+        setIsYoutubeLoading(true);
+        setPlaybackLoading(true);
+        updatePlaybackEngineSnapshot({ desiredPlayState: true, isLoading: true, isBuffering: true });
+
+        void getYouTubeMusicVisualVideoId(activeSong)
+          .then((visualVideoId) => {
+            if (currentSongRef.current?.id !== activeSongId) return;
+
+            if (visualVideoId && visualVideoId !== youtubeVideoId) {
+              youtubeShouldAutoPlayRef.current = true;
+              youtubeHostedRetryRef.current = false;
+              setYoutubeUseLocalHTML(true);
+              setYoutubeVideoId(visualVideoId);
+              setYoutubePlayerKey((key) => key + 1);
+              setYoutubePlaying(true);
+              return;
+            }
+
+            youtubeShouldAutoPlayRef.current = false;
+            setYoutubePlaying(false);
+            showPlaybackNotice("YouTube video blocked or unavailable. Skipping...");
+            advancePreviewPlayback();
+          })
+          .catch(() => {
+            if (currentSongRef.current?.id !== activeSongId) return;
+            youtubeShouldAutoPlayRef.current = false;
+            setYoutubePlaying(false);
+            showPlaybackNotice("YouTube video blocked or unavailable. Skipping...");
+            advancePreviewPlayback();
+          });
+        return;
+      }
+
       youtubeShouldAutoPlayRef.current = false;
       setYoutubePlaying(false);
       showPlaybackNotice("YouTube video blocked or unavailable. Skipping...");
@@ -1723,7 +1767,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
       showPlaybackNotice("Could not play this YouTube Music song.");
     }
-  }, [advancePreviewPlayback, showPlaybackNotice, youtubeUseLocalHTML]);
+  }, [advancePreviewPlayback, showPlaybackNotice, youtubeUseLocalHTML, youtubeVideoId]);
 
   useEffect(() => {
     if (!youtubePlaying || !youtubeVideoId) {
@@ -1746,7 +1790,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           // ignore
         }
       }
-    }, 500);
+    }, Platform.OS === "android" ? 1500 : 1000);
 
     return () => clearInterval(intervalId);
   }, [youtubePlaying, youtubeVideoId, applyPreviewPlaybackStatus]);
@@ -2196,6 +2240,8 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
         const ready = await ensurePlayerReady();
         if (!ready) {
+          setPlaybackIntent(null);
+          updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
           showPlaybackNotice("Player not ready yet. Please try again.");
           return;
         }
@@ -2290,6 +2336,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   }, [appendRemainingTracksIfCurrent, clearUserQueuedSongIds, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, markPendingNativeTrack, runSerializedPlaybackSwitch, showPlaybackNotice]);
 
   const playSong = useCallback(async (song: Song, newQueue?: Song[]) => {
+    try {
     let songToPlay = song;
     const normalizedSong = normalizePlayableSong(songToPlay);
 
@@ -2308,6 +2355,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     if (!TrackPlayer || !setupPlayer) {
       if (canUseLightweightAudioFallback) {
         // Fallback runtimes: use expo-audio instead of the native TrackPlayer stack.
+        const fallbackRequestId = ++playRequestIdRef.current;
         let fallbackQueue = (newQueue || [songToPlay]).filter((item): item is Song => Boolean(item?.id));
 
         const songIndex = fallbackQueue.findIndex((s) => s.id === songToPlay.id);
@@ -2323,6 +2371,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         const targetSong = fallbackQueue[targetIndex] ?? fallbackQueue[0];
 
         setPlaybackIntent(true);
+        setPlaybackLoading(true);
         updatePlaybackEngineSnapshot({
           currentSong: targetSong,
           queue: fallbackQueue,
@@ -2336,15 +2385,20 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         });
 
         resolvePlaybackUrl(targetSong).then((audioUrl) => {
+          if (fallbackRequestId !== playRequestIdRef.current) {
+            return;
+          }
+
           if (!audioUrl) {
             logger.warn("[ExpoAv] No audio URL for song", { id: targetSong.id, title: targetSong.title });
             showPlaybackNotice("This song has no playable audio URL.");
             setPlaybackIntent(null);
+            setPlaybackLoading(false);
             updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false });
             return;
           }
 
-          console.log(`[ExpoAv] Attempting to play:`, {
+          logger.debug("[ExpoAv] Attempting to play", {
             id: targetSong.id,
             title: targetSong.title,
             hasAudioUrl: !!audioUrl,
@@ -2370,21 +2424,41 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
             isLoading: false,
             isBuffering: false,
           });
+          setPlaybackLoading(false);
           setPreviewProgress(0);
           setPreviewIsShuffled(false);
           setPreviewRepeatMode("off");
           previewIsPlayingRef.current = true;
           setPreviewIsPlaying(true);
           // Play via expo-audio
-          console.log(`[ExpoAv] Calling loadAndPlay with URL:`, audioUrl.substring(0, 100) + '...');
+          logger.debug("[ExpoAv] Calling loadAndPlay", { audioUrlLength: audioUrl.length });
           void ExpoAvPlayer.loadAndPlay(audioUrl).catch((error: any) => {
-            console.error(`[ExpoAv] Failed to play:`, error);
+            if (fallbackRequestId !== playRequestIdRef.current) {
+              return;
+            }
+
+            logger.error("[ExpoAv] Failed to play:", error);
+            setPlaybackIntent(null);
+            setPlaybackLoading(false);
+            previewIsPlayingRef.current = false;
+            setPreviewIsPlaying(false);
+            updatePlaybackEngineSnapshot({
+              desiredPlayState: null,
+              isPlaying: false,
+              isLoading: false,
+              isBuffering: false,
+            });
             showPlaybackNotice("Could not play this YouTube Music song.");
           });
         }).catch((error) => {
-          console.error(`[ExpoAv] Failed to resolve URL:`, error);
+          if (fallbackRequestId !== playRequestIdRef.current) {
+            return;
+          }
+
+          logger.error("[ExpoAv] Failed to resolve URL:", error);
           showPlaybackNotice("This song has no playable audio URL.");
           setPlaybackIntent(null);
+          setPlaybackLoading(false);
           updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false });
         });
         return;
@@ -2393,10 +2467,10 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       return;
     }
 
-    console.log(`[Player] Normalized song:`, {
+    logger.debug("[Player] Normalized song", {
       id: normalizedSong?.id,
       hasAudioUrl: !!normalizedSong?.audioUrl,
-      audioUrlPreview: normalizedSong?.audioUrl?.substring(0, 50)
+      audioUrlLength: normalizedSong?.audioUrl?.length,
     });
 
     if (!normalizedSong) {
@@ -2409,7 +2483,10 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     }
 
     const q = mapFilter((newQueue || [songToPlay]), normalizePlayableSong, (item): item is Song => Boolean(item));
-    console.log(`[Player] Playable queue size: ${q.length} from ${(newQueue || [songToPlay]).length} songs`);
+    logger.debug("[Player] Playable queue size", {
+      playableQueueSize: q.length,
+      sourceQueueSize: (newQueue || [songToPlay]).length,
+    });
 
     if (q.length === 0) {
       logger.warn("[Player] No playable songs in queue", {
@@ -2430,7 +2507,25 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       return;
     }
     const targetIndex = idx;
-    loadAndPlaySong(q[targetIndex], q, targetIndex);
+    await loadAndPlaySong(q[targetIndex], q, targetIndex);
+    } catch (error) {
+      logger.error("[Player] playSong failed", {
+        error,
+        songId: song?.id,
+        source: song?.source,
+      });
+      setPlaybackIntent(null);
+      setPlaybackLoading(false);
+      previewIsPlayingRef.current = false;
+      setPreviewIsPlaying(false);
+      updatePlaybackEngineSnapshot({
+        desiredPlayState: null,
+        isPlaying: false,
+        isLoading: false,
+        isBuffering: false,
+      });
+      showPlaybackNotice("Could not start playback.");
+    }
   }, [clearUserQueuedSongIds, loadAndPlaySong, playYouTubeSong, showPlaybackNotice]);
 
   const togglePlay = useCallback(async () => {
