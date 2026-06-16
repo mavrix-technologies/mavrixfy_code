@@ -58,6 +58,7 @@ function toCollectionMetadataSummary(metadata: ReturnType<typeof getCollectionMe
 // audioUrl must be the REMOTE url — the player resolves the local file
 // from the download store automatically via resolvePlaybackUrl.
 function downloadItemToSong(item: DownloadItem): Song {
+  const isYt = item.songId.startsWith("youtube_") || item.songId.startsWith("yt:") || item.album === "YouTube Music";
   return {
     id: item.songId,
     title: item.title,
@@ -67,6 +68,8 @@ function downloadItemToSong(item: DownloadItem): Song {
     audioUrl: item.audioUrl,   // remote URL — player will use local file from store
     duration: item.duration,
     genre: "",
+    source: isYt ? "youtube" : "jiosaavn",
+    youtubeVideoId: isYt ? item.songId.replace("youtube_", "").replace("yt:", "") : undefined,
   };
 }
 

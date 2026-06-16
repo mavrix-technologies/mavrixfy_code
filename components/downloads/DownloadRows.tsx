@@ -138,6 +138,8 @@ function DownloadRow({ item, onPause, onResume, onRetry, onRemove }: DownloadRow
         <Text style={[styles.rowStatus, { color: statusColor(item.status) }]}>
           {item.status === "downloading"
             ? `${item.progress}% · ${formatBytes(item.bytesDownloaded)}`
+            : item.status === "completed"
+            ? `Downloaded · ${formatBytes(item.totalBytes || item.bytesDownloaded)}`
             : statusLabel(item.status)}
         </Text>
       </View>

@@ -641,6 +641,16 @@ function usePlaylistScreenView() {
     []
   );
 
+  // Optimize FlatList item layout for better scrolling performance
+  const getItemLayout = useCallback(
+    (_data: ArrayLike<Song> | null | undefined, index: number) => ({
+      length: 64, // Approximate height of SongRow
+      offset: 64 * index,
+      index,
+    }),
+    []
+  );
+
   // ── Error / not-found screens ──────────────────────────────────────────────
   if (loading && !hasPrefilledHeader) {
     return (
@@ -677,16 +687,17 @@ function usePlaylistScreenView() {
         data={loadError ? [] : songs}
         keyExtractor={playlistSongKeyExtractor}
         renderItem={renderPlaylistSong}
+        getItemLayout={getItemLayout}
         contentContainerStyle={{ paddingBottom: bottomPad }}
         scrollIndicatorInsets={{ bottom: bottomPad }}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={10}
-        maxToRenderPerBatch={8}
-        updateCellsBatchingPeriod={40}
-        windowSize={7}
-        removeClippedSubviews={Platform.OS === "android"}
+        initialNumToRender={15}
+        maxToRenderPerBatch={10}
+        updateCellsBatchingPeriod={50}
+        windowSize={10}
+        removeClippedSubviews={true}
         ListHeaderComponent={
           <>
             {/* ── Hero — same pattern as artist page ── */}

@@ -23,3 +23,19 @@ allprojects {
 
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
+
+subprojects { proj ->
+    def configureReact = {
+        def reactExt = proj.extensions.findByName("react")
+        if (reactExt != null) {
+            reactExt.nodeExecutableAndArgs.set(["C:\\Users\\ASUS\\AppData\\Local\\nvm\\v22.18.0\\node.exe"])
+        }
+    }
+    if (proj.state.executed) {
+        configureReact()
+    } else {
+        proj.afterEvaluate {
+            configureReact()
+        }
+    }
+}

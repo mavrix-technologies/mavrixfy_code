@@ -92,6 +92,7 @@
             "minSdkVersion": 24,
             "targetSdkVersion": 35,
             "compileSdkVersion": 35,
+            "AsyncStorage_db_size_in_MB": "200",
             "enableShrinkResourcesInReleaseBuilds": true,
             "enableProguardInReleaseBuilds": true,
             "extraProguardRules": "-keep class com.facebook.hermes.unicode.** { *; }\n-keep class com.facebook.jni.** { *; }\n-keep class com.doublesymmetry.** { *; }\n-keep class expo.modules.updates.** { *; }\n-keep class kotlin.** { *; }\n-keep class kotlin.reflect.** { *; }",

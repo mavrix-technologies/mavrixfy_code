@@ -1139,7 +1139,11 @@ function useHomeScreenInnerView() {
     setHasRecommendationFeedFailed(false);
     try {
       if (recommendationLoadId !== latestRecommendationLoadIdRef.current) return;
-      const feed = await getRecommendationHomeFeed({ ...options, authUser: firebaseUser });
+      const feed = await withPromiseTimeout(
+        getRecommendationHomeFeed({ ...options, authUser: firebaseUser }),
+        8000,
+        "Recommendation feed timeout"
+      );
       const isLatestRecommendationLoad = recommendationLoadId === latestRecommendationLoadIdRef.current;
       if (!isLatestRecommendationLoad) return;
       setRecommendationFeed(dedupeRecommendationFeed(feed));
@@ -1232,8 +1236,12 @@ function useHomeScreenInnerView() {
           "Home new release songs timeout"
         );
 
-        const youtubeTrendingPromise = getYouTubeMusicTrendingPlaylists("IN").catch((err) => {
-          logger.warn("[Home] YouTube trending fetch failed:", err);
+        const youtubeTrendingPromise = withPromiseTimeout(
+          getYouTubeMusicTrendingPlaylists("IN"),
+          6000,
+          "YouTube trending timeout"
+        ).catch((err) => {
+          logger.warn("[Home] YouTube trending fetch failed or timed out:", err);
           return [] as YouTubeMusicPlaylistCard[];
         });
 
@@ -1335,7 +1343,7 @@ function useHomeScreenInnerView() {
                 limitPerCategory: Math.min(limitPerCategory, 8),
                 realtime: realtimeRefresh,
                 categoryIds: [...HOME_PRIORITY_CATEGORY_IDS],
-                youtubeTimeoutMs: 3600,
+                youtubeTimeoutMs: 4800,
               }),
               HOME_PRIORITY_CATEGORY_TIMEOUT_MS,
               "Home priority categories timeout"
@@ -1357,7 +1365,7 @@ function useHomeScreenInnerView() {
                 forceRefresh,
                 limitPerCategory,
                 realtime: realtimeRefresh,
-                youtubeTimeoutMs: 5200,
+                youtubeTimeoutMs: 8000,
               }),
               HOME_CATEGORY_FETCH_TIMEOUT_MS,
               "Home categories timeout"

@@ -122,6 +122,38 @@ def get_lyrics(browseId: str):
     return {"lyrics": None, "source": None}
 
 
+@app.get("/lyrics/video/{videoId}")
+def get_lyrics_by_video_id(videoId: str):
+    """
+    Get lyrics using videoId by first getting the watch playlist
+    which contains the lyrics browseId
+    """
+    try:
+        # First get the watch playlist which contains lyrics info
+        watch_result = safe_call(yt.get_watch_playlist, videoId=videoId, radio=False, limit=1)
+        
+        if not isinstance(watch_result, dict):
+            return {"lyrics": None, "source": None, "error": "Invalid watch result"}
+        
+        # Check if lyrics info is available
+        lyrics_browse_id = watch_result.get("lyrics")
+        
+        if not lyrics_browse_id:
+            return {"lyrics": None, "source": None, "error": "No lyrics available"}
+        
+        # Now fetch the actual lyrics using the browseId
+        lyrics_result = safe_call(yt.get_lyrics, lyrics_browse_id)
+        
+        if isinstance(lyrics_result, dict):
+            return lyrics_result
+        
+        return {"lyrics": None, "source": None, "error": "Failed to fetch lyrics"}
+        
+    except Exception as e:
+        logger.error(f"Error fetching lyrics for videoId {videoId}: {e}")
+        return {"lyrics": None, "source": None, "error": str(e)}
+
+
 @app.get("/watch/{videoId}")
 def get_watch_playlist(
     videoId: str,
@@ -153,19 +185,25 @@ def get_home(limit: int = Query(default=3, ge=1, le=10)):
             shelves.append(shelf)
     return shelves
 
-
 @app.get("/download/{videoId}")
-def get_download_url(videoId: str):
+def get_download_url(videoId: str, quality: Optional[str] = Query(default=None)):
     """
     Get direct download URL for offline playback
     Returns audio stream URL that can be downloaded to device
     """
     try:
-        logger.info(f"[Download] Processing request for videoId: {videoId}")
+        logger.info(f"[Download] Processing request for videoId: {videoId} with quality: {quality}")
         url = f"https://www.youtube.com/watch?v={videoId}"
         
+        # Select format based on quality
+        audio_format = 'bestaudio[ext=m4a]/bestaudio'
+        if quality == 'low':
+            audio_format = 'worstaudio/worst'
+        elif quality == 'medium':
+            audio_format = 'worstaudio[abr>=96]/bestaudio[ext=m4a]/bestaudio'
+            
         ydl_opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio',
+            'format': audio_format,
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,

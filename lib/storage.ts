@@ -53,6 +53,7 @@ export interface AppSettings {
   crossfade: number;
   gapless: boolean;
   normalizeVolume: boolean;
+  ambientBackdropEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -71,6 +72,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   crossfade: 0,
   gapless: true,
   normalizeVolume: false,
+  ambientBackdropEnabled: true,
 };
 
 const EQUALIZER_PRESETS: Record<string, Record<string, number>> = {
@@ -166,6 +168,77 @@ async function getJSON<T>(key: string, fallback: T): Promise<T> {
   }
 }
 
+export async function pruneNonEssentialStorageCaches(): Promise<void> {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const keysToRemove = keys.filter(key => {
+      if (!key.startsWith("@mavrixfy_")) return false;
+
+      const isCritical =
+        key === "@mavrixfy_downloads" ||
+        key === "@mavrixfy_downloads_index" ||
+        key === "@mavrixfy_download_prefs" ||
+        key.startsWith("@mavrixfy_download_") ||
+        key === "@mavrixfy_liked_songs" ||
+        key === "@mavrixfy_liked_songs_data" ||
+        key === "@mavrixfy_user_playlists" ||
+        key === "@mavrixfy_recently_played" ||
+        key === "@mavrixfy_search_history" ||
+        key === "@mavrixfy_settings" ||
+        key === "@mavrixfy_player_state" ||
+        key === "@mavrixfy_followed_artists_v1" ||
+        key === "@mavrixfy_device_id" ||
+        key.startsWith("@mavrixfy_promotion_modal_dismissed") ||
+        key === "@mavrixfy_last_shown_playlists_v1";
+
+      return !isCritical;
+    });
+
+    if (keysToRemove.length > 0) {
+      await AsyncStorage.multiRemove(keysToRemove);
+      console.log(`[Storage] Pruned ${keysToRemove.length} non-essential cache keys to free up space.`);
+    }
+  } catch (err) {
+    console.error("[Storage] Failed to prune storage caches:", err);
+  }
+}
+
+export async function safeAsyncStorageSetItem(key: string, value: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(key, value);
+  } catch (err: any) {
+    const errMsg = String(err?.message || "").toLowerCase();
+    if (errMsg.includes("full") || err?.code === 13 || err?.code === "SQLITE_FULL") {
+      await pruneNonEssentialStorageCaches();
+      try {
+        await AsyncStorage.setItem(key, value);
+      } catch (retryErr) {
+        console.error(`[Storage] Failed to set key ${key} even after pruning:`, retryErr);
+      }
+    } else {
+      console.error(`[Storage] Failed to set key ${key}:`, err);
+    }
+  }
+}
+
+export async function safeAsyncStorageMultiSet(pairs: [string, string][]): Promise<void> {
+  try {
+    await AsyncStorage.multiSet(pairs);
+  } catch (err: any) {
+    const errMsg = String(err?.message || "").toLowerCase();
+    if (errMsg.includes("full") || err?.code === 13 || err?.code === "SQLITE_FULL") {
+      await pruneNonEssentialStorageCaches();
+      try {
+        await AsyncStorage.multiSet(pairs);
+      } catch (retryErr) {
+        console.error(`[Storage] Failed to multiSet even after pruning:`, retryErr);
+      }
+    } else {
+      console.error(`[Storage] Failed to multiSet:`, err);
+    }
+  }
+}
+
 async function setJSON(key: string, value: unknown): Promise<void> {
   try {
     // Update memory cache immediately
@@ -173,7 +246,15 @@ async function setJSON(key: string, value: unknown): Promise<void> {
     
     // Persist to AsyncStorage
     await AsyncStorage.setItem(key, JSON.stringify(value));
-  } catch {}
+  } catch (err: any) {
+    const errMsg = String(err?.message || "").toLowerCase();
+    if (errMsg.includes("full") || err?.code === 13 || err?.code === "SQLITE_FULL") {
+      await pruneNonEssentialStorageCaches();
+      try {
+        await AsyncStorage.setItem(key, JSON.stringify(value));
+      } catch {}
+    }
+  }
 }
 
 export { setJSON };
@@ -362,6 +443,7 @@ export async function getSettings(): Promise<AppSettings> {
       ...(saved.equalizer || {}),
     },
     hapticsEnabled: Boolean(saved.hapticsEnabled),
+    ambientBackdropEnabled: saved.ambientBackdropEnabled !== undefined ? Boolean(saved.ambientBackdropEnabled) : DEFAULT_SETTINGS.ambientBackdropEnabled,
   };
 }
 

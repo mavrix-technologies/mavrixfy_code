@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import Slider from "@react-native-community/slider";
 import * as Animated from "@/lib/nativeAnimated";
+import * as Network from "expo-network";
+import * as Device from "expo-device";
 import {
   View,
   Text,
@@ -28,10 +30,10 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { AD_UNITS } from "@/constants/admob";
 import { safeGoBack } from "@/utils/navigation";
-import { usePlayerActions, usePlayerProgress } from "@/contexts/PlayerContext";
+import { usePlayerActions, usePlayerProgress, usePlayerRow } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { convertJioSaavnSong, formatDuration, getBestImageUrl, Song } from "@/lib/musicData";
-import { getRecentlyPlayed, getUserPlaylists } from "@/lib/storage";
+import { getRecentlyPlayed, getUserPlaylists, getSettings } from "@/lib/storage";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { logger } from "@/lib/logger";
 import {
@@ -48,6 +50,7 @@ import { globalQueueSheetRef } from "@/lib/queueRef";
 import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
 import { getYouTubeMusicVisualVideoId } from "@/lib/youtubeMusicService";
 import YoutubePlayer from "react-native-youtube-iframe";
+import LiveLyrics from "@/components/LiveLyrics";
 
 const getCurrentTimestamp = () => Date.now();
 const PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING = 136;
@@ -358,6 +361,22 @@ const StableArtworkImage = memo(function StableArtworkImage({
   );
 });
 
+async function getAdaptiveQuality(): Promise<"low" | "medium" | "high"> {
+  try {
+    const settings = await getSettings();
+    if (settings.streamingQuality === "low" || settings.streamingQuality === "medium") {
+      return settings.streamingQuality;
+    }
+    const netState = await Network.getNetworkStateAsync();
+    if (netState.type === Network.NetworkStateType.CELLULAR) {
+      return "medium";
+    }
+  } catch (e) {
+    logger.error("[Player] Failed to determine adaptive quality", e);
+  }
+  return "high";
+}
+
 type VisibleYoutubeVideoProps = {
   song: Song;
   isPlaying: boolean;
@@ -440,12 +459,15 @@ const VisibleYoutubeVideo = memo(function VisibleYoutubeVideo({
 
     // Set adaptive quality for better performance
     if (playerRef.current) {
-      try {
-        // Auto quality adapts to network/device performance
-        playerRef.current.setPlaybackQuality?.('auto');
-      } catch (error) {
-        logger.warn('[YouTube Detail] Failed to set quality:', error);
-      }
+      void getAdaptiveQuality().then((quality) => {
+        try {
+          const ytQuality = quality === "low" ? "small" : quality === "medium" ? "medium" : "auto";
+          playerRef.current.setPlaybackQuality?.(ytQuality);
+          logger.debug("[YouTube Detail] Set playback quality to", { ytQuality });
+        } catch (error) {
+          logger.warn('[YouTube Detail] Failed to set quality:', error);
+        }
+      });
     }
 
     const targetSeconds = latestPositionSecondsRef.current;
@@ -569,10 +591,23 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   const playerRef = useRef<any>(null);
   const initialPositionSeconds = Math.max(0, Math.floor(positionMillis / 1000));
   const lastPositionRef = useRef(initialPositionSeconds);
+  const [playerReady, setPlayerReady] = useState(false);
+
+  const onReady = useCallback(() => {
+    setPlayerReady(true);
+    playerRef.current?.mute?.();
+    playerRef.current?.setPlaybackQuality?.("small");
+  }, []);
+
+  useEffect(() => {
+    if (playerReady) {
+      playerRef.current?.mute?.();
+    }
+  }, [playerReady, isPlaying]);
 
   useEffect(() => {
     const targetSeconds = Math.max(0, Math.floor(positionMillis / 1000));
-    if (Math.abs(targetSeconds - lastPositionRef.current) > 3) {
+    if (Math.abs(targetSeconds - lastPositionRef.current) > 10) {
       playerRef.current?.seekTo?.(targetSeconds, true);
     }
     lastPositionRef.current = targetSeconds;
@@ -611,7 +646,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
           left: dimensions.offsetLeft,
           width: dimensions.scaledW,
           height: dimensions.scaledH,
-          opacity: 0.95,
+          opacity: 1.0,
         }}
       >
         <YoutubePlayer
@@ -620,9 +655,9 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
           height={dimensions.scaledH}
           width={dimensions.scaledW}
           play={isPlaying}
-          mute
+          mute={true}
           videoId={videoId}
-          forceAndroidAutoplay
+          onReady={onReady}
           useLocalHTML
           baseUrlOverride={YOUTUBE_PLAYER_REFERRER_URL}
           initialPlayerParams={{
@@ -648,6 +683,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
             allowsInlineMediaPlayback: true,
             mediaPlaybackRequiresUserAction: false,
             androidLayerType: "hardware",
+            incognito: true,
           }}
         />
       </View>
@@ -672,17 +708,16 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
     </View>
   );
 }, (prevProps, nextProps) => {
-  // Custom comparison to prevent unnecessary re-renders
-  // Always allow first render (when videoId changes from empty/undefined)
-  if (!prevProps.videoId || prevProps.videoId !== nextProps.videoId) {
-    return false; // Allow re-render when video changes
+  if (prevProps.videoId !== nextProps.videoId) return false;
+  if (prevProps.isPlaying !== nextProps.isPlaying) return false;
+  if (prevProps.containerHeight !== nextProps.containerHeight) return false;
+  
+  const diff = Math.abs(prevProps.positionMillis - nextProps.positionMillis);
+  if (diff >= 10000) {
+    return false;
   }
   
-  return (
-    prevProps.isPlaying === nextProps.isPlaying &&
-    Math.abs(prevProps.positionMillis - nextProps.positionMillis) < 3000 &&
-    prevProps.containerHeight === nextProps.containerHeight
-  );
+  return true;
 });
 BackgroundYoutubeVideo.displayName = "BackgroundYoutubeVideo";
 
@@ -721,69 +756,52 @@ function PlayerPlayButton({
   onAccentColor: string;
   onPress: () => void;
 }) {
-    const playbackState = usePlaybackPlayState();
-    const isPlaying = isPlayingOverride ?? playbackState.isPlaying;
-    const isLoading = isLoadingOverride ?? (playbackState.isBuffering || playbackState.isLoading);
-    const [showSpinner, setShowSpinner] = useState(false);
-    const prevIsLoadingRef = useRef(isLoading);
-    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playbackState = usePlaybackPlayState();
+  const isPlaying = isPlayingOverride ?? playbackState.isPlaying;
+  const isLoading = isLoadingOverride ?? (playbackState.isBuffering || playbackState.isLoading);
+  const [showSpinner, setShowSpinner] = useState(false);
 
-    // Inline adjustment when isLoading transitions to false — avoids routing
-    // through a useEffect which causes an extra stale render.
-    if (!isLoading && prevIsLoadingRef.current !== isLoading) {
-      prevIsLoadingRef.current = isLoading;
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
+  useEffect(() => {
+    if (!isLoading) {
       setShowSpinner(false);
-    } else if (isLoading && prevIsLoadingRef.current !== isLoading) {
-      prevIsLoadingRef.current = isLoading;
+      return;
     }
 
-    useEffect(() => {
-      if (!isLoading) return;
+    const timer = setTimeout(() => {
+      setShowSpinner(true);
+    }, 180);
 
-      timerRef.current = setTimeout(() => {
-        setShowSpinner(true);
-      }, 180);
+    return () => clearTimeout(timer);
+  }, [isLoading]);
 
-      return () => {
-        if (timerRef.current) {
-          clearTimeout(timerRef.current);
-          timerRef.current = null;
-        }
-      };
-    }, [isLoading]);
-
-    return (
-      <SmoothControlButton
-        onPress={onPress}
-        style={[
-          styles.playButton,
-          {
-            width: buttonSize,
-            height: buttonSize,
-            borderRadius: buttonSize / 2,
-            backgroundColor: "#F7FAFF",
-            borderWidth: 1,
-            borderColor: "rgba(255,255,255,0.92)",
-          },
-        ]}
-      >
-        {showSpinner ? (
-          <ActivityIndicator size="small" color={onAccentColor} />
-        ) : (
-          <Ionicons
-            name={isPlaying ? "pause" : "play"}
-            size={iconSize}
-            color={onAccentColor}
-            style={!isPlaying ? { marginLeft: 2 } : undefined}
-          />
-        )}
-      </SmoothControlButton>
-    );
-  }
+  return (
+    <SmoothControlButton
+      onPress={onPress}
+      style={[
+        styles.playButton,
+        {
+          width: buttonSize,
+          height: buttonSize,
+          borderRadius: buttonSize / 2,
+          backgroundColor: "#F7FAFF",
+          borderWidth: 1,
+          borderColor: "rgba(255,255,255,0.92)",
+        },
+      ]}
+    >
+      {showSpinner ? (
+        <ActivityIndicator size="small" color={onAccentColor} />
+      ) : (
+        <Ionicons
+          name={isPlaying ? "pause" : "play"}
+          size={iconSize}
+          color={onAccentColor}
+          style={!isPlaying ? { marginLeft: 2 } : undefined}
+        />
+      )}
+    </SmoothControlButton>
+  );
+}
 
 PlayerPlayButton.displayName = "PlayerPlayButton";
 
@@ -809,15 +827,46 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
   onSeekingChange,
 }: PlayerProgressCardProps) {
   const { progress, duration, positionMillis } = usePlayerProgress();
+  const { isPlaying } = usePlayerRow();
   const [seekValue, setSeekValue] = useState<number | null>(null);
   const [isSeeking, setIsSeeking] = useState(false);
   const androidSeekFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const playerProgress = isDevPreviewActive ? devPreviewProgress : progress;
+
+  const [localProgress, setLocalProgress] = useState(progress);
+  const lastSyncRef = useRef({ progress, timestamp: Date.now() });
+
+  // Sync with global progress changes
+  useEffect(() => {
+    setLocalProgress(progress);
+    lastSyncRef.current = { progress, timestamp: Date.now() };
+  }, [progress]);
+
+  // Interpolate progress smoothly at 60fps when actively playing
+  useEffect(() => {
+    if (!isPlaying || isSeeking) return;
+
+    let animId: number;
+    const tick = () => {
+      const elapsedSec = (Date.now() - lastSyncRef.current.timestamp) / 1000;
+      const durationSec = duration / 1000;
+      if (durationSec > 0) {
+        const addedProgress = elapsedSec / durationSec;
+        const nextProgress = Math.min(1.0, lastSyncRef.current.progress + addedProgress);
+        setLocalProgress(nextProgress);
+      }
+      animId = requestAnimationFrame(tick);
+    };
+
+    animId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animId);
+  }, [isPlaying, isSeeking, duration]);
+
+  const playerProgress = isDevPreviewActive ? devPreviewProgress : localProgress;
   const safeSongDuration = Number.isFinite(songDurationSeconds) ? Math.max(0, songDurationSeconds) : 0;
   const playerDuration = isDevPreviewActive ? safeSongDuration * 1000 : duration;
   const playerPositionMillis = isDevPreviewActive
     ? Math.round(safeSongDuration * 1000 * devPreviewProgress)
-    : positionMillis;
+    : Math.round(playerDuration * localProgress);
   const currentTimeSec = Math.floor(playerPositionMillis / 1000);
   const totalDurationSec = Math.floor(playerDuration / 1000);
   const effectiveDurationSec = totalDurationSec > 0 ? totalDurationSec : safeSongDuration;
@@ -911,7 +960,7 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
             text: `${formatDuration(
               seekValue !== null
                 ? Math.floor(Math.max(0, effectiveDurationSec) * visualProgress)
-                : currentTimeSec
+                : Math.min(effectiveDurationSec, currentTimeSec)
             )} of ${displayDuration}`,
           }}
           onSlidingStart={handleSlidingStart}
@@ -924,7 +973,7 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
           {formatDuration(
             seekValue !== null
               ? Math.floor(Math.max(0, effectiveDurationSec) * visualProgress)
-              : currentTimeSec
+              : Math.min(effectiveDurationSec, currentTimeSec)
           )}
         </Text>
         <Text style={styles.timeText}>{displayDuration}</Text>
@@ -1091,6 +1140,42 @@ function useLegacyPlayerScreenView() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const [ambientBackdropEnabled, setAmbientBackdropEnabled] = useState(true);
+  const [isScreenFocused, setIsScreenFocused] = useState(true);
+
+  // Detect low-end Android/iOS devices for performance profiling
+  const isLowEnd = useMemo(() => {
+    if (Platform.OS === "web") return false;
+    const isOldYear = Device.deviceYearClass ? Device.deviceYearClass < 2019 : false;
+    const isLowMemory = Device.totalMemory ? Device.totalMemory < 3758096384 : false; // < 3.5 GB
+    return isOldYear || isLowMemory;
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchSettings = () => {
+      getSettings().then((s) => {
+        if (mounted) {
+          setAmbientBackdropEnabled(s.ambientBackdropEnabled);
+        }
+      });
+    };
+
+    fetchSettings();
+    const unsubscribeFocus = navigation.addListener("focus", () => {
+      fetchSettings();
+      setIsScreenFocused(true);
+    });
+    const unsubscribeBlur = navigation.addListener("blur", () => {
+      setIsScreenFocused(false);
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribeFocus();
+      unsubscribeBlur();
+    };
+  }, [navigation]);
   const {
     currentSong,
     queue,
@@ -1211,6 +1296,31 @@ function useLegacyPlayerScreenView() {
       cancelled = true;
     };
   }, [screenSong]);
+
+  const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
+  const [showLyrics, setShowLyrics] = useState(false);
+
+  useEffect(() => {
+    setHasStartedPlaying(false);
+  }, [screenSong?.id]);
+
+  useEffect(() => {
+    if (playbackState.isPlaying && !playbackState.isLoading && !playbackState.isBuffering) {
+      setHasStartedPlaying(true);
+    }
+  }, [playbackState.isPlaying, playbackState.isLoading, playbackState.isBuffering]);
+
+  const ambientVideoLayoutActive = useMemo(() => Boolean(
+    ambientBackdropEnabled &&
+    backgroundVideoId &&
+    screenSongIsYouTube &&
+    !isLowEnd
+  ), [ambientBackdropEnabled, backgroundVideoId, screenSongIsYouTube, isLowEnd]);
+
+  const shouldRenderBackgroundVideo = useMemo(() => Boolean(
+    ambientVideoLayoutActive &&
+    hasStartedPlaying
+  ), [ambientVideoLayoutActive, hasStartedPlaying]);
   const currentPlayerAdSongId = screenSong?.id ?? null;
   if (currentPlayerAdSongId !== lastPlayerAdSongIdRef.current) {
     if (lastPlayerAdSongIdRef.current) {
@@ -2062,6 +2172,17 @@ function useLegacyPlayerScreenView() {
     const baseKey = String(item.id || item.audioUrl || item.title || "queue-song");
     return `${baseKey}-${index}`;
   }, []);
+  
+  // Optimize queue FlatList performance with getItemLayout
+  const getQueueItemLayout = useCallback(
+    (_data: ArrayLike<Song> | null | undefined, index: number) => ({
+      length: isShortScreen ? 56 : 64, // Approximate height of QueueSongRow
+      offset: (isShortScreen ? 56 : 64) * index,
+      index,
+    }),
+    [isShortScreen]
+  );
+  
   const renderPlayerScrollItem = useCallback(() => null, []);
 
   const handleExploreSongPress = useCallback(
@@ -2199,7 +2320,7 @@ function useLegacyPlayerScreenView() {
         overScrollMode="never"
         ListHeaderComponent={
           <>
-            {backgroundVideoId && screenSongIsYouTube ? (() => {
+            {shouldRenderBackgroundVideo ? (() => {
               // Cover upper 88% of screen, pushing playlist down to bottom 10-12%
               const containerH = Math.round(screenHeight * 0.88);
               return (
@@ -2223,8 +2344,8 @@ function useLegacyPlayerScreenView() {
                 >
                   <BackgroundYoutubeVideo
                     key={`bg-video-${backgroundVideoId}`}
-                    videoId={backgroundVideoId}
-                    isPlaying={playerIsPlaying}
+                    videoId={backgroundVideoId!}
+                    isPlaying={playerIsPlaying && isScreenFocused}
                     positionMillis={positionMillis}
                     containerHeight={containerH}
                   />
@@ -2238,7 +2359,7 @@ function useLegacyPlayerScreenView() {
                   paddingTop: topInset + topBarHeight,
                   paddingBottom: isShortScreen ? 10 : 14,
                 },
-                backgroundVideoId && screenSongIsYouTube && {
+                ambientVideoLayoutActive && {
                   minHeight: screenHeight - topInset - (isShortScreen ? 70 : 90),
                   paddingBottom: 0,
                 },
@@ -2247,7 +2368,7 @@ function useLegacyPlayerScreenView() {
               <View
                 style={[
                   styles.playerPrimaryStack,
-                  backgroundVideoId && screenSongIsYouTube && { flex: 1 },
+                  ambientVideoLayoutActive && { flex: 1 },
                 ]}
               >
                 <View
@@ -2286,7 +2407,7 @@ function useLegacyPlayerScreenView() {
                   />
                 </View>
 
-                {backgroundVideoId && screenSongIsYouTube ? (
+                {ambientVideoLayoutActive ? (
                   <View style={{ flex: 1 }} />
                 ) : null}
 
@@ -2332,30 +2453,49 @@ function useLegacyPlayerScreenView() {
                     paused={!interactionReady}
                   />
                 </View>
-                <SmoothControlButton
-                  onPress={() => {
-                    if (isDevPreviewActive) {
-                      setDevPreviewLikedSongIds((prev) =>
-                        prev.includes(screenSong.id)
-                          ? prev.filter((songId) => songId !== screenSong.id)
-                          : [...prev, screenSong.id]
-                      );
-                      return;
-                    }
-                    toggleLike(screenSong);
-                  }}
-                  hitSlop={10}
-                  style={[
-                    styles.likeButton,
-                    playerIconBtnStyle,
-                  ]}
-                >
-                  <Ionicons
-                    name={liked ? "heart" : "heart-outline"}
-                    size={shuffleRepeatIconSize + 3}
-                    color={liked ? selectedControlIconColor : controlIconColor}
-                  />
-                </SmoothControlButton>
+                <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+                  {/* Lyrics Button - Only show for YouTube songs */}
+                  {screenSongIsYouTube && (
+                    <SmoothControlButton
+                      onPress={() => setShowLyrics(true)}
+                      hitSlop={10}
+                      style={[
+                        styles.likeButton,
+                        playerIconBtnStyle,
+                      ]}
+                    >
+                      <Ionicons
+                        name="musical-notes-outline"
+                        size={shuffleRepeatIconSize + 2}
+                        color={controlIconColor}
+                      />
+                    </SmoothControlButton>
+                  )}
+                  <SmoothControlButton
+                    onPress={() => {
+                      if (isDevPreviewActive) {
+                        setDevPreviewLikedSongIds((prev) =>
+                          prev.includes(screenSong.id)
+                            ? prev.filter((songId) => songId !== screenSong.id)
+                            : [...prev, screenSong.id]
+                        );
+                        return;
+                      }
+                      toggleLike(screenSong);
+                    }}
+                    hitSlop={10}
+                    style={[
+                      styles.likeButton,
+                      playerIconBtnStyle,
+                    ]}
+                  >
+                    <Ionicons
+                      name={liked ? "heart" : "heart-outline"}
+                      size={shuffleRepeatIconSize + 3}
+                      color={liked ? selectedControlIconColor : controlIconColor}
+                    />
+                  </SmoothControlButton>
+                </View>
               </View>
             </View>
 
@@ -2474,7 +2614,7 @@ function useLegacyPlayerScreenView() {
           <View
             style={[
               styles.playingListSection,
-              backgroundVideoId && screenSongIsYouTube
+              ambientVideoLayoutActive
                 ? {
                     marginTop: 0,
                     marginHorizontal: 0,
@@ -2488,7 +2628,7 @@ function useLegacyPlayerScreenView() {
                   },
             ]}
           >
-            {!(backgroundVideoId && screenSongIsYouTube) && (
+            {!ambientVideoLayoutActive && (
               <>
                 {Platform.OS === "ios" ? (
                   <BlurView
@@ -2516,17 +2656,18 @@ function useLegacyPlayerScreenView() {
               data={playingQueue}
               keyExtractor={queueKeyExtractor}
               renderItem={renderQueueItem}
+              getItemLayout={getQueueItemLayout}
               style={[styles.queueListViewport, queueViewportStyle]}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.queueListContent}
               nestedScrollEnabled
               bounces={false}
               overScrollMode="never"
-              initialNumToRender={8}
-              maxToRenderPerBatch={6}
-              updateCellsBatchingPeriod={40}
-              windowSize={5}
-              removeClippedSubviews={Platform.OS === "android"}
+              initialNumToRender={12}
+              maxToRenderPerBatch={8}
+              updateCellsBatchingPeriod={50}
+              windowSize={8}
+              removeClippedSubviews={true}
             />
           </View>
           </>
@@ -2672,6 +2813,21 @@ function useLegacyPlayerScreenView() {
       />
 
       </View>
+
+      {/* Live Lyrics Modal */}
+      {showLyrics && screenSong && (
+        <View style={StyleSheet.absoluteFillObject}>
+          <LiveLyrics
+            songId={screenSong.id}
+            videoId={screenSongIsYouTube ? (screenSong.videoId || screenSong.youtubeVideoId || getYouTubeVideoIdFromSong(screenSong)) : null}
+            positionMs={positionMillis}
+            isPlaying={playerIsPlaying}
+            onClose={() => setShowLyrics(false)}
+            primaryColor={playerTheme.accent}
+            source={screenSong.source}
+          />
+        </View>
+      )}
     </View>
   );
 }

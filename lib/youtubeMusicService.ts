@@ -70,7 +70,65 @@ export interface YouTubeMusicWatchPlaylist {
   lyrics?: string | null;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+/**
+ * Get YouTube audio stream URL for native playback
+ * Uses the same backend endpoint as downloads
+ */
+export async function getYouTubeStreamUrl(videoId: string, quality?: string): Promise<string | null> {
+  try {
+    const apiUrl = getYouTubeMusicApiUrl();
+    const qualityParam = quality ? `?quality=${quality}` : "";
+    const url = `${apiUrl}download/${videoId}${qualityParam}`;
+    
+    logger.debug("[YouTube Stream] Fetching stream URL", { videoId, apiUrl, quality });
+    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: { Accept: "application/json" },
+      });
+      
+      clearTimeout(timeout);
+      
+      if (!response.ok) {
+        logger.error("[YouTube Stream] API error", { 
+          status: response.status, 
+          statusText: response.statusText 
+        });
+        return null;
+      }
+      
+      const data = await response.json();
+      
+      if (data.success && data.data?.downloadUrl) {
+        logger.debug("[YouTube Stream] Stream URL fetched successfully", { 
+          videoId,
+          hasUrl: !!data.data.downloadUrl,
+          format: data.data.format,
+          duration: data.data.duration,
+        });
+        return data.data.downloadUrl;
+      }
+      
+      logger.error("[YouTube Stream] Invalid response format", { data });
+      return null;
+    } catch (error: any) {
+      clearTimeout(timeout);
+      if (error.name === 'AbortError') {
+        logger.error("[YouTube Stream] Request timeout", { videoId });
+      } else {
+        logger.error("[YouTube Stream] Fetch failed", { videoId, error: error.message });
+      }
+      return null;
+    }
+  } catch (error: any) {
+    logger.error("[YouTube Stream] Unexpected error", { videoId, error: error.message });
+    return null;
+  }
+}
 
 const YOUTUBE_MUSIC_CACHE_PREFIX = "@mavrixfy_youtube_music";
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -86,9 +144,11 @@ async function getCached<T>(key: string, ttl: number): Promise<T | null> {
   try {
     const [[, data], [, time]] = await AsyncStorage.multiGet([key, `${key}:time`]);
     if (!data || !time) return null;
-    if (Date.now() - Number(time) > ttl) return null;
+    const timestamp = Number(time);
+    if (!timestamp || Date.now() - timestamp > ttl) return null;
     return JSON.parse(data) as T;
-  } catch {
+  } catch (error) {
+    logger.warn('[YouTube Music Cache] Failed to get cached data:', error);
     return null;
   }
 }
@@ -308,7 +368,7 @@ export function convertYouTubeMusicTrack(track: any): Song | null {
     duration,
     coverUrl,
     genre: "YouTube Music",
-    audioUrl: "", // Played by videoId through the YouTube iframe player
+    audioUrl: "", // Will be resolved dynamically via getYouTubeStreamUrl() for native playback
     year: normalizedTrack.year?.toString(),
     source: "youtube",
     hasLyrics: false,
@@ -1405,7 +1465,15 @@ export async function getHomeYouTubeMusicCategories(options?: {
   categoryIds?: string[];
 }): Promise<YouTubeMusicHomeCategoryData[]> {
   const limit = Math.min(options?.limitPerCategory ?? 5, 8);
-  const categoryIdFilter = new Set(options?.categoryIds ?? []);
+  const categoryIds = options?.categoryIds ?? [];
+  const categoryIdFilter = new Set(categoryIds);
+
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:home_categories:${limit}:${[...categoryIds].sort().join(",")}`;
+  const cached = await getCached<YouTubeMusicHomeCategoryData[]>(cacheKey, 60 * 60 * 1000); // 1 hour TTL
+  if (cached) {
+    return cached;
+  }
+
   const categoriesToFetch =
     categoryIdFilter.size > 0
       ? HOME_YOUTUBE_MUSIC_CATEGORIES.filter((category) => categoryIdFilter.has(category.id))
@@ -1423,7 +1491,13 @@ export async function getHomeYouTubeMusicCategories(options?: {
     })
   );
 
-  return categoryResults.filter((category) => category.results.length > 0);
+  const finalResults = categoryResults.filter((category) => category.results.length > 0);
+
+  if (finalResults.length > 0) {
+    void setCache(cacheKey, finalResults);
+  }
+
+  return finalResults;
 }
 
 export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): Promise<YouTubeMusicPlaylistCard[]> {

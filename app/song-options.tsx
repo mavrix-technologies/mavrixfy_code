@@ -735,10 +735,7 @@ export default function SongOptionsScreen() {
           automaticallyAdjustContentInsets={false}
           ListHeaderComponent={
             showDownload ? (
-              <View style={styles.menuRow}>
-                <DownloadButton song={song} size={22} style={styles.menuIcon} />
-                <Text style={styles.menuText} numberOfLines={1}>Download</Text>
-              </View>
+              <DownloadButton song={song} size={22} showLabel={true} />
             ) : null
           }
         />

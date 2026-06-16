@@ -129,6 +129,7 @@ interface DownloadContextValue {
   removeAllDownloads: () => Promise<void>;
   updatePreferences: (patch: Partial<DownloadPreferences>) => Promise<void>;
   refreshSummary: () => Promise<void>;
+  refreshDownloads: () => Promise<void>;
 
   // Queries (read from store directly — no re-render cost)
   getDownload: (songId: string) => DownloadItem | null;
@@ -161,6 +162,66 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   });
   const [isInitialized, setIsInitialized] = useState(false);
 
+  // ─── Refresh Downloads (merges YouTube + JioSaavn) ────────────────────────
+  const refreshDownloads = useCallback(async () => {
+    try {
+      const [jioItems, summary] = await Promise.all([
+        getAllDownloads(),
+        getStorageSummary(),
+      ]);
+
+      let ytItems: DownloadItem[] = [];
+      try {
+        const { getAllDownloads: getAllYtDownloads } = await import("@/lib/offlineDownloadService");
+        const ytDownloaded = await getAllYtDownloads();
+        ytItems = ytDownloaded.map(ytSong => ({
+          songId: ytSong.songId || `youtube_${ytSong.videoId}`,
+          title: ytSong.title,
+          artist: ytSong.artist,
+          album: "YouTube Music",
+          coverUrl: ytSong.thumbnail,
+          audioUrl: "",
+          duration: ytSong.duration,
+          status: "completed" as const,
+          progress: 1.0,
+          bytesDownloaded: ytSong.filesize,
+          totalBytes: ytSong.filesize,
+          quality: "high" as const,
+          localPath: ytSong.localUri,
+          collectionRefs: [],
+          retryCount: 0,
+          failedAt: null,
+          failureReason: null,
+          queuedAt: new Date(ytSong.downloadedAt).toISOString(),
+          completedAt: new Date(ytSong.downloadedAt).toISOString(),
+          licenseExpiresAt: null,
+        }));
+      } catch (ytErr) {
+        logger.error("[DownloadContext] failed to load YouTube downloads", ytErr);
+      }
+
+      // Seed all items to the store
+      const allItems = [...jioItems, ...ytItems];
+      downloadItemStore.seed(allItems);
+
+      // Recalculate storage summary to include YouTube songs
+      const totalYtBytes = ytItems.reduce((sum, item) => sum + item.bytesDownloaded, 0);
+      const totalYtCount = ytItems.length;
+
+      const mergedSummary: StorageSummary = {
+        totalDownloadedBytes: summary.totalDownloadedBytes + totalYtBytes,
+        totalDownloadedTracks: summary.totalDownloadedTracks + totalYtCount,
+        completedTracks: summary.completedTracks + totalYtCount,
+        pendingTracks: summary.pendingTracks,
+        failedTracks: summary.failedTracks,
+      };
+
+      setStorageSummary(mergedSummary);
+    } catch (err) {
+      logger.error("[DownloadContext] refreshDownloads failed", err);
+    }
+  }, []);
+
   // ─── Initialization ─────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -168,21 +229,19 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
 
     const initialize = async () => {
       try {
-        const [allItems, prefs, summary] = await Promise.all([
-          getAllDownloads(),
-          loadDownloadPreferences(),
-          getStorageSummary(),
-        ]);
-
-        if (!isMounted) return;
-        downloadItemStore.seed(allItems);
-        setPreferences(prefs);
-        setStorageSummary(summary);
-        setIsInitialized(true);
+        const prefs = await loadDownloadPreferences();
+        if (isMounted) {
+          setPreferences(prefs);
+        }
+        await refreshDownloads();
+        if (isMounted) {
+          setIsInitialized(true);
+        }
       } catch (err) {
-        if (!isMounted) return;
-        logger.error("[DownloadContext] initialize failed", err);
-        setIsInitialized(true);
+        if (isMounted) {
+          logger.error("[DownloadContext] initialize failed", err);
+          setIsInitialized(true);
+        }
       }
     };
 
@@ -191,7 +250,9 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [refreshDownloads]);
+
+
 
   // ─── Entitlement refresh ────────────────────────────────────────────────────
 
@@ -225,7 +286,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
             .then(({ onDownloadCompleted }) => onDownloadCompleted(uid, songId, 1))
             .catch(() => {});
         }
-        getStorageSummary().then(setStorageSummary).catch(() => {});
+        refreshDownloads();
       }),
 
       onQueueEvent("failed", (songId, item) => {
@@ -241,7 +302,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     ];
 
     return () => unsubs.forEach((fn) => fn());
-  }, [uid]);
+  }, [uid, refreshDownloads]);
 
   // ─── License sync on app foreground ────────────────────────────────────────
 
@@ -270,9 +331,9 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   // ─── Storage summary ────────────────────────────────────────────────────────
 
   const refreshSummary = useCallback(async () => {
-    const summary = await getStorageSummary();
-    setStorageSummary(summary);
-  }, []);
+    await refreshDownloads();
+
+  }, [refreshDownloads]);
 
   // ─── Actions ────────────────────────────────────────────────────────────────
 
@@ -308,19 +369,38 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const handleRemove = useCallback(async (songId: string, collectionId?: string) => {
+    const isYt = songId.startsWith("youtube_") || songId.startsWith("yt:") || downloadItemStore.get(songId)?.album === "YouTube Music";
+    if (isYt) {
+      const videoId = songId.replace("youtube_", "").replace("yt:", "");
+      try {
+        const { deleteDownload } = await import("@/lib/offlineDownloadService");
+        await deleteDownload(videoId);
+      } catch (err) {
+        logger.error("[DownloadContext] failed to delete YouTube download", err);
+      }
+      downloadItemStore.delete(songId);
+      await refreshDownloads();
+      return;
+    }
     await removeSongDownload(songId, collectionId);
     downloadItemStore.delete(songId);
     refreshSummary();
-  }, [refreshSummary]);
+  }, [refreshDownloads, refreshSummary]);
 
   const handleRemoveAll = useCallback(async () => {
+    try {
+      const { clearAllDownloads } = await import("@/lib/offlineDownloadService");
+      await clearAllDownloads();
+    } catch (err) {
+      logger.error("[DownloadContext] failed to clear YouTube downloads", err);
+    }
     await removeAllDownloads();
     // Clear the store
     for (const item of downloadItemStore.getAll()) {
       downloadItemStore.delete(item.songId);
     }
-    refreshSummary();
-  }, [refreshSummary]);
+    await refreshDownloads();
+  }, [refreshDownloads, refreshSummary]);
 
   const handleUpdatePreferences = useCallback(
     async (patch: Partial<DownloadPreferences>) => {
@@ -380,6 +460,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       removeAllDownloads: handleRemoveAll,
       updatePreferences: handleUpdatePreferences,
       refreshSummary,
+      refreshDownloads,
       getDownload,
       isDownloaded,
       isDownloading,
@@ -401,6 +482,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       handleRemoveAll,
       handleUpdatePreferences,
       refreshSummary,
+      refreshDownloads,
       getDownload,
       isDownloaded,
       isDownloading,

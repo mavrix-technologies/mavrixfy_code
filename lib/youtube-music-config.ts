@@ -1,11 +1,16 @@
 import Constants from 'expo-constants';
+import * as Device from 'expo-device';
+import { Platform } from 'react-native';
 import { logger } from "@/lib/logger";
+
+const PRODUCTION_YOUTUBE_MUSIC_API_URL = 'https://mavrixfy-api-drab.vercel.app/api/youtube-music';
 
 /**
  * YouTube Music API Configuration
  * 
  * Configured via .env file or app.json extra config:
- * - Development: EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL=http://localhost:8000 (or your local IP)
+ * - Development: EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL=https://mavrixfy-api-drab.vercel.app/api/youtube-music
+ *   or a device-reachable LAN URL like http://192.168.x.x:8000
  * - Production: EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL=https://mavrixfy-api-drab.vercel.app/api/youtube-music
  * - Standalone builds: app.json extra.youtubeMusicApiUrl
  * 
@@ -22,6 +27,7 @@ function isPrivateDevelopmentUrl(value: string): boolean {
     return (
       host === 'localhost' ||
       host === '127.0.0.1' ||
+      host === '0.0.0.0' ||
       host === '10.0.2.2' ||
       host.startsWith('192.168.') ||
       host.startsWith('10.') ||
@@ -32,22 +38,42 @@ function isPrivateDevelopmentUrl(value: string): boolean {
   }
 }
 
+function isHostOnlyDevelopmentUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '0.0.0.0' ||
+      host === '10.0.2.2'
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function getYouTubeMusicApiUrlForPlatform(): string {
+  const configUrl = Constants.expoConfig?.extra?.youtubeMusicApiUrl;
+  const fallbackUrl = configUrl || PRODUCTION_YOUTUBE_MUSIC_API_URL;
+
   // Try environment variable first (works in development and if embedded in build)
   const envUrl = process.env.EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL;
   
+  if (__DEV__ && envUrl && Platform.OS !== 'web' && Device.isDevice && isHostOnlyDevelopmentUrl(envUrl)) {
+    logger.warn(
+      '[YouTube Music Config] Ignoring host-only development URL on a physical device. Use a LAN IP or the production proxy.'
+    );
+    return fallbackUrl;
+  }
+
   if (envUrl && (__DEV__ || !isPrivateDevelopmentUrl(envUrl))) {
     return envUrl;
   }
   
   // Fallback to app.json extra config for standalone builds
-  const configUrl = Constants.expoConfig?.extra?.youtubeMusicApiUrl;
-  
-  if (configUrl) {
-    return configUrl;
-  }
+  if (configUrl) return configUrl;
   
   // Final fallback to production URL
   logger.warn('[YouTube Music Config] Using fallback production URL. Consider setting EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL in .env');
-  return 'https://mavrixfy-api-drab.vercel.app/api/youtube-music';
+  return PRODUCTION_YOUTUBE_MUSIC_API_URL;
 }

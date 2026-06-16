@@ -4,8 +4,9 @@
  * Provides functionality to download YouTube Music songs for offline playback
  */
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { safeAsyncStorageSetItem } from './storage';
 import { getYouTubeMusicApiUrl } from '@/lib/api-config';
 import { logger } from '@/lib/logger';
 import type { Song } from '@/lib/musicData';
@@ -13,6 +14,25 @@ import type { Song } from '@/lib/musicData';
 // Constants
 const DOWNLOADS_DIR = `${FileSystem.documentDirectory}downloads/`;
 const DOWNLOADS_METADATA_KEY = '@mavrixfy_downloads';
+
+// Cache of downloaded video IDs
+const downloadedCache = new Set<string>();
+let isCacheHydrated = false;
+
+// Hydrate cache immediately when this module is loaded
+getAllDownloads().then(downloads => {
+  downloadedCache.clear();
+  downloads.forEach(d => downloadedCache.add(d.videoId));
+  isCacheHydrated = true;
+  logger.info(`[Download] Hydrated in-memory downloaded cache with ${downloadedCache.size} items`);
+}).catch(err => {
+  logger.error('[Download] Failed to hydrate cache on load:', err);
+});
+
+export function isDownloadedSync(videoId: string): boolean {
+  return downloadedCache.has(videoId);
+}
+
 
 export interface DownloadInfo {
   videoId: string;
@@ -65,6 +85,7 @@ export async function getDownloadInfo(videoId: string): Promise<DownloadInfo | n
     const url = `${apiUrl}download/${videoId}`;
     
     logger.info(`[Download] Fetching download info for ${videoId}`);
+    logger.info(`[Download] Exact URL requested: ${url}`);
     
     const response = await fetch(url);
     
@@ -187,7 +208,8 @@ async function saveDownloadMetadata(
       downloads.push(downloadedSong);
     }
     
-    await AsyncStorage.setItem(DOWNLOADS_METADATA_KEY, JSON.stringify(downloads));
+    await safeAsyncStorageSetItem(DOWNLOADS_METADATA_KEY, JSON.stringify(downloads));
+    downloadedCache.add(info.videoId);
     logger.info('[Download] Saved metadata for', song.title);
     
   } catch (error) {
@@ -256,7 +278,8 @@ export async function deleteDownload(videoId: string): Promise<boolean> {
     
     // Remove from metadata
     const updated = downloads.filter(d => d.videoId !== videoId);
-    await AsyncStorage.setItem(DOWNLOADS_METADATA_KEY, JSON.stringify(updated));
+    await safeAsyncStorageSetItem(DOWNLOADS_METADATA_KEY, JSON.stringify(updated));
+    downloadedCache.delete(videoId);
     logger.info('[Download] Removed metadata for', videoId);
     
     return true;
@@ -296,6 +319,7 @@ export async function clearAllDownloads(): Promise<boolean> {
     
     // Clear metadata
     await AsyncStorage.removeItem(DOWNLOADS_METADATA_KEY);
+    downloadedCache.clear();
     logger.info('[Download] Cleared all downloads');
     
     return true;

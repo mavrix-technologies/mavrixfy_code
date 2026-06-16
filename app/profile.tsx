@@ -90,6 +90,7 @@ export default function ProfileScreen() {
     crossfade: 0,
     gapless: true,
     normalizeVolume: false,
+    ambientBackdropEnabled: true,
   });
 
   useEffect(() => {
@@ -232,6 +233,19 @@ export default function ProfileScreen() {
               <Switch
                 value={settings.normalizeVolume}
                 onValueChange={(v) => updateSettings({ normalizeVolume: v })}
+                trackColor={{ false: Colors.inactive, true: Colors.primary }}
+                thumbColor={Colors.text}
+              />
+            }
+          />
+          <SettingsRow
+            icon="phone-portrait-outline"
+            title="Ambient video backdrop"
+            subtitle="Show dynamic video loops behind the player"
+            trailing={
+              <Switch
+                value={settings.ambientBackdropEnabled}
+                onValueChange={(v) => updateSettings({ ambientBackdropEnabled: v })}
                 trackColor={{ false: Colors.inactive, true: Colors.primary }}
                 thumbColor={Colors.text}
               />

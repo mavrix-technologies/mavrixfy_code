@@ -223,23 +223,22 @@ const SongRow = memo(function SongRow({
 
     const canRemoveFromPlaylist = optionContext === "playlist" && Boolean(playlistId);
 
-    requestAnimationFrame(() => {
-      router.push(
-        {
-          pathname: "/song-options",
-          params: {
-            song: JSON.stringify(song),
-            showDownload: showDownload && !onRemove && !canRemoveFromPlaylist ? "1" : "0",
-            canRemove: onRemove || canRemoveFromPlaylist ? "1" : "0",
-            optionContext: optionContext ?? "",
-            playlistId: playlistId ?? "",
-            playlistSource: playlistSource ?? "",
-            playlistName: playlistName ?? "",
-          },
+    try {
+      router.push({
+        pathname: "/song-options",
+        params: {
+          song: JSON.stringify(song),
+          showDownload: showDownload && !onRemove && !canRemoveFromPlaylist ? "1" : "0",
+          canRemove: onRemove || canRemoveFromPlaylist ? "1" : "0",
+          optionContext: optionContext ?? "",
+          playlistId: playlistId ?? "",
+          playlistSource: playlistSource ?? "",
+          playlistName: playlistName ?? "",
         },
-        { dangerouslySingular: () => "song-options" }
-      );
-    });
+      });
+    } catch (error) {
+      console.error("[SongRow] Failed to open song options:", error);
+    }
 
     optionOpenTimerRef.current = setTimeout(() => {
       optionOpenLockRef.current = false;
@@ -290,6 +289,8 @@ const SongRow = memo(function SongRow({
                 contentFit="cover"
                 cachePolicy="memory-disk"
                 priority="normal"
+                placeholder={{ blurhash: 'L5H2EC=PM+yV+^$gM_e-4Wo0WB%M' }}
+                transition={100}
               />
             )}
 
@@ -346,12 +347,13 @@ const SongRow = memo(function SongRow({
     </View>
   );
 }, (prevProps, nextProps) => {
+  // Optimized comparison - skip queue array comparison for better performance
+  // Queue changes are detected via queueKey instead
   return (
     prevProps.song.id === nextProps.song.id &&
     prevProps.song.title === nextProps.song.title &&
     prevProps.song.artist === nextProps.song.artist &&
     prevProps.song.coverUrl === nextProps.song.coverUrl &&
-    prevProps.song.audioUrl === nextProps.song.audioUrl &&
     prevProps.index === nextProps.index &&
     prevProps.showCover === nextProps.showCover &&
     prevProps.showDownload === nextProps.showDownload &&
@@ -362,8 +364,7 @@ const SongRow = memo(function SongRow({
     prevProps.horizontalPadding === nextProps.horizontalPadding &&
     prevProps.onSongPress === nextProps.onSongPress &&
     Boolean(prevProps.onRemove) === Boolean(nextProps.onRemove) &&
-    prevProps.queueKey === nextProps.queueKey &&
-    prevProps.queue === nextProps.queue
+    prevProps.queueKey === nextProps.queueKey
   );
 });
 

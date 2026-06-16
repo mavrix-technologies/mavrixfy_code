@@ -17,6 +17,7 @@ export interface Song {
   youtubeVideoId?: string;
   youtubeVisualVideoId?: string;
   youtubeVideoType?: string;
+  downloadUrl?: unknown;
 }
 
 export interface JioSaavnImage {
@@ -164,6 +165,26 @@ function getBestAudioUrl(downloadUrls: unknown): string {
   return sorted[0]?.url || "";
 }
 
+export function getBestAudioUrlWithQuality(downloadUrls: unknown, quality: "low" | "medium" | "high"): string {
+  const candidates = normalizeAudioCandidates(downloadUrls);
+  if (candidates.length === 0) return "";
+
+  const targetQualityOrder: Record<string, string[]> = {
+    low: ["96kbps", "48kbps", "12kbps", "160kbps", "320kbps"],
+    medium: ["160kbps", "96kbps", "320kbps", "48kbps", "12kbps"],
+    high: ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"],
+  };
+
+  const preference = targetQualityOrder[quality] || targetQualityOrder.high;
+
+  for (const pref of preference) {
+    const found = candidates.find(c => c.quality === pref);
+    if (found) return found.url;
+  }
+
+  return getBestAudioUrl(downloadUrls);
+}
+
 export function convertJioSaavnSong(song: JioSaavnSong): Song {
   const artistNames = song.artists?.primary?.map(a => a.name).join(", ") || "Unknown Artist";
   return {
@@ -175,6 +196,7 @@ export function convertJioSaavnSong(song: JioSaavnSong): Song {
     coverUrl: getBestImageUrl(song.image),
     genre: song.language || "",
     audioUrl: getBestAudioUrl(song.downloadUrl || song.audioUrl || song.url),
+    downloadUrl: song.downloadUrl || song.audioUrl || song.url,
     year: song.year,
     language: song.language,
     hasLyrics: song.hasLyrics,
