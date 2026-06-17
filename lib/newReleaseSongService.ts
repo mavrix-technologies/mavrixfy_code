@@ -290,7 +290,6 @@ function normalizeNewReleaseCandidate(raw: any, resultRank: number): NewReleaseS
     audioUrl,
     year: cleanText(raw?.year || raw?.releaseDate || raw?.release_date),
     language,
-    hasLyrics: Boolean(raw?.hasLyrics || raw?.has_lyrics),
     source: "jiosaavn",
     playCount: Number(raw?.playCount || raw?.play_count || 0) || 0,
   };

@@ -368,6 +368,20 @@ function mergeUniqueById<T extends { id: string }>(items: T[], limit: number): T
   return out;
 }
 
+function uniqueById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+
+  for (const item of items) {
+    const id = String(item.id || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(item);
+  }
+
+  return out;
+}
+
 const SONG_METADATA_TITLE_WORDS = new Set([
   "from",
   "original",
@@ -383,8 +397,6 @@ const SONG_METADATA_TITLE_WORDS = new Set([
   "song",
   "video",
   "audio",
-  "lyrics",
-  "lyrical",
 ]);
 
 const SONG_VERSION_TITLE_WORDS = new Set([
@@ -408,7 +420,7 @@ const SONG_VERSION_TITLE_WORDS = new Set([
 ]);
 
 const SONG_METADATA_PATTERN =
-  "from|original|motion\\s+picture|soundtrack|ost|movie|film|album|official|full\\s+song|video|audio|lyrics?|lyrical";
+  "from|original|motion\\s+picture|soundtrack|ost|movie|film|album|official|full\\s+song|video|audio";
 const SONG_VERSION_PATTERN =
   "remix|remixed|rmx|lofi|lo-fi|lo\\s+fi|slowed|reverb|cover|live|acoustic|instrumental|karaoke|8d|nightcore|mashup|version";
 
@@ -519,6 +531,123 @@ function uniqueSongResultIds(songs: Song[]): Song[] {
     seen.add(nextId);
     return nextId === song.id ? song : { ...song, id: nextId };
   });
+}
+
+function mergeSearchSongRows(primarySongs: Song[], youtubeSongs: Song[]): Song[] {
+  if (youtubeSongs.length === 0) return primarySongs;
+
+  const youtubeUnique: Song[] = [];
+  for (const song of youtubeSongs) {
+    if (!youtubeUnique.some((existing) => areDuplicateSearchSongs(song, existing, true))) {
+      youtubeUnique.push(song);
+    }
+  }
+
+  const primaryUnique: Song[] = [];
+  for (const song of primarySongs) {
+    if (!primaryUnique.some((existing) => areDuplicateSearchSongs(song, existing, true))) {
+      primaryUnique.push(song);
+    }
+  }
+
+  const merged: Song[] = [];
+  const usedPrimaryIndexes = new Set<number>();
+
+  for (const youtubeSong of youtubeUnique) {
+    merged.push(youtubeSong);
+
+    const matchingPrimaryIndex = primaryUnique.findIndex((primarySong, index) =>
+      !usedPrimaryIndexes.has(index) && areDuplicateSearchSongs(youtubeSong, primarySong, true)
+    );
+    if (matchingPrimaryIndex >= 0) {
+      merged.push(primaryUnique[matchingPrimaryIndex]);
+      usedPrimaryIndexes.add(matchingPrimaryIndex);
+    }
+  }
+
+  primaryUnique.forEach((primarySong, index) => {
+    if (!usedPrimaryIndexes.has(index)) {
+      merged.push(primarySong);
+    }
+  });
+
+  return uniqueSongResultIds(merged);
+}
+
+function isYouTubeCollectionResult(id: string, url?: string, description?: string): boolean {
+  const value = String(id || "").trim();
+  const lowerUrl = String(url || "").toLowerCase();
+  const lowerDescription = String(description || "").toLowerCase();
+
+  return (
+    value.startsWith("MPRE") ||
+    value.startsWith("OLAK") ||
+    value.startsWith("PL") ||
+    value.startsWith("VL") ||
+    value.startsWith("RDCLAK") ||
+    value.startsWith("RDTMAK") ||
+    lowerUrl.includes("youtube") ||
+    lowerUrl.includes("music.youtube.com") ||
+    lowerDescription.includes("youtube")
+  );
+}
+
+function normalizeCollectionDuplicateName(value: string | undefined): string {
+  return normalizeSongDuplicateTitle(String(value || ""), true);
+}
+
+function areDuplicateAlbumResults(next: AlbumResult, existing: AlbumResult): boolean {
+  const nextName = normalizeCollectionDuplicateName(next.name);
+  const existingName = normalizeCollectionDuplicateName(existing.name);
+  if (!nextName || nextName !== existingName) return false;
+
+  const nextArtist = normalizeSongPeopleKey(next.artist || "");
+  const existingArtist = normalizeSongPeopleKey(existing.artist || "");
+  return nextArtist === "unknown" || existingArtist === "unknown" || nextArtist === existingArtist;
+}
+
+function areDuplicatePlaylistResults(next: PlaylistResult, existing: PlaylistResult): boolean {
+  const nextName = normalizeCollectionDuplicateName(next.name);
+  const existingName = normalizeCollectionDuplicateName(existing.name);
+  return Boolean(nextName && nextName === existingName);
+}
+
+function areDuplicateArtistResults(next: ArtistResult, existing: ArtistResult): boolean {
+  const nextName = normalizeText(next.name || "");
+  const existingName = normalizeText(existing.name || "");
+  return Boolean(nextName && nextName === existingName);
+}
+
+function mergePairedSearchRows<T extends { id: string }>(
+  priorityItems: T[],
+  secondaryItems: T[],
+  isDuplicate: (priorityItem: T, secondaryItem: T) => boolean,
+  limit: number
+): T[] {
+  const priorityUnique = uniqueById(priorityItems);
+  const secondaryUnique = uniqueById(secondaryItems);
+  const merged: T[] = [];
+  const usedSecondaryIndexes = new Set<number>();
+
+  for (const priorityItem of priorityUnique) {
+    merged.push(priorityItem);
+
+    const matchingSecondaryIndex = secondaryUnique.findIndex((secondaryItem, index) =>
+      !usedSecondaryIndexes.has(index) && isDuplicate(priorityItem, secondaryItem)
+    );
+    if (matchingSecondaryIndex >= 0) {
+      merged.push(secondaryUnique[matchingSecondaryIndex]);
+      usedSecondaryIndexes.add(matchingSecondaryIndex);
+    }
+  }
+
+  secondaryUnique.forEach((secondaryItem, index) => {
+    if (!usedSecondaryIndexes.has(index)) {
+      merged.push(secondaryItem);
+    }
+  });
+
+  return mergeUniqueById(merged, limit);
 }
 
 function stableHash(input: string): number {
@@ -818,9 +947,24 @@ function useSearchScreenView() {
                 }
               }
 
-              const enrichedAlbums = mergeUniqueById([...albums, ...ytMusicAlbums], 12);
-              const enrichedArtists = mergeUniqueById([...artists, ...ytMusicArtists], 12);
-              const enrichedPlaylists = mergeUniqueById([...playlists, ...ytMusicPlaylists], 12);
+              const enrichedAlbums = mergePairedSearchRows(
+                ytMusicAlbums,
+                albums,
+                areDuplicateAlbumResults,
+                16
+              );
+              const enrichedArtists = mergePairedSearchRows(
+                ytMusicArtists,
+                artists,
+                areDuplicateArtistResults,
+                16
+              );
+              const enrichedPlaylists = mergePairedSearchRows(
+                ytMusicPlaylists,
+                playlists,
+                areDuplicatePlaylistResults,
+                16
+              );
 
               logger.debug("[Search] YouTube Music results", { songCount: youtubeSongs.length });
               setYoutubeMusicResults(youtubeSongs);
@@ -1156,11 +1300,16 @@ function useSearchScreenView() {
     });
   }, [query, resultFilter]);
 
-  const hasResults = songResults.length > 0 || albumResults.length > 0 || artistResults.length > 0 || playlistResults.length > 0;
+  const hasResults =
+    songResults.length > 0 ||
+    youtubeMusicResults.length > 0 ||
+    albumResults.length > 0 ||
+    artistResults.length > 0 ||
+    playlistResults.length > 0;
   const showFocusedRecentSearches = isSearchMode && query.trim().length < 2;
   const showBrowse = !isSearchMode && query.trim().length < 2;
   const resultDataKey =
-    `${query.trim()}-${resultFilter}-${songResults.length}-${albumResults.length}-${artistResults.length}-${playlistResults.length}-${searchLoading ? 1 : 0}`;
+    `${query.trim()}-${resultFilter}-${songResults.length}-${youtubeMusicResults.length}-${albumResults.length}-${artistResults.length}-${playlistResults.length}-${searchLoading ? 1 : 0}`;
   const searchHeaderNode = useMemo(
     () => (
       <SearchHeaderField
@@ -1202,13 +1351,20 @@ function useSearchScreenView() {
         resultsSongsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       }
     });
-  }, [searchLoading, resultFilter, showBrowse, showFocusedRecentSearches, songResults.length, albumResults.length, artistResults.length, playlistResults.length]);
+  }, [searchLoading, resultFilter, showBrowse, showFocusedRecentSearches, songResults.length, youtubeMusicResults.length, albumResults.length, artistResults.length, playlistResults.length]);
 
   const showAlbumResults = resultFilter !== "songs" && resultFilter !== "artists" && resultFilter !== "playlists" && albumResults.length > 0;
   const showArtistResults = resultFilter !== "songs" && resultFilter !== "albums" && resultFilter !== "playlists" && artistResults.length > 0;
   const showPlaylistResults = resultFilter !== "songs" && resultFilter !== "albums" && resultFilter !== "artists" && playlistResults.length > 0;
-  const showSongResults = resultFilter !== "albums" && resultFilter !== "artists" && resultFilter !== "playlists" && songResults.length > 0;
-  const displayedSongs = useMemo(() => (showSongResults ? songResults : []), [showSongResults, songResults]);
+  const showSongResults =
+    resultFilter !== "albums" &&
+    resultFilter !== "artists" &&
+    resultFilter !== "playlists" &&
+    (songResults.length > 0 || youtubeMusicResults.length > 0);
+  const displayedSongs = useMemo(
+    () => (showSongResults ? mergeSearchSongRows(songResults, youtubeMusicResults) : []),
+    [showSongResults, songResults, youtubeMusicResults]
+  );
   const featuredAlbums = useMemo(() => albumResults.slice(0, 6), [albumResults]);
   const featuredArtists = useMemo(() => artistResults.slice(0, 5), [artistResults]);
   const featuredPlaylists = useMemo(() => playlistResults.slice(0, 6), [playlistResults]);
@@ -1216,11 +1372,6 @@ function useSearchScreenView() {
     () => displayedSongs.map((song) => song.id).join("|"),
     [displayedSongs]
   );
-  const youtubeMusicQueueKey = useMemo(
-    () => youtubeMusicResults.map((song) => song.id).join("|"),
-    [youtubeMusicResults]
-  );
-
   const handleSongResultPress = useCallback((song: Song) => {
     void addSongSearchHistoryItem(song)
       .then((items) => setRecentSearches(toRecentSearchItems(items)))
@@ -1230,12 +1381,13 @@ function useSearchScreenView() {
   const renderSong = useCallback(
     ({ item }: { item: Song; index: number }) => {
       return (
-        <SongRow
-          song={item}
-          queue={displayedSongs}
-          queueKey={displayedSongsQueueKey}
-          onSongPress={handleSongResultPress}
-        />
+          <SongRow
+            song={item}
+            queue={displayedSongs}
+            queueKey={displayedSongsQueueKey}
+            onSongPress={handleSongResultPress}
+            showSearchSourceMeta
+          />
       );
     },
     [displayedSongs, displayedSongsQueueKey, handleSongResultPress]
@@ -1311,6 +1463,7 @@ function useSearchScreenView() {
         album.year,
         album.language,
       ].filter((value): value is string => Boolean(value));
+      const isYt = isYouTubeCollectionResult(album.id, album.url, album.description);
       const meta = album.songCount > 0
         ? `${album.songCount} songs`
         : metaParts.join(" · ") || "Album";
@@ -1323,7 +1476,6 @@ function useSearchScreenView() {
             pressed && styles.playlistClassicCardPressed,
           ]}
           onPress={() => {
-            const isYt = album.id.startsWith("MPREI_") || album.id.startsWith("PL") || album.id.startsWith("VL") || String(album.url).includes("youtube") || String(album.id).length > 20;
             routerPush({
               pathname: "/playlist/[id]",
               params: {
@@ -1359,7 +1511,11 @@ function useSearchScreenView() {
               style={StyleSheet.absoluteFill}
             />
             <View pointerEvents="none" style={styles.brandCoverBadge}>
-              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
+              {isYt ? (
+                <Ionicons name="videocam-outline" size={15} color="#FFFFFF" />
+              ) : (
+                <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
+              )}
             </View>
           </View>
           <View style={styles.playlistGridContent}>
@@ -1390,6 +1546,7 @@ function useSearchScreenView() {
       const tiltPattern = [-1.1, 0.9, -0.8, 1.2, -0.6, 0.8] as const;
       const staggerOffset = staggerPattern[seed % staggerPattern.length];
       const tilt = tiltPattern[(Math.floor(seed / 7)) % tiltPattern.length];
+      const isYt = isYouTubeCollectionResult(playlist.id, playlist.url, playlist.description);
       const meta = playlist.songCount > 0
         ? `${Math.max(0, playlist.songCount || 0)} songs`
         : playlist.language || playlist.description || "Playlist";
@@ -1402,7 +1559,6 @@ function useSearchScreenView() {
             pressed && styles.playlistClassicCardPressed,
           ]}
           onPress={() => {
-            const isYt = playlist.id.startsWith("PL") || playlist.id.startsWith("VL") || String(playlist.url).includes("youtube") || String(playlist.id).length > 20;
             routerPush({
               pathname: "/playlist/[id]",
               params: {
@@ -1437,7 +1593,11 @@ function useSearchScreenView() {
               style={StyleSheet.absoluteFill}
             />
             <View pointerEvents="none" style={styles.brandCoverBadge}>
-              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
+              {isYt ? (
+                <Ionicons name="videocam-outline" size={15} color="#FFFFFF" />
+              ) : (
+                <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
+              )}
             </View>
           </View>
           <View style={styles.playlistGridContent}>
@@ -1696,40 +1856,8 @@ function useSearchScreenView() {
               maxToRenderPerBatch={8}
               windowSize={7}
               ListFooterComponent={
-                showAlbumResults || showArtistResults || showPlaylistResults || youtubeMusicResults.length > 0 ? (
+                showAlbumResults || showArtistResults || showPlaylistResults ? (
                   <>
-                    {/* YouTube Music Section */}
-                    {youtubeMusicResults.length > 0 ? (
-                      <View style={styles.sectionBlock}>
-                        <View style={styles.sectionHeaderRow}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                            <Ionicons name="logo-youtube" size={20} color="#FF0000" />
-                            <Text style={styles.sectionTitle}>YouTube Music</Text>
-                            <View style={{ backgroundColor: '#FF0000', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                              <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '600' }}>LIVE</Text>
-                            </View>
-                          </View>
-                          <Text style={[styles.sectionActionText, { color: Colors.subtext }]}>
-                            {youtubeMusicResults.length} songs
-                          </Text>
-                        </View>
-                        <Text style={{ color: Colors.subtext, fontSize: 12, marginBottom: 12, paddingHorizontal: 16 }}>
-                          Tap any song to play directly from YouTube Music.
-                        </Text>
-                        <View>
-                          {youtubeMusicResults.slice(0, 5).map((song) => (
-                            <SongRow 
-                              key={song.id} 
-                              song={song} 
-                              queue={youtubeMusicResults}
-                              queueKey={youtubeMusicQueueKey}
-                              onSongPress={handleSongResultPress} 
-                            />
-                          ))}
-                        </View>
-                      </View>
-                    ) : null}
-                    
                     {showAlbumResults ? (
                       <View style={styles.sectionBlock}>
                         <View style={styles.sectionHeaderRow}>

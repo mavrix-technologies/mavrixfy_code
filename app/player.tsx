@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
-import Slider from "@react-native-community/slider";
 import * as Animated from "@/lib/nativeAnimated";
 import * as Network from "expo-network";
-import * as Device from "expo-device";
 import {
   View,
   Text,
@@ -15,8 +13,10 @@ import {
   ActivityIndicator,
   InteractionManager,
   GestureResponderEvent,
+  LayoutChangeEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  PanResponder,
   StyleProp,
   useWindowDimensions,
   ViewStyle
@@ -26,6 +26,16 @@ import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useNavigation, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Reanimated, {
+  Extrapolation,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { AD_UNITS } from "@/constants/admob";
@@ -36,6 +46,7 @@ import { convertJioSaavnSong, formatDuration, getBestImageUrl, Song } from "@/li
 import { getRecentlyPlayed, getUserPlaylists, getSettings } from "@/lib/storage";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { logger } from "@/lib/logger";
+import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
 import {
   createSpotifyColorTheme,
   extractDominantColor,
@@ -43,6 +54,7 @@ import {
   preloadDominantColors,
 } from "@/lib/colorExtractor";
 import EqualizerBars from "@/components/EqualizerBars";
+import DownloadButton from "@/components/DownloadButton";
 import { getArtistDetails, JioSaavnArtist, searchArtists } from "@/lib/artistService";
 import { isFollowingArtist, toggleFollowArtist } from "@/lib/followedArtists";
 import { mapFilter } from "@/lib/arrayUtils";
@@ -50,12 +62,22 @@ import { globalQueueSheetRef } from "@/lib/queueRef";
 import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
 import { getYouTubeMusicVisualVideoId } from "@/lib/youtubeMusicService";
 import YoutubePlayer from "react-native-youtube-iframe";
-import LiveLyrics from "@/components/LiveLyrics";
 
 const getCurrentTimestamp = () => Date.now();
 const PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING = 136;
 const PLAYER_AD_COVER_COOLDOWN_MS = 8 * 60 * 1000;
 const PLAYER_AD_COVER_COOLDOWN_SONGS = 4;
+const PLAYER_PRIMARY_DISMISS_START_PX = 8;
+const PLAYER_PRIMARY_DISMISS_CLOSE_PX = 62;
+const PLAYER_PRIMARY_DISMISS_FAST_VELOCITY = 650;
+const PLAYER_PRIMARY_DISMISS_FAIL_X_PX = 34;
+const PLAYER_PRIMARY_DISMISS_MAX_DRAG_RATIO = 0.58;
+const PLAYER_PRIMARY_DISMISS_TIMING_MS = 180;
+const PLAYER_PRIMARY_DISMISS_SPRING = {
+  damping: 24,
+  mass: 0.9,
+  stiffness: 270,
+};
 const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
 
 function getYouTubeVideoIdFromSong(song: Song | null | undefined): string {
@@ -783,7 +805,7 @@ function PlayerPlayButton({
           width: buttonSize,
           height: buttonSize,
           borderRadius: buttonSize / 2,
-          backgroundColor: "#F7FAFF",
+          backgroundColor: "#FFFFFF",
           borderWidth: 1,
           borderColor: "rgba(255,255,255,0.92)",
         },
@@ -805,7 +827,7 @@ function PlayerPlayButton({
 
 PlayerPlayButton.displayName = "PlayerPlayButton";
 
-type PlayerProgressCardProps = {
+type PlayerSpotifyProgressProps = {
   screenSongId: string;
   songDurationSeconds: number;
   isShortScreen: boolean;
@@ -816,7 +838,7 @@ type PlayerProgressCardProps = {
   onSeekingChange: (isSeeking: boolean) => void;
 };
 
-const PlayerProgressCard = memo(function PlayerProgressCard({
+const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   screenSongId,
   songDurationSeconds,
   isShortScreen,
@@ -825,11 +847,12 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
   setDevPreviewProgress,
   seekTo,
   onSeekingChange,
-}: PlayerProgressCardProps) {
-  const { progress, duration, positionMillis } = usePlayerProgress();
+}: PlayerSpotifyProgressProps) {
+  const { progress, duration } = usePlayerProgress();
   const { isPlaying } = usePlayerRow();
   const [seekValue, setSeekValue] = useState<number | null>(null);
   const [isSeeking, setIsSeeking] = useState(false);
+  const [progressTrackWidth, setProgressTrackWidth] = useState(0);
   const androidSeekFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [localProgress, setLocalProgress] = useState(progress);
@@ -876,13 +899,15 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
     (Platform.OS === "android" && Boolean(screenSongId));
   const displayDuration =
     totalDurationSec > 0 ? formatDuration(totalDurationSec) : formatDuration(safeSongDuration);
-  const progressFillColor = Colors.primary;
-  const progressTrackColor = "rgba(247,250,255,0.24)";
-  const androidThumbTintColor = Platform.OS === "android" ? "#F7FAFF" : undefined;
 
   const clampProgress = useCallback((value: number) => {
     return Math.max(0, Math.min(1, value));
   }, []);
+
+  const getProgressFromLocation = useCallback((locationX: number) => {
+    if (progressTrackWidth <= 0) return 0;
+    return clampProgress(locationX / progressTrackWidth);
+  }, [clampProgress, progressTrackWidth]);
 
   const clearAndroidSeekFallbackTimer = useCallback(() => {
     if (!androidSeekFallbackTimerRef.current) return;
@@ -918,7 +943,7 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
     setSeekValue(clampProgress(value));
   }, [clearAndroidSeekFallbackTimer, clampProgress, updateSeeking]);
 
-  const handleSliderValueChange = useCallback((value: number) => {
+  const handleScrubValueChange = useCallback((value: number) => {
     setSeekValue(clampProgress(value));
   }, [clampProgress]);
 
@@ -937,52 +962,82 @@ const PlayerProgressCard = memo(function PlayerProgressCard({
     }, 1500);
   }, [clearAndroidSeekFallbackTimer, clampProgress, isDevPreviewActive, seekTo, setDevPreviewProgress, updateSeeking]);
 
+  const handleProgressLayout = useCallback((event: LayoutChangeEvent) => {
+    setProgressTrackWidth(event.nativeEvent.layout.width);
+  }, []);
+
+  const progressPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => canSeek,
+        onMoveShouldSetPanResponder: () => canSeek,
+        onPanResponderGrant: (event) => {
+          handleSlidingStart(getProgressFromLocation(event.nativeEvent.locationX));
+        },
+        onPanResponderMove: (event) => {
+          handleScrubValueChange(getProgressFromLocation(event.nativeEvent.locationX));
+        },
+        onPanResponderRelease: (event) => {
+          handleSlidingComplete(getProgressFromLocation(event.nativeEvent.locationX));
+        },
+        onPanResponderTerminate: () => {
+          setSeekValue(null);
+          updateSeeking(false);
+        },
+      }),
+    [
+      canSeek,
+      getProgressFromLocation,
+      handleScrubValueChange,
+      handleSlidingComplete,
+      handleSlidingStart,
+      updateSeeking,
+    ]
+  );
+
+  const progressFillWidth = progressTrackWidth * visualProgress;
+  const currentDisplayTime = formatDuration(
+    seekValue !== null
+      ? Math.floor(Math.max(0, effectiveDurationSec) * visualProgress)
+      : Math.min(effectiveDurationSec, currentTimeSec)
+  );
+
   return (
     <View
       style={[
-        styles.progressCard,
+        styles.spotifyProgressWrap,
         { marginTop: isShortScreen ? 8 : 10, marginHorizontal: isShortScreen ? 14 : 20 },
       ]}
     >
-      <View style={styles.progressTouch}>
-        <Slider
-          style={styles.progressSliderNative}
-          minimumValue={0}
-          maximumValue={1}
-          value={visualProgress}
-          disabled={!canSeek}
-          tapToSeek={Platform.OS === "ios"}
-          minimumTrackTintColor={progressFillColor}
-          maximumTrackTintColor={progressTrackColor}
-          thumbTintColor={androidThumbTintColor}
-          accessibilityLabel="Playback position"
-          accessibilityValue={{
-            text: `${formatDuration(
-              seekValue !== null
-                ? Math.floor(Math.max(0, effectiveDurationSec) * visualProgress)
-                : Math.min(effectiveDurationSec, currentTimeSec)
-            )} of ${displayDuration}`,
-          }}
-          onSlidingStart={handleSlidingStart}
-          onValueChange={handleSliderValueChange}
-          onSlidingComplete={handleSlidingComplete}
-        />
+      <View
+        accessibilityRole="adjustable"
+        accessibilityLabel="Playback position"
+        accessibilityValue={{ text: `${currentDisplayTime} of ${displayDuration}` }}
+        style={styles.spotifyProgressTouch}
+        {...progressPanResponder.panHandlers}
+      >
+        <View style={styles.spotifyProgressTrack} onLayout={handleProgressLayout}>
+          <View style={[styles.spotifyProgressFill, { width: progressFillWidth }]} />
+          <View
+            style={[
+              styles.spotifyProgressThumb,
+              {
+                left: progressFillWidth,
+                opacity: canSeek ? 1 : 0.35,
+              },
+            ]}
+          />
+        </View>
       </View>
-      <View style={styles.timeRow}>
-        <Text style={styles.timeText}>
-          {formatDuration(
-            seekValue !== null
-              ? Math.floor(Math.max(0, effectiveDurationSec) * visualProgress)
-              : Math.min(effectiveDurationSec, currentTimeSec)
-          )}
-        </Text>
-        <Text style={styles.timeText}>{displayDuration}</Text>
+      <View style={styles.spotifyTimeRow}>
+        <Text style={styles.spotifyTimeText}>{currentDisplayTime}</Text>
+        <Text style={styles.spotifyTimeText}>{displayDuration}</Text>
       </View>
     </View>
   );
 });
 
-PlayerProgressCard.displayName = "PlayerProgressCard";
+PlayerSpotifyProgress.displayName = "PlayerSpotifyProgress";
 
 
 const QueueSongRow = memo(
@@ -1143,12 +1198,20 @@ function useLegacyPlayerScreenView() {
   const [ambientBackdropEnabled, setAmbientBackdropEnabled] = useState(true);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
 
-  // Detect low-end Android/iOS devices for performance profiling
-  const isLowEnd = useMemo(() => {
-    if (Platform.OS === "web") return false;
-    const isOldYear = Device.deviceYearClass ? Device.deviceYearClass < 2019 : false;
-    const isLowMemory = Device.totalMemory ? Device.totalMemory < 3758096384 : false; // < 3.5 GB
-    return isOldYear || isLowMemory;
+  const [isLowEnd, setIsLowEnd] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    void getDevicePerformanceProfile().then((profile) => {
+      if (mounted) {
+        setIsLowEnd(profile.isLowEndDevice);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -1181,7 +1244,6 @@ function useLegacyPlayerScreenView() {
     queue,
     sourceQueue,
     queueIndex,
-    isShuffled,
     repeatMode,
   } = usePlaybackNowPlaying();
   const playbackState = usePlaybackPlayState();
@@ -1216,7 +1278,7 @@ function useLegacyPlayerScreenView() {
   const [devPreviewIndex, setDevPreviewIndex] = useState(0);
   const [devPreviewIsPlaying, setDevPreviewIsPlaying] = useState(true);
   const [devPreviewProgress, setDevPreviewProgress] = useState(0.18);
-  const [devPreviewIsShuffled, setDevPreviewIsShuffled] = useState(false);
+  const [, setDevPreviewIsShuffled] = useState(false);
   const [devPreviewRepeatMode, setDevPreviewRepeatMode] = useState<"off" | "all" | "one">("off");
   const [devPreviewLikedSongIds, setDevPreviewLikedSongIds] = useState<string[]>([]);
   const skipCooldownRef = useRef(false);
@@ -1229,6 +1291,9 @@ function useLegacyPlayerScreenView() {
   const pendingArtworkTargetIndexRef = useRef<number | null>(null);
   const didHandleSheetDismissRef = useRef(false);
   const sheetDetentReadyAtRef = useRef(0);
+  const playerDismissGestureEnabledRef = useRef(true);
+  const playerDismissGestureEnabledShared = useSharedValue(1);
+  const playerDismissTranslateY = useSharedValue(0);
   const optionsPressLockRef = useRef(false);
   const isDevPreviewActive = __DEV__ && !currentSong && isDevPreviewEnabled;
 
@@ -1243,6 +1308,34 @@ function useLegacyPlayerScreenView() {
       clearSkipCooldownTimer();
     };
   }, [clearSkipCooldownTimer]);
+
+  const setPlayerDismissGestureEnabled = useCallback((enabled: boolean) => {
+    if (playerDismissGestureEnabledRef.current === enabled) return;
+
+    playerDismissGestureEnabledRef.current = enabled;
+    playerDismissGestureEnabledShared.value = enabled ? 1 : 0;
+    if (!enabled) {
+      playerDismissTranslateY.value = withSpring(0, PLAYER_PRIMARY_DISMISS_SPRING);
+    }
+    if (Platform.OS !== "ios") return;
+
+    navigation.setOptions({ gestureEnabled: enabled });
+  }, [navigation, playerDismissGestureEnabledShared, playerDismissTranslateY]);
+
+  useEffect(() => {
+    playerDismissGestureEnabledRef.current = true;
+    playerDismissGestureEnabledShared.value = 1;
+    playerDismissTranslateY.value = 0;
+    if (Platform.OS === "ios") {
+      navigation.setOptions({ gestureEnabled: true });
+    }
+
+    return () => {
+      if (Platform.OS === "ios") {
+        navigation.setOptions({ gestureEnabled: true });
+      }
+    };
+  }, [navigation, playerDismissGestureEnabledShared, playerDismissTranslateY]);
 
   // ── Defer heavy work until after the open animation completes ───────────────
   const [interactionReady, setInteractionReady] = useState(false);
@@ -1298,7 +1391,6 @@ function useLegacyPlayerScreenView() {
   }, [screenSong]);
 
   const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
-  const [showLyrics, setShowLyrics] = useState(false);
 
   useEffect(() => {
     setHasStartedPlaying(false);
@@ -1359,6 +1451,9 @@ function useLegacyPlayerScreenView() {
         return;
       }
       if (!isStable || index !== 0) {
+        return;
+      }
+      if (!playerDismissGestureEnabledRef.current) {
         return;
       }
       if (didHandleSheetDismissRef.current) {
@@ -1475,7 +1570,7 @@ function useLegacyPlayerScreenView() {
   }, [applyArtistInfoSnapshot, clearArtistInfo, interactionReady, currentSong?.artist]);
 
   const rawTopInset = Platform.OS === "web" ? 67 : insets.top;
-  const topInset = Platform.OS === "ios" ? Math.max(2, rawTopInset - 18) : rawTopInset;
+  const topInset = rawTopInset;
   const bottomInset = Platform.OS === "web" ? 28 : insets.bottom;
   const isShortScreen = screenHeight <= 760;
   const isVeryShortScreen = screenHeight <= 700;
@@ -1486,13 +1581,54 @@ function useLegacyPlayerScreenView() {
   const shuffleRepeatIconSize = isVeryShortScreen ? 18 : isShortScreen ? 19 : 20;
   const playButtonSize = isVeryShortScreen ? 60 : isShortScreen ? 64 : 68;
   const playIconSize = isVeryShortScreen ? 28 : isShortScreen ? 31 : 34;
+  const controlsRowGap = isVeryShortScreen ? 8 : isShortScreen ? 10 : 12;
+  const playerControlsWidth = Math.min(
+    controlButtonSize * 2 + prevNextButtonSize * 2 + playButtonSize + controlsRowGap * 4,
+    screenWidth - (isShortScreen ? 28 : 40)
+  );
+  const bottomUtilityIconSize = shuffleRepeatIconSize + 5;
   const listBottomPadding =
     Platform.OS === "web"
       ? 16
       : Math.max(PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING, bottomInset + PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING);
-  const defaultArtByWidth = Math.min(screenWidth - 62, 336);
-  const defaultArtByHeight = Math.max(192, Math.floor(screenHeight * (isVeryShortScreen ? 0.3 : 0.34)));
-  const artSize = Math.min(defaultArtByWidth, defaultArtByHeight);
+  const legacyVideoArtByWidth = Math.min(screenWidth - 62, 336);
+  const legacyVideoArtByHeight = Math.max(192, Math.floor(screenHeight * (isVeryShortScreen ? 0.3 : 0.34)));
+  const largeArtworkByWidth = Math.min(screenWidth - (isShortScreen ? 44 : 38), isShortScreen ? 348 : 388);
+  const largeArtworkByHeight = Math.max(
+    isVeryShortScreen ? 220 : 240,
+    Math.floor(screenHeight * (isVeryShortScreen ? 0.34 : isShortScreen ? 0.38 : 0.42))
+  );
+  const artSize = ambientVideoLayoutActive
+    ? Math.min(legacyVideoArtByWidth, legacyVideoArtByHeight)
+    : Math.min(largeArtworkByWidth, largeArtworkByHeight);
+
+  const playerDismissAnimatedStyle = useAnimatedStyle(() => {
+    const translateY = Math.max(0, playerDismissTranslateY.value);
+    const opacity = interpolate(
+      translateY,
+      [0, Math.max(1, screenHeight * 0.72)],
+      [1, 0.94],
+      Extrapolation.CLAMP
+    );
+    const scale = interpolate(
+      translateY,
+      [0, Math.max(1, screenHeight * 0.78)],
+      [1, 0.985],
+      Extrapolation.CLAMP
+    );
+    const borderRadius = interpolate(
+      translateY,
+      [0, Math.max(1, screenHeight * 0.32)],
+      [0, 18],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      borderRadius,
+      opacity,
+      transform: [{ translateY }, { scale }],
+    };
+  }, [screenHeight]);
 
   const livePlayingQueue = useMemo(() => {
     const hasFullActiveQueue = queue.length > 1;
@@ -1566,7 +1702,6 @@ function useLegacyPlayerScreenView() {
     });
   }, [playingQueue]);
   const playerIsPlaying = isDevPreviewActive ? devPreviewIsPlaying : playbackState.isPlaying;
-  const playerIsShuffled = isDevPreviewActive ? devPreviewIsShuffled : isShuffled;
   const playerRepeatMode = isDevPreviewActive ? devPreviewRepeatMode : repeatMode;
 
   useEffect(() => {
@@ -1710,10 +1845,8 @@ function useLegacyPlayerScreenView() {
   const sheetTextColor = Colors.text;
   const sheetMutedTextColor = "rgba(223,226,235,0.68)";
   // These are all static — define once outside the component (see bottom of file)
-  const controlButtonBg = "rgba(223,226,235,0.07)";
-  const controlButtonBorder = "rgba(223,226,235,0.14)";
-  const controlIconColor = "rgba(236,240,247,0.72)";
-  const activeControlIconColor = "#F7FAFF";
+  const activeControlIconColor = "#FFFFFF";
+  const sideControlIconColor = "#FFFFFF";
   const selectedControlIconColor = Colors.primary;
 
   // Memoize control button base styles to avoid new objects every render
@@ -1725,13 +1858,28 @@ function useLegacyPlayerScreenView() {
     }),
     [controlButtonSize]
   );
-  const ctrlBtnStyle = useMemo(
-    () => ({ ...ctrlBtnBase, backgroundColor: controlButtonBg, borderColor: controlButtonBorder }),
-    [ctrlBtnBase]
-  );
   const playerIconBtnStyle = useMemo(
     () => ({ ...ctrlBtnBase, backgroundColor: "transparent", borderColor: "transparent" }),
     [ctrlBtnBase]
+  );
+  const bottomUtilityBtnStyle = useMemo(
+    () => ({
+      width: controlButtonSize,
+      height: controlButtonSize,
+      borderRadius: controlButtonSize / 2,
+      backgroundColor: "transparent",
+      borderColor: "transparent",
+    }),
+    [controlButtonSize]
+  );
+  const downloadUtilityBtnStyle = useMemo(
+    () => ({
+      width: controlButtonSize,
+      height: controlButtonSize,
+      borderRadius: controlButtonSize / 2,
+      padding: 0,
+    }),
+    [controlButtonSize]
   );
   const prevNextBtnSizeStyle = useMemo(
     () => ({
@@ -1794,7 +1942,6 @@ function useLegacyPlayerScreenView() {
       audioUrl: source.audioUrl,
       year: source.year,
       language: source.language,
-      hasLyrics: source.hasLyrics,
       source: source.source,
     };
   }, []);
@@ -1925,6 +2072,111 @@ function useLegacyPlayerScreenView() {
     [artScrollX]
   );
 
+  const handlePlayerScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const offsetY = Math.max(0, event.nativeEvent.contentOffset.y);
+    setPlayerDismissGestureEnabled(offsetY <= 2);
+  }, [setPlayerDismissGestureEnabled]);
+
+  const finishPlayerGestureDismiss = useCallback(() => {
+    if (didHandleSheetDismissRef.current) {
+      return;
+    }
+    didHandleSheetDismissRef.current = true;
+    safeGoBack();
+  }, []);
+
+  const startPlayerCleanDismiss = useCallback(() => {
+    if (didHandleSheetDismissRef.current || !playerDismissGestureEnabledRef.current) {
+      return;
+    }
+
+    playerDismissGestureEnabledRef.current = false;
+    playerDismissGestureEnabledShared.value = 0;
+    if (Platform.OS === "ios") {
+      navigation.setOptions({ gestureEnabled: false });
+    }
+
+    playerDismissTranslateY.value = withTiming(
+      screenHeight + 40,
+      { duration: PLAYER_PRIMARY_DISMISS_TIMING_MS },
+      (finished) => {
+        if (finished) {
+          runOnJS(finishPlayerGestureDismiss)();
+        }
+      }
+    );
+  }, [
+    finishPlayerGestureDismiss,
+    navigation,
+    playerDismissGestureEnabledShared,
+    playerDismissTranslateY,
+    screenHeight,
+  ]);
+
+  const playerPrimaryDismissGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(!isProgressSeeking)
+        .activeOffsetY([-100000, PLAYER_PRIMARY_DISMISS_START_PX])
+        .failOffsetX([-PLAYER_PRIMARY_DISMISS_FAIL_X_PX, PLAYER_PRIMARY_DISMISS_FAIL_X_PX])
+        .onBegin(() => {
+          if (playerDismissGestureEnabledShared.value <= 0) {
+            playerDismissTranslateY.value = 0;
+          }
+        })
+        .onUpdate((event) => {
+          if (playerDismissGestureEnabledShared.value <= 0) {
+            playerDismissTranslateY.value = 0;
+            return;
+          }
+
+          const rawTranslateY = Math.max(0, event.translationY);
+          const maxDrag = Math.max(120, screenHeight * PLAYER_PRIMARY_DISMISS_MAX_DRAG_RATIO);
+          const resistedTranslateY =
+            rawTranslateY > maxDrag
+              ? maxDrag + (rawTranslateY - maxDrag) * 0.18
+              : rawTranslateY;
+
+          playerDismissTranslateY.value = resistedTranslateY;
+        })
+        .onEnd((event) => {
+          if (playerDismissGestureEnabledShared.value <= 0) {
+            playerDismissTranslateY.value = withSpring(0, PLAYER_PRIMARY_DISMISS_SPRING);
+            return;
+          }
+
+          const horizontalDistance = Math.abs(event.translationX);
+          const mostlyVertical = event.translationY > horizontalDistance * 1.08;
+          const draggedFarEnough = event.translationY > PLAYER_PRIMARY_DISMISS_CLOSE_PX;
+          const flickedDown =
+            event.translationY > 28 &&
+            event.velocityY > PLAYER_PRIMARY_DISMISS_FAST_VELOCITY;
+
+          if (mostlyVertical && (draggedFarEnough || flickedDown)) {
+            playerDismissGestureEnabledShared.value = 0;
+            playerDismissTranslateY.value = withTiming(
+              screenHeight + 40,
+              { duration: PLAYER_PRIMARY_DISMISS_TIMING_MS },
+              (finished) => {
+                if (finished) {
+                  runOnJS(finishPlayerGestureDismiss)();
+                }
+              }
+            );
+            return;
+          }
+
+          playerDismissTranslateY.value = withSpring(0, PLAYER_PRIMARY_DISMISS_SPRING);
+        }),
+    [
+      finishPlayerGestureDismiss,
+      isProgressSeeking,
+      playerDismissGestureEnabledShared,
+      playerDismissTranslateY,
+      screenHeight,
+    ]
+  );
+
   useEffect(() => {
     if (!artCarouselRef.current || artCarouselSnapInterval <= 0 || playingQueue.length === 0) {
       return;
@@ -1984,8 +2236,8 @@ function useLegacyPlayerScreenView() {
         extrapolate: "clamp",
       });
 
-      // Active YouTube card: render invisible spacer so background video shows through
-      if (isActiveYouTubeTrack) {
+      // Active YouTube card only becomes a spacer while the video backdrop is actually visible.
+      if (isActiveYouTubeTrack && ambientVideoLayoutActive) {
         return (
           <View
             key={item.artworkKey}
@@ -2125,6 +2377,7 @@ function useLegacyPlayerScreenView() {
     },
     [
       activeQueueIndex,
+      ambientVideoLayoutActive,
       artCarouselPageWidth,
       artCarouselSnapInterval,
       artScrollX,
@@ -2257,10 +2510,11 @@ function useLegacyPlayerScreenView() {
 
   return (
     <View style={styles.container}>
-      <CinematicPlayerBackground
-        colors={gradientColors}
-        coverUrl={screenSong.coverUrl || ""}
-      />
+      <Reanimated.View style={[styles.playerSheetSurface, playerDismissAnimatedStyle]}>
+        <CinematicPlayerBackground
+          colors={gradientColors}
+          coverUrl={screenSong.coverUrl || ""}
+        />
 
       <View style={[styles.playerForeground, { paddingBottom: 0 }]}>
       <View
@@ -2279,11 +2533,14 @@ function useLegacyPlayerScreenView() {
       >
         <View style={styles.headerSideGroup}>
           <Pressable
-            style={[styles.headerIconButton, ctrlBtnStyle]}
-            onPress={safeGoBack}
+            style={({ pressed }) => [
+              styles.headerIconButton,
+              pressed && styles.headerIconButtonPressed,
+            ]}
+            onPress={startPlayerCleanDismiss}
             hitSlop={10}
           >
-            <Ionicons name="arrow-down" size={22} color={sheetTextColor} />
+            <Ionicons name="chevron-down" size={30} color={sheetTextColor} />
           </Pressable>
         </View>
 
@@ -2297,11 +2554,14 @@ function useLegacyPlayerScreenView() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Open song options"
-            style={[styles.headerIconButton, ctrlBtnStyle]}
+            style={({ pressed }) => [
+              styles.headerIconButton,
+              pressed && styles.headerIconButtonPressed,
+            ]}
             onPress={handleSongOptionsPress}
             hitSlop={10}
           >
-            <Ionicons name="ellipsis-horizontal" size={22} color={sheetTextColor} />
+            <Ionicons name="ellipsis-horizontal" size={26} color={sheetTextColor} />
           </Pressable>
         </View>
       </View>
@@ -2318,6 +2578,8 @@ function useLegacyPlayerScreenView() {
         bounces={Platform.OS === "ios"}
         alwaysBounceVertical={Platform.OS === "ios"}
         overScrollMode="never"
+        onScroll={handlePlayerScroll}
+        scrollEventThrottle={16}
         ListHeaderComponent={
           <>
             {shouldRenderBackgroundVideo ? (() => {
@@ -2365,16 +2627,22 @@ function useLegacyPlayerScreenView() {
                 },
               ]}
             >
-              <View
-                style={[
-                  styles.playerPrimaryStack,
-                  ambientVideoLayoutActive && { flex: 1 },
-                ]}
-              >
+                <GestureDetector gesture={playerPrimaryDismissGesture}>
+                  <View
+                    style={[
+                      styles.playerPrimaryStack,
+                      ambientVideoLayoutActive && { flex: 1 },
+                    ]}
+                  >
                 <View
                   style={[
                     styles.artWrap,
-                    { marginTop: isShortScreen ? 4 : 8, paddingHorizontal: 0 },
+                    {
+                      marginTop: ambientVideoLayoutActive
+                        ? isShortScreen ? 4 : 8
+                        : isVeryShortScreen ? 8 : isShortScreen ? 12 : 18,
+                      paddingHorizontal: 0,
+                    },
                   ]}
                 >
                   <AnimatedSongFlatList
@@ -2414,7 +2682,12 @@ function useLegacyPlayerScreenView() {
                 <View
                   style={[
                     styles.songBlock,
-                    { marginTop: isShortScreen ? 95 : 120, marginHorizontal: isShortScreen ? 14 : 20 },
+                    {
+                      marginTop: ambientVideoLayoutActive
+                        ? isShortScreen ? 95 : 120
+                        : isVeryShortScreen ? 22 : isShortScreen ? 26 : 34,
+                      marginHorizontal: isShortScreen ? 14 : 20,
+                    },
                   ]}
                 >
                 {/* Small album artwork on the left */}
@@ -2453,54 +2726,12 @@ function useLegacyPlayerScreenView() {
                     paused={!interactionReady}
                   />
                 </View>
-                <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                  {/* Lyrics Button - Only show for YouTube songs */}
-                  {screenSongIsYouTube && (
-                    <SmoothControlButton
-                      onPress={() => setShowLyrics(true)}
-                      hitSlop={10}
-                      style={[
-                        styles.likeButton,
-                        playerIconBtnStyle,
-                      ]}
-                    >
-                      <Ionicons
-                        name="musical-notes-outline"
-                        size={shuffleRepeatIconSize + 2}
-                        color={controlIconColor}
-                      />
-                    </SmoothControlButton>
-                  )}
-                  <SmoothControlButton
-                    onPress={() => {
-                      if (isDevPreviewActive) {
-                        setDevPreviewLikedSongIds((prev) =>
-                          prev.includes(screenSong.id)
-                            ? prev.filter((songId) => songId !== screenSong.id)
-                            : [...prev, screenSong.id]
-                        );
-                        return;
-                      }
-                      toggleLike(screenSong);
-                    }}
-                    hitSlop={10}
-                    style={[
-                      styles.likeButton,
-                      playerIconBtnStyle,
-                    ]}
-                  >
-                    <Ionicons
-                      name={liked ? "heart" : "heart-outline"}
-                      size={shuffleRepeatIconSize + 3}
-                      color={liked ? selectedControlIconColor : controlIconColor}
-                    />
-                  </SmoothControlButton>
-                </View>
               </View>
             </View>
+                </GestureDetector>
 
             <View style={styles.playerActionStack}>
-              <PlayerProgressCard
+              <PlayerSpotifyProgress
                 screenSongId={screenSong.id}
                 songDurationSeconds={screenSong.duration}
                 isShortScreen={isShortScreen}
@@ -2517,7 +2748,7 @@ function useLegacyPlayerScreenView() {
                   {
                     marginTop: isShortScreen ? 6 : 8,
                     marginHorizontal: isShortScreen ? 14 : 20,
-                    gap: isVeryShortScreen ? 8 : isShortScreen ? 10 : 12,
+                    gap: controlsRowGap,
                   },
                 ]}
               >
@@ -2537,7 +2768,7 @@ function useLegacyPlayerScreenView() {
                   <Ionicons
                     name="shuffle"
                     size={shuffleRepeatIconSize}
-                    color={playerIsShuffled ? selectedControlIconColor : controlIconColor}
+                    color={sideControlIconColor}
                   />
                 </SmoothControlButton>
 
@@ -2600,12 +2831,61 @@ function useLegacyPlayerScreenView() {
                   <Ionicons
                     name="repeat"
                     size={shuffleRepeatIconSize}
-                    color={playerRepeatMode !== "off" ? selectedControlIconColor : controlIconColor}
+                    color={sideControlIconColor}
                   />
                   {playerRepeatMode === "one" && (
-                    <Text style={[styles.repeatOneBadge, { color: selectedControlIconColor }]}>1</Text>
+                    <Text style={[styles.repeatOneBadge, { color: sideControlIconColor }]}>1</Text>
                   )}
                 </SmoothControlButton>
+              </View>
+
+              <View
+                style={[
+                  styles.bottomUtilityRow,
+                  {
+                    width: playerControlsWidth,
+                    alignSelf: "center",
+                    marginTop: isShortScreen ? 8 : 10,
+                  },
+                ]}
+              >
+                <SmoothControlButton
+                  style={[styles.bottomUtilityButton, bottomUtilityBtnStyle]}
+                  onPress={() => {
+                    if (isDevPreviewActive) {
+                      setDevPreviewLikedSongIds((prev) =>
+                        prev.includes(screenSong.id)
+                          ? prev.filter((songId) => songId !== screenSong.id)
+                          : [...prev, screenSong.id]
+                      );
+                      return;
+                    }
+                    toggleLike(screenSong);
+                  }}
+                >
+                  <Ionicons
+                    name={liked ? "heart" : "heart-outline"}
+                    size={bottomUtilityIconSize}
+                    color={liked ? selectedControlIconColor : "#FFFFFF"}
+                  />
+                </SmoothControlButton>
+
+                <View style={[styles.bottomUtilityButton, bottomUtilityBtnStyle]}>
+                  {isDevPreviewActive ? (
+                    <Ionicons
+                      name="download-outline"
+                      size={bottomUtilityIconSize}
+                      color="rgba(236,240,247,0.28)"
+                    />
+                  ) : (
+                    <DownloadButton
+                      song={screenSong}
+                      size={bottomUtilityIconSize}
+                      color="#FFFFFF"
+                      style={[styles.playerDownloadButton, downloadUtilityBtnStyle]}
+                    />
+                  )}
+                </View>
               </View>
 
             </View>
@@ -2813,21 +3093,7 @@ function useLegacyPlayerScreenView() {
       />
 
       </View>
-
-      {/* Live Lyrics Modal */}
-      {showLyrics && screenSong && (
-        <View style={StyleSheet.absoluteFillObject}>
-          <LiveLyrics
-            songId={screenSong.id}
-            videoId={screenSongIsYouTube ? (screenSong.videoId || screenSong.youtubeVideoId || getYouTubeVideoIdFromSong(screenSong)) : null}
-            positionMs={positionMillis}
-            isPlaying={playerIsPlaying}
-            onClose={() => setShowLyrics(false)}
-            primaryColor={playerTheme.accent}
-            source={screenSong.source}
-          />
-        </View>
-      )}
+      </Reanimated.View>
     </View>
   );
 }
@@ -2848,6 +3114,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  playerSheetSurface: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    overflow: "hidden",
   },
   backgroundLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -2903,14 +3174,16 @@ const styles = StyleSheet.create({
     flexGrow: 0,
   },
   headerIconButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(223,226,235,0.07)",
-    borderWidth: 1,
-    borderColor: "rgba(223,226,235,0.14)",
+    backgroundColor: "transparent",
+    borderWidth: 0,
+  },
+  headerIconButtonPressed: {
+    opacity: 0.58,
   },
   headerSideGroup: {
     width: 84,
@@ -3157,7 +3430,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
 
-  progressCard: {
+  spotifyProgressWrap: {
     marginTop: 14,
     marginHorizontal: 20,
     paddingHorizontal: 0,
@@ -3166,23 +3439,44 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     borderWidth: 0,
   },
-  progressTouch: {
+  spotifyProgressTouch: {
     justifyContent: "center",
-    minHeight: Platform.OS === "ios" ? 38 : 40,
+    minHeight: 24,
+    paddingVertical: 10,
   },
-  progressSliderNative: {
+  spotifyProgressTrack: {
     width: "100%",
-    height: Platform.OS === "ios" ? 38 : 40,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(247,250,255,0.28)",
+    overflow: "visible",
+    position: "relative",
   },
-  timeRow: {
-    marginTop: 3,
+  spotifyProgressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#F7FAFF",
+  },
+  spotifyProgressThumb: {
+    position: "absolute",
+    top: -4,
+    width: 12,
+    height: 12,
+    marginLeft: -6,
+    borderRadius: 6,
+    backgroundColor: "#F7FAFF",
+  },
+  spotifyTimeRow: {
+    marginTop: 2,
     flexDirection: "row",
     justifyContent: "space-between",
   },
-  timeText: {
-    color: "rgba(223,226,235,0.58)",
+  spotifyTimeText: {
+    color: "rgba(247,250,255,0.62)",
     fontSize: 11,
-    fontFamily: "Inter_600SemiBold",
+    lineHeight: 14,
+    fontFamily: "Inter_500Medium",
+    letterSpacing: 0,
   },
 
   controlsRow: {
@@ -3195,6 +3489,31 @@ const styles = StyleSheet.create({
   },
   controlsRowCompact: {
     marginTop: 0,
+  },
+  utilityControlButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+  },
+  bottomUtilityRow: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  bottomUtilityButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  playerDownloadButton: {
+    width: 38,
+    height: 38,
+    padding: 0,
+    alignItems: "center",
+    justifyContent: "center",
   },
   playingListSection: {
     overflow: "hidden",

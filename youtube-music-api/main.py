@@ -114,46 +114,6 @@ def get_song(videoId: str):
     return details
 
 
-@app.get("/lyrics/{browseId}")
-def get_lyrics(browseId: str):
-    result = safe_call(yt.get_lyrics, browseId)
-    if isinstance(result, dict):
-        return result
-    return {"lyrics": None, "source": None}
-
-
-@app.get("/lyrics/video/{videoId}")
-def get_lyrics_by_video_id(videoId: str):
-    """
-    Get lyrics using videoId by first getting the watch playlist
-    which contains the lyrics browseId
-    """
-    try:
-        # First get the watch playlist which contains lyrics info
-        watch_result = safe_call(yt.get_watch_playlist, videoId=videoId, radio=False, limit=1)
-        
-        if not isinstance(watch_result, dict):
-            return {"lyrics": None, "source": None, "error": "Invalid watch result"}
-        
-        # Check if lyrics info is available
-        lyrics_browse_id = watch_result.get("lyrics")
-        
-        if not lyrics_browse_id:
-            return {"lyrics": None, "source": None, "error": "No lyrics available"}
-        
-        # Now fetch the actual lyrics using the browseId
-        lyrics_result = safe_call(yt.get_lyrics, lyrics_browse_id)
-        
-        if isinstance(lyrics_result, dict):
-            return lyrics_result
-        
-        return {"lyrics": None, "source": None, "error": "Failed to fetch lyrics"}
-        
-    except Exception as e:
-        logger.error(f"Error fetching lyrics for videoId {videoId}: {e}")
-        return {"lyrics": None, "source": None, "error": str(e)}
-
-
 @app.get("/watch/{videoId}")
 def get_watch_playlist(
     videoId: str,
@@ -164,9 +124,8 @@ def get_watch_playlist(
     if isinstance(result, dict):
         tracks = result.get("tracks", [])
         playlist_id = result.get("playlistId")
-        lyrics = result.get("lyrics")
-        return {"tracks": tracks, "playlistId": playlist_id, "lyrics": lyrics}
-    return {"tracks": [], "playlistId": None, "lyrics": None}
+        return {"tracks": tracks, "playlistId": playlist_id}
+    return {"tracks": [], "playlistId": None}
 
 
 @app.get("/playlist/{playlistId}")

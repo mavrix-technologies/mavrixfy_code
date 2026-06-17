@@ -9,6 +9,9 @@ export interface JioSaavnPlaylistResult {
   name: string;
   image: JioSaavnImage[];
   songCount: number;
+  url?: string;
+  description?: string;
+  language?: string;
 }
 
 export interface JioSaavnAlbumResult {
@@ -604,7 +607,6 @@ function normalizePlaylistSong(raw: any): JioSaavnSong | null {
     year: toTrimmedString(raw?.year) || toTrimmedString(raw?.release_date),
     duration: Number.isFinite(durationValue) ? Math.max(0, durationValue) : 0,
     language: toTrimmedString(raw?.language) || toTrimmedString(raw?.lang),
-    hasLyrics: parseBoolean(raw?.hasLyrics ?? raw?.has_lyrics ?? raw?.more_info?.has_lyrics),
     album: {
       id: albumId,
       name: albumName,

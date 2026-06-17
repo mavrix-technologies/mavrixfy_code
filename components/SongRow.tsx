@@ -35,6 +35,7 @@ interface Props {
   onRemove?: () => void;
   onSongPress?: (song: Song) => void;
   horizontalPadding?: number;
+  showSearchSourceMeta?: boolean;
 }
 
 const SWIPE_ACTION_WIDTH = 184;
@@ -108,6 +109,7 @@ const SongRow = memo(function SongRow({
   onRemove,
   onSongPress,
   horizontalPadding,
+  showSearchSourceMeta = false,
 }: Props) {
   const { playSong, currentSongId, isPlaying, addToQueue } = usePlayerRow();
   const queueCommittedRef = useRef(false);
@@ -182,6 +184,7 @@ const SongRow = memo(function SongRow({
   if (!song || !song.id || !song.title) return null;
 
   const isActive = currentSongId === song.id;
+  const showYouTubeSearchMeta = showSearchSourceMeta && song.source === "youtube";
 
   const handlePress = () => {
     if (didSwipeRef.current) return;
@@ -301,6 +304,13 @@ const SongRow = memo(function SongRow({
               <Text style={styles.artist} numberOfLines={1}>
                 {song.artist || "Unknown Artist"}
               </Text>
+              {showYouTubeSearchMeta ? (
+                <View style={styles.sourceMetaRow}>
+                  <View style={styles.sourcePill}>
+                    <Ionicons name="videocam-outline" size={13} color="#D7D7D7" />
+                  </View>
+                </View>
+              ) : null}
             </View>
 
             {/* Remove / duration */}
@@ -362,6 +372,7 @@ const SongRow = memo(function SongRow({
     prevProps.playlistSource === nextProps.playlistSource &&
     prevProps.playlistName === nextProps.playlistName &&
     prevProps.horizontalPadding === nextProps.horizontalPadding &&
+    prevProps.showSearchSourceMeta === nextProps.showSearchSourceMeta &&
     prevProps.onSongPress === nextProps.onSongPress &&
     Boolean(prevProps.onRemove) === Boolean(nextProps.onRemove) &&
     prevProps.queueKey === nextProps.queueKey
@@ -466,6 +477,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     marginTop: 2,
+  },
+  sourceMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 6,
+  },
+  sourcePill: {
+    width: 22,
+    height: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   removeBtn: {
     padding: 6,

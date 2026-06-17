@@ -61,7 +61,6 @@ function parseSongParam(value: string | string[] | undefined): Song | null {
       audioUrl: parsed.audioUrl || "",
       year: parsed.year,
       language: parsed.language,
-      hasLyrics: parsed.hasLyrics,
       source: parsed.source,
       playCount: parsed.playCount,
     };

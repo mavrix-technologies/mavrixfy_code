@@ -18,6 +18,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
 import { setHapticsPreference } from "@/lib/haptics";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/storage";
+import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
 import { safeGoBack } from "@/utils/navigation";
 
 const QUALITY_OPTIONS: { label: string; value: "low" | "medium" | "high" }[] = [
@@ -80,6 +81,7 @@ export default function ProfileScreen() {
   const { user, isAuthenticated, isGuest, logout } = useAuth();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomScrollPadding = Platform.OS === "web" ? 120 : Math.max(128, insets.bottom + 120);
+  const [lowEndDevice, setLowEndDevice] = useState(false);
 
   const [settings, setSettings] = useState<AppSettings>({
     streamingQuality: "high",
@@ -95,9 +97,10 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     let mounted = true;
-    getSettings().then((s) => {
+    void Promise.all([getSettings(), getDevicePerformanceProfile()]).then(([s, profile]) => {
       if (!mounted) return;
       setSettings(s);
+      setLowEndDevice(profile.isLowEndDevice);
       setHapticsPreference(Boolean(s.hapticsEnabled));
     });
     return () => { mounted = false; };
@@ -111,6 +114,8 @@ export default function ProfileScreen() {
       return updated;
     });
   }, []);
+
+  const ambientBackdropSwitchValue = lowEndDevice ? false : settings.ambientBackdropEnabled;
 
   const handleLogout = useCallback(() => {
     Alert.alert("Log Out", "Are you sure you want to log out?", [
@@ -241,13 +246,18 @@ export default function ProfileScreen() {
           <SettingsRow
             icon="phone-portrait-outline"
             title="Ambient video backdrop"
-            subtitle="Show dynamic video loops behind the player"
+            subtitle={
+              lowEndDevice
+                ? "Disabled automatically on low-RAM Android devices for smoother playback"
+                : "Show dynamic video loops behind the player"
+            }
             trailing={
               <Switch
-                value={settings.ambientBackdropEnabled}
+                value={ambientBackdropSwitchValue}
+                disabled={lowEndDevice}
                 onValueChange={(v) => updateSettings({ ambientBackdropEnabled: v })}
                 trackColor={{ false: Colors.inactive, true: Colors.primary }}
-                thumbColor={Colors.text}
+                thumbColor={lowEndDevice ? Colors.subtext : Colors.text}
               />
             }
           />

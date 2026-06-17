@@ -179,7 +179,6 @@ function normalizeSong(raw: any): JioSaavnSong | null {
     year: toStr(raw?.year),
     duration: Number(raw?.duration ?? 0),
     language: toStr(raw?.language),
-    hasLyrics: Boolean(raw?.hasLyrics ?? raw?.has_lyrics),
     album: {
       id: toStr(raw?.album?.id),
       name: toStr(raw?.album?.name) || toStr(raw?.album),

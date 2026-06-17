@@ -87,8 +87,9 @@ const globalToastListeners = new Set<GlobalToastListener>();
 const GLOBAL_TOAST_VISIBLE_MS = 1050;
 
 const IOS_VERTICAL_SHEET_OPTIONS = {
-  presentation: "modal" as const,
+  presentation: "card" as const,
   animation: "slide_from_bottom" as const,
+  animationMatchesGesture: true,
   gestureEnabled: true,
   gestureDirection: "vertical" as const,
   fullScreenGestureEnabled: true,

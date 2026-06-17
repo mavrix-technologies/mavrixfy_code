@@ -58,7 +58,6 @@ async function fetchCatalogSongs(): Promise<Song[]> {
           audioUrl,
           year: data.year ? String(data.year) : '',
           language: data.language || '',
-          hasLyrics: false,
           source: 'local' as const,
         };
       }, (s): s is Song => s !== null);

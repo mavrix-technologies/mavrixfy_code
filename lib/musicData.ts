@@ -10,7 +10,6 @@ export interface Song {
   audioUrl: string;
   year?: string;
   language?: string;
-  hasLyrics?: boolean;
   source?: "jiosaavn" | "local" | "youtube";
   playCount?: number; // JioSaavn real play count
   videoId?: string;
@@ -32,7 +31,6 @@ export interface JioSaavnSong {
   year: string;
   duration: number;
   language: string;
-  hasLyrics: boolean;
   album: { id: string; name: string; url: string };
   artists: {
     primary: Array<{ id: string; name: string; image: JioSaavnImage[]; url: string }>;
@@ -199,7 +197,6 @@ export function convertJioSaavnSong(song: JioSaavnSong): Song {
     downloadUrl: song.downloadUrl || song.audioUrl || song.url,
     year: song.year,
     language: song.language,
-    hasLyrics: song.hasLyrics,
     source: "jiosaavn",
   };
 }

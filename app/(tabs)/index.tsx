@@ -127,9 +127,11 @@ const HOME_SESSION_CACHE: HomeSessionCache = {
   youtubeTrending: [],
 };
 
-const HOME_JIOSAAVN_SECTION_ORDER = [
+const HOME_CATEGORY_SECTION_ORDER = [
   "trending",
+  "bollywood",
   "new-arrivals",
+  "popular",
   "most-viral",
   "party-mix",
   "chill-vibes",
@@ -140,7 +142,9 @@ const HOME_JIOSAAVN_SECTION_ORDER = [
 
 const HOME_JIOSAAVN_TITLES: Record<string, string> = {
   trending:       "Trending Now",
-  "new-arrivals": "New Releases",
+  bollywood:      "Bollywood Hits",
+  "new-arrivals": "New Songs",
+  popular:        "Popular on YouTube Music",
   "most-viral":   "Viral Hits",
   "party-mix":    "Party Mix",
   "chill-vibes":  "Chill Vibes",
@@ -171,7 +175,7 @@ const HOME_BOOTSTRAP_MAX_WAIT_MS = 15000;
 const HOME_NEW_RELEASE_SONG_TIMEOUT_MS = 8000;
 const MAX_ROW_ITEMS = 10;
 const NEW_RELEASE_SONG_LIMIT = 10;
-const HOME_PRIORITY_CATEGORY_IDS = ["trending", "new-arrivals", "most-viral"] as const;
+const HOME_PRIORITY_CATEGORY_IDS = ["trending", "bollywood", "new-arrivals", "popular"] as const;
 const HOME_PRIORITY_CATEGORY_TIMEOUT_MS = 5500;
 const PLACEHOLDER_ROW_ITEMS = [0, 1, 2, 3];
 const HORIZONTAL_ROW_GAP = 12;
@@ -228,10 +232,7 @@ function getHomeCategoryItemImageUrl(item: HomeCategoryItem): string {
 
 function getHomeCategorySourceLabel(item: HomeCategoryItem): string {
   if (item.source !== "youtube") return "JioSaavn";
-
-  if (item.playlistKind === "chart") return "YouTube Chart";
-  if (item.playlistKind === "editorial" || item.playlistKind === "featured") return "YouTube Editorial";
-  return "YouTube Community";
+  return "YouTube Music";
 }
 
 function normalizeId(value: unknown): string {
@@ -347,7 +348,7 @@ function mergeHomeCategorySources(
   });
 
   const orderedIds = [
-    ...HOME_JIOSAAVN_SECTION_ORDER,
+    ...HOME_CATEGORY_SECTION_ORDER,
     ...jioCategories.map((category) => category.id),
     ...youtubeCategories.map((category) => category.id),
   ];
@@ -1647,7 +1648,7 @@ function useHomeScreenInnerView() {
     categories.forEach((cat) => categoryById.set(cat.id, cat));
 
     // Preferred order first, then any extras the service returned
-    const preferred = mapFilter(HOME_JIOSAAVN_SECTION_ORDER, (id) => {
+    const preferred = mapFilter(HOME_CATEGORY_SECTION_ORDER, (id) => {
         const cat = categoryById.get(id);
         if (!cat || cat.results.length === 0) return null;
         return { ...cat, title: HOME_JIOSAAVN_TITLES[id] ?? cat.title };
@@ -1935,7 +1936,6 @@ function useHomeScreenInnerView() {
             audioUrl: resolvedAudioUrl,
             year: sourceSong.year,
             language: sourceSong.language,
-            hasLyrics: sourceSong.hasLyrics,
             source: sourceSong.source,
           };
           if (hydratedSong.audioUrl.trim().length > 0) {
@@ -2604,7 +2604,7 @@ function useHomeScreenInnerView() {
         case "youtube-trending":
           return (
             <View style={styles.section}>
-              {getSectionHeaderElement("YouTube Music Trending")}
+              {getSectionHeaderElement("Trending on YouTube Music")}
               {youtubeTrendingPlaylists.length > 0 ? (
                 <FlatList
                   horizontal

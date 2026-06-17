@@ -46,7 +46,7 @@ try {
     Write-Host "Next steps:" -ForegroundColor Cyan
     Write-Host "1. Backend should already be running (check other terminal)" -ForegroundColor White
     Write-Host "2. Reload your app (press 'r' in Expo terminal)" -ForegroundColor White
-    Write-Host "3. Try opening lyrics (tap 🎵 icon)" -ForegroundColor White
+    Write-Host "3. Try YouTube Music search/playback in the app" -ForegroundColor White
     Write-Host ""
     
 } catch {
