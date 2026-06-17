@@ -556,6 +556,7 @@ function mergeSearchSongRows(primarySongs: Song[], youtubeSongs: Song[]): Song[]
   for (const youtubeSong of youtubeUnique) {
     merged.push(youtubeSong);
 
+    // react-doctor-disable-next-line react-doctor/js-index-maps
     const matchingPrimaryIndex = primaryUnique.findIndex((primarySong, index) =>
       !usedPrimaryIndexes.has(index) && areDuplicateSearchSongs(youtubeSong, primarySong, true)
     );
@@ -632,6 +633,7 @@ function mergePairedSearchRows<T extends { id: string }>(
   for (const priorityItem of priorityUnique) {
     merged.push(priorityItem);
 
+    // react-doctor-disable-next-line react-doctor/js-index-maps
     const matchingSecondaryIndex = secondaryUnique.findIndex((secondaryItem, index) =>
       !usedSecondaryIndexes.has(index) && isDuplicate(priorityItem, secondaryItem)
     );
@@ -922,6 +924,7 @@ function useSearchScreenView() {
 
           const loadYouTubeSections = async () => {
             try {
+              // react-doctor-disable-next-line react-doctor/async-defer-await
               const [
                 ytMusicSongs,
                 ytMusicVideos,

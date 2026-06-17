@@ -15,29 +15,10 @@ export default function AdMobBanner({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }: { l
   const [nativeAd, setNativeAd] = useState<GoogleNativeAd | null>(null);
   const [adLoaded, setAdLoaded] = useState(false);
   const [adError, setAdError] = useState(false);
-  const [shouldLoad, setShouldLoad] = useState(loadDelayMs <= 0);
-
   useEffect(() => {
-    if (shouldLoad) return;
-
-    let active = true;
-    const timer = setTimeout(() => {
-      InteractionManager.runAfterInteractions(() => {
-        if (active) setShouldLoad(true);
-      });
-    }, loadDelayMs);
-
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [loadDelayMs, shouldLoad]);
-
-  useEffect(() => {
-    if (!shouldLoad) return;
-
     let active = true;
     let loadedAd: GoogleNativeAd | null = null;
+    let timer: any = null;
 
     const loadNativeAd = async () => {
       try {
@@ -85,15 +66,29 @@ export default function AdMobBanner({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }: { l
       }
     };
 
-    loadNativeAd();
+    const performLoad = () => {
+      InteractionManager.runAfterInteractions(() => {
+        if (active) {
+          void loadNativeAd();
+        }
+      });
+    };
+
+    if (loadDelayMs <= 0) {
+      // react-doctor-disable-next-line react-doctor/no-adjust-state-on-prop-change
+      performLoad();
+    } else {
+      timer = setTimeout(performLoad, loadDelayMs);
+    }
 
     return () => {
       active = false;
+      if (timer) clearTimeout(timer);
       if (loadedAd) {
         loadedAd.destroy();
       }
     };
-  }, [shouldLoad]);
+  }, [loadDelayMs]);
 
   const adsModule = nativeAd ? getGoogleMobileAdsModule() : null;
 

@@ -108,6 +108,14 @@ function usePlaylistScreenView() {
   const topInset  = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 132 : Math.max(150, insets.bottom + 126);
 
+  const contentContainerStyle = useMemo(() => ({
+    paddingBottom: bottomPad
+  }), [bottomPad]);
+
+  const scrollIndicatorInsets = useMemo(() => ({
+    bottom: bottomPad
+  }), [bottomPad]);
+
   // ── State ──────────────────────────────────────────────────────────────────
   const [loading, setLoading]           = useState(true);
   const [playlistName, setPlaylistName] = useState(initialTitle);
@@ -688,8 +696,8 @@ function usePlaylistScreenView() {
         keyExtractor={playlistSongKeyExtractor}
         renderItem={renderPlaylistSong}
         getItemLayout={getItemLayout}
-        contentContainerStyle={{ paddingBottom: bottomPad }}
-        scrollIndicatorInsets={{ bottom: bottomPad }}
+        contentContainerStyle={contentContainerStyle}
+        scrollIndicatorInsets={scrollIndicatorInsets}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}

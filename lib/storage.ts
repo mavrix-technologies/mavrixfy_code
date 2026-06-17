@@ -221,7 +221,7 @@ export async function safeAsyncStorageSetItem(key: string, value: string): Promi
   }
 }
 
-export async function safeAsyncStorageMultiSet(pairs: [string, string][]): Promise<void> {
+async function safeAsyncStorageMultiSet(pairs: [string, string][]): Promise<void> {
   try {
     await AsyncStorage.multiSet(pairs);
   } catch (err: any) {

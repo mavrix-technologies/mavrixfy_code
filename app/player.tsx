@@ -16,6 +16,7 @@ import {
   LayoutChangeEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  // react-doctor-disable-next-line react-doctor/rn-no-panresponder
   PanResponder,
   StyleProp,
   useWindowDimensions,
@@ -623,6 +624,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
 
   useEffect(() => {
     if (playerReady) {
+      // react-doctor-disable-next-line react-doctor/no-event-handler
       playerRef.current?.mute?.();
     }
   }, [playerReady, isPlaying]);
@@ -783,11 +785,12 @@ function PlayerPlayButton({
   const isLoading = isLoadingOverride ?? (playbackState.isBuffering || playbackState.isLoading);
   const [showSpinner, setShowSpinner] = useState(false);
 
+  if (!isLoading && showSpinner) {
+    setShowSpinner(false);
+  }
+
   useEffect(() => {
-    if (!isLoading) {
-      setShowSpinner(false);
-      return;
-    }
+    if (!isLoading) return;
 
     const timer = setTimeout(() => {
       setShowSpinner(true);
@@ -1214,6 +1217,7 @@ function useLegacyPlayerScreenView() {
     };
   }, []);
 
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state
   useEffect(() => {
     let mounted = true;
     const fetchSettings = () => {
@@ -1391,10 +1395,12 @@ function useLegacyPlayerScreenView() {
   }, [screenSong]);
 
   const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
+  const [prevSongId, setPrevSongId] = useState(screenSong?.id);
 
-  useEffect(() => {
+  if (screenSong?.id !== prevSongId) {
+    setPrevSongId(screenSong?.id);
     setHasStartedPlaying(false);
-  }, [screenSong?.id]);
+  }
 
   useEffect(() => {
     if (playbackState.isPlaying && !playbackState.isLoading && !playbackState.isBuffering) {

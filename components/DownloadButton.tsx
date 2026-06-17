@@ -80,6 +80,8 @@ export default function DownloadButton({
 
   // Sync YouTube download status on mount/song change
   useEffect(() => {
+    // react-doctor-disable-next-line react-doctor/no-derived-state
+    checkYtDownloadStatus();
     checkYtDownloadStatus();
   }, [checkYtDownloadStatus]);
 

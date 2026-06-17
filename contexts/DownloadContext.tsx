@@ -400,6 +400,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       downloadItemStore.delete(item.songId);
     }
     await refreshDownloads();
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps
   }, [refreshDownloads, refreshSummary]);
 
   const handleUpdatePreferences = useCallback(

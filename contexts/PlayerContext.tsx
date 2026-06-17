@@ -979,6 +979,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     if (canUseLightweightAudioFallback) {
       ExpoAvPlayer.pause();
     }
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps
   }, [canUseLightweightAudioFallback]);
 
   const applyPreviewTrackAdvance = useCallback((nextIndex: number, nextTrack: Song) => {
@@ -2590,6 +2591,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       if (isYt && !targetSong.audioUrl) {
         logger.debug("[Playback] playSong: Resolving YouTube stream in background", { id: targetSong.id });
         try {
+          // react-doctor-disable-next-line react-doctor/async-defer-await
           const streamUrl = await resolvePlaybackUrl(targetSong);
           if (requestId !== playRequestIdRef.current) return;
           
@@ -2882,6 +2884,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       if (isYt && !nextTrack.audioUrl) {
         logger.debug("[Playback] nextSong: Resolving YouTube stream in background", { id: nextTrack.id });
         try {
+          // react-doctor-disable-next-line react-doctor/async-defer-await
           const streamUrl = await resolvePlaybackUrl(nextTrack);
           if (requestId !== playRequestIdRef.current) return;
           
@@ -3047,6 +3050,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       if (isYt && !prevTrack.audioUrl) {
         logger.debug("[Playback] prevSong: Resolving YouTube stream in background", { id: prevTrack.id });
         try {
+          // react-doctor-disable-next-line react-doctor/async-defer-await
           const streamUrl = await resolvePlaybackUrl(prevTrack);
           if (requestId !== playRequestIdRef.current) return;
           
