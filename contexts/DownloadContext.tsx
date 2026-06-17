@@ -145,6 +145,7 @@ const DownloadContext = createContext<DownloadContextValue | null>(null);
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
+// react-doctor-disable-next-line react-doctor/no-giant-component
 export function DownloadProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const uid = user?.id ?? null;

@@ -623,8 +623,8 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   }, []);
 
   useEffect(() => {
+    // react-doctor-disable-next-line react-doctor/no-event-handler
     if (playerReady) {
-      // react-doctor-disable-next-line react-doctor/no-event-handler
       playerRef.current?.mute?.();
     }
   }, [playerReady, isPlaying]);

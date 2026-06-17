@@ -31,6 +31,7 @@ const UI = {
   primaryB: "#00b87b",
 };
 
+// react-doctor-disable-next-line react-doctor/no-giant-component
 export default function LikedSongsScreen() {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;

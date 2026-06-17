@@ -82,7 +82,6 @@ export default function DownloadButton({
   useEffect(() => {
     // react-doctor-disable-next-line react-doctor/no-derived-state
     checkYtDownloadStatus();
-    checkYtDownloadStatus();
   }, [checkYtDownloadStatus]);
 
   // Derive unified states
