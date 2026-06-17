@@ -71,21 +71,7 @@ jobs:
           rm -rf node_modules/expo-dev-launcher node_modules/expo-dev-menu node_modules/expo-dev-client
 
       - name: Patch React Native codegen for expand function bug
-        run: |
-          CODEGEN_INDEX="node_modules/react-native/scripts/codegen/generate-artifacts-executor/index.js"
-          if [ -f "$CODEGEN_INDEX" ]; then
-            if ! grep -q "function expand" "$CODEGEN_INDEX"; then
-              echo "Patching codegen index.js..."
-              TEMP_FILE=$(mktemp)
-              echo "'use strict';" > "$TEMP_FILE"
-              echo "" >> "$TEMP_FILE"
-              echo "function expand(p) { return typeof p === 'string' ? [p] : Array.isArray(p) ? p : []; }" >> "$TEMP_FILE"
-              echo "" >> "$TEMP_FILE"
-              tail -n +2 "$CODEGEN_INDEX" >> "$TEMP_FILE"
-              mv "$TEMP_FILE" "$CODEGEN_INDEX"
-              echo "✅ Patched codegen index.js"
-            fi
-          fi
+        run: node scripts/patch-codegen.js
 
       - name: Prebuild iOS
         run: npx expo prebuild --platform ios --clean
