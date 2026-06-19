@@ -824,56 +824,32 @@ export async function getYouTubeMusicAudioStream(
   }
   audioStreamCache.delete(cleanVideoId);
 
-  const existingRequest = audioStreamRequests.get(cleanVideoId);
-  if (existingRequest) return existingRequest;
+  // Directly construct the streaming URL pointing to the proxy on our backend.
+  // In development, use the configured local dev API. In production, connect directly
+  // to the Render container backend to avoid Vercel serverless function limits and timeouts.
+  const apiBase = getYouTubeMusicApiUrl().replace(/\/+$/, "");
+  let streamUrl = "";
+  if (isPrivateDevelopmentApiUrl(apiBase)) {
+    streamUrl = `${apiBase}/stream/${encodeURIComponent(cleanVideoId)}`;
+  } else {
+    streamUrl = `https://mavrixfy-ytmusic-api.onrender.com/stream/${encodeURIComponent(cleanVideoId)}`;
+  }
 
-  const request = (async () => {
-    try {
-      // 1. Try client-side resolution first using public Invidious instances
-      logger.info(`[YouTube Music] Attempting client-side stream resolution for ${cleanVideoId}`);
-      const clientStream = await resolveInvidiousStream(cleanVideoId, signal);
-      if (clientStream) {
-        logger.info(`[YouTube Music] Client-side stream resolution succeeded for ${cleanVideoId}`);
-        audioStreamCache.set(cleanVideoId, clientStream);
-        if (audioStreamCache.size > AUDIO_STREAM_CACHE_MAX_ITEMS) {
-          const oldestKey = audioStreamCache.keys().next().value;
-          if (oldestKey) audioStreamCache.delete(oldestKey);
-        }
-        return clientStream;
-      }
+  const stream: YouTubeMusicAudioStream = {
+    videoId: cleanVideoId,
+    url: streamUrl,
+    expiresAt: Date.now() + 5.5 * 60 * 60 * 1000,
+    headers: {},
+    mimeType: "audio/mp4",
+  };
 
-      // 2. Fall back to backend endpoints if client-side resolution fails
-      logger.info(`[YouTube Music] Client-side resolution failed/unavailable, falling back to backend for ${cleanVideoId}`);
-      const json = await fetchFirstJsonSequential<any>(
-        getEndpointCandidates(`/stream/${encodeURIComponent(cleanVideoId)}`),
-        signal
-      );
-      const stream = normalizeAudioStreamPayload(json, cleanVideoId);
-      if (!stream || stream.expiresAt - AUDIO_STREAM_EXPIRY_MARGIN_MS <= Date.now()) {
-        return null;
-      }
+  audioStreamCache.set(cleanVideoId, stream);
+  if (audioStreamCache.size > AUDIO_STREAM_CACHE_MAX_ITEMS) {
+    const oldestKey = audioStreamCache.keys().next().value;
+    if (oldestKey) audioStreamCache.delete(oldestKey);
+  }
 
-      audioStreamCache.set(cleanVideoId, stream);
-      if (audioStreamCache.size > AUDIO_STREAM_CACHE_MAX_ITEMS) {
-        const oldestKey = audioStreamCache.keys().next().value;
-        if (oldestKey) audioStreamCache.delete(oldestKey);
-      }
-      return stream;
-    } catch (error: any) {
-      if (error?.message !== "Request aborted" && !signal?.aborted) {
-        logger.warn("[YouTube Music] Audio stream resolution failed", {
-          videoId: cleanVideoId,
-          message: error?.message || String(error),
-        });
-      }
-      return null;
-    } finally {
-      audioStreamRequests.delete(cleanVideoId);
-    }
-  })();
-
-  audioStreamRequests.set(cleanVideoId, request);
-  return request;
+  return stream;
 }
 
 

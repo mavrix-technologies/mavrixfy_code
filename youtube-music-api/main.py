@@ -379,24 +379,55 @@ def get_song(videoId: str):
 
 
 @app.get("/stream/{videoId}")
-async def get_audio_stream(
+def get_audio_stream(
     videoId: str,
-    response: Response,
+    request: Request,
+    token: Optional[str] = Query(default=None),
     x_resolver_token: Optional[str] = Header(default=None),
 ):
     if not YOUTUBE_VIDEO_ID_PATTERN.fullmatch(videoId):
         raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
-    verify_audio_resolver_token(x_resolver_token)
-    response.headers["Cache-Control"] = "no-store"
+    
+    provided_token = x_resolver_token or token
+    verify_audio_resolver_token(provided_token)
 
     try:
-        async with audio_resolver_semaphore:
-            return await run_in_threadpool(extract_audio_stream, videoId)
-    except yt_dlp.utils.DownloadError as error:
-        logger.warning("yt-dlp could not resolve %s: %s", videoId, error)
-        raise HTTPException(status_code=502, detail="Unable to resolve YouTube audio") from error
-    except HTTPException:
-        raise
+        stream_info = extract_audio_stream(videoId)
+        target_url = stream_info["url"]
+
+        req_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        client_range = request.headers.get("range")
+        if client_range:
+            req_headers["Range"] = client_range
+
+        r = requests.get(target_url, headers=req_headers, stream=True, timeout=15)
+        
+        res_headers = {}
+        for h in ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]:
+            if h in r.headers:
+                res_headers[h] = r.headers[h]
+            elif h.lower() in r.headers:
+                res_headers[h] = r.headers[h.lower()]
+
+        if "Content-Type" not in res_headers or "octet-stream" in res_headers.get("Content-Type", ""):
+            res_headers["Content-Type"] = stream_info.get("mimeType", "audio/mp4")
+
+        def iterate_chunks():
+            try:
+                for chunk in r.iter_content(chunk_size=65536):
+                    yield chunk
+            except Exception as e:
+                logger.warning(f"Error streaming video {videoId}: {e}")
+            finally:
+                r.close()
+
+        return StreamingResponse(
+            iterate_chunks(),
+            status_code=r.status_code,
+            headers=res_headers
+        )
     except Exception as error:
         logger.exception("YouTube audio resolver failed for %s", videoId)
         raise HTTPException(status_code=502, detail="Unable to resolve YouTube audio") from error
