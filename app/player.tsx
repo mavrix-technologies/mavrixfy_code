@@ -2747,7 +2747,6 @@ function useLegacyPlayerScreenView() {
             height: topBarHeight,
             paddingHorizontal: isShortScreen ? 14 : 18,
             zIndex: 10,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
           },
           controlsDismissAnimatedStyle,
         ]}
