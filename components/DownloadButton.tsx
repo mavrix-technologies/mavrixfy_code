@@ -13,6 +13,7 @@ import { useDownloads, useSongDownload } from '@/contexts/DownloadContext';
 import type { Song } from '@/lib/musicData';
 import { logger } from '@/lib/logger';
 import { formatBytes } from '@/lib/downloads/storagePolicy';
+import { resolveYouTubeSongToJioSaavn } from '@/lib/youtubeToJioSaavnDownload';
 
 function resolveSongAudioUrl(song: Song): string {
   if (song.audioUrl) return song.audioUrl;
@@ -56,9 +57,11 @@ export default function DownloadButton({
   showLabel = false,
 }: DownloadButtonProps) {
   const { downloadSong, removeDownload } = useDownloads();
-  const download = useSongDownload(song.id);
-  const [isPreparing, setIsPreparing] = useState(false);
   const isYouTube = song.source === 'youtube' || song.id?.startsWith('youtube_') || song.id?.startsWith('yt:');
+  const [downloadTarget, setDownloadTarget] = useState<Song | null>(null);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const activeSong = downloadTarget || song;
+  const download = useSongDownload(activeSong.id);
 
   const isDownloaded = download?.status === 'completed';
   const isDownloading =
@@ -75,10 +78,29 @@ export default function DownloadButton({
 
     setIsPreparing(true);
     try {
+      let targetSong = song;
+      let matchedFromYouTube = false;
+
+      if (isYouTube) {
+        const match = await resolveYouTubeSongToJioSaavn(song);
+        if (!match?.song) {
+          setIsPreparing(false);
+          Alert.alert(
+            'Download Unavailable',
+            'Could not find a confident JioSaavn match for this YouTube song.'
+          );
+          return;
+        }
+
+        targetSong = match.song;
+        matchedFromYouTube = true;
+        setDownloadTarget(targetSong);
+      }
+
       let sizeLabel = 'unknown size';
       let actualSize: number | null = null;
       
-      const audioUrl = resolveSongAudioUrl(song);
+      const audioUrl = resolveSongAudioUrl(targetSong);
       if (audioUrl) {
         try {
           const response = await fetch(audioUrl, { method: 'HEAD' });
@@ -93,7 +115,7 @@ export default function DownloadButton({
       }
 
       if (!actualSize) {
-        const estimatedBytes = (song.duration || 0) * 25_000;
+        const estimatedBytes = (targetSong.duration || 0) * 25_000;
         sizeLabel = estimatedBytes > 0 ? `~${formatBytes(estimatedBytes)}` : 'unknown size';
       }
 
@@ -101,14 +123,14 @@ export default function DownloadButton({
 
       Alert.alert(
         'Download Song',
-        `Download "${song.title}" for offline playback?\n\nSize: ${sizeLabel}`,
+        `Download "${targetSong.title}" for offline playback?${matchedFromYouTube ? '\n\nMatched from JioSaavn.' : ''}\n\nSize: ${sizeLabel}`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Download',
             onPress: async () => {
               try {
-                const res = await downloadSong(song);
+                const res = await downloadSong(targetSong);
                 if (!res.ok) {
                   Alert.alert('Download Failed', res.reason || 'Could not queue download');
                 }
@@ -128,23 +150,19 @@ export default function DownloadButton({
   async function handleDelete() {
     Alert.alert(
       'Delete Download',
-      `Remove "${song.title}" from downloads?`,
+      `Remove "${activeSong.title}" from downloads?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await removeDownload(song.id);
+            await removeDownload(activeSong.id);
             onDownloadDeleted?.();
           }
         }
       ]
     );
-  }
-
-  if (isYouTube) {
-    return null;
   }
 
   return (
@@ -178,7 +196,7 @@ export default function DownloadButton({
       {showLabel && (
         <Text style={[styles.rowText, isDownloaded && styles.labelActive]}>
           {isDownloading
-            ? `Downloading...`
+            ? isPreparing && isYouTube ? `Matching...` : `Downloading...`
             : isDownloaded
             ? `Downloaded`
             : `Download`}

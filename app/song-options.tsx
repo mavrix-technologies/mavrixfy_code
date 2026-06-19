@@ -486,10 +486,7 @@ export default function SongOptionsScreen() {
   const showDownload = params.showDownload !== "0";
   const canShowDownload =
     showDownload &&
-    Boolean(song) &&
-    song?.source !== "youtube" &&
-    !song?.id?.startsWith("youtube_") &&
-    !song?.id?.startsWith("yt:");
+    Boolean(song);
   const canRemove = params.canRemove === "1";
   const optionContext = Array.isArray(params.optionContext) ? params.optionContext[0] : params.optionContext;
   const playlistIdParam = Array.isArray(params.playlistId) ? params.playlistId[0] : params.playlistId;

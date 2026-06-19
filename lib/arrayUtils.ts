@@ -42,19 +42,6 @@ export function filterMap<T, U>(
   return results;
 }
 
-export function forEachFiltered<T>(
-  items: readonly T[],
-  predicate: (item: T, index: number) => boolean,
-  visitor: (item: T, index: number) => void
-): void {
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index];
-    if (predicate(item, index)) {
-      visitor(item, index);
-    }
-  }
-}
-
 function flatMapMap<T, U, V>(
   items: readonly T[],
   flatMapper: (item: T, index: number) => readonly U[],

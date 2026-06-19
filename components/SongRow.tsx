@@ -236,6 +236,7 @@ const SongRow = memo(function SongRow({
             title: song.title,
             artist: song.artist,
             album: song.album || "",
+            duration: song.duration || 0,
             coverUrl: song.coverUrl || "",
             audioUrl: song.audioUrl ? song.audioUrl.split("?")[0] : "",
             source: song.source,
@@ -336,8 +337,8 @@ const SongRow = memo(function SongRow({
               </Pressable>
             ) : null}
 
-            {/* Download button - native audio only */}
-            {showDownload && !onRemove && song.source !== 'youtube' ? (
+            {/* Download button */}
+            {showDownload && !onRemove ? (
               <View
                 onTouchStart={(e) => e.stopPropagation()}
                 style={styles.downloadBtnWrapper}

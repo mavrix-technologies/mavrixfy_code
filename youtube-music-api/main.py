@@ -9,11 +9,13 @@ from threading import Lock
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
+import requests
 import uvicorn
 import yt_dlp
-from fastapi import FastAPI, Header, HTTPException, Query, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from ytmusicapi import YTMusic
 
 logging.basicConfig(level=logging.INFO)
