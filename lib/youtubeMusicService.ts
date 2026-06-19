@@ -454,8 +454,8 @@ function getSearchQueryCandidates(query: string, filter: string, limit: number):
     return [`q=${encodedQuery}&filter=${filter}&limit=${limit}`];
   }
   return [
-    `q=${encodedQuery}&filter=${filter}&limit=${limit}`,
     `query=${encodedQuery}&filter=${filter}&limit=${limit}`,
+    `q=${encodedQuery}&filter=${filter}&limit=${limit}`,
   ];
 }
 
