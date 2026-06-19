@@ -62,14 +62,6 @@ jobs:
             '
           fi
 
-      - name: Remove expo-dev-client before prebuild
-        # expo-dev-client pulls in expo-dev-launcher whose Assets.xcassets
-        # fails to compile with Xcode 16 in Release mode.
-        # It is a dev-only tool and must not be included in production builds.
-        run: |
-          npm uninstall --no-save expo-dev-client
-          rm -rf node_modules/expo-dev-launcher node_modules/expo-dev-menu node_modules/expo-dev-client
-
       - name: Patch React Native codegen for expand function bug
         run: |
           CODEGEN_FILE="node_modules/react-native/scripts/codegen/generate-artifacts-executor/index.js"

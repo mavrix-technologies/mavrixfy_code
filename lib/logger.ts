@@ -42,19 +42,3 @@ export const logger = {
     if (isDev) console.timeEnd(label);
   },
 };
-
-// Performance monitoring helper
-const perfMonitor = {
-  start: (label: string) => {
-    if (isDev) {
-      performance.mark(`${label}-start`);
-    }
-  },
-  
-  end: (label: string) => {
-    if (isDev) {
-      performance.mark(`${label}-end`);
-      performance.measure(label, `${label}-start`, `${label}-end`);
-    }
-  },
-};

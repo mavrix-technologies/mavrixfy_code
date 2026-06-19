@@ -79,7 +79,7 @@ import AdMobBanner from "@/components/AdMobBanner";
 import AppPromotionModal from "@/components/AppPromotionModal";
 import PromotionBanner from "@/components/PromotionBanner";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { filterMap, forEachFiltered, mapFilter } from "@/lib/arrayUtils";
+import { filterMap, mapFilter } from "@/lib/arrayUtils";
 import { DISABLED_HOME_HERO_CONFIG, subscribeHomeHeroConfig, type HomeHeroVideoItem } from "@/lib/homeHeroConfig";
 import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
 import { logger } from "@/lib/logger";
@@ -195,7 +195,23 @@ const HOME_BOOTSTRAP_MAX_WAIT_MS = 15000;
 const HOME_NEW_RELEASE_SONG_TIMEOUT_MS = 8000;
 const MAX_ROW_ITEMS = 10;
 const NEW_RELEASE_SONG_LIMIT = 10;
-const HOME_PRIORITY_CATEGORY_IDS = ["trending", "top-charts", "new-releases", "ranked", "viral-hits", "hot-right-now", "bollywood", "popular"] as const;
+const HOME_DEFAULT_BROWSE_CATEGORY_IDS = ["trending", "top-charts", "new-releases", "bollywood"] as const;
+const HOME_BROWSE_CATEGORY_FETCH_IDS = [
+  "trending",
+  "top-charts",
+  "new-releases",
+  "bollywood",
+  "party-mix",
+  "chill-vibes",
+  "romance",
+  "workout",
+  "retro",
+] as const;
+const HOME_MAX_DEFAULT_BROWSE_SECTIONS = 4;
+const HOME_MAX_MOOD_BROWSE_SECTIONS = 3;
+const HOME_MAX_RECOMMENDATION_SECTIONS = 2;
+const HOME_MAX_PUBLIC_PLAYLISTS = 12;
+const HOME_MAX_YOUTUBE_DISCOVERY_PLAYLISTS = 8;
 const HOME_PRIORITY_CATEGORY_TIMEOUT_MS = 5500;
 const PLACEHOLDER_ROW_ITEMS = [0, 1, 2, 3];
 const QUICK_PICK_PLACEHOLDER_COLUMNS = [0, 1];
@@ -213,7 +229,7 @@ const HOME_HERO_VIDEO_TRANSFORM = "f_mp4,vc_h264,c_crop,g_center,w_1440,h_810/c_
 const HOME_HERO_POSTER_TRANSFORM = "so_2,c_crop,g_center,w_1440,h_810/c_fill,w_1080,h_608,q_auto,f_jpg";
 const INITIAL_CATEGORY_LIMIT = 10;
 const REFRESH_CATEGORY_LIMIT = 12;
-const INITIAL_PUBLIC_LIMIT = 100; // Increased to show all playlists
+const INITIAL_PUBLIC_LIMIT = 24;
 const INLINE_AD_SCROLL_GATE_Y = 1800;
 const INLINE_AD_LOAD_DELAY_MS = 6000;
 const HOME_IMAGE_TRANSITION_MS = 0;
@@ -1490,7 +1506,7 @@ function useHomeScreenInnerView() {
                 forceRefresh,
                 limitPerCategory: Math.min(limitPerCategory, 8),
                 realtime: realtimeRefresh,
-                categoryIds: [...HOME_PRIORITY_CATEGORY_IDS],
+                categoryIds: [...HOME_DEFAULT_BROWSE_CATEGORY_IDS],
                 youtubeTimeoutMs: 4800,
               }),
               HOME_PRIORITY_CATEGORY_TIMEOUT_MS,
@@ -1513,6 +1529,7 @@ function useHomeScreenInnerView() {
                 forceRefresh,
                 limitPerCategory,
                 realtime: realtimeRefresh,
+                categoryIds: [...HOME_BROWSE_CATEGORY_FETCH_IDS],
                 youtubeTimeoutMs: 8000,
               }),
               HOME_CATEGORY_FETCH_TIMEOUT_MS,
@@ -1839,28 +1856,51 @@ function useHomeScreenInnerView() {
       }), (cat) => cat.results.length > 0);
   }, [orderedHomeCategories]);
 
+  const visibleBrowseCategoryRows = useMemo(() => {
+    if (selectedMood) {
+      return allCategoryRows.slice(0, HOME_MAX_MOOD_BROWSE_SECTIONS);
+    }
+
+    const rowById = new Map(allCategoryRows.map((cat) => [cat.id, cat]));
+    const preferred = mapFilter(
+      HOME_DEFAULT_BROWSE_CATEGORY_IDS,
+      (id) => rowById.get(id) ?? null,
+      (cat): cat is HomeCategoryData => Boolean(cat)
+    );
+    const preferredIds = new Set(preferred.map((cat) => cat.id));
+    const fallback = filterMap(
+      allCategoryRows,
+      (cat) => !preferredIds.has(cat.id),
+      (cat) => cat
+    );
+
+    return [...preferred, ...fallback].slice(0, HOME_MAX_DEFAULT_BROWSE_SECTIONS);
+  }, [allCategoryRows, selectedMood]);
+
   const publicPlaylistsForSection = useMemo(
-    () => dedupeFirestorePlaylistsById(publicPlaylists, publicPlaylists.length),
+    () => dedupeFirestorePlaylistsById(publicPlaylists, HOME_MAX_PUBLIC_PLAYLISTS),
     [publicPlaylists]
   );
 
   const recommendationSections = useMemo(
-    () => recommendationFeed?.sections.filter((section) => section.items.length > 0) ?? [],
+    () => recommendationFeed?.sections.filter((section) => section.items.length > 0).slice(0, HOME_MAX_RECOMMENDATION_SECTIONS) ?? [],
     [recommendationFeed]
+  );
+
+  const youtubeDiscoveryPlaylists = useMemo(
+    () => youtubeTrendingPlaylists.slice(0, HOME_MAX_YOUTUBE_DISCOVERY_PLAYLISTS),
+    [youtubeTrendingPlaylists]
   );
 
   const sections = useMemo<HomeSection[]>(() => {
     const data: HomeSection[] = [];
     const appendCategorySections = () => {
-      const rowById = new Map(allCategoryRows.map((cat) => [cat.id, cat]));
+      visibleBrowseCategoryRows.forEach((category) => {
+        data.push({ id: `category-${category.id}`, type: "category", data: category });
+      });
 
-      HOME_PRIORITY_CATEGORY_IDS.forEach((priorityId) => {
-        const existing = rowById.get(priorityId);
-        if (existing) {
-          data.push({ id: `category-${existing.id}`, type: "category", data: existing });
-          return;
-        }
-        if (isLoadingCategories) {
+      if (visibleBrowseCategoryRows.length === 0 && isLoadingCategories) {
+        HOME_DEFAULT_BROWSE_CATEGORY_IDS.slice(0, 2).forEach((priorityId) => {
           data.push({
             id: `category-loading-${priorityId}`,
             type: "category",
@@ -1870,27 +1910,18 @@ function useHomeScreenInnerView() {
               results: [],
             },
           });
-        }
-      });
-
-      forEachFiltered(
-        allCategoryRows,
-        (cat) => !HOME_PRIORITY_CATEGORY_IDS.includes(cat.id as (typeof HOME_PRIORITY_CATEGORY_IDS)[number]),
-        (cat) => data.push({ id: `category-${cat.id}`, type: "category", data: cat })
-      );
+        });
+      }
     };
 
     if (shouldUseRecommendationFeed && recommendationSections.length > 0) {
-      if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
-        data.push({ id: "new-release-songs", type: "new-release-songs" });
-      }
-      if (featuredArtists.length > 0) {
-        data.push({ id: "featured-artists", type: "featured-artists" });
-      }
       if (recentlyPlayed.length > 0) {
         data.push({ id: "recents", type: "recents" });
       }
-      if (youtubeTrendingPlaylists.length > 0 || isLoadingYoutubeTrending) {
+      if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
+        data.push({ id: "new-release-songs", type: "new-release-songs" });
+      }
+      if (youtubeDiscoveryPlaylists.length > 0 || isLoadingYoutubeTrending) {
         data.push({ id: "youtube-trending", type: "youtube-trending" });
       }
       recommendationSections.forEach((section) => {
@@ -1900,46 +1931,47 @@ function useHomeScreenInnerView() {
       if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS || isLoadingPublicPlaylists) {
         data.push({ id: "public-playlists", type: "public-playlists" });
       }
+      if (featuredArtists.length > 0 && !selectedMood) {
+        data.push({ id: "featured-artists", type: "featured-artists" });
+      }
       return data;
     }
 
     const hasFallbackContent =
       featuredArtists.length > 0 ||
       recentlyPlayed.length > 0 ||
-      youtubeTrendingPlaylists.length > 0 ||
-      allCategoryRows.length > 0 ||
+      youtubeDiscoveryPlaylists.length > 0 ||
+      visibleBrowseCategoryRows.length > 0 ||
       publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS;
 
     if (shouldUseRecommendationFeed && isRecommendationFeedLoading && !hasRecommendationFeedFailed && !hasFallbackContent) {
       return data;
     }
 
-    // 1. Quick Picks (new release songs) — very top
-    if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
-      data.push({ id: "new-release-songs", type: "new-release-songs" });
-    }
-
-    // 2. Featured Artists
-    if (featuredArtists.length > 0) {
-      data.push({ id: "featured-artists", type: "featured-artists" });
-    }
-
-    // 3. Jump Back In (recents)
+    // 1. Resume first: this is the fastest path back into listening.
     if (recentlyPlayed.length > 0) {
       data.push({ id: "recents", type: "recents" });
     }
 
-    // 3.5 YouTube Trending Hits
-    if (youtubeTrendingPlaylists.length > 0 || isLoadingYoutubeTrending) {
+    // 2. Fresh songs and quick taps.
+    if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
+      data.push({ id: "new-release-songs", type: "new-release-songs" });
+    }
+
+    // 3. Video-backed discovery is separate from the main app catalog.
+    if (youtubeDiscoveryPlaylists.length > 0 || isLoadingYoutubeTrending) {
       data.push({ id: "youtube-trending", type: "youtube-trending" });
     }
 
-    // 4. Stable category slots: priority rows are always reserved while loading.
+    // 4. Browse: a small curated set, filtered by mood when selected.
     appendCategorySections();
 
-    // 5. Made for You — bottom
+    // 5. Made for You and people discovery sit lower to keep the first screen calm.
     if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS || isLoadingPublicPlaylists) {
       data.push({ id: "public-playlists", type: "public-playlists" });
+    }
+    if (featuredArtists.length > 0 && !selectedMood) {
+      data.push({ id: "featured-artists", type: "featured-artists" });
     }
 
     return data;
@@ -1947,10 +1979,10 @@ function useHomeScreenInnerView() {
     recentlyPlayed,
     publicPlaylistsForSection,
     featuredArtists,
-    allCategoryRows,
+    visibleBrowseCategoryRows,
     newReleaseSongs.length,
     isLoadingNewReleaseSongs,
-    youtubeTrendingPlaylists.length,
+    youtubeDiscoveryPlaylists.length,
     isLoadingYoutubeTrending,
     isLoadingCategories,
     isLoadingPublicPlaylists,
@@ -1958,6 +1990,7 @@ function useHomeScreenInnerView() {
     shouldUseRecommendationFeed,
     isRecommendationFeedLoading,
     hasRecommendationFeedFailed,
+    selectedMood,
   ]);
 
   const openJioSaavnPlaylist = useCallback(
@@ -2316,7 +2349,11 @@ function useHomeScreenInnerView() {
               recyclingKey={`${categoryId}-${item.id}`}
             />
             <View pointerEvents="none" style={styles.brandCoverBadge}>
-              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
+              {item.source === "youtube" ? (
+                <Ionicons name="logo-youtube" size={15} color="#FFFFFF" />
+              ) : (
+                <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
+              )}
             </View>
           </View>
           <Text style={styles.rectCardTitle} numberOfLines={2}>
@@ -2774,7 +2811,7 @@ function useHomeScreenInnerView() {
   }, [handleRefresh, homeFeedState, routerPush]);
 
   const getSectionHeaderElement = useCallback((title: string, onViewAll?: () => void) => {
-    const isQuickPicks = title === "Quick picks";
+    const isQuickPicks = title === "New & quick picks";
     return (
       <View style={styles.sectionHeader}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -2828,7 +2865,7 @@ function useHomeScreenInnerView() {
         case "new-release-songs":
           return (
             <View style={styles.section}>
-              {getSectionHeaderElement("Quick picks")}
+              {getSectionHeaderElement("New & quick picks")}
               {newReleaseSongs.length > 0 ? (
                 <FlatList
                   horizontal
@@ -2860,11 +2897,11 @@ function useHomeScreenInnerView() {
         case "youtube-trending":
           return (
             <View style={styles.section}>
-              {getSectionHeaderElement("Trending Now")}
-              {youtubeTrendingPlaylists.length > 0 ? (
+              {getSectionHeaderElement("YouTube Music videos")}
+              {youtubeDiscoveryPlaylists.length > 0 ? (
                 <FlatList
                   horizontal
-                  data={youtubeTrendingPlaylists}
+                  data={youtubeDiscoveryPlaylists}
                   keyExtractor={(item) => `yt-trending-playlist-${item.id}`}
                   renderItem={renderYouTubeTrendingPlaylist}
                   ItemSeparatorComponent={renderRowSeparator}
@@ -2926,7 +2963,7 @@ function useHomeScreenInnerView() {
         case "featured-artists":
           return (
             <View style={styles.section}>
-              {getSectionHeaderElement("Top Featured Artists", () => routerPush("/artists", { withAnchor: true }))}
+              {getSectionHeaderElement("Artists to explore", () => routerPush("/artists", { withAnchor: true }))}
               <FlatList
                 horizontal
                 data={featuredArtists}
@@ -3015,7 +3052,7 @@ function useHomeScreenInnerView() {
       featuredArtists,
       renderArtistCard,
       makeCategoryRenderItem,
-      youtubeTrendingPlaylists,
+      youtubeDiscoveryPlaylists,
       renderYouTubeTrendingPlaylist,
       renderRecommendationPlaylist,
       getSectionHeaderElement,

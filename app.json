@@ -110,11 +110,25 @@
           }
         }
       ],
-      "./plugins/withSliderBuildFix",
       "@react-native-community/datetimepicker",
-      "expo-audio",
+      [
+        "expo-audio",
+        {
+          "recordAudioAndroid": false,
+          "microphonePermission": false
+        }
+      ],
       "expo-asset",
       "@react-native-google-signin/google-signin",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-6003470714469240~2133470244",
+          "iosAppId": "ca-app-pub-6003470714469240~2133470244",
+          "optimizeInitialization": true,
+          "optimizeAdLoading": true
+        }
+      ],
       "expo-video"
     ],
     "experiments": {
@@ -150,9 +164,5 @@
       }
     },
     "owner": "satvik1234"
-  },
-  "react-native-google-mobile-ads": {
-    "android_app_id": "ca-app-pub-6003470714469240~2133470244",
-    "ios_app_id": "ca-app-pub-6003470714469240~2133470244"
   }
 }

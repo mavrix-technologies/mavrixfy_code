@@ -50,10 +50,8 @@ import {
 } from "@/lib/storage";
 import AdMobNativeVideo from "@/components/AdMobNativeVideo";
 import {
+  getYouTubeMusicSearchSuggestions,
   searchYouTubeMusic,
-  searchYouTubeMusicAlbums,
-  searchYouTubeMusicPlaylists,
-  searchYouTubeMusicArtists,
   searchYouTubeMusicVideos
 } from "@/lib/youtubeMusicService";
 import { logger } from "@/lib/logger";
@@ -101,7 +99,7 @@ interface BrowseCategory {
   isHero?: boolean;
 }
 
-type ResultFilter = "all" | "songs" | "albums" | "artists" | "playlists";
+type ResultFilter = "all" | "songs" | "youtube" | "albums" | "artists" | "playlists";
 
 const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
   { key: "all", label: "All" },
@@ -113,7 +111,6 @@ const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
 
 const CARD_ROTATION_PATTERN = [-11, 8, -7, 10, -5, 6] as const;
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
-
 function getRouteSearchQuery(params: { q?: string | string[]; name?: string | string[] }) {
   const incomingQuery = Array.isArray(params.q)
     ? params.q[0]
@@ -368,20 +365,6 @@ function mergeUniqueById<T extends { id: string }>(items: T[], limit: number): T
   return out;
 }
 
-function uniqueById<T extends { id: string }>(items: T[]): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-
-  for (const item of items) {
-    const id = String(item.id || "").trim();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    out.push(item);
-  }
-
-  return out;
-}
-
 const SONG_METADATA_TITLE_WORDS = new Set([
   "from",
   "original",
@@ -533,48 +516,6 @@ function uniqueSongResultIds(songs: Song[]): Song[] {
   });
 }
 
-function mergeSearchSongRows(primarySongs: Song[], youtubeSongs: Song[]): Song[] {
-  if (youtubeSongs.length === 0) return primarySongs;
-
-  const youtubeUnique: Song[] = [];
-  for (const song of youtubeSongs) {
-    if (!youtubeUnique.some((existing) => areDuplicateSearchSongs(song, existing, true))) {
-      youtubeUnique.push(song);
-    }
-  }
-
-  const primaryUnique: Song[] = [];
-  for (const song of primarySongs) {
-    if (!primaryUnique.some((existing) => areDuplicateSearchSongs(song, existing, true))) {
-      primaryUnique.push(song);
-    }
-  }
-
-  const merged: Song[] = [];
-  const usedPrimaryIndexes = new Set<number>();
-
-  for (const youtubeSong of youtubeUnique) {
-    merged.push(youtubeSong);
-
-    // react-doctor-disable-next-line react-doctor/js-index-maps
-    const matchingPrimaryIndex = primaryUnique.findIndex((primarySong, index) =>
-      !usedPrimaryIndexes.has(index) && areDuplicateSearchSongs(youtubeSong, primarySong, true)
-    );
-    if (matchingPrimaryIndex >= 0) {
-      merged.push(primaryUnique[matchingPrimaryIndex]);
-      usedPrimaryIndexes.add(matchingPrimaryIndex);
-    }
-  }
-
-  primaryUnique.forEach((primarySong, index) => {
-    if (!usedPrimaryIndexes.has(index)) {
-      merged.push(primarySong);
-    }
-  });
-
-  return uniqueSongResultIds(merged);
-}
-
 function isYouTubeCollectionResult(id: string, url?: string, description?: string): boolean {
   const value = String(id || "").trim();
   const lowerUrl = String(url || "").toLowerCase();
@@ -591,65 +532,6 @@ function isYouTubeCollectionResult(id: string, url?: string, description?: strin
     lowerUrl.includes("music.youtube.com") ||
     lowerDescription.includes("youtube")
   );
-}
-
-function normalizeCollectionDuplicateName(value: string | undefined): string {
-  return normalizeSongDuplicateTitle(String(value || ""), true);
-}
-
-function areDuplicateAlbumResults(next: AlbumResult, existing: AlbumResult): boolean {
-  const nextName = normalizeCollectionDuplicateName(next.name);
-  const existingName = normalizeCollectionDuplicateName(existing.name);
-  if (!nextName || nextName !== existingName) return false;
-
-  const nextArtist = normalizeSongPeopleKey(next.artist || "");
-  const existingArtist = normalizeSongPeopleKey(existing.artist || "");
-  return nextArtist === "unknown" || existingArtist === "unknown" || nextArtist === existingArtist;
-}
-
-function areDuplicatePlaylistResults(next: PlaylistResult, existing: PlaylistResult): boolean {
-  const nextName = normalizeCollectionDuplicateName(next.name);
-  const existingName = normalizeCollectionDuplicateName(existing.name);
-  return Boolean(nextName && nextName === existingName);
-}
-
-function areDuplicateArtistResults(next: ArtistResult, existing: ArtistResult): boolean {
-  const nextName = normalizeText(next.name || "");
-  const existingName = normalizeText(existing.name || "");
-  return Boolean(nextName && nextName === existingName);
-}
-
-function mergePairedSearchRows<T extends { id: string }>(
-  priorityItems: T[],
-  secondaryItems: T[],
-  isDuplicate: (priorityItem: T, secondaryItem: T) => boolean,
-  limit: number
-): T[] {
-  const priorityUnique = uniqueById(priorityItems);
-  const secondaryUnique = uniqueById(secondaryItems);
-  const merged: T[] = [];
-  const usedSecondaryIndexes = new Set<number>();
-
-  for (const priorityItem of priorityUnique) {
-    merged.push(priorityItem);
-
-    // react-doctor-disable-next-line react-doctor/js-index-maps
-    const matchingSecondaryIndex = secondaryUnique.findIndex((secondaryItem, index) =>
-      !usedSecondaryIndexes.has(index) && isDuplicate(priorityItem, secondaryItem)
-    );
-    if (matchingSecondaryIndex >= 0) {
-      merged.push(secondaryUnique[matchingSecondaryIndex]);
-      usedSecondaryIndexes.add(matchingSecondaryIndex);
-    }
-  }
-
-  secondaryUnique.forEach((secondaryItem, index) => {
-    if (!usedSecondaryIndexes.has(index)) {
-      merged.push(secondaryItem);
-    }
-  });
-
-  return mergeUniqueById(merged, limit);
 }
 
 function stableHash(input: string): number {
@@ -692,12 +574,14 @@ function useSearchScreenView() {
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeqRef = useRef(0);
   const suggestionsSeqRef = useRef(0);
+  const latestSuggestionsRef = useRef<{ query: string; items: string[] } | null>(null);
   const appliedRouteSearchQueryRef = useRef(routeSearchQuery);
   const activeSearchAbortRef = useRef<AbortController | null>(null);
   const resultsPlaylistsListRef = useRef<FlatList<PlaylistResult> | null>(null);
   const resultsAlbumsListRef = useRef<FlatList<AlbumResult> | null>(null);
   const resultsArtistsListRef = useRef<FlatList<ArtistResult> | null>(null);
   const resultsSongsListRef = useRef<FlatList<Song> | null>(null);
+  const resultsYoutubeListRef = useRef<FlatList<Song> | null>(null);
   const searchCacheRef = useRef<Map<string, SearchCacheEntry> | null>(null);
   if (searchCacheRef.current === null) {
     searchCacheRef.current = new Map();
@@ -922,21 +806,18 @@ function useSearchScreenView() {
             }
           };
 
-          const loadYouTubeSections = async () => {
+          const loadDiscoverySections = async () => {
             try {
-              // react-doctor-disable-next-line react-doctor/async-defer-await
-              const [
-                ytMusicSongs,
-                ytMusicVideos,
-                ytMusicAlbums,
-                ytMusicArtists,
-                ytMusicPlaylists
-              ] = await Promise.all([
+              const cachedSuggestions = latestSuggestionsRef.current;
+              const suggestionRequest =
+                cachedSuggestions?.query === normalizeText(searchTerm)
+                  ? Promise.resolve(cachedSuggestions.items)
+                  : getYouTubeMusicSearchSuggestions(searchTerm, controller.signal);
+              // react-doctor-disable-next-line react-doctor/async-defer-await -- request activity can change while these concurrent calls are in flight.
+              const [ytMusicSongs, ytMusicVideos, youtubeSuggestions] = await Promise.all([
                 searchYouTubeMusic(searchTerm, "song", 15, controller.signal),
                 searchYouTubeMusicVideos(searchTerm, 10, controller.signal),
-                searchYouTubeMusicAlbums(searchTerm, 8, controller.signal),
-                searchYouTubeMusicArtists(searchTerm, 8, controller.signal),
-                searchYouTubeMusicPlaylists(searchTerm, 8, controller.signal),
+                suggestionRequest,
               ]);
 
               if (!requestIsActive()) return;
@@ -950,36 +831,43 @@ function useSearchScreenView() {
                 }
               }
 
-              const enrichedAlbums = mergePairedSearchRows(
-                ytMusicAlbums,
-                albums,
-                areDuplicateAlbumResults,
-                16
-              );
-              const enrichedArtists = mergePairedSearchRows(
-                ytMusicArtists,
-                artists,
-                areDuplicateArtistResults,
-                16
-              );
-              const enrichedPlaylists = mergePairedSearchRows(
-                ytMusicPlaylists,
-                playlists,
-                areDuplicatePlaylistResults,
-                16
-              );
+              const normalizedSearchTerm = normalizeText(searchTerm);
+              const searchTokens = normalizedSearchTerm.split(" ").filter((token) => token.length > 1);
+              const suggestionQuery = youtubeSuggestions.find((suggestion) => {
+                const normalizedSuggestion = normalizeText(suggestion);
+                if (!normalizedSuggestion || normalizedSuggestion === normalizedSearchTerm) return false;
+                return searchTokens.some((token) => normalizedSuggestion.includes(token));
+              });
 
-              logger.debug("[Search] YouTube Music results", { songCount: youtubeSongs.length });
+              let enrichedRankedSongs = rankedSongs;
+              if (suggestionQuery) {
+                // react-doctor-disable-next-line react-doctor/async-defer-await -- the stale-request guard must run after this optional enrichment request.
+                const suggestionData = await safeFetch(
+                  `${apiUrl}api/search/songs?query=${encodeURIComponent(suggestionQuery)}&limit=10`
+                );
+                if (!requestIsActive()) return;
+
+                const enrichedSongs = rankedSongs.slice();
+                for (const rawSong of (suggestionData?.data?.results || suggestionData?.results || [])) {
+                  const parsedSong = parseBackup(rawSong);
+                  if (parsedSong) mergeInto(enrichedSongs, parsedSong);
+                }
+                enrichedRankedSongs = fastRank(toFinalList(enrichedSongs));
+              }
+
+              logger.debug("[Search] Discovery results", {
+                youtubeSongCount: youtubeSongs.length,
+                jioSaavnSongCount: enrichedRankedSongs.length,
+                usedSuggestion: Boolean(suggestionQuery),
+              });
+              setSongResults(enrichedRankedSongs);
               setYoutubeMusicResults(youtubeSongs);
-              setAlbumResults(enrichedAlbums);
-              setArtistResults(enrichedArtists);
-              setPlaylistResults(enrichedPlaylists);
               writeCache({
-                songs: rankedSongs,
+                songs: enrichedRankedSongs,
                 youtubeSongs,
-                albums: enrichedAlbums,
-                artists: enrichedArtists,
-                playlists: enrichedPlaylists,
+                albums,
+                artists,
+                playlists,
                 timestamp: Date.now(),
               });
             } catch (error) {
@@ -1002,7 +890,7 @@ function useSearchScreenView() {
           };
 
           InteractionManager.runAfterInteractions(() => {
-            void loadYouTubeSections();
+            void loadDiscoverySections();
           });
         }
       }
@@ -1052,6 +940,7 @@ function useSearchScreenView() {
     const trimmed = query.trim();
     if (trimmed.length < 2) {
       suggestionsSeqRef.current += 1;
+      latestSuggestionsRef.current = null;
       setSuggestions([]);
       return;
     }
@@ -1060,9 +949,9 @@ function useSearchScreenView() {
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const { getYouTubeMusicSearchSuggestions } = await import("@/lib/youtubeMusicService");
         const list = await getYouTubeMusicSearchSuggestions(trimmed, controller.signal);
         if (requestId === suggestionsSeqRef.current && !controller.signal.aborted) {
+          latestSuggestionsRef.current = { query: normalizeText(trimmed), items: list };
           setSuggestions(list);
         }
       } catch (error) {
@@ -1208,6 +1097,7 @@ function useSearchScreenView() {
 
   const applyEmptySearchState = useCallback((displayQuery = "") => {
     setSongResults([]);
+    setYoutubeMusicResults([]);
     setAlbumResults([]);
     setArtistResults([]);
     setPlaylistResults([]);
@@ -1297,6 +1187,8 @@ function useSearchScreenView() {
         resultsAlbumsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else if (resultFilter === "artists") {
         resultsArtistsListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      } else if (resultFilter === "youtube") {
+        resultsYoutubeListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else {
         resultsSongsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       }
@@ -1350,23 +1242,26 @@ function useSearchScreenView() {
         resultsAlbumsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else if (resultFilter === "artists") {
         resultsArtistsListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      } else if (resultFilter === "youtube") {
+        resultsYoutubeListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else {
         resultsSongsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       }
     });
   }, [searchLoading, resultFilter, showBrowse, showFocusedRecentSearches, songResults.length, youtubeMusicResults.length, albumResults.length, artistResults.length, playlistResults.length]);
 
-  const showAlbumResults = resultFilter !== "songs" && resultFilter !== "artists" && resultFilter !== "playlists" && albumResults.length > 0;
-  const showArtistResults = resultFilter !== "songs" && resultFilter !== "albums" && resultFilter !== "playlists" && artistResults.length > 0;
-  const showPlaylistResults = resultFilter !== "songs" && resultFilter !== "albums" && resultFilter !== "artists" && playlistResults.length > 0;
-  const showSongResults =
-    resultFilter !== "albums" &&
-    resultFilter !== "artists" &&
-    resultFilter !== "playlists" &&
-    (songResults.length > 0 || youtubeMusicResults.length > 0);
+  const showAlbumResults = (resultFilter === "all" || resultFilter === "albums") && albumResults.length > 0;
+  const showArtistResults = (resultFilter === "all" || resultFilter === "artists") && artistResults.length > 0;
+  const showPlaylistResults = (resultFilter === "all" || resultFilter === "playlists") && playlistResults.length > 0;
+  const showSongResults = (resultFilter === "all" || resultFilter === "songs") && songResults.length > 0;
+  const hasYoutubeResults = youtubeMusicResults.length > 0;
+  const appResultCount = songResults.length + albumResults.length + artistResults.length + playlistResults.length;
+  const showYoutubeResults = resultFilter === "youtube" && hasYoutubeResults;
+  const youtubePreviewResults = useMemo(() => youtubeMusicResults.slice(0, 3), [youtubeMusicResults]);
+  const showYoutubePreviewSection = resultFilter === "all" && youtubePreviewResults.length > 0;
   const displayedSongs = useMemo(
-    () => (showSongResults ? mergeSearchSongRows(songResults, youtubeMusicResults) : []),
-    [showSongResults, songResults, youtubeMusicResults]
+    () => (showSongResults ? songResults : []),
+    [showSongResults, songResults]
   );
   const featuredAlbums = useMemo(() => albumResults.slice(0, 6), [albumResults]);
   const featuredArtists = useMemo(() => artistResults.slice(0, 5), [artistResults]);
@@ -1395,6 +1290,103 @@ function useSearchScreenView() {
     },
     [displayedSongs, displayedSongsQueueKey, handleSongResultPress]
   );
+
+  const handleYoutubeResultPress = useCallback((song: Song) => {
+    void addSongSearchHistoryItem(song)
+      .then((items) => setRecentSearches(toRecentSearchItems(items)))
+      .catch(() => undefined);
+    void playSong(song, youtubeMusicResults);
+  }, [playSong, youtubeMusicResults]);
+
+  const handleShowAppResults = useCallback(() => {
+    resetHeaderElevation();
+    setResultFilter("all");
+  }, [resetHeaderElevation]);
+
+  const handleShowYoutubeResults = useCallback(() => {
+    resetHeaderElevation();
+    if (query.trim().length >= 2) {
+      setResultFilter("youtube");
+    }
+  }, [query, resetHeaderElevation]);
+
+  const getYoutubeResultElement = useCallback(
+    (item: Song) => (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Play ${item.title} by ${item.artist}`}
+        style={({ pressed }) => [styles.youtubeResultRow, pressed && styles.youtubeResultRowPressed]}
+        onPress={() => handleYoutubeResultPress(item)}
+      >
+        <Image
+          recyclingKey={`youtube-${item.id}`}
+          source={{ uri: item.coverUrl }}
+          style={styles.youtubeResultImage}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={100}
+        />
+        <View style={styles.youtubeResultInfo}>
+          <Text style={styles.youtubeResultTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.youtubeResultArtist} numberOfLines={1}>{item.artist}</Text>
+          <View style={styles.youtubeResultSource}>
+            <Ionicons name="logo-youtube" size={14} color="#FF3B30" />
+            <Text style={styles.youtubeResultSourceText}>YouTube Music</Text>
+          </View>
+        </View>
+        <Ionicons name="play-circle-outline" size={23} color={Colors.subtext} />
+      </Pressable>
+    ),
+    [handleYoutubeResultPress]
+  );
+
+  const renderYoutubeResult = useCallback(
+    ({ item }: { item: Song }) => getYoutubeResultElement(item),
+    [getYoutubeResultElement]
+  );
+
+  const youtubeHighlightSectionNode = useMemo(() => {
+    if (youtubePreviewResults.length === 0) return null;
+
+    return (
+      <View style={styles.youtubeHighlightSection}>
+        <View style={styles.youtubeHighlightHeader}>
+          <View style={styles.youtubeHighlightTitleWrap}>
+            <View style={styles.youtubeHighlightIcon}>
+              <Ionicons name="logo-youtube" size={18} color="#FFFFFF" />
+            </View>
+            <View style={styles.youtubeHighlightTextWrap}>
+              <Text style={styles.youtubeHighlightTitle}>YouTube Music</Text>
+              <Text style={styles.youtubeHighlightMeta} numberOfLines={1}>
+                {youtubeMusicResults.length} more results
+              </Text>
+            </View>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Show all YouTube Music results"
+            onPress={handleShowYoutubeResults}
+            style={({ pressed }) => [
+              styles.youtubeHighlightAction,
+              pressed && styles.youtubeHighlightActionPressed,
+            ]}
+          >
+            <Text style={styles.youtubeHighlightActionText}>Show all</Text>
+          </Pressable>
+        </View>
+        {youtubePreviewResults.map((item) => (
+          <View key={`youtube-preview-${item.id}`} style={styles.youtubePreviewRowWrap}>
+            {getYoutubeResultElement(item)}
+          </View>
+        ))}
+      </View>
+    );
+  }, [
+    getYoutubeResultElement,
+    handleShowYoutubeResults,
+    youtubeMusicResults.length,
+    youtubePreviewResults,
+  ]);
 
   const handleArtistPress = useCallback(
     (artist: ArtistResult) => {
@@ -1778,6 +1770,70 @@ function useSearchScreenView() {
               contentContainerStyle={styles.filterRowContent}
             />
           </View>
+          {hasYoutubeResults ? (
+            <View style={styles.sourceSwitchWrap}>
+              <View style={styles.sourceSwitchLabelRow}>
+                <Ionicons name="logo-youtube" size={16} color="#FF3B30" />
+                <Text style={styles.sourceSwitchLabel}>Result source</Text>
+              </View>
+              <View style={styles.sourceSwitchTrack}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Show Mavrixfy search results"
+                  onPress={handleShowAppResults}
+                  style={[
+                    styles.sourceSwitchOption,
+                    resultFilter !== "youtube" && styles.sourceSwitchOptionActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.sourceSwitchText,
+                      resultFilter !== "youtube" && styles.sourceSwitchTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    Mavrixfy
+                  </Text>
+                  <Text
+                    style={[
+                      styles.sourceSwitchCount,
+                      resultFilter !== "youtube" && styles.sourceSwitchCountActive,
+                    ]}
+                  >
+                    {appResultCount}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Show YouTube Music search results"
+                  onPress={handleShowYoutubeResults}
+                  style={[
+                    styles.sourceSwitchOption,
+                    resultFilter === "youtube" && styles.sourceSwitchOptionYoutube,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.sourceSwitchText,
+                      resultFilter === "youtube" && styles.sourceSwitchTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    YouTube Music
+                  </Text>
+                  <Text
+                    style={[
+                      styles.sourceSwitchCount,
+                      resultFilter === "youtube" && styles.sourceSwitchCountActive,
+                    ]}
+                  >
+                    {youtubeMusicResults.length}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
 
           {searchLoading ? (
             <View style={styles.loadingContainer}>
@@ -1788,6 +1844,28 @@ function useSearchScreenView() {
               <Text style={styles.emptyText}>{`No results for "${searchDisplayQuery}"`}</Text>
               <Text style={styles.emptySubtext}>Check the spelling, or search for something else.</Text>
             </View>
+          ) : resultFilter === "youtube" ? (
+            <FlatList
+              ref={resultsYoutubeListRef}
+              key={`yt-${resultDataKey}`}
+              data={showYoutubeResults ? youtubeMusicResults : []}
+              keyExtractor={(item) => item.id}
+              renderItem={renderYoutubeResult}
+              style={styles.scrollView}
+              contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              onScroll={handleHeaderScroll}
+              scrollEventThrottle={16}
+              initialNumToRender={10}
+              maxToRenderPerBatch={8}
+              windowSize={7}
+              ListEmptyComponent={
+                <View style={styles.emptyInline}>
+                  <Text style={styles.emptyInlineText}>No YouTube results found.</Text>
+                </View>
+              }
+            />
           ) : resultFilter === "playlists" ? (
             <FlatList
               ref={resultsPlaylistsListRef}
@@ -1842,6 +1920,24 @@ function useSearchScreenView() {
             />
           ) : !showSongResults && resultFilter === "songs" ? (
             <View style={styles.emptyInline}><Text style={styles.emptyInlineText}>No songs found.</Text></View>
+          ) : resultFilter === "all" &&
+              !showSongResults &&
+              !showAlbumResults &&
+              !showArtistResults &&
+              !showPlaylistResults ? (
+            <ScrollView
+              style={styles.scrollView}
+              contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              onScroll={handleHeaderScroll}
+              scrollEventThrottle={16}
+            >
+              <View style={styles.emptyInline}>
+                <Text style={styles.emptyInlineText}>No app results found. Try YouTube Music.</Text>
+              </View>
+              {youtubeHighlightSectionNode}
+            </ScrollView>
           ) : (
             <FlatList
               ref={resultsSongsListRef}
@@ -1859,7 +1955,7 @@ function useSearchScreenView() {
               maxToRenderPerBatch={8}
               windowSize={7}
               ListFooterComponent={
-                showAlbumResults || showArtistResults || showPlaylistResults ? (
+                showAlbumResults || showArtistResults || showPlaylistResults || showYoutubePreviewSection ? (
                   <>
                     {showAlbumResults ? (
                       <View style={styles.sectionBlock}>
@@ -1916,6 +2012,7 @@ function useSearchScreenView() {
                         </View>
                       </View>
                     ) : null}
+                    {showYoutubePreviewSection ? youtubeHighlightSectionNode : null}
                   </>
                 ) : null
               }
@@ -2117,6 +2214,67 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 8,
   },
+  sourceSwitchWrap: {
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    gap: 8,
+  },
+  sourceSwitchLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  sourceSwitchLabel: {
+    color: Colors.subtext,
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
+  sourceSwitchTrack: {
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 3,
+    gap: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  sourceSwitchOption: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 34,
+    borderRadius: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    gap: 7,
+  },
+  sourceSwitchOptionActive: {
+    backgroundColor: Colors.primary,
+  },
+  sourceSwitchOptionYoutube: {
+    backgroundColor: "#FF3B30",
+  },
+  sourceSwitchText: {
+    minWidth: 0,
+    color: Colors.subtext,
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+  },
+  sourceSwitchTextActive: {
+    color: "#FFFFFF",
+  },
+  sourceSwitchCount: {
+    color: Colors.subtext,
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+    fontVariant: ["tabular-nums"],
+  },
+  sourceSwitchCountActive: {
+    color: "#FFFFFF",
+  },
   resultsContent: { paddingTop: 8 },
   sectionBlock: {
     paddingHorizontal: 16,
@@ -2182,6 +2340,120 @@ const styles = StyleSheet.create({
     color: Colors.subtext,
     fontSize: 12.5,
     fontFamily: "Inter_500Medium",
+  },
+
+  // ── YouTube discovery results ───────────────────────────────────────────────
+  youtubeResultRow: {
+    minHeight: 72,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 13,
+  },
+  youtubeResultRowPressed: {
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  youtubeResultImage: {
+    width: 52,
+    height: 52,
+    borderRadius: 4,
+    backgroundColor: Colors.surface,
+  },
+  youtubeResultInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  youtubeResultTitle: {
+    color: Colors.text,
+    fontSize: 15,
+    fontFamily: "Inter_500Medium",
+  },
+  youtubeResultArtist: {
+    marginTop: 2,
+    color: Colors.subtext,
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+  },
+  youtubeResultSource: {
+    marginTop: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  youtubeResultSourceText: {
+    color: Colors.subtext,
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+  },
+  youtubeHighlightSection: {
+    marginTop: 10,
+    marginBottom: 22,
+    paddingTop: 12,
+    paddingBottom: 4,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "rgba(255,59,48,0.30)",
+    backgroundColor: "rgba(255,59,48,0.08)",
+  },
+  youtubeHighlightHeader: {
+    minHeight: 44,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  youtubeHighlightTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  youtubeHighlightIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FF3B30",
+  },
+  youtubeHighlightTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  youtubeHighlightTitle: {
+    color: Colors.text,
+    fontSize: 16,
+    fontFamily: "Inter_800ExtraBold",
+  },
+  youtubeHighlightMeta: {
+    marginTop: 2,
+    color: Colors.subtext,
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+  },
+  youtubeHighlightAction: {
+    minHeight: 32,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(255,255,255,0.10)",
+  },
+  youtubeHighlightActionPressed: {
+    opacity: 0.75,
+  },
+  youtubeHighlightActionText: {
+    color: Colors.text,
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+  },
+  youtubePreviewRowWrap: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.08)",
   },
 
   // ── Playlist grid ────────────────────────────────────────────────────────────

@@ -1,11 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { JioSaavnImage, JioSaavnSong, Song } from "@/lib/musicData";
+import { JioSaavnImage, Song } from "@/lib/musicData";
 import { getYouTubeMusicApiUrl } from "@/lib/api-config";
 import { compactMap, mapFilter, sortedCopy } from "@/lib/arrayUtils";
 import { logger } from "@/lib/logger";
-import type { JioSaavnAlbumResult, JioSaavnPlaylistResult } from "./jioSaavnService";
-import type { ArtistCard } from "./artistService";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -69,6 +67,18 @@ export interface YouTubeMusicWatchPlaylist {
   playlistId?: string | null;
 }
 
+export interface YouTubeMusicAudioStream {
+  videoId: string;
+  url: string;
+  expiresAt: number;
+  headers: Record<string, string>;
+  mimeType?: string;
+  formatId?: string;
+  audioCodec?: string;
+  bitrateKbps?: number | null;
+  duration?: number | null;
+}
+
 const YOUTUBE_MUSIC_CACHE_PREFIX = "@mavrixfy_youtube_music";
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -76,6 +86,10 @@ const REQUEST_TIMEOUT_MS = 30000;
 const CURRENT_YEAR = new Date().getFullYear();
 const HOME_YOUTUBE_CATEGORY_CONCURRENCY = 2;
 const PREVIOUS_YEAR = CURRENT_YEAR - 1;
+const AUDIO_STREAM_EXPIRY_MARGIN_MS = 60 * 1000;
+const AUDIO_STREAM_CACHE_MAX_ITEMS = 50;
+const audioStreamCache = new Map<string, YouTubeMusicAudioStream>();
+const audioStreamRequests = new Map<string, Promise<YouTubeMusicAudioStream | null>>();
 
 // ─── Cache Helpers ────────────────────────────────────────────────────────────
 
@@ -317,50 +331,6 @@ export function convertYouTubeMusicTrack(track: any): Song | null {
   };
 }
 
-/**
- * Convert YouTube Music track to JioSaavn-compatible format (for UI reuse)
- */
-export function convertYouTubeMusicTrackToJioSaavn(track: YouTubeMusicTrack): JioSaavnSong | null {
-  if (!track.videoId || !track.title) return null;
-
-  const artistNames = compactMap(track.artists || [], (a) => a.name || null);
-  const images = normalizeYouTubeThumbnails(track.thumbnails);
-
-  return {
-    id: track.videoId,
-    name: track.title,
-    type: "song",
-    year: track.year || "",
-    duration: parseDurationSeconds(track.duration_seconds) || parseDurationSeconds(track.duration),
-    language: "en", // Default, could be enhanced with language detection
-    album: {
-      id: track.album?.id || "",
-      name: track.album?.name || "",
-      url: "",
-    },
-    artists: {
-      primary: track.artists?.map((a) => ({
-        id: a.id || "",
-        name: a.name,
-        image: [],
-        url: "",
-      })) || [],
-      featured: [],
-      all: track.artists?.map((a) => ({
-        id: a.id || "",
-        name: a.name,
-        role: "primary",
-        image: [],
-        url: "",
-      })) || [],
-    },
-    image: images,
-    downloadUrl: undefined,
-    audioUrl: undefined,
-    url: `https://music.youtube.com/watch?v=${track.videoId}`,
-  };
-}
-
 // ─── Timeout Wrapper ──────────────────────────────────────────────────────────
 
 function createTimeoutSignal(ms: number = REQUEST_TIMEOUT_MS, parentSignal?: AbortSignal) {
@@ -404,22 +374,42 @@ async function fetchFirstJson<T>(urls: string[], signal?: AbortSignal): Promise<
     throw new Error("Request aborted");
   }
 
-  const results = await Promise.allSettled(urls.map((url) => fetchJson<T>(url, signal)));
   let lastError: unknown = null;
 
-  for (const result of results) {
-    if (result.status === "fulfilled") {
-      if (result.value !== null) return result.value;
-    } else {
-      lastError = result.reason;
-      if (signal?.aborted) {
-        throw result.reason;
-      }
+  for (const url of urls) {
+    try {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- endpoint fallbacks must stay sequential to avoid duplicate backend work.
+      const result = await fetchJson<T>(url, signal);
+      if (result !== null) return result;
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted) throw error;
     }
   }
 
   if (lastError) throw lastError;
   return null;
+}
+
+async function fetchFirstJsonSequential<T>(urls: string[], signal?: AbortSignal): Promise<T | null> {
+  return fetchFirstJson<T>(urls, signal);
+}
+
+function isPrivateDevelopmentApiUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "0.0.0.0" ||
+      host === "10.0.2.2" ||
+      host.startsWith("192.168.") ||
+      host.startsWith("10.") ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function getEndpointCandidates(
@@ -429,13 +419,15 @@ function getEndpointCandidates(
 ): string[] {
   const appBase = getYouTubeMusicApiUrl().replace(/\/+$/, "");
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  const pathCandidates = appBase.includes("/api/youtube-music")
-    ? [`${appBase}${normalizedPath}`, `${appBase}/api${normalizedPath}`]
-    : [
-        `${appBase}${normalizedPath}`,
-        `${appBase}/api/youtube-music${normalizedPath}`,
-        `${appBase}/api${normalizedPath}`,
-      ];
+  const pathCandidates = isPrivateDevelopmentApiUrl(appBase)
+    ? [`${appBase}${normalizedPath}`]
+    : appBase.includes("/api/youtube-music")
+      ? [`${appBase}${normalizedPath}`, `${appBase}/api${normalizedPath}`]
+      : [
+          `${appBase}${normalizedPath}`,
+          `${appBase}/api/youtube-music${normalizedPath}`,
+          `${appBase}/api${normalizedPath}`,
+        ];
   const queryCandidates = Array.isArray(query) ? query : [query];
   const seen = new Set<string>();
   const candidates: string[] = [];
@@ -456,8 +448,8 @@ function getEndpointCandidates(
 function getSearchQueryCandidates(query: string, filter: string, limit: number): string[] {
   const encodedQuery = encodeURIComponent(query);
   return [
-    `query=${encodedQuery}&filter=${filter}&limit=${limit}`,
     `q=${encodedQuery}&filter=${filter}&limit=${limit}`,
+    `query=${encodedQuery}&filter=${filter}&limit=${limit}`,
   ];
 }
 
@@ -475,6 +467,39 @@ function getSearchSuggestionItems(json: any): string[] {
   if (Array.isArray(json?.data?.suggestions)) return compactMap(json.data.suggestions, (item: unknown) => (typeof item === "string" ? item : null));
   if (Array.isArray(json?.data)) return compactMap(json.data, (item: unknown) => (typeof item === "string" ? item : null));
   return [];
+}
+
+function normalizeAudioStreamPayload(json: any, videoId: string): YouTubeMusicAudioStream | null {
+  const source = getResponsePayload(json, "stream", "audio");
+  const url = readString(source?.url);
+  if (!url.startsWith("https://")) return null;
+
+  const rawExpiry = Number(source?.expiresAt);
+  const expiresAt = Number.isFinite(rawExpiry) && rawExpiry > 0
+    ? rawExpiry < 1_000_000_000_000
+      ? rawExpiry * 1000
+      : rawExpiry
+    : Date.now() + 10 * 60 * 1000;
+  const headers: Record<string, string> = {};
+  if (source?.headers && typeof source.headers === "object") {
+    for (const [key, value] of Object.entries(source.headers)) {
+      if (!key || typeof value !== "string") continue;
+      const normalizedValue = value.trim();
+      if (normalizedValue) headers[key] = normalizedValue;
+    }
+  }
+
+  return {
+    videoId,
+    url,
+    expiresAt,
+    headers,
+    mimeType: readString(source?.mimeType) || undefined,
+    formatId: readString(source?.formatId) || undefined,
+    audioCodec: readString(source?.audioCodec) || undefined,
+    bitrateKbps: Number.isFinite(Number(source?.bitrateKbps)) ? Number(source.bitrateKbps) : null,
+    duration: Number.isFinite(Number(source?.duration)) ? Number(source.duration) : null,
+  };
 }
 
 function getChartsPayload(json: any): any {
@@ -622,192 +647,6 @@ export async function searchYouTubeMusic(
 }
 
 /**
- * Search YouTube Music for albums
- */
-export async function searchYouTubeMusicAlbums(
-  query: string,
-  limit = 8,
-  signal?: AbortSignal
-): Promise<JioSaavnAlbumResult[]> {
-  const q = query.trim();
-  if (!q) return [];
-
-  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:search:album:${limit}:${q.toLowerCase()}`;
-  const cached = await getCached<JioSaavnAlbumResult[]>(cacheKey, SEARCH_CACHE_TTL_MS);
-  if (cached) return cached;
-
-  try {
-    const json = await fetchFirstJson<any>(
-      getEndpointCandidates(
-        "/search",
-        "/search",
-        getSearchQueryCandidates(q, "albums", limit)
-      ),
-      signal
-    );
-    const results = getSearchResultItems(json);
-    const albums: JioSaavnAlbumResult[] = mapFilter(
-      results,
-      (item: any) => {
-        const id = readString(item.browseId || item.playlistId);
-        const name = readString(item.title || item.name);
-        if (!id || !name) return null;
-
-        const result: JioSaavnAlbumResult = {
-          id,
-          name,
-          image: normalizeYouTubeThumbnails(item.thumbnails),
-          songCount: Number(item.trackCount) || 0,
-          year: readString(item.year) || undefined,
-          artist: item.artists ? item.artists.map((a: any) => a.name).join(", ") : "",
-          description: readString(item.type) || "Album",
-          url: `https://music.youtube.com/browse/${encodeURIComponent(id)}`,
-        };
-        return result;
-      },
-      (album): album is JioSaavnAlbumResult => album !== null
-    );
-
-    if (albums.length > 0) {
-      await setCache(cacheKey, albums);
-    }
-    return albums;
-  } catch (error: any) {
-    // Abort errors are expected when user types quickly - don't log them
-    if (error?.message === "Request aborted" || signal?.aborted) {
-      return [];
-    }
-    logger.warn("[YouTube Music] Album search failed:", error);
-    return [];
-  }
-}
-
-/**
- * Search YouTube Music for playlists
- */
-export async function searchYouTubeMusicPlaylists(
-  query: string,
-  limit = 8,
-  signal?: AbortSignal
-): Promise<JioSaavnPlaylistResult[]> {
-  const q = query.trim();
-  if (!q) return [];
-
-  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:search:playlist:${limit}:${q.toLowerCase()}`;
-  const cached = await getCached<JioSaavnPlaylistResult[]>(cacheKey, SEARCH_CACHE_TTL_MS);
-  if (cached) return cached;
-
-  try {
-    const json = await fetchFirstJson<any>(
-      getEndpointCandidates(
-        "/search",
-        "/search",
-        getSearchQueryCandidates(q, "playlists", limit)
-      ),
-      signal
-    );
-    const results = getSearchResultItems(json);
-    const playlists: JioSaavnPlaylistResult[] = mapFilter(
-      results,
-      (item: any) => {
-        const id = readString(item.browseId || item.playlistId);
-        const name = readString(item.title || item.name);
-        const resultType = readString(item.resultType || item.type || item.category).toLowerCase();
-        const isPlaylist =
-          resultType.includes("playlist") ||
-          Boolean(item.playlistId) ||
-          id.startsWith("VL");
-        if (!isPlaylist) return null;
-        if (!id || !name) return null;
-
-        const result: JioSaavnPlaylistResult = {
-          id,
-          name,
-          image: normalizeYouTubeThumbnails(item.thumbnails),
-          songCount: Number(item.trackCount || item.itemCount || item.count) || 0,
-          url: `https://music.youtube.com/playlist?list=${encodeURIComponent(id.replace(/^VL/, ""))}`,
-          description: "Playlist",
-        };
-        return result;
-      },
-      (playlist): playlist is JioSaavnPlaylistResult => playlist !== null
-    );
-
-    if (playlists.length > 0) {
-      await setCache(cacheKey, playlists);
-    }
-    return playlists;
-  } catch (error: any) {
-    // Abort errors are expected when user types quickly - don't log them
-    if (error?.message === "Request aborted" || signal?.aborted) {
-      return [];
-    }
-    logger.warn("[YouTube Music] Playlist search failed:", error);
-    return [];
-  }
-}
-
-/**
- * Search YouTube Music for artists
- */
-export async function searchYouTubeMusicArtists(
-  query: string,
-  limit = 8,
-  signal?: AbortSignal
-): Promise<ArtistCard[]> {
-  const q = query.trim();
-  if (!q) return [];
-
-  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:search:artist:${limit}:${q.toLowerCase()}`;
-  const cached = await getCached<ArtistCard[]>(cacheKey, SEARCH_CACHE_TTL_MS);
-  if (cached) return cached;
-
-  try {
-    const json = await fetchFirstJson<any>(
-      getEndpointCandidates(
-        "/search",
-        "/search",
-        getSearchQueryCandidates(q, "artists", limit)
-      ),
-      signal
-    );
-    const results = getSearchResultItems(json);
-    const artists: ArtistCard[] = mapFilter(
-      results,
-      (item: any) => {
-        const id = readString(item.browseId);
-        const name = readString(item.artist || item.title || item.name);
-        if (!id || !name) return null;
-
-        const result: ArtistCard = {
-          id,
-          name,
-          image: normalizeYouTubeThumbnails(item.thumbnails),
-          followerCount: null,
-          fanCount: null,
-          isVerified: false,
-          dominantLanguage: null,
-        };
-        return result;
-      },
-      (artist): artist is ArtistCard => artist !== null
-    );
-
-    if (artists.length > 0) {
-      await setCache(cacheKey, artists);
-    }
-    return artists;
-  } catch (error: any) {
-    // Abort errors are expected when user types quickly - don't log them
-    if (error?.message === "Request aborted" || signal?.aborted) {
-      return [];
-    }
-    logger.warn("[YouTube Music] Artist search failed:", error);
-    return [];
-  }
-}
-
-/**
  * Search YouTube Music for videos (with movement / actual motion)
  */
 export async function searchYouTubeMusicVideos(
@@ -856,6 +695,56 @@ export async function searchYouTubeMusicVideos(
     logger.warn("[YouTube Music] Video search failed:", error);
     return [];
   }
+}
+
+export async function getYouTubeMusicAudioStream(
+  videoId: string,
+  signal?: AbortSignal
+): Promise<YouTubeMusicAudioStream | null> {
+  const cleanVideoId = extractVideoId({ videoId: readString(videoId).replace(/^youtube_/, "") });
+  if (!cleanVideoId) return null;
+
+  const cached = audioStreamCache.get(cleanVideoId);
+  if (cached && cached.expiresAt - AUDIO_STREAM_EXPIRY_MARGIN_MS > Date.now()) {
+    return cached;
+  }
+  audioStreamCache.delete(cleanVideoId);
+
+  const existingRequest = audioStreamRequests.get(cleanVideoId);
+  if (existingRequest) return existingRequest;
+
+  const request = (async () => {
+    try {
+      const json = await fetchFirstJsonSequential<any>(
+        getEndpointCandidates(`/stream/${encodeURIComponent(cleanVideoId)}`),
+        signal
+      );
+      const stream = normalizeAudioStreamPayload(json, cleanVideoId);
+      if (!stream || stream.expiresAt - AUDIO_STREAM_EXPIRY_MARGIN_MS <= Date.now()) {
+        return null;
+      }
+
+      audioStreamCache.set(cleanVideoId, stream);
+      if (audioStreamCache.size > AUDIO_STREAM_CACHE_MAX_ITEMS) {
+        const oldestKey = audioStreamCache.keys().next().value;
+        if (oldestKey) audioStreamCache.delete(oldestKey);
+      }
+      return stream;
+    } catch (error: any) {
+      if (error?.message !== "Request aborted" && !signal?.aborted) {
+        logger.warn("[YouTube Music] Audio stream resolution failed", {
+          videoId: cleanVideoId,
+          message: error?.message || String(error),
+        });
+      }
+      return null;
+    } finally {
+      audioStreamRequests.delete(cleanVideoId);
+    }
+  })();
+
+  audioStreamRequests.set(cleanVideoId, request);
+  return request;
 }
 
 
@@ -941,7 +830,7 @@ export async function getYouTubeMusicAlbum(albumId: string): Promise<YouTubeMusi
  * Get YouTube Music watch queue details for one video.
  * A song track often has a counterpart videoId for the actual music video.
  */
-export async function getYouTubeMusicWatchPlaylist(
+async function getYouTubeMusicWatchPlaylist(
   videoId: string,
   options: { limit?: number; radio?: boolean } = {}
 ): Promise<YouTubeMusicWatchPlaylist | null> {
@@ -1023,50 +912,6 @@ export async function getYouTubeMusicVisualVideoId(song: Song): Promise<string |
   }
 
   return extractVideoId({ videoId: counterpartId, id: counterpartId }) || existingVisualId || audioVideoId;
-}
-
-/**
- * Get trending/chart songs from YouTube Music
- */
-export async function getYouTubeMusicTrending(country: string = "IN"): Promise<Song[]> {
-  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:trending:${country}`;
-  const cached = await getCached<Song[]>(cacheKey, CACHE_TTL_MS);
-  if (cached) return cached;
-
-  try {
-    const json = await fetchFirstJson<any>(
-      getEndpointCandidates("/charts", "/charts", `country=${encodeURIComponent(country)}`)
-    );
-    if (!json) return [];
-    const candidates = getChartPlaylistItems(json);
-
-    let playlistId = "";
-    const trendingPlaylist = candidates.find(p => p && p.playlistId && String(p.title || "").toLowerCase().includes("trending"));
-    if (trendingPlaylist) {
-      playlistId = trendingPlaylist.playlistId;
-    } else if (candidates.length > 0 && candidates[0] && candidates[0].playlistId) {
-      playlistId = candidates[0].playlistId;
-    }
-
-    if (!playlistId) {
-      playlistId = country === "IN" ? "OLAK5uy_lSTp1DIuzZBUyee3kDsXwPgP25WdfwB40" : "OLAK5uy_kNWGJvgWVqlt5LsFDL9Sdluly4M8TvGkM";
-    }
-
-    const playlistData = await getYouTubeMusicPlaylist(playlistId);
-    const tracks = playlistData?.tracks || [];
-
-    const songs = mapFilter(
-      tracks,
-      (track: any) => convertYouTubeMusicTrack(track),
-      (song): song is Song => song !== null
-    );
-
-    await setCache(cacheKey, songs);
-    return songs;
-  } catch (error) {
-    logger.error("YouTube Music trending error:", error);
-    return [];
-  }
 }
 
 export interface YouTubeMusicPlaylistCard {
@@ -1755,8 +1600,8 @@ export async function getYouTubeMusicSearchSuggestions(query: string, signal?: A
   try {
     const json = await fetchFirstJson<any>(
       getEndpointCandidates("/search/suggestions", "/search/suggestions", [
-        `query=${encodeURIComponent(q)}`,
         `q=${encodeURIComponent(q)}`,
+        `query=${encodeURIComponent(q)}`,
       ]),
       signal
     );

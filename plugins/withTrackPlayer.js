@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const { deserialize, serialize } = require("node:v8");
-const { withAndroidManifest, withDangerousMod } = require("@expo/config-plugins");
+const { withAndroidManifest, withDangerousMod } = require("expo/config-plugins");
 
 function ensureIntentAction(service, actionName) {
   if (!service["intent-filter"]) {

@@ -1,11 +1,20 @@
-import os
-import uvicorn
-import os
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
-from ytmusicapi import YTMusic
-from typing import Optional
+import asyncio
 import logging
+import os
+import re
+import secrets
+import time
+from collections import OrderedDict
+from threading import Lock
+from typing import Any, Optional
+from urllib.parse import parse_qs, urlparse
+
+import uvicorn
+import yt_dlp
+from fastapi import FastAPI, Header, HTTPException, Query, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
+from ytmusicapi import YTMusic
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +32,34 @@ app.add_middleware(
 
 yt = YTMusic()
 
+YOUTUBE_VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
+AUDIO_FORMAT_SELECTOR = "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio"
+AUDIO_CACHE_MAX_ITEMS = 100
+AUDIO_CACHE_MAX_AGE_SECONDS = 20 * 60
+AUDIO_CACHE_EXPIRY_MARGIN_SECONDS = 90
+AUDIO_RESOLVER_TOKEN = os.environ.get("YOUTUBE_MUSIC_AUDIO_TOKEN", "").strip()
+SAFE_PLAYBACK_HEADERS = {
+    "accept",
+    "accept-language",
+    "origin",
+    "referer",
+    "user-agent",
+}
+
+
+def get_positive_int_env(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+audio_resolver_semaphore = asyncio.Semaphore(
+    get_positive_int_env("YOUTUBE_MUSIC_AUDIO_CONCURRENCY", 2)
+)
+audio_stream_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+audio_stream_cache_lock = Lock()
+
 
 def safe_call(fn, *args, **kwargs):
     try:
@@ -33,6 +70,131 @@ def safe_call(fn, *args, **kwargs):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def get_audio_url_expiry(audio_url: str) -> int:
+    try:
+        raw_expiry = parse_qs(urlparse(audio_url).query).get("expire", [None])[0]
+        expiry = int(raw_expiry) if raw_expiry else 0
+        if expiry > int(time.time()):
+            return expiry
+    except (TypeError, ValueError):
+        pass
+    return int(time.time()) + AUDIO_CACHE_MAX_AGE_SECONDS
+
+
+def get_safe_playback_headers(raw_headers: Any) -> dict[str, str]:
+    if not isinstance(raw_headers, dict):
+        return {}
+
+    headers: dict[str, str] = {}
+    for key, value in raw_headers.items():
+        normalized_key = str(key).strip()
+        if normalized_key.lower() not in SAFE_PLAYBACK_HEADERS:
+            continue
+        normalized_value = str(value).strip()
+        if normalized_value:
+            headers[normalized_key] = normalized_value
+    return headers
+
+
+def get_cached_audio_stream(video_id: str) -> Optional[dict[str, Any]]:
+    now = int(time.time())
+    with audio_stream_cache_lock:
+        cached = audio_stream_cache.get(video_id)
+        if not cached:
+            return None
+        if int(cached.get("_cacheUntil", 0)) <= now:
+            audio_stream_cache.pop(video_id, None)
+            return None
+        audio_stream_cache.move_to_end(video_id)
+        return {key: value for key, value in cached.items() if key != "_cacheUntil"}
+
+
+def cache_audio_stream(video_id: str, stream: dict[str, Any]) -> None:
+    now = int(time.time())
+    expires_at = int(stream.get("expiresAt", now + AUDIO_CACHE_MAX_AGE_SECONDS))
+    cache_until = min(
+        expires_at - AUDIO_CACHE_EXPIRY_MARGIN_SECONDS,
+        now + AUDIO_CACHE_MAX_AGE_SECONDS,
+    )
+    if cache_until <= now:
+        return
+
+    with audio_stream_cache_lock:
+        audio_stream_cache[video_id] = {**stream, "_cacheUntil": cache_until}
+        audio_stream_cache.move_to_end(video_id)
+        while len(audio_stream_cache) > AUDIO_CACHE_MAX_ITEMS:
+            audio_stream_cache.popitem(last=False)
+
+
+def extract_audio_stream(video_id: str) -> dict[str, Any]:
+    cached = get_cached_audio_stream(video_id)
+    if cached:
+        return cached
+
+    watch_url = f"https://www.youtube.com/watch?v={video_id}"
+    options = {
+        "format": AUDIO_FORMAT_SELECTOR,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "socket_timeout": 12,
+        "retries": 1,
+        "fragment_retries": 1,
+        "extractor_retries": 1,
+        "cachedir": False,
+    }
+
+    with yt_dlp.YoutubeDL(options) as downloader:
+        info = downloader.extract_info(watch_url, download=False)
+
+    if not isinstance(info, dict):
+        raise RuntimeError("YouTube returned no stream information")
+
+    audio_url = str(info.get("url") or "").strip()
+    if not audio_url.startswith("https://"):
+        raise RuntimeError("YouTube returned no direct audio URL")
+
+    extension = str(info.get("ext") or "").strip().lower()
+    mime_type = {
+        "m4a": "audio/mp4",
+        "mp4": "audio/mp4",
+        "webm": "audio/webm",
+        "opus": "audio/ogg",
+    }.get(extension, "audio/mpeg")
+    stream = {
+        "videoId": video_id,
+        "url": audio_url,
+        "expiresAt": get_audio_url_expiry(audio_url),
+        "headers": get_safe_playback_headers(info.get("http_headers")),
+        "formatId": str(info.get("format_id") or ""),
+        "extension": extension,
+        "mimeType": mime_type,
+        "audioCodec": str(info.get("acodec") or ""),
+        "bitrateKbps": info.get("abr"),
+        "duration": info.get("duration"),
+        "contentLength": info.get("filesize") or info.get("filesize_approx"),
+    }
+    logger.info(
+        "yt-dlp audio stream resolved videoId=%s formatId=%s extension=%s mimeType=%s audioCodec=%s host=%s",
+        video_id,
+        stream["formatId"],
+        stream["extension"],
+        stream["mimeType"],
+        stream["audioCodec"],
+        urlparse(audio_url).hostname or "",
+    )
+    cache_audio_stream(video_id, stream)
+    return stream
+
+
+def verify_audio_resolver_token(provided_token: Optional[str]) -> None:
+    if AUDIO_RESOLVER_TOKEN and not secrets.compare_digest(
+        provided_token or "", AUDIO_RESOLVER_TOKEN
+    ):
+        raise HTTPException(status_code=403, detail="Invalid audio resolver token")
+
+
 @app.get("/healthz")
 def health_check():
     return {"status": "ok"}
@@ -40,25 +202,37 @@ def health_check():
 
 @app.get("/search")
 def search(
-    q: str,
+    q: Optional[str] = Query(default=None),
+    search_query: Optional[str] = Query(default=None, alias="query"),
     filter: Optional[str] = None,
     limit: int = Query(default=20, ge=1, le=50),
 ):
+    term = (q or search_query or "").strip()
+    if not term:
+        raise HTTPException(status_code=400, detail="Missing search query")
+
     valid_filters = [
         "songs", "videos", "albums", "artists", "playlists",
         "community_playlists", "featured_playlists", "uploads",
     ]
     if filter and filter not in valid_filters:
         raise HTTPException(status_code=400, detail=f"Invalid filter. Choose from: {valid_filters}")
-    results = safe_call(yt.search, q, filter=filter, limit=limit)
+    results = safe_call(yt.search, term, filter=filter, limit=limit)
     if not isinstance(results, list):
         return []
     return results
 
 
 @app.get("/search/suggestions")
-def get_search_suggestions(q: str):
-    result = safe_call(yt.get_search_suggestions, q)
+def get_search_suggestions(
+    q: Optional[str] = Query(default=None),
+    search_query: Optional[str] = Query(default=None, alias="query"),
+):
+    term = (q or search_query or "").strip()
+    if not term:
+        raise HTTPException(status_code=400, detail="Missing search query")
+
+    result = safe_call(yt.get_search_suggestions, term)
     if isinstance(result, list):
         flat = []
         for item in result:
@@ -111,6 +285,30 @@ def get_song(videoId: str):
     result = safe_call(yt.get_song, videoId)
     details = result.get("videoDetails", {}) if isinstance(result, dict) else {}
     return details
+
+
+@app.get("/stream/{videoId}")
+async def get_audio_stream(
+    videoId: str,
+    response: Response,
+    x_resolver_token: Optional[str] = Header(default=None),
+):
+    if not YOUTUBE_VIDEO_ID_PATTERN.fullmatch(videoId):
+        raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
+    verify_audio_resolver_token(x_resolver_token)
+    response.headers["Cache-Control"] = "no-store"
+
+    try:
+        async with audio_resolver_semaphore:
+            return await run_in_threadpool(extract_audio_stream, videoId)
+    except yt_dlp.utils.DownloadError as error:
+        logger.warning("yt-dlp could not resolve %s: %s", videoId, error)
+        raise HTTPException(status_code=502, detail="Unable to resolve YouTube audio") from error
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception("YouTube audio resolver failed for %s", videoId)
+        raise HTTPException(status_code=502, detail="Unable to resolve YouTube audio") from error
 
 
 @app.get("/watch/{videoId}")
