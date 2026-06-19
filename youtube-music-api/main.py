@@ -267,13 +267,22 @@ def verify_audio_resolver_token(provided_token: Optional[str]) -> None:
 
 
 @app.get("/healthz")
-def health_check():
+def health_check(test_id: Optional[str] = None):
     import yt_dlp
-    return {
+    res = {
         "status": "ok",
         "yt_dlp_version": yt_dlp.version.__version__,
         "has_cookies": bool(os.environ.get("YOUTUBE_COOKIES", "").strip())
     }
+    if test_id:
+        try:
+            stream_res = extract_audio_stream(test_id)
+            res["test_stream"] = stream_res
+        except Exception as e:
+            import traceback
+            res["test_error"] = str(e)
+            res["test_traceback"] = traceback.format_exc()
+    return res
 
 
 @app.get("/search")
