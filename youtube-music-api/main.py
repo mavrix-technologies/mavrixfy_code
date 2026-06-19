@@ -9,6 +9,7 @@ from threading import Lock
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
+import httpx
 import requests
 import uvicorn
 import yt_dlp
@@ -33,6 +34,7 @@ app.add_middleware(
 )
 
 yt = YTMusic()
+http_client = httpx.AsyncClient(timeout=httpx.Timeout(15.0, read=None))
 
 YOUTUBE_VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
@@ -379,7 +381,7 @@ def get_song(videoId: str):
 
 
 @app.get("/stream/{videoId}")
-def get_audio_stream(
+async def get_audio_stream(
     videoId: str,
     request: Request,
     token: Optional[str] = Query(default=None),
@@ -392,7 +394,8 @@ def get_audio_stream(
     verify_audio_resolver_token(provided_token)
 
     try:
-        stream_info = extract_audio_stream(videoId)
+        import anyio
+        stream_info = await anyio.to_thread.run_sync(extract_audio_stream, videoId)
         target_url = stream_info["url"]
 
         req_headers = {
@@ -402,7 +405,8 @@ def get_audio_stream(
         if client_range:
             req_headers["Range"] = client_range
 
-        r = requests.get(target_url, headers=req_headers, stream=True, timeout=15)
+        req = http_client.build_request("GET", target_url, headers=req_headers)
+        r = await http_client.send(req, stream=True)
         
         res_headers = {}
         for h in ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]:
@@ -414,14 +418,14 @@ def get_audio_stream(
         if "Content-Type" not in res_headers or "octet-stream" in res_headers.get("Content-Type", ""):
             res_headers["Content-Type"] = stream_info.get("mimeType", "audio/mp4")
 
-        def iterate_chunks():
+        async def iterate_chunks():
             try:
-                for chunk in r.iter_content(chunk_size=65536):
+                async for chunk in r.aiter_bytes(chunk_size=65536):
                     yield chunk
             except Exception as e:
                 logger.warning(f"Error streaming video {videoId}: {e}")
             finally:
-                r.close()
+                await r.aclose()
 
         return StreamingResponse(
             iterate_chunks(),
@@ -478,6 +482,12 @@ def get_new_releases():
     This endpoint is kept for compatibility but the client should use /home.
     """
     return []
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await http_client.aclose()
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))

@@ -1045,6 +1045,7 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
 }: PlayerSpotifyProgressProps) {
   const { progress, duration } = usePlayerProgress();
   const { isPlaying } = usePlayerRow();
+  const { isBuffering, isLoading } = usePlaybackPlayState();
 
   const [localProgress, setLocalProgress] = useState(progress);
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -1058,7 +1059,10 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
 
   // Interpolate progress smoothly at 60fps when actively playing
   useEffect(() => {
-    if (!isPlaying || isScrubbing) return;
+    if (!isPlaying || isBuffering || isLoading || isScrubbing) return;
+
+    // Reset the reference point to prevent jumping after pause/resume or buffering
+    lastSyncRef.current = { progress, timestamp: Date.now() };
 
     let animId: number;
     const tick = () => {
@@ -1074,7 +1078,7 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
 
     animId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, duration, isScrubbing]);
+  }, [isPlaying, isBuffering, isLoading, duration, isScrubbing, progress]);
 
   const liveProgress = isPlaying && !isScrubbing ? localProgress : progress;
   const playerProgress = isDevPreviewActive ? devPreviewProgress : liveProgress;
