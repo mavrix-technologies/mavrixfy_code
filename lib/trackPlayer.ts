@@ -122,6 +122,7 @@ export async function setupPlayer(): Promise<void> {
                   iosCategoryMode: IOSCategoryMode.Default,
                   iosCategoryOptions: [
                     IOSCategoryOptions.AllowAirPlay,
+                    IOSCategoryOptions.AllowBluetooth,
                     IOSCategoryOptions.AllowBluetoothA2DP,
                   ],
                 }

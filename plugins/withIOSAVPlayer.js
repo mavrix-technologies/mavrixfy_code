@@ -169,6 +169,10 @@ final class MavrixfyAVPlayer: RCTEventEmitter {
     player = nil
     playerViewController = nil
     lastKnownDurationSeconds = 0
+
+    // Deactivate our audio session and notify react-native-track-player so it
+    // can reclaim the audio focus and resume background playback on iOS.
+    deactivateAudioSession()
   }
 
   private func attachTimeObserver(to player: AVPlayer) {
@@ -188,13 +192,34 @@ final class MavrixfyAVPlayer: RCTEventEmitter {
   private func configureAudioSession() {
     do {
       let session = AVAudioSession.sharedInstance()
-      try session.setCategory(.playback, mode: .default, options: [.allowAirPlay])
+      // Use the same options as react-native-track-player so both sessions
+      // are compatible. AllowBluetooth + AllowBluetoothA2DP ensures headphones
+      // keep working; AllowAirPlay covers AirPlay speakers.
+      try session.setCategory(
+        .playback,
+        mode: .default,
+        options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
+      )
       try session.setActive(true)
     } catch {
       sendEventIfObserved(
         withName: "MavrixfyAVPlayerError",
         body: ["message": error.localizedDescription]
       )
+    }
+  }
+
+  private func deactivateAudioSession() {
+    do {
+      // Notify other audio sessions (RNTP) that they can resume.
+      // Without this iOS keeps our session alive after dismiss and RNTP
+      // cannot reclaim the audio focus for background / lock-screen playback.
+      try AVAudioSession.sharedInstance().setActive(
+        false,
+        options: .notifyOthersOnDeactivation
+      )
+    } catch {
+      // Non-fatal — RNTP will attempt to resume on the next play() call.
     }
   }
 
