@@ -34,7 +34,10 @@ app.add_middleware(
 )
 
 yt = YTMusic()
-http_client = httpx.AsyncClient(timeout=httpx.Timeout(15.0, read=None))
+http_client = httpx.AsyncClient(
+    timeout=httpx.Timeout(15.0, read=None),
+    follow_redirects=True,
+)
 
 YOUTUBE_VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
@@ -380,13 +383,14 @@ def get_song(videoId: str):
     return details
 
 
-@app.get("/stream/{videoId}")
-async def get_audio_stream(
+async def build_audio_stream_response(
     videoId: str,
     request: Request,
+    head_only: bool = False,
     token: Optional[str] = Query(default=None),
     x_resolver_token: Optional[str] = Header(default=None),
 ):
+    videoId = videoId.removesuffix(".m4a").removesuffix(".mp4")
     if not YOUTUBE_VIDEO_ID_PATTERN.fullmatch(videoId):
         raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
     
@@ -399,13 +403,14 @@ async def get_audio_stream(
         target_url = stream_info["url"]
 
         req_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            "Accept": "*/*",
         }
         client_range = request.headers.get("range")
         if client_range:
             req_headers["Range"] = client_range
 
-        req = http_client.build_request("GET", target_url, headers=req_headers)
+        req = http_client.build_request("HEAD" if head_only else "GET", target_url, headers=req_headers)
         r = await http_client.send(req, stream=True)
         
         res_headers = {}
@@ -417,6 +422,13 @@ async def get_audio_stream(
 
         if "Content-Type" not in res_headers or "octet-stream" in res_headers.get("Content-Type", ""):
             res_headers["Content-Type"] = stream_info.get("mimeType", "audio/mp4")
+        res_headers["Accept-Ranges"] = res_headers.get("Accept-Ranges", "bytes")
+        res_headers["Cache-Control"] = "no-store"
+        res_headers["Content-Disposition"] = f'inline; filename="{videoId}.m4a"'
+
+        if head_only:
+            await r.aclose()
+            return Response(status_code=r.status_code, headers=res_headers)
 
         async def iterate_chunks():
             try:
@@ -435,6 +447,26 @@ async def get_audio_stream(
     except Exception as error:
         logger.exception("YouTube audio resolver failed for %s", videoId)
         raise HTTPException(status_code=502, detail="Unable to resolve YouTube audio") from error
+
+
+@app.get("/stream/{videoId}")
+async def get_audio_stream(
+    videoId: str,
+    request: Request,
+    token: Optional[str] = Query(default=None),
+    x_resolver_token: Optional[str] = Header(default=None),
+):
+    return await build_audio_stream_response(videoId, request, False, token, x_resolver_token)
+
+
+@app.head("/stream/{videoId}")
+async def head_audio_stream(
+    videoId: str,
+    request: Request,
+    token: Optional[str] = Query(default=None),
+    x_resolver_token: Optional[str] = Header(default=None),
+):
+    return await build_audio_stream_response(videoId, request, True, token, x_resolver_token)
 
 
 @app.get("/watch/{videoId}")

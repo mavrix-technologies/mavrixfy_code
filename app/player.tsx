@@ -240,6 +240,7 @@ const CinematicPlayerBackground = memo(function CinematicPlayerBackground({
     previous: null,
   });
 
+  // react-doctor-disable-next-line react-doctor/no-event-handler -- imperative iframe seek sync must follow external playback position updates.
   useEffect(() => {
     setLayers((previousLayers) => {
       if (areGradientColorsEqual(previousLayers.current, colors)) {
@@ -450,6 +451,7 @@ const VisibleYoutubeVideo = memo(function VisibleYoutubeVideo({
   useEffect(() => {
     const targetSeconds = Math.max(0, Math.floor(positionMillis / 1000));
     latestPositionSecondsRef.current = targetSeconds;
+    // react-doctor-disable-next-line react-doctor/no-event-handler -- imperative iframe seek sync must follow external playback position updates.
     if (isReady && Math.abs(targetSeconds - lastPositionRef.current) > 2) {
       playerRef.current?.seekTo?.(targetSeconds, true);
     }
@@ -614,7 +616,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   }, []);
 
   useEffect(() => {
-    // react-doctor-disable-next-line react-doctor/no-event-handler
+    // react-doctor-disable-next-line react-doctor/no-event-handler -- imperative iframe mute sync must follow readiness/playback updates.
     if (playerReady) {
       playerRef.current?.mute?.();
     }
@@ -622,6 +624,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
 
   useEffect(() => {
     const targetSeconds = Math.max(0, Math.floor(positionMillis / 1000));
+    // react-doctor-disable-next-line react-doctor/no-event-handler -- imperative iframe seek sync must follow external playback position updates.
     if (playerReady && Math.abs(targetSeconds - lastPositionRef.current) > 10) {
       playerRef.current?.seekTo?.(targetSeconds, true);
     }
