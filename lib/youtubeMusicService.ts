@@ -447,6 +447,11 @@ function getEndpointCandidates(
 
 function getSearchQueryCandidates(query: string, filter: string, limit: number): string[] {
   const encodedQuery = encodeURIComponent(query);
+  const appBase = getYouTubeMusicApiUrl();
+  // On a private LAN dev server both param forms work; only send one to halve request variants.
+  if (isPrivateDevelopmentApiUrl(appBase)) {
+    return [`q=${encodedQuery}&filter=${filter}&limit=${limit}`];
+  }
   return [
     `q=${encodedQuery}&filter=${filter}&limit=${limit}`,
     `query=${encodedQuery}&filter=${filter}&limit=${limit}`,
@@ -1485,43 +1490,60 @@ function selectRelevantYouTubeTrendingPlaylists(playlists: YouTubeMusicPlaylistC
     .sort((a, b) => scoreYouTubeHomePlaylist(b, trendingCategory) - scoreYouTubeHomePlaylist(a, trendingCategory));
 }
 
+/** Default categories on home — fetch only these 4 when no IDs are specified. */
+const HOME_YOUTUBE_DEFAULT_CATEGORY_IDS = new Set(["trending", "top-charts", "new-releases", "bollywood"]);
+
 export async function getHomeYouTubeMusicCategories(options?: {
   limitPerCategory?: number;
   categoryIds?: string[];
 }): Promise<YouTubeMusicHomeCategoryData[]> {
-  const limit = Math.min(options?.limitPerCategory ?? 10, 15); // Increased from 5 to 10 default
-  const categoryIds = options?.categoryIds ?? [];
-  const categoryIdFilter = new Set(categoryIds);
+  const limit = Math.min(options?.limitPerCategory ?? 8, 12);
+  const requestedIds = options?.categoryIds ?? [];
+  // When no IDs are specified, use only the 4 default categories to reduce traffic.
+  const effectiveIds = requestedIds.length > 0 ? requestedIds : [...HOME_YOUTUBE_DEFAULT_CATEGORY_IDS];
+  const categoryIdFilter = new Set(effectiveIds);
 
-  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:home_categories:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${limit}:${[...categoryIds].sort().join(",")}`;
-  const cached = await getCached<YouTubeMusicHomeCategoryData[]>(cacheKey, 60 * 60 * 1000); // 1 hour TTL
-  if (cached) {
-    return cached;
-  }
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:home_categories:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${limit}:${[...categoryIdFilter].sort().join(",")}`;
+  const cached = await getCached<YouTubeMusicHomeCategoryData[]>(cacheKey, 60 * 60 * 1000);
+  if (cached) return cached;
 
-  const categoriesToFetch =
-    categoryIdFilter.size > 0
-      ? HOME_YOUTUBE_MUSIC_CATEGORIES.filter((category) => categoryIdFilter.has(category.id))
-      : HOME_YOUTUBE_MUSIC_CATEGORIES;
-
+  const categoriesToFetch = HOME_YOUTUBE_MUSIC_CATEGORIES.filter((c) => categoryIdFilter.has(c.id));
   if (categoriesToFetch.length === 0) return [];
 
+  // ── Fetch shared sources ONCE, reuse across all categories ───────────────────
+  // Old pattern fired charts+home once PER category (n×2 requests).
+  // New pattern fires them once total and passes the result pool down.
+  const [sharedChartPlaylists, sharedHomePlaylists] = await Promise.all([
+    getYouTubeMusicTrendingPlaylists("IN").catch(() => [] as YouTubeMusicPlaylistCard[]),
+    getYouTubeMusicHomePlaylistCards(10).catch(() => [] as YouTubeMusicPlaylistCard[]),
+  ]);
+  const sharedPool = dedupeYouTubePlaylistCards([...sharedChartPlaylists, ...sharedHomePlaylists]);
+
+  // ── One search query per category instead of 3, at controlled concurrency ────
+  const searchLimit = Math.max(limit * 2, 12);
   const categoryResults = await runYouTubeHomeCategoryLimit(
     categoriesToFetch,
     HOME_YOUTUBE_CATEGORY_CONCURRENCY,
-    async (category) => ({
-      id: category.id,
-      title: category.title,
-      results: await getYouTubeHomeCategoryPlaylists(category, limit),
-    })
+    async (category) => {
+      const primaryTerm = category.searchTerms[0];
+      let searchResults: YouTubeMusicPlaylistCard[] = [];
+      if (primaryTerm) {
+        try {
+          searchResults = await searchYouTubeMusicPlaylistCards(primaryTerm, searchLimit);
+        } catch {
+          // non-fatal — sharedPool still covers this category
+        }
+      }
+      const results = dedupeYouTubePlaylistCards([...sharedPool, ...searchResults])
+        .filter((p) => isRelevantYouTubeHomePlaylist(p, category))
+        .sort((a, b) => scoreYouTubeHomePlaylist(b, category) - scoreYouTubeHomePlaylist(a, category))
+        .slice(0, limit);
+      return { id: category.id, title: category.title, results };
+    }
   );
 
-  const finalResults = categoryResults.filter((category) => category.results.length > 0);
-
-  if (finalResults.length > 0) {
-    void setCache(cacheKey, finalResults);
-  }
-
+  const finalResults = categoryResults.filter((c) => c.results.length > 0);
+  if (finalResults.length > 0) void setCache(cacheKey, finalResults);
   return finalResults;
 }
 

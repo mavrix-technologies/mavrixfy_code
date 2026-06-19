@@ -2618,6 +2618,13 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
         if (targetNativeIndex < 0) {
           if (isYouTubeSource(targetSong)) {
+            // Native audio stream could not be resolved (backend unavailable or yt-dlp failed).
+            // Fall back to iframe — background playback and lock screen will NOT work in this session.
+            logger.warn("[Playback] YouTube native audio resolution failed — falling back to iframe (no background/lock screen)", {
+              songId: targetSong.id,
+              title: targetSong.title,
+            });
+            showPlaybackNotice("Playing via YouTube — background & lock screen unavailable");
             await playYouTubeSong(
               stripTransientYouTubeAudioUrl(targetSong),
               playableQueue,

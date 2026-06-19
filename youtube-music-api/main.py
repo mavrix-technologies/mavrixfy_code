@@ -337,11 +337,7 @@ def get_home(limit: int = Query(default=3, ge=1, le=10)):
     result = safe_call(yt.get_home, limit=limit)
     if not isinstance(result, list):
         return []
-    shelves = []
-    for shelf in result:
-        if isinstance(shelf, dict):
-            shelves.append(shelf)
-    return shelves
+    return [shelf for shelf in result if isinstance(shelf, dict)]
 
 
 @app.get("/mood-playlists")
@@ -358,25 +354,10 @@ def get_mood_playlists():
 
 @app.get("/new-releases")
 def get_new_releases():
-    """Get new release albums"""
-    try:
-        # Get home feed which often contains new releases
-        home_result = safe_call(yt.get_home, limit=5)
-        if not isinstance(home_result, list):
-            return []
-        
-        new_releases = []
-        for shelf in home_result:
-            if isinstance(shelf, dict):
-                title = str(shelf.get("title", "")).lower()
-                if "new" in title or "release" in title or "latest" in title:
-                    contents = shelf.get("contents", [])
-                    new_releases.extend(contents)
-        
-        return new_releases
-    except Exception as e:
-        logger.error(f"New releases error: {e}")
-        return []
+    """New releases are derived from the home feed on the client side.
+    This endpoint is kept for compatibility but the client should use /home.
+    """
+    return []
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
