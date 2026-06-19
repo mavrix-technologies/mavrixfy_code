@@ -35,7 +35,7 @@ app.add_middleware(
 yt = YTMusic()
 
 YOUTUBE_VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
-AUDIO_FORMAT_SELECTOR = "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio"
+AUDIO_FORMAT_SELECTOR = "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best"
 AUDIO_CACHE_MAX_ITEMS = 100
 AUDIO_CACHE_MAX_AGE_SECONDS = 20 * 60
 AUDIO_CACHE_EXPIRY_MARGIN_SECONDS = 90
@@ -135,7 +135,6 @@ def extract_audio_stream(video_id: str) -> dict[str, Any]:
 
     watch_url = f"https://www.youtube.com/watch?v={video_id}"
     options = {
-        "format": AUDIO_FORMAT_SELECTOR,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
@@ -177,11 +176,41 @@ def extract_audio_stream(video_id: str) -> dict[str, Any]:
     if not isinstance(info, dict):
         raise RuntimeError("YouTube returned no stream information")
 
-    audio_url = str(info.get("url") or "").strip()
-    if not audio_url.startswith("https://"):
-        raise RuntimeError("YouTube returned no direct audio URL")
+    formats = info.get("formats", [])
+    if not formats and info.get("url"):
+        formats = [info]
+    playable_formats = []
+    for f in formats:
+        url = f.get("url")
+        if not url or not url.startswith("https://"):
+            continue
+        # Format must have an audio codec
+        acodec = f.get("acodec")
+        if not acodec or acodec == "none":
+            continue
+        playable_formats.append(f)
 
-    extension = str(info.get("ext") or "").strip().lower()
+    if not playable_formats:
+        format_summaries = [
+            f"{f.get('format_id')}: ext={f.get('ext')}, acodec={f.get('acodec')}, vcodec={f.get('vcodec')}, has_url={bool(f.get('url'))}"
+            for f in formats
+        ]
+        logger.error("No playable formats found. Available formats: %s", ", ".join(format_summaries))
+        raise RuntimeError("No playable audio formats found for this video")
+
+    # Sort playable formats:
+    # 1. Prefer audio-only (vcodec is None or 'none')
+    # 2. Prefer higher bitrate (abr or tbr)
+    def format_sort_key(f):
+        is_audio_only = 1 if f.get("vcodec") in (None, "none") else 0
+        bitrate = f.get("abr") or f.get("tbr") or 0
+        return (is_audio_only, bitrate)
+
+    playable_formats.sort(key=format_sort_key, reverse=True)
+    best_format = playable_formats[0]
+
+    audio_url = best_format["url"]
+    extension = str(best_format.get("ext") or "").strip().lower()
     mime_type = {
         "m4a": "audio/mp4",
         "mp4": "audio/mp4",
@@ -223,7 +252,8 @@ def verify_audio_resolver_token(provided_token: Optional[str]) -> None:
 
 @app.get("/healthz")
 def health_check():
-    return {"status": "ok"}
+    import yt_dlp
+    return {"status": "ok", "yt_dlp_version": yt_dlp.version.__version__}
 
 
 @app.get("/search")
