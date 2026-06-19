@@ -69,82 +69,6 @@ export interface YouTubeMusicWatchPlaylist {
   playlistId?: string | null;
 }
 
-/**
- * Get YouTube audio stream URL for native playback
- * Uses the same backend endpoint as downloads
- */
-export async function getYouTubeStreamUrl(videoId: string, quality?: string): Promise<string | null> {
-  try {
-    const apiUrl = getYouTubeMusicApiUrl();
-    const qualityParam = quality ? `?quality=${quality}` : "";
-    const url = `${apiUrl}download/${videoId}${qualityParam}`;
-    
-    logger.debug("[YouTube Stream] Fetching stream URL", { videoId, apiUrl, quality });
-    
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
-    
-    try {
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: { Accept: "application/json" },
-      });
-      
-      clearTimeout(timeout);
-      
-      if (!response.ok) {
-        let detail: string | undefined;
-        try {
-          const errorBody = await response.json();
-          if (typeof errorBody?.detail === "string") {
-            detail = errorBody.detail;
-          }
-        } catch {}
-
-        const logPayload = {
-          videoId,
-          status: response.status, 
-          statusText: response.statusText,
-          detail,
-        };
-
-        if (response.status === 404) {
-          logger.warn("[YouTube Stream] Stream URL unavailable, falling back to iframe", logPayload);
-        } else {
-          logger.error("[YouTube Stream] API error", logPayload);
-        }
-        return null;
-      }
-      
-      const data = await response.json();
-      
-      if (data.success && data.data?.downloadUrl) {
-        logger.debug("[YouTube Stream] Stream URL fetched successfully", { 
-          videoId,
-          hasUrl: !!data.data.downloadUrl,
-          format: data.data.format,
-          duration: data.data.duration,
-        });
-        return data.data.downloadUrl;
-      }
-      
-      logger.error("[YouTube Stream] Invalid response format", { data });
-      return null;
-    } catch (error: any) {
-      clearTimeout(timeout);
-      if (error.name === 'AbortError') {
-        logger.error("[YouTube Stream] Request timeout", { videoId });
-      } else {
-        logger.error("[YouTube Stream] Fetch failed", { videoId, error: error.message });
-      }
-      return null;
-    }
-  } catch (error: any) {
-    logger.error("[YouTube Stream] Unexpected error", { videoId, error: error.message });
-    return null;
-  }
-}
-
 const YOUTUBE_MUSIC_CACHE_PREFIX = "@mavrixfy_youtube_music";
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -383,7 +307,7 @@ export function convertYouTubeMusicTrack(track: any): Song | null {
     duration,
     coverUrl,
     genre: "YouTube Music",
-    audioUrl: "", // Will be resolved dynamically via getYouTubeStreamUrl() for native playback
+    audioUrl: "", // YouTube songs play through the embedded iframe player.
     year: normalizedTrack.year?.toString(),
     source: "youtube",
     videoId: normalizedTrack.videoId,
@@ -476,19 +400,20 @@ async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T | null
 }
 
 async function fetchFirstJson<T>(urls: string[], signal?: AbortSignal): Promise<T | null> {
+  if (signal?.aborted) {
+    throw new Error("Request aborted");
+  }
+
+  const results = await Promise.allSettled(urls.map((url) => fetchJson<T>(url, signal)));
   let lastError: unknown = null;
 
-  for (const url of urls) {
-    if (signal?.aborted) {
-      throw new Error("Request aborted");
-    }
-    try {
-      const json = await fetchJson<T>(url, signal);
-      if (json !== null) return json;
-    } catch (error) {
-      lastError = error;
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      if (result.value !== null) return result.value;
+    } else {
+      lastError = result.reason;
       if (signal?.aborted) {
-        throw error;
+        throw result.reason;
       }
     }
   }
@@ -1224,16 +1149,76 @@ const YOUTUBE_HOME_BLOCKED_TERMS = [
 const HOME_YOUTUBE_MUSIC_CATEGORIES: HomeYouTubeMusicCategoryConfig[] = [
   {
     id: "trending",
-    title: "Trending on YouTube Music",
+    title: "Trending Now",
     useCharts: true,
     useHome: true,
     searchTerms: [
-      `youtube music india trending songs ${CURRENT_YEAR} playlist`,
+      `trending songs india ${CURRENT_YEAR}`,
       `trending bollywood hindi songs ${CURRENT_YEAR} playlist`,
-      `india top hindi songs ${CURRENT_YEAR}`,
+      `viral hits india ${CURRENT_YEAR}`,
+      `trending music ${CURRENT_YEAR} india`,
     ],
-    requiredAny: ["trending", "top", "chart", "hits", "hindi", "bollywood", "india"],
-    preferredAny: ["trending", "top", "chart", String(CURRENT_YEAR), "hindi", "bollywood", "india", "songs"],
+    requiredAny: ["trending", "viral", "top", "chart", "hits", "hindi", "bollywood", "india"],
+    preferredAny: ["trending", "viral", "top", "chart", String(CURRENT_YEAR), "hindi", "bollywood", "india", "songs"],
+    blockedAny: YOUTUBE_HOME_BLOCKED_TERMS,
+  },
+  {
+    id: "top-charts",
+    title: "Top Charts",
+    useCharts: true,
+    useHome: true,
+    searchTerms: [
+      `top charts india ${CURRENT_YEAR}`,
+      `top 50 hindi songs ${CURRENT_YEAR}`,
+      `music charts ${CURRENT_YEAR}`,
+      `bollywood top charts`,
+    ],
+    requiredAny: ["chart", "top", "ranked", "best", "#"],
+    preferredAny: ["chart", "top", "ranked", String(CURRENT_YEAR), "hindi", "bollywood", "india", "50", "100"],
+    blockedAny: YOUTUBE_HOME_BLOCKED_TERMS,
+  },
+  {
+    id: "new-releases",
+    title: "New Releases",
+    useHome: true,
+    useCharts: false,
+    searchTerms: [
+      `new releases ${CURRENT_YEAR} india`,
+      `latest songs ${CURRENT_YEAR}`,
+      `new hindi music ${CURRENT_YEAR} playlist`,
+      `fresh releases bollywood ${CURRENT_YEAR}`,
+    ],
+    requiredAny: ["new", "latest", String(CURRENT_YEAR), "fresh", "release"],
+    preferredAny: ["new", "latest", "release", String(CURRENT_YEAR), "bollywood", "hindi", "songs", "music"],
+    blockedAny: YOUTUBE_HOME_BLOCKED_TERMS,
+  },
+  {
+    id: "ranked",
+    title: "Top Ranked",
+    useCharts: true,
+    useHome: true,
+    searchTerms: [
+      `top ranked songs ${CURRENT_YEAR}`,
+      `best of ${CURRENT_YEAR} india`,
+      `most popular hindi songs ${CURRENT_YEAR}`,
+      `top rated bollywood`,
+    ],
+    requiredAny: ["ranked", "rating", "top", "best", "most", "popular"],
+    preferredAny: ["ranked", "rating", "top", "best", String(CURRENT_YEAR), "hindi", "bollywood", "popular"],
+    blockedAny: YOUTUBE_HOME_BLOCKED_TERMS,
+  },
+  {
+    id: "viral-hits",
+    title: "Viral Hits",
+    useHome: true,
+    searchTerms: [
+      `viral songs ${CURRENT_YEAR} india`,
+      `viral hits hindi ${CURRENT_YEAR}`,
+      `trending reels music ${CURRENT_YEAR}`,
+      `viral bollywood songs`,
+    ],
+    requiredAny: ["viral", "trending", "reels", "shorts"],
+    preferredAny: ["viral", "trending", "reels", String(CURRENT_YEAR), "hindi", "india", "songs"],
     blockedAny: YOUTUBE_HOME_BLOCKED_TERMS,
   },
   {
@@ -1241,38 +1226,42 @@ const HOME_YOUTUBE_MUSIC_CATEGORIES: HomeYouTubeMusicCategoryConfig[] = [
     title: "Bollywood Hits",
     useHome: true,
     searchTerms: [
-      `bollywood hits ${CURRENT_YEAR} playlist`,
-      `hindi bollywood top songs ${CURRENT_YEAR} playlist`,
-      "bollywood music playlist",
+      `bollywood hits ${CURRENT_YEAR}`,
+      `hindi songs playlist ${CURRENT_YEAR}`,
+      `bollywood essentials`,
+      `best bollywood songs ${CURRENT_YEAR}`,
     ],
     requiredAny: ["bollywood", "hindi", "india"],
-    preferredAny: ["bollywood", "hindi", "hits", "top", "songs", String(CURRENT_YEAR)],
+    preferredAny: ["bollywood", "hindi", "hits", "top", "songs", "best", String(CURRENT_YEAR)],
     blockedAny: YOUTUBE_HOME_BLOCKED_TERMS,
   },
   {
-    id: "new-arrivals",
-    title: "New Songs",
+    id: "hot-right-now",
+    title: "Hot Right Now",
     useHome: true,
+    useCharts: true,
     searchTerms: [
-      `new bollywood songs ${CURRENT_YEAR} playlist`,
-      `new hindi songs ${CURRENT_YEAR} playlist`,
-      `latest hindi music ${CURRENT_YEAR}`,
+      `hot songs ${CURRENT_YEAR} india`,
+      `right now trending hindi`,
+      `currently popular bollywood`,
+      `hot hits ${CURRENT_YEAR}`,
     ],
-    requiredAny: ["new", "latest", String(CURRENT_YEAR), "fresh"],
-    preferredAny: ["new", "latest", String(CURRENT_YEAR), "bollywood", "hindi", "songs"],
+    requiredAny: ["hot", "now", "current", "today", "this week"],
+    preferredAny: ["hot", "right now", "current", String(CURRENT_YEAR), "hindi", "bollywood", "trending"],
     blockedAny: YOUTUBE_HOME_BLOCKED_TERMS,
   },
   {
     id: "popular",
-    title: "Popular on YouTube Music",
+    title: "Most Popular",
     useHome: true,
     searchTerms: [
-      `popular hindi songs ${CURRENT_YEAR} playlist`,
-      `most played bollywood songs ${CURRENT_YEAR}`,
-      "top bollywood songs playlist",
+      `most popular songs ${CURRENT_YEAR}`,
+      `most played hindi songs`,
+      `popular bollywood playlist`,
+      `best hindi songs ${CURRENT_YEAR}`,
     ],
-    requiredAny: ["popular", "top", "hits", "best", "most played", "bollywood", "hindi"],
-    preferredAny: ["popular", "top", "hits", "best", "bollywood", "hindi", "songs", String(CURRENT_YEAR)],
+    requiredAny: ["popular", "top", "hits", "best", "most played", "most"],
+    preferredAny: ["popular", "most", "top", "hits", "best", "bollywood", "hindi", String(CURRENT_YEAR)],
     blockedAny: YOUTUBE_HOME_BLOCKED_TERMS,
   },
 ];
@@ -1354,8 +1343,19 @@ function isRelevantYouTubeHomePlaylist(
 ): boolean {
   const text = `${playlist.name} ${playlist.author || ""} ${playlist.category || ""} ${playlist.description || ""}`.toLowerCase();
 
+  // Block unwanted content
   if (includesAnyTerm(text, category.blockedAny)) return false;
-  if (!includesAnyTerm(text, YOUTUBE_HOME_INDIAN_TERMS)) return false;
+  
+  // For non-Indian content categories, check if it's regionally relevant
+  const isIndianContentCategory = category.id === "bollywood" || category.id === "trending" || 
+                                   category.id === "popular" || category.id === "new-arrivals";
+  if (isIndianContentCategory && !includesAnyTerm(text, YOUTUBE_HOME_INDIAN_TERMS)) {
+    // Allow if it's official YouTube Music content
+    if (playlist.kind !== "chart" && playlist.kind !== "editorial") {
+      return false;
+    }
+  }
+  
   const requiredMatches = countTermMatches(text, category.requiredAny);
   if (requiredMatches === 0) return false;
 
@@ -1363,11 +1363,13 @@ function isRelevantYouTubeHomePlaylist(
   const preferredMatches = countTermMatches(text, category.preferredAny);
   const playlistLike = isPlaylistLikeTitle(text);
 
+  // More lenient for official content
   if (isOfficial) {
-    return playlistLike || requiredMatches >= 2 || preferredMatches >= 2;
+    return playlistLike || requiredMatches >= 1 || preferredMatches >= 2;
   }
 
-  return playlistLike && (requiredMatches >= 2 || preferredMatches >= 1);
+  // Stricter for community playlists
+  return playlistLike && (requiredMatches >= 2 || preferredMatches >= 2);
 }
 
 async function searchYouTubeMusicPlaylistCards(
@@ -1491,30 +1493,87 @@ function scoreYouTubeHomePlaylist(
   category: HomeYouTubeMusicCategoryConfig
 ): number {
   const text = playlist.name.toLowerCase();
+  const author = (playlist.author || "").toLowerCase();
+  const description = (playlist.description || "").toLowerCase();
+  const fullText = `${text} ${author} ${description}`;
   let score = 0;
 
-  if (playlist.kind === "chart") score += 90;
-  if (playlist.kind === "editorial") score += 80;
-  if (playlist.kind === "featured") score += 55;
-  if (playlist.author?.toLowerCase() === "youtube music") score += 30;
+  // Strongly prefer official content
+  if (playlist.kind === "chart") score += 120;
+  if (playlist.kind === "editorial") score += 100;
+  if (playlist.kind === "featured") score += 80;
+  if (author.includes("music")) score += 50; // Any official music service
 
-  score += countTermMatches(text, category.requiredAny) * 26;
-  score += countTermMatches(text, category.preferredAny) * 14;
+  // Category-specific matches (increased weights)
+  score += countTermMatches(fullText, category.requiredAny) * 35;
+  score += countTermMatches(fullText, category.preferredAny) * 20;
 
-  if (text.includes(String(CURRENT_YEAR))) score += 32;
-  if (text.includes("hindi") || text.includes("bollywood") || text.includes("india")) score += 24;
-  if (text.includes("playlist") || text.includes("mix") || text.includes("essentials")) score += 16;
-  if (text.includes("bollywood")) score += category.id === "bollywood" ? 36 : 10;
-  if (text.includes("popular") || text.includes("most played") || text.includes("best")) score += category.id === "popular" ? 34 : 8;
-  if (text.includes("latest") || text.includes("new")) score += category.id === "new-arrivals" ? 32 : 14;
-  if (text.includes("trending") || text.includes("viral") || text.includes("reels")) score += 24;
+  // Boost for current year content
+  if (fullText.includes(String(CURRENT_YEAR))) score += 40;
+  
+  // Boost for regional/language content
+  if (fullText.includes("hindi") || fullText.includes("bollywood") || fullText.includes("india") || fullText.includes("indian")) score += 32;
+  
+  // Boost for playlist-like titles
+  if (text.includes("playlist") || text.includes("mix") || text.includes("essentials") || text.includes("best of")) score += 22;
+
+  // Category-specific bonuses (increased)
+  if (category.id === "trending") {
+    if (fullText.includes("trending") || fullText.includes("viral")) score += 50;
+    if (fullText.includes("top") || fullText.includes("chart")) score += 45;
+    if (fullText.includes("now") || fullText.includes("today")) score += 35;
+  }
+  
+  if (category.id === "top-charts") {
+    if (fullText.includes("chart") || fullText.includes("top")) score += 55;
+    if (fullText.includes("50") || fullText.includes("100")) score += 40;
+    if (fullText.includes("ranked") || fullText.includes("#")) score += 35;
+  }
+  
+  if (category.id === "new-releases") {
+    if (fullText.includes("new") || fullText.includes("latest") || fullText.includes("fresh")) score += 50;
+    if (fullText.includes("release")) score += 45;
+    if (fullText.includes(String(CURRENT_YEAR))) score += 35;
+  }
+  
+  if (category.id === "ranked") {
+    if (fullText.includes("ranked") || fullText.includes("rating")) score += 50;
+    if (fullText.includes("top") || fullText.includes("best")) score += 40;
+  }
+  
+  if (category.id === "viral-hits") {
+    if (fullText.includes("viral") || fullText.includes("trending")) score += 50;
+    if (fullText.includes("reels") || fullText.includes("shorts")) score += 40;
+  }
+  
+  if (category.id === "hot-right-now") {
+    if (fullText.includes("hot") || fullText.includes("right now")) score += 50;
+    if (fullText.includes("current") || fullText.includes("today")) score += 40;
+  }
+  
+  if (category.id === "bollywood") {
+    if (fullText.includes("bollywood")) score += 45;
+    if (fullText.includes("hindi")) score += 35;
+  }
+  
+  if (category.id === "popular") {
+    if (fullText.includes("popular") || fullText.includes("most played") || fullText.includes("best")) score += 42;
+  }
+
+  // Additional semantic bonuses
+  if (text.includes("hits") || text.includes("greatest")) score += 18;
   if (text.includes("party") || text.includes("dance")) score += category.id === "party-mix" ? 30 : 10;
-  if (text.includes("lofi") || text.includes("chill") || text.includes("sukoon")) score += category.id === "chill-vibes" ? 30 : 10;
+  if (text.includes("lofi") || text.includes("chill") || text.includes("sukoon") || text.includes("calm")) score += category.id === "chill-vibes" ? 30 : 10;
   if (text.includes("romantic") || text.includes("love") || text.includes("romance")) score += category.id === "romance" ? 30 : 10;
-  if (text.includes("workout") || text.includes("gym")) score += category.id === "workout" ? 30 : 10;
-  if (text.includes("retro") || text.includes("classic") || text.includes("old")) score += category.id === "retro" ? 30 : -8;
+  if (text.includes("workout") || text.includes("gym") || text.includes("fitness")) score += category.id === "workout" ? 30 : 10;
+  if (text.includes("retro") || text.includes("classic") || text.includes("old") || text.includes("90s") || text.includes("80s")) score += category.id === "retro" ? 30 : -8;
 
-  score += Math.min(Number(playlist.songCount || 0), 40);
+  // Boost for higher song counts (indicates curated playlists)
+  const songCount = Number(playlist.songCount || 0);
+  if (songCount > 0) {
+    score += Math.min(songCount * 0.5, 60); // Up to 60 points for song count
+  }
+  
   return score;
 }
 
@@ -1544,15 +1603,15 @@ async function getYouTubeHomeCategoryPlaylists(
   category: HomeYouTubeMusicCategoryConfig,
   limit: number
 ): Promise<YouTubeMusicPlaylistCard[]> {
-  const searchLimit = Math.max(limit, 8);
+  const searchLimit = Math.max(limit * 2, 15); // Fetch more to ensure we have enough after filtering
   const chartPlaylistsPromise = category.useCharts
     ? getYouTubeMusicTrendingPlaylists("IN").catch(() => [] as YouTubeMusicPlaylistCard[])
     : Promise.resolve([] as YouTubeMusicPlaylistCard[]);
   const homePlaylistsPromise = category.useHome
-    ? getYouTubeMusicHomePlaylistCards(Math.max(limit, 6)).catch(() => [] as YouTubeMusicPlaylistCard[])
+    ? getYouTubeMusicHomePlaylistCards(10).catch(() => [] as YouTubeMusicPlaylistCard[])
     : Promise.resolve([] as YouTubeMusicPlaylistCard[]);
   const searchResultsPromise = Promise.all(
-    category.searchTerms.slice(0, 2).map(async (term) => {
+    category.searchTerms.slice(0, 3).map(async (term) => {
       try {
         return await searchYouTubeMusicPlaylistCards(term, searchLimit);
       } catch {
@@ -1585,7 +1644,7 @@ export async function getHomeYouTubeMusicCategories(options?: {
   limitPerCategory?: number;
   categoryIds?: string[];
 }): Promise<YouTubeMusicHomeCategoryData[]> {
-  const limit = Math.min(options?.limitPerCategory ?? 5, 8);
+  const limit = Math.min(options?.limitPerCategory ?? 10, 15); // Increased from 5 to 10 default
   const categoryIds = options?.categoryIds ?? [];
   const categoryIdFilter = new Set(categoryIds);
 
@@ -1648,17 +1707,20 @@ export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): 
         const name = item.title || item.name;
         if (!id || !name) return null;
 
-        const bestImage = item.thumbnails && item.thumbnails.length > 0
-          ? item.thumbnails[item.thumbnails.length - 1].url
+        // Get best quality thumbnail
+        const thumbnails = item.thumbnails || [];
+        const bestImage = thumbnails.length > 0
+          ? thumbnails[thumbnails.length - 1].url
           : "";
 
         const result: YouTubeMusicPlaylistCard = {
           id,
           name,
-          imageUrl: bestImage,
-          songCount: Number(item.trackCount) || 20,
-          author: "YouTube Music",
-          category: "Charts",
+          imageUrl: upscaleYouTubeThumbnail(bestImage),
+          songCount: Number(item.trackCount || item.itemCount) || 50,
+          author: item.author || "YouTube Music",
+          category: item.category || "Charts",
+          description: item.description || undefined,
           kind: "chart",
         };
         return result;

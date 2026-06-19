@@ -4,9 +4,8 @@ import os
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
-from typing import Optional, List, Any
+from typing import Optional
 import logging
-import yt_dlp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -144,77 +143,40 @@ def get_home(limit: int = Query(default=3, ge=1, le=10)):
             shelves.append(shelf)
     return shelves
 
-@app.get("/download/{videoId}")
-def get_download_url(videoId: str, quality: Optional[str] = Query(default=None)):
-    """
-    Get direct download URL for offline playback
-    Returns audio stream URL that can be downloaded to device
-    """
-    try:
-        logger.info(f"[Download] Processing request for videoId: {videoId} with quality: {quality}")
-        url = f"https://www.youtube.com/watch?v={videoId}"
-        
-        # Select format based on quality
-        audio_format = 'bestaudio[ext=m4a]/bestaudio'
-        if quality == 'low':
-            audio_format = 'worstaudio/worst'
-        elif quality == 'medium':
-            audio_format = 'worstaudio[abr>=96]/bestaudio[ext=m4a]/bestaudio'
-            
-        ydl_opts = {
-            'format': audio_format,
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': False,
-            'nocheckcertificate': True,
-        }
-        
-        logger.info(f"[Download] Extracting info for: {url}")
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            
-            if not info:
-                logger.error(f"[Download] No info returned for {videoId}")
-                raise HTTPException(status_code=404, detail="Video not found")
-            
-            # Get the direct download URL
-            download_url = info.get('url')
-            
-            if not download_url:
-                logger.error(f"[Download] No download URL in info for {videoId}")
-                raise HTTPException(status_code=500, detail="Could not extract download URL")
-            
-            logger.info(f"[Download] Successfully extracted URL for {videoId}")
-            
-            return {
-                "success": True,
-                "data": {
-                    "videoId": videoId,
-                    "title": info.get('title', ''),
-                    "artist": info.get('artist') or info.get('uploader') or info.get('channel', ''),
-                    "duration": info.get('duration', 0),
-                    "thumbnail": info.get('thumbnail', ''),
-                    "downloadUrl": download_url,
-                    "format": info.get('ext', 'm4a'),
-                    "filesize": info.get('filesize'),
-                    "bitrate": info.get('abr'),
-                    "sampleRate": info.get('asr'),
-                }
-            }
-            
-    except yt_dlp.utils.DownloadError as e:
-        error_msg = str(e)
-        logger.error(f"[Download] yt-dlp DownloadError for {videoId}: {error_msg}")
-        raise HTTPException(status_code=404, detail=f"Video not available: {error_msg}")
-    except HTTPException:
-        # Re-raise HTTPExceptions as-is
-        raise
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"[Download] Unexpected error for {videoId}: {error_msg}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {error_msg}")
 
+@app.get("/mood-playlists")
+def get_mood_playlists():
+    """Get mood and genre based playlists"""
+    result = safe_call(yt.get_mood_categories)
+    if isinstance(result, dict):
+        categories = []
+        for title, items in result.items():
+            categories.append({"title": title, "items": items})
+        return categories
+    return []
+
+
+@app.get("/new-releases")
+def get_new_releases():
+    """Get new release albums"""
+    try:
+        # Get home feed which often contains new releases
+        home_result = safe_call(yt.get_home, limit=5)
+        if not isinstance(home_result, list):
+            return []
+        
+        new_releases = []
+        for shelf in home_result:
+            if isinstance(shelf, dict):
+                title = str(shelf.get("title", "")).lower()
+                if "new" in title or "release" in title or "latest" in title:
+                    contents = shelf.get("contents", [])
+                    new_releases.extend(contents)
+        
+        return new_releases
+    except Exception as e:
+        logger.error(f"New releases error: {e}")
+        return []
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))

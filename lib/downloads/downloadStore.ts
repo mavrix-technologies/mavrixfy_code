@@ -113,6 +113,11 @@ export async function loadDownload(songId: string): Promise<DownloadItem | null>
     if (!raw) return null;
     const item = JSON.parse(raw) as DownloadItem;
     memCache.set(songId, item);
+    // Register in the durable index so a subsequent loadAllDownloads()
+    // (which iterates the index) does not miss this entry. Without this,
+    // an item read here before seeding completes would be invisible to
+    // getAllDownloads()/getStorageSummary(), creating a cache/index desync.
+    addToIndex(songId).catch(() => {});
     return item;
   } catch {
     return null;

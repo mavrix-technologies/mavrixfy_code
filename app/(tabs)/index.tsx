@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { memo, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -18,10 +18,17 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
+import { showGlobalToast } from "@/app/_layout";
 import { LinearGradient } from "expo-linear-gradient";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { getBestImageUrl, JioSaavnImage, Song } from "@/lib/musicData";
@@ -47,6 +54,11 @@ import {
   RecommendationSection,
 } from "@/lib/recommendationService";
 import { getDailyNewReleaseSongs } from "@/lib/newReleaseSongService";
+import {
+  subscribeNotifications,
+  getUnreadNotificationsCount,
+  loadNotifications,
+} from "@/stores/notificationStore";
 import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistService";
 import {
   clearYouTubeMusicCache,
@@ -60,11 +72,9 @@ import HomeSkeletonLoader from "@/components/HomeSkeletonLoader";
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
 import AppTopHeader, {
-  AppTopHeaderDownloadButton,
   AppTopHeaderProfileButton,
   useAppTopHeaderScrollElevation,
 } from "@/components/AppTopHeader";
-import ShinyText from "@/components/ShinyText";
 import AdMobBanner from "@/components/AdMobBanner";
 import AppPromotionModal from "@/components/AppPromotionModal";
 import PromotionBanner from "@/components/PromotionBanner";
@@ -129,9 +139,14 @@ const HOME_SESSION_CACHE: HomeSessionCache = {
 
 const HOME_CATEGORY_SECTION_ORDER = [
   "trending",
+  "top-charts",
+  "new-releases",
+  "ranked",
+  "viral-hits",
+  "hot-right-now",
   "bollywood",
-  "new-arrivals",
   "popular",
+  "new-arrivals",
   "most-viral",
   "party-mix",
   "chill-vibes",
@@ -142,9 +157,14 @@ const HOME_CATEGORY_SECTION_ORDER = [
 
 const HOME_JIOSAAVN_TITLES: Record<string, string> = {
   trending:       "Trending Now",
+  "top-charts":   "Top Charts",
+  "new-releases": "New Releases",
+  ranked:         "Top Ranked",
+  "viral-hits":   "Viral Hits",
+  "hot-right-now": "Hot Right Now",
   bollywood:      "Bollywood Hits",
+  popular:        "Most Popular",
   "new-arrivals": "New Songs",
-  popular:        "Popular on YouTube Music",
   "most-viral":   "Viral Hits",
   "party-mix":    "Party Mix",
   "chill-vibes":  "Chill Vibes",
@@ -175,9 +195,11 @@ const HOME_BOOTSTRAP_MAX_WAIT_MS = 15000;
 const HOME_NEW_RELEASE_SONG_TIMEOUT_MS = 8000;
 const MAX_ROW_ITEMS = 10;
 const NEW_RELEASE_SONG_LIMIT = 10;
-const HOME_PRIORITY_CATEGORY_IDS = ["trending", "bollywood", "new-arrivals", "popular"] as const;
+const HOME_PRIORITY_CATEGORY_IDS = ["trending", "top-charts", "new-releases", "ranked", "viral-hits", "hot-right-now", "bollywood", "popular"] as const;
 const HOME_PRIORITY_CATEGORY_TIMEOUT_MS = 5500;
 const PLACEHOLDER_ROW_ITEMS = [0, 1, 2, 3];
+const QUICK_PICK_PLACEHOLDER_COLUMNS = [0, 1];
+const MOOD_CHIPS = ["Podcasts", "Energize", "Feel good", "Romance", "Workout", "Relax"];
 const HORIZONTAL_ROW_GAP = 12;
 const RECENT_CARD_SIZE = 90;
 const RECT_CARD_WIDTH = 152;
@@ -195,11 +217,11 @@ const INITIAL_PUBLIC_LIMIT = 100; // Increased to show all playlists
 const INLINE_AD_SCROLL_GATE_Y = 1800;
 const INLINE_AD_LOAD_DELAY_MS = 6000;
 const HOME_IMAGE_TRANSITION_MS = 0;
-const HOME_ROW_INITIAL_RENDER_COUNT = 3;
-const HOME_ROW_WINDOW_SIZE = 3;
-const HOME_VERTICAL_INITIAL_RENDER_COUNT = 2;
-const HOME_VERTICAL_MAX_RENDER_BATCH = 1;
-const HOME_VERTICAL_WINDOW_SIZE = 3;
+const HOME_ROW_INITIAL_RENDER_COUNT = 4;
+const HOME_ROW_WINDOW_SIZE = 5;
+const HOME_VERTICAL_INITIAL_RENDER_COUNT = 3;
+const HOME_VERTICAL_MAX_RENDER_BATCH = 2;
+const HOME_VERTICAL_WINDOW_SIZE = 5;
 
 function hasHomeContent(source: {
   categories: HomeCategoryData[];
@@ -230,11 +252,6 @@ function getHomeCategoryItemImageUrl(item: HomeCategoryItem): string {
   return item.imageUrl || getThumbImageUrl(item.image);
 }
 
-function getHomeCategorySourceLabel(item: HomeCategoryItem): string {
-  if (item.source !== "youtube") return "JioSaavn";
-  return "YouTube Music";
-}
-
 function normalizeId(value: unknown): string {
   if (typeof value !== "string") return "";
   return value.trim();
@@ -258,6 +275,14 @@ function dedupeHomeCategoryItemsBySource(
   }
 
   return unique;
+}
+
+function chunkArray<T>(array: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
 }
 
 function toJioSaavnHomeCategoryItem(item: HomeJioSaavnCategoryData["results"][number]): HomeCategoryItem {
@@ -910,6 +935,71 @@ function HomeHeroVideoCard({
   );
 }
 
+const MoodChipListItem = memo(function MoodChipListItem({
+  item,
+  selected,
+  onPress,
+}: {
+  item: string;
+  selected: boolean;
+  onPress: (mood: string) => void;
+}) {
+  const handlePress = useCallback(() => {
+    onPress(item);
+  }, [item, onPress]);
+
+  return (
+    <Pressable
+      onPress={handlePress}
+      style={[
+        styles.moodChip,
+        selected ? styles.moodChipSelected : styles.moodChipUnselected,
+      ]}
+    >
+      <Text
+        style={[
+          styles.moodChipText,
+          selected ? styles.moodChipTextSelected : styles.moodChipTextUnselected,
+        ]}
+      >
+        {item}
+      </Text>
+    </Pressable>
+  );
+});
+
+function MoodChips({
+  selectedMood,
+  onMoodPress,
+}: {
+  selectedMood: string | null;
+  onMoodPress: (mood: string) => void;
+}) {
+  const renderMoodChip = useCallback(
+    ({ item }: { item: string }) => (
+      <MoodChipListItem
+        item={item}
+        selected={selectedMood === item}
+        onPress={onMoodPress}
+      />
+    ),
+    [onMoodPress, selectedMood]
+  );
+
+  return (
+    <View style={styles.moodChipsContainer}>
+      <FlatList
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        data={MOOD_CHIPS}
+        keyExtractor={(item) => item}
+        contentContainerStyle={styles.moodChipsContent}
+        renderItem={renderMoodChip}
+      />
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   return (
     <ErrorBoundary>
@@ -934,6 +1024,7 @@ function useHomeScreenInnerView() {
     isAuthenticated,
     isGuest,
     firebaseUser,
+    user,
   } = useAuth();
   const { playSong, currentSong, isPlaying } = usePlayerBrowse();
   const currentSongId = currentSong?.id || null;
@@ -997,6 +1088,55 @@ function useHomeScreenInnerView() {
     return () => subscription.remove();
   }, []);
 
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+
+  useEffect(() => {
+    // Initial load
+    void loadNotifications().then(() => {
+      setUnreadNotifCount(getUnreadNotificationsCount());
+    });
+
+    // Subscribe to store updates
+    const unsubscribe = subscribeNotifications(() => {
+      setUnreadNotifCount(getUnreadNotificationsCount());
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const bellRotation = useSharedValue(0);
+
+  const triggerBellShake = useCallback(() => {
+    bellRotation.value = withSequence(
+      withTiming(-22, { duration: 90 }),
+      withTiming(18, { duration: 110 }),
+      withTiming(-14, { duration: 110 }),
+      withTiming(10, { duration: 110 }),
+      withTiming(-6, { duration: 110 }),
+      withTiming(3, { duration: 110 }),
+      withTiming(-1, { duration: 110 }),
+      withTiming(0, { duration: 110 })
+    );
+  }, [bellRotation]);
+
+  const prevNotifCountRef = useRef(0);
+
+  useEffect(() => {
+    if (unreadNotifCount > prevNotifCountRef.current) {
+      triggerBellShake();
+    }
+    prevNotifCountRef.current = unreadNotifCount;
+  }, [unreadNotifCount, triggerBellShake]);
+
+  const animatedBellStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { translateY: -10 },
+        { rotate: `${bellRotation.value}deg` },
+        { translateY: 10 },
+      ],
+    };
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       setIsHomeScreenFocused(true);
@@ -1032,6 +1172,13 @@ function useHomeScreenInnerView() {
       setActiveHomeVideoIndex((currentIndex) => (currentIndex === nextIndex ? currentIndex : nextIndex));
     }
   );
+
+  const [selectedMood, setSelectedMood] = useState<string | null>(null);
+
+  const handleMoodPress = useCallback((mood: string) => {
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedMood((current) => (current === mood ? null : mood));
+  }, []);
 
   // Auto-mute video card when a song is playing
   useEffect(() => {
@@ -1643,9 +1790,30 @@ function useHomeScreenInnerView() {
     return cancelScheduledPlaylistPrefetch;
   }, [cancelScheduledPlaylistPrefetch]);
 
+  const filteredCategories = useMemo(() => {
+    if (!selectedMood) return categories;
+    const moodLower = selectedMood.toLowerCase();
+
+    let targetCategoryIds: string[] = [];
+    if (moodLower === "romance") {
+      targetCategoryIds = ["romance"];
+    } else if (moodLower === "energize" || moodLower === "workout") {
+      targetCategoryIds = ["workout", "party-mix"];
+    } else if (moodLower === "feel good") {
+      targetCategoryIds = ["chill-vibes", "party-mix"];
+    } else if (moodLower === "podcasts") {
+      targetCategoryIds = ["retro", "trending"];
+    } else if (moodLower === "relax") {
+      targetCategoryIds = ["chill-vibes", "retro"];
+    }
+
+    if (targetCategoryIds.length === 0) return categories;
+    return categories.filter((cat) => targetCategoryIds.includes(cat.id));
+  }, [categories, selectedMood]);
+
   const orderedHomeCategories = useMemo<HomeCategoryData[]>(() => {
     const categoryById = new Map<string, HomeCategoryData>();
-    categories.forEach((cat) => categoryById.set(cat.id, cat));
+    filteredCategories.forEach((cat) => categoryById.set(cat.id, cat));
 
     // Preferred order first, then any extras the service returned
     const preferred = mapFilter(HOME_CATEGORY_SECTION_ORDER, (id) => {
@@ -1655,10 +1823,14 @@ function useHomeScreenInnerView() {
       }, (cat): cat is HomeCategoryData => Boolean(cat));
 
     const preferredIds = new Set(preferred.map((c) => c.id));
-    const extras = filterMap(categories, (c) => !preferredIds.has(c.id) && c.results.length > 0, (c) => ({ ...c, title: HOME_JIOSAAVN_TITLES[c.id] ?? c.title }));
+    const extras = filterMap(
+      filteredCategories,
+      (c) => !preferredIds.has(c.id) && c.results.length > 0,
+      (c) => ({ ...c, title: HOME_JIOSAAVN_TITLES[c.id] ?? c.title })
+    );
 
     return [...preferred, ...extras];
-  }, [categories]);
+  }, [filteredCategories]);
 
   const allCategoryRows = useMemo(() => {
     return mapFilter(orderedHomeCategories, (cat) => ({
@@ -1709,14 +1881,14 @@ function useHomeScreenInnerView() {
     };
 
     if (shouldUseRecommendationFeed && recommendationSections.length > 0) {
+      if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
+        data.push({ id: "new-release-songs", type: "new-release-songs" });
+      }
       if (featuredArtists.length > 0) {
         data.push({ id: "featured-artists", type: "featured-artists" });
       }
       if (recentlyPlayed.length > 0) {
         data.push({ id: "recents", type: "recents" });
-      }
-      if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
-        data.push({ id: "new-release-songs", type: "new-release-songs" });
       }
       if (youtubeTrendingPlaylists.length > 0 || isLoadingYoutubeTrending) {
         data.push({ id: "youtube-trending", type: "youtube-trending" });
@@ -1742,19 +1914,19 @@ function useHomeScreenInnerView() {
       return data;
     }
 
-    // 1. Featured Artists — very top
+    // 1. Quick Picks (new release songs) — very top
+    if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
+      data.push({ id: "new-release-songs", type: "new-release-songs" });
+    }
+
+    // 2. Featured Artists
     if (featuredArtists.length > 0) {
       data.push({ id: "featured-artists", type: "featured-artists" });
     }
 
-    // 2. Jump Back In (recents)
+    // 3. Jump Back In (recents)
     if (recentlyPlayed.length > 0) {
       data.push({ id: "recents", type: "recents" });
-    }
-
-    // 3. Daily song picks: actual playable tracks, not playlist cards.
-    if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
-      data.push({ id: "new-release-songs", type: "new-release-songs" });
     }
 
     // 3.5 YouTube Trending Hits
@@ -2104,58 +2276,66 @@ function useHomeScreenInnerView() {
     [routerPush]
   );
 
-  const getCategoryPlaylistElement = useCallback(
-    (categoryId: string, categoryTitle: string) =>
-      function CategoryPlaylistCard({ item }: { item: HomeCategoryData["results"][number] }) {
-        const imageUrl = getHomeCategoryItemImageUrl(item);
-        const sourceLabel = getHomeCategorySourceLabel(item);
+  const categoryCardCallbacks = useMemo(
+    () => ({ openJioSaavnPlaylist, openYouTubeMusicPlaylist }),
+    [openJioSaavnPlaylist, openYouTubeMusicPlaylist]
+  );
 
-        return (
-          <Pressable
-            style={({ pressed }) => [styles.rectCard, pressed && styles.cardPressed]}
-            onPress={() => {
-              if (item.source === "youtube") {
-                openYouTubeMusicPlaylist({
-                  id: item.id,
-                  name: item.name,
-                  imageUrl,
-                  songCount: Number(item.songCount || 0),
-                });
-                return;
-              }
-
-              openJioSaavnPlaylist({
+  const renderCategoryPlaylist = useCallback(
+    ({ item, categoryId, categoryTitle }: { item: HomeCategoryData["results"][number]; categoryId: string; categoryTitle: string }) => {
+      const imageUrl = getHomeCategoryItemImageUrl(item);
+      return (
+        <Pressable
+          style={({ pressed }) => [styles.rectCard, pressed && styles.cardPressed]}
+          onPress={() => {
+            if (item.source === "youtube") {
+              categoryCardCallbacks.openYouTubeMusicPlaylist({
                 id: item.id,
                 name: item.name,
                 imageUrl,
                 songCount: Number(item.songCount || 0),
-                url: item.url,
               });
-            }}
-          >
-            <View style={styles.rectCardImageWrap}>
-              <Image
-                source={{ uri: imageUrl }}
-                style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
-                contentFit="contain"
-                transition={HOME_IMAGE_TRANSITION_MS}
-                cachePolicy="memory-disk"
-                recyclingKey={`${categoryId}-${item.id}`}
-              />
-              <View pointerEvents="none" style={styles.brandCoverBadge}>
-                <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
-              </View>
+              return;
+            }
+            categoryCardCallbacks.openJioSaavnPlaylist({
+              id: item.id,
+              name: item.name,
+              imageUrl,
+              songCount: Number(item.songCount || 0),
+              url: item.url,
+            });
+          }}
+        >
+          <View style={styles.rectCardImageWrap}>
+            <Image
+              source={{ uri: imageUrl }}
+              style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
+              contentFit="contain"
+              transition={HOME_IMAGE_TRANSITION_MS}
+              cachePolicy="memory-disk"
+              recyclingKey={`${categoryId}-${item.id}`}
+            />
+            <View pointerEvents="none" style={styles.brandCoverBadge}>
+              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
             </View>
-            <Text style={styles.rectCardTitle} numberOfLines={2}>
-              {item.name}
-            </Text>
-            <Text style={styles.rectCardMeta} numberOfLines={1}>
-              {item.songCount > 0 ? `${sourceLabel} - ${item.songCount} songs` : sourceLabel || categoryTitle}
-            </Text>
-          </Pressable>
-        );
-      },
-    [openJioSaavnPlaylist, openYouTubeMusicPlaylist]
+          </View>
+          <Text style={styles.rectCardTitle} numberOfLines={2}>
+            {item.name}
+          </Text>
+          <Text style={styles.rectCardMeta} numberOfLines={1}>
+            {item.songCount > 0 ? `${item.songCount} songs` : categoryTitle}
+          </Text>
+        </Pressable>
+      );
+    },
+    [categoryCardCallbacks]
+  );
+
+  const makeCategoryRenderItem = useCallback(
+    (categoryId: string, categoryTitle: string) =>
+      ({ item }: { item: HomeCategoryData["results"][number] }) =>
+        renderCategoryPlaylist({ item, categoryId, categoryTitle }),
+    [renderCategoryPlaylist]
   );
 
   const renderRecommendationPlaylist = useCallback(
@@ -2188,38 +2368,6 @@ function useHomeScreenInnerView() {
     [openRecommendationPlaylist]
   );
 
-  const renderNewReleaseSong = useCallback(
-    ({ item }: { item: Song }) => (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Play ${item.title}`}
-        style={({ pressed }) => [styles.rectCard, pressed && styles.cardPressed]}
-        onPress={() => handleNewReleaseSongPress(item)}
-      >
-        <View style={styles.rectCardImageWrap}>
-          <Image
-            source={{ uri: item.coverUrl || undefined }}
-            style={[styles.rectCardImage, { borderColor: Colors.cardBorder }]}
-            contentFit="contain"
-            transition={HOME_IMAGE_TRANSITION_MS}
-            cachePolicy="memory-disk"
-            recyclingKey={`new-release-song-${item.id}`}
-          />
-          <View pointerEvents="none" style={styles.brandCoverBadge}>
-            <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
-          </View>
-        </View>
-        <Text style={styles.rectCardTitle} numberOfLines={2}>
-          {item.title}
-        </Text>
-        <Text style={styles.rectCardMeta} numberOfLines={1}>
-          {item.artist}
-        </Text>
-      </Pressable>
-    ),
-    [handleNewReleaseSongPress]
-  );
-
   const renderYouTubeTrendingPlaylist = useCallback(
     ({ item }: { item: YouTubeMusicPlaylistCard }) => (
       <Pressable
@@ -2249,22 +2397,104 @@ function useHomeScreenInnerView() {
         <Text style={styles.rectCardTitle} numberOfLines={2}>
           {item.name}
         </Text>
+        <Text style={styles.rectCardMeta} numberOfLines={1}>
+          {item.songCount ? `${item.songCount} songs` : "Playlist"}
+        </Text>
       </Pressable>
     ),
     [openYouTubeMusicPlaylist]
   );
 
-  const renderSongPlaceholder = useCallback(
-    ({ item }: { item: number }) => (
-      <View style={styles.rectCard}>
-        <View style={styles.rectCardImageWrap}>
-          <View style={[styles.rectCardImage, styles.placeholderBlock]} />
-        </View>
-        <View style={[styles.placeholderLine, styles.placeholderLineTitle]} />
-        <View style={[styles.placeholderLine, styles.placeholderLineMeta]} />
+  const quickPicksChunks = useMemo(() => {
+    return chunkArray(newReleaseSongs, 4).filter((chunk) => chunk.length === 4);
+  }, [newReleaseSongs]);
+
+  const renderQuickPicksColumnSeparator = useCallback(() => <View style={{ width: 14 }} />, []);
+
+  const renderQuickPicksColumn = useCallback(
+    ({ item: columnSongs }: { item: Song[] }) => (
+      <View style={{ width: windowWidth * 0.86, gap: 10 }}>
+        {columnSongs.map((song) => {
+          const isActive = currentSongId === song.id;
+          return (
+            <View key={song.id} style={styles.quickPickRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  { flex: 1, flexDirection: "row", alignItems: "center" },
+                  pressed && styles.quickPickRowPressed,
+                ]}
+                onPress={() => handleNewReleaseSongPress(song)}
+              >
+                <Image
+                  source={{ uri: song.coverUrl }}
+                  style={styles.quickPickCover}
+                  contentFit="cover"
+                  recyclingKey={`quick-pick-${song.id}`}
+                />
+                <View style={styles.quickPickInfo}>
+                  <Text style={[styles.quickPickTitle, isActive && { color: Colors.primary }]} numberOfLines={1}>
+                    {song.title}
+                  </Text>
+                  <Text style={styles.quickPickArtist} numberOfLines={1}>
+                    {song.artist}
+                  </Text>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  try {
+                    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                    const prunedSong = {
+                      id: song.id,
+                      title: song.title,
+                      artist: song.artist,
+                      album: song.album || "",
+                      coverUrl: song.coverUrl || "",
+                      audioUrl: song.audioUrl ? song.audioUrl.split("?")[0] : "",
+                      source: song.source,
+                    };
+                    routerPush({
+                      pathname: "/song-options",
+                      params: {
+                        song: JSON.stringify(prunedSong),
+                        showDownload: song.source !== "youtube" ? "1" : "0",
+                        canRemove: "0",
+                        optionContext: "",
+                      },
+                    });
+                  } catch (err) {
+                    logger.error("[QuickPicks] Failed to open options menu:", err);
+                    showGlobalToast("Could not open options");
+                  }
+                }}
+                hitSlop={10}
+                style={styles.quickPickMore}
+              >
+                <Ionicons name="ellipsis-vertical" size={18} color="rgba(255, 255, 255, 0.6)" />
+              </Pressable>
+            </View>
+          );
+        })}
       </View>
     ),
-    []
+    [currentSongId, handleNewReleaseSongPress, routerPush, windowWidth]
+  );
+
+  const renderQuickPicksPlaceholder = useCallback(
+    () => (
+      <View style={{ width: windowWidth * 0.86, gap: 10 }}>
+        {[0, 1, 2, 3].map((val) => (
+          <View key={val} style={styles.quickPickRow}>
+            <View style={[styles.quickPickCover, styles.placeholderBlock]} />
+            <View style={styles.quickPickInfo}>
+              <View style={[styles.placeholderLine, { width: "70%", height: 14, marginBottom: 6 }]} />
+              <View style={[styles.placeholderLine, { width: "45%", height: 11 }]} />
+            </View>
+          </View>
+        ))}
+      </View>
+    ),
+    [windowWidth]
   );
 
   const renderRectPlaceholder = useCallback(
@@ -2450,20 +2680,9 @@ function useHomeScreenInnerView() {
     videoSafeTopInset,
   ]);
 
-  const homeHeaderTitleNode = useMemo(
-    () => (
-      <ShinyText
-        text="MAVRIXFY"
-        speed={2.4}
-        delay={0.6}
-        color="#F8FBF9"
-        shineColor="#FFFFFF"
-        spread={130}
-        direction="left"
-        style={styles.headerBrandTitle}
-      />
-    ),
-    []
+  const moodChipsElement = useMemo(
+    () => <MoodChips selectedMood={selectedMood} onMoodPress={handleMoodPress} />,
+    [handleMoodPress, selectedMood]
   );
 
   const getTopHeaderElement = useCallback(() => {
@@ -2471,12 +2690,36 @@ function useHomeScreenInnerView() {
       <AppTopHeader
         topInset={topInset}
         elevated={isHomeHeaderElevated}
-        titleNode={homeHeaderTitleNode}
-        left={<AppTopHeaderProfileButton />}
-        right={<AppTopHeaderDownloadButton />}
+        titleNode={null}
+        left={
+          <View style={styles.headerBrandRow}>
+            <Text style={styles.headerBrandLargeTitle}>Mavrixfy</Text>
+          </View>
+        }
+        leftWidth={150}
+        right={
+          <View style={styles.headerRightActions}>
+            <Pressable
+              hitSlop={8}
+              onPress={() => {
+                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                router.push("/notifications");
+              }}
+            >
+              <Animated.View style={[styles.notificationBellIconWrap, animatedBellStyle]}>
+                <Ionicons name="notifications-outline" size={24} color="#F8FBF9" />
+                {unreadNotifCount > 0 && (
+                  <View style={styles.notificationUnreadDot} />
+                )}
+              </Animated.View>
+            </Pressable>
+            <AppTopHeaderProfileButton />
+          </View>
+        }
+        rightWidth={85}
       />
     );
-  }, [homeHeaderTitleNode, isHomeHeaderElevated, topInset]);
+  }, [isHomeHeaderElevated, topInset, unreadNotifCount, animatedBellStyle]);
 
   const renderEmptyState = useCallback(() => {
     const isNetworkIssue = homeFeedState === "network";
@@ -2531,9 +2774,23 @@ function useHomeScreenInnerView() {
   }, [handleRefresh, homeFeedState, routerPush]);
 
   const getSectionHeaderElement = useCallback((title: string, onViewAll?: () => void) => {
+    const isQuickPicks = title === "Quick picks";
     return (
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          {isQuickPicks && (
+            <View style={styles.quickPicksAvatarWrap}>
+              {isAuthenticated && user?.picture ? (
+                <Image source={{ uri: user.picture }} style={styles.quickPicksAvatar} contentFit="cover" />
+              ) : (
+                <View style={styles.quickPicksAvatarFallback}>
+                  <Ionicons name="person-circle-outline" size={22} color="#F8FBF9" />
+                </View>
+              )}
+            </View>
+          )}
+          <Text style={styles.sectionTitle}>{title}</Text>
+        </View>
         {onViewAll ? (
           <Pressable onPress={onViewAll} hitSlop={8}>
             <Text style={styles.viewAllText}>View All</Text>
@@ -2541,7 +2798,7 @@ function useHomeScreenInnerView() {
         ) : null}
       </View>
     );
-  }, []);
+  }, [isAuthenticated, user]);
 
   const renderRowSeparator = useCallback(() => <View style={styles.rowSeparator} />, []);
 
@@ -2571,28 +2828,27 @@ function useHomeScreenInnerView() {
         case "new-release-songs":
           return (
             <View style={styles.section}>
-              {getSectionHeaderElement("New Release Songs")}
+              {getSectionHeaderElement("Quick picks")}
               {newReleaseSongs.length > 0 ? (
                 <FlatList
                   horizontal
-                  data={newReleaseSongs}
-                  keyExtractor={(item) => `new-release-song-${item.id}`}
-                  renderItem={renderNewReleaseSong}
-                  ItemSeparatorComponent={renderRowSeparator}
+                  data={quickPicksChunks}
+                  keyExtractor={(_, index) => `quick-picks-col-${index}`}
+                  renderItem={renderQuickPicksColumn}
+                  ItemSeparatorComponent={renderQuickPicksColumnSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
-                  initialNumToRender={HOME_ROW_INITIAL_RENDER_COUNT}
-                  maxToRenderPerBatch={HOME_ROW_INITIAL_RENDER_COUNT}
-                  windowSize={HOME_ROW_WINDOW_SIZE}
-                  removeClippedSubviews={Platform.OS === "android"}
+                  snapToInterval={windowWidth * 0.86 + 14}
+                  decelerationRate="fast"
+                  snapToAlignment="start"
                 />
               ) : (
                 <FlatList
                   horizontal
-                  data={PLACEHOLDER_ROW_ITEMS}
-                  keyExtractor={(item) => `new-release-song-loading-${item}`}
-                  renderItem={renderSongPlaceholder}
-                  ItemSeparatorComponent={renderRowSeparator}
+                  data={QUICK_PICK_PLACEHOLDER_COLUMNS}
+                  keyExtractor={(item) => `quick-picks-loading-${item}`}
+                  renderItem={renderQuickPicksPlaceholder}
+                  ItemSeparatorComponent={renderQuickPicksColumnSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
                   scrollEnabled={false}
@@ -2604,7 +2860,7 @@ function useHomeScreenInnerView() {
         case "youtube-trending":
           return (
             <View style={styles.section}>
-              {getSectionHeaderElement("Trending on YouTube Music")}
+              {getSectionHeaderElement("Trending Now")}
               {youtubeTrendingPlaylists.length > 0 ? (
                 <FlatList
                   horizontal
@@ -2696,14 +2952,15 @@ function useHomeScreenInnerView() {
                   horizontal
                   data={section.data.results}
                   keyExtractor={(item) => `${section.data.id}-${item.id}`}
-                  renderItem={getCategoryPlaylistElement(section.data.id, section.data.title)}
+                  renderItem={makeCategoryRenderItem(section.data.id, section.data.title)}
                   ItemSeparatorComponent={renderRowSeparator}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.rowContent}
                   initialNumToRender={HOME_ROW_INITIAL_RENDER_COUNT}
                   maxToRenderPerBatch={HOME_ROW_INITIAL_RENDER_COUNT}
+                  updateCellsBatchingPeriod={30}
                   windowSize={HOME_ROW_WINDOW_SIZE}
-                  removeClippedSubviews={Platform.OS === "android"}
+                  removeClippedSubviews
                 />
               ) : (
                 <FlatList
@@ -2748,20 +3005,23 @@ function useHomeScreenInnerView() {
       recentlyPlayed,
       renderRecentCard,
       newReleaseSongs,
-      renderNewReleaseSong,
-      renderSongPlaceholder,
+      quickPicksChunks,
+      renderQuickPicksColumn,
+      renderQuickPicksColumnSeparator,
+      renderQuickPicksPlaceholder,
       publicPlaylistsForSection,
       renderPublicPlaylist,
       renderRectPlaceholder,
       featuredArtists,
       renderArtistCard,
-      getCategoryPlaylistElement,
+      makeCategoryRenderItem,
       youtubeTrendingPlaylists,
       renderYouTubeTrendingPlaylist,
       renderRecommendationPlaylist,
       getSectionHeaderElement,
       renderRowSeparator,
       routerPush,
+      windowWidth,
     ]
   );
 
@@ -2777,6 +3037,18 @@ function useHomeScreenInnerView() {
       />
     ),
     [handleRefresh, refreshing, topInset]
+  );
+
+  const homeFeedListHeader = useMemo(
+    () => (
+      <>
+        {getLiveVideoElement()}
+        {moodChipsElement}
+        <PromotionBanner />
+        <AppPromotionModal />
+      </>
+    ),
+    [getLiveVideoElement, moodChipsElement]
   );
 
   const shouldShowSkeleton = (loading || isRecommendationFeedLoading) && sections.length === 0;
@@ -2812,6 +3084,11 @@ function useHomeScreenInnerView() {
 
   return (
     <View style={styles.container}>
+      <LinearGradient
+        colors={["rgba(38, 225, 154, 0.28)", "rgba(24, 160, 251, 0.15)", "rgba(16, 20, 26, 0)"]}
+        locations={[0, 0.65, 1]}
+        style={styles.headerGlowGradient}
+      />
       {/* Slim banner when offline but cached content is available */}
       {!isOnline && <OfflineBanner />}
       <FlatList
@@ -2826,16 +3103,10 @@ function useHomeScreenInnerView() {
         scrollEventThrottle={16}
         initialNumToRender={HOME_VERTICAL_INITIAL_RENDER_COUNT}
         maxToRenderPerBatch={HOME_VERTICAL_MAX_RENDER_BATCH}
-        updateCellsBatchingPeriod={50}
+        updateCellsBatchingPeriod={30}
         windowSize={HOME_VERTICAL_WINDOW_SIZE}
-        removeClippedSubviews={Platform.OS === "android"}
-        ListHeaderComponent={
-          <>
-            {getLiveVideoElement()}
-            <PromotionBanner />
-            <AppPromotionModal />
-          </>
-        }
+        removeClippedSubviews
+        ListHeaderComponent={homeFeedListHeader}
         ListEmptyComponent={renderEmptyState}
       />
       {getTopHeaderElement()}
@@ -2948,14 +3219,43 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     letterSpacing: 0,
   },
+  headerBrandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  headerBrandLargeTitle: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0,
+  },
+  headerRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  notificationBellIconWrap: {
+    position: "relative",
+  },
+  notificationUnreadDot: {
+    position: "absolute",
+    top: -1,
+    right: -1,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.primary,
+    borderWidth: 1.5,
+    borderColor: "#10141a",
+  },
   liveVideoWrap: {
     width: "100%",
     marginTop: 0,
-    backgroundColor: Colors.background,
+    backgroundColor: "transparent",
   },
   liveVideoSurface: {
     width: "100%",
-    backgroundColor: Colors.background,
+    backgroundColor: "transparent",
     overflow: "hidden",
     position: "relative",
   },
@@ -3294,5 +3594,104 @@ const styles = StyleSheet.create({
   cardPressed: {
     opacity: 0.76,
     transform: [{ scale: 0.985 }],
+  },
+  headerGlowGradient: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 540,
+    zIndex: 0,
+  },
+  moodChipsContainer: {
+    width: "100%",
+    paddingVertical: 12,
+    backgroundColor: "transparent",
+  },
+  moodChipsContent: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  moodChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  moodChipUnselected: {
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderColor: "rgba(255, 255, 255, 0.05)",
+  },
+  moodChipSelected: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#FFFFFF",
+  },
+  moodChipText: {
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+  },
+  moodChipTextUnselected: {
+    color: "#FFFFFF",
+  },
+  moodChipTextSelected: {
+    color: "#10141a",
+  },
+  quickPickRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 4,
+    width: "100%",
+  },
+  quickPickRowPressed: {
+    opacity: 0.7,
+  },
+  quickPickCover: {
+    width: 52,
+    height: 52,
+    borderRadius: 4,
+    marginRight: 12,
+    backgroundColor: Colors.surfaceLight,
+  },
+  quickPickInfo: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 12,
+  },
+  quickPickTitle: {
+    color: "#FFFFFF",
+    fontSize: 15.5,
+    fontFamily: "Inter_600SemiBold",
+  },
+  quickPickArtist: {
+    color: "rgba(255, 255, 255, 0.6)",
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    marginTop: 2,
+  },
+  quickPickMore: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+  },
+  quickPicksAvatarWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "transparent",
+  },
+  quickPicksAvatar: {
+    width: "100%",
+    height: "100%",
+  },
+  quickPicksAvatarFallback: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

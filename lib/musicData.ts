@@ -174,9 +174,10 @@ export function getBestAudioUrlWithQuality(downloadUrls: unknown, quality: "low"
   };
 
   const preference = targetQualityOrder[quality] || targetQualityOrder.high;
+  const candidatesByQuality = new Map(candidates.map((candidate) => [candidate.quality, candidate]));
 
   for (const pref of preference) {
-    const found = candidates.find(c => c.quality === pref);
+    const found = candidatesByQuality.get(pref);
     if (found) return found.url;
   }
 

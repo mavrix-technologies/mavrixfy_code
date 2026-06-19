@@ -21,10 +21,10 @@ function qualityToBitrate(quality: DownloadQuality): string {
 
 /**
  * Attempt to construct a quality-specific audio URL
- * JioSaavn URLs follow patterns like:
- * - .../320/...
- * - .../128/...
- * - .../48/...
+ * JioSaavn CDN URLs encode the bitrate in the filename, e.g.:
+ * - https://aac.saavncdn.com/<hash>/<bitrate>_<hash>.mp4
+ * - https://preview.saavncdn.com/<hash>/<bitrate>_<hash>.mp4
+ * Legacy responses may also embed /<bitrate>/ as a path segment.
  */
 export function getAudioUrlByQuality(baseUrl: string, quality: DownloadQuality): string {
   if (!baseUrl || typeof baseUrl !== "string") {
@@ -34,14 +34,31 @@ export function getAudioUrlByQuality(baseUrl: string, quality: DownloadQuality):
   const targetBitrate = qualityToBitrate(quality);
   const bitrateNum = targetBitrate.replace("kbps", "");
 
-  // Try to replace bitrate patterns in URL
-  // Pattern 1: /320/ or /128/ or /96/ etc
-  const withSlashes = baseUrl.replace(/\/(?:320|256|192|160|128|96|64|48|32)\//g, `/${bitrateNum}/`);
-  if (withSlashes !== baseUrl) {
-    return withSlashes;
+  // Known JioSaavn CDN hosts whose path layout reliably uses a bitrate segment.
+  // Constraining the slash pattern to these hosts avoids rewriting arbitrary
+  // numeric path segments (e.g. .../users/128/... or .../albums/64/...) that
+  // happen to collide with a bitrate value.
+  const JIOSAAVN_HOSTS = ["saavncdn.com", "saavn.com", "jiosaavn.com"];
+
+  // Pattern 1: /320/ or /128/ or /96/ etc — but only on known audio CDN hosts
+  // to avoid false positives on unrelated numeric path segments.
+  try {
+    const { host } = new URL(baseUrl);
+    if (JIOSAAVN_HOSTS.some((h) => host.includes(h))) {
+      const withSlashes = baseUrl.replace(
+        /\/(?:320|256|192|160|128|96|64|48|32)\//g,
+        `/${bitrateNum}/`
+      );
+      if (withSlashes !== baseUrl) {
+        return withSlashes;
+      }
+    }
+  } catch {
+    // Not an absolute URL — skip the host-scoped slash pattern.
   }
 
-  // Pattern 2: _320 or _128 etc in filename
+  // Pattern 2: _320 or _128 etc in filename (the real JioSaavn encoding).
+  // Anchored before a file extension, trailing underscore, or end of path.
   const withUnderscore = baseUrl.replace(/_(?:320|256|192|160|128|96|64|48|32)(?=\.|_|$)/g, `_${bitrateNum}`);
   if (withUnderscore !== baseUrl) {
     return withUnderscore;

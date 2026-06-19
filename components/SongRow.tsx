@@ -19,6 +19,7 @@ import { usePlayerRow } from "@/contexts/PlayerContext";
 import EqualizerBars from "@/components/EqualizerBars";
 import { showGlobalToast } from "@/app/_layout";
 import DownloadButton from "@/components/DownloadButton";
+import { logger } from "@/lib/logger";
 
 interface Props {
   song: Song;
@@ -230,7 +231,15 @@ const SongRow = memo(function SongRow({
       router.push({
         pathname: "/song-options",
         params: {
-          song: JSON.stringify(song),
+          song: JSON.stringify({
+            id: song.id,
+            title: song.title,
+            artist: song.artist,
+            album: song.album || "",
+            coverUrl: song.coverUrl || "",
+            audioUrl: song.audioUrl ? song.audioUrl.split("?")[0] : "",
+            source: song.source,
+          }),
           showDownload: showDownload && !onRemove && !canRemoveFromPlaylist ? "1" : "0",
           canRemove: onRemove || canRemoveFromPlaylist ? "1" : "0",
           optionContext: optionContext ?? "",
@@ -240,7 +249,7 @@ const SongRow = memo(function SongRow({
         },
       });
     } catch (error) {
-      console.error("[SongRow] Failed to open song options:", error);
+      logger.error("[SongRow] Failed to open song options:", error);
     }
 
     optionOpenTimerRef.current = setTimeout(() => {
@@ -327,8 +336,8 @@ const SongRow = memo(function SongRow({
               </Pressable>
             ) : null}
 
-            {/* Download button - only for YouTube songs */}
-            {showDownload && !onRemove && song.source === 'youtube' && song.youtubeVideoId ? (
+            {/* Download button - native audio only */}
+            {showDownload && !onRemove && song.source !== 'youtube' ? (
               <View
                 onTouchStart={(e) => e.stopPropagation()}
                 style={styles.downloadBtnWrapper}

@@ -4,32 +4,19 @@
   "version": "2.6.0",
   "scripts": {
     "expo:dev": "EXPO_PACKAGER_PROXY_URL=https://$REPLIT_DEV_DOMAIN REACT_NATIVE_PACKAGER_HOSTNAME=$REPLIT_DEV_DOMAIN npx expo start --localhost",
-    "server:dev": "set NODE_ENV=development&& tsx server/index.ts",
     "expo:start:static:build": "npx expo start --no-dev --minify --localhost",
-    "expo:static:build": "node scripts/build.js",
-    "server:build": "esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=server_dist",
-    "server:prod": "set NODE_ENV=production&& node server_dist/index.js",
-    "db:push": "drizzle-kit push",
     "start": "npx expo start --dev-client",
     "start:expo-go": "npx expo start",
     "lint": "npx expo lint",
     "lint:fix": "npx expo lint --fix",
-    "generate:icons": "node scripts/generate-app-icons.js",
-    "fix:deps": "node scripts/fix-dependencies.js",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "version:increment": "node scripts/increment-version.js patch",
-    "version:major": "node scripts/increment-version.js major",
-    "version:minor": "node scripts/increment-version.js minor",
-    "version:patch": "node scripts/increment-version.js patch",
-    "test:api": "node scripts/test-api-connection.js",
     "build:apk": "cd android && gradlew.bat assembleRelease",
     "build:aab:local": "cd android && gradlew.bat bundleRelease",
     "build:eas": "npx eas build --platform android --profile production",
     "build:aab": "npx eas build --platform android --profile production-aab",
     "update:production": "npx eas update --branch production",
     "update:preview": "npx eas update --branch preview",
-    "import:songs": "tsx scripts/import-songs-from-csv.ts",
     "firestore:deploy:indexes": "npx firebase-tools deploy --only firestore:indexes",
     "firestore:deploy:rules": "npx firebase-tools deploy --only firestore:rules",
     "postinstall": "patch-package",
@@ -39,7 +26,7 @@
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
     "@gorhom/bottom-sheet": "^5.2.14",
-    "@react-native-async-storage/async-storage": "1.23.1",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "8.4.4",
     "@react-native-community/slider": "5.0.1",
     "@react-native-google-signin/google-signin": "^16.1.2",
@@ -96,16 +83,13 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@expo/ngrok": "^4.1.0",
-    "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "~19.1.10",
     "@typescript-eslint/parser": "^8.58.0",
     "eslint": "^9.31.0",
     "eslint-config-expo": "~10.0.0",
     "patch-package": "^8.0.1",
-    "tsx": "^4.20.6",
-    "typescript": "~5.9.2",
-    "ws": "^8.18.0"
+    "typescript": "~5.9.2"
   },
   "expo": {
     "doctor": {
@@ -115,14 +99,10 @@
           "react-native-track-player"
         ],
         "listUnknownPackages": true
+      },
+      "appConfigFieldsNotSyncedCheck": {
+        "enabled": false
       }
-    }
-  },
-  "reactDoctor": {
-    "ignore": {
-      "files": [
-        "youtube-music-api/venv/**"
-      ]
     }
   },
   "overrides": {

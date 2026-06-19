@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Song, Playlist } from "./musicData";
+import { logger } from "@/lib/logger";
 
 const KEYS = {
   LIKED_SONGS: "@mavrixfy_liked_songs",
@@ -44,8 +45,33 @@ export interface UserPlaylist {
   updatedAt: number;
 }
 
+export type YouTubeVideoQualityPreference = "auto" | "low" | "medium" | "high";
+
+function normalizeYouTubeVideoQuality(value: unknown): YouTubeVideoQualityPreference {
+  return value === "low" || value === "medium" || value === "high" || value === "auto"
+    ? value
+    : "auto";
+}
+
+export function getYouTubePlaybackQuality(
+  quality: YouTubeVideoQualityPreference
+): "default" | "small" | "medium" | "hd720" {
+  switch (quality) {
+    case "low":
+      return "small";
+    case "medium":
+      return "medium";
+    case "high":
+      return "hd720";
+    case "auto":
+    default:
+      return "default";
+  }
+}
+
 export interface AppSettings {
   streamingQuality: "low" | "medium" | "high";
+  videoBackgroundQuality: YouTubeVideoQualityPreference;
   downloadQuality: "low" | "medium" | "high";
   equalizer: Record<string, number>;
   equalizerEnabled: boolean;
@@ -58,6 +84,7 @@ export interface AppSettings {
 
 const DEFAULT_SETTINGS: AppSettings = {
   streamingQuality: "high",
+  videoBackgroundQuality: "auto",
   downloadQuality: "high",
   equalizer: {
     "60Hz": 0,
@@ -196,14 +223,13 @@ export async function pruneNonEssentialStorageCaches(): Promise<void> {
 
     if (keysToRemove.length > 0) {
       await AsyncStorage.multiRemove(keysToRemove);
-      console.log(`[Storage] Pruned ${keysToRemove.length} non-essential cache keys to free up space.`);
     }
   } catch (err) {
-    console.error("[Storage] Failed to prune storage caches:", err);
+    logger.error("[Storage] Failed to prune storage caches:", err);
   }
 }
 
-export async function safeAsyncStorageSetItem(key: string, value: string): Promise<void> {
+async function safeAsyncStorageSetItem(key: string, value: string): Promise<void> {
   try {
     await AsyncStorage.setItem(key, value);
   } catch (err: any) {
@@ -213,10 +239,10 @@ export async function safeAsyncStorageSetItem(key: string, value: string): Promi
       try {
         await AsyncStorage.setItem(key, value);
       } catch (retryErr) {
-        console.error(`[Storage] Failed to set key ${key} even after pruning:`, retryErr);
+        logger.error(`[Storage] Failed to set key ${key} even after pruning:`, retryErr);
       }
     } else {
-      console.error(`[Storage] Failed to set key ${key}:`, err);
+      logger.error(`[Storage] Failed to set key ${key}:`, err);
     }
   }
 }
@@ -231,10 +257,10 @@ async function safeAsyncStorageMultiSet(pairs: [string, string][]): Promise<void
       try {
         await AsyncStorage.multiSet(pairs);
       } catch (retryErr) {
-        console.error(`[Storage] Failed to multiSet even after pruning:`, retryErr);
+        logger.error("[Storage] Failed to multiSet even after pruning:", retryErr);
       }
     } else {
-      console.error(`[Storage] Failed to multiSet:`, err);
+      logger.error("[Storage] Failed to multiSet:", err);
     }
   }
 }
@@ -443,6 +469,7 @@ export async function getSettings(): Promise<AppSettings> {
       ...(saved.equalizer || {}),
     },
     hapticsEnabled: Boolean(saved.hapticsEnabled),
+    videoBackgroundQuality: normalizeYouTubeVideoQuality(saved.videoBackgroundQuality),
     ambientBackdropEnabled: saved.ambientBackdropEnabled !== undefined ? Boolean(saved.ambientBackdropEnabled) : DEFAULT_SETTINGS.ambientBackdropEnabled,
   };
 }

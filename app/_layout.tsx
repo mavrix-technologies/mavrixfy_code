@@ -5,7 +5,8 @@ import { DarkTheme,
   ThemeProvider } from "@react-navigation/native";
 import { Stack,
   useRouter,
-  useSegments } from "expo-router";
+  useSegments,
+  router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
 import React,
@@ -19,14 +20,19 @@ import { ActivityIndicator,
   Platform,
   StyleSheet,
   View,
-  Text
+  Text,
+  Pressable,
+  AppState
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MD3DarkTheme, PaperProvider } from "react-native-paper";
+import { MD3DarkTheme, PaperProvider, Modal, Portal } from "react-native-paper";
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from "@expo-google-fonts/inter";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
+import { Image } from "expo-image";
 import { queryClient } from "@/lib/query-client";
 import { PlayerProvider } from "@/contexts/PlayerContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
@@ -36,7 +42,7 @@ import Colors from "@/constants/colors";
 import { logAppOpen } from "@/lib/analytics";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { getRecentlyPlayed } from "@/lib/storage";
-import { AppNavBar } from "@/app/(tabs)/_layout";
+
 import QueueBottomSheet from "@/components/QueueBottomSheet";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { logger } from "@/lib/logger";
@@ -74,7 +80,7 @@ LogBox.ignoreLogs([
 ]);
 
 // Screens where the docked mini player and tab bar must not cover the route.
-const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "player", "profile", "delete-account"]);
+const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "profile", "delete-account", "notifications"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
@@ -86,6 +92,13 @@ type GlobalToastListener = (message: string) => void;
 const globalToastListeners = new Set<GlobalToastListener>();
 const GLOBAL_TOAST_VISIBLE_MS = 1050;
 
+function parseAppVersion(version: string) {
+  return version
+    .split(".")
+    .map(Number)
+    .reduce((acc, part, index) => acc + part * 10 ** (6 - index * 2), 0);
+}
+
 const IOS_VERTICAL_SHEET_OPTIONS = {
   presentation: "card" as const,
   animation: "slide_from_bottom" as const,
@@ -93,18 +106,6 @@ const IOS_VERTICAL_SHEET_OPTIONS = {
   gestureEnabled: true,
   gestureDirection: "vertical" as const,
   fullScreenGestureEnabled: true,
-  contentStyle: { backgroundColor: Colors.background },
-};
-
-const ANDROID_VERTICAL_SHEET_OPTIONS = {
-  presentation: "formSheet" as const,
-  animation: "slide_from_bottom" as const,
-  sheetAllowedDetents: [1.0],
-  sheetInitialDetentIndex: 0,
-  sheetCornerRadius: 32,
-  sheetGrabberVisible: false,
-  sheetExpandsWhenScrolledToEdge: false,
-  gestureEnabled: true,
   contentStyle: { backgroundColor: Colors.background },
 };
 
@@ -216,75 +217,113 @@ function RootLayoutNav() {
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
 
-  // 1. Request notification permission after first paint so startup is not blocked.
+  // ── Enterprise Notification Startup Sequence ────────────────────────────────
+  // Runs once after auth resolves. Handles:
+  //  1. Device registration (token + version + language + timezone → Firestore)
+  //  2. Firestore activity feed sync
+  //  3. Version check (force update / optional update)
+  //  4. Notification listeners (foreground receive + tap → Activity store)
   useEffect(() => {
     if (loading) return;
 
-    let active = true;
-    const timer = setTimeout(() => {
-      InteractionManager.runAfterInteractions(() => {
-        if (!active) return;
-        import("@/services/notificationService")
-          .then(({ requestNotificationPermission }) => {
-            if (active) {
-              requestNotificationPermission();
-            }
-          })
-          .catch(err => logger.error("Failed to request permission:", err));
-      });
-    }, 5000);
-
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [loading]);
-
-  // 2. Register push tokens in Firestore only for authenticated users
-  useEffect(() => {
-    let cleanupNotificationListeners: (() => void) | undefined;
     let isActive = true;
+    let cleanupListeners: (() => void) | undefined;
 
-    import("@/services/notificationService")
-      .then(({ registerForPushNotificationsAsync, registerNotificationListeners }) => {
-        if (!isActive) {
-          return;
-        }
+    const run = async () => {
+      const [notificationService, notificationStore] = await Promise.all([
+        import("@/services/notificationService"),
+        import("@/stores/notificationStore"),
+      ]);
+      const { registerForPushNotificationsAsync, registerNotificationListeners, checkAppVersion } =
+        notificationService;
+      const { addNotification, syncFromFirestore, loadNotifications } = notificationStore;
 
-        // Only save to Firestore when a real user is signed in
-        if (firebaseUser?.uid) {
-          registerForPushNotificationsAsync(firebaseUser.uid);
-        }
+      if (!isActive) return;
 
-        cleanupNotificationListeners = registerNotificationListeners(
-          (notification) => {
-            // Notification received in foreground
-            logger.debug("Foreground notification received", {
-              identifier: notification.request.identifier,
-            });
-          },
-          (response) => {
-            // Notification tapped/clicked
-            const data = response.notification.request.content.data;
-            if (data?.route) {
-              try {
-                routerReplace(data.route as any);
-              } catch (err) {
-                logger.error("Navigation from notification failed:", err);
-              }
+      // Step 1 — Load local notification cache immediately
+      await loadNotifications();
+
+      // Step 2 — Register device (token + metadata) for authenticated users
+      if (firebaseUser?.uid) {
+        void registerForPushNotificationsAsync(firebaseUser.uid);
+        // Step 3 — Sync activity feed from Firestore
+        void syncFromFirestore(firebaseUser.uid);
+      }
+
+      // Step 4 — Version check (non-blocking)
+      const versionInfo = await checkAppVersion().catch(() => null);
+      if (versionInfo?.forceUpdate && isActive) {
+        // Navigate to force update screen
+        try { routerReplace("/force-update" as any); } catch { /* ignore */ }
+        return;
+      }
+
+      // Step 5 — Notification listeners
+      cleanupListeners = registerNotificationListeners(
+        // Foreground received → add to Activity store
+        (notification) => {
+          const content = notification.request.content;
+          const data = content.data as Record<string, string> | null;
+          const notificationId = data?.notificationId ?? notification.request.identifier;
+          void addNotification(
+            content.title ?? "Mavrixfy",
+            content.body ?? "",
+            (data?.type as any) ?? "system",
+            {
+              deeplink: data?.route ?? undefined,
+              notificationId,
+              imageUrl: data?.imageUrl ?? undefined,
+              minAppVersion: data?.minAppVersion ?? undefined,
+              maxAppVersion: data?.maxAppVersion ?? undefined,
+            },
+            firebaseUser?.uid
+          );
+          logger.debug("[Layout] Foreground notification stored in Activity feed");
+        },
+        // Tap / click → add as read + deep link
+        (response) => {
+          const content = response.notification.request.content;
+          const data = content.data as Record<string, string> | null;
+          const notificationId = data?.notificationId ?? response.notification.request.identifier;
+
+          // Add to activity feed (will dedup by notificationId)
+          void addNotification(
+            content.title ?? "Mavrixfy",
+            content.body ?? "",
+            (data?.type as any) ?? "system",
+            {
+              deeplink: data?.route ?? undefined,
+              notificationId,
+              minAppVersion: data?.minAppVersion ?? undefined,
+              maxAppVersion: data?.maxAppVersion ?? undefined,
+            },
+            firebaseUser?.uid
+          );
+
+          // Deep link routing
+          const route = data?.route;
+          if (route) {
+            try { routerReplace(route as any); } catch (err) {
+              logger.error("[Layout] Deep link navigation failed:", err);
             }
           }
-        );
-      })
-      .catch((err) => {
-        logger.error("Failed to load notification service:", err);
+        }
+      );
+    };
+
+    // Delay slightly to not block first paint
+    const timer = setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
+        run().catch((err) => logger.error("[Layout] Notification startup failed:", err));
       });
+    }, 3000);
 
     return () => {
       isActive = false;
-      cleanupNotificationListeners?.();
+      clearTimeout(timer);
+      cleanupListeners?.();
     };
-  }, [firebaseUser?.uid, routerReplace]);
+  }, [loading, firebaseUser?.uid, routerReplace]);
 
   useEffect(() => {
     if (loading) return;
@@ -342,9 +381,11 @@ function RootLayoutNav() {
         <Stack.Screen
           name="player"
           options={{
-            ...(Platform.OS === "android"
-              ? ANDROID_VERTICAL_SHEET_OPTIONS
-              : IOS_VERTICAL_SHEET_OPTIONS),
+            presentation: "transparentModal",
+            animation: "slide_from_bottom",
+            gestureEnabled: false,
+            headerShown: false,
+            contentStyle: { backgroundColor: "transparent" },
           }}
         />
         <Stack.Screen
@@ -387,6 +428,17 @@ function RootLayoutNav() {
           }}
         />
         <Stack.Screen
+          name="notifications"
+          options={{
+            presentation: "card",
+            animation: "slide_from_right",
+            headerShown: false,
+            gestureEnabled: true,
+            gestureDirection: "horizontal",
+            contentStyle: { backgroundColor: "#000000" },
+          }}
+        />
+        <Stack.Screen
           name="artist-mix"
           options={{
             ...(Platform.OS === "android"
@@ -423,13 +475,203 @@ function RootLayoutNav() {
           options={{ gestureEnabled: false }}
         />
       </Stack>
-      {/* Keep the nav visible under utility sheets, but not over full player details. */}
-      {!unmountNavBar && <AppNavBar />}
+
       {/* Queue sheet is always mounted but closed by default (index: -1) */}
       <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
         <QueueBottomSheet ref={globalQueueSheetRef} />
       </View>
+      <InAppPromotionPopup />
     </View>
+  );
+}
+
+function InAppPromotionPopup() {
+  const { firebaseUser } = useAuth();
+  const firebaseUserUid = firebaseUser?.uid;
+  const firebaseUserCreationTime = firebaseUser?.metadata?.creationTime;
+  const [activePopup, setActivePopup] = useState<any>(null);
+  const storeUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!firebaseUserUid) return;
+
+    let isActive = true;
+
+    const checkPopup = async () => {
+      try {
+        const { getNotifications } = await import("@/stores/notificationStore");
+        const items = getNotifications();
+
+        const creationTimeMs = firebaseUserCreationTime
+          ? new Date(firebaseUserCreationTime).getTime()
+          : 0;
+
+        const currentVersion = Constants.expoConfig?.version ?? "0.0.0";
+
+        // Fetch last time activity screen was opened
+        const lastViewedStr = await AsyncStorage.getItem("@Mavrixfy:lastNotificationScreenViewed");
+        const lastViewedTimeMs = lastViewedStr ? new Date(lastViewedStr).getTime() : 0;
+
+        // Filter: only unread promotions/updates sent after user creation
+        const campaignPromos = items.filter((n) => {
+          if (n.type !== "promotion" && n.type !== "update") return false;
+          if (n.read) return false;
+
+          const notifTimeMs = new Date(n.timestamp).getTime();
+
+          // Skip if this notification was already received before user opened the activity feed screen
+          if (lastViewedTimeMs > 0 && notifTimeMs <= lastViewedTimeMs) {
+            return false;
+          }
+
+          // If this is an update, bypass if the user's version is already >= target max version
+          if (n.type === "update" && n.meta?.maxAppVersion) {
+            try {
+              const current = parseAppVersion(currentVersion);
+              const maxTarget = parseAppVersion(n.meta.maxAppVersion);
+              if (current >= maxTarget) {
+                return false;
+              }
+            } catch (err) {
+              logger.warn("[InAppPromotionPopup] Failed to parse version for popup skip:", err);
+            }
+          }
+
+          // Skip notifications sent before the user was registered (with 5s clock buffer)
+          if (creationTimeMs > 0 && notifTimeMs < creationTimeMs - 5000) {
+            return false;
+          }
+          return true;
+        });
+
+        if (campaignPromos.length === 0) return;
+
+        // Sort newest first to ensure we pick the most recent one
+        campaignPromos.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        const promo = campaignPromos[0];
+
+        // Check if we have already shown a popup for this notification ID
+        const seenKey = `@Mavrixfy:seenPopup:${promo.id}`;
+        const seen = await AsyncStorage.getItem(seenKey);
+        if (seen === "true") return;
+
+        if (isActive) {
+          setActivePopup(promo);
+        }
+      } catch (err) {
+        logger.error("[InAppPromotionPopup] Error checking popups:", err);
+      }
+    };
+
+    // Check on mount (app start)
+    checkPopup();
+
+    // Recheck only when user opens/reopens the app (transitions back to active)
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        checkPopup();
+      }
+    });
+
+    return () => {
+      isActive = false;
+      subscription.remove();
+    };
+  }, [firebaseUserCreationTime, firebaseUserUid]);
+
+  useEffect(() => {
+    storeUrlRef.current = null;
+    if (activePopup?.type !== "update") {
+      return;
+    }
+
+    let isActive = true;
+    import("@/services/notificationService")
+      .then(({ checkAppVersion }) => checkAppVersion())
+      .then((info) => {
+        if (isActive && info?.storeUrl) {
+          storeUrlRef.current = info.storeUrl;
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isActive = false;
+    };
+  }, [activePopup?.id, activePopup?.type]);
+
+  if (!activePopup) return null;
+
+  const imageUri = activePopup.imageUrl || activePopup.meta?.imageUrl || activePopup.meta?.coverUrl;
+  const isUpdate = activePopup.type === "update";
+
+  const handleClose = async () => {
+    try {
+      const seenKey = `@Mavrixfy:seenPopup:${activePopup.id}`;
+      const [{ markNotificationAsRead }] = await Promise.all([
+        import("@/stores/notificationStore"),
+        AsyncStorage.setItem(seenKey, "true"),
+      ]);
+      await markNotificationAsRead(activePopup.id, firebaseUserUid);
+    } catch {}
+    setActivePopup(null);
+  };
+
+  const handlePressCta = async () => {
+    await handleClose();
+    if (isUpdate) {
+      const targetUrl = storeUrlRef.current || (Platform.OS === 'ios'
+        ? "https://apps.apple.com/app/mavrixfy/id123456789"
+        : "https://play.google.com/store/apps/details?id=com.mavrixfy.app");
+      try {
+        const { Linking } = await import("react-native");
+        await Linking.openURL(targetUrl);
+      } catch (err) {
+        logger.error("[InAppPromotionPopup] Failed to open store URL:", err);
+      }
+    } else {
+      const route = activePopup.meta?.route || activePopup.meta?.deeplink;
+      if (route) {
+        try {
+          router.push(route as any);
+        } catch (err) {
+          logger.error("[InAppPromotionPopup] Navigation to deep link failed:", err);
+        }
+      }
+    }
+  };
+
+  return (
+    <Portal>
+      <Modal
+        visible={true}
+        onDismiss={handleClose}
+        contentContainerStyle={styles.popupModalContainer}
+      >
+        <View style={styles.popupCard}>
+          {imageUri && (
+            <Image source={{ uri: imageUri }} style={styles.popupImage} contentFit="cover" />
+          )}
+          <View style={styles.popupContent}>
+            <Text style={styles.popupTitle}>{activePopup.title}</Text>
+            <Text style={styles.popupBody}>{activePopup.body}</Text>
+
+            <View style={styles.popupActions}>
+              <Pressable style={styles.popupCloseBtn} onPress={handleClose}>
+                <Text style={styles.popupCloseBtnText}>Close</Text>
+              </Pressable>
+              {(isUpdate || activePopup.meta?.route || activePopup.meta?.deeplink) && (
+                <Pressable style={styles.popupCtaBtn} onPress={handlePressCta}>
+                  <Text style={styles.popupCtaBtnText}>
+                    {isUpdate ? "Update Now" : "Check Out"}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </Portal>
   );
 }
 
@@ -536,5 +778,66 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontSize: 13,
     fontFamily: "Inter_700Bold",
+  },
+  popupModalContainer: {
+    padding: 24,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  popupCard: {
+    width: "100%",
+    backgroundColor: "#181C22",
+    borderRadius: 24,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  popupImage: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  popupContent: {
+    padding: 20,
+  },
+  popupTitle: {
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    marginBottom: 8,
+  },
+  popupBody: {
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    color: "rgba(255,255,255,0.7)",
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  popupActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 12,
+  },
+  popupCloseBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  popupCloseBtnText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: "#FFFFFF",
+  },
+  popupCtaBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+  },
+  popupCtaBtnText: {
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    color: "#000000",
   },
 });

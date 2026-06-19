@@ -26,6 +26,12 @@ const QUALITY_OPTIONS: { label: string; value: "low" | "medium" | "high" }[] = [
   { label: "Medium", value: "medium" },
   { label: "High", value: "high" },
 ];
+const VIDEO_BACKGROUND_QUALITY_OPTIONS: { label: string; value: AppSettings["videoBackgroundQuality"] }[] = [
+  { label: "Auto", value: "auto" },
+  { label: "Low", value: "low" },
+  { label: "Medium", value: "medium" },
+  { label: "High", value: "high" },
+];
 const CROSSFADE_STEPS = Array.from({ length: 13 }, (_, value) => ({
   key: `crossfade-${value}`,
   value,
@@ -75,16 +81,296 @@ function SettingsRow({
   );
 }
 
+type ProfileUser = ReturnType<typeof useAuth>["user"];
+type RouterPush = ReturnType<typeof useRouter>["push"];
+type RouterReplace = ReturnType<typeof useRouter>["replace"];
+type UpdateSettings = (partial: Partial<AppSettings>) => void;
+
+function ProfileHero({
+  user,
+  isGuest,
+}: {
+  user: ProfileUser;
+  isGuest: boolean;
+}) {
+  return (
+    <View style={styles.heroSection}>
+      <View style={styles.avatarShell}>
+        {user?.picture ? (
+          <Image source={{ uri: user.picture }} style={styles.avatar} contentFit="cover" />
+        ) : (
+          <View style={styles.avatarPlaceholder}>
+            <Ionicons name="person" size={32} color={Colors.text} />
+          </View>
+        )}
+      </View>
+      <Text style={styles.heroName}>
+        {user?.name || (isGuest ? "Guest" : "Mavrixfy User")}
+      </Text>
+      {user?.email ? (
+        <Text style={styles.heroEmail}>{user.email}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+function PlaybackSettingsSection({
+  settings,
+  lowEndDevice,
+  updateSettings,
+}: {
+  settings: AppSettings;
+  lowEndDevice: boolean;
+  updateSettings: UpdateSettings;
+}) {
+  const ambientBackdropSwitchValue = lowEndDevice ? false : settings.ambientBackdropEnabled;
+
+  return (
+    <>
+      <Text style={styles.sectionTitle}>Playback</Text>
+      <View style={styles.rowsSurface}>
+        <View style={styles.controlBlock}>
+          <View style={styles.controlHeader}>
+            <View style={styles.rowLeading}>
+              <Ionicons name="speedometer-outline" size={20} color={Colors.primary} />
+            </View>
+            <Text style={styles.rowTitle}>Streaming quality</Text>
+          </View>
+          <View style={styles.segmentRow}>
+            {QUALITY_OPTIONS.map((opt) => {
+              const active = settings.streamingQuality === opt.value;
+              return (
+                <Pressable
+                  key={opt.value}
+                  style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+                  onPress={() => updateSettings({ streamingQuality: opt.value })}
+                >
+                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={[styles.controlBlock, styles.controlBlockBorder]}>
+          <View style={styles.controlHeader}>
+            <View style={styles.rowLeading}>
+              <Ionicons name="git-compare-outline" size={20} color={Colors.primary} />
+            </View>
+            <Text style={styles.rowTitle}>Crossfade</Text>
+            <Text style={styles.valuePill}>{settings.crossfade}s</Text>
+          </View>
+          <View style={styles.crossfadeRow}>
+            {CROSSFADE_STEPS.map((step) => (
+              <Pressable
+                key={step.key}
+                onPress={() => updateSettings({ crossfade: step.value })}
+                style={[styles.crossfadeBar, step.value <= settings.crossfade && styles.crossfadeBarActive]}
+              />
+            ))}
+          </View>
+        </View>
+
+        <SettingsRow
+          icon="swap-horizontal-outline"
+          title="Gapless playback"
+          trailing={
+            <Switch
+              value={settings.gapless}
+              onValueChange={(v) => updateSettings({ gapless: v })}
+              trackColor={{ false: Colors.inactive, true: Colors.primary }}
+              thumbColor={Colors.text}
+            />
+          }
+        />
+        <SettingsRow
+          icon="pulse-outline"
+          title="Normalize volume"
+          trailing={
+            <Switch
+              value={settings.normalizeVolume}
+              onValueChange={(v) => updateSettings({ normalizeVolume: v })}
+              trackColor={{ false: Colors.inactive, true: Colors.primary }}
+              thumbColor={Colors.text}
+            />
+          }
+        />
+        <SettingsRow
+          icon="phone-portrait-outline"
+          title="Ambient video backdrop"
+          subtitle={
+            lowEndDevice
+              ? "Disabled automatically on low-RAM Android devices for smoother playback"
+              : "Show dynamic video loops behind the player"
+          }
+          trailing={
+            <Switch
+              value={ambientBackdropSwitchValue}
+              disabled={lowEndDevice}
+              onValueChange={(v) => updateSettings({ ambientBackdropEnabled: v })}
+              trackColor={{ false: Colors.inactive, true: Colors.primary }}
+              thumbColor={lowEndDevice ? Colors.subtext : Colors.text}
+            />
+          }
+        />
+        <View style={[styles.controlBlock, styles.controlBlockBorder]}>
+          <View style={styles.controlHeader}>
+            <View style={styles.rowLeading}>
+              <Ionicons name="videocam-outline" size={20} color={Colors.primary} />
+            </View>
+            <View style={styles.rowBody}>
+              <Text style={styles.rowTitle}>Video background quality</Text>
+              <Text style={styles.rowSubtitle}>For YouTube Music video backdrops</Text>
+            </View>
+          </View>
+          <View style={styles.segmentRow}>
+            {VIDEO_BACKGROUND_QUALITY_OPTIONS.map((opt) => {
+              const active = settings.videoBackgroundQuality === opt.value;
+              return (
+                <Pressable
+                  key={opt.value}
+                  style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+                  onPress={() => updateSettings({ videoBackgroundQuality: opt.value })}
+                >
+                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        <SettingsRow
+          icon="phone-portrait-outline"
+          title="Haptic touch"
+          trailing={
+            <Switch
+              value={settings.hapticsEnabled}
+              onValueChange={(v) => updateSettings({ hapticsEnabled: v })}
+              trackColor={{ false: Colors.inactive, true: Colors.primary }}
+              thumbColor={Colors.text}
+            />
+          }
+        />
+      </View>
+    </>
+  );
+}
+
+function AccountSettingsSection({
+  isAuthenticated,
+  user,
+  routerPush,
+  routerReplace,
+}: {
+  isAuthenticated: boolean;
+  user: ProfileUser;
+  routerPush: RouterPush;
+  routerReplace: RouterReplace;
+}) {
+  return (
+    <>
+      <Text style={styles.sectionTitle}>Account</Text>
+      <View style={styles.rowsSurface}>
+        {isAuthenticated ? (
+          <>
+            <SettingsRow
+              icon="mail-outline"
+              title="Email"
+              subtitle={user?.email || "—"}
+              first
+            />
+            <SettingsRow
+              icon="person-outline"
+              title="Display name"
+              subtitle={user?.name || "—"}
+            />
+          </>
+        ) : (
+          <SettingsRow
+            icon="log-in-outline"
+            title="Sign In"
+            onPress={() => routerReplace("/login")}
+            first
+          />
+        )}
+        <SettingsRow
+          icon="shield-checkmark-outline"
+          title="Privacy Policy"
+          onPress={() => void openPrivacyPolicy()}
+        />
+        <SettingsRow
+          icon="document-text-outline"
+          title="Terms of Service"
+          onPress={() => void openTermsOfService()}
+        />
+        {isAuthenticated ? (
+          <SettingsRow
+            icon="trash-outline"
+            title="Delete Account"
+            onPress={() => routerPush("/delete-account")}
+            danger
+          />
+        ) : null}
+      </View>
+    </>
+  );
+}
+
+function LibrarySettingsSection({ routerPush }: { routerPush: RouterPush }) {
+  return (
+    <>
+      <Text style={styles.sectionTitle}>Library</Text>
+      <View style={styles.rowsSurface}>
+        <SettingsRow
+          icon="cloud-upload-outline"
+          title="Import Songs"
+          onPress={() => routerPush("/import-songs")}
+          first
+        />
+      </View>
+    </>
+  );
+}
+
+function SessionSettingsSection({
+  isAuthenticated,
+  onLogout,
+}: {
+  isAuthenticated: boolean;
+  onLogout: () => void;
+}) {
+  if (!isAuthenticated) return null;
+
+  return (
+    <>
+      <Text style={styles.sectionTitle}>Session</Text>
+      <View style={styles.rowsSurface}>
+        <SettingsRow
+          icon="log-out-outline"
+          title="Log Out"
+          onPress={onLogout}
+          danger
+          first
+        />
+      </View>
+    </>
+  );
+}
+
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { push: routerPush, replace: routerReplace } = useRouter();
   const { user, isAuthenticated, isGuest, logout } = useAuth();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const bottomScrollPadding = Platform.OS === "web" ? 120 : Math.max(128, insets.bottom + 120);
+  const bottomContentInset = Platform.OS === "web" ? 0 : insets.bottom;
   const [lowEndDevice, setLowEndDevice] = useState(false);
 
   const [settings, setSettings] = useState<AppSettings>({
     streamingQuality: "high",
+    videoBackgroundQuality: "auto",
     downloadQuality: "high",
     equalizer: { "60Hz": 0, "150Hz": 0, "400Hz": 0, "1KHz": 0, "2.4KHz": 0, "15KHz": 0 },
     equalizerEnabled: false,
@@ -115,8 +401,6 @@ export default function ProfileScreen() {
     });
   }, []);
 
-  const ambientBackdropSwitchValue = lowEndDevice ? false : settings.ambientBackdropEnabled;
-
   const handleLogout = useCallback(() => {
     Alert.alert("Log Out", "Are you sure you want to log out?", [
       { text: "Cancel", style: "cancel" },
@@ -141,211 +425,32 @@ export default function ProfileScreen() {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: bottomScrollPadding },
-        ]}
-        contentInset={{ bottom: bottomScrollPadding }}
-        scrollIndicatorInsets={{ bottom: bottomScrollPadding }}
+        contentContainerStyle={styles.scrollContent}
+        contentInset={{ bottom: bottomContentInset }}
+        scrollIndicatorInsets={{ bottom: bottomContentInset }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* Profile hero */}
-        <View style={styles.heroSection}>
-          <View style={styles.avatarShell}>
-            {user?.picture ? (
-              <Image source={{ uri: user.picture }} style={styles.avatar} contentFit="cover" />
-            ) : (
-              <View style={styles.avatarPlaceholder}>
-                <Ionicons name="person" size={32} color={Colors.text} />
-              </View>
-            )}
-          </View>
-          <Text style={styles.heroName}>
-            {user?.name || (isGuest ? "Guest" : "Mavrixfy User")}
-          </Text>
-          {user?.email ? (
-            <Text style={styles.heroEmail}>{user.email}</Text>
-          ) : null}
-        </View>
+        <ProfileHero user={user} isGuest={isGuest} />
 
-        {/* Playback */}
-        <Text style={styles.sectionTitle}>Playback</Text>
-        <View style={styles.rowsSurface}>
-          {/* Streaming quality */}
-          <View style={styles.controlBlock}>
-            <View style={styles.controlHeader}>
-              <View style={styles.rowLeading}>
-                <Ionicons name="speedometer-outline" size={20} color={Colors.primary} />
-              </View>
-              <Text style={styles.rowTitle}>Streaming quality</Text>
-            </View>
-            <View style={styles.segmentRow}>
-              {QUALITY_OPTIONS.map((opt) => {
-                const active = settings.streamingQuality === opt.value;
-                return (
-                  <Pressable
-                    key={opt.value}
-                    style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-                    onPress={() => updateSettings({ streamingQuality: opt.value })}
-                  >
-                    <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                      {opt.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
+        <PlaybackSettingsSection
+          settings={settings}
+          lowEndDevice={lowEndDevice}
+          updateSettings={updateSettings}
+        />
 
-          {/* Crossfade */}
-          <View style={[styles.controlBlock, styles.controlBlockBorder]}>
-            <View style={styles.controlHeader}>
-              <View style={styles.rowLeading}>
-                <Ionicons name="git-compare-outline" size={20} color={Colors.primary} />
-              </View>
-              <Text style={styles.rowTitle}>Crossfade</Text>
-              <Text style={styles.valuePill}>{settings.crossfade}s</Text>
-            </View>
-            <View style={styles.crossfadeRow}>
-              {CROSSFADE_STEPS.map((step) => (
-                <Pressable
-                  key={step.key}
-                  onPress={() => updateSettings({ crossfade: step.value })}
-                  style={[styles.crossfadeBar, step.value <= settings.crossfade && styles.crossfadeBarActive]}
-                />
-              ))}
-            </View>
-          </View>
-
-          <SettingsRow
-            icon="swap-horizontal-outline"
-            title="Gapless playback"
-            trailing={
-              <Switch
-                value={settings.gapless}
-                onValueChange={(v) => updateSettings({ gapless: v })}
-                trackColor={{ false: Colors.inactive, true: Colors.primary }}
-                thumbColor={Colors.text}
-              />
-            }
-          />
-          <SettingsRow
-            icon="pulse-outline"
-            title="Normalize volume"
-            trailing={
-              <Switch
-                value={settings.normalizeVolume}
-                onValueChange={(v) => updateSettings({ normalizeVolume: v })}
-                trackColor={{ false: Colors.inactive, true: Colors.primary }}
-                thumbColor={Colors.text}
-              />
-            }
-          />
-          <SettingsRow
-            icon="phone-portrait-outline"
-            title="Ambient video backdrop"
-            subtitle={
-              lowEndDevice
-                ? "Disabled automatically on low-RAM Android devices for smoother playback"
-                : "Show dynamic video loops behind the player"
-            }
-            trailing={
-              <Switch
-                value={ambientBackdropSwitchValue}
-                disabled={lowEndDevice}
-                onValueChange={(v) => updateSettings({ ambientBackdropEnabled: v })}
-                trackColor={{ false: Colors.inactive, true: Colors.primary }}
-                thumbColor={lowEndDevice ? Colors.subtext : Colors.text}
-              />
-            }
-          />
-          <SettingsRow
-            icon="phone-portrait-outline"
-            title="Haptic touch"
-            trailing={
-              <Switch
-                value={settings.hapticsEnabled}
-                onValueChange={(v) => updateSettings({ hapticsEnabled: v })}
-                trackColor={{ false: Colors.inactive, true: Colors.primary }}
-                thumbColor={Colors.text}
-              />
-            }
-          />
-        </View>
-
-        {/* Account */}
-        <Text style={styles.sectionTitle}>Account</Text>
-        <View style={styles.rowsSurface}>
-          {isAuthenticated ? (
-            <>
-              <SettingsRow
-                icon="mail-outline"
-                title="Email"
-                subtitle={user?.email || "—"}
-                first
-              />
-              <SettingsRow
-                icon="person-outline"
-                title="Display name"
-                subtitle={user?.name || "—"}
-              />
-            </>
-          ) : (
-            <SettingsRow
-              icon="log-in-outline"
-              title="Sign In"
-              onPress={() => routerReplace("/login")}
-              first
-            />
-          )}
-          <SettingsRow
-            icon="shield-checkmark-outline"
-            title="Privacy Policy"
-            onPress={() => void openPrivacyPolicy()}
-          />
-          <SettingsRow
-            icon="document-text-outline"
-            title="Terms of Service"
-            onPress={() => void openTermsOfService()}
-          />
-          {isAuthenticated ? (
-            <SettingsRow
-              icon="trash-outline"
-              title="Delete Account"
-              onPress={() => routerPush("/delete-account")}
-              danger
-            />
-          ) : null}
-        </View>
-
-        {/* Import */}
-        <Text style={styles.sectionTitle}>Library</Text>
-        <View style={styles.rowsSurface}>
-          <SettingsRow
-            icon="cloud-upload-outline"
-            title="Import Songs"
-            onPress={() => routerPush("/import-songs")}
-            first
-          />
-        </View>
-
-        {/* Session */}
-        {isAuthenticated ? (
-          <>
-            <Text style={styles.sectionTitle}>Session</Text>
-            <View style={styles.rowsSurface}>
-              <SettingsRow
-                icon="log-out-outline"
-                title="Log Out"
-                onPress={handleLogout}
-                danger
-                first
-              />
-            </View>
-          </>
-        ) : null}
+        <AccountSettingsSection
+          isAuthenticated={isAuthenticated}
+          user={user}
+          routerPush={routerPush}
+          routerReplace={routerReplace}
+        />
+        <LibrarySettingsSection routerPush={routerPush} />
+        <SessionSettingsSection
+          isAuthenticated={isAuthenticated}
+          onLogout={handleLogout}
+        />
       </ScrollView>
     </View>
   );

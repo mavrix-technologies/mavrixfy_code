@@ -28,7 +28,6 @@ import {
   DownloadPreferences,
   DownloadEntitlement,
   StorageSummary,
-  DownloadStatus,
   DEFAULT_DOWNLOAD_PREFERENCES,
 } from "@/types/downloads";
 import {
@@ -163,61 +162,16 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   });
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // ─── Refresh Downloads (merges YouTube + JioSaavn) ────────────────────────
+  // ─── Refresh Downloads ────────────────────────────────────────────────────
   const refreshDownloads = useCallback(async () => {
     try {
-      const [jioItems, summary] = await Promise.all([
+      const [items, summary] = await Promise.all([
         getAllDownloads(),
         getStorageSummary(),
       ]);
 
-      let ytItems: DownloadItem[] = [];
-      try {
-        const { getAllDownloads: getAllYtDownloads } = await import("@/lib/offlineDownloadService");
-        const ytDownloaded = await getAllYtDownloads();
-        ytItems = ytDownloaded.map(ytSong => ({
-          songId: ytSong.songId || `youtube_${ytSong.videoId}`,
-          title: ytSong.title,
-          artist: ytSong.artist,
-          album: "YouTube Music",
-          coverUrl: ytSong.thumbnail,
-          audioUrl: "",
-          duration: ytSong.duration,
-          status: "completed" as const,
-          progress: 1.0,
-          bytesDownloaded: ytSong.filesize,
-          totalBytes: ytSong.filesize,
-          quality: "high" as const,
-          localPath: ytSong.localUri,
-          collectionRefs: [],
-          retryCount: 0,
-          failedAt: null,
-          failureReason: null,
-          queuedAt: new Date(ytSong.downloadedAt).toISOString(),
-          completedAt: new Date(ytSong.downloadedAt).toISOString(),
-          licenseExpiresAt: null,
-        }));
-      } catch (ytErr) {
-        logger.error("[DownloadContext] failed to load YouTube downloads", ytErr);
-      }
-
-      // Seed all items to the store
-      const allItems = [...jioItems, ...ytItems];
-      downloadItemStore.seed(allItems);
-
-      // Recalculate storage summary to include YouTube songs
-      const totalYtBytes = ytItems.reduce((sum, item) => sum + item.bytesDownloaded, 0);
-      const totalYtCount = ytItems.length;
-
-      const mergedSummary: StorageSummary = {
-        totalDownloadedBytes: summary.totalDownloadedBytes + totalYtBytes,
-        totalDownloadedTracks: summary.totalDownloadedTracks + totalYtCount,
-        completedTracks: summary.completedTracks + totalYtCount,
-        pendingTracks: summary.pendingTracks,
-        failedTracks: summary.failedTracks,
-      };
-
-      setStorageSummary(mergedSummary);
+      downloadItemStore.seed(items);
+      setStorageSummary(summary);
     } catch (err) {
       logger.error("[DownloadContext] refreshDownloads failed", err);
     }
@@ -370,31 +324,12 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const handleRemove = useCallback(async (songId: string, collectionId?: string) => {
-    const isYt = songId.startsWith("youtube_") || songId.startsWith("yt:") || downloadItemStore.get(songId)?.album === "YouTube Music";
-    if (isYt) {
-      const videoId = songId.replace("youtube_", "").replace("yt:", "");
-      try {
-        const { deleteDownload } = await import("@/lib/offlineDownloadService");
-        await deleteDownload(videoId);
-      } catch (err) {
-        logger.error("[DownloadContext] failed to delete YouTube download", err);
-      }
-      downloadItemStore.delete(songId);
-      await refreshDownloads();
-      return;
-    }
     await removeSongDownload(songId, collectionId);
     downloadItemStore.delete(songId);
     refreshSummary();
-  }, [refreshDownloads, refreshSummary]);
+  }, [refreshSummary]);
 
   const handleRemoveAll = useCallback(async () => {
-    try {
-      const { clearAllDownloads } = await import("@/lib/offlineDownloadService");
-      await clearAllDownloads();
-    } catch (err) {
-      logger.error("[DownloadContext] failed to clear YouTube downloads", err);
-    }
     await removeAllDownloads();
     // Clear the store
     for (const item of downloadItemStore.getAll()) {
@@ -402,7 +337,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     }
     await refreshDownloads();
   // react-doctor-disable-next-line react-doctor/exhaustive-deps
-  }, [refreshDownloads, refreshSummary]);
+  }, [refreshDownloads]);
 
   const handleUpdatePreferences = useCallback(
     async (patch: Partial<DownloadPreferences>) => {

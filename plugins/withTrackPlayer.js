@@ -6,6 +6,7 @@
  */
 const fs = require("fs");
 const path = require("path");
+const { deserialize, serialize } = require("node:v8");
 const { withAndroidManifest, withDangerousMod } = require("@expo/config-plugins");
 
 function ensureIntentAction(service, actionName) {
@@ -27,7 +28,7 @@ function hasIntentAction(filter, actionName) {
 }
 
 function cloneManifestNode(node) {
-  return JSON.parse(JSON.stringify(node));
+  return typeof structuredClone === "function" ? structuredClone(node) : deserialize(serialize(node));
 }
 
 function ensureRemovedIntentAction(service, filter) {

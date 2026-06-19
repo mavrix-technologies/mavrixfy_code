@@ -383,7 +383,12 @@ export async function getStorageSummary(): Promise<StorageSummary> {
 
     return {
       totalDownloadedBytes: totalBytes,
-      totalDownloadedTracks: all.length,
+      // Count only active library entries (completed + pending + failed).
+      // Excludes terminal/bookkeeping statuses like "deleted", "expired",
+      // "revoked" that fall into the "other" bucket — those should not inflate
+      // the user-visible track count or break the sum
+      // completedTracks + pendingTracks + failedTracks.
+      totalDownloadedTracks: completed + pending + failed,
       completedTracks: completed,
       pendingTracks: pending,
       failedTracks: failed,

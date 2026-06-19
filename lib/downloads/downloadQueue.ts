@@ -237,12 +237,13 @@ async function executeDownload(songId: string): Promise<void> {
 
     releaseSlot(songId); // free the slot before retry delay
 
-    if (retryCount < MAX_RETRIES) {
+    if (retryCount <= MAX_RETRIES) {
       await updateStatus(songId, "queued", {
         retryCount,
         failureReason: err?.message ?? "Unknown error",
         failedAt: new Date().toISOString(),
       });
+      // Delays for attempts 1, 2, 3 → 2s, 5s, 10s (exponential backoff).
       const delays = [2000, 5000, 10000];
       clearRetryTimer(songId);
       const retryTimer = setTimeout(async () => {

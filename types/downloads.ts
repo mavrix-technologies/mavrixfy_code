@@ -1,6 +1,5 @@
 /**
  * Offline Downloads — Type Definitions
- * Matches the contracts defined in docs/offline-downloads-prd.md
  */
 
 // ─── Constants ────────────────────────────────────────────────────────────────

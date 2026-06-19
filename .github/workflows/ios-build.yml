@@ -71,7 +71,34 @@ jobs:
           rm -rf node_modules/expo-dev-launcher node_modules/expo-dev-menu node_modules/expo-dev-client
 
       - name: Patch React Native codegen for expand function bug
-        run: node scripts/patch-codegen.js
+        run: |
+          CODEGEN_FILE="node_modules/react-native/scripts/codegen/generate-artifacts-executor/index.js"
+          if [ ! -f "$CODEGEN_FILE" ]; then
+            echo "Codegen patch skipped: $CODEGEN_FILE not found"
+          else
+            CODEGEN_FILE="$CODEGEN_FILE" node <<'NODE'
+            const fs = require('fs');
+
+            const file = process.env.CODEGEN_FILE;
+            let content = fs.readFileSync(file, 'utf8');
+
+            if (content.includes('function expand')) {
+              console.log('Codegen index.js already patched.');
+              process.exit(0);
+            }
+
+            const target = "'use strict';";
+            if (!content.includes(target)) {
+              console.error('Could not find "use strict" line in codegen index.js');
+              process.exit(1);
+            }
+
+            const patch = "function expand(p) { return typeof p === 'string' ? [p] : Array.isArray(p) ? p : []; }";
+            content = content.replace(target, `${target}\n\n${patch}\n`);
+            fs.writeFileSync(file, content, 'utf8');
+            console.log('Patched codegen index.js with expand function.');
+          NODE
+          fi
 
       - name: Prebuild iOS
         run: npx expo prebuild --platform ios --clean

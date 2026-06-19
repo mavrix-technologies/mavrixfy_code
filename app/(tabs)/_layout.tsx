@@ -22,6 +22,7 @@ import { useLastMix, clearLastMix } from "@/lib/lastMix";
 import { compactMap, mapFilter } from "@/lib/arrayUtils";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { useAuth } from "@/contexts/AuthContext";
+import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
 
 const MIX_DELETE_THRESHOLD = -72;
 
@@ -323,6 +324,12 @@ export function AppNavBar(props: AppNavBarProps) {
 function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   const { push: routerPush, navigate: routerNavigate } = useRouter();
   const pathname = usePathname();
+  const [playerModalVisible, setPlayerModalVisible] = useState(() => globalPlayerDetailsVisibleRef.current);
+  useEffect(() => {
+    return globalPlayerDetailsVisibleRef.subscribe((visible) => {
+      setPlayerModalVisible(visible);
+    });
+  }, []);
   const [activeTab, setActiveTab] = useState<VisibleRoute>(() => {
     if (!pathname) return "index";
     if (pathname === "/" || pathname === "/index") return "index";
@@ -430,6 +437,17 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   const chipOpacityRef = useRef<Animated.Value | null>(null);
   if (chipOpacityRef.current === null) chipOpacityRef.current = new Animated.Value(1);
   const chipOpacity = chipOpacityRef.current;
+  const coverOpacityRef = useRef<Animated.Value | null>(null);
+  if (coverOpacityRef.current === null) coverOpacityRef.current = new Animated.Value(1);
+  const coverOpacity = coverOpacityRef.current;
+
+  useEffect(() => {
+    Animated.timing(coverOpacity, {
+      toValue: playerModalVisible ? 0 : 1,
+      duration: 160,
+      useNativeDriver: true,
+    }).start();
+  }, [playerModalVisible, coverOpacity]);
 
   const resetMixChip = useCallback(() => {
     Animated.parallel([
@@ -724,22 +742,31 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
               onPress={openPlayer}
             >
               <View style={styles.playerLeft}>
-                <View style={[styles.coverWrap, { width: miniCoverSlotSize }]}>
+                <Animated.View style={[styles.coverWrap, { width: miniCoverSlotSize, opacity: coverOpacity }]}>
                   {coverUrl && !coverFailed ? (
                     <Image
                       source={{ uri: coverUrl }}
-                      style={[styles.cover, { width: miniCoverSize, height: miniCoverSize }]}
+                      style={[
+                        styles.cover,
+                        { width: miniCoverSize, height: miniCoverSize },
+                      ]}
                       contentFit="cover"
                       decodeFormat="argb"
-                      transition={120}
+                      transition={0}
                       onError={() => setCoverFailed(true)}
                     />
                   ) : (
-                    <View style={[styles.cover, styles.coverFallback, { width: miniCoverSize, height: miniCoverSize }]}>
+                    <View
+                      style={[
+                        styles.cover,
+                        styles.coverFallback,
+                        { width: miniCoverSize, height: miniCoverSize },
+                      ]}
+                    >
                       <Ionicons name="musical-notes" size={20} color="rgba(255,255,255,0.72)" />
                     </View>
                   )}
-                </View>
+                </Animated.View>
                 <View style={[styles.songInfo, isDragging && styles.songInfoDuringMixDrag]}>
                   <PingPongScroll
                     text={activeSong.title}
@@ -1000,6 +1027,24 @@ function IOSMiniPlayerOverlay() {
 
 function useIOSMiniPlayerOverlayView() {
   const insets = useSafeAreaInsets();
+  const [playerModalVisible, setPlayerModalVisible] = useState(() => globalPlayerDetailsVisibleRef.current);
+  useEffect(() => {
+    return globalPlayerDetailsVisibleRef.subscribe((visible) => {
+      setPlayerModalVisible(visible);
+    });
+  }, []);
+  const coverOpacityRef = useRef<Animated.Value | null>(null);
+  if (coverOpacityRef.current === null) coverOpacityRef.current = new Animated.Value(1);
+  const coverOpacity = coverOpacityRef.current;
+
+  useEffect(() => {
+    Animated.timing(coverOpacity, {
+      toValue: playerModalVisible ? 0 : 1,
+      duration: 160,
+      useNativeDriver: true,
+    }).start();
+  }, [playerModalVisible, coverOpacity]);
+
   const { push: overlayRouterPush } = useRouter();
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
   const playbackState = usePlaybackPlayState();
@@ -1170,21 +1215,26 @@ function useIOSMiniPlayerOverlayView() {
 
         <View style={styles.iosMiniPlayerRow}>
           <Pressable style={styles.iosMiniPlayerMain} onPress={openPlayer} android_disableSound>
-            <View style={styles.iosMiniPlayerArtworkShell}>
+            <Animated.View style={[styles.iosMiniPlayerArtworkShell, { opacity: coverOpacity }]}>
               {activeSong.coverUrl && !coverFailed ? (
                 <Image
                   source={{ uri: activeSong.coverUrl }}
                   style={styles.iosMiniPlayerCover}
                   contentFit="cover"
-                  transition={120}
+                  transition={0}
                   onError={() => setCoverFailed(true)}
                 />
               ) : (
-                <View style={[styles.iosMiniPlayerCover, styles.iosMiniPlayerCoverFallback]}>
+                <View
+                  style={[
+                    styles.iosMiniPlayerCover,
+                    styles.iosMiniPlayerCoverFallback,
+                  ]}
+                >
                   <Ionicons name="musical-notes" size={20} color="rgba(255,255,255,0.72)" />
                 </View>
               )}
-            </View>
+            </Animated.View>
 
             <View style={styles.iosMiniPlayerText}>
               <PingPongScroll
@@ -1376,6 +1426,7 @@ export default function TabLayout() {
         <Tabs.Screen name="liked-songs" options={{ title: "Liked" }} />
         <Tabs.Screen name="import-songs" options={{ title: "Import" }} />
       </Tabs>
+      <AppNavBar hidden={shouldHideTabBar} />
     </View>
   );
 }
@@ -1631,6 +1682,7 @@ const styles = StyleSheet.create({
   },
   wrapperHidden: {
     opacity: 0,
+    display: "none",
   },
   container: {
     width: "96%",

@@ -7,8 +7,6 @@ const config = getDefaultConfig(__dirname);
 config.resolver = {
   ...config.resolver,
   blockList: [
-    /server\/.*/,
-    /server_dist\/.*/,
     /node_modules\/react-native-track-player\/lib\/web\/.*/,
     /node_modules\/react-native-track-player\/.*\.web\.js$/,
   ],
