@@ -450,11 +450,11 @@ const VisibleYoutubeVideo = memo(function VisibleYoutubeVideo({
   useEffect(() => {
     const targetSeconds = Math.max(0, Math.floor(positionMillis / 1000));
     latestPositionSecondsRef.current = targetSeconds;
-    if (Math.abs(targetSeconds - lastPositionRef.current) > 2) {
+    if (isReady && Math.abs(targetSeconds - lastPositionRef.current) > 2) {
       playerRef.current?.seekTo?.(targetSeconds, true);
     }
     lastPositionRef.current = targetSeconds;
-  }, [positionMillis]);
+  }, [positionMillis, isReady]);
 
   // react-doctor-disable-next-line react-doctor/no-derived-state-effect -- iframe readiness/error are imperative player state, not render-derived values.
   useEffect(() => {
@@ -622,11 +622,11 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
 
   useEffect(() => {
     const targetSeconds = Math.max(0, Math.floor(positionMillis / 1000));
-    if (Math.abs(targetSeconds - lastPositionRef.current) > 10) {
+    if (playerReady && Math.abs(targetSeconds - lastPositionRef.current) > 10) {
       playerRef.current?.seekTo?.(targetSeconds, true);
     }
     lastPositionRef.current = targetSeconds;
-  }, [positionMillis]);
+  }, [positionMillis, playerReady]);
 
   // Calculate dimensions with aggressive bottom extension to hide all edges
   const dimensions = useMemo(() => {
