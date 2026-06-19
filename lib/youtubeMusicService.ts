@@ -702,13 +702,13 @@ export async function searchYouTubeMusicVideos(
   }
 }
 
-let cachedInvidiousInstances: string[] = ["https://inv.thepixora.com"];
+let cachedInvidiousInstances: string[] = ["https://inv.thepixora.com", "https://iv.melmac.space"];
 let lastInstanceFetchTime = 0;
 
 async function getInvidiousInstances(): Promise<string[]> {
   const now = Date.now();
   // Refresh cache every 2 hours
-  if (cachedInvidiousInstances.length > 1 && now - lastInstanceFetchTime < 2 * 60 * 60 * 1000) {
+  if (cachedInvidiousInstances.length > 2 && now - lastInstanceFetchTime < 2 * 60 * 60 * 1000) {
     return cachedInvidiousInstances;
   }
 
@@ -717,7 +717,7 @@ async function getInvidiousInstances(): Promise<string[]> {
       headers: { 'Accept': 'application/json' }
     });
     const instances = await res.json();
-    const list: string[] = ["https://inv.thepixora.com"]; // Always put the verified working one first
+    const list: string[] = ["https://inv.thepixora.com", "https://iv.melmac.space"]; // Always put the verified working ones first
     if (Array.isArray(instances)) {
       for (const item of instances) {
         if (Array.isArray(item) && item.length >= 2) {
@@ -754,7 +754,7 @@ async function resolveInvidiousStream(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4500); // 4.5 second timeout per instance
 
-      const url = `${instance}/api/v1/videos/${encodeURIComponent(videoId)}`;
+      const url = `${instance}/api/v1/videos/${encodeURIComponent(videoId)}?local=true`;
       const res = await fetch(url, {
         headers: {
           'Accept': 'application/json',
@@ -784,9 +784,14 @@ async function resolveInvidiousStream(
             // Ignore URL parsing errors
           }
 
+          let streamUrl = bestFormat.url;
+          if (streamUrl.startsWith("http://")) {
+            streamUrl = streamUrl.replace("http://", "https://");
+          }
+
           return {
             videoId,
-            url: bestFormat.url,
+            url: streamUrl,
             expiresAt,
             headers: {},
             mimeType: bestFormat.type,

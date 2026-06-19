@@ -167,7 +167,7 @@ def extract_audio_stream(video_id: str) -> dict[str, Any]:
         "cachedir": False,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "web"]
+                "player_client": ["ios", "android"]
             }
         },
     }
