@@ -253,7 +253,11 @@ def verify_audio_resolver_token(provided_token: Optional[str]) -> None:
 @app.get("/healthz")
 def health_check():
     import yt_dlp
-    return {"status": "ok", "yt_dlp_version": yt_dlp.version.__version__}
+    return {
+        "status": "ok",
+        "yt_dlp_version": yt_dlp.version.__version__,
+        "has_cookies": bool(os.environ.get("YOUTUBE_COOKIES", "").strip())
+    }
 
 
 @app.get("/search")
