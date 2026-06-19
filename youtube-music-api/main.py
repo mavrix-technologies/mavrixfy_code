@@ -145,10 +145,34 @@ def extract_audio_stream(video_id: str) -> dict[str, Any]:
         "fragment_retries": 1,
         "extractor_retries": 1,
         "cachedir": False,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"]
+            }
+        },
     }
 
-    with yt_dlp.YoutubeDL(options) as downloader:
-        info = downloader.extract_info(watch_url, download=False)
+    cookie_path = None
+    cookies_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    if cookies_content:
+        import tempfile
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt", encoding="utf-8") as f:
+                f.write(cookies_content)
+                cookie_path = f.name
+            options["cookiefile"] = cookie_path
+        except Exception as e:
+            logger.warning("Failed to create temporary cookies file: %s", e)
+
+    try:
+        with yt_dlp.YoutubeDL(options) as downloader:
+            info = downloader.extract_info(watch_url, download=False)
+    finally:
+        if cookie_path:
+            try:
+                os.unlink(cookie_path)
+            except Exception:
+                pass
 
     if not isinstance(info, dict):
         raise RuntimeError("YouTube returned no stream information")
