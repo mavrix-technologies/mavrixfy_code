@@ -39,8 +39,11 @@ YOUTUBE_VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 def normalize_netscape_cookies(content: str) -> str:
     lines = []
+    has_header = False
     for line in content.splitlines():
         trimmed = line.strip()
+        if trimmed.startswith("# Netscape HTTP Cookie File") or trimmed.startswith("# HTTP Cookie File") or trimmed.startswith("#cookies.txt"):
+            has_header = True
         if not trimmed or trimmed.startswith("#"):
             lines.append(line)
             continue
@@ -49,7 +52,10 @@ def normalize_netscape_cookies(content: str) -> str:
             lines.append("\t".join(parts))
         else:
             lines.append(line)
-    return "\n".join(lines)
+    result = "\n".join(lines)
+    if not has_header:
+        result = "# Netscape HTTP Cookie File\n# This is a generated file! Do not edit.\n\n" + result
+    return result
 AUDIO_FORMAT_SELECTOR = "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best"
 AUDIO_CACHE_MAX_ITEMS = 100
 AUDIO_CACHE_MAX_AGE_SECONDS = 20 * 60
