@@ -702,6 +702,110 @@ export async function searchYouTubeMusicVideos(
   }
 }
 
+let cachedInvidiousInstances: string[] = ["https://inv.thepixora.com"];
+let lastInstanceFetchTime = 0;
+
+async function getInvidiousInstances(): Promise<string[]> {
+  const now = Date.now();
+  // Refresh cache every 2 hours
+  if (cachedInvidiousInstances.length > 1 && now - lastInstanceFetchTime < 2 * 60 * 60 * 1000) {
+    return cachedInvidiousInstances;
+  }
+
+  try {
+    const res = await fetch("https://api.invidious.io/instances.json?sort_by=type,health", {
+      headers: { 'Accept': 'application/json' }
+    });
+    const instances = await res.json();
+    const list: string[] = ["https://inv.thepixora.com"]; // Always put the verified working one first
+    if (Array.isArray(instances)) {
+      for (const item of instances) {
+        if (Array.isArray(item) && item.length >= 2) {
+          const name = item[0];
+          const info = item[1];
+          if (info && info.type === 'https' && info.uri) {
+            const uri = info.uri.replace(/\/$/, "");
+            if (!list.includes(uri)) {
+              list.push(uri);
+            }
+          }
+        }
+      }
+    }
+    cachedInvidiousInstances = list;
+    lastInstanceFetchTime = now;
+  } catch (err) {
+    logger.warn("[YouTube Music] Failed to fetch Invidious instances, using cache/defaults", err);
+  }
+  return cachedInvidiousInstances;
+}
+
+async function resolveInvidiousStream(
+  videoId: string,
+  signal?: AbortSignal
+): Promise<YouTubeMusicAudioStream | null> {
+  const instances = await getInvidiousInstances();
+  // Try up to 4 instances sequentially
+  const instancesToTry = instances.slice(0, 4);
+
+  for (const instance of instancesToTry) {
+    if (signal?.aborted) return null;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4500); // 4.5 second timeout per instance
+
+      const url = `${instance}/api/v1/videos/${encodeURIComponent(videoId)}`;
+      const res = await fetch(url, {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        signal: signal ? (signal.aborted ? signal : controller.signal) : controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (res.status === 200) {
+        const data = await res.json();
+        const formats = data.adaptiveFormats || [];
+        const audioFormats = formats.filter((f: any) => f.type && f.type.startsWith('audio/'));
+        
+        if (audioFormats.length > 0) {
+          // Find best audio format (AAC/m4a format first, then others)
+          const bestFormat = audioFormats.find((f: any) => f.container === 'm4a') || audioFormats[0];
+          
+          let expiresAt = Date.now() + 5.5 * 60 * 60 * 1000;
+          try {
+            const urlObj = new URL(bestFormat.url);
+            const expireParam = urlObj.searchParams.get('expire');
+            if (expireParam) {
+              expiresAt = Number(expireParam) * 1000;
+            }
+          } catch (e) {
+            // Ignore URL parsing errors
+          }
+
+          return {
+            videoId,
+            url: bestFormat.url,
+            expiresAt,
+            headers: {},
+            mimeType: bestFormat.type,
+            formatId: String(bestFormat.itag),
+            audioCodec: bestFormat.encoding || undefined,
+            bitrateKbps: Math.round(Number(bestFormat.bitrate) / 1000) || null,
+            duration: Number(data.lengthSeconds) || null,
+          };
+        }
+      }
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        logger.warn(`[YouTube Music] Failed resolving via Invidious instance ${instance}:`, err?.message || err);
+      }
+    }
+  }
+  return null;
+}
+
 export async function getYouTubeMusicAudioStream(
   videoId: string,
   signal?: AbortSignal
@@ -720,6 +824,21 @@ export async function getYouTubeMusicAudioStream(
 
   const request = (async () => {
     try {
+      // 1. Try client-side resolution first using public Invidious instances
+      logger.info(`[YouTube Music] Attempting client-side stream resolution for ${cleanVideoId}`);
+      const clientStream = await resolveInvidiousStream(cleanVideoId, signal);
+      if (clientStream) {
+        logger.info(`[YouTube Music] Client-side stream resolution succeeded for ${cleanVideoId}`);
+        audioStreamCache.set(cleanVideoId, clientStream);
+        if (audioStreamCache.size > AUDIO_STREAM_CACHE_MAX_ITEMS) {
+          const oldestKey = audioStreamCache.keys().next().value;
+          if (oldestKey) audioStreamCache.delete(oldestKey);
+        }
+        return clientStream;
+      }
+
+      // 2. Fall back to backend endpoints if client-side resolution fails
+      logger.info(`[YouTube Music] Client-side resolution failed/unavailable, falling back to backend for ${cleanVideoId}`);
       const json = await fetchFirstJsonSequential<any>(
         getEndpointCandidates(`/stream/${encodeURIComponent(cleanVideoId)}`),
         signal
