@@ -20,20 +20,42 @@
         "simulator": true
       }
     },
-    "production": {
-      "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
-      },
+    "ios-optimized": {
+      "distribution": "internal",
       "ios": {
-        "buildConfiguration": "Release"
+        "buildConfiguration": "Release",
+        "simulator": false,
+        "image": "latest",
+        "resourceClass": "m-medium"
       },
       "channel": "production",
       "autoIncrement": false,
       "env": {
         "NODE_ENV": "production",
         "EXPO_USE_UPDATES": "1",
-        "EAS_NO_VCS": "1"
+        "EXPO_NO_FLIPPER": "1",
+        "EXPO_NO_CLIENT_ENV_VARS": "1",
+        "EXPO_NO_DOTENV": "1"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      },
+      "ios": {
+        "buildConfiguration": "Release",
+        "simulator": false,
+        "image": "latest"
+      },
+      "channel": "production",
+      "autoIncrement": false,
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_USE_UPDATES": "1",
+        "EAS_NO_VCS": "1",
+        "EXPO_NO_FLIPPER": "1",
+        "EXPO_NO_CLIENT_ENV_VARS": "1"
       }
     },
     "production-arm": {

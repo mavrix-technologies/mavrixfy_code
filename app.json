@@ -17,6 +17,7 @@
       "icon": "./assets/images/mavrixfy_icon_ios.png",
       "bundleIdentifier": "com.mavrixfy.app",
       "buildNumber": "20601",
+      "bitcode": false,
       "infoPlist": {
         "UIBackgroundModes": [
           "audio"
@@ -81,11 +82,20 @@
         {
           "ios": {
             "deploymentTarget": "15.1",
+            "useFrameworks": "static",
             "extraBuildProperties": {
               "GCC_WARN_INHIBIT_ALL_WARNINGS": "YES",
               "CLANG_WARN_DOCUMENTATION_COMMENTS": "NO",
               "CLANG_WARN_STRICT_PROTOTYPES": "NO",
-              "SWIFT_SUPPRESS_WARNINGS": "YES"
+              "SWIFT_SUPPRESS_WARNINGS": "YES",
+              "SWIFT_COMPILATION_MODE": "wholemodule",
+              "SWIFT_OPTIMIZATION_LEVEL": "-O",
+              "GCC_OPTIMIZATION_LEVEL": "s",
+              "DEAD_CODE_STRIPPING": "YES",
+              "STRIP_INSTALLED_PRODUCT": "YES",
+              "STRIP_STYLE": "non-global",
+              "COPY_PHASE_STRIP": "YES",
+              "ENABLE_BITCODE": "NO"
             }
           },
           "android": {

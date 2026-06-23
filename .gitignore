@@ -16,6 +16,7 @@ ios/
 android/build/
 android/app/build/
 android/.gradle/
+.gradle/
 android/.idea/
 android/local.properties
 outputs/

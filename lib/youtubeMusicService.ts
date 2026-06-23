@@ -355,6 +355,13 @@ function createTimeoutSignal(ms: number = REQUEST_TIMEOUT_MS, parentSignal?: Abo
   };
 }
 
+function isAbortLikeError(error: unknown): boolean {
+  const err = error as { name?: unknown; message?: unknown } | null | undefined;
+  const name = typeof err?.name === "string" ? err.name : "";
+  const message = typeof err?.message === "string" ? err.message : "";
+  return name === "AbortError" || message === "Aborted" || message === "Request aborted";
+}
+
 async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T | null> {
   const timeout = createTimeoutSignal(REQUEST_TIMEOUT_MS, signal);
   try {
@@ -1337,6 +1344,10 @@ async function getYouTubeMusicHomePlaylistCards(limit: number): Promise<YouTubeM
     }
     return cards;
   } catch (error) {
+    if (isAbortLikeError(error)) {
+      logger.debug("[YouTube Music] Home shelves fetch aborted");
+      return [];
+    }
     logger.warn("[YouTube Music] Home shelves fetch failed:", error);
     return [];
   }
@@ -1611,7 +1622,11 @@ export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): 
     await setCache(cacheKey, finalPlaylists);
     return finalPlaylists;
   } catch (error) {
-    logger.error("YouTube Music trending playlists error:", error);
+    if (isAbortLikeError(error)) {
+      logger.debug("[YouTube Music] Trending playlists fetch aborted");
+      return [];
+    }
+    logger.warn("YouTube Music trending playlists error:", error);
     return [];
   }
 }
@@ -1635,7 +1650,7 @@ export async function getYouTubeMusicSearchSuggestions(query: string, signal?: A
     return getSearchSuggestionItems(json);
   } catch (error: any) {
     // Abort errors are expected when user types quickly - don't log them as errors
-    if (error?.message === "Request aborted" || signal?.aborted) {
+    if (isAbortLikeError(error) || signal?.aborted) {
       return [];
     }
     logger.error("YouTube Music suggestions error:", error);

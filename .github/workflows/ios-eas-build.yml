@@ -38,6 +38,10 @@ jobs:
       - name: Build iOS (Simulator - No Apple Account Required)
         run: eas build --platform ios --profile ios-simulator --non-interactive --no-wait
 
-      - name: Build iOS (Production - Requires Apple Developer Account)
+      - name: Build iOS (Optimized Production - Smaller Size)
+        run: eas build --platform ios --profile ios-optimized --non-interactive --no-wait
+        continue-on-error: true
+
+      - name: Build iOS (Standard Production - Requires Apple Developer Account)
         run: eas build --platform ios --profile production --non-interactive --no-wait
         continue-on-error: true

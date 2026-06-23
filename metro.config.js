@@ -20,6 +20,18 @@ config.resolver = {
 // names without proving a measurable performance gain.
 config.transformer = {
   ...config.transformer,
+  minifierConfig: {
+    compress: {
+      drop_console: true, // Remove console.log in production
+      reduce_funcs: true,
+    },
+    mangle: {
+      keep_fnames: false,
+    },
+    output: {
+      comments: false,
+    },
+  },
   getTransformOptions: async () => ({
     transform: {
       inlineRequires: true,

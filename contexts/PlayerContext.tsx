@@ -4271,7 +4271,9 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   // Native audio is preferred. If we must fall back to the YouTube iframe on
   // the full player screen, give Android WebView a real visible surface so
   // autoplay does not get stuck behind a hidden 4 px view.
-  const isYoutubePlayerVisible = Boolean(youtubeVideoId && pathname === "/player");
+  // MODIFIED: Always keep YouTube player hidden (4x4 off-screen) for audio-only playback
+  // Original logic made it visible on /player screen, but we want audio-only mode
+  const isYoutubePlayerVisible = false; // Boolean(youtubeVideoId && pathname === "/player");
   const isShortPlayerScreen = screenHeight <= 760;
   const isVeryShortPlayerScreen = screenHeight <= 700;
   const playerTopInset =
@@ -4300,8 +4302,8 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     measuredYoutubeFrame
       ? Math.max(0, measuredYoutubeFrame.x - youtubeRootOffsetX)
       : Math.max(0, (screenWidth - visibleYoutubeWidth) / 2);
-  const youtubePlayerWidth = shouldUseVisibleYoutubeFrame ? visibleYoutubeWidth : 4;
-  const youtubePlayerHeight = shouldUseVisibleYoutubeFrame ? visibleYoutubeHeight : 4;
+  const youtubePlayerWidth = shouldUseVisibleYoutubeFrame ? visibleYoutubeWidth : 1;
+  const youtubePlayerHeight = shouldUseVisibleYoutubeFrame ? visibleYoutubeHeight : 1;
   const youtubeVisibleBorderRadius =
     measuredYoutubeFrame && measuredYoutubeFrame.width >= screenWidth - 2 ? 0 : 16;
   const youtubePlayerStyle = shouldUseVisibleYoutubeFrame
@@ -4319,14 +4321,18 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         backgroundColor: "#000000",
       }
     : {
+        // MODIFIED: 1x1 pixel in top-right corner with minimal opacity for audio-only playback
+        // Browsers require minimal visibility for autoplay to work
         position: "absolute" as const,
-        width: 4,
-        height: 4,
-        opacity: 0.1,
-        left: 0,
+        width: 1,
+        height: 1,
+        opacity: 0.01, // Nearly invisible but allows autoplay
+        right: 0,
         top: 0,
-        zIndex: -1000,
+        zIndex: -999,
+        elevation: -999,
         overflow: "hidden" as const,
+        pointerEvents: "none" as const,
       };
 
   return (
@@ -4383,7 +4389,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
                             allowsFullscreenVideo: false,
                             allowsInlineMediaPlayback: true,
                             mediaPlaybackRequiresUserAction: false,
-                            androidLayerType: "software",
+                            androidLayerType: "hardware",
                             allowsBackgroundMediaPlayback: true,
                           }}
                         />

@@ -1587,7 +1587,8 @@ function useLegacyPlayerScreenView() {
     ambientBackdropEnabled &&
     backgroundVideoId &&
     screenSongIsYouTube &&
-    !isLowEnd
+    !isLowEnd &&
+    false // DISABLED: Never show YouTube video player
   ), [ambientBackdropEnabled, backgroundVideoId, screenSongIsYouTube, isLowEnd]);
 
   const shouldRenderBackgroundVideo = useMemo(() => Boolean(
@@ -1896,7 +1897,7 @@ function useLegacyPlayerScreenView() {
   const activeQueueIndex = isDevPreviewActive ? devPreviewIndex : liveActiveQueueIndex;
 
   useEffect(() => {
-    if (!screenSongIsYouTube) {
+    if (!screenSongIsYouTube || !ambientVideoLayoutActive) {
       setYoutubePlayerFrame(null);
       return;
     }
@@ -1916,6 +1917,7 @@ function useLegacyPlayerScreenView() {
     screenHeight,
     screenSong?.id,
     screenSongIsYouTube,
+    ambientVideoLayoutActive,
     screenWidth,
     setYoutubePlayerFrame,
   ]);
