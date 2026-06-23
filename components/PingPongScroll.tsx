@@ -50,7 +50,10 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
   // Derive needsScroll during render — no state needed
   const containerWidth = containerWidthRef.current;
   const overflow = textWidth - containerWidth;
-  const needsScroll = !paused && overflow > 6 && containerWidth > 0 && textWidth > 0;
+  // Multiple native marquee loops keep older Android GPUs composing at 60fps
+  // even when the rest of the player is static. Android gets a stable,
+  // single-line label; iOS keeps the marquee where compositor cost is lower.
+  const needsScroll = Platform.OS !== "android" && !paused && overflow > 6 && containerWidth > 0 && textWidth > 0;
 
   useEffect(() => {
     Animated.timing(contentOpacity, {

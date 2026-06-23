@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
+  Keyboard,
   InteractionManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -111,6 +112,9 @@ const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
 
 const CARD_ROTATION_PATTERN = [-11, 8, -7, 10, -5, 6] as const;
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
+const MAX_SEARCH_SUGGESTIONS = 8;
+const MAX_JIOSAAVN_ENRICHMENT_QUERIES = 4;
+
 function getRouteSearchQuery(params: { q?: string | string[]; name?: string | string[] }) {
   const incomingQuery = Array.isArray(params.q)
     ? params.q[0]
@@ -120,6 +124,82 @@ function getRouteSearchQuery(params: { q?: string | string[]; name?: string | st
 
 function normalizeRecentSearchLabel(value: string): string {
   return value.trim().replace(/\s+/g, " ");
+}
+
+function getMeaningfulSearchTokens(value: string): string[] {
+  const normalized = normalizeText(value);
+  if (!normalized) return [];
+
+  const out: string[] = [];
+  for (const token of normalized.split(" ")) {
+    if (token.length > 1) out.push(token);
+  }
+  return out;
+}
+
+function getTokenOverlapScore(source: string, candidate: string): number {
+  const sourceTokens = getMeaningfulSearchTokens(source);
+  if (sourceTokens.length === 0) return 0;
+
+  const candidateText = normalizeText(candidate);
+  let hits = 0;
+  for (const token of sourceTokens) {
+    if (candidateText.includes(token)) hits += 1;
+  }
+  return hits / sourceTokens.length;
+}
+
+function normalizeSearchSuggestionList(query: string, items: string[]): string[] {
+  const normalizedQuery = normalizeText(query);
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const item of items) {
+    const label = normalizeRecentSearchLabel(String(item || ""));
+    const key = normalizeText(label);
+    if (!key || key.length < 2 || key === normalizedQuery || seen.has(key)) continue;
+
+    seen.add(key);
+    out.push(label);
+    if (out.length >= MAX_SEARCH_SUGGESTIONS) break;
+  }
+
+  return out;
+}
+
+function buildJioSaavnEnrichmentQueries(
+  searchTerm: string,
+  youtubeSuggestions: string[],
+  youtubeSongs: Song[]
+): string[] {
+  const originalKey = normalizeText(searchTerm);
+  const seen = new Set<string>([originalKey]);
+  const out: string[] = [];
+  const add = (value: string) => {
+    const label = normalizeRecentSearchLabel(value);
+    const key = normalizeText(label);
+    if (!key || key.length < 2 || seen.has(key)) return;
+    seen.add(key);
+    out.push(label);
+  };
+
+  for (const suggestion of youtubeSuggestions) {
+    const key = normalizeText(suggestion);
+    if (!key) continue;
+    const overlapsOriginal = getTokenOverlapScore(searchTerm, suggestion) >= 0.5;
+    if (overlapsOriginal) add(suggestion);
+    if (out.length >= 2) break;
+  }
+
+  for (const song of youtubeSongs.slice(0, 3)) {
+    const title = normalizeRecentSearchLabel(song.title || "");
+    const artist = normalizeRecentSearchLabel(song.artist || "");
+    if (title && artist && artist !== "Unknown Artist") add(`${title} ${artist}`);
+    if (title) add(title);
+    if (out.length >= MAX_JIOSAAVN_ENRICHMENT_QUERIES) break;
+  }
+
+  return out.slice(0, MAX_JIOSAAVN_ENRICHMENT_QUERIES);
 }
 
 function toRecentSearchItem(item: SearchHistoryItem): RecentSearchItem {
@@ -566,6 +646,7 @@ function useSearchScreenView() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [isSearchMode, setIsSearchMode] = useState(routeSearchQuery.length > 0);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const {
     isHeaderElevated,
     handleHeaderScroll,
@@ -575,6 +656,7 @@ function useSearchScreenView() {
   const requestSeqRef = useRef(0);
   const suggestionsSeqRef = useRef(0);
   const latestSuggestionsRef = useRef<{ query: string; items: string[] } | null>(null);
+  const suggestionsClosedForQueryRef = useRef<string | null>(null);
   const appliedRouteSearchQueryRef = useRef(routeSearchQuery);
   const activeSearchAbortRef = useRef<AbortController | null>(null);
   const resultsPlaylistsListRef = useRef<FlatList<PlaylistResult> | null>(null);
@@ -601,7 +683,6 @@ function useSearchScreenView() {
   );
 
   const performSearch = useCallback(async (searchQuery: string) => {
-    setSuggestions([]);
     const requestId = ++requestSeqRef.current;
     const normalizedQuery = searchQuery.trim();
     if (normalizedQuery.length < 2) {
@@ -831,26 +912,26 @@ function useSearchScreenView() {
                 }
               }
 
-              const normalizedSearchTerm = normalizeText(searchTerm);
-              const searchTokens = normalizedSearchTerm.split(" ").filter((token) => token.length > 1);
-              const suggestionQuery = youtubeSuggestions.find((suggestion) => {
-                const normalizedSuggestion = normalizeText(suggestion);
-                if (!normalizedSuggestion || normalizedSuggestion === normalizedSearchTerm) return false;
-                return searchTokens.some((token) => normalizedSuggestion.includes(token));
-              });
-
               let enrichedRankedSongs = rankedSongs;
-              if (suggestionQuery) {
-                // react-doctor-disable-next-line react-doctor/async-defer-await -- the stale-request guard must run after this optional enrichment request.
-                const suggestionData = await safeFetch(
-                  `${apiUrl}api/search/songs?query=${encodeURIComponent(suggestionQuery)}&limit=10`
+              const enrichmentQueries = buildJioSaavnEnrichmentQueries(
+                searchTerm,
+                normalizeSearchSuggestionList(searchTerm, youtubeSuggestions),
+                youtubeSongs
+              );
+              if (enrichmentQueries.length > 0) {
+                const enrichmentRequests = enrichmentQueries.map((enrichmentQuery) =>
+                  safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(enrichmentQuery)}&limit=8`)
                 );
+                // react-doctor-disable-next-line react-doctor/async-defer-await -- the stale-request guard must run after this optional enrichment batch.
+                const enrichmentResults = await Promise.all(enrichmentRequests);
                 if (!requestIsActive()) return;
 
                 const enrichedSongs = rankedSongs.slice();
-                for (const rawSong of (suggestionData?.data?.results || suggestionData?.results || [])) {
-                  const parsedSong = parseBackup(rawSong);
-                  if (parsedSong) mergeInto(enrichedSongs, parsedSong);
+                for (const suggestionData of enrichmentResults) {
+                  for (const rawSong of (suggestionData?.data?.results || suggestionData?.results || [])) {
+                    const parsedSong = parseBackup(rawSong);
+                    if (parsedSong) mergeInto(enrichedSongs, parsedSong);
+                  }
                 }
                 enrichedRankedSongs = fastRank(toFinalList(enrichedSongs));
               }
@@ -858,7 +939,7 @@ function useSearchScreenView() {
               logger.debug("[Search] Discovery results", {
                 youtubeSongCount: youtubeSongs.length,
                 jioSaavnSongCount: enrichedRankedSongs.length,
-                usedSuggestion: Boolean(suggestionQuery),
+                enrichmentQueryCount: enrichmentQueries.length,
               });
               setSongResults(enrichedRankedSongs);
               setYoutubeMusicResults(youtubeSongs);
@@ -917,7 +998,12 @@ function useSearchScreenView() {
     if (text.trim().length < 2) {
       setResultFilter("all");
       setSuggestions([]);
+      setSuggestionsOpen(false);
+      suggestionsClosedForQueryRef.current = null;
+      return;
     }
+    suggestionsClosedForQueryRef.current = null;
+    setSuggestionsOpen(true);
   }, []);
 
   useEffect(() => {
@@ -942,6 +1028,7 @@ function useSearchScreenView() {
       suggestionsSeqRef.current += 1;
       latestSuggestionsRef.current = null;
       setSuggestions([]);
+      setSuggestionsOpen(false);
       return;
     }
 
@@ -951,8 +1038,13 @@ function useSearchScreenView() {
       try {
         const list = await getYouTubeMusicSearchSuggestions(trimmed, controller.signal);
         if (requestId === suggestionsSeqRef.current && !controller.signal.aborted) {
-          latestSuggestionsRef.current = { query: normalizeText(trimmed), items: list };
-          setSuggestions(list);
+          const normalizedList = normalizeSearchSuggestionList(trimmed, list);
+          const normalizedTrimmed = normalizeText(trimmed);
+          latestSuggestionsRef.current = { query: normalizeText(trimmed), items: normalizedList };
+          setSuggestions(normalizedList);
+          setSuggestionsOpen(
+            normalizedList.length > 0 && suggestionsClosedForQueryRef.current !== normalizedTrimmed
+          );
         }
       } catch (error) {
         if (!controller.signal.aborted) {
@@ -989,19 +1081,25 @@ function useSearchScreenView() {
       .catch(() => undefined);
   }, []);
 
+  const applyProgrammaticSearchQuery = useCallback((next: string) => {
+    setIsSearchMode(true);
+    setQuery(next);
+    setSuggestionsOpen(false);
+  }, []);
+
   useEffect(() => {
     const next = routeSearchQuery;
     if (next.length < 2 || next === appliedRouteSearchQueryRef.current) return;
 
     appliedRouteSearchQueryRef.current = next;
-    setIsSearchMode(true);
-    setQuery(next);
+    applyProgrammaticSearchQuery(next);
+    suggestionsClosedForQueryRef.current = normalizeText(next);
     rememberRecentSearch(next);
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
     void performSearch(next);
-  }, [performSearch, rememberRecentSearch, routeSearchQuery]);
+  }, [applyProgrammaticSearchQuery, performSearch, rememberRecentSearch, routeSearchQuery]);
 
   const handleGenrePress = useCallback(
     (genreName: string) => {
@@ -1010,6 +1108,9 @@ function useSearchScreenView() {
       resetHeaderElevation();
       setIsSearchMode(true);
       setQuery(next);
+      suggestionsClosedForQueryRef.current = normalizeText(next);
+      setSuggestionsOpen(false);
+      setSuggestions([]);
       rememberRecentSearch(next);
       if (debounceTimer.current) {
         clearTimeout(debounceTimer.current);
@@ -1041,6 +1142,9 @@ function useSearchScreenView() {
       resetHeaderElevation();
       setIsSearchMode(true);
       setQuery(next);
+      suggestionsClosedForQueryRef.current = normalizeText(next);
+      setSuggestionsOpen(false);
+      setSuggestions([]);
       rememberRecentSearch(next);
       if (debounceTimer.current) {
         clearTimeout(debounceTimer.current);
@@ -1051,17 +1155,29 @@ function useSearchScreenView() {
   );
 
   const handleSuggestionPress = useCallback((suggestion: string) => {
-    setQuery(suggestion);
+    const next = normalizeRecentSearchLabel(suggestion);
+    if (next.length < 2) return;
+    resetHeaderElevation();
+    setIsSearchMode(true);
+    setResultFilter("all");
+    suggestionsClosedForQueryRef.current = normalizeText(next);
+    setSuggestionsOpen(false);
+    setQuery(next);
     setSuggestions([]);
-    rememberRecentSearch(suggestion);
-    void performSearch(suggestion);
-  }, [performSearch, rememberRecentSearch]);
+    Keyboard.dismiss();
+    rememberRecentSearch(next);
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+      debounceTimer.current = null;
+    }
+    void performSearch(next);
+  }, [performSearch, rememberRecentSearch, resetHeaderElevation]);
 
   const renderSuggestion = useCallback(
     ({ item: suggestion }: { item: string }) => (
       <Pressable
         style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]}
-        onPress={() => handleSuggestionPress(suggestion)}
+        onPressIn={() => handleSuggestionPress(suggestion)}
       >
         <Ionicons name="search-outline" size={18} color={Colors.subtext} style={styles.suggestionIcon} />
         <Text style={styles.suggestionText} numberOfLines={1}>
@@ -1121,7 +1237,10 @@ function useSearchScreenView() {
   const handleSubmitSearch = useCallback(() => {
     const trimmed = query.trim();
     if (trimmed.length < 2) return;
+    suggestionsClosedForQueryRef.current = normalizeText(trimmed);
+    setSuggestionsOpen(false);
     setSuggestions([]);
+    Keyboard.dismiss();
     rememberRecentSearch(trimmed);
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
@@ -1133,6 +1252,8 @@ function useSearchScreenView() {
     requestSeqRef.current += 1;
     cancelActiveSearchWork();
     setQuery("");
+    suggestionsClosedForQueryRef.current = null;
+    setSuggestionsOpen(false);
     setSuggestions([]);
     applyEmptySearchState();
   }, [applyEmptySearchState, cancelActiveSearchWork]);
@@ -1660,11 +1781,12 @@ function useSearchScreenView() {
         </View>
       ) : null}
 
-      {isSearchMode && suggestions.length > 0 && query !== searchDisplayQuery && (
+      {isSearchMode && suggestionsOpen && suggestions.length > 0 && query.trim().length >= 2 && (
         <View style={[styles.suggestionsDropdown, { top: topInset + APP_TOP_HEADER_HEIGHT + 8 }]}>
           <FlatList
             data={suggestions}
-            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="none"
+            keyboardShouldPersistTaps="always"
             keyExtractor={(suggestion) => `suggestion-${suggestion}`}
             renderItem={renderSuggestion}
           />
@@ -1772,10 +1894,6 @@ function useSearchScreenView() {
           </View>
           {hasYoutubeResults ? (
             <View style={styles.sourceSwitchWrap}>
-              <View style={styles.sourceSwitchLabelRow}>
-                <Ionicons name="logo-youtube" size={16} color="#FF3B30" />
-                <Text style={styles.sourceSwitchLabel}>Result source</Text>
-              </View>
               <View style={styles.sourceSwitchTrack}>
                 <Pressable
                   accessibilityRole="button"
@@ -1793,7 +1911,7 @@ function useSearchScreenView() {
                     ]}
                     numberOfLines={1}
                   >
-                    Mavrixfy
+                    App
                   </Text>
                   <Text
                     style={[
@@ -1820,7 +1938,7 @@ function useSearchScreenView() {
                     ]}
                     numberOfLines={1}
                   >
-                    YouTube Music
+                    YT
                   </Text>
                   <Text
                     style={[
@@ -2216,8 +2334,8 @@ const styles = StyleSheet.create({
   },
   sourceSwitchWrap: {
     paddingHorizontal: 16,
-    paddingBottom: 10,
-    gap: 8,
+    paddingBottom: 6,
+    alignItems: "flex-end",
   },
   sourceSwitchLabelRow: {
     flexDirection: "row",
@@ -2230,11 +2348,12 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
   },
   sourceSwitchTrack: {
-    minHeight: 42,
+    width: 148,
+    minHeight: 30,
     flexDirection: "row",
     alignItems: "center",
-    padding: 3,
-    gap: 3,
+    padding: 2,
+    gap: 2,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
@@ -2243,13 +2362,13 @@ const styles = StyleSheet.create({
   sourceSwitchOption: {
     flex: 1,
     minWidth: 0,
-    minHeight: 34,
+    minHeight: 24,
     borderRadius: 6,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 10,
-    gap: 7,
+    paddingHorizontal: 6,
+    gap: 4,
   },
   sourceSwitchOptionActive: {
     backgroundColor: Colors.primary,
@@ -2260,7 +2379,7 @@ const styles = StyleSheet.create({
   sourceSwitchText: {
     minWidth: 0,
     color: Colors.subtext,
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: "Inter_700Bold",
   },
   sourceSwitchTextActive: {
@@ -2268,7 +2387,7 @@ const styles = StyleSheet.create({
   },
   sourceSwitchCount: {
     color: Colors.subtext,
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: "Inter_700Bold",
     fontVariant: ["tabular-nums"],
   },

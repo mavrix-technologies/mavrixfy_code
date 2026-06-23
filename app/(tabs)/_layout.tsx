@@ -1,7 +1,7 @@
 import { Redirect, Tabs, usePathname, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import { ActivityIndicator, Easing, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
+import { Easing, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -1370,11 +1370,7 @@ function useIOSMiniPlayerOverlayView() {
 }
 
 function AuthRouteFallback() {
-  return (
-    <View style={styles.authRouteFallback}>
-      <ActivityIndicator size="large" color={Colors.primary} />
-    </View>
-  );
+  return <View style={styles.authRouteFallback} />;
 }
 
 export default function TabLayout() {

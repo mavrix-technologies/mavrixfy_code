@@ -68,7 +68,6 @@ import {
   YouTubeMusicPlaylistCard,
   type YouTubeMusicPlaylistKind,
 } from "@/lib/youtubeMusicService";
-import HomeSkeletonLoader from "@/components/HomeSkeletonLoader";
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
 import AppTopHeader, {
@@ -259,6 +258,36 @@ function hasVisibleHomeSections(source: HomeSessionCache): boolean {
   return hasHomeContent(source) || source.featuredArtists.length > 0;
 }
 
+function isRecentYouTubeSong(song: Partial<Song>): boolean {
+  return Boolean(
+    song.source === "youtube" ||
+      String(song.id || "").startsWith("youtube_") ||
+      song.youtubeVideoId ||
+      song.videoId
+  );
+}
+
+function getRecentSongAudioUrl(sourceSong: Partial<Song>): string {
+  const legacySource = sourceSong as Partial<Song> & {
+    url?: string;
+    uri?: string;
+    streamUrl?: string;
+    downloadUrl?: string | { url?: string; link?: string };
+  };
+  const downloadUrlCandidate =
+    typeof legacySource.downloadUrl === "string"
+      ? legacySource.downloadUrl
+      : legacySource.downloadUrl?.url || legacySource.downloadUrl?.link || "";
+
+  return [
+    sourceSong.audioUrl,
+    legacySource.url,
+    legacySource.uri,
+    legacySource.streamUrl,
+    downloadUrlCandidate,
+  ].find((candidate) => typeof candidate === "string" && candidate.trim().length > 0)?.trim() || "";
+}
+
 function getThumbImageUrl(images: JioSaavnImage[] | undefined): string {
   if (!Array.isArray(images) || images.length === 0) return "";
   return getBestImageUrl(images);
@@ -299,6 +328,35 @@ function chunkArray<T>(array: T[], size: number): T[][] {
     chunks.push(array.slice(i, i + size));
   }
   return chunks;
+}
+
+function getQuickPickRotationSeed(): number {
+  const now = new Date();
+  const daySeed = Math.floor(now.getTime() / 86_400_000);
+  return daySeed * 4 + Math.floor(now.getHours() / 6);
+}
+
+function getQuickPickSongs(songs: Song[], seed: number): Song[] {
+  const seen = new Set<string>();
+  const latestSongs: Song[] = [];
+
+  for (const song of songs) {
+    const id = String(song.id || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    latestSongs.push(song);
+    if (latestSongs.length >= 24) break;
+  }
+
+  if (latestSongs.length <= 5) return latestSongs;
+
+  const [latestSong, ...rotatingSongs] = latestSongs;
+  const offset = rotatingSongs.length > 0 ? seed % rotatingSongs.length : 0;
+  return [
+    latestSong,
+    ...rotatingSongs.slice(offset),
+    ...rotatingSongs.slice(0, offset),
+  ];
 }
 
 function toJioSaavnHomeCategoryItem(item: HomeJioSaavnCategoryData["results"][number]): HomeCategoryItem {
@@ -951,6 +1009,18 @@ function HomeHeroVideoCard({
   );
 }
 
+function HomeBootSurface({ topInset }: { topInset: number }) {
+  return (
+    <View style={[styles.bootSurface, { paddingTop: topInset }]}>
+      <LinearGradient
+        colors={["rgba(38,225,154,0.10)", "rgba(16,20,26,0)"]}
+        locations={[0, 1]}
+        style={styles.bootSurfaceGlow}
+      />
+    </View>
+  );
+}
+
 const MoodChipListItem = memo(function MoodChipListItem({
   item,
   selected,
@@ -1040,7 +1110,6 @@ function useHomeScreenInnerView() {
     isAuthenticated,
     isGuest,
     firebaseUser,
-    user,
   } = useAuth();
   const { playSong, currentSong, isPlaying } = usePlayerBrowse();
   const currentSongId = currentSong?.id || null;
@@ -1265,6 +1334,10 @@ function useHomeScreenInnerView() {
   const [hasRecommendationFeedFailed, setHasRecommendationFeedFailed] = useState(false);
   const latestLoadIdRef = useRef(0);
   const latestRecommendationLoadIdRef = useRef(0);
+  const quickPickRotationSeedRef = useRef<number | null>(null);
+  if (quickPickRotationSeedRef.current === null) {
+    quickPickRotationSeedRef.current = getQuickPickRotationSeed();
+  }
   const hasHydratedRef = useRef(HOME_SESSION_CACHE.hydrated);
   const prefetchStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelPlaylistPrefetchRef = useRef<(() => void) | null>(null);
@@ -2112,25 +2185,10 @@ function useHomeScreenInnerView() {
       if (item.type === "song") {
         const sourceSong = item.data as Partial<Song> | undefined;
         if (sourceSong && typeof sourceSong.id === "string") {
-          const legacySource = sourceSong as Partial<Song> & {
-            url?: string;
-            uri?: string;
-            streamUrl?: string;
-            downloadUrl?: string | { url?: string; link?: string };
-          };
-          const downloadUrlCandidate =
-            typeof legacySource.downloadUrl === "string"
-              ? legacySource.downloadUrl
-              : legacySource.downloadUrl?.url || legacySource.downloadUrl?.link || "";
-          const resolvedAudioUrl = [
-            sourceSong.audioUrl,
-            legacySource.url,
-            legacySource.uri,
-            legacySource.streamUrl,
-            downloadUrlCandidate,
-          ].find((candidate) => typeof candidate === "string" && candidate.trim().length > 0)?.trim() || "";
+          const resolvedAudioUrl = getRecentSongAudioUrl(sourceSong);
 
           const hydratedSong: Song = {
+            ...sourceSong,
             id: sourceSong.id,
             title: sourceSong.title || item.name || "Unknown Song",
             artist: sourceSong.artist || "Unknown Artist",
@@ -2143,7 +2201,7 @@ function useHomeScreenInnerView() {
             language: sourceSong.language,
             source: sourceSong.source,
           };
-          if (hydratedSong.audioUrl.trim().length > 0) {
+          if (hydratedSong.audioUrl.trim().length > 0 || isRecentYouTubeSong(hydratedSong)) {
             playSong(hydratedSong, [hydratedSong]);
             routerPush("/player");
             return;
@@ -2443,7 +2501,8 @@ function useHomeScreenInnerView() {
   );
 
   const quickPicksChunks = useMemo(() => {
-    return chunkArray(newReleaseSongs, 4).filter((chunk) => chunk.length === 4);
+    const quickPickSongs = getQuickPickSongs(newReleaseSongs, quickPickRotationSeedRef.current ?? 0);
+    return chunkArray(quickPickSongs, 4).filter((chunk) => chunk.length === 4);
   }, [newReleaseSongs]);
 
   const renderQuickPicksColumnSeparator = useCallback(() => <View style={{ width: 14 }} />, []);
@@ -2727,33 +2786,24 @@ function useHomeScreenInnerView() {
       <AppTopHeader
         topInset={topInset}
         elevated={isHomeHeaderElevated}
-        titleNode={null}
-        left={
-          <View style={styles.headerBrandRow}>
-            <Text style={styles.headerBrandLargeTitle}>Mavrixfy</Text>
-          </View>
-        }
-        leftWidth={150}
+        title="Mavrixfy"
+        left={<AppTopHeaderProfileButton />}
         right={
-          <View style={styles.headerRightActions}>
-            <Pressable
-              hitSlop={8}
-              onPress={() => {
-                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                router.push("/notifications");
-              }}
-            >
-              <Animated.View style={[styles.notificationBellIconWrap, animatedBellStyle]}>
-                <Ionicons name="notifications-outline" size={24} color="#F8FBF9" />
-                {unreadNotifCount > 0 && (
-                  <View style={styles.notificationUnreadDot} />
-                )}
-              </Animated.View>
-            </Pressable>
-            <AppTopHeaderProfileButton />
-          </View>
+          <Pressable
+            hitSlop={8}
+            onPress={() => {
+              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/notifications");
+            }}
+          >
+            <Animated.View style={[styles.notificationBellIconWrap, animatedBellStyle]}>
+              <Ionicons name="notifications-outline" size={24} color="#F8FBF9" />
+              {unreadNotifCount > 0 && (
+                <View style={styles.notificationUnreadDot} />
+              )}
+            </Animated.View>
+          </Pressable>
         }
-        rightWidth={85}
       />
     );
   }, [isHomeHeaderElevated, topInset, unreadNotifCount, animatedBellStyle]);
@@ -2811,21 +2861,9 @@ function useHomeScreenInnerView() {
   }, [handleRefresh, homeFeedState, routerPush]);
 
   const getSectionHeaderElement = useCallback((title: string, onViewAll?: () => void) => {
-    const isQuickPicks = title === "New & quick picks";
     return (
       <View style={styles.sectionHeader}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          {isQuickPicks && (
-            <View style={styles.quickPicksAvatarWrap}>
-              {isAuthenticated && user?.picture ? (
-                <Image source={{ uri: user.picture }} style={styles.quickPicksAvatar} contentFit="cover" />
-              ) : (
-                <View style={styles.quickPicksAvatarFallback}>
-                  <Ionicons name="person-circle-outline" size={22} color="#F8FBF9" />
-                </View>
-              )}
-            </View>
-          )}
           <Text style={styles.sectionTitle}>{title}</Text>
         </View>
         {onViewAll ? (
@@ -2835,7 +2873,7 @@ function useHomeScreenInnerView() {
         ) : null}
       </View>
     );
-  }, [isAuthenticated, user]);
+  }, []);
 
   const renderRowSeparator = useCallback(() => <View style={styles.rowSeparator} />, []);
 
@@ -2865,7 +2903,7 @@ function useHomeScreenInnerView() {
         case "new-release-songs":
           return (
             <View style={styles.section}>
-              {getSectionHeaderElement("New & quick picks")}
+              {getSectionHeaderElement("Quick Picks")}
               {newReleaseSongs.length > 0 ? (
                 <FlatList
                   horizontal
@@ -3088,7 +3126,7 @@ function useHomeScreenInnerView() {
     [getLiveVideoElement, moodChipsElement]
   );
 
-  const shouldShowSkeleton = (loading || isRecommendationFeedLoading) && sections.length === 0;
+  const shouldShowBootSurface = (loading || isRecommendationFeedLoading) && sections.length === 0;
   const inlineAdSectionIndex = useMemo(() => Math.min(5, Math.max(0, sections.length - 1)), [sections.length]);
   const renderHomeSection = useCallback(
     ({ item, index }: { item: HomeSection; index: number }) => (
@@ -3111,10 +3149,10 @@ function useHomeScreenInnerView() {
     );
   }
 
-  if (shouldShowSkeleton) {
+  if (shouldShowBootSurface) {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
-        <HomeSkeletonLoader />
+        <HomeBootSurface topInset={0} />
       </View>
     );
   }
@@ -3161,6 +3199,20 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  bootSurface: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.background,
+    paddingHorizontal: 24,
+  },
+  bootSurfaceGlow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 220,
   },
   adOverlayContainer: {
     position: "absolute",
@@ -3713,22 +3765,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 18,
-  },
-  quickPicksAvatarWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    overflow: "hidden",
-    backgroundColor: "transparent",
-  },
-  quickPicksAvatar: {
-    width: "100%",
-    height: "100%",
-  },
-  quickPicksAvatarFallback: {
-    width: "100%",
-    height: "100%",
-    alignItems: "center",
-    justifyContent: "center",
   },
 });

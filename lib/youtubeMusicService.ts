@@ -1,5 +1,4 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
 
 import { JioSaavnImage, Song } from "@/lib/musicData";
 import { getYouTubeMusicApiUrl } from "@/lib/api-config";
@@ -716,28 +715,45 @@ export async function getYouTubeMusicAudioStream(
   }
   audioStreamCache.delete(cleanVideoId);
 
-  // Directly construct the streaming URL pointing to the configured YouTube Music API.
-  const apiBase = getYouTubeMusicApiUrl().replace(/\/+$/, "");
-  const streamId = Platform.OS === "ios"
-    ? `${encodeURIComponent(cleanVideoId)}.m4a`
-    : encodeURIComponent(cleanVideoId);
-  const streamUrl = `${apiBase}/stream/${streamId}`;
+  const pending = audioStreamRequests.get(cleanVideoId);
+  if (pending) return pending;
 
-  const stream: YouTubeMusicAudioStream = {
-    videoId: cleanVideoId,
-    url: streamUrl,
-    expiresAt: Date.now() + 5.5 * 60 * 60 * 1000,
-    headers: {},
-    mimeType: "audio/mp4",
-  };
+  const request = (async () => {
+    try {
+      const encodedVideoId = encodeURIComponent(cleanVideoId);
+      const json = await fetchFirstJson<any>(
+        [
+          ...getEndpointCandidates(`/audio/${encodedVideoId}`, `/audio/${encodedVideoId}`),
+          ...getEndpointCandidates(`/stream-info/${encodedVideoId}`, `/stream-info/${encodedVideoId}`),
+        ],
+        signal
+      );
+      const stream = normalizeAudioStreamPayload(json, cleanVideoId);
+      if (!stream) {
+        logger.warn("[YouTube Music] Audio resolver returned no direct stream URL", { videoId: cleanVideoId });
+        return null;
+      }
 
-  audioStreamCache.set(cleanVideoId, stream);
-  if (audioStreamCache.size > AUDIO_STREAM_CACHE_MAX_ITEMS) {
-    const oldestKey = audioStreamCache.keys().next().value;
-    if (oldestKey) audioStreamCache.delete(oldestKey);
-  }
+      audioStreamCache.set(cleanVideoId, stream);
+      if (audioStreamCache.size > AUDIO_STREAM_CACHE_MAX_ITEMS) {
+        const oldestKey = audioStreamCache.keys().next().value;
+        if (oldestKey) audioStreamCache.delete(oldestKey);
+      }
 
-  return stream;
+      return stream;
+    } catch (error: any) {
+      if (error?.message === "Request aborted" || signal?.aborted) {
+        return null;
+      }
+      logger.warn("[YouTube Music] Audio resolver failed:", error?.message || error);
+      return null;
+    } finally {
+      audioStreamRequests.delete(cleanVideoId);
+    }
+  })();
+
+  audioStreamRequests.set(cleanVideoId, request);
+  return request;
 }
 
 

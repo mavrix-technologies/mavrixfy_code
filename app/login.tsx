@@ -252,7 +252,7 @@ function useLoginScreenView() {
               <View style={styles.heroPanel}>
                 <View style={styles.heroBrandRow}>
                   <View style={[styles.logoBadge, { width: 58, height: 58, borderRadius: 29 }]}>
-                    <Image source={require("@/assets/images/mavrixfy_icone.png")} style={styles.logoImage} resizeMode="contain" />
+                    <Image source={require("@/assets/images/mavrixfy_icone.png")} style={styles.logoImage} contentFit="contain" />
                   </View>
                   <View style={styles.heroBrandCopy}>
                     <Text style={styles.heroBrandName}>Mavrixfy</Text>
@@ -298,7 +298,7 @@ function useLoginScreenView() {
                   {!heroVisible ? (
                     <>
                       <View style={[styles.logoBadge, { width: logoSize, height: logoSize, borderRadius: logoSize / 2 }]}>
-                        <Image source={require("@/assets/images/mavrixfy_icone.png")} style={styles.logoImage} resizeMode="contain" />
+                        <Image source={require("@/assets/images/mavrixfy_icone.png")} style={styles.logoImage} contentFit="contain" />
                       </View>
                       <View style={styles.mobileBrandCopy}>
                         <Text style={styles.mobileBrandName}>Mavrixfy</Text>

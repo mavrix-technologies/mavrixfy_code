@@ -164,12 +164,24 @@ const withTrackPlayer = (config) => {
       ],
     });
 
-    // Remove stale Android Auto declarations until a native MediaBrowserService
-    // implementation exists. Leaving the service in the manifest crashes
-    // playback when Android tries to bind it for media resume.
-    removeAppMetaData(app, "com.google.android.gms.car.application");
-    removeService(app, ".auto.MavrixfyAutoService");
-    removeService(app, "com.mavrixfy.app.auto.MavrixfyAutoService");
+    ensureAppMetaData(app, {
+      $: {
+        "android:name": "com.google.android.gms.car.application",
+        "android:resource": "@xml/automotive_app_desc",
+      },
+    });
+
+    ensureService(app, {
+      $: {
+        "android:name": ".auto.MavrixfyAutoService",
+        "android:exported": "true",
+      },
+      "intent-filter": [
+        {
+          action: [{ $: { "android:name": "android.media.browse.MediaBrowserService" } }],
+        },
+      ],
+    });
 
     return config;
   });
@@ -179,9 +191,13 @@ const withTrackPlayer = (config) => {
     async (config) => {
       const xmlDir = path.join(config.modRequest.projectRoot, "android", "app", "src", "main", "res", "xml");
       const automotiveDescPath = path.join(xmlDir, "automotive_app_desc.xml");
-      if (fs.existsSync(automotiveDescPath)) {
-        fs.unlinkSync(automotiveDescPath);
+      if (!fs.existsSync(xmlDir)) {
+        fs.mkdirSync(xmlDir, { recursive: true });
       }
+      fs.writeFileSync(
+        automotiveDescPath,
+        `<?xml version="1.0" encoding="utf-8"?>\n<automotiveApp>\n  <uses name="media"/>\n</automotiveApp>\n`
+      );
       return config;
     },
   ]);

@@ -8,9 +8,8 @@
  * Official docs: https://rntp.dev/docs/basics/playback-service
  */
 
-import TrackPlayer, { Event, RepeatMode } from "react-native-track-player";
+import TrackPlayer, { Event } from "react-native-track-player";
 import { setupPlayer } from "@/lib/trackPlayer";
-import { registerAutoMediaRemoteService } from "@/lib/autoMediaRemoteService";
 import { compactMap } from "@/lib/arrayUtils";
 
 let pausedForDuck = false;
@@ -40,8 +39,6 @@ export const trackPlayerService = async () => {
     // player_already_initialized is fine — just means the app already set it up
   }
 
-  registerAutoMediaRemoteService();
-
   // ── Play / Pause / Stop ────────────────────────────────────────────────────
   TrackPlayer.addEventListener(Event.RemotePlay, () => runRemoteCommand(() => TrackPlayer.play()));
   TrackPlayer.addEventListener(Event.RemotePause, () => runRemoteCommand(() => TrackPlayer.pause()));
@@ -49,49 +46,8 @@ export const trackPlayerService = async () => {
 
   // ── Next / Previous ────────────────────────────────────────────────────────
   TrackPlayer.addEventListener(Event.RemoteNext, () => runRemoteCommand(async () => {
-      const [queue, index] = await Promise.all([
-        TrackPlayer.getQueue(),
-        TrackPlayer.getActiveTrackIndex(),
-      ]);
-      const next = (index ?? 0) + 1;
-      if (next < queue.length) {
-        await TrackPlayer.skip(next);
-        // Update metadata after skip to ensure lock screen shows correct song
-        if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[next]) {
-          try {
-            await TrackPlayer.updateNowPlayingMetadata({
-              title: queue[next].title,
-              artist: queue[next].artist,
-              album: queue[next].album,
-              artwork: queue[next].artwork,
-              duration: queue[next].duration,
-            });
-          } catch {
-            // Ignore — will fall back to automatic metadata
-          }
-        }
-        await TrackPlayer.play();
-      } else {
-        const mode = await TrackPlayer.getRepeatMode();
-        if (mode === RepeatMode.Queue) {
-          await TrackPlayer.skip(0);
-          // Update metadata for first track
-          if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[0]) {
-            try {
-              await TrackPlayer.updateNowPlayingMetadata({
-                title: queue[0].title,
-                artist: queue[0].artist,
-                album: queue[0].album,
-                artwork: queue[0].artwork,
-                duration: queue[0].duration,
-              });
-            } catch {
-              // Ignore — will fall back to automatic metadata
-            }
-          }
-          await TrackPlayer.play();
-        }
-      }
+      await TrackPlayer.skipToNext();
+      await TrackPlayer.play();
   }));
 
   TrackPlayer.addEventListener(Event.RemotePrevious, () => runRemoteCommand(async () => {
@@ -101,50 +57,11 @@ export const trackPlayerService = async () => {
         await TrackPlayer.seekTo(0);
         return;
       }
-      const [queue, index] = await Promise.all([
-        TrackPlayer.getQueue(),
-        TrackPlayer.getActiveTrackIndex(),
-      ]);
-      const prev = (index ?? 0) - 1;
-      if (prev >= 0) {
-        await TrackPlayer.skip(prev);
-        // Update metadata after skip to ensure lock screen shows correct song
-        if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[prev]) {
-          try {
-            await TrackPlayer.updateNowPlayingMetadata({
-              title: queue[prev].title,
-              artist: queue[prev].artist,
-              album: queue[prev].album,
-              artwork: queue[prev].artwork,
-              duration: queue[prev].duration,
-            });
-          } catch {
-            // Ignore — will fall back to automatic metadata
-          }
-        }
+      try {
+        await TrackPlayer.skipToPrevious();
         await TrackPlayer.play();
-      } else {
-        const mode = await TrackPlayer.getRepeatMode();
-        if (mode === RepeatMode.Queue) {
-          await TrackPlayer.skip(queue.length - 1);
-          // Update metadata for last track
-          if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[queue.length - 1]) {
-            try {
-              await TrackPlayer.updateNowPlayingMetadata({
-                title: queue[queue.length - 1].title,
-                artist: queue[queue.length - 1].artist,
-                album: queue[queue.length - 1].album,
-                artwork: queue[queue.length - 1].artwork,
-                duration: queue[queue.length - 1].duration,
-              });
-            } catch {
-              // Ignore — will fall back to automatic metadata
-            }
-          }
-          await TrackPlayer.play();
-        } else {
-          await TrackPlayer.seekTo(0);
-        }
+      } catch {
+        await TrackPlayer.seekTo(0);
       }
   }));
 
@@ -178,20 +95,6 @@ export const trackPlayerService = async () => {
       const idx = queue.findIndex((t) => String(t.id) === String(e.id));
       if (idx >= 0) {
         await TrackPlayer.skip(idx);
-        // Update metadata after skip to ensure lock screen shows correct song
-        if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[idx]) {
-          try {
-            await TrackPlayer.updateNowPlayingMetadata({
-              title: queue[idx].title,
-              artist: queue[idx].artist,
-              album: queue[idx].album,
-              artwork: queue[idx].artwork,
-              duration: queue[idx].duration,
-            });
-          } catch {
-            // Ignore — will fall back to automatic metadata
-          }
-        }
         await TrackPlayer.play();
       }
   }));
@@ -202,20 +105,6 @@ export const trackPlayerService = async () => {
       const terms = compactMap([e.title, e.artist, e.album, e.query], (v) => String(v ?? "").toLowerCase().trim());
       if (terms.length === 0) {
         await TrackPlayer.skip(0);
-        // Update metadata after skip
-        if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[0]) {
-          try {
-            await TrackPlayer.updateNowPlayingMetadata({
-              title: queue[0].title,
-              artist: queue[0].artist,
-              album: queue[0].album,
-              artwork: queue[0].artwork,
-              duration: queue[0].duration,
-            });
-          } catch {
-            // Ignore — will fall back to automatic metadata
-          }
-        }
         await TrackPlayer.play();
         return;
       }
@@ -227,20 +116,12 @@ export const trackPlayerService = async () => {
       });
       const targetIdx = idx >= 0 ? idx : 0;
       await TrackPlayer.skip(targetIdx);
-      // Update metadata after skip
-      if (typeof TrackPlayer.updateNowPlayingMetadata === "function" && queue[targetIdx]) {
-        try {
-          await TrackPlayer.updateNowPlayingMetadata({
-            title: queue[targetIdx].title,
-            artist: queue[targetIdx].artist,
-            album: queue[targetIdx].album,
-            artwork: queue[targetIdx].artwork,
-            duration: queue[targetIdx].duration,
-          });
-        } catch {
-          // Ignore — will fall back to automatic metadata
-        }
-      }
+      await TrackPlayer.play();
+  }));
+
+  TrackPlayer.addEventListener(Event.RemoteSkip, (e) => runRemoteCommand(async () => {
+      if (typeof e.index !== "number") return;
+      await TrackPlayer.skip(e.index);
       await TrackPlayer.play();
   }));
 };

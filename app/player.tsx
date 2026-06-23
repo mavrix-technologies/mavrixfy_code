@@ -10,6 +10,7 @@ import {
   Alert,
   ToastAndroid,
   ActivityIndicator,
+  AppState,
   InteractionManager,
   GestureResponderEvent,
   NativeScrollEvent,
@@ -631,21 +632,20 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
     lastPositionRef.current = targetSeconds;
   }, [positionMillis, playerReady]);
 
-  // Calculate dimensions with aggressive bottom extension to hide all edges
+  // Keep the WebView surface at screen width and let the compositor scale it.
+  // Rendering the iframe itself at the full portrait-cover width can create a
+  // multi-thousand-pixel hardware surface on phones and consume several cores.
   const dimensions = useMemo(() => {
     const baseW = winW;
     const baseH = Math.round(baseW / (16 / 9));
-    const extraBleed = 280; // 80px top + 200px bottom for complete bottom coverage
-    const targetH = containerHeight + extraBleed;
+    const targetH = containerHeight + 120;
     const scaleFactor = targetH / baseH;
-    const scaledW = Math.round(baseW * scaleFactor);
-    const scaledH = Math.round(baseH * scaleFactor);
-    
+
     return {
-      scaledW,
-      scaledH,
-      offsetTop: -80,
-      offsetLeft: Math.round((winW - scaledW) / 2),
+      baseW,
+      baseH,
+      scaleFactor,
+      offsetTop: Math.round((containerHeight - baseH) / 2),
     };
   }, [winW, containerHeight]);
 
@@ -661,17 +661,18 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
         style={{
           position: "absolute",
           top: dimensions.offsetTop,
-          left: dimensions.offsetLeft,
-          width: dimensions.scaledW,
-          height: dimensions.scaledH,
+          left: 0,
+          width: dimensions.baseW,
+          height: dimensions.baseH,
+          transform: [{ scale: dimensions.scaleFactor }],
           opacity: 1.0,
         }}
       >
         <YoutubePlayer
           key={videoId}
           ref={playerRef}
-          height={dimensions.scaledH}
-          width={dimensions.scaledW}
+          height={dimensions.baseH}
+          width={dimensions.baseW}
           play={isPlaying}
           mute={true}
           videoId={videoId}
@@ -1060,15 +1061,16 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
     lastSyncRef.current = { progress, timestamp: Date.now() };
   }, [isScrubbing, progress]);
 
-  // Interpolate progress smoothly at 60fps when actively playing
+  // A song progress bar moves by less than a pixel per sample at 4 Hz on a
+  // phone. Updating React state every animation frame needlessly rerendered
+  // the player around 60 times per second and kept multiple CPU cores busy.
   useEffect(() => {
     if (!isPlaying || isBuffering || isLoading || isScrubbing) return;
 
     // Reset the reference point to prevent jumping after pause/resume or buffering
     lastSyncRef.current = { progress, timestamp: Date.now() };
 
-    let animId: number;
-    const tick = () => {
+    const updateInterpolatedProgress = () => {
       const elapsedSec = (Date.now() - lastSyncRef.current.timestamp) / 1000;
       const durationSec = duration / 1000;
       if (durationSec > 0) {
@@ -1076,11 +1078,11 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
         const nextProgress = Math.min(1.0, lastSyncRef.current.progress + addedProgress);
         setLocalProgress(nextProgress);
       }
-      animId = requestAnimationFrame(tick);
     };
 
-    animId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animId);
+    updateInterpolatedProgress();
+    const interval = setInterval(updateInterpolatedProgress, 250);
+    return () => clearInterval(interval);
   }, [isPlaying, isBuffering, isLoading, duration, isScrubbing, progress]);
 
   const liveProgress = isPlaying && !isScrubbing ? localProgress : progress;
@@ -1344,7 +1346,9 @@ function useLegacyPlayerScreenView() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const [ambientBackdropEnabled, setAmbientBackdropEnabled] = useState(true);
-  const [isScreenFocused, setIsScreenFocused] = useState(true);
+  const [isNavigationFocused, setIsNavigationFocused] = useState(() => navigation.isFocused());
+  const [isAppActive, setIsAppActive] = useState(() => AppState.currentState === "active");
+  const isScreenFocused = isNavigationFocused && isAppActive;
 
   const [isLowEnd, setIsLowEnd] = useState(false);
 
@@ -1376,10 +1380,10 @@ function useLegacyPlayerScreenView() {
     fetchSettings();
     const unsubscribeFocus = navigation.addListener("focus", () => {
       fetchSettings();
-      setIsScreenFocused(true);
+      setIsNavigationFocused(true);
     });
     const unsubscribeBlur = navigation.addListener("blur", () => {
-      setIsScreenFocused(false);
+      setIsNavigationFocused(false);
     });
 
     return () => {
@@ -1388,6 +1392,13 @@ function useLegacyPlayerScreenView() {
       unsubscribeBlur();
     };
   }, [navigation]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      setIsAppActive(nextState === "active");
+    });
+    return () => subscription.remove();
+  }, []);
   const {
     currentSong,
     queue,
@@ -1598,6 +1609,7 @@ function useLegacyPlayerScreenView() {
     playerAdSongsSinceCoverRef.current < PLAYER_AD_COVER_COOLDOWN_SONGS;
   const showAdInPlayer = Boolean(
     currentPlayerAdSongId &&
+      !isLowEnd &&
       playerAdLoaded &&
       playerAd &&
       !isDevPreviewActive &&
@@ -2483,7 +2495,7 @@ function useLegacyPlayerScreenView() {
                 },
               ]}
             >
-              {showAdInPlayer && isActiveCard && playerAd && NativeAdView && NativeMediaView && NativeAsset && NativeAssetType ? (
+              {showAdInPlayer && isScreenFocused && isActiveCard && playerAd && NativeAdView && NativeMediaView && NativeAsset && NativeAssetType ? (
                 <NativeAdView
                   nativeAd={playerAd}
                   style={[styles.albumArt, styles.adCardContainer]}
@@ -2532,7 +2544,7 @@ function useLegacyPlayerScreenView() {
             </Animated.View>
 
             {/* Toggle ad/artwork overlay button */}
-            {isActiveCard && playerAdLoaded && (
+            {isActiveCard && !isLowEnd && playerAdLoaded && (
               <Pressable
                 style={[
                   styles.adBadgeOverlay,
@@ -2597,6 +2609,8 @@ function useLegacyPlayerScreenView() {
       artSize,
       handleArtworkSongChange,
       handlePlayerAdToggle,
+      isLowEnd,
+      isScreenFocused,
       NativeAdView,
       NativeAsset,
       NativeAssetType,

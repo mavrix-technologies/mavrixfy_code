@@ -161,6 +161,7 @@ def extract_audio_stream(video_id: str) -> dict[str, Any]:
 
     watch_url = f"https://www.youtube.com/watch?v={video_id}"
     options = {
+        "format": AUDIO_FORMAT_SELECTOR,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
@@ -244,18 +245,21 @@ def extract_audio_stream(video_id: str) -> dict[str, Any]:
         "webm": "audio/webm",
         "opus": "audio/ogg",
     }.get(extension, "audio/mpeg")
+    playback_headers = get_safe_playback_headers(
+        best_format.get("http_headers") or info.get("http_headers")
+    )
     stream = {
         "videoId": video_id,
         "url": audio_url,
         "expiresAt": get_audio_url_expiry(audio_url),
-        "headers": get_safe_playback_headers(info.get("http_headers")),
-        "formatId": str(info.get("format_id") or ""),
+        "headers": playback_headers,
+        "formatId": str(best_format.get("format_id") or info.get("format_id") or ""),
         "extension": extension,
         "mimeType": mime_type,
-        "audioCodec": str(info.get("acodec") or ""),
-        "bitrateKbps": info.get("abr"),
-        "duration": info.get("duration"),
-        "contentLength": info.get("filesize") or info.get("filesize_approx"),
+        "audioCodec": str(best_format.get("acodec") or info.get("acodec") or ""),
+        "bitrateKbps": best_format.get("abr") or best_format.get("tbr") or info.get("abr"),
+        "duration": best_format.get("duration") or info.get("duration"),
+        "contentLength": best_format.get("filesize") or best_format.get("filesize_approx") or info.get("filesize") or info.get("filesize_approx"),
     }
     logger.info(
         "yt-dlp audio stream resolved videoId=%s formatId=%s extension=%s mimeType=%s audioCodec=%s host=%s",
@@ -383,6 +387,41 @@ def get_song(videoId: str):
     return details
 
 
+async def resolve_audio_stream_info(
+    videoId: str,
+    token: Optional[str] = None,
+    x_resolver_token: Optional[str] = None,
+):
+    videoId = videoId.removesuffix(".m4a").removesuffix(".mp4")
+    if not YOUTUBE_VIDEO_ID_PATTERN.fullmatch(videoId):
+        raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
+
+    verify_audio_resolver_token(x_resolver_token or token)
+
+    try:
+        import anyio
+        async with audio_resolver_semaphore:
+            stream_info = await anyio.to_thread.run_sync(extract_audio_stream, videoId)
+        return {"stream": stream_info}
+    except Exception as error:
+        logger.exception("YouTube audio resolver failed for %s", videoId)
+        raise HTTPException(status_code=502, detail="Unable to resolve YouTube audio") from error
+
+
+@app.get("/audio/{videoId}")
+@app.get("/stream-info/{videoId}")
+@app.get("/api/audio/{videoId}")
+@app.get("/api/stream-info/{videoId}")
+@app.get("/api/youtube-music/audio/{videoId}")
+@app.get("/api/youtube-music/stream-info/{videoId}")
+async def get_audio_stream_info(
+    videoId: str,
+    token: Optional[str] = Query(default=None),
+    x_resolver_token: Optional[str] = Header(default=None),
+):
+    return await resolve_audio_stream_info(videoId, token, x_resolver_token)
+
+
 async def build_audio_stream_response(
     videoId: str,
     request: Request,
@@ -399,7 +438,8 @@ async def build_audio_stream_response(
 
     try:
         import anyio
-        stream_info = await anyio.to_thread.run_sync(extract_audio_stream, videoId)
+        async with audio_resolver_semaphore:
+            stream_info = await anyio.to_thread.run_sync(extract_audio_stream, videoId)
         target_url = stream_info["url"]
 
         req_headers = {

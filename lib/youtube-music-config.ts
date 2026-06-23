@@ -66,7 +66,7 @@ export function getYouTubeMusicApiUrlForPlatform(): string {
     return fallbackUrl;
   }
 
-  if (envUrl && (__DEV__ || !isPrivateDevelopmentUrl(envUrl))) {
+  if (envUrl) {
     return envUrl;
   }
   

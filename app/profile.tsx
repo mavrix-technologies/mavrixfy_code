@@ -420,7 +420,9 @@ export default function ProfileScreen() {
           <Ionicons name="arrow-back" size={22} color={Colors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Account</Text>
-        <View style={{ width: 42 }} />
+        <Pressable onPress={handleLogout} hitSlop={8} style={{ padding: 8 }}>
+          <Text style={{ color: "#FF8B8B", fontSize: 14, fontFamily: "Inter_700Bold" }}>Log Out</Text>
+        </Pressable>
       </View>
 
       <ScrollView

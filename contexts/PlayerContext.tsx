@@ -1,11 +1,13 @@
 import React, { createContext, use, useState, useCallback, useMemo, useRef, ReactNode, useEffect } from "react";
-import { Alert, AppState, InteractionManager, NativeModules, Platform, ToastAndroid, View, useWindowDimensions } from "react-native";
+import { Alert, AppState, DeviceEventEmitter, InteractionManager, NativeModules, Platform, ToastAndroid, View, useWindowDimensions } from "react-native";
 import { isRunningInExpoGo } from "expo";
 import * as Network from "expo-network";
 import { usePathname } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Song } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
+import { getCatalogSongs } from "@/lib/catalogService";
+import { resolveYouTubeSongToJioSaavn } from "@/lib/youtubeToJioSaavnDownload";
 import { useAuth } from "@/contexts/AuthContext";
 import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
 import { logger } from "@/lib/logger";
@@ -36,12 +38,20 @@ let State: any = {
 let usePlaybackState: any = () => ({ state: undefined });
 let useProgress: any = () => ({ position: 0, duration: 0 });
 let setupPlayer: any = null;
-const MavrixfyAutoMedia =
-  Platform.OS === "android" ? NativeModules.MavrixfyAutoMedia : null;
 
 type NativeSubscription = {
   remove: () => void;
 };
+
+type AndroidAutoMediaModule = {
+  publishBrowseState?: (stateJson: string) => void;
+  clearBrowseState?: () => void;
+};
+
+const AndroidAutoMedia: AndroidAutoMediaModule | null =
+  Platform.OS === "android"
+    ? (NativeModules.MavrixfyAutoMedia as AndroidAutoMediaModule | undefined) ?? null
+    : null;
 
 const cleanupNativeSubscription = (subscription: NativeSubscription | null | undefined) => {
   subscription?.remove();
@@ -49,14 +59,6 @@ const cleanupNativeSubscription = (subscription: NativeSubscription | null | und
 
 const subscribeTrackPlayerEvent = (eventName: unknown, listener: (...args: any[]) => void) => {
   const subscription = TrackPlayer.addEventListener(eventName, listener) as NativeSubscription;
-  return () => cleanupNativeSubscription(subscription);
-};
-
-const subscribeAutoQueueApplied = (
-  listener: (event: { tracks: Song[]; startIndex: number; queueTitle: string }) => void
-) => {
-  const { DeviceEventEmitter } = require("react-native");
-  const subscription = DeviceEventEmitter.addListener("AutoQueueApplied", listener) as NativeSubscription;
   return () => cleanupNativeSubscription(subscription);
 };
 
@@ -260,7 +262,7 @@ type SongPlaybackSource = Partial<Song> & {
   url?: string;
   uri?: string;
   streamUrl?: string;
-  downloadUrl?: string | { url?: string; link?: string };
+  downloadUrl?: unknown;
 };
 
 function readNonEmptyString(value: unknown): string {
@@ -269,27 +271,92 @@ function readNonEmptyString(value: unknown): string {
   return trimmed.length > 0 ? trimmed : "";
 }
 
-function resolveAudioUrl(source: SongPlaybackSource | null | undefined): string {
-  if (!source) return "";
+function isKnownNonAudioPageUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.toLowerCase();
 
-  const directCandidates = [source.audioUrl, source.url, source.uri, source.streamUrl];
-  for (const candidate of directCandidates) {
-    const value = readNonEmptyString(candidate);
-    if (value) return value;
+    if (host.includes("saavncdn.com")) return false;
+    if (host.includes("jiosaavn.com")) return true;
+    if (host.includes("youtube.com") || host.includes("youtu.be")) return true;
+    if (host.includes("spotify.com") || host.includes("music.apple.com")) return true;
+    if (/\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac)(?:$|[?#])/i.test(path)) return false;
+  } catch {
+    return false;
   }
 
-  const downloadUrlValue = source.downloadUrl;
-  if (typeof downloadUrlValue === "string") {
-    return readNonEmptyString(downloadUrlValue);
+  return false;
+}
+
+function readAudioCandidate(value: unknown): string {
+  const url = readNonEmptyString(value);
+  if (!url || isKnownNonAudioPageUrl(url)) return "";
+  return url;
+}
+
+function isTrustedNativeAudioUrl(value: unknown): boolean {
+  const url = readAudioCandidate(value);
+  if (!url) return false;
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.toLowerCase();
+
+    if (host.includes("saavncdn.com")) return true;
+    if (host.includes("googlevideo.com")) {
+      const mime = parsed.searchParams.get("mime")?.toLowerCase() || "";
+      return path.includes("/videoplayback") || mime.startsWith("audio/");
+    }
+    return /\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac)(?:$|[?#])/i.test(path);
+  } catch {
+    return url.startsWith("file://");
+  }
+}
+
+function readDownloadAudioUrl(value: unknown): string {
+  if (typeof value === "string") return readAudioCandidate(value);
+
+  if (Array.isArray(value)) {
+    const preferredQualities = ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"];
+    for (const quality of preferredQualities) {
+      const match = value.find((item) => String(item?.quality || "").toLowerCase() === quality);
+      const url = readAudioCandidate(match?.url) || readAudioCandidate(match?.link);
+      if (url) return url;
+    }
+
+    for (let index = value.length - 1; index >= 0; index -= 1) {
+      const item = value[index];
+      const url =
+        typeof item === "string"
+          ? readAudioCandidate(item)
+          : readAudioCandidate(item?.url) || readAudioCandidate(item?.link);
+      if (url) return url;
+    }
   }
 
-  if (downloadUrlValue && typeof downloadUrlValue === "object") {
-    const nestedValue =
-      readNonEmptyString(downloadUrlValue.url) || readNonEmptyString(downloadUrlValue.link);
-    if (nestedValue) return nestedValue;
+  if (value && typeof value === "object") {
+    const item = value as { url?: unknown; link?: unknown };
+    return readAudioCandidate(item.url) || readAudioCandidate(item.link);
   }
 
   return "";
+}
+
+function resolveAudioUrl(source: SongPlaybackSource | null | undefined): string {
+  if (!source) return "";
+
+  const directCandidates = [source.audioUrl, source.uri, source.streamUrl];
+  for (const candidate of directCandidates) {
+    const value = readAudioCandidate(candidate);
+    if (value) return value;
+  }
+
+  const downloadUrl = readDownloadAudioUrl(source.downloadUrl);
+  if (downloadUrl) return downloadUrl;
+
+  return readAudioCandidate(source.url);
 }
 
 function isYouTubeSource(song: Song | null | undefined): boolean {
@@ -305,7 +372,7 @@ function isYouTubeSource(song: Song | null | undefined): boolean {
 const YOUTUBE_AUDIO_EXPIRY_MARGIN_MS = 60 * 1000;
 
 function hasFreshYouTubeNativeAudio(song: Song | null | undefined): boolean {
-  if (!song?.youtubeNativeAudio || !readNonEmptyString(song.audioUrl)) return false;
+  if (!song?.youtubeNativeAudio || !isTrustedNativeAudioUrl(song.audioUrl)) return false;
   const expiresAt = Number(song.youtubeAudioExpiresAt);
   return !Number.isFinite(expiresAt) || expiresAt - YOUTUBE_AUDIO_EXPIRY_MARGIN_MS > Date.now();
 }
@@ -376,19 +443,190 @@ function isYouTubeSong(song: Song | null | undefined): boolean {
   return Boolean(song && isYouTubeSource(song) && !hasFreshYouTubeNativeAudio(song));
 }
 
+const SINGLE_SONG_AUTOPLAY_MIN_SIZE = 6;
+const SINGLE_SONG_AUTOPLAY_TARGET_SIZE = 18;
+const SINGLE_SONG_AUTOPLAY_LOOKUP_TIMEOUT_MS = 900;
+const YOUTUBE_NATIVE_MATCH_TIMEOUT_MS = 2200;
+const YOUTUBE_NATIVE_STREAM_TIMEOUT_MS = 8500;
+const RESOLVED_NATIVE_AUDIO_TTL_MS = 5.5 * 60 * 60 * 1000;
+
+function textKey(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&amp;/g, "&")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function titleArtistKey(song: Song): string {
+  return `${textKey(song.title)}:${textKey(song.artist)}`;
+}
+
+function songMatchKey(song: Song): string {
+  return `${String(song.source || "song")}:${String(song.id || "")}`;
+}
+
+function wordSet(value: unknown): Set<string> {
+  return new Set(
+    textKey(value)
+      .split(" ")
+      .filter((word) => word.length > 2)
+  );
+}
+
+function sharedWordCount(a: Set<string>, b: Set<string>): number {
+  let count = 0;
+  a.forEach((word) => {
+    if (b.has(word)) count += 1;
+  });
+  return count;
+}
+
+function scoreAutoplayCandidate(seed: Song, candidate: Song, index: number): number {
+  const seedArtist = textKey(seed.artist);
+  const candidateArtist = textKey(candidate.artist);
+  const seedTitleWords = wordSet(seed.title);
+  const candidateTitleWords = wordSet(candidate.title);
+  const seedArtistWords = wordSet(seed.artist);
+  const candidateArtistWords = wordSet(candidate.artist);
+  let score = 0;
+
+  if (seedArtist && candidateArtist && seedArtist === candidateArtist) score += 70;
+  score += sharedWordCount(seedArtistWords, candidateArtistWords) * 22;
+  score += sharedWordCount(seedTitleWords, candidateTitleWords) * 6;
+  if (textKey(seed.album) && textKey(seed.album) === textKey(candidate.album)) score += 18;
+  if (textKey(seed.genre) && textKey(seed.genre) === textKey(candidate.genre)) score += 12;
+  if (textKey(seed.language) && textKey(seed.language) === textKey(candidate.language)) score += 10;
+  if (seed.source && candidate.source && seed.source === candidate.source) score += 6;
+  score += Math.min(Math.log10(Math.max(Number(candidate.playCount || 0), 1)) * 6, 24);
+  score += Math.random() * 4;
+  score -= index * 0.04;
+
+  return score;
+}
+
+function makeAutoplayQueue(seed: Song, candidates: Song[]): Song[] {
+  const playableSeed = normalizePlayableSong(seed);
+  if (!playableSeed) return [];
+
+  const seenIds = new Set([songMatchKey(playableSeed)]);
+  const seenTitles = new Set([titleArtistKey(playableSeed)]);
+  const ranked = candidates
+    .map((candidate, index) => ({ candidate, score: scoreAutoplayCandidate(playableSeed, candidate, index) }))
+    .sort((a, b) => b.score - a.score)
+    .map(({ candidate }) => candidate);
+
+  const nextQueue: Song[] = [playableSeed];
+  for (const candidate of ranked) {
+    const playableCandidate = normalizePlayableSong(candidate);
+    if (!playableCandidate || playableCandidate.id === playableSeed.id) continue;
+
+    const idKey = songMatchKey(playableCandidate);
+    const titleKey = titleArtistKey(playableCandidate);
+    if (seenIds.has(idKey) || seenTitles.has(titleKey)) continue;
+
+    seenIds.add(idKey);
+    seenTitles.add(titleKey);
+    nextQueue.push(playableCandidate);
+
+    if (nextQueue.length >= SINGLE_SONG_AUTOPLAY_TARGET_SIZE) break;
+  }
+
+  return nextQueue;
+}
+
+function isSingleSongQueue(queue: Song[], song: Song): boolean {
+  if (queue.length <= 1) return true;
+  const uniqueIds = new Set(queue.map((item) => item.id).filter(Boolean));
+  return uniqueIds.size <= 1 && uniqueIds.has(song.id);
+}
+
+function resolveWithin<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      }
+    );
+  });
+}
+
+async function getRecentSongCandidates(): Promise<Song[]> {
+  const items = await Storage.getRecentlyPlayed().catch(() => []);
+  return mapFilter(
+    items,
+    (item) => (item.type === "song" && item.data ? item.data as Song : null),
+    (song): song is Song => Boolean(song?.id && song?.title)
+  );
+}
+
+async function getSingleSongAutoplayCandidates(): Promise<Song[]> {
+  const [recentSongs, catalogSongs] = await Promise.all([
+    getRecentSongCandidates(),
+    resolveWithin(getCatalogSongs(), SINGLE_SONG_AUTOPLAY_LOOKUP_TIMEOUT_MS, [] as Song[]),
+  ]);
+  return [...recentSongs, ...catalogSongs];
+}
+
+async function resolveJioSaavnAudioForSong(song: Song): Promise<Song | null> {
+  const jioSaavnMatch = await resolveWithin(
+    resolveYouTubeSongToJioSaavn(song),
+    YOUTUBE_NATIVE_MATCH_TIMEOUT_MS,
+    null
+  );
+  const matchedSong = jioSaavnMatch?.song;
+  const matchedAudioUrl = resolveAudioUrl(matchedSong as SongPlaybackSource);
+  if (matchedSong && matchedAudioUrl) {
+    return {
+      ...song,
+      audioUrl: matchedAudioUrl,
+      downloadUrl: matchedSong.downloadUrl || matchedSong.audioUrl || matchedAudioUrl,
+      playbackHeaders: undefined,
+      source: song.source || "jiosaavn",
+    };
+  }
+
+  return null;
+}
+
 async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | null> {
   const videoId = extractYouTubeVideoId(song);
   if (!videoId) return null;
 
-  const stream = await getYouTubeMusicAudioStream(videoId);
-  if (!stream?.url) return null;
+  const resolvedSong = await resolveJioSaavnAudioForSong(song);
+  if (resolvedSong) {
+    return {
+      ...resolvedSong,
+      youtubeNativeAudio: true,
+      youtubeAudioExpiresAt: Date.now() + RESOLVED_NATIVE_AUDIO_TTL_MS,
+      youtubeVideoId: videoId,
+      source: "youtube",
+    };
+  }
+
+  const stream = await resolveWithin(
+    getYouTubeMusicAudioStream(videoId),
+    YOUTUBE_NATIVE_STREAM_TIMEOUT_MS,
+    null
+  );
+  if (!stream?.url || !isTrustedNativeAudioUrl(stream.url)) {
+    return null;
+  }
 
   return {
     ...song,
     audioUrl: stream.url,
-    playbackHeaders: stream.headers,
+    downloadUrl: undefined,
+    playbackHeaders: stream.headers && Object.keys(stream.headers).length > 0 ? stream.headers : undefined,
+    duration: song.duration || stream.duration || 0,
     youtubeNativeAudio: true,
-    youtubeAudioExpiresAt: stream.expiresAt,
+    youtubeAudioExpiresAt: stream.expiresAt || Date.now() + RESOLVED_NATIVE_AUDIO_TTL_MS,
     youtubeVideoId: videoId,
     source: "youtube",
   };
@@ -472,14 +710,15 @@ function getYouTubeVideoIdFromSong(song: Song | null | undefined): string {
 function songToTrack(song: Song, localUrl?: string | null): any {
   const audioUrl = localUrl || resolveAudioUrl(song as SongPlaybackSource);
   const durationSeconds = toDurationSeconds(song.duration);
+  const album = cleanAndroidAutoText(song.album);
   
   return {
     id: song.id,
     url: audioUrl,
-    title: song.title,
-    artist: song.artist,
-    album: song.album || "",
-    genre: song.genre || "",
+    title: cleanAndroidAutoTitle(song.title, album) || song.title,
+    artist: cleanAndroidAutoText(song.artist) || song.artist,
+    album,
+    genre: cleanAndroidAutoText(song.genre),
     artwork: song.coverUrl,
     duration: durationSeconds,
     ...(song.playbackHeaders && Object.keys(song.playbackHeaders).length > 0
@@ -495,12 +734,19 @@ type NativeTrackEntry = {
 };
 
 async function resolveNativeTrackEntry(song: Song, appIndex: number): Promise<NativeTrackEntry | null> {
-  const nativeSong = isYouTubeSource(song) && !hasFreshYouTubeNativeAudio(song)
+  let nativeSong = isYouTubeSource(song) && !hasFreshYouTubeNativeAudio(song)
     ? await resolveYouTubeTrackForNativePlayback(song)
     : song;
   if (!nativeSong) return null;
 
-  const audioUrl = await resolvePlaybackUrl(nativeSong);
+  let audioUrl = await resolvePlaybackUrl(nativeSong);
+  if (!audioUrl && !isYouTubeSource(song) && song.source !== "local") {
+    const matchedSong = await resolveJioSaavnAudioForSong(song);
+    if (matchedSong) {
+      nativeSong = matchedSong;
+      audioUrl = await resolvePlaybackUrl(nativeSong);
+    }
+  }
   if (!audioUrl) return null;
   const resolvedSong = withResolvedPlaybackUrl(nativeSong, audioUrl);
 
@@ -665,7 +911,8 @@ async function resolvePlaybackUrl(song: Song): Promise<string | null> {
       const { getBestAudioUrlWithQuality } = await import("@/lib/musicData");
       const targetQuality = await getAdaptiveStreamingQuality();
       const resolvedUrl = getBestAudioUrlWithQuality(song.downloadUrl, targetQuality);
-      if (resolvedUrl) return resolvedUrl;
+      const playableUrl = readAudioCandidate(resolvedUrl);
+      if (playableUrl) return playableUrl;
     } catch (e) {
       logger.error("[Player] Failed to resolve quality-specific audio URL:", e);
     }
@@ -678,6 +925,91 @@ function isPlayableSong(song: Song | null | undefined): song is Song {
   return Boolean(song?.id && (isYouTubeSource(song) || resolveAudioUrl(song as SongPlaybackSource)));
 }
 
+function decodeBasicHtmlEntities(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+function cleanAndroidAutoText(value: unknown): string {
+  return decodeBasicHtmlEntities(readNonEmptyString(value)).replace(/\s+/g, " ").trim();
+}
+
+function cleanAndroidAutoTitle(title: unknown, album: unknown): string {
+  const decodedTitle = cleanAndroidAutoText(title);
+  if (!decodedTitle) return "";
+
+  const decodedAlbum = cleanAndroidAutoText(album);
+  if (!decodedAlbum) return decodedTitle;
+
+  const withoutFromSuffix = decodedTitle
+    .replace(/\s*\((?:from|movie|film)\s+["']?[^)]*["']?\)\s*$/i, "")
+    .replace(/\s*-\s*(?:from|movie|film)\s+["']?.*["']?\s*$/i, "")
+    .trim();
+
+  return withoutFromSuffix.length >= 2 ? withoutFromSuffix : decodedTitle;
+}
+
+function songToAndroidAutoItem(song: Song | null | undefined) {
+  if (!song?.id || !song.title) return null;
+
+  const album = cleanAndroidAutoText(song.album);
+
+  return {
+    id: String(song.id),
+    title: cleanAndroidAutoTitle(song.title, album) || "Unknown song",
+    artist: cleanAndroidAutoText(song.artist) || "Mavrixfy",
+    album,
+    duration: Math.round(toDurationSeconds(song.duration)),
+    artwork: readNonEmptyString(song.coverUrl),
+  };
+}
+
+function uniqueAndroidAutoSongs(songs: Array<Song | null | undefined>, limit: number) {
+  const seen = new Set<string>();
+  const items: Array<NonNullable<ReturnType<typeof songToAndroidAutoItem>>> = [];
+
+  for (const song of songs) {
+    const item = songToAndroidAutoItem(song);
+    if (!item || seen.has(item.id)) continue;
+    seen.add(item.id);
+    items.push(item);
+    if (items.length >= limit) break;
+  }
+
+  return items;
+}
+
+function uniqueSongsById(songs: Array<Song | null | undefined>): Song[] {
+  const seen = new Set<string>();
+  const items: Song[] = [];
+
+  for (const song of songs) {
+    if (!song?.id || seen.has(song.id)) continue;
+    seen.add(song.id);
+    items.push(song);
+  }
+
+  return items;
+}
+
+function parseAndroidAutoPlayRequest(mediaId: string): { section: string; index: number; id: string } | null {
+  const parts = mediaId.split("|");
+  if (parts[0] !== "play" || parts.length < 4) return null;
+
+  const index = Number(parts[2]);
+  if (!Number.isFinite(index) || index < 0) return null;
+
+  return {
+    section: parts[1] || "",
+    index,
+    id: parts.slice(3).join("|"),
+  };
+}
+
 function isSameQueueById(a: Song[], b: Song[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
@@ -687,6 +1019,8 @@ function isSameQueueById(a: Song[], b: Song[]): boolean {
 }
 
 const OPTIMISTIC_NATIVE_TRACK_SYNC_GRACE_MS = 1800;
+const NATIVE_START_STALL_GRACE_MS = 12000;
+const NATIVE_START_STALL_POSITION_SECONDS = 0.75;
 const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
 const YOUTUBE_PLAYER_MIN_WIDTH = 360;
 const YOUTUBE_PLAYER_MIN_HEIGHT = Math.ceil(YOUTUBE_PLAYER_MIN_WIDTH * 9 / 16);
@@ -785,6 +1119,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
   const currentSongRef = useRef<Song | null>(null);
   const queueRef = useRef<Song[]>([]);
+  const likedSongsRef = useRef<Song[]>([]);
   const userQueuedSongIdsRef = useRef<string[]>([]);
   const queueIndexRef = useRef(0);
   const repeatModeRef = useRef<"off" | "all" | "one">("off");
@@ -796,14 +1131,18 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const lastPlaybackNoticeAtRef = useRef(0);
   const restoredPositionSecondsRef = useRef(0);
   const latestPositionSecondsRef = useRef(0);
+  const nativeStartWatchdogRef = useRef<{
+    songId: string | null;
+    startedAt: number;
+    lastPosition: number;
+    lastAdvancedAt: number;
+  } | null>(null);
   const sleepTimerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sleepTimerRef = useRef<SleepTimerState | null>(null);
   const playbackSwitchChainRef = useRef<Promise<void> | null>(null);
   if (playbackSwitchChainRef.current === null) {
     playbackSwitchChainRef.current = Promise.resolve();
   }
-  const lastAutoQueueSyncRef = useRef("");
-  const lastAutoPlaybackSyncRef = useRef("");
   const nativeQueueAppIndicesRef = useRef<number[]>([]);
   const pendingNativeTrackRef = useRef<{
     id: string;
@@ -814,6 +1153,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
   useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
+  useEffect(() => { likedSongsRef.current = likedSongs; }, [likedSongs]);
   useEffect(() => { userQueuedSongIdsRef.current = userQueuedSongIds; }, [userQueuedSongIds]);
   useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
   useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
@@ -1300,8 +1640,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     runtimePlaybackStateSnapshot === State.Buffering ||
     runtimePlaybackStateSnapshot === State.Loading;
   const resolvedIsBuffering = isYoutubeSession ? isYoutubeLoading : !isPreviewSession && nativeIsBuffering;
-  const autoSyncPositionMs =
-    Math.floor(Math.max(0, resolvedPositionMillis) / 10_000) * 10_000;
 
   useEffect(() => {
     updatePlaybackEngineSnapshot({
@@ -1330,191 +1668,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     sourceQueue,
     userQueuedSongIds,
   ]);
-
-  useEffect(() => {
-    if (Platform.OS !== "android" || !MavrixfyAutoMedia) return;
-
-    let cancelled = false;
-
-    const syncPhonePlaybackToAuto = async () => {
-      let songForAuto = currentSong;
-      let durationForAutoMs = resolvedDuration;
-      let positionForAutoMs = autoSyncPositionMs;
-      let isPlayingForAuto = resolvedIsPlaying;
-      let queueForAuto = queueRef.current;
-      let queueIndexForAuto = queueIndexRef.current;
-
-      if (TrackPlayer && setupPlayer) {
-        try {
-          const [
-            activeTrack,
-            nativePlaybackState,
-            nativeProgress,
-            nativeQueue,
-            activeTrackIndex,
-          ] = await Promise.all([
-            TrackPlayer.getActiveTrack(),
-            TrackPlayer.getPlaybackState(),
-            TrackPlayer.getProgress(),
-            TrackPlayer.getQueue(),
-            typeof TrackPlayer.getActiveTrackIndex === "function"
-              ? TrackPlayer.getActiveTrackIndex()
-              : Promise.resolve(undefined),
-          ]);
-          if (!cancelled) {
-            const activeTrackId = String(activeTrack?.id ?? "").trim();
-            const nativeSong = trackToSong(activeTrack);
-            const nativeState =
-              nativePlaybackState && typeof nativePlaybackState === "object" && "state" in nativePlaybackState
-                ? nativePlaybackState.state
-                : nativePlaybackState;
-            const nativeIsActive =
-              nativeState === State.Playing ||
-              nativeState === State.Buffering ||
-              nativeState === State.Loading;
-
-            if (activeTrackId && nativeSong) {
-              const nativeSongs = Array.isArray(nativeQueue)
-                ? mapFilter(nativeQueue, trackToSong, (song): song is Song => Boolean(song))
-                : [];
-              const fallbackIndex =
-                typeof activeTrackIndex === "number" && Number.isFinite(activeTrackIndex)
-                  ? activeTrackIndex
-                  : nativeSongs.findIndex((song) => String(song.id) === activeTrackId);
-
-              if (String(currentSong?.id ?? "") !== activeTrackId && nativeSongs.length > 0) {
-                applyNativeQueueSnapshot(nativeSongs, fallbackIndex >= 0 ? fallbackIndex : 0);
-              }
-
-              songForAuto = nativeSong;
-              if (nativeSongs.length > 0) {
-                queueForAuto = nativeSongs;
-                queueIndexForAuto = fallbackIndex >= 0 ? fallbackIndex : 0;
-              }
-              durationForAutoMs =
-                (Number.isFinite(nativeProgress?.duration) && nativeProgress.duration > 0
-                  ? nativeProgress.duration
-                  : toDurationSeconds(nativeSong.duration)) * 1000;
-              positionForAutoMs =
-                Math.floor(Math.max(0, Number(nativeProgress?.position ?? 0)) * 1000 / 10_000) * 10_000;
-              isPlayingForAuto = nativeIsActive;
-            }
-          }
-        } catch {
-          // During startup the Android Auto command can still be hydrating TrackPlayer.
-          // Avoid clearing Auto just because React state has not caught up yet.
-          if (!isPlayerReady && !currentSong) return;
-        }
-      }
-
-      if (cancelled) return;
-
-      if (!songForAuto) {
-        return;
-      }
-
-      const playableQueueForAuto = mapFilter((queueForAuto.length > 0 ? queueForAuto : [songForAuto]), normalizePlayableSong, (song): song is Song => Boolean(song))
-        .slice(0, 100);
-      const resolvedQueueIndexForAuto = Math.max(
-        0,
-        Math.min(
-          playableQueueForAuto.findIndex((song) => song.id === songForAuto.id) >= 0
-            ? playableQueueForAuto.findIndex((song) => song.id === songForAuto.id)
-            : queueIndexForAuto,
-          Math.max(0, playableQueueForAuto.length - 1)
-        )
-      );
-
-      if (!isPreviewSession && queueRef.current.length === 0 && !songForAuto.audioUrl) {
-        return;
-      }
-
-      if (!isPreviewSession && !isPlayerReady && !isPlayingForAuto) {
-        return;
-      }
-
-      if (playableQueueForAuto.length > 0) {
-        const queueSignature = [
-          resolvedQueueIndexForAuto,
-          playableQueueForAuto.length,
-          playableQueueForAuto.map((song) => String(song.id || "")).join("|"),
-        ].join(":");
-
-        if (lastAutoQueueSyncRef.current !== queueSignature) {
-          lastAutoQueueSyncRef.current = queueSignature;
-          MavrixfyAutoMedia.syncQueue?.(
-            playableQueueForAuto.map((song) => ({
-              id: String(song.id || ""),
-              title: String(song.title || ""),
-              artist: String(song.artist || ""),
-              album: String(song.album || ""),
-              coverUrl: String(song.coverUrl || ""),
-              audioUrl: String(resolveAudioUrl(song as SongPlaybackSource) || song.audioUrl || ""),
-              duration: Number(song.duration || 0),
-            })),
-            resolvedQueueIndexForAuto
-          );
-        }
-      }
-
-      const playbackSignature = [
-        songForAuto.id,
-        songForAuto.title,
-        songForAuto.artist,
-        songForAuto.album,
-        songForAuto.coverUrl,
-        durationForAutoMs,
-        positionForAutoMs,
-        isPlayingForAuto ? "1" : "0",
-      ].join("|");
-
-      if (lastAutoPlaybackSyncRef.current !== playbackSignature) {
-        lastAutoPlaybackSyncRef.current = playbackSignature;
-        MavrixfyAutoMedia.syncPlayback?.(
-          songForAuto.id,
-          songForAuto.title,
-          songForAuto.artist,
-          songForAuto.album,
-          songForAuto.coverUrl,
-          durationForAutoMs,
-          positionForAutoMs,
-          isPlayingForAuto
-        );
-      }
-    };
-
-    void syncPhonePlaybackToAuto();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    applyNativeQueueSnapshot,
-    autoSyncPositionMs,
-    currentSong,
-    isPreviewSession,
-    isPlayerReady,
-    queue,
-    queueIndex,
-    resolvedDuration,
-    resolvedIsPlaying,
-  ]);
-
-  useEffect(() => {
-    if (Platform.OS !== "android" || !MavrixfyAutoMedia?.syncLikedSongs) return;
-
-    const autoLikedSongs = mapFilter(likedSongs, (song) => ({
-        id: String(song.id || ""),
-        title: String(song.title || ""),
-        artist: String(song.artist || ""),
-        album: String(song.album || ""),
-        coverUrl: String(song.coverUrl || ""),
-        audioUrl: String(resolveAudioUrl(song as SongPlaybackSource) || song.audioUrl || ""),
-        duration: Number(song.duration || 0),
-      }), (song) => song.id && song.title && song.audioUrl)
-      .slice(0, 100);
-
-    MavrixfyAutoMedia.syncLikedSongs(autoLikedSongs);
-  }, [likedSongs]);
 
   useEffect(() => {
     if (playbackIntent === null || playbackIntent !== actualResolvedIsPlaying) {
@@ -1609,6 +1762,91 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       Alert.alert("Playback", message);
     }
   }, []);
+
+  useEffect(() => {
+    if (
+      Platform.OS === "web" ||
+      !TrackPlayer ||
+      !setupPlayer ||
+      !currentSong?.id ||
+      isYoutubeSession ||
+      isPreviewSession ||
+      playbackLoading ||
+      resolvedIsBuffering ||
+      !actualResolvedIsPlaying
+    ) {
+      nativeStartWatchdogRef.current = null;
+      return;
+    }
+
+    const now = Date.now();
+    const positionSeconds = Math.max(0, effectivePositionSeconds);
+    const existing = nativeStartWatchdogRef.current;
+
+    if (!existing || existing.songId !== currentSong.id) {
+      nativeStartWatchdogRef.current = {
+        songId: currentSong.id,
+        startedAt: now,
+        lastPosition: positionSeconds,
+        lastAdvancedAt: now,
+      };
+      return;
+    }
+
+    if (positionSeconds > existing.lastPosition + 0.25 || positionSeconds > NATIVE_START_STALL_POSITION_SECONDS) {
+      nativeStartWatchdogRef.current = {
+        ...existing,
+        lastPosition: positionSeconds,
+        lastAdvancedAt: now,
+      };
+      return;
+    }
+
+    if (now - existing.startedAt < NATIVE_START_STALL_GRACE_MS || now - existing.lastAdvancedAt < NATIVE_START_STALL_GRACE_MS) {
+      return;
+    }
+
+    nativeStartWatchdogRef.current = {
+      songId: currentSong.id,
+      startedAt: now,
+      lastPosition: positionSeconds,
+      lastAdvancedAt: now,
+    };
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        await TrackPlayer.pause();
+      } catch {
+        // The playback service may already be torn down.
+      }
+
+      if (cancelled) return;
+      setRuntimePlaybackStateSnapshot(State.Paused ?? "paused");
+      setPlaybackIntent(null);
+      setPlaybackLoading(false);
+      updatePlaybackEngineSnapshot({
+        desiredPlayState: null,
+        isPlaying: false,
+        isLoading: false,
+        isBuffering: false,
+      });
+      showPlaybackNotice("This song could not start. Please try again.");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    actualResolvedIsPlaying,
+    currentSong?.id,
+    effectivePositionSeconds,
+    isPreviewSession,
+    isYoutubeSession,
+    playbackLoading,
+    resolvedIsBuffering,
+    showPlaybackNotice,
+  ]);
 
   const setYoutubePlayerFrame = useCallback((frame: YoutubePlayerFrame | null) => {
     setYoutubePlayerFrameState((previous) => {
@@ -2396,26 +2634,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     syncFromTrackEvent,
   ]);
 
-  // Listen for Android Auto queue replacements so we can sync currentSong immediately
-  // without waiting for PlaybackActiveTrackChanged (which fires after the queue is set)
-  useEffect(() => {
-    if (!isPlayerReady || Platform.OS !== "android") {
-      return;
-    }
-
-    return subscribeAutoQueueApplied(
-      (event: { tracks: Song[]; startIndex: number; queueTitle: string }) => {
-        try {
-          const { tracks, startIndex } = event;
-          if (!Array.isArray(tracks) || tracks.length === 0) return;
-          applyNativeQueueSnapshot(tracks, startIndex);
-        } catch {
-          // Silent fail
-        }
-      }
-    );
-  }, [applyNativeQueueSnapshot, isPlayerReady]);
-
   const runSerializedPlaybackSwitch = useCallback(async <T,>(task: () => Promise<T>): Promise<T> => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -2481,6 +2699,54 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     return (await getNativeTrackIndexForSong(index, songId)) >= 0;
   }, [getNativeTrackIndexForSong]);
 
+  const buildPlaybackQueueForSong = useCallback(async (
+    song: Song,
+    requestedQueue?: Song[]
+  ): Promise<{ queue: Song[]; targetIndex: number; targetSong: Song } | null> => {
+    const seed = normalizePlayableSong(song);
+    if (!seed) return null;
+
+    const rawBaseQueue = Array.isArray(requestedQueue) && requestedQueue.length > 0
+      ? requestedQueue
+      : [song];
+    const baseQueue = mapFilter(rawBaseQueue, normalizePlayableSong, (item): item is Song => Boolean(item));
+    const baseTargetIndex = baseQueue.findIndex((item) => item.id === seed.id);
+
+    if (!isSingleSongQueue(baseQueue, seed)) {
+      if (baseTargetIndex >= 0) {
+        return { queue: baseQueue, targetIndex: baseTargetIndex, targetSong: baseQueue[baseTargetIndex] };
+      }
+
+      return {
+        queue: [seed, ...baseQueue],
+        targetIndex: 0,
+        targetSong: seed,
+      };
+    }
+
+    const currentQueue = queueRef.current;
+    const currentIndex = queueIndexRef.current;
+    const immediateCandidates = [
+      ...rawBaseQueue,
+      ...currentQueue.slice(Math.max(0, currentIndex + 1)),
+      ...currentQueue.slice(0, Math.max(0, currentIndex)),
+      ...originalQueueRef.current,
+      ...likedSongsRef.current,
+    ];
+
+    let autoplayQueue = makeAutoplayQueue(seed, immediateCandidates);
+    if (autoplayQueue.length < SINGLE_SONG_AUTOPLAY_MIN_SIZE) {
+      const storageCandidates = await getSingleSongAutoplayCandidates();
+      autoplayQueue = makeAutoplayQueue(seed, [...immediateCandidates, ...storageCandidates]);
+    }
+
+    return {
+      queue: autoplayQueue.length > 0 ? autoplayQueue : [seed],
+      targetIndex: 0,
+      targetSong: autoplayQueue[0] ?? seed,
+    };
+  }, []);
+
   const appendRemainingTracksIfCurrent = useCallback((requestId: number, songs: Song[], startIndex: number) => {
     if (!TrackPlayer || songs.length === 0) return;
 
@@ -2512,18 +2778,25 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const loadAndPlaySong = useCallback(async (song: Song, newQueue?: Song[], newIndex?: number) => {
     const requestId = ++playRequestIdRef.current;
     setPlaybackIntent(true);
-    const playableQueue = mapFilter((newQueue || [song]), normalizePlayableSong, (item): item is Song => Boolean(item));
-    if (playableQueue.length === 0) {
+    const playbackPlan = await buildPlaybackQueueForSong(song, newQueue);
+    if (requestId !== playRequestIdRef.current) {
+      return;
+    }
+    if (!playbackPlan || playbackPlan.queue.length === 0) {
       setPlaybackIntent(null);
       updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
       return;
     }
 
+    const playableQueue = playbackPlan.queue;
     const requestedIndex =
-      typeof newIndex === "number" && newIndex >= 0 && newIndex < playableQueue.length
+      typeof newIndex === "number" &&
+      newIndex >= 0 &&
+      newIndex < playableQueue.length &&
+      playableQueue[newIndex]?.id === playbackPlan.targetSong.id
         ? newIndex
-        : playableQueue.findIndex((s) => s.id === song.id);
-    const targetIndex = requestedIndex >= 0 ? requestedIndex : 0;
+        : playbackPlan.targetIndex;
+    const targetIndex = requestedIndex >= 0 ? requestedIndex : playbackPlan.targetIndex;
     const targetSong = playableQueue[targetIndex];
 
     const previousQueue = queueRef.current;
@@ -2715,13 +2988,94 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         }
       }
     });
-  }, [appendRemainingTracksIfCurrent, clearUserQueuedSongIds, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, markPendingNativeTrack, playYouTubeSong, runSerializedPlaybackSwitch, showPlaybackNotice]);
+  }, [appendRemainingTracksIfCurrent, buildPlaybackQueueForSong, clearUserQueuedSongIds, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, markPendingNativeTrack, playYouTubeSong, runSerializedPlaybackSwitch, showPlaybackNotice]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || !AndroidAutoMedia) return;
+
+    const subscription = DeviceEventEmitter.addListener("MavrixfyAutoMediaPlayRequest", (mediaId: unknown) => {
+      const request = parseAndroidAutoPlayRequest(String(mediaId || ""));
+      if (!request) return;
+
+      const liveQueue = queueRef.current;
+      const searchPool = [
+        ...liveQueue,
+        ...originalQueueRef.current,
+        ...likedSongsRef.current,
+        currentSongRef.current,
+      ];
+
+      const targetSong = searchPool.find((item) => item?.id === request.id) || liveQueue[request.index];
+      if (!targetSong?.id) return;
+
+      const queueIndexForTarget = liveQueue.findIndex((item) => item.id === targetSong.id);
+      if (queueIndexForTarget >= 0) {
+        void loadAndPlaySong(targetSong, liveQueue, queueIndexForTarget);
+        return;
+      }
+
+      const nextQueue = uniqueSongsById([targetSong, ...liveQueue, ...originalQueueRef.current]);
+      void loadAndPlaySong(targetSong, nextQueue, 0);
+    });
+
+    return () => subscription.remove();
+  }, [loadAndPlaySong]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || !AndroidAutoMedia?.publishBrowseState) return;
+
+    const visibleQueue = queue.length > 0
+      ? queue
+      : currentSong
+        ? [currentSong]
+        : [];
+    const safeQueueIndex = Math.min(Math.max(queueIndex, 0), Math.max(visibleQueue.length - 1, 0));
+    const activeSong = currentSong || visibleQueue[safeQueueIndex] || null;
+    const quickCandidates = [
+      activeSong,
+      ...visibleQueue.slice(safeQueueIndex + 1),
+      ...visibleQueue.slice(0, safeQueueIndex),
+      ...sourceQueue,
+      ...likedSongs,
+    ];
+
+    const payload = {
+      currentSong: songToAndroidAutoItem(activeSong),
+      queue: uniqueAndroidAutoSongs(visibleQueue, 30),
+      quickPicks: uniqueAndroidAutoSongs(quickCandidates, 24),
+      recentSongs: uniqueAndroidAutoSongs([activeSong, ...sourceQueue, ...visibleQueue], 24),
+      likedSongs: uniqueAndroidAutoSongs(likedSongs, 24),
+      queueIndex: safeQueueIndex,
+      isPlaying: resolvedIsPlaying,
+    };
+
+    try {
+      AndroidAutoMedia.publishBrowseState(JSON.stringify(payload));
+    } catch {
+      // Android Auto browse metadata is optional; phone playback must continue.
+    }
+  }, [currentSong, likedSongs, queue, queueIndex, resolvedIsPlaying, sourceQueue]);
 
   const playSong = useCallback(async (song: Song, newQueue?: Song[]) => {
     try {
-      const q = (newQueue || [song]).filter((item): item is Song => Boolean(item?.id));
-      const targetIndex = Math.max(0, q.findIndex((item) => item.id === song.id));
-      const targetSong = q[targetIndex] || song;
+      const requestId = ++playRequestIdRef.current;
+      const requestedQueue = (newQueue || [song]).filter((item): item is Song => Boolean(item?.id));
+      const requestedIndex = Math.max(0, requestedQueue.findIndex((item) => item.id === song.id));
+      const requestedSong = requestedQueue[requestedIndex] || song;
+      const playbackPlan = await buildPlaybackQueueForSong(requestedSong, requestedQueue);
+      if (requestId !== playRequestIdRef.current) {
+        return;
+      }
+      if (!playbackPlan) {
+        setPlaybackIntent(null);
+        setPlaybackLoading(false);
+        showPlaybackNotice("This song cannot be played.");
+        return;
+      }
+
+      const q = playbackPlan.queue;
+      const targetIndex = playbackPlan.targetIndex;
+      const targetSong = playbackPlan.targetSong;
 
       if (isYouTubeSong(targetSong) && (!TrackPlayer || !setupPlayer)) {
         pauseNativeForYouTubeHandoff();
@@ -2735,7 +3089,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       });
 
       // 1. Update UI state immediately for responsiveness
-      const requestId = ++playRequestIdRef.current;
       setPlaybackIntent(true);
       setPlaybackLoading(true);
       setQueueIndex(targetIndex);
@@ -2837,18 +3190,32 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       });
       showPlaybackNotice("Could not start playback.");
     }
-  }, [clearUserQueuedSongIds, loadAndPlaySong, pauseNativeForYouTubeHandoff, playYouTubeSong, showPlaybackNotice]);
+  }, [buildPlaybackQueueForSong, clearUserQueuedSongIds, loadAndPlaySong, pauseNativeForYouTubeHandoff, playYouTubeSong, showPlaybackNotice]);
 
   const togglePlay = useCallback(async () => {
     try {
       if (isYouTubeSong(currentSong)) {
         const youtubeSong = currentSong;
         if (!youtubeSong) return;
+        const currentQueue = queueRef.current.length > 0 ? queueRef.current : [youtubeSong];
+        const targetIndex = Math.max(0, currentQueue.findIndex((item) => item.id === youtubeSong.id));
+
+        if (TrackPlayer && setupPlayer && !youtubePlaying) {
+          const nativeQueue = mapFilter(currentQueue, normalizePlayableSong, (item): item is Song => Boolean(item));
+          const nativeSong = normalizePlayableSong(youtubeSong);
+          if (nativeSong) {
+            const nativeTargetIndex = Math.max(0, nativeQueue.findIndex((item) => item.id === nativeSong.id));
+            await loadAndPlaySong(
+              nativeSong,
+              nativeQueue.length > 0 ? nativeQueue : [nativeSong],
+              nativeTargetIndex
+            );
+            return;
+          }
+        }
 
         const currentVideoId = getYouTubeVideoIdFromSong(youtubeSong);
         if (!youtubeVideoId || youtubeVideoId !== currentVideoId) {
-          const currentQueue = queueRef.current.length > 0 ? queueRef.current : [youtubeSong];
-          const targetIndex = Math.max(0, currentQueue.findIndex((item) => item.id === youtubeSong.id));
           await playYouTubeSong(youtubeSong, currentQueue, targetIndex);
           return;
         }
@@ -3901,10 +4268,10 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     ]
   );
 
-  // The player detail screen renders its own muted visual iframe inside the
-  // sheet. Keep this provider iframe hidden so it remains the single audible
-  // playback source and does not fight Android native sheet layering.
-  const isYoutubePlayerVisible = false;
+  // Native audio is preferred. If we must fall back to the YouTube iframe on
+  // the full player screen, give Android WebView a real visible surface so
+  // autoplay does not get stuck behind a hidden 4 px view.
+  const isYoutubePlayerVisible = Boolean(youtubeVideoId && pathname === "/player");
   const isShortPlayerScreen = screenHeight <= 760;
   const isVeryShortPlayerScreen = screenHeight <= 700;
   const playerTopInset =
@@ -3920,7 +4287,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     Math.floor(screenHeight * (isVeryShortPlayerScreen ? 0.3 : 0.34))
   );
   const measuredYoutubeFrame = isYoutubePlayerVisible ? youtubePlayerFrame : null;
-  const shouldUseVisibleYoutubeFrame = Boolean(isYoutubePlayerVisible && measuredYoutubeFrame);
+  const shouldUseVisibleYoutubeFrame = isYoutubePlayerVisible;
   const youtubeRootOffsetX = youtubeOverlayRootFrame?.x ?? 0;
   const youtubeRootOffsetY = youtubeOverlayRootFrame?.y ?? 0;
   const visibleYoutubeWidth = measuredYoutubeFrame?.width ?? Math.min(playerArtByWidth, playerArtByHeight);

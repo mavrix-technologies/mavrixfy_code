@@ -8,13 +8,22 @@ type MatchResult = {
   score: number;
 };
 
-const MIN_CONFIDENT_SCORE = 0.82;
+const MIN_CONFIDENT_SCORE = 0.74;
 const MIN_TITLE_SCORE = 0.72;
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
 
 function firstString(...values: unknown[]): string {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) {
-      return value.trim();
+      return decodeHtmlEntities(value.trim());
     }
   }
   return "";
@@ -105,8 +114,9 @@ function normalizeJioSaavnCandidate(raw: any): Song | null {
 }
 
 function stripVersionNoise(value: string): string {
-  return normalizeText(value)
+  return normalizeText(decodeHtmlEntities(value))
     .replace(/\b(official|video|audio|lyrics?|lyrical|full|song|music|visualizer|hd|4k)\b/g, " ")
+    .replace(/\b(quot|apos|amp)\b/g, " ")
     .replace(/\b(from|movie|film|album)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -155,7 +165,8 @@ function scoreMatch(source: Song, candidate: Song): number {
   const duration = durationScore(source.duration || 0, candidate.duration || 0);
 
   if (title < MIN_TITLE_SCORE) return 0;
-  if (artist < 0.25 && duration < 0.85) return 0;
+  const strongTitleFallback = title >= 0.95 && duration >= 0.6;
+  if (artist < 0.25 && duration < 0.85 && !strongTitleFallback) return 0;
 
   return title * 0.58 + artist * 0.27 + duration * 0.15;
 }
@@ -179,7 +190,8 @@ export async function resolveYouTubeSongToJioSaavn(song: Song): Promise<MatchRes
       const candidate = normalizeJioSaavnCandidate(raw);
       if (!candidate) continue;
       const score = scoreMatch(song, candidate);
-      if (score >= MIN_CONFIDENT_SCORE) {
+      const strongTitleFallback = score >= 0.66 && titleScore(song.title, candidate.title) >= 0.95;
+      if (score >= MIN_CONFIDENT_SCORE || strongTitleFallback) {
         matches.push({ song: candidate, score });
       }
     }

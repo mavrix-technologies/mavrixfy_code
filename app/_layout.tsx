@@ -9,13 +9,13 @@ import { Stack,
   router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
+import * as SplashScreen from "expo-splash-screen";
 import React,
   { useCallback,
   useEffect,
   useRef,
   useState } from "react";
-import { ActivityIndicator,
-  InteractionManager,
+import { InteractionManager,
   LogBox,
   Platform,
   StyleSheet,
@@ -51,6 +51,9 @@ import { getRecentlyPlayed } from "@/lib/storage";
 import QueueBottomSheet from "@/components/QueueBottomSheet";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { logger } from "@/lib/logger";
+
+void SplashScreen.preventAutoHideAsync().catch(() => {});
+SplashScreen.setOptions({ fade: true, duration: 320 });
 
 // Filter out noisy expo-notifications warnings in the terminal console when testing in Expo Go
 if (__DEV__) {
@@ -221,6 +224,18 @@ function RootLayoutNav() {
   const { replace: routerReplace } = useRouter();
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
+  const splashReleasedRef = useRef(false);
+
+  useEffect(() => {
+    if (loading || splashReleasedRef.current) return;
+
+    splashReleasedRef.current = true;
+    const frame = requestAnimationFrame(() => {
+      void SplashScreen.hideAsync().catch(() => {});
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [loading]);
 
   // ── Enterprise Notification Startup Sequence ────────────────────────────────
   // Runs once after auth resolves. Handles:
@@ -717,22 +732,7 @@ export default function RootLayout() {
   }
 
   if (!appIsReady || !fontsLoaded) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: Colors.background,
-          justifyContent: "center",
-          alignItems: "center",
-          paddingHorizontal: 28,
-        }}
-      >
-        <ActivityIndicator size="large" color={Colors.primary} />
-        <Text style={{ color: Colors.text, fontSize: 22, marginTop: 16, fontWeight: "700" }}>
-          Mavrixfy
-        </Text>
-      </View>
-    );
+    return null;
   }
 
   return (
