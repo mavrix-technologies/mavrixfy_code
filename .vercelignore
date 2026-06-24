@@ -1,0 +1,6 @@
+# Ignore everything by default to avoid uploading large React Native files (android, ios, node_modules, etc.)
+*
+
+# Allow the youtube-music-api folder and its contents
+!youtube-music-api/**
+!youtube-music-api

@@ -33,7 +33,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-yt = YTMusic()
+yt_language = os.environ.get("YOUTUBE_MUSIC_LANGUAGE", "en").strip()
+yt_location = os.environ.get("YOUTUBE_MUSIC_LOCATION", "IN").strip()
+yt = YTMusic(language=yt_language, location=yt_location)
 http_client = httpx.AsyncClient(
     timeout=httpx.Timeout(15.0, read=None),
     follow_redirects=True,
