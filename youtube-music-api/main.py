@@ -530,8 +530,76 @@ def get_playlist(playlistId: str):
     return safe_call(yt.get_playlist, playlistId, limit=100)
 
 
+def get_custom_indian_home():
+    shelves = []
+    
+    # 1. India Trending Charts
+    try:
+        charts = yt.get_charts(country='IN')
+        chart_items = []
+        
+        daily = charts.get('daily', [])
+        weekly = charts.get('weekly', [])
+        for item in (daily + weekly):
+            p_id = item.get('playlistId') or item.get('browseId')
+            if p_id:
+                chart_items.append({
+                    'title': item.get('title'),
+                    'playlistId': p_id,
+                    'thumbnails': item.get('thumbnails', []),
+                    'description': item.get('description', 'Chart • YouTube Music')
+                })
+        if chart_items:
+            shelves.append({
+                'title': 'India Trending Charts',
+                'contents': chart_items[:12]
+            })
+    except Exception as e:
+        logger.error(f"Error fetching Indian charts: {e}")
+
+    # 2. Curated Indian Search-based categories targeting official featured playlists
+    search_queries = [
+        ("Bollywood Hits (Official)", "Bollywood"),
+        ("Punjabi Hits (Official)", "Punjabi"),
+        ("Tamil Hits (Official)", "Tamil Hits"),
+        ("Telugu Hits (Official)", "Telugu Hits"),
+        ("Indian Pop & Indie (Official)", "Indian Indie")
+    ]
+    
+    for shelf_title, query in search_queries:
+        try:
+            results = yt.search(query, filter="featured_playlists", limit=12)
+            contents = []
+            for item in results:
+                p_id = item.get('browseId') or item.get('playlistId')
+                if p_id:
+                    # Strip 'VL' prefix if present for clean routing or keep as ytmusicapi returns
+                    contents.append({
+                        'title': item.get('title'),
+                        'playlistId': p_id,
+                        'thumbnails': item.get('thumbnails', []),
+                        'description': f"Playlist • {item.get('author', 'YouTube Music')}"
+                    })
+            if contents:
+                shelves.append({
+                    'title': shelf_title,
+                    'contents': contents
+                })
+        except Exception as e:
+            logger.error(f"Error fetching custom Indian playlists for {query}: {e}")
+            
+    return shelves
+
+
 @app.get("/home")
 def get_home(limit: int = Query(default=3, ge=1, le=10)):
+    if yt_location == "IN":
+        try:
+            return get_custom_indian_home()
+        except Exception as e:
+            logger.error(f"Failed to generate custom Indian home feed: {e}")
+            pass
+
     result = safe_call(yt.get_home, limit=limit)
     if not isinstance(result, list):
         return []
