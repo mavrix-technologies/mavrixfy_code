@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
+import { getAppleMobileCredential } from "@/lib/appleAuth";
 import { getGoogleMobileIdToken } from "@/lib/googleAuth";
 import {
   openPrivacyPolicy,
@@ -54,20 +55,31 @@ export default function DeleteAccountScreen() {
   }, [firebaseUser]);
   const isPasswordAccount = primaryProviderId === "password";
   const isGoogleAccount = primaryProviderId === "google.com";
+  const isAppleAccount = primaryProviderId === "apple.com";
 
   const performDeletion = async () => {
     setLoading(true);
 
     try {
       let googleIdToken: string | undefined;
+      let appleIdToken: string | undefined;
+      let appleRawNonce: string | undefined;
 
       if (isGoogleAccount && Platform.OS !== "web") {
         googleIdToken = await getGoogleMobileIdToken("Google confirmation");
       }
 
+      if (isAppleAccount && Platform.OS !== "web") {
+        const appleCredential = await getAppleMobileCredential("Apple confirmation");
+        appleIdToken = appleCredential.idToken;
+        appleRawNonce = appleCredential.rawNonce;
+      }
+
       await deleteAccount({
         password,
         googleIdToken,
+        appleIdToken,
+        appleRawNonce,
       });
 
       Alert.alert("Account deleted", "Your Mavrixfy account and app data have been deleted.");
@@ -156,6 +168,8 @@ export default function DeleteAccountScreen() {
               ? "Enter your current password to confirm deletion."
               : isGoogleAccount && Platform.OS !== "web"
                 ? "When you tap Delete Account, we will ask Google to confirm the deletion."
+                : isAppleAccount && Platform.OS !== "web"
+                  ? "When you tap Delete Account, we will ask Apple to confirm the deletion."
                 : "When you tap Delete Account, you may be asked to sign in again to confirm."}
           </Text>
 

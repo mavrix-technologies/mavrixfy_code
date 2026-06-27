@@ -47,6 +47,7 @@ import Colors from "@/constants/colors";
 import { logAppOpen } from "@/lib/analytics";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { getRecentlyPlayed } from "@/lib/storage";
+import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
 
 import QueueBottomSheet from "@/components/QueueBottomSheet";
 import { globalQueueSheetRef } from "@/lib/queueRef";
@@ -224,6 +225,7 @@ function RootLayoutNav() {
   const { replace: routerReplace } = useRouter();
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
+  const isAllowedGuest = GUEST_LOGIN_ENABLED && isGuest;
   const splashReleasedRef = useRef(false);
 
   useEffect(() => {
@@ -371,12 +373,12 @@ function RootLayoutNav() {
       } else {
         routerReplace("/(tabs)");
       }
-    } else if (!isAuthenticated && !isGuest && inProtected) {
+    } else if (!isAuthenticated && !isAllowedGuest && inProtected) {
       routerReplace("/login");
-    } else if (!isAuthenticated && !isGuest && inOnboarding) {
+    } else if (!isAuthenticated && !isAllowedGuest && inOnboarding) {
       routerReplace("/login");
     }
-  }, [loading, isAuthenticated, isGuest, firebaseUser, segments, routerReplace]);
+  }, [loading, isAuthenticated, isAllowedGuest, firebaseUser, segments, routerReplace]);
 
   const activeSegment = segments[0] as string;
   const unmountNavBar = NAV_UNMOUNT_SEGMENTS.has(activeSegment);

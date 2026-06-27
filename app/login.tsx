@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import * as AppleAuthentication from "expo-apple-authentication";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -22,7 +23,9 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import { triggerNotification } from "@/lib/haptics";
 import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
+import { getAppleMobileCredential, isAppleSignInAvailable } from "@/lib/appleAuth";
 import { getGoogleMobileIdToken } from "@/lib/googleAuth";
+import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
 
 type AuthMode = "login" | "signup";
 
@@ -79,6 +82,8 @@ function useLoginScreenView() {
     register,
     signInWithGoogle,
     signInWithGoogleCredential,
+    signInWithApple,
+    signInWithAppleCredential,
     resetPassword,
     continueAsGuest,
   } = useAuth();
@@ -90,6 +95,8 @@ function useLoginScreenView() {
   const isWide = screenWidth >= 960 && screenHeight >= 640;
   const isNarrow = screenWidth <= 360;
   const isExpoGo = Constants.appOwnership === "expo";
+  const guestLoginEnabled = GUEST_LOGIN_ENABLED;
+  const showAppleLoginOption = Platform.OS === "ios" || Platform.OS === "web";
   const shellMaxWidth = Math.min(isWide ? 980 : 460, screenWidth - 32);
   const logoSize = isUltraShort ? 42 : 50;
   const cardPadding = isUltraShort ? 16 : isShort ? 18 : 24;
@@ -106,13 +113,39 @@ function useLoginScreenView() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  const [appleAvailabilityChecked, setAppleAvailabilityChecked] = useState(false);
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
 
   const isSignup = mode === "signup";
+  const showAuthActionStack = !isSignup && (!isExpoGo || guestLoginEnabled || showAppleLoginOption);
   const title = isSignup ? "Create your account" : "Log in to Mavrixfy";
   const subtitle = isSignup
     ? "Set up your profile and keep your library synced."
     : "Music, playlists, and account access in one clean place.";
+
+  useEffect(() => {
+    let mounted = true;
+
+    void isAppleSignInAvailable()
+      .then((available) => {
+        if (mounted) {
+          setAppleAvailable(available);
+          setAppleAvailabilityChecked(true);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setAppleAvailable(false);
+          setAppleAvailabilityChecked(true);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleSubmit = async () => {
     if (!email.trim() || !password.trim()) {
@@ -181,6 +214,35 @@ function useLoginScreenView() {
     }
   };
 
+  const handleAppleSignIn = async () => {
+    if (appleLoading) return;
+
+    setAppleLoading(true);
+    try {
+      if (Platform.OS === "web") {
+        await signInWithApple();
+      } else {
+        const credential = await getAppleMobileCredential("Apple Sign-In");
+        await signInWithAppleCredential(credential);
+      }
+      void triggerNotification(Haptics.NotificationFeedbackType.Success);
+      routerReplace("/(tabs)");
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "Apple Sign-In failed");
+    } finally {
+      setAppleLoading(false);
+    }
+  };
+
+  const handleUnavailableAppleSignIn = () => {
+    Alert.alert(
+      "Apple Sign-In unavailable",
+      isExpoGo
+        ? "Expo Go can test Apple Sign-In on iOS, but this device is reporting it unavailable. Make sure you are on an iPhone or iPad signed into iCloud with two-factor authentication enabled."
+        : "Apple Sign-In is not available on this device or this build is missing the Apple Sign-In entitlement."
+    );
+  };
+
   const handleForgotPassword = async () => {
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
@@ -206,6 +268,10 @@ function useLoginScreenView() {
   };
 
   const handleContinueAsGuest = () => {
+    if (!guestLoginEnabled) {
+      return;
+    }
+
     continueAsGuest();
     routerReplace("/(tabs)");
   };
@@ -270,7 +336,9 @@ function useLoginScreenView() {
                 <View style={styles.heroFeatureStack}>
                   <View style={styles.heroFeature}>
                     <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
-                    <Text style={styles.heroFeatureText}>Fast sign in, sign up, and guest access</Text>
+                    <Text style={styles.heroFeatureText}>
+                      {guestLoginEnabled ? "Fast sign in, sign up, and guest access" : "Fast sign in and sign up flows"}
+                    </Text>
                   </View>
                   <View style={styles.heroFeature}>
                     <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
@@ -303,7 +371,7 @@ function useLoginScreenView() {
                       <View style={styles.mobileBrandCopy}>
                         <Text style={styles.mobileBrandName}>Mavrixfy</Text>
                         <Text style={styles.mobileBrandTag}>
-                          {isSignup ? "Create your profile" : "Login or guest access"}
+                          {isSignup ? "Create your profile" : guestLoginEnabled ? "Login or guest access" : "Login or create an account"}
                         </Text>
                       </View>
                     </>
@@ -339,8 +407,54 @@ function useLoginScreenView() {
                 {!isUltraShort ? <Text style={styles.cardSubtitle}>{subtitle}</Text> : null}
               </View>
 
-              {!isSignup ? (
+              {showAuthActionStack ? (
                 <View style={styles.authActionStack}>
+                  {showAppleLoginOption ? (
+                    <View style={[styles.appleButtonWrap, { height: primaryButtonHeight }]}>
+                      {appleLoading ? (
+                        <View style={styles.appleLoadingButton}>
+                          <ActivityIndicator size="small" color={Colors.black} />
+                          <Text style={styles.oauthButtonText}>Continue with Apple</Text>
+                        </View>
+                      ) : appleAvailable && Platform.OS === "ios" ? (
+                        <AppleAuthentication.AppleAuthenticationButton
+                          buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                          cornerRadius={primaryButtonHeight / 2}
+                          style={styles.appleButton}
+                          onPress={handleAppleSignIn}
+                        />
+                      ) : Platform.OS === "web" ? (
+                        <Pressable
+                          style={styles.appleFallbackButton}
+                          onPress={handleAppleSignIn}
+                          accessibilityRole="button"
+                          accessibilityLabel="Continue with Apple"
+                        >
+                          <Ionicons name="logo-apple" size={20} color={Colors.black} />
+                          <Text style={styles.oauthButtonText}>Continue with Apple</Text>
+                        </Pressable>
+                      ) : (
+                        <Pressable
+                          style={[
+                            styles.appleFallbackButton,
+                            !appleAvailabilityChecked ? styles.appleFallbackButtonChecking : null,
+                          ]}
+                          onPress={handleUnavailableAppleSignIn}
+                          accessibilityRole="button"
+                          accessibilityLabel="Continue with Apple"
+                        >
+                          {!appleAvailabilityChecked ? (
+                            <ActivityIndicator size="small" color={Colors.black} />
+                          ) : (
+                            <Ionicons name="logo-apple" size={20} color={Colors.black} />
+                          )}
+                          <Text style={styles.oauthButtonText}>Continue with Apple</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  ) : null}
+
                   {!isExpoGo ? (
                     <Pressable
                       style={[styles.oauthButton, { height: primaryButtonHeight }]}
@@ -360,13 +474,15 @@ function useLoginScreenView() {
                     </Pressable>
                   ) : null}
 
-                  <Pressable
-                    style={[styles.secondaryButton, { height: primaryButtonHeight }]}
-                    onPress={handleContinueAsGuest}
-                  >
-                    <Ionicons name="person-circle-outline" size={18} color={Colors.text} />
-                    <Text style={styles.secondaryButtonText}>Continue As A Guest</Text>
-                  </Pressable>
+                  {guestLoginEnabled ? (
+                    <Pressable
+                      style={[styles.secondaryButton, { height: primaryButtonHeight }]}
+                      onPress={handleContinueAsGuest}
+                    >
+                      <Ionicons name="person-circle-outline" size={18} color={Colors.text} />
+                      <Text style={styles.secondaryButtonText}>Continue As A Guest</Text>
+                    </Pressable>
+                  ) : null}
 
                   {!isExpoGo ? (
                     <View style={styles.dividerRow}>
@@ -659,6 +775,35 @@ const styles = StyleSheet.create({
   authActionStack: {
     gap: 10,
     marginBottom: 4,
+  },
+  appleButtonWrap: {
+    marginTop: 4,
+    width: "100%",
+  },
+  appleButton: {
+    width: "100%",
+    height: "100%",
+  },
+  appleLoadingButton: {
+    flex: 1,
+    borderRadius: 999,
+    backgroundColor: Colors.text,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  appleFallbackButton: {
+    flex: 1,
+    borderRadius: 999,
+    backgroundColor: Colors.text,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  appleFallbackButtonChecking: {
+    opacity: 0.82,
   },
   oauthButton: {
     marginTop: 4,

@@ -55,9 +55,11 @@ async function fetchCatalogSongs(): Promise<Song[]> {
           duration: data.duration ? Number(data.duration) : 0,
           coverUrl: imageUrl,
           genre: data.genre || '',
+          mood: data.mood || data.moods || undefined,
           audioUrl,
           year: data.year ? String(data.year) : '',
           language: data.language || '',
+          popularity: Number(data.popularity || 0) || undefined,
           source: 'local' as const,
         };
       }, (s): s is Song => s !== null);

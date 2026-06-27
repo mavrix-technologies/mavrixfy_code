@@ -265,6 +265,11 @@ export async function checkAppVersion(): Promise<AppVersionInfo | null> {
         "https://play.google.com/store/apps/details?id=com.mavrixfy.app",
     };
   } catch (err) {
+    const code = String((err as { code?: unknown } | null | undefined)?.code || "");
+    if (code === "permission-denied") {
+      logger.debug("[NotifService] Version check skipped: appVersions/mavrixfy is not readable by this client.");
+      return null;
+    }
     logger.warn("[NotifService] Version check failed:", err);
     return null;
   }

@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Song, Playlist } from "./musicData";
 import { logger } from "@/lib/logger";
+import { normalizeSmartAutoplayMode, type SmartAutoplayMode } from "@/lib/smartAutoplayConfig";
 
 const KEYS = {
   LIKED_SONGS: "@mavrixfy_liked_songs",
@@ -72,6 +73,8 @@ export function getYouTubePlaybackQuality(
 export interface AppSettings {
   streamingQuality: "low" | "medium" | "high";
   videoBackgroundQuality: YouTubeVideoQualityPreference;
+  smartAutoplayEnabled: boolean;
+  smartAutoplayMode: SmartAutoplayMode;
   downloadQuality: "low" | "medium" | "high";
   equalizer: Record<string, number>;
   equalizerEnabled: boolean;
@@ -85,6 +88,8 @@ export interface AppSettings {
 const DEFAULT_SETTINGS: AppSettings = {
   streamingQuality: "high",
   videoBackgroundQuality: "auto",
+  smartAutoplayEnabled: true,
+  smartAutoplayMode: "similar-trending",
   downloadQuality: "high",
   equalizer: {
     "60Hz": 0,
@@ -470,6 +475,8 @@ export async function getSettings(): Promise<AppSettings> {
     },
     hapticsEnabled: Boolean(saved.hapticsEnabled),
     videoBackgroundQuality: normalizeYouTubeVideoQuality(saved.videoBackgroundQuality),
+    smartAutoplayEnabled: saved.smartAutoplayEnabled !== undefined ? Boolean(saved.smartAutoplayEnabled) : DEFAULT_SETTINGS.smartAutoplayEnabled,
+    smartAutoplayMode: normalizeSmartAutoplayMode(saved.smartAutoplayMode),
     ambientBackdropEnabled: saved.ambientBackdropEnabled !== undefined ? Boolean(saved.ambientBackdropEnabled) : DEFAULT_SETTINGS.ambientBackdropEnabled,
   };
 }

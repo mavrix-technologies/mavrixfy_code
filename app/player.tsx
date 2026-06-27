@@ -76,6 +76,46 @@ const PLAYER_PRIMARY_DISMISS_SPRING = {
   stiffness: 270,
 };
 const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
+const BACKGROUND_YOUTUBE_CHROME_CROP_PX = 260;
+const BACKGROUND_YOUTUBE_CHROME_CROP_TOTAL_PX = BACKGROUND_YOUTUBE_CHROME_CROP_PX * 2;
+const BACKGROUND_YOUTUBE_CROP_SCRIPT = `
+(function () {
+  function applyAmbientCrop() {
+    var head = document.head || document.getElementsByTagName("head")[0];
+    if (!head) {
+      setTimeout(applyAmbientCrop, 16);
+      return;
+    }
+
+    var viewportHeight = Math.max(window.innerHeight || 0, document.documentElement.clientHeight || 0, 220);
+    var videoHeight = Math.ceil(viewportHeight + ${BACKGROUND_YOUTUBE_CHROME_CROP_TOTAL_PX});
+    var videoWidth = Math.ceil(videoHeight * 16 / 9);
+    var style = document.getElementById("mavrixfy-ambient-youtube-crop");
+    if (!style) {
+      style = document.createElement("style");
+      style.id = "mavrixfy-ambient-youtube-crop";
+      head.appendChild(style);
+    }
+    style.textContent = [
+      "html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: ${Colors.background}; }",
+      ".container { position: relative !important; width: 100% !important; height: 100vh !important; padding-bottom: 0 !important; overflow: hidden !important; background: ${Colors.background}; }",
+      "#player, .container iframe { position: absolute !important; top: -${BACKGROUND_YOUTUBE_CHROME_CROP_PX}px !important; left: 50% !important; width: " + videoWidth + "px !important; height: " + videoHeight + "px !important; max-width: none !important; max-height: none !important; transform: translateX(-50%) !important; border: 0 !important; pointer-events: none !important; }"
+    ].join("\\n");
+
+    document.documentElement.style.overflow = "hidden";
+    if (document.body) {
+      document.body.style.overflow = "hidden";
+      document.body.style.background = "${Colors.background}";
+    }
+  }
+
+  applyAmbientCrop();
+  setTimeout(applyAmbientCrop, 250);
+  setTimeout(applyAmbientCrop, 1000);
+  window.addEventListener("resize", applyAmbientCrop);
+})();
+true;
+`;
 
 function getYouTubeVideoIdFromSong(song: Song | null | undefined): string {
   if (!song) return "";
@@ -607,6 +647,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   const initialPositionSeconds = Math.max(0, Math.floor(positionMillis / 1000));
   const lastPositionRef = useRef(initialPositionSeconds);
   const [playerReady, setPlayerReady] = useState(false);
+  const [videoVisible, setVideoVisible] = useState(false);
 
   const onReady = useCallback(() => {
     setPlayerReady(true);
@@ -614,6 +655,10 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
     void getVideoBackgroundQuality().then((quality) => {
       playerRef.current?.setPlaybackQuality?.(getYouTubePlaybackQuality(quality));
     });
+  }, []);
+
+  const handleBackgroundStateChange = useCallback((state: string) => {
+    setVideoVisible(state === "playing");
   }, []);
 
   useEffect(() => {
@@ -632,20 +677,10 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
     lastPositionRef.current = targetSeconds;
   }, [positionMillis, playerReady]);
 
-  // Keep the WebView surface at screen width and let the compositor scale it.
-  // Rendering the iframe itself at the full portrait-cover width can create a
-  // multi-thousand-pixel hardware surface on phones and consume several cores.
   const dimensions = useMemo(() => {
-    const baseW = winW;
-    const baseH = Math.round(baseW / (16 / 9));
-    const targetH = containerHeight + 120;
-    const scaleFactor = targetH / baseH;
-
     return {
-      baseW,
-      baseH,
-      scaleFactor,
-      offsetTop: Math.round((containerHeight - baseH) / 2),
+      frameW: Math.max(winW, 220),
+      frameH: Math.max(containerHeight, 220),
     };
   }, [winW, containerHeight]);
 
@@ -660,23 +695,25 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
       <View
         style={{
           position: "absolute",
-          top: dimensions.offsetTop,
+          top: 0,
           left: 0,
-          width: dimensions.baseW,
-          height: dimensions.baseH,
-          transform: [{ scale: dimensions.scaleFactor }],
-          opacity: 1.0,
+          width: dimensions.frameW,
+          height: dimensions.frameH,
+          opacity: videoVisible ? 1 : 0,
         }}
       >
         <YoutubePlayer
           key={videoId}
           ref={playerRef}
-          height={dimensions.baseH}
-          width={dimensions.baseW}
+          height={dimensions.frameH}
+          width={dimensions.frameW}
           play={isPlaying}
           mute={true}
+          volume={0}
           videoId={videoId}
           onReady={onReady}
+          onChangeState={handleBackgroundStateChange}
+          forceAndroidAutoplay
           useLocalHTML
           baseUrlOverride={YOUTUBE_PLAYER_REFERRER_URL}
           initialPlayerParams={{
@@ -697,6 +734,8 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
             javaScriptEnabled: true,
             domStorageEnabled: true,
             thirdPartyCookiesEnabled: true,
+            injectedJavaScriptBeforeContentLoaded: BACKGROUND_YOUTUBE_CROP_SCRIPT,
+            injectedJavaScript: BACKGROUND_YOUTUBE_CROP_SCRIPT,
             setSupportMultipleWindows: false,
             allowsFullscreenVideo: false,
             allowsInlineMediaPlayback: true,
@@ -1544,23 +1583,20 @@ function useLegacyPlayerScreenView() {
 
   const [backgroundVideoId, setBackgroundVideoId] = useState<string | null>(null);
 
-  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- background video id follows the current song, then upgrades to a visual-video id when available.
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- background video id follows the current song after the resolver verifies an official visual match.
   useEffect(() => {
     if (!screenSong) {
       setBackgroundVideoId(null);
       return;
     }
 
-    const immediateId = getYouTubeVideoIdFromSong(screenSong);
-    setBackgroundVideoId(immediateId || null);
+    setBackgroundVideoId(null);
 
     let cancelled = false;
     void getYouTubeMusicVisualVideoId(screenSong)
       .then((visualVideoId) => {
         if (cancelled) return;
-        if (visualVideoId) {
-          setBackgroundVideoId(visualVideoId);
-        }
+        setBackgroundVideoId(visualVideoId || null);
       })
       .catch(() => undefined);
 
@@ -1587,8 +1623,7 @@ function useLegacyPlayerScreenView() {
     ambientBackdropEnabled &&
     backgroundVideoId &&
     screenSongIsYouTube &&
-    !isLowEnd &&
-    false // DISABLED: Never show YouTube video player
+    !isLowEnd
   ), [ambientBackdropEnabled, backgroundVideoId, screenSongIsYouTube, isLowEnd]);
 
   const shouldRenderBackgroundVideo = useMemo(() => Boolean(
@@ -2846,7 +2881,7 @@ function useLegacyPlayerScreenView() {
                   <BackgroundYoutubeVideo
                     key={`bg-video-${backgroundVideoId}`}
                     videoId={backgroundVideoId!}
-                    isPlaying={playerIsPlaying && isScreenFocused}
+                    isPlaying={isScreenFocused}
                     positionMillis={positionMillis}
                     containerHeight={containerH}
                   />

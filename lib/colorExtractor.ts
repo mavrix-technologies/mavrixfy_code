@@ -1,11 +1,17 @@
 /**
  * Extract dominant color from image URL for player gradients.
- * Uses expo-image thumbhashes with stable fallback colors when
- * image metadata is unavailable.
+ * Uses react-native-image-colors with stable fallback colors.
  */
 
 import { Platform } from "react-native";
-import { Image as ExpoImage } from "expo-image";
+
+let getColors: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  getColors = require("react-native-image-colors").getColors;
+} catch (e) {
+  // Native module react-native-image-colors is not built/available in current runtime
+}
 
 interface ColorResult {
   primary: string;
@@ -22,20 +28,8 @@ export interface SpotifyColorTheme {
   playlistBackdrop: [string, string, string, string, string];
 }
 
-const COLOR_EXTRACTION_TIMEOUT_MS = 1400;
 const COLOR_CACHE_MAX_ENTRIES = 200;
 const DEFAULT_FALLBACK: ColorResult = { primary: "#25282E", text: "#F5FBFF", isDark: true };
-
-// Neutral fallback palette. If extraction is unavailable, never invent a green/blue
-// background that can visibly mismatch monochrome album artwork.
-const fallbackPalettes: ColorResult[] = [
-  { primary: "#181B21", text: "#F5FBFF", isDark: true },
-  { primary: "#20232A", text: "#F5FBFF", isDark: true },
-  { primary: "#25282E", text: "#F5FBFF", isDark: true },
-  { primary: "#2B2E35", text: "#F5FBFF", isDark: true },
-  { primary: "#30343A", text: "#F5FBFF", isDark: true },
-  { primary: "#17191F", text: "#F5FBFF", isDark: true },
-];
 
 const colorCache = new Map<string, ColorResult>();
 const pendingColorRequests = new Map<string, Promise<ColorResult>>();
@@ -64,21 +58,39 @@ export async function extractDominantColor(imageUrl: string): Promise<ColorResul
 }
 
 async function extractDominantColorUncached(cacheKey: string): Promise<ColorResult> {
-  const thumbhashPrimary = await getThumbhashAverageColor(cacheKey);
-  if (thumbhashPrimary) {
-    const mappedPrimary = toneMapForCinematicDarkTheme(thumbhashPrimary);
-    const thumbhashResult: ColorResult = {
+  try {
+    if (!getColors) {
+      throw new Error("react-native-image-colors is not available in the current native build.");
+    }
+
+    const result = await getColors(cacheKey, {
+      fallback: "#25282E",
+      cache: true,
+      key: cacheKey,
+    });
+
+    let primaryColor = "#25282E";
+    if (result.platform === "android") {
+      primaryColor = result.dominant ?? result.vibrant ?? result.average ?? "#25282E";
+    } else if (result.platform === "ios") {
+      primaryColor = result.background ?? result.primary ?? "#25282E";
+    } else if (result.platform === "web") {
+      primaryColor = result.dominant ?? result.vibrant ?? "#25282E";
+    }
+
+    const mappedPrimary = toneMapForCinematicDarkTheme(primaryColor);
+    const res: ColorResult = {
       primary: mappedPrimary,
       text: "#F5FBFF",
       isDark: true,
     };
-    setCachedColor(cacheKey, thumbhashResult);
-    return thumbhashResult;
+    setCachedColor(cacheKey, res);
+    return res;
+  } catch (error) {
+    const fallback = getStableFallbackColor(cacheKey);
+    setCachedColor(cacheKey, fallback);
+    return fallback;
   }
-
-  const fallback = getStableFallbackColor(cacheKey);
-  setCachedColor(cacheKey, fallback);
-  return fallback;
 }
 
 export function preloadDominantColors(imageUrls: Array<string | null | undefined>): void {
@@ -94,7 +106,9 @@ export function getImmediateArtworkColor(imageUrl: string | null | undefined): C
   if (!cacheKey) return DEFAULT_FALLBACK;
 
   const cached = colorCache.get(cacheKey);
-  if (!cached) return DEFAULT_FALLBACK;
+  if (!cached) {
+    return getStableFallbackColor(cacheKey);
+  }
 
   colorCache.delete(cacheKey);
   colorCache.set(cacheKey, cached);
@@ -154,21 +168,6 @@ function getHexLuminance(hex: string): number {
   return (0.299 * r) + (0.587 * g) + (0.114 * b);
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Color extraction timeout")), timeoutMs);
-    promise
-      .then((value) => {
-        clearTimeout(timer);
-        resolve(value);
-      })
-      .catch((error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-  });
-}
-
 function stableHash(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -192,105 +191,14 @@ function rgbToHex(r: number, g: number, b: number): string {
 
 function getStableFallbackColor(imageUrl: string): ColorResult {
   if (!imageUrl) return DEFAULT_FALLBACK;
-  const index = stableHash(imageUrl) % fallbackPalettes.length;
-  const fallback = fallbackPalettes[index];
+  const hash = stableHash(imageUrl);
+  const h = hash % 360;
+  const s = 0.82;
+  const l = 0.52;
+  const rgb = hslToRgb(h, s, l);
+  const primaryColor = rgbToHex(rgb.r, rgb.g, rgb.b);
   return {
-    primary: toneMapForCinematicDarkTheme(fallback.primary),
-    text: "#F5FBFF",
-    isDark: true,
-  };
-}
-
-async function getThumbhashAverageColor(imageUrl: string): Promise<string | null> {
-  if (Platform.OS === "web") return null;
-  if (!imageUrl) return null;
-  if (typeof ExpoImage?.generateThumbhashAsync !== "function") return null;
-
-  try {
-    const rawThumbhash = await withTimeout(
-      ExpoImage.generateThumbhashAsync(imageUrl),
-      COLOR_EXTRACTION_TIMEOUT_MS
-    );
-    if (!rawThumbhash || typeof rawThumbhash !== "string") return null;
-    return thumbhashStringToAverageHex(rawThumbhash);
-  } catch {
-    return null;
-  }
-}
-
-function thumbhashStringToAverageHex(raw: string): string | null {
-  const payload = normalizeThumbhashPayload(raw);
-  if (!payload) return null;
-
-  const hash = decodeBase64ToBytes(payload);
-  if (!hash || hash.length < 5) return null;
-
-  const avg = thumbHashToAverageRGBA(hash);
-  const r = Math.round(avg.r * 255);
-  const g = Math.round(avg.g * 255);
-  const b = Math.round(avg.b * 255);
-  return rgbToHex(r, g, b);
-}
-
-function normalizeThumbhashPayload(value: string): string {
-  const base = value
-    .trim()
-    .replace(/^thumbhash:\//i, "")
-    .replace(/\\/g, "/")
-    .replace(/-/g, "+")
-    .replace(/_/g, "/");
-  const pad = base.length % 4;
-  if (pad === 0) return base;
-  return `${base}${"=".repeat(4 - pad)}`;
-}
-
-function decodeBase64ToBytes(base64: string): Uint8Array | null {
-  try {
-    if (typeof atob === "function") {
-      const binary = atob(base64);
-      return Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
-    }
-  } catch {
-    // Try Buffer fallback below.
-  }
-
-  try {
-    const bufferCtor = (globalThis as any)?.Buffer;
-    if (bufferCtor?.from) {
-      const buffer = bufferCtor.from(base64, "base64");
-      return new Uint8Array(buffer);
-    }
-  } catch {
-    // No-op.
-  }
-
-  return null;
-}
-
-function thumbHashToAverageRGBA(hash: Uint8Array): { r: number; g: number; b: number; a: number } {
-  const header = hash[0] | (hash[1] << 8) | (hash[2] << 16);
-  const l = (header & 63) / 63;
-  const p = ((header >> 6) & 63) / 31.5 - 1;
-  const q = ((header >> 12) & 63) / 31.5 - 1;
-  const hasAlpha = header >> 23;
-  const a = hasAlpha ? (hash[5] & 15) / 15 : 1;
-  const b = l - (2 / 3) * p;
-  const r = (3 * l - b + q) / 2;
-  const g = r - q;
-
-  return {
-    r: clamp(r, 0, 1),
-    g: clamp(g, 0, 1),
-    b: clamp(b, 0, 1),
-    a: clamp(a, 0, 1),
-  };
-}
-
-function getRandomMusicColor(): ColorResult {
-  const randomIndex = Math.floor(Math.random() * fallbackPalettes.length);
-  const fallback = fallbackPalettes[randomIndex];
-  return {
-    primary: toneMapForCinematicDarkTheme(fallback.primary),
+    primary: primaryColor,
     text: "#F5FBFF",
     isDark: true,
   };
@@ -371,13 +279,14 @@ function toneMapForCinematicDarkTheme(hex: string): string {
   const { r, g, b } = toRgb(base);
   const { h, s, l } = rgbToHsl(r, g, b);
 
-  const naturalSaturation = s < 0.1
-    ? 0
-    : s < 0.18
-      ? clamp(s * 0.48, 0.02, 0.08)
-      : clamp(s * 0.76, 0.22, 0.58);
-  const cinematicLightness = clamp(l < 0.18 ? 0.28 : l * 0.72, 0.24, 0.42);
-  const mapped = hslToRgb(h, naturalSaturation, cinematicLightness);
+  if (s < 0.12) {
+    return "#2B303B";
+  }
+
+  // Pure candy color boost (no custom hue shifting)
+  const candyS = clamp(s * 1.15, 0.55, 0.95);
+  const candyL = clamp(l * 1.1, 0.42, 0.65);
+  const mapped = hslToRgb(h, candyS, candyL);
   return rgbToHex(mapped.r, mapped.g, mapped.b);
 }
 
@@ -418,8 +327,4 @@ export function createSpotifyColorTheme(baseHex: string): SpotifyColorTheme {
       "rgba(16,20,26,0)",
     ],
   };
-}
-
-function clearColorCache(): void {
-  colorCache.clear();
 }

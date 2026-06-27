@@ -6,6 +6,7 @@ import {
   signOut as firebaseSignOut,
   updateProfile,
   GoogleAuthProvider,
+  OAuthProvider,
   signInWithPopup,
   signInWithCredential,
   sendPasswordResetEmail,
@@ -23,6 +24,8 @@ import { deleteUserFirestoreData } from "@/lib/firestore";
 import { clearAppStorage } from "@/lib/storage";
 import { clearUserCache } from "@/lib/cache";
 import { compactMap } from "@/lib/arrayUtils";
+import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
+import type { AppleMobileCredential } from "@/lib/appleAuth";
 
 interface AppUser {
   id: string;
@@ -43,8 +46,15 @@ interface AuthContextValue {
   register: (email: string, password: string, fullName: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signInWithGoogleCredential: (idToken: string) => Promise<void>;
+  signInWithApple: () => Promise<void>;
+  signInWithAppleCredential: (credential: AppleMobileCredential) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
-  deleteAccount: (options?: { password?: string; googleIdToken?: string }) => Promise<void>;
+  deleteAccount: (options?: {
+    password?: string;
+    googleIdToken?: string;
+    appleIdToken?: string;
+    appleRawNonce?: string;
+  }) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -143,6 +153,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [buildAppUser]);
 
   const continueAsGuest = useCallback(() => {
+    if (!GUEST_LOGIN_ENABLED) {
+      setFirebaseUser(null);
+      setUser(null);
+      setIsGuest(false);
+      setLoading(false);
+      throw new Error("Guest access is disabled in production builds.");
+    }
+
     setFirebaseUser(null);
     setUser(null);
     setIsGuest(true);
@@ -261,6 +279,111 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsGuest(false);
   }, [buildAppUser]);
 
+  const signInWithApple = useCallback(async () => {
+    if (Platform.OS !== "web") {
+      throw new Error("Apple Sign-In on native should use the Apple device sign-in flow.");
+    }
+
+    const provider = new OAuthProvider("apple.com");
+    provider.addScope("email");
+    provider.addScope("name");
+
+    const result = await signInWithPopup(auth, provider);
+    const fbUser = result.user;
+    const userDocRef = doc(db, "users", fbUser.uid);
+    const userDocSnap = await getDoc(userDocRef);
+    const displayName = fbUser.displayName || "";
+    const email = fbUser.email || "";
+    const appleUserData = {
+      email,
+      emailLower: email.toLowerCase(),
+      displayName,
+      fullName: displayName,
+      imageUrl: fbUser.photoURL || null,
+      photoURL: fbUser.photoURL || null,
+      provider: "apple.com",
+      schemaVersion: 2,
+      updatedAt: serverTimestamp(),
+      lastLoginAt: serverTimestamp(),
+    };
+
+    if (!userDocSnap.exists()) {
+      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
+      await setDoc(userDocRef, {
+        ...appleUserData,
+        onboardingCompleted: false,
+        createdAt: serverTimestamp(),
+      });
+      logSignUp("apple");
+    } else {
+      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
+      await setDoc(userDocRef, appleUserData, { merge: true });
+      logLogin("apple");
+    }
+
+    const appUser = await buildAppUser(fbUser);
+    setUser(appUser);
+    setFirebaseUser(fbUser);
+    setIsGuest(false);
+  }, [buildAppUser]);
+
+  const signInWithAppleCredential = useCallback(async (appleCredential: AppleMobileCredential) => {
+    const provider = new OAuthProvider("apple.com");
+    const credential = provider.credential({
+      idToken: appleCredential.idToken,
+      rawNonce: appleCredential.rawNonce,
+    });
+    const result = await signInWithCredential(auth, credential);
+    const fbUser = result.user;
+    const userDocRef = doc(db, "users", fbUser.uid);
+    const userDocSnap = await getDoc(userDocRef);
+    const displayName = appleCredential.fullName?.trim() || fbUser.displayName || "";
+    const email = fbUser.email || appleCredential.email || "";
+
+    if (displayName && !fbUser.displayName) {
+      await updateProfile(fbUser, { displayName }).catch(() => {});
+    }
+
+    const appleUserData = {
+      email,
+      emailLower: email.toLowerCase(),
+      imageUrl: fbUser.photoURL || null,
+      photoURL: fbUser.photoURL || null,
+      provider: "apple.com",
+      appleUserId: appleCredential.user || null,
+      schemaVersion: 2,
+      updatedAt: serverTimestamp(),
+      lastLoginAt: serverTimestamp(),
+    };
+    const appleNameData = displayName
+      ? { displayName, fullName: displayName }
+      : {};
+
+    if (!userDocSnap.exists()) {
+      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
+      await setDoc(userDocRef, {
+        ...appleUserData,
+        displayName,
+        fullName: displayName,
+        onboardingCompleted: false,
+        createdAt: serverTimestamp(),
+      });
+      logSignUp("apple");
+    } else {
+      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
+      await setDoc(userDocRef, {
+        ...appleUserData,
+        ...appleNameData,
+      }, { merge: true });
+      logLogin("apple");
+    }
+
+    const appUser = await buildAppUser(fbUser);
+    setUser(appUser);
+    setFirebaseUser(fbUser);
+    setIsGuest(false);
+  }, [buildAppUser]);
+
   const resetPassword = useCallback(async (email: string) => {
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
@@ -270,7 +393,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await sendPasswordResetEmail(auth, trimmedEmail);
   }, []);
 
-  const deleteAccount = useCallback(async (options?: { password?: string; googleIdToken?: string }) => {
+  const deleteAccount = useCallback(async (options?: {
+    password?: string;
+    googleIdToken?: string;
+    appleIdToken?: string;
+    appleRawNonce?: string;
+  }) => {
     const currentUser = auth.currentUser;
 
     if (!currentUser) {
@@ -305,6 +433,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         const credential = GoogleAuthProvider.credential(googleIdToken);
+        await reauthenticateWithCredential(currentUser, credential);
+      }
+    } else if (primaryProviderId === "apple.com") {
+      const provider = new OAuthProvider("apple.com");
+
+      if (Platform.OS === "web") {
+        await reauthenticateWithPopup(currentUser, provider);
+      } else {
+        const appleIdToken = options?.appleIdToken?.trim();
+        const appleRawNonce = options?.appleRawNonce?.trim();
+
+        if (!appleIdToken || !appleRawNonce) {
+          throw new Error("Please confirm with Apple before deleting your account.");
+        }
+
+        const credential = provider.credential({
+          idToken: appleIdToken,
+          rawNonce: appleRawNonce,
+        });
         await reauthenticateWithCredential(currentUser, credential);
       }
     }
@@ -343,11 +490,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     register,
     signInWithGoogle,
     signInWithGoogleCredential,
+    signInWithApple,
+    signInWithAppleCredential,
     resetPassword,
     deleteAccount,
     logout,
     refreshUser,
-  }), [user, firebaseUser, loading, isGuest, continueAsGuest, login, register, signInWithGoogle, signInWithGoogleCredential, resetPassword, deleteAccount, logout, refreshUser]);
+  }), [user, firebaseUser, loading, isGuest, continueAsGuest, login, register, signInWithGoogle, signInWithGoogleCredential, signInWithApple, signInWithAppleCredential, resetPassword, deleteAccount, logout, refreshUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

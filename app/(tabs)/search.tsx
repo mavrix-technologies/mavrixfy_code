@@ -1387,10 +1387,6 @@ function useSearchScreenView() {
   const featuredAlbums = useMemo(() => albumResults.slice(0, 6), [albumResults]);
   const featuredArtists = useMemo(() => artistResults.slice(0, 5), [artistResults]);
   const featuredPlaylists = useMemo(() => playlistResults.slice(0, 6), [playlistResults]);
-  const displayedSongsQueueKey = useMemo(
-    () => displayedSongs.map((song) => song.id).join("|"),
-    [displayedSongs]
-  );
   const handleSongResultPress = useCallback((song: Song) => {
     void addSongSearchHistoryItem(song)
       .then((items) => setRecentSearches(toRecentSearchItems(items)))
@@ -1402,22 +1398,20 @@ function useSearchScreenView() {
       return (
           <SongRow
             song={item}
-            queue={displayedSongs}
-            queueKey={displayedSongsQueueKey}
             onSongPress={handleSongResultPress}
             showSearchSourceMeta
           />
       );
     },
-    [displayedSongs, displayedSongsQueueKey, handleSongResultPress]
+    [handleSongResultPress]
   );
 
   const handleYoutubeResultPress = useCallback((song: Song) => {
     void addSongSearchHistoryItem(song)
       .then((items) => setRecentSearches(toRecentSearchItems(items)))
       .catch(() => undefined);
-    void playSong(song, youtubeMusicResults);
-  }, [playSong, youtubeMusicResults]);
+    void playSong(song, [song]);
+  }, [playSong]);
 
   const handleShowAppResults = useCallback(() => {
     resetHeaderElevation();

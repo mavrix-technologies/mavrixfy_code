@@ -7,7 +7,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
-import { BlurView } from "expo-blur";
+
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,7 +15,7 @@ import * as Haptics from "expo-haptics";
 import { useAuth } from "@/contexts/AuthContext";
 import { triggerImpact } from "@/lib/haptics";
 
-export const APP_TOP_HEADER_HEIGHT = 56;
+export const APP_TOP_HEADER_HEIGHT = 44;
 const DEFAULT_ELEVATION_SCROLL_THRESHOLD = 10;
 
 type AppTopHeaderProps = {
@@ -93,7 +93,7 @@ export default function AppTopHeader({
       ]}
       >
       {elevated ? (
-        <BlurView pointerEvents="none" intensity={72} tint="dark" style={StyleSheet.absoluteFill} />
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.headerElevatedBg]} />
       ) : null}
       <View style={styles.content}>
         <View style={[styles.sideSlot, { width: leftWidth }]}>{left}</View>
@@ -202,8 +202,11 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   headerElevated: {
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(223,226,235,0.1)",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(223,226,235,0.15)",
+  },
+  headerElevatedBg: {
+    backgroundColor: "#0E1016",
   },
   headerSeamless: {
     borderBottomWidth: 0,
@@ -212,17 +215,17 @@ const styles = StyleSheet.create({
   },
   content: {
     minHeight: APP_TOP_HEADER_HEIGHT,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 10,
+    gap: 8,
   },
   sideSlot: {
-    minHeight: 40,
+    minHeight: 36,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
   },
   rightSlot: {
     justifyContent: "flex-end",
@@ -239,19 +242,19 @@ const styles = StyleSheet.create({
   titleText: {
     maxWidth: "100%",
     color: "#F8FBF9",
-    fontSize: 20,
-    lineHeight: 24,
+    fontSize: 17,
+    lineHeight: 21,
     fontFamily: "Inter_700Bold",
     letterSpacing: 0,
   },
   titleTextLeft: {
-    fontSize: 22,
-    lineHeight: 27,
+    fontSize: 18,
+    lineHeight: 22,
   },
   button: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: "transparent",
     borderWidth: 0,
     borderColor: "transparent",

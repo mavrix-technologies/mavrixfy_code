@@ -69,9 +69,19 @@ service cloud.firestore {
         );
     }
 
+    function isPublicAppVersion(data) {
+      return data.keys().hasAll(['latestVersion', 'minimumVersion']);
+    }
+
     match /admins/{adminId} {
       allow get: if isOwner(adminId) || isAdmin();
       allow list, create, update, delete: if isAdmin();
+    }
+
+    match /appVersions/{appId} {
+      allow get: if isPublicAppVersion(resource.data);
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     match /users/{userId} {

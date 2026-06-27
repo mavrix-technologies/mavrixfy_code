@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { JioSaavnImage, Song } from "@/lib/musicData";
 import { getYouTubeMusicApiUrl } from "@/lib/api-config";
+import { PRODUCTION_YOUTUBE_MUSIC_API_URL } from "@/lib/youtube-music-config";
 import { compactMap, mapFilter, sortedCopy } from "@/lib/arrayUtils";
 import { logger } from "@/lib/logger";
 
@@ -83,9 +84,12 @@ const YOUTUBE_MUSIC_CACHE_PREFIX = "@mavrixfy_youtube_music";
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const REQUEST_TIMEOUT_MS = 30000;
+const PRIVATE_DEVELOPMENT_REQUEST_TIMEOUT_MS = 1800;
 const CURRENT_YEAR = new Date().getFullYear();
 const HOME_YOUTUBE_CATEGORY_CONCURRENCY = 2;
 const PREVIOUS_YEAR = CURRENT_YEAR - 1;
+const OFFICIAL_VISUAL_SEARCH_CACHE_VERSION = "v1";
+const YOUTUBE_VIDEO_SEARCH_CACHE_VERSION = "v2";
 const AUDIO_STREAM_EXPIRY_MARGIN_MS = 60 * 1000;
 const AUDIO_STREAM_CACHE_MAX_ITEMS = 50;
 const audioStreamCache = new Map<string, YouTubeMusicAudioStream>();
@@ -257,7 +261,7 @@ function normalizeTrackShape(track: any): YouTubeMusicTrack | null {
     title,
     artists: normalizeArtists(track?.artists || track?.artist),
     album: album?.name ? album : undefined,
-    duration: track?.duration,
+    duration: track?.duration || track?.length,
     duration_seconds: Number(track?.duration_seconds || track?.durationSeconds || track?.lengthSeconds) || undefined,
     thumbnails: normalizeThumbnails(track?.thumbnails || track?.thumbnail || track?.image),
     videoType: readString(track?.videoType) || undefined,
@@ -285,6 +289,258 @@ function parseDurationSeconds(raw: unknown): number {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+const VISUAL_METADATA_WORDS = new Set([
+  "4k",
+  "album",
+  "film",
+  "full",
+  "hd",
+  "movie",
+  "music",
+  "official",
+  "ost",
+  "picture",
+  "song",
+  "soundtrack",
+  "title",
+  "track",
+  "video",
+]);
+
+const VISUAL_BLOCKED_VERSION_TERMS = [
+  "8d",
+  "acoustic",
+  "audio",
+  "cover",
+  "dj",
+  "instrumental",
+  "karaoke",
+  "live",
+  "lo fi",
+  "lofi",
+  "lyric",
+  "lyrics",
+  "lyrical",
+  "mashup",
+  "mix",
+  "nightcore",
+  "reaction",
+  "recreate",
+  "recreated",
+  "recreation",
+  "remake",
+  "remix",
+  "remixed",
+  "reverb",
+  "rmx",
+  "slowed",
+  "sped up",
+  "status",
+  "teaser",
+  "trailer",
+  "unplugged",
+  "version",
+  "visualizer",
+];
+
+const VISUAL_STOP_WORDS = new Set([
+  "and",
+  "feat",
+  "featuring",
+  "from",
+  "ft",
+  "the",
+  "with",
+  ...VISUAL_METADATA_WORDS,
+]);
+
+function normalizeComparableText(value: unknown): string {
+  return readString(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&amp;/gi, " and ")
+    .replace(/&quot;|&#039;|&apos;|&nbsp;/gi, " ")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function includesWholeTerm(text: string, term: string): boolean {
+  const normalizedTerm = normalizeComparableText(term);
+  if (!normalizedTerm) return false;
+  const pattern = escapeRegExp(normalizedTerm).replace(/\s+/g, "\\s+");
+  return new RegExp(`\\b${pattern}\\b`, "i").test(text);
+}
+
+function stripVisualMetadata(value: unknown): string {
+  return normalizeComparableText(value)
+    .split(" ")
+    .filter((word) => word && !VISUAL_METADATA_WORDS.has(word))
+    .join(" ")
+    .trim();
+}
+
+function visualTokenSet(value: unknown): Set<string> {
+  return new Set(
+    stripVisualMetadata(value)
+      .split(" ")
+      .filter((word) => word.length > 1 && !VISUAL_STOP_WORDS.has(word))
+  );
+}
+
+function countSharedVisualTokens(a: Set<string>, b: Set<string>): number {
+  let count = 0;
+  a.forEach((word) => {
+    if (b.has(word)) count += 1;
+  });
+  return count;
+}
+
+function hasBlockedVisualVersion(title: unknown, seedTitle: unknown): boolean {
+  const text = normalizeComparableText(title);
+  const seedText = normalizeComparableText(seedTitle);
+  return VISUAL_BLOCKED_VERSION_TERMS.some((term) => includesWholeTerm(text, term) && !includesWholeTerm(seedText, term));
+}
+
+function isOfficialMusicVideoType(value: unknown): boolean {
+  const type = normalizeComparableText(value).replace(/\s+/g, "_");
+  return type === "music_video_type_omv" || type.includes("official_music_video") || type.endsWith("_omv");
+}
+
+function getVisualTitleScore(seedTitle: unknown, candidateTitle: unknown): { score: number; strong: boolean } {
+  const seed = stripVisualMetadata(seedTitle);
+  const candidate = stripVisualMetadata(candidateTitle);
+  if (!seed || !candidate) return { score: 0, strong: false };
+
+  if (seed === candidate) return { score: 160, strong: true };
+  if (candidate.includes(seed) || seed.includes(candidate)) return { score: 110, strong: true };
+
+  const seedTokens = visualTokenSet(seed);
+  const candidateTokens = visualTokenSet(candidate);
+  const shared = countSharedVisualTokens(seedTokens, candidateTokens);
+  const ratio = seedTokens.size > 0 ? shared / seedTokens.size : 0;
+
+  if (ratio >= 0.75) {
+    return { score: 80 + shared * 12, strong: true };
+  }
+
+  if (seedTokens.size === 1 && shared === 1) {
+    return { score: 70, strong: true };
+  }
+
+  return { score: shared * 10, strong: false };
+}
+
+function getVisualArtistScore(seedArtist: unknown, candidateArtist: unknown): number {
+  const seed = normalizeComparableText(seedArtist);
+  const candidate = normalizeComparableText(candidateArtist);
+  if (!seed || !candidate) return 0;
+  if (seed === candidate) return 90;
+  if (candidate.includes(seed) || seed.includes(candidate)) return 70;
+
+  const seedTokens = visualTokenSet(seed);
+  const candidateTokens = visualTokenSet(candidate);
+  return countSharedVisualTokens(seedTokens, candidateTokens) * 28;
+}
+
+function scoreOfficialVisualCandidate(seed: Song, candidate: Song, index: number): number | null {
+  const videoId = extractVideoId(candidate);
+  if (!videoId) return null;
+  if (!isOfficialMusicVideoType(candidate.youtubeVideoType)) return null;
+  if (hasBlockedVisualVersion(candidate.title, seed.title)) return null;
+
+  const titleScore = getVisualTitleScore(seed.title, candidate.title);
+  if (!titleScore.strong) return null;
+
+  let score = 140 + titleScore.score + getVisualArtistScore(seed.artist, candidate.artist);
+  if (normalizeComparableText(candidate.title).includes("official")) score += 18;
+  if (normalizeComparableText(candidate.title).includes("full video")) score += 12;
+
+  const seedDuration = parseDurationSeconds(seed.duration);
+  const candidateDuration = parseDurationSeconds(candidate.duration);
+  if (seedDuration && candidateDuration) {
+    const diff = Math.abs(seedDuration - candidateDuration);
+    if (diff <= 35) score += 24;
+    else if (diff <= 90) score += 8;
+    else if (diff > 240) score -= 45;
+  }
+
+  score -= index * 4;
+  return score >= 230 ? score : null;
+}
+
+function selectOfficialVisualVideoId(seed: Song, candidates: Song[]): string | null {
+  let best: { id: string; score: number } | null = null;
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    const score = scoreOfficialVisualCandidate(seed, candidate, index);
+    if (score === null) continue;
+    const id = extractVideoId(candidate);
+    if (!id) continue;
+    if (!best || score > best.score) {
+      best = { id, score };
+    }
+  }
+
+  return best ? best.id : null;
+}
+
+function compactSongCandidates(candidates: Array<Song | null | undefined>): Song[] {
+  return candidates.filter((candidate): candidate is Song => Boolean(candidate));
+}
+
+function artistNamesToString(artists: YouTubeMusicTrack["artists"] | undefined): string {
+  return Array.isArray(artists) ? compactMap(artists, (artist) => readString(artist?.name) || null).join(", ") : "";
+}
+
+function trackToVisualCandidate(track: YouTubeMusicTrack | null | undefined, fallback: Song): Song | null {
+  if (!track) return null;
+  const videoId = extractVideoId(track);
+  if (!videoId) return null;
+  return {
+    ...fallback,
+    id: `youtube_${videoId}`,
+    title: track.title || fallback.title,
+    artist: artistNamesToString(track.artists) || fallback.artist,
+    duration: parseDurationSeconds(track.duration_seconds) || parseDurationSeconds(track.duration) || fallback.duration,
+    coverUrl: getBestThumbnailUrl(track.thumbnails) || fallback.coverUrl,
+    source: "youtube",
+    videoId,
+    youtubeVideoId: videoId,
+    youtubeVisualVideoId: videoId,
+    youtubeVideoType: track.videoType,
+  };
+}
+
+function counterpartToVisualCandidate(
+  track: YouTubeMusicTrack | null | undefined,
+  fallback: Song
+): Song | null {
+  const counterpart = track?.counterpart;
+  if (!counterpart?.videoId) return null;
+  const videoId = extractVideoId(counterpart);
+  if (!videoId) return null;
+  return {
+    ...fallback,
+    id: `youtube_${videoId}`,
+    title: counterpart.title || track?.title || fallback.title,
+    artist: artistNamesToString(track?.artists) || fallback.artist,
+    duration: parseDurationSeconds(counterpart.length) || fallback.duration,
+    coverUrl: getBestThumbnailUrl(counterpart.thumbnails) || fallback.coverUrl,
+    source: "youtube",
+    videoId,
+    youtubeVideoId: videoId,
+    youtubeVisualVideoId: videoId,
+    youtubeVideoType: counterpart.videoType,
+  };
 }
 
 /**
@@ -363,7 +619,10 @@ function isAbortLikeError(error: unknown): boolean {
 }
 
 async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T | null> {
-  const timeout = createTimeoutSignal(REQUEST_TIMEOUT_MS, signal);
+  const timeout = createTimeoutSignal(
+    isPrivateDevelopmentApiUrl(url) ? PRIVATE_DEVELOPMENT_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+    signal
+  );
   try {
     const res = await fetch(url, {
       headers: { Accept: "application/json" },
@@ -388,6 +647,7 @@ async function fetchFirstJson<T>(urls: string[], signal?: AbortSignal): Promise<
       // react-doctor-disable-next-line react-doctor/async-await-in-loop -- endpoint fallbacks must stay sequential to avoid duplicate backend work.
       const result = await fetchJson<T>(url, signal);
       if (result !== null) return result;
+      lastError = null;
     } catch (error) {
       lastError = error;
       if (signal?.aborted) throw error;
@@ -425,8 +685,9 @@ function getEndpointCandidates(
   query: string | string[] = ""
 ): string[] {
   const appBase = getYouTubeMusicApiUrl().replace(/\/+$/, "");
+  const productionBase = PRODUCTION_YOUTUBE_MUSIC_API_URL.replace(/\/+$/, "");
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  const pathCandidates = isPrivateDevelopmentApiUrl(appBase)
+  const primaryPathCandidates = isPrivateDevelopmentApiUrl(appBase)
     ? [`${appBase}${normalizedPath}`]
     : appBase.includes("/api/youtube-music")
       ? [`${appBase}${normalizedPath}`, `${appBase}/api${normalizedPath}`]
@@ -435,6 +696,16 @@ function getEndpointCandidates(
           `${appBase}/api/youtube-music${normalizedPath}`,
           `${appBase}/api${normalizedPath}`,
         ];
+  const productionPathCandidates = productionBase.includes("/api/youtube-music")
+    ? [`${productionBase}${normalizedPath}`, `${productionBase}/api${normalizedPath}`]
+    : [
+        `${productionBase}${normalizedPath}`,
+        `${productionBase}/api/youtube-music${normalizedPath}`,
+        `${productionBase}/api${normalizedPath}`,
+      ];
+  const pathCandidates = isPrivateDevelopmentApiUrl(appBase)
+    ? [...primaryPathCandidates, ...productionPathCandidates]
+    : primaryPathCandidates;
   const queryCandidates = Array.isArray(query) ? query : [query];
   const seen = new Set<string>();
   const candidates: string[] = [];
@@ -454,11 +725,6 @@ function getEndpointCandidates(
 
 function getSearchQueryCandidates(query: string, filter: string, limit: number): string[] {
   const encodedQuery = encodeURIComponent(query);
-  const appBase = getYouTubeMusicApiUrl();
-  // On a private LAN dev server both param forms work; only send one to halve request variants.
-  if (isPrivateDevelopmentApiUrl(appBase)) {
-    return [`q=${encodedQuery}&filter=${filter}&limit=${limit}`];
-  }
   return [
     `query=${encodedQuery}&filter=${filter}&limit=${limit}`,
     `q=${encodedQuery}&filter=${filter}&limit=${limit}`,
@@ -669,7 +935,7 @@ export async function searchYouTubeMusicVideos(
   const q = query.trim();
   if (!q) return [];
 
-  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:search:video:${limit}:${q.toLowerCase()}`;
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:search:video:${YOUTUBE_VIDEO_SEARCH_CACHE_VERSION}:${limit}:${q.toLowerCase()}`;
   const cached = await getCached<Song[]>(cacheKey, SEARCH_CACHE_TTL_MS);
   if (cached) return cached;
 
@@ -687,7 +953,7 @@ export async function searchYouTubeMusicVideos(
       results,
       (item: any) => {
         const song = convertYouTubeMusicTrack(item);
-        if (song) {
+        if (song && !song.youtubeVideoType) {
           song.youtubeVideoType = "video";
         }
         return song;
@@ -893,6 +1159,7 @@ export async function getYouTubeMusicVisualVideoId(song: Song): Promise<string |
   const source = song as Song & {
     youtubeVideoId?: string;
     youtubeVisualVideoId?: string;
+    youtubeVideoType?: string;
     videoId?: string;
   };
   const audioVideoId = extractVideoId({
@@ -904,30 +1171,83 @@ export async function getYouTubeMusicVisualVideoId(song: Song): Promise<string |
     id: source.youtubeVisualVideoId,
   });
 
-  if (!audioVideoId) return existingVisualId || null;
+  if (!audioVideoId) {
+    return selectOfficialVisualVideoId(song, compactSongCandidates([
+      existingVisualId
+        ? {
+            ...song,
+            id: `youtube_${existingVisualId}`,
+            videoId: existingVisualId,
+            youtubeVideoId: existingVisualId,
+            youtubeVisualVideoId: existingVisualId,
+            youtubeVideoType: source.youtubeVideoType,
+          }
+        : null,
+    ]));
+  }
+
+  const visualCacheKey = [
+    YOUTUBE_MUSIC_CACHE_PREFIX,
+    "official_visual",
+    OFFICIAL_VISUAL_SEARCH_CACHE_VERSION,
+    audioVideoId,
+    normalizeComparableText(song.title),
+    normalizeComparableText(song.artist),
+  ].join(":");
+  const cached = await getCached<{ videoId: string | null }>(visualCacheKey, CACHE_TTL_MS);
+  if (cached && Object.prototype.hasOwnProperty.call(cached, "videoId")) {
+    return cached.videoId;
+  }
+
+  const cacheAndReturn = async (videoId: string | null) => {
+    await setCache(visualCacheKey, { videoId });
+    return videoId;
+  };
 
   const watch = await getYouTubeMusicWatchPlaylist(audioVideoId, { limit: 5, radio: false });
   const currentTrack =
     watch?.tracks.find((track) => track.videoId === audioVideoId) ||
     watch?.tracks[0] ||
     null;
-  let counterpartId = currentTrack?.counterpart?.videoId || "";
+  const watchCandidateId = selectOfficialVisualVideoId(song, compactSongCandidates([
+    trackToVisualCandidate(currentTrack, song),
+    counterpartToVisualCandidate(currentTrack, song),
+  ]));
 
-  if (!counterpartId && song.title && song.artist) {
-    try {
-      const searchResults = await searchYouTubeMusicVideos(`${song.title} ${song.artist}`, 2);
-      if (searchResults.length > 0) {
-        const firstVideo = searchResults[0];
-        if (firstVideo && firstVideo.youtubeVideoId) {
-          counterpartId = firstVideo.youtubeVideoId;
+  if (watchCandidateId) {
+    return cacheAndReturn(watchCandidateId);
+  }
+
+  const existingCandidateId = selectOfficialVisualVideoId(song, compactSongCandidates([
+    existingVisualId
+      ? {
+          ...song,
+          id: `youtube_${existingVisualId}`,
+          videoId: existingVisualId,
+          youtubeVideoId: existingVisualId,
+          youtubeVisualVideoId: existingVisualId,
+          youtubeVideoType: source.youtubeVideoType,
         }
+      : null,
+  ]));
+
+  if (existingCandidateId) {
+    return cacheAndReturn(existingCandidateId);
+  }
+
+  if (song.title && song.artist) {
+    try {
+      const searchResults = await searchYouTubeMusicVideos(`${song.title} ${song.artist} official music video`, 10);
+      const searchCandidateId = selectOfficialVisualVideoId(song, searchResults);
+      if (searchCandidateId) {
+        return cacheAndReturn(searchCandidateId);
       }
     } catch (err) {
       logger.warn("[YouTube Music] Visual fallback search failed:", err);
     }
   }
 
-  return extractVideoId({ videoId: counterpartId, id: counterpartId }) || existingVisualId || audioVideoId;
+  return cacheAndReturn(null);
 }
 
 export interface YouTubeMusicPlaylistCard {

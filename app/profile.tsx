@@ -32,6 +32,12 @@ const VIDEO_BACKGROUND_QUALITY_OPTIONS: { label: string; value: AppSettings["vid
   { label: "Medium", value: "medium" },
   { label: "High", value: "high" },
 ];
+const SMART_AUTOPLAY_MODE_OPTIONS: { label: string; value: AppSettings["smartAutoplayMode"] }[] = [
+  { label: "Mix", value: "similar-trending" },
+  { label: "Similar", value: "similar-only" },
+  { label: "Artist", value: "artist-radio" },
+  { label: "Mood", value: "mood-radio" },
+];
 const CROSSFADE_STEPS = Array.from({ length: 13 }, (_, value) => ({
   key: `crossfade-${value}`,
   value,
@@ -172,6 +178,49 @@ function PlaybackSettingsSection({
             ))}
           </View>
         </View>
+
+        <SettingsRow
+          icon="radio-outline"
+          title="Smart Autoplay"
+          subtitle="Generate similar songs when your queue runs low"
+          trailing={
+            <Switch
+              value={settings.smartAutoplayEnabled}
+              onValueChange={(v) => updateSettings({ smartAutoplayEnabled: v })}
+              trackColor={{ false: Colors.inactive, true: Colors.primary }}
+              thumbColor={Colors.text}
+            />
+          }
+        />
+        {settings.smartAutoplayEnabled ? (
+          <View style={[styles.controlBlock, styles.controlBlockBorder]}>
+            <View style={styles.controlHeader}>
+              <View style={styles.rowLeading}>
+                <Ionicons name="sparkles-outline" size={20} color={Colors.primary} />
+              </View>
+              <View style={styles.rowBody}>
+                <Text style={styles.rowTitle}>Autoplay mode</Text>
+                <Text style={styles.rowSubtitle}>Choose how the next queue is generated</Text>
+              </View>
+            </View>
+            <View style={styles.segmentRow}>
+              {SMART_AUTOPLAY_MODE_OPTIONS.map((opt) => {
+                const active = settings.smartAutoplayMode === opt.value;
+                return (
+                  <Pressable
+                    key={opt.value}
+                    style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+                    onPress={() => updateSettings({ smartAutoplayMode: opt.value })}
+                  >
+                    <Text style={[styles.segmentText, styles.smartSegmentText, active && styles.segmentTextActive]}>
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
 
         <SettingsRow
           icon="swap-horizontal-outline"
@@ -371,6 +420,8 @@ export default function ProfileScreen() {
   const [settings, setSettings] = useState<AppSettings>({
     streamingQuality: "high",
     videoBackgroundQuality: "auto",
+    smartAutoplayEnabled: true,
+    smartAutoplayMode: "similar-trending",
     downloadQuality: "high",
     equalizer: { "60Hz": 0, "150Hz": 0, "400Hz": 0, "1KHz": 0, "2.4KHz": 0, "15KHz": 0 },
     equalizerEnabled: false,
@@ -527,6 +578,7 @@ const styles = StyleSheet.create({
   segmentBtn: { flex: 1, paddingVertical: 10, alignItems: "center" },
   segmentBtnActive: { backgroundColor: Colors.primary },
   segmentText: { color: Colors.subtext, fontSize: 14, fontFamily: "Inter_600SemiBold" },
+  smartSegmentText: { fontSize: 12 },
   segmentTextActive: { color: Colors.black },
 
   crossfadeRow: { flexDirection: "row", marginTop: 12 },

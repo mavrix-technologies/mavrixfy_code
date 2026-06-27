@@ -7,9 +7,11 @@ export interface Song {
   duration: number;
   coverUrl: string;
   genre: string;
+  mood?: string | string[];
   audioUrl: string;
   year?: string;
   language?: string;
+  popularity?: number;
   source?: "jiosaavn" | "local" | "youtube";
   playCount?: number; // JioSaavn real play count
   videoId?: string;

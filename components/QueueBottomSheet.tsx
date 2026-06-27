@@ -49,6 +49,7 @@ import {
 } from "@/lib/playbackEngine";
 import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
+import { getSmartAutoplayModeLabel } from "@/lib/smartAutoplayConfig";
 
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -296,6 +297,43 @@ const QueueNowPlaying = React.memo(
 );
 QueueNowPlaying.displayName = "QueueNowPlaying";
 
+type QueueSmartAutoplayProps = {
+  enabled: boolean;
+  isRefreshing: boolean;
+  modeLabel: string;
+  basisLabels: string[];
+  generatedCount: number;
+};
+
+const QueueSmartAutoplay = React.memo(
+  ({ enabled, isRefreshing, modeLabel, basisLabels, generatedCount }: QueueSmartAutoplayProps) => {
+    if (!enabled) return null;
+    const hasBasis = basisLabels.length > 0;
+
+    return (
+      <View style={s.smartWrap}>
+        <View style={s.smartHeaderRow}>
+          <View style={s.smartBadge}>
+            <Ionicons name="sparkles-outline" size={12} color={Colors.primary} />
+            <Text style={s.smartBadgeText}>Generated for You</Text>
+          </View>
+          <Text style={s.smartModeText} numberOfLines={1}>
+            {isRefreshing ? "Refreshing" : modeLabel}
+          </Text>
+        </View>
+        <Text style={s.smartBasisText} numberOfLines={1}>
+          {hasBasis
+            ? `Based on: ${basisLabels.join(" • ")}`
+            : generatedCount > 0
+              ? `${generatedCount} recommended songs ready`
+              : "Smart Autoplay will fill your next songs"}
+        </Text>
+      </View>
+    );
+  }
+);
+QueueSmartAutoplay.displayName = "QueueSmartAutoplay";
+
 type QueueFooterProps = {
   sleepTimer: { label: string } | null;
   bottomPad: number;
@@ -373,6 +411,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
       reorderQueue,
       shuffleQueue,
       sleepTimer,
+      smartAutoplayStatus,
       togglePlay,
     } = usePlayerActions();
 
@@ -556,6 +595,11 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
       }));
     }, [currentSong, queueIndex, upcomingQueue, userQueuedCount]);
 
+    const smartModeLabel = useMemo(
+      () => getSmartAutoplayModeLabel(smartAutoplayStatus.mode),
+      [smartAutoplayStatus.mode]
+    );
+
     // ── Handlers ─────────────────────────────────────────────────────────────
     const handleSongPress = useCallback(
       (song: Song) => {
@@ -607,7 +651,11 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
           {item.isFirstInSection ? (
             <View style={s.sectionHeader}>
               <Text style={s.sectionTitle}>
-                {item.section === "user" ? "Added to queue" : "Playing next"}
+                {item.section === "user"
+                  ? "Added to queue"
+                  : smartAutoplayStatus.enabled
+                    ? "Generated for You"
+                    : "Playing next"}
               </Text>
             </View>
           ) : null}
@@ -624,7 +672,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
           />
         </View>
       ),
-      [handleSongPress, handleSwipeOpen, isPlaying, removeFromQueue]
+      [handleSongPress, handleSwipeOpen, isPlaying, removeFromQueue, smartAutoplayStatus.enabled]
     );
 
     const keyExtractor = useCallback((item: QueueItem) => item.key, []);
@@ -715,6 +763,14 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
           upcomingQueueLength={upcomingQueue.length}
           onPress={handleNowPlayingPress}
           togglePlay={togglePlay}
+        />
+
+        <QueueSmartAutoplay
+          enabled={smartAutoplayStatus.enabled}
+          isRefreshing={smartAutoplayStatus.isRefreshing}
+          modeLabel={smartModeLabel}
+          basisLabels={smartAutoplayStatus.basisLabels}
+          generatedCount={smartAutoplayStatus.generatedCount}
         />
 
         {/* ── Upcoming queue list ──────────────────────────────────────── */}
@@ -909,6 +965,48 @@ const s = StyleSheet.create({
   },
   shuffleText: {
     color: "#9E9E9E",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+
+  // Smart Autoplay
+  smartWrap: {
+    marginHorizontal: 18,
+    marginTop: 2,
+    marginBottom: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "rgba(29,185,84,0.09)",
+    borderWidth: 1,
+    borderColor: "rgba(29,185,84,0.20)",
+  },
+  smartHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  smartBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minWidth: 0,
+  },
+  smartBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontFamily: "Inter_700Bold",
+  },
+  smartModeText: {
+    flexShrink: 1,
+    color: Colors.primary,
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+  },
+  smartBasisText: {
+    marginTop: 5,
+    color: "#A9A9A9",
     fontSize: 12,
     fontFamily: "Inter_400Regular",
   },

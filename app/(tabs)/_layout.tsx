@@ -5,15 +5,12 @@ import { Easing, Platform, Pressable, StyleSheet, Text, View, useWindowDimension
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
-import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import Colors from "@/constants/colors";
 import { usePlayerActions, usePlayerProgress } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import {
-  createSpotifyColorTheme,
   extractDominantColor,
   getImmediateArtworkColor,
   preloadDominantColors,
@@ -82,6 +79,85 @@ function toProgressWidth(progress: number): DimensionValue {
   return `${Math.max(0, Math.min(100, (Number.isFinite(progress) ? progress : 0) * 100))}%`;
 }
 
+function getCandyColors(baseHex: string | null | undefined): { bg: string; accent: string; border: string } {
+  const defaultRes = { bg: "#1E222D", accent: "#26E19A", border: "rgba(38, 225, 154, 0.72)" };
+  if (!baseHex) return defaultRes;
+
+  const hex = baseHex.trim().replace("#", "");
+  let r = 0, g = 0, b = 0;
+  if (hex.length === 6) {
+    r = parseInt(hex.slice(0, 2), 16);
+    g = parseInt(hex.slice(2, 4), 16);
+    b = parseInt(hex.slice(4, 6), 16);
+  } else if (hex.length === 3) {
+    r = parseInt(hex[0] + hex[0], 16);
+    g = parseInt(hex[1] + hex[1], 16);
+    b = parseInt(hex[2] + hex[2], 16);
+  } else {
+    return defaultRes;
+  }
+
+  // RGB to HSL
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const delta = max - min;
+  let h = 0;
+  if (delta !== 0) {
+    if (max === rn) h = ((gn - bn) / delta) % 6;
+    else if (max === gn) h = (bn - rn) / delta + 2;
+    else h = (rn - gn) / delta + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  const l = (max + min) / 2;
+  const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+
+
+
+  // Boost to a vibrant, shiny candy color (high saturation, bright candy lightness)
+  const candyS = s < 0.1 ? 0 : Math.min(0.95, Math.max(0.75, s * 1.4));
+  const candyL = s < 0.1 ? 0.8 : 0.52;
+
+  const c = (1 - Math.abs(2 * candyL - 1)) * candyS;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = candyL - c / 2;
+  let rCandy = 0, gCandy = 0, bCandy = 0;
+  if (h >= 0 && h < 60) {
+    rCandy = c; gCandy = x;
+  } else if (h < 120) {
+    rCandy = x; gCandy = c;
+  } else if (h < 180) {
+    gCandy = c; bCandy = x;
+  } else if (h < 240) {
+    gCandy = x; bCandy = c;
+  } else if (h < 300) {
+    rCandy = x; bCandy = c;
+  } else {
+    rCandy = c; bCandy = x;
+  }
+
+  const rc = Math.round((rCandy + m) * 255);
+  const gc = Math.round((gCandy + m) * 255);
+  const bc = Math.round((bCandy + m) * 255);
+
+  const toHexStr = (val: number) => Math.min(255, Math.max(0, val)).toString(16).padStart(2, "0").toUpperCase();
+  const accent = `#${toHexStr(rc)}${toHexStr(gc)}${toHexStr(bc)}`;
+
+  // Shiny dark background (blend 18% of the candy color with dark slate base '#0A0C10')
+  const alpha = 0.18;
+  const rBg = Math.round(rc * alpha + 10 * (1 - alpha));
+  const gBg = Math.round(gc * alpha + 12 * (1 - alpha));
+  const bBg = Math.round(bc * alpha + 16 * (1 - alpha));
+  const bg = `#${toHexStr(rBg)}${toHexStr(gBg)}${toHexStr(bBg)}`;
+
+  const border = `rgba(${rc},${gc},${bc},0.68)`;
+
+  return { bg, accent, border };
+}
+
 const MiniPlayerProgressBar = React.memo(function MiniPlayerProgressBar({
   fillColor,
 }: {
@@ -141,7 +217,7 @@ const NAV_ITEMS: NavItem[] = [
   { route: "liked-songs", label: "Liked", icon: "heart-outline", iconActive: "heart-sharp" },
   { route: "import-songs", label: "Import", icon: "cloud-upload-outline", iconActive: "cloud-upload" },
 ];
-const noopLongPress = () => {};
+const noopLongPress = () => { };
 
 const TAB_TRANSITION_SPEC = {
   animation: "timing" as const,
@@ -407,7 +483,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
-    void Image.prefetch(urls, "memory-disk").catch(() => {});
+    void Image.prefetch(urls, "memory-disk").catch(() => { });
     preloadDominantColors(urls);
   }, [activeSong?.coverUrl, queue, queueIndex]);
 
@@ -518,7 +594,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   useEffect(() => {
     if (!activeSong?.coverUrl) {
       applyMiniPlayerColors("#25282E", "#F5FBFF");
-      return () => {};
+      return () => { };
     }
     let active = true;
     const immediateColors = getImmediateArtworkColor(activeSong.coverUrl);
@@ -529,7 +605,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
         if (!active) return;
         applyMiniPlayerColors(colors.primary, colors.text);
       })
-      .catch(() => {});
+      .catch(() => { });
 
     return () => {
       active = false;
@@ -541,28 +617,14 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   }, [activeSong?.id, activeSong?.coverUrl]);
 
   const resolvedBottomInset = isWeb ? 0 : Math.max(bottomInset, 0);
-  const containerBottomPadding = 0;
-  const containerWidth: DimensionValue = isIOS && !isWeb
-    ? Math.min(width - 14, 560)
-    : "96%";
-  const navIconSize = isIOS
-    ? (isNarrowMobile ? 20 : 22)
-    : (isNarrowMobile ? 19 : 21);
-  const navLabelSize = isIOS ? 10 : (isNarrowMobile ? 9 : 10);
-  const navLabelLineHeight = isIOS ? 12 : (isNarrowMobile ? 12 : 13);
-  const navTopPadding = 0;
-  const navBottomSafePadding = 0;
-  const navBaseHeight = 54;
-  const navHeight = navBaseHeight;
-  const navHorizontalPadding = isIOS ? 12 : (isNarrowMobile ? 8 : 10);
-  const navItemPaddingTop = isIOS ? 4 : (isNarrowMobile ? 2 : 3);
-  const navItemPaddingBottom = isIOS ? 3 : 1;
+  const navIconSize = isNarrowMobile ? 20 : 22;
+  const navLabelSize = isNarrowMobile ? 9 : 10;
+  const navLabelLineHeight = 12;
+  const navHorizontalPadding = isNarrowMobile ? 6 : 8;
+  const navItemPaddingTop = 6;
+  const navItemPaddingBottom = 4;
   const conceptText = "#dfe2eb";
   const conceptSubtext = "#bccbb9";
-  const miniPlayerTheme = useMemo(
-    () => createSpotifyColorTheme(albumColor || Colors.primary),
-    [albumColor]
-  );
 
   // Ensure title is always readable — if extracted textColor is too dark, use white
   const safeTextColor = useMemo(() => {
@@ -578,68 +640,40 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     return raw;
   }, [textColor]);
 
+  const candyTheme = useMemo(() => {
+    return getCandyColors(albumColor);
+  }, [albumColor]);
+
   const playerTitleColor = safeTextColor;
   const playerSecondaryColor = useMemo(
     () => colorToRgba(safeTextColor, 0.72, conceptSubtext),
     [safeTextColor]
   );
-  const playIconColor = isIOS ? "#111317" : miniPlayerTheme.onAccent;
-  const playerSectionBg = isIOS ? "rgba(22,24,29,0.38)" : Colors.surface;
-  const activeNavColor = isIOS ? "#F7F7FA" : "#FFFFFF";
-  const navInactiveColor = isIOS ? "rgba(235,235,245,0.62)" : conceptSubtext;
-  const navBaseBg = playerSectionBg;
-  const containerGlassBase = isIOS ? "rgba(15,17,22,0.28)" : Colors.background;
+  const playIconColor = "#FFFFFF";
+  const playerSectionBg = candyTheme.bg;
+  const activeNavColor = "#FFFFFF";
+  const navInactiveColor = conceptSubtext;
+  const navBaseBg = "#0E1016";
+  const containerGlassBase = "#0E1016";
   const playerSectionDivider = useMemo(
-    () => colorToRgba(miniPlayerTheme.accent, 0.14, "rgba(223,226,235,0.08)"),
-    [miniPlayerTheme.accent]
+    () => colorToRgba(candyTheme.accent, 0.14, "rgba(223,226,235,0.08)"),
+    [candyTheme.accent]
   );
-  const playerProgressFillColor = Colors.primary;
+  const playerProgressFillColor = candyTheme.accent;
 
-  // Static — never changes, defined once
-  const navGlassTintColors = useMemo<readonly [string, string, string]>(
-    () => isIOS
-      ? ["rgba(255,255,255,0.08)", "rgba(255,255,255,0.025)", "rgba(255,255,255,0.04)"]
-      : ["rgba(255,255,255,0.035)", "rgba(255,255,255,0.015)", "rgba(255,255,255,0.02)"],
-    [isIOS]
-  );
-  const navGlowFillColors = useMemo<readonly [string, string, string]>(
-    () => isIOS
-      ? [
-          colorToRgba(albumColor, 0.018, "rgba(255,255,255,0.035)"),
-          colorToRgba(albumColor, 0.01, "rgba(255,255,255,0.02)"),
-          "rgba(255,255,255,0.008)",
-        ]
-      : [
-          colorToRgba(albumColor, 0.035, "rgba(16,20,26,0.06)"),
-          colorToRgba(albumColor, 0.018, "rgba(16,20,26,0.04)"),
-          "rgba(16,20,26,0.01)",
-        ],
-    [albumColor, isIOS]
-  );
-  const playerGradientColors = useMemo<readonly [string, string, string]>(
-    () => [
-      colorToRgba(albumColor, 0.2, "rgba(255,255,255,0.08)"),
-      colorToRgba(albumColor, 0.08, "rgba(255,255,255,0.03)"),
-      "transparent",
-    ],
-    [albumColor]
-  );
+
   const playerTopEdgeTint = useMemo(
-    () => colorToRgba(miniPlayerTheme.accent, 0.14, "rgba(255,255,255,0.12)"),
-    [miniPlayerTheme.accent]
+    () => colorToRgba(candyTheme.accent, 0.18, "rgba(255,255,255,0.12)"),
+    [candyTheme.accent]
   );
-  const miniButtonPrimaryBg = isIOS ? "rgba(255,255,255,0.96)" : miniPlayerTheme.accent;
-  const miniButtonPrimaryBorder = isIOS
-    ? "rgba(255,255,255,0.16)"
-    : colorToRgba(miniPlayerTheme.accent, 0.72, "rgba(38, 225, 154, 0.72)");
-  const miniSecondaryButtonBg = isIOS ? "rgba(255,255,255,0.08)" : miniPlayerTheme.accent;
-  const miniSecondaryButtonBorder = isIOS
-    ? "rgba(255,255,255,0.08)"
-    : colorToRgba(miniPlayerTheme.accent, 0.72, "rgba(38, 225, 154, 0.72)");
-  const miniSecondaryIconColor = isIOS ? "rgba(255,255,255,0.88)" : playIconColor;
+  const miniButtonPrimaryBg = candyTheme.accent;
+  const miniButtonPrimaryBorder = candyTheme.border;
+  const miniSecondaryButtonBg = "#1C1F26";
+  const miniSecondaryButtonBorder = "rgba(255,255,255,0.12)";
+  const miniSecondaryIconColor = "rgba(255,255,255,0.88)";
   const coverUrl = activeSong?.coverUrl?.trim();
   const miniPlayerHeight = 60;
-  const miniCoverSlotSize = 60;
+  const miniCoverSlotSize = 48;
   const miniCoverSize = 48;
   const miniControlSize = 42;
   const miniControlRadius = Math.round(miniControlSize / 2);
@@ -666,308 +700,249 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
         importantForAccessibility={hidden ? "no-hide-descendants" : "auto"}
         style={[
           styles.wrapper,
-          { bottom: resolvedBottomInset },
+          { bottom: 0 },
           hidden && styles.wrapperHidden,
         ]}
       >
-      <View
-        style={[
-          styles.container,
-          isIOS && styles.containerIOS,
-          { paddingBottom: containerBottomPadding, width: containerWidth },
-          !hasActiveMiniPlayer && styles.containerNavOnly,
-          !hasActiveMiniPlayer && isIOS && styles.containerNavOnlyIOS,
-        ]}
-      >
-        <View pointerEvents="none" style={styles.glassLayer}>
-          {isIOS ? (
-            <BlurView
-              tint="dark"
-              intensity={42}
-              style={styles.containerBlur}
-            />
-          ) : null}
-          <View style={[styles.glassBaseLayer, { backgroundColor: containerGlassBase }]} />
-          <LinearGradient
-            colors={["rgba(255,255,255,0.14)", "rgba(255,255,255,0.04)", "rgba(255,255,255,0.08)"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.glassTint}
-          />
-          <View
-            style={[
-              styles.glassOutline,
-              isIOS && styles.glassOutlineIOS,
-              !hasActiveMiniPlayer && styles.glassOutlineNavOnly,
-              !hasActiveMiniPlayer && isIOS && styles.glassOutlineNavOnlyIOS,
-            ]}
-          />
-        </View>
-
-        {hasActiveMiniPlayer && activeSong ? (
-          <View
-            style={[
-              styles.playerSection,
-              isIOS && styles.playerSectionIOS,
-              { backgroundColor: playerSectionBg, borderBottomColor: playerSectionDivider },
-            ]}
-          >
-            {isIOS ? (
-              <BlurView
-                pointerEvents="none"
-                tint="dark"
-                intensity={34}
-                style={styles.playerBlur}
-              />
-            ) : null}
-            <LinearGradient
-              pointerEvents="none"
-              colors={playerGradientColors}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={styles.playerGradient}
-            />
-            <View pointerEvents="none" style={[styles.playerTopEdge, { backgroundColor: playerTopEdgeTint }]} />
-            <View
-              pointerEvents="none"
-              style={[styles.playerCornerAccentLeft, { borderColor: playerTopEdgeTint }]}
-            />
-            <View
-              pointerEvents="none"
-              style={[styles.playerCornerAccentRight, { borderColor: playerTopEdgeTint }]}
-            />
-            <Pressable
-              android_disableSound
-              style={[styles.playerRow, { height: miniPlayerHeight }]}
-              onPress={openPlayer}
-            >
-              <View style={styles.playerLeft}>
-                <Animated.View style={[styles.coverWrap, { width: miniCoverSlotSize, opacity: coverOpacity }]}>
-                  {coverUrl && !coverFailed ? (
-                    <Image
-                      source={{ uri: coverUrl }}
-                      style={[
-                        styles.cover,
-                        { width: miniCoverSize, height: miniCoverSize },
-                      ]}
-                      contentFit="cover"
-                      decodeFormat="argb"
-                      transition={0}
-                      onError={() => setCoverFailed(true)}
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.cover,
-                        styles.coverFallback,
-                        { width: miniCoverSize, height: miniCoverSize },
-                      ]}
-                    >
-                      <Ionicons name="musical-notes" size={20} color="rgba(255,255,255,0.72)" />
-                    </View>
-                  )}
-                </Animated.View>
-                <View style={[styles.songInfo, isDragging && styles.songInfoDuringMixDrag]}>
-                  <PingPongScroll
-                    text={activeSong.title}
-                    style={[styles.songTitle, { color: playerTitleColor }]}
-                    velocity={15}
-                  />
-                  <PingPongScroll
-                    text={activeSong.artist}
-                    style={[styles.songArtist, { color: playerSecondaryColor }]}
-                    velocity={12}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.playerControls}>
-                {lastMix ? (
-                  <GestureDetector gesture={mixDragGesture}>
-                    <Animated.View
-                      style={[
-                        styles.mixChipWrap,
-                        {
-                          opacity: chipOpacity,
-                          transform: [{ translateX: dragX }, { scale: chipScale }],
-                        },
-                      ]}
-                    >
-                      <Pressable
-                        android_disableSound
-                        onPress={openLastMix}
-                        onLongPress={startMixDrag}
-                        delayLongPress={280}
-                        hitSlop={8}
-                        style={[
-                          styles.mixChip,
-                          isDragging && styles.mixChipDragging,
-                          overTrash && styles.mixChipDeleteReady,
-                        ]}
-                      >
-                        <View style={styles.mixChipAvatars}>
-                          {mixChipImages.slice(0, 3).map((image, index) => (
-                            <Image
-                              key={image}
-                              source={{ uri: image }}
-                              style={[
-                                styles.mixChipAvatar,
-                                index > 0 ? { marginLeft: -8 } : null,
-                              ]}
-                              contentFit="cover"
-                              cachePolicy="memory-disk"
-                            />
-                          ))}
-                          {mixChipImages.length === 0 ? (
-                            <View style={styles.mixChipAvatar}>
-                              <Ionicons name="people" size={12} color="rgba(255,255,255,0.82)" />
-                            </View>
-                          ) : null}
-                        </View>
-                        <Ionicons
-                          name={overTrash ? "trash" : "albums"}
-                          size={16}
-                          color={overTrash ? "#ff6b6b" : "rgba(255,255,255,0.9)"}
-                        />
-                      </Pressable>
-                    </Animated.View>
-                  </GestureDetector>
-                ) : null}
-                <Pressable
-                  android_disableSound
-                  onPress={() => {
-                    togglePlay();
-                  }}
-                  hitSlop={14}
-                  style={({ pressed }) => [
-                    styles.iconButton,
-                    {
-                      width: miniControlSize,
-                      height: miniControlSize,
-                      borderRadius: miniControlRadius,
-                    },
-                    styles.iconButtonPrimary,
-                    {
-                      backgroundColor: miniButtonPrimaryBg,
-                      borderColor: miniButtonPrimaryBorder,
-                    },
-                    pressed && styles.miniButtonPressed,
-                  ]}
-                >
-                  <Ionicons
-                    name={playbackState.isPlaying ? "pause" : "play"}
-                    size={25}
-                    color={playIconColor}
-                    style={!playbackState.isPlaying ? { marginLeft: 1 } : undefined}
-                  />
-                </Pressable>
-                <Pressable
-                  android_disableSound
-                  onPress={() => globalQueueSheetRef.current?.expand()}
-                  hitSlop={14}
-                  style={({ pressed }) => [
-                    styles.iconButton,
-                    { width: miniControlSize, height: miniControlSize, borderRadius: miniControlRadius },
-                    !isIOS && styles.iconButtonPrimary,
-                    {
-                      backgroundColor: miniSecondaryButtonBg,
-                      borderColor: miniSecondaryButtonBorder,
-                    },
-                    pressed && styles.miniButtonPressed,
-                  ]}
-                >
-                  <Ionicons name="list" size={24} color={miniSecondaryIconColor} />
-                </Pressable>
-              </View>
-            </Pressable>
-
-            <MiniPlayerProgressBar fillColor={playerProgressFillColor} />
-
-            <Animated.View
-              pointerEvents={isDragging ? "auto" : "none"}
-              style={[
-                styles.mixTrashDock,
-                overTrash && styles.mixTrashDockActive,
-                {
-                  opacity: trashOpacity,
-                  transform: [
-                    { translateX: trashShiftX },
-                    { translateY: trashShiftY },
-                    { scale: trashScale },
-                  ],
-                },
-              ]}
-            >
-              <Ionicons
-                name={overTrash ? "trash" : "trash-outline"}
-                size={17}
-                color={overTrash ? "#ff6b6b" : "rgba(255,255,255,0.84)"}
-              />
-            </Animated.View>
-          </View>
-        ) : null}
-
         <View
           style={[
-            styles.navContent,
-            isIOS && styles.navContentIOS,
-            {
-              backgroundColor: navBaseBg,
-              height: navHeight,
-              paddingHorizontal: navHorizontalPadding,
-              paddingTop: navTopPadding,
-              paddingBottom: navBottomSafePadding,
-              borderTopWidth: hasActiveMiniPlayer ? 1 : 0,
-            },
-            !hasActiveMiniPlayer && styles.navContentNavOnly,
+            styles.container,
+            isIOS && styles.containerIOS,
+            { width: "100%" },
+            !hasActiveMiniPlayer && styles.containerNavOnly,
+            !hasActiveMiniPlayer && isIOS && styles.containerNavOnlyIOS,
           ]}
         >
-          {isIOS ? (
-            <BlurView
-              pointerEvents="none"
-              tint="dark"
-              intensity={56}
-              style={styles.navGlassBlur}
-            />
-          ) : null}
-          <LinearGradient
-            pointerEvents="none"
-            colors={navGlassTintColors}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.navGlassTint}
-          />
-          <LinearGradient
-            pointerEvents="none"
-            colors={navGlowFillColors}
-            start={{ x: 0.5, y: 0.05 }}
-            end={{ x: 0.5, y: 1 }}
-            style={styles.navGlowFill}
-          />
-          {NAV_ITEMS.map((item) => {
-            const isFocused = item.route === activeTab;
+          <View pointerEvents="none" style={[styles.glassLayer, { backgroundColor: containerGlassBase }]} />
 
-            return (
-              <MemoizedNavTabItem
-                key={item.route}
-                item={item}
-                isFocused={isFocused}
-                isAndroid={isAndroid}
-                isIOS={isIOS}
-                navIconSize={navIconSize}
-                navLabelSize={navLabelSize}
-                navLabelLineHeight={navLabelLineHeight}
-                navItemPaddingTop={navItemPaddingTop}
-                navItemPaddingBottom={navItemPaddingBottom}
-                activeNavColor={activeNavColor}
-                navInactiveColor={navInactiveColor}
-                onPress={handleTabPress}
-                onLongPress={noopLongPress}
+          {hasActiveMiniPlayer && activeSong ? (
+            <View
+              style={[
+                styles.playerSection,
+                isIOS && styles.playerSectionIOS,
+                { backgroundColor: playerSectionBg, borderBottomColor: playerSectionDivider },
+              ]}
+            >
+
+              <View pointerEvents="none" style={[styles.playerTopEdge, { backgroundColor: playerTopEdgeTint }]} />
+              <View
+                pointerEvents="none"
+                style={[styles.playerCornerAccentLeft, { borderColor: playerTopEdgeTint }]}
               />
-            );
-          })}
+              <View
+                pointerEvents="none"
+                style={[styles.playerCornerAccentRight, { borderColor: playerTopEdgeTint }]}
+              />
+              <Pressable
+                android_disableSound
+                style={[styles.playerRow, { height: miniPlayerHeight }]}
+                onPress={openPlayer}
+              >
+                <View style={styles.playerLeft}>
+                  <Animated.View style={[styles.coverWrap, { width: miniCoverSlotSize, opacity: coverOpacity }]}>
+                    {coverUrl && !coverFailed ? (
+                      <Image
+                        source={{ uri: coverUrl }}
+                        style={[
+                          styles.cover,
+                          { width: miniCoverSize, height: miniCoverSize },
+                        ]}
+                        contentFit="cover"
+                        decodeFormat="argb"
+                        transition={0}
+                        onError={() => setCoverFailed(true)}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.cover,
+                          styles.coverFallback,
+                          { width: miniCoverSize, height: miniCoverSize },
+                        ]}
+                      >
+                        <Ionicons name="musical-notes" size={20} color="rgba(255,255,255,0.72)" />
+                      </View>
+                    )}
+                  </Animated.View>
+                  <View style={[styles.songInfo, isDragging && styles.songInfoDuringMixDrag]}>
+                    <PingPongScroll
+                      text={activeSong.title}
+                      style={[styles.songTitle, { color: playerTitleColor }]}
+                      velocity={15}
+                    />
+                    <PingPongScroll
+                      text={activeSong.artist}
+                      style={[styles.songArtist, { color: playerSecondaryColor }]}
+                      velocity={12}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.playerControls}>
+                  {lastMix ? (
+                    <GestureDetector gesture={mixDragGesture}>
+                      <Animated.View
+                        style={[
+                          styles.mixChipWrap,
+                          {
+                            opacity: chipOpacity,
+                            transform: [{ translateX: dragX }, { scale: chipScale }],
+                          },
+                        ]}
+                      >
+                        <Pressable
+                          android_disableSound
+                          onPress={openLastMix}
+                          onLongPress={startMixDrag}
+                          delayLongPress={280}
+                          hitSlop={8}
+                          style={[
+                            styles.mixChip,
+                            isDragging && styles.mixChipDragging,
+                            overTrash && styles.mixChipDeleteReady,
+                          ]}
+                        >
+                          <View style={styles.mixChipAvatars}>
+                            {mixChipImages.slice(0, 3).map((image, index) => (
+                              <Image
+                                key={image}
+                                source={{ uri: image }}
+                                style={[
+                                  styles.mixChipAvatar,
+                                  index > 0 ? { marginLeft: -8 } : null,
+                                ]}
+                                contentFit="cover"
+                                cachePolicy="memory-disk"
+                              />
+                            ))}
+                            {mixChipImages.length === 0 ? (
+                              <View style={styles.mixChipAvatar}>
+                                <Ionicons name="people" size={12} color="rgba(255,255,255,0.82)" />
+                              </View>
+                            ) : null}
+                          </View>
+                          <Ionicons
+                            name={overTrash ? "trash" : "albums"}
+                            size={16}
+                            color={overTrash ? "#ff6b6b" : "rgba(255,255,255,0.9)"}
+                          />
+                        </Pressable>
+                      </Animated.View>
+                    </GestureDetector>
+                  ) : null}
+                  <Pressable
+                    android_disableSound
+                    onPress={() => globalQueueSheetRef.current?.expand()}
+                    hitSlop={14}
+                    style={({ pressed }) => [
+                      styles.iconButton,
+                      { width: miniControlSize, height: miniControlSize, borderRadius: miniControlRadius },
+                      {
+                        backgroundColor: miniSecondaryButtonBg,
+                        borderColor: miniSecondaryButtonBorder,
+                      },
+                      pressed && styles.miniButtonPressed,
+                    ]}
+                  >
+                    <Ionicons name="list" size={24} color={miniSecondaryIconColor} />
+                  </Pressable>
+                  <Pressable
+                    android_disableSound
+                    onPress={() => {
+                      togglePlay();
+                    }}
+                    hitSlop={14}
+                    style={({ pressed }) => [
+                      styles.iconButton,
+                      {
+                        width: miniControlSize,
+                        height: miniControlSize,
+                        borderRadius: miniControlRadius,
+                      },
+                      styles.iconButtonPrimary,
+                      {
+                        backgroundColor: miniButtonPrimaryBg,
+                        borderColor: miniButtonPrimaryBorder,
+                      },
+                      pressed && styles.miniButtonPressed,
+                    ]}
+                  >
+                    <Ionicons
+                      name={playbackState.isPlaying ? "pause" : "play"}
+                      size={25}
+                      color={playIconColor}
+                      style={!playbackState.isPlaying ? { marginLeft: 1 } : undefined}
+                    />
+                  </Pressable>
+                </View>
+              </Pressable>
+
+              <MiniPlayerProgressBar fillColor={playerProgressFillColor} />
+
+              <Animated.View
+                pointerEvents={isDragging ? "auto" : "none"}
+                style={[
+                  styles.mixTrashDock,
+                  overTrash && styles.mixTrashDockActive,
+                  {
+                    opacity: trashOpacity,
+                    transform: [
+                      { translateX: trashShiftX },
+                      { translateY: trashShiftY },
+                      { scale: trashScale },
+                    ],
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={overTrash ? "trash" : "trash-outline"}
+                  size={17}
+                  color={overTrash ? "#ff6b6b" : "rgba(255,255,255,0.84)"}
+                />
+              </Animated.View>
+            </View>
+          ) : null}
+
+          <View
+            style={[
+              styles.navContent,
+              isIOS && styles.navContentIOS,
+              {
+                backgroundColor: navBaseBg,
+                paddingHorizontal: navHorizontalPadding,
+                paddingTop: 4,
+                paddingBottom: Math.min(resolvedBottomInset, 10),
+                borderTopWidth: hasActiveMiniPlayer ? StyleSheet.hairlineWidth : 0,
+                borderTopColor: "rgba(255, 255, 255, 0.08)",
+              },
+              !hasActiveMiniPlayer && styles.navContentNavOnly,
+            ]}
+          >
+
+            {NAV_ITEMS.map((item) => {
+              const isFocused = item.route === activeTab;
+
+              return (
+                <MemoizedNavTabItem
+                  key={item.route}
+                  item={item}
+                  isFocused={isFocused}
+                  isAndroid={isAndroid}
+                  isIOS={isIOS}
+                  navIconSize={navIconSize}
+                  navLabelSize={navLabelSize}
+                  navLabelLineHeight={navLabelLineHeight}
+                  navItemPaddingTop={navItemPaddingTop}
+                  navItemPaddingBottom={navItemPaddingBottom}
+                  activeNavColor={activeNavColor}
+                  navInactiveColor={navInactiveColor}
+                  onPress={handleTabPress}
+                  onLongPress={noopLongPress}
+                />
+              );
+            })}
+          </View>
         </View>
-      </View>
       </View>
 
     </>
@@ -1074,7 +1049,7 @@ function useIOSMiniPlayerOverlayView() {
     ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
-    void Image.prefetch(urls, "memory-disk").catch(() => {});
+    void Image.prefetch(urls, "memory-disk").catch(() => { });
     preloadDominantColors(urls);
   }, [activeSong?.coverUrl, queue, queueIndex]);
 
@@ -1119,7 +1094,7 @@ function useIOSMiniPlayerOverlayView() {
   useEffect(() => {
     if (!activeSong?.coverUrl) {
       applyMiniPlayerColors("#25282E", "#F5FBFF");
-      return () => {};
+      return () => { };
     }
     let active = true;
     const immediateColors = getImmediateArtworkColor(activeSong.coverUrl);
@@ -1130,7 +1105,7 @@ function useIOSMiniPlayerOverlayView() {
         if (!active) return;
         applyMiniPlayerColors(colors.primary, colors.text);
       })
-      .catch(() => {});
+      .catch(() => { });
 
     return () => {
       active = false;
@@ -1210,7 +1185,6 @@ function useIOSMiniPlayerOverlayView() {
   return (
     <View pointerEvents="box-none" style={[styles.iosMiniPlayerRoot, { bottom: bottomOffset }]}>
       <View style={styles.iosMiniPlayerShell}>
-        <BlurView tint="systemChromeMaterialDark" intensity={85} style={styles.iosMiniPlayerBlur} />
         <View pointerEvents="none" style={styles.iosMiniPlayerTopHairline} />
 
         <View style={styles.iosMiniPlayerRow}>
@@ -1259,7 +1233,6 @@ function useIOSMiniPlayerOverlayView() {
               hitSlop={8}
               style={styles.iosMiniPlayerInlineMixBtn}
             >
-              <BlurView tint="systemChromeMaterialDark" intensity={85} style={styles.iosMiniPlayerSideActionBlur} />
               <View style={styles.iosMiniPlayerMixCard}>
                 {/* Show multiple artist images in a grid for multi-artist mixes */}
                 {mixImages.length > 1 ? (
@@ -1451,8 +1424,8 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderRadius: 24,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.16)",
-    backgroundColor: "rgba(37,37,37,0.18)",
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "#111317",
     boxShadow: "none",
   },
   iosMiniPlayerBlur: {
@@ -1681,98 +1654,30 @@ const styles = StyleSheet.create({
     display: "none",
   },
   container: {
-    width: "96%",
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
+    width: "100%",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     overflow: "hidden",
-    borderWidth: 0,
-    borderColor: "transparent",
-    boxShadow: "none",
   },
-  containerIOS: {
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 14,
-    boxShadow: "none",
-  },
-  containerNavOnly: {
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 14,
-  },
-  containerNavOnlyIOS: {
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 14,
-  },
+  containerIOS: {},
+  containerNavOnly: {},
+  containerNavOnlyIOS: {},
   glassLayer: {
     ...StyleSheet.absoluteFillObject,
   },
-  containerBlur: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  glassBaseLayer: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(9, 12, 18, 0.58)",
-  },
-  glassTint: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  glassOutline: {
-    ...StyleSheet.absoluteFillObject,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    borderColor: "rgba(255, 255, 255, 0.06)",
-  },
-  glassOutlineIOS: {
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 14,
-    borderBottomWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.09)",
-  },
-  glassOutlineNavOnly: {
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 14,
-  },
-  glassOutlineNavOnlyIOS: {
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 14,
-  },
+
   playerSection: {
     backgroundColor: "#0A0A0C",
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    borderBottomWidth: 1,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "rgba(61, 74, 61, 0.4)",
     overflow: "hidden",
   },
   playerSectionIOS: {
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
     borderBottomColor: "rgba(255,255,255,0.07)",
   },
-  playerBlur: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  playerGradient: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.52,
-  },
+
   playerTopEdge: {
     position: "absolute",
     top: 0,
@@ -1879,10 +1784,10 @@ const styles = StyleSheet.create({
   },
   playerRow: {
     height: 60,
-    paddingLeft: 0,
+    paddingLeft: 10,
     paddingRight: 10,
     flexDirection: "row",
-    alignItems: "stretch",
+    alignItems: "center",
     justifyContent: "space-between",
   },
   playerLeft: {
@@ -1892,8 +1797,8 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   coverWrap: {
-    width: 60,
-    height: "100%",
+    width: 48,
+    height: 48,
     overflow: "hidden",
     borderRightWidth: 0,
     justifyContent: "center",
@@ -1907,13 +1812,17 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   coverFallback: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.06)",
     alignItems: "center",
     justifyContent: "center",
   },
   songInfo: {
     flex: 1,
     minWidth: 0,
-    marginLeft: 12,
+    marginLeft: 10,
     marginRight: 8,
     justifyContent: "center",
   },
@@ -1953,7 +1862,6 @@ const styles = StyleSheet.create({
     borderColor: "rgba(38, 225, 154, 0.72)",
   },
   navContent: {
-    height: 54,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -1968,22 +1876,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 0,
     borderTopRightRadius: 0,
   },
-  navContentNavOnly: {
-    borderTopLeftRadius: 40,
-    borderTopRightRadius: 40,
-    borderBottomLeftRadius: 40,
-    borderBottomRightRadius: 40,
-  },
-  navGlassBlur: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  navGlassTint: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  navGlowFill: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.4,
-  },
+  navContentNavOnly: {},
+
   navItemAnimWrap: {
     flex: 1,
     minWidth: 0,
