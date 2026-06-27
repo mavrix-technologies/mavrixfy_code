@@ -34,7 +34,8 @@ if (!isRunningInExpoGo() && Platform.OS !== "web") {
 // The player itself is still set up lazily from PlayerContext on first playback.
 if (!isRunningInExpoGo() && Platform.OS !== "web") {
   try {
-    const TrackPlayer = require("react-native-track-player").default;
+    const trackPlayerModule = require("react-native-track-player");
+    const TrackPlayer = trackPlayerModule.default || trackPlayerModule;
     TrackPlayer.registerPlaybackService(
       () => require("./lib/trackPlayerService").trackPlayerService
     );

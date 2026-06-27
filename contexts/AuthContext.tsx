@@ -25,6 +25,7 @@ import { clearAppStorage } from "@/lib/storage";
 import { clearUserCache } from "@/lib/cache";
 import { compactMap } from "@/lib/arrayUtils";
 import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
+import { logger } from "@/lib/logger";
 import type { AppleMobileCredential } from "@/lib/appleAuth";
 
 interface AppUser {
@@ -130,7 +131,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Safety fallback timeout to prevent stuck loading / splash screen on boot
+    const safetyTimeout = setTimeout(() => {
+      setLoading((currLoading) => {
+        if (currLoading) {
+          logger.warn("[AuthContext] Firebase auth initialization timed out. Forcing loading = false.");
+          return false;
+        }
+        return currLoading;
+      });
+    }, 4500); // 4.5 seconds safety window
+
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      clearTimeout(safetyTimeout);
       if (fbUser) {
         applyAuthenticatedSnapshot(fbUser);
         // Enrich with Firestore data in the background (non-blocking)
@@ -140,7 +153,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    return unsubscribe;
+    return () => {
+      clearTimeout(safetyTimeout);
+      unsubscribe();
+    };
   }, [applyAuthenticatedSnapshot, applySignedOutSnapshot, buildAppUser]);
 
   const login = useCallback(async (email: string, password: string) => {

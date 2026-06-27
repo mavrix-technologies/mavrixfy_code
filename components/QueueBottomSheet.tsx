@@ -411,9 +411,16 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
       reorderQueue,
       shuffleQueue,
       sleepTimer,
-      smartAutoplayStatus,
       togglePlay,
     } = usePlayerActions();
+
+    const smartAutoplayStatus = {
+      enabled: false,
+      isRefreshing: false,
+      mode: "similar-trending" as const,
+      basisLabels: [],
+      generatedCount: 0,
+    };
 
     const openSwipeRef = useRef<Swipeable | null>(null);
     const lastPlaceholderRef = useRef<number | null>(null);

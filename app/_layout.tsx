@@ -229,14 +229,25 @@ function RootLayoutNav() {
   const splashReleasedRef = useRef(false);
 
   useEffect(() => {
-    if (loading || splashReleasedRef.current) return;
+    // 5 seconds safety timeout to force hide the splash screen in case auth or database loading hangs.
+    const safetyTimer = setTimeout(() => {
+      if (!splashReleasedRef.current) {
+        splashReleasedRef.current = true;
+        void SplashScreen.hideAsync().catch(() => {});
+        logger.warn("[RootLayoutNav] Splash screen hidden by safety timeout.");
+      }
+    }, 5000);
 
-    splashReleasedRef.current = true;
-    const frame = requestAnimationFrame(() => {
-      void SplashScreen.hideAsync().catch(() => {});
-    });
+    if (!loading && !splashReleasedRef.current) {
+      splashReleasedRef.current = true;
+      clearTimeout(safetyTimer);
+      const frame = requestAnimationFrame(() => {
+        void SplashScreen.hideAsync().catch(() => {});
+      });
+      return () => cancelAnimationFrame(frame);
+    }
 
-    return () => cancelAnimationFrame(frame);
+    return () => clearTimeout(safetyTimer);
   }, [loading]);
 
   // ── Enterprise Notification Startup Sequence ────────────────────────────────
@@ -700,6 +711,7 @@ function InAppPromotionPopup() {
 export default function RootLayout() {
   const [appIsReady, setAppIsReady] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [safetyTimeoutActive, setSafetyTimeoutActive] = useState(false);
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -707,6 +719,15 @@ export default function RootLayout() {
     Inter_700Bold,
     Inter_800ExtraBold,
   });
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSafetyTimeoutActive(true);
+      logger.warn("[RootLayout] Safety timeout triggered. Proceeding without waiting for fonts/assets.");
+    }, 3500); // 3.5 seconds safety window
+
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     async function prepare() {
@@ -733,7 +754,9 @@ export default function RootLayout() {
     );
   }
 
-  if (!appIsReady || !fontsLoaded) {
+  const isReady = safetyTimeoutActive || (appIsReady && fontsLoaded);
+
+  if (!isReady) {
     return null;
   }
 
