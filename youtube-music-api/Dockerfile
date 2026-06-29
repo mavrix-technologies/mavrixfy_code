@@ -1,21 +1,14 @@
-FROM python:3.11-slim
+FROM node:20-slim
 
 WORKDIR /app
 
-# Install system dependencies including Node.js (required by yt-dlp for signature decryption)
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends nodejs && \
-    rm -rf /var/lib/apt/lists/*
+COPY package*.json ./
+RUN npm ci --omit=dev
 
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY server.js ./
+COPY routes ./routes
+COPY services ./services
 
-# Copy application code
-COPY main.py .
-
-# Expose port
 EXPOSE 8000
 
-# Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["node", "server.js"]

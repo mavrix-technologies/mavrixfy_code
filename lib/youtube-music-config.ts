@@ -13,6 +13,8 @@ export const PRODUCTION_YOUTUBE_MUSIC_API_URL = 'https://mavrixfy-api-drab.verce
  *   or a device-reachable LAN URL like http://192.168.x.x:8000
  * - Production: EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL=https://mavrixfy-api-drab.vercel.app/api/youtube-music
  * - Standalone builds: app.json extra.youtubeMusicApiUrl
+ *
+ * The backend at this URL is the Node youtubei.js service in youtube-music-api/.
  * 
  * Priority: Environment variable > app.json extra > hardcoded fallback
  */
@@ -74,6 +76,6 @@ export function getYouTubeMusicApiUrlForPlatform(): string {
   if (configUrl) return configUrl;
   
   // Final fallback to production URL
-  logger.warn('[YouTube Music Config] Using fallback production URL. Consider setting EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL in .env');
+  logger.warn('[YouTube Music Config] Using fallback Node youtubei.js production URL. Consider setting EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL in .env');
   return PRODUCTION_YOUTUBE_MUSIC_API_URL;
 }

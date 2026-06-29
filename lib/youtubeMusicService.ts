@@ -13,7 +13,7 @@ export interface YouTubeMusicTrack {
   title: string;
   artists: Array<{ name: string; id?: string }>;
   album?: { name: string; id?: string };
-  duration?: number | string; // seconds or mm:ss from ytmusicapi
+  duration?: number | string; // seconds or mm:ss from the youtubei.js backend
   duration_seconds?: number;
   thumbnails?: Array<{ url: string; width: number; height: number }>;
   videoType?: string;
@@ -545,13 +545,13 @@ function counterpartToVisualCandidate(
 
 /**
  * Convert YouTube Music track to app's Song format
- * Handles ytmusicapi response format from Python FastAPI backend
+ * Handles the normalized response format from the Node youtubei.js backend.
  */
 export function convertYouTubeMusicTrack(track: any): Song | null {
   const normalizedTrack = normalizeTrackShape(track);
   if (!normalizedTrack) return null;
 
-  // Handle artists array from ytmusicapi
+  // Handle artists array from the backend.
   const artistsArray = normalizedTrack.artists || [];
   const artistNames = compactMap(artistsArray, (a: any) => a?.name || null);
   const artist = artistNames.join(", ") || "Unknown Artist";
