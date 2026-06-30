@@ -43,7 +43,6 @@ import { triggerImpact } from "@/lib/haptics";
 import {
   clearJioSaavnPlaylistCache,
   getHomeJioSaavnCategories,
-  HOME_JIOSAAVN_CATEGORIES,
   HomeJioSaavnCategoryData,
   prefetchVisiblePlaylists,
 } from "@/lib/jioSaavnService";
@@ -139,15 +138,13 @@ const HOME_SESSION_CACHE: HomeSessionCache = {
 
 const HOME_CATEGORY_SECTION_ORDER = [
   "trending",
-  "new-releases",
-  "bollywood",
-  "hindi",
-  "official-songs",
-  "popular",
   "top-charts",
+  "new-releases",
   "ranked",
   "viral-hits",
   "hot-right-now",
+  "bollywood",
+  "popular",
   "new-arrivals",
   "most-viral",
   "party-mix",
@@ -158,33 +155,21 @@ const HOME_CATEGORY_SECTION_ORDER = [
 ] as const;
 
 const HOME_JIOSAAVN_TITLES: Record<string, string> = {
-  trending:         "Trending",
-  "new-releases":   "Latest",
-  bollywood:        "Bollywood",
-  hindi:            "Hindi",
-  "official-songs": "Official Songs",
-  popular:          "Popular",
-  "top-charts":     "Top Charts",
-  ranked:           "Top Ranked",
-  "viral-hits":     "Viral Hits",
-  "hot-right-now":  "Hot Right Now",
-  "new-arrivals":   "New Songs",
-  "most-viral":     "Viral Hits",
-  "party-mix":      "Party Mix",
-  "chill-vibes":    "Chill Vibes",
-  romance:          "Love & Romance",
-  workout:          "Workout & Energy",
-  retro:            "Retro Classics",
-};
-
-/** Home browse IDs that map to a different JioSaavn category id. */
-const HOME_TO_JIO_CATEGORY_ID: Record<string, string> = {
-  "new-releases": "new-arrivals",
-};
-
-/** Re-map JioSaavn category ids back to home browse ids after fetch. */
-const JIO_TO_HOME_CATEGORY_ID: Record<string, string> = {
-  "new-arrivals": "new-releases",
+  trending:       "Trending Now",
+  "top-charts":   "Top Charts",
+  "new-releases": "New Releases",
+  ranked:         "Top Ranked",
+  "viral-hits":   "Viral Hits",
+  "hot-right-now": "Hot Right Now",
+  bollywood:      "Bollywood Hits",
+  popular:        "Most Popular",
+  "new-arrivals": "New Songs",
+  "most-viral":   "Viral Hits",
+  "party-mix":    "Party Mix",
+  "chill-vibes":  "Chill Vibes",
+  romance:        "Love & Romance",
+  workout:        "Workout & Energy",
+  retro:          "Retro Classics",
 };
 
 const BRAND = {
@@ -209,30 +194,24 @@ const HOME_BOOTSTRAP_MAX_WAIT_MS = 15000;
 const HOME_NEW_RELEASE_SONG_TIMEOUT_MS = 8000;
 const MAX_ROW_ITEMS = 10;
 const NEW_RELEASE_SONG_LIMIT = 10;
-const HOME_DEFAULT_BROWSE_CATEGORY_IDS = [
+const HOME_DEFAULT_BROWSE_CATEGORY_IDS = ["trending", "top-charts", "new-releases", "bollywood"] as const;
+const HOME_BROWSE_CATEGORY_FETCH_IDS = [
   "trending",
+  "top-charts",
   "new-releases",
   "bollywood",
-  "hindi",
-  "official-songs",
-  "popular",
-] as const;
-const HOME_BROWSE_CATEGORY_FETCH_IDS = [
-  ...HOME_DEFAULT_BROWSE_CATEGORY_IDS,
-  "top-charts",
   "party-mix",
   "chill-vibes",
   "romance",
   "workout",
   "retro",
 ] as const;
-const HOME_MAX_DEFAULT_BROWSE_SECTIONS = 6;
+const HOME_MAX_DEFAULT_BROWSE_SECTIONS = 4;
 const HOME_MAX_MOOD_BROWSE_SECTIONS = 3;
 const HOME_MAX_RECOMMENDATION_SECTIONS = 2;
 const HOME_MAX_PUBLIC_PLAYLISTS = 12;
 const HOME_MAX_YOUTUBE_DISCOVERY_PLAYLISTS = 8;
-const HOME_PRIORITY_CATEGORY_TIMEOUT_MS = 18000;
-const HOME_YOUTUBE_CATEGORY_TIMEOUT_MS = 15000;
+const HOME_PRIORITY_CATEGORY_TIMEOUT_MS = 5500;
 const PLACEHOLDER_ROW_ITEMS = [0, 1, 2, 3];
 const QUICK_PICK_PLACEHOLDER_COLUMNS = [0, 1];
 const MOOD_CHIPS = ["Podcasts", "Energize", "Feel good", "Romance", "Workout", "Relax"];
@@ -580,24 +559,6 @@ function withPromiseTimeout<T>(promise: Promise<T>, timeoutMs: number, message: 
   });
 }
 
-function resolveJioCategoryIds(categoryIds?: string[]): string[] | undefined {
-  if (!categoryIds?.length) return undefined;
-
-  const jioIds = new Set(HOME_JIOSAAVN_CATEGORIES.map((category) => category.id));
-  const resolved = categoryIds
-    .map((id) => HOME_TO_JIO_CATEGORY_ID[id] ?? id)
-    .filter((id) => jioIds.has(id));
-
-  return resolved.length > 0 ? [...new Set(resolved)] : undefined;
-}
-
-function mapJioCategoriesToHomeIds(categories: HomeJioSaavnCategoryData[]): HomeJioSaavnCategoryData[] {
-  return categories.map((category) => ({
-    ...category,
-    id: JIO_TO_HOME_CATEGORY_ID[category.id] ?? category.id,
-  }));
-}
-
 async function getHomeMixedCategories(options: {
   forceRefresh: boolean;
   limitPerCategory: number;
@@ -606,14 +567,13 @@ async function getHomeMixedCategories(options: {
   youtubeTimeoutMs?: number;
 }): Promise<HomeCategoryData[]> {
   const youtubeLimit = Math.max(3, Math.ceil(options.limitPerCategory / 2));
-  const youtubeTimeoutMs = options.youtubeTimeoutMs ?? HOME_YOUTUBE_CATEGORY_TIMEOUT_MS;
-  const jioCategoryIds = resolveJioCategoryIds(options.categoryIds);
+  const youtubeTimeoutMs = options.youtubeTimeoutMs ?? 4500;
   const jioPromise = getHomeJioSaavnCategories({
     forceRefresh: options.forceRefresh,
     limitPerCategory: options.limitPerCategory,
     realtime: options.realtime,
-    categoryIds: jioCategoryIds,
-  }).then(mapJioCategoriesToHomeIds);
+    categoryIds: options.categoryIds,
+  });
   const youtubePromise = withPromiseTimeout(
     getHomeYouTubeMusicCategories({
       limitPerCategory: youtubeLimit,
@@ -1620,7 +1580,7 @@ function useHomeScreenInnerView() {
                 limitPerCategory: Math.min(limitPerCategory, 8),
                 realtime: realtimeRefresh,
                 categoryIds: [...HOME_DEFAULT_BROWSE_CATEGORY_IDS],
-                youtubeTimeoutMs: HOME_YOUTUBE_CATEGORY_TIMEOUT_MS,
+                youtubeTimeoutMs: 4800,
               }),
               HOME_PRIORITY_CATEGORY_TIMEOUT_MS,
               "Home priority categories timeout"
@@ -1643,7 +1603,7 @@ function useHomeScreenInnerView() {
                 limitPerCategory,
                 realtime: realtimeRefresh,
                 categoryIds: [...HOME_BROWSE_CATEGORY_FETCH_IDS],
-                youtubeTimeoutMs: HOME_YOUTUBE_CATEGORY_TIMEOUT_MS,
+                youtubeTimeoutMs: 8000,
               }),
               HOME_CATEGORY_FETCH_TIMEOUT_MS,
               "Home categories timeout"
@@ -2013,7 +1973,7 @@ function useHomeScreenInnerView() {
       });
 
       if (visibleBrowseCategoryRows.length === 0 && isLoadingCategories) {
-        HOME_DEFAULT_BROWSE_CATEGORY_IDS.slice(0, 4).forEach((priorityId) => {
+        HOME_DEFAULT_BROWSE_CATEGORY_IDS.slice(0, 2).forEach((priorityId) => {
           data.push({
             id: `category-loading-${priorityId}`,
             type: "category",

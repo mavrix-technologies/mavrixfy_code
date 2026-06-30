@@ -86,7 +86,7 @@ const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const REQUEST_TIMEOUT_MS = 30000;
 const PRIVATE_DEVELOPMENT_REQUEST_TIMEOUT_MS = 1800;
 const CURRENT_YEAR = new Date().getFullYear();
-const HOME_YOUTUBE_CATEGORY_CONCURRENCY = 4;
+const HOME_YOUTUBE_CATEGORY_CONCURRENCY = 2;
 const PREVIOUS_YEAR = CURRENT_YEAR - 1;
 const OFFICIAL_VISUAL_SEARCH_CACHE_VERSION = "v1";
 const YOUTUBE_VIDEO_SEARCH_CACHE_VERSION = "v2";
@@ -1291,7 +1291,7 @@ const HINDI_CATEGORY_BLOCKED_TERMS = [
 const STALE_YEAR_TERMS = Array.from({ length: Math.max(0, CURRENT_YEAR - 2016) }, (_, index) => String(2016 + index))
   .filter((year) => year !== String(PREVIOUS_YEAR) && year !== String(CURRENT_YEAR));
 
-const HOME_YOUTUBE_MUSIC_CATEGORY_VERSION = "v4";
+const HOME_YOUTUBE_MUSIC_CATEGORY_VERSION = "v3";
 const YOUTUBE_HOME_INDIAN_TERMS = [
   "bollywood",
   "desi",
@@ -1445,35 +1445,6 @@ const HOME_YOUTUBE_MUSIC_CATEGORIES: HomeYouTubeMusicCategoryConfig[] = [
     preferredAny: ["popular", "most", "top", "hits", "best", "bollywood", "hindi", String(CURRENT_YEAR)],
     blockedAny: YOUTUBE_HOME_BLOCKED_TERMS,
   },
-  {
-    id: "hindi",
-    title: "Hindi Hits",
-    useHome: true,
-    searchTerms: [
-      `hindi songs playlist ${CURRENT_YEAR}`,
-      `best hindi hits ${CURRENT_YEAR}`,
-      `hindi music india`,
-      `top hindi songs`,
-    ],
-    requiredAny: ["hindi", "bollywood", "india"],
-    preferredAny: ["hindi", "songs", "hits", "bollywood", "india", String(CURRENT_YEAR)],
-    blockedAny: YOUTUBE_HOME_BLOCKED_TERMS,
-  },
-  {
-    id: "official-songs",
-    title: "Official Songs",
-    useHome: true,
-    useCharts: true,
-    searchTerms: [
-      `official music videos hindi ${CURRENT_YEAR}`,
-      `vevo bollywood official`,
-      `official songs india ${CURRENT_YEAR}`,
-      `t-series official songs`,
-    ],
-    requiredAny: ["official", "vevo", "topic", "records", "music", "t-series", "sony music"],
-    preferredAny: ["official", "vevo", "bollywood", "hindi", "music video", String(CURRENT_YEAR)],
-    blockedAny: YOUTUBE_HOME_BLOCKED_TERMS,
-  },
 ];
 
 function dedupeYouTubePlaylistCards(playlists: YouTubeMusicPlaylistCard[]): YouTubeMusicPlaylistCard[] {
@@ -1557,13 +1528,8 @@ function isRelevantYouTubeHomePlaylist(
   if (includesAnyTerm(text, category.blockedAny)) return false;
   
   // For non-Indian content categories, check if it's regionally relevant
-  const isIndianContentCategory =
-    category.id === "bollywood" ||
-    category.id === "trending" ||
-    category.id === "popular" ||
-    category.id === "new-arrivals" ||
-    category.id === "new-releases" ||
-    category.id === "hindi";
+  const isIndianContentCategory = category.id === "bollywood" || category.id === "trending" || 
+                                   category.id === "popular" || category.id === "new-arrivals";
   if (isIndianContentCategory && !includesAnyTerm(text, YOUTUBE_HOME_INDIAN_TERMS)) {
     // Allow if it's official YouTube Music content
     if (playlist.kind !== "chart" && playlist.kind !== "editorial") {
@@ -1577,18 +1543,13 @@ function isRelevantYouTubeHomePlaylist(
   const isOfficial = playlist.kind === "chart" || playlist.kind === "editorial" || playlist.kind === "featured";
   const preferredMatches = countTermMatches(text, category.preferredAny);
   const playlistLike = isPlaylistLikeTitle(text);
-  const hasIndianContext = includesAnyTerm(text, YOUTUBE_HOME_INDIAN_TERMS);
 
   // More lenient for official content
   if (isOfficial) {
     return playlistLike || requiredMatches >= 1 || preferredMatches >= 2;
   }
 
-  // Community playlists: one strong signal is enough when clearly Indian music.
-  if (hasIndianContext && requiredMatches >= 1) {
-    return playlistLike || preferredMatches >= 1;
-  }
-
+  // Stricter for community playlists
   return playlistLike && (requiredMatches >= 2 || preferredMatches >= 2);
 }
 
@@ -1784,16 +1745,6 @@ function scoreYouTubeHomePlaylist(
     if (fullText.includes("popular") || fullText.includes("most played") || fullText.includes("best")) score += 42;
   }
 
-  if (category.id === "hindi") {
-    if (fullText.includes("hindi")) score += 45;
-    if (fullText.includes("bollywood") || fullText.includes("india")) score += 30;
-  }
-
-  if (category.id === "official-songs") {
-    if (fullText.includes("official") || fullText.includes("vevo")) score += 50;
-    if (fullText.includes("music video") || fullText.includes("topic")) score += 35;
-  }
-
   // Additional semantic bonuses
   if (text.includes("hits") || text.includes("greatest")) score += 18;
   if (text.includes("party") || text.includes("dance")) score += category.id === "party-mix" ? 30 : 10;
@@ -1875,14 +1826,7 @@ function selectRelevantYouTubeTrendingPlaylists(playlists: YouTubeMusicPlaylistC
 }
 
 /** Default categories on home — fetch only these 4 when no IDs are specified. */
-const HOME_YOUTUBE_DEFAULT_CATEGORY_IDS = new Set([
-  "trending",
-  "new-releases",
-  "bollywood",
-  "hindi",
-  "official-songs",
-  "popular",
-]);
+const HOME_YOUTUBE_DEFAULT_CATEGORY_IDS = new Set(["trending", "top-charts", "new-releases", "bollywood"]);
 
 export async function getHomeYouTubeMusicCategories(options?: {
   limitPerCategory?: number;
