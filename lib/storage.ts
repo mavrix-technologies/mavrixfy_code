@@ -70,6 +70,8 @@ export function getYouTubePlaybackQuality(
   }
 }
 
+export type MiniPlayerSecondaryControl = "queue" | "next" | "prev" | "more";
+
 export interface AppSettings {
   streamingQuality: "low" | "medium" | "high";
   videoBackgroundQuality: YouTubeVideoQualityPreference;
@@ -79,6 +81,7 @@ export interface AppSettings {
   equalizer: Record<string, number>;
   equalizerEnabled: boolean;
   hapticsEnabled: boolean;
+  miniPlayerSecondaryControl: MiniPlayerSecondaryControl;
   crossfade: number;
   gapless: boolean;
   normalizeVolume: boolean;
@@ -101,6 +104,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   equalizerEnabled: false,
   hapticsEnabled: false,
+  miniPlayerSecondaryControl: "queue",
   crossfade: 0,
   gapless: true,
   normalizeVolume: false,
@@ -464,6 +468,13 @@ export async function removeSearchHistoryItem(id: string): Promise<SearchHistory
   return nextItems;
 }
 
+function normalizeMiniPlayerSecondaryControl(value: unknown): MiniPlayerSecondaryControl {
+  if (value === "queue" || value === "next" || value === "prev" || value === "more") {
+    return value;
+  }
+  return DEFAULT_SETTINGS.miniPlayerSecondaryControl;
+}
+
 export async function getSettings(): Promise<AppSettings> {
   const saved = await getJSON<Partial<AppSettings>>(KEYS.SETTINGS, DEFAULT_SETTINGS);
   return {
@@ -477,6 +488,10 @@ export async function getSettings(): Promise<AppSettings> {
     videoBackgroundQuality: normalizeYouTubeVideoQuality(saved.videoBackgroundQuality),
     smartAutoplayEnabled: saved.smartAutoplayEnabled !== undefined ? Boolean(saved.smartAutoplayEnabled) : DEFAULT_SETTINGS.smartAutoplayEnabled,
     smartAutoplayMode: normalizeSmartAutoplayMode(saved.smartAutoplayMode),
+    miniPlayerSecondaryControl: normalizeMiniPlayerSecondaryControl(saved.miniPlayerSecondaryControl),
+    crossfade: DEFAULT_SETTINGS.crossfade,
+    gapless: DEFAULT_SETTINGS.gapless,
+    normalizeVolume: DEFAULT_SETTINGS.normalizeVolume,
     ambientBackdropEnabled: saved.ambientBackdropEnabled !== undefined ? Boolean(saved.ambientBackdropEnabled) : DEFAULT_SETTINGS.ambientBackdropEnabled,
   };
 }

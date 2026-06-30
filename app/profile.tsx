@@ -17,6 +17,7 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
 import { setHapticsPreference } from "@/lib/haptics";
+import { setMiniPlayerSecondaryControlPreference } from "@/lib/miniPlayerControls";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/storage";
 import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
 import { safeGoBack } from "@/utils/navigation";
@@ -38,10 +39,49 @@ const SMART_AUTOPLAY_MODE_OPTIONS: { label: string; value: AppSettings["smartAut
   { label: "Artist", value: "artist-radio" },
   { label: "Mood", value: "mood-radio" },
 ];
-const CROSSFADE_STEPS = Array.from({ length: 13 }, (_, value) => ({
-  key: `crossfade-${value}`,
+const MINI_PLAYER_SECONDARY_OPTIONS: { label: string; value: AppSettings["miniPlayerSecondaryControl"] }[] = [
+  { label: "Queue", value: "queue" },
+  { label: "Next", value: "next" },
+  { label: "Prev", value: "prev" },
+  { label: "More", value: "more" },
+];
+
+function SegmentGroup<T extends string>({
+  options,
   value,
-}));
+  onChange,
+  compact = false,
+}: {
+  options: { label: string; value: T }[];
+  value: T;
+  onChange: (value: T) => void;
+  compact?: boolean;
+}) {
+  return (
+    <View style={styles.segmentRow}>
+      {options.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <Pressable
+            key={opt.value}
+            style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+            onPress={() => onChange(opt.value)}
+          >
+            <Text
+              style={[
+                styles.segmentText,
+                compact && styles.segmentTextCompact,
+                active && styles.segmentTextActive,
+              ]}
+            >
+              {opt.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
 
 type SettingsRowProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -135,126 +175,75 @@ function PlaybackSettingsSection({
     <>
       <Text style={styles.sectionTitle}>Playback</Text>
       <View style={styles.rowsSurface}>
-        <View style={styles.controlBlock}>
-          <View style={styles.controlHeader}>
-            <View style={styles.rowLeading}>
-              <Ionicons name="speedometer-outline" size={20} color={Colors.primary} />
-            </View>
-            <Text style={styles.rowTitle}>Streaming quality</Text>
-          </View>
-          <View style={styles.segmentRow}>
-            {QUALITY_OPTIONS.map((opt) => {
-              const active = settings.streamingQuality === opt.value;
-              return (
-                <Pressable
-                  key={opt.value}
-                  style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-                  onPress={() => updateSettings({ streamingQuality: opt.value })}
-                >
-                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                    {opt.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+        <View style={styles.settingCard}>
+          <Text style={styles.settingLabel}>Streaming quality</Text>
+          <Text style={styles.settingHint}>Audio quality for online playback</Text>
+          <SegmentGroup
+            options={QUALITY_OPTIONS}
+            value={settings.streamingQuality}
+            onChange={(value) => updateSettings({ streamingQuality: value })}
+          />
         </View>
 
-        <View style={[styles.controlBlock, styles.controlBlockBorder]}>
-          <View style={styles.controlHeader}>
-            <View style={styles.rowLeading}>
-              <Ionicons name="git-compare-outline" size={20} color={Colors.primary} />
+        <View style={[styles.settingCard, styles.settingCardBorder]}>
+          <View style={styles.settingRowInline}>
+            <View style={styles.settingTextBlock}>
+              <Text style={styles.settingLabel}>Smart autoplay</Text>
+              <Text style={styles.settingHint}>Add similar songs when the queue ends</Text>
             </View>
-            <Text style={styles.rowTitle}>Crossfade</Text>
-            <Text style={styles.valuePill}>{settings.crossfade}s</Text>
-          </View>
-          <View style={styles.crossfadeRow}>
-            {CROSSFADE_STEPS.map((step) => (
-              <Pressable
-                key={step.key}
-                onPress={() => updateSettings({ crossfade: step.value })}
-                style={[styles.crossfadeBar, step.value <= settings.crossfade && styles.crossfadeBarActive]}
-              />
-            ))}
-          </View>
-        </View>
-
-        <SettingsRow
-          icon="radio-outline"
-          title="Smart Autoplay"
-          subtitle="Generate similar songs when your queue runs low"
-          trailing={
             <Switch
               value={settings.smartAutoplayEnabled}
               onValueChange={(v) => updateSettings({ smartAutoplayEnabled: v })}
               trackColor={{ false: Colors.inactive, true: Colors.primary }}
               thumbColor={Colors.text}
             />
-          }
-        />
-        {settings.smartAutoplayEnabled ? (
-          <View style={[styles.controlBlock, styles.controlBlockBorder]}>
-            <View style={styles.controlHeader}>
-              <View style={styles.rowLeading}>
-                <Ionicons name="sparkles-outline" size={20} color={Colors.primary} />
-              </View>
-              <View style={styles.rowBody}>
-                <Text style={styles.rowTitle}>Autoplay mode</Text>
-                <Text style={styles.rowSubtitle}>Choose how the next queue is generated</Text>
-              </View>
-            </View>
-            <View style={styles.segmentRow}>
-              {SMART_AUTOPLAY_MODE_OPTIONS.map((opt) => {
-                const active = settings.smartAutoplayMode === opt.value;
-                return (
-                  <Pressable
-                    key={opt.value}
-                    style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-                    onPress={() => updateSettings({ smartAutoplayMode: opt.value })}
-                  >
-                    <Text style={[styles.segmentText, styles.smartSegmentText, active && styles.segmentTextActive]}>
-                      {opt.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
           </View>
-        ) : null}
+          {settings.smartAutoplayEnabled ? (
+            <SegmentGroup
+              options={SMART_AUTOPLAY_MODE_OPTIONS}
+              value={settings.smartAutoplayMode}
+              onChange={(value) => updateSettings({ smartAutoplayMode: value })}
+              compact
+            />
+          ) : null}
+        </View>
 
-        <SettingsRow
-          icon="swap-horizontal-outline"
-          title="Gapless playback"
-          trailing={
+        <View style={[styles.settingCard, styles.settingCardBorder]}>
+          <Text style={styles.settingLabel}>Mini player button</Text>
+          <Text style={styles.settingHint}>Right-side control next to play</Text>
+          <SegmentGroup
+            options={MINI_PLAYER_SECONDARY_OPTIONS}
+            value={settings.miniPlayerSecondaryControl}
+            onChange={(value) => updateSettings({ miniPlayerSecondaryControl: value })}
+            compact
+          />
+        </View>
+
+        <View style={[styles.settingCard, styles.settingCardBorder]}>
+          <View style={styles.settingRowInline}>
+            <View style={styles.settingTextBlock}>
+              <Text style={styles.settingLabel}>Haptic feedback</Text>
+              <Text style={styles.settingHint}>Vibration on taps and actions</Text>
+            </View>
             <Switch
-              value={settings.gapless}
-              onValueChange={(v) => updateSettings({ gapless: v })}
+              value={settings.hapticsEnabled}
+              onValueChange={(v) => updateSettings({ hapticsEnabled: v })}
               trackColor={{ false: Colors.inactive, true: Colors.primary }}
               thumbColor={Colors.text}
             />
-          }
-        />
-        <SettingsRow
-          icon="pulse-outline"
-          title="Normalize volume"
-          trailing={
-            <Switch
-              value={settings.normalizeVolume}
-              onValueChange={(v) => updateSettings({ normalizeVolume: v })}
-              trackColor={{ false: Colors.inactive, true: Colors.primary }}
-              thumbColor={Colors.text}
-            />
-          }
-        />
-        <SettingsRow
-          icon="phone-portrait-outline"
-          title="Ambient video backdrop"
-          subtitle={
-            lowEndDevice
-              ? "Disabled automatically on low-RAM Android devices for smoother playback"
-              : "Show dynamic video loops behind the player"
-          }
-          trailing={
+          </View>
+        </View>
+
+        <View style={[styles.settingCard, styles.settingCardBorder]}>
+          <View style={styles.settingRowInline}>
+            <View style={styles.settingTextBlock}>
+              <Text style={styles.settingLabel}>Video backdrop</Text>
+              <Text style={styles.settingHint}>
+                {lowEndDevice
+                  ? "Off on this device for smoother playback"
+                  : "Loop videos behind the player"}
+              </Text>
+            </View>
             <Switch
               value={ambientBackdropSwitchValue}
               disabled={lowEndDevice}
@@ -262,47 +251,16 @@ function PlaybackSettingsSection({
               trackColor={{ false: Colors.inactive, true: Colors.primary }}
               thumbColor={lowEndDevice ? Colors.subtext : Colors.text}
             />
-          }
-        />
-        <View style={[styles.controlBlock, styles.controlBlockBorder]}>
-          <View style={styles.controlHeader}>
-            <View style={styles.rowLeading}>
-              <Ionicons name="videocam-outline" size={20} color={Colors.primary} />
-            </View>
-            <View style={styles.rowBody}>
-              <Text style={styles.rowTitle}>Video background quality</Text>
-              <Text style={styles.rowSubtitle}>For YouTube Music video backdrops</Text>
-            </View>
           </View>
-          <View style={styles.segmentRow}>
-            {VIDEO_BACKGROUND_QUALITY_OPTIONS.map((opt) => {
-              const active = settings.videoBackgroundQuality === opt.value;
-              return (
-                <Pressable
-                  key={opt.value}
-                  style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-                  onPress={() => updateSettings({ videoBackgroundQuality: opt.value })}
-                >
-                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                    {opt.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-        <SettingsRow
-          icon="phone-portrait-outline"
-          title="Haptic touch"
-          trailing={
-            <Switch
-              value={settings.hapticsEnabled}
-              onValueChange={(v) => updateSettings({ hapticsEnabled: v })}
-              trackColor={{ false: Colors.inactive, true: Colors.primary }}
-              thumbColor={Colors.text}
+          {ambientBackdropSwitchValue && !lowEndDevice ? (
+            <SegmentGroup
+              options={VIDEO_BACKGROUND_QUALITY_OPTIONS}
+              value={settings.videoBackgroundQuality}
+              onChange={(value) => updateSettings({ videoBackgroundQuality: value })}
+              compact
             />
-          }
-        />
+          ) : null}
+        </View>
       </View>
     </>
   );
@@ -384,30 +342,6 @@ function LibrarySettingsSection({ routerPush }: { routerPush: RouterPush }) {
   );
 }
 
-function SessionSettingsSection({
-  isAuthenticated,
-  onLogout,
-}: {
-  isAuthenticated: boolean;
-  onLogout: () => void;
-}) {
-  if (!isAuthenticated) return null;
-
-  return (
-    <>
-      <Text style={styles.sectionTitle}>Session</Text>
-      <View style={styles.rowsSurface}>
-        <SettingsRow
-          icon="log-out-outline"
-          title="Log Out"
-          onPress={onLogout}
-          danger
-          first
-        />
-      </View>
-    </>
-  );
-}
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -426,6 +360,7 @@ export default function ProfileScreen() {
     equalizer: { "60Hz": 0, "150Hz": 0, "400Hz": 0, "1KHz": 0, "2.4KHz": 0, "15KHz": 0 },
     equalizerEnabled: false,
     hapticsEnabled: false,
+    miniPlayerSecondaryControl: "queue",
     crossfade: 0,
     gapless: true,
     normalizeVolume: false,
@@ -444,12 +379,14 @@ export default function ProfileScreen() {
   }, []);
 
   const updateSettings = useCallback((partial: Partial<AppSettings>) => {
-    setSettings((current) => {
-      const updated = { ...current, ...partial };
-      if (typeof partial.hapticsEnabled === "boolean") setHapticsPreference(partial.hapticsEnabled);
-      void saveSettings(partial);
-      return updated;
-    });
+    setSettings((current) => ({ ...current, ...partial }));
+    if (typeof partial.hapticsEnabled === "boolean") {
+      setHapticsPreference(partial.hapticsEnabled);
+    }
+    if (partial.miniPlayerSecondaryControl) {
+      setMiniPlayerSecondaryControlPreference(partial.miniPlayerSecondaryControl);
+    }
+    void saveSettings(partial);
   }, []);
 
   const handleLogout = useCallback(() => {
@@ -471,9 +408,13 @@ export default function ProfileScreen() {
           <Ionicons name="arrow-back" size={22} color={Colors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Account</Text>
-        <Pressable onPress={handleLogout} hitSlop={8} style={{ padding: 8 }}>
-          <Text style={{ color: "#FF8B8B", fontSize: 14, fontFamily: "Inter_700Bold" }}>Log Out</Text>
-        </Pressable>
+        {isAuthenticated ? (
+          <Pressable onPress={handleLogout} hitSlop={8} style={{ padding: 8 }}>
+            <Text style={{ color: "#FF8B8B", fontSize: 14, fontFamily: "Inter_700Bold" }}>Log Out</Text>
+          </Pressable>
+        ) : (
+          <View style={{ width: 52 }} />
+        )}
       </View>
 
       <ScrollView
@@ -500,10 +441,6 @@ export default function ProfileScreen() {
           routerReplace={routerReplace}
         />
         <LibrarySettingsSection routerPush={routerPush} />
-        <SessionSettingsSection
-          isAuthenticated={isAuthenticated}
-          onLogout={handleLogout}
-        />
       </ScrollView>
     </View>
   );
@@ -563,36 +500,35 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
 
-  // Control blocks (quality, crossfade)
-  controlBlock: { paddingHorizontal: 16, paddingVertical: 14 },
-  controlBlockBorder: {
+  settingCard: { paddingHorizontal: 16, paddingVertical: 14, gap: 10 },
+  settingCardBorder: {
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.08)",
   },
-  controlHeader: { flexDirection: "row", alignItems: "center" },
+  settingRowInline: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  settingTextBlock: { flex: 1, minWidth: 0 },
+  settingLabel: {
+    color: Colors.text, fontSize: 15, fontFamily: "Inter_600SemiBold",
+  },
+  settingHint: {
+    color: Colors.subtext, fontSize: 12, marginTop: 3, fontFamily: "Inter_400Regular",
+    lineHeight: 16,
+  },
 
   segmentRow: {
-    flexDirection: "row", marginTop: 12, borderRadius: 10, overflow: "hidden",
+    flexDirection: "row", borderRadius: 10, overflow: "hidden",
     backgroundColor: "rgba(255,255,255,0.04)",
     borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
   },
   segmentBtn: { flex: 1, paddingVertical: 10, alignItems: "center" },
   segmentBtnActive: { backgroundColor: Colors.primary },
-  segmentText: { color: Colors.subtext, fontSize: 14, fontFamily: "Inter_600SemiBold" },
-  smartSegmentText: { fontSize: 12 },
+  segmentText: { color: Colors.subtext, fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  segmentTextCompact: { fontSize: 12 },
   segmentTextActive: { color: Colors.black },
-
-  crossfadeRow: { flexDirection: "row", marginTop: 12 },
-  crossfadeBar: {
-    flex: 1, height: 6, borderRadius: 999, marginRight: 4,
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  crossfadeBarActive: { backgroundColor: Colors.primary },
-
-  valuePill: {
-    color: Colors.text, fontSize: 13, paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: 999, backgroundColor: "rgba(255,255,255,0.06)",
-    overflow: "hidden", fontFamily: "Inter_600SemiBold", marginLeft: "auto",
-  },
 
   // Rows
   settingsRow: {

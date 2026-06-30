@@ -107,14 +107,18 @@ const HOME_FETCH_CATEGORY_CONCURRENCY = 3;
 const AUTO_REFRESH_POLL_INTERVAL_MS = 30 * 1000;
 export const JIOSAAVN_CATEGORY_CACHE_TTL_MS = 30 * 60 * 1000;
 const CATEGORY_TTL_MS: Record<string, number> = {
-  trending:      30 * 60 * 1000,
-  "new-arrivals": 45 * 60 * 1000,
-  "most-viral":  45 * 60 * 1000,
-  "party-mix":   60 * 60 * 1000,
-  "chill-vibes": 60 * 60 * 1000,
-  romance:       60 * 60 * 1000,
-  workout:       60 * 60 * 1000,
-  retro:         90 * 60 * 1000,
+  trending:        30 * 60 * 1000,
+  "top-charts":    30 * 60 * 1000,
+  bollywood:       45 * 60 * 1000,
+  hindi:           45 * 60 * 1000,
+  popular:         45 * 60 * 1000,
+  "new-arrivals":  45 * 60 * 1000,
+  "most-viral":    45 * 60 * 1000,
+  "party-mix":     60 * 60 * 1000,
+  "chill-vibes":   60 * 60 * 1000,
+  romance:         60 * 60 * 1000,
+  workout:         60 * 60 * 1000,
+  retro:           90 * 60 * 1000,
 };
 const JIOSAAVN_PLAYLIST_BASE_URLS = [
   `${getApiUrl().replace(/\/$/, "")}/api`,
@@ -142,6 +146,46 @@ export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
       `latest bollywood songs ${CURRENT_YEAR}`,
       "new hindi songs",
       "latest releases",
+    ],
+  },
+  {
+    id: "top-charts",
+    title: "Top Charts",
+    searchTerms: [
+      `top charts hindi ${CURRENT_YEAR}`,
+      "top 50 bollywood songs",
+      "chartbuster hindi songs",
+      "top hindi songs",
+    ],
+  },
+  {
+    id: "bollywood",
+    title: "Bollywood Hits",
+    searchTerms: [
+      `bollywood hits ${CURRENT_YEAR}`,
+      "best bollywood songs",
+      "bollywood playlist",
+      "hindi film songs",
+    ],
+  },
+  {
+    id: "hindi",
+    title: "Hindi Hits",
+    searchTerms: [
+      `hindi songs ${CURRENT_YEAR}`,
+      "best hindi music",
+      "hindi hits playlist",
+      "popular hindi songs",
+    ],
+  },
+  {
+    id: "popular",
+    title: "Most Popular",
+    searchTerms: [
+      `most popular hindi songs ${CURRENT_YEAR}`,
+      "popular bollywood hits",
+      "most played hindi songs",
+      "best hindi songs",
     ],
   },
   {

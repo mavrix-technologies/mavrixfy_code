@@ -11,13 +11,18 @@ import { usePlayerActions, usePlayerProgress } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import {
-  extractDominantColor,
-  getImmediateArtworkColor,
+  DEFAULT_ARTWORK_PALETTE,
+  extractArtworkColors,
+  getImmediateArtworkPalette,
+  miniPlayerBorderFromAccent,
   preloadDominantColors,
+  type ArtworkPalette,
 } from "@/lib/colorExtractor";
 import { useLastMix, clearLastMix } from "@/lib/lastMix";
 import { compactMap, mapFilter } from "@/lib/arrayUtils";
 import { globalQueueSheetRef } from "@/lib/queueRef";
+import { useMiniPlayerSecondaryControl } from "@/lib/miniPlayerControls";
+import type { MiniPlayerSecondaryControl } from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
 import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
 
@@ -79,83 +84,72 @@ function toProgressWidth(progress: number): DimensionValue {
   return `${Math.max(0, Math.min(100, (Number.isFinite(progress) ? progress : 0) * 100))}%`;
 }
 
-function getCandyColors(baseHex: string | null | undefined): { bg: string; accent: string; border: string } {
-  const defaultRes = { bg: "#1E222D", accent: "#26E19A", border: "rgba(38, 225, 154, 0.72)" };
-  if (!baseHex) return defaultRes;
+type MiniPlayerSecondaryControlButtonProps = {
+  control: MiniPlayerSecondaryControl;
+  size: number;
+  radius: number;
+  backgroundColor: string;
+  borderColor: string;
+  iconColor: string;
+  shellStyle?: object | object[];
+  onQueue: () => void;
+  onNext: () => void;
+  onPrev: () => void;
+  onMore: () => void;
+};
 
-  const hex = baseHex.trim().replace("#", "");
-  let r = 0, g = 0, b = 0;
-  if (hex.length === 6) {
-    r = parseInt(hex.slice(0, 2), 16);
-    g = parseInt(hex.slice(2, 4), 16);
-    b = parseInt(hex.slice(4, 6), 16);
-  } else if (hex.length === 3) {
-    r = parseInt(hex[0] + hex[0], 16);
-    g = parseInt(hex[1] + hex[1], 16);
-    b = parseInt(hex[2] + hex[2], 16);
-  } else {
-    return defaultRes;
-  }
+function MiniPlayerSecondaryControlButton({
+  control,
+  size,
+  radius,
+  backgroundColor,
+  borderColor,
+  iconColor,
+  shellStyle,
+  onQueue,
+  onNext,
+  onPrev,
+  onMore,
+}: MiniPlayerSecondaryControlButtonProps) {
+  const action = (() => {
+    switch (control) {
+      case "next":
+        return { icon: "play-skip-forward" as const, onPress: onNext, label: "Next track" };
+      case "prev":
+        return { icon: "play-skip-back" as const, onPress: onPrev, label: "Previous track" };
+      case "more":
+        return { icon: "ellipsis-horizontal" as const, onPress: onMore, label: "More options" };
+      default:
+        return { icon: "list" as const, onPress: onQueue, label: "Open queue" };
+    }
+  })();
 
-  // RGB to HSL
-  const rn = r / 255;
-  const gn = g / 255;
-  const bn = b / 255;
-  const max = Math.max(rn, gn, bn);
-  const min = Math.min(rn, gn, bn);
-  const delta = max - min;
-  let h = 0;
-  if (delta !== 0) {
-    if (max === rn) h = ((gn - bn) / delta) % 6;
-    else if (max === gn) h = (bn - rn) / delta + 2;
-    else h = (rn - gn) / delta + 4;
-    h *= 60;
-    if (h < 0) h += 360;
-  }
-  const l = (max + min) / 2;
-  const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
-
-
-
-  // Boost to a vibrant, shiny candy color (high saturation, bright candy lightness)
-  const candyS = s < 0.1 ? 0 : Math.min(0.95, Math.max(0.75, s * 1.4));
-  const candyL = s < 0.1 ? 0.8 : 0.52;
-
-  const c = (1 - Math.abs(2 * candyL - 1)) * candyS;
-  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
-  const m = candyL - c / 2;
-  let rCandy = 0, gCandy = 0, bCandy = 0;
-  if (h >= 0 && h < 60) {
-    rCandy = c; gCandy = x;
-  } else if (h < 120) {
-    rCandy = x; gCandy = c;
-  } else if (h < 180) {
-    gCandy = c; bCandy = x;
-  } else if (h < 240) {
-    gCandy = x; bCandy = c;
-  } else if (h < 300) {
-    rCandy = x; bCandy = c;
-  } else {
-    rCandy = c; bCandy = x;
-  }
-
-  const rc = Math.round((rCandy + m) * 255);
-  const gc = Math.round((gCandy + m) * 255);
-  const bc = Math.round((bCandy + m) * 255);
-
-  const toHexStr = (val: number) => Math.min(255, Math.max(0, val)).toString(16).padStart(2, "0").toUpperCase();
-  const accent = `#${toHexStr(rc)}${toHexStr(gc)}${toHexStr(bc)}`;
-
-  // Shiny dark background (blend 18% of the candy color with dark slate base '#0A0C10')
-  const alpha = 0.18;
-  const rBg = Math.round(rc * alpha + 10 * (1 - alpha));
-  const gBg = Math.round(gc * alpha + 12 * (1 - alpha));
-  const bBg = Math.round(bc * alpha + 16 * (1 - alpha));
-  const bg = `#${toHexStr(rBg)}${toHexStr(gBg)}${toHexStr(bBg)}`;
-
-  const border = `rgba(${rc},${gc},${bc},0.68)`;
-
-  return { bg, accent, border };
+  return (
+    <Pressable
+      android_disableSound
+      onPress={action.onPress}
+      hitSlop={14}
+      accessibilityRole="button"
+      accessibilityLabel={action.label}
+      style={({ pressed }) => [
+        shellStyle,
+        {
+          width: size,
+          height: size,
+          borderRadius: radius,
+          backgroundColor,
+          borderColor,
+        },
+        pressed && styles.miniButtonPressed,
+      ]}
+    >
+      <Ionicons
+        name={action.icon}
+        size={control === "more" ? 22 : 24}
+        color={iconColor}
+      />
+    </Pressable>
+  );
 }
 
 const MiniPlayerProgressBar = React.memo(function MiniPlayerProgressBar({
@@ -442,13 +436,16 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   const {
     textColor,
     togglePlay,
-    albumColor,
+    nextSong,
+    prevSong,
     setAlbumColor,
     setTextColor,
   } = usePlayerActions();
+  const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const hasActiveMiniPlayer = Boolean(activeSong);
   const [coverFailed, setCoverFailed] = useState(false);
+  const [artworkPalette, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
   const routePressLockRef = useRef({ href: "", time: 0 });
   const openPlayerLockRef = useRef(0);
 
@@ -474,6 +471,29 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     openPlayerLockRef.current = now;
     routerPush("/player");
   }, [routerPush]);
+
+  const openMiniPlayerQueue = useCallback(() => {
+    globalQueueSheetRef.current?.expand();
+  }, []);
+
+  const openMiniPlayerSongOptions = useCallback(() => {
+    if (!activeSong) return;
+    routerPush(
+      {
+        pathname: "/song-options",
+        params: {
+          song: JSON.stringify(activeSong),
+          showDownload: "1",
+          canRemove: "0",
+          optionContext: "",
+          playlistId: "",
+          playlistSource: "",
+          playlistName: "",
+        },
+      },
+      { dangerouslySingular: () => "song-options" }
+    );
+  }, [activeSong, routerPush]);
 
   useEffect(() => {
     const urls = mapFilter([
@@ -586,24 +606,27 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     [deleteMixWithAnimation, dragX, isDragging, resetMixChip]
   );
 
-  const applyMiniPlayerColors = useCallback((primary: string, text: string) => {
-    setAlbumColor(primary);
-    setTextColor(text);
+  const applyMiniPlayerColors = useCallback((palette: ArtworkPalette) => {
+    setArtworkPalette(palette);
+    setAlbumColor(palette.accent);
+    setTextColor(palette.text);
   }, [setAlbumColor, setTextColor]);
 
   useEffect(() => {
-    if (!activeSong?.coverUrl) {
-      applyMiniPlayerColors("#25282E", "#F5FBFF");
+    const coverUrl = activeSong?.coverUrl?.trim() ?? "";
+    if (!coverUrl) {
+      applyMiniPlayerColors(DEFAULT_ARTWORK_PALETTE);
       return () => { };
     }
     let active = true;
-    const immediateColors = getImmediateArtworkColor(activeSong.coverUrl);
-    applyMiniPlayerColors(immediateColors.primary, immediateColors.text);
+    const immediatePalette = getImmediateArtworkPalette(coverUrl);
+    applyMiniPlayerColors(immediatePalette);
 
-    extractDominantColor(activeSong.coverUrl)
-      .then((colors) => {
+    extractArtworkColors(coverUrl)
+      .then((palette) => {
         if (!active) return;
-        applyMiniPlayerColors(colors.primary, colors.text);
+        if (activeSong?.coverUrl?.trim() !== coverUrl) return;
+        applyMiniPlayerColors(palette);
       })
       .catch(() => { });
 
@@ -640,34 +663,30 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     return raw;
   }, [textColor]);
 
-  const candyTheme = useMemo(() => {
-    return getCandyColors(albumColor);
-  }, [albumColor]);
-
   const playerTitleColor = safeTextColor;
   const playerSecondaryColor = useMemo(
     () => colorToRgba(safeTextColor, 0.72, conceptSubtext),
     [safeTextColor]
   );
   const playIconColor = "#FFFFFF";
-  const playerSectionBg = candyTheme.bg;
+  const playerSectionBg = artworkPalette.background;
   const activeNavColor = "#FFFFFF";
   const navInactiveColor = conceptSubtext;
   const navBaseBg = "#0E1016";
   const containerGlassBase = "#0E1016";
   const playerSectionDivider = useMemo(
-    () => colorToRgba(candyTheme.accent, 0.14, "rgba(223,226,235,0.08)"),
-    [candyTheme.accent]
+    () => colorToRgba(artworkPalette.accent, 0.14, "rgba(223,226,235,0.08)"),
+    [artworkPalette.accent]
   );
-  const playerProgressFillColor = candyTheme.accent;
+  const playerProgressFillColor = artworkPalette.accent;
 
 
   const playerTopEdgeTint = useMemo(
-    () => colorToRgba(candyTheme.accent, 0.18, "rgba(255,255,255,0.12)"),
-    [candyTheme.accent]
+    () => colorToRgba(artworkPalette.accent, 0.18, "rgba(255,255,255,0.12)"),
+    [artworkPalette.accent]
   );
-  const miniButtonPrimaryBg = candyTheme.accent;
-  const miniButtonPrimaryBorder = candyTheme.border;
+  const miniButtonPrimaryBg = artworkPalette.accent;
+  const miniButtonPrimaryBorder = miniPlayerBorderFromAccent(artworkPalette.accent);
   const miniSecondaryButtonBg = "#1C1F26";
   const miniSecondaryButtonBorder = "rgba(255,255,255,0.12)";
   const miniSecondaryIconColor = "rgba(255,255,255,0.88)";
@@ -832,22 +851,6 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
                   ) : null}
                   <Pressable
                     android_disableSound
-                    onPress={() => globalQueueSheetRef.current?.expand()}
-                    hitSlop={14}
-                    style={({ pressed }) => [
-                      styles.iconButton,
-                      { width: miniControlSize, height: miniControlSize, borderRadius: miniControlRadius },
-                      {
-                        backgroundColor: miniSecondaryButtonBg,
-                        borderColor: miniSecondaryButtonBorder,
-                      },
-                      pressed && styles.miniButtonPressed,
-                    ]}
-                  >
-                    <Ionicons name="list" size={24} color={miniSecondaryIconColor} />
-                  </Pressable>
-                  <Pressable
-                    android_disableSound
                     onPress={() => {
                       togglePlay();
                     }}
@@ -874,6 +877,19 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
                       style={!playbackState.isPlaying ? { marginLeft: 1 } : undefined}
                     />
                   </Pressable>
+                  <MiniPlayerSecondaryControlButton
+                    control={miniPlayerSecondaryControl}
+                    size={miniControlSize}
+                    radius={miniControlRadius}
+                    backgroundColor={miniSecondaryButtonBg}
+                    borderColor={miniSecondaryButtonBorder}
+                    iconColor={miniSecondaryIconColor}
+                    shellStyle={styles.iconButton}
+                    onQueue={openMiniPlayerQueue}
+                    onNext={nextSong}
+                    onPrev={prevSong}
+                    onMore={openMiniPlayerSongOptions}
+                  />
                 </View>
               </Pressable>
 
@@ -1025,10 +1041,13 @@ function useIOSMiniPlayerOverlayView() {
   const playbackState = usePlaybackPlayState();
   const {
     togglePlay,
+    nextSong,
+    prevSong,
     textColor,
     setAlbumColor,
     setTextColor,
   } = usePlayerActions();
+  const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const [coverFailed, setCoverFailed] = useState(false);
   const openPlayerLockRef = useRef(0);
@@ -1040,6 +1059,29 @@ function useIOSMiniPlayerOverlayView() {
     openPlayerLockRef.current = now;
     overlayRouterPush("/player");
   }, [overlayRouterPush]);
+
+  const openMiniPlayerQueue = useCallback(() => {
+    globalQueueSheetRef.current?.expand();
+  }, []);
+
+  const openMiniPlayerSongOptions = useCallback(() => {
+    if (!activeSong) return;
+    overlayRouterPush(
+      {
+        pathname: "/song-options",
+        params: {
+          song: JSON.stringify(activeSong),
+          showDownload: "1",
+          canRemove: "0",
+          optionContext: "",
+          playlistId: "",
+          playlistSource: "",
+          playlistName: "",
+        },
+      },
+      { dangerouslySingular: () => "song-options" }
+    );
+  }, [activeSong, overlayRouterPush]);
 
   useEffect(() => {
     const urls = mapFilter([
@@ -1086,24 +1128,29 @@ function useIOSMiniPlayerOverlayView() {
     const mixSet = new Set(mixSongIds);
     return queue.every((song) => mixSet.has(song.id));
   }, [activeSongId, playbackState.isPlaying, mixSongIds, queue]);
-  const applyMiniPlayerColors = useCallback((primary: string, text: string) => {
-    setAlbumColor(primary);
-    setTextColor(text);
+  const [iosArtworkPalette, setIosArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
+
+  const applyMiniPlayerColors = useCallback((palette: ArtworkPalette) => {
+    setIosArtworkPalette(palette);
+    setAlbumColor(palette.accent);
+    setTextColor(palette.text);
   }, [setAlbumColor, setTextColor]);
 
   useEffect(() => {
-    if (!activeSong?.coverUrl) {
-      applyMiniPlayerColors("#25282E", "#F5FBFF");
+    const coverUrl = activeSong?.coverUrl?.trim() ?? "";
+    if (!coverUrl) {
+      applyMiniPlayerColors(DEFAULT_ARTWORK_PALETTE);
       return () => { };
     }
     let active = true;
-    const immediateColors = getImmediateArtworkColor(activeSong.coverUrl);
-    applyMiniPlayerColors(immediateColors.primary, immediateColors.text);
+    const immediatePalette = getImmediateArtworkPalette(coverUrl);
+    applyMiniPlayerColors(immediatePalette);
 
-    extractDominantColor(activeSong.coverUrl)
-      .then((colors) => {
+    extractArtworkColors(coverUrl)
+      .then((palette) => {
         if (!active) return;
-        applyMiniPlayerColors(colors.primary, colors.text);
+        if (activeSong?.coverUrl?.trim() !== coverUrl) return;
+        applyMiniPlayerColors(palette);
       })
       .catch(() => { });
 
@@ -1177,7 +1224,7 @@ function useIOSMiniPlayerOverlayView() {
     return raw;
   })();
   const secondaryColor = colorToRgba(resolvedTextColor, 0.7, "rgba(235,235,245,0.7)");
-  const progressFillColor = Colors.primary;
+  const progressFillColor = iosArtworkPalette.accent;
   const tabBarVisualHeight = 49;
   const tabBarGap = 6;
   const bottomOffset = Math.max(insets.bottom + tabBarVisualHeight + tabBarGap, 80);
@@ -1321,18 +1368,19 @@ function useIOSMiniPlayerOverlayView() {
                 style={!playbackState.isPlaying ? { marginLeft: 2 } : undefined}
               />
             </Pressable>
-            <Pressable
-              android_disableSound
-              onPress={() => globalQueueSheetRef.current?.expand()}
-              hitSlop={14}
-              style={({ pressed }) => [
-                styles.iosMiniPlayerButton,
-                styles.iosMiniPlayerSecondaryButton,
-                pressed && styles.miniButtonPressed,
-              ]}
-            >
-              <Ionicons name="list" size={24} color="rgba(255,255,255,0.88)" />
-            </Pressable>
+            <MiniPlayerSecondaryControlButton
+              control={miniPlayerSecondaryControl}
+              size={42}
+              radius={21}
+              backgroundColor="rgba(255,255,255,0.06)"
+              borderColor="rgba(255,255,255,0.12)"
+              iconColor="rgba(255,255,255,0.88)"
+              shellStyle={[styles.iosMiniPlayerButton, styles.iosMiniPlayerSecondaryButton]}
+              onQueue={openMiniPlayerQueue}
+              onNext={nextSong}
+              onPrev={prevSong}
+              onMore={openMiniPlayerSongOptions}
+            />
           </View>
         </View>
 
@@ -1845,6 +1893,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     marginLeft: 4,
+    marginRight: 2,
     flexShrink: 0,
   },
   iconButton: {

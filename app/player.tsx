@@ -20,7 +20,6 @@ import {
   ViewStyle
 } from "react-native";
 import { Image } from "expo-image";
-import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useNavigation, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -47,9 +46,11 @@ import { logger } from "@/lib/logger";
 import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
 import {
   createSpotifyColorTheme,
-  extractDominantColor,
-  getImmediateArtworkColor,
+  DEFAULT_ARTWORK_PALETTE,
+  extractArtworkColors,
+  getImmediateArtworkPalette,
   preloadDominantColors,
+  type ArtworkPalette,
 } from "@/lib/colorExtractor";
 import EqualizerBars from "@/components/EqualizerBars";
 import DownloadButton from "@/components/DownloadButton";
@@ -1098,6 +1099,7 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   useEffect(() => {
     if (isScrubbing) return;
     lastSyncRef.current = { progress, timestamp: Date.now() };
+    setLocalProgress((prev) => (Math.abs(prev - progress) > 0.015 ? progress : prev));
   }, [isScrubbing, progress]);
 
   // A song progress bar moves by less than a pixel per sample at 4 Hz on a
@@ -1150,6 +1152,8 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   useEffect(() => {
     setIsScrubbing(false);
     updateSeeking(false);
+    setLocalProgress(0);
+    lastSyncRef.current = { progress: 0, timestamp: Date.now() };
   }, [screenSongId, updateSeeking]);
 
   // Slider works on a fixed 0..1000 scale. Convert normalized progress to/from it.
@@ -1456,7 +1460,6 @@ function useLegacyPlayerScreenView() {
     toggleRepeat,
     toggleLike,
     isLiked,
-    albumColor,
     setAlbumColor,
     setTextColor,
     setYoutubePlayerFrame,
@@ -1465,6 +1468,7 @@ function useLegacyPlayerScreenView() {
   const { positionMillis } = usePlayerProgress();
 
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
+  const [artworkPalette, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
   const [playerAd, setPlayerAd] = useState<GoogleNativeAd | null>(null);
   const [playerAdLoaded, setPlayerAdLoaded] = useState(false);
   const [manualPlayerAdSongId, setManualPlayerAdSongId] = useState<string | null>(null);
@@ -1686,9 +1690,10 @@ function useLegacyPlayerScreenView() {
     };
   }, [navigation]);
 
-  const applyPlayerArtworkColors = useCallback((primary: string, text: string) => {
-    setAlbumColor(primary);
-    setTextColor(text);
+  const applyPlayerArtworkColors = useCallback((palette: ArtworkPalette) => {
+    setArtworkPalette(palette);
+    setAlbumColor(palette.accent);
+    setTextColor(palette.text);
   }, [setAlbumColor, setTextColor]);
 
   const publishYoutubeVideoFrame = useCallback(() => {
@@ -1739,17 +1744,18 @@ function useLegacyPlayerScreenView() {
     let active = true;
     const cover = screenSong?.coverUrl?.trim();
     if (!cover) {
-      applyPlayerArtworkColors("#25282E", "#F5FBFF");
+      applyPlayerArtworkColors(DEFAULT_ARTWORK_PALETTE);
       return () => {};
     }
 
-    const immediateColors = getImmediateArtworkColor(cover);
-    applyPlayerArtworkColors(immediateColors.primary, immediateColors.text);
+    const immediatePalette = getImmediateArtworkPalette(cover);
+    applyPlayerArtworkColors(immediatePalette);
 
-    extractDominantColor(cover)
-      .then((colors) => {
+    extractArtworkColors(cover)
+      .then((palette) => {
         if (!active) return;
-        applyPlayerArtworkColors(colors.primary, colors.text);
+        if (screenSong?.coverUrl?.trim() !== cover) return;
+        applyPlayerArtworkColors(palette);
       })
       .catch(() => {});
 
@@ -2099,9 +2105,10 @@ function useLegacyPlayerScreenView() {
       ? devPreviewLikedSongIds.includes(screenSong.id)
       : isLiked(screenSong.id)
     : false;
+  const queueRowHeight = isShortScreen ? 48 : 54;
   const queueViewportHeight = Math.min(
-    playingQueue.length * (isShortScreen ? 48 : 54) + 10,
-    isShortScreen ? 286 : 274
+    playingQueue.length * queueRowHeight + 18,
+    Math.round(screenHeight * 0.42)
   );
   const queueViewportStyle = useMemo(
     () => ({ height: queueViewportHeight }),
@@ -2112,8 +2119,8 @@ function useLegacyPlayerScreenView() {
   const artCarouselSnapInterval = artCarouselPageWidth;
 
   const playerTheme = useMemo(
-    () => createSpotifyColorTheme(albumColor || Colors.primary),
-    [albumColor]
+    () => createSpotifyColorTheme(artworkPalette),
+    [artworkPalette]
   );
   const gradientColors = playerTheme.playerGradient;
   const sheetTextColor = Colors.text;
@@ -2456,7 +2463,6 @@ function useLegacyPlayerScreenView() {
       const isActiveCard = index === activeQueueIndex;
       const isYouTubeTrack = song.id?.startsWith("youtube_") || song.source === "youtube";
       const isActiveYouTubeTrack = isYouTubeTrack && isActiveCard;
-      const decor = getArtworkCardDecor(item.artworkKey);
       const inputRange = [
         (index - 1) * artCarouselSnapInterval,
         index * artCarouselSnapInterval,
@@ -2475,16 +2481,6 @@ function useLegacyPlayerScreenView() {
       const slideTranslateY = artScrollX.interpolate({
         inputRange,
         outputRange: [4, 0, 4],
-        extrapolate: "clamp",
-      });
-      const slideTranslateX = artScrollX.interpolate({
-        inputRange,
-        outputRange: [8, 0, -8],
-        extrapolate: "clamp",
-      });
-      const imageParallaxX = artScrollX.interpolate({
-        inputRange,
-        outputRange: [-4, 0, 4],
         extrapolate: "clamp",
       });
 
@@ -2512,26 +2508,14 @@ function useLegacyPlayerScreenView() {
               { width: artSize, height: artSize },
               {
                 opacity: slideOpacity,
-                boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
                 transform: [
-                  { translateX: slideTranslateX },
                   { translateY: slideTranslateY },
                   { scale: slideScale },
                 ],
               },
             ]}
           >
-            <Animated.View
-              style={[
-                styles.albumArtParallax,
-                {
-                  transform: [
-                    { scale: 1.06 },
-                    { translateX: imageParallaxX },
-                  ],
-                },
-              ]}
-            >
+            <View style={styles.albumArtParallax}>
               {showAdInPlayer && isScreenFocused && isActiveCard && playerAd && NativeAdView && NativeMediaView && NativeAsset && NativeAssetType ? (
                 <NativeAdView
                   nativeAd={playerAd}
@@ -2578,7 +2562,7 @@ function useLegacyPlayerScreenView() {
                   <Ionicons name="musical-notes" size={58} color={Colors.subtext} />
                 </View>
               )}
-            </Animated.View>
+            </View>
 
             {/* Toggle ad/artwork overlay button */}
             {isActiveCard && !isLowEnd && playerAdLoaded && (
@@ -2606,24 +2590,9 @@ function useLegacyPlayerScreenView() {
                   {showAdInPlayer ? "Show Cover" : "Show Ad"}
                 </Text>
               </Pressable>
-            )}
+              )}
 
-            {/* Perfect overlay border to prevent clipping/bleeding issues on Android/iOS */}
-            <View
-              style={[
-                StyleSheet.absoluteFillObject,
-                {
-                  borderWidth: 1,
-                  borderColor: isActiveCard
-                    ? hexToRgba(playerTheme.accent, 0.54)
-                    : hexToRgba(playerTheme.accent, decor.borderAlpha),
-                  borderRadius: 16,
-                  opacity: 1,
-                },
-              ]}
-              pointerEvents="none"
-            />
-          </Animated.View>
+            </Animated.View>
         </Pressable>
       );
 
@@ -2652,7 +2621,6 @@ function useLegacyPlayerScreenView() {
       NativeAsset,
       NativeAssetType,
       NativeMediaView,
-      playerTheme.accent,
       playerAd,
       playerAdLoaded,
       showAdInPlayer,
@@ -3050,6 +3018,7 @@ function useLegacyPlayerScreenView() {
             <Reanimated.View style={controlsDismissAnimatedStyle}>
               <View style={styles.playerActionStack}>
               <PlayerSpotifyProgress
+                key={screenSong.id}
                 screenSongId={screenSong.id}
                 songDurationSeconds={screenSong.duration}
                 isShortScreen={isShortScreen}
@@ -3166,41 +3135,9 @@ function useLegacyPlayerScreenView() {
             <View
               style={[
                 styles.playingListSection,
-              ambientVideoLayoutActive
-                ? {
-                    marginTop: 0,
-                    marginHorizontal: 0,
-                    borderRadius: 0,
-                    borderWidth: 0,
-                    backgroundColor: "rgba(25,28,35,0.92)",
-                  }
-                : {
-                    marginTop: 0,
-                    marginHorizontal: isShortScreen ? 14 : 20,
-                  },
-            ]}
-          >
-            {!ambientVideoLayoutActive && (
-              <>
-                {Platform.OS === "ios" ? (
-                  <BlurView
-                    pointerEvents="none"
-                    intensity={26}
-                    tint="dark"
-                    experimentalBlurMethod="none"
-                    style={StyleSheet.absoluteFillObject}
-                  />
-                ) : (
-                  <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: "rgba(20,23,30,0.9)" }]} />
-                )}
-                <LinearGradient
-                  pointerEvents="none"
-                  colors={["rgba(35,38,45,0.5)", "rgba(13,16,22,0.74)"]}
-                  locations={[0, 1]}
-                  style={StyleSheet.absoluteFillObject}
-                />
-              </>
-            )}
+                ambientVideoLayoutActive && styles.playingListSectionAmbient,
+              ]}
+            >
             <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
               <Text style={styles.playingListTitle}>Queue</Text>
             </View>
@@ -3224,144 +3161,6 @@ function useLegacyPlayerScreenView() {
           </View>
           </Reanimated.View>
           </>
-        }
-        ListFooterComponent={
-          <Reanimated.View style={controlsDismissAnimatedStyle}>
-
-      {/* ── About the artist ── */}
-      {artistInfo && !isDevPreviewActive ? (
-        <View style={styles.spotifyCard}>
-          <Pressable
-            onPress={() => {
-              const img = artistInfo.image?.length ? getBestImageUrl(artistInfo.image) : "";
-              router.push(
-                { pathname: "/artist/[id]", params: { id: artistInfo.id, name: artistInfo.name, image: img } },
-                { withAnchor: true, dangerouslySingular: () => "artist-profile" }
-              );
-            }}
-          >
-            <View style={styles.artistHero}>
-              <Image
-                source={{ uri: artistInfo.image?.length ? getBestImageUrl(artistInfo.image) : screenSong.coverUrl || undefined }}
-                style={styles.artistHeroImage}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-              />
-              <LinearGradient
-                colors={["transparent", "rgba(0,0,0,0.62)"]}
-                style={styles.artistHeroShade}
-              />
-            </View>
-          </Pressable>
-
-          <View style={styles.artistCardBody}>
-            <View style={styles.artistRankRow}>
-              <Text style={styles.artistRankText}>
-                {artistInfo.dominantLanguage ? `${artistInfo.dominantLanguage} artist` : "Featured artist"}
-              </Text>
-              <Pressable
-                style={[styles.artistFollowBtn, artistFollowing && styles.artistFollowBtnActive]}
-                onPress={handleArtistFollowPress}
-              >
-                <Text
-                  style={[
-                    styles.artistFollowBtnText,
-                    artistFollowing && styles.artistFollowBtnTextActive,
-                  ]}
-                >
-                  {artistFollowing ? "Following" : "Follow"}
-                </Text>
-              </Pressable>
-            </View>
-
-            <Pressable
-              onPress={() => {
-                const img = artistInfo.image?.length ? getBestImageUrl(artistInfo.image) : "";
-                router.push(
-                  { pathname: "/artist/[id]", params: { id: artistInfo.id, name: artistInfo.name, image: img } },
-                  { withAnchor: true, dangerouslySingular: () => "artist-profile" }
-                );
-              }}
-            >
-              <View style={styles.artistNameRow}>
-                <Text style={styles.artistCardName} numberOfLines={1}>{artistInfo.name}</Text>
-                {artistInfo.isVerified ? (
-                  <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
-                ) : null}
-              </View>
-              {artistInfo.followerCount ? (
-                <Text style={styles.artistListeners}>
-                  {artistInfo.followerCount >= 1_000_000
-                    ? `${(artistInfo.followerCount / 1_000_000).toFixed(1)}M followers`
-                    : artistInfo.followerCount >= 1_000
-                    ? `${(artistInfo.followerCount / 1_000).toFixed(0)}K followers`
-                    : `${artistInfo.followerCount} followers`}
-                </Text>
-              ) : null}
-              {artistInfo.bio?.length ? (
-                <Text style={styles.artistBio} numberOfLines={3}>
-                  {artistInfo.bio[0]?.text?.replace(/<[^>]*>/g, "").trim() ?? ""}
-                </Text>
-              ) : null}
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
-
-      {/* ── Explore ── */}
-      {artistInfo && !isDevPreviewActive && artistExploreItems.length > 0 ? (
-        <View style={styles.spotifyCard}>
-          <View style={styles.exploreHeader}>
-            <Text style={styles.exploreTitle}>Explore {artistInfo.name}</Text>
-          </View>
-
-          <FlatList
-            data={artistExploreItems}
-            keyExtractor={(item) => item.id}
-            renderItem={renderExploreItem}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.exploreTileRow}
-          />
-        </View>
-      ) : null}
-
-      {artistInfo && !isDevPreviewActive ? (
-        <View style={styles.spotifyCard}>
-          <View style={styles.creditsHeader}>
-            <Text style={styles.creditsTitle}>Credits</Text>
-            <Text style={styles.creditsShowAll}>Show all</Text>
-          </View>
-          <View style={styles.creditPersonRow}>
-            <View style={styles.creditPersonText}>
-              <Text style={styles.creditPersonName}>{artistInfo.name}</Text>
-              <Text style={styles.creditPersonRole}>Main Artist</Text>
-            </View>
-            <Pressable
-              style={[styles.artistFollowBtn, artistFollowing && styles.artistFollowBtnActive]}
-              onPress={handleArtistFollowPress}
-            >
-              <Text
-                style={[
-                  styles.artistFollowBtnText,
-                  artistFollowing && styles.artistFollowBtnTextActive,
-                ]}
-              >
-                {artistFollowing ? "Following" : "Follow"}
-              </Text>
-            </Pressable>
-          </View>
-          {screenSong.album ? (
-            <View style={styles.creditPersonRow}>
-              <View style={styles.creditPersonText}>
-                <Text style={styles.creditPersonName}>{screenSong.album}</Text>
-                <Text style={styles.creditPersonRole}>Album</Text>
-              </View>
-            </View>
-          ) : null}
-        </View>
-      ) : null}
-          </Reanimated.View>
         }
       />
 
@@ -3516,13 +3315,12 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   artFrame: {
-    borderRadius: 16,
+    borderRadius: 0,
     overflow: "hidden",
-    backgroundColor: "rgba(223,226,235,0.08)",
-    boxShadow: "none",
+    backgroundColor: "transparent",
   },
   artFrameDefault: {
-    borderRadius: 16,
+    borderRadius: 0,
   },
   youtubeArtFrame: {
     borderRadius: 0,
@@ -3672,8 +3470,8 @@ const styles = StyleSheet.create({
   songBlockArtwork: {
     width: 48,
     height: 48,
-    borderRadius: 6,
-    backgroundColor: "rgba(223,226,235,0.08)",
+    borderRadius: 0,
+    backgroundColor: "transparent",
   },
   songTextWrap: {
     flex: 1,
@@ -3820,20 +3618,29 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   playingListSection: {
+    alignSelf: "stretch",
+    width: "100%",
+    marginTop: 0,
+    marginHorizontal: 0,
     overflow: "hidden",
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
-    borderBottomLeftRadius: 22,
-    borderBottomRightRadius: 22,
-    backgroundColor: "rgba(20,23,30,0.5)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    maxHeight: 320,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    backgroundColor: "#14171E",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.1)",
+  },
+  playingListSectionAmbient: {
+    borderRadius: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "#191C23",
   },
   queueListContent: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 10,
+    paddingBottom: 12,
   },
   queueListViewport: {
     flexGrow: 0,
@@ -3841,7 +3648,7 @@ const styles = StyleSheet.create({
 
   playingListHeader: {
     height: 48,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 4,
     flexDirection: "row",
     alignItems: "center",
@@ -3874,7 +3681,7 @@ const styles = StyleSheet.create({
 
   queueRow: {
     height: 54,
-    paddingHorizontal: 6,
+    paddingHorizontal: 4,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,

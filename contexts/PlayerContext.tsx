@@ -1150,6 +1150,17 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     startedAt: number;
     transactionId: number;
   } | null>(null);
+  const trackProgressSongIdRef = useRef<string | null>(null);
+
+  const resetProgressForTrackChange = useCallback((songId: string | null | undefined) => {
+    if (!songId) return;
+    trackProgressSongIdRef.current = String(songId);
+    setSeekOverride(null);
+    setPreviewProgress(0);
+    setYoutubePosition(0);
+    const durationSeconds = toDurationSeconds(currentSongRef.current?.duration);
+    setRuntimeProgressSnapshot({ position: 0, duration: durationSeconds });
+  }, []);
 
   useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
@@ -1558,20 +1569,27 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const currentSongDurationSeconds = toDurationSeconds(currentSong?.duration);
   const queueSongDurationSeconds = toDurationSeconds(queue[queueIndex]?.duration);
   const sourceQueueSongDurationSeconds = toDurationSeconds(sourceQueue[queueIndex]?.duration);
-  const hookPosition = Number.isFinite(position) ? Math.max(0, position) : 0;
   const hookTrackDuration = Number.isFinite(trackDuration) ? Math.max(0, trackDuration) : 0;
-  const runtimePosition = Number.isFinite(runtimeProgressSnapshot.position)
-    ? Math.max(0, runtimeProgressSnapshot.position)
-    : 0;
   const runtimeTrackDuration = Number.isFinite(runtimeProgressSnapshot.duration)
     ? Math.max(0, runtimeProgressSnapshot.duration)
     : 0;
+  const pendingNative = pendingNativeTrackRef.current;
+  const awaitingNativeTrack =
+    Boolean(pendingNative?.id) &&
+    pendingNative?.id === (currentSong?.id ?? null) &&
+    Date.now() - (pendingNative?.startedAt ?? 0) < 5000;
+  const rawHookPosition = Number.isFinite(position) ? Math.max(0, position) : 0;
+  const rawRuntimePosition = Number.isFinite(runtimeProgressSnapshot.position)
+    ? Math.max(0, runtimeProgressSnapshot.position)
+    : 0;
+  const guardedHookPosition = awaitingNativeTrack ? 0 : rawHookPosition;
+  const guardedRuntimePosition = awaitingNativeTrack ? 0 : rawRuntimePosition;
   const safePosition =
     Platform.OS === "android"
-      ? hookTrackDuration > 0 || hookPosition > 0
-        ? hookPosition
-        : runtimePosition
-      : hookPosition;
+      ? hookTrackDuration > 0 || guardedHookPosition > 0
+        ? guardedHookPosition
+        : guardedRuntimePosition
+      : guardedHookPosition;
   const safeTrackDuration =
     Platform.OS === "android"
       ? hookTrackDuration > 0
@@ -1700,6 +1718,12 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   useEffect(() => {
     latestPositionSecondsRef.current = Math.max(0, effectivePositionSeconds);
   }, [effectivePositionSeconds]);
+
+  useEffect(() => {
+    const songId = currentSong?.id ? String(currentSong.id) : null;
+    if (!songId || trackProgressSongIdRef.current === songId) return;
+    resetProgressForTrackChange(songId);
+  }, [currentSong?.id, resetProgressForTrackChange]);
 
   const persistCurrentPlayerState = useCallback(() => {
     const song = currentSongRef.current;

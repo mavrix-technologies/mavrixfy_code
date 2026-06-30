@@ -52,9 +52,16 @@ import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
 import QueueBottomSheet from "@/components/QueueBottomSheet";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { logger } from "@/lib/logger";
+import { AppNavBar } from "@/app/(tabs)/_layout";
+
+function isExpoGoRuntime(): boolean {
+  return Constants.executionEnvironment === "storeClient" || Constants.appOwnership === "expo";
+}
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
-SplashScreen.setOptions({ fade: true, duration: 320 });
+if (!isExpoGoRuntime()) {
+  SplashScreen.setOptions({ fade: true, duration: 320 });
+}
 
 // Filter out noisy expo-notifications warnings in the terminal console when testing in Expo Go
 if (__DEV__) {
@@ -90,6 +97,8 @@ LogBox.ignoreLogs([
 
 // Screens where the docked mini player and tab bar must not cover the route.
 const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "profile", "delete-account", "notifications"]);
+// Root-stack routes (outside tabs) that still show the docked mini player + tab bar.
+const NAV_OVERLAY_SEGMENTS = new Set(["playlist"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
@@ -393,6 +402,11 @@ function RootLayoutNav() {
 
   const activeSegment = segments[0] as string;
   const unmountNavBar = NAV_UNMOUNT_SEGMENTS.has(activeSegment);
+  const showNavOverlay =
+    !loading &&
+    (isAuthenticated || isAllowedGuest) &&
+    !unmountNavBar &&
+    NAV_OVERLAY_SEGMENTS.has(activeSegment);
 
   // Close queue sheet when navigating to screens where it shouldn't appear
   useEffect(() => {
@@ -502,12 +516,29 @@ function RootLayoutNav() {
             contentStyle: { backgroundColor: Colors.background },
           }}
         />
+        <Stack.Screen
+          name="playlist"
+          options={{
+            presentation: "card",
+            animation: "default",
+            gestureEnabled: true,
+            gestureDirection: "horizontal",
+            fullScreenGestureEnabled: false,
+            contentStyle: { backgroundColor: Colors.background },
+          }}
+        />
         <Stack.Screen name="login" options={{ gestureEnabled: false }} />
         <Stack.Screen
           name="onboarding/index"
           options={{ gestureEnabled: false }}
         />
       </Stack>
+
+      {showNavOverlay ? (
+        <View style={[StyleSheet.absoluteFill, { zIndex: 998 }]} pointerEvents="box-none">
+          <AppNavBar />
+        </View>
+      ) : null}
 
       {/* Queue sheet is always mounted but closed by default (index: -1) */}
       <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
@@ -712,6 +743,7 @@ export default function RootLayout() {
   const [appIsReady, setAppIsReady] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [safetyTimeoutActive, setSafetyTimeoutActive] = useState(false);
+  const fontsLoadedRef = useRef(false);
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -720,11 +752,15 @@ export default function RootLayout() {
     Inter_800ExtraBold,
   });
 
+  fontsLoadedRef.current = fontsLoaded;
+
   useEffect(() => {
     const timer = setTimeout(() => {
       setSafetyTimeoutActive(true);
-      logger.warn("[RootLayout] Safety timeout triggered. Proceeding without waiting for fonts/assets.");
-    }, 3500); // 3.5 seconds safety window
+      if (!fontsLoadedRef.current) {
+        logger.warn("[RootLayout] Safety timeout triggered. Proceeding without waiting for fonts/assets.");
+      }
+    }, 3500);
 
     return () => clearTimeout(timer);
   }, []);
