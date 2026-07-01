@@ -63,6 +63,7 @@ import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistServ
 import {
   clearYouTubeMusicCache,
   getHomeYouTubeMusicCategories,
+  upscaleYouTubeThumbnail,
   YouTubeMusicHomeCategoryData,
   YouTubeMusicPlaylistCard,
   type YouTubeMusicPlaylistKind,
@@ -146,7 +147,6 @@ const HOME_CATEGORY_SECTION_ORDER = [
   "new-arrivals",
   "most-viral",
   "party-mix",
-  "chill-vibes",
   "romance",
   "workout",
   "retro",
@@ -164,7 +164,6 @@ const HOME_JIOSAAVN_TITLES: Record<string, string> = {
   "new-arrivals": "New Songs",
   "most-viral":   "Viral Hits",
   "party-mix":    "Party Mix",
-  "chill-vibes":  "Chill Vibes",
   romance:        "Love & Romance",
   workout:        "Workout & Energy",
   retro:          "Retro Classics",
@@ -198,16 +197,15 @@ const HOME_BROWSE_CATEGORY_FETCH_IDS = [
   "new-releases",
   "bollywood",
   "party-mix",
-  "chill-vibes",
   "romance",
   "workout",
   "retro",
 ] as const;
-const HOME_MAX_DEFAULT_BROWSE_SECTIONS = 2;
 const HOME_MAX_MOOD_BROWSE_SECTIONS = 3;
+const HOME_MAX_JIOSAAVN_HOME_SECTIONS = 3;
+const HOME_MAX_YOUTUBE_HOME_SECTIONS = 14;
 const HOME_MAX_RECOMMENDATION_SECTIONS = 2;
 const HOME_MAX_PUBLIC_PLAYLISTS = 12;
-const HOME_MAX_YOUTUBE_HOME_SECTIONS = 8;
 const HOME_PRIORITY_CATEGORY_TIMEOUT_MS = 5500;
 const PLACEHOLDER_ROW_ITEMS = [0, 1, 2, 3];
 const QUICK_PICK_PLACEHOLDER_COLUMNS = [0, 1];
@@ -215,6 +213,7 @@ const MOOD_CHIPS = ["Podcasts", "Energize", "Feel good", "Romance", "Workout", "
 const HORIZONTAL_ROW_GAP = 12;
 const RECENT_CARD_SIZE = 90;
 const RECT_CARD_WIDTH = 152;
+const HOME_CARD_IMAGE_SOURCE_SIZE = 480;
 const ARTIST_CARD_WIDTH = 120;
 const PINNED_HOME_HEADER_HEIGHT = 56;
 const HOME_VIDEO_CARD_GAP = 10;
@@ -299,6 +298,26 @@ function normalizeId(value: unknown): string {
   return value.trim();
 }
 
+function getHomeCategoryItemKey(item: HomeCategoryItem): string {
+  const source = item?.source || "jiosaavn";
+  const rawId = normalizeId(item?.id);
+  if (!rawId) return "";
+  const comparableId = source === "youtube" && rawId.startsWith("VL")
+    ? rawId.slice(2)
+    : rawId;
+  return `${source}:${comparableId}`;
+}
+
+function stableHomeScore(seed: string, value: string): number {
+  let hash = 2166136261;
+  const input = `${seed}:${value}`;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
 function dedupeHomeCategoryItemsBySource(
   items: HomeCategoryItem[],
   limit: number
@@ -307,10 +326,8 @@ function dedupeHomeCategoryItemsBySource(
   const unique: HomeCategoryItem[] = [];
 
   for (const item of items) {
-    const id = normalizeId(item?.id);
-    const source = item?.source || "jiosaavn";
-    const key = `${source}:${id}`;
-    if (!id || seen.has(key)) continue;
+    const key = getHomeCategoryItemKey(item);
+    if (!key || seen.has(key)) continue;
     seen.add(key);
     unique.push(item);
     if (unique.length >= limit) break;
@@ -367,11 +384,12 @@ function toJioSaavnHomeCategoryItem(item: HomeJioSaavnCategoryData["results"][nu
 }
 
 function toYouTubeHomeCategoryItem(item: YouTubeMusicPlaylistCard): HomeCategoryItem {
+  const imageUrl = item.imageUrl ? upscaleYouTubeThumbnail(item.imageUrl, HOME_CARD_IMAGE_SOURCE_SIZE) : "";
   return {
     id: item.id,
     name: item.name,
-    image: item.imageUrl ? [{ quality: "500x500", url: item.imageUrl }] : [],
-    imageUrl: item.imageUrl,
+    image: imageUrl ? [{ quality: `${HOME_CARD_IMAGE_SOURCE_SIZE}x${HOME_CARD_IMAGE_SOURCE_SIZE}`, url: imageUrl }] : [],
+    imageUrl,
     songCount: Number(item.songCount || 0),
     source: "youtube",
     playlistKind: item.kind,
@@ -1788,11 +1806,11 @@ function useHomeScreenInnerView() {
     } else if (moodLower === "energize" || moodLower === "workout") {
       targetCategoryIds = ["workout", "party-mix"];
     } else if (moodLower === "feel good") {
-      targetCategoryIds = ["chill-vibes", "party-mix"];
+      targetCategoryIds = ["party-mix", "romance"];
     } else if (moodLower === "podcasts") {
       targetCategoryIds = ["retro", "trending"];
     } else if (moodLower === "relax") {
-      targetCategoryIds = ["chill-vibes", "retro"];
+      targetCategoryIds = ["retro", "romance"];
     }
 
     if (targetCategoryIds.length === 0) return categories;
@@ -1827,26 +1845,76 @@ function useHomeScreenInnerView() {
       }), (cat) => cat.results.length > 0);
   }, [orderedHomeCategories]);
 
-  const visibleBrowseCategoryRows = useMemo(() => {
-    if (selectedMood) {
-      return allCategoryRows.slice(0, HOME_MAX_MOOD_BROWSE_SECTIONS);
+  const homeCategorySections = useMemo<HomeCategoryData[]>(() => {
+    if (allCategoryRows.length === 0 && youtubeHomeCategories.length === 0) {
+      return [];
     }
 
-    const rowById = new Map(allCategoryRows.map((cat) => [cat.id, cat]));
-    const preferred = mapFilter(
-      HOME_DEFAULT_BROWSE_CATEGORY_IDS,
-      (id) => rowById.get(id) ?? null,
-      (cat): cat is HomeCategoryData => Boolean(cat)
-    );
-    const preferredIds = new Set(preferred.map((cat) => cat.id));
-    const fallback = filterMap(
-      allCategoryRows,
-      (cat) => !preferredIds.has(cat.id),
-      (cat) => cat
-    );
+    const buildProviderRows = (
+      rows: HomeCategoryData[],
+      maxSections: number,
+      seed: string
+    ): HomeCategoryData[] => {
+      const seenKeys = new Set<string>();
+      return mapFilter(
+        rows,
+        (row) => {
+          const results: HomeCategoryItem[] = [];
+          for (const item of row.results) {
+            const key = getHomeCategoryItemKey(item);
+            if (!key || seenKeys.has(key)) continue;
+            seenKeys.add(key);
+            results.push(item);
+            if (results.length >= MAX_ROW_ITEMS) break;
+          }
+          return results.length > 0
+            ? { ...row, id: `${seed}-${row.id}`, results }
+            : null;
+        },
+        (row): row is HomeCategoryData => Boolean(row)
+      ).slice(0, maxSections);
+    };
 
-    return [...preferred, ...fallback].slice(0, HOME_MAX_DEFAULT_BROWSE_SECTIONS);
-  }, [allCategoryRows, selectedMood]);
+    const jioSourceRows = selectedMood
+      ? allCategoryRows.slice(0, HOME_MAX_MOOD_BROWSE_SECTIONS)
+      : [...allCategoryRows].sort(
+          (left, right) => {
+            const seed = `jio-section-${quickPickRotationSeedRef.current ?? 0}`;
+            return stableHomeScore(seed, left.id) - stableHomeScore(seed, right.id);
+          }
+        );
+    const jioRows = buildProviderRows(jioSourceRows, HOME_MAX_JIOSAAVN_HOME_SECTIONS, "jiosaavn");
+    const youtubeRows = buildProviderRows(youtubeHomeCategories, HOME_MAX_YOUTUBE_HOME_SECTIONS, "youtube");
+    const maxJioRowsForYoutubeShare = youtubeRows.length === 0
+      ? HOME_MAX_JIOSAAVN_HOME_SECTIONS
+      : Math.min(
+          HOME_MAX_JIOSAAVN_HOME_SECTIONS,
+          Math.max(youtubeRows.length >= 3 ? 1 : 0, Math.floor((youtubeRows.length * 3) / 7))
+        );
+    const visibleJioRows = jioRows.slice(0, maxJioRowsForYoutubeShare);
+
+    const sections: HomeCategoryData[] = [];
+    let youtubeIndex = 0;
+    let jioIndex = 0;
+    let cycleIndex = 0;
+
+    while (youtubeIndex < youtubeRows.length || jioIndex < visibleJioRows.length) {
+      if (youtubeIndex < youtubeRows.length) {
+        sections.push(youtubeRows[youtubeIndex]);
+        youtubeIndex += 1;
+      }
+
+      const shouldInsertJio = cycleIndex === 0 || cycleIndex % 2 === 0 || youtubeIndex >= youtubeRows.length;
+      if (shouldInsertJio && jioIndex < visibleJioRows.length) {
+        sections.push(visibleJioRows[jioIndex]);
+        jioIndex += 1;
+      }
+
+      cycleIndex += 1;
+    }
+
+    return sections;
+  }, [allCategoryRows, youtubeHomeCategories, selectedMood]);
 
   const publicPlaylistsForSection = useMemo(
     () => dedupeFirestorePlaylistsById(publicPlaylists, HOME_MAX_PUBLIC_PLAYLISTS),
@@ -1854,30 +1922,33 @@ function useHomeScreenInnerView() {
   );
 
   const recommendationSections = useMemo(
-    () => recommendationFeed?.sections.filter((section) => section.items.length > 0).slice(0, HOME_MAX_RECOMMENDATION_SECTIONS) ?? [],
+    () => recommendationFeed?.sections
+      .filter((section) => section.items.length > 0 && section.id !== "popularNearYou")
+      .slice(0, HOME_MAX_RECOMMENDATION_SECTIONS) ?? [],
     [recommendationFeed]
   );
 
-  const visibleYoutubeHomeCategoryRows = useMemo(() => {
-    return mapFilter(
-      youtubeHomeCategories,
-      (category) => ({
-        ...category,
-        results: dedupeHomeCategoryItemsBySource(category.results, MAX_ROW_ITEMS),
-      }),
-      (category) => category.results.length > 0
-    ).slice(0, HOME_MAX_YOUTUBE_HOME_SECTIONS);
-  }, [youtubeHomeCategories]);
-
   const sections = useMemo<HomeSection[]>(() => {
     const data: HomeSection[] = [];
-    const appendCategorySections = () => {
-      visibleBrowseCategoryRows.forEach((category) => {
+    const appendHomeCategorySections = () => {
+      homeCategorySections.forEach((category) => {
         data.push({ id: `category-${category.id}`, type: "category", data: category });
       });
 
-      if (visibleBrowseCategoryRows.length === 0 && isLoadingCategories) {
-        HOME_DEFAULT_BROWSE_CATEGORY_IDS.slice(0, 2).forEach((priorityId) => {
+      if (homeCategorySections.length === 0 && isLoadingYoutubeHomeCategories) {
+        data.push({
+          id: "category-loading-youtube",
+          type: "category",
+          data: {
+            id: "youtube-loading",
+            title: "YouTube Music",
+            results: [],
+          },
+        });
+      }
+
+      if (homeCategorySections.length === 0 && isLoadingCategories) {
+        HOME_DEFAULT_BROWSE_CATEGORY_IDS.slice(0, HOME_MAX_JIOSAAVN_HOME_SECTIONS).forEach((priorityId) => {
           data.push({
             id: `category-loading-${priorityId}`,
             type: "category",
@@ -1891,24 +1962,6 @@ function useHomeScreenInnerView() {
       }
     };
 
-    const appendYoutubeHomeCategorySections = () => {
-      visibleYoutubeHomeCategoryRows.forEach((category) => {
-        data.push({ id: `youtube-category-${category.id}`, type: "category", data: category });
-      });
-
-      if (visibleYoutubeHomeCategoryRows.length === 0 && isLoadingYoutubeHomeCategories) {
-        data.push({
-          id: "youtube-category-loading",
-          type: "category",
-          data: {
-            id: "yt-loading",
-            title: "YouTube Music",
-            results: [],
-          },
-        });
-      }
-    };
-
     if (shouldUseRecommendationFeed && recommendationSections.length > 0) {
       if (recentlyPlayed.length > 0) {
         data.push({ id: "recents", type: "recents" });
@@ -1916,11 +1969,10 @@ function useHomeScreenInnerView() {
       if (newReleaseSongs.length > 0 || isLoadingNewReleaseSongs) {
         data.push({ id: "new-release-songs", type: "new-release-songs" });
       }
-      appendYoutubeHomeCategorySections();
+      appendHomeCategorySections();
       recommendationSections.forEach((section) => {
         data.push({ id: `recommendation-${section.id}`, type: "recommendation", data: section });
       });
-      appendCategorySections();
       if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS || isLoadingPublicPlaylists) {
         data.push({ id: "public-playlists", type: "public-playlists" });
       }
@@ -1933,8 +1985,7 @@ function useHomeScreenInnerView() {
     const hasFallbackContent =
       featuredArtists.length > 0 ||
       recentlyPlayed.length > 0 ||
-      visibleYoutubeHomeCategoryRows.length > 0 ||
-      visibleBrowseCategoryRows.length > 0 ||
+      homeCategorySections.length > 0 ||
       publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS;
 
     if (shouldUseRecommendationFeed && isRecommendationFeedLoading && !hasRecommendationFeedFailed && !hasFallbackContent) {
@@ -1951,10 +2002,7 @@ function useHomeScreenInnerView() {
       data.push({ id: "new-release-songs", type: "new-release-songs" });
     }
 
-    appendYoutubeHomeCategorySections();
-
-    // 4. Browse: a small curated set, filtered by mood when selected.
-    appendCategorySections();
+    appendHomeCategorySections();
 
     // 5. Made for You and people discovery sit lower to keep the first screen calm.
     if (publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS || isLoadingPublicPlaylists) {
@@ -1969,8 +2017,7 @@ function useHomeScreenInnerView() {
     recentlyPlayed,
     publicPlaylistsForSection,
     featuredArtists,
-    visibleBrowseCategoryRows,
-    visibleYoutubeHomeCategoryRows,
+    homeCategorySections,
     newReleaseSongs.length,
     isLoadingNewReleaseSongs,
     isLoadingYoutubeHomeCategories,
@@ -2291,8 +2338,11 @@ function useHomeScreenInnerView() {
 
   const renderCategoryPlaylist = useCallback(
     ({ item, categoryId, categoryTitle }: { item: HomeCategoryData["results"][number]; categoryId: string; categoryTitle: string }) => {
-      const imageUrl = getHomeCategoryItemImageUrl(item);
+      const rawImageUrl = getHomeCategoryItemImageUrl(item);
       const isYouTube = item.source === "youtube";
+      const imageUrl = isYouTube && rawImageUrl
+        ? upscaleYouTubeThumbnail(rawImageUrl, HOME_CARD_IMAGE_SOURCE_SIZE)
+        : rawImageUrl;
       const youtubeMeta = item.playlistAuthor || (item.songCount > 0 ? `${item.songCount} songs` : categoryTitle);
       const metaText = isYouTube
         ? youtubeMeta
@@ -2321,13 +2371,7 @@ function useHomeScreenInnerView() {
             });
           }}
         >
-          <View style={[styles.rectCardImageWrap, isYouTube && styles.youtubeRectCardImageWrap]}>
-            {isYouTube ? (
-              <>
-                <View pointerEvents="none" style={styles.youtubeCoverBackPlateOuter} />
-                <View pointerEvents="none" style={styles.youtubeCoverBackPlateInner} />
-              </>
-            ) : null}
+          <View style={styles.rectCardImageWrap}>
             <Image
               source={{ uri: imageUrl || undefined }}
               style={[
@@ -2336,23 +2380,13 @@ function useHomeScreenInnerView() {
                 isYouTube && styles.youtubeRectCardImage,
               ]}
               contentFit={isYouTube ? "cover" : "contain"}
-              transition={HOME_IMAGE_TRANSITION_MS}
               cachePolicy="memory-disk"
+              priority="low"
+              transition={HOME_IMAGE_TRANSITION_MS}
               recyclingKey={`${categoryId}-${item.id}`}
             />
-            {isYouTube ? (
-              <LinearGradient
-                pointerEvents="none"
-                colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.42)"]}
-                style={styles.youtubeCoverShade}
-              />
-            ) : null}
-            <View pointerEvents="none" style={[styles.brandCoverBadge, isYouTube && styles.youtubeCoverBadge]}>
-              {isYouTube ? (
-                <Ionicons name="logo-youtube" size={15} color="#FFFFFF" />
-              ) : (
-                <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
-              )}
+            <View pointerEvents="none" style={styles.brandCoverBadge}>
+              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
             </View>
           </View>
           <Text style={styles.rectCardTitle} numberOfLines={2}>
@@ -3488,31 +3522,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     position: "relative",
   },
-  youtubeRectCardImageWrap: {
-    boxShadow: "0px 8px 14px rgba(255, 0, 51, 0.18)",
-  },
-  youtubeCoverBackPlateOuter: {
-    position: "absolute",
-    left: 8,
-    right: -8,
-    top: 8,
-    bottom: -8,
-    borderRadius: 8,
-    backgroundColor: "rgba(255,0,51,0.15)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-  },
-  youtubeCoverBackPlateInner: {
-    position: "absolute",
-    left: 4,
-    right: -4,
-    top: 4,
-    bottom: -4,
-    borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
   rectCardImage: {
     width: RECT_CARD_WIDTH,
     height: RECT_CARD_WIDTH,
@@ -3524,15 +3533,6 @@ const styles = StyleSheet.create({
   youtubeRectCardImage: {
     backgroundColor: "#11161E",
     borderColor: "rgba(255,255,255,0.14)",
-  },
-  youtubeCoverShade: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 60,
-    borderBottomLeftRadius: 8,
-    borderBottomRightRadius: 8,
   },
   rectCardTitle: {
     color: BRAND.textPrimary,
@@ -3560,12 +3560,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.45)",
     backgroundColor: "#0E131A",
-  },
-  youtubeCoverBadge: {
-    backgroundColor: "#FF0033",
-    borderColor: "rgba(255,255,255,0.28)",
-    alignItems: "center",
-    justifyContent: "center",
   },
   brandCoverBadgeImage: {
     width: "100%",

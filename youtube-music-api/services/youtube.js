@@ -9,8 +9,17 @@ function installJavascriptEvaluator() {
   if (evaluatorInstalled) return;
 
   Platform.shim.eval = async (data, env) => {
-    const script = new vm.Script(data.output);
-    const context = vm.createContext({ env });
+    const source = String(data?.output || "");
+    const script = new vm.Script(`(function(){\n${source}\n})()`);
+    const context = vm.createContext({
+      env,
+      URL,
+      URLSearchParams,
+      TextDecoder,
+      TextEncoder,
+      atob: globalThis.atob,
+      btoa: globalThis.btoa,
+    });
     return script.runInContext(context);
   };
 

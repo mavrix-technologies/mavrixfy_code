@@ -66,7 +66,7 @@ function killPlayer(p: AudioPlayer | null): void {
   playerSubscriptions.delete(p);
   try { p.setAudioSamplingEnabled(false); } catch {}
   try { p.pause(); } catch {}   // stop audio output immediately
-  try { p.remove(); } catch {}  // release native resources
+  try { p.release(); } catch {}  // release native resources
   resetPlaybackAudioLevels();
 }
 

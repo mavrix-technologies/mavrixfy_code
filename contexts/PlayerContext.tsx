@@ -169,6 +169,13 @@ interface PlayerRowContextValue {
 
 const PlayerRowContext = createContext<PlayerRowContextValue | null>(null);
 
+interface PlayerRowActionsContextValue {
+  playSong: (song: Song, queue?: Song[]) => void;
+  addToQueue: (song: Song) => void;
+}
+
+const PlayerRowActionsContext = createContext<PlayerRowActionsContextValue | null>(null);
+
 interface PlayerBrowseContextValue {
   currentSong: Song | null;
   queue: Song[];
@@ -583,6 +590,8 @@ async function getSingleSongAutoplayCandidates(): Promise<Song[]> {
 }
 
 async function resolveJioSaavnAudioForSong(song: Song): Promise<Song | null> {
+  if (isYouTubeSource(song)) return null;
+
   const jioSaavnMatch = await resolveWithin(
     resolveYouTubeSongToJioSaavn(song),
     YOUTUBE_NATIVE_MATCH_TIMEOUT_MS,
@@ -606,18 +615,6 @@ async function resolveJioSaavnAudioForSong(song: Song): Promise<Song | null> {
 async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | null> {
   const videoId = extractYouTubeVideoId(song);
   if (!videoId) return null;
-
-  // Try JioSaavn match first (cross-platform CDN, no expiry issues)
-  const resolvedSong = await resolveJioSaavnAudioForSong(song);
-  if (resolvedSong) {
-    return {
-      ...resolvedSong,
-      youtubeNativeAudio: true,
-      youtubeAudioExpiresAt: Date.now() + RESOLVED_NATIVE_AUDIO_TTL_MS,
-      youtubeVideoId: videoId,
-      source: "youtube",
-    };
-  }
 
   // Direct stream resolution with retry (youtubei.js → Piped API fallback on server)
   const RETRY_DELAYS = [0, 1000, 3000]; // immediate, 1s, 3s
@@ -1172,7 +1169,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     setRuntimeProgressSnapshot({ position: 0, duration: durationSeconds });
   }
   const [runtimePlaybackStateSnapshot, setRuntimePlaybackStateSnapshot] = useState<any>(undefined);
-  const PRELOAD_QUEUE_SIZE = 20;
+  const NATIVE_START_QUEUE_LOOKAHEAD = 4;
 
   const currentSongRef = useRef<Song | null>(null);
   const queueRef = useRef<Song[]>([]);
@@ -1208,6 +1205,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     transactionId: number;
   } | null>(null);
   const trackProgressSongIdRef = useRef<string | null>(null);
+  const lastPrefetchedSongIdRef = useRef<string | null>(null);
 
   const resetProgressForTrackChange = useCallback((songId: string | null | undefined) => {
     if (!songId) return;
@@ -2380,6 +2378,15 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     return () => clearInterval(intervalId);
   }, [youtubePlaying, youtubeVideoId, applyPreviewPlaybackStatus]);
 
+  const applyPreviewPlaybackStatusRef = useRef(applyPreviewPlaybackStatus);
+  const advancePreviewPlaybackRef = useRef(advancePreviewPlayback);
+  useEffect(() => {
+    applyPreviewPlaybackStatusRef.current = applyPreviewPlaybackStatus;
+  }, [applyPreviewPlaybackStatus]);
+  useEffect(() => {
+    advancePreviewPlaybackRef.current = advancePreviewPlayback;
+  }, [advancePreviewPlayback]);
+
   // Wire expo-audio status + error callbacks for runtimes using the lightweight fallback.
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- cleanup intentionally resets mutable playback refs without treating ref.current as a render dependency.
   useEffect(() => {
@@ -2394,7 +2401,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
     ExpoAvPlayer.onStatusUpdate(({ isPlaying, position, duration, didJustFinish }) => {
       if (!mounted || previewIsEndedRef.current) return;
-      applyPreviewPlaybackStatus(isPlaying, position, duration);
+      applyPreviewPlaybackStatusRef.current(isPlaying, position, duration);
 
       // Robust check for playback completion
       const isMs = duration > 10000;
@@ -2405,7 +2412,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       // Auto-advance to next song when current one finishes
       if (finished) {
         previewIsEndedRef.current = true; // prevent double auto-advancing
-        advancePreviewPlayback();
+        advancePreviewPlaybackRef.current();
       }
     });
 
@@ -2418,7 +2425,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       setYoutubeVideoId(null);
     };
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- cleanup deliberately writes the latest ref value when tearing down fallback playback.
-  }, [applyPreviewPlaybackStatus, advancePreviewPlayback, canUseLightweightAudioFallback, showPlaybackNotice]);
+  }, [canUseLightweightAudioFallback, showPlaybackNotice]);
 
   useEffect(() => {
     if (!TrackPlayer || !setupPlayer || !isPlayerReady || Platform.OS === "web") {
@@ -2511,8 +2518,9 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
           applyRuntimeProgressAndState(nextPosition, nextDuration, nextPlaybackState);
 
-          // 80% progress prefetch trigger
-          if (shouldPrefetch(nextPosition, nextDuration)) {
+           // 80% progress prefetch trigger
+          if (shouldPrefetch(nextPosition, nextDuration) && activeTrackId && lastPrefetchedSongIdRef.current !== activeTrackId) {
+            lastPrefetchedSongIdRef.current = activeTrackId;
             void prefetchNextSongs(currentQueue, nextQueueIndex, 3).then((prefetchedUrls) => {
               if (prefetchedUrls && prefetchedUrls.size > 0 && mounted) {
                 const updatedQueue = currentQueue.map((song) => {
@@ -2916,16 +2924,17 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     queueIndexRef.current = targetIndex;
     currentSongRef.current = targetSong;
     setCurrentSong(targetSong);
-    updatePlaybackEngineSnapshot({
-      currentSong: targetSong,
-      queue: playableQueue,
-      sourceQueue: playableQueue,
-      userQueuedSongIds: [],
-      queueIndex: targetIndex,
-      desiredPlayState: true,
-      isLoading: false,
-      isBuffering: false,
-    });
+      updatePlaybackEngineSnapshot({
+        currentSong: targetSong,
+        queue: playableQueue,
+        sourceQueue: playableQueue,
+        userQueuedSongIds: [],
+        queueIndex: targetIndex,
+        desiredPlayState: true,
+        isPlaying: true,
+        isLoading: false,
+        isBuffering: false,
+      });
 
     Storage.addRecentlyPlayed({
       id: targetSong.id,
@@ -2980,13 +2989,11 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           return;
         }
 
-        // Resolve playable URLs before handing items to TrackPlayer.
-        const preloadCount = Math.max(
-          Math.min(playableQueue.length, PRELOAD_QUEUE_SIZE),
-          targetIndex + 1
-        );
+        // Resolve only the tapped track before playback. The next few tracks are
+        // appended after start so large YouTube playlists do not block the tap.
         // react-doctor-disable-next-line react-doctor/async-defer-await -- requestId can become stale while resolving native tracks, so the guard below must run after this await.
-        const initialEntries = await resolveNativeTrackEntries(playableQueue.slice(0, preloadCount), 0);
+        const targetEntry = await resolveNativeTrackEntry(targetSong, targetIndex);
+        const initialEntries = targetEntry ? [targetEntry] : [];
         const targetNativeIndex = initialEntries.findIndex((entry) => entry.appIndex === targetIndex);
 
         if (requestId !== playRequestIdRef.current) {
@@ -3042,7 +3049,12 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         }
 
         const initialTracks = initialEntries.map((entry) => entry.track);
-        const remainingSongs = resolvedPlayableQueue.slice(preloadCount);
+        const appendStartIndex = targetIndex + 1;
+        const appendEndIndex = Math.min(
+          resolvedPlayableQueue.length,
+          appendStartIndex + NATIVE_START_QUEUE_LOOKAHEAD
+        );
+        const remainingSongs = resolvedPlayableQueue.slice(appendStartIndex, appendEndIndex);
         nativeQueueAppIndicesRef.current = initialEntries.map((entry) => entry.appIndex);
 
         if (typeof TrackPlayer.setQueue === "function") {
@@ -3053,7 +3065,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           await publishNativeNowPlaying(resolvedTargetSong, targetIndex);
           await TrackPlayer.play();
 
-          appendRemainingTracksIfCurrent(requestId, remainingSongs, preloadCount);
+          appendRemainingTracksIfCurrent(requestId, remainingSongs, appendStartIndex);
         } else {
           await TrackPlayer.reset();
           await TrackPlayer.add(initialTracks);
@@ -3063,7 +3075,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           await publishNativeNowPlaying(resolvedTargetSong, targetIndex);
           await TrackPlayer.play();
 
-          appendRemainingTracksIfCurrent(requestId, remainingSongs, preloadCount);
+          appendRemainingTracksIfCurrent(requestId, remainingSongs, appendStartIndex);
         }
 
         if (RepeatMode) {
@@ -3174,6 +3186,32 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       const requestedQueue = (newQueue || [song]).filter((item): item is Song => Boolean(item?.id));
       const requestedIndex = Math.max(0, requestedQueue.findIndex((item) => item.id === song.id));
       const requestedSong = requestedQueue[requestedIndex] || song;
+      const optimisticQueue = requestedQueue.length > 0 ? requestedQueue : [requestedSong];
+      const optimisticIndex = Math.max(0, optimisticQueue.findIndex((item) => item.id === requestedSong.id));
+
+      setPlaybackIntent(true);
+      setPlaybackLoading(true);
+      setQueueIndex(optimisticIndex);
+      queueIndexRef.current = optimisticIndex;
+      currentSongRef.current = requestedSong;
+      setCurrentSong(requestedSong);
+      clearUserQueuedSongIds();
+      setQueue(optimisticQueue);
+      setSourceQueue(optimisticQueue);
+      queueRef.current = optimisticQueue;
+      originalQueueRef.current = optimisticQueue;
+      updatePlaybackEngineSnapshot({
+        currentSong: requestedSong,
+        queue: optimisticQueue,
+        sourceQueue: optimisticQueue,
+        userQueuedSongIds: [],
+        queueIndex: optimisticIndex,
+        desiredPlayState: true,
+        isPlaying: true,
+        isLoading: true,
+        isBuffering: false,
+      });
+
       const playbackPlan = await buildPlaybackQueueForSong(requestedSong, requestedQueue);
       if (!playbackPlan || requestId !== playRequestIdRef.current) {
         if (!playbackPlan && requestId === playRequestIdRef.current) {
@@ -3193,11 +3231,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         await playYouTubeSong(stripTransientYouTubeAudioUrl(targetSong), q, targetIndex);
         return;
       }
-
-      logger.debug("[Playback] playSong initiating", {
-        songId: targetSong.id,
-        songTitle: targetSong.title,
-      });
 
       // 1. Update UI state immediately for responsiveness
       setPlaybackIntent(true);
@@ -3236,7 +3269,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       currentSongRef.current = normalizedSong;
       setCurrentSong(normalizedSong);
 
-      logger.debug("[Playback] playSong: Routing to native player");
       youtubeShouldAutoPlayRef.current = false;
       setYoutubePlaying(false);
       setYoutubeVideoId(null);
@@ -3494,12 +3526,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         return;
       }
 
-      logger.debug("[Playback] nextSong initiating", {
-        currentIndex: ci,
-        nextIndex: ni,
-        nextSongId: nextTrack.id,
-      });
-
       // 1. Update UI state immediately for responsiveness
       const requestId = ++playRequestIdRef.current;
       setPlaybackIntent(true);
@@ -3519,7 +3545,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         isBuffering: false,
       });
 
-      logger.debug("[Playback] nextSong: Routing to native player");
       currentSongRef.current = nextTrack;
       youtubeShouldAutoPlayRef.current = false;
       setYoutubePlaying(false);
@@ -3617,12 +3642,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         return;
       }
 
-      logger.debug("[Playback] prevSong initiating", {
-        currentIndex: ci,
-        prevIndex: pi,
-        prevSongId: prevTrack.id,
-      });
-
       // 1. Update UI state immediately for responsiveness
       const requestId = ++playRequestIdRef.current;
       setPlaybackIntent(true);
@@ -3642,7 +3661,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         isBuffering: false,
       });
 
-      logger.debug("[Playback] prevSong: Routing to native player");
       currentSongRef.current = prevTrack;
       youtubeShouldAutoPlayRef.current = false;
       setYoutubePlaying(false);
@@ -4280,6 +4298,14 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     [currentSong?.id, resolvedIsPlaying, playSong, toggleLike, isLiked, addToQueue, playNext]
   );
 
+  const rowActionsValue = useMemo(
+    () => ({
+      playSong,
+      addToQueue,
+    }),
+    [playSong, addToQueue]
+  );
+
   const browseValue = useMemo(
     () => ({
       currentSong,
@@ -4385,7 +4411,9 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
             <PlayerBrowseContext.Provider value={browseValue}>
               <PlayerQueueContext.Provider value={queueValue}>
                 <PlayerRowContext.Provider value={rowValue}>
-                  {children}
+                  <PlayerRowActionsContext.Provider value={rowActionsValue}>
+                    {children}
+                  </PlayerRowActionsContext.Provider>
                 </PlayerRowContext.Provider>
               </PlayerQueueContext.Provider>
             </PlayerBrowseContext.Provider>
@@ -4423,6 +4451,12 @@ export function usePlayerActions() {
 export function usePlayerRow() {
   const ctx = use(PlayerRowContext);
   if (!ctx) throw new Error("usePlayerRow must be used within PlayerProvider");
+  return ctx;
+}
+
+export function usePlayerRowActions() {
+  const ctx = use(PlayerRowActionsContext);
+  if (!ctx) throw new Error("usePlayerRowActions must be used within PlayerProvider");
   return ctx;
 }
 

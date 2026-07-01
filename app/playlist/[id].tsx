@@ -43,7 +43,7 @@ import { sortedCopy } from "@/lib/arrayUtils";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { getJioSaavnAlbumDetails, getJioSaavnPlaylistDetails } from "@/lib/jioSaavnService";
-import { getYouTubeMusicPlaylist, getYouTubeMusicAlbum, convertYouTubeMusicTrack } from "@/lib/youtubeMusicService";
+import { getYouTubeMusicPlaylist, getYouTubeMusicAlbum, convertYouTubeMusicTrack, upscaleYouTubeThumbnail } from "@/lib/youtubeMusicService";
 import { useAuth } from "@/contexts/AuthContext";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
@@ -143,6 +143,7 @@ function usePlaylistScreenView() {
   if (stickyOpacityRef.current === null) stickyOpacityRef.current = new Animated.Value(0);
   const stickyOpacity = stickyOpacityRef.current;
   const [isStickyVisible, setIsStickyVisible] = useState(false);
+  const stickyVisibleRef = useRef(false);
 
   // Bottom sheet animation
   const { height: screenHeight } = useWindowDimensions();
@@ -291,7 +292,11 @@ function usePlaylistScreenView() {
             if (data) {
               setPlaylistName(data.title);
               const cover = data.thumbnails && data.thumbnails.length > 0
-                ? data.thumbnails[data.thumbnails.length - 1].url.replace(/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?$/, "=w500-h500-l90-rj")
+                ? upscaleYouTubeThumbnail(sortedCopy(data.thumbnails, (a, b) => {
+                    const left = Number(a?.width || 0) * Number(a?.height || 0);
+                    const right = Number(b?.width || 0) * Number(b?.height || 0);
+                    return right - left;
+                  })[0]?.url || "")
                 : "";
               setPlaylistCover(cover);
               const description = ("description" in data && typeof data.description === "string") ? data.description : `${data.trackCount || data.tracks?.length || 0} tracks`;
@@ -375,15 +380,14 @@ function usePlaylistScreenView() {
   const handleScroll = useCallback((e: any) => {
     const y = e.nativeEvent.contentOffset.y;
     const shouldShow = y > 260;
-    setIsStickyVisible((prev) => {
-      if (prev === shouldShow) return prev;
-      Animated.timing(stickyOpacity, {
-        toValue: shouldShow ? 1 : 0,
-        duration: 160,
-        useNativeDriver: true,
-      }).start();
-      return shouldShow;
-    });
+    if (stickyVisibleRef.current === shouldShow) return;
+    stickyVisibleRef.current = shouldShow;
+    setIsStickyVisible(shouldShow);
+    Animated.timing(stickyOpacity, {
+      toValue: shouldShow ? 1 : 0,
+      duration: 160,
+      useNativeDriver: true,
+    }).start();
   }, [stickyOpacity]);
 
   const handlePlayAll = useCallback(() => {
@@ -652,8 +656,8 @@ function usePlaylistScreenView() {
   // Optimize FlatList item layout for better scrolling performance
   const getItemLayout = useCallback(
     (_data: ArrayLike<Song> | null | undefined, index: number) => ({
-      length: 64, // Approximate height of SongRow
-      offset: 64 * index,
+      length: 68,
+      offset: 68 * index,
       index,
     }),
     []
@@ -701,10 +705,10 @@ function usePlaylistScreenView() {
         onScroll={handleScroll}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={15}
-        maxToRenderPerBatch={10}
-        updateCellsBatchingPeriod={50}
-        windowSize={10}
+        initialNumToRender={8}
+        maxToRenderPerBatch={6}
+        updateCellsBatchingPeriod={80}
+        windowSize={7}
         removeClippedSubviews={true}
         ListHeaderComponent={
           <>

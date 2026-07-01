@@ -16,6 +16,7 @@ const DEFAULT_PLAYBACK_HEADERS = {
 };
 
 const audioStreamCache = new Map();
+const audioStreamRequests = new Map();
 
 function asyncRoute(handler) {
   return (req, res, next) => {
@@ -346,23 +347,87 @@ function mimeExtension(mimeType) {
 }
 
 function audioCodec(mimeType) {
-  const match = mimeType.match(/codecs="([^"]+)"/i);
-  return match?.[1] || "";
+  const mime = text(mimeType);
+  const match = mime.match(/codecs="([^"]+)"/i);
+  if (match?.[1]) return match[1];
+
+  const value = mime.toLowerCase();
+  if (value.includes("opus")) return "opus";
+  if (value.includes("mp4") || value.includes("m4a") || value.includes("aac")) return "mp4a.40.2";
+  if (value.includes("vorbis")) return "vorbis";
+  return "";
 }
 
-function selectAudioFormat(formats) {
+function audioCodecScore(mimeType) {
+  const codec = audioCodec(mimeType).toLowerCase();
+  if (codec.includes("opus")) return 4;
+  if (codec.includes("mp4a") || codec.includes("aac")) return 3;
+  if (codec.includes("vorbis")) return 2;
+  return 1;
+}
+
+function audioQualityScore(value) {
+  const quality = text(value).toLowerCase();
+  if (quality.includes("high")) return 3;
+  if (quality.includes("medium")) return 2;
+  if (quality.includes("low")) return 1;
+  return 0;
+}
+
+function audioContainerScore(mimeType) {
+  const mime = text(mimeType).toLowerCase();
+  if (mime.includes("webm")) return 3;
+  if (mime.includes("mp4") || mime.includes("m4a")) return 2;
+  if (mime.includes("ogg")) return 1;
+  return 0;
+}
+
+function audioBitrate(format) {
+  return Number(format?.average_bitrate || format?.bitrate || 0) || 0;
+}
+
+function audioContentLength(format) {
+  return Number(format?.content_length || format?.contentLength || 0) || 0;
+}
+
+function compareAudioQuality(left, right) {
+  const leftBitrate = audioBitrate(left);
+  const rightBitrate = audioBitrate(right);
+  if (leftBitrate !== rightBitrate) return leftBitrate - rightBitrate;
+
+  const leftQuality = audioQualityScore(left?.audio_quality || left?.quality);
+  const rightQuality = audioQualityScore(right?.audio_quality || right?.quality);
+  if (leftQuality !== rightQuality) return leftQuality - rightQuality;
+
+  const leftCodec = audioCodecScore(left?.mime_type || left?.mimeType);
+  const rightCodec = audioCodecScore(right?.mime_type || right?.mimeType);
+  if (leftCodec !== rightCodec) return leftCodec - rightCodec;
+
+  const leftLength = audioContentLength(left);
+  const rightLength = audioContentLength(right);
+  if (leftLength !== rightLength) return leftLength - rightLength;
+
+  return audioContainerScore(left?.mime_type || left?.mimeType) - audioContainerScore(right?.mime_type || right?.mimeType);
+}
+
+function shouldPreferMp4Audio(options = {}) {
+  const platform = text(options.platform).toLowerCase();
+  return platform === "ios" || platform === "iphone" || platform === "ipad";
+}
+
+function selectAudioFormat(formats, options = {}) {
   const audioOnly = formats.filter((format) => format?.has_audio && !format?.has_video);
   if (audioOnly.length === 0) return undefined;
-  return audioOnly.reduce((best, current) => {
-    const bestMp4 = text(best.mime_type).includes("mp4") ? 1 : 0;
-    const currMp4 = text(current.mime_type).includes("mp4") ? 1 : 0;
-    if (currMp4 !== bestMp4) {
-      return currMp4 > bestMp4 ? current : best;
-    }
-    const bestBitrate = Number(best.average_bitrate || best.bitrate || 0);
-    const currBitrate = Number(current.average_bitrate || current.bitrate || 0);
-    return currBitrate > bestBitrate ? current : best;
-  });
+  const preferred = shouldPreferMp4Audio(options)
+    ? audioOnly.filter((format) => {
+        const mime = text(format?.mime_type).toLowerCase();
+        return mime.includes("mp4") || mime.includes("m4a");
+      })
+    : audioOnly;
+  const candidates = preferred.length > 0 ? preferred : audioOnly;
+  return candidates.reduce((best, current) => (
+    compareAudioQuality(current, best) > 0 ? current : best
+  ));
 }
 
 function getCachedAudioStream(videoId) {
@@ -408,7 +473,7 @@ const PIPED_INSTANCES = [
 
 let pipedIndex = 0;
 
-async function tryPipedInstance(instance, videoId) {
+async function tryPipedInstance(instance, videoId, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
 
@@ -423,15 +488,18 @@ async function tryPipedInstance(instance, videoId) {
   }
 
   const data = await response.json();
-  const audioStreams = (data.audioStreams || [])
-    .filter((s) => s.url && s.mimeType && !s.videoOnly)
-    .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+  const rawStreams = (data.audioStreams || [])
+    .filter((s) => s.url && s.mimeType && !s.videoOnly);
+  const preferredStreams = shouldPreferMp4Audio(options)
+    ? rawStreams.filter((s) => {
+        const mime = text(s.mimeType).toLowerCase();
+        return mime.includes("audio/mp4") || mime.includes("audio/m4a");
+      })
+    : rawStreams;
+  const audioStreams = (preferredStreams.length > 0 ? preferredStreams : rawStreams)
+    .sort((a, b) => compareAudioQuality(b, a));
 
-  const m4a = audioStreams.find((s) =>
-    s.mimeType.toLowerCase().includes("audio/mp4") ||
-    s.mimeType.toLowerCase().includes("audio/m4a")
-  );
-  const best = m4a || audioStreams[0];
+  const best = audioStreams[0];
 
   if (!best) {
     throw new Error("no audio streams in response");
@@ -445,7 +513,7 @@ async function tryPipedInstance(instance, videoId) {
   };
 }
 
-async function tryPipedWithRotation(videoId, attempt = 0, errors = []) {
+async function tryPipedWithRotation(videoId, options = {}, attempt = 0, errors = []) {
   if (attempt >= PIPED_INSTANCES.length) {
     console.warn(`[StreamResolver] All Piped instances failed for ${videoId}:`, errors);
     return null;
@@ -453,7 +521,7 @@ async function tryPipedWithRotation(videoId, attempt = 0, errors = []) {
 
   const instance = PIPED_INSTANCES[(pipedIndex + attempt) % PIPED_INSTANCES.length];
   try {
-    const result = await tryPipedInstance(instance, videoId);
+    const result = await tryPipedInstance(instance, videoId, options);
     pipedIndex = (pipedIndex + attempt + 1) % PIPED_INSTANCES.length;
     console.log(
       `[StreamResolver] Piped fallback resolved ${videoId} via ${instance} → ${result.mimeType}`
@@ -461,18 +529,19 @@ async function tryPipedWithRotation(videoId, attempt = 0, errors = []) {
     return result;
   } catch (err) {
     errors.push(`${instance}: ${err.message}`);
-    return tryPipedWithRotation(videoId, attempt + 1, errors);
+    return tryPipedWithRotation(videoId, options, attempt + 1, errors);
   }
 }
 
-async function resolveViaPiped(videoId) {
-  return tryPipedWithRotation(videoId, 0, []);
+function getAudioStreamCacheKey(videoId, options = {}) {
+  return `${videoId}:${shouldPreferMp4Audio(options) ? "mp4" : "best"}`;
 }
 
-async function resolveAudioStream(videoId) {
-  const cached = getCachedAudioStream(videoId);
-  if (cached) return cached;
+async function resolveViaPiped(videoId, options = {}) {
+  return tryPipedWithRotation(videoId, options, 0, []);
+}
 
+async function resolveAudioStreamUncached(videoId, options = {}, cacheKey) {
   // 1. Try youtubei.js (InnerTube)
   try {
     const yt = await getYoutube();
@@ -481,7 +550,7 @@ async function resolveAudioStream(videoId) {
       ...(info?.streaming_data?.formats || []),
       ...(info?.streaming_data?.adaptive_formats || []),
     ];
-    const format = selectAudioFormat(formats);
+    const format = selectAudioFormat(formats, options);
     if (format) {
       const url = await format.decipher(yt.session.player);
       if (url && url.startsWith("https://")) {
@@ -499,7 +568,7 @@ async function resolveAudioStream(videoId) {
           duration: Math.round(Number(format.approx_duration_ms || info?.basic_info?.duration || 0) / 1000) || info?.basic_info?.duration || null,
           contentLength: Number(format.content_length) || null,
         };
-        cacheAudioStream(videoId, stream);
+        cacheAudioStream(cacheKey, stream);
         return stream;
       }
     }
@@ -509,7 +578,7 @@ async function resolveAudioStream(videoId) {
 
   // 2. Try Piped API as fallback
   try {
-    const piped = await resolveViaPiped(videoId);
+    const piped = await resolveViaPiped(videoId, options);
     if (piped?.url) {
       const stream = {
         videoId,
@@ -519,12 +588,12 @@ async function resolveAudioStream(videoId) {
         formatId: "piped",
         extension: mimeExtension(piped.mimeType),
         mimeType: piped.mimeType,
-        audioCodec: "mp4a",
+        audioCodec: audioCodec(piped.mimeType),
         bitrateKbps: piped.bitrateKbps,
         duration: piped.duration,
         contentLength: null,
       };
-      cacheAudioStream(videoId, stream);
+      cacheAudioStream(cacheKey, stream);
       return stream;
     }
   } catch (err) {
@@ -534,11 +603,30 @@ async function resolveAudioStream(videoId) {
   throw httpError(502, "All stream resolvers failed to resolve this video");
 }
 
+async function resolveAudioStream(videoId, options = {}) {
+  const cacheKey = getAudioStreamCacheKey(videoId, options);
+  const cached = getCachedAudioStream(cacheKey);
+  if (cached) return cached;
+
+  const pending = audioStreamRequests.get(cacheKey);
+  if (pending) return pending;
+
+  const request = resolveAudioStreamUncached(videoId, options, cacheKey)
+    .finally(() => {
+      audioStreamRequests.delete(cacheKey);
+    });
+
+  audioStreamRequests.set(cacheKey, request);
+  return request;
+}
+
 async function resolveAudioStreamForRequest(req) {
   const videoId = extractVideoId(req.params.videoId);
   if (!videoId) throw httpError(400, "Invalid YouTube video ID");
   verifyAudioResolverToken(req);
-  return resolveAudioStream(videoId);
+  return resolveAudioStream(videoId, {
+    platform: req.query.platform,
+  });
 }
 
 router.get("/healthz", asyncRoute(async (_req, res) => {

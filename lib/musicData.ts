@@ -96,6 +96,8 @@ function normalizeJioSaavnImageUrl(rawUrl: string): string {
 function qualityScore(quality: string | undefined, url: string | undefined): number {
   const qualityKey = String(quality || "").trim().toLowerCase();
   const direct: Record<string, number> = {
+    "1200x1200": 5,
+    "1000x1000": 4,
     "500x500": 3,
     "150x150": 2,
     "50x50": 1,

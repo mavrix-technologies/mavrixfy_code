@@ -13,7 +13,6 @@ import { useDownloads, useSongDownload } from '@/contexts/DownloadContext';
 import type { Song } from '@/lib/musicData';
 import { logger } from '@/lib/logger';
 import { formatBytes } from '@/lib/downloads/storagePolicy';
-import { resolveYouTubeSongToJioSaavn } from '@/lib/youtubeToJioSaavnDownload';
 
 function resolveSongAudioUrl(song: Song): string {
   if (song.audioUrl) return song.audioUrl;
@@ -57,11 +56,13 @@ export default function DownloadButton({
   showLabel = false,
 }: DownloadButtonProps) {
   const { downloadSong, removeDownload } = useDownloads();
-  const isYouTube = song.source === 'youtube' || song.id?.startsWith('youtube_') || song.id?.startsWith('yt:');
-  const [downloadTarget, setDownloadTarget] = useState<Song | null>(null);
+  const isYouTube =
+    song.source === 'youtube' ||
+    song.id?.startsWith('youtube_') ||
+    song.id?.startsWith('yt:') ||
+    Boolean(song.youtubeVideoId);
   const [isPreparing, setIsPreparing] = useState(false);
-  const activeSong = downloadTarget || song;
-  const download = useSongDownload(activeSong.id);
+  const download = useSongDownload(song.id);
 
   const isDownloaded = download?.status === 'completed';
   const isDownloading =
@@ -75,27 +76,17 @@ export default function DownloadButton({
 
   async function handleDownload() {
     if (isDownloading) return;
+    if (isYouTube) {
+      Alert.alert(
+        'Streaming Only',
+        'YouTube songs are available for streaming playback only.'
+      );
+      return;
+    }
 
     setIsPreparing(true);
     try {
-      let targetSong = song;
-      let matchedFromYouTube = false;
-
-      if (isYouTube) {
-        const match = await resolveYouTubeSongToJioSaavn(song);
-        if (!match?.song) {
-          setIsPreparing(false);
-          Alert.alert(
-            'Download Unavailable',
-            'Could not find a confident JioSaavn match for this YouTube song.'
-          );
-          return;
-        }
-
-        targetSong = match.song;
-        matchedFromYouTube = true;
-        setDownloadTarget(targetSong);
-      }
+      const targetSong = song;
 
       let sizeLabel = 'unknown size';
       let actualSize: number | null = null;
@@ -123,7 +114,7 @@ export default function DownloadButton({
 
       Alert.alert(
         'Download Song',
-        `Download "${targetSong.title}" for offline playback?${matchedFromYouTube ? '\n\nMatched from JioSaavn.' : ''}\n\nSize: ${sizeLabel}`,
+        `Download "${targetSong.title}" for offline playback?\n\nSize: ${sizeLabel}`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -150,14 +141,14 @@ export default function DownloadButton({
   async function handleDelete() {
     Alert.alert(
       'Delete Download',
-      `Remove "${activeSong.title}" from downloads?`,
+      `Remove "${song.title}" from downloads?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await removeDownload(activeSong.id);
+            await removeDownload(song.id);
             onDownloadDeleted?.();
           }
         }
@@ -196,7 +187,7 @@ export default function DownloadButton({
       {showLabel && (
         <Text style={[styles.rowText, isDownloaded && styles.labelActive]}>
           {isDownloading
-            ? isPreparing && isYouTube ? `Matching...` : `Downloading...`
+            ? `Downloading...`
             : isDownloaded
             ? `Downloaded`
             : `Download`}

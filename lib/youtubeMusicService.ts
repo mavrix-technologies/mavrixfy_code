@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
 import { JioSaavnImage, Song } from "@/lib/musicData";
 import { getYouTubeMusicApiUrl, PRODUCTION_YOUTUBE_MUSIC_API_URL } from "@/lib/api-config";
@@ -90,8 +91,10 @@ const OFFICIAL_VISUAL_SEARCH_CACHE_VERSION = "v1";
 const YOUTUBE_VIDEO_SEARCH_CACHE_VERSION = "v2";
 const AUDIO_STREAM_EXPIRY_MARGIN_MS = 60 * 1000;
 const AUDIO_STREAM_CACHE_MAX_ITEMS = 50;
+const YOUTUBE_HIGH_RES_IMAGE_SIZE = 1200;
 const audioStreamCache = new Map<string, YouTubeMusicAudioStream>();
 const audioStreamRequests = new Map<string, Promise<YouTubeMusicAudioStream | null>>();
+const pendingFetchRequests = new Map<string, Promise<any>>();
 
 // ─── Cache Helpers ────────────────────────────────────────────────────────────
 
@@ -119,13 +122,24 @@ async function setCache<T>(key: string, value: T): Promise<void> {
 
 // ─── Normalization Functions ──────────────────────────────────────────────────
 
-function upscaleYouTubeThumbnail(url: string): string {
+export function upscaleYouTubeThumbnail(url: string, size = YOUTUBE_HIGH_RES_IMAGE_SIZE): string {
   if (!url) return "";
+
+  const targetSize = Math.max(160, Math.min(size, YOUTUBE_HIGH_RES_IMAGE_SIZE));
 
   // 1. Googleusercontent / ggpht / yt3 images
   if (url.includes("googleusercontent.com") || url.includes("ggpht.com") || url.includes("yt3.ggpht.com") || url.includes("yt3.googleusercontent.com")) {
-    // Replace width/height parameters with 500x500
-    return url.replace(/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?$/, "=w500-h500-l90-rj");
+    const highResSquare = `=w${targetSize}-h${targetSize}-l90-rj`;
+    if (/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i.test(url)) {
+      return url.replace(/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i, highResSquare);
+    }
+    if (/=s\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i.test(url)) {
+      return url.replace(/=s\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i, `=s${targetSize}-c-k-c0x00ffffff-no-rj`);
+    }
+    const suffixMatch = url.match(/[?#].*$/);
+    const suffix = suffixMatch?.[0] || "";
+    const baseUrl = suffix ? url.slice(0, -suffix.length) : url;
+    return `${baseUrl}${highResSquare}${suffix}`;
   }
 
   // 2. Standard YouTube video thumbnails
@@ -134,7 +148,8 @@ function upscaleYouTubeThumbnail(url: string): string {
     const match = url.match(/\/vi\/([a-zA-Z0-9_-]{11})\//);
     if (match && match[1]) {
       const videoId = match[1];
-      return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+      const fileName = targetSize >= 900 ? "maxresdefault.jpg" : "hq720.jpg";
+      return `https://i.ytimg.com/vi/${videoId}/${fileName}`;
     }
   }
   return url;
@@ -144,7 +159,7 @@ function normalizeYouTubeThumbnails(thumbnails?: Array<{ url: string; width: num
   if (!thumbnails || thumbnails.length === 0) return [];
 
   return thumbnails.map((thumb) => ({
-    quality: "500x500",
+    quality: `${YOUTUBE_HIGH_RES_IMAGE_SIZE}x${YOUTUBE_HIGH_RES_IMAGE_SIZE}`,
     url: upscaleYouTubeThumbnail(thumb.url),
   }));
 }
@@ -655,26 +670,42 @@ async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T | null
 }
 
 async function fetchFirstJson<T>(urls: string[], signal?: AbortSignal): Promise<T | null> {
+  if (urls.length === 0) return null;
   if (signal?.aborted) {
     throw new Error("Request aborted");
   }
 
-  let lastError: unknown = null;
-
-  for (const url of urls) {
-    try {
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- endpoint fallbacks must stay sequential to avoid duplicate backend work.
-      const result = await fetchJson<T>(url, signal);
-      if (result !== null) return result;
-      lastError = null;
-    } catch (error) {
-      lastError = error;
-      if (signal?.aborted) throw error;
-    }
+  const requestKey = urls.join("|");
+  const pending = pendingFetchRequests.get(requestKey);
+  if (pending) {
+    return pending as Promise<T | null>;
   }
 
-  if (lastError) throw lastError;
-  return null;
+  const requestPromise = (async () => {
+    let lastError: unknown = null;
+
+    for (const url of urls) {
+      try {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- endpoint fallbacks must stay sequential to avoid duplicate backend work.
+        const result = await fetchJson<T>(url, signal);
+        if (result !== null) return result;
+        lastError = null;
+      } catch (error) {
+        lastError = error;
+        if (signal?.aborted) throw error;
+      }
+    }
+
+    if (lastError) throw lastError;
+    return null;
+  })();
+
+  pendingFetchRequests.set(requestKey, requestPromise);
+  try {
+    return await requestPromise;
+  } finally {
+    pendingFetchRequests.delete(requestKey);
+  }
 }
 
 function isPrivateDevelopmentApiUrl(value: string): boolean {
@@ -1004,23 +1035,26 @@ export async function getYouTubeMusicAudioStream(
 ): Promise<YouTubeMusicAudioStream | null> {
   const cleanVideoId = extractVideoId({ videoId: readString(videoId).replace(/^youtube_/, "") });
   if (!cleanVideoId) return null;
+  const playbackPlatform = Platform.OS === "ios" ? "ios" : Platform.OS === "android" ? "android" : "web";
+  const requestKey = `${cleanVideoId}:${playbackPlatform}`;
 
-  const cached = audioStreamCache.get(cleanVideoId);
+  const cached = audioStreamCache.get(requestKey);
   if (cached && cached.expiresAt - AUDIO_STREAM_EXPIRY_MARGIN_MS > Date.now()) {
     return cached;
   }
-  audioStreamCache.delete(cleanVideoId);
+  audioStreamCache.delete(requestKey);
 
-  const pending = audioStreamRequests.get(cleanVideoId);
+  const pending = audioStreamRequests.get(requestKey);
   if (pending) return pending;
 
   const request = (async () => {
     try {
       const encodedVideoId = encodeURIComponent(cleanVideoId);
+      const streamQuery = `platform=${encodeURIComponent(playbackPlatform)}&quality=highest`;
       const json = await fetchFirstJson<any>(
         [
-          ...getEndpointCandidates(`/audio/${encodedVideoId}`, `/audio/${encodedVideoId}`),
-          ...getEndpointCandidates(`/stream-info/${encodedVideoId}`, `/stream-info/${encodedVideoId}`),
+          ...getEndpointCandidates(`/audio/${encodedVideoId}`, `/audio/${encodedVideoId}`, streamQuery),
+          ...getEndpointCandidates(`/stream-info/${encodedVideoId}`, `/stream-info/${encodedVideoId}`, streamQuery),
         ],
         signal
       );
@@ -1030,7 +1064,7 @@ export async function getYouTubeMusicAudioStream(
         return null;
       }
 
-      audioStreamCache.set(cleanVideoId, stream);
+      audioStreamCache.set(requestKey, stream);
       if (audioStreamCache.size > AUDIO_STREAM_CACHE_MAX_ITEMS) {
         const oldestKey = audioStreamCache.keys().next().value;
         if (oldestKey) audioStreamCache.delete(oldestKey);
@@ -1044,11 +1078,11 @@ export async function getYouTubeMusicAudioStream(
       logger.warn("[YouTube Music] Audio resolver failed:", error?.message || error);
       return null;
     } finally {
-      audioStreamRequests.delete(cleanVideoId);
+      audioStreamRequests.delete(requestKey);
     }
   })();
 
-  audioStreamRequests.set(cleanVideoId, request);
+  audioStreamRequests.set(requestKey, request);
   return request;
 }
 
@@ -1294,7 +1328,48 @@ export interface YouTubeMusicHomeCategoryData {
   results: YouTubeMusicPlaylistCard[];
 }
 
-const HOME_YOUTUBE_MUSIC_CATEGORY_VERSION = "v10";
+const HOME_YOUTUBE_MUSIC_CATEGORY_VERSION = "v12";
+
+function normalizeYouTubePlaylistIdentity(value: unknown): string {
+  const id = readString(value);
+  if (!id) return "";
+  return id.startsWith("VL") && id.length > 2 ? id.slice(2) : id;
+}
+
+function isProfessionalYouTubePlaylist(playlist: YouTubeMusicPlaylistCard): boolean {
+  const name = (playlist.name || "").toLowerCase();
+  const author = (playlist.author || "").toLowerCase();
+  const description = (playlist.description || "").toLowerCase();
+
+  // 1. Unprofessional keywords to reject (lofi, slowed, reverb, unreleased, desi mixes/unofficial content)
+  const badKeywords = [
+    "lofi", "lo-fi", "logi", "slowed", "reverb", "reverbed", "sped up", "speed up",
+    "mashup", "mashups", "bootleg", "unofficial", "fan-made", "fanmade", "unreleased",
+    "covers", "cover song", "cover songs", "karaoke", "remix", "remixes", "dj remix",
+    "desi mix", "mixed by", "dj mix", "personal playlist", "my mix", "my playlist",
+    "favorites", "favourite", "liked videos", "subscribed", "subscribe", "youtube mix",
+    "mixed playlist", "desi"
+  ];
+
+  for (const keyword of badKeywords) {
+    if (name.includes(keyword) || description.includes(keyword) || author.includes(keyword)) {
+      return false;
+    }
+  }
+
+  // 2. Strict mix filter: Reject general "mix" unless it is an official edit or author is youtube music
+  if (name.includes("mix")) {
+    const isOfficialYoutubeMusic = author === "youtube music" || author === "youtube";
+    const isAllowedMixName = ["party mix", "club mix", "dance mix", "hits mix", "summer mix"].some(
+      (allowed) => name.includes(allowed)
+    );
+    if (!isOfficialYoutubeMusic && !isAllowedMixName) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 function dedupeYouTubePlaylistCards(playlists: YouTubeMusicPlaylistCard[]): YouTubeMusicPlaylistCard[] {
   const seen = new Set<string>();
@@ -1302,8 +1377,10 @@ function dedupeYouTubePlaylistCards(playlists: YouTubeMusicPlaylistCard[]): YouT
 
   for (const playlist of playlists) {
     const id = readString(playlist.id);
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
+    const key = normalizeYouTubePlaylistIdentity(id);
+    if (!id || !key || seen.has(key)) continue;
+    if (!isProfessionalYouTubePlaylist(playlist)) continue;
+    seen.add(key);
     unique.push({ ...playlist, id });
   }
 
@@ -1315,10 +1392,10 @@ function normalizeYouTubePlaylistKind(raw: any, fallbackKind?: YouTubeMusicPlayl
 
   const category = readString(raw?.category).toLowerCase();
   const author = readString(raw?.author || raw?.owner || raw?.channel?.name).toLowerCase();
-  const id = readString(raw?.browseId || raw?.playlistId || raw?.id);
+  const id = normalizeYouTubePlaylistIdentity(raw?.browseId || raw?.playlistId || raw?.id);
 
   if (category.includes("chart")) return "chart";
-  if (author === "youtube music" || id.startsWith("VLRDCLAK5uy_")) return "editorial";
+  if (author === "youtube music" || id.startsWith("RDCLAK5uy_")) return "editorial";
   if (category.includes("featured")) return "featured";
   return "community";
 }
@@ -1375,8 +1452,9 @@ function dedupeYouTubeHomeSections(sections: YouTubeMusicHomeCategoryData[]): Yo
 
     const results = section.results.filter((playlist) => {
       const id = readString(playlist.id);
-      if (!id || seenPlaylistIds.has(id)) return false;
-      seenPlaylistIds.add(id);
+      const key = normalizeYouTubePlaylistIdentity(id);
+      if (!id || !key || seenPlaylistIds.has(key)) return false;
+      seenPlaylistIds.add(key);
       return true;
     });
 
@@ -1423,11 +1501,13 @@ async function searchYouTubeMusicPlaylistCards(
     (playlist): playlist is YouTubeMusicPlaylistCard => Boolean(playlist)
   );
 
-  if (cards.length > 0) {
-    await setCache(cacheKey, cards);
+  const filteredCards = dedupeYouTubePlaylistCards(cards);
+
+  if (filteredCards.length > 0) {
+    await setCache(cacheKey, filteredCards);
   }
 
-  return cards;
+  return filteredCards;
 }
 
 function getHomeShelfItems(json: any): any[] {
@@ -1643,10 +1723,10 @@ export async function getHomeYouTubeMusicCategories(options?: {
   }
 
   const [shelfSections, trendingPlaylists, moodSections] = await Promise.all([
-    getYouTubeMusicHomeCategorySections(limit, 10),
+    getYouTubeMusicHomeCategorySections(limit, 12),
     getYouTubeMusicTrendingPlaylists("IN").catch(() => [] as YouTubeMusicPlaylistCard[]),
     resolveWithTimeout(
-      getYouTubeMusicMoodCategorySections(limit, 2),
+      getYouTubeMusicMoodCategorySections(limit, 4),
       OPTIONAL_HOME_SECTION_TIMEOUT_MS,
       [] as YouTubeMusicHomeCategoryData[]
     ),
