@@ -29,21 +29,21 @@ function isHostOnlyDevelopmentUrl(value: string): boolean {
 
 function getYouTubeMusicBaseUrl(): string {
   const envUrl = process.env.EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL?.trim();
-  const extraUrl = Constants.expoConfig?.extra?.youtubeMusicApiUrl?.trim();
-  const fallbackUrl = extraUrl || PRODUCTION_YOUTUBE_MUSIC_API_URL;
-
-  if (__DEV__ && envUrl && Platform.OS !== "web" && Device.isDevice && isHostOnlyDevelopmentUrl(envUrl)) {
-    logger.warn(
-      "[YouTube Music Config] Ignoring host-only development URL on a physical device. Use a LAN IP or the production proxy."
-    );
-    return normalizeBaseUrl(fallbackUrl);
+  
+  // ALWAYS use environment variable if set, no fallbacks
+  if (envUrl) {
+    // Only warn on physical devices using localhost/127.0.0.1
+    if (__DEV__ && Platform.OS !== "web" && Device.isDevice && isHostOnlyDevelopmentUrl(envUrl)) {
+      logger.warn(
+        "[YouTube Music Config] Using localhost URL on a physical device. This may not work. Consider using your LAN IP or the production proxy."
+      );
+    }
+    return normalizeBaseUrl(envUrl);
   }
 
-  if (envUrl) return normalizeBaseUrl(envUrl);
-  if (extraUrl) return normalizeBaseUrl(extraUrl);
-
+  // No environment variable set - use production as last resort
   logger.warn(
-    "[YouTube Music Config] Using production YouTube Music proxy. Set EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL for a different backend."
+    "[YouTube Music Config] No EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL set. Using production YouTube Music proxy."
   );
   return normalizeBaseUrl(PRODUCTION_YOUTUBE_MUSIC_API_URL);
 }

@@ -1,125 +1,110 @@
 /**
- * Prefetch Queue — Pre-resolves audio URLs for upcoming songs.
+ * Prefetch Queue — transient playback preparation only.
  *
- * When the current song reaches 80% progress, this module:
- *  1. Resolves audio URLs for the next 3 songs in queue
- *  2. Fetches related songs via YouTube watch playlist
- *  3. Feeds them into the smart autoplay system
- *
- * This eliminates the gap between songs and ensures gapless playback.
+ * At 80% progress this module asks the backend for the next 20 autoplay
+ * recommendations and fresh stream URLs. Stream URLs are not persisted.
  */
 
 import { logger } from "@/lib/logger";
-import { getYouTubeMusicAudioStream } from "@/lib/youtubeMusicService";
+import {
+  convertYouTubeMusicTrack,
+  getYouTubeMusicAudioStream,
+  prefetchYouTubeMusicAutoplay,
+} from "@/lib/youtubeMusicService";
 import type { Song } from "@/lib/musicData";
 
-/** Track which songs have already been prefetched to avoid duplicate work. */
 const prefetchedIds = new Set<string>();
-
-/** Maximum number of prefetched IDs to track (prevents memory leak). */
 const MAX_PREFETCH_TRACKING = 200;
+const PREFETCH_TARGET_COUNT = 20;
 
-/**
- * Resolve audio URLs for the next N songs in the queue.
- *
- * Only processes YouTube-source songs that don't already have
- * a fresh native audio URL.
- */
+export type QueuePrefetchResult = {
+  urls: Map<string, string>;
+  songs: Song[];
+};
+
 export async function prefetchNextSongs(
   queue: Song[],
   currentIndex: number,
-  count: number = 3
-): Promise<Map<string, string>> {
-  const resolved = new Map<string, string>();
-  const songsToResolve: Song[] = [];
+  count: number = PREFETCH_TARGET_COUNT
+): Promise<QueuePrefetchResult> {
+  const urls = new Map<string, string>();
+  const songs: Song[] = [];
+  const targetCount = Math.max(1, Math.min(count, PREFETCH_TARGET_COUNT));
+  const currentSong = queue[currentIndex];
+  const currentVideoId = currentSong ? extractVideoId(currentSong) : null;
 
-  for (let i = currentIndex + 1; i < Math.min(currentIndex + 1 + count, queue.length); i++) {
-    const song = queue[i];
-    if (!song?.id) continue;
+  const existingYouTubeSongs = queue
+    .slice(currentIndex + 1, currentIndex + 1 + targetCount)
+    .filter((song) => {
+      if (!song?.id || prefetchedIds.has(song.id)) return false;
+      return Boolean(extractVideoId(song));
+    });
 
-    // Skip songs that already have a valid audio URL or were already prefetched
-    if (prefetchedIds.has(song.id)) continue;
-    if (song.audioUrl && !song.audioUrl.includes("youtube.com")) continue;
+  const [existingResults, autoplayResult] = await Promise.allSettled([
+    Promise.allSettled(
+      existingYouTubeSongs.map(async (song) => {
+        const videoId = extractVideoId(song);
+        if (!videoId) return null;
+        const stream = await Promise.race([
+          getYouTubeMusicAudioStream(videoId),
+          new Promise<null>((_, reject) => setTimeout(() => reject(new Error("Prefetch timeout")), 10000)),
+        ]);
+        if (!stream?.url) return null;
+        trackPrefetched(song.id);
+        return { songId: song.id, videoId, url: stream.url };
+      })
+    ),
+    currentVideoId ? prefetchYouTubeMusicAutoplay(currentVideoId, targetCount) : Promise.resolve(null),
+  ]);
 
-    const isYouTube =
-      song.source === "youtube" ||
-      String(song.id).startsWith("youtube_");
-
-    if (isYouTube) {
-      songsToResolve.push(song);
+  if (existingResults.status === "fulfilled") {
+    for (const result of existingResults.value) {
+      if (result.status !== "fulfilled" || !result.value) continue;
+      urls.set(result.value.songId, result.value.url);
+      urls.set(`youtube_${result.value.videoId}`, result.value.url);
+      urls.set(result.value.videoId, result.value.url);
     }
   }
 
-  if (songsToResolve.length === 0) return resolved;
+  if (autoplayResult.status === "fulfilled" && autoplayResult.value) {
+    for (const track of autoplayResult.value.queue) {
+      const song = convertYouTubeMusicTrack(track);
+      if (song) songs.push(song);
+    }
 
-  // Resolve in parallel with a 10-second timeout per song
-  const results = await Promise.allSettled(
-    songsToResolve.map(async (song) => {
-      const videoId = extractVideoId(song);
-      if (!videoId) return null;
-
-      try {
-        const stream = await Promise.race([
-          getYouTubeMusicAudioStream(videoId),
-          new Promise<null>((_, reject) =>
-            setTimeout(() => reject(new Error("Prefetch timeout")), 10000)
-          ),
-        ]);
-
-        if (stream?.url) {
-          trackPrefetched(song.id);
-          resolved.set(song.id, stream.url);
-          logger.debug("[Prefetch] Resolved:", { songId: song.id, videoId });
-          return stream.url;
-        }
-      } catch (err) {
-        logger.warn("[Prefetch] Failed:", { songId: song.id, error: String(err) });
-      }
-      return null;
-    })
-  );
+    for (const entry of autoplayResult.value.streams) {
+      if (!entry.stream?.url) continue;
+      urls.set(entry.videoId, entry.stream.url);
+      urls.set(`youtube_${entry.videoId}`, entry.stream.url);
+    }
+  }
 
   logger.debug("[Prefetch] Batch complete:", {
-    attempted: songsToResolve.length,
-    resolved: resolved.size,
+    existingAttempted: existingYouTubeSongs.length,
+    recommendedSongs: songs.length,
+    resolvedUrls: urls.size,
   });
 
-  return resolved;
+  return { urls, songs };
 }
 
-/**
- * Check if a song's playback has reached the prefetch threshold (80%).
- */
-export function shouldPrefetch(
-  positionSeconds: number,
-  durationSeconds: number
-): boolean {
+export function shouldPrefetch(positionSeconds: number, durationSeconds: number): boolean {
   if (durationSeconds <= 0 || positionSeconds <= 0) return false;
   return positionSeconds / durationSeconds >= 0.8;
 }
 
-/**
- * Track a song as prefetched. Evicts old entries if the set grows too large.
- */
 function trackPrefetched(songId: string) {
   if (prefetchedIds.size >= MAX_PREFETCH_TRACKING) {
-    // Evict the oldest entries (first half)
     const entries = Array.from(prefetchedIds);
     entries.slice(0, Math.floor(entries.length / 2)).forEach((id) => prefetchedIds.delete(id));
   }
   prefetchedIds.add(songId);
 }
 
-/**
- * Clear the prefetch tracking set (e.g., on app restart).
- */
 export function clearPrefetchCache() {
   prefetchedIds.clear();
 }
 
-/**
- * Extract a YouTube video ID from a Song object.
- */
 function extractVideoId(song: Song): string | null {
   const source = song as Song & {
     videoId?: unknown;

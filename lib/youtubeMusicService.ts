@@ -89,10 +89,6 @@ const OPTIONAL_HOME_SECTION_TIMEOUT_MS = 4500;
 const CURRENT_YEAR = new Date().getFullYear();
 const OFFICIAL_VISUAL_SEARCH_CACHE_VERSION = "v1";
 const YOUTUBE_VIDEO_SEARCH_CACHE_VERSION = "v2";
-const AUDIO_STREAM_EXPIRY_MARGIN_MS = 60 * 1000;
-const AUDIO_STREAM_CACHE_MAX_ITEMS = 50;
-const audioStreamCache = new Map<string, YouTubeMusicAudioStream>();
-const audioStreamRequests = new Map<string, Promise<YouTubeMusicAudioStream | null>>();
 
 // ─── Cache Helpers ────────────────────────────────────────────────────────────
 
@@ -581,7 +577,7 @@ export function convertYouTubeMusicTrack(track: any): Song | null {
     duration,
     coverUrl,
     genre: "YouTube Music",
-    audioUrl: "", // YouTube songs play through the embedded iframe player.
+    audioUrl: "", // Backend resolves a fresh native stream URL when playback starts.
     year: normalizedTrack.year?.toString(),
     source: "youtube",
     videoId: normalizedTrack.videoId,
@@ -773,7 +769,7 @@ function getSearchSuggestionItems(json: any): string[] {
 
 function normalizeAudioStreamPayload(json: any, videoId: string): YouTubeMusicAudioStream | null {
   const source = getResponsePayload(json, "stream", "audio");
-  const url = readString(source?.url);
+  const url = readString(source?.playbackUrl || source?.proxyUrl || source?.url);
   if (!url.startsWith("https://") && !url.startsWith("http://")) return null;
 
   const rawExpiry = Number(source?.expiresAt);
@@ -1006,64 +1002,149 @@ export async function getYouTubeMusicAudioStream(
   const cleanVideoId = extractVideoId({ videoId: readString(videoId).replace(/^youtube_/, "") });
   if (!cleanVideoId) return null;
 
-  const cached = audioStreamCache.get(cleanVideoId);
-  if (cached && cached.expiresAt - AUDIO_STREAM_EXPIRY_MARGIN_MS > Date.now()) {
-    return cached;
-  }
-  audioStreamCache.delete(cleanVideoId);
-
-  const pending = audioStreamRequests.get(cleanVideoId);
-  if (pending) return pending;
-
-  const request = (async () => {
-    try {
-      const encodedVideoId = encodeURIComponent(cleanVideoId);
-      const json = await fetchFirstJson<any>(
-        [
-          ...getEndpointCandidates(`/audio/${encodedVideoId}`, `/audio/${encodedVideoId}`),
-          ...getEndpointCandidates(`/stream-info/${encodedVideoId}`, `/stream-info/${encodedVideoId}`),
-        ],
-        signal
-      );
-      const stream = normalizeAudioStreamPayload(json, cleanVideoId);
-      if (!stream) {
-        logger.warn("[YouTube Music] Audio resolver returned no direct stream URL", { videoId: cleanVideoId });
-        return null;
-      }
-
-      // Replace the raw IP-bound googlevideo.com URL with our backend proxy URL.
-      // YouTube signs stream URLs to the requesting IP (the server's IP), so the
-      // mobile app would get 403 if it tried to play the raw URL directly.
-      // The proxy endpoint fetches from Google CDN server-side and pipes bytes back.
-      const apiBase = getYouTubeMusicApiUrl().replace(/\/+$/, "");
-      const proxyUrl = `${apiBase}/stream/media/${encodedVideoId}?platform=${encodeURIComponent(Platform.OS)}`;
-      const proxyStream: YouTubeMusicAudioStream = {
-        ...stream,
-        url: proxyUrl,
-        // Extend TTL — proxy URL never expires (underlying stream is re-resolved server-side)
-        expiresAt: Date.now() + 6 * 60 * 60 * 1000,
-      };
-
-      audioStreamCache.set(cleanVideoId, proxyStream);
-      if (audioStreamCache.size > AUDIO_STREAM_CACHE_MAX_ITEMS) {
-        const oldestKey = audioStreamCache.keys().next().value;
-        if (oldestKey) audioStreamCache.delete(oldestKey);
-      }
-
-      return proxyStream;
-    } catch (error: any) {
-      if (error?.message === "Request aborted" || signal?.aborted) {
-        return null;
-      }
-      logger.warn("[YouTube Music] Audio resolver failed:", error?.message || error);
-      return null;
-    } finally {
-      audioStreamRequests.delete(cleanVideoId);
+  try {
+    // Force ios platform to get MP4/M4A format (formatId 140) which works universally
+    // WebM/Opus (formatId 251) from android has playback issues on both platforms
+    const query = [
+      `platform=ios`,
+      `reason=playback_start`,
+      `nonce=${Date.now()}`,
+    ].join("&");
+    
+    const candidates = getEndpointCandidates(
+      `/stream/${encodeURIComponent(cleanVideoId)}`,
+      `/stream/${encodeURIComponent(cleanVideoId)}`,
+      query
+    );
+    
+    // Debug logging to verify API endpoints
+    logger.debug("[YouTube Music] Fetching stream", { videoId: cleanVideoId, candidates });
+    
+    const json = await fetchFirstJson<any>(candidates, signal);
+    
+    if (json) {
+      logger.debug("[YouTube Music] Stream response received", { 
+        videoId: cleanVideoId,
+        hasUrl: Boolean(json?.stream?.url || json?.data?.url || json?.url),
+        formatId: json?.stream?.formatId || json?.data?.formatId || json?.formatId,
+      });
     }
-  })();
+    
+    return json ? normalizeAudioStreamPayload(json, cleanVideoId) : null;
+  } catch (error: any) {
+    if (error?.message === "Request aborted" || signal?.aborted) {
+      return null;
+    }
+    logger.error("[YouTube Music] Backend audio resolver failed", { 
+      videoId: cleanVideoId,
+      error: error?.message || String(error),
+    });
+    return null;
+  }
+}
 
-  audioStreamRequests.set(cleanVideoId, request);
-  return request;
+export async function reportYouTubeMusicPlaybackFailure(payload: {
+  videoId?: string;
+  status?: number;
+  code?: string;
+  message?: string;
+  platform?: string;
+}): Promise<void> {
+  const cleanVideoId = extractVideoId({ videoId: payload.videoId });
+  try {
+    const [url] = getEndpointCandidates("/playback/failure", "/playback/failure");
+    if (!url) return;
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      },
+      body: JSON.stringify({
+        ...payload,
+        videoId: cleanVideoId || payload.videoId,
+      }),
+    });
+  } catch {
+    // Best effort.
+  }
+}
+
+export interface YouTubeMusicQueueResponse {
+  current?: YouTubeMusicTrack;
+  queue: YouTubeMusicTrack[];
+  queueSize?: number;
+  endless?: boolean;
+  generatedAt?: string;
+}
+
+export async function getYouTubeMusicQueue(
+  videoId: string,
+  limit = 50,
+  signal?: AbortSignal
+): Promise<YouTubeMusicQueueResponse | null> {
+  const cleanVideoId = extractVideoId({ videoId: readString(videoId).replace(/^youtube_/, "") });
+  if (!cleanVideoId) return null;
+
+  try {
+    const json = await fetchFirstJson<any>(
+      getEndpointCandidates(
+        `/queue/${encodeURIComponent(cleanVideoId)}`,
+        `/queue/${encodeURIComponent(cleanVideoId)}`,
+        `limit=${Math.max(1, Math.min(limit, 100))}`
+      ),
+      signal
+    );
+    const queuePayload = json?.queue || json?.data?.queue || json;
+    const rawQueue = Array.isArray(queuePayload?.queue) ? queuePayload.queue : [];
+    return {
+      ...queuePayload,
+      queue: mapFilter(rawQueue, normalizeTrackShape, (track): track is YouTubeMusicTrack => track !== null),
+      current: normalizeTrackShape(queuePayload?.current) || undefined,
+    };
+  } catch (error) {
+    logger.warn("[YouTube Music] Queue generation failed:", error);
+    return null;
+  }
+}
+
+export async function prefetchYouTubeMusicAutoplay(
+  videoId: string,
+  limit = 20,
+  signal?: AbortSignal
+): Promise<{
+  queue: YouTubeMusicTrack[];
+  streams: Array<{ videoId: string; stream: YouTubeMusicAudioStream }>;
+} | null> {
+  const cleanVideoId = extractVideoId({ videoId: readString(videoId).replace(/^youtube_/, "") });
+  if (!cleanVideoId) return null;
+
+  try {
+    const json = await fetchFirstJson<any>(
+      getEndpointCandidates(
+        `/autoplay/${encodeURIComponent(cleanVideoId)}/prefetch`,
+        `/autoplay/${encodeURIComponent(cleanVideoId)}/prefetch`,
+        `limit=${Math.max(1, Math.min(limit, 20))}&platform=ios&nonce=${Date.now()}`
+      ),
+      signal
+    );
+    const payload = json?.prefetch || json?.data?.prefetch || json || {};
+    return {
+      queue: mapFilter(payload.queue || json?.queue || [], normalizeTrackShape, (track): track is YouTubeMusicTrack => track !== null),
+      streams: mapFilter(
+        payload.streams || json?.streams || [],
+        (entry: any) => {
+          const stream = normalizeAudioStreamPayload(entry?.stream || entry, readString(entry?.videoId));
+          return stream?.videoId ? { videoId: stream.videoId, stream } : null;
+        },
+        (entry): entry is { videoId: string; stream: YouTubeMusicAudioStream } => Boolean(entry)
+      ),
+    };
+  } catch (error) {
+    logger.warn("[YouTube Music] Autoplay prefetch failed:", error);
+    return null;
+  }
 }
 
 
