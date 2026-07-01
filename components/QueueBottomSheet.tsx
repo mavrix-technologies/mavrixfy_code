@@ -391,6 +391,14 @@ type Props = {
   ref?: React.Ref<QueueBottomSheetRef>;
 };
 
+const SMART_AUTOPLAY_STATUS = {
+  enabled: false,
+  isRefreshing: false,
+  mode: "similar-trending" as const,
+  basisLabels: [],
+  generatedCount: 0,
+};
+
 // react-doctor-disable-next-line react-doctor/no-giant-component -- queue gestures, sheet index state, and playback actions are tightly coordinated in this bottom sheet.
 const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     const insets = useSafeAreaInsets();
@@ -414,13 +422,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
       togglePlay,
     } = usePlayerActions();
 
-    const smartAutoplayStatus = {
-      enabled: false,
-      isRefreshing: false,
-      mode: "similar-trending" as const,
-      basisLabels: [],
-      generatedCount: 0,
-    };
+    const smartAutoplayStatus = SMART_AUTOPLAY_STATUS;
 
     const openSwipeRef = useRef<Swipeable | null>(null);
     const lastPlaceholderRef = useRef<number | null>(null);

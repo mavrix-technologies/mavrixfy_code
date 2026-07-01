@@ -62,7 +62,7 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+function useAuthProviderState() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -495,7 +495,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [buildAppUser]);
 
-  const value = useMemo(() => ({
+  return useMemo(() => ({
     user,
     firebaseUser,
     loading,
@@ -513,7 +513,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logout,
     refreshUser,
   }), [user, firebaseUser, loading, isGuest, continueAsGuest, login, register, signInWithGoogle, signInWithGoogleCredential, signInWithApple, signInWithAppleCredential, resetPassword, deleteAccount, logout, refreshUser]);
+}
 
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const value = useAuthProviderState();
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

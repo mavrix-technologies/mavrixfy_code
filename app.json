@@ -27,7 +27,10 @@
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to upload images.",
         "NSAppleMusicUsageDescription": "This app streams music content.",
         "NSUserTrackingUsageDescription": "This identifier will be used to deliver personalized ads to you.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
       }
     },
     "android": {

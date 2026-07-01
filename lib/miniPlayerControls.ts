@@ -16,7 +16,7 @@ export function setMiniPlayerSecondaryControlPreference(value: MiniPlayerSeconda
   notifyListeners(value);
 }
 
-export async function refreshMiniPlayerSecondaryControlPreference(): Promise<MiniPlayerSecondaryControl> {
+async function refreshMiniPlayerSecondaryControlPreference(): Promise<MiniPlayerSecondaryControl> {
   const settings = await getSettings();
   cachedControl = settings.miniPlayerSecondaryControl;
   notifyListeners(cachedControl);

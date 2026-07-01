@@ -40,7 +40,7 @@ import { usePlayerActions, usePlayerProgress, usePlayerRow } from "@/contexts/Pl
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
 import { convertJioSaavnSong, formatDuration, getBestImageUrl, Song } from "@/lib/musicData";
-import { getRecentlyPlayed, getUserPlaylists, getSettings, getYouTubePlaybackQuality } from "@/lib/storage";
+import { getRecentlyPlayed, getUserPlaylists, getSettings } from "@/lib/storage";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { logger } from "@/lib/logger";
 import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
@@ -60,7 +60,7 @@ import { mapFilter } from "@/lib/arrayUtils";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
 import { getYouTubeMusicVisualVideoId } from "@/lib/youtubeMusicService";
-import YoutubePlayer from "react-native-youtube-iframe";
+// Removed react-native-youtube-iframe for native-only streaming migration.
 
 const getCurrentTimestamp = () => Date.now();
 const PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING = 136;
@@ -76,80 +76,6 @@ const PLAYER_PRIMARY_DISMISS_SPRING = {
   mass: 0.9,
   stiffness: 270,
 };
-const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
-const BACKGROUND_YOUTUBE_CHROME_CROP_PX = 260;
-const BACKGROUND_YOUTUBE_CHROME_CROP_TOTAL_PX = BACKGROUND_YOUTUBE_CHROME_CROP_PX * 2;
-const BACKGROUND_YOUTUBE_CROP_SCRIPT = `
-(function () {
-  function applyAmbientCrop() {
-    var head = document.head || document.getElementsByTagName("head")[0];
-    if (!head) {
-      setTimeout(applyAmbientCrop, 16);
-      return;
-    }
-
-    var viewportHeight = Math.max(window.innerHeight || 0, document.documentElement.clientHeight || 0, 220);
-    var videoHeight = Math.ceil(viewportHeight + ${BACKGROUND_YOUTUBE_CHROME_CROP_TOTAL_PX});
-    var videoWidth = Math.ceil(videoHeight * 16 / 9);
-    var style = document.getElementById("mavrixfy-ambient-youtube-crop");
-    if (!style) {
-      style = document.createElement("style");
-      style.id = "mavrixfy-ambient-youtube-crop";
-      head.appendChild(style);
-    }
-    style.textContent = [
-      "html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: ${Colors.background}; }",
-      ".container { position: relative !important; width: 100% !important; height: 100vh !important; padding-bottom: 0 !important; overflow: hidden !important; background: ${Colors.background}; }",
-      "#player, .container iframe { position: absolute !important; top: -${BACKGROUND_YOUTUBE_CHROME_CROP_PX}px !important; left: 50% !important; width: " + videoWidth + "px !important; height: " + videoHeight + "px !important; max-width: none !important; max-height: none !important; transform: translateX(-50%) !important; border: 0 !important; pointer-events: none !important; }"
-    ].join("\\n");
-
-    document.documentElement.style.overflow = "hidden";
-    if (document.body) {
-      document.body.style.overflow = "hidden";
-      document.body.style.background = "${Colors.background}";
-    }
-  }
-
-  applyAmbientCrop();
-  setTimeout(applyAmbientCrop, 250);
-  setTimeout(applyAmbientCrop, 1000);
-  window.addEventListener("resize", applyAmbientCrop);
-})();
-true;
-`;
-
-function getYouTubeVideoIdFromSong(song: Song | null | undefined): string {
-  if (!song) return "";
-  const source = song as Song & {
-    videoId?: unknown;
-    video_id?: unknown;
-    youtubeId?: unknown;
-    youtube_id?: unknown;
-    youtubeVideoId?: unknown;
-    youtubeVisualVideoId?: unknown;
-    url?: unknown;
-    watchUrl?: unknown;
-    videoUrl?: unknown;
-  };
-  const candidates = [
-    source.youtubeVisualVideoId,
-    source.youtubeVideoId,
-    source.videoId,
-    source.video_id,
-    source.youtubeId,
-    source.youtube_id,
-    String(source.id || "").replace(/^youtube_/, ""),
-  ];
-
-  for (const candidate of candidates) {
-    const value = typeof candidate === "string" ? candidate.trim() : "";
-    if (/^[a-zA-Z0-9_-]{11}$/.test(value)) return value;
-  }
-
-  const watchUrl = String(source.url || source.watchUrl || source.videoUrl || "").trim();
-  const match = watchUrl.match(/[?&]v=([a-zA-Z0-9_-]{11})|youtu\.be\/([a-zA-Z0-9_-]{11})/);
-  return match?.[1] || match?.[2] || "";
-}
 
 function hexToRgba(color: string, alpha: number): string {
   const safeAlpha = Math.max(0, Math.min(1, alpha));
@@ -422,381 +348,8 @@ const StableArtworkImage = memo(function StableArtworkImage({
   );
 });
 
-async function getVideoBackgroundQuality() {
-  try {
-    const settings = await getSettings();
-    return settings.videoBackgroundQuality;
-  } catch (e) {
-    logger.error("[Player] Failed to determine video background quality", e);
-  }
-  return "auto";
-}
 
-type VisibleYoutubeVideoProps = {
-  song: Song;
-  isPlaying: boolean;
-  width: number;
-  height: number;
-};
 
-const VisibleYoutubeVideo = memo(function VisibleYoutubeVideo({
-  song,
-  isPlaying,
-  width,
-  height,
-}: VisibleYoutubeVideoProps) {
-  const { positionMillis } = usePlayerProgress();
-  const initialVideoId = useMemo(() => getYouTubeVideoIdFromSong(song), [song]);
-  const [videoId, setVideoId] = useState(initialVideoId);
-  const playerRef = useRef<any>(null);
-  const initialPositionSeconds = Math.max(0, Math.floor(positionMillis / 1000));
-  const latestPositionSecondsRef = useRef(initialPositionSeconds);
-  const [isReady, setIsReady] = useState(false);
-  const [hasError, setHasError] = useState(false);
-  const mountedRef = useRef(false);
-  const coverUri = useMemo(() => song.coverUrl?.trim() || "", [song.coverUrl]);
-
-  // Track mount state
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- video id changes reset iframe readiness/error state together.
-  useEffect(() => {
-    setVideoId(initialVideoId);
-    // Reset ready state when video ID changes to ensure proper initialization
-    setIsReady(false);
-    setHasError(false);
-  }, [initialVideoId]);
-
-  useEffect(() => {
-    if (!song?.id || song.source !== "youtube") return;
-
-    let cancelled = false;
-    void getYouTubeMusicVisualVideoId(song)
-      .then((visualVideoId) => {
-        if (cancelled || !visualVideoId) return;
-        setVideoId((current) => (current === visualVideoId ? current : visualVideoId));
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [song]);
-
-  const lastPositionRef = useRef(initialPositionSeconds);
-
-  useEffect(() => {
-    const targetSeconds = Math.max(0, Math.floor(positionMillis / 1000));
-    latestPositionSecondsRef.current = targetSeconds;
-    // react-doctor-disable-next-line react-doctor/no-event-handler -- imperative iframe seek sync must follow external playback position updates.
-    if (isReady && Math.abs(targetSeconds - lastPositionRef.current) > 2) {
-      playerRef.current?.seekTo?.(targetSeconds, true);
-    }
-    lastPositionRef.current = targetSeconds;
-  }, [positionMillis, isReady]);
-
-  // react-doctor-disable-next-line react-doctor/no-derived-state-effect -- iframe readiness/error are imperative player state, not render-derived values.
-  useEffect(() => {
-    // react-doctor-disable-next-line react-doctor/no-chain-state-updates -- both flags reset together when a new resolved video id loads.
-    setIsReady(false);
-    // react-doctor-disable-next-line react-doctor/no-chain-state-updates -- both flags reset together when a new resolved video id loads.
-    setHasError(false);
-  }, [videoId]);
-
-  const handleReady = useCallback(() => {
-    if (!mountedRef.current) return;
-    setIsReady(true);
-    setHasError(false);
-
-    // Set requested quality for YouTube detail/backdrop playback.
-    if (playerRef.current) {
-      void getVideoBackgroundQuality().then((quality) => {
-        try {
-          const ytQuality = getYouTubePlaybackQuality(quality);
-          playerRef.current.setPlaybackQuality?.(ytQuality);
-          logger.debug("[YouTube Detail] Set playback quality to", { ytQuality });
-        } catch (error) {
-          logger.warn('[YouTube Detail] Failed to set quality:', error);
-        }
-      });
-    }
-
-    const targetSeconds = latestPositionSecondsRef.current;
-    if (targetSeconds <= 0) return;
-
-    setTimeout(() => {
-      if (mountedRef.current) {
-        playerRef.current?.seekTo?.(targetSeconds, true);
-      }
-    }, 250);
-  }, []);
-
-  const handleError = useCallback(() => {
-    if (!mountedRef.current) return;
-    setHasError(true);
-    setIsReady(false);
-  }, []);
-
-  const youtubeWebViewProps = useMemo(() => ({
-    javaScriptEnabled: true,
-    domStorageEnabled: true,
-    thirdPartyCookiesEnabled: true,
-    setSupportMultipleWindows: false,
-    allowsFullscreenVideo: false,
-    allowsInlineMediaPlayback: true,
-    mediaPlaybackRequiresUserAction: false,
-    scrollEnabled: false,
-    overScrollMode: "never" as const,
-    androidLayerType: "hardware" as const,
-  }), []);
-
-  return (
-    <View style={styles.youtubeDetailPlayer}>
-      {coverUri ? (
-        <Image
-          source={{ uri: coverUri }}
-          style={StyleSheet.absoluteFillObject}
-          contentFit="cover"
-          blurRadius={Platform.OS === "android" ? 0 : 12}
-          transition={0}
-          priority="high"
-          cachePolicy="memory-disk"
-        />
-      ) : null}
-      <View style={styles.youtubeDetailShade} />
-      {videoId && !hasError ? (
-        <View pointerEvents="none" style={styles.youtubeDetailIframe}>
-          <YoutubePlayer
-            key={videoId}
-            ref={playerRef}
-            height={height}
-            width={width}
-            play={isPlaying}
-            mute
-            videoId={videoId}
-            onReady={handleReady}
-            onError={handleError}
-            forceAndroidAutoplay
-            useLocalHTML
-            baseUrlOverride={YOUTUBE_PLAYER_REFERRER_URL}
-            initialPlayerParams={{
-              controls: false,
-              modestbranding: true,
-              rel: false,
-              preventFullScreen: true,
-              showClosedCaptions: false,
-              iv_load_policy: 3,
-              start: initialPositionSeconds,
-              disablekb: true,
-              fs: false,
-              playsinline: true,
-              cc_load_policy: 0,
-              enablejsapi: 1,
-              origin: 'https://www.youtube.com',
-            }}
-            webViewProps={youtubeWebViewProps}
-          />
-        </View>
-      ) : null}
-      {!isReady && !hasError ? (
-        <View pointerEvents="none" style={styles.youtubeDetailLoading}>
-          <ActivityIndicator size="small" color="#FFFFFF" />
-        </View>
-      ) : null}
-      {hasError ? (
-        <View pointerEvents="none" style={styles.youtubeDetailLoading}>
-          <Ionicons name="logo-youtube" size={30} color="#FFFFFF" />
-        </View>
-      ) : null}
-    </View>
-  );
-}, (prevProps, nextProps) => {
-  // Always allow re-render when song changes (especially on first load)
-  if (prevProps.song.id !== nextProps.song.id) {
-    return false; // Allow re-render
-  }
-  
-  return (
-    prevProps.isPlaying === nextProps.isPlaying &&
-    prevProps.width === nextProps.width &&
-    prevProps.height === nextProps.height
-  );
-});
-
-VisibleYoutubeVideo.displayName = "VisibleYoutubeVideo";
-
-type BackgroundYoutubeVideoProps = {
-  videoId: string;
-  isPlaying: boolean;
-  positionMillis: number;
-  containerHeight: number;
-};
-
-const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
-  videoId,
-  isPlaying,
-  positionMillis,
-  containerHeight,
-}: BackgroundYoutubeVideoProps) {
-  const { width: winW } = useWindowDimensions();
-  const playerRef = useRef<any>(null);
-  const initialPositionSeconds = Math.max(0, Math.floor(positionMillis / 1000));
-  const lastPositionRef = useRef(initialPositionSeconds);
-  const [playerReady, setPlayerReady] = useState(false);
-  const [videoVisible, setVideoVisible] = useState(false);
-
-  const onReady = useCallback(() => {
-    setPlayerReady(true);
-    playerRef.current?.mute?.();
-    void getVideoBackgroundQuality().then((quality) => {
-      playerRef.current?.setPlaybackQuality?.(getYouTubePlaybackQuality(quality));
-    });
-  }, []);
-
-  const handleBackgroundStateChange = useCallback((state: string) => {
-    setVideoVisible(state === "playing");
-  }, []);
-
-  useEffect(() => {
-    // react-doctor-disable-next-line react-doctor/no-event-handler -- imperative iframe mute sync must follow readiness/playback updates.
-    if (playerReady) {
-      playerRef.current?.mute?.();
-    }
-  }, [playerReady, isPlaying]);
-
-  useEffect(() => {
-    const targetSeconds = Math.max(0, Math.floor(positionMillis / 1000));
-    // react-doctor-disable-next-line react-doctor/no-event-handler -- imperative iframe seek sync must follow external playback position updates.
-    if (playerReady && Math.abs(targetSeconds - lastPositionRef.current) > 10) {
-      playerRef.current?.seekTo?.(targetSeconds, true);
-    }
-    lastPositionRef.current = targetSeconds;
-  }, [positionMillis, playerReady]);
-
-  const dimensions = useMemo(() => {
-    return {
-      frameW: Math.max(winW, 220),
-      frameH: Math.max(containerHeight, 220),
-    };
-  }, [winW, containerHeight]);
-
-  return (
-    <View
-      pointerEvents="none"
-      style={[
-        StyleSheet.absoluteFillObject,
-        { overflow: "hidden", backgroundColor: Colors.background },
-      ]}
-    >
-      <View
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: dimensions.frameW,
-          height: dimensions.frameH,
-          opacity: videoVisible ? 1 : 0,
-        }}
-      >
-        <YoutubePlayer
-          key={videoId}
-          ref={playerRef}
-          height={dimensions.frameH}
-          width={dimensions.frameW}
-          play={isPlaying}
-          mute={true}
-          volume={0}
-          videoId={videoId}
-          onReady={onReady}
-          onChangeState={handleBackgroundStateChange}
-          forceAndroidAutoplay
-          useLocalHTML
-          baseUrlOverride={YOUTUBE_PLAYER_REFERRER_URL}
-          initialPlayerParams={{
-            controls: false,
-            modestbranding: true,
-            rel: false,
-            preventFullScreen: true,
-            showClosedCaptions: false,
-            iv_load_policy: 3,
-            start: initialPositionSeconds,
-            disablekb: true,
-            fs: false,
-            playsinline: true,
-            cc_load_policy: 0,
-            enablejsapi: 1,
-          }}
-          webViewProps={{
-            javaScriptEnabled: true,
-            domStorageEnabled: true,
-            thirdPartyCookiesEnabled: true,
-            injectedJavaScriptBeforeContentLoaded: BACKGROUND_YOUTUBE_CROP_SCRIPT,
-            injectedJavaScript: BACKGROUND_YOUTUBE_CROP_SCRIPT,
-            setSupportMultipleWindows: false,
-            allowsFullscreenVideo: false,
-            allowsInlineMediaPlayback: true,
-            mediaPlaybackRequiresUserAction: false,
-            androidLayerType: "hardware",
-            incognito: true,
-          }}
-        />
-      </View>
-      {/* Subtle top fade - keeps status bar area clean */}
-      <LinearGradient
-        colors={topGradientColors}
-        locations={topGradientLocations}
-        style={StyleSheet.absoluteFillObject}
-        pointerEvents="none"
-      />
-      {/* Bottom gradient fade - starts earlier but more subtle */}
-      <LinearGradient
-        colors={bottomGradientColors}
-        locations={bottomGradientLocations}
-        style={StyleSheet.absoluteFillObject}
-        pointerEvents="none"
-      />
-      {/* Light scrim for overall text readability */}
-      <View
-        style={scrimStyle}
-      />
-    </View>
-  );
-}, (prevProps, nextProps) => {
-  if (prevProps.videoId !== nextProps.videoId) return false;
-  if (prevProps.isPlaying !== nextProps.isPlaying) return false;
-  if (prevProps.containerHeight !== nextProps.containerHeight) return false;
-  
-  const diff = Math.abs(prevProps.positionMillis - nextProps.positionMillis);
-  if (diff >= 10000) {
-    return false;
-  }
-  
-  return true;
-});
-BackgroundYoutubeVideo.displayName = "BackgroundYoutubeVideo";
-
-// Pre-define gradient colors and styles outside component to avoid recreation on every render
-const topGradientColors = ["rgba(7,10,16,0.3)", "rgba(7,10,16,0.1)", "transparent"] as const;
-const topGradientLocations = [0, 0.06, 0.15] as const;
-const bottomGradientColors = [
-  "transparent",
-  "rgba(7,10,16,0.08)",
-  "rgba(7,10,16,0.18)",
-  "rgba(7,10,16,0.35)",
-  "rgba(7,10,16,0.58)",
-  "rgba(7,10,16,0.82)",
-  Colors.background
-] as const;
-const bottomGradientLocations = [0.15, 0.3, 0.45, 0.6, 0.75, 0.88, 1] as const;
-const scrimStyle = [
-  StyleSheet.absoluteFillObject,
-  { backgroundColor: "rgba(7,10,16,0.06)" },
-];
 
 
 
@@ -1095,12 +648,15 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   const [isScrubbing, setIsScrubbing] = useState(false);
   const lastSyncRef = useRef({ progress, timestamp: Date.now() });
 
-  // Sync with global progress changes
-  useEffect(() => {
-    if (isScrubbing) return;
-    lastSyncRef.current = { progress, timestamp: Date.now() };
-    setLocalProgress((prev) => (Math.abs(prev - progress) > 0.015 ? progress : prev));
-  }, [isScrubbing, progress]);
+  // Sync with global progress changes during render to avoid extra useEffect renders
+  const [prevProgress, setPrevProgress] = useState(progress);
+  if (progress !== prevProgress) {
+    setPrevProgress(progress);
+    if (!isScrubbing) {
+      lastSyncRef.current = { progress, timestamp: Date.now() };
+      setLocalProgress(progress);
+    }
+  }
 
   // A song progress bar moves by less than a pixel per sample at 4 Hz on a
   // phone. Updating React state every animation frame needlessly rerendered
@@ -1388,7 +944,6 @@ function useLegacyPlayerScreenView() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const [ambientBackdropEnabled, setAmbientBackdropEnabled] = useState(true);
   const [isNavigationFocused, setIsNavigationFocused] = useState(() => navigation.isFocused());
   const [isAppActive, setIsAppActive] = useState(() => AppState.currentState === "active");
   const isScreenFocused = isNavigationFocused && isAppActive;
@@ -1409,20 +964,8 @@ function useLegacyPlayerScreenView() {
     };
   }, []);
 
-  // react-doctor-disable-next-line react-doctor/no-cascading-set-state
   useEffect(() => {
-    let mounted = true;
-    const fetchSettings = () => {
-      getSettings().then((s) => {
-        if (mounted) {
-          setAmbientBackdropEnabled(s.ambientBackdropEnabled);
-        }
-      });
-    };
-
-    fetchSettings();
     const unsubscribeFocus = navigation.addListener("focus", () => {
-      fetchSettings();
       setIsNavigationFocused(true);
     });
     const unsubscribeBlur = navigation.addListener("blur", () => {
@@ -1430,7 +973,6 @@ function useLegacyPlayerScreenView() {
     });
 
     return () => {
-      mounted = false;
       unsubscribeFocus();
       unsubscribeBlur();
     };
@@ -1462,7 +1004,6 @@ function useLegacyPlayerScreenView() {
     isLiked,
     setAlbumColor,
     setTextColor,
-    setYoutubePlayerFrame,
   } = usePlayerActions();
 
   const { positionMillis } = usePlayerProgress();
@@ -1475,7 +1016,6 @@ function useLegacyPlayerScreenView() {
   const playerAdCoverCooldownUntilRef = useRef(0);
   const playerAdSongsSinceCoverRef = useRef(PLAYER_AD_COVER_COOLDOWN_SONGS);
   const lastPlayerAdSongIdRef = useRef<string | null>(currentSong?.id ?? null);
-  const youtubeVideoFrameRef = useRef<View | null>(null);
   const [isLoadingDevTrack, setIsLoadingDevTrack] = useState(false);
   const [isDevPreviewEnabled, setIsDevPreviewEnabled] = useState(false);
   const [devPreviewIndex, setDevPreviewIndex] = useState(0);
@@ -1584,56 +1124,8 @@ function useLegacyPlayerScreenView() {
     DEV_PREVIEW_SONGS[0];
   const screenSong = currentSong ?? (isDevPreviewActive ? devPreviewSong : null);
   const screenSongIsYouTube = Boolean(screenSong?.source === "youtube" || screenSong?.id?.startsWith("youtube_"));
+  const ambientVideoLayoutActive = false;
 
-  const [backgroundVideoId, setBackgroundVideoId] = useState<string | null>(null);
-
-  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- background video id follows the current song after the resolver verifies an official visual match.
-  useEffect(() => {
-    if (!screenSong) {
-      setBackgroundVideoId(null);
-      return;
-    }
-
-    setBackgroundVideoId(null);
-
-    let cancelled = false;
-    void getYouTubeMusicVisualVideoId(screenSong)
-      .then((visualVideoId) => {
-        if (cancelled) return;
-        setBackgroundVideoId(visualVideoId || null);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [screenSong]);
-
-  const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
-  const [prevSongId, setPrevSongId] = useState(screenSong?.id);
-
-  if (screenSong?.id !== prevSongId) {
-    setPrevSongId(screenSong?.id);
-    setHasStartedPlaying(false);
-  }
-
-  useEffect(() => {
-    if (playbackState.isPlaying && !playbackState.isLoading && !playbackState.isBuffering) {
-      setHasStartedPlaying(true);
-    }
-  }, [playbackState.isPlaying, playbackState.isLoading, playbackState.isBuffering]);
-
-  const ambientVideoLayoutActive = useMemo(() => Boolean(
-    ambientBackdropEnabled &&
-    backgroundVideoId &&
-    screenSongIsYouTube &&
-    !isLowEnd
-  ), [ambientBackdropEnabled, backgroundVideoId, screenSongIsYouTube, isLowEnd]);
-
-  const shouldRenderBackgroundVideo = useMemo(() => Boolean(
-    ambientVideoLayoutActive &&
-    hasStartedPlaying
-  ), [ambientVideoLayoutActive, hasStartedPlaying]);
   const currentPlayerAdSongId = screenSong?.id ?? null;
   if (currentPlayerAdSongId !== lastPlayerAdSongIdRef.current) {
     if (lastPlayerAdSongIdRef.current) {
@@ -1695,16 +1187,6 @@ function useLegacyPlayerScreenView() {
     setAlbumColor(palette.accent);
     setTextColor(palette.text);
   }, [setAlbumColor, setTextColor]);
-
-  const publishYoutubeVideoFrame = useCallback(() => {
-    requestAnimationFrame(() => {
-      youtubeVideoFrameRef.current?.measureInWindow((x, y, width, height) => {
-        if (width > 0 && height > 0) {
-          setYoutubePlayerFrame({ x, y, width, height });
-        }
-      });
-    });
-  }, [setYoutubePlayerFrame]);
   
   const handleSongOptionsPress = useCallback(() => {
     if (!screenSong || optionsPressLockRef.current) return;
@@ -1819,9 +1301,7 @@ function useLegacyPlayerScreenView() {
     isVeryShortScreen ? 220 : 240,
     Math.floor(screenHeight * (isVeryShortScreen ? 0.34 : isShortScreen ? 0.38 : 0.42))
   );
-  const artSize = ambientVideoLayoutActive
-    ? Math.min(legacyVideoArtByWidth, legacyVideoArtByHeight)
-    : Math.min(largeArtworkByWidth, largeArtworkByHeight);
+  const artSize = Math.min(largeArtworkByWidth, largeArtworkByHeight);
 
   const playerDismissAnimatedStyle = useAnimatedStyle(() => {
     const translateY = Math.max(0, playerDismissTranslateY.value);
@@ -1832,7 +1312,7 @@ function useLegacyPlayerScreenView() {
 
   const targetScale = (Platform.OS === "ios" ? 40 : 48) / artSize;
   const targetCenterX = Platform.OS === "ios" ? 40 : 48;
-  const cardTop = topInset + 54 + (ambientVideoLayoutActive ? (isShortScreen ? 4 : 8) : (isVeryShortScreen ? 8 : isShortScreen ? 12 : 18));
+  const cardTop = topInset + 54 + (isVeryShortScreen ? 8 : isShortScreen ? 12 : 18);
   const cardCenterY = cardTop + artSize / 2;
   const targetCenterY = screenHeight - bottomInset - 30;
   const targetTranslateYRelative = targetCenterY - screenHeight - cardCenterY;
@@ -1936,38 +1416,6 @@ function useLegacyPlayerScreenView() {
   }, [currentSong?.id, livePlayingQueue, queue.length, queueIndex]);
   const playingQueue = isDevPreviewActive ? DEV_PREVIEW_SONGS : livePlayingQueue;
   const activeQueueIndex = isDevPreviewActive ? devPreviewIndex : liveActiveQueueIndex;
-
-  useEffect(() => {
-    if (!screenSongIsYouTube || !ambientVideoLayoutActive) {
-      setYoutubePlayerFrame(null);
-      return;
-    }
-
-    const interactionTask = InteractionManager.runAfterInteractions(() => {
-      publishYoutubeVideoFrame();
-    });
-    const layoutTimer = setTimeout(publishYoutubeVideoFrame, 260);
-
-    return () => {
-      interactionTask.cancel();
-      clearTimeout(layoutTimer);
-    };
-  }, [
-    activeQueueIndex,
-    publishYoutubeVideoFrame,
-    screenHeight,
-    screenSong?.id,
-    screenSongIsYouTube,
-    ambientVideoLayoutActive,
-    screenWidth,
-    setYoutubePlayerFrame,
-  ]);
-
-  useEffect(() => {
-    return () => {
-      setYoutubePlayerFrame(null);
-    };
-  }, [setYoutubePlayerFrame]);
 
   const artworkQueue = useMemo<ArtworkQueueItem[]>(() => {
     const occurrenceByKey = new Map<string, number>();
@@ -2483,17 +1931,6 @@ function useLegacyPlayerScreenView() {
         outputRange: [4, 0, 4],
         extrapolate: "clamp",
       });
-
-      // Active YouTube card only becomes a spacer while the video backdrop is actually visible.
-      if (isActiveYouTubeTrack && ambientVideoLayoutActive) {
-        return (
-          <View
-            key={item.artworkKey}
-            style={{ width: artCarouselPageWidth, height: artSize }}
-          />
-        );
-      }
-
       const cardContent = (
         <Pressable
           style={[styles.artCarouselTouch, { width: artCarouselPageWidth, height: artSize }]}
@@ -2608,7 +2045,6 @@ function useLegacyPlayerScreenView() {
     },
     [
       activeQueueIndex,
-      ambientVideoLayoutActive,
       artCarouselPageWidth,
       artCarouselSnapInterval,
       artScrollX,
@@ -2824,38 +2260,6 @@ function useLegacyPlayerScreenView() {
         scrollEventThrottle={16}
         ListHeaderComponent={
           <>
-            {shouldRenderBackgroundVideo ? (() => {
-              // Cover upper 88% of screen, pushing playlist down to bottom 10-12%
-              const containerH = Math.round(screenHeight * 0.88);
-              return (
-                <Animated.View
-                  pointerEvents="none"
-                  style={[
-                    styles.backgroundYoutubeContainer,
-                    {
-                      height: containerH,
-                      opacity: artScrollX.interpolate({
-                        inputRange: [
-                          (activeQueueIndex - 1) * artCarouselSnapInterval,
-                          activeQueueIndex * artCarouselSnapInterval,
-                          (activeQueueIndex + 1) * artCarouselSnapInterval,
-                        ],
-                        outputRange: [0, 1, 0],
-                        extrapolate: "clamp",
-                      }),
-                    },
-                  ]}
-                >
-                  <BackgroundYoutubeVideo
-                    key={`bg-video-${backgroundVideoId}`}
-                    videoId={backgroundVideoId!}
-                    isPlaying={isScreenFocused}
-                    positionMillis={positionMillis}
-                    containerHeight={containerH}
-                  />
-                </Animated.View>
-              );
-            })() : null}
             <View
               style={[
                 styles.playerContent,
@@ -2863,26 +2267,15 @@ function useLegacyPlayerScreenView() {
                   paddingTop: topInset + topBarHeight,
                   paddingBottom: isShortScreen ? 10 : 14,
                 },
-                ambientVideoLayoutActive && {
-                  minHeight: screenHeight - topInset - (isShortScreen ? 70 : 90),
-                  paddingBottom: 0,
-                },
               ]}
             >
                 <GestureDetector gesture={playerPrimaryDismissGesture}>
-                  <View
-                    style={[
-                      styles.playerPrimaryStack,
-                      ambientVideoLayoutActive && { flex: 1 },
-                    ]}
-                  >
+                  <View style={styles.playerPrimaryStack}>
                 <View
                   style={[
                     styles.artWrap,
                     {
-                      marginTop: ambientVideoLayoutActive
-                        ? isShortScreen ? 4 : 8
-                        : isVeryShortScreen ? 8 : isShortScreen ? 12 : 18,
+                      marginTop: isVeryShortScreen ? 8 : isShortScreen ? 12 : 18,
                       paddingHorizontal: 0,
                     },
                   ]}
@@ -2926,9 +2319,7 @@ function useLegacyPlayerScreenView() {
                     style={[
                       styles.songBlock,
                       {
-                        marginTop: ambientVideoLayoutActive
-                          ? isShortScreen ? 95 : 120
-                          : isVeryShortScreen ? 22 : isShortScreen ? 26 : 34,
+                        marginTop: isVeryShortScreen ? 22 : isShortScreen ? 26 : 34,
                         marginHorizontal: isShortScreen ? 14 : 20,
                       },
                     ]}
@@ -3132,12 +2523,7 @@ function useLegacyPlayerScreenView() {
           </View>
 
           <Reanimated.View style={controlsDismissAnimatedStyle}>
-            <View
-              style={[
-                styles.playingListSection,
-                ambientVideoLayoutActive && styles.playingListSectionAmbient,
-              ]}
-            >
+            <View style={styles.playingListSection}>
             <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
               <Text style={styles.playingListTitle}>Queue</Text>
             </View>
@@ -3205,14 +2591,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "#070A10",
     overflow: "hidden",
-  },
-  backgroundYoutubeContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    overflow: "hidden",
-    zIndex: -1,
   },
   backgroundArtworkImage: {
     position: "absolute",
@@ -3630,12 +3008,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#14171E",
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(255,255,255,0.1)",
-  },
-  playingListSectionAmbient: {
-    borderRadius: 0,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.1)",
-    backgroundColor: "#191C23",
   },
   queueListContent: {
     paddingHorizontal: 16,

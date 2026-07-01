@@ -773,7 +773,7 @@ function getSearchSuggestionItems(json: any): string[] {
 function normalizeAudioStreamPayload(json: any, videoId: string): YouTubeMusicAudioStream | null {
   const source = getResponsePayload(json, "stream", "audio");
   const url = readString(source?.url);
-  if (!url.startsWith("https://")) return null;
+  if (!url.startsWith("https://") && !url.startsWith("http://")) return null;
 
   const rawExpiry = Number(source?.expiresAt);
   const expiresAt = Number.isFinite(rawExpiry) && rawExpiry > 0
@@ -1671,7 +1671,7 @@ export async function getHomeYouTubeMusicCategories(options?: {
   return finalResults;
 }
 
-export async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): Promise<YouTubeMusicPlaylistCard[]> {
+async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): Promise<YouTubeMusicPlaylistCard[]> {
   const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:trending_playlists:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${country}`;
   const cached = await getCached<YouTubeMusicPlaylistCard[]>(cacheKey, CACHE_TTL_MS);
   if (cached) {

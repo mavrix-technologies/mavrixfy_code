@@ -95,7 +95,7 @@ export async function extractArtworkColors(imageUrl: string): Promise<ArtworkPal
 }
 
 /** @deprecated Use extractArtworkColors */
-export const extractDominantColor = extractArtworkColors;
+const extractDominantColor = extractArtworkColors;
 
 export function preloadDominantColors(imageUrls: Array<string | null | undefined>): void {
   for (const rawUrl of imageUrls) {
@@ -118,7 +118,7 @@ export function getImmediateArtworkPalette(imageUrl: string | null | undefined):
 }
 
 /** @deprecated Use getImmediateArtworkPalette */
-export const getImmediateArtworkColor = getImmediateArtworkPalette;
+const getImmediateArtworkColor = getImmediateArtworkPalette;
 
 export function createSpotifyColorTheme(palette: ArtworkPalette | string): SpotifyColorTheme {
   const colors =
@@ -191,9 +191,10 @@ async function extractArtworkColorsUncached(cacheKey: string): Promise<ArtworkPa
   if (getColors) {
     const sources = await buildArtworkSources(cacheKey);
 
-    for (const source of sources) {
+    const trySource = async (index: number): Promise<ArtworkPalette | null> => {
+      if (index >= sources.length) return null;
       try {
-        const result = await getColors(source, {
+        const result = await getColors(sources[index], {
           fallback: DEFAULT_ARTWORK_PALETTE.background,
           cache: false,
           quality: "high",
@@ -202,14 +203,18 @@ async function extractArtworkColorsUncached(cacheKey: string): Promise<ArtworkPa
         });
 
         const palette = mapImageColorsToPalette(result);
-        if (isDefaultPalette(palette)) continue;
-
-        setCachedPalette(cacheKey, palette);
-        return palette;
+        if (!isDefaultPalette(palette)) {
+          setCachedPalette(cacheKey, palette);
+          return palette;
+        }
       } catch {
         // Try next source.
       }
-    }
+      return trySource(index + 1);
+    };
+
+    const palette = await trySource(0);
+    if (palette) return palette;
   }
 
   try {

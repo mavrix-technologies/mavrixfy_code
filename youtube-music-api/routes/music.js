@@ -79,13 +79,15 @@ function getThumbnails(value) {
           ? value.thumbnail
           : [];
 
-  return source
-    .map((thumb) => ({
-      url: text(thumb?.url),
+  return source.flatMap((thumb) => {
+    const url = text(thumb?.url);
+    if (!url) return [];
+    return [{
+      url,
       width: Number(thumb?.width) || 0,
       height: Number(thumb?.height) || 0,
-    }))
-    .filter((thumb) => thumb.url);
+    }];
+  });
 }
 
 function itemThumbnails(item) {
@@ -94,14 +96,12 @@ function itemThumbnails(item) {
 
 function normalizePeople(value) {
   const source = Array.isArray(value) ? value : value ? [value] : [];
-  return source
-    .map((person) => {
-      const name = text(person?.name || person?.title || person);
-      if (!name) return null;
-      const id = text(person?.channel_id || person?.id || person?.browseId);
-      return id ? { name, id } : { name };
-    })
-    .filter(Boolean);
+  return source.flatMap((person) => {
+    const name = text(person?.name || person?.title || person);
+    if (!name) return [];
+    const id = text(person?.channel_id || person?.id || person?.browseId);
+    return [id ? { name, id } : { name }];
+  });
 }
 
 function getBrowseId(item) {
@@ -229,9 +229,10 @@ function parseYearFromSubtitle(value) {
 
 function normalizePlaylist(playlist, fallbackId) {
   const header = playlist?.header || {};
-  const tracks = (playlist?.contents || [])
-    .map((item) => normalizeTrack(item))
-    .filter(Boolean);
+  const tracks = (playlist?.contents || []).flatMap((item) => {
+    const track = normalizeTrack(item);
+    return track ? [track] : [];
+  });
 
   return {
     browseId: fallbackId,
@@ -245,9 +246,10 @@ function normalizePlaylist(playlist, fallbackId) {
 
 function normalizeAlbum(album, fallbackId) {
   const header = album?.header || {};
-  const tracks = (album?.contents || [])
-    .map((item) => normalizeTrack(item))
-    .filter(Boolean);
+  const tracks = (album?.contents || []).flatMap((item) => {
+    const track = normalizeTrack(item);
+    return track ? [track] : [];
+  });
 
   return {
     browseId: fallbackId,
@@ -273,8 +275,9 @@ function normalizeArtist(artist, fallbackId) {
 
   for (const section of sections) {
     const title = sectionTitle(section).toLowerCase();
+    const isSongSection = /song/i.test(title);
     for (const item of section?.contents || []) {
-      if ((item?.item_type === "song" || item?.item_type === "video") && (title.includes("song") || tracks.length < 10)) {
+      if ((item?.item_type === "song" || item?.item_type === "video") && (isSongSection || tracks.length < 10)) {
         const track = normalizeTrack(item);
         if (track) tracks.push(track);
       } else if (item?.item_type === "album") {
@@ -297,19 +300,21 @@ function normalizeArtist(artist, fallbackId) {
 
 function normalizeHomeShelf(section) {
   const title = sectionTitle(section);
-  const contents = (section?.contents || [])
-    .filter((item) => {
-      const id = getBrowseId(item);
-      return (
-        item?.item_type === "playlist" ||
-        id.startsWith("VL") ||
-        id.startsWith("PL") ||
-        id.startsWith("RDCLAK") ||
-        id.startsWith("RDTMAK")
-      );
-    })
-    .map((item) => normalizeCollectionItem(item, "playlist"))
-    .filter((item) => item?.playlistId || item?.browseId);
+  const contents = (section?.contents || []).flatMap((item) => {
+    const id = getBrowseId(item);
+    const isMatch =
+      item?.item_type === "playlist" ||
+      id.startsWith("VL") ||
+      id.startsWith("PL") ||
+      id.startsWith("RDCLAK") ||
+      id.startsWith("RDTMAK");
+    if (!isMatch) return [];
+    const normalized = normalizeCollectionItem(item, "playlist");
+    if (normalized?.playlistId || normalized?.browseId) {
+      return [normalized];
+    }
+    return [];
+  });
 
   return title && contents.length > 0 ? { title, contents } : null;
 }
@@ -319,8 +324,10 @@ async function searchPlaylists(query, limit) {
   const search = await yt.music.search(query, { type: "playlist" });
   return shelfItems(search, "playlist")
     .slice(0, limit)
-    .map((item) => normalizeCollectionItem(item, "playlist"))
-    .filter((item) => item?.playlistId || item?.browseId);
+    .flatMap((item) => {
+      const normalized = normalizeCollectionItem(item, "playlist");
+      return (normalized?.playlistId || normalized?.browseId) ? [normalized] : [];
+    });
 }
 
 function getAudioUrlExpiry(audioUrl) {
@@ -344,15 +351,18 @@ function audioCodec(mimeType) {
 }
 
 function selectAudioFormat(formats) {
-  return formats
-    .filter((format) => format?.has_audio && !format?.has_video)
-    .sort((a, b) => {
-      const aMp4 = text(a.mime_type).includes("mp4") ? 1 : 0;
-      const bMp4 = text(b.mime_type).includes("mp4") ? 1 : 0;
-      const aBitrate = Number(a.average_bitrate || a.bitrate || 0);
-      const bBitrate = Number(b.average_bitrate || b.bitrate || 0);
-      return bMp4 - aMp4 || bBitrate - aBitrate;
-    })[0];
+  const audioOnly = formats.filter((format) => format?.has_audio && !format?.has_video);
+  if (audioOnly.length === 0) return undefined;
+  return audioOnly.reduce((best, current) => {
+    const bestMp4 = text(best.mime_type).includes("mp4") ? 1 : 0;
+    const currMp4 = text(current.mime_type).includes("mp4") ? 1 : 0;
+    if (currMp4 !== bestMp4) {
+      return currMp4 > bestMp4 ? current : best;
+    }
+    const bestBitrate = Number(best.average_bitrate || best.bitrate || 0);
+    const currBitrate = Number(current.average_bitrate || current.bitrate || 0);
+    return currBitrate > bestBitrate ? current : best;
+  });
 }
 
 function getCachedAudioStream(videoId) {
@@ -390,41 +400,138 @@ function verifyAudioResolverToken(req) {
   }
 }
 
+const PIPED_INSTANCES = [
+  "https://pipedapi.kavin.rocks",
+  "https://pipedapi.adminforge.de",
+  "https://pipedapi.in.projectsegfau.lt",
+];
+
+let pipedIndex = 0;
+
+async function tryPipedInstance(instance, videoId) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  const response = await fetch(`${instance}/streams/${videoId}`, {
+    signal: controller.signal,
+    headers: { "Accept": "application/json" },
+  });
+  clearTimeout(timeout);
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  const audioStreams = (data.audioStreams || [])
+    .filter((s) => s.url && s.mimeType && !s.videoOnly)
+    .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+
+  const m4a = audioStreams.find((s) =>
+    s.mimeType.toLowerCase().includes("audio/mp4") ||
+    s.mimeType.toLowerCase().includes("audio/m4a")
+  );
+  const best = m4a || audioStreams[0];
+
+  if (!best) {
+    throw new Error("no audio streams in response");
+  }
+
+  return {
+    url: best.url,
+    mimeType: (best.mimeType || "audio/mp4").split(";")[0].trim(),
+    bitrateKbps: best.bitrate ? Math.round(best.bitrate / 1000) : null,
+    duration: typeof data.duration === "number" ? data.duration : null,
+  };
+}
+
+async function tryPipedWithRotation(videoId, attempt = 0, errors = []) {
+  if (attempt >= PIPED_INSTANCES.length) {
+    console.warn(`[StreamResolver] All Piped instances failed for ${videoId}:`, errors);
+    return null;
+  }
+
+  const instance = PIPED_INSTANCES[(pipedIndex + attempt) % PIPED_INSTANCES.length];
+  try {
+    const result = await tryPipedInstance(instance, videoId);
+    pipedIndex = (pipedIndex + attempt + 1) % PIPED_INSTANCES.length;
+    console.log(
+      `[StreamResolver] Piped fallback resolved ${videoId} via ${instance} → ${result.mimeType}`
+    );
+    return result;
+  } catch (err) {
+    errors.push(`${instance}: ${err.message}`);
+    return tryPipedWithRotation(videoId, attempt + 1, errors);
+  }
+}
+
+async function resolveViaPiped(videoId) {
+  return tryPipedWithRotation(videoId, 0, []);
+}
+
 async function resolveAudioStream(videoId) {
   const cached = getCachedAudioStream(videoId);
   if (cached) return cached;
 
-  const yt = await getYoutube();
-  const info = await yt.music.getInfo(videoId, process.env.YOUTUBE_PO_TOKEN ? { po_token: process.env.YOUTUBE_PO_TOKEN } : undefined);
-  const formats = [
-    ...(info?.streaming_data?.formats || []),
-    ...(info?.streaming_data?.adaptive_formats || []),
-  ];
-  const format = selectAudioFormat(formats);
-  if (!format) throw httpError(502, "No playable audio formats found for this video");
-
-  const url = await format.decipher(yt.session.player);
-  if (!url || !url.startsWith("https://")) {
-    throw httpError(502, "Unable to resolve YouTube audio");
+  // 1. Try youtubei.js (InnerTube)
+  try {
+    const yt = await getYoutube();
+    const info = await yt.music.getInfo(videoId, process.env.YOUTUBE_PO_TOKEN ? { po_token: process.env.YOUTUBE_PO_TOKEN } : undefined);
+    const formats = [
+      ...(info?.streaming_data?.formats || []),
+      ...(info?.streaming_data?.adaptive_formats || []),
+    ];
+    const format = selectAudioFormat(formats);
+    if (format) {
+      const url = await format.decipher(yt.session.player);
+      if (url && url.startsWith("https://")) {
+        const mimeType = text(format.mime_type).split(";")[0] || "audio/mp4";
+        const stream = {
+          videoId,
+          url,
+          expiresAt: getAudioUrlExpiry(url),
+          headers: {},
+          formatId: String(format.itag || ""),
+          extension: mimeExtension(mimeType),
+          mimeType,
+          audioCodec: audioCodec(text(format.mime_type)),
+          bitrateKbps: Math.round(Number(format.average_bitrate || format.bitrate || 0) / 1000) || null,
+          duration: Math.round(Number(format.approx_duration_ms || info?.basic_info?.duration || 0) / 1000) || info?.basic_info?.duration || null,
+          contentLength: Number(format.content_length) || null,
+        };
+        cacheAudioStream(videoId, stream);
+        return stream;
+      }
+    }
+  } catch (err) {
+    console.warn(`[StreamResolver] youtubei.js failed for ${videoId}:`, err.message);
   }
 
-  const mimeType = text(format.mime_type).split(";")[0] || "audio/mp4";
-  const stream = {
-    videoId,
-    url,
-    expiresAt: getAudioUrlExpiry(url),
-    headers: {},
-    formatId: String(format.itag || ""),
-    extension: mimeExtension(mimeType),
-    mimeType,
-    audioCodec: audioCodec(text(format.mime_type)),
-    bitrateKbps: Math.round(Number(format.average_bitrate || format.bitrate || 0) / 1000) || null,
-    duration: Math.round(Number(format.approx_duration_ms || info?.basic_info?.duration || 0) / 1000) || info?.basic_info?.duration || null,
-    contentLength: Number(format.content_length) || null,
-  };
+  // 2. Try Piped API as fallback
+  try {
+    const piped = await resolveViaPiped(videoId);
+    if (piped?.url) {
+      const stream = {
+        videoId,
+        url: piped.url,
+        expiresAt: Math.floor(Date.now() / 1000) + 3 * 60 * 60, // 3-hour TTL for Piped
+        headers: {},
+        formatId: "piped",
+        extension: mimeExtension(piped.mimeType),
+        mimeType: piped.mimeType,
+        audioCodec: "mp4a",
+        bitrateKbps: piped.bitrateKbps,
+        duration: piped.duration,
+        contentLength: null,
+      };
+      cacheAudioStream(videoId, stream);
+      return stream;
+    }
+  } catch (err) {
+    console.warn(`[StreamResolver] Piped fallback failed for ${videoId}:`, err.message);
+  }
 
-  cacheAudioStream(videoId, stream);
-  return stream;
+  throw httpError(502, "All stream resolvers failed to resolve this video");
 }
 
 async function resolveAudioStreamForRequest(req) {
@@ -456,8 +563,10 @@ router.get("/search", asyncRoute(async (req, res) => {
   const search = await yt.music.search(term, { type });
   const results = shelfItems(search, type)
     .slice(0, limit)
-    .map((item) => normalizeSearchItem(item, type))
-    .filter(Boolean);
+    .flatMap((item) => {
+      const normalized = normalizeSearchItem(item, type);
+      return normalized ? [normalized] : [];
+    });
 
   res.json(results);
 }));
@@ -537,8 +646,10 @@ router.get("/watch/:videoId", asyncRoute(async (req, res) => {
   const yt = await getYoutube();
   const upNext = await yt.music.getUpNext(videoId, radio);
   const tracks = (upNext?.contents || [])
-    .map((item) => normalizeTrack(item))
-    .filter(Boolean)
+    .flatMap((item) => {
+      const track = normalizeTrack(item);
+      return track ? [track] : [];
+    })
     .slice(0, limit);
 
   res.json({
@@ -552,8 +663,10 @@ router.get("/home", asyncRoute(async (req, res) => {
   const yt = await getYoutube();
   const home = await yt.music.getHomeFeed();
   const shelves = (home?.sections || [])
-    .map((section) => normalizeHomeShelf(section))
-    .filter(Boolean)
+    .flatMap((section) => {
+      const shelf = normalizeHomeShelf(section);
+      return shelf ? [shelf] : [];
+    })
     .slice(0, limit);
 
   res.json(shelves);

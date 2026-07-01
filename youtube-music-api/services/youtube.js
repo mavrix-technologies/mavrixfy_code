@@ -1,5 +1,7 @@
 import { Innertube, Platform } from "youtubei.js";
 
+import vm from "node:vm";
+
 let youtubePromise = null;
 let evaluatorInstalled = false;
 
@@ -7,8 +9,9 @@ function installJavascriptEvaluator() {
   if (evaluatorInstalled) return;
 
   Platform.shim.eval = async (data, env) => {
-    const evaluatePlayerScript = new Function("env", data.output);
-    return evaluatePlayerScript(env);
+    const script = new vm.Script(data.output);
+    const context = vm.createContext({ env });
+    return script.runInContext(context);
   };
 
   evaluatorInstalled = true;

@@ -230,7 +230,7 @@ export function preWarmHomeCache() {
   ]).catch(() => {});
 }
 
-function RootLayoutNav() {
+function useRootLayoutNavigation() {
   const { replace: routerReplace } = useRouter();
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
@@ -414,6 +414,12 @@ function RootLayoutNav() {
       globalQueueSheetRef.current?.collapse();
     }
   }, [unmountNavBar]);
+
+  return { showNavOverlay };
+}
+
+function RootLayoutNav() {
+  const { showNavOverlay } = useRootLayoutNavigation();
 
   return (
     <View style={{ flex: 1 }}>

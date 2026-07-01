@@ -13,7 +13,7 @@ import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFro
 import { logger } from "@/lib/logger";
 import * as ExpoAvPlayer from "@/lib/expoAvPlayer";
 import { getYouTubeMusicAudioStream, getYouTubeMusicVisualVideoId } from "@/lib/youtubeMusicService";
-import YoutubePlayer from "react-native-youtube-iframe";
+import { prefetchNextSongs, shouldPrefetch, clearPrefetchCache } from "@/lib/prefetchQueue";
 import {
   beginPlaybackTransaction,
   completePlaybackTransaction,
@@ -142,7 +142,6 @@ interface PlayerContextValue extends PlayerState {
   clearSleepTimer: () => void;
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
-  setYoutubePlayerFrame: (frame: YoutubePlayerFrame | null) => void;
 }
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -223,7 +222,6 @@ interface PlayerActionsContextValue {
   clearSleepTimer: () => void;
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
-  setYoutubePlayerFrame: (frame: YoutubePlayerFrame | null) => void;
 }
 
 const PlayerActionsContext = createContext<PlayerActionsContextValue | null>(null);
@@ -305,9 +303,9 @@ function isTrustedNativeAudioUrl(value: unknown): boolean {
     const path = parsed.pathname.toLowerCase();
 
     if (host.includes("saavncdn.com")) return true;
-    if (host.includes("googlevideo.com")) {
+    if (host.includes("googlevideo.com") || host.includes("piped") || path.includes("/videoplayback")) {
       const mime = parsed.searchParams.get("mime")?.toLowerCase() || "";
-      return path.includes("/videoplayback") || mime.startsWith("audio/");
+      return path.includes("/videoplayback") || mime.startsWith("audio/") || !path.includes(".");
     }
     return /\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac)(?:$|[?#])/i.test(path);
   } catch {
@@ -319,9 +317,15 @@ function readDownloadAudioUrl(value: unknown): string {
   if (typeof value === "string") return readAudioCandidate(value);
 
   if (Array.isArray(value)) {
+    const qualityMap = new Map<string, any>();
+    for (const item of value) {
+      if (item && typeof item === "object") {
+        qualityMap.set(String((item as any).quality || "").toLowerCase(), item);
+      }
+    }
     const preferredQualities = ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"];
     for (const quality of preferredQualities) {
-      const match = value.find((item) => String(item?.quality || "").toLowerCase() === quality);
+      const match = qualityMap.get(quality);
       const url = readAudioCandidate(match?.url) || readAudioCandidate(match?.link);
       if (url) return url;
     }
@@ -404,7 +408,9 @@ function extractYouTubeVideoId(song: Song | null | undefined): string {
 function normalizePlayableSong(song: Song | null | undefined): Song | null {
   if (!song?.id) return null;
 
-  // Unresolved or expired YouTube tracks use the iframe until a fresh native URL is available.
+  // YouTube songs without fresh native audio: mark them for native resolution
+  // at playback time. The old iframe fallback has been removed — resolution
+  // uses youtubei.js + Piped API with retry logic instead.
   if (isYouTubeSource(song) && !hasFreshYouTubeNativeAudio(song)) {
     const videoId = extractYouTubeVideoId(song);
     if (!videoId) {
@@ -440,7 +446,9 @@ function normalizePlayableSong(song: Song | null | undefined): Song | null {
 }
 
 function isYouTubeSong(song: Song | null | undefined): boolean {
-  return Boolean(song && isYouTubeSource(song) && !hasFreshYouTubeNativeAudio(song));
+  // All YouTube songs are now played natively. By returning false, we bypass
+  // all legacy iframe-specific routing and state management.
+  return false;
 }
 
 const SINGLE_SONG_AUTOPLAY_MIN_SIZE = 6;
@@ -537,7 +545,7 @@ function makeAutoplayQueue(seed: Song, candidates: Song[]): Song[] {
 
 function isSingleSongQueue(queue: Song[], song: Song): boolean {
   if (queue.length <= 1) return true;
-  const uniqueIds = new Set(queue.map((item) => item.id).filter(Boolean));
+  const uniqueIds = new Set(queue.flatMap((item) => item.id ? [item.id] : []));
   return uniqueIds.size <= 1 && uniqueIds.has(song.id);
 }
 
@@ -599,6 +607,7 @@ async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | 
   const videoId = extractYouTubeVideoId(song);
   if (!videoId) return null;
 
+  // Try JioSaavn match first (cross-platform CDN, no expiry issues)
   const resolvedSong = await resolveJioSaavnAudioForSong(song);
   if (resolvedSong) {
     return {
@@ -610,27 +619,49 @@ async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | 
     };
   }
 
-  const stream = await resolveWithin(
-    getYouTubeMusicAudioStream(videoId),
-    YOUTUBE_NATIVE_STREAM_TIMEOUT_MS,
-    null
-  );
-  if (!stream?.url || !isTrustedNativeAudioUrl(stream.url)) {
-    return null;
-  }
+  // Direct stream resolution with retry (youtubei.js → Piped API fallback on server)
+  const RETRY_DELAYS = [0, 1000, 3000]; // immediate, 1s, 3s
+  const attemptResolve = async (attempt: number): Promise<Song | null> => {
+    if (attempt >= RETRY_DELAYS.length) {
+      logger.error(`[NativeResolve] All ${RETRY_DELAYS.length} attempts failed for ${videoId}`);
+      return null;
+    }
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS[attempt]));
+    }
 
-  return {
-    ...song,
-    audioUrl: stream.url,
-    downloadUrl: undefined,
-    playbackHeaders: stream.headers && Object.keys(stream.headers).length > 0 ? stream.headers : undefined,
-    duration: song.duration || stream.duration || 0,
-    youtubeNativeAudio: true,
-    youtubeAudioExpiresAt: stream.expiresAt || Date.now() + RESOLVED_NATIVE_AUDIO_TTL_MS,
-    youtubeVideoId: videoId,
-    source: "youtube",
+    try {
+      const stream = await resolveWithin(
+        getYouTubeMusicAudioStream(videoId),
+        YOUTUBE_NATIVE_STREAM_TIMEOUT_MS,
+        null
+      );
+      if (stream?.url && isTrustedNativeAudioUrl(stream.url)) {
+        if (attempt > 0) {
+          logger.debug(`[NativeResolve] Succeeded on retry attempt ${attempt + 1}`, { videoId });
+        }
+        return {
+          ...song,
+          audioUrl: stream.url,
+          downloadUrl: undefined,
+          playbackHeaders: stream.headers && Object.keys(stream.headers).length > 0 ? stream.headers : undefined,
+          duration: song.duration || stream.duration || 0,
+          youtubeNativeAudio: true,
+          youtubeAudioExpiresAt: stream.expiresAt || Date.now() + RESOLVED_NATIVE_AUDIO_TTL_MS,
+          youtubeVideoId: videoId,
+          source: "youtube",
+        };
+      }
+    } catch (err) {
+      logger.warn(`[NativeResolve] Attempt ${attempt + 1} failed for ${videoId}`, err);
+    }
+
+    return attemptResolve(attempt + 1);
   };
+
+  return attemptResolve(0);
 }
+
 
 function withResolvedPlaybackUrl(song: Song, audioUrl: string): Song {
   const resolvedUrl = readNonEmptyString(audioUrl);
@@ -875,12 +906,6 @@ async function getAdaptiveStreamingQuality(): Promise<"low" | "medium" | "high">
 }
 
 async function getVideoBackgroundQuality() {
-  try {
-    const settings = await Storage.getSettings();
-    return settings.videoBackgroundQuality;
-  } catch (e) {
-    logger.error("[Player] Failed to determine video background quality", e);
-  }
   return "auto";
 }
 
@@ -889,9 +914,18 @@ async function resolvePlaybackUrl(song: Song): Promise<string | null> {
   try {
     const isYt = isYouTubeSource(song);
     if (isYt) {
-      return hasFreshYouTubeNativeAudio(song)
-        ? resolveAudioUrl(song as SongPlaybackSource) || null
-        : null;
+      if (hasFreshYouTubeNativeAudio(song)) {
+        return resolveAudioUrl(song as SongPlaybackSource) || null;
+      }
+      const resolved = await resolveYouTubeTrackForNativePlayback(song);
+      if (resolved && resolved.audioUrl) {
+        song.audioUrl = resolved.audioUrl;
+        song.youtubeNativeAudio = resolved.youtubeNativeAudio;
+        song.youtubeAudioExpiresAt = resolved.youtubeAudioExpiresAt;
+        song.youtubeVideoId = resolved.youtubeVideoId;
+        return resolved.audioUrl;
+      }
+      return null;
     }
 
     // Static import path — dynamic import can fail silently in some contexts
@@ -1046,10 +1080,25 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const [isPlayerReady, setIsPlayerReady] = useState(false);
   const canUseNativePlayback = Boolean(TrackPlayer && setupPlayer);
   
+  // Get auth context properly
+  const { user: authUser } = useAuth();
+
+  const playbackState = usePlaybackState();
+  const progressData = useProgress(1000);
+  const { position, duration: trackDuration } = progressData;
+
+  const [currentSong, setCurrentSong] = useState<Song | null>(null);
+
   const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null);
   const [youtubePlaying, setYoutubePlaying] = useState(false);
   const [youtubeDuration, setYoutubeDuration] = useState(0);
   const [youtubePosition, setYoutubePosition] = useState(0);
+  const [lastYoutubeSongId, setLastYoutubeSongId] = useState<string | null>(null);
+  const currentSongIdStrForYoutube = currentSong?.id ? String(currentSong.id) : null;
+  if (currentSongIdStrForYoutube !== lastYoutubeSongId) {
+    setLastYoutubeSongId(currentSongIdStrForYoutube);
+    setYoutubePosition(0);
+  }
   const [isYoutubeLoading, setIsYoutubeLoading] = useState(false);
   const [youtubePlayerKey, setYoutubePlayerKey] = useState(0);
   const [youtubeUseLocalHTML, setYoutubeUseLocalHTML] = useState(true);
@@ -1076,15 +1125,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   useEffect(() => {
     return () => clearYoutubeAutoPlayTimer();
   }, [clearYoutubeAutoPlayTimer]);
-
-  // Get auth context properly
-  const { user: authUser } = useAuth();
-
-  const playbackState = usePlaybackState();
-  const progressData = useProgress(1000);
-  const { position, duration: trackDuration } = progressData;
-
-  const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [queue, setQueue] = useState<Song[]>([]);
   const [userQueuedSongIds, setUserQueuedSongIds] = useState<string[]>([]);
   const [sourceQueue, setSourceQueue] = useState<Song[]>([]);
@@ -1103,10 +1143,20 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     seconds: number;
     startedAt: number;
   } | null>(null);
+
+  if (seekOverride && seekOverride.songId !== (currentSong?.id ? String(currentSong.id) : null)) {
+    setSeekOverride(null);
+  }
   const [previewIsPlaying, setPreviewIsPlaying] = useState(false);
   const previewIsPlayingRef = useRef(false); // ref so togglePlay never has stale closure
   const previewIsEndedRef = useRef(false);
   const [previewProgress, setPreviewProgress] = useState(0);
+  const [lastPreviewSongId, setLastPreviewSongId] = useState<string | null>(null);
+  const currentSongIdStr = currentSong?.id ? String(currentSong.id) : null;
+  if (currentSongIdStr !== lastPreviewSongId) {
+    setLastPreviewSongId(currentSongIdStr);
+    setPreviewProgress(0);
+  }
   const [previewDuration, setPreviewDuration] = useState(0);
   const [previewIsShuffled, setPreviewIsShuffled] = useState(false);
   const [previewRepeatMode, setPreviewRepeatMode] = useState<"off" | "all" | "one">("off");
@@ -1114,6 +1164,13 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     position: 0,
     duration: 0,
   });
+  const [lastProgressSongId, setLastProgressSongId] = useState<string | null>(null);
+  const currentSongIdStrForProgress = currentSong?.id ? String(currentSong.id) : null;
+  if (currentSongIdStrForProgress !== lastProgressSongId) {
+    setLastProgressSongId(currentSongIdStrForProgress);
+    const durationSeconds = toDurationSeconds(currentSong?.duration);
+    setRuntimeProgressSnapshot({ position: 0, duration: durationSeconds });
+  }
   const [runtimePlaybackStateSnapshot, setRuntimePlaybackStateSnapshot] = useState<any>(undefined);
   const PRELOAD_QUEUE_SIZE = 20;
 
@@ -1155,11 +1212,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const resetProgressForTrackChange = useCallback((songId: string | null | undefined) => {
     if (!songId) return;
     trackProgressSongIdRef.current = String(songId);
-    setSeekOverride(null);
-    setPreviewProgress(0);
-    setYoutubePosition(0);
-    const durationSeconds = toDurationSeconds(currentSongRef.current?.duration);
-    setRuntimeProgressSnapshot({ position: 0, duration: durationSeconds });
   }, []);
 
   useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
@@ -2146,15 +2198,11 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
     // Set requested quality for YouTube video playback.
     if (youtubePlayerRef.current) {
-      void getVideoBackgroundQuality().then((quality) => {
-        try {
-          const ytQuality = Storage.getYouTubePlaybackQuality(quality);
-          youtubePlayerRef.current.setPlaybackQuality?.(ytQuality);
-          logger.debug("[YouTube] Set playback quality to", { ytQuality });
-        } catch (error) {
-          logger.warn("[YouTube] Failed to set playback quality:", error);
-        }
-      });
+      try {
+        youtubePlayerRef.current.setPlaybackQuality?.("auto");
+      } catch (error) {
+        logger.warn("[YouTube] Failed to set playback quality:", error);
+      }
     }
 
     logger.debug("[YouTube] Preparing to start playback in 50ms");
@@ -2364,6 +2412,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     return () => {
       mounted = false;
       ExpoAvPlayer.destroy();
+      clearPrefetchCache();
       youtubeShouldAutoPlayRef.current = false;
       setYoutubePlaying(false);
       setYoutubeVideoId(null);
@@ -2461,6 +2510,33 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           }
 
           applyRuntimeProgressAndState(nextPosition, nextDuration, nextPlaybackState);
+
+          // 80% progress prefetch trigger
+          if (shouldPrefetch(nextPosition, nextDuration)) {
+            void prefetchNextSongs(currentQueue, nextQueueIndex, 3).then((prefetchedUrls) => {
+              if (prefetchedUrls && prefetchedUrls.size > 0 && mounted) {
+                const updatedQueue = currentQueue.map((song) => {
+                  if (song?.id && prefetchedUrls.has(song.id)) {
+                    const newUrl = prefetchedUrls.get(song.id);
+                    if (newUrl) {
+                      return {
+                        ...song,
+                        audioUrl: newUrl,
+                        youtubeNativeAudio: true,
+                        youtubeAudioExpiresAt: Date.now() + RESOLVED_NATIVE_AUDIO_TTL_MS,
+                      };
+                    }
+                  }
+                  return song;
+                });
+                queueRef.current = updatedQueue;
+                setQueue(updatedQueue);
+                setSourceQueue(updatedQueue);
+              }
+            }).catch((err) => {
+              logger.warn("[Prefetch] Background prefetch failed", err);
+            });
+          }
 
           if (nextQueueIndex >= 0 && nextQueueIndex < currentQueue.length) {
             applyNativeTrackIndex(nextQueueIndex, activeTrackId || null);
@@ -2803,10 +2879,14 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     const requestId = ++playRequestIdRef.current;
     setPlaybackIntent(true);
     const playbackPlan = await buildPlaybackQueueForSong(song, newQueue);
-    if (requestId !== playRequestIdRef.current) {
+    if (!playbackPlan || requestId !== playRequestIdRef.current) {
+      if (!playbackPlan && requestId === playRequestIdRef.current) {
+        setPlaybackIntent(null);
+        updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
+      }
       return;
     }
-    if (!playbackPlan || playbackPlan.queue.length === 0) {
+    if (playbackPlan.queue.length === 0) {
       setPlaybackIntent(null);
       updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
       return;
@@ -2915,18 +2995,26 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
         if (targetNativeIndex < 0) {
           if (isYouTubeSource(targetSong)) {
-            // Native audio stream could not be resolved (backend unavailable or yt-dlp failed).
-            // Fall back to iframe — background playback and lock screen will NOT work in this session.
-            logger.warn("[Playback] YouTube native audio resolution failed — falling back to iframe (no background/lock screen)", {
+            // Native audio stream could not be resolved after retries (youtubei.js + Piped).
+            // Show error and auto-advance to the next song instead of falling back to iframe.
+            logger.error("[Playback] YouTube native audio resolution failed — all resolvers exhausted", {
               songId: targetSong.id,
               title: targetSong.title,
             });
-            showPlaybackNotice("Playing via YouTube — background & lock screen unavailable");
-            await playYouTubeSong(
-              stripTransientYouTubeAudioUrl(targetSong),
-              playableQueue,
-              targetIndex
-            );
+            setPlaybackIntent(null);
+            setPlaybackLoading(false);
+            failPendingNativeTrack("Could not resolve audio stream for this song.");
+            updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
+            showPlaybackNotice("Could not play this song. Trying next...");
+            // Auto-advance to next song after a brief delay
+            setTimeout(() => {
+              const cq = queueRef.current;
+              const ci = queueIndexRef.current;
+              if (ci + 1 < cq.length) {
+                const nextTrack = cq[ci + 1];
+                if (nextTrack) void loadAndPlaySong(nextTrack, cq, ci + 1);
+              }
+            }, 500);
             return;
           }
           setPlaybackIntent(null);
@@ -3087,13 +3175,12 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       const requestedIndex = Math.max(0, requestedQueue.findIndex((item) => item.id === song.id));
       const requestedSong = requestedQueue[requestedIndex] || song;
       const playbackPlan = await buildPlaybackQueueForSong(requestedSong, requestedQueue);
-      if (requestId !== playRequestIdRef.current) {
-        return;
-      }
-      if (!playbackPlan) {
-        setPlaybackIntent(null);
-        setPlaybackLoading(false);
-        showPlaybackNotice("This song cannot be played.");
+      if (!playbackPlan || requestId !== playRequestIdRef.current) {
+        if (!playbackPlan && requestId === playRequestIdRef.current) {
+          setPlaybackIntent(null);
+          setPlaybackLoading(false);
+          showPlaybackNotice("This song cannot be played.");
+        }
         return;
       }
 
@@ -4261,7 +4348,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
-      setYoutubePlayerFrame,
     }),
     [
       likedSongIds,
@@ -4288,76 +4374,8 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
-      setYoutubePlayerFrame,
     ]
   );
-
-  // Native audio is preferred. If we must fall back to the YouTube iframe on
-  // the full player screen, give Android WebView a real visible surface so
-  // autoplay does not get stuck behind a hidden 4 px view.
-  // MODIFIED: Always keep YouTube player hidden (4x4 off-screen) for audio-only playback
-  // Original logic made it visible on /player screen, but we want audio-only mode
-  const isYoutubePlayerVisible = false; // Boolean(youtubeVideoId && pathname === "/player");
-  const isShortPlayerScreen = screenHeight <= 760;
-  const isVeryShortPlayerScreen = screenHeight <= 700;
-  const playerTopInset =
-    Platform.OS === "web"
-      ? 67
-      : Platform.OS === "ios"
-        ? Math.max(2, insets.top - 18)
-        : insets.top;
-  const playerTopBarHeight = isShortPlayerScreen ? 50 : 54;
-  const playerArtByWidth = Math.min(screenWidth - 62, 336);
-  const playerArtByHeight = Math.max(
-    192,
-    Math.floor(screenHeight * (isVeryShortPlayerScreen ? 0.3 : 0.34))
-  );
-  const measuredYoutubeFrame = isYoutubePlayerVisible ? youtubePlayerFrame : null;
-  const shouldUseVisibleYoutubeFrame = isYoutubePlayerVisible;
-  const youtubeRootOffsetX = youtubeOverlayRootFrame?.x ?? 0;
-  const youtubeRootOffsetY = youtubeOverlayRootFrame?.y ?? 0;
-  const visibleYoutubeWidth = measuredYoutubeFrame?.width ?? Math.min(playerArtByWidth, playerArtByHeight);
-  const visibleYoutubeHeight = measuredYoutubeFrame?.height ?? Math.round(visibleYoutubeWidth * 9 / 16);
-  const visibleYoutubeTop =
-    measuredYoutubeFrame
-      ? Math.max(0, measuredYoutubeFrame.y - youtubeRootOffsetY)
-      : playerTopInset + playerTopBarHeight + (isShortPlayerScreen ? 4 : 8);
-  const visibleYoutubeLeft =
-    measuredYoutubeFrame
-      ? Math.max(0, measuredYoutubeFrame.x - youtubeRootOffsetX)
-      : Math.max(0, (screenWidth - visibleYoutubeWidth) / 2);
-  const youtubePlayerWidth = shouldUseVisibleYoutubeFrame ? visibleYoutubeWidth : 1;
-  const youtubePlayerHeight = shouldUseVisibleYoutubeFrame ? visibleYoutubeHeight : 1;
-  const youtubeVisibleBorderRadius =
-    measuredYoutubeFrame && measuredYoutubeFrame.width >= screenWidth - 2 ? 0 : 16;
-  const youtubePlayerStyle = shouldUseVisibleYoutubeFrame
-    ? {
-        position: "absolute" as const,
-        width: youtubePlayerWidth,
-        height: youtubePlayerHeight,
-        opacity: 1,
-        left: visibleYoutubeLeft,
-        top: visibleYoutubeTop,
-        zIndex: 1200,
-        elevation: 1200,
-        overflow: "hidden" as const,
-        borderRadius: youtubeVisibleBorderRadius,
-        backgroundColor: "#000000",
-      }
-    : {
-        // MODIFIED: 1x1 pixel in top-right corner with minimal opacity for audio-only playback
-        // Browsers require minimal visibility for autoplay to work
-        position: "absolute" as const,
-        width: 1,
-        height: 1,
-        opacity: 0.01, // Nearly invisible but allows autoplay
-        right: 0,
-        top: 0,
-        zIndex: -999,
-        elevation: -999,
-        overflow: "hidden" as const,
-        pointerEvents: "none" as const,
-      };
 
   return (
     <PlayerContext.Provider value={value}>
@@ -4367,59 +4385,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
             <PlayerBrowseContext.Provider value={browseValue}>
               <PlayerQueueContext.Provider value={queueValue}>
                 <PlayerRowContext.Provider value={rowValue}>
-                  <View
-                    ref={youtubeOverlayRootRef}
-                    onLayout={measureYoutubeOverlayRoot}
-                    style={{ flex: 1 }}
-                  >
-                    {children}
-                    {youtubeVideoId ? (
-                       <View
-                        pointerEvents="none"
-                        style={youtubePlayerStyle}
-                      >
-                        <YoutubePlayer
-                          key={`${youtubeVideoId}-${youtubePlayerKey}-${youtubeUseLocalHTML ? "local" : "hosted"}`}
-                          ref={youtubePlayerRef}
-                          height={youtubePlayerHeight}
-                          width={youtubePlayerWidth}
-                          play={youtubePlaying}
-                          videoId={youtubeVideoId}
-                          onReady={onYoutubeReady}
-                          onChangeState={onYoutubeStateChange}
-                          onError={onYoutubeError}
-                          forceAndroidAutoplay
-                          useLocalHTML={youtubeUseLocalHTML}
-                          baseUrlOverride={youtubeUseLocalHTML ? YOUTUBE_PLAYER_REFERRER_URL : undefined}
-                          initialPlayerParams={{
-                            controls: false,
-                            modestbranding: true,
-                            rel: false,
-                            preventFullScreen: true,
-                            showClosedCaptions: false,
-                            iv_load_policy: 3,
-                            disablekb: true,
-                            fs: false,
-                            playsinline: true,
-                            cc_load_policy: 0,
-                            enablejsapi: 1,
-                            origin: 'https://www.youtube.com',
-                          }}
-                          webViewProps={{
-                            javaScriptEnabled: true,
-                            domStorageEnabled: true,
-                            thirdPartyCookiesEnabled: true,
-                            setSupportMultipleWindows: false,
-                            allowsFullscreenVideo: false,
-                            allowsInlineMediaPlayback: true,
-                            mediaPlaybackRequiresUserAction: false,
-                            androidLayerType: "hardware",
-                            allowsBackgroundMediaPlayback: true,
-                          }}
-                        />
-                      </View>
-                    ) : null}
-                  </View>
+                  {children}
                 </PlayerRowContext.Provider>
               </PlayerQueueContext.Provider>
             </PlayerBrowseContext.Provider>

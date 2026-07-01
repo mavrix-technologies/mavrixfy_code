@@ -3489,11 +3489,7 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   youtubeRectCardImageWrap: {
-    shadowColor: "#FF0033",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    elevation: 4,
+    boxShadow: "0px 8px 14px rgba(255, 0, 51, 0.18)",
   },
   youtubeCoverBackPlateOuter: {
     position: "absolute",
