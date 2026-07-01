@@ -131,6 +131,11 @@ export async function setupPlayer(): Promise<void> {
             autoUpdateMetadata: true,
             // Let RNTP handle audio interruptions (calls, alarms, etc.).
             autoHandleInterruptions: true,
+            // Optimize buffering behaviors for fast startup and stutter prevention
+            minBuffer: 15,
+            maxBuffer: 50,
+            playBuffer: 2.0,
+            backBuffer: 30,
             // allowBackgroundSetup is Android-only (patched native module for
             // Android Auto headless startup). Do NOT pass on iOS.
             ...(Platform.OS === "android" ? { allowBackgroundSetup: true } : {}),

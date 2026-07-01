@@ -18,7 +18,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import { convertJioSaavnSong, getBestImageUrl, Song } from "@/lib/musicData";
-import { getYouTubeMusicArtist, convertYouTubeMusicTrack } from "@/lib/youtubeMusicService";
+import { getYouTubeMusicArtist, convertYouTubeMusicTrack, upscaleYouTubeThumbnail } from "@/lib/youtubeMusicService";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import {
@@ -46,8 +46,8 @@ function pickFirst(v: string | string[] | undefined): string {
 function getYtImage(thumbnails?: any[]) {
   if (!thumbnails || thumbnails.length === 0) return [];
   return thumbnails.map((t) => ({
-    quality: "500x500",
-    url: t.url ? t.url.replace(/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?$/, "=w500-h500-l90-rj") : "",
+    quality: "1200x1200",
+    url: t.url ? upscaleYouTubeThumbnail(t.url) : "",
   }));
 }
 

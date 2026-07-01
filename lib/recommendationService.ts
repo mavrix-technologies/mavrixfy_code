@@ -67,19 +67,6 @@ const LOCAL_SECTION_QUERIES: Array<{
   queries: string[];
 }> = [
     {
-      id: "popularNearYou",
-      title: "Popular Near You",
-      subtitle: "Popular Hindi, Bollywood, and viral India playlists",
-      source: "regional",
-      queries: [
-        "popular hindi playlist",
-        "bollywood most played playlist",
-        "hindi reels trending playlist",
-        "viral bollywood songs playlist",
-        "india top hindi playlist",
-      ],
-    },
-    {
       id: "basedOnActivity",
       title: "Based On Your Activity",
       subtitle: "High-scoring Hindi and Bollywood moods",

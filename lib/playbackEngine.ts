@@ -244,6 +244,19 @@ export function usePlaybackPlayState() {
   );
 }
 
+export function usePlaybackRowState(songId: string | null | undefined) {
+  return usePlaybackEngineSelector(
+    (state) => {
+      const isActive = Boolean(songId && state.currentSongId === songId);
+      return {
+        isActive,
+        isPlaying: isActive && state.isPlaying,
+      };
+    },
+    shallowEqualObject
+  );
+}
+
 export function usePlaybackQueueState() {
   return usePlaybackEngineSelector(
     (state) => ({

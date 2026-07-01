@@ -15,7 +15,8 @@ import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
-import { usePlayerRow } from "@/contexts/PlayerContext";
+import { usePlayerRowActions } from "@/contexts/PlayerContext";
+import { usePlaybackRowState } from "@/lib/playbackEngine";
 import EqualizerBars from "@/components/EqualizerBars";
 import { showGlobalToast } from "@/app/_layout";
 import DownloadButton from "@/components/DownloadButton";
@@ -42,6 +43,28 @@ interface Props {
 const SWIPE_ACTION_WIDTH = 184;
 const SWIPE_COMMIT_DISTANCE = 82;
 const SWIPE_SOFT_LIMIT = 214;
+const ROW_ARTWORK_SIZE = 160;
+
+function getSongRowCoverUrl(url: string | undefined): string {
+  if (!url) return "";
+
+  if (url.includes("googleusercontent.com") || url.includes("ggpht.com")) {
+    const rowSquare = `=w${ROW_ARTWORK_SIZE}-h${ROW_ARTWORK_SIZE}-l90-rj`;
+    if (/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i.test(url)) {
+      return url.replace(/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i, rowSquare);
+    }
+    if (/=s\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i.test(url)) {
+      return url.replace(/=s\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i, `=s${ROW_ARTWORK_SIZE}-c-k-c0x00ffffff-no-rj`);
+    }
+  }
+
+  const youtubeMatch = url.match(/https?:\/\/i\.ytimg\.com\/vi\/([a-zA-Z0-9_-]{11})\/[^?#]+/i);
+  if (youtubeMatch?.[1]) {
+    return `https://i.ytimg.com/vi/${youtubeMatch[1]}/hqdefault.jpg`;
+  }
+
+  return url;
+}
 
 function QueueSwipeAction({
   dragX,
@@ -112,7 +135,8 @@ const SongRow = memo(function SongRow({
   horizontalPadding,
   showSearchSourceMeta = false,
 }: Props) {
-  const { playSong, currentSongId, isPlaying, addToQueue } = usePlayerRow();
+  const { playSong, addToQueue } = usePlayerRowActions();
+  const { isActive, isPlaying } = usePlaybackRowState(song?.id);
   const queueCommittedRef = useRef(false);
   const didSwipeRef = useRef(false);
   const swipeableRef = useRef<Swipeable | null>(null);
@@ -184,8 +208,8 @@ const SongRow = memo(function SongRow({
 
   if (!song || !song.id || !song.title) return null;
 
-  const isActive = currentSongId === song.id;
   const showYouTubeSearchMeta = showSearchSourceMeta && song.source === "youtube";
+  const rowCoverUrl = getSongRowCoverUrl(song.coverUrl);
 
   const handlePress = () => {
     if (didSwipeRef.current) return;
@@ -294,16 +318,16 @@ const SongRow = memo(function SongRow({
             </View>
           ) : null}
 
-            {showCover && song.coverUrl && (
+            {showCover && rowCoverUrl && (
               <Image
-                recyclingKey={song.id}
-                source={{ uri: song.coverUrl }}
+                recyclingKey={`${song.id}:${rowCoverUrl}`}
+                source={{ uri: rowCoverUrl }}
                 style={styles.cover}
                 contentFit="cover"
                 cachePolicy="memory-disk"
-                priority="normal"
+                priority="low"
                 placeholder={{ blurhash: 'L5H2EC=PM+yV+^$gM_e-4Wo0WB%M' }}
-                transition={100}
+                transition={0}
               />
             )}
 
