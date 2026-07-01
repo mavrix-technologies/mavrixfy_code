@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
 import { JioSaavnImage, Song } from "@/lib/musicData";
 import { getYouTubeMusicApiUrl, PRODUCTION_YOUTUBE_MUSIC_API_URL } from "@/lib/api-config";
@@ -1030,13 +1031,26 @@ export async function getYouTubeMusicAudioStream(
         return null;
       }
 
-      audioStreamCache.set(cleanVideoId, stream);
+      // Replace the raw IP-bound googlevideo.com URL with our backend proxy URL.
+      // YouTube signs stream URLs to the requesting IP (the server's IP), so the
+      // mobile app would get 403 if it tried to play the raw URL directly.
+      // The proxy endpoint fetches from Google CDN server-side and pipes bytes back.
+      const apiBase = getYouTubeMusicApiUrl().replace(/\/+$/, "");
+      const proxyUrl = `${apiBase}/stream/media/${encodedVideoId}?platform=${encodeURIComponent(Platform.OS)}`;
+      const proxyStream: YouTubeMusicAudioStream = {
+        ...stream,
+        url: proxyUrl,
+        // Extend TTL — proxy URL never expires (underlying stream is re-resolved server-side)
+        expiresAt: Date.now() + 6 * 60 * 60 * 1000,
+      };
+
+      audioStreamCache.set(cleanVideoId, proxyStream);
       if (audioStreamCache.size > AUDIO_STREAM_CACHE_MAX_ITEMS) {
         const oldestKey = audioStreamCache.keys().next().value;
         if (oldestKey) audioStreamCache.delete(oldestKey);
       }
 
-      return stream;
+      return proxyStream;
     } catch (error: any) {
       if (error?.message === "Request aborted" || signal?.aborted) {
         return null;

@@ -7,12 +7,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Song } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
 import { getCatalogSongs } from "@/lib/catalogService";
-import { resolveYouTubeSongToJioSaavn } from "@/lib/youtubeToJioSaavnDownload";
 import { useAuth } from "@/contexts/AuthContext";
 import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
 import { logger } from "@/lib/logger";
 import * as ExpoAvPlayer from "@/lib/expoAvPlayer";
 import { getYouTubeMusicAudioStream, getYouTubeMusicVisualVideoId } from "@/lib/youtubeMusicService";
+import { resolveYouTubeSongToJioSaavn } from "@/lib/youtubeToJioSaavnDownload";
 import { prefetchNextSongs, shouldPrefetch, clearPrefetchCache } from "@/lib/prefetchQueue";
 import {
   beginPlaybackTransaction,
@@ -303,9 +303,14 @@ function isTrustedNativeAudioUrl(value: unknown): boolean {
     const path = parsed.pathname.toLowerCase();
 
     if (host.includes("saavncdn.com")) return true;
-    if (host.includes("googlevideo.com") || host.includes("piped") || path.includes("/videoplayback")) {
-      const mime = parsed.searchParams.get("mime")?.toLowerCase() || "";
-      return path.includes("/videoplayback") || mime.startsWith("audio/") || !path.includes(".");
+    if (
+      host.includes("googlevideo.com") ||
+      host.includes("piped") ||
+      path.includes("/videoplayback") ||
+      path.includes("/stream/media/") ||
+      path.includes("/stream/")
+    ) {
+      return true;
     }
     return /\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac)(?:$|[?#])/i.test(path);
   } catch {
@@ -771,13 +776,6 @@ async function resolveNativeTrackEntry(song: Song, appIndex: number): Promise<Na
   if (!nativeSong) return null;
 
   let audioUrl = await resolvePlaybackUrl(nativeSong);
-  if (!audioUrl && !isYouTubeSource(song) && song.source !== "local") {
-    const matchedSong = await resolveJioSaavnAudioForSong(song);
-    if (matchedSong) {
-      nativeSong = matchedSong;
-      audioUrl = await resolvePlaybackUrl(nativeSong);
-    }
-  }
   if (!audioUrl) return null;
   const resolvedSong = withResolvedPlaybackUrl(nativeSong, audioUrl);
 
