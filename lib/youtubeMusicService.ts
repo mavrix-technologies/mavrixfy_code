@@ -92,7 +92,7 @@ const CURRENT_YEAR = new Date().getFullYear();
 const OFFICIAL_VISUAL_SEARCH_CACHE_VERSION = "v1";
 const YOUTUBE_VIDEO_SEARCH_CACHE_VERSION = "v2";
 
-// Piped constants and state removed - now using yt-dlp via backend
+// Stream resolution is handled by the backend.
 
 // ─── Cache Helpers ────────────────────────────────────────────────────────────
 
@@ -834,8 +834,18 @@ function normalizeAudioStreamPayload(json: any, videoId: string): YouTubeMusicAu
   };
 }
 
-function isNativeAudioOnlyStream(stream: YouTubeMusicAudioStream): boolean {
-  if (!stream.url || stream.hasAudio === false || stream.hasVideo === true) {
+function isBackendProxiedStreamUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname.toLowerCase();
+    return path.includes("/stream/media/") || path.includes("/api/youtube-music/stream/");
+  } catch {
+    return false;
+  }
+}
+
+function isNativePlayableStream(stream: YouTubeMusicAudioStream): boolean {
+  if (!stream.url || stream.hasAudio === false) {
     return false;
   }
 
@@ -843,6 +853,10 @@ function isNativeAudioOnlyStream(stream: YouTubeMusicAudioStream): boolean {
   const formatId = readString(stream.formatId);
   const format = formatId.toUpperCase();
   const codec = readString(stream.audioCodec).toLowerCase();
+  const isMp4Video =
+    mimeType.includes("video/mp4") ||
+    formatId === "18" ||
+    (stream.hasVideo === true && codec.includes("mp4a"));
   const isMp4Audio =
     mimeType.includes("audio/mp4") ||
     mimeType.includes("audio/m4a") ||
@@ -863,6 +877,10 @@ function isNativeAudioOnlyStream(stream: YouTubeMusicAudioStream): boolean {
     format.includes("OPUS") ||
     format.includes("WEBM") ||
     codec.includes("opus");
+
+  if (stream.hasVideo === true) {
+    return isBackendProxiedStreamUrl(stream.url) && isMp4Video;
+  }
 
   if (isMp4Audio || isMp3Audio || isAacAudio) return true;
 
@@ -889,7 +907,7 @@ function getConservativeStreamExpiry(url: string): number {
   return getDirectStreamExpiresAt(url) ?? Date.now() + 55 * 60 * 1000;
 }
 
-// Piped helper functions removed - no longer needed with yt-dlp
+// Stream helper functions.
 
 function toBitrateKbps(bitrate: number): number | null {
   if (!Number.isFinite(bitrate) || bitrate <= 0) return null;
@@ -1100,36 +1118,59 @@ export async function getYouTubeMusicAudioStream(
   try {
     const nonce = Date.now();
     const queryAttempts = [
-      // Ask the backend for a mobile-safe M4A/audio-only stream first.
-      `platform=m4a&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`,
-      `platform=ios&formatId=140&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`,
-      `platform=ios&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`,
-      // Android can often play audio/webm; iOS should stay on MP4/M4A-only attempts.
+      // Ask the backend for a mobile-safe stream. It prefers audio-only, then falls back to seekable MP4.
+      `platform=ios&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
+      `platform=m4a&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
+      `platform=ios&preferMuxed=true&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
+      // Android can often play audio/webm.
       ...(Platform.OS === "android"
-        ? [`platform=best&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`]
+        ? [`platform=best&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`]
         : []),
     ];
+    let lastError: unknown = null;
 
     for (const query of queryAttempts) {
-      const candidates = getEndpointCandidates(
-        `/stream/${encodeURIComponent(cleanVideoId)}`,
-        `/stream/${encodeURIComponent(cleanVideoId)}`,
-        query
-      );
-      const json = await fetchFirstJson<any>(candidates, signal);
-      const stream = json ? normalizeAudioStreamPayload(json, cleanVideoId) : null;
+      let stream: YouTubeMusicAudioStream | null = null;
+      try {
+        const candidates = getEndpointCandidates(
+          `/stream/${encodeURIComponent(cleanVideoId)}`,
+          `/stream/${encodeURIComponent(cleanVideoId)}`,
+          query
+        );
+        const json = await fetchFirstJson<any>(candidates, signal);
+        stream = json ? normalizeAudioStreamPayload(json, cleanVideoId) : null;
+      } catch (error: any) {
+        lastError = error;
+        if (error?.message === "Request aborted" || signal?.aborted) {
+          throw error;
+        }
+        logger.warn("[YouTube Music] Stream candidate failed", {
+          videoId: cleanVideoId,
+          query,
+          error: error?.message || String(error),
+        });
+        continue;
+      }
+
       if (!stream) continue;
 
-      if (isNativeAudioOnlyStream(stream)) {
+      if (isNativePlayableStream(stream)) {
         return stream;
       }
 
-      logger.warn("[YouTube Music] Rejected backend stream that is not native audio-only", {
+      logger.warn("[YouTube Music] Rejected backend stream that is not native playable", {
         videoId: cleanVideoId,
         formatId: stream.formatId,
         mimeType: stream.mimeType,
         hasAudio: stream.hasAudio,
         hasVideo: stream.hasVideo,
+      });
+    }
+
+    if (lastError) {
+      logger.warn("[YouTube Music] All stream candidates failed", {
+        videoId: cleanVideoId,
+        error: lastError instanceof Error ? lastError.message : String(lastError),
       });
     }
 
@@ -1147,22 +1188,20 @@ export async function getYouTubeMusicAudioStream(
 }
 
 /**
- * Get YouTube audio stream using yt-dlp via backend.
- * Simple and reliable - no Piped, no complex fallback logic.
+ * Get a backend-proxied YouTube audio stream for native playback.
  * 
  * @param videoId - YouTube video ID
  * @param signal - Abort signal for cancellation
  * @returns Audio stream info with direct playback URL
  */
-export async function getYouTubeAudioStreamWithPiped(
+export async function getYouTubeAudioStreamForPlayback(
   videoId: string,
   signal?: AbortSignal
 ): Promise<YouTubeMusicAudioStream | null> {
   const cleanVideoId = extractVideoId({ videoId: readString(videoId).replace(/^youtube_/, "") });
   if (!cleanVideoId) return null;
 
-  // Directly use backend with yt-dlp (simple and reliable)
-  logger.info(`[YouTube Music] Resolving stream for ${cleanVideoId} via backend (yt-dlp)`);
+  logger.info(`[YouTube Music] Resolving stream for ${cleanVideoId} via backend`);
   return getYouTubeMusicAudioStream(cleanVideoId, signal);
 }
 

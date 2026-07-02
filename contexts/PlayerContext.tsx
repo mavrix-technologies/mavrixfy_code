@@ -12,7 +12,7 @@ import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFro
 import { logger } from "@/lib/logger";
 import * as ExpoAvPlayer from "@/lib/expoAvPlayer";
 import {
-  getYouTubeAudioStreamWithPiped,
+  getYouTubeAudioStreamForPlayback,
   reportYouTubeMusicPlaybackFailure,
 } from "@/lib/youtubeMusicService";
 import { prefetchNextSongs, shouldPrefetch, clearPrefetchCache } from "@/lib/prefetchQueue";
@@ -595,7 +595,7 @@ async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | 
   const timeout = createPlaybackTimeoutSignal(YOUTUBE_NATIVE_STREAM_TIMEOUT_MS);
 
   try {
-    const stream = await getYouTubeAudioStreamWithPiped(videoId, timeout.signal);
+    const stream = await getYouTubeAudioStreamForPlayback(videoId, timeout.signal);
 
     logger.info(`[NativeResolve] Got stream response for ${videoId}`, {
       hasStream: !!stream,
@@ -776,11 +776,39 @@ async function resolveNativeTrackEntries(songs: Song[], startIndex = 0): Promise
     songs.map((song, index) => resolveNativeTrackEntry(song, startIndex + index))
   );
 
-  return mapFilter(
-    settled,
-    (result) => (result.status === "fulfilled" ? result.value : null),
-    (entry): entry is NativeTrackEntry => Boolean(entry?.song?.id && readNonEmptyString(entry?.track?.url))
-  );
+  const entries: NativeTrackEntry[] = [];
+  settled.forEach((result, index) => {
+    const song = songs[index];
+    const appIndex = startIndex + index;
+
+    if (result.status === "rejected") {
+      if (isYouTubeSource(song)) {
+        logger.warn("[NativeResolve] Skipping unresolved YouTube track", {
+          songId: song?.id,
+          title: song?.title,
+          appIndex,
+          error: result.reason,
+        });
+      }
+      return;
+    }
+
+    const entry = result.value;
+    if (entry?.song?.id && readNonEmptyString(entry?.track?.url)) {
+      entries.push(entry);
+      return;
+    }
+
+    if (isYouTubeSource(song)) {
+      logger.warn("[NativeResolve] Skipping YouTube track without playable stream", {
+        songId: song?.id,
+        title: song?.title,
+        appIndex,
+      });
+    }
+  });
+
+  return entries;
 }
 
 type NowPlayingMetadataSource = {
@@ -1769,6 +1797,73 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const scheduleNextTrackAfterFailure = useCallback((
+    failedIndex: number,
+    reason: string,
+    notice = "Skipping unavailable song...",
+    delayMs = 250
+  ): boolean => {
+    const currentQueue = queueRef.current;
+    if (currentQueue.length === 0 || !loadAndPlaySongRef.current) return false;
+
+    const safeFailedIndex = Math.max(0, Math.min(failedIndex, currentQueue.length - 1));
+    const failedSong = currentQueue[safeFailedIndex];
+    const nextIndex = getNextQueueIndex(
+      safeFailedIndex,
+      currentQueue.length,
+      repeatModeRef.current === "all" ? "all" : "off"
+    );
+    const nextTrack = nextIndex !== null ? currentQueue[nextIndex] : null;
+
+    if (nextIndex === null || !nextTrack) return false;
+    if (failedSong?.id && String(nextTrack.id) === String(failedSong.id) && currentQueue.length > 1) {
+      return false;
+    }
+
+    logger.warn("[Player] Skipping failed track and advancing queue", {
+      reason,
+      failedIndex: safeFailedIndex,
+      failedSongId: failedSong?.id,
+      failedTitle: failedSong?.title,
+      nextIndex,
+      nextSongId: nextTrack.id,
+      nextTitle: nextTrack.title,
+    });
+
+    if (notice) showPlaybackNotice(notice);
+    setPlaybackIntent(true);
+    setPlaybackLoading(true);
+    setQueueIndex(nextIndex);
+    queueIndexRef.current = nextIndex;
+    currentSongRef.current = nextTrack;
+    setCurrentSong(nextTrack);
+    updatePlaybackEngineSnapshot({
+      currentSong: nextTrack,
+      queue: currentQueue,
+      queueIndex: nextIndex,
+      desiredPlayState: true,
+      isPlaying: true,
+      isLoading: true,
+      isBuffering: false,
+    });
+
+    setTimeout(() => {
+      const liveQueue = queueRef.current;
+      const liveSong = liveQueue[nextIndex];
+      if (liveSong?.id === nextTrack.id) {
+        void loadAndPlaySongRef.current?.(liveSong, liveQueue, nextIndex);
+        return;
+      }
+
+      const refreshedIndex = liveQueue.findIndex((item) => item.id === nextTrack.id);
+      if (refreshedIndex >= 0) {
+        void loadAndPlaySongRef.current?.(liveQueue[refreshedIndex], liveQueue, refreshedIndex);
+      }
+    }, delayMs);
+
+    return true;
+  }, [showPlaybackNotice]);
+
   useEffect(() => {
     const shouldWatchNativeStart =
       playbackIntent === true ||
@@ -1836,16 +1931,13 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         });
         if (cancelled || recovered) return;
 
-        const currentQueue = queueRef.current;
-        const nextIndex = getNextQueueIndex(
+        const skipped = scheduleNextTrackAfterFailure(
           queueIndexRef.current,
-          currentQueue.length,
-          repeatModeRef.current === "all" ? "all" : "off"
+          "youtube_start_stall",
+          "This song is slow to start. Trying next...",
+          0
         );
-        const nextTrack = nextIndex !== null ? currentQueue[nextIndex] : null;
-        if (nextIndex !== null && nextTrack && loadAndPlaySongRef.current) {
-          showPlaybackNotice("This song is slow to start. Trying next...");
-          await loadAndPlaySongRef.current(nextTrack, currentQueue, nextIndex);
+        if (skipped) {
           return;
         }
       }
@@ -1881,6 +1973,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     playbackLoading,
     playbackIntent,
     resolvedIsBuffering,
+    scheduleNextTrackAfterFailure,
     showPlaybackNotice,
   ]);
 
@@ -2410,24 +2503,13 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
       const failedSong = currentSongRef.current;
       if (failedSong && isYouTubeSource(failedSong)) {
-        const currentQueue = queueRef.current;
-        const nextIndex = getNextQueueIndex(
+        const skipped = scheduleNextTrackAfterFailure(
           queueIndexRef.current,
-          currentQueue.length,
-          repeatModeRef.current === "all" ? "all" : "off"
+          "youtube_playback_error",
+          "Skipping unavailable song...",
+          0
         );
-        const nextTrack = nextIndex !== null ? currentQueue[nextIndex] : null;
-        if (nextIndex !== null && nextTrack && loadAndPlaySongRef.current && nextTrack.id !== failedSong.id) {
-          showPlaybackNotice("Skipping unavailable song...");
-          setPlaybackIntent(true);
-          setPlaybackLoading(true);
-          updatePlaybackEngineSnapshot({
-            desiredPlayState: true,
-            isPlaying: true,
-            isLoading: true,
-            isBuffering: false,
-          });
-          void loadAndPlaySongRef.current(nextTrack, currentQueue, nextIndex);
+        if (skipped) {
           return;
         }
       }
@@ -2443,7 +2525,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       });
       showPlaybackNotice("Playback stopped. Please try this song again.");
     });
-  }, [retryYouTubePlaybackAfterFailure, showPlaybackNotice]);
+  }, [retryYouTubePlaybackAfterFailure, scheduleNextTrackAfterFailure, showPlaybackNotice]);
 
   const handleNativeQueueEnded = useCallback(() => {
     const currentQueue = queueRef.current;
@@ -2646,11 +2728,37 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     if (songsToAppend.length === 0) return;
 
     void (async () => {
-      const entries = await resolveNativeTrackEntries(songsToAppend, startIndex);
-      if (requestId !== playRequestIdRef.current || entries.length === 0) return;
+      const nextStartIndex = startIndex + songsToAppend.length;
+      const scheduleNextYouTubeBatch = () => {
+        if (maxCount !== YOUTUBE_UPCOMING_NATIVE_PRELOAD_SIZE) return;
+        if (requestId !== playRequestIdRef.current) return;
+
+        const liveQueue = queueRef.current;
+        if (nextStartIndex >= liveQueue.length) return;
+
+        setTimeout(() => {
+          appendRemainingTracksIfCurrent(
+            requestId,
+            queueRef.current.slice(nextStartIndex),
+            nextStartIndex,
+            maxCount
+          );
+        }, 1200);
+      };
+
+      const resolvedEntries = await resolveNativeTrackEntries(songsToAppend, startIndex);
+      if (requestId !== playRequestIdRef.current) return;
+      if (resolvedEntries.length === 0) {
+        scheduleNextYouTubeBatch();
+        return;
+      }
 
       await runSerializedPlaybackSwitch(async () => {
         if (requestId !== playRequestIdRef.current) return;
+
+        const queuedAppIndices = new Set(nativeQueueAppIndicesRef.current);
+        const entries = resolvedEntries.filter((entry) => !queuedAppIndices.has(entry.appIndex));
+        if (entries.length === 0) return;
 
         const currentQueue = queueRef.current;
         const resolvedQueue = mergeResolvedNativeEntriesIntoQueue(currentQueue, entries);
@@ -2668,8 +2776,13 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         ];
         await TrackPlayer.add(entries.map((entry) => entry.track));
       });
-    })().catch(() => {
-      // Silent background queue append failure.
+      scheduleNextYouTubeBatch();
+    })().catch((error) => {
+      logger.warn("[Player] Background native queue append failed", {
+        startIndex,
+        count: songsToAppend.length,
+        error,
+      });
     });
   }, [runSerializedPlaybackSwitch]);
 
@@ -2771,7 +2884,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
         // Resolve playable URLs before handing items to TrackPlayer.
         const preloadCount = isYouTubeSource(targetSong)
-          ? targetIndex + 1
+          ? Math.min(playableQueue.length, targetIndex + 1 + YOUTUBE_UPCOMING_NATIVE_PRELOAD_SIZE)
           : Math.max(
               Math.min(playableQueue.length, PRELOAD_QUEUE_SIZE),
               targetIndex + 1
@@ -2796,17 +2909,15 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
             setPlaybackLoading(false);
             failPendingNativeTrack("Could not resolve audio stream for this song.");
             updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
-            showPlaybackNotice("Could not play this song. Trying next...");
-            // Auto-advance to next song after a brief delay
-            setTimeout(() => {
-              const cq = queueRef.current;
-              const ci = queueIndexRef.current;
-              const nextIndex = getNextQueueIndex(ci, cq.length, repeatModeRef.current === "all" ? "all" : "off");
-              if (nextIndex !== null) {
-                const nextTrack = cq[nextIndex];
-                if (nextTrack) void loadAndPlaySong(nextTrack, cq, nextIndex);
-              }
-            }, 500);
+            const skipped = scheduleNextTrackAfterFailure(
+              targetIndex,
+              "youtube_resolve_failed",
+              "Could not play this song. Trying next...",
+              500
+            );
+            if (!skipped) {
+              showPlaybackNotice("Could not play this song.");
+            }
             return;
           }
           setPlaybackIntent(null);
@@ -2896,7 +3007,17 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           songId: song?.id,
           songAudioUrl: song?.audioUrl,
         });
-        showPlaybackNotice("Could not start playback.");
+        const skipped = requestId === playRequestIdRef.current && isYouTubeSource(targetSong)
+          ? scheduleNextTrackAfterFailure(
+              targetIndex,
+              "load_and_play_failed",
+              "Could not start this song. Trying next...",
+              500
+            )
+          : false;
+        if (!skipped) {
+          showPlaybackNotice("Could not start playback.");
+        }
       } finally {
         if (requestId === playRequestIdRef.current) {
           setPlaybackLoading(false);
@@ -2904,7 +3025,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         }
       }
     });
-  }, [appendRemainingTracksIfCurrent, buildPlaybackQueueForSong, clearUserQueuedSongIds, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, markPendingNativeTrack, runSerializedPlaybackSwitch, showPlaybackNotice]);
+  }, [appendRemainingTracksIfCurrent, buildPlaybackQueueForSong, clearUserQueuedSongIds, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, markPendingNativeTrack, runSerializedPlaybackSwitch, scheduleNextTrackAfterFailure, showPlaybackNotice]);
   loadAndPlaySongRef.current = loadAndPlaySong;
 
   useEffect(() => {
@@ -3330,8 +3451,24 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       });
     } catch (error) {
       failPendingNativeTrack("Could not skip to next track.");
+      logger.warn("[Player] nextSong failed", error);
+      const failedSong = currentSongRef.current;
+      const skipped = failedSong && isYouTubeSource(failedSong)
+        ? scheduleNextTrackAfterFailure(
+            queueIndexRef.current,
+            "next_song_failed",
+            "Could not play this song. Trying next...",
+            250
+          )
+        : false;
+      if (!skipped) {
+        setPlaybackIntent(null);
+        setPlaybackLoading(false);
+        updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
+        showPlaybackNotice("Could not skip to next track.");
+      }
     }
-  }, [consumeLeadingUserQueuedSongId, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, isPlayerReady, loadAndPlaySong, markPendingNativeTrack, previewRepeatMode, runSerializedPlaybackSwitch]);
+  }, [consumeLeadingUserQueuedSongId, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, isPlayerReady, loadAndPlaySong, markPendingNativeTrack, previewRepeatMode, runSerializedPlaybackSwitch, scheduleNextTrackAfterFailure, showPlaybackNotice]);
 
   const prevSong = useCallback(async () => {
     try {
