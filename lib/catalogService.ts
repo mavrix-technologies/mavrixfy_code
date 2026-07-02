@@ -12,11 +12,17 @@ let _cache: Song[] | null = null;
 let _cacheTime = 0;
 let _inFlight: Promise<Song[]> | null = null;
 const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+const FAILURE_CACHE_TTL = 60 * 1000; // Avoid repeated permission-denied reads in dev.
+let _lastFailureAt = 0;
 
 export async function getCatalogSongs(): Promise<Song[]> {
   const now = Date.now();
   if (_cache && now - _cacheTime < CACHE_TTL) {
     return _cache;
+  }
+
+  if (_lastFailureAt && now - _lastFailureAt < FAILURE_CACHE_TTL) {
+    return _cache || [];
   }
 
   if (_inFlight) {
@@ -66,8 +72,21 @@ async function fetchCatalogSongs(): Promise<Song[]> {
 
     _cache = songs;
     _cacheTime = Date.now();
+    _lastFailureAt = 0;
     return songs;
   } catch (e) {
+    _lastFailureAt = Date.now();
+    const error = e as { code?: string; message?: string };
+    const message = error?.message || '';
+
+    if (error?.code === 'permission-denied' || message.includes('Missing or insufficient permissions')) {
+      logger.warn(
+        '[CatalogService] Firestore /songs is not readable for this user. Ensure public song docs match firestore.rules public catalog fields.',
+        e
+      );
+      return _cache || [];
+    }
+
     logger.warn('[CatalogService] Failed to fetch catalog songs.', e);
     return _cache || [];
   }

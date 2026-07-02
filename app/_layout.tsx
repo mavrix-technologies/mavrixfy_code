@@ -58,7 +58,47 @@ function isExpoGoRuntime(): boolean {
   return Constants.executionEnvironment === "storeClient" || Constants.appOwnership === "expo";
 }
 
-void SplashScreen.preventAutoHideAsync().catch(() => {});
+let splashPrevented = false;
+let splashPreventFailed = false;
+let splashHideRequested = false;
+
+function isMissingNativeSplashError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return message.includes("No native splash screen registered");
+}
+
+void SplashScreen.preventAutoHideAsync()
+  .then(() => {
+    splashPrevented = true;
+  })
+  .catch((error) => {
+    splashPreventFailed = true;
+    if (!isMissingNativeSplashError(error)) {
+      logger.warn("[RootLayout] Failed to prevent splash auto-hide", error);
+    }
+  });
+
+function hideSplashScreenSafely(reason: string) {
+  if (splashHideRequested || splashPreventFailed) return;
+  if (!splashPrevented) {
+    setTimeout(() => hideSplashScreenSafely(reason), 50);
+    return;
+  }
+
+  splashHideRequested = true;
+  try {
+    void SplashScreen.hideAsync().catch((error) => {
+      if (!isMissingNativeSplashError(error)) {
+        logger.warn("[RootLayout] Failed to hide splash screen", { reason, error });
+      }
+    });
+  } catch (error) {
+    if (!isMissingNativeSplashError(error)) {
+      logger.warn("[RootLayout] Failed to hide splash screen", { reason, error });
+    }
+  }
+}
+
 if (!isExpoGoRuntime()) {
   SplashScreen.setOptions({ fade: true, duration: 320 });
 }
@@ -242,7 +282,7 @@ function useRootLayoutNavigation() {
     const safetyTimer = setTimeout(() => {
       if (!splashReleasedRef.current) {
         splashReleasedRef.current = true;
-        void SplashScreen.hideAsync().catch(() => {});
+        hideSplashScreenSafely("safety_timeout");
         logger.warn("[RootLayoutNav] Splash screen hidden by safety timeout.");
       }
     }, 5000);
@@ -251,7 +291,7 @@ function useRootLayoutNavigation() {
       splashReleasedRef.current = true;
       clearTimeout(safetyTimer);
       const frame = requestAnimationFrame(() => {
-        void SplashScreen.hideAsync().catch(() => {});
+        hideSplashScreenSafely("auth_ready");
       });
       return () => cancelAnimationFrame(frame);
     }

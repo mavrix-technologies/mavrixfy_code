@@ -78,6 +78,8 @@ export interface YouTubeMusicAudioStream {
   audioCodec?: string;
   bitrateKbps?: number | null;
   duration?: number | null;
+  hasAudio?: boolean;
+  hasVideo?: boolean;
 }
 
 const YOUTUBE_MUSIC_CACHE_PREFIX = "@mavrixfy_youtube_music";
@@ -89,6 +91,8 @@ const OPTIONAL_HOME_SECTION_TIMEOUT_MS = 4500;
 const CURRENT_YEAR = new Date().getFullYear();
 const OFFICIAL_VISUAL_SEARCH_CACHE_VERSION = "v1";
 const YOUTUBE_VIDEO_SEARCH_CACHE_VERSION = "v2";
+
+// Piped constants and state removed - now using yt-dlp via backend
 
 // ─── Cache Helpers ────────────────────────────────────────────────────────────
 
@@ -651,7 +655,29 @@ async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T | null
       signal: timeout.signal,
     });
     if (!res.ok) return null;
-    return res.json();
+    const body = await res.text();
+    const trimmed = body.trim();
+    if (!trimmed) return null;
+
+    const contentType = res.headers.get("content-type")?.toLowerCase() || "";
+    if (!contentType.includes("json") && trimmed.startsWith("<")) {
+      logger.warn("[YouTube Music] Ignoring non-JSON response", {
+        url,
+        preview: trimmed.slice(0, 80).replace(/\s+/g, " "),
+      });
+      return null;
+    }
+
+    try {
+      return JSON.parse(trimmed) as T;
+    } catch (error: any) {
+      logger.warn("[YouTube Music] Ignoring invalid JSON response", {
+        url,
+        error: error?.message || String(error),
+        preview: trimmed.slice(0, 80).replace(/\s+/g, " "),
+      });
+      return null;
+    }
   } finally {
     timeout.cleanup();
   }
@@ -803,7 +829,71 @@ function normalizeAudioStreamPayload(json: any, videoId: string): YouTubeMusicAu
     audioCodec: readString(source?.audioCodec) || undefined,
     bitrateKbps: Number.isFinite(Number(source?.bitrateKbps)) ? Number(source.bitrateKbps) : null,
     duration: Number.isFinite(Number(source?.duration)) ? Number(source.duration) : null,
+    hasAudio: typeof source?.hasAudio === "boolean" ? source.hasAudio : undefined,
+    hasVideo: typeof source?.hasVideo === "boolean" ? source.hasVideo : undefined,
   };
+}
+
+function isNativeAudioOnlyStream(stream: YouTubeMusicAudioStream): boolean {
+  if (!stream.url || stream.hasAudio === false || stream.hasVideo === true) {
+    return false;
+  }
+
+  const mimeType = readString(stream.mimeType).toLowerCase();
+  const formatId = readString(stream.formatId);
+  const format = formatId.toUpperCase();
+  const codec = readString(stream.audioCodec).toLowerCase();
+  const isMp4Audio =
+    mimeType.includes("audio/mp4") ||
+    mimeType.includes("audio/m4a") ||
+    format === "M4A" ||
+    format === "MPEG_4" ||
+    formatId === "139" ||
+    formatId === "140" ||
+    formatId === "141" ||
+    codec.includes("mp4a");
+  const isMp3Audio =
+    mimeType.includes("audio/mpeg") ||
+    mimeType.includes("audio/mp3") ||
+    format === "MP3";
+  const isAacAudio = mimeType.includes("audio/aac") || codec.includes("aac");
+  const isWebmOpusAudio =
+    mimeType.includes("audio/webm") ||
+    mimeType.includes("opus") ||
+    format.includes("OPUS") ||
+    format.includes("WEBM") ||
+    codec.includes("opus");
+
+  if (isMp4Audio || isMp3Audio || isAacAudio) return true;
+
+  return Platform.OS === "android" && isWebmOpusAudio;
+}
+
+function getDirectStreamExpiresAt(url: string): number | null {
+  try {
+    const parsed = new URL(url);
+    const expireParam = parsed.searchParams.get("expire");
+    if (!expireParam) return null;
+
+    const expireSeconds = Number(expireParam);
+    if (!Number.isFinite(expireSeconds) || expireSeconds <= 0) return null;
+
+    const expiresAt = expireSeconds * 1000;
+    return expiresAt > Date.now() + 30 * 1000 ? expiresAt : null;
+  } catch {
+    return null;
+  }
+}
+
+function getConservativeStreamExpiry(url: string): number {
+  return getDirectStreamExpiresAt(url) ?? Date.now() + 55 * 60 * 1000;
+}
+
+// Piped helper functions removed - no longer needed with yt-dlp
+
+function toBitrateKbps(bitrate: number): number | null {
+  if (!Number.isFinite(bitrate) || bitrate <= 0) return null;
+  return bitrate > 1000 ? Math.round(bitrate / 1000) : Math.round(bitrate);
 }
 
 function getChartsPayload(json: any): any {
@@ -1008,22 +1098,42 @@ export async function getYouTubeMusicAudioStream(
   if (!cleanVideoId) return null;
 
   try {
-    // Force ios platform to get MP4/M4A format (formatId 140) which works universally
-    // WebM/Opus (formatId 251) from android has playback issues on both platforms
-    const query = [
-      `platform=ios`,
-      `reason=playback_start`,
-      `nonce=${Date.now()}`,
-    ].join("&");
-    
-    const candidates = getEndpointCandidates(
-      `/stream/${encodeURIComponent(cleanVideoId)}`,
-      `/stream/${encodeURIComponent(cleanVideoId)}`,
-      query
-    );
-    const json = await fetchFirstJson<any>(candidates, signal);
+    const nonce = Date.now();
+    const queryAttempts = [
+      // Ask the backend for a mobile-safe M4A/audio-only stream first.
+      `platform=m4a&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`,
+      `platform=ios&formatId=140&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`,
+      `platform=ios&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`,
+      // Android can often play audio/webm; iOS should stay on MP4/M4A-only attempts.
+      ...(Platform.OS === "android"
+        ? [`platform=best&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`]
+        : []),
+    ];
 
-    return json ? normalizeAudioStreamPayload(json, cleanVideoId) : null;
+    for (const query of queryAttempts) {
+      const candidates = getEndpointCandidates(
+        `/stream/${encodeURIComponent(cleanVideoId)}`,
+        `/stream/${encodeURIComponent(cleanVideoId)}`,
+        query
+      );
+      const json = await fetchFirstJson<any>(candidates, signal);
+      const stream = json ? normalizeAudioStreamPayload(json, cleanVideoId) : null;
+      if (!stream) continue;
+
+      if (isNativeAudioOnlyStream(stream)) {
+        return stream;
+      }
+
+      logger.warn("[YouTube Music] Rejected backend stream that is not native audio-only", {
+        videoId: cleanVideoId,
+        formatId: stream.formatId,
+        mimeType: stream.mimeType,
+        hasAudio: stream.hasAudio,
+        hasVideo: stream.hasVideo,
+      });
+    }
+
+    return null;
   } catch (error: any) {
     if (error?.message === "Request aborted" || signal?.aborted) {
       return null;
@@ -1034,6 +1144,26 @@ export async function getYouTubeMusicAudioStream(
     });
     return null;
   }
+}
+
+/**
+ * Get YouTube audio stream using yt-dlp via backend.
+ * Simple and reliable - no Piped, no complex fallback logic.
+ * 
+ * @param videoId - YouTube video ID
+ * @param signal - Abort signal for cancellation
+ * @returns Audio stream info with direct playback URL
+ */
+export async function getYouTubeAudioStreamWithPiped(
+  videoId: string,
+  signal?: AbortSignal
+): Promise<YouTubeMusicAudioStream | null> {
+  const cleanVideoId = extractVideoId({ videoId: readString(videoId).replace(/^youtube_/, "") });
+  if (!cleanVideoId) return null;
+
+  // Directly use backend with yt-dlp (simple and reliable)
+  logger.info(`[YouTube Music] Resolving stream for ${cleanVideoId} via backend (yt-dlp)`);
+  return getYouTubeMusicAudioStream(cleanVideoId, signal);
 }
 
 export async function reportYouTubeMusicPlaybackFailure(payload: {
