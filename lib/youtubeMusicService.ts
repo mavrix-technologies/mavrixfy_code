@@ -116,13 +116,19 @@ async function setCache<T>(key: string, value: T): Promise<void> {
 
 // ─── Normalization Functions ──────────────────────────────────────────────────
 
-function upscaleYouTubeThumbnail(url: string): string {
+export function upscaleYouTubeThumbnail(url: string, size = 500): string {
   if (!url) return "";
+  const safeSize = Math.max(120, Math.min(Math.round(size) || 500, 1200));
 
   // 1. Googleusercontent / ggpht / yt3 images
   if (url.includes("googleusercontent.com") || url.includes("ggpht.com") || url.includes("yt3.ggpht.com") || url.includes("yt3.googleusercontent.com")) {
-    // Replace width/height parameters with 500x500
-    return url.replace(/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?$/, "=w500-h500-l90-rj");
+    // Replace width/height parameters with a square size suitable for app artwork.
+    if (/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i.test(url)) {
+      return url.replace(/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i, `=w${safeSize}-h${safeSize}-l90-rj`);
+    }
+    if (/=s\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i.test(url)) {
+      return url.replace(/=s\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i, `=s${safeSize}-c-k-c0x00ffffff-no-rj`);
+    }
   }
 
   // 2. Standard YouTube video thumbnails
@@ -890,7 +896,6 @@ export async function searchYouTubeMusic(
 ): Promise<Song[]> {
   const q = query.trim();
   if (!q) {
-    logger.debug("[YouTube Music] Empty query, returning empty array");
     return [];
   }
 
@@ -1016,20 +1021,8 @@ export async function getYouTubeMusicAudioStream(
       `/stream/${encodeURIComponent(cleanVideoId)}`,
       query
     );
-    
-    // Debug logging to verify API endpoints
-    logger.debug("[YouTube Music] Fetching stream", { videoId: cleanVideoId, candidates });
-    
     const json = await fetchFirstJson<any>(candidates, signal);
-    
-    if (json) {
-      logger.debug("[YouTube Music] Stream response received", { 
-        videoId: cleanVideoId,
-        hasUrl: Boolean(json?.stream?.url || json?.data?.url || json?.url),
-        formatId: json?.stream?.formatId || json?.data?.formatId || json?.formatId,
-      });
-    }
-    
+
     return json ? normalizeAudioStreamPayload(json, cleanVideoId) : null;
   } catch (error: any) {
     if (error?.message === "Request aborted" || signal?.aborted) {
@@ -1068,44 +1061,6 @@ export async function reportYouTubeMusicPlaybackFailure(payload: {
     });
   } catch {
     // Best effort.
-  }
-}
-
-export interface YouTubeMusicQueueResponse {
-  current?: YouTubeMusicTrack;
-  queue: YouTubeMusicTrack[];
-  queueSize?: number;
-  endless?: boolean;
-  generatedAt?: string;
-}
-
-export async function getYouTubeMusicQueue(
-  videoId: string,
-  limit = 50,
-  signal?: AbortSignal
-): Promise<YouTubeMusicQueueResponse | null> {
-  const cleanVideoId = extractVideoId({ videoId: readString(videoId).replace(/^youtube_/, "") });
-  if (!cleanVideoId) return null;
-
-  try {
-    const json = await fetchFirstJson<any>(
-      getEndpointCandidates(
-        `/queue/${encodeURIComponent(cleanVideoId)}`,
-        `/queue/${encodeURIComponent(cleanVideoId)}`,
-        `limit=${Math.max(1, Math.min(limit, 100))}`
-      ),
-      signal
-    );
-    const queuePayload = json?.queue || json?.data?.queue || json;
-    const rawQueue = Array.isArray(queuePayload?.queue) ? queuePayload.queue : [];
-    return {
-      ...queuePayload,
-      queue: mapFilter(rawQueue, normalizeTrackShape, (track): track is YouTubeMusicTrack => track !== null),
-      current: normalizeTrackShape(queuePayload?.current) || undefined,
-    };
-  } catch (error) {
-    logger.warn("[YouTube Music] Queue generation failed:", error);
-    return null;
   }
 }
 
@@ -1379,6 +1334,9 @@ export interface YouTubeMusicPlaylistCard {
   category?: string;
   description?: string;
   kind?: YouTubeMusicPlaylistKind;
+  itemType?: "playlist" | "song";
+  videoId?: string;
+  duration?: number;
 }
 
 export type YouTubeMusicPlaylistKind = "chart" | "editorial" | "featured" | "community";
@@ -1386,10 +1344,248 @@ export type YouTubeMusicPlaylistKind = "chart" | "editorial" | "featured" | "com
 export interface YouTubeMusicHomeCategoryData {
   id: string;
   title: string;
+  eyebrow?: string;
   results: YouTubeMusicPlaylistCard[];
 }
 
-const HOME_YOUTUBE_MUSIC_CATEGORY_VERSION = "v10";
+const HOME_YOUTUBE_MUSIC_CATEGORY_VERSION = "v19";
+
+type YouTubeHomeBrowseSection = {
+  id: string;
+  title: string;
+  eyebrow?: string;
+  playlistIds?: readonly string[];
+  matchTerms?: readonly string[];
+  queries: readonly string[];
+  mode: "playlist" | "song";
+};
+
+const YOUTUBE_HOME_BROWSE_SECTIONS: readonly YouTubeHomeBrowseSection[] = [
+  {
+    id: "yt-india-biggest-hits",
+    eyebrow: "MUSIC THAT'S HOT AND HAPPENING!",
+    title: "India's biggest hits",
+    queries: [
+      "Bollywood Hitlist",
+      "Uncut Bollywood",
+      "Bollywood Dance Hitlist",
+      "Bollywood Romance Hitlist",
+      "Gujarati Hitlist",
+      "Ekdum Fresh",
+    ],
+    playlistIds: [
+      "RDCLAK5uy_n9Fbdw7e6ap-98_A-8JYBmPv64v-Uaq1g",
+      "RDCLAK5uy_krbBs7P2iEb30IODyVbiOXWyhZtAIX9Uk",
+      "RDCLAK5uy_kjNBBWqyQ_Cy14B0P4xrcKgd39CRjXXKk",
+      "RDCLAK5uy_mypHeJ-B5f7-OgrxJcXeiHSotjIJ_UDhQ",
+      "RDCLAK5uy_n2S5rcCsh7xTdULPMqgPaFdaleM43gKGg",
+      "RDCLAK5uy_mDTfR8UPbTurG-Riq7QDI5mjT4a7H5eoI",
+    ],
+    matchTerms: ["bollywood", "uncut", "dance", "romance", "gujarati", "fresh", "hitlist"],
+    mode: "playlist",
+  },
+  {
+    id: "yt-featured-playlists",
+    title: "Fresh Indian playlists",
+    queries: [`new indian music ${CURRENT_YEAR}`, `latest hindi punjabi tamil telugu songs ${CURRENT_YEAR}`, "new indian indie"],
+    playlistIds: [
+      "RDCLAK5uy_l8jPcXx__5Dsu2D7vTiXPlO8pZhZsjBFk",
+      "RDCLAK5uy_k66J6mE65JgdE4zoeNSzmw_16JB_ueINE",
+      "RDCLAK5uy_nNhhgRET3NcJ4SJBvqhAIJ6t7vjsQYowc",
+      "RDCLAK5uy_mk3xwsayv9PxawuXS-U6ao9eMeNmSwYAM",
+      "RDCLAK5uy_nVQAtE2KBWk-ROQIc5o39Oup3hOLnYV0g",
+      "RDCLAK5uy_l8CaYQvBQWVT2st1VsW9JjODWisR_vd3U",
+      "RDCLAK5uy_lkfuM4Tjwc_1D3cyzECzM2TjcjWj0AZ5k",
+      "RDCLAK5uy_nS8QPuM3petGWZqr2iILgb9dPEQZsjc1Y",
+    ],
+    matchTerms: ["new", "fresh", "indian", "hindi", "punjabi", "tamil", "telugu", "indie", "pop", "next wave"],
+    mode: "playlist",
+  },
+  {
+    id: "yt-top-50-india",
+    title: "Top 50 India",
+    queries: [`latest top hindi songs ${CURRENT_YEAR}`, `india top chart songs ${CURRENT_YEAR}`, `latest bollywood songs ${CURRENT_YEAR}`],
+    mode: "song",
+  },
+  {
+    id: "yt-top-100-songs",
+    title: "Top 100 Songs",
+    queries: [`top hindi songs ${CURRENT_YEAR} latest`, `new bollywood hits ${CURRENT_YEAR}`, `trending hindi songs ${CURRENT_YEAR} latest`],
+    matchTerms: ["top", "chart", "trending", "hits", "hindi", "bollywood", "india"],
+    mode: "playlist",
+  },
+  {
+    id: "yt-trending-now",
+    title: "Trending Now",
+    queries: [`trending hindi songs ${CURRENT_YEAR}`, `viral indian songs ${CURRENT_YEAR}`, `india top chart songs ${CURRENT_YEAR}`],
+    mode: "song",
+  },
+  {
+    id: "yt-new-releases",
+    title: "New Releases",
+    queries: [`latest hindi songs ${CURRENT_YEAR} bollywood`, `new bollywood songs ${CURRENT_YEAR}`, `latest indian songs ${CURRENT_YEAR}`],
+    mode: "song",
+  },
+  {
+    id: "yt-bollywood-hits",
+    title: "Bollywood Hits",
+    queries: [`latest bollywood songs ${CURRENT_YEAR}`, `bollywood new songs ${CURRENT_YEAR}`, `new bollywood hits ${CURRENT_YEAR}`],
+    playlistIds: [
+      "RDCLAK5uy_n9Fbdw7e6ap-98_A-8JYBmPv64v-Uaq1g",
+      "RDCLAK5uy_m1SfwuulEBVcweY5bCV8jJ6ZCn8M2gKGM",
+      "RDCLAK5uy_nbTnrBv4CxZys35IAzhO0-fFCiKD58qzo",
+      "RDCLAK5uy_mAL8kVq6SS6BUekEyyKLOvq68v44mq6bE",
+      "RDCLAK5uy_kMV8D6xyDudzUMstUx1-Ow5anGYJxfnrE",
+      "RDCLAK5uy_kjcqi4IupK6Pl1cz_sHCfMGnXaRPyscoc",
+    ],
+    matchTerms: ["bollywood", "hindi", "hit", "dance", "party", "remix", "recharger"],
+    mode: "playlist",
+  },
+  {
+    id: "yt-hip-hop",
+    title: "Hip Hop",
+    queries: ["Desi Hip Hop X", "Next Wave Desi Hip Hop", `indian hip hop rap ${CURRENT_YEAR}`],
+    playlistIds: [
+      "RDCLAK5uy_lkfuM4Tjwc_1D3cyzECzM2TjcjWj0AZ5k",
+      "RDCLAK5uy_kSBA4QYRS3z-HZyp9P8Kp1_egtDFqzaG4",
+      "RDCLAK5uy_lxyYFz9HM1dHqshLRZTm2Vnyh6BMOgn6g",
+      "RDCLAK5uy_k5OicslPLzEMgpcyeTgam0J1rvvt0h6Ys",
+    ],
+    matchTerms: ["hip hop", "rap", "desi", "punjabi rap", "dhh", "gully"],
+    mode: "playlist",
+  },
+  {
+    id: "yt-romance",
+    title: "Romance",
+    queries: [`romantic hindi songs ${CURRENT_YEAR}`, `bollywood love songs ${CURRENT_YEAR}`, "romantic bollywood songs"],
+    playlistIds: [
+      "RDCLAK5uy_mypHeJ-B5f7-OgrxJcXeiHSotjIJ_UDhQ",
+      "RDCLAK5uy_mgEm8q7vw-VJ8DeKUOCZqKgileRj9GnQ4",
+      "RDCLAK5uy_kvB-Tek1AZcCVmlbyA8iDfBgD4hPxgec8",
+      "RDCLAK5uy_miAacfMxVybbt7ketqqnPPbH9LDn1TavU",
+      "RDCLAK5uy_n9S8w04iJGdSirkDSX6svxZ8YtcpbLwFM",
+      "RDCLAK5uy_mcMBXir4RT5m0mkGIRtbwFOtD4nbiVSvg",
+      "RDCLAK5uy_lbfDqlFOiRJekoTwNgiES65gcham4ZelA",
+      "RDCLAK5uy_mrtv7Q8jbt2mDcDC6z7wcWfk26dtOIBmc",
+      "RDCLAK5uy_nst6TjuDcm2GKUXPrp9nYkfg5_oeEofE8",
+      "RDCLAK5uy_mobUQoWWE7bCp6QlBYKVF3TPITZUhvTM8",
+    ],
+    matchTerms: ["romance", "romantic", "love", "bollywood", "punjabi", "midnight", "kollywood", "tollywood"],
+    mode: "playlist",
+  },
+  {
+    id: "yt-party-hits",
+    title: "Party Hits",
+    queries: [`bollywood party songs ${CURRENT_YEAR}`, `punjabi party songs ${CURRENT_YEAR}`, "hindi dance songs"],
+    playlistIds: [
+      "RDCLAK5uy_l_Bj8rMsjkhFMMs-eLrA17_zjr9r6g_Eg",
+      "RDCLAK5uy_m1SfwuulEBVcweY5bCV8jJ6ZCn8M2gKGM",
+      "RDCLAK5uy_nbTnrBv4CxZys35IAzhO0-fFCiKD58qzo",
+      "RDCLAK5uy_ku8t94xLI1tlwohvGukeht34glDJXSt94",
+      "RDCLAK5uy_kW5twHnDG2vIwFy0knslnK87jmxg_6uJk",
+      "RDCLAK5uy_nlOMew8qv8HGXb9HbshuU1OgH3aL_JMKA",
+    ],
+    matchTerms: ["party", "dance", "edm", "club", "desi", "punjabi"],
+    mode: "playlist",
+  },
+  {
+    id: "yt-punjabi-hits",
+    title: "Punjabi Hits",
+    queries: [`latest punjabi songs ${CURRENT_YEAR}`, `punjabi hits ${CURRENT_YEAR}`, "punjabi party hits"],
+    playlistIds: [
+      "RDCLAK5uy_mk3xwsayv9PxawuXS-U6ao9eMeNmSwYAM",
+      "RDCLAK5uy_kW5twHnDG2vIwFy0knslnK87jmxg_6uJk",
+      "RDCLAK5uy_nlOMew8qv8HGXb9HbshuU1OgH3aL_JMKA",
+      "RDCLAK5uy_k5OicslPLzEMgpcyeTgam0J1rvvt0h6Ys",
+      "RDCLAK5uy_nS8QPuM3petGWZqr2iILgb9dPEQZsjc1Y",
+      "RDCLAK5uy_n9S8w04iJGdSirkDSX6svxZ8YtcpbLwFM",
+    ],
+    matchTerms: ["punjabi"],
+    mode: "playlist",
+  },
+  {
+    id: "yt-south-hits",
+    title: "South Hits",
+    queries: [`latest telugu songs ${CURRENT_YEAR}`, `latest tamil songs ${CURRENT_YEAR}`, `south indian songs ${CURRENT_YEAR}`],
+    playlistIds: [
+      "RDCLAK5uy_nVQAtE2KBWk-ROQIc5o39Oup3hOLnYV0g",
+      "RDCLAK5uy_l8CaYQvBQWVT2st1VsW9JjODWisR_vd3U",
+      "RDCLAK5uy_kxyDfb8adHA-cigfDo_m-thB3GIvSiQSQ",
+      "RDCLAK5uy_nGC5IUV3lYF-P_wGb-LzMPFydA-RkPblc",
+      "RDCLAK5uy_mXUrV3_kqn3WUflvb3nZr35f3F5Q049H0",
+      "RDCLAK5uy_mErBkQfx-R-FQHnM6CsikE72lJlMuFKNs",
+    ],
+    matchTerms: ["tamil", "telugu", "kollywood", "tollywood", "south"],
+    mode: "playlist",
+  },
+] as const;
+
+const YOUTUBE_HOME_FALLBACK_QUERIES = YOUTUBE_HOME_BROWSE_SECTIONS.flatMap((section) => section.queries);
+
+const YOUTUBE_OFFICIAL_AUTHOR_TERMS = [
+  "youtube music",
+  "t series",
+  "zee music company",
+  "zee music",
+  "sony music india",
+  "yrf",
+  "saregama music",
+  "tips official",
+  "tips music",
+  "speed records",
+  "desi melodies",
+  "white hill music",
+  "geet mp3",
+  "aditya music",
+  "lahari music",
+  "think music india",
+  "mango music",
+  "times music",
+  "universal music india",
+] as const;
+
+const YOUTUBE_BLOCKED_PLAYLIST_TERMS = [
+  "8d",
+  "all time",
+  "bgm",
+  "black and white",
+  "carvaan classics",
+  "classic",
+  "classics",
+  "cover",
+  "covers",
+  "dj",
+  "evergreen",
+  "lofi",
+  "lyrics",
+  "lyric",
+  "old",
+  "old is gold",
+  "mashup",
+  "nonstop",
+  "reaction",
+  "remix",
+  "remixes",
+  "retro",
+  "ringtone",
+  "ringtones",
+  "slowed",
+  "sped up",
+  "spotify",
+  "status",
+  "unplugged",
+] as const;
+
+const YOUTUBE_OLD_PLAYLIST_TERMS = [
+  "60s",
+  "70s",
+  "80s",
+  "90s",
+  "00s",
+  "2000s",
+  "nostalgic",
+  "nostalgia",
+] as const;
 
 function dedupeYouTubePlaylistCards(playlists: YouTubeMusicPlaylistCard[]): YouTubeMusicPlaylistCard[] {
   const seen = new Set<string>();
@@ -1397,12 +1593,88 @@ function dedupeYouTubePlaylistCards(playlists: YouTubeMusicPlaylistCard[]): YouT
 
   for (const playlist of playlists) {
     const id = readString(playlist.id);
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
+    const canonicalId = getCanonicalYouTubePlaylistCardId(playlist);
+    if (!id || !canonicalId || seen.has(canonicalId)) continue;
+    seen.add(canonicalId);
     unique.push({ ...playlist, id });
   }
 
   return unique;
+}
+
+function getCanonicalYouTubePlaylistCardId(playlist: Pick<YouTubeMusicPlaylistCard, "id">): string {
+  const id = readString(playlist.id);
+  return id.startsWith("VL") ? id.slice(2) : id;
+}
+
+function getYouTubePlaylistText(playlist: YouTubeMusicPlaylistCard): string {
+  return normalizeComparableText([
+    playlist.name,
+    playlist.author,
+    playlist.category,
+    playlist.description,
+  ].filter(Boolean).join(" "));
+}
+
+function hasAnyWholeTerm(text: string, terms: readonly string[]): boolean {
+  return terms.some((term) => includesWholeTerm(text, term));
+}
+
+function hasOldYear(text: string): boolean {
+  const years = text.match(/\b(?:19\d{2}|20\d{2})\b/g) || [];
+  return years.some((year) => {
+    const value = Number(year);
+    return Number.isFinite(value) && value < CURRENT_YEAR - 1;
+  });
+}
+
+function isOfficialYouTubePlaylistCard(playlist: YouTubeMusicPlaylistCard): boolean {
+  const id = readString(playlist.id);
+  if (id.startsWith("VLRDCLAK5uy_") || id.startsWith("RDCLAK5uy_")) return true;
+
+  const author = normalizeComparableText(playlist.author);
+  return YOUTUBE_OFFICIAL_AUTHOR_TERMS.some((term) => includesWholeTerm(author, term));
+}
+
+function isCleanCurrentYouTubePlaylistCard(playlist: YouTubeMusicPlaylistCard): boolean {
+  const text = getYouTubePlaylistText(playlist);
+  if (!text) return false;
+  if (hasAnyWholeTerm(text, YOUTUBE_BLOCKED_PLAYLIST_TERMS)) return false;
+  if (hasAnyWholeTerm(text, YOUTUBE_OLD_PLAYLIST_TERMS)) return false;
+  if (hasOldYear(text)) return false;
+  return true;
+}
+
+function isWantedYouTubePlaylistCard(playlist: YouTubeMusicPlaylistCard): boolean {
+  return isOfficialYouTubePlaylistCard(playlist) && isCleanCurrentYouTubePlaylistCard(playlist);
+}
+
+function officialYouTubePlaylistScore(playlist: YouTubeMusicPlaylistCard): number {
+  const text = getYouTubePlaylistText(playlist);
+  let score = 0;
+  const id = readString(playlist.id);
+  if (id.startsWith("VLRDCLAK5uy_") || id.startsWith("RDCLAK5uy_")) score += 50;
+  if (includesWholeTerm(text, String(CURRENT_YEAR))) score += 30;
+  if (includesWholeTerm(text, String(CURRENT_YEAR - 1))) score += 12;
+  if (hasAnyWholeTerm(text, ["latest", "new", "fresh", "trending"])) score += 16;
+  if (hasAnyWholeTerm(text, ["official", "movie songs", "bollywood", "punjabi", "telugu", "tamil"])) score += 8;
+  return score;
+}
+
+function filterWantedYouTubePlaylistCards(playlists: YouTubeMusicPlaylistCard[]): YouTubeMusicPlaylistCard[] {
+  return dedupeYouTubePlaylistCards(playlists)
+    .filter(isWantedYouTubePlaylistCard)
+    .sort((left, right) => officialYouTubePlaylistScore(right) - officialYouTubePlaylistScore(left));
+}
+
+function filterBalancedYouTubePlaylistCards(playlists: YouTubeMusicPlaylistCard[], limit: number): YouTubeMusicPlaylistCard[] {
+  const official = filterWantedYouTubePlaylistCards(playlists);
+  const officialIds = new Set(official.map(getCanonicalYouTubePlaylistCardId));
+  const cleanFallback = dedupeYouTubePlaylistCards(playlists)
+    .filter((playlist) => !officialIds.has(getCanonicalYouTubePlaylistCardId(playlist)) && isCleanCurrentYouTubePlaylistCard(playlist))
+    .sort((left, right) => officialYouTubePlaylistScore(right) - officialYouTubePlaylistScore(left));
+
+  return dedupeYouTubePlaylistCards([...official, ...cleanFallback]).slice(0, limit);
 }
 
 function normalizeYouTubePlaylistKind(raw: any, fallbackKind?: YouTubeMusicPlaylistKind): YouTubeMusicPlaylistKind {
@@ -1413,7 +1685,7 @@ function normalizeYouTubePlaylistKind(raw: any, fallbackKind?: YouTubeMusicPlayl
   const id = readString(raw?.browseId || raw?.playlistId || raw?.id);
 
   if (category.includes("chart")) return "chart";
-  if (author === "youtube music" || id.startsWith("VLRDCLAK5uy_")) return "editorial";
+  if (author === "youtube music" || id.startsWith("VLRDCLAK5uy_") || id.startsWith("RDCLAK5uy_")) return "editorial";
   if (category.includes("featured")) return "featured";
   return "community";
 }
@@ -1438,6 +1710,90 @@ function normalizeYouTubePlaylistCard(raw: any, fallbackKind?: YouTubeMusicPlayl
     category: readString(raw?.category) || undefined,
     description: readString(raw?.description) || undefined,
     kind: normalizeYouTubePlaylistKind(raw, fallbackKind),
+    itemType: "playlist",
+  };
+}
+
+function toYouTubePlaylistCardFromPlaylist(
+  playlist: YouTubeMusicPlaylist | null,
+  fallbackId: string
+): YouTubeMusicPlaylistCard | null {
+  if (!playlist) return null;
+
+  return normalizeYouTubePlaylistCard(
+    {
+      id: readString(playlist.browseId) || fallbackId,
+      title: playlist.title,
+      description: playlist.description,
+      thumbnails: playlist.thumbnails,
+      trackCount: playlist.trackCount || playlist.tracks?.length,
+      author: "YouTube Music",
+      category: "Playlist",
+    },
+    "editorial"
+  );
+}
+
+async function getYouTubeMusicPlaylistCardsFromIds(
+  playlistIds: readonly string[] = []
+): Promise<YouTubeMusicPlaylistCard[]> {
+  if (playlistIds.length === 0) return [];
+
+  const cards = await Promise.all(
+    playlistIds.map(async (playlistId) => {
+      const id = readString(playlistId);
+      if (!id) return null;
+      const playlist = await getYouTubeMusicPlaylist(id).catch(() => null);
+      return toYouTubePlaylistCardFromPlaylist(playlist, id);
+    })
+  );
+
+  return dedupeYouTubePlaylistCards(mapFilter(
+    cards,
+    (card) => card,
+    (card): card is YouTubeMusicPlaylistCard => Boolean(card)
+  ));
+}
+
+function filterYouTubeCardsForBrowseSection(
+  cards: YouTubeMusicPlaylistCard[],
+  section: YouTubeHomeBrowseSection
+): YouTubeMusicPlaylistCard[] {
+  const terms = section.matchTerms || [];
+  if (terms.length === 0) return cards;
+
+  return cards.filter((card) => {
+    const text = getYouTubePlaylistText(card);
+    return terms.some((term) => includesWholeTerm(text, term));
+  });
+}
+
+function normalizeYouTubeSongCard(raw: any, category?: string): YouTubeMusicPlaylistCard | null {
+  const source = raw?.data && typeof raw.data === "object" ? raw.data : raw;
+  const track = normalizeTrackShape(source);
+  if (!track) return null;
+
+  const bestThumbnail = getBestThumbnail(track.thumbnails);
+  const imageUrl = bestThumbnail ? upscaleYouTubeThumbnail(bestThumbnail.url) : "";
+  const author = artistNamesToString(track.artists) || readString(source?.artist) || undefined;
+  const albumName =
+    typeof source?.album === "string"
+      ? readString(source.album)
+      : readString(track.album?.name || source?.album?.name || source?.album?.title);
+
+  return {
+    id: `youtube_${track.videoId}`,
+    name: track.title,
+    imageUrl,
+    imageWidth: bestThumbnail?.width || undefined,
+    imageHeight: bestThumbnail?.height || undefined,
+    author,
+    category: category || "Songs",
+    description: albumName || author,
+    kind: "featured",
+    itemType: "song",
+    videoId: track.videoId,
+    duration: parseDurationSeconds(track.duration_seconds) || parseDurationSeconds(track.duration),
   };
 }
 
@@ -1445,18 +1801,19 @@ function toYouTubeHomeSection(
   id: string,
   title: string,
   playlists: YouTubeMusicPlaylistCard[],
-  limit: number
+  limit: number,
+  eyebrow?: string
 ): YouTubeMusicHomeCategoryData | null {
   const results = dedupeYouTubePlaylistCards(playlists)
     .filter((playlist) => playlist.id && playlist.name)
     .slice(0, limit)
     .map((playlist) => ({
       ...playlist,
-      author: playlist.author || "YouTube Music",
+      author: playlist.author || undefined,
       category: playlist.category || title,
     }));
 
-  return results.length > 0 ? { id, title, results } : null;
+  return results.length > 0 ? { id, title, eyebrow, results } : null;
 }
 
 function dedupeYouTubeHomeSections(sections: YouTubeMusicHomeCategoryData[]): YouTubeMusicHomeCategoryData[] {
@@ -1469,7 +1826,7 @@ function dedupeYouTubeHomeSections(sections: YouTubeMusicHomeCategoryData[]): Yo
     seenSectionIds.add(section.id);
 
     const results = section.results.filter((playlist) => {
-      const id = readString(playlist.id);
+      const id = getCanonicalYouTubePlaylistCardId(playlist);
       if (!id || seenPlaylistIds.has(id)) return false;
       seenPlaylistIds.add(id);
       return true;
@@ -1525,6 +1882,40 @@ async function searchYouTubeMusicPlaylistCards(
   return cards;
 }
 
+async function searchYouTubeMusicSongCards(
+  query: string,
+  limit: number,
+  category?: string
+): Promise<YouTubeMusicPlaylistCard[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:search:song_cards:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${limit}:${q.toLowerCase()}`;
+  const cached = await getCached<YouTubeMusicPlaylistCard[]>(cacheKey, SEARCH_CACHE_TTL_MS);
+  if (cached) return cached;
+
+  const json = await fetchFirstJson<any>(
+    getEndpointCandidates(
+      "/search",
+      "/search",
+      getSearchQueryCandidates(q, "songs", limit)
+    )
+  );
+  const results = getSearchResultItems(json);
+
+  const cards = mapFilter(
+    results,
+    (item: any) => normalizeYouTubeSongCard(item, category),
+    (song): song is YouTubeMusicPlaylistCard => Boolean(song)
+  );
+
+  if (cards.length > 0) {
+    await setCache(cacheKey, cards);
+  }
+
+  return cards;
+}
+
 function getHomeShelfItems(json: any): any[] {
   const payload = getResponsePayload(json, "home", "shelves", "results");
   if (Array.isArray(payload)) return payload;
@@ -1560,14 +1951,16 @@ function normalizeHomeShelfPlaylistCard(item: any): YouTubeMusicPlaylistCard | n
     imageWidth: bestThumbnail?.width || undefined,
     imageHeight: bestThumbnail?.height || undefined,
     songCount: Number(item?.trackCount || item?.itemCount || item?.count) || undefined,
-    author: author || "YouTube Music",
+    author: author || undefined,
     category: "YouTube Home",
     description: description || undefined,
     kind: normalizeYouTubePlaylistKind(item, "featured"),
+    itemType: "playlist",
   };
 }
 
 function getHomeShelfContents(shelf: any): any[] {
+  if (Array.isArray(shelf?.results)) return shelf.results;
   if (Array.isArray(shelf?.contents)) return shelf.contents;
   if (Array.isArray(shelf?.items)) return shelf.items;
   return [];
@@ -1633,8 +2026,7 @@ async function getYouTubeMusicMoodCategorySections(
             )
           );
           return toYouTubeHomeSection(`yt-mood-${homeShelfTitleToId(mood.title)}`, mood.title, playlists, safeItemLimit);
-        } catch (err) {
-          logger.debug("[YouTube Music] Mood playlist fetch skipped:", mood.title, err);
+        } catch {
           return null;
         }
       })
@@ -1651,7 +2043,6 @@ async function getYouTubeMusicMoodCategorySections(
     return finalSections;
   } catch (error) {
     if (isAbortLikeError(error)) {
-      logger.debug("[YouTube Music] Mood sections fetch aborted");
       return [];
     }
     logger.warn("[YouTube Music] Mood sections fetch failed:", error);
@@ -1718,10 +2109,251 @@ async function getYouTubeMusicHomeCategorySections(
     return sections;
   } catch (error) {
     if (isAbortLikeError(error)) {
-      logger.debug("[YouTube Music] Home shelf sections fetch aborted");
       return [];
     }
     logger.warn("[YouTube Music] Home shelf sections fetch failed:", error);
+    return [];
+  }
+}
+
+async function searchYouTubeMusicPlaylistCardsFromQueries(
+  queries: readonly string[],
+  limitPerQuery: number
+): Promise<YouTubeMusicPlaylistCard[]> {
+  const results = await Promise.all(
+    queries.map((query) => searchYouTubeMusicPlaylistCards(query, limitPerQuery).catch(
+      () => [] as YouTubeMusicPlaylistCard[]
+    ))
+  );
+  return dedupeYouTubePlaylistCards(results.flat());
+}
+
+async function searchYouTubeMusicSongCardsFromQueries(
+  queries: readonly string[],
+  limitPerQuery: number,
+  category?: string
+): Promise<YouTubeMusicPlaylistCard[]> {
+  const results = await Promise.all(
+    queries.map((query) => searchYouTubeMusicSongCards(query, limitPerQuery, category).catch(
+      () => [] as YouTubeMusicPlaylistCard[]
+    ))
+  );
+  return dedupeYouTubePlaylistCards(results.flat());
+}
+
+function flattenYouTubeHomePlaylists(sections: YouTubeMusicHomeCategoryData[]): YouTubeMusicPlaylistCard[] {
+  return dedupeYouTubePlaylistCards(sections.flatMap((section) => section.results));
+}
+
+function getChartSongItems(json: any): any[] {
+  const charts = getChartsPayload(json);
+  const songs: any[] = [];
+  const append = (value: any) => {
+    if (Array.isArray(value)) {
+      songs.push(...value);
+      return;
+    }
+
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value.songs)) songs.push(...value.songs);
+    if (Array.isArray(value.tracks)) songs.push(...value.tracks);
+    if (Array.isArray(value.results)) songs.push(...value.results);
+    if (Array.isArray(value.items)) songs.push(...value.items);
+    if (extractVideoId(value)) songs.push(value);
+  };
+
+  append(charts?.songs);
+  append(charts?.daily?.songs);
+  append(charts?.videos?.songs);
+  append(charts?.trending?.songs);
+
+  return songs;
+}
+
+async function getYouTubeMusicChartSongCards(country: string = "IN"): Promise<YouTubeMusicPlaylistCard[]> {
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:chart_song_cards:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${country}`;
+  const cached = await getCached<YouTubeMusicPlaylistCard[]>(cacheKey, CACHE_TTL_MS);
+  if (cached) return cached;
+
+  try {
+    const json = await fetchFirstJson<any>(
+      getEndpointCandidates("/charts", "/charts", `country=${encodeURIComponent(country)}`)
+    );
+    if (!json) return [];
+
+    const songs = dedupeYouTubePlaylistCards(
+      mapFilter(
+        getChartSongItems(json),
+        (item: any) => normalizeYouTubeSongCard(item, "Charts"),
+        (song): song is YouTubeMusicPlaylistCard => Boolean(song)
+      )
+    );
+
+    if (songs.length > 0) {
+      await setCache(cacheKey, songs);
+    }
+    return songs;
+  } catch (error) {
+    if (isAbortLikeError(error)) {
+      return [];
+    }
+    logger.warn("[YouTube Music] Chart songs fetch failed:", error);
+    return [];
+  }
+}
+
+function getYouTubeBrowseSectionSeedPlaylists(
+  section: (typeof YOUTUBE_HOME_BROWSE_SECTIONS)[number],
+  seedPlaylists: YouTubeMusicPlaylistCard[]
+): YouTubeMusicPlaylistCard[] {
+  const seedTermsBySectionId: Record<string, string[]> = {
+    "yt-featured-playlists-for-you": [],
+    "yt-trending-community-playlists": ["trending", "viral", "hot", "chart", "top"],
+    "yt-featured-playlists": ["new", "latest", "fresh", "release", "hit"],
+    "yt-india-biggest-hits": [],
+    "yt-top-50-india": [],
+    "yt-top-100-songs": [],
+    "yt-trending-now": [],
+    "yt-new-releases": ["new", "latest", "fresh", "release", "releases"],
+    "yt-bollywood-hits": ["bollywood", "hindi"],
+    "yt-hip-hop": ["hip hop", "rap", "desi"],
+    "yt-romance": ["romance", "romantic", "love", "ishq"],
+    "yt-party-hits": ["party", "dance", "club"],
+    "yt-punjabi-hits": ["punjabi"],
+    "yt-south-hits": ["south", "telugu", "tamil", "tollywood"],
+  };
+  const terms = section.matchTerms || seedTermsBySectionId[section.id] || [];
+  if (terms.length === 0) return seedPlaylists;
+
+  return seedPlaylists.filter((playlist) => {
+    const text = getYouTubePlaylistText(playlist);
+    return terms.some((term) => includesWholeTerm(text, term));
+  });
+}
+
+async function getYouTubeMusicBrowseCategorySections(
+  limitPerCategory: number,
+  homeSeedPlaylists: YouTubeMusicPlaylistCard[] = [],
+  chartSeedPlaylists: YouTubeMusicPlaylistCard[] = []
+): Promise<YouTubeMusicHomeCategoryData[]> {
+  const safeItemLimit = Math.max(1, Math.min(limitPerCategory, 12));
+  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:browse_category_sections:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${safeItemLimit}`;
+  if (!__DEV__) {
+    const cached = await getCached<YouTubeMusicHomeCategoryData[]>(cacheKey, CACHE_TTL_MS);
+    if (cached) return cached;
+  }
+
+  try {
+    const searchLimit = Math.max(safeItemLimit, 8);
+    const fallbackLimit = Math.max(safeItemLimit, 10);
+    const emptyCards: YouTubeMusicPlaylistCard[] = [];
+    const cleanSeed = filterBalancedYouTubePlaylistCards([
+      ...homeSeedPlaylists,
+      ...chartSeedPlaylists,
+    ], safeItemLimit * YOUTUBE_HOME_BROWSE_SECTIONS.length);
+    const sections = await Promise.all(
+      YOUTUBE_HOME_BROWSE_SECTIONS.map(async (section) => {
+        const seedPlaylists = getYouTubeBrowseSectionSeedPlaylists(section, cleanSeed);
+
+        if (section.mode === "playlist") {
+          const curatedPlaylists = await resolveWithTimeout(
+            getYouTubeMusicPlaylistCardsFromIds(section.playlistIds),
+            OPTIONAL_HOME_SECTION_TIMEOUT_MS,
+            emptyCards
+          );
+          const searchPlaylists = await resolveWithTimeout(
+            searchYouTubeMusicPlaylistCardsFromQueries(section.queries, fallbackLimit),
+            OPTIONAL_HOME_SECTION_TIMEOUT_MS,
+            emptyCards
+          );
+          let cards = filterWantedYouTubePlaylistCards(
+            filterYouTubeCardsForBrowseSection(
+              [
+                ...curatedPlaylists,
+                ...searchPlaylists,
+                ...seedPlaylists.filter((item) => item.itemType !== "song"),
+              ],
+              section
+            )
+          ).slice(0, safeItemLimit);
+
+          if (cards.length < Math.min(3, safeItemLimit) && !section.playlistIds?.length) {
+            cards = filterBalancedYouTubePlaylistCards(
+              filterYouTubeCardsForBrowseSection(
+                [...searchPlaylists, ...seedPlaylists.filter((item) => item.itemType !== "song")],
+                section
+              ),
+              safeItemLimit
+            );
+          }
+
+          if (cards.length < Math.min(3, safeItemLimit) && !section.playlistIds?.length) {
+            const fallbackSongs = await resolveWithTimeout(
+              searchYouTubeMusicSongCardsFromQueries(section.queries, searchLimit, section.title),
+              OPTIONAL_HOME_SECTION_TIMEOUT_MS,
+              emptyCards
+            );
+            cards = dedupeYouTubePlaylistCards([
+              ...cards,
+              ...filterBalancedYouTubePlaylistCards(
+                filterYouTubeCardsForBrowseSection(fallbackSongs, section),
+                safeItemLimit
+              ),
+              ...seedPlaylists.filter((item) => item.itemType === "song"),
+            ]).slice(0, safeItemLimit);
+          }
+
+          return toYouTubeHomeSection(section.id, section.title, cards, safeItemLimit, section.eyebrow);
+        }
+
+        const searchSongs = await resolveWithTimeout(
+          searchYouTubeMusicSongCardsFromQueries(section.queries, searchLimit, section.title),
+          OPTIONAL_HOME_SECTION_TIMEOUT_MS,
+          emptyCards
+        );
+        const seedSongs = seedPlaylists.filter((item) => item.itemType === "song");
+        let cards = dedupeYouTubePlaylistCards([
+          ...filterBalancedYouTubePlaylistCards(
+            filterYouTubeCardsForBrowseSection(searchSongs, section),
+            safeItemLimit
+          ),
+          ...seedSongs,
+        ]).slice(0, safeItemLimit);
+
+        if (cards.length < Math.min(4, safeItemLimit)) {
+          const searchPlaylists = await resolveWithTimeout(
+            searchYouTubeMusicPlaylistCardsFromQueries(section.queries, fallbackLimit),
+            OPTIONAL_HOME_SECTION_TIMEOUT_MS,
+            emptyCards
+          );
+          const fallbackPlaylists = filterBalancedYouTubePlaylistCards(
+            filterYouTubeCardsForBrowseSection(
+              [...searchPlaylists, ...seedPlaylists.filter((item) => item.itemType !== "song")],
+              section
+            ),
+            safeItemLimit
+          );
+          cards = dedupeYouTubePlaylistCards([...cards, ...fallbackPlaylists]).slice(0, safeItemLimit);
+        }
+
+        return toYouTubeHomeSection(section.id, section.title, cards, safeItemLimit, section.eyebrow);
+      })
+    );
+
+    const finalSections = mapFilter(
+      sections,
+      (section) => section,
+      (section): section is YouTubeMusicHomeCategoryData => Boolean(section)
+    );
+    if (!__DEV__ && finalSections.length > 0) {
+      await setCache(cacheKey, finalSections);
+    }
+    return finalSections;
+  } catch (error) {
+    if (isAbortLikeError(error)) {
+      return [];
+    }
+    logger.warn("[YouTube Music] Browse category sections fetch failed:", error);
     return [];
   }
 }
@@ -1737,28 +2369,35 @@ export async function getHomeYouTubeMusicCategories(options?: {
     if (cached) return cached;
   }
 
-  const [shelfSections, trendingPlaylists, moodSections] = await Promise.all([
+  const [shelfSections, trendingPlaylists, chartSongs] = await Promise.all([
     getYouTubeMusicHomeCategorySections(limit, 10),
     getYouTubeMusicTrendingPlaylists("IN").catch(() => [] as YouTubeMusicPlaylistCard[]),
-    resolveWithTimeout(
-      getYouTubeMusicMoodCategorySections(limit, 2),
-      OPTIONAL_HOME_SECTION_TIMEOUT_MS,
-      [] as YouTubeMusicHomeCategoryData[]
-    ),
+    getYouTubeMusicChartSongCards("IN").catch(() => [] as YouTubeMusicPlaylistCard[]),
   ]);
 
-  const chartSection = toYouTubeHomeSection("yt-charts", "YouTube Music Charts", trendingPlaylists, limit);
-  const fallbackSection = shelfSections.length === 0 && trendingPlaylists.length === 0 && moodSections.length === 0
+  const browseSections = await getYouTubeMusicBrowseCategorySections(
+    limit,
+    flattenYouTubeHomePlaylists(shelfSections),
+    [...chartSongs, ...trendingPlaylists]
+  );
+  const fallbackSection = browseSections.length === 0
     ? toYouTubeHomeSection(
         "yt-search-suggestions",
-        "YouTube Music Suggestions",
-        await searchYouTubeMusicPlaylistCards("music", limit).catch(() => [] as YouTubeMusicPlaylistCard[]),
+        "More to Explore",
+        filterBalancedYouTubePlaylistCards(
+          await searchYouTubeMusicSongCardsFromQueries(
+            YOUTUBE_HOME_FALLBACK_QUERIES,
+            Math.max(limit, 8),
+            "More to Explore"
+          ).catch(() => [] as YouTubeMusicPlaylistCard[]),
+          limit
+        ),
         limit
       )
     : null;
 
   const finalResults = dedupeYouTubeHomeSections(mapFilter(
-    [...shelfSections, chartSection, ...moodSections, fallbackSection],
+    [...browseSections, fallbackSection],
     (section) => section,
     (section): section is YouTubeMusicHomeCategoryData => Boolean(section)
   ));
@@ -1772,7 +2411,7 @@ async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): Promise
   if (cached) {
     return dedupeYouTubePlaylistCards(cached.map((playlist) => ({
       ...playlist,
-      author: playlist.author || "YouTube Music",
+      author: playlist.author || undefined,
       category: playlist.category || "Charts",
       kind: playlist.kind || "chart",
     })));
@@ -1804,10 +2443,11 @@ async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): Promise
           imageWidth: bestThumbnail?.width || undefined,
           imageHeight: bestThumbnail?.height || undefined,
           songCount: Number(item.trackCount || item.itemCount) || 50,
-          author: item.author || "YouTube Music",
+          author: item.author || undefined,
           category: item.category || "Charts",
           description: item.description || undefined,
           kind: "chart",
+          itemType: "playlist",
         };
         return result;
       },
@@ -1827,7 +2467,6 @@ async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): Promise
     return finalPlaylists;
   } catch (error) {
     if (isAbortLikeError(error)) {
-      logger.debug("[YouTube Music] Trending playlists fetch aborted");
       return [];
     }
     logger.warn("YouTube Music trending playlists error:", error);

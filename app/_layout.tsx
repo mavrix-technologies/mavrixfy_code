@@ -320,7 +320,6 @@ function useRootLayoutNavigation() {
             },
             firebaseUser?.uid
           );
-          logger.debug("[Layout] Foreground notification stored in Activity feed");
         },
         // Tap / click → add as read + deep link
         (response) => {

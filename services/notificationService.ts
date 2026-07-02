@@ -219,7 +219,6 @@ export async function registerForPushNotificationsAsync(
       { merge: true }
     );
 
-    logger.debug("[NotifService] Device registered successfully", { appVersion, platform: Platform.OS });
     return registration;
   } catch (err) {
     logger.error("[NotifService] Registration failed:", err);
@@ -267,7 +266,6 @@ export async function checkAppVersion(): Promise<AppVersionInfo | null> {
   } catch (err) {
     const code = String((err as { code?: unknown } | null | undefined)?.code || "");
     if (code === "permission-denied") {
-      logger.debug("[NotifService] Version check skipped: appVersions/mavrixfy is not readable by this client.");
       return null;
     }
     logger.warn("[NotifService] Version check failed:", err);
@@ -287,16 +285,10 @@ export function registerNotificationListeners(
   ensureNotificationHandler();
 
   const sub1 = Notifications.addNotificationReceivedListener((n) => {
-    logger.debug("[NotifService] Foreground notification received", {
-      id: n.request.identifier,
-    });
     onReceived?.(n);
   });
 
   const sub2 = Notifications.addNotificationResponseReceivedListener((r) => {
-    logger.debug("[NotifService] Notification tapped", {
-      id: r.notification.request.identifier,
-    });
     onResponse?.(r);
   });
 

@@ -39,8 +39,8 @@ import { safeGoBack } from "@/utils/navigation";
 import { usePlayerActions, usePlayerProgress, usePlayerRow } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
-import { convertJioSaavnSong, formatDuration, getBestImageUrl, Song } from "@/lib/musicData";
-import { getRecentlyPlayed, getUserPlaylists, getSettings } from "@/lib/storage";
+import { formatDuration, Song } from "@/lib/musicData";
+import { getRecentlyPlayed, getUserPlaylists } from "@/lib/storage";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { logger } from "@/lib/logger";
 import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
@@ -54,15 +54,11 @@ import {
 } from "@/lib/colorExtractor";
 import EqualizerBars from "@/components/EqualizerBars";
 import DownloadButton from "@/components/DownloadButton";
-import { getArtistDetails, JioSaavnArtist, searchArtists } from "@/lib/artistService";
-import { isFollowingArtist, toggleFollowArtist } from "@/lib/followedArtists";
 import { mapFilter } from "@/lib/arrayUtils";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
-import { getYouTubeMusicVisualVideoId } from "@/lib/youtubeMusicService";
 // Removed react-native-youtube-iframe for native-only streaming migration.
 
-const getCurrentTimestamp = () => Date.now();
 const PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING = 136;
 const PLAYER_AD_COVER_COOLDOWN_MS = 8 * 60 * 1000;
 const PLAYER_AD_COVER_COOLDOWN_SONGS = 4;
@@ -76,56 +72,6 @@ const PLAYER_PRIMARY_DISMISS_SPRING = {
   mass: 0.9,
   stiffness: 270,
 };
-
-function hexToRgba(color: string, alpha: number): string {
-  const safeAlpha = Math.max(0, Math.min(1, alpha));
-  const hex = color.replace("#", "").trim();
-  if (hex.length === 3) {
-    const red = Number.parseInt(hex[0] + hex[0], 16);
-    const green = Number.parseInt(hex[1] + hex[1], 16);
-    const blue = Number.parseInt(hex[2] + hex[2], 16);
-    if (!Number.isNaN(red) && !Number.isNaN(green) && !Number.isNaN(blue)) {
-      return `rgba(${red},${green},${blue},${safeAlpha})`;
-    }
-  }
-  if (hex.length === 6) {
-    const red = Number.parseInt(hex.slice(0, 2), 16);
-    const green = Number.parseInt(hex.slice(2, 4), 16);
-    const blue = Number.parseInt(hex.slice(4, 6), 16);
-    if (!Number.isNaN(red) && !Number.isNaN(green) && !Number.isNaN(blue)) {
-      return `rgba(${red},${green},${blue},${safeAlpha})`;
-    }
-  }
-  return `rgba(255,255,255,${safeAlpha})`;
-}
-
-function getSeededFraction(seed: number): number {
-  const safeSeed = seed >>> 0;
-  return (safeSeed % 1000003) / 1000003;
-}
-
-function hashArtworkKey(input: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function mapSeededRange(seed: number, min: number, max: number): number {
-  return min + (max - min) * getSeededFraction(seed);
-}
-
-function getArtworkCardDecor(seedKey: string) {
-  const baseSeed = hashArtworkKey(seedKey);
-  const rotateDeg = mapSeededRange(baseSeed, -5.4, 5.4);
-  const borderAlpha = mapSeededRange(Math.imul(baseSeed, 48271) + 7, 0.2, 0.36);
-  return {
-    rotateDeg,
-    borderAlpha,
-  };
-}
 
 const AnimatedSongFlatList = Animated.createAnimatedComponent(
   FlatList as React.ComponentType<any>
@@ -858,47 +804,6 @@ const QueueSongRow = memo(
 
 QueueSongRow.displayName = "QueueSongRow";
 
-type ArtistExploreItem =
-  | { type: "song"; id: string; song: Song }
-  | { type: "artist"; id: string; name: string; image: string };
-
-function ArtistExploreTile({
-  item,
-  fallbackCoverUrl,
-  onSongPress,
-  onArtistPress,
-}: {
-  item: ArtistExploreItem;
-  fallbackCoverUrl: string;
-  onSongPress: (song: Song) => void;
-  onArtistPress: (artist: { id: string; name: string; image: string }) => void;
-}) {
-  const handlePress = useCallback(() => {
-    if (item.type === "song") {
-      onSongPress(item.song);
-      return;
-    }
-    onArtistPress({ id: item.id, name: item.name, image: item.image });
-  }, [item, onArtistPress, onSongPress]);
-
-  const imageUrl = item.type === "song" ? item.song.coverUrl : item.image || fallbackCoverUrl;
-  const title = item.type === "song" ? item.song.title : `Similar to ${item.name}`;
-
-  return (
-    <Pressable style={styles.exploreTile} onPress={handlePress}>
-      <Image
-        source={{ uri: imageUrl || undefined }}
-        style={styles.exploreTileImage}
-        contentFit="cover"
-        transition={120}
-      />
-      <LinearGradient colors={["transparent", "rgba(0,0,0,0.74)"]} style={styles.exploreTileShade} />
-      {item.type === "song" ? <Text style={styles.exploreTileEyebrow}>Song</Text> : null}
-      <Text style={styles.exploreTileText} numberOfLines={3}>{title}</Text>
-    </Pressable>
-  );
-}
-
 const DEV_PREVIEW_SONGS: Song[] = [
   {
     id: "dev-preview-1",
@@ -1006,8 +911,6 @@ function useLegacyPlayerScreenView() {
     setTextColor,
   } = usePlayerActions();
 
-  const { positionMillis } = usePlayerProgress();
-
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
   const [artworkPalette, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
   const [playerAd, setPlayerAd] = useState<GoogleNativeAd | null>(null);
@@ -1114,11 +1017,6 @@ function useLegacyPlayerScreenView() {
     };
   }, []);
 
-
-  // ── About the artist / Credits state ────────────────────────────────────────
-  const [artistInfo, setArtistInfo] = useState<JioSaavnArtist | null>(null);
-  const [artistFollowing, setArtistFollowing] = useState(false);
-  const artistFetchIdRef = useRef<string>("");
   const devPreviewSong =
     DEV_PREVIEW_SONGS[Math.max(0, Math.min(devPreviewIndex, DEV_PREVIEW_SONGS.length - 1))] ??
     DEV_PREVIEW_SONGS[0];
@@ -1213,14 +1111,6 @@ function useLegacyPlayerScreenView() {
     }, 600);
   }, [isDevPreviewActive, screenSong]);
   
-  const clearArtistInfo = useCallback(() => {
-    setArtistInfo(null);
-  }, []);
-  const applyArtistInfoSnapshot = useCallback((details: JioSaavnArtist | null, following: boolean) => {
-    setArtistInfo(details);
-    setArtistFollowing(following);
-  }, []);
-
   useEffect(() => {
     if (!interactionReady) return;
     let active = true;
@@ -1246,35 +1136,6 @@ function useLegacyPlayerScreenView() {
     };
   }, [applyPlayerArtworkColors, interactionReady, screenSong?.id, screenSong?.coverUrl]);
 
-  // Fetch artist info whenever the current song's artist changes
-  useEffect(() => {
-    if (!interactionReady) return;
-    const artistName = currentSong?.artist?.split(",")[0]?.trim();
-    if (!artistName) { clearArtistInfo(); return; }
-
-    let cancelled = false;
-    const fetchId = artistName;
-    artistFetchIdRef.current = fetchId;
-
-    // Try to find artist by name then fetch full details
-    searchArtists(artistName)
-      .then(async (results) => {
-        if (cancelled || artistFetchIdRef.current !== fetchId) return;
-        const first = results[0];
-        if (!first) return;
-        const [details, following] = await Promise.all([
-          getArtistDetails(first.id),
-          isFollowingArtist(first.id),
-        ]);
-        if (!cancelled && artistFetchIdRef.current === fetchId) {
-          applyArtistInfoSnapshot(details, following);
-        }
-      })
-      .catch(() => {});
-
-    return () => { cancelled = true; };
-  }, [applyArtistInfoSnapshot, clearArtistInfo, interactionReady, currentSong?.artist]);
-
   const rawTopInset = Platform.OS === "web" ? 67 : insets.top;
   const topInset = rawTopInset;
   const bottomInset = Platform.OS === "web" ? 28 : insets.bottom;
@@ -1294,8 +1155,6 @@ function useLegacyPlayerScreenView() {
     Platform.OS === "web"
       ? 16
       : Math.max(PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING, bottomInset + PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING);
-  const legacyVideoArtByWidth = Math.min(screenWidth - 62, 336);
-  const legacyVideoArtByHeight = Math.max(192, Math.floor(screenHeight * (isVeryShortScreen ? 0.3 : 0.34)));
   const largeArtworkByWidth = Math.min(screenWidth - (isShortScreen ? 44 : 38), isShortScreen ? 348 : 388);
   const largeArtworkByHeight = Math.max(
     isVeryShortScreen ? 220 : 240,
@@ -1505,49 +1364,6 @@ function useLegacyPlayerScreenView() {
     preloadDominantColors(urls);
   }, [activeQueueIndex, playingQueue]);
 
-  const artistTopSongs = useMemo(() => {
-    if (!artistInfo?.topSongs?.length || !screenSong?.id) return [];
-    const seen = new Set<string>([screenSong.id]);
-    const songs: Song[] = [];
-    for (const item of artistInfo.topSongs) {
-      const converted = convertJioSaavnSong(item);
-      if (!converted.id || seen.has(converted.id)) continue;
-      seen.add(converted.id);
-      songs.push(converted);
-      if (songs.length >= 6) break;
-    }
-    return songs;
-  }, [artistInfo?.topSongs, screenSong?.id]);
-  const artistExploreItems = useMemo<ArtistExploreItem[]>(() => {
-    const items: ArtistExploreItem[] = artistTopSongs.slice(0, 5).map((song) => ({
-      type: "song",
-      id: `song-${song.id}`,
-      song,
-    }));
-
-    for (const artist of artistInfo?.similarArtists?.slice(0, 2) ?? []) {
-      items.push({
-        type: "artist",
-        id: `artist-${artist.id}`,
-        name: artist.name,
-        image: artist.image?.length ? getBestImageUrl(artist.image) : "",
-      });
-    }
-
-    return items;
-  }, [artistInfo?.similarArtists, artistTopSongs]);
-  const handleArtistFollowPress = useCallback(async () => {
-    if (!artistInfo) return;
-
-    const image = artistInfo.image?.length ? getBestImageUrl(artistInfo.image) : "";
-    const nowFollowing = await toggleFollowArtist({
-      id: artistInfo.id,
-      name: artistInfo.name,
-      image,
-      followedAt: getCurrentTimestamp(),
-    });
-    setArtistFollowing(nowFollowing);
-  }, [artistInfo]);
   const liked = screenSong
     ? isDevPreviewActive
       ? devPreviewLikedSongIds.includes(screenSong.id)
@@ -1909,8 +1725,6 @@ function useLegacyPlayerScreenView() {
     ({ item, index }: { item: ArtworkQueueItem; index: number }) => {
       const song = item.song;
       const isActiveCard = index === activeQueueIndex;
-      const isYouTubeTrack = song.id?.startsWith("youtube_") || song.source === "youtube";
-      const isActiveYouTubeTrack = isYouTubeTrack && isActiveCard;
       const inputRange = [
         (index - 1) * artCarouselSnapInterval,
         index * artCarouselSnapInterval,
@@ -2106,36 +1920,6 @@ function useLegacyPlayerScreenView() {
   );
   
   const renderPlayerScrollItem = useCallback(() => null, []);
-
-  const handleExploreSongPress = useCallback(
-    (song: Song) => {
-      playSong(song, artistTopSongs);
-    },
-    [artistTopSongs, playSong]
-  );
-
-  const handleExploreArtistPress = useCallback(
-    (artist: { id: string; name: string; image: string }) => {
-      router.push(
-        { pathname: "/artist/[id]", params: { id: artist.id, name: artist.name, image: artist.image } },
-        { withAnchor: true, dangerouslySingular: () => "artist-profile" }
-      );
-    },
-    []
-  );
-
-  const renderExploreItem = useCallback(
-    ({ item }: { item: ArtistExploreItem }) => (
-      <ArtistExploreTile
-        item={item}
-        fallbackCoverUrl={screenSong?.coverUrl || ""}
-        onSongPress={handleExploreSongPress}
-        onArtistPress={handleExploreArtistPress}
-      />
-    ),
-    [handleExploreArtistPress, handleExploreSongPress, screenSong?.coverUrl]
-  );
-
 
   if (!screenSong) {
     return (
@@ -3251,373 +3035,4 @@ const styles = StyleSheet.create({
     borderColor: Colors.cardBorder,
   },
 
-  // ── About the artist / Explore / Credits ────────────────────────────────────
-  spotifyCard: {
-    marginHorizontal: 20,
-    marginTop: 24,
-    borderRadius: 22,
-    overflow: "hidden",
-    backgroundColor: "rgba(36,36,36,0.94)",
-  },
-  infoCard: {
-    marginHorizontal: 20,
-    marginTop: 24,
-    paddingTop: 18,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(223,226,235,0.12)",
-  },
-
-  trackDetailsCard: {
-    backgroundColor: "transparent",
-  },
-  trackDetailsHeader: {
-    marginBottom: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  trackDetailsTitleWrap: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  trackDetailsIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(223,226,235,0.06)",
-  },
-  trackDetailsTitleText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  trackDetailsTitle: {
-    color: Colors.text,
-    fontSize: 16,
-    fontFamily: "Inter_800ExtraBold",
-    letterSpacing: 0,
-  },
-  trackDetailsSubtitle: {
-    marginTop: 2,
-    color: "rgba(223,226,235,0.52)",
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
-  },
-  trackIdentityPanel: {
-    minHeight: 70,
-    paddingBottom: 18,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(223,226,235,0.1)",
-  },
-  trackIdentityArt: {
-    width: 56,
-    height: 56,
-    borderRadius: 8,
-    backgroundColor: "rgba(223,226,235,0.08)",
-  },
-  trackIdentityText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  trackIdentityTitle: {
-    color: Colors.text,
-    fontSize: 15,
-    lineHeight: 20,
-    fontFamily: "Inter_800ExtraBold",
-    letterSpacing: 0,
-  },
-  trackIdentityArtist: {
-    marginTop: 3,
-    color: "rgba(223,226,235,0.62)",
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
-  },
-  trackMetaHeader: {
-    marginTop: 18,
-    marginBottom: 4,
-  },
-  infoCardLabel: {
-    color: "rgba(223,226,235,0.5)",
-    fontSize: 10,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 1.2,
-    marginBottom: 14,
-  },
-
-  trackDetailsLabel: {
-    marginBottom: 0,
-  },
-  // Artist row
-  artistInfoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  artistInfoAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.surface,
-    flexShrink: 0,
-  },
-  artistInfoAvatarFallback: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  artistInfoMeta: {
-    flex: 1,
-    minWidth: 0,
-    gap: 3,
-  },
-  artistInfoName: {
-    color: "#fff",
-    fontSize: 15,
-    fontFamily: "Inter_700Bold",
-  },
-
-  artistInfoSub: {
-    color: "rgba(255,255,255,0.45)",
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-  },
-
-  artistFollowBtn: {
-    height: 30,
-    paddingHorizontal: 16,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.4)",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-  artistFollowBtnActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  artistFollowBtnText: {
-    color: "#fff",
-    fontSize: 12,
-    fontFamily: "Inter_700Bold",
-  },
-
-  artistFollowBtnTextActive: {
-    color: "#000",
-  },
-  artistBio: {
-    marginTop: 18,
-    color: "rgba(255,255,255,0.68)",
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    lineHeight: 19,
-  },
-  artistHero: {
-    height: 220,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    overflow: "hidden",
-  },
-  artistHeroImage: {
-    ...StyleSheet.absoluteFillObject,
-    width: "100%",
-    height: "100%",
-  },
-  artistHeroShade: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 120,
-  },
-  artistCardBody: {
-    paddingHorizontal: 28,
-    paddingTop: 24,
-    paddingBottom: 28,
-  },
-  artistRankRow: {
-    minHeight: 38,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-  },
-  artistRankText: {
-    flex: 1,
-    minWidth: 0,
-    color: "rgba(255,255,255,0.86)",
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-    textTransform: "capitalize",
-  },
-  artistNameRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  artistCardName: {
-    color: "#FFFFFF",
-    fontSize: 25,
-    lineHeight: 31,
-    fontFamily: "Inter_800ExtraBold",
-    letterSpacing: 0,
-    flexShrink: 1,
-  },
-  artistListeners: {
-    marginTop: 6,
-    color: "rgba(255,255,255,0.66)",
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-  },
-  exploreHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    paddingHorizontal: 28,
-    paddingTop: 28,
-  },
-  exploreTitle: {
-    color: Colors.text,
-    fontSize: 21,
-    fontFamily: "Inter_800ExtraBold",
-    letterSpacing: 0,
-  },
-  exploreTileRow: {
-    gap: 16,
-    paddingHorizontal: 28,
-    paddingTop: 24,
-    paddingBottom: 30,
-  },
-  exploreTile: {
-    width: 152,
-    height: 216,
-    borderRadius: 10,
-    overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  exploreTileImage: {
-    width: "100%",
-    height: "100%",
-  },
-  exploreTileShade: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 112,
-  },
-  exploreTileText: {
-    position: "absolute",
-    left: 12,
-    right: 12,
-    bottom: 14,
-    color: "#FFFFFF",
-    fontSize: 17,
-    lineHeight: 21,
-    fontFamily: "Inter_800ExtraBold",
-    letterSpacing: 0,
-  },
-  exploreTileEyebrow: {
-    position: "absolute",
-    left: 12,
-    right: 12,
-    bottom: 60,
-    color: "rgba(255,255,255,0.78)",
-    fontSize: 11,
-    fontFamily: "Inter_700Bold",
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
-  creditsHeader: {
-    paddingHorizontal: 28,
-    paddingTop: 28,
-    paddingBottom: 22,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  creditsTitle: {
-    color: "#FFFFFF",
-    fontSize: 22,
-    fontFamily: "Inter_800ExtraBold",
-    letterSpacing: 0,
-  },
-  creditsShowAll: {
-    color: Colors.primary,
-    fontSize: 15,
-    fontFamily: "Inter_800ExtraBold",
-  },
-  creditPersonRow: {
-    minHeight: 66,
-    paddingHorizontal: 28,
-    paddingBottom: 24,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-  },
-  creditPersonText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  creditPersonName: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    lineHeight: 25,
-    fontFamily: "Inter_500Medium",
-  },
-  creditPersonRole: {
-    marginTop: 5,
-    color: "rgba(255,255,255,0.62)",
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
-  },
-
-
-  // Credits grid
-  creditsGrid: {
-    gap: 0,
-  },
-  creditItem: {
-    minHeight: 46,
-    paddingVertical: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(223,226,235,0.1)",
-  },
-  creditLabel: {
-    width: 82,
-    color: "rgba(223,226,235,0.48)",
-    fontSize: 10,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.7,
-    textTransform: "uppercase",
-    flexShrink: 0,
-  },
-  creditValueWrap: {
-    flex: 1,
-    minWidth: 0,
-    alignItems: "flex-end",
-  },
-  creditValue: {
-    color: Colors.text,
-    fontSize: 13,
-    lineHeight: 18,
-    fontFamily: "Inter_600SemiBold",
-    textAlign: "right",
-  },
-  creditValueCapitalized: {
-    textTransform: "capitalize",
-  },
 });

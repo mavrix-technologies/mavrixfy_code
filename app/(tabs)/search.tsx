@@ -936,11 +936,6 @@ function useSearchScreenView() {
                 enrichedRankedSongs = fastRank(toFinalList(enrichedSongs));
               }
 
-              logger.debug("[Search] Discovery results", {
-                youtubeSongCount: youtubeSongs.length,
-                jioSaavnSongCount: enrichedRankedSongs.length,
-                enrichmentQueryCount: enrichmentQueries.length,
-              });
               setSongResults(enrichedRankedSongs);
               setYoutubeMusicResults(youtubeSongs);
               writeCache({

@@ -7,7 +7,7 @@ import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-ic
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import Colors from "@/constants/colors";
-import { usePlayerActions, usePlayerProgress } from "@/contexts/PlayerContext";
+import { useOptionalPlayerActions, useOptionalPlayerProgress } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import {
@@ -157,7 +157,8 @@ const MiniPlayerProgressBar = React.memo(function MiniPlayerProgressBar({
 }: {
   fillColor: string;
 }) {
-  const { progress } = usePlayerProgress();
+  const playerProgress = useOptionalPlayerProgress();
+  const progress = playerProgress?.progress ?? 0;
   const progressWidth = useMemo(() => toProgressWidth(progress), [progress]);
 
   return (
@@ -180,7 +181,8 @@ const IOSMiniPlayerProgressBar = React.memo(function IOSMiniPlayerProgressBar({
 }: {
   fillColor: string;
 }) {
-  const { progress } = usePlayerProgress();
+  const playerProgress = useOptionalPlayerProgress();
+  const progress = playerProgress?.progress ?? 0;
   const progressWidth = useMemo(() => toProgressWidth(progress), [progress]);
 
   return (
@@ -212,6 +214,7 @@ const NAV_ITEMS: NavItem[] = [
   { route: "import-songs", label: "Import", icon: "cloud-upload-outline", iconActive: "cloud-upload" },
 ];
 const noopLongPress = () => { };
+const noopPlayerAction = () => { };
 
 const TAB_TRANSITION_SPEC = {
   animation: "timing" as const,
@@ -433,14 +436,13 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   const isNarrowMobile = !isWeb && width <= 380;
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
   const playbackState = usePlaybackPlayState();
-  const {
-    textColor,
-    togglePlay,
-    nextSong,
-    prevSong,
-    setAlbumColor,
-    setTextColor,
-  } = usePlayerActions();
+  const playerActions = useOptionalPlayerActions();
+  const textColor = playerActions?.textColor ?? "#FFFFFF";
+  const togglePlay = playerActions?.togglePlay ?? noopPlayerAction;
+  const nextSong = playerActions?.nextSong ?? noopPlayerAction;
+  const prevSong = playerActions?.prevSong ?? noopPlayerAction;
+  const setAlbumColor = playerActions?.setAlbumColor ?? noopPlayerAction;
+  const setTextColor = playerActions?.setTextColor ?? noopPlayerAction;
   const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const hasActiveMiniPlayer = Boolean(activeSong);
@@ -1039,14 +1041,13 @@ function useIOSMiniPlayerOverlayView() {
   const { push: overlayRouterPush } = useRouter();
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
   const playbackState = usePlaybackPlayState();
-  const {
-    togglePlay,
-    nextSong,
-    prevSong,
-    textColor,
-    setAlbumColor,
-    setTextColor,
-  } = usePlayerActions();
+  const playerActions = useOptionalPlayerActions();
+  const togglePlay = playerActions?.togglePlay ?? noopPlayerAction;
+  const nextSong = playerActions?.nextSong ?? noopPlayerAction;
+  const prevSong = playerActions?.prevSong ?? noopPlayerAction;
+  const textColor = playerActions?.textColor ?? "#FFFFFF";
+  const setAlbumColor = playerActions?.setAlbumColor ?? noopPlayerAction;
+  const setTextColor = playerActions?.setTextColor ?? noopPlayerAction;
   const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const [coverFailed, setCoverFailed] = useState(false);
