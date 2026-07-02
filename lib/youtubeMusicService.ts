@@ -85,7 +85,7 @@ export interface YouTubeMusicAudioStream {
 const YOUTUBE_MUSIC_CACHE_PREFIX = "@mavrixfy_youtube_music";
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const REQUEST_TIMEOUT_MS = 30000;
+const REQUEST_TIMEOUT_MS = 45000; // 45 seconds for production cold starts
 const PRIVATE_DEVELOPMENT_REQUEST_TIMEOUT_MS = 15000;
 const OPTIONAL_HOME_SECTION_TIMEOUT_MS = 4500;
 const CURRENT_YEAR = new Date().getFullYear();
@@ -1118,13 +1118,13 @@ export async function getYouTubeMusicAudioStream(
   try {
     const nonce = Date.now();
     const queryAttempts = [
-      // Ask the backend for a mobile-safe stream. It prefers audio-only, then falls back to seekable MP4.
-      `platform=ios&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
-      `platform=m4a&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
-      `platform=ios&preferMuxed=true&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
+      // Ask the backend for a mobile-safe stream with redirect enabled for faster response
+      `platform=ios&allowMuxedFallback=true&redirect=true&reason=playback_start&nonce=${nonce}`,
+      `platform=m4a&allowMuxedFallback=true&redirect=true&reason=playback_start&nonce=${nonce}`,
+      `platform=ios&preferMuxed=true&allowMuxedFallback=true&redirect=true&reason=playback_start&nonce=${nonce}`,
       // Android can often play audio/webm.
       ...(Platform.OS === "android"
-        ? [`platform=best&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`]
+        ? [`platform=best&allowMuxedFallback=true&redirect=true&reason=playback_start&nonce=${nonce}`]
         : []),
     ];
     let lastError: unknown = null;
