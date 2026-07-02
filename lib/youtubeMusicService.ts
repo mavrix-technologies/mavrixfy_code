@@ -1117,14 +1117,18 @@ export async function getYouTubeMusicAudioStream(
 
   try {
     const nonce = Date.now();
+    
+    // CRITICAL: Use /stream/ endpoint directly to avoid Vercel 10s timeout
+    // The backend will return the YouTube CDN URL in the response
+    // This is much faster than /stream/media/ which was timing out
     const queryAttempts = [
-      // Ask the backend for a mobile-safe stream with redirect enabled for faster response
-      `platform=ios&allowMuxedFallback=true&redirect=true&reason=playback_start&nonce=${nonce}`,
-      `platform=m4a&allowMuxedFallback=true&redirect=true&reason=playback_start&nonce=${nonce}`,
-      `platform=ios&preferMuxed=true&allowMuxedFallback=true&redirect=true&reason=playback_start&nonce=${nonce}`,
+      // Ask for iOS-compatible formats, backend resolves and returns URL
+      `platform=ios&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
+      `platform=m4a&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
+      `platform=ios&preferMuxed=true&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
       // Android can often play audio/webm.
       ...(Platform.OS === "android"
-        ? [`platform=best&allowMuxedFallback=true&redirect=true&reason=playback_start&nonce=${nonce}`]
+        ? [`platform=best&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`]
         : []),
     ];
     let lastError: unknown = null;
@@ -1154,16 +1158,25 @@ export async function getYouTubeMusicAudioStream(
 
       if (!stream) continue;
 
-      if (isNativePlayableStream(stream)) {
+      // Check if we got a direct YouTube URL (from backend resolution)
+      if (stream.url && isNativePlayableStream(stream)) {
+        logger.info("[YouTube Music] Got direct playable stream from backend", {
+          videoId: cleanVideoId,
+          formatId: stream.formatId,
+          mimeType: stream.mimeType,
+          hasVideo: stream.hasVideo,
+          urlPreview: stream.url.substring(0, 100),
+        });
         return stream;
       }
 
-      logger.warn("[YouTube Music] Rejected backend stream that is not native playable", {
+      logger.warn("[YouTube Music] Backend stream not immediately playable", {
         videoId: cleanVideoId,
         formatId: stream.formatId,
         mimeType: stream.mimeType,
         hasAudio: stream.hasAudio,
         hasVideo: stream.hasVideo,
+        hasUrl: !!stream.url,
       });
     }
 
