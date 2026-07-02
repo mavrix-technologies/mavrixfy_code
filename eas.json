@@ -18,6 +18,12 @@
       "distribution": "internal",
       "ios": {
         "simulator": true
+      },
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
+        "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
     },
     "ios-optimized": {
