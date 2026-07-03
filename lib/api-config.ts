@@ -47,11 +47,6 @@ function getYouTubeMusicBaseUrl(): string {
       return normalizeBaseUrl(PRODUCTION_YOUTUBE_MUSIC_API_URL);
     }
 
-    if (__DEV__ && Platform.OS !== "web" && Device.isDevice && isPrivateDevelopmentApiUrl(normalizedEnvUrl)) {
-      logger.warn(
-        "[YouTube Music Config] Using private development API URL on a physical device. Make sure the phone can reach your backend."
-      );
-    }
     return normalizedEnvUrl;
   }
 

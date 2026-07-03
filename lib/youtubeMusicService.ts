@@ -2559,10 +2559,8 @@ export async function getHomeYouTubeMusicCategories(options?: {
 }): Promise<YouTubeMusicHomeCategoryData[]> {
   const limit = Math.min(options?.limitPerCategory ?? 8, 12);
   const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:home_categories:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${limit}:raw`;
-  if (!__DEV__) {
-    const cached = await getCached<YouTubeMusicHomeCategoryData[]>(cacheKey, 60 * 60 * 1000);
-    if (cached) return cached;
-  }
+  const cached = await getCached<YouTubeMusicHomeCategoryData[]>(cacheKey, 60 * 60 * 1000);
+  if (cached) return cached;
 
   const [shelfSections, chartSongs] = await Promise.all([
     getYouTubeMusicHomeCategorySections(limit, 6),
@@ -2583,7 +2581,7 @@ export async function getHomeYouTubeMusicCategories(options?: {
   )).slice(0, 6);
 
   if (fastSections.length > 0) {
-    if (!__DEV__) void setCache(cacheKey, fastSections);
+    void setCache(cacheKey, fastSections);
     return fastSections;
   }
 
