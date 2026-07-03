@@ -1,36 +1,16 @@
-name: iOS IPA Build
+name: iOS IPA Build (Unsigned)
 
 on:
   workflow_dispatch:
-    inputs:
-      profile:
-        description: EAS build profile
-        required: true
-        type: choice
-        default: ios-simulator
-        options:
-          - ios-simulator
-          - ios-unsigned
-          - ios-ipa
-          - production
-      wait_for_build:
-        description: Wait for EAS to finish and upload the IPA as a GitHub artifact
-        required: true
-        type: boolean
-        default: false
 
 permissions:
-  contents: read
-
-concurrency:
-  group: ios-ipa-build-${{ github.ref }}
-  cancel-in-progress: true
+  contents: write
 
 jobs:
   build-ios:
-    name: Trigger iOS EAS build
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+    name: 🎉 iOS Build (No Code Signing)
+    runs-on: macos-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -39,97 +19,72 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: '20'
           cache: 'npm'
-
-      - name: Setup Expo and EAS
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          packager: npm
-          token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Prepare App Store Connect API key
-        shell: bash
-        env:
-          ASC_API_KEY: ${{ secrets.EXPO_ASC_API_KEY }}
-          ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
-          APPLE_TEAM_ID: ${{ secrets.EXPO_APPLE_TEAM_ID }}
-          APPLE_TEAM_TYPE: ${{ secrets.EXPO_APPLE_TEAM_TYPE }}
+      - name: Prebuild iOS
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+          bundler-cache: true
+
+      - name: Install CocoaPods dependencies
         run: |
-          set -euo pipefail
+          cd ios
+          pod install
 
-          if [ -z "$ASC_API_KEY" ]; then
-            echo "No EXPO_ASC_API_KEY secret found; EAS will use existing remote iOS credentials."
-            exit 0
-          fi
-
-          if [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ] || [ -z "$APPLE_TEAM_ID" ] || [ -z "$APPLE_TEAM_TYPE" ]; then
-            echo "::error::When EXPO_ASC_API_KEY is set, also add EXPO_ASC_KEY_ID, EXPO_ASC_ISSUER_ID, EXPO_APPLE_TEAM_ID, and EXPO_APPLE_TEAM_TYPE secrets."
-            exit 1
-          fi
-
-          key_path="$RUNNER_TEMP/asc-api-key.p8"
-          printf '%s' "$ASC_API_KEY" > "$key_path"
-          chmod 600 "$key_path"
-
-          {
-            echo "EXPO_ASC_API_KEY_PATH=$key_path"
-            echo "EXPO_ASC_KEY_ID=$ASC_KEY_ID"
-            echo "EXPO_ASC_ISSUER_ID=$ASC_ISSUER_ID"
-            echo "EXPO_APPLE_TEAM_ID=$APPLE_TEAM_ID"
-            echo "EXPO_APPLE_TEAM_TYPE=$APPLE_TEAM_TYPE"
-          } >> "$GITHUB_ENV"
-
-      - name: Start EAS iOS build
-        id: eas-build
-        shell: bash
-        env:
-          EAS_PROFILE: ${{ inputs.profile }}
-          WAIT_FOR_BUILD: ${{ inputs.wait_for_build }}
+      - name: Build iOS app (no codesign)
         run: |
-          set -euo pipefail
+          cd ios
+          xcodebuild -workspace *.xcworkspace \
+            -scheme Mavrixfy \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
 
-          if [ "$WAIT_FOR_BUILD" = "true" ]; then
-            eas build --platform ios --profile "$EAS_PROFILE" --non-interactive --wait --json > eas-build-result.json
-            node <<'NODE'
-          const fs = require('fs');
-          const raw = fs.readFileSync('eas-build-result.json', 'utf8').trim();
-          const parsed = JSON.parse(raw);
-          const builds = Array.isArray(parsed) ? parsed : Array.isArray(parsed.builds) ? parsed.builds : [parsed];
-          const build = builds.find(Boolean);
-          const artifactUrl =
-            build?.artifacts?.buildUrl ||
-            build?.artifacts?.applicationArchiveUrl ||
-            build?.buildUrl;
-          const dashboardUrl = build?.buildDetailsPageUrl || build?.url || '';
-
-          if (!artifactUrl) {
-            throw new Error('EAS build finished but no IPA artifact URL was returned.');
-          }
-
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact_url=${artifactUrl}\n`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `dashboard_url=${dashboardUrl}\n`);
-          NODE
-          else
-            eas build --platform ios --profile "$EAS_PROFILE" --non-interactive --no-wait
-          fi
-
-      - name: Download IPA artifact
-        if: ${{ inputs.wait_for_build }}
+      - name: Create IPA
         run: |
-          curl --fail --location "${{ steps.eas-build.outputs.artifact_url }}" --output Mavrixfy.ipa
-          ls -lh Mavrixfy.ipa
+          cd ios/build/Build/Products/Release-iphoneos
+          mkdir Payload
+          mv *.app Payload/
+          zip -qq -r -9 Mavrixfy.ipa Payload
+          mv Mavrixfy.ipa ${{ github.workspace }}/
 
       - name: Upload IPA artifact
-        if: ${{ inputs.wait_for_build }}
         uses: actions/upload-artifact@v4
         with:
-          name: Mavrixfy-iOS-IPA
+          name: Mavrixfy-iOS-IPA-Unsigned
           path: Mavrixfy.ipa
           compression-level: 0
           retention-days: 14
+
+      - name: Create Release and Upload IPA
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: iOS Build v${{ github.run_number }} (Unsigned)
+          body: |
+            iOS IPA Build - Unsigned (No Code Signing)
+            
+            ⚠️ This IPA is NOT signed and cannot be installed on real devices.
+            It's built without any Apple Developer account requirements.
+            
+            **Build Details:**
+            - Build Number: ${{ github.run_number }}
+            - Commit: ${{ github.sha }}
+            - Date: ${{ github.event.head_commit.timestamp }}
+          draft: false
+          prerelease: false
+          files: Mavrixfy.ipa
