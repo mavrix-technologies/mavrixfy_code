@@ -47,7 +47,28 @@
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
     },
+    "ios-unsigned": {
+      "distribution": "internal",
+      "ios": {
+        "buildConfiguration": "Release",
+        "simulator": false,
+        "resourceClass": "m-medium"
+      },
+      "channel": "production",
+      "autoIncrement": false,
+      "env": {
+        "NODE_ENV": "production",
+        "EXPO_USE_UPDATES": "1",
+        "EXPO_NO_FLIPPER": "1",
+        "EXPO_NO_CLIENT_ENV_VARS": "1",
+        "EXPO_NO_DOTENV": "1",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
+        "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
+      }
+    },
     "ios-ipa": {
+      "distribution": "internal",
       "ios": {
         "buildConfiguration": "Release",
         "simulator": false,
