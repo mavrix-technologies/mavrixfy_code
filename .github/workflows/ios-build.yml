@@ -1,275 +1,100 @@
-name: iOS-ipa-build
+name: iOS IPA Build
 
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: EAS build profile
+        required: true
+        type: choice
+        default: ios-ipa
+        options:
+          - ios-ipa
+          - production
+      wait_for_build:
+        description: Wait for EAS to finish and upload the IPA as a GitHub artifact
+        required: true
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ios-ipa-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-ios:
-    name: 🎉 iOS Build
-    runs-on: macos-15
+    name: Trigger iOS EAS build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Select Xcode version
-        # GitHub's macOS 15 runners have had runtime-registration issues when
-        # switching back to Xcode 16.2. Prefer Xcode 16.4 when available,
-        # otherwise stay on the image default instead of forcing 16.2.
-        run: |
-          if [ -d /Applications/Xcode_16.4.app/Contents/Developer ]; then
-            sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
-          else
-            echo "Xcode 16.4 not found; using the runner default Xcode"
-          fi
-          xcodebuild -version
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
 
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Fix expo-notifications for SDK compatibility
-        # Keep this patch defensive: newer branches may not install expo-notifications
-        # at all, so the workflow must not fail just because that module is absent.
+      - name: Start EAS iOS build
+        id: eas-build
+        shell: bash
+        env:
+          EAS_PROFILE: ${{ inputs.profile }}
+          WAIT_FOR_BUILD: ${{ inputs.wait_for_build }}
         run: |
-          FILE="node_modules/expo-notifications/ios/ExpoNotifications/Notifications/DateComponentsSerializer.swift"
-          if [ ! -f "$FILE" ]; then
-            echo "expo-notifications patch skipped: $FILE not found"
-          else
-            PATCH_FILE="$FILE" python3 -c '
-            import os, pathlib, re
+          set -euo pipefail
 
-            f = pathlib.Path(os.environ["PATCH_FILE"])
-            text = f.read_text()
-            patched = re.sub(
-                r"\s*if #available\(iOS 26\.0, \*\) \{\s*serializedComponents\[\"isRepeatedDay\"\] = dateComponents\.isRepeatedDay \?\? false\s*\}\s*",
-                "\n    serializedComponents[\"isRepeatedDay\"] = false\n",
-                text,
-            )
-            if patched != text:
-                f.write_text(patched)
-                print("Patched DateComponentsSerializer.swift (removed iOS 26.0 availability guard)")
-            else:
-                print("DateComponentsSerializer.swift - no patch needed")
-            '
-          fi
+          if [ "$WAIT_FOR_BUILD" = "true" ]; then
+            eas build --platform ios --profile "$EAS_PROFILE" --non-interactive --wait --json > eas-build-result.json
+            node <<'NODE'
+          const fs = require('fs');
+          const raw = fs.readFileSync('eas-build-result.json', 'utf8').trim();
+          const parsed = JSON.parse(raw);
+          const builds = Array.isArray(parsed) ? parsed : Array.isArray(parsed.builds) ? parsed.builds : [parsed];
+          const build = builds.find(Boolean);
+          const artifactUrl =
+            build?.artifacts?.buildUrl ||
+            build?.artifacts?.applicationArchiveUrl ||
+            build?.buildUrl;
+          const dashboardUrl = build?.buildDetailsPageUrl || build?.url || '';
 
-      - name: Patch React Native codegen for expand function bug
-        run: |
-          CODEGEN_FILE="node_modules/react-native/scripts/codegen/generate-artifacts-executor/index.js"
-          if [ ! -f "$CODEGEN_FILE" ]; then
-            echo "Codegen patch skipped: $CODEGEN_FILE not found"
-          else
-            CODEGEN_FILE="$CODEGEN_FILE" node <<'NODE'
-            const fs = require('fs');
+          if (!artifactUrl) {
+            throw new Error('EAS build finished but no IPA artifact URL was returned.');
+          }
 
-            const file = process.env.CODEGEN_FILE;
-            let content = fs.readFileSync(file, 'utf8');
-
-            if (content.includes('function expand')) {
-              console.log('Codegen index.js already patched.');
-              process.exit(0);
-            }
-
-            const target = "'use strict';";
-            if (!content.includes(target)) {
-              console.error('Could not find "use strict" line in codegen index.js');
-              process.exit(1);
-            }
-
-            const patch = "function expand(p) { return typeof p === 'string' ? [p] : Array.isArray(p) ? p : []; }";
-            content = content.replace(target, `${target}\n\n${patch}\n`);
-            fs.writeFileSync(file, content, 'utf8');
-            console.log('Patched codegen index.js with expand function.');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact_url=${artifactUrl}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `dashboard_url=${dashboardUrl}\n`);
           NODE
+          else
+            eas build --platform ios --profile "$EAS_PROFILE" --non-interactive --no-wait
           fi
 
-      - name: Prebuild iOS
-        run: npx expo prebuild --platform ios --clean
-
-      - name: Fix Podfile for modular headers
-        # Add modular headers for GoogleUtilities and Firebase dependencies
-        # to fix "does not define modules" error with Swift pods
+      - name: Download IPA artifact
+        if: ${{ inputs.wait_for_build }}
         run: |
-          PODFILE="ios/Podfile"
-          if [ ! -f "$PODFILE" ]; then
-            echo "❌ ERROR: Podfile not found at $PODFILE"
-            exit 1
-          fi
-
-          echo "📝 Patching Podfile to add modular headers..."
-          
-          # Create backup
-          cp "$PODFILE" "${PODFILE}.backup"
-          
-          # Insert modular headers after use_expo_modules! line
-          python3 -c '
-          import sys
-          
-          with open("ios/Podfile", "r") as f:
-              lines = f.readlines()
-          
-          patched_lines = []
-          inserted = False
-          
-          for line in lines:
-              patched_lines.append(line)
-              # Insert after use_expo_modules! line
-              if "use_expo_modules!" in line and not inserted:
-                  patched_lines.append("\n")
-                  patched_lines.append("  # Fix for AppCheckCore modular headers issue\n")
-                  patched_lines.append("  # Swift pods require module maps when building as static libraries\n")
-                  patched_lines.append("  pod '\''GoogleUtilities'\'', :modular_headers => true\n")
-                  patched_lines.append("  pod '\''RecaptchaInterop'\'', :modular_headers => true\n")
-                  patched_lines.append("  pod '\''AppCheckCore'\'', :modular_headers => true\n")
-                  patched_lines.append("\n")
-                  inserted = True
-                  print("✅ Inserted modular headers configuration after use_expo_modules!")
-          
-          if not inserted:
-              print("⚠️  WARNING: Could not find use_expo_modules! line, appending to target block")
-              # Try to insert after "target 'Mavrixfy' do" line
-              patched_lines = []
-              for line in lines:
-                  patched_lines.append(line)
-                  if "target '\''Mavrixfy'\'' do" in line or "target \"Mavrixfy\" do" in line:
-                      patched_lines.append("\n")
-                      patched_lines.append("  # Fix for AppCheckCore modular headers issue\n")
-                      patched_lines.append("  pod '\''GoogleUtilities'\'', :modular_headers => true\n")
-                      patched_lines.append("  pod '\''RecaptchaInterop'\'', :modular_headers => true\n")
-                      patched_lines.append("  pod '\''AppCheckCore'\'', :modular_headers => true\n")
-                      patched_lines.append("\n")
-                      inserted = True
-                      break
-          
-          with open("ios/Podfile", "w") as f:
-              f.writelines(patched_lines)
-          
-          print("\n📄 Patched Podfile (showing relevant lines):")
-          for i, line in enumerate(patched_lines):
-              if "GoogleUtilities" in line or "use_expo_modules" in line or "target" in line:
-                  # Show context around the match
-                  start = max(0, i-2)
-                  end = min(len(patched_lines), i+5)
-                  for j in range(start, end):
-                      print(f"  {j+1:3d}: {patched_lines[j]}", end="")
-                  break
-          '
-          
-          echo ""
-          echo "✅ Podfile patched successfully!"
-
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.2'
-          bundler-cache: false
-
-      - name: Install CocoaPods
-        run: gem install cocoapods --no-document
-
-      - name: Install xcpretty
-        run: gem install xcpretty --no-document
-
-      - name: Install CocoaPods dependencies
-        working-directory: ios
-        run: |
-          set -o pipefail
-          pod install --repo-update 2>&1 | tee pod-install.log || \
-          (
-            echo "=== POD INSTALL FAILED — ERRORS FROM RAW LOG ==="
-            grep -E "error:|Error|ERROR|failed|Failed|Unable|undefined method" pod-install.log | head -80 || true
-            echo ""
-            echo "=== LAST 120 LINES ==="
-            tail -120 pod-install.log
-            exit 1
-          )
-
-      - name: Build iOS app (no codesign)
-        working-directory: ios
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -workspace Mavrixfy.xcworkspace \
-            -scheme Mavrixfy \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
-            SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
-            GCC_TREAT_WARNINGS_AS_ERRORS=NO \
-            IBTOOL_WARNINGS_AS_ERRORS=NO \
-            build \
-            2>&1 | tee build.log | xcpretty --color --simple || \
-            (
-              echo "=== BUILD FAILED — ERRORS FROM RAW LOG ==="
-              grep -E "error:|warning: .*(error|failed)" build.log | head -60 || true
-              echo ""
-              echo "=== STORYBOARD / IBTOOL ERRORS ==="
-              grep -i "ibtool\|storyboard\|CompileStoryboard" build.log | head -40 || true
-              echo ""
-              echo "=== LAST 80 LINES ==="
-              tail -80 build.log
-              exit 1
-            )
-
-      - name: Create Payload directory
-        working-directory: ios/build/Build/Products/Release-iphoneos
-        run: mkdir Payload
-
-      - name: Move app to Payload
-        working-directory: ios/build/Build/Products/Release-iphoneos
-        run: mv Mavrixfy.app Payload/
-
-      - name: Zip output
-        working-directory: ios/build/Build/Products/Release-iphoneos
-        run: zip -qq -r -9 MavrixfyIpaExport.ipa Payload
-
-      - name: Rename IPA for direct download
-        run: |
-          cp ios/build/Build/Products/Release-iphoneos/MavrixfyIpaExport.ipa ./Mavrixfy.ipa
+          curl --fail --location "${{ steps.eas-build.outputs.artifact_url }}" --output Mavrixfy.ipa
           ls -lh Mavrixfy.ipa
 
       - name: Upload IPA artifact
+        if: ${{ inputs.wait_for_build }}
         uses: actions/upload-artifact@v4
         with:
           name: Mavrixfy-iOS-IPA
-          path: ./Mavrixfy.ipa
+          path: Mavrixfy.ipa
           compression-level: 0
-
-      - name: Upload failure logs
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-build-failure-logs
-          path: |
-            ios/pod-install.log
-            ios/build.log
-          if-no-files-found: warn
-
-      - name: Create Release and Upload IPA
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ github.run_number }}
-          name: iOS Build v${{ github.run_number }}
-          body: |
-            iOS IPA Build - Unsigned (No Code Signing)
-
-            **Build Details:**
-            - Build Number: ${{ github.run_number }}
-            - Commit: ${{ github.sha }}
-          draft: false
-          prerelease: false
-          files: ./Mavrixfy.ipa
+          retention-days: 14

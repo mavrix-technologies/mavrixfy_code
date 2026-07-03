@@ -803,6 +803,9 @@ function normalizeAudioStreamPayload(json: any, videoId: string): YouTubeMusicAu
   const source = getResponsePayload(json, "stream", "audio");
   const url = readString(source?.playbackUrl || source?.proxyUrl || source?.url);
   if (!url.startsWith("https://") && !url.startsWith("http://")) return null;
+  const playbackUrl = shouldUseBackendMediaProxy(url)
+    ? getBackendMediaStreamUrl(videoId, source) ?? url
+    : url;
 
   const rawExpiry = Number(source?.expiresAt);
   const expiresAt = Number.isFinite(rawExpiry) && rawExpiry > 0
@@ -821,7 +824,7 @@ function normalizeAudioStreamPayload(json: any, videoId: string): YouTubeMusicAu
 
   return {
     videoId,
-    url,
+    url: playbackUrl,
     expiresAt,
     headers,
     mimeType: readString(source?.mimeType) || undefined,
@@ -832,6 +835,43 @@ function normalizeAudioStreamPayload(json: any, videoId: string): YouTubeMusicAu
     hasAudio: typeof source?.hasAudio === "boolean" ? source.hasAudio : undefined,
     hasVideo: typeof source?.hasVideo === "boolean" ? source.hasVideo : undefined,
   };
+}
+
+function shouldUseBackendMediaProxy(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host.endsWith(".googlevideo.com") || host === "googlevideo.com";
+  } catch {
+    return false;
+  }
+}
+
+function getBackendMediaStreamUrl(videoId: string, source: any): string | null {
+  const mimeType = readString(source?.mimeType).toLowerCase();
+  const extension = mimeType.includes("audio/mp4") || mimeType.includes("audio/m4a")
+    ? ".m4a"
+    : mimeType.includes("video/mp4")
+      ? ".mp4"
+      : "";
+  const params = new URLSearchParams();
+  params.set("reason", "app_cdn_proxy");
+  params.set("session", String(source?.generatedAt || Date.now()));
+
+  const formatId = readString(source?.formatId);
+  if (formatId) params.set("formatId", formatId);
+  if (source?.hasVideo === true) {
+    params.set("preferMuxed", "true");
+    params.set("allowMuxedFallback", "true");
+  } else {
+    params.set("strictAudioOnly", "true");
+    params.set("allowMuxedFallback", "false");
+  }
+
+  return getEndpointCandidates(
+    `/stream/media/${encodeURIComponent(videoId)}${extension}`,
+    undefined,
+    params.toString()
+  )[0] ?? null;
 }
 
 function isBackendProxiedStreamUrl(url: string): boolean {
@@ -919,31 +959,6 @@ function getChartsPayload(json: any): any {
   if (json?.data?.charts && typeof json.data.charts === "object") return json.data.charts;
   if (json?.data && typeof json.data === "object") return json.data;
   return json;
-}
-
-function getChartPlaylistItems(json: any): any[] {
-  const charts = getChartsPayload(json);
-  const playlists: any[] = [];
-  const append = (value: any) => {
-    if (Array.isArray(value)) {
-      playlists.push(...value);
-      return;
-    }
-
-    if (!value || typeof value !== "object") return;
-    if (Array.isArray(value.playlists)) playlists.push(...value.playlists);
-    if (Array.isArray(value.items)) playlists.push(...value.items);
-    if (value.playlistId || value.browseId) playlists.push(value);
-  };
-
-  append(charts?.daily);
-  append(charts?.videos);
-  append(charts?.weekly);
-  append(charts?.trending);
-  append(charts?.playlists);
-  append(charts?.songs);
-
-  return playlists;
 }
 
 function getResponsePayload(json: any, ...keys: string[]): any {
@@ -1118,18 +1133,20 @@ export async function getYouTubeMusicAudioStream(
   try {
     const nonce = Date.now();
     
-    // CRITICAL: Use /stream/ endpoint directly to avoid Vercel 10s timeout
-    // The backend will return the YouTube CDN URL in the response
-    // This is much faster than /stream/media/ which was timing out
+    // Use /stream/ for lightweight stream metadata. The backend can return a
+    // direct CDN URL or a media proxy URL, depending on deployment/version.
     const queryAttempts = [
-      // Ask for iOS-compatible formats, backend resolves and returns URL
-      `platform=ios&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
-      `platform=m4a&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
-      `platform=ios&preferMuxed=true&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
-      // Android can often play audio/webm.
+      // Prefer audio-only streams for native playback. The production backend can
+      // return muxed video/mp4 for iOS-style requests, which Android release
+      // builds may reject before audio starts.
+      `platform=m4a&strictAudioOnly=true&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`,
+      `platform=ios&strictAudioOnly=true&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`,
+      // Android can often play audio/webm when M4A is unavailable.
       ...(Platform.OS === "android"
-        ? [`platform=best&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`]
+        ? [`platform=best&strictAudioOnly=true&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`]
         : []),
+      // Last resort: allow the backend to return muxed/proxied media.
+      `platform=ios&preferMuxed=true&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
     ];
     let lastError: unknown = null;
 
@@ -2323,10 +2340,6 @@ async function searchYouTubeMusicSongCardsFromQueries(
   return dedupeYouTubePlaylistCards(results.flat());
 }
 
-function flattenYouTubeHomePlaylists(sections: YouTubeMusicHomeCategoryData[]): YouTubeMusicPlaylistCard[] {
-  return dedupeYouTubePlaylistCards(sections.flatMap((section) => section.results));
-}
-
 function getChartSongItems(json: any): any[] {
   const charts = getChartsPayload(json);
   const songs: any[] = [];
@@ -2551,17 +2564,30 @@ export async function getHomeYouTubeMusicCategories(options?: {
     if (cached) return cached;
   }
 
-  const [shelfSections, trendingPlaylists, chartSongs] = await Promise.all([
-    getYouTubeMusicHomeCategorySections(limit, 10),
-    getYouTubeMusicTrendingPlaylists("IN").catch(() => [] as YouTubeMusicPlaylistCard[]),
+  const [shelfSections, chartSongs] = await Promise.all([
+    getYouTubeMusicHomeCategorySections(limit, 6),
     getYouTubeMusicChartSongCards("IN").catch(() => [] as YouTubeMusicPlaylistCard[]),
   ]);
 
-  const browseSections = await getYouTubeMusicBrowseCategorySections(
+  const chartSection = toYouTubeHomeSection(
+    "yt-top-songs-india",
+    "Top songs India",
+    chartSongs,
     limit,
-    flattenYouTubeHomePlaylists(shelfSections),
-    [...chartSongs, ...trendingPlaylists]
+    "CHARTS"
   );
+  const fastSections = dedupeYouTubeHomeSections(mapFilter(
+    [...shelfSections, chartSection],
+    (section) => section,
+    (section): section is YouTubeMusicHomeCategoryData => Boolean(section)
+  )).slice(0, 6);
+
+  if (fastSections.length > 0) {
+    if (!__DEV__) void setCache(cacheKey, fastSections);
+    return fastSections;
+  }
+
+  const browseSections = await getYouTubeMusicBrowseCategorySections(limit, [], chartSongs);
   const fallbackSection = browseSections.length === 0
     ? toYouTubeHomeSection(
         "yt-search-suggestions",
@@ -2585,75 +2611,6 @@ export async function getHomeYouTubeMusicCategories(options?: {
   ));
   if (!__DEV__ && finalResults.length > 0) void setCache(cacheKey, finalResults);
   return finalResults;
-}
-
-async function getYouTubeMusicTrendingPlaylists(country: string = "IN"): Promise<YouTubeMusicPlaylistCard[]> {
-  const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:trending_playlists:${HOME_YOUTUBE_MUSIC_CATEGORY_VERSION}:${country}`;
-  const cached = await getCached<YouTubeMusicPlaylistCard[]>(cacheKey, CACHE_TTL_MS);
-  if (cached) {
-    return dedupeYouTubePlaylistCards(cached.map((playlist) => ({
-      ...playlist,
-      author: playlist.author || undefined,
-      category: playlist.category || "Charts",
-      kind: playlist.kind || "chart",
-    })));
-  }
-
-  try {
-    const json = await fetchFirstJson<any>(
-      getEndpointCandidates("/charts", "/charts", `country=${encodeURIComponent(country)}`)
-    );
-    if (!json) return [];
-
-    const rawPlaylists = getChartPlaylistItems(json);
-
-    const playlists = mapFilter(
-      rawPlaylists,
-      (item: any) => {
-        const id = item.playlistId || item.browseId;
-        const name = item.title || item.name;
-        if (!id || !name) return null;
-
-        // Get best quality thumbnail
-        const thumbnails = normalizeThumbnails(item.thumbnails || item.thumbnail || item.image);
-        const bestThumbnail = getBestThumbnail(thumbnails);
-
-        const result: YouTubeMusicPlaylistCard = {
-          id,
-          name,
-          imageUrl: bestThumbnail ? upscaleYouTubeThumbnail(bestThumbnail.url) : "",
-          imageWidth: bestThumbnail?.width || undefined,
-          imageHeight: bestThumbnail?.height || undefined,
-          songCount: Number(item.trackCount || item.itemCount) || 50,
-          author: item.author || undefined,
-          category: item.category || "Charts",
-          description: item.description || undefined,
-          kind: "chart",
-          itemType: "playlist",
-        };
-        return result;
-      },
-      (p): p is YouTubeMusicPlaylistCard => p !== null
-    );
-
-    const seen = new Set<string>();
-    const uniquePlaylists = playlists.filter(p => {
-      if (seen.has(p.id)) return false;
-      seen.add(p.id);
-      return true;
-    });
-
-    const finalPlaylists = dedupeYouTubePlaylistCards(uniquePlaylists);
-
-    await setCache(cacheKey, finalPlaylists);
-    return finalPlaylists;
-  } catch (error) {
-    if (isAbortLikeError(error)) {
-      return [];
-    }
-    logger.warn("YouTube Music trending playlists error:", error);
-    return [];
-  }
 }
 
 /**

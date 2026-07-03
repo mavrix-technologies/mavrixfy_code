@@ -1,4 +1,3 @@
-import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { Platform } from "react-native";
 
@@ -18,10 +17,18 @@ function normalizeBaseUrl(value: string): string {
 const SONG_API_BASE_URL = normalizeBaseUrl(API_CONFIG.songBaseUrl);
 const APP_API_BASE_URL = normalizeBaseUrl(process.env.EXPO_PUBLIC_APP_API_URL || API_CONFIG.appBaseUrl);
 
-function isHostOnlyDevelopmentUrl(value: string): boolean {
+function isPrivateDevelopmentApiUrl(value: string): boolean {
   try {
     const host = new URL(value).hostname.toLowerCase();
-    return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "10.0.2.2";
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "0.0.0.0" ||
+      host === "10.0.2.2" ||
+      host.startsWith("192.168.") ||
+      host.startsWith("10.") ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+    );
   } catch {
     return false;
   }
@@ -30,15 +37,22 @@ function isHostOnlyDevelopmentUrl(value: string): boolean {
 function getYouTubeMusicBaseUrl(): string {
   const envUrl = process.env.EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL?.trim();
   
-  // ALWAYS use environment variable if set, no fallbacks
   if (envUrl) {
-    // Only warn on physical devices using localhost/127.0.0.1
-    if (__DEV__ && Platform.OS !== "web" && Device.isDevice && isHostOnlyDevelopmentUrl(envUrl)) {
+    const normalizedEnvUrl = normalizeBaseUrl(envUrl);
+
+    if (!__DEV__ && isPrivateDevelopmentApiUrl(normalizedEnvUrl)) {
       logger.warn(
-        "[YouTube Music Config] Using localhost URL on a physical device. This may not work. Consider using your LAN IP or the production proxy."
+        "[YouTube Music Config] Ignoring private development API URL in release build. Using production proxy."
+      );
+      return normalizeBaseUrl(PRODUCTION_YOUTUBE_MUSIC_API_URL);
+    }
+
+    if (__DEV__ && Platform.OS !== "web" && Device.isDevice && isPrivateDevelopmentApiUrl(normalizedEnvUrl)) {
+      logger.warn(
+        "[YouTube Music Config] Using private development API URL on a physical device. Make sure the phone can reach your backend."
       );
     }
-    return normalizeBaseUrl(envUrl);
+    return normalizedEnvUrl;
   }
 
   // No environment variable set - use production as last resort
