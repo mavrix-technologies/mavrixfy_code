@@ -37,7 +37,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Setup Expo and EAS
@@ -49,6 +49,39 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Prepare App Store Connect API key
+        shell: bash
+        env:
+          ASC_API_KEY: ${{ secrets.EXPO_ASC_API_KEY }}
+          ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.EXPO_APPLE_TEAM_ID }}
+          APPLE_TEAM_TYPE: ${{ secrets.EXPO_APPLE_TEAM_TYPE }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$ASC_API_KEY" ]; then
+            echo "No EXPO_ASC_API_KEY secret found; EAS will use existing remote iOS credentials."
+            exit 0
+          fi
+
+          if [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ] || [ -z "$APPLE_TEAM_ID" ] || [ -z "$APPLE_TEAM_TYPE" ]; then
+            echo "::error::When EXPO_ASC_API_KEY is set, also add EXPO_ASC_KEY_ID, EXPO_ASC_ISSUER_ID, EXPO_APPLE_TEAM_ID, and EXPO_APPLE_TEAM_TYPE secrets."
+            exit 1
+          fi
+
+          key_path="$RUNNER_TEMP/asc-api-key.p8"
+          printf '%s' "$ASC_API_KEY" > "$key_path"
+          chmod 600 "$key_path"
+
+          {
+            echo "EXPO_ASC_API_KEY_PATH=$key_path"
+            echo "EXPO_ASC_KEY_ID=$ASC_KEY_ID"
+            echo "EXPO_ASC_ISSUER_ID=$ASC_ISSUER_ID"
+            echo "EXPO_APPLE_TEAM_ID=$APPLE_TEAM_ID"
+            echo "EXPO_APPLE_TEAM_TYPE=$APPLE_TEAM_TYPE"
+          } >> "$GITHUB_ENV"
 
       - name: Start EAS iOS build
         id: eas-build
