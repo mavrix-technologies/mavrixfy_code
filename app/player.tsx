@@ -2035,6 +2035,7 @@ function useLegacyPlayerScreenView() {
         renderItem={renderPlayerScrollItem}
         contentContainerStyle={[styles.playerScrollContent, { paddingBottom: listBottomPadding }]}
         showsVerticalScrollIndicator={false}
+        nestedScrollEnabled
         scrollEnabled={Platform.OS === "android" ? !isProgressSeeking : true}
         keyboardShouldPersistTaps="handled"
         bounces={Platform.OS === "ios"}
@@ -2326,7 +2327,7 @@ function useLegacyPlayerScreenView() {
               maxToRenderPerBatch={8}
               updateCellsBatchingPeriod={50}
               windowSize={8}
-              removeClippedSubviews={true}
+              removeClippedSubviews={false}
             />
           </View>
           </Reanimated.View>

@@ -541,11 +541,11 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
 
   useEffect(() => {
     Animated.timing(coverOpacity, {
-      toValue: playerModalVisible ? 0 : 1,
+      toValue: 1,
       duration: 160,
       useNativeDriver: true,
     }).start();
-  }, [playerModalVisible, coverOpacity]);
+  }, [coverOpacity]);
 
   const resetMixChip = useCallback(() => {
     Animated.parallel([
@@ -1700,7 +1700,6 @@ const styles = StyleSheet.create({
   },
   wrapperHidden: {
     opacity: 0,
-    display: "none",
   },
   container: {
     width: "100%",

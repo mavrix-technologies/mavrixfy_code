@@ -138,7 +138,7 @@ LogBox.ignoreLogs([
 // Screens where the docked mini player and tab bar must not cover the route.
 const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "profile", "delete-account", "notifications"]);
 // Root-stack routes (outside tabs) that still show the docked mini player + tab bar.
-const NAV_OVERLAY_SEGMENTS = new Set(["playlist"]);
+const NAV_OVERLAY_SEGMENTS = new Set(["playlist", "player", "artist"]);
 
 // Set navigation bar color on Android
 if (Platform.OS === "android") {
