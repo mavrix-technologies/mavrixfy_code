@@ -2609,7 +2609,9 @@ export async function getHomeYouTubeMusicCategories(options?: {
   ));
 
   if (finalResults.length > 0) {
-    void setCache(cacheKey, finalResults);
+    if (shelfSections.length > 0) {
+      void setCache(cacheKey, finalResults);
+    }
     return finalResults;
   }
 
