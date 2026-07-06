@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-ios:
     name: 🎉 iOS Build (No Code Signing)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
