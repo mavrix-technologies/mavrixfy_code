@@ -4,13 +4,14 @@ import { isRunningInExpoGo } from "expo";
 import * as Network from "expo-network";
 import { usePathname } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Song } from "@/lib/musicData";
+import { convertJioSaavnSong, Song } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
 import { getCatalogSongs } from "@/lib/catalogService";
 import { useAuth } from "@/contexts/AuthContext";
 import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
 import { logger } from "@/lib/logger";
 import * as ExpoAvPlayer from "@/lib/expoAvPlayer";
+import { searchSong } from "@/lib/song-matcher";
 import {
   getYouTubeAudioStreamForPlayback,
   reportYouTubeMusicPlaybackFailure,
@@ -447,8 +448,9 @@ function normalizePlayableSong(song: Song | null | undefined): Song | null {
 const SINGLE_SONG_AUTOPLAY_MIN_SIZE = 6;
 const SINGLE_SONG_AUTOPLAY_TARGET_SIZE = 18;
 const SINGLE_SONG_AUTOPLAY_LOOKUP_TIMEOUT_MS = 900;
-const YOUTUBE_NATIVE_STREAM_TIMEOUT_MS = 15000;
+const YOUTUBE_NATIVE_STREAM_TIMEOUT_MS = 7000;
 const YOUTUBE_UPCOMING_NATIVE_PRELOAD_SIZE = 3;
+const YOUTUBE_JIOSAAVN_FALLBACK_TIMEOUT_MS = 2500;
 const RESOLVED_NATIVE_AUDIO_TTL_MS = 55 * 60 * 1000;
 
 function textKey(value: unknown): string {
@@ -588,6 +590,42 @@ async function getSingleSongAutoplayCandidates(): Promise<Song[]> {
   return [...recentSongs, ...catalogSongs];
 }
 
+async function resolveJioSaavnFallbackForYouTubeSong(song: Song, signal: AbortSignal): Promise<Song | null> {
+  const title = readNonEmptyString(song.title);
+  const artist = readNonEmptyString(song.artist);
+  if (!title || signal.aborted) return null;
+
+  const match = await resolveWithin(
+    searchSong(title, artist, readNonEmptyString(song.album) || undefined),
+    YOUTUBE_JIOSAAVN_FALLBACK_TIMEOUT_MS,
+    null
+  );
+  if (!match?.song || signal.aborted) return null;
+
+  const fallbackSong = convertJioSaavnSong(match.song);
+  const audioUrl = resolveAudioUrl(fallbackSong as SongPlaybackSource);
+  if (!audioUrl) return null;
+
+  logger.info("[NativeResolve] Using JioSaavn fallback for YouTube song", {
+    originalSongId: song.id,
+    originalTitle: song.title,
+    fallbackSongId: fallbackSong.id,
+    fallbackTitle: fallbackSong.title,
+    matchScore: match.matchScore,
+  });
+
+  return {
+    ...fallbackSong,
+    audioUrl,
+    source: "jiosaavn",
+    youtubeVideoId: undefined,
+    youtubeVisualVideoId: undefined,
+    youtubeNativeAudio: false,
+    youtubeAudioExpiresAt: undefined,
+    playbackHeaders: undefined,
+  };
+}
+
 async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | null> {
   const videoId = extractYouTubeVideoId(song);
   if (!videoId) return null;
@@ -595,7 +633,8 @@ async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | 
   const timeout = createPlaybackTimeoutSignal(YOUTUBE_NATIVE_STREAM_TIMEOUT_MS);
 
   try {
-    const stream = await getYouTubeAudioStreamForPlayback(videoId, timeout.signal);
+    // 1. Try YouTube stream resolution directly FIRST for instant playback
+    const stream = await getYouTubeAudioStreamForPlayback(videoId, song.title, song.artist, timeout.signal);
 
     logger.info(`[NativeResolve] Got stream response for ${videoId}`, {
       hasStream: !!stream,
@@ -618,6 +657,12 @@ async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | 
         source: "youtube",
       };
     }
+
+    // 2. ONLY if direct YouTube resolution returned no stream, attempt JioSaavn fallback
+    logger.warn(`[NativeResolve] Direct YouTube stream resolution failed for ${videoId}, trying JioSaavn fallback...`);
+    const fallbackSong = await resolveJioSaavnFallbackForYouTubeSong(song, timeout.signal);
+    if (fallbackSong) return fallbackSong;
+
   } catch (err) {
     logger.warn("[NativeResolve] Stream request failed", { videoId, error: err });
   } finally {
@@ -642,7 +687,13 @@ function mergeResolvedNativeEntriesIntoQueue(queue: Song[], entries: NativeTrack
   for (const entry of entries) {
     const index = entry.appIndex;
     const existing = queue[index];
-    if (!existing || String(existing.id) !== String(entry.song.id)) continue;
+    if (!existing) continue;
+    const sameSongId = String(existing.id) === String(entry.song.id);
+    const isProviderFallback =
+      isYouTubeSource(existing) &&
+      entry.song.source === "jiosaavn" &&
+      Boolean(resolveAudioUrl(entry.song as SongPlaybackSource));
+    if (!sameSongId && !isProviderFallback) continue;
 
     const resolvedUrl = resolveAudioUrl(entry.song as SongPlaybackSource);
     if (!resolvedUrl) continue;
@@ -654,8 +705,8 @@ function mergeResolvedNativeEntriesIntoQueue(queue: Song[], entries: NativeTrack
     if (existingUrl === resolvedUrl && !nativeMetadataChanged) continue;
 
     if (!nextQueue) nextQueue = queue.slice();
-    nextQueue[index] = isYouTubeSource(entry.song)
-      ? { ...existing, ...stripTransientYouTubeAudioUrl(entry.song), audioUrl: "" }
+    nextQueue[index] = isProviderFallback
+      ? { ...entry.song, audioUrl: resolvedUrl }
       : { ...existing, ...entry.song, audioUrl: resolvedUrl };
   }
 
@@ -3294,27 +3345,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       }
 
       const targetIndex = Math.max(0, currentQueue.findIndex((song) => song.id === targetSong.id));
-      if (isYouTubeSource(targetSong)) {
-        const resumeAt = Math.max(
-          0,
-          restoredPositionSecondsRef.current,
-          latestPositionSecondsRef.current,
-          effectivePositionSeconds
-        );
-        const refreshQueue = (currentQueue.length > 0 ? currentQueue : [targetSong]).map((item, index) =>
-          index === targetIndex || item.id === targetSong.id
-            ? stripTransientYouTubeAudioUrl(item)
-            : item
-        );
-        const refreshTarget = stripTransientYouTubeAudioUrl(targetSong);
-
-        await loadAndPlaySong(refreshTarget, refreshQueue, targetIndex);
-        if (resumeAt > 1 && currentSongRef.current?.id === targetSong.id) {
-          await TrackPlayer.seekTo(resumeAt).catch(() => {});
-        }
-        restoredPositionSecondsRef.current = 0;
-        return;
-      }
 
       const nativeTargetIndex = await getNativeTrackIndexForSong(targetIndex, targetSong.id);
       if (nativeTargetIndex < 0) {
