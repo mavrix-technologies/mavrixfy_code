@@ -46,28 +46,6 @@ service cloud.firestore {
         (!resource.data.keys().hasAny(['admin']) || request.resource.data.admin == resource.data.admin);
     }
 
-    function isPublicCatalogDocument(data) {
-      return (!data.keys().hasAny(['visibility']) || data.visibility == 'public') &&
-        (!data.keys().hasAny(['isPublic']) || data.isPublic == true) &&
-        (!data.keys().hasAny(['status']) || data.status in ['published', 'active']) &&
-        (
-          data.keys().hasAny(['name']) ||
-          data.keys().hasAny(['title']) ||
-          data.keys().hasAny(['songId']) ||
-          data.keys().hasAny(['albumId'])
-        );
-    }
-
-    function isPublicPromotionDocument(data) {
-      return (!data.keys().hasAny(['visibility']) || data.visibility == 'public') &&
-        (!data.keys().hasAny(['isPublic']) || data.isPublic == true) &&
-        (!data.keys().hasAny(['status']) || data.status in ['published', 'active']) &&
-        (
-          data.keys().hasAny(['title']) ||
-          data.keys().hasAny(['message']) ||
-          data.keys().hasAny(['imageUrl'])
-        );
-    }
 
     function isPublicAppVersion(data) {
       return data.keys().hasAll(['latestVersion', 'minimumVersion']);
@@ -158,17 +136,17 @@ service cloud.firestore {
     }
 
     match /songs/{songId} {
-      allow read: if isPublicCatalogDocument(resource.data);
+      allow read: if true;
       allow create, update, delete: if isAdmin();
     }
 
     match /albums/{albumId} {
-      allow read: if isPublicCatalogDocument(resource.data);
+      allow read: if true;
       allow create, update, delete: if isAdmin();
     }
 
     match /trendingSongs/{songId} {
-      allow read: if isPublicCatalogDocument(resource.data);
+      allow read: if true;
       allow create, update, delete: if isAdmin();
     }
 
@@ -193,7 +171,7 @@ service cloud.firestore {
     }
 
     match /promotions/{promotionId} {
-      allow read: if isPublicPromotionDocument(resource.data);
+      allow read: if true;
       allow create, update, delete: if isAdmin();
     }
 

@@ -1132,28 +1132,38 @@ export async function searchYouTubeMusicVideos(
 
 export async function getYouTubeMusicAudioStream(
   videoId: string,
-  signal?: AbortSignal
+  titleOrSignal?: string | AbortSignal,
+  artist?: string,
+  signalParam?: AbortSignal
 ): Promise<YouTubeMusicAudioStream | null> {
   const cleanVideoId = extractVideoId({ videoId: readString(videoId).replace(/^youtube_/, "") });
   if (!cleanVideoId) return null;
+
+  const title = typeof titleOrSignal === "string" ? titleOrSignal : undefined;
+  const signal = typeof titleOrSignal !== "string" ? titleOrSignal : signalParam;
 
   try {
     const nonce = Date.now();
     
     // Use /stream/ for lightweight stream metadata. The backend can return a
     // direct CDN URL or a media proxy URL, depending on deployment/version.
+    const extraParams: string[] = [];
+    if (title) extraParams.push(`title=${encodeURIComponent(title)}`);
+    if (artist) extraParams.push(`artist=${encodeURIComponent(artist)}`);
+    const extraQs = extraParams.length ? `&${extraParams.join('&')}` : '';
+
     const queryAttempts = [
       // Prefer audio-only streams for native playback. The production backend can
       // return muxed video/mp4 for iOS-style requests, which Android release
       // builds may reject before audio starts.
-      `platform=m4a&strictAudioOnly=true&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`,
-      `platform=ios&strictAudioOnly=true&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`,
+      `platform=m4a&strictAudioOnly=true&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}${extraQs}`,
+      `platform=ios&strictAudioOnly=true&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}${extraQs}`,
       // Android can often play audio/webm when M4A is unavailable.
       ...(Platform.OS === "android"
-        ? [`platform=best&strictAudioOnly=true&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}`]
+        ? [`platform=best&strictAudioOnly=true&allowMuxedFallback=false&reason=playback_start&nonce=${nonce}${extraQs}`]
         : []),
       // Last resort: allow the backend to return muxed/proxied media.
-      `platform=ios&preferMuxed=true&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}`,
+      `platform=ios&preferMuxed=true&allowMuxedFallback=true&reason=playback_start&nonce=${nonce}${extraQs}`,
     ];
     let lastError: unknown = null;
 
@@ -1233,13 +1243,15 @@ export async function getYouTubeMusicAudioStream(
  */
 export async function getYouTubeAudioStreamForPlayback(
   videoId: string,
+  title?: string,
+  artist?: string,
   signal?: AbortSignal
 ): Promise<YouTubeMusicAudioStream | null> {
   const cleanVideoId = extractVideoId({ videoId: readString(videoId).replace(/^youtube_/, "") });
   if (!cleanVideoId) return null;
 
   logger.info(`[YouTube Music] Resolving stream for ${cleanVideoId} via backend`);
-  return getYouTubeMusicAudioStream(cleanVideoId, signal);
+  return getYouTubeMusicAudioStream(cleanVideoId, title, artist, signal);
 }
 
 export async function reportYouTubeMusicPlaybackFailure(payload: {
