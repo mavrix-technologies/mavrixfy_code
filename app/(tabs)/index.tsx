@@ -1441,7 +1441,7 @@ function useHomeScreenInnerView() {
 
         const youtubeHomeCategoriesPromise = withPromiseTimeout(
           getHomeYouTubeMusicCategories({ limitPerCategory: 8 }),
-          35000,
+          8000,
           "YouTube home categories timeout"
         ).catch((err) => {
           logger.warn("[Home] YouTube home categories fetch failed or timed out:", err);

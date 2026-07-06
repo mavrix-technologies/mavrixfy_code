@@ -2602,10 +2602,8 @@ export async function getHomeYouTubeMusicCategories(options?: {
     "CHARTS"
   );
 
-  const shelfSeedPlaylists = shelfSections.flatMap((section) => section.results);
-  const browseSections = await getYouTubeMusicBrowseCategorySections(limit, shelfSeedPlaylists, chartSongs);
   const finalResults = dedupeYouTubeHomeSections(mapFilter(
-    [...browseSections, chartSection],
+    [chartSection, ...shelfSections],
     (section) => section,
     (section): section is YouTubeMusicHomeCategoryData => Boolean(section)
   ));
