@@ -2,6 +2,10 @@ name: iOS IPA Build (Unsigned)
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
 
 permissions:
   contents: write
@@ -9,17 +13,17 @@ permissions:
 jobs:
   build-ios:
     name: 🎉 iOS Build (No Code Signing)
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -31,8 +35,9 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.0'
+          ruby-version: '3.2'
           bundler-cache: true
+          working-directory: ios
 
       - name: Install CocoaPods dependencies
         run: |
@@ -42,7 +47,7 @@ jobs:
       - name: Build iOS app (no codesign)
         run: |
           cd ios
-          xcodebuild -workspace *.xcworkspace \
+          xcodebuild -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
             -configuration Release \
             -sdk iphoneos \
@@ -57,8 +62,8 @@ jobs:
       - name: Create IPA
         run: |
           cd ios/build/Build/Products/Release-iphoneos
-          mkdir Payload
-          mv *.app Payload/
+          mkdir -p Payload
+          mv Mavrixfy.app Payload/
           zip -qq -r -9 Mavrixfy.ipa Payload
           mv Mavrixfy.ipa ${{ github.workspace }}/
 
@@ -72,19 +77,19 @@ jobs:
 
       - name: Create Release and Upload IPA
         uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: v${{ github.run_number }}
+          tag_name: ios-v${{ github.run_number }}
           name: iOS Build v${{ github.run_number }} (Unsigned)
           body: |
             iOS IPA Build - Unsigned (No Code Signing)
             
-            ⚠️ This IPA is NOT signed and cannot be installed on real devices.
-            It's built without any Apple Developer account requirements.
+            ⚠️ This IPA is NOT signed and cannot be installed directly on un-jailbroken devices without Sideloadly/AltStore.
+            Built automatically without any Apple Developer Account.
             
             **Build Details:**
             - Build Number: ${{ github.run_number }}
             - Commit: ${{ github.sha }}
-            - Date: ${{ github.event.head_commit.timestamp }}
           draft: false
           prerelease: false
           files: Mavrixfy.ipa

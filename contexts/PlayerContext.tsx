@@ -1169,12 +1169,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const previewIsPlayingRef = useRef(false); // ref so togglePlay never has stale closure
   const previewIsEndedRef = useRef(false);
   const [previewProgress, setPreviewProgress] = useState(0);
-  const [lastPreviewSongId, setLastPreviewSongId] = useState<string | null>(null);
-  const currentSongIdStr = currentSong?.id ? String(currentSong.id) : null;
-  if (currentSongIdStr !== lastPreviewSongId) {
-    setLastPreviewSongId(currentSongIdStr);
-    setPreviewProgress(0);
-  }
   const [previewDuration, setPreviewDuration] = useState(0);
   const [previewIsShuffled, setPreviewIsShuffled] = useState(false);
   const [previewRepeatMode, setPreviewRepeatMode] = useState<"off" | "all" | "one">("off");
@@ -1182,13 +1176,13 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     position: 0,
     duration: 0,
   });
-  const [lastProgressSongId, setLastProgressSongId] = useState<string | null>(null);
-  const currentSongIdStrForProgress = currentSong?.id ? String(currentSong.id) : null;
-  if (currentSongIdStrForProgress !== lastProgressSongId) {
-    setLastProgressSongId(currentSongIdStrForProgress);
+
+  useEffect(() => {
+    setPreviewProgress(0);
     const durationSeconds = toDurationSeconds(currentSong?.duration);
     setRuntimeProgressSnapshot({ position: 0, duration: durationSeconds });
-  }
+  }, [currentSong?.id, currentSong?.duration]);
+
   const [runtimePlaybackStateSnapshot, setRuntimePlaybackStateSnapshot] = useState<any>(undefined);
   const PRELOAD_QUEUE_SIZE = 20;
 

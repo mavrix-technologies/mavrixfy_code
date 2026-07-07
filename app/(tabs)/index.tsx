@@ -425,7 +425,7 @@ function getQuickPickSongs(songs: Song[], seed: number): Song[] {
     if (!id || seen.has(id)) continue;
     seen.add(id);
     latestSongs.push(song);
-    if (latestSongs.length >= 24) break;
+    if (latestSongs.length >= 60) break;
   }
 
   if (latestSongs.length <= 5) return latestSongs;
@@ -492,19 +492,37 @@ function getQuickPickSongsFromHomeRows(rows: HomeCategoryData[], seed: number): 
 
   for (const row of rows) {
     for (const item of row.results) {
-      if (item.source !== "youtube" || item.itemType !== "song") continue;
+      if (item.itemType && item.itemType !== "song") continue;
       const imageUrl = getHomeCategoryItemImageUrl(item);
-      const song = toYouTubeHomePlayableSong(
-        item,
-        imageUrl ? upscaleYouTubeThumbnail(imageUrl, HOME_CARD_IMAGE_SOURCE_SIZE) : "",
-        row.title
-      );
-      if (!song || seen.has(song.id)) continue;
+      let song: Song | null = null;
+
+      const videoId = getYouTubeHomeVideoId(item);
+      if (videoId) {
+        song = toYouTubeHomePlayableSong(
+          item,
+          imageUrl ? upscaleYouTubeThumbnail(imageUrl, HOME_CARD_IMAGE_SOURCE_SIZE) : "",
+          row.title
+        );
+      } else if (item.id && item.name) {
+        song = {
+          id: item.id,
+          title: item.name,
+          artist: item.playlistAuthor || "JioSaavn",
+          album: row.title,
+          duration: Number(item.duration || 0),
+          coverUrl: imageUrl,
+          genre: row.title,
+          audioUrl: "",
+          source: (item.source as any) || "jiosaavn",
+        };
+      }
+
+      if (!song || !song.id || seen.has(song.id)) continue;
       seen.add(song.id);
       songs.push(song);
-      if (songs.length >= 24) break;
+      if (songs.length >= 60) break;
     }
-    if (songs.length >= 24) break;
+    if (songs.length >= 60) break;
   }
 
   return getQuickPickSongs(songs, seed);
@@ -1039,32 +1057,7 @@ function HomeBootSurface({ topInset }: { topInset: number }) {
   );
 }
 
-function QuickPickRankNumber({ rank }: { rank: number }) {
-  const colors = QUICK_PICK_RANK_GRADIENTS[(rank - 1) % QUICK_PICK_RANK_GRADIENTS.length];
-  const gradientId = `quickPickRankGradient${rank}`;
 
-  return (
-    <Svg width={34} height={52} viewBox="0 0 34 52">
-      <Defs>
-        <SvgLinearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-          <Stop offset="0" stopColor={colors[0]} />
-          <Stop offset="1" stopColor={colors[1]} />
-        </SvgLinearGradient>
-      </Defs>
-      <SvgText
-        x="17"
-        y="34"
-        fill={`url(#${gradientId})`}
-        fontFamily="Inter_700Bold"
-        fontSize="24"
-        fontWeight="700"
-        textAnchor="middle"
-      >
-        {rank}
-      </SvgText>
-    </Svg>
-  );
-}
 
 export default function HomeScreen() {
   return (
@@ -1448,7 +1441,7 @@ function useHomeScreenInnerView() {
 
         const youtubeHomeCategoriesPromise = withPromiseTimeout(
           getHomeYouTubeMusicCategories({ limitPerCategory: 8 }),
-          35000,
+          8000,
           "YouTube home categories timeout"
         ).catch((err) => {
           logger.warn("[Home] YouTube home categories fetch failed or timed out:", err);
@@ -1922,9 +1915,7 @@ function useHomeScreenInnerView() {
 
   const quickPickSongs = useMemo(() => {
     const seed = quickPickRotationSeedRef.current ?? 0;
-    const rowSongs = getQuickPickSongsFromHomeRows(visibleYoutubeHomeCategoryRows, seed);
-    if (rowSongs.length >= 4) return rowSongs;
-
+    const rowSongs = getQuickPickSongsFromHomeRows([...visibleYoutubeHomeCategoryRows, ...visibleIndianHomeCategoryRows], seed);
     const seen = new Set(rowSongs.map((song) => song.id));
     const fallbackSongs = getQuickPickSongs(newReleaseSongs, seed).filter((song) => {
       if (seen.has(song.id)) return false;
@@ -1932,8 +1923,8 @@ function useHomeScreenInnerView() {
       return true;
     });
 
-    return [...rowSongs, ...fallbackSongs];
-  }, [newReleaseSongs, visibleYoutubeHomeCategoryRows]);
+    return [...rowSongs, ...fallbackSongs].slice(0, 60);
+  }, [newReleaseSongs, visibleIndianHomeCategoryRows, visibleYoutubeHomeCategoryRows]);
 
   const sections = useMemo<HomeSection[]>(() => {
     const data: HomeSection[] = [];
@@ -2499,7 +2490,7 @@ function useHomeScreenInnerView() {
           const isActive = currentSongId === song.id;
           const rank = columnIndex * 4 + songIndex + 1;
           return (
-            <View key={`${song.id}-${rank}`} style={styles.quickPickRow}>
+            <View key={`${song.id}-${songIndex}`} style={styles.quickPickRow}>
               <Pressable
                 style={({ pressed }) => [
                   { flex: 1, flexDirection: "row", alignItems: "center" },
@@ -2507,9 +2498,6 @@ function useHomeScreenInnerView() {
                 ]}
                 onPress={() => handleQuickPickSongPress(song)}
               >
-                <View style={styles.quickPickRankSlot}>
-                  <QuickPickRankNumber rank={rank} />
-                </View>
                 <Image
                   source={{ uri: song.coverUrl }}
                   style={styles.quickPickCover}
@@ -2570,7 +2558,6 @@ function useHomeScreenInnerView() {
       <View style={{ width: windowWidth * 0.86, gap: 10 }}>
         {[0, 1, 2, 3].map((val) => (
           <View key={val} style={styles.quickPickRow}>
-            <View style={styles.quickPickRankSlot} />
             <View style={[styles.quickPickCover, styles.placeholderBlock]} />
             <View style={styles.quickPickInfo}>
               <View style={[styles.placeholderLine, { width: "70%", height: 14, marginBottom: 6 }]} />
@@ -3677,13 +3664,7 @@ const styles = StyleSheet.create({
   quickPickRowPressed: {
     opacity: 0.7,
   },
-  quickPickRankSlot: {
-    width: 34,
-    height: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 8,
-  },
+
   quickPickCover: {
     width: 52,
     height: 52,

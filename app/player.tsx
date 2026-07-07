@@ -590,17 +590,34 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   const { isPlaying } = usePlayerRow();
   const { isBuffering, isLoading } = usePlaybackPlayState();
 
-  const [localProgress, setLocalProgress] = useState(progress);
+  const [localProgress, setLocalProgress] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
-  const lastSyncRef = useRef({ progress, timestamp: Date.now() });
+  const lastSyncRef = useRef({ progress: 0, timestamp: Date.now() });
+  const ignoreStaleProgressRef = useRef(false);
 
-  // Sync with global progress changes during render to avoid extra useEffect renders
+  // Sync with global progress changes during render phase
   const [prevProgress, setPrevProgress] = useState(progress);
-  if (progress !== prevProgress) {
+  const [trackedSongId, setTrackedSongId] = useState(screenSongId);
+
+  if (screenSongId !== trackedSongId) {
+    setTrackedSongId(screenSongId);
+    setPrevProgress(0);
+    setLocalProgress(0);
+    lastSyncRef.current = { progress: 0, timestamp: Date.now() };
+    ignoreStaleProgressRef.current = true;
+  } else if (progress !== prevProgress) {
     setPrevProgress(progress);
     if (!isScrubbing) {
-      lastSyncRef.current = { progress, timestamp: Date.now() };
-      setLocalProgress(progress);
+      if (ignoreStaleProgressRef.current) {
+        if (progress <= 0.05) {
+          ignoreStaleProgressRef.current = false;
+          lastSyncRef.current = { progress, timestamp: Date.now() };
+          setLocalProgress(progress);
+        }
+      } else {
+        lastSyncRef.current = { progress, timestamp: Date.now() };
+        setLocalProgress(progress);
+      }
     }
   }
 
@@ -2035,6 +2052,7 @@ function useLegacyPlayerScreenView() {
         renderItem={renderPlayerScrollItem}
         contentContainerStyle={[styles.playerScrollContent, { paddingBottom: listBottomPadding }]}
         showsVerticalScrollIndicator={false}
+        nestedScrollEnabled
         scrollEnabled={Platform.OS === "android" ? !isProgressSeeking : true}
         keyboardShouldPersistTaps="handled"
         bounces={Platform.OS === "ios"}
@@ -2326,7 +2344,7 @@ function useLegacyPlayerScreenView() {
               maxToRenderPerBatch={8}
               updateCellsBatchingPeriod={50}
               windowSize={8}
-              removeClippedSubviews={true}
+              removeClippedSubviews={false}
             />
           </View>
           </Reanimated.View>

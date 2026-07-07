@@ -807,6 +807,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
             style={s.list}
             contentContainerStyle={s.listContent}
             showsVerticalScrollIndicator={false}
+            nestedScrollEnabled={true}
             removeClippedSubviews={false}
             initialNumToRender={10}
             maxToRenderPerBatch={8}
