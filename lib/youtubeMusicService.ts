@@ -1130,7 +1130,7 @@ export async function searchYouTubeMusicVideos(
   }
 }
 
-export async function getYouTubeMusicAudioStream(
+async function getYouTubeMusicAudioStream(
   videoId: string,
   titleOrSignal?: string | AbortSignal,
   artist?: string,
@@ -1175,6 +1175,7 @@ export async function getYouTubeMusicAudioStream(
           `/stream/${encodeURIComponent(cleanVideoId)}`,
           query
         );
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- sequential fallback query attempts are by design
         const json = await fetchFirstJson<any>(candidates, signal);
         stream = json ? normalizeAudioStreamPayload(json, cleanVideoId) : null;
       } catch (error: any) {
@@ -1446,7 +1447,7 @@ async function getYouTubeMusicWatchPlaylist(
   }
 }
 
-export async function getYouTubeMusicVisualVideoId(song: Song): Promise<string | null> {
+async function getYouTubeMusicVisualVideoId(song: Song): Promise<string | null> {
   const source = song as Song & {
     youtubeVideoId?: string;
     youtubeVisualVideoId?: string;

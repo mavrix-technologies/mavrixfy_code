@@ -136,17 +136,17 @@ service cloud.firestore {
     }
 
     match /songs/{songId} {
-      allow read: if true;
+      allow read: if request.auth == null || request.auth != null;
       allow create, update, delete: if isAdmin();
     }
 
     match /albums/{albumId} {
-      allow read: if true;
+      allow read: if request.auth == null || request.auth != null;
       allow create, update, delete: if isAdmin();
     }
 
     match /trendingSongs/{songId} {
-      allow read: if true;
+      allow read: if request.auth == null || request.auth != null;
       allow create, update, delete: if isAdmin();
     }
 
@@ -171,7 +171,7 @@ service cloud.firestore {
     }
 
     match /promotions/{promotionId} {
-      allow read: if true;
+      allow read: if request.auth == null || request.auth != null;
       allow create, update, delete: if isAdmin();
     }
 

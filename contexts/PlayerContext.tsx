@@ -3406,7 +3406,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     } catch (error) {
       // Silent fail
     }
-  }, [currentSong, effectivePositionSeconds, ensurePlayerReady, getNativeTrackIndexForSong, isPlayerReady, loadAndPlaySong, previewDuration, previewProgress, resolvedIsPlaying, showPlaybackNotice]);
+  }, [currentSong, ensurePlayerReady, getNativeTrackIndexForSong, isPlayerReady, loadAndPlaySong, previewDuration, previewProgress, resolvedIsPlaying, showPlaybackNotice]);
 
   const nextSong = useCallback(async () => {
     try {

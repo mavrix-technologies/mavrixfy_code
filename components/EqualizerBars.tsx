@@ -1,12 +1,19 @@
 /**
- * Compact now-playing equalizer.
- * Real playback samples drive the bars when the active player exposes waveform data.
+ * Premium Music Equalizer Bars Component
+ * Built using react-native-reanimated for 60fps native thread performance.
+ * Emulates the clean, official equalizer look found in apps like Spotify and Apple Music.
  */
-import React, { useEffect, useRef } from "react";
-import * as Animated from "@/lib/nativeAnimated";
+import React, { useEffect } from "react";
 import { StyleSheet, View } from "react-native";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  cancelAnimation,
+} from "react-native-reanimated";
 import Colors from "@/constants/colors";
-import { usePlaybackAudioLevels } from "@/lib/playbackAudioLevels";
 
 interface Props {
   isPlaying: boolean;
@@ -14,96 +21,99 @@ interface Props {
   size?: number; // width of each bar
 }
 
-const BAR_CONFIGS = [
-  { minH: 3, maxH: 14, activeScale: 0.4 },
-  { minH: 3, maxH: 18, activeScale: 0.34 },
-  { minH: 3, maxH: 11, activeScale: 0.46 },
+// 4 distinct bars with different heights and speeds to look organic and professional
+const BARS = [
+  { minScale: 0.2, maxScale: 1.0, duration: 320 },
+  { minScale: 0.2, maxScale: 0.8, duration: 420 },
+  { minScale: 0.2, maxScale: 0.95, duration: 360 },
+  { minScale: 0.2, maxScale: 0.7, duration: 480 },
 ];
 
 function Bar({
   isPlaying,
-  minH,
-  maxH,
-  activeScale,
-  signalLevel,
+  minScale,
+  maxScale,
+  duration,
   color,
   width,
+  height,
 }: {
   isPlaying: boolean;
-  minH: number;
-  maxH: number;
-  activeScale: number;
-  signalLevel: number | null;
+  minScale: number;
+  maxScale: number;
+  duration: number;
   color: string;
   width: number;
+  height: number;
 }) {
-  const minScale = minH / maxH;
-  const pausedScale = (minH + 1) / maxH;
-  const scaleRef = useRef<Animated.Value | null>(null);
-  if (scaleRef.current === null) scaleRef.current = new Animated.Value(minScale);
-  const scale = scaleRef.current;
-  const animRef = useRef<Animated.CompositeAnimation | null>(null);
+  const scaleY = useSharedValue(minScale);
 
   useEffect(() => {
-    if (animRef.current) {
-      animRef.current.stop();
-      animRef.current = null;
+    if (!isPlaying) {
+      // Settle down smoothly to the minimum paused scale
+      scaleY.value = withTiming(minScale, { duration: 350 });
+      return;
     }
 
-    const targetScale = isPlaying
-      ? Math.max(minScale, signalLevel ?? activeScale)
-      : pausedScale;
-    const settle = Animated.timing(scale, {
-      toValue: targetScale,
-      duration: signalLevel == null ? 180 : 72,
-      useNativeDriver: true,
-      isInteraction: false,
-    });
-    animRef.current = settle;
-    settle.start();
+    // Run infinite bounce sequence on the native thread
+    scaleY.value = withRepeat(
+      withSequence(
+        withTiming(maxScale, { duration }),
+        withTiming(minScale, { duration })
+      ),
+      -1, // infinite loop
+      true // reverse direction (ping-pong)
+    );
 
     return () => {
-      animRef.current?.stop();
+      cancelAnimation(scaleY);
     };
-  }, [activeScale, isPlaying, minScale, pausedScale, scale, signalLevel]);
+  }, [isPlaying, minScale, maxScale, duration, scaleY]);
 
-  const translateY = scale.interpolate({
-    inputRange: [minScale, 1],
-    outputRange: [(maxH - minH) / 2, 0],
-    extrapolate: "clamp",
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        // Anchors the scale to the bottom of the bar
+        { translateY: (height / 2) * (1 - scaleY.value) },
+        { scaleY: scaleY.value },
+      ],
+    };
   });
 
   return (
     <Animated.View
-      style={{
-        width,
-        height: maxH,
-        backgroundColor: color,
-        borderRadius: 1.5,
-        alignSelf: "flex-end",
-        transform: [{ translateY }, { scaleY: scale }],
-      }}
+      style={[
+        {
+          width,
+          height,
+          backgroundColor: color,
+          borderRadius: width / 2,
+          alignSelf: "flex-end",
+        },
+        animatedStyle,
+      ]}
     />
   );
 }
 
-export default function EqualizerBars({ isPlaying, color, size = 3 }: Props) {
+export default function EqualizerBars({ isPlaying, color, size = 2.5 }: Props) {
   const barColor = color ?? Colors.primary;
-  const audioLevels = usePlaybackAudioLevels();
-  const signalLevels = isPlaying && audioLevels.hasSignal ? audioLevels.levels : null;
+  const gap = 1.5;
+  const height = 15;
+  const totalWidth = BARS.length * size + (BARS.length - 1) * gap;
 
   return (
-    <View style={[styles.container, { width: size * 3 + 4, height: 20 }]}>
-      {BAR_CONFIGS.map((cfg, index) => (
+    <View style={[styles.container, { width: totalWidth, height }]}>
+      {BARS.map((cfg, index) => (
         <Bar
-          key={`${cfg.minH}-${cfg.maxH}-${cfg.activeScale}`}
+          key={`bar-${cfg.maxScale}-${cfg.duration}-${index}`}
           isPlaying={isPlaying}
-          minH={cfg.minH}
-          maxH={cfg.maxH}
-          activeScale={cfg.activeScale}
-          signalLevel={signalLevels?.[index] ?? null}
+          minScale={cfg.minScale}
+          maxScale={cfg.maxScale}
+          duration={cfg.duration}
           color={barColor}
           width={size}
+          height={height}
         />
       ))}
     </View>

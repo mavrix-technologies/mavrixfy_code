@@ -415,17 +415,19 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
 
   useEffect(() => {
     if (!pathname) return;
+    let nextTab: VisibleRoute = "index";
     if (pathname === "/" || pathname === "/index") {
-      setActiveTab("index");
+      nextTab = "index";
     } else if (pathname === "/search" || pathname.startsWith("/search/")) {
-      setActiveTab("search");
+      nextTab = "search";
     } else if (pathname === "/library" || pathname.startsWith("/library/")) {
-      setActiveTab("library");
+      nextTab = "library";
     } else if (pathname === "/liked-songs" || pathname.startsWith("/liked-songs/")) {
-      setActiveTab("liked-songs");
+      nextTab = "liked-songs";
     } else if (pathname === "/import-songs" || pathname.startsWith("/import-songs/") || pathname === "/import-songs-file" || pathname.startsWith("/import-songs-file")) {
-      setActiveTab("import-songs");
+      nextTab = "import-songs";
     }
+    setActiveTab(nextTab);
   }, [pathname]);
   const isWeb = Platform.OS === "web";
   const isIOS = Platform.OS === "ios";

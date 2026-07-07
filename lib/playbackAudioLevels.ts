@@ -120,6 +120,6 @@ function getSnapshot(): PlaybackAudioLevelFrame {
   return frame;
 }
 
-export function usePlaybackAudioLevels(): PlaybackAudioLevelFrame {
+function usePlaybackAudioLevels(): PlaybackAudioLevelFrame {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
