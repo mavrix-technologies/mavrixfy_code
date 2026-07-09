@@ -12,6 +12,7 @@ import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFro
 import { logger } from "@/lib/logger";
 import * as ExpoAvPlayer from "@/lib/expoAvPlayer";
 import { searchSong } from "@/lib/song-matcher";
+import { buildAppApiUrl } from "@/lib/api-config";
 import { prefetchNextSongs, shouldPrefetch, clearPrefetchCache } from "@/lib/prefetchQueue";
 import {
   beginPlaybackTransaction,
@@ -623,34 +624,40 @@ async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
   try {
+    // 1. Try direct YouTube streaming via Express proxy first for YouTube source tracks
+    const videoId = extractYouTubeVideoId(song);
+    if (videoId) {
+      logger.info("[resolveYouTubeTrackForNativePlayback] Attempting direct YouTube stream proxy...", { videoId });
+      try {
+        const url = buildAppApiUrl(`/youtube-music/stream/${videoId}?json=true`);
+        const response = await fetch(url, { signal: controller.signal });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.stream?.url) {
+            logger.info("[resolveYouTubeTrackForNativePlayback] Successfully resolved stream from proxy!", { url: data.stream.url });
+            return {
+              ...song,
+              audioUrl: data.stream.url,
+              source: "youtube",
+              youtubeVideoId: videoId,
+              youtubeNativeAudio: true,
+              playbackHeaders: data.stream.headers || {},
+            };
+          }
+        }
+      } catch (err: any) {
+        logger.warn("[resolveYouTubeTrackForNativePlayback] Direct YouTube stream proxy failed:", err?.message || err);
+      }
+    }
+
+    // 2. Fall back to JioSaavn if YouTube proxy failed or videoId is missing
+    logger.info("[resolveYouTubeTrackForNativePlayback] Falling back to JioSaavn resolution...");
     const res = await resolveJioSaavnFallbackForYouTubeSong(song, controller.signal);
     if (res) return res;
 
-    // Fall back to direct YouTube streaming via Express proxy if JioSaavn doesn't have it
-    const videoId = extractYouTubeVideoId(song);
-    if (videoId) {
-      logger.info("[resolveYouTubeTrackForNativePlayback] JioSaavn fallback not found. Attempting direct YouTube stream proxy...", { videoId });
-      const { buildAppApiUrl } = await import("@/lib/api-config");
-      const url = buildAppApiUrl(`/youtube-music/stream/${videoId}?json=true`);
-      const response = await fetch(url, { signal: controller.signal });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.stream?.url) {
-          logger.info("[resolveYouTubeTrackForNativePlayback] Successfully resolved stream from proxy!", { url: data.stream.url });
-          return {
-            ...song,
-            audioUrl: data.stream.url,
-            source: "youtube",
-            youtubeVideoId: videoId,
-            youtubeNativeAudio: true,
-            playbackHeaders: data.stream.headers || {},
-          };
-        }
-      }
-    }
     return null;
   } catch (err: any) {
-    logger.error("[resolveYouTubeTrackForNativePlayback] Error resolving fallback or proxy:", err?.message || err);
+    logger.error("[resolveYouTubeTrackForNativePlayback] Error resolving proxy or fallback:", err?.message || err);
     return null;
   } finally {
     clearTimeout(timer);
