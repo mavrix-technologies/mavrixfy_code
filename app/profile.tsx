@@ -29,6 +29,12 @@ const QUALITY_OPTIONS: { label: string; value: "low" | "medium" | "high" }[] = [
   { label: "Medium", value: "medium" },
   { label: "High", value: "high" },
 ];
+const VIDEO_BACKGROUND_QUALITY_OPTIONS: { label: string; value: AppSettings["videoBackgroundQuality"] }[] = [
+  { label: "Auto", value: "auto" },
+  { label: "Low", value: "low" },
+  { label: "Medium", value: "medium" },
+  { label: "High", value: "high" },
+];
 const SMART_AUTOPLAY_MODE_OPTIONS: { label: string; value: AppSettings["smartAutoplayMode"] }[] = [
   { label: "Mix", value: "similar-trending" },
   { label: "Similar", value: "similar-only" },
@@ -165,6 +171,8 @@ function PlaybackSettingsSection({
   lowEndDevice: boolean;
   updateSettings: UpdateSettings;
 }) {
+  const ambientBackdropSwitchValue = settings.ambientBackdropEnabled;
+
   return (
     <>
       <Text style={styles.sectionTitle}>Playback</Text>
@@ -226,6 +234,32 @@ function PlaybackSettingsSection({
               thumbColor={Colors.text}
             />
           </View>
+        </View>
+
+        <View style={[styles.settingCard, styles.settingCardBorder]}>
+          <View style={styles.settingRowInline}>
+            <View style={styles.settingTextBlock}>
+              <Text style={styles.settingLabel}>Video backdrop</Text>
+              <Text style={styles.settingHint}>
+                Loop videos behind the player
+              </Text>
+            </View>
+            <Switch
+              value={ambientBackdropSwitchValue}
+              disabled={false}
+              onValueChange={(v) => updateSettings({ ambientBackdropEnabled: v })}
+              trackColor={{ false: Colors.inactive, true: Colors.primary }}
+              thumbColor={Colors.text}
+            />
+          </View>
+          {ambientBackdropSwitchValue ? (
+            <SegmentGroup
+              options={VIDEO_BACKGROUND_QUALITY_OPTIONS}
+              value={settings.videoBackgroundQuality}
+              onChange={(value) => updateSettings({ videoBackgroundQuality: value })}
+              compact
+            />
+          ) : null}
         </View>
       </View>
     </>
@@ -356,6 +390,7 @@ export default function ProfileScreen() {
 
   const [settings, setSettings] = useState<AppSettings>({
     streamingQuality: "high",
+    videoBackgroundQuality: "auto",
     smartAutoplayEnabled: true,
     smartAutoplayMode: "similar-trending",
     downloadQuality: "high",
@@ -366,6 +401,7 @@ export default function ProfileScreen() {
     crossfade: 0,
     gapless: true,
     normalizeVolume: false,
+    ambientBackdropEnabled: true,
   });
 
   useEffect(() => {

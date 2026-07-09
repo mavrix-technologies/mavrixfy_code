@@ -20,7 +20,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import Colors from "@/constants/colors";
 import { getBestImageUrl, Song } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
-import { buildAppApiUrl } from "@/lib/api-config";
 import SongRow from "@/components/SongRow";
 import { getCatalogSongs, searchCatalog } from "@/lib/catalogService";
 import {
@@ -96,7 +95,7 @@ interface BrowseCategory {
   isHero?: boolean;
 }
 
-type ResultFilter = "all" | "songs" | "youtube" | "albums" | "artists" | "playlists";
+type ResultFilter = "all" | "songs" | "albums" | "artists" | "playlists";
 
 const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
   { key: "all", label: "All" },
@@ -593,21 +592,7 @@ function uniqueSongResultIds(songs: Song[]): Song[] {
 }
 
 function isYouTubeCollectionResult(id: string, url?: string, description?: string): boolean {
-  const value = String(id || "").trim();
-  const lowerUrl = String(url || "").toLowerCase();
-  const lowerDescription = String(description || "").toLowerCase();
-
-  return (
-    value.startsWith("MPRE") ||
-    value.startsWith("OLAK") ||
-    value.startsWith("PL") ||
-    value.startsWith("VL") ||
-    value.startsWith("RDCLAK") ||
-    value.startsWith("RDTMAK") ||
-    lowerUrl.includes("youtube") ||
-    lowerUrl.includes("music.youtube.com") ||
-    lowerDescription.includes("youtube")
-  );
+  return false;
 }
 
 function stableHash(input: string): number {
@@ -662,7 +647,6 @@ function useSearchScreenView() {
   const resultsAlbumsListRef = useRef<FlatList<AlbumResult> | null>(null);
   const resultsArtistsListRef = useRef<FlatList<ArtistResult> | null>(null);
   const resultsSongsListRef = useRef<FlatList<Song> | null>(null);
-  const resultsYoutubeListRef = useRef<FlatList<Song> | null>(null);
   const searchCacheRef = useRef<Map<string, SearchCacheEntry> | null>(null);
   if (searchCacheRef.current === null) {
     searchCacheRef.current = new Map();
@@ -823,24 +807,19 @@ function useSearchScreenView() {
         // Fetch only endpoints needed for the active resultFilter
         let globalData: any = null;
         let songsData: any = null;
-        let youtubeSongsData: any = null;
         let albumSectionResults: JioSaavnAlbumResult[] = [];
         let artistsData: any = null;
         let playlistsData: any = null;
 
         if (resultFilter === "all") {
-          const [g, s, yt] = await Promise.all([
+          const [g, s] = await Promise.all([
             safeFetch(`${apiUrl}api/search?query=${encodeURIComponent(searchTerm)}`),
             safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=15`),
-            safeFetch(buildAppApiUrl(`/youtube-music/search?q=${encodeURIComponent(searchTerm)}&limit=15`)),
           ]);
           globalData = g;
           songsData = s;
-          youtubeSongsData = yt;
         } else if (resultFilter === "songs") {
           songsData = await safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=25`);
-        } else if (resultFilter === "youtube") {
-          youtubeSongsData = await safeFetch(buildAppApiUrl(`/youtube-music/search?q=${encodeURIComponent(searchTerm)}&limit=25`));
         } else if (resultFilter === "albums") {
           albumSectionResults = await searchJioSaavnAlbums(searchTerm, 20, controller.signal).catch(() => []);
         } else if (resultFilter === "artists") {
@@ -859,28 +838,6 @@ function useSearchScreenView() {
           }
 
           const parsedYoutubeSongs: Song[] = [];
-          if (youtubeSongsData?.results && Array.isArray(youtubeSongsData.results)) {
-            for (const item of youtubeSongsData.results) {
-              const videoId = item.videoId || item.id;
-              if (videoId) {
-                const thumbs = Array.isArray(item.thumbnails) ? item.thumbnails : [];
-                const coverUrl = thumbs[0]?.url || item.thumbnail || "";
-                parsedYoutubeSongs.push({
-                  id: `youtube_${videoId}`,
-                  title: String(item.title || "").trim(),
-                  artist: item.artist || item.artists?.[0]?.name || "Unknown Artist",
-                  album: item.album?.name || item.album || "",
-                  duration: Number(item.duration_seconds || item.duration) || 0,
-                  coverUrl,
-                  genre: "YouTube Music",
-                  audioUrl: "",
-                  source: "youtube",
-                  youtubeVideoId: videoId,
-                  videoId: videoId,
-                });
-              }
-            }
-          }
 
           const playlists = playlistsData
             ? mergeUniqueById(normalizePlaylistResults(playlistsData.data?.results || playlistsData.results), 20)
@@ -1060,13 +1017,16 @@ function useSearchScreenView() {
     setSuggestionsOpen(false);
   }, []);
 
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- programmatic route query updates multiple search configurations concurrently, which are batched by React.
   useEffect(() => {
     const next = routeSearchQuery;
     if (next.length < 2 || next === appliedRouteSearchQueryRef.current) return;
 
     appliedRouteSearchQueryRef.current = next;
+    // react-doctor-disable-next-line react-doctor/no-chain-state-updates -- programmatic route query updates multiple search configurations concurrently.
     applyProgrammaticSearchQuery(next);
     suggestionsClosedForQueryRef.current = normalizeText(next);
+    // react-doctor-disable-next-line react-doctor/no-chain-state-updates -- programmatic route query updates multiple search configurations concurrently.
     rememberRecentSearch(next);
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
@@ -1289,8 +1249,6 @@ function useSearchScreenView() {
         resultsAlbumsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else if (resultFilter === "artists") {
         resultsArtistsListRef.current?.scrollToOffset({ offset: 0, animated: false });
-      } else if (resultFilter === "youtube") {
-        resultsYoutubeListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else {
         resultsSongsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       }
@@ -1344,8 +1302,6 @@ function useSearchScreenView() {
         resultsAlbumsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else if (resultFilter === "artists") {
         resultsArtistsListRef.current?.scrollToOffset({ offset: 0, animated: false });
-      } else if (resultFilter === "youtube") {
-        resultsYoutubeListRef.current?.scrollToOffset({ offset: 0, animated: false });
       } else {
         resultsSongsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       }
@@ -1356,11 +1312,6 @@ function useSearchScreenView() {
   const showArtistResults = (resultFilter === "all" || resultFilter === "artists") && artistResults.length > 0;
   const showPlaylistResults = (resultFilter === "all" || resultFilter === "playlists") && playlistResults.length > 0;
   const showSongResults = (resultFilter === "all" || resultFilter === "songs") && songResults.length > 0;
-  const hasYoutubeResults = youtubeMusicResults.length > 0;
-  const appResultCount = songResults.length + albumResults.length + artistResults.length + playlistResults.length;
-  const showYoutubeResults = resultFilter === "youtube" && hasYoutubeResults;
-  const youtubePreviewResults = useMemo(() => youtubeMusicResults.slice(0, 3), [youtubeMusicResults]);
-  const showYoutubePreviewSection = resultFilter === "all" && youtubePreviewResults.length > 0;
   const displayedSongs = useMemo(
     () => (showSongResults ? songResults : []),
     [showSongResults, songResults]
@@ -1386,103 +1337,6 @@ function useSearchScreenView() {
     },
     [handleSongResultPress]
   );
-
-  const handleYoutubeResultPress = useCallback((song: Song) => {
-    void addSongSearchHistoryItem(song)
-      .then((items) => setRecentSearches(toRecentSearchItems(items)))
-      .catch(() => undefined);
-    void playSong(song, [song]);
-  }, [playSong]);
-
-  const handleShowAppResults = useCallback(() => {
-    resetHeaderElevation();
-    setResultFilter("all");
-  }, [resetHeaderElevation]);
-
-  const handleShowYoutubeResults = useCallback(() => {
-    resetHeaderElevation();
-    if (query.trim().length >= 2) {
-      setResultFilter("youtube");
-    }
-  }, [query, resetHeaderElevation]);
-
-  const getYoutubeResultElement = useCallback(
-    (item: Song) => (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Play ${item.title} by ${item.artist}`}
-        style={({ pressed }) => [styles.youtubeResultRow, pressed && styles.youtubeResultRowPressed]}
-        onPress={() => handleYoutubeResultPress(item)}
-      >
-        <Image
-          recyclingKey={`youtube-${item.id}`}
-          source={{ uri: item.coverUrl }}
-          style={styles.youtubeResultImage}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={100}
-        />
-        <View style={styles.youtubeResultInfo}>
-          <Text style={styles.youtubeResultTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.youtubeResultArtist} numberOfLines={1}>{item.artist}</Text>
-          <View style={styles.youtubeResultSource}>
-            <Ionicons name="logo-youtube" size={14} color="#FF3B30" />
-            <Text style={styles.youtubeResultSourceText}>YouTube Music</Text>
-          </View>
-        </View>
-        <Ionicons name="play-circle-outline" size={23} color={Colors.subtext} />
-      </Pressable>
-    ),
-    [handleYoutubeResultPress]
-  );
-
-  const renderYoutubeResult = useCallback(
-    ({ item }: { item: Song }) => getYoutubeResultElement(item),
-    [getYoutubeResultElement]
-  );
-
-  const youtubeHighlightSectionNode = useMemo(() => {
-    if (youtubePreviewResults.length === 0) return null;
-
-    return (
-      <View style={styles.youtubeHighlightSection}>
-        <View style={styles.youtubeHighlightHeader}>
-          <View style={styles.youtubeHighlightTitleWrap}>
-            <View style={styles.youtubeHighlightIcon}>
-              <Ionicons name="logo-youtube" size={18} color="#FFFFFF" />
-            </View>
-            <View style={styles.youtubeHighlightTextWrap}>
-              <Text style={styles.youtubeHighlightTitle}>YouTube Music</Text>
-              <Text style={styles.youtubeHighlightMeta} numberOfLines={1}>
-                {youtubeMusicResults.length} more results
-              </Text>
-            </View>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Show all YouTube Music results"
-            onPress={handleShowYoutubeResults}
-            style={({ pressed }) => [
-              styles.youtubeHighlightAction,
-              pressed && styles.youtubeHighlightActionPressed,
-            ]}
-          >
-            <Text style={styles.youtubeHighlightActionText}>Show all</Text>
-          </Pressable>
-        </View>
-        {youtubePreviewResults.map((item) => (
-          <View key={`youtube-preview-${item.id}`} style={styles.youtubePreviewRowWrap}>
-            {getYoutubeResultElement(item)}
-          </View>
-        ))}
-      </View>
-    );
-  }, [
-    getYoutubeResultElement,
-    handleShowYoutubeResults,
-    youtubeMusicResults.length,
-    youtubePreviewResults,
-  ]);
 
   const handleArtistPress = useCallback(
     (artist: ArtistResult) => {
@@ -1867,66 +1721,6 @@ function useSearchScreenView() {
               contentContainerStyle={styles.filterRowContent}
             />
           </View>
-          {hasYoutubeResults ? (
-            <View style={styles.sourceSwitchWrap}>
-              <View style={styles.sourceSwitchTrack}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Show Mavrixfy search results"
-                  onPress={handleShowAppResults}
-                  style={[
-                    styles.sourceSwitchOption,
-                    resultFilter !== "youtube" && styles.sourceSwitchOptionActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.sourceSwitchText,
-                      resultFilter !== "youtube" && styles.sourceSwitchTextActive,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    App
-                  </Text>
-                  <Text
-                    style={[
-                      styles.sourceSwitchCount,
-                      resultFilter !== "youtube" && styles.sourceSwitchCountActive,
-                    ]}
-                  >
-                    {appResultCount}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Show YouTube Music search results"
-                  onPress={handleShowYoutubeResults}
-                  style={[
-                    styles.sourceSwitchOption,
-                    resultFilter === "youtube" && styles.sourceSwitchOptionYoutube,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.sourceSwitchText,
-                      resultFilter === "youtube" && styles.sourceSwitchTextActive,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    YT
-                  </Text>
-                  <Text
-                    style={[
-                      styles.sourceSwitchCount,
-                      resultFilter === "youtube" && styles.sourceSwitchCountActive,
-                    ]}
-                  >
-                    {youtubeMusicResults.length}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
 
           {searchLoading ? (
             <View style={styles.loadingContainer}>
@@ -1937,28 +1731,6 @@ function useSearchScreenView() {
               <Text style={styles.emptyText}>{`No results for "${searchDisplayQuery}"`}</Text>
               <Text style={styles.emptySubtext}>Check the spelling, or search for something else.</Text>
             </View>
-          ) : resultFilter === "youtube" ? (
-            <FlatList
-              ref={resultsYoutubeListRef}
-              key={`yt-${resultDataKey}`}
-              data={showYoutubeResults ? youtubeMusicResults : []}
-              keyExtractor={(item) => item.id}
-              renderItem={renderYoutubeResult}
-              style={styles.scrollView}
-              contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              onScroll={handleHeaderScroll}
-              scrollEventThrottle={16}
-              initialNumToRender={10}
-              maxToRenderPerBatch={8}
-              windowSize={7}
-              ListEmptyComponent={
-                <View style={styles.emptyInline}>
-                  <Text style={styles.emptyInlineText}>No YouTube results found.</Text>
-                </View>
-              }
-            />
           ) : resultFilter === "playlists" ? (
             <FlatList
               ref={resultsPlaylistsListRef}
@@ -2027,9 +1799,8 @@ function useSearchScreenView() {
               scrollEventThrottle={16}
             >
               <View style={styles.emptyInline}>
-                <Text style={styles.emptyInlineText}>No app results found. Try YouTube Music.</Text>
+                <Text style={styles.emptyInlineText}>No app results found.</Text>
               </View>
-              {youtubeHighlightSectionNode}
             </ScrollView>
           ) : (
             <FlatList
@@ -2048,7 +1819,7 @@ function useSearchScreenView() {
               maxToRenderPerBatch={8}
               windowSize={7}
               ListFooterComponent={
-                showAlbumResults || showArtistResults || showPlaylistResults || showYoutubePreviewSection ? (
+                showAlbumResults || showArtistResults || showPlaylistResults ? (
                   <>
                     {showAlbumResults ? (
                       <View style={styles.sectionBlock}>
@@ -2105,7 +1876,6 @@ function useSearchScreenView() {
                         </View>
                       </View>
                     ) : null}
-                    {showYoutubePreviewSection ? youtubeHighlightSectionNode : null}
                   </>
                 ) : null
               }

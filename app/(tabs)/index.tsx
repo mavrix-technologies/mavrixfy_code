@@ -1001,19 +1001,20 @@ function useHomeScreenInnerView() {
   const videoSafeTopInset = Platform.OS === "web" ? 0 : insets.top;
   const [homeHeroConfig, setHomeHeroConfig] = useState(DISABLED_HOME_HERO_CONFIG);
   const [unavailableHomeAdItemIds, setUnavailableHomeAdItemIds] = useState<string[]>([]);
+  const unavailableAdIdsSet = useMemo(() => new Set(unavailableHomeAdItemIds), [unavailableHomeAdItemIds]);
   const homeHeroVideos = useMemo(
     () => (
       homeHeroConfig.enabled
         ? homeHeroConfig.items.filter((item) => {
             if (!item.enabled) return false;
             if (item.kind === "ad") {
-              return Boolean(item.adUnitId?.trim()) && !unavailableHomeAdItemIds.includes(item.id);
+              return Boolean(item.adUnitId?.trim()) && !unavailableAdIdsSet.has(item.id);
             }
             return Boolean(item.videoUrl.trim());
           })
         : []
     ),
-    [homeHeroConfig.enabled, homeHeroConfig.items, unavailableHomeAdItemIds]
+    [homeHeroConfig.enabled, homeHeroConfig.items, unavailableAdIdsSet]
   );
   const liveVideoCardWidth = useMemo(() => Math.round(Math.max(280, windowWidth - 28)), [windowWidth]);
   const liveVideoCardHeight = useMemo(() => Math.round(liveVideoCardWidth * 9 / 16), [liveVideoCardWidth]);
@@ -1954,8 +1955,8 @@ function useHomeScreenInnerView() {
         pathname: "/playlist/[id]",
         params: {
           id: playlist.id,
-          youtube: "true",
-          jiosaavn: "false",
+          youtube: "false",
+          jiosaavn: "true",
           firestore: "false",
           title: playlist.name || "",
           cover: playlist.imageUrl || "",
@@ -2001,7 +2002,7 @@ function useHomeScreenInnerView() {
   );
 
   const quickPickSongQueue = useMemo(
-    () => quickPickSongs.filter((song) => song.audioUrl.trim().length > 0 || song.source === "youtube"),
+    () => quickPickSongs.filter((song) => song.audioUrl.trim().length > 0),
     [quickPickSongs]
   );
 
@@ -2270,7 +2271,7 @@ function useHomeScreenInnerView() {
         </Pressable>
       );
     },
-    [categoryCardCallbacks, playSong, routerPush]
+    [categoryCardCallbacks]
   );
 
   const makeCategoryRenderItem = useCallback(

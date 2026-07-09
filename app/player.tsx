@@ -4,6 +4,7 @@ import {
   View,
   Text,
   FlatList,
+  ScrollView,
   Pressable,
   StyleSheet,
   Platform,
@@ -39,7 +40,7 @@ import { safeGoBack } from "@/utils/navigation";
 import { usePlayerActions, usePlayerProgress, usePlayerRow } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
-import { formatDuration, Song } from "@/lib/musicData";
+import { formatDuration, Song, getBestImageUrl, convertJioSaavnSong } from "@/lib/musicData";
 import { getRecentlyPlayed, getUserPlaylists } from "@/lib/storage";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { logger } from "@/lib/logger";
@@ -57,7 +58,10 @@ import DownloadButton from "@/components/DownloadButton";
 import { mapFilter } from "@/lib/arrayUtils";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
-// Removed react-native-youtube-iframe for native-only streaming migration.
+import YoutubePlayer from "react-native-youtube-iframe";
+import { getYouTubeMusicVisualVideoId } from "@/lib/youtubeMusicService";
+import { searchArtists, getArtistDetails } from "@/lib/artistService";
+import { getYouTubePlaybackQuality, getSettings } from "@/lib/storage";
 
 const PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING = 136;
 const PLAYER_AD_COVER_COOLDOWN_MS = 8 * 60 * 1000;
@@ -142,84 +146,249 @@ const CinematicPlayerBackground = memo(function CinematicPlayerBackground({
   colors: CinematicGradientColors;
   coverUrl: string;
 }) {
-  const fadeInRef = useRef<Animated.Value | null>(null);
-  if (fadeInRef.current === null) fadeInRef.current = new Animated.Value(1);
-  const fadeIn = fadeInRef.current;
-  const artworkUri = coverUrl.trim();
-  const [layers, setLayers] = useState<{
-    current: CinematicGradientColors;
-    previous: CinematicGradientColors | null;
-  }>({
-    current: colors,
-    previous: null,
-  });
-
-  // react-doctor-disable-next-line react-doctor/no-event-handler -- imperative iframe seek sync must follow external playback position updates.
-  useEffect(() => {
-    setLayers((previousLayers) => {
-      if (areGradientColorsEqual(previousLayers.current, colors)) {
-        return previousLayers;
-      }
-      fadeIn.stopAnimation();
-      fadeIn.setValue(0.78);
-      return {
-        current: colors,
-        previous: previousLayers.current,
-      };
-    });
-
-    Animated.timing(fadeIn, {
-      toValue: 1,
-      duration: 420,
-      useNativeDriver: true,
-      isInteraction: false,
-    }).start(({ finished }) => {
-      if (!finished) return;
-      setLayers((previousLayers) => ({ current: previousLayers.current, previous: null }));
-    });
-  }, [colors, fadeIn]);
-
   return (
     <View pointerEvents="none" style={styles.backgroundLayer}>
-      {artworkUri ? (
+      {coverUrl ? (
         <Image
-          recyclingKey={`player-bg-${artworkUri}`}
-          source={{ uri: artworkUri }}
+          source={{ uri: coverUrl }}
           style={styles.backgroundArtworkImage}
+          blurRadius={70}
           contentFit="cover"
-          blurRadius={42}
-          cachePolicy="memory-disk"
-          transition={0}
         />
       ) : null}
-      {layers.previous ? (
-        <LinearGradient
-          colors={layers.previous}
-          locations={[0, 0.34, 0.72, 1]}
-          style={[
-            StyleSheet.absoluteFillObject,
-            styles.backgroundColorWash,
-          ]}
-        />
-      ) : null}
-      <Animated.View style={[StyleSheet.absoluteFillObject, { opacity: fadeIn }]}>
-        <LinearGradient
-          colors={layers.current}
-          locations={[0, 0.34, 0.72, 1]}
-          style={[
-            StyleSheet.absoluteFillObject,
-            styles.backgroundColorWash,
-          ]}
-        />
-      </Animated.View>
       <LinearGradient
-        colors={["rgba(7,10,16,0.28)", "rgba(7,10,16,0.62)", "rgba(7,10,16,0.9)", "#070A10"]}
-        locations={[0, 0.5, 0.86, 1]}
+        colors={["rgba(16,20,26,0.35)", "rgba(16,20,26,0.72)", Colors.background]}
+        locations={[0, 0.5, 1]}
         style={StyleSheet.absoluteFillObject}
       />
     </View>
   );
 });
+
+const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
+const BACKGROUND_YOUTUBE_CHROME_CROP_PX = 260;
+const BACKGROUND_YOUTUBE_CHROME_CROP_TOTAL_PX = BACKGROUND_YOUTUBE_CHROME_CROP_PX * 2;
+const BACKGROUND_YOUTUBE_CROP_SCRIPT = `
+(function () {
+  function applyAmbientCrop() {
+    var head = document.head || document.getElementsByTagName("head")[0];
+    if (!head) {
+      setTimeout(applyAmbientCrop, 16);
+      return;
+    }
+
+    var viewportHeight = Math.max(window.innerHeight || 0, document.documentElement.clientHeight || 0, 220);
+    var videoHeight = Math.ceil(viewportHeight + ${BACKGROUND_YOUTUBE_CHROME_CROP_TOTAL_PX});
+    var videoWidth = Math.ceil(videoHeight * 16 / 9);
+    var style = document.getElementById("mavrixfy-ambient-youtube-crop");
+    if (!style) {
+      style = document.createElement("style");
+      style.id = "mavrixfy-ambient-youtube-crop";
+      head.appendChild(style);
+    }
+    style.textContent = [
+      "html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: ${Colors.background}; }",
+      ".container { position: relative !important; width: 100% !important; height: 100vh !important; padding-bottom: 0 !important; overflow: hidden !important; background: ${Colors.background}; }",
+      "#player, .container iframe { position: absolute !important; top: -${BACKGROUND_YOUTUBE_CHROME_CROP_PX}px !important; left: 50% !important; width: " + videoWidth + "px !important; height: " + videoHeight + "px !important; max-width: none !important; max-height: none !important; transform: translateX(-50%) !important; border: 0 !important; pointer-events: none !important; }"
+    ].join("\\n");
+
+    document.documentElement.style.overflow = "hidden";
+    if (document.body) {
+      document.body.style.overflow = "hidden";
+      document.body.style.background = "${Colors.background}";
+    }
+  }
+
+  applyAmbientCrop();
+  setTimeout(applyAmbientCrop, 250);
+  setTimeout(applyAmbientCrop, 1000);
+  window.addEventListener("resize", applyAmbientCrop);
+})();
+true;
+`;
+
+function getYouTubeVideoIdFromSong(song: Song | null | undefined): string {
+  if (!song) return "";
+  const source = song as Song & {
+    videoId?: unknown;
+    video_id?: unknown;
+    youtubeId?: unknown;
+    youtube_id?: unknown;
+    youtubeVideoId?: unknown;
+    youtubeVisualVideoId?: unknown;
+    url?: unknown;
+    watchUrl?: unknown;
+    videoUrl?: unknown;
+  };
+  const candidates = [
+    source.youtubeVisualVideoId,
+    source.youtubeVideoId,
+    source.videoId,
+    source.video_id,
+    source.youtubeId,
+    source.youtube_id,
+    String(source.id || "").replace(/^youtube_/, ""),
+  ];
+
+  for (const candidate of candidates) {
+    const value = typeof candidate === "string" ? candidate.trim() : "";
+    if (/^[a-zA-Z0-9_-]{11}$/.test(value)) return value;
+  }
+
+  const watchUrl = String(source.url || source.watchUrl || source.videoUrl || "").trim();
+  const match = watchUrl.match(/[?&]v=([a-zA-Z0-9_-]{11})|youtu\.be\/([a-zA-Z0-9_-]{11})/);
+  return match?.[1] || match?.[2] || "";
+}
+
+type BackgroundYoutubeVideoProps = {
+  videoId: string;
+  isPlaying: boolean;
+  positionMillis: number;
+  containerHeight: number;
+};
+
+const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
+  videoId,
+  isPlaying,
+  positionMillis,
+  containerHeight,
+}: BackgroundYoutubeVideoProps) {
+  const { width: winW } = useWindowDimensions();
+  const playerRef = useRef<any>(null);
+  const initialPositionSeconds = Math.max(0, Math.floor(positionMillis / 1000));
+  const lastPositionRef = useRef(initialPositionSeconds);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [videoVisible, setVideoVisible] = useState(false);
+
+  const onReady = useCallback(() => {
+    setPlayerReady(true);
+    playerRef.current?.mute?.();
+    void getSettings().then((settings) => {
+      playerRef.current?.setPlaybackQuality?.(getYouTubePlaybackQuality(settings.videoBackgroundQuality));
+    });
+  }, []);
+
+  const handleBackgroundStateChange = useCallback((state: string) => {
+    setVideoVisible(state === "playing");
+  }, []);
+
+  useEffect(() => {
+    if (playerReady) {
+      playerRef.current?.mute?.();
+    }
+  }, [playerReady, isPlaying]);
+
+  useEffect(() => {
+    const targetSeconds = Math.max(0, Math.floor(positionMillis / 1000));
+    if (playerReady && Math.abs(targetSeconds - lastPositionRef.current) > 10) {
+      playerRef.current?.seekTo?.(targetSeconds, true);
+    }
+    lastPositionRef.current = targetSeconds;
+  }, [positionMillis, playerReady]);
+
+  const dimensions = useMemo(() => {
+    const frameW = Math.max(winW, 220);
+    const frameH = Math.max(containerHeight, 220);
+    
+    const containerAspect = frameW / frameH;
+    const videoAspect = 16 / 9;
+    
+    let videoW = frameW;
+    let videoH = frameH;
+    let offsetX = 0;
+    let offsetY = 0;
+    
+    if (videoAspect > containerAspect) {
+      videoH = frameH;
+      videoW = Math.round(frameH * videoAspect);
+      offsetX = Math.round(-(videoW - frameW) / 2);
+    } else {
+      videoW = frameW;
+      videoH = Math.round(frameW / videoAspect);
+      offsetY = Math.round(-(videoH - frameH) / 2);
+    }
+    
+    return {
+      frameW: videoW,
+      frameH: videoH,
+      offsetX,
+      offsetY,
+    };
+  }, [winW, containerHeight]);
+
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFillObject,
+        { overflow: "hidden", backgroundColor: Colors.background },
+      ]}
+    >
+      <View
+        style={{
+          position: "absolute",
+          top: dimensions.offsetY,
+          left: dimensions.offsetX,
+          width: dimensions.frameW,
+          height: dimensions.frameH,
+          opacity: videoVisible ? 1 : 0,
+        }}
+      >
+        <YoutubePlayer
+          key={videoId}
+          ref={playerRef}
+          height={dimensions.frameH}
+          width={dimensions.frameW}
+          play={isPlaying}
+          mute={true}
+          volume={0}
+          videoId={videoId}
+          onReady={onReady}
+          onChangeState={handleBackgroundStateChange}
+          forceAndroidAutoplay
+          useLocalHTML
+          baseUrlOverride={YOUTUBE_PLAYER_REFERRER_URL}
+          initialPlayerParams={{
+            controls: false,
+            modestbranding: true,
+            rel: false,
+            preventFullScreen: true,
+            showClosedCaptions: false,
+            iv_load_policy: 3,
+            start: initialPositionSeconds,
+            disablekb: true,
+            fs: false,
+            playsinline: true,
+            cc_load_policy: 0,
+            enablejsapi: 1,
+          }}
+          webViewProps={{
+            javaScriptEnabled: true,
+            domStorageEnabled: true,
+            thirdPartyCookiesEnabled: true,
+            injectedJavaScriptBeforeContentLoaded: BACKGROUND_YOUTUBE_CROP_SCRIPT,
+            injectedJavaScript: BACKGROUND_YOUTUBE_CROP_SCRIPT,
+            setSupportMultipleWindows: false,
+            allowsFullscreenVideo: false,
+            allowsInlineMediaPlayback: true,
+            mediaPlaybackRequiresUserAction: false,
+            scrollEnabled: false,
+            overScrollMode: "never" as const,
+            androidLayerType: "hardware" as const,
+          }}
+        />
+        <View
+          style={[
+            StyleSheet.absoluteFillObject,
+            { backgroundColor: "rgba(0, 0, 0, 0.36)" }
+          ]}
+        />
+      </View>
+    </View>
+  );
+});
+
+BackgroundYoutubeVideo.displayName = "BackgroundYoutubeVideo";
 
 const StableArtworkImage = memo(function StableArtworkImage({
   uri,
@@ -603,6 +772,7 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
     setTrackedSongId(screenSongId);
     setPrevProgress(0);
     setLocalProgress(0);
+    setIsScrubbing(false);
     lastSyncRef.current = { progress: 0, timestamp: Date.now() };
     ignoreStaleProgressRef.current = true;
   } else if (progress !== prevProgress) {
@@ -667,13 +837,7 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
     [onSeekingChange]
   );
 
-  // Reset interactive state when the song changes.
-  useEffect(() => {
-    setIsScrubbing(false);
-    updateSeeking(false);
-    setLocalProgress(0);
-    lastSyncRef.current = { progress: 0, timestamp: Date.now() };
-  }, [screenSongId, updateSeeking]);
+
 
   // Slider works on a fixed 0..1000 scale. Convert normalized progress to/from it.
   const SLIDER_MAX = 1000;
@@ -819,7 +983,124 @@ const QueueSongRow = memo(
   }
 );
 
-QueueSongRow.displayName = "QueueSongRow";
+function formatFollowers(n: number | null | undefined): string {
+  if (!n) return "";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M followers`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K followers`;
+  return `${n} followers`;
+}
+
+// About Artist Card Component
+const AboutArtistCard = memo(({
+  artistDetails,
+  loading,
+  onPress,
+}: {
+  artistDetails: any;
+  loading: boolean;
+  onPress: () => void;
+}) => {
+  if (loading) {
+    return (
+      <View style={styles.artistCardContainer}>
+        <Text style={styles.artistSectionTitle}>About the Artist</Text>
+        <View style={[styles.artistCard, { height: 120, justifyContent: "center", alignItems: "center" }]}>
+          <ActivityIndicator size="small" color="#F7FAFF" />
+        </View>
+      </View>
+    );
+  }
+
+  if (!artistDetails) return null;
+
+  const imageUrl = artistDetails.image?.length ? getBestImageUrl(artistDetails.image) : "";
+  const followerText = artistDetails.followerCount ? formatFollowers(artistDetails.followerCount) : "";
+  const bioText = artistDetails.bio?.[0]?.text || "";
+
+  return (
+    <View style={styles.artistCardContainer}>
+      <Text style={styles.artistSectionTitle}>About the Artist</Text>
+      <Pressable style={styles.artistCard} onPress={onPress}>
+        {imageUrl ? (
+          <Image
+            source={{ uri: imageUrl }}
+            style={StyleSheet.absoluteFillObject}
+            contentFit="cover"
+            transition={200}
+          />
+        ) : null}
+        <LinearGradient
+          colors={["rgba(7,10,16,0.2)", "rgba(7,10,16,0.65)", "#070A10"]}
+          locations={[0, 0.5, 1]}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View style={styles.artistCardContent}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            {artistDetails.isVerified && (
+              <Ionicons name="checkmark-circle" size={16} color="#F7FAFF" />
+            )}
+            <Text style={styles.artistCardName}>{artistDetails.name}</Text>
+          </View>
+          {followerText ? <Text style={styles.artistCardFollowers}>{followerText}</Text> : null}
+          {bioText ? (
+            <Text style={styles.artistCardBio} numberOfLines={2}>
+              {bioText}
+            </Text>
+          ) : null}
+          <View style={styles.artistCardButton}>
+            <Text style={styles.artistCardButtonText}>View Profile</Text>
+          </View>
+        </View>
+      </Pressable>
+    </View>
+  );
+});
+
+AboutArtistCard.displayName = "AboutArtistCard";
+
+// Related Songs Component
+const RelatedSongsSection = memo(({
+  songs,
+  onSongPress,
+}: {
+  songs: Song[];
+  onSongPress: (song: Song) => void;
+}) => {
+  if (songs.length === 0) return null;
+
+  return (
+    <View style={styles.relatedSongsContainer}>
+      <Text style={styles.artistSectionTitle}>You Might Also Like</Text>
+      <View style={styles.relatedSongsList}>
+        {songs.map((song) => (
+          <Pressable
+            key={song.id}
+            style={styles.relatedSongRow}
+            onPress={() => onSongPress(song)}
+          >
+            <Image
+              source={{ uri: song.coverUrl || undefined }}
+              style={styles.relatedSongThumb}
+              contentFit="cover"
+              transition={120}
+            />
+            <View style={styles.relatedSongTextWrap}>
+              <Text style={styles.relatedSongTitle} numberOfLines={1}>
+                {song.title}
+              </Text>
+              <Text style={styles.relatedSongArtist} numberOfLines={1}>
+                {song.artist}
+              </Text>
+            </View>
+            <Ionicons name="play-circle-outline" size={24} color="rgba(255,255,255,0.6)" />
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+});
+
+RelatedSongsSection.displayName = "RelatedSongsSection";
 
 const DEV_PREVIEW_SONGS: Song[] = [
   {
@@ -866,6 +1147,7 @@ function useLegacyPlayerScreenView() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const [ambientBackdropEnabled, setAmbientBackdropEnabled] = useState(true);
   const [isNavigationFocused, setIsNavigationFocused] = useState(() => navigation.isFocused());
   const [isAppActive, setIsAppActive] = useState(() => AppState.currentState === "active");
   const isScreenFocused = isNavigationFocused && isAppActive;
@@ -887,7 +1169,18 @@ function useLegacyPlayerScreenView() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+    const fetchSettings = () => {
+      getSettings().then((s) => {
+        if (mounted) {
+          setAmbientBackdropEnabled(s.ambientBackdropEnabled);
+        }
+      });
+    };
+
+    fetchSettings();
     const unsubscribeFocus = navigation.addListener("focus", () => {
+      fetchSettings();
       setIsNavigationFocused(true);
     });
     const unsubscribeBlur = navigation.addListener("blur", () => {
@@ -895,6 +1188,7 @@ function useLegacyPlayerScreenView() {
     });
 
     return () => {
+      mounted = false;
       unsubscribeFocus();
       unsubscribeBlur();
     };
@@ -929,6 +1223,11 @@ function useLegacyPlayerScreenView() {
   } = usePlayerActions();
 
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
+  const [prevTrackedSongId, setPrevTrackedSongId] = useState(currentSong?.id);
+  if (currentSong?.id !== prevTrackedSongId) {
+    setPrevTrackedSongId(currentSong?.id);
+    setIsProgressSeeking(false);
+  }
   const [artworkPalette, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
   const [playerAd, setPlayerAd] = useState<GoogleNativeAd | null>(null);
   const [playerAdLoaded, setPlayerAdLoaded] = useState(false);
@@ -1037,9 +1336,67 @@ function useLegacyPlayerScreenView() {
   const devPreviewSong =
     DEV_PREVIEW_SONGS[Math.max(0, Math.min(devPreviewIndex, DEV_PREVIEW_SONGS.length - 1))] ??
     DEV_PREVIEW_SONGS[0];
+  const { positionMillis } = usePlayerProgress();
   const screenSong = currentSong ?? (isDevPreviewActive ? devPreviewSong : null);
   const screenSongIsYouTube = Boolean(screenSong?.source === "youtube" || screenSong?.id?.startsWith("youtube_"));
-  const ambientVideoLayoutActive = false;
+
+  const [backgroundVideoId, setBackgroundVideoId] = useState<string | null>(null);
+
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- background video id follows the current song after the resolver verifies an official visual match.
+  useEffect(() => {
+    if (!screenSong) {
+      setBackgroundVideoId(null);
+      return;
+    }
+
+    setBackgroundVideoId(null);
+
+    let cancelled = false;
+    void getYouTubeMusicVisualVideoId(screenSong)
+      .then((visualVideoId) => {
+        if (cancelled) return;
+        setBackgroundVideoId(visualVideoId || null);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [screenSong]);
+
+  const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
+  const [prevSongId, setPrevSongId] = useState(screenSong?.id);
+
+  if (screenSong?.id !== prevSongId) {
+    setPrevSongId(screenSong?.id);
+    setHasStartedPlaying(false);
+  }
+
+  useEffect(() => {
+    if (playbackState.isPlaying && !playbackState.isLoading && !playbackState.isBuffering) {
+      setHasStartedPlaying(true);
+    }
+  }, [playbackState.isPlaying, playbackState.isLoading, playbackState.isBuffering]);
+
+  const ambientVideoLayoutActive = useMemo(() => Boolean(
+    ambientBackdropEnabled &&
+    backgroundVideoId
+  ), [ambientBackdropEnabled, backgroundVideoId]);
+
+  const shouldRenderBackgroundVideo = useMemo(() => Boolean(
+    ambientVideoLayoutActive
+  ), [ambientVideoLayoutActive]);
+
+
+
+  console.log("DEBUG [PlayerDetails] Ambient states:", {
+    ambientBackdropEnabled,
+    backgroundVideoId,
+    ambientVideoLayoutActive,
+    shouldRenderBackgroundVideo,
+    songId: screenSong?.id,
+    songTitle: screenSong?.title
+  });
 
   const currentPlayerAdSongId = screenSong?.id ?? null;
   if (currentPlayerAdSongId !== lastPlayerAdSongIdRef.current) {
@@ -1292,6 +1649,73 @@ function useLegacyPlayerScreenView() {
   }, [currentSong?.id, livePlayingQueue, queue.length, queueIndex]);
   const playingQueue = isDevPreviewActive ? DEV_PREVIEW_SONGS : livePlayingQueue;
   const activeQueueIndex = isDevPreviewActive ? devPreviewIndex : liveActiveQueueIndex;
+
+  const [artistDetails, setArtistDetails] = useState<any>(null);
+  const [artistLoading, setArtistLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (!screenSong?.artist) {
+      setArtistDetails(null);
+      return;
+    }
+
+    async function loadArtist() {
+      if (!active) return;
+      setArtistLoading(true);
+      try {
+        const currentArtist = screenSong?.artist;
+        if (!currentArtist) return;
+        const query = currentArtist.split(",")[0].trim();
+        const artists = await searchArtists(query);
+        if (!active) return;
+        if (artists.length > 0) {
+          const details = await getArtistDetails(artists[0].id);
+          if (!active) return;
+          setArtistDetails(details);
+        } else {
+          setArtistDetails(null);
+        }
+      } catch (err) {
+        console.warn("[PlayerArtistDetails] Failed to load artist:", err);
+      } finally {
+        if (active) setArtistLoading(false);
+      }
+    }
+
+    void loadArtist();
+    return () => {
+      active = false;
+    };
+  }, [screenSong?.artist]);
+
+  const relatedSongs = useMemo<Song[]>(() => {
+    if (!artistDetails?.topSongs) return [];
+    const filtered = artistDetails.topSongs.flatMap((item) => {
+      const s = convertJioSaavnSong(item);
+      return s.id !== screenSong?.id ? [s] : [];
+    });
+    return filtered.slice(0, 5);
+  }, [artistDetails, screenSong?.id]);
+
+  const handleViewArtistProfile = useCallback(() => {
+    if (!artistDetails) return;
+    safeGoBack();
+    setTimeout(() => {
+      router.push({
+        pathname: "/artist/[id]",
+        params: {
+          id: artistDetails.id,
+          name: artistDetails.name,
+          image: artistDetails.image?.length ? getBestImageUrl(artistDetails.image) : "",
+        },
+      });
+    }, 120);
+  }, [artistDetails]);
+
+  const handlePlayRelatedSong = useCallback((song: Song) => {
+    playSong(song, [song, ...playingQueue.slice(activeQueueIndex + 1)]);
+  }, [playingQueue, activeQueueIndex, playSong]);
 
   const artworkQueue = useMemo<ArtworkQueueItem[]>(() => {
     const occurrenceByKey = new Map<string, number>();
@@ -1742,6 +2166,15 @@ function useLegacyPlayerScreenView() {
     ({ item, index }: { item: ArtworkQueueItem; index: number }) => {
       const song = item.song;
       const isActiveCard = index === activeQueueIndex;
+
+      if (isActiveCard && ambientVideoLayoutActive) {
+        return (
+          <View
+            key={item.artworkKey}
+            style={{ width: artCarouselPageWidth, height: artSize }}
+          />
+        );
+      }
       const inputRange = [
         (index - 1) * artCarouselSnapInterval,
         index * artCarouselSnapInterval,
@@ -1892,6 +2325,7 @@ function useLegacyPlayerScreenView() {
       playerAdLoaded,
       showAdInPlayer,
       artworkDismissAnimatedStyle,
+      ambientVideoLayoutActive,
     ]
   );
 
@@ -1994,6 +2428,21 @@ function useLegacyPlayerScreenView() {
           />
         </Reanimated.View>
 
+        <View
+          pointerEvents="none"
+          style={[
+            styles.lowerDarkBackdrop,
+            { top: Math.max(200, topInset + topBarHeight + artSize + (isShortScreen ? 92 : 116) - 160) },
+          ]}
+        >
+          <LinearGradient
+            pointerEvents="none"
+            colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.58)", "rgba(0,0,0,0.82)"]}
+            style={{ height: 160, width: "100%" }}
+          />
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.82)" }} />
+        </View>
+
       <View style={[styles.playerForeground, { paddingBottom: 0 }]}>
       <Reanimated.View
         style={[
@@ -2062,6 +2511,51 @@ function useLegacyPlayerScreenView() {
         scrollEventThrottle={16}
         ListHeaderComponent={
           <>
+            {shouldRenderBackgroundVideo ? (() => {
+              const containerH = Math.round(
+                screenWidth * (16 / 9)
+              );
+              return (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.backgroundYoutubeContainer,
+                    {
+                      height: containerH,
+                      opacity: artScrollX.interpolate({
+                        inputRange: [
+                          (activeQueueIndex - 1) * artCarouselSnapInterval,
+                          activeQueueIndex * artCarouselSnapInterval,
+                          (activeQueueIndex + 1) * artCarouselSnapInterval,
+                        ],
+                        outputRange: [0, 1, 0],
+                        extrapolate: "clamp",
+                      }),
+                    },
+                  ]}
+                >
+                  <BackgroundYoutubeVideo
+                    key={`bg-video-${backgroundVideoId}`}
+                    videoId={backgroundVideoId!}
+                    isPlaying={isScreenFocused}
+                    positionMillis={positionMillis}
+                    containerHeight={containerH}
+                  />
+                  <LinearGradient
+                    pointerEvents="none"
+                    colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.48)", "rgba(0,0,0,0.92)", "#000000"]}
+                    locations={[0, 0.45, 0.82, 1]}
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 220,
+                    }}
+                  />
+                </Animated.View>
+              );
+            })() : null}
             <View
               style={[
                 styles.playerContent,
@@ -2069,15 +2563,26 @@ function useLegacyPlayerScreenView() {
                   paddingTop: topInset + topBarHeight,
                   paddingBottom: isShortScreen ? 10 : 14,
                 },
+                ambientVideoLayoutActive && {
+                  minHeight: screenHeight - topInset - (isShortScreen ? 110 : 130),
+                  paddingBottom: 0,
+                },
               ]}
             >
                 <GestureDetector gesture={playerPrimaryDismissGesture}>
-                  <View style={styles.playerPrimaryStack}>
+                  <View
+                    style={[
+                      styles.playerPrimaryStack,
+                      ambientVideoLayoutActive && { flex: 1 },
+                    ]}
+                  >
                 <View
                   style={[
                     styles.artWrap,
                     {
-                      marginTop: isVeryShortScreen ? 8 : isShortScreen ? 12 : 18,
+                      marginTop: ambientVideoLayoutActive
+                        ? isShortScreen ? 4 : 8
+                        : isVeryShortScreen ? 8 : isShortScreen ? 12 : 18,
                       paddingHorizontal: 0,
                     },
                   ]}
@@ -2121,7 +2626,9 @@ function useLegacyPlayerScreenView() {
                     style={[
                       styles.songBlock,
                       {
-                        marginTop: isVeryShortScreen ? 22 : isShortScreen ? 26 : 34,
+                        marginTop: ambientVideoLayoutActive
+                          ? isShortScreen ? 75 : 95
+                          : isVeryShortScreen ? 22 : isShortScreen ? 26 : 34,
                         marginHorizontal: isShortScreen ? 14 : 20,
                       },
                     ]}
@@ -2325,28 +2832,42 @@ function useLegacyPlayerScreenView() {
           </View>
 
           <Reanimated.View style={controlsDismissAnimatedStyle}>
-            <View style={styles.playingListSection}>
+            <View
+              style={[
+                styles.playingListSection,
+                ambientVideoLayoutActive && styles.playingListSectionAmbient,
+              ]}
+            >
             <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
               <Text style={styles.playingListTitle}>Queue</Text>
             </View>
-            <FlatList
-              data={playingQueue}
-              keyExtractor={queueKeyExtractor}
-              renderItem={renderQueueItem}
-              getItemLayout={getQueueItemLayout}
+            <ScrollView
               style={[styles.queueListViewport, queueViewportStyle]}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.queueListContent}
-              nestedScrollEnabled
+              nestedScrollEnabled={true}
               bounces={false}
               overScrollMode="never"
-              initialNumToRender={12}
-              maxToRenderPerBatch={8}
-              updateCellsBatchingPeriod={50}
-              windowSize={8}
-              removeClippedSubviews={false}
-            />
+            >
+              {/* react-doctor-disable-next-line react-doctor/rn-no-scrollview-mapped-list -- queue viewport is small, height-constrained, and does not require virtualization overhead */}
+              {playingQueue.map((item, index) => (
+                <React.Fragment key={queueKeyExtractor(item, index)}>
+                  {renderQueueItem({ item, index })}
+                </React.Fragment>
+              ))}
+            </ScrollView>
           </View>
+
+          <AboutArtistCard
+            artistDetails={artistDetails}
+            loading={artistLoading}
+            onPress={handleViewArtistProfile}
+          />
+
+          <RelatedSongsSection
+            songs={relatedSongs}
+            onSongPress={handlePlayRelatedSong}
+          />
           </Reanimated.View>
           </>
         }
@@ -2384,6 +2905,16 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0, 0, 0, 0.54)",
   },
+  backgroundYoutubeContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    overflow: "hidden",
+    zIndex: -1,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+  },
   activeCardReanimatedContainer: {
     alignItems: "center",
     justifyContent: "center",
@@ -2391,7 +2922,7 @@ const styles = StyleSheet.create({
   },
   backgroundLayer: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#070A10",
+    backgroundColor: "#000000",
     overflow: "hidden",
   },
   backgroundArtworkImage: {
@@ -2405,6 +2936,20 @@ const styles = StyleSheet.create({
   },
   backgroundColorWash: {
     opacity: 0.2,
+  },
+  lowerDarkBackdrop: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "transparent",
+  },
+  lowerDarkFade: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: -132,
+    height: 132,
   },
 
   playerForeground: {
@@ -2495,15 +3040,15 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   artFrame: {
-    borderRadius: 0,
+    borderRadius: 22,
     overflow: "hidden",
     backgroundColor: "transparent",
   },
   artFrameDefault: {
-    borderRadius: 0,
+    borderRadius: 22,
   },
   youtubeArtFrame: {
-    borderRadius: 0,
+    borderRadius: 22,
     backgroundColor: "#000000",
   },
   albumArt: {
@@ -2799,22 +3344,25 @@ const styles = StyleSheet.create({
   },
   playingListSection: {
     alignSelf: "stretch",
-    width: "100%",
     marginTop: 0,
-    marginHorizontal: 0,
+    marginHorizontal: 16,
     overflow: "hidden",
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
+    borderRadius: 22,
     backgroundColor: "#14171E",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  playingListSectionAmbient: {
+    marginHorizontal: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: "#191C23",
   },
   queueListContent: {
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 12,
+    paddingBottom: 64,
   },
   queueListViewport: {
     flexGrow: 0,
@@ -3051,6 +3599,101 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.cardBorder,
+  },
+  artistCardContainer: {
+    marginHorizontal: 16,
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  artistSectionTitle: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+    marginBottom: 12,
+  },
+  artistCard: {
+    height: 180,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#14171E",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  artistCardContent: {
+    flex: 1,
+    justifyContent: "flex-end",
+    padding: 16,
+  },
+  artistCardName: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+  },
+  artistCardFollowers: {
+    color: "rgba(255, 255, 255, 0.7)",
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+    marginTop: 2,
+  },
+  artistCardBio: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    marginTop: 6,
+    lineHeight: 16,
+  },
+  artistCardButton: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.3)",
+    borderRadius: 18,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    marginTop: 10,
+  },
+  artistCardButtonText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
+  relatedSongsContainer: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 48,
+  },
+  relatedSongsList: {
+    backgroundColor: "#14171E",
+    borderRadius: 16,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  relatedSongRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  relatedSongThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 6,
+  },
+  relatedSongTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  relatedSongTitle: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+  },
+  relatedSongArtist: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    marginTop: 2,
   },
 
 });

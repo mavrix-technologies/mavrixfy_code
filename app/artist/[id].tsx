@@ -105,7 +105,7 @@ function useArtistScreenView() {
       ? mapFilter(artist.topSongs, (s) => convertJioSaavnSong(s), (s) => s.audioUrl?.trim())
       : [];
     return [...base, ...extraSongs];
-  }, [artist, extraSongs, artistId]);
+  }, [artist, extraSongs]);
 
   // songs alias kept for play/shuffle handlers
   const songs = allSongs;
@@ -431,7 +431,7 @@ function useArtistScreenView() {
           ) : songs.length > 0 ? (
             <>
               {songs.map((song, i) => (
-                <SongRow key={`${song.id}-${i}`} song={song} index={i} queue={songs} queueKey={songsQueueKey} />
+                <SongRow key={song.id} song={song} index={i} queue={songs} queueKey={songsQueueKey} />
               ))}
               {/* Load More button */}
               {hasMore ? (

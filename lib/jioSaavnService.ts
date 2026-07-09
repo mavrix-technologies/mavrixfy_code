@@ -117,9 +117,13 @@ const CATEGORY_TTL_MS: Record<string, number> = {
   retro:         90 * 60 * 1000,
 };
 const JIOSAAVN_PLAYLIST_BASE_URLS = [
+  "https://mavrixfy-api-drab.vercel.app/api",
+  "https://mavrixfy-song-api.vercel.app/api",
   `${getApiUrl().replace(/\/$/, "")}/api`,
 ];
 const JIOSAAVN_SEARCH_BASE_URLS = [
+  "https://mavrixfy-api-drab.vercel.app/api",
+  "https://mavrixfy-song-api.vercel.app/api",
   `${getApiUrl().replace(/\/$/, "")}/api`,
 ];
 
@@ -1290,7 +1294,8 @@ async function fetchPlaylistDetailsPage(
   const sourceQuery = playlistLink
     ? `link=${encodeURIComponent(playlistLink)}`
     : `id=${encodeURIComponent(playlistId)}`;
-  const query = `${sourceQuery}&limit=${limit}&page=${page}`;
+  const apiPage = Math.max(0, page - 1);
+  const query = `${sourceQuery}&limit=${limit}&page=${apiPage}`;
 
   const candidateUrls = JIOSAAVN_PLAYLIST_BASE_URLS.map(
     (base) => `${base.replace(/\/+$/, "")}/playlists?${query}`

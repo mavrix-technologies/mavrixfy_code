@@ -46,10 +46,35 @@ export interface UserPlaylist {
   updatedAt: number;
 }
 
+export type YouTubeVideoQualityPreference = "auto" | "low" | "medium" | "high";
+
+function normalizeYouTubeVideoQuality(value: unknown): YouTubeVideoQualityPreference {
+  return value === "low" || value === "medium" || value === "high" || value === "auto"
+    ? value
+    : "auto";
+}
+
+export function getYouTubePlaybackQuality(
+  quality: YouTubeVideoQualityPreference
+): "default" | "small" | "medium" | "hd720" {
+  switch (quality) {
+    case "low":
+      return "small";
+    case "medium":
+      return "medium";
+    case "high":
+      return "hd720";
+    case "auto":
+    default:
+      return "default";
+  }
+}
+
 export type MiniPlayerSecondaryControl = "queue" | "next" | "prev" | "more";
 
 export interface AppSettings {
   streamingQuality: "low" | "medium" | "high";
+  videoBackgroundQuality: YouTubeVideoQualityPreference;
   smartAutoplayEnabled: boolean;
   smartAutoplayMode: SmartAutoplayMode;
   downloadQuality: "low" | "medium" | "high";
@@ -60,10 +85,12 @@ export interface AppSettings {
   crossfade: number;
   gapless: boolean;
   normalizeVolume: boolean;
+  ambientBackdropEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
   streamingQuality: "high",
+  videoBackgroundQuality: "auto",
   smartAutoplayEnabled: true,
   smartAutoplayMode: "similar-trending",
   downloadQuality: "high",
@@ -81,6 +108,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   crossfade: 0,
   gapless: true,
   normalizeVolume: false,
+  ambientBackdropEnabled: true,
 };
 
 const EQUALIZER_PRESETS: Record<string, Record<string, number>> = {
@@ -457,12 +485,14 @@ export async function getSettings(): Promise<AppSettings> {
       ...(saved.equalizer || {}),
     },
     hapticsEnabled: Boolean(saved.hapticsEnabled),
+    videoBackgroundQuality: normalizeYouTubeVideoQuality(saved.videoBackgroundQuality),
     smartAutoplayEnabled: saved.smartAutoplayEnabled !== undefined ? Boolean(saved.smartAutoplayEnabled) : DEFAULT_SETTINGS.smartAutoplayEnabled,
     smartAutoplayMode: normalizeSmartAutoplayMode(saved.smartAutoplayMode),
     miniPlayerSecondaryControl: normalizeMiniPlayerSecondaryControl(saved.miniPlayerSecondaryControl),
     crossfade: DEFAULT_SETTINGS.crossfade,
     gapless: DEFAULT_SETTINGS.gapless,
     normalizeVolume: DEFAULT_SETTINGS.normalizeVolume,
+    ambientBackdropEnabled: saved.ambientBackdropEnabled !== undefined ? Boolean(saved.ambientBackdropEnabled) : DEFAULT_SETTINGS.ambientBackdropEnabled,
   };
 }
 

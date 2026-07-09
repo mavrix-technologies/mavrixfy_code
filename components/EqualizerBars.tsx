@@ -23,10 +23,10 @@ interface Props {
 
 // 4 distinct bars with different heights and speeds to look organic and professional
 const BARS = [
-  { minScale: 0.2, maxScale: 1.0, duration: 320 },
-  { minScale: 0.2, maxScale: 0.8, duration: 420 },
-  { minScale: 0.2, maxScale: 0.95, duration: 360 },
-  { minScale: 0.2, maxScale: 0.7, duration: 480 },
+  { id: "bar-1", minScale: 0.2, maxScale: 1.0, duration: 320 },
+  { id: "bar-2", minScale: 0.2, maxScale: 0.8, duration: 420 },
+  { id: "bar-3", minScale: 0.2, maxScale: 0.95, duration: 360 },
+  { id: "bar-4", minScale: 0.2, maxScale: 0.7, duration: 480 },
 ];
 
 function Bar({
@@ -104,9 +104,9 @@ export default function EqualizerBars({ isPlaying, color, size = 2.5 }: Props) {
 
   return (
     <View style={[styles.container, { width: totalWidth, height }]}>
-      {BARS.map((cfg, index) => (
+      {BARS.map((cfg) => (
         <Bar
-          key={`bar-${cfg.maxScale}-${cfg.duration}-${index}`}
+          key={cfg.id}
           isPlaying={isPlaying}
           minScale={cfg.minScale}
           maxScale={cfg.maxScale}

@@ -265,6 +265,7 @@ function usePlaylistScreenView() {
   }, []);
 
   // ── Load ───────────────────────────────────────────────────────────────────
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- resetting playlist loading state updates multiple independent UI properties at once, which is batched by React.
   useEffect(() => {
     let cancelled = false;
     if (!playlistId) { markPlaylistNotFound(); return; }

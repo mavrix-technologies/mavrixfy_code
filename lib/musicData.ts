@@ -17,6 +17,7 @@ export interface Song {
   videoId?: string;
   youtubeVideoId?: string;
   youtubeVisualVideoId?: string;
+  youtubeVideoType?: string;
   youtubeNativeAudio?: boolean;
   youtubeAudioExpiresAt?: number;
   playbackHeaders?: Record<string, string>;

@@ -1,19 +1,19 @@
 import React, { createContext, use, useState, useCallback, useMemo, useRef, ReactNode, useEffect } from "react";
-import { Alert, AppState, DeviceEventEmitter, InteractionManager, NativeModules, Platform, ToastAndroid, useWindowDimensions } from "react-native";
+import { Alert, AppState, DeviceEventEmitter, InteractionManager, NativeModules, Platform, ToastAndroid, View, useWindowDimensions } from "react-native";
 import { isRunningInExpoGo } from "expo";
 import * as Network from "expo-network";
 import { usePathname } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { convertJioSaavnSong, Song } from "@/lib/musicData";
+import { Song, convertJioSaavnSong } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
 import { getCatalogSongs } from "@/lib/catalogService";
+import { searchSong } from "@/lib/song-matcher";
 import { useAuth } from "@/contexts/AuthContext";
 import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
 import { logger } from "@/lib/logger";
 import * as ExpoAvPlayer from "@/lib/expoAvPlayer";
-import { searchSong } from "@/lib/song-matcher";
-import { buildAppApiUrl } from "@/lib/api-config";
-import { prefetchNextSongs, shouldPrefetch, clearPrefetchCache } from "@/lib/prefetchQueue";
+import { getYouTubeAudioStreamForPlayback, getYouTubeMusicVisualVideoId } from "@/lib/youtubeMusicService";
+import YoutubePlayer from "react-native-youtube-iframe";
 import {
   beginPlaybackTransaction,
   completePlaybackTransaction,
@@ -142,6 +142,7 @@ interface PlayerContextValue extends PlayerState {
   clearSleepTimer: () => void;
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
+  setYoutubePlayerFrame: (frame: YoutubePlayerFrame | null) => void;
 }
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -222,6 +223,7 @@ interface PlayerActionsContextValue {
   clearSleepTimer: () => void;
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
+  setYoutubePlayerFrame: (frame: YoutubePlayerFrame | null) => void;
 }
 
 const PlayerActionsContext = createContext<PlayerActionsContextValue | null>(null);
@@ -303,13 +305,9 @@ function isTrustedNativeAudioUrl(value: unknown): boolean {
     const path = parsed.pathname.toLowerCase();
 
     if (host.includes("saavncdn.com")) return true;
-    if (
-      host.includes("googlevideo.com") ||
-      path.includes("/videoplayback") ||
-      path.includes("/stream/media/") ||
-      path.includes("/stream/")
-    ) {
-      return true;
+    if (host.includes("googlevideo.com")) {
+      const mime = parsed.searchParams.get("mime")?.toLowerCase() || "";
+      return path.includes("/videoplayback") || mime.startsWith("audio/");
     }
     return /\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac)(?:$|[?#])/i.test(path);
   } catch {
@@ -321,15 +319,9 @@ function readDownloadAudioUrl(value: unknown): string {
   if (typeof value === "string") return readAudioCandidate(value);
 
   if (Array.isArray(value)) {
-    const qualityMap = new Map<string, any>();
-    for (const item of value) {
-      if (item && typeof item === "object") {
-        qualityMap.set(String((item as any).quality || "").toLowerCase(), item);
-      }
-    }
     const preferredQualities = ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"];
     for (const quality of preferredQualities) {
-      const match = qualityMap.get(quality);
+      const match = value.find((item) => String(item?.quality || "").toLowerCase() === quality);
       const url = readAudioCandidate(match?.url) || readAudioCandidate(match?.link);
       if (url) return url;
     }
@@ -368,10 +360,21 @@ function resolveAudioUrl(source: SongPlaybackSource | null | undefined): string 
 }
 
 function isYouTubeSource(song: Song | null | undefined): boolean {
-  if (!song) return false;
-  if (song.source === "youtube") return true;
-  const id = song.id || "";
-  return id.startsWith("youtube_") || id.startsWith("yt:") || song.youtubeVideoId !== undefined || song.videoId !== undefined;
+  return Boolean(
+    song &&
+      (song.source === "youtube" ||
+        song.id?.startsWith("youtube_") ||
+        song.id?.startsWith("yt:") ||
+        song.youtubeVideoId)
+  );
+}
+
+const YOUTUBE_AUDIO_EXPIRY_MARGIN_MS = 60 * 1000;
+
+function hasFreshYouTubeNativeAudio(song: Song | null | undefined): boolean {
+  if (!song?.youtubeNativeAudio || !isTrustedNativeAudioUrl(song.audioUrl)) return false;
+  const expiresAt = Number(song.youtubeAudioExpiresAt);
+  return !Number.isFinite(expiresAt) || expiresAt - YOUTUBE_AUDIO_EXPIRY_MARGIN_MS > Date.now();
 }
 
 function extractYouTubeVideoId(song: Song | null | undefined): string {
@@ -401,9 +404,8 @@ function extractYouTubeVideoId(song: Song | null | undefined): string {
 function normalizePlayableSong(song: Song | null | undefined): Song | null {
   if (!song?.id) return null;
 
-  // YouTube stream URLs are short-lived. Keep only the video ID in app state;
-  // resolve a fresh backend URL at the moment playback starts.
-  if (isYouTubeSource(song)) {
+  // Unresolved or expired YouTube tracks use the iframe until a fresh native URL is available.
+  if (isYouTubeSource(song) && !hasFreshYouTubeNativeAudio(song)) {
     const videoId = extractYouTubeVideoId(song);
     if (!videoId) {
       logger.warn("[Normalize] YouTube song missing video ID", { id: song.id, title: song.title });
@@ -437,15 +439,16 @@ function normalizePlayableSong(song: Song | null | undefined): Song | null {
   };
 }
 
-
+function isYouTubeSong(song: Song | null | undefined): boolean {
+  return Boolean(song && isYouTubeSource(song) && !hasFreshYouTubeNativeAudio(song));
+}
 
 const SINGLE_SONG_AUTOPLAY_MIN_SIZE = 6;
 const SINGLE_SONG_AUTOPLAY_TARGET_SIZE = 18;
 const SINGLE_SONG_AUTOPLAY_LOOKUP_TIMEOUT_MS = 900;
-const YOUTUBE_NATIVE_STREAM_TIMEOUT_MS = 7000;
-const YOUTUBE_UPCOMING_NATIVE_PRELOAD_SIZE = 3;
-const YOUTUBE_JIOSAAVN_FALLBACK_TIMEOUT_MS = 2500;
-const RESOLVED_NATIVE_AUDIO_TTL_MS = 55 * 60 * 1000;
+const YOUTUBE_NATIVE_MATCH_TIMEOUT_MS = 2200;
+const YOUTUBE_NATIVE_STREAM_TIMEOUT_MS = 8500;
+const RESOLVED_NATIVE_AUDIO_TTL_MS = 5.5 * 60 * 60 * 1000;
 
 function textKey(value: unknown): string {
   return String(value || "")
@@ -554,24 +557,11 @@ function resolveWithin<T>(promise: Promise<T>, ms: number, fallback: T): Promise
   });
 }
 
-function createPlaybackTimeoutSignal(ms: number): {
-  signal: AbortSignal;
-  cleanup: () => void;
-} {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-
-  return {
-    signal: controller.signal,
-    cleanup: () => clearTimeout(timer),
-  };
-}
-
 async function getRecentSongCandidates(): Promise<Song[]> {
   const items = await Storage.getRecentlyPlayed().catch(() => []);
   return mapFilter(
     items,
-    (item) => (item.type === "song" && item.data ? sanitizeSongForStorage(item.data as Song) : null),
+    (item) => (item.type === "song" && item.data ? item.data as Song : null),
     (song): song is Song => Boolean(song?.id && song?.title)
   );
 }
@@ -591,7 +581,7 @@ async function resolveJioSaavnFallbackForYouTubeSong(song: Song, signal: AbortSi
 
   const match = await resolveWithin(
     searchSong(title, artist, readNonEmptyString(song.album) || undefined),
-    YOUTUBE_JIOSAAVN_FALLBACK_TIMEOUT_MS,
+    2500, // YOUTUBE_JIOSAAVN_FALLBACK_TIMEOUT_MS
     null
   );
   if (!match?.song || signal.aborted) return null;
@@ -620,50 +610,62 @@ async function resolveJioSaavnFallbackForYouTubeSong(song: Song, signal: AbortSi
   };
 }
 
-async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | null> {
+async function resolveJioSaavnAudioForSong(song: Song): Promise<Song | null> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
+  const timer = setTimeout(() => controller.abort(), YOUTUBE_NATIVE_MATCH_TIMEOUT_MS);
   try {
-    // 1. Try direct YouTube streaming via Express proxy first for YouTube source tracks
-    const videoId = extractYouTubeVideoId(song);
-    if (videoId) {
-      logger.info("[resolveYouTubeTrackForNativePlayback] Attempting direct YouTube stream proxy...", { videoId });
-      try {
-        const url = buildAppApiUrl(`/youtube-music/stream/${videoId}?json=true`);
-        const response = await fetch(url, { signal: controller.signal });
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success && data.stream?.url) {
-            logger.info("[resolveYouTubeTrackForNativePlayback] Successfully resolved stream from proxy!", { url: data.stream.url });
-            return {
-              ...song,
-              audioUrl: data.stream.url,
-              source: "youtube",
-              youtubeVideoId: videoId,
-              youtubeNativeAudio: true,
-              playbackHeaders: data.stream.headers || {},
-            };
-          }
-        }
-      } catch (err: any) {
-        logger.warn("[resolveYouTubeTrackForNativePlayback] Direct YouTube stream proxy failed:", err?.message || err);
-      }
-    }
-
-    // 2. Fall back to JioSaavn if YouTube proxy failed or videoId is missing
-    logger.info("[resolveYouTubeTrackForNativePlayback] Falling back to JioSaavn resolution...");
-    const res = await resolveJioSaavnFallbackForYouTubeSong(song, controller.signal);
-    if (res) return res;
-
-    return null;
-  } catch (err: any) {
-    logger.error("[resolveYouTubeTrackForNativePlayback] Error resolving proxy or fallback:", err?.message || err);
+    return await resolveJioSaavnFallbackForYouTubeSong(song, controller.signal);
+  } catch (err) {
     return null;
   } finally {
     clearTimeout(timer);
   }
 }
 
+async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | null> {
+  const videoId = extractYouTubeVideoId(song);
+  if (!videoId) return null;
+
+  const resolvedSong = await resolveJioSaavnAudioForSong(song);
+  if (resolvedSong) {
+    return {
+      ...resolvedSong,
+      youtubeNativeAudio: true,
+      youtubeAudioExpiresAt: Date.now() + RESOLVED_NATIVE_AUDIO_TTL_MS,
+      youtubeVideoId: videoId,
+      source: "youtube",
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), YOUTUBE_NATIVE_STREAM_TIMEOUT_MS);
+  try {
+    const stream = await resolveWithin(
+      getYouTubeAudioStreamForPlayback(videoId, song.title, song.artist, controller.signal),
+      YOUTUBE_NATIVE_STREAM_TIMEOUT_MS,
+      null
+    );
+    if (!stream?.url || !isTrustedNativeAudioUrl(stream.url)) {
+      return null;
+    }
+
+    return {
+      ...song,
+      audioUrl: stream.url,
+      downloadUrl: undefined,
+      playbackHeaders: stream.headers && Object.keys(stream.headers).length > 0 ? stream.headers : undefined,
+      duration: song.duration || stream.duration || 0,
+      youtubeNativeAudio: true,
+      youtubeAudioExpiresAt: stream.expiresAt || Date.now() + RESOLVED_NATIVE_AUDIO_TTL_MS,
+      youtubeVideoId: videoId,
+      source: "youtube",
+    };
+  } catch (err) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function withResolvedPlaybackUrl(song: Song, audioUrl: string): Song {
   const resolvedUrl = readNonEmptyString(audioUrl);
@@ -678,13 +680,7 @@ function mergeResolvedNativeEntriesIntoQueue(queue: Song[], entries: NativeTrack
   for (const entry of entries) {
     const index = entry.appIndex;
     const existing = queue[index];
-    if (!existing) continue;
-    const sameSongId = String(existing.id) === String(entry.song.id);
-    const isProviderFallback =
-      isYouTubeSource(existing) &&
-      entry.song.source === "jiosaavn" &&
-      Boolean(resolveAudioUrl(entry.song as SongPlaybackSource));
-    if (!sameSongId && !isProviderFallback) continue;
+    if (!existing || String(existing.id) !== String(entry.song.id)) continue;
 
     const resolvedUrl = resolveAudioUrl(entry.song as SongPlaybackSource);
     if (!resolvedUrl) continue;
@@ -696,9 +692,7 @@ function mergeResolvedNativeEntriesIntoQueue(queue: Song[], entries: NativeTrack
     if (existingUrl === resolvedUrl && !nativeMetadataChanged) continue;
 
     if (!nextQueue) nextQueue = queue.slice();
-    nextQueue[index] = isProviderFallback
-      ? { ...entry.song, audioUrl: resolvedUrl }
-      : { ...existing, ...entry.song, audioUrl: resolvedUrl };
+    nextQueue[index] = { ...existing, ...entry.song, audioUrl: resolvedUrl };
   }
 
   return nextQueue ?? queue;
@@ -713,14 +707,6 @@ function stripTransientYouTubeAudioUrl(song: Song): Song {
     youtubeNativeAudio: false,
     youtubeAudioExpiresAt: undefined,
   };
-}
-
-function sanitizeSongForStorage(song: Song): Song {
-  return isYouTubeSource(song) ? stripTransientYouTubeAudioUrl(song) : song;
-}
-
-function sanitizeQueueForStorage(queue: Song[]): Song[] {
-  return queue.map(sanitizeSongForStorage);
 }
 
 function getYouTubeVideoIdFromSong(song: Song | null | undefined): string {
@@ -761,7 +747,7 @@ function songToTrack(song: Song, localUrl?: string | null): any {
   const durationSeconds = toDurationSeconds(song.duration);
   const album = cleanAndroidAutoText(song.album);
   
-  const track = {
+  return {
     id: song.id,
     url: audioUrl,
     title: cleanAndroidAutoTitle(song.title, album) || song.title,
@@ -770,22 +756,10 @@ function songToTrack(song: Song, localUrl?: string | null): any {
     genre: cleanAndroidAutoText(song.genre),
     artwork: song.coverUrl,
     duration: durationSeconds,
-    type: 'default', // Explicitly set track type for TrackPlayer
     ...(song.playbackHeaders && Object.keys(song.playbackHeaders).length > 0
       ? { headers: song.playbackHeaders }
       : {}),
   };
-  
-  logger.info('[songToTrack] Created track', {
-    id: track.id,
-    url: track.url,
-    hasHeaders: !!track.headers,
-    headers: track.headers,
-    duration: track.duration,
-    source: song.source,
-  });
-  
-  return track;
 }
 
 type NativeTrackEntry = {
@@ -795,14 +769,19 @@ type NativeTrackEntry = {
 };
 
 async function resolveNativeTrackEntry(song: Song, appIndex: number): Promise<NativeTrackEntry | null> {
-  const nativeSong = isYouTubeSource(song)
-    ? await resolveYouTubeTrackForNativePlayback(stripTransientYouTubeAudioUrl(song))
+  let nativeSong = isYouTubeSource(song) && !hasFreshYouTubeNativeAudio(song)
+    ? await resolveYouTubeTrackForNativePlayback(song)
     : song;
   if (!nativeSong) return null;
 
-  const audioUrl = isYouTubeSource(nativeSong)
-    ? resolveAudioUrl(nativeSong as SongPlaybackSource)
-    : await resolvePlaybackUrl(nativeSong);
+  let audioUrl = await resolvePlaybackUrl(nativeSong);
+  if (!audioUrl && !isYouTubeSource(song) && song.source !== "local") {
+    const matchedSong = await resolveJioSaavnAudioForSong(song);
+    if (matchedSong) {
+      nativeSong = matchedSong;
+      audioUrl = await resolvePlaybackUrl(nativeSong);
+    }
+  }
   if (!audioUrl) return null;
   const resolvedSong = withResolvedPlaybackUrl(nativeSong, audioUrl);
 
@@ -818,39 +797,11 @@ async function resolveNativeTrackEntries(songs: Song[], startIndex = 0): Promise
     songs.map((song, index) => resolveNativeTrackEntry(song, startIndex + index))
   );
 
-  const entries: NativeTrackEntry[] = [];
-  settled.forEach((result, index) => {
-    const song = songs[index];
-    const appIndex = startIndex + index;
-
-    if (result.status === "rejected") {
-      if (isYouTubeSource(song)) {
-        logger.warn("[NativeResolve] Skipping unresolved YouTube track", {
-          songId: song?.id,
-          title: song?.title,
-          appIndex,
-          error: result.reason,
-        });
-      }
-      return;
-    }
-
-    const entry = result.value;
-    if (entry?.song?.id && readNonEmptyString(entry?.track?.url)) {
-      entries.push(entry);
-      return;
-    }
-
-    if (isYouTubeSource(song)) {
-      logger.warn("[NativeResolve] Skipping YouTube track without playable stream", {
-        songId: song?.id,
-        title: song?.title,
-        appIndex,
-      });
-    }
-  });
-
-  return entries;
+  return mapFilter(
+    settled,
+    (result) => (result.status === "fulfilled" ? result.value : null),
+    (entry): entry is NativeTrackEntry => Boolean(entry?.song?.id && readNonEmptyString(entry?.track?.url))
+  );
 }
 
 type NowPlayingMetadataSource = {
@@ -949,6 +900,7 @@ async function getAdaptiveStreamingQuality(): Promise<"low" | "medium" | "high">
     }
     const netState = await Network.getNetworkStateAsync();
     if (netState.type === Network.NetworkStateType.CELLULAR) {
+      logger.debug("[Player] Cellular connection detected, automatically using medium quality to prevent buffering");
       return "medium";
     }
   } catch (e) {
@@ -958,28 +910,35 @@ async function getAdaptiveStreamingQuality(): Promise<"low" | "medium" | "high">
 }
 
 async function getVideoBackgroundQuality() {
+  try {
+    const settings = await Storage.getSettings();
+    return settings.videoBackgroundQuality;
+  } catch (e) {
+    logger.error("[Player] Failed to determine video background quality", e);
+  }
   return "auto";
 }
 
-/** Resolve the best playback URL for a song — local file first, then stream. */
+/** Resolve the best playback URL for a song ΓÇö local file first, then stream. */
 async function resolvePlaybackUrl(song: Song): Promise<string | null> {
   try {
     const isYt = isYouTubeSource(song);
     if (isYt) {
-      const resolved = await resolveYouTubeTrackForNativePlayback(stripTransientYouTubeAudioUrl(song));
-      return resolved?.audioUrl || null;
+      return hasFreshYouTubeNativeAudio(song)
+        ? resolveAudioUrl(song as SongPlaybackSource) || null
+        : null;
     }
 
-    // Static import path — dynamic import can fail silently in some contexts
+    // Static import path ΓÇö dynamic import can fail silently in some contexts
     const { getLocalPlaybackUrl } = await import("@/lib/downloads/downloadManager");
     const local = await getLocalPlaybackUrl(song.id);
     if (local) {
-      // Ensure the URI has the file:// scheme — RNTP requires it on both platforms
+      // Ensure the URI has the file:// scheme ΓÇö RNTP requires it on both platforms
       if (local.startsWith("file://") || local.startsWith("http")) return local;
       return `file://${local}`;
     }
   } catch {
-    // downloads module not available — fall through to stream
+    // downloads module not available ΓÇö fall through to stream
   }
 
   if (song.downloadUrl) {
@@ -1096,24 +1055,20 @@ function isSameQueueById(a: Song[], b: Song[]): boolean {
 
 const OPTIMISTIC_NATIVE_TRACK_SYNC_GRACE_MS = 1800;
 const NATIVE_START_STALL_GRACE_MS = 12000;
-const NATIVE_YOUTUBE_START_STALL_GRACE_MS = 28000;
 const NATIVE_START_STALL_POSITION_SECONDS = 0.75;
-
-function getNextQueueIndex(
-  currentIndex: number,
-  queueLength: number,
-  repeatMode: "off" | "all" | "one"
-): number | null {
-  if (queueLength <= 0) return null;
-  if (repeatMode === "one") {
-    return Math.max(0, Math.min(currentIndex, queueLength - 1));
-  }
-
-  const nextIndex = currentIndex + 1;
-  if (nextIndex < queueLength) return nextIndex;
-  return repeatMode === "all" ? 0 : null;
-}
-
+const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
+const YOUTUBE_PLAYER_MIN_WIDTH = 360;
+const YOUTUBE_PLAYER_MIN_HEIGHT = Math.ceil(YOUTUBE_PLAYER_MIN_WIDTH * 9 / 16);
+const UNKNOWN_YOUTUBE_PLAYER_ERROR = "unknown_player_error";
+const SKIPPABLE_YOUTUBE_ERRORS = new Set([
+  "invalid_parameter",
+  "video_not_found",
+  "embed_not_allowed",
+  2,
+  100,
+  101,
+  150,
+]);
 
 export function PlayerProvider(props: { children: ReactNode }) {
   return usePlayerProviderView(props);
@@ -1126,6 +1081,37 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const [isPlayerReady, setIsPlayerReady] = useState(false);
   const canUseNativePlayback = Boolean(TrackPlayer && setupPlayer);
   
+  const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null);
+  const [youtubePlaying, setYoutubePlaying] = useState(false);
+  const [youtubeDuration, setYoutubeDuration] = useState(0);
+  const [youtubePosition, setYoutubePosition] = useState(0);
+  const [isYoutubeLoading, setIsYoutubeLoading] = useState(false);
+  const [youtubePlayerKey, setYoutubePlayerKey] = useState(0);
+  const [youtubeUseLocalHTML, setYoutubeUseLocalHTML] = useState(true);
+  const [youtubePlayerFrame, setYoutubePlayerFrameState] = useState<YoutubePlayerFrame | null>(null);
+  const [youtubeOverlayRootFrame, setYoutubeOverlayRootFrame] = useState<YoutubePlayerFrame | null>(null);
+  const youtubeOverlayRootRef = useRef<View | null>(null);
+  const youtubePlayerRef = useRef<any>(null);
+  const youtubeShouldAutoPlayRef = useRef(false);
+  const youtubeHostedRetryRef = useRef(false);
+  const youtubeVisualRetrySongIdRef = useRef<string | null>(null);
+  // Track pending YouTube auto-play timers so they can be cleared when the
+  // video changes or the provider unmounts, preventing stale setState calls.
+  const youtubeAutoPlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearYoutubeAutoPlayTimer = useCallback(() => {
+    if (youtubeAutoPlayTimerRef.current != null) {
+      clearTimeout(youtubeAutoPlayTimerRef.current);
+      youtubeAutoPlayTimerRef.current = null;
+    }
+  }, []);
+
+  // Clear pending YouTube auto-play timers on unmount to prevent
+  // stale setState calls after the provider is destroyed.
+  useEffect(() => {
+    return () => clearYoutubeAutoPlayTimer();
+  }, [clearYoutubeAutoPlayTimer]);
+
   // Get auth context properly
   const { user: authUser } = useAuth();
 
@@ -1152,10 +1138,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     seconds: number;
     startedAt: number;
   } | null>(null);
-
-  if (seekOverride && seekOverride.songId !== (currentSong?.id ? String(currentSong.id) : null)) {
-    setSeekOverride(null);
-  }
   const [previewIsPlaying, setPreviewIsPlaying] = useState(false);
   const previewIsPlayingRef = useRef(false); // ref so togglePlay never has stale closure
   const previewIsEndedRef = useRef(false);
@@ -1167,13 +1149,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     position: 0,
     duration: 0,
   });
-
-  useEffect(() => {
-    setPreviewProgress(0);
-    const durationSeconds = toDurationSeconds(currentSong?.duration);
-    setRuntimeProgressSnapshot({ position: 0, duration: durationSeconds });
-  }, [currentSong?.id, currentSong?.duration]);
-
   const [runtimePlaybackStateSnapshot, setRuntimePlaybackStateSnapshot] = useState<any>(undefined);
   const PRELOAD_QUEUE_SIZE = 20;
 
@@ -1204,15 +1179,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     playbackSwitchChainRef.current = Promise.resolve();
   }
   const nativeQueueAppIndicesRef = useRef<number[]>([]);
-  const autoplayPrefetchInFlightRef = useRef<string | null>(null);
-  const lastAutoplayPrefetchKeyRef = useRef<string | null>(null);
-  const nativePlaybackRecoveryRef = useRef<{
-    songId: string;
-    attempts: number;
-    lastAt: number;
-  } | null>(null);
-  const loadAndPlaySongRef = useRef<((song: Song, newQueue?: Song[], newIndex?: number) => Promise<void>) | null>(null);
-  const retryYouTubePlaybackAfterFailureRef = useRef<((event: any) => Promise<boolean>) | null>(null);
   const pendingNativeTrackRef = useRef<{
     id: string;
     index: number;
@@ -1224,6 +1190,11 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const resetProgressForTrackChange = useCallback((songId: string | null | undefined) => {
     if (!songId) return;
     trackProgressSongIdRef.current = String(songId);
+    setSeekOverride(null);
+    setPreviewProgress(0);
+    setYoutubePosition(0);
+    const durationSeconds = toDurationSeconds(currentSongRef.current?.duration);
+    setRuntimeProgressSnapshot({ position: 0, duration: durationSeconds });
   }, []);
 
   useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
@@ -1292,6 +1263,10 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   }, []);
 
   const shouldAcceptNativeTrackSync = useCallback((trackId: string | null, index: number) => {
+    if (isYouTubeSong(currentSongRef.current)) {
+      return false;
+    }
+
     const pending = pendingNativeTrackRef.current;
     if (!pending) {
       return true;
@@ -1312,6 +1287,16 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     completePlaybackTransaction(pending.transactionId);
     pendingNativeTrackRef.current = null;
     return true;
+  }, []);
+
+  const pauseNativeForYouTubeHandoff = useCallback(() => {
+    pendingNativeTrackRef.current = null;
+    youtubeShouldAutoPlayRef.current = true;
+    setRuntimePlaybackStateSnapshot(State.Paused ?? "paused");
+    if (TrackPlayer && setupPlayer) {
+      void TrackPlayer.pause().catch(() => undefined);
+    }
+    ExpoAvPlayer.pause();
   }, []);
 
   const applyNativeTrackIndex = useCallback((nextIndex: number, trackId: string | null = null) => {
@@ -1342,7 +1327,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     
     // Update iOS lock screen metadata when track changes automatically
     publishNativeNowPlaying(nextSong, nextIndex).catch(() => {
-      // Ignore errors — autoUpdateMetadata will provide fallback
+      // Ignore errors ΓÇö autoUpdateMetadata will provide fallback
     });
     
     return true;
@@ -1401,21 +1386,19 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   }, []);
 
   const applySavedPlayerSnapshot = useCallback((saved: NonNullable<Awaited<ReturnType<typeof Storage.loadPlayerState>>>) => {
-    const savedCurrentSong = saved.currentSong ? sanitizeSongForStorage(saved.currentSong) : saved.currentSong;
-    const savedQueue = sanitizeQueueForStorage(saved.queue || []);
-    currentSongRef.current = savedCurrentSong;
-    setCurrentSong(savedCurrentSong);
-    setQueue(savedQueue);
-    setSourceQueue(savedQueue);
-    queueRef.current = savedQueue;
-    originalQueueRef.current = savedQueue;
+    currentSongRef.current = saved.currentSong;
+    setCurrentSong(saved.currentSong);
+    setQueue(saved.queue);
+    setSourceQueue(saved.queue);
+    queueRef.current = saved.queue;
+    originalQueueRef.current = saved.queue;
     setQueueIndex(saved.queueIndex);
     queueIndexRef.current = saved.queueIndex;
     restoredPositionSecondsRef.current = Math.max(0, saved.positionSeconds ?? 0);
     updatePlaybackEngineSnapshot({
-      currentSong: savedCurrentSong,
-      queue: savedQueue,
-      sourceQueue: savedQueue,
+      currentSong: saved.currentSong,
+      queue: saved.queue,
+      sourceQueue: saved.queue,
       queueIndex: saved.queueIndex,
     });
   }, []);
@@ -1484,7 +1467,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     setLikedSongs([]);
   }, []);
 
-  // ── Restore player state on mount (show mini player with last song) ────────
+  // ΓöÇΓöÇ Restore player state on mount (show mini player with last song) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
   useEffect(() => {
     let mounted = true;
 
@@ -1673,12 +1656,22 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const positionMillis = effectivePositionSeconds * 1000;
   const duration = effectiveTrackDurationSeconds * 1000;
   const isPreviewSession = (canUseLightweightAudioFallback && !canUseNativePlayback && Boolean(currentSong));
-  const resolvedProgress = isPreviewSession ? previewProgress : progress;
+  const isYoutubeSession = isYouTubeSong(currentSong);
+  const youtubeDurationMillis = (youtubeDuration > 0 ? youtubeDuration : currentSongDurationSeconds) * 1000;
+  const resolvedProgress = isYoutubeSession
+    ? youtubeDuration > 0
+      ? Math.max(0, Math.min(1, youtubePosition / youtubeDuration))
+      : 0
+    : isPreviewSession ? previewProgress : progress;
   const resolvedDuration = isPreviewSession
     ? (previewDuration > 0 ? previewDuration : currentSongDurationSeconds * 1000)
+    : isYoutubeSession
+      ? youtubeDurationMillis
     : duration;
   const resolvedPositionMillis = isPreviewSession
     ? Math.round((previewDuration > 0 ? previewDuration : currentSongDurationSeconds * 1000) * previewProgress)
+    : isYoutubeSession
+      ? youtubePosition * 1000
     : positionMillis;
   const resolvedIsShuffled = isPreviewSession ? previewIsShuffled : isShuffled;
   const resolvedRepeatMode = isPreviewSession ? previewRepeatMode : repeatMode;
@@ -1686,7 +1679,9 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     runtimePlaybackStateSnapshot === State.Playing ||
     runtimePlaybackStateSnapshot === State.Buffering ||
     runtimePlaybackStateSnapshot === State.Loading;
-  const actualResolvedIsPlaying = isPreviewSession
+  const actualResolvedIsPlaying = isYoutubeSession
+    ? youtubePlaying
+    : isPreviewSession
     ? previewIsPlaying
     : Platform.OS === "android" && runtimePlaybackStateSnapshot !== undefined
       ? runtimeIsPlaying
@@ -1697,7 +1692,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     playbackStateValue === State.Loading ||
     runtimePlaybackStateSnapshot === State.Buffering ||
     runtimePlaybackStateSnapshot === State.Loading;
-  const resolvedIsBuffering = !isPreviewSession && nativeIsBuffering;
+  const resolvedIsBuffering = isYoutubeSession ? isYoutubeLoading : !isPreviewSession && nativeIsBuffering;
 
   useEffect(() => {
     updatePlaybackEngineSnapshot({
@@ -1746,45 +1741,41 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (playbackIntent && (playbackLoading || resolvedIsBuffering)) {
-      return;
-    }
-
     const timeout = setTimeout(() => {
       setPlaybackIntent(null);
-    }, playbackIntent ? 8000 : 1800);
+    }, 1800);
 
     return () => {
       clearTimeout(timeout);
     };
-  }, [playbackIntent, playbackLoading, resolvedIsBuffering]);
+  }, [playbackIntent]);
 
   useEffect(() => {
     latestPositionSecondsRef.current = Math.max(0, effectivePositionSeconds);
   }, [effectivePositionSeconds]);
 
+  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- resetting progress state updates multiple properties at once, which is batched.
   useEffect(() => {
     const songId = currentSong?.id ? String(currentSong.id) : null;
     if (!songId || trackProgressSongIdRef.current === songId) return;
+    // react-doctor-disable-next-line react-doctor/no-derived-state -- transient seekOverride cannot be derived and resets cleanly during track change.
     resetProgressForTrackChange(songId);
   }, [currentSong?.id, resetProgressForTrackChange]);
 
   const persistCurrentPlayerState = useCallback(() => {
     const song = currentSongRef.current;
     if (!song) return;
-    const storedSong = sanitizeSongForStorage(song);
-    const storedQueue = sanitizeQueueForStorage(queueRef.current.length > 0 ? queueRef.current : [song]);
 
     void Storage.savePlayerState({
-      currentSong: storedSong,
-      queue: storedQueue,
+      currentSong: song,
+      queue: queueRef.current.length > 0 ? queueRef.current : [song],
       queueIndex: queueIndexRef.current,
       positionSeconds: latestPositionSecondsRef.current,
       updatedAt: Date.now(),
     });
   }, []);
 
-  // ── Persist restored mini-player state without writing on every progress tick
+  // ΓöÇΓöÇ Persist restored mini-player state without writing on every progress tick
   useEffect(() => {
     if (!currentSong) return;
     persistCurrentPlayerState();
@@ -1798,7 +1789,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       if (state !== "active") {
         persistCurrentPlayerState();
       } else {
-        // App became active — refresh iOS lock screen metadata
+        // App became active ΓÇö refresh iOS lock screen metadata
         if (Platform.OS === "ios" && TrackPlayer && currentSongRef.current) {
           try {
             const trackIndex = typeof TrackPlayer.getActiveTrackIndex === "function"
@@ -1833,87 +1824,17 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const scheduleNextTrackAfterFailure = useCallback((
-    failedIndex: number,
-    reason: string,
-    notice = "Skipping unavailable song...",
-    delayMs = 250
-  ): boolean => {
-    const currentQueue = queueRef.current;
-    if (currentQueue.length === 0 || !loadAndPlaySongRef.current) return false;
-
-    const safeFailedIndex = Math.max(0, Math.min(failedIndex, currentQueue.length - 1));
-    const failedSong = currentQueue[safeFailedIndex];
-    const nextIndex = getNextQueueIndex(
-      safeFailedIndex,
-      currentQueue.length,
-      repeatModeRef.current === "all" ? "all" : "off"
-    );
-    const nextTrack = nextIndex !== null ? currentQueue[nextIndex] : null;
-
-    if (nextIndex === null || !nextTrack) return false;
-    if (failedSong?.id && String(nextTrack.id) === String(failedSong.id) && currentQueue.length > 1) {
-      return false;
-    }
-
-    logger.warn("[Player] Skipping failed track and advancing queue", {
-      reason,
-      failedIndex: safeFailedIndex,
-      failedSongId: failedSong?.id,
-      failedTitle: failedSong?.title,
-      nextIndex,
-      nextSongId: nextTrack.id,
-      nextTitle: nextTrack.title,
-    });
-
-    if (notice) showPlaybackNotice(notice);
-    setPlaybackIntent(true);
-    setPlaybackLoading(true);
-    setQueueIndex(nextIndex);
-    queueIndexRef.current = nextIndex;
-    currentSongRef.current = nextTrack;
-    setCurrentSong(nextTrack);
-    updatePlaybackEngineSnapshot({
-      currentSong: nextTrack,
-      queue: currentQueue,
-      queueIndex: nextIndex,
-      desiredPlayState: true,
-      isPlaying: true,
-      isLoading: true,
-      isBuffering: false,
-    });
-
-    setTimeout(() => {
-      const liveQueue = queueRef.current;
-      const liveSong = liveQueue[nextIndex];
-      if (liveSong?.id === nextTrack.id) {
-        void loadAndPlaySongRef.current?.(liveSong, liveQueue, nextIndex);
-        return;
-      }
-
-      const refreshedIndex = liveQueue.findIndex((item) => item.id === nextTrack.id);
-      if (refreshedIndex >= 0) {
-        void loadAndPlaySongRef.current?.(liveQueue[refreshedIndex], liveQueue, refreshedIndex);
-      }
-    }, delayMs);
-
-    return true;
-  }, [showPlaybackNotice]);
-
   useEffect(() => {
-    const shouldWatchNativeStart =
-      playbackIntent === true ||
-      actualResolvedIsPlaying ||
-      resolvedIsBuffering;
-
     if (
       Platform.OS === "web" ||
       !TrackPlayer ||
       !setupPlayer ||
       !currentSong?.id ||
+      isYoutubeSession ||
       isPreviewSession ||
       playbackLoading ||
-      !shouldWatchNativeStart
+      resolvedIsBuffering ||
+      !actualResolvedIsPlaying
     ) {
       nativeStartWatchdogRef.current = null;
       return;
@@ -1942,12 +1863,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       return;
     }
 
-    const isCurrentYouTubeTrack = isYouTubeSource(currentSong);
-    const stallGraceMs = isCurrentYouTubeTrack
-      ? NATIVE_YOUTUBE_START_STALL_GRACE_MS
-      : NATIVE_START_STALL_GRACE_MS;
-
-    if (now - existing.startedAt < stallGraceMs || now - existing.lastAdvancedAt < stallGraceMs) {
+    if (now - existing.startedAt < NATIVE_START_STALL_GRACE_MS || now - existing.lastAdvancedAt < NATIVE_START_STALL_GRACE_MS) {
       return;
     }
 
@@ -1960,24 +1876,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
     let cancelled = false;
     void (async () => {
-      if (isCurrentYouTubeTrack) {
-        const recovered = await retryYouTubePlaybackAfterFailureRef.current?.({
-          code: "start_stall",
-          message: "Playback started but audio position did not advance",
-        });
-        if (cancelled || recovered) return;
-
-        const skipped = scheduleNextTrackAfterFailure(
-          queueIndexRef.current,
-          "youtube_start_stall",
-          "This song is slow to start. Trying next...",
-          0
-        );
-        if (skipped) {
-          return;
-        }
-      }
-
       try {
         await TrackPlayer.pause();
       } catch {
@@ -2002,18 +1900,158 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     };
   }, [
     actualResolvedIsPlaying,
-    currentSong,
     currentSong?.id,
     effectivePositionSeconds,
     isPreviewSession,
+    isYoutubeSession,
     playbackLoading,
-    playbackIntent,
     resolvedIsBuffering,
-    scheduleNextTrackAfterFailure,
     showPlaybackNotice,
   ]);
 
+  const setYoutubePlayerFrame = useCallback((frame: YoutubePlayerFrame | null) => {
+    setYoutubePlayerFrameState((previous) => {
+      if (!frame) {
+        return previous ? null : previous;
+      }
 
+      const next = {
+        x: Math.round(frame.x),
+        y: Math.round(frame.y),
+        width: Math.round(frame.width),
+        height: Math.round(frame.height),
+      };
+
+      if (next.width < 120 || next.height < 80) {
+        return previous;
+      }
+
+      if (
+        previous &&
+        Math.abs(previous.x - next.x) <= 1 &&
+        Math.abs(previous.y - next.y) <= 1 &&
+        Math.abs(previous.width - next.width) <= 1 &&
+        Math.abs(previous.height - next.height) <= 1
+      ) {
+        return previous;
+      }
+
+      return next;
+    });
+  }, []);
+
+  const measureYoutubeOverlayRoot = useCallback(() => {
+    requestAnimationFrame(() => {
+      youtubeOverlayRootRef.current?.measureInWindow((x, y, width, height) => {
+        if (width <= 0 || height <= 0) return;
+
+        const next = {
+          x: Math.round(x),
+          y: Math.round(y),
+          width: Math.round(width),
+          height: Math.round(height),
+        };
+
+        setYoutubeOverlayRootFrame((previous) => {
+          if (
+            previous &&
+            Math.abs(previous.x - next.x) <= 1 &&
+            Math.abs(previous.y - next.y) <= 1 &&
+            Math.abs(previous.width - next.width) <= 1 &&
+            Math.abs(previous.height - next.height) <= 1
+          ) {
+            return previous;
+          }
+
+          return next;
+        });
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    // react-doctor-disable-next-line react-doctor/no-derived-state -- overlay frame comes from native measurement, not render-derived props.
+    measureYoutubeOverlayRoot();
+  }, [measureYoutubeOverlayRoot, pathname, screenHeight, screenWidth]);
+
+  const playYouTubeSong = useCallback(async (song: Song, newQueue?: Song[], newIndex?: number) => {
+    const playableQueue = (newQueue || [song])
+      .filter((item): item is Song => Boolean(item?.id))
+      .map(stripTransientYouTubeAudioUrl);
+    if (playableQueue.length === 0) {
+      showPlaybackNotice("Could not play this YouTube Music song.");
+      return;
+    }
+
+    const requestedIndex =
+      typeof newIndex === "number" && newIndex >= 0 && newIndex < playableQueue.length
+        ? newIndex
+        : playableQueue.findIndex((item) => item.id === song.id);
+    const targetIndex = requestedIndex >= 0 ? requestedIndex : 0;
+    const targetSong = playableQueue[targetIndex] ?? playableQueue[0];
+    const videoId = getYouTubeVideoIdFromSong(targetSong);
+
+    if (!videoId) {
+      logger.warn("[YouTube] Result is missing a playable video ID", { songId: targetSong.id });
+      showPlaybackNotice("Could not play this YouTube Music song.");
+      return;
+    }
+
+    youtubeShouldAutoPlayRef.current = true;
+    youtubeHostedRetryRef.current = false;
+    youtubeVisualRetrySongIdRef.current = null;
+    pendingNativeTrackRef.current = null;
+    currentSongRef.current = targetSong;
+    queueRef.current = playableQueue;
+    originalQueueRef.current = playableQueue;
+    queueIndexRef.current = targetIndex;
+
+    try {
+      if (TrackPlayer && setupPlayer) {
+        await TrackPlayer.pause().catch(() => undefined);
+      }
+      ExpoAvPlayer.pause();
+    } catch {
+      // YouTube playback can continue even if the native handoff cleanup fails.
+    }
+
+    setPlaybackIntent(true);
+    setPlaybackLoading(true);
+    setQueue(playableQueue);
+    setSourceQueue(playableQueue);
+    clearUserQueuedSongIds();
+    setQueueIndex(targetIndex);
+    setCurrentSong(targetSong);
+    setYoutubeDuration(toDurationSeconds(targetSong.duration));
+    setYoutubePosition(0);
+    setYoutubeVideoId(videoId);
+    setYoutubeUseLocalHTML(true);
+    setYoutubePlayerKey((key) => key + 1);
+    setYoutubePlaying(true);
+    setIsYoutubeLoading(true);
+    previewIsPlayingRef.current = true;
+    setPreviewIsPlaying(true);
+
+    updatePlaybackEngineSnapshot({
+      currentSong: targetSong,
+      queue: playableQueue,
+      sourceQueue: playableQueue,
+      userQueuedSongIds: [],
+      queueIndex: targetIndex,
+      desiredPlayState: true,
+      isPlaying: true,
+      isLoading: true,
+      isBuffering: true,
+    });
+
+    Storage.addRecentlyPlayed({
+      id: targetSong.id,
+      name: targetSong.title,
+      imageUrl: targetSong.coverUrl,
+      type: "song",
+      data: targetSong,
+    });
+  }, [clearUserQueuedSongIds, showPlaybackNotice]);
 
   const clearSleepTimer = useCallback(() => {
     if (sleepTimerTimeoutRef.current) {
@@ -2036,6 +2074,15 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     sleepTimerRef.current = null;
     setSleepTimerState(null);
     setRuntimePlaybackStateSnapshot(State.Paused ?? "paused");
+
+    if (isYouTubeSong(currentSongRef.current)) {
+      youtubeShouldAutoPlayRef.current = false;
+      setYoutubePlaying(false);
+      previewIsPlayingRef.current = false;
+      setPreviewIsPlaying(false);
+      updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isBuffering: false });
+      return;
+    }
 
     if (!TrackPlayer || !setupPlayer) {
       if (canUseLightweightAudioFallback) {
@@ -2106,16 +2153,221 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     const nextTrack = cq[ni];
     if (!nextTrack) return;
 
+    if (isYouTubeSong(nextTrack)) {
+      void playYouTubeSong(nextTrack, cq, ni);
+      return;
+    }
+
     applyPreviewTrackAdvance(ni, nextTrack);
 
+    youtubeShouldAutoPlayRef.current = false;
+    setYoutubePlaying(false);
+    setYoutubeVideoId(null);
     void resolvePlaybackUrl(nextTrack).then((url) => {
       if (url) {
         void ExpoAvPlayer.loadAndPlay(url);
       }
     });
-  }, [applyPreviewTrackAdvance, clearSleepTimer, stopPreviewPlayback]);
+  }, [applyPreviewTrackAdvance, clearSleepTimer, playYouTubeSong, stopPreviewPlayback]);
 
+  const onYoutubeReady = useCallback(() => {
+    logger.debug("[YouTube] onReady callback fired", {
+      shouldAutoPlay: youtubeShouldAutoPlayRef.current,
+      videoId: youtubeVideoId,
+    });
 
+    if (!youtubeShouldAutoPlayRef.current) {
+      logger.warn("[YouTube] onReady but shouldAutoPlay is false, skipping");
+      return;
+    }
+
+    // Set requested quality for YouTube video playback.
+    if (youtubePlayerRef.current) {
+      void getVideoBackgroundQuality().then((quality) => {
+        try {
+          const ytQuality = Storage.getYouTubePlaybackQuality(quality);
+          youtubePlayerRef.current.setPlaybackQuality?.(ytQuality);
+          logger.debug("[YouTube] Set playback quality to", { ytQuality });
+        } catch (error) {
+          logger.warn("[YouTube] Failed to set playback quality:", error);
+        }
+      });
+    }
+
+    logger.debug("[YouTube] Preparing to start playback in 50ms");
+    setYoutubePlaying(false);
+    clearYoutubeAutoPlayTimer();
+    youtubeAutoPlayTimerRef.current = setTimeout(() => {
+      youtubeAutoPlayTimerRef.current = null;
+      if (!youtubeShouldAutoPlayRef.current) {
+        logger.warn("[YouTube] setTimeout check: shouldAutoPlay is false, aborting");
+        return;
+      }
+      logger.debug("[YouTube] Starting playback now");
+      setYoutubePlaying(true);
+      setPlaybackIntent(true);
+      setIsYoutubeLoading(true);
+      setPlaybackLoading(true);
+    }, 50);
+  }, [clearYoutubeAutoPlayTimer, youtubeVideoId]);
+
+  const onYoutubeStateChange = useCallback((state: string) => {
+    logger.debug("[YouTube] State changed", { 
+      state, 
+      shouldAutoPlay: youtubeShouldAutoPlayRef.current,
+      videoId: youtubeVideoId,
+    });
+
+    if (state === "playing") {
+      logger.debug("[YouTube] Now playing");
+      youtubeShouldAutoPlayRef.current = true;
+      setPlaybackIntent(null);
+      setPreviewIsPlaying(true);
+      previewIsPlayingRef.current = true;
+      setIsYoutubeLoading(false);
+      setPlaybackLoading(false);
+      updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: true, isLoading: false, isBuffering: false });
+    } else if (state === "video cued" || state === "unstarted") {
+      logger.debug("[YouTube] Video cued/unstarted", { shouldAutoPlay: youtubeShouldAutoPlayRef.current });
+      if (youtubeShouldAutoPlayRef.current) {
+        setIsYoutubeLoading(true);
+        setPlaybackLoading(true);
+        updatePlaybackEngineSnapshot({ desiredPlayState: true, isLoading: true, isBuffering: true });
+      }
+    } else if (state === "paused") {
+      logger.debug("[YouTube] Paused", { shouldAutoPlay: youtubeShouldAutoPlayRef.current });
+      if (youtubeShouldAutoPlayRef.current) {
+        setIsYoutubeLoading(true);
+        setPlaybackLoading(true);
+        updatePlaybackEngineSnapshot({ desiredPlayState: true, isLoading: true, isBuffering: true });
+        return;
+      }
+      setPlaybackIntent(null);
+      setPreviewIsPlaying(false);
+      previewIsPlayingRef.current = false;
+      setIsYoutubeLoading(false);
+      setPlaybackLoading(false);
+      updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
+    } else if (state === "buffering") {
+      logger.debug("[YouTube] Buffering");
+      setIsYoutubeLoading(true);
+      setPlaybackLoading(true);
+      updatePlaybackEngineSnapshot({ isLoading: true, isBuffering: true });
+    } else if (state === "ended") {
+      logger.debug("[YouTube] Ended");
+      youtubeShouldAutoPlayRef.current = false;
+      setYoutubePlaying(false);
+      previewIsPlayingRef.current = false;
+      setPreviewIsPlaying(false);
+      advancePreviewPlayback();
+    }
+  }, [advancePreviewPlayback, youtubeVideoId]);
+
+  const onYoutubeError = useCallback((error: any) => {
+    setPlaybackIntent(null);
+    setPlaybackLoading(false);
+    setIsYoutubeLoading(false);
+    const errCode = (typeof error === "object" && error !== null ? error?.error : error) ?? UNKNOWN_YOUTUBE_PLAYER_ERROR;
+    logger.error("[YoutubePlayer] Error occurred", { 
+      raw: error, 
+      code: errCode,
+      videoId: youtubeVideoId,
+      songId: currentSongRef.current?.id,
+    });
+
+    if (errCode === UNKNOWN_YOUTUBE_PLAYER_ERROR && youtubeUseLocalHTML && !youtubeHostedRetryRef.current) {
+      youtubeHostedRetryRef.current = true;
+      setIsYoutubeLoading(true);
+      setPlaybackLoading(true);
+      setYoutubePlaying(false);
+      setYoutubeUseLocalHTML(false);
+      setYoutubePlayerKey((key) => key + 1);
+      clearYoutubeAutoPlayTimer();
+      youtubeAutoPlayTimerRef.current = setTimeout(() => {
+        youtubeAutoPlayTimerRef.current = null;
+        if (!youtubeShouldAutoPlayRef.current) return;
+        setYoutubePlaying(true);
+      }, 100);
+      return;
+    }
+
+    if (SKIPPABLE_YOUTUBE_ERRORS.has(errCode)) {
+      const activeSong = currentSongRef.current;
+      const activeSongId = activeSong?.id || null;
+      if (activeSong && isYouTubeSong(activeSong) && activeSongId && youtubeVisualRetrySongIdRef.current !== activeSongId) {
+        youtubeVisualRetrySongIdRef.current = activeSongId;
+        setIsYoutubeLoading(true);
+        setPlaybackLoading(true);
+        updatePlaybackEngineSnapshot({ desiredPlayState: true, isLoading: true, isBuffering: true });
+
+        void getYouTubeMusicVisualVideoId(activeSong)
+          .then((visualVideoId) => {
+            if (currentSongRef.current?.id !== activeSongId) return;
+
+            if (visualVideoId && visualVideoId !== youtubeVideoId) {
+              youtubeShouldAutoPlayRef.current = true;
+              youtubeHostedRetryRef.current = false;
+              setYoutubeUseLocalHTML(true);
+              setYoutubeVideoId(visualVideoId);
+              setYoutubePlayerKey((key) => key + 1);
+              setYoutubePlaying(true);
+              return;
+            }
+
+            youtubeShouldAutoPlayRef.current = false;
+            setYoutubePlaying(false);
+            showPlaybackNotice("YouTube video blocked or unavailable. Skipping...");
+            advancePreviewPlayback();
+          })
+          .catch(() => {
+            if (currentSongRef.current?.id !== activeSongId) return;
+            youtubeShouldAutoPlayRef.current = false;
+            setYoutubePlaying(false);
+            showPlaybackNotice("YouTube video blocked or unavailable. Skipping...");
+            advancePreviewPlayback();
+          });
+        return;
+      }
+
+      youtubeShouldAutoPlayRef.current = false;
+      setYoutubePlaying(false);
+      showPlaybackNotice("YouTube video blocked or unavailable. Skipping...");
+      advancePreviewPlayback();
+    } else {
+      youtubeShouldAutoPlayRef.current = false;
+      setYoutubePlaying(false);
+      previewIsPlayingRef.current = false;
+      setPreviewIsPlaying(false);
+      updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
+      showPlaybackNotice("Could not play this YouTube Music song.");
+    }
+  }, [advancePreviewPlayback, clearYoutubeAutoPlayTimer, showPlaybackNotice, youtubeUseLocalHTML, youtubeVideoId]);
+
+  useEffect(() => {
+    if (!youtubePlaying || !youtubeVideoId) {
+      return;
+    }
+
+    let intervalId = setInterval(async () => {
+      if (youtubePlayerRef.current) {
+        try {
+          const [time, dur] = await Promise.all([
+            youtubePlayerRef.current.getCurrentTime(),
+            youtubePlayerRef.current.getDuration(),
+          ]);
+          if (typeof time === "number" && typeof dur === "number") {
+            setYoutubePosition(time);
+            setYoutubeDuration(dur);
+            applyPreviewPlaybackStatus(youtubePlaying, time, dur);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }, Platform.OS === "android" ? 1500 : 1000);
+
+    return () => clearInterval(intervalId);
+  }, [youtubePlaying, youtubeVideoId, applyPreviewPlaybackStatus]);
 
   // Wire expo-audio status + error callbacks for runtimes using the lightweight fallback.
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- cleanup intentionally resets mutable playback refs without treating ref.current as a render dependency.
@@ -2149,7 +2401,9 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     return () => {
       mounted = false;
       ExpoAvPlayer.destroy();
-      clearPrefetchCache();
+      youtubeShouldAutoPlayRef.current = false;
+      setYoutubePlaying(false);
+      setYoutubeVideoId(null);
     };
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- cleanup deliberately writes the latest ref value when tearing down fallback playback.
   }, [applyPreviewPlaybackStatus, advancePreviewPlayback, canUseLightweightAudioFallback, showPlaybackNotice]);
@@ -2160,7 +2414,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     }
 
     let mounted = true;
-    // Only poll when app is in foreground — saves battery in background
+    // Only poll when app is in foreground ΓÇö saves battery in background
     let appState = "active";
     const appStateSub = AppState.addEventListener(
       "change",
@@ -2169,7 +2423,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         appState = next;
         // When app comes back to foreground, sync currentSong from TrackPlayer.
         // This handles the case where Android Auto changed the track while the
-        // app was backgrounded — without this the home screen mini-player stays blank.
+        // app was backgrounded ΓÇö without this the home screen mini-player stays blank.
         if (next === "active" && prev !== "active" && mounted) {
           try {
             const [activeTrack, nativeQueue, activeTrackIndex] = await Promise.all([
@@ -2244,52 +2498,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           }
 
           applyRuntimeProgressAndState(nextPosition, nextDuration, nextPlaybackState);
-
-          // 80% progress trigger: ask the backend for the next autoplay batch
-          // and keep returned stream URLs only in the transient playback queue.
-          if (shouldPrefetch(nextPosition, nextDuration)) {
-            const activeSong = currentQueue[nextQueueIndex];
-            const activePrefetchId = extractYouTubeVideoId(activeSong) || readNonEmptyString(activeSong?.id);
-            const prefetchKey = activePrefetchId ? `${activePrefetchId}:${Math.round(nextDuration || 0)}` : "";
-
-            if (
-              prefetchKey &&
-              autoplayPrefetchInFlightRef.current !== prefetchKey &&
-              lastAutoplayPrefetchKeyRef.current !== prefetchKey
-            ) {
-              autoplayPrefetchInFlightRef.current = prefetchKey;
-              void prefetchNextSongs(currentQueue, nextQueueIndex, 20).then((prefetchResult) => {
-                if (!mounted) return;
-
-                const normalizedRecommendations = mapFilter(
-                  prefetchResult.songs,
-                  (song) => normalizePlayableSong(song),
-                  (song): song is Song => Boolean(song)
-                );
-
-                const updatedQueue = uniqueSongsById([
-                  ...currentQueue.map(sanitizeSongForStorage),
-                  ...normalizedRecommendations,
-                ]);
-
-                if (updatedQueue.length !== currentQueue.length) {
-                  queueRef.current = updatedQueue;
-                  originalQueueRef.current = updatedQueue;
-                  setQueue(updatedQueue);
-                  setSourceQueue(updatedQueue);
-                  updatePlaybackEngineSnapshot({ queue: updatedQueue, sourceQueue: updatedQueue });
-                }
-
-                lastAutoplayPrefetchKeyRef.current = prefetchKey;
-              }).catch((err) => {
-                logger.warn("[Prefetch] Background autoplay prefetch failed", err);
-              }).finally(() => {
-                if (autoplayPrefetchInFlightRef.current === prefetchKey) {
-                  autoplayPrefetchInFlightRef.current = null;
-                }
-              });
-            }
-          }
 
           if (nextQueueIndex >= 0 && nextQueueIndex < currentQueue.length) {
             applyNativeTrackIndex(nextQueueIndex, activeTrackId || null);
@@ -2422,70 +2630,24 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     }
   }, [applyNativeTrackIndex]);
 
-  const retryYouTubePlaybackAfterFailure = useCallback(async (event: any): Promise<boolean> => {
-    return false;
-  }, []);
-  retryYouTubePlaybackAfterFailureRef.current = retryYouTubePlaybackAfterFailure;
-
   const handleNativePlaybackError = useCallback((event: any) => {
-    logger.error("[Player] Native playback error", {
-      event,
-      code: event?.code,
-      message: event?.message,
-      type: event?.type,
-      currentSong: currentSongRef.current?.id,
-      currentSongTitle: currentSongRef.current?.title,
-      audioUrl: currentSongRef.current?.audioUrl,
-    });
-    void retryYouTubePlaybackAfterFailure(event).then((recovered) => {
-      if (recovered) return;
-
-      const failedSong = currentSongRef.current;
-      if (failedSong && isYouTubeSource(failedSong)) {
-        const skipped = scheduleNextTrackAfterFailure(
-          queueIndexRef.current,
-          "youtube_playback_error",
-          "Skipping unavailable song...",
-          0
-        );
-        if (skipped) {
-          return;
-        }
-      }
-
-      setRuntimePlaybackStateSnapshot(State.Paused ?? "paused");
-      setPlaybackIntent(null);
-      setPlaybackLoading(false);
-      updatePlaybackEngineSnapshot({
-        desiredPlayState: null,
-        isPlaying: false,
-        isLoading: false,
-        isBuffering: false,
-      });
-      showPlaybackNotice("Playback stopped. Please try this song again.");
-    });
-  }, [retryYouTubePlaybackAfterFailure, scheduleNextTrackAfterFailure, showPlaybackNotice]);
-
-  const handleNativeQueueEnded = useCallback(() => {
-    const currentQueue = queueRef.current;
-    const nextIndex = getNextQueueIndex(queueIndexRef.current, currentQueue.length, repeatModeRef.current);
-    const nextTrack = nextIndex !== null ? currentQueue[nextIndex] : null;
-    if (nextIndex !== null && nextTrack && loadAndPlaySongRef.current) {
-      setPlaybackIntent(true);
-      setPlaybackLoading(true);
-      updatePlaybackEngineSnapshot({
-        currentSong: nextTrack,
-        queue: currentQueue,
-        queueIndex: nextIndex,
-        desiredPlayState: true,
-        isPlaying: true,
-        isLoading: true,
-        isBuffering: false,
-      });
-      void loadAndPlaySongRef.current(nextTrack, currentQueue, nextIndex);
+    logger.warn("[Player] Native playback error", event);
+    const failedSong = currentSongRef.current;
+    if (failedSong && isYouTubeSource(failedSong)) {
+      const currentQueue = queueRef.current.length > 0 ? queueRef.current : [failedSong];
+      const targetIndex = Math.max(0, currentQueue.findIndex((item) => item.id === failedSong.id));
+      void playYouTubeSong(
+        stripTransientYouTubeAudioUrl(failedSong),
+        currentQueue,
+        targetIndex
+      );
       return;
     }
+    setRuntimePlaybackStateSnapshot(State.Paused ?? "paused");
+    showPlaybackNotice("Playback stopped. Please try this song again.");
+  }, [playYouTubeSong, showPlaybackNotice]);
 
+  const handleNativeQueueEnded = useCallback(() => {
     setRuntimePlaybackStateSnapshot(State.Paused ?? "paused");
     if (sleepTimerRef.current?.mode === "end-of-stack") {
       clearSleepTimer();
@@ -2497,16 +2659,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       event && typeof event === "object" && "state" in event
         ? event.state
         : event;
-    
-    logger.info("[Player] State changed", {
-      state: nextState,
-      isPlaying: nextState === State.Playing,
-      isPaused: nextState === State.Paused,
-      isBuffering: nextState === State.Buffering,
-      isLoading: nextState === State.Loading,
-      currentSong: currentSongRef.current?.id,
-    });
-    
     setRuntimePlaybackStateSnapshot(nextState);
     if (nextState === State.Playing || nextState === State.Paused) {
       setPlaybackLoading(false);
@@ -2656,72 +2808,31 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const appendRemainingTracksIfCurrent = useCallback((
-    requestId: number,
-    songs: Song[],
-    startIndex: number,
-    maxCount = PRELOAD_QUEUE_SIZE
-  ) => {
+  const appendRemainingTracksIfCurrent = useCallback((requestId: number, songs: Song[], startIndex: number) => {
     if (!TrackPlayer || songs.length === 0) return;
-    const songsToAppend = songs.slice(0, Math.max(0, maxCount));
-    if (songsToAppend.length === 0) return;
 
-    void (async () => {
-      const nextStartIndex = startIndex + songsToAppend.length;
-      const scheduleNextYouTubeBatch = () => {
-        if (maxCount !== YOUTUBE_UPCOMING_NATIVE_PRELOAD_SIZE) return;
-        if (requestId !== playRequestIdRef.current) return;
-
-        const liveQueue = queueRef.current;
-        if (nextStartIndex >= liveQueue.length) return;
-
-        setTimeout(() => {
-          appendRemainingTracksIfCurrent(
-            requestId,
-            queueRef.current.slice(nextStartIndex),
-            nextStartIndex,
-            maxCount
-          );
-        }, 1200);
-      };
-
-      const resolvedEntries = await resolveNativeTrackEntries(songsToAppend, startIndex);
+    void runSerializedPlaybackSwitch(async () => {
       if (requestId !== playRequestIdRef.current) return;
-      if (resolvedEntries.length === 0) {
-        scheduleNextYouTubeBatch();
-        return;
+      const entries = await resolveNativeTrackEntries(songs, startIndex);
+      if (requestId !== playRequestIdRef.current || entries.length === 0) return;
+
+      const currentQueue = queueRef.current;
+      const resolvedQueue = mergeResolvedNativeEntriesIntoQueue(currentQueue, entries);
+      if (resolvedQueue !== currentQueue) {
+        queueRef.current = resolvedQueue;
+        originalQueueRef.current = resolvedQueue;
+        setQueue(resolvedQueue);
+        setSourceQueue(resolvedQueue);
+        updatePlaybackEngineSnapshot({ queue: resolvedQueue, sourceQueue: resolvedQueue });
       }
 
-      await runSerializedPlaybackSwitch(async () => {
-        if (requestId !== playRequestIdRef.current) return;
-
-        const queuedAppIndices = new Set(nativeQueueAppIndicesRef.current);
-        const entries = resolvedEntries.filter((entry) => !queuedAppIndices.has(entry.appIndex));
-        if (entries.length === 0) return;
-
-        const currentQueue = queueRef.current;
-        const resolvedQueue = mergeResolvedNativeEntriesIntoQueue(currentQueue, entries);
-        if (resolvedQueue !== currentQueue) {
-          queueRef.current = resolvedQueue;
-          originalQueueRef.current = resolvedQueue;
-          setQueue(resolvedQueue);
-          setSourceQueue(resolvedQueue);
-          updatePlaybackEngineSnapshot({ queue: resolvedQueue, sourceQueue: resolvedQueue });
-        }
-
-        nativeQueueAppIndicesRef.current = [
-          ...nativeQueueAppIndicesRef.current,
-          ...entries.map((entry) => entry.appIndex),
-        ];
-        await TrackPlayer.add(entries.map((entry) => entry.track));
-      });
-      scheduleNextYouTubeBatch();
-    })().catch((error) => {
-      logger.warn("[Player] Background native queue append failed", {
-        startIndex,
-        count: songsToAppend.length,
-        error,
-      });
+      nativeQueueAppIndicesRef.current = [
+        ...nativeQueueAppIndicesRef.current,
+        ...entries.map((entry) => entry.appIndex),
+      ];
+      await TrackPlayer.add(entries.map((entry) => entry.track));
+    }).catch(() => {
+      // Silent background queue append failure.
     });
   }, [runSerializedPlaybackSwitch]);
 
@@ -2729,14 +2840,10 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     const requestId = ++playRequestIdRef.current;
     setPlaybackIntent(true);
     const playbackPlan = await buildPlaybackQueueForSong(song, newQueue);
-    if (!playbackPlan || requestId !== playRequestIdRef.current) {
-      if (!playbackPlan && requestId === playRequestIdRef.current) {
-        setPlaybackIntent(null);
-        updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
-      }
+    if (requestId !== playRequestIdRef.current) {
       return;
     }
-    if (playbackPlan.queue.length === 0) {
+    if (!playbackPlan || playbackPlan.queue.length === 0) {
       setPlaybackIntent(null);
       updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
       return;
@@ -2782,7 +2889,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       name: targetSong.title,
       imageUrl: targetSong.coverUrl,
       type: "song",
-      data: sanitizeSongForStorage(targetSong),
+      data: targetSong,
     });
 
     await runSerializedPlaybackSwitch(async () => {
@@ -2796,6 +2903,14 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
         const ready = await ensurePlayerReady();
         if (!ready) {
+          if (isYouTubeSource(targetSong)) {
+            await playYouTubeSong(
+              stripTransientYouTubeAudioUrl(targetSong),
+              playableQueue,
+              targetIndex
+            );
+            return;
+          }
           setPlaybackIntent(null);
           setPlaybackLoading(false);
           updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
@@ -2807,11 +2922,12 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           return;
         }
 
-        const existingNativeTargetIndex = queueIsSame
+        const existingNativeTargetIndex = queueIsSame &&
+          (!isYouTubeSource(targetSong) || hasFreshYouTubeNativeAudio(targetSong))
           ? await getNativeTrackIndexForSong(targetIndex, targetSong.id)
           : -1;
 
-        if (queueIsSame && existingNativeTargetIndex >= 0 && !isYouTubeSource(targetSong)) {
+        if (queueIsSame && existingNativeTargetIndex >= 0) {
           // Fast path: queue unchanged and native queue is confirmed in sync.
           // Do not remove/re-add the active track here; rebuilding is safer
           // than indexed native mutation if the URL source needs to change.
@@ -2821,10 +2937,14 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           return;
         }
 
-        // Resolve only the target song first to ensure instant playback response
-        const initialEntries = await resolveNativeTrackEntries([targetSong], targetIndex);
+        // Resolve playable URLs before handing items to TrackPlayer.
+        const preloadCount = Math.max(
+          Math.min(playableQueue.length, PRELOAD_QUEUE_SIZE),
+          targetIndex + 1
+        );
+        // react-doctor-disable-next-line react-doctor/async-defer-await -- requestId can become stale while resolving native tracks, so the guard below must run after this await.
+        const initialEntries = await resolveNativeTrackEntries(playableQueue.slice(0, preloadCount), 0);
         const targetNativeIndex = initialEntries.findIndex((entry) => entry.appIndex === targetIndex);
-        const preloadCount = targetIndex + 1;
 
         if (requestId !== playRequestIdRef.current) {
           return;
@@ -2832,25 +2952,18 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
         if (targetNativeIndex < 0) {
           if (isYouTubeSource(targetSong)) {
-            // Native audio stream could not be resolved after backend retries.
-            // Show error and auto-advance to the next song.
-            logger.error("[Playback] YouTube native audio resolution failed — all resolvers exhausted", {
+            // Native audio stream could not be resolved (backend unavailable or yt-dlp failed).
+            // Fall back to iframe ΓÇö background playback and lock screen will NOT work in this session.
+            logger.warn("[Playback] YouTube native audio resolution failed ΓÇö falling back to iframe (no background/lock screen)", {
               songId: targetSong.id,
               title: targetSong.title,
             });
-            setPlaybackIntent(null);
-            setPlaybackLoading(false);
-            failPendingNativeTrack("Could not resolve audio stream for this song.");
-            updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
-            const skipped = scheduleNextTrackAfterFailure(
-              targetIndex,
-              "youtube_resolve_failed",
-              "Could not play this song. Trying next...",
-              500
+            showPlaybackNotice("Playing via YouTube ΓÇö background & lock screen unavailable");
+            await playYouTubeSong(
+              stripTransientYouTubeAudioUrl(targetSong),
+              playableQueue,
+              targetIndex
             );
-            if (!skipped) {
-              showPlaybackNotice("Could not play this song.");
-            }
             return;
           }
           setPlaybackIntent(null);
@@ -2887,24 +3000,9 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
             await TrackPlayer.skip(targetNativeIndex);
           }
           await publishNativeNowPlaying(resolvedTargetSong, targetIndex);
-          
-          logger.info("[Player] About to call TrackPlayer.play()", {
-            song: resolvedTargetSong.id,
-            title: resolvedTargetSong.title,
-            url: resolvedTargetSong.audioUrl,
-            hasHeaders: !!resolvedTargetSong.playbackHeaders,
-          });
-          
           await TrackPlayer.play();
-          
-          logger.info("[Player] TrackPlayer.play() called successfully");
 
-          appendRemainingTracksIfCurrent(
-            requestId,
-            remainingSongs,
-            preloadCount,
-            isYouTubeSource(targetSong) ? YOUTUBE_UPCOMING_NATIVE_PRELOAD_SIZE : PRELOAD_QUEUE_SIZE
-          );
+          appendRemainingTracksIfCurrent(requestId, remainingSongs, preloadCount);
         } else {
           await TrackPlayer.reset();
           await TrackPlayer.add(initialTracks);
@@ -2914,12 +3012,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           await publishNativeNowPlaying(resolvedTargetSong, targetIndex);
           await TrackPlayer.play();
 
-          appendRemainingTracksIfCurrent(
-            requestId,
-            remainingSongs,
-            preloadCount,
-            isYouTubeSource(targetSong) ? YOUTUBE_UPCOMING_NATIVE_PRELOAD_SIZE : PRELOAD_QUEUE_SIZE
-          );
+          appendRemainingTracksIfCurrent(requestId, remainingSongs, preloadCount);
         }
 
         if (RepeatMode) {
@@ -2931,6 +3024,14 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           await TrackPlayer.setRepeatMode(repeatMap[repeatModeRef.current]);
         }
       } catch (error) {
+        if (isYouTubeSource(targetSong)) {
+          await playYouTubeSong(
+            stripTransientYouTubeAudioUrl(targetSong),
+            playableQueue,
+            targetIndex
+          );
+          return;
+        }
         setPlaybackIntent(null);
         setPlaybackLoading(false);
         failPendingNativeTrack("Could not start playback.");
@@ -2940,17 +3041,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           songId: song?.id,
           songAudioUrl: song?.audioUrl,
         });
-        const skipped = requestId === playRequestIdRef.current && isYouTubeSource(targetSong)
-          ? scheduleNextTrackAfterFailure(
-              targetIndex,
-              "load_and_play_failed",
-              "Could not start this song. Trying next...",
-              500
-            )
-          : false;
-        if (!skipped) {
-          showPlaybackNotice("Could not start playback.");
-        }
+        showPlaybackNotice("Could not start playback.");
       } finally {
         if (requestId === playRequestIdRef.current) {
           setPlaybackLoading(false);
@@ -2958,8 +3049,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         }
       }
     });
-  }, [appendRemainingTracksIfCurrent, buildPlaybackQueueForSong, clearUserQueuedSongIds, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, markPendingNativeTrack, runSerializedPlaybackSwitch, scheduleNextTrackAfterFailure, showPlaybackNotice]);
-  loadAndPlaySongRef.current = loadAndPlaySong;
+  }, [appendRemainingTracksIfCurrent, buildPlaybackQueueForSong, clearUserQueuedSongIds, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, markPendingNativeTrack, playYouTubeSong, runSerializedPlaybackSwitch, showPlaybackNotice]);
 
   useEffect(() => {
     if (Platform.OS !== "android" || !AndroidAutoMedia) return;
@@ -3034,18 +3124,30 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       const requestedIndex = Math.max(0, requestedQueue.findIndex((item) => item.id === song.id));
       const requestedSong = requestedQueue[requestedIndex] || song;
       const playbackPlan = await buildPlaybackQueueForSong(requestedSong, requestedQueue);
-      if (!playbackPlan || requestId !== playRequestIdRef.current) {
-        if (!playbackPlan && requestId === playRequestIdRef.current) {
-          setPlaybackIntent(null);
-          setPlaybackLoading(false);
-          showPlaybackNotice("This song cannot be played.");
-        }
+      if (requestId !== playRequestIdRef.current) {
+        return;
+      }
+      if (!playbackPlan) {
+        setPlaybackIntent(null);
+        setPlaybackLoading(false);
+        showPlaybackNotice("This song cannot be played.");
         return;
       }
 
       const q = playbackPlan.queue;
       const targetIndex = playbackPlan.targetIndex;
       const targetSong = playbackPlan.targetSong;
+
+      if (isYouTubeSong(targetSong) && (!TrackPlayer || !setupPlayer)) {
+        pauseNativeForYouTubeHandoff();
+        await playYouTubeSong(stripTransientYouTubeAudioUrl(targetSong), q, targetIndex);
+        return;
+      }
+
+      logger.debug("[Playback] playSong initiating", {
+        songId: targetSong.id,
+        songTitle: targetSong.title,
+      });
 
       // 1. Update UI state immediately for responsiveness
       setPlaybackIntent(true);
@@ -3083,6 +3185,12 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
       currentSongRef.current = normalizedSong;
       setCurrentSong(normalizedSong);
+
+      logger.debug("[Playback] playSong: Routing to native player");
+      youtubeShouldAutoPlayRef.current = false;
+      setYoutubePlaying(false);
+      setYoutubeVideoId(null);
+      setIsYoutubeLoading(false);
 
       if (!TrackPlayer || !setupPlayer) {
         if (canUseLightweightAudioFallback) {
@@ -3143,13 +3251,55 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       });
       showPlaybackNotice("Could not start playback.");
     }
-  }, [buildPlaybackQueueForSong, clearUserQueuedSongIds, loadAndPlaySong, showPlaybackNotice]);
+  }, [buildPlaybackQueueForSong, clearUserQueuedSongIds, loadAndPlaySong, pauseNativeForYouTubeHandoff, playYouTubeSong, showPlaybackNotice]);
 
   const togglePlay = useCallback(async () => {
     try {
+      if (isYouTubeSong(currentSong)) {
+        const youtubeSong = currentSong;
+        if (!youtubeSong) return;
+        const currentQueue = queueRef.current.length > 0 ? queueRef.current : [youtubeSong];
+        const targetIndex = Math.max(0, currentQueue.findIndex((item) => item.id === youtubeSong.id));
+
+        if (TrackPlayer && setupPlayer && !youtubePlaying) {
+          const nativeQueue = mapFilter(currentQueue, normalizePlayableSong, (item): item is Song => Boolean(item));
+          const nativeSong = normalizePlayableSong(youtubeSong);
+          if (nativeSong) {
+            const nativeTargetIndex = Math.max(0, nativeQueue.findIndex((item) => item.id === nativeSong.id));
+            await loadAndPlaySong(
+              nativeSong,
+              nativeQueue.length > 0 ? nativeQueue : [nativeSong],
+              nativeTargetIndex
+            );
+            return;
+          }
+        }
+
+        const currentVideoId = getYouTubeVideoIdFromSong(youtubeSong);
+        if (!youtubeVideoId || youtubeVideoId !== currentVideoId) {
+          await playYouTubeSong(youtubeSong, currentQueue, targetIndex);
+          return;
+        }
+
+        const nextPlaying = !youtubePlaying;
+        youtubeShouldAutoPlayRef.current = nextPlaying;
+        setPlaybackIntent(nextPlaying);
+        setYoutubePlaying(nextPlaying);
+        setIsYoutubeLoading(false);
+        previewIsPlayingRef.current = nextPlaying;
+        setPreviewIsPlaying(nextPlaying);
+        updatePlaybackEngineSnapshot({
+          desiredPlayState: nextPlaying,
+          isPlaying: nextPlaying,
+          isLoading: false,
+          isBuffering: false,
+        });
+        return;
+      }
+
       if (!TrackPlayer || !setupPlayer) {
         if (canUseLightweightAudioFallback && currentSong) {
-          // Use ref — never stale, always reflects current playback state
+          // Use ref ΓÇö never stale, always reflects current playback state
           if (previewIsPlayingRef.current) {
             setPlaybackIntent(false);
             updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isBuffering: false });
@@ -3162,26 +3312,11 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
             updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true, isBuffering: false });
             previewIsPlayingRef.current = true;
             setPreviewIsPlaying(true);
-            const shouldRefreshYouTubeResume = isYouTubeSource(currentSong);
-            // If no URL loaded yet (e.g. after app reopen), load first then play.
-            // YouTube proxy URLs are resolved just-in-time, so refresh them on
-            // resume and restore the visible position.
-            if (!ExpoAvPlayer.isLoaded() || shouldRefreshYouTubeResume) {
-              const resumeDuration = previewDuration > 0
-                ? previewDuration / 1000
-                : toDurationSeconds(currentSong.duration);
-              const resumeAt = previewProgress > 0 && resumeDuration > 0
-                ? previewProgress * resumeDuration
-                : latestPositionSecondsRef.current;
-              const playbackSong = shouldRefreshYouTubeResume
-                ? stripTransientYouTubeAudioUrl(currentSong)
-                : currentSong;
-              const url = await resolvePlaybackUrl(playbackSong);
+            // If no URL loaded yet (e.g. after app reopen), load first then play
+            if (!ExpoAvPlayer.isLoaded()) {
+              const url = await resolvePlaybackUrl(currentSong);
               if (url) {
-                await ExpoAvPlayer.loadAndPlay(url);
-                if (shouldRefreshYouTubeResume && resumeAt > 1) {
-                  await ExpoAvPlayer.seekTo(resumeAt);
-                }
+                void ExpoAvPlayer.loadAndPlay(url);
               }
             } else {
               ExpoAvPlayer.play();
@@ -3227,7 +3362,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       }
 
       const targetIndex = Math.max(0, currentQueue.findIndex((song) => song.id === targetSong.id));
-
       const nativeTargetIndex = await getNativeTrackIndexForSong(targetIndex, targetSong.id);
       if (nativeTargetIndex < 0) {
         await loadAndPlaySong(targetSong, currentQueue.length > 0 ? currentQueue : [targetSong], targetIndex);
@@ -3288,7 +3422,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     } catch (error) {
       // Silent fail
     }
-  }, [currentSong, ensurePlayerReady, getNativeTrackIndexForSong, isPlayerReady, loadAndPlaySong, previewDuration, previewProgress, resolvedIsPlaying, showPlaybackNotice]);
+  }, [currentSong, ensurePlayerReady, getNativeTrackIndexForSong, isPlayerReady, loadAndPlaySong, playYouTubeSong, resolvedIsPlaying, showPlaybackNotice, youtubePlaying, youtubeVideoId]);
 
   const nextSong = useCallback(async () => {
     try {
@@ -3304,6 +3438,17 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
       const nextTrack = cq[ni];
       if (!nextTrack) return;
+      if (isYouTubeSong(nextTrack) && (!TrackPlayer || !setupPlayer)) {
+        pauseNativeForYouTubeHandoff();
+        await playYouTubeSong(stripTransientYouTubeAudioUrl(nextTrack), cq, ni);
+        return;
+      }
+
+      logger.debug("[Playback] nextSong initiating", {
+        currentIndex: ci,
+        nextIndex: ni,
+        nextSongId: nextTrack.id,
+      });
 
       // 1. Update UI state immediately for responsiveness
       const requestId = ++playRequestIdRef.current;
@@ -3324,7 +3469,12 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         isBuffering: false,
       });
 
+      logger.debug("[Playback] nextSong: Routing to native player");
       currentSongRef.current = nextTrack;
+      youtubeShouldAutoPlayRef.current = false;
+      setYoutubePlaying(false);
+      setYoutubeVideoId(null);
+      setIsYoutubeLoading(false);
 
       if (!TrackPlayer || !setupPlayer) {
         if (canUseLightweightAudioFallback) {
@@ -3348,8 +3498,10 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         }
       }
 
-      const nativeTargetIndex = await getNativeTrackIndexForSong(ni, nextTrack.id);
-      if (nativeTargetIndex < 0 || isYouTubeSource(nextTrack)) {
+      const nativeTargetIndex = isYouTubeSong(nextTrack)
+        ? -1
+        : await getNativeTrackIndexForSong(ni, nextTrack.id);
+      if (nativeTargetIndex < 0) {
         if (queueIndexRef.current !== ni || queueRef.current[ni]?.id !== nextTrack.id) return;
         await loadAndPlaySong(nextTrack, cq, ni);
         return;
@@ -3363,24 +3515,8 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       });
     } catch (error) {
       failPendingNativeTrack("Could not skip to next track.");
-      logger.warn("[Player] nextSong failed", error);
-      const failedSong = currentSongRef.current;
-      const skipped = failedSong && isYouTubeSource(failedSong)
-        ? scheduleNextTrackAfterFailure(
-            queueIndexRef.current,
-            "next_song_failed",
-            "Could not play this song. Trying next...",
-            250
-          )
-        : false;
-      if (!skipped) {
-        setPlaybackIntent(null);
-        setPlaybackLoading(false);
-        updatePlaybackEngineSnapshot({ desiredPlayState: null, isLoading: false, isBuffering: false });
-        showPlaybackNotice("Could not skip to next track.");
-      }
     }
-  }, [consumeLeadingUserQueuedSongId, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, isPlayerReady, loadAndPlaySong, markPendingNativeTrack, previewRepeatMode, runSerializedPlaybackSwitch, scheduleNextTrackAfterFailure, showPlaybackNotice]);
+  }, [consumeLeadingUserQueuedSongId, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, isPlayerReady, loadAndPlaySong, markPendingNativeTrack, pauseNativeForYouTubeHandoff, playYouTubeSong, previewRepeatMode, runSerializedPlaybackSwitch]);
 
   const prevSong = useCallback(async () => {
     try {
@@ -3389,10 +3525,14 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       if (cq.length === 0) return;
 
       const rm = TrackPlayer && setupPlayer ? repeatModeRef.current : previewRepeatMode;
+      const isYoutube = isYouTubeSong(currentSong);
 
-      const positionSeconds = TrackPlayer && setupPlayer ? safePosition : previewProgress * (previewDuration / 1000);
+      const positionSeconds = isYoutube ? youtubePosition : (TrackPlayer && setupPlayer ? safePosition : previewProgress * (previewDuration / 1000));
       if (positionSeconds > 3) {
-        if (TrackPlayer && setupPlayer) {
+        if (isYoutube && youtubePlayerRef.current) {
+          await youtubePlayerRef.current.seekTo(0, true);
+          setPreviewProgress(0);
+        } else if (TrackPlayer && setupPlayer) {
           await TrackPlayer.seekTo(0);
         } else {
           await ExpoAvPlayer.seekTo(0);
@@ -3406,7 +3546,10 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         if (rm === "all") {
           pi = cq.length - 1;
         } else {
-          if (TrackPlayer && setupPlayer) {
+          if (isYoutube && youtubePlayerRef.current) {
+            await youtubePlayerRef.current.seekTo(0, true);
+            setPreviewProgress(0);
+          } else if (TrackPlayer && setupPlayer) {
             await TrackPlayer.seekTo(0);
           } else {
             await ExpoAvPlayer.seekTo(0);
@@ -3418,6 +3561,17 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
       const prevTrack = cq[pi];
       if (!prevTrack) return;
+      if (isYouTubeSong(prevTrack) && (!TrackPlayer || !setupPlayer)) {
+        pauseNativeForYouTubeHandoff();
+        await playYouTubeSong(stripTransientYouTubeAudioUrl(prevTrack), cq, pi);
+        return;
+      }
+
+      logger.debug("[Playback] prevSong initiating", {
+        currentIndex: ci,
+        prevIndex: pi,
+        prevSongId: prevTrack.id,
+      });
 
       // 1. Update UI state immediately for responsiveness
       const requestId = ++playRequestIdRef.current;
@@ -3438,7 +3592,12 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         isBuffering: false,
       });
 
+      logger.debug("[Playback] prevSong: Routing to native player");
       currentSongRef.current = prevTrack;
+      youtubeShouldAutoPlayRef.current = false;
+      setYoutubePlaying(false);
+      setYoutubeVideoId(null);
+      setIsYoutubeLoading(false);
 
       if (!TrackPlayer || !setupPlayer) {
         if (canUseLightweightAudioFallback) {
@@ -3462,8 +3621,10 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         }
       }
 
-      const nativeTargetIndex = await getNativeTrackIndexForSong(pi, prevTrack.id);
-      if (nativeTargetIndex < 0 || isYouTubeSource(prevTrack)) {
+      const nativeTargetIndex = isYouTubeSong(prevTrack)
+        ? -1
+        : await getNativeTrackIndexForSong(pi, prevTrack.id);
+      if (nativeTargetIndex < 0) {
         if (queueIndexRef.current !== pi || queueRef.current[pi]?.id !== prevTrack.id) return;
         await loadAndPlaySong(prevTrack, cq, pi);
         return;
@@ -3478,11 +3639,22 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     } catch (error) {
       failPendingNativeTrack("Could not skip to previous track.");
     }
-  }, [consumeLeadingUserQueuedSongId, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, isPlayerReady, loadAndPlaySong, markPendingNativeTrack, previewRepeatMode, runSerializedPlaybackSwitch, safePosition, previewDuration, previewProgress]);
+  }, [consumeLeadingUserQueuedSongId, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, isPlayerReady, loadAndPlaySong, markPendingNativeTrack, pauseNativeForYouTubeHandoff, playYouTubeSong, previewRepeatMode, runSerializedPlaybackSwitch, safePosition, currentSong, youtubePosition, previewDuration, previewProgress]);
 
   const seekTo = useCallback(async (p: number) => {
     let seekRequestId = 0;
     try {
+      if (isYouTubeSong(currentSong)) {
+        const normalizedProgress = Number.isFinite(p) ? Math.max(0, Math.min(1, p)) : 0;
+        const seekableDuration = youtubeDuration > 0 ? youtubeDuration : toDurationSeconds(currentSong?.duration);
+        if (seekableDuration > 0 && youtubePlayerRef.current?.seekTo) {
+          const seconds = normalizedProgress * seekableDuration;
+          setYoutubePosition(seconds);
+          await youtubePlayerRef.current.seekTo(seconds, true);
+        }
+        return;
+      }
+
       if (!TrackPlayer || !setupPlayer) {
         if (canUseLightweightAudioFallback) {
           previewIsEndedRef.current = false;
@@ -3490,7 +3662,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           // Set progress immediately so the UI moves right away
           setPreviewProgress(normalizedProgress);
 
-          // Get duration — prefer live state, fall back to song metadata
+          // Get duration ΓÇö prefer live state, fall back to song metadata
           let durSec = previewDuration / 1000;
           if (durSec <= 0) {
             durSec = toDurationSeconds(currentSong?.duration);
@@ -3538,7 +3710,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         setSeekOverride(null);
       }
     }
-  }, [currentSong, effectiveTrackDurationSeconds, isPlayerReady, previewDuration]);
+  }, [currentSong, effectiveTrackDurationSeconds, isPlayerReady, previewDuration, youtubeDuration]);
 
   const toggleShuffle = useCallback(async () => {
     const applyShuffleState = (nextShuffleState: boolean) => {
@@ -3637,7 +3809,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     }
 
     const isCurrentlyLiked = likedSongIds.includes(song.id);
-    const storedSong = sanitizeSongForStorage(song);
     
     try {
       if (isCurrentlyLiked) {
@@ -3646,14 +3817,14 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         await removeLikedSongFromFirestore(authUser.id, song.id);
       } else {
         setLikedSongIds(prev => [song.id, ...prev]);
-        setLikedSongs(prev => [storedSong, ...prev]);
-        await addLikedSongToFirestore(authUser.id, storedSong);
+        setLikedSongs(prev => [song, ...prev]);
+        await addLikedSongToFirestore(authUser.id, song);
       }
     } catch (error) {
       logger.warn("[Player] Failed to sync liked song", { songId: song.id, error });
       if (isCurrentlyLiked) {
         setLikedSongIds(prev => prev.includes(song.id) ? prev : [song.id, ...prev]);
-        setLikedSongs(prev => prev.some((s) => s.id === song.id) ? prev : [storedSong, ...prev]);
+        setLikedSongs(prev => prev.some((s) => s.id === song.id) ? prev : [song, ...prev]);
       } else {
         setLikedSongIds(prev => prev.filter(id => id !== song.id));
         setLikedSongs(prev => prev.filter(s => s.id !== song.id));
@@ -3663,26 +3834,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   }, [authUser?.id, likedSongIds, showPlaybackNotice]);
 
   const isLiked = useCallback((songId: string) => likedSongIds.includes(songId), [likedSongIds]);
-
-  const addNativeQueueTrack = useCallback(async (song: Song, insertIndex: number): Promise<boolean> => {
-    if (!TrackPlayer || !setupPlayer) return false;
-
-    const entry = isYouTubeSource(song)
-      ? await resolveNativeTrackEntry(song, insertIndex)
-      : {
-          song,
-          track: songToTrack(song),
-          appIndex: insertIndex,
-        };
-    if (!entry?.track?.url) return false;
-
-    await TrackPlayer.add(entry.track, insertIndex);
-    nativeQueueAppIndicesRef.current = nativeQueueAppIndicesRef.current.map((appIndex) =>
-      appIndex >= insertIndex ? appIndex + 1 : appIndex
-    );
-    nativeQueueAppIndicesRef.current.splice(insertIndex, 0, insertIndex);
-    return true;
-  }, []);
 
   const addToQueue = useCallback(async (song: Song) => {
     try {
@@ -3726,11 +3877,11 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       setQueue(next);
       queueRef.current = next;
       appendUserQueuedSongId(normalizedSong.id);
-      await addNativeQueueTrack(normalizedSong, insertIndex);
+      await TrackPlayer.add(songToTrack(normalizedSong), insertIndex);
     } catch (error) {
       // Silent fail
     }
-  }, [addNativeQueueTrack, appendUserQueuedSongId, isPlayerReady]);
+  }, [appendUserQueuedSongId, isPlayerReady]);
 
   const playNext = useCallback(async (song: Song) => {
     try {
@@ -3772,28 +3923,23 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         (ci >= 0 && ci < currentQueue.length && await nativeQueueHasTrackAt(ci, currentQueue[ci].id));
 
       if (canInsertNative) {
-        await addNativeQueueTrack(normalizedSong, insertIndex);
+        await TrackPlayer.add(songToTrack(normalizedSong), insertIndex);
         return;
       }
 
       const activeSongId = currentQueue[ci]?.id ?? currentSongRef.current?.id ?? normalizedSong.id;
       const validSongs = mapFilter(next, normalizePlayableSong, (item): item is Song => Boolean(item));
       const activeIndex = Math.max(0, validSongs.findIndex((song) => song.id === activeSongId));
-      const entries = await resolveNativeTrackEntries(validSongs, 0);
-      const nativeActiveIndex = Math.max(0, entries.findIndex((entry) => entry.appIndex === activeIndex));
-      if (entries.length > 0) {
-        nativeQueueAppIndicesRef.current = entries.map((entry) => entry.appIndex);
-        await rebuildNativeQueue(
-          entries.map((entry) => entry.track),
-          nativeActiveIndex,
-          resolvedIsPlaying
-        );
-      }
+      await rebuildNativeQueue(
+        validSongs.map((song) => songToTrack(song)),
+        activeIndex,
+        resolvedIsPlaying
+      );
     } catch (error) {
       setPlaybackIntent(null);
       // Silent fail
     }
-  }, [addNativeQueueTrack, isPlayerReady, nativeQueueHasTrackAt, prependUserQueuedSongId, resolvedIsPlaying]);
+  }, [isPlayerReady, nativeQueueHasTrackAt, prependUserQueuedSongId, resolvedIsPlaying]);
 
   const removeFromQueue = useCallback(async (index: number) => {
     try {
@@ -3981,11 +4127,11 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     isShuffled: resolvedIsShuffled, repeatMode: resolvedRepeatMode, likedSongIds, likedSongs, isLoading: playbackLoading, albumColor, textColor, sleepTimer,
     playSong, togglePlay, nextSong, prevSong, seekTo, toggleShuffle, toggleRepeat,
     toggleLike, isLiked, addToQueue, playNext, removeFromQueue, reorderQueue, clearQueue, shuffleQueue,
-    setSleepTimer, clearSleepTimer, setAlbumColor, setTextColor,
+    setSleepTimer, clearSleepTimer, setAlbumColor, setTextColor, setYoutubePlayerFrame,
   }), [currentSong, queue, userQueuedSongIds, sourceQueue, queueIndex, resolvedIsPlaying, resolvedProgress, resolvedDuration, resolvedPositionMillis,
     resolvedIsShuffled, resolvedRepeatMode, likedSongIds, likedSongs, playbackLoading, albumColor, textColor, sleepTimer, playSong, togglePlay, nextSong,
     prevSong, seekTo, toggleShuffle, toggleRepeat, toggleLike, isLiked, addToQueue,
-    playNext, removeFromQueue, reorderQueue, clearQueue, shuffleQueue, setSleepTimer, clearSleepTimer]);
+    playNext, removeFromQueue, reorderQueue, clearQueue, shuffleQueue, setSleepTimer, clearSleepTimer, setYoutubePlayerFrame]);
 
   const liteValue = useMemo(
     () => ({
@@ -4022,6 +4168,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
+      setYoutubePlayerFrame,
     }),
     [
       currentSong,
@@ -4057,6 +4204,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
+      setYoutubePlayerFrame,
     ]
   );
 
@@ -4150,6 +4298,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
+      setYoutubePlayerFrame,
     }),
     [
       likedSongIds,
@@ -4176,8 +4325,76 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
+      setYoutubePlayerFrame,
     ]
   );
+
+  // Native audio is preferred. If we must fall back to the YouTube iframe on
+  // the full player screen, give Android WebView a real visible surface so
+  // autoplay does not get stuck behind a hidden 4 px view.
+  // MODIFIED: Always keep YouTube player hidden (4x4 off-screen) for audio-only playback
+  // Original logic made it visible on /player screen, but we want audio-only mode
+  const isYoutubePlayerVisible = false; // Boolean(youtubeVideoId && pathname === "/player");
+  const isShortPlayerScreen = screenHeight <= 760;
+  const isVeryShortPlayerScreen = screenHeight <= 700;
+  const playerTopInset =
+    Platform.OS === "web"
+      ? 67
+      : Platform.OS === "ios"
+        ? Math.max(2, insets.top - 18)
+        : insets.top;
+  const playerTopBarHeight = isShortPlayerScreen ? 50 : 54;
+  const playerArtByWidth = Math.min(screenWidth - 62, 336);
+  const playerArtByHeight = Math.max(
+    192,
+    Math.floor(screenHeight * (isVeryShortPlayerScreen ? 0.3 : 0.34))
+  );
+  const measuredYoutubeFrame = isYoutubePlayerVisible ? youtubePlayerFrame : null;
+  const shouldUseVisibleYoutubeFrame = isYoutubePlayerVisible;
+  const youtubeRootOffsetX = youtubeOverlayRootFrame?.x ?? 0;
+  const youtubeRootOffsetY = youtubeOverlayRootFrame?.y ?? 0;
+  const visibleYoutubeWidth = measuredYoutubeFrame?.width ?? Math.min(playerArtByWidth, playerArtByHeight);
+  const visibleYoutubeHeight = measuredYoutubeFrame?.height ?? Math.round(visibleYoutubeWidth * 9 / 16);
+  const visibleYoutubeTop =
+    measuredYoutubeFrame
+      ? Math.max(0, measuredYoutubeFrame.y - youtubeRootOffsetY)
+      : playerTopInset + playerTopBarHeight + (isShortPlayerScreen ? 4 : 8);
+  const visibleYoutubeLeft =
+    measuredYoutubeFrame
+      ? Math.max(0, measuredYoutubeFrame.x - youtubeRootOffsetX)
+      : Math.max(0, (screenWidth - visibleYoutubeWidth) / 2);
+  const youtubePlayerWidth = shouldUseVisibleYoutubeFrame ? visibleYoutubeWidth : 1;
+  const youtubePlayerHeight = shouldUseVisibleYoutubeFrame ? visibleYoutubeHeight : 1;
+  const youtubeVisibleBorderRadius =
+    measuredYoutubeFrame && measuredYoutubeFrame.width >= screenWidth - 2 ? 0 : 16;
+  const youtubePlayerStyle = shouldUseVisibleYoutubeFrame
+    ? {
+        position: "absolute" as const,
+        width: youtubePlayerWidth,
+        height: youtubePlayerHeight,
+        opacity: 1,
+        left: visibleYoutubeLeft,
+        top: visibleYoutubeTop,
+        zIndex: 1200,
+        elevation: 1200,
+        overflow: "hidden" as const,
+        borderRadius: youtubeVisibleBorderRadius,
+        backgroundColor: "#000000",
+      }
+    : {
+        // MODIFIED: 1x1 pixel in top-right corner with minimal opacity for audio-only playback
+        // Browsers require minimal visibility for autoplay to work
+        position: "absolute" as const,
+        width: 1,
+        height: 1,
+        opacity: 0.01, // Nearly invisible but allows autoplay
+        right: 0,
+        top: 0,
+        zIndex: -999,
+        elevation: -999,
+        overflow: "hidden" as const,
+        pointerEvents: "none" as const,
+      };
 
   return (
     <PlayerContext.Provider value={value}>
@@ -4187,7 +4404,59 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
             <PlayerBrowseContext.Provider value={browseValue}>
               <PlayerQueueContext.Provider value={queueValue}>
                 <PlayerRowContext.Provider value={rowValue}>
-                  {children}
+                  <View
+                    ref={youtubeOverlayRootRef}
+                    onLayout={measureYoutubeOverlayRoot}
+                    style={{ flex: 1 }}
+                  >
+                    {children}
+                    {youtubeVideoId ? (
+                       <View
+                        pointerEvents="none"
+                        style={youtubePlayerStyle}
+                      >
+                        <YoutubePlayer
+                          key={`${youtubeVideoId}-${youtubePlayerKey}-${youtubeUseLocalHTML ? "local" : "hosted"}`}
+                          ref={youtubePlayerRef}
+                          height={youtubePlayerHeight}
+                          width={youtubePlayerWidth}
+                          play={youtubePlaying}
+                          videoId={youtubeVideoId}
+                          onReady={onYoutubeReady}
+                          onChangeState={onYoutubeStateChange}
+                          onError={onYoutubeError}
+                          forceAndroidAutoplay
+                          useLocalHTML={youtubeUseLocalHTML}
+                          baseUrlOverride={youtubeUseLocalHTML ? YOUTUBE_PLAYER_REFERRER_URL : undefined}
+                          initialPlayerParams={{
+                            controls: false,
+                            modestbranding: true,
+                            rel: false,
+                            preventFullScreen: true,
+                            showClosedCaptions: false,
+                            iv_load_policy: 3,
+                            disablekb: true,
+                            fs: false,
+                            playsinline: true,
+                            cc_load_policy: 0,
+                            enablejsapi: 1,
+                            origin: 'https://www.youtube.com',
+                          }}
+                          webViewProps={{
+                            javaScriptEnabled: true,
+                            domStorageEnabled: true,
+                            thirdPartyCookiesEnabled: true,
+                            setSupportMultipleWindows: false,
+                            allowsFullscreenVideo: false,
+                            allowsInlineMediaPlayback: true,
+                            mediaPlaybackRequiresUserAction: false,
+                            androidLayerType: "hardware",
+                            allowsBackgroundMediaPlayback: true,
+                          }}
+                        />
+                      </View>
+                    ) : null}
+                  </View>
                 </PlayerRowContext.Provider>
               </PlayerQueueContext.Provider>
             </PlayerBrowseContext.Provider>

@@ -1,8 +1,14 @@
+import Constants from "expo-constants";
+import * as Device from "expo-device";
+import { Platform } from "react-native";
+
 import { logger } from "@/lib/logger";
 
+// Music catalogue (JioSaavn) is served directly by the dedicated song API.
+// We no longer route music requests through the drab web backend.
 const API_CONFIG = {
-  songBaseUrl: "https://mavrixfy-api-drab.vercel.app",
-  appBaseUrl: "https://mavrixfy-api-drab.vercel.app",
+  songBaseUrl: "https://mavrixfy-song-api.vercel.app",
+  appBaseUrl: "https://mavrixfy-song-api.vercel.app",
 } as const;
 
 
@@ -90,6 +96,33 @@ export function getMusicApiUrl(): string {
 
 export function getApiUrl(): string {
   return getMusicApiUrl();
+}
+
+export const PRODUCTION_YOUTUBE_MUSIC_API_URL = "https://mavrixfy-api-drab.vercel.app/api/youtube-music";
+
+function getYouTubeMusicBaseUrl(): string {
+  const envUrl = process.env.EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL?.trim();
+  const extraUrl = Constants.expoConfig?.extra?.youtubeMusicApiUrl?.trim();
+  const fallbackUrl = extraUrl || PRODUCTION_YOUTUBE_MUSIC_API_URL;
+
+  if (__DEV__ && envUrl && Platform.OS !== "web" && Device.isDevice && isPrivateDevelopmentApiUrl(envUrl)) {
+    logger.warn(
+      "[YouTube Music Config] Ignoring host-only development URL on a physical device. Use a LAN IP or the production proxy."
+    );
+    return normalizeBaseUrl(fallbackUrl);
+  }
+
+  if (envUrl) return normalizeBaseUrl(envUrl);
+  if (extraUrl) return normalizeBaseUrl(extraUrl);
+
+  logger.warn(
+    "[YouTube Music Config] Using production YouTube Music proxy. Set EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL for a different backend."
+  );
+  return normalizeBaseUrl(PRODUCTION_YOUTUBE_MUSIC_API_URL);
+}
+
+export function getYouTubeMusicApiUrl(): string {
+  return `${getYouTubeMusicBaseUrl()}/`;
 }
 
 function buildMusicApiUrl(path: string): string {
