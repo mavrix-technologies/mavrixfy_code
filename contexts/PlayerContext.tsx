@@ -621,12 +621,36 @@ async function resolveJioSaavnFallbackForYouTubeSong(song: Song, signal: AbortSi
 
 async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | null> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6000);
+  const timer = setTimeout(() => controller.abort(), 10000);
   try {
     const res = await resolveJioSaavnFallbackForYouTubeSong(song, controller.signal);
-    return res;
-  } catch (err) {
-    logger.error("[resolveYouTubeTrackForNativePlayback] Error resolving fallback:", err);
+    if (res) return res;
+
+    // Fall back to direct YouTube streaming via Express proxy if JioSaavn doesn't have it
+    const videoId = extractYouTubeVideoId(song);
+    if (videoId) {
+      logger.info("[resolveYouTubeTrackForNativePlayback] JioSaavn fallback not found. Attempting direct YouTube stream proxy...", { videoId });
+      const { buildAppApiUrl } = await import("@/lib/api-config");
+      const url = buildAppApiUrl(`/youtube-music/stream/${videoId}?json=true`);
+      const response = await fetch(url, { signal: controller.signal });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.stream?.url) {
+          logger.info("[resolveYouTubeTrackForNativePlayback] Successfully resolved stream from proxy!", { url: data.stream.url });
+          return {
+            ...song,
+            audioUrl: data.stream.url,
+            source: "youtube",
+            youtubeVideoId: videoId,
+            youtubeNativeAudio: true,
+            playbackHeaders: data.stream.headers || {},
+          };
+        }
+      }
+    }
+    return null;
+  } catch (err: any) {
+    logger.error("[resolveYouTubeTrackForNativePlayback] Error resolving fallback or proxy:", err?.message || err);
     return null;
   } finally {
     clearTimeout(timer);

@@ -20,6 +20,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import Colors from "@/constants/colors";
 import { getBestImageUrl, Song } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
+import { buildAppApiUrl } from "@/lib/api-config";
 import SongRow from "@/components/SongRow";
 import { getCatalogSongs, searchCatalog } from "@/lib/catalogService";
 import {
@@ -822,19 +823,24 @@ function useSearchScreenView() {
         // Fetch only endpoints needed for the active resultFilter
         let globalData: any = null;
         let songsData: any = null;
+        let youtubeSongsData: any = null;
         let albumSectionResults: JioSaavnAlbumResult[] = [];
         let artistsData: any = null;
         let playlistsData: any = null;
 
         if (resultFilter === "all") {
-          const [g, s] = await Promise.all([
+          const [g, s, yt] = await Promise.all([
             safeFetch(`${apiUrl}api/search?query=${encodeURIComponent(searchTerm)}`),
             safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=15`),
+            safeFetch(buildAppApiUrl(`/youtube-music/search?q=${encodeURIComponent(searchTerm)}&limit=15`)),
           ]);
           globalData = g;
           songsData = s;
+          youtubeSongsData = yt;
         } else if (resultFilter === "songs") {
           songsData = await safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=25`);
+        } else if (resultFilter === "youtube") {
+          youtubeSongsData = await safeFetch(buildAppApiUrl(`/youtube-music/search?q=${encodeURIComponent(searchTerm)}&limit=25`));
         } else if (resultFilter === "albums") {
           albumSectionResults = await searchJioSaavnAlbums(searchTerm, 20, controller.signal).catch(() => []);
         } else if (resultFilter === "artists") {
@@ -849,6 +855,30 @@ function useSearchScreenView() {
             for (const s of (songsData?.data?.results || songsData?.results || [])) {
               const song = parseBackup(s);
               if (song) mergeInto(mergedSongs, song);
+            }
+          }
+
+          const parsedYoutubeSongs: Song[] = [];
+          if (youtubeSongsData?.results && Array.isArray(youtubeSongsData.results)) {
+            for (const item of youtubeSongsData.results) {
+              const videoId = item.videoId || item.id;
+              if (videoId) {
+                const thumbs = Array.isArray(item.thumbnails) ? item.thumbnails : [];
+                const coverUrl = thumbs[0]?.url || item.thumbnail || "";
+                parsedYoutubeSongs.push({
+                  id: `youtube_${videoId}`,
+                  title: String(item.title || "").trim(),
+                  artist: item.artist || item.artists?.[0]?.name || "Unknown Artist",
+                  album: item.album?.name || item.album || "",
+                  duration: Number(item.duration_seconds || item.duration) || 0,
+                  coverUrl,
+                  genre: "YouTube Music",
+                  audioUrl: "",
+                  source: "youtube",
+                  youtubeVideoId: videoId,
+                  videoId: videoId,
+                });
+              }
             }
           }
 
@@ -868,7 +898,7 @@ function useSearchScreenView() {
           const rankedSongs = fastRank(songs);
 
           setSongResults(rankedSongs);
-          setYoutubeMusicResults([]);
+          setYoutubeMusicResults(parsedYoutubeSongs);
           setAlbumResults(albums);
           setArtistResults(artists);
           setPlaylistResults(playlists);
@@ -886,7 +916,7 @@ function useSearchScreenView() {
           const loadDiscoverySections = async () => {
             writeCache({
               songs: rankedSongs,
-              youtubeSongs: [],
+              youtubeSongs: parsedYoutubeSongs,
               albums,
               artists,
               playlists,
