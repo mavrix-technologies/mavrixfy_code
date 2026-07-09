@@ -12,7 +12,7 @@ import {
   InteractionManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -50,11 +50,6 @@ import {
   type SearchHistoryItem,
 } from "@/lib/storage";
 import AdMobNativeVideo from "@/components/AdMobNativeVideo";
-import {
-  getYouTubeMusicSearchSuggestions,
-  searchYouTubeMusic,
-  searchYouTubeMusicVideos
-} from "@/lib/youtubeMusicService";
 import { logger } from "@/lib/logger";
 
 interface PlaylistResult {
@@ -659,6 +654,9 @@ function useSearchScreenView() {
   const suggestionsClosedForQueryRef = useRef<string | null>(null);
   const appliedRouteSearchQueryRef = useRef(routeSearchQuery);
   const activeSearchAbortRef = useRef<AbortController | null>(null);
+  const lastQueryRef = useRef("");
+  const suggestionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suggestionsAbortRef = useRef<AbortController | null>(null);
   const resultsPlaylistsListRef = useRef<FlatList<PlaylistResult> | null>(null);
   const resultsAlbumsListRef = useRef<FlatList<AlbumResult> | null>(null);
   const resultsArtistsListRef = useRef<FlatList<ArtistResult> | null>(null);
@@ -702,8 +700,8 @@ function useSearchScreenView() {
     const controller = new AbortController();
     activeSearchAbortRef.current = controller;
 
-    // Check cache first (5 minute TTL)
-    const cacheKey = normalizedQuery.toLowerCase();
+    // Check cache first (5 minute TTL, specific to filter)
+    const cacheKey = `${resultFilter}:${normalizedQuery.toLowerCase()}`;
     const cached = searchCache.get(cacheKey);
     const now = Date.now();
     if (cached && (now - cached.timestamp) < 300000) { // 5 minutes
@@ -821,56 +819,54 @@ function useSearchScreenView() {
           setSearchDisplayQuery(normalizedQuery);
         }
 
-        // Fetch primary app/API sections first so the UI can settle before YouTube enrichment.
-        const [
-          globalData,
-          songsData,
-          albumSectionResults,
-          artistsData,
-          playlistsData
-        ] = await Promise.all([
-          safeFetch(`${apiUrl}api/search?query=${encodeURIComponent(searchTerm)}`),
-          safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=12`),
-          searchJioSaavnAlbums(searchTerm, 8, controller.signal),
-          safeFetch(`${apiUrl}api/search/artists?query=${encodeURIComponent(searchTerm)}&limit=8&page=1`),
-          safeFetch(`${apiUrl}api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=6`),
-        ]);
+        // Fetch only endpoints needed for the active resultFilter
+        let globalData: any = null;
+        let songsData: any = null;
+        let albumSectionResults: JioSaavnAlbumResult[] = [];
+        let artistsData: any = null;
+        let playlistsData: any = null;
+
+        if (resultFilter === "all") {
+          const [g, s] = await Promise.all([
+            safeFetch(`${apiUrl}api/search?query=${encodeURIComponent(searchTerm)}`),
+            safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=15`),
+          ]);
+          globalData = g;
+          songsData = s;
+        } else if (resultFilter === "songs") {
+          songsData = await safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=25`);
+        } else if (resultFilter === "albums") {
+          albumSectionResults = await searchJioSaavnAlbums(searchTerm, 20, controller.signal).catch(() => []);
+        } else if (resultFilter === "artists") {
+          artistsData = await safeFetch(`${apiUrl}api/search/artists?query=${encodeURIComponent(searchTerm)}&limit=20&page=1`);
+        } else if (resultFilter === "playlists") {
+          playlistsData = await safeFetch(`${apiUrl}api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=20`);
+        }
 
         if (requestIsActive()) {
           // Merge network results with catalog results
-          for (const s of (songsData?.data?.results || songsData?.results || [])) {
-            const song = parseBackup(s);
-            if (song) mergeInto(mergedSongs, song);
+          if (songsData) {
+            for (const s of (songsData?.data?.results || songsData?.results || [])) {
+              const song = parseBackup(s);
+              if (song) mergeInto(mergedSongs, song);
+            }
           }
 
-          const playlists = playlistsData?.success
-            ? mergeUniqueById([
-                ...normalizePlaylistResults(globalData?.data?.playlists?.results),
-                ...normalizePlaylistResults(playlistsData.data?.results),
-              ], 12)
-            : Array.isArray(playlistsData?.results)
-              ? mergeUniqueById([
-                  ...normalizePlaylistResults(globalData?.data?.playlists?.results),
-                  ...normalizePlaylistResults(playlistsData.results),
-                ], 12)
-              : mergeUniqueById([
-                  ...normalizePlaylistResults(globalData?.data?.playlists?.results),
-                ], 12);
+          const playlists = playlistsData
+            ? mergeUniqueById(normalizePlaylistResults(playlistsData.data?.results || playlistsData.results), 20)
+            : mergeUniqueById(normalizePlaylistResults(globalData?.data?.playlists?.results), 12);
 
-          const albums = mergeUniqueById([
-            ...normalizeAlbumResults(globalData?.data?.albums?.results),
-            ...albumSectionResults,
-          ], 12);
-          const artists = mergeUniqueById([
-            ...normalizeArtistResults(globalData?.data?.artists?.results),
-            ...normalizeArtistResults(artistsData?.data?.results),
-            ...normalizeArtistResults(artistsData?.results),
-          ], 12);
+          const albums = albumSectionResults.length > 0
+            ? mergeUniqueById(normalizeAlbumResults(albumSectionResults), 20)
+            : mergeUniqueById(normalizeAlbumResults(globalData?.data?.albums?.results), 12);
+
+          const artists = artistsData
+            ? mergeUniqueById(normalizeArtistResults(artistsData?.data?.results || artistsData?.results), 20)
+            : mergeUniqueById(normalizeArtistResults(globalData?.data?.artists?.results), 12);
 
           const songs = toFinalList(mergedSongs);
           const rankedSongs = fastRank(songs);
 
-          // Show primary results without waiting for YouTube secondary sections.
           setSongResults(rankedSongs);
           setYoutubeMusicResults([]);
           setAlbumResults(albums);
@@ -888,80 +884,16 @@ function useSearchScreenView() {
           };
 
           const loadDiscoverySections = async () => {
-            try {
-              const cachedSuggestions = latestSuggestionsRef.current;
-              const suggestionRequest =
-                cachedSuggestions?.query === normalizeText(searchTerm)
-                  ? Promise.resolve(cachedSuggestions.items)
-                  : getYouTubeMusicSearchSuggestions(searchTerm, controller.signal);
-              // react-doctor-disable-next-line react-doctor/async-defer-await -- request activity can change while these concurrent calls are in flight.
-              const [ytMusicSongs, ytMusicVideos, youtubeSuggestions] = await Promise.all([
-                searchYouTubeMusic(searchTerm, "song", 15, controller.signal),
-                searchYouTubeMusicVideos(searchTerm, 10, controller.signal),
-                suggestionRequest,
-              ]);
-
-              if (!requestIsActive()) return;
-
-              const youtubeSongs: Song[] = [];
-              const seenYtIds = new Set<string>();
-              for (const ytSong of [...ytMusicSongs, ...ytMusicVideos]) {
-                if (ytSong && !seenYtIds.has(ytSong.id)) {
-                  seenYtIds.add(ytSong.id);
-                  youtubeSongs.push(ytSong);
-                }
-              }
-
-              let enrichedRankedSongs = rankedSongs;
-              const enrichmentQueries = buildJioSaavnEnrichmentQueries(
-                searchTerm,
-                normalizeSearchSuggestionList(searchTerm, youtubeSuggestions),
-                youtubeSongs
-              );
-              if (enrichmentQueries.length > 0) {
-                const enrichmentRequests = enrichmentQueries.map((enrichmentQuery) =>
-                  safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(enrichmentQuery)}&limit=8`)
-                );
-                // react-doctor-disable-next-line react-doctor/async-defer-await -- the stale-request guard must run after this optional enrichment batch.
-                const enrichmentResults = await Promise.all(enrichmentRequests);
-                if (!requestIsActive()) return;
-
-                const enrichedSongs = rankedSongs.slice();
-                for (const suggestionData of enrichmentResults) {
-                  for (const rawSong of (suggestionData?.data?.results || suggestionData?.results || [])) {
-                    const parsedSong = parseBackup(rawSong);
-                    if (parsedSong) mergeInto(enrichedSongs, parsedSong);
-                  }
-                }
-                enrichedRankedSongs = fastRank(toFinalList(enrichedSongs));
-              }
-
-              setSongResults(enrichedRankedSongs);
-              setYoutubeMusicResults(youtubeSongs);
-              writeCache({
-                songs: enrichedRankedSongs,
-                youtubeSongs,
-                albums,
-                artists,
-                playlists,
-                timestamp: Date.now(),
-              });
-            } catch (error) {
-              if (!controller.signal.aborted) {
-                logger.warn("[Search] YouTube Music enrichment failed:", error);
-                writeCache({
-                  songs: rankedSongs,
-                  youtubeSongs: [],
-                  albums,
-                  artists,
-                  playlists,
-                  timestamp: Date.now(),
-                });
-              }
-            } finally {
-              if (activeSearchAbortRef.current === controller) {
-                activeSearchAbortRef.current = null;
-              }
+            writeCache({
+              songs: rankedSongs,
+              youtubeSongs: [],
+              albums,
+              artists,
+              playlists,
+              timestamp: Date.now(),
+            });
+            if (activeSearchAbortRef.current === controller) {
+              activeSearchAbortRef.current = null;
             }
           };
 
@@ -984,7 +916,7 @@ function useSearchScreenView() {
         activeSearchAbortRef.current = null;
       }
     }
-  }, [searchCache]);
+  }, [searchCache, resultFilter]);
 
 
 
@@ -1001,56 +933,72 @@ function useSearchScreenView() {
     setSuggestionsOpen(true);
   }, []);
 
-  useEffect(() => {
-    let isActive = true;
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
 
-    void getSearchHistory()
-      .then((items) => {
-        if (isActive) {
-          setRecentSearches(toRecentSearchItems(items));
-        }
-      })
-      .catch(() => undefined);
+      void getSearchHistory()
+        .then((items) => {
+          if (isActive) {
+            setRecentSearches(toRecentSearchItems(items));
+          }
+        })
+        .catch(() => undefined);
 
-    return () => {
-      isActive = false;
-    };
-  }, []);
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
 
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed.length < 2) {
-      suggestionsSeqRef.current += 1;
-      latestSuggestionsRef.current = null;
       setSuggestions([]);
       setSuggestionsOpen(false);
       return;
     }
 
-    const requestId = ++suggestionsSeqRef.current;
-    const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      try {
-        const list = await getYouTubeMusicSearchSuggestions(trimmed, controller.signal);
-        if (requestId === suggestionsSeqRef.current && !controller.signal.aborted) {
-          const normalizedList = normalizeSearchSuggestionList(trimmed, list);
-          const normalizedTrimmed = normalizeText(trimmed);
-          latestSuggestionsRef.current = { query: normalizeText(trimmed), items: normalizedList };
-          setSuggestions(normalizedList);
-          setSuggestionsOpen(
-            normalizedList.length > 0 && suggestionsClosedForQueryRef.current !== normalizedTrimmed
-          );
+    if (suggestionsClosedForQueryRef.current === normalizeText(trimmed)) {
+      setSuggestionsOpen(false);
+      return;
+    }
+
+    if (suggestionsTimerRef.current) {
+      clearTimeout(suggestionsTimerRef.current);
+    }
+
+    suggestionsTimerRef.current = setTimeout(() => {
+      suggestionsAbortRef.current?.abort();
+      const controller = new AbortController();
+      suggestionsAbortRef.current = controller;
+
+      fetch(
+        `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&client=firefox&q=${encodeURIComponent(
+          trimmed
+        )}`,
+        {
+          signal: controller.signal,
         }
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          logger.warn("Failed to fetch suggestions:", error);
-        }
-      }
-    }, 200);
+      )
+        .then((res) => res.json())
+        .then((data) => {
+          if (controller.signal.aborted) return;
+          if (Array.isArray(data) && Array.isArray(data[1])) {
+            const rawSuggestions = data[1].map((s) => String(s || ""));
+            const cleanSuggestions = normalizeSearchSuggestionList(trimmed, rawSuggestions);
+            setSuggestions(cleanSuggestions);
+            setSuggestionsOpen(cleanSuggestions.length > 0);
+          }
+        })
+        .catch(() => {});
+    }, 150);
 
     return () => {
-      clearTimeout(timer);
-      controller.abort();
+      if (suggestionsTimerRef.current) {
+        clearTimeout(suggestionsTimerRef.current);
+      }
+      suggestionsAbortRef.current?.abort();
     };
   }, [query]);
 
@@ -1265,29 +1213,37 @@ function useSearchScreenView() {
   }, [handleClear, resetHeaderElevation]);
 
   useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      requestSeqRef.current += 1;
+      cancelActiveSearchWork();
+      applyEmptySearchState();
+      lastQueryRef.current = "";
+      return;
+    }
+
+    if (trimmed === lastQueryRef.current) {
+      // Just filter tab changed, search immediately without debounce
+      startSearchLoading();
+      void performSearch(trimmed);
+      return;
+    }
+
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
 
-    const trimmed = query.trim();
-    if (trimmed.length < 2) {
-      requestSeqRef.current += 1;
-      activeSearchAbortRef.current?.abort();
-      activeSearchAbortRef.current = null;
-      applyEmptySearchState();
-      return;
-    }
-
     startSearchLoading();
     const searchTimer = setTimeout(() => {
+      lastQueryRef.current = trimmed;
       void performSearch(trimmed);
-    }, 300); // Increased from 150ms to 300ms for better performance
+    }, 300);
     debounceTimer.current = searchTimer;
 
     return () => {
       clearTimeout(searchTimer);
     };
-  }, [applyEmptySearchState, performSearch, query, startSearchLoading]);
+  }, [applyEmptySearchState, performSearch, query, startSearchLoading, resultFilter, cancelActiveSearchWork]);
 
   useEffect(() => {
     return cancelActiveSearchWork;

@@ -18,7 +18,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import { convertJioSaavnSong, getBestImageUrl, Song } from "@/lib/musicData";
-import { getYouTubeMusicArtist, convertYouTubeMusicTrack, upscaleYouTubeThumbnail } from "@/lib/youtubeMusicService";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import {
@@ -43,13 +42,7 @@ function pickFirst(v: string | string[] | undefined): string {
   return v ?? "";
 }
 
-function getYtImage(thumbnails?: any[]) {
-  if (!thumbnails || thumbnails.length === 0) return [];
-  return thumbnails.map((t) => ({
-    quality: "1200x1200",
-    url: t.url ? upscaleYouTubeThumbnail(t.url) : "",
-  }));
-}
+
 
 function formatFollowers(n: number | null | undefined): string {
   if (!n) return "";
@@ -104,7 +97,7 @@ function useArtistScreenView() {
   // All songs = initial topSongs + loaded extra pages
   const allSongs: Song[] = useMemo(() => {
     if (!artist) return [];
-    const isYt = artistId.startsWith("youtube_") || artistId.startsWith("UC") || artistId.length > 20;
+    const isYt = false;
     if (isYt) {
       return [...(artist.topSongs as unknown as Song[]), ...extraSongs];
     }
@@ -171,55 +164,6 @@ function useArtistScreenView() {
     void isFollowingArtist(artistId).then((v) => {
       if (!cancelled) applyArtistFollowState(v);
     });
-
-    const isYt = artistId.startsWith("youtube_") || artistId.startsWith("UC") || artistId.length > 20;
-
-    if (isYt) {
-      setHasMore(false);
-      getYouTubeMusicArtist(artistId)
-        .then((data) => {
-          if (cancelled) return;
-          if (data) {
-            const mappedTracks = (data.tracks || [])
-              .map(convertYouTubeMusicTrack)
-              .filter((t): t is Song => t !== null);
-              
-            const mappedAlbums = (data.albums || []).map((album) => ({
-              id: album.browseId,
-              name: album.title,
-              year: album.year ? Number(album.year) : undefined,
-              songCount: album.trackCount || 0,
-              url: "",
-              image: getYtImage(album.thumbnails),
-            }));
-
-            setArtist({
-              id: data.browseId,
-              name: data.name,
-              url: "",
-              image: getYtImage(data.thumbnails),
-              followerCount: data.subscribers ? Number(data.subscribers.replace(/[^0-9]/g, "")) || null : null,
-              fanCount: null,
-              isVerified: true,
-              dominantLanguage: "YouTube Music",
-              bio: data.description ? [{ text: data.description, title: "Biography" }] : [],
-              topSongs: mappedTracks as unknown as any[],
-              topAlbums: mappedAlbums as any[],
-              similarArtists: [],
-            });
-          } else {
-            setError("Artist not found");
-          }
-        })
-        .catch(() => {
-          if (!cancelled) setError("Could not load YouTube Music artist.");
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-      return;
-    }
-
     getArtistDetails(artistId)
       .then((data) => {
         if (cancelled) return;
@@ -312,7 +256,7 @@ function useArtistScreenView() {
   }, [routerPush]);
 
   const handleAlbumPress = useCallback((album: JioSaavnArtistAlbum) => {
-    const isYt = album.id.startsWith("MPREI_") || album.id.startsWith("PL") || album.id.startsWith("VL") || String(album.id).length > 20;
+    const isYt = false;
     routerPush({
       pathname: "/playlist/[id]",
       params: {

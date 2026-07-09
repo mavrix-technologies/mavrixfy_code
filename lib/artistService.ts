@@ -57,7 +57,7 @@ const ARTIST_CACHE_PREFIX = "@mavrixfy_artist";
 const ARTIST_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const FEATURED_ARTISTS_CACHE_KEY = "@mavrixfy_featured_artists_v5";
 const FEATURED_ARTISTS_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
-const FEATURED_ARTIST_QUERY_LIMIT = 40;
+const FEATURED_ARTIST_QUERY_LIMIT = 12;
 const FEATURED_ARTIST_SHOWCASE_LIMIT = 12;
 const FEATURED_ARTIST_ROTATION_WINDOW_MS = 6 * 60 * 60 * 1000;
 const TIMEOUT_MS = 6000;
@@ -506,12 +506,7 @@ async function fetchFeaturedArtists(): Promise<ArtistCard[]> {
 
 export async function getArtistDetails(id: string): Promise<JioSaavnArtist | null> {
   const cached = await getCachedArtist(id);
-  if (cached) {
-    void fetchArtistRaw(id).then((fresh) => {
-      if (fresh) void setCachedArtist(id, fresh);
-    });
-    return cached;
-  }
+  if (cached) return cached;
   const fresh = await fetchArtistRaw(id);
   if (fresh) void setCachedArtist(id, fresh);
   return fresh;
@@ -520,9 +515,6 @@ export async function getArtistDetails(id: string): Promise<JioSaavnArtist | nul
 export async function getFeaturedArtists(): Promise<ArtistCard[]> {
   const cached = await getCachedFeaturedArtists();
   if (cached && cached.length > 0) {
-    void fetchFeaturedArtists().then((fresh) => {
-      if (fresh.length > 0) void setCachedFeaturedArtists(fresh);
-    });
     return buildFeaturedArtistShowcase(cached);
   }
   const fresh = await fetchFeaturedArtists();

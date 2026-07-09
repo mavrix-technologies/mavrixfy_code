@@ -13,11 +13,10 @@ export interface Song {
   language?: string;
   popularity?: number;
   source?: "jiosaavn" | "local" | "youtube";
-  playCount?: number; // JioSaavn real play count
+  playCount?: number;
   videoId?: string;
   youtubeVideoId?: string;
   youtubeVisualVideoId?: string;
-  youtubeVideoType?: string;
   youtubeNativeAudio?: boolean;
   youtubeAudioExpiresAt?: number;
   playbackHeaders?: Record<string, string>;

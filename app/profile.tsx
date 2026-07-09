@@ -21,6 +21,8 @@ import { setMiniPlayerSecondaryControlPreference } from "@/lib/miniPlayerControl
 import { getSettings, saveSettings, type AppSettings } from "@/lib/storage";
 import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
 import { safeGoBack } from "@/utils/navigation";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { clearJioSaavnPlaylistCache } from "@/lib/jioSaavnService";
 
 const QUALITY_OPTIONS: { label: string; value: "low" | "medium" | "high" }[] = [
   { label: "Low", value: "low" },
@@ -306,6 +308,43 @@ function LibrarySettingsSection({ routerPush }: { routerPush: RouterPush }) {
   );
 }
 
+function CacheSettingsSection({
+  onClearCache,
+  onClearSearchHistory,
+  onClearRecentlyPlayed,
+}: {
+  onClearCache: () => void;
+  onClearSearchHistory: () => void;
+  onClearRecentlyPlayed: () => void;
+}) {
+  return (
+    <>
+      <Text style={styles.sectionTitle}>Cache & Storage</Text>
+      <View style={styles.rowsSurface}>
+        <SettingsRow
+          icon="trash-bin-outline"
+          title="Clear App Cache"
+          subtitle="Clear cached images and API responses"
+          onPress={onClearCache}
+          first
+        />
+        <SettingsRow
+          icon="time-outline"
+          title="Clear Search History"
+          subtitle="Clear all past search terms"
+          onPress={onClearSearchHistory}
+        />
+        <SettingsRow
+          icon="play-back-outline"
+          title="Clear Recently Played"
+          subtitle="Clear 'Jump Back In' list on home screen"
+          onPress={onClearRecentlyPlayed}
+        />
+      </View>
+    </>
+  );
+}
+
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -362,6 +401,78 @@ export default function ProfileScreen() {
     ]);
   }, [logout, routerReplace]);
 
+  const handleClearCache = useCallback(() => {
+    Alert.alert(
+      "Clear App Cache",
+      "Are you sure you want to clear cached images and API response data? This will not delete your downloads or liked songs.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await clearJioSaavnPlaylistCache().catch(() => {});
+              await AsyncStorage.multiRemove([
+                "@mavrixfy_home_public_playlists_v1",
+                "@mavrixfy_home_public_playlists_time_v1",
+              ]).catch(() => {});
+              await Image.clearDiskCache().catch(() => {});
+              Image.clearMemoryCache();
+              Alert.alert("Success", "Cache cleared successfully.");
+            } catch (err) {
+              Alert.alert("Error", "Failed to clear cache.");
+            }
+          },
+        },
+      ]
+    );
+  }, []);
+
+  const handleClearSearchHistory = useCallback(() => {
+    Alert.alert(
+      "Clear Search History",
+      "Are you sure you want to delete all search history?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await AsyncStorage.setItem("@mavrixfy_search_history", JSON.stringify([]));
+              Alert.alert("Success", "Search history cleared successfully.");
+            } catch (err) {
+              Alert.alert("Error", "Failed to clear search history.");
+            }
+          },
+        },
+      ]
+    );
+  }, []);
+
+  const handleClearRecentlyPlayed = useCallback(() => {
+    Alert.alert(
+      "Clear Recently Played",
+      "Are you sure you want to clear your 'Jump Back In' recently played history?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await AsyncStorage.setItem("@mavrixfy_recently_played", JSON.stringify([]));
+              Alert.alert("Success", "Recently played history cleared.");
+            } catch (err) {
+              Alert.alert("Error", "Failed to clear recently played history.");
+            }
+          },
+        },
+      ]
+    );
+  }, []);
+
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
       {/* Header */}
@@ -403,6 +514,11 @@ export default function ProfileScreen() {
           routerReplace={routerReplace}
         />
         <LibrarySettingsSection routerPush={routerPush} />
+        <CacheSettingsSection
+          onClearCache={handleClearCache}
+          onClearSearchHistory={handleClearSearchHistory}
+          onClearRecentlyPlayed={handleClearRecentlyPlayed}
+        />
       </ScrollView>
     </View>
   );

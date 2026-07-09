@@ -61,14 +61,6 @@ import {
   loadNotifications,
 } from "@/stores/notificationStore";
 import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistService";
-import {
-  clearYouTubeMusicCache,
-  getHomeYouTubeMusicCategories,
-  upscaleYouTubeThumbnail,
-  YouTubeMusicHomeCategoryData,
-  YouTubeMusicPlaylistCard,
-  type YouTubeMusicPlaylistKind,
-} from "@/lib/youtubeMusicService";
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
 import AppTopHeader, {
@@ -104,7 +96,7 @@ type HomeCategoryItem = {
   source: HomeContentSource;
   imageUrl?: string;
   url?: string;
-  playlistKind?: YouTubeMusicPlaylistKind;
+  playlistKind?: string;
   playlistAuthor?: string;
   itemType?: "playlist" | "song";
   youtubeVideoId?: string;
@@ -270,44 +262,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isRecentYouTubeSong(song: Partial<Song>): boolean {
-  return Boolean(
-    song.source === "youtube" ||
-      String(song.id || "").startsWith("youtube_") ||
-      song.youtubeVideoId ||
-      song.videoId
-  );
-}
-
-function getYouTubeHomeVideoId(item: HomeCategoryItem): string {
-  const explicitId = normalizeId(item.youtubeVideoId);
-  if (explicitId) return explicitId;
-
-  const id = normalizeId(item.id);
-  return id.startsWith("youtube_") ? id.slice("youtube_".length) : "";
-}
-
-function toYouTubeHomePlayableSong(
-  item: HomeCategoryItem,
-  imageUrl: string,
-  categoryTitle: string
-): Song | null {
-  const videoId = getYouTubeHomeVideoId(item);
-  if (!videoId) return null;
-
-  return {
-    id: `youtube_${videoId}`,
-    title: item.name || "Unknown Song",
-    artist: item.playlistAuthor || "Unknown Artist",
-    album: categoryTitle,
-    duration: Number(item.duration || 0),
-    coverUrl: imageUrl,
-    genre: categoryTitle,
-    audioUrl: "",
-    source: "youtube",
-    videoId,
-    youtubeVideoId: videoId,
-    youtubeVisualVideoId: videoId,
-  };
+  return false;
 }
 
 function getRecentSongAudioUrl(sourceSong: Partial<Song>): string {
@@ -449,43 +404,6 @@ function toJioSaavnHomeCategoryItem(item: HomeJioSaavnCategoryData["results"][nu
   };
 }
 
-function toYouTubeHomeCategoryItem(item: YouTubeMusicPlaylistCard): HomeCategoryItem {
-  const imageUrl = item.imageUrl ? upscaleYouTubeThumbnail(item.imageUrl, HOME_CARD_IMAGE_SOURCE_SIZE) : "";
-  const author = item.author?.trim();
-  const playlistAuthor = author && author.toLowerCase() !== "youtube music" ? author : undefined;
-  return {
-    id: item.id,
-    name: item.name,
-    image: imageUrl ? [{ quality: `${HOME_CARD_IMAGE_SOURCE_SIZE}x${HOME_CARD_IMAGE_SOURCE_SIZE}`, url: imageUrl }] : [],
-    imageUrl,
-    songCount: Number(item.songCount || 0),
-    source: "youtube",
-    playlistKind: item.kind,
-    playlistAuthor,
-    itemType: item.itemType,
-    youtubeVideoId: item.videoId,
-    duration: item.duration,
-  };
-}
-
-function toYouTubeHomeCategoryRows(categories: YouTubeMusicHomeCategoryData[]): HomeCategoryData[] {
-  return mapFilter(
-    categories,
-    (category) => {
-      const results = category.results.map(toYouTubeHomeCategoryItem);
-      return results.length > 0
-        ? {
-            id: category.id,
-            title: category.title,
-            ...(category.eyebrow ? { eyebrow: category.eyebrow } : {}),
-            results,
-          }
-        : null;
-    },
-    (category): category is HomeCategoryData => Boolean(category)
-  );
-}
-
 function getQuickPickSongsFromHomeRows(rows: HomeCategoryData[], seed: number): Song[] {
   const songs: Song[] = [];
   const seen = new Set<string>();
@@ -496,14 +414,7 @@ function getQuickPickSongsFromHomeRows(rows: HomeCategoryData[], seed: number): 
       const imageUrl = getHomeCategoryItemImageUrl(item);
       let song: Song | null = null;
 
-      const videoId = getYouTubeHomeVideoId(item);
-      if (videoId) {
-        song = toYouTubeHomePlayableSong(
-          item,
-          imageUrl ? upscaleYouTubeThumbnail(imageUrl, HOME_CARD_IMAGE_SOURCE_SIZE) : "",
-          row.title
-        );
-      } else if (item.id && item.name) {
+      if (item.id && item.name) {
         song = {
           id: item.id,
           title: item.name,
@@ -1199,6 +1110,14 @@ function useHomeScreenInnerView() {
     useCallback(() => {
       setIsHomeScreenFocused(true);
 
+      getRecentlyPlayed()
+        .then((recent) => {
+          const trimmed = recent.slice(0, 8);
+          setRecentlyPlayed(trimmed);
+          HOME_SESSION_CACHE.recentlyPlayed = trimmed;
+        })
+        .catch(() => {});
+
       return () => {
         setIsHomeScreenFocused(false);
       };
@@ -1253,12 +1172,8 @@ function useHomeScreenInnerView() {
   const [newReleaseSongs, setNewReleaseSongs] = useState<Song[]>(
     HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.newReleaseSongs : []
   );
-  const [youtubeHomeCategories, setYoutubeHomeCategories] = useState<HomeCategoryData[]>(
-    HOME_SESSION_CACHE.hydrated ? HOME_SESSION_CACHE.youtubeHomeCategories : []
-  );
-  const [isLoadingYoutubeHomeCategories, setIsLoadingYoutubeHomeCategories] = useState(
-    !HOME_SESSION_CACHE.hydrated && HOME_SESSION_CACHE.youtubeHomeCategories.length === 0
-  );
+  const [youtubeHomeCategories, setYoutubeHomeCategories] = useState<HomeCategoryData[]>([]);
+  const [isLoadingYoutubeHomeCategories, setIsLoadingYoutubeHomeCategories] = useState(false);
   const [loading, setLoading] = useState(!HOME_SESSION_CACHE.hydrated);
   const [homeFeedState, setHomeFeedState] = useState<HomeFeedState>(
     hasHomeContent(HOME_SESSION_CACHE) ? "ready" : "empty"
@@ -1439,49 +1354,8 @@ function useHomeScreenInnerView() {
           "Home new release songs timeout"
         );
 
-        const youtubeHomeCategoriesPromise = withPromiseTimeout(
-          getHomeYouTubeMusicCategories({ limitPerCategory: 8 }),
-          8000,
-          "YouTube home categories timeout"
-        ).catch((err) => {
-          logger.warn("[Home] YouTube home categories fetch failed or timed out:", err);
-          return [] as YouTubeMusicHomeCategoryData[];
-        });
-
-        const youtubeHomeCategoriesResultPromise = youtubeHomeCategoriesPromise
-          .then(async (categories) => {
-            if (loadId !== latestLoadIdRef.current) {
-              return { status: "fulfilled" as const, value: categories };
-            }
-
-            const nextRows = toYouTubeHomeCategoryRows(categories);
-            if (nextRows.length === 0) {
-              setYoutubeHomeCategories([]);
-              HOME_SESSION_CACHE.youtubeHomeCategories = [];
-            } else {
-              for (let index = 0; index < nextRows.length; index += 1) {
-                if (loadId !== latestLoadIdRef.current) {
-                  return { status: "fulfilled" as const, value: nextRows };
-                }
-
-                const partialRows = nextRows.slice(0, index + 1);
-                setYoutubeHomeCategories(partialRows);
-                HOME_SESSION_CACHE.youtubeHomeCategories = partialRows;
-                markReadyIfContentVisible();
-
-                if (index < nextRows.length - 1) {
-                  await sleep(HOME_YOUTUBE_ROW_REVEAL_DELAY_MS);
-                }
-              }
-            }
-
-            setIsLoadingYoutubeHomeCategories(false);
-            if (nextRows.length > 0) {
-              markReadyIfContentVisible();
-            }
-            return { status: "fulfilled" as const, value: nextRows };
-          })
-          .catch((reason) => ({ status: "rejected" as const, reason }));
+        const youtubeHomeCategoriesPromise = Promise.resolve([]);
+        const youtubeHomeCategoriesResultPromise = Promise.resolve({ status: "fulfilled" as const, value: [] });
 
         const publicPlaylistsResultPromise = publicPlaylistsPromise
           .then((nextPublicPlaylists) => {
@@ -1699,7 +1573,6 @@ function useHomeScreenInnerView() {
       resetHomeState();
       await Promise.all([
         clearJioSaavnPlaylistCache().catch(() => {}),
-        clearYouTubeMusicCache().catch(() => {}),
       ]);
       const recommendationPromise = shouldUseRecommendationFeed
         ? loadRecommendationFeed({ forceRefresh: true })
@@ -2344,61 +2217,21 @@ function useHomeScreenInnerView() {
       item,
       categoryId,
       categoryTitle,
-      categoryItems,
     }: {
       item: HomeCategoryData["results"][number];
       categoryId: string;
       categoryTitle: string;
       categoryItems?: HomeCategoryData["results"];
     }) => {
-      const rawImageUrl = getHomeCategoryItemImageUrl(item);
-      const isYouTube = item.source === "youtube";
-      const imageUrl = isYouTube && rawImageUrl
-        ? upscaleYouTubeThumbnail(rawImageUrl, HOME_CARD_IMAGE_SOURCE_SIZE)
-        : rawImageUrl;
-      const isYouTubeSong = isYouTube && item.itemType === "song" && Boolean(getYouTubeHomeVideoId(item));
-      const youtubeMeta = isYouTubeSong
-        ? item.playlistAuthor || categoryTitle
-        : item.playlistAuthor || (item.songCount > 0 ? `${item.songCount} songs` : categoryTitle);
-      const metaText = isYouTube
-        ? youtubeMeta
-        : item.songCount > 0
-          ? `${item.songCount} songs`
-          : categoryTitle;
+      const imageUrl = getHomeCategoryItemImageUrl(item);
+      const isYouTube = false;
+      const metaText = item.songCount > 0
+        ? `${item.songCount} songs`
+        : categoryTitle;
       return (
         <Pressable
           style={({ pressed }) => [styles.rectCard, pressed && styles.cardPressed]}
           onPress={() => {
-            if (isYouTube) {
-              if (isYouTubeSong) {
-                const song = toYouTubeHomePlayableSong(item, imageUrl, categoryTitle);
-                if (song) {
-                  const playableQueue = mapFilter(
-                    categoryItems && categoryItems.length > 0 ? categoryItems : [item],
-                    (queueItem) => {
-                      if (queueItem.source !== "youtube" || queueItem.itemType !== "song") return null;
-                      const queueRawImageUrl = getHomeCategoryItemImageUrl(queueItem);
-                      const queueImageUrl = queueRawImageUrl
-                        ? upscaleYouTubeThumbnail(queueRawImageUrl, HOME_CARD_IMAGE_SOURCE_SIZE)
-                        : "";
-                      return toYouTubeHomePlayableSong(queueItem, queueImageUrl, categoryTitle);
-                    },
-                    (queueSong): queueSong is Song => Boolean(queueSong)
-                  );
-                  const selectedSong = playableQueue.find((queueSong) => queueSong.id === song.id) || song;
-                  playSong(selectedSong, playableQueue.length > 0 ? playableQueue : [selectedSong]);
-                  routerPush("/player");
-                  return;
-                }
-              }
-              categoryCardCallbacks.openYouTubeMusicPlaylist({
-                id: item.id,
-                name: item.name,
-                imageUrl,
-                songCount: Number(item.songCount || 0),
-              });
-              return;
-            }
             categoryCardCallbacks.openJioSaavnPlaylist({
               id: item.id,
               name: item.name,

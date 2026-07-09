@@ -5,7 +5,6 @@ const API_CONFIG = {
   appBaseUrl: "https://mavrixfy-api-drab.vercel.app",
 } as const;
 
-export const PRODUCTION_YOUTUBE_MUSIC_API_URL = "https://mavrixfy-api-drab.vercel.app/api/youtube-music";
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
@@ -85,35 +84,8 @@ function isPrivateDevelopmentApiUrl(value: string): boolean {
   }
 }
 
-function getYouTubeMusicBaseUrl(): string {
-  const envUrl = process.env.EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL?.trim();
-  
-  if (envUrl) {
-    const normalizedEnvUrl = normalizeBaseUrl(envUrl);
-
-    if (!__DEV__ && isPrivateDevelopmentApiUrl(normalizedEnvUrl)) {
-      logger.warn(
-        "[YouTube Music Config] Ignoring private development API URL in release build. Using production proxy."
-      );
-      return normalizeBaseUrl(PRODUCTION_YOUTUBE_MUSIC_API_URL);
-    }
-
-    return normalizedEnvUrl;
-  }
-
-  // No environment variable set - use production as last resort
-  logger.warn(
-    "[YouTube Music Config] No EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL set. Using production YouTube Music proxy."
-  );
-  return normalizeBaseUrl(PRODUCTION_YOUTUBE_MUSIC_API_URL);
-}
-
 export function getMusicApiUrl(): string {
   return `${SONG_API_BASE_URL}/`;
-}
-
-export function getYouTubeMusicApiUrl(): string {
-  return `${getYouTubeMusicBaseUrl()}/`;
 }
 
 export function getApiUrl(): string {

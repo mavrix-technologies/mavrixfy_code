@@ -12,10 +12,6 @@ import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFro
 import { logger } from "@/lib/logger";
 import * as ExpoAvPlayer from "@/lib/expoAvPlayer";
 import { searchSong } from "@/lib/song-matcher";
-import {
-  getYouTubeAudioStreamForPlayback,
-  reportYouTubeMusicPlaybackFailure,
-} from "@/lib/youtubeMusicService";
 import { prefetchNextSongs, shouldPrefetch, clearPrefetchCache } from "@/lib/prefetchQueue";
 import {
   beginPlaybackTransaction,
@@ -371,13 +367,10 @@ function resolveAudioUrl(source: SongPlaybackSource | null | undefined): string 
 }
 
 function isYouTubeSource(song: Song | null | undefined): boolean {
-  return Boolean(
-    song &&
-      (song.source === "youtube" ||
-        song.id?.startsWith("youtube_") ||
-        song.id?.startsWith("yt:") ||
-        song.youtubeVideoId)
-  );
+  if (!song) return false;
+  if (song.source === "youtube") return true;
+  const id = song.id || "";
+  return id.startsWith("youtube_") || id.startsWith("yt:") || song.youtubeVideoId !== undefined || song.videoId !== undefined;
 }
 
 function extractYouTubeVideoId(song: Song | null | undefined): string {
@@ -627,50 +620,17 @@ async function resolveJioSaavnFallbackForYouTubeSong(song: Song, signal: AbortSi
 }
 
 async function resolveYouTubeTrackForNativePlayback(song: Song): Promise<Song | null> {
-  const videoId = extractYouTubeVideoId(song);
-  if (!videoId) return null;
-
-  const timeout = createPlaybackTimeoutSignal(YOUTUBE_NATIVE_STREAM_TIMEOUT_MS);
-
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
   try {
-    // 1. Try YouTube stream resolution directly FIRST for instant playback
-    const stream = await getYouTubeAudioStreamForPlayback(videoId, song.title, song.artist, timeout.signal);
-
-    logger.info(`[NativeResolve] Got stream response for ${videoId}`, {
-      hasStream: !!stream,
-      hasUrl: !!stream?.url,
-      url: stream?.url,
-      urlTrusted: stream?.url ? isTrustedNativeAudioUrl(stream.url) : false,
-    });
-
-    if (stream?.url && isTrustedNativeAudioUrl(stream.url)) {
-      logger.info(`[NativeResolve] Stream resolved for ${videoId} - URL: ${stream.url}`);
-      return {
-        ...song,
-        audioUrl: stream.url,
-        downloadUrl: undefined,
-        playbackHeaders: stream.headers && Object.keys(stream.headers).length > 0 ? stream.headers : undefined,
-        duration: song.duration || stream.duration || 0,
-        youtubeNativeAudio: true,
-        youtubeAudioExpiresAt: stream.expiresAt || Date.now() + RESOLVED_NATIVE_AUDIO_TTL_MS,
-        youtubeVideoId: videoId,
-        source: "youtube",
-      };
-    }
-
-    // 2. ONLY if direct YouTube resolution returned no stream, attempt JioSaavn fallback
-    logger.warn(`[NativeResolve] Direct YouTube stream resolution failed for ${videoId}, trying JioSaavn fallback...`);
-    const fallbackSong = await resolveJioSaavnFallbackForYouTubeSong(song, timeout.signal);
-    if (fallbackSong) return fallbackSong;
-
+    const res = await resolveJioSaavnFallbackForYouTubeSong(song, controller.signal);
+    return res;
   } catch (err) {
-    logger.warn("[NativeResolve] Stream request failed", { videoId, error: err });
+    logger.error("[resolveYouTubeTrackForNativePlayback] Error resolving fallback:", err);
+    return null;
   } finally {
-    timeout.cleanup();
+    clearTimeout(timer);
   }
-
-  logger.error("[NativeResolve] Could not resolve YouTube stream", { videoId, songId: song.id });
-  return null;
 }
 
 
@@ -2432,105 +2392,8 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   }, [applyNativeTrackIndex]);
 
   const retryYouTubePlaybackAfterFailure = useCallback(async (event: any): Promise<boolean> => {
-    const failedSong = currentSongRef.current;
-    if (!failedSong || !TrackPlayer || !setupPlayer || !isYouTubeSource(failedSong)) return false;
-
-    const videoId = extractYouTubeVideoId(failedSong);
-    if (!videoId) return false;
-
-    const songId = String(failedSong.id || videoId);
-    const previousRecovery = nativePlaybackRecoveryRef.current;
-    const attempts =
-      previousRecovery?.songId === songId && Date.now() - previousRecovery.lastAt < 30000
-        ? previousRecovery.attempts + 1
-        : 1;
-
-    nativePlaybackRecoveryRef.current = {
-      songId,
-      attempts,
-      lastAt: Date.now(),
-    };
-
-    if (attempts > 2) {
-      logger.warn("[Player] YouTube playback recovery attempts exhausted", { songId, videoId });
-      return false;
-    }
-
-    const message = readNonEmptyString(event?.message || event?.error || event?.code);
-    await reportYouTubeMusicPlaybackFailure({
-      videoId,
-      code: readNonEmptyString(event?.code) || undefined,
-      status: Number(event?.status) || (message.includes("403") ? 403 : undefined),
-      message: message || "Native playback error",
-      platform: Platform.OS,
-    });
-
-    try {
-      setPlaybackLoading(true);
-      updatePlaybackEngineSnapshot({ isLoading: true, isBuffering: true });
-
-      const refreshedSong = await resolveYouTubeTrackForNativePlayback(stripTransientYouTubeAudioUrl(failedSong));
-      if (!refreshedSong?.audioUrl) return false;
-
-      const currentQueue: Song[] = queueRef.current.length > 0 ? queueRef.current : [failedSong];
-      const activeIndex = Math.max(
-        0,
-        Math.min(
-          queueIndexRef.current,
-          Math.max(0, currentQueue.length - 1)
-        )
-      );
-      const nextQueue: Song[] = currentQueue.map((song, index): Song =>
-        index === activeIndex
-          ? {
-              ...song,
-              ...refreshedSong,
-              id: song.id,
-              title: refreshedSong.title || song.title,
-              artist: refreshedSong.artist || song.artist,
-            }
-          : song
-      );
-      const nextActiveSong = nextQueue[activeIndex];
-      if (!nextActiveSong) return false;
-      const preloadEnd = Math.min(nextQueue.length, activeIndex + PRELOAD_QUEUE_SIZE);
-      const entries = await resolveNativeTrackEntries(nextQueue.slice(activeIndex, preloadEnd), activeIndex);
-      const targetNativeIndex = entries.findIndex((entry) => entry.appIndex === activeIndex);
-      if (targetNativeIndex < 0 || entries.length === 0) return false;
-
-      queueRef.current = nextQueue;
-      originalQueueRef.current = nextQueue;
-      currentSongRef.current = nextActiveSong;
-      setQueue(nextQueue);
-      setSourceQueue(nextQueue);
-      setCurrentSong(nextActiveSong);
-      setQueueIndex(activeIndex);
-      queueIndexRef.current = activeIndex;
-      nativeQueueAppIndicesRef.current = entries.map((entry) => entry.appIndex);
-
-      await rebuildNativeQueue(entries.map((entry) => entry.track), targetNativeIndex, true);
-
-      setPlaybackIntent(true);
-      setPlaybackLoading(false);
-      setRuntimePlaybackStateSnapshot(State.Playing ?? "playing");
-      updatePlaybackEngineSnapshot({
-        currentSong: nextActiveSong,
-        queue: nextQueue,
-        sourceQueue: nextQueue,
-        queueIndex: activeIndex,
-        desiredPlayState: true,
-        isLoading: false,
-        isBuffering: false,
-      });
-
-      return true;
-    } catch (error) {
-      logger.warn("[Player] YouTube playback recovery failed", error);
-      return false;
-    } finally {
-      setPlaybackLoading(false);
-    }
-  }, [PRELOAD_QUEUE_SIZE]);
+    return false;
+  }, []);
   retryYouTubePlaybackAfterFailureRef.current = retryYouTubePlaybackAfterFailure;
 
   const handleNativePlaybackError = useCallback((event: any) => {
@@ -2927,16 +2790,10 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
           return;
         }
 
-        // Resolve playable URLs before handing items to TrackPlayer.
-        const preloadCount = isYouTubeSource(targetSong)
-          ? Math.min(playableQueue.length, targetIndex + 1 + YOUTUBE_UPCOMING_NATIVE_PRELOAD_SIZE)
-          : Math.max(
-              Math.min(playableQueue.length, PRELOAD_QUEUE_SIZE),
-              targetIndex + 1
-            );
-        // react-doctor-disable-next-line react-doctor/async-defer-await -- requestId can become stale while resolving native tracks, so the guard below must run after this await.
-        const initialEntries = await resolveNativeTrackEntries(playableQueue.slice(0, preloadCount), 0);
+        // Resolve only the target song first to ensure instant playback response
+        const initialEntries = await resolveNativeTrackEntries([targetSong], targetIndex);
         const targetNativeIndex = initialEntries.findIndex((entry) => entry.appIndex === targetIndex);
+        const preloadCount = targetIndex + 1;
 
         if (requestId !== playRequestIdRef.current) {
           return;

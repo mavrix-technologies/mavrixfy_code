@@ -56,11 +56,7 @@ export default function DownloadButton({
   showLabel = false,
 }: DownloadButtonProps) {
   const { downloadSong, removeDownload } = useDownloads();
-  const isYouTube =
-    song.source === 'youtube' ||
-    song.id?.startsWith('youtube_') ||
-    song.id?.startsWith('yt:') ||
-    Boolean(song.youtubeVideoId);
+  const isYouTube = false;
   const [isPreparing, setIsPreparing] = useState(false);
   const download = useSongDownload(song.id);
 

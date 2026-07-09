@@ -43,7 +43,6 @@ import { sortedCopy } from "@/lib/arrayUtils";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { getJioSaavnAlbumDetails, getJioSaavnPlaylistDetails } from "@/lib/jioSaavnService";
-import { getYouTubeMusicPlaylist, getYouTubeMusicAlbum, convertYouTubeMusicTrack, upscaleYouTubeThumbnail } from "@/lib/youtubeMusicService";
 import { useAuth } from "@/contexts/AuthContext";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
@@ -89,7 +88,7 @@ function usePlaylistScreenView() {
 
   const playlistId       = pickFirstParam(params.id).trim();
   const isAlbumSource    = pickFirstParam(params.album) === "true";
-  const isYouTubeSource  = pickFirstParam(params.youtube) === "true";
+  const isYouTubeSource  = false;
   const isJioSaavnSource = (pickFirstParam(params.jiosaavn) === "true" || isAlbumSource) && !isYouTubeSource;
   const isFirestoreSource = pickFirstParam(params.firestore) === "true";
   const sourceLink       = pickFirstParam(params.link).trim();
@@ -281,35 +280,6 @@ function usePlaylistScreenView() {
             if (playlist) applyFirestorePlaylistData(playlist);
             else if (!hasPrefilledHeader) markPlaylistNotFound();
             else markPlaylistLoadError("Playlist tracks could not load right now.");
-          }
-          return;
-        }
-        if (isYouTubeSource) {
-          const data = isAlbumSource
-            ? await getYouTubeMusicAlbum(playlistId)
-            : await getYouTubeMusicPlaylist(playlistId);
-          if (!cancelled) {
-            if (data) {
-              setPlaylistName(data.title);
-              const cover = data.thumbnails && data.thumbnails.length > 0
-                ? upscaleYouTubeThumbnail(sortedCopy(data.thumbnails, (a, b) => {
-                    const left = Number(a?.width || 0) * Number(a?.height || 0);
-                    const right = Number(b?.width || 0) * Number(b?.height || 0);
-                    return right - left;
-                  })[0]?.url || "")
-                : "";
-              setPlaylistCover(cover);
-              const description = ("description" in data && typeof data.description === "string") ? data.description : `${data.trackCount || data.tracks?.length || 0} tracks`;
-              setPlaylistDescription(description);
-              const finalSongs = (data.tracks || [])
-                .map(convertYouTubeMusicTrack)
-                .filter((s): s is Song => s !== null);
-              setSongs(finalSongs);
-            } else if (!hasPrefilledHeader) {
-              markPlaylistNotFound();
-            } else {
-              markPlaylistLoadError("YouTube Music tracks could not load right now.");
-            }
           }
           return;
         }

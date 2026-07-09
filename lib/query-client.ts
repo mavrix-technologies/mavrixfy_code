@@ -12,10 +12,7 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Gets the base URL for the Express API server (e.g., "http://localhost:3000")
- * @returns {string} The API base URL
- */
+
 export function getApiUrl(): string {
   return getMusicApiUrl();
 }

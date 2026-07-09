@@ -21,7 +21,7 @@
       },
       "env": {
         "NODE_ENV": "production",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -42,7 +42,7 @@
         "EXPO_NO_FLIPPER": "1",
         "EXPO_NO_CLIENT_ENV_VARS": "1",
         "EXPO_NO_DOTENV": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -62,7 +62,7 @@
         "EXPO_NO_FLIPPER": "1",
         "EXPO_NO_CLIENT_ENV_VARS": "1",
         "EXPO_NO_DOTENV": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -82,7 +82,7 @@
         "EXPO_NO_FLIPPER": "1",
         "EXPO_NO_CLIENT_ENV_VARS": "1",
         "EXPO_NO_DOTENV": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -105,7 +105,7 @@
         "EAS_NO_VCS": "1",
         "EXPO_NO_FLIPPER": "1",
         "EXPO_NO_CLIENT_ENV_VARS": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -119,7 +119,7 @@
       "env": {
         "NODE_ENV": "production",
         "EXPO_USE_UPDATES": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -135,7 +135,7 @@
         "EXPO_USE_UPDATES": "1",
         "EXPO_NO_FLIPPER": "1",
         "EXPO_NO_CLIENT_ENV_VARS": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -152,7 +152,7 @@
         "EXPO_USE_UPDATES": "1",
         "EAS_NO_VCS": "1",
         "SKIP_PATCH_PACKAGE": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -165,7 +165,7 @@
       "autoIncrement": true,
       "env": {
         "NODE_ENV": "production",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -179,7 +179,7 @@
       "env": {
         "NODE_ENV": "production",
         "EXPO_NO_DOTENV": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -196,7 +196,7 @@
         "EXPO_NO_DOTENV": "1",
         "EXPO_NO_CLIENT_ENV_VARS": "1",
         "EXPO_NO_FLIPPER": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -212,7 +212,7 @@
         "NODE_ENV": "production",
         "EXPO_USE_UPDATES": "1",
         "EXPO_NO_FLIPPER": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -228,7 +228,7 @@
         "NODE_ENV": "production",
         "EXPO_USE_UPDATES": "1",
         "EXPO_NO_FLIPPER": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
@@ -246,7 +246,7 @@
         "EXPO_NO_FLIPPER": "1",
         "EXPO_NO_CLIENT_ENV_VARS": "1",
         "EXPO_NO_DOTENV": "1",
-        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api.vercel.app/api/youtube-music",
+        "EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL": "https://mavrixfy-api-drab.vercel.app/api/youtube-music",
         "EXPO_PUBLIC_MUSIC_API_DOMAIN": "mavrixfy-song-api.vercel.app",
         "EXPO_PUBLIC_APP_API_URL": "https://mavrixfy-song-api.vercel.app"
       }
