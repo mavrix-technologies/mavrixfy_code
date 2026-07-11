@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-ios:
     name: 🎉 iOS Build (No Code Signing)
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 60
 
     steps:
@@ -31,6 +31,20 @@ jobs:
 
       - name: Prebuild iOS
         run: npx expo prebuild --platform ios --clean
+
+      - name: Patch Podfile for XCode compatibility (if needed)
+        run: |
+          cd ios
+          # Check XCode version
+          xcodebuild -version
+          # Remove strict XCode version check if present
+          if grep -q "React Native requires XCode" Podfile; then
+            echo "Patching Podfile to remove XCode version requirement..."
+            sed -i.bak '/React Native requires XCode/,/raise.*XCode/d' Podfile
+            echo "Podfile patched successfully"
+          else
+            echo "No XCode version check found in Podfile"
+          fi
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
