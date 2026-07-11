@@ -20,7 +20,7 @@
     "update:preview": "npx eas update --branch preview",
     "firestore:deploy:indexes": "npx firebase-tools deploy --only firestore:indexes",
     "firestore:deploy:rules": "npx firebase-tools deploy --only firestore:rules",
-    "postinstall": "patch-package",
+    "postinstall": "[ -d patches ] && [ \"$(ls -A patches 2>/dev/null)\" ] && patch-package || echo 'No patches to apply'",
     "doctor": "npx react-doctor@latest"
   },
   "dependencies": {
