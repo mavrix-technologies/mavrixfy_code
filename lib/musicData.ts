@@ -83,14 +83,10 @@ function normalizeJioSaavnImageUrl(rawUrl: string): string {
   const trimmed = String(rawUrl || "").trim();
   if (!trimmed) return "";
 
-  // Prefer higher-res covers to avoid badge-like thumbnail variants.
-  return trimmed
-    .replace(/50x50/gi, "500x500")
-    .replace(/150x150/gi, "500x500")
-    .replace(/_50x50\./gi, "_500x500.")
-    .replace(/_150x150\./gi, "_500x500.")
-    .replace(/-50x50\./gi, "-500x500.")
-    .replace(/-150x150\./gi, "-500x500.");
+  // Prefer higher-res covers (500x500) over lower resolutions (50x50, 150x150).
+  return trimmed.replace(/[-_]?(50x50|150x150)(?=\b|\.jpg)/gi, (match) => {
+    return match.startsWith("-") ? "-500x500" : match.startsWith("_") ? "_500x500" : "500x500";
+  });
 }
 
 function qualityScore(quality: string | undefined, url: string | undefined): number {
@@ -119,12 +115,12 @@ export function getBestImageUrl(images: JioSaavnImage[]): string {
   return normalizeJioSaavnImageUrl(sorted[0]?.url || "");
 }
 
-type AudioCandidate = {
+export type AudioCandidate = {
   quality: string;
   url: string;
 };
 
-function normalizeAudioCandidates(downloadUrls: unknown): AudioCandidate[] {
+export function normalizeAudioCandidates(downloadUrls: unknown): AudioCandidate[] {
   if (!downloadUrls) return [];
 
   if (typeof downloadUrls === "string") {

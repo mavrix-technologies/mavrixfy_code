@@ -1,5 +1,5 @@
 import React, { createContext, use, useState, useCallback, useMemo, useRef, ReactNode, useEffect } from "react";
-import { Alert, AppState, DeviceEventEmitter, InteractionManager, NativeModules, Platform, ToastAndroid, View, useWindowDimensions } from "react-native";
+import { Alert, AppState, InteractionManager, Platform, ToastAndroid, View, useWindowDimensions } from "react-native";
 import { isRunningInExpoGo } from "expo";
 import * as Network from "expo-network";
 import { usePathname } from "expo-router";
@@ -42,16 +42,6 @@ let setupPlayer: any = null;
 type NativeSubscription = {
   remove: () => void;
 };
-
-type AndroidAutoMediaModule = {
-  publishBrowseState?: (stateJson: string) => void;
-  clearBrowseState?: () => void;
-};
-
-const AndroidAutoMedia: AndroidAutoMediaModule | null =
-  Platform.OS === "android"
-    ? (NativeModules.MavrixfyAutoMedia as AndroidAutoMediaModule | undefined) ?? null
-    : null;
 
 const cleanupNativeSubscription = (subscription: NativeSubscription | null | undefined) => {
   subscription?.remove();
@@ -422,11 +412,13 @@ function normalizePlayableSong(song: Song | null | undefined): Song | null {
     };
   }
 
-  // For native audio, must have resolvable audioUrl
+  // Allow songs with no cached URL through — resolveNativeTrackEntry will fetch
+  // a fresh URL from JioSaavn by ID before giving up. Only hard-drop if the song
+  // has no ID at all (already guarded above).
   const resolvedAudioUrl = resolveAudioUrl(song as SongPlaybackSource);
   if (!resolvedAudioUrl) {
-    logger.warn("[Normalize] Native song missing audio URL", { id: song.id, title: song.title });
-    return null;
+    // No cached URL — pass through with empty audioUrl so the async resolver can fetch it.
+    return { ...song, audioUrl: "" };
   }
 
   if (song.audioUrl === resolvedAudioUrl) {
@@ -590,7 +582,7 @@ async function resolveJioSaavnFallbackForYouTubeSong(song: Song, signal: AbortSi
   const audioUrl = resolveAudioUrl(fallbackSong as SongPlaybackSource);
   if (!audioUrl) return null;
 
-  logger.info("[NativeResolve] Using JioSaavn fallback for YouTube song", {
+  logger.debug("[NativeResolve] Using JioSaavn fallback for YouTube song", {
     originalSongId: song.id,
     originalTitle: song.title,
     fallbackSongId: fallbackSong.id,
@@ -745,15 +737,13 @@ function getYouTubeVideoIdFromSong(song: Song | null | undefined): string {
 function songToTrack(song: Song, localUrl?: string | null): any {
   const audioUrl = localUrl || resolveAudioUrl(song as SongPlaybackSource);
   const durationSeconds = toDurationSeconds(song.duration);
-  const album = cleanAndroidAutoText(song.album);
-  
   return {
     id: song.id,
     url: audioUrl,
-    title: cleanAndroidAutoTitle(song.title, album) || song.title,
-    artist: cleanAndroidAutoText(song.artist) || song.artist,
-    album,
-    genre: cleanAndroidAutoText(song.genre),
+    title: readNonEmptyString(song.title) || "Unknown",
+    artist: readNonEmptyString(song.artist) || "Mavrixfy",
+    album: readNonEmptyString(song.album),
+    genre: readNonEmptyString(song.genre),
     artwork: song.coverUrl,
     duration: durationSeconds,
     ...(song.playbackHeaders && Object.keys(song.playbackHeaders).length > 0
@@ -775,6 +765,25 @@ async function resolveNativeTrackEntry(song: Song, appIndex: number): Promise<Na
   if (!nativeSong) return null;
 
   let audioUrl = await resolvePlaybackUrl(nativeSong);
+
+  // No URL on a JioSaavn song = the CDN URLs in downloadUrl have expired.
+  // Fetch fresh song details by ID to get a new downloadUrl array before
+  // falling back to the slower title/artist search.
+  if (!audioUrl && !isYouTubeSource(song) && song.source !== "local" && song.id) {
+    try {
+      const { getJioSaavnSongDetails } = await import("@/lib/jioSaavnService");
+      const { convertJioSaavnSong } = await import("@/lib/musicData");
+      const fresh = await getJioSaavnSongDetails(song.id);
+      if (fresh) {
+        const refreshed: Song = { ...nativeSong, ...convertJioSaavnSong(fresh) };
+        audioUrl = await resolvePlaybackUrl(refreshed);
+        if (audioUrl) nativeSong = refreshed;
+      }
+    } catch {
+      // fall through to search fallback
+    }
+  }
+
   if (!audioUrl && !isYouTubeSource(song) && song.source !== "local") {
     const matchedSong = await resolveJioSaavnAudioForSong(song);
     if (matchedSong) {
@@ -831,17 +840,13 @@ function getNowPlayingMetadata(track: NowPlayingMetadataSource) {
 }
 
 async function publishNativeNowPlaying(track: NowPlayingMetadataSource, trackIndex?: number): Promise<void> {
-  if (Platform.OS !== "ios" || !TrackPlayer) return;
+  if (!TrackPlayer) return;
 
   const metadata = getNowPlayingMetadata(track);
 
-  // According to Apple's MPNowPlayingInfoCenter documentation and react-native-track-player best practices:
-  // 1. Update metadata synchronously when track changes
-  // 2. Let autoUpdateMetadata handle routine updates
-  // 3. Only manual update when autoUpdateMetadata doesn't cover the case (remote controls, manual skips)
-  
   try {
-    // Update the specific track in the queue (preferred method per RNTP docs)
+    // Update the specific track in the RNTP queue so autoUpdateMetadata has
+    // fresh data on both iOS (MPNowPlayingInfoCenter) and Android (MediaSession).
     if (
       typeof trackIndex === "number" &&
       trackIndex >= 0 &&
@@ -850,17 +855,18 @@ async function publishNativeNowPlaying(track: NowPlayingMetadataSource, trackInd
       await TrackPlayer.updateMetadataForTrack(trackIndex, metadata);
     }
   } catch {
-    // The active queue can change while the user is skipping quickly.
+    // Queue can change while skipping quickly — not fatal.
   }
 
   try {
-    // Update the current now playing info (required for immediate lock screen update)
-    // This is the official Apple MPNowPlayingInfoCenter pattern via RNTP
+    // Push to the active now-playing slot immediately.
+    // On iOS this updates MPNowPlayingInfoCenter; on Android it refreshes
+    // the MediaSession notification without waiting for the next progress tick.
     if (typeof TrackPlayer.updateNowPlayingMetadata === "function") {
       await TrackPlayer.updateNowPlayingMetadata(metadata);
     }
   } catch {
-    // iOS will still fall back to RNTP's automatic metadata publishing.
+    // autoUpdateMetadata provides the fallback on both platforms.
   }
 }
 
@@ -943,79 +949,36 @@ async function resolvePlaybackUrl(song: Song): Promise<string | null> {
 
   if (song.downloadUrl) {
     try {
-      const { getBestAudioUrlWithQuality } = await import("@/lib/musicData");
+      const { getBestAudioUrlWithQuality, normalizeAudioCandidates } = await import("@/lib/musicData");
       const targetQuality = await getAdaptiveStreamingQuality();
       const resolvedUrl = getBestAudioUrlWithQuality(song.downloadUrl, targetQuality);
       const playableUrl = readAudioCandidate(resolvedUrl);
-      if (playableUrl) return playableUrl;
+      if (playableUrl) {
+        const candidates = normalizeAudioCandidates(song.downloadUrl);
+        const chosenCandidate = candidates.find(c => c.url === playableUrl);
+        logger.debug(`[Player] Resolved stream for "${song.title}" (Source: ${song.source || "jiosaavn"})`, {
+          requestedQuality: targetQuality,
+          availableQualities: candidates.map(c => c.quality || "unknown"),
+          selectedQuality: chosenCandidate?.quality || "unknown",
+          url: `${playableUrl.substring(0, 60)}...`,
+        });
+        return playableUrl;
+      }
     } catch (e) {
       logger.error("[Player] Failed to resolve quality-specific audio URL:", e);
     }
   }
 
-  return resolveAudioUrl(song as SongPlaybackSource) || null;
+  const fallbackUrl = resolveAudioUrl(song as SongPlaybackSource) || null;
+  logger.debug(`[Player] Resolved fallback stream for "${song.title}"`, {
+    songId: song.id,
+    url: fallbackUrl ? `${fallbackUrl.substring(0, 60)}...` : null,
+  });
+  return fallbackUrl;
 }
 
 function isPlayableSong(song: Song | null | undefined): song is Song {
   return Boolean(song?.id && (isYouTubeSource(song) || resolveAudioUrl(song as SongPlaybackSource)));
-}
-
-function decodeBasicHtmlEntities(value: string): string {
-  return value
-    .replace(/&quot;/g, '"')
-    .replace(/&#34;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&");
-}
-
-function cleanAndroidAutoText(value: unknown): string {
-  return decodeBasicHtmlEntities(readNonEmptyString(value)).replace(/\s+/g, " ").trim();
-}
-
-function cleanAndroidAutoTitle(title: unknown, album: unknown): string {
-  const decodedTitle = cleanAndroidAutoText(title);
-  if (!decodedTitle) return "";
-
-  const decodedAlbum = cleanAndroidAutoText(album);
-  if (!decodedAlbum) return decodedTitle;
-
-  const withoutFromSuffix = decodedTitle
-    .replace(/\s*\((?:from|movie|film)\s+["']?[^)]*["']?\)\s*$/i, "")
-    .replace(/\s*-\s*(?:from|movie|film)\s+["']?.*["']?\s*$/i, "")
-    .trim();
-
-  return withoutFromSuffix.length >= 2 ? withoutFromSuffix : decodedTitle;
-}
-
-function songToAndroidAutoItem(song: Song | null | undefined) {
-  if (!song?.id || !song.title) return null;
-
-  const album = cleanAndroidAutoText(song.album);
-
-  return {
-    id: String(song.id),
-    title: cleanAndroidAutoTitle(song.title, album) || "Unknown song",
-    artist: cleanAndroidAutoText(song.artist) || "Mavrixfy",
-    album,
-    duration: Math.round(toDurationSeconds(song.duration)),
-    artwork: readNonEmptyString(song.coverUrl),
-  };
-}
-
-function uniqueAndroidAutoSongs(songs: Array<Song | null | undefined>, limit: number) {
-  const seen = new Set<string>();
-  const items: Array<NonNullable<ReturnType<typeof songToAndroidAutoItem>>> = [];
-
-  for (const song of songs) {
-    const item = songToAndroidAutoItem(song);
-    if (!item || seen.has(item.id)) continue;
-    seen.add(item.id);
-    items.push(item);
-    if (items.length >= limit) break;
-  }
-
-  return items;
 }
 
 function uniqueSongsById(songs: Array<Song | null | undefined>): Song[] {
@@ -1029,20 +992,6 @@ function uniqueSongsById(songs: Array<Song | null | undefined>): Song[] {
   }
 
   return items;
-}
-
-function parseAndroidAutoPlayRequest(mediaId: string): { section: string; index: number; id: string } | null {
-  const parts = mediaId.split("|");
-  if (parts[0] !== "play" || parts.length < 4) return null;
-
-  const index = Number(parts[2]);
-  if (!Number.isFinite(index) || index < 0) return null;
-
-  return {
-    section: parts[1] || "",
-    index,
-    id: parts.slice(3).join("|"),
-  };
 }
 
 function isSameQueueById(a: Song[], b: Song[]): boolean {
@@ -1789,8 +1738,8 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       if (state !== "active") {
         persistCurrentPlayerState();
       } else {
-        // App became active ΓÇö refresh iOS lock screen metadata
-        if (Platform.OS === "ios" && TrackPlayer && currentSongRef.current) {
+        // App became active — refresh lock screen metadata on both platforms
+        if (TrackPlayer && currentSongRef.current) {
           try {
             const trackIndex = typeof TrackPlayer.getActiveTrackIndex === "function"
               ? await TrackPlayer.getActiveTrackIndex()
@@ -2720,8 +2669,14 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   }, []);
 
   const ensurePlayerReady = useCallback(async (): Promise<boolean> => {
+    logger.debug("[Player] ensurePlayerReady check:", {
+      isPlayerReady,
+      hasTrackPlayer: Boolean(TrackPlayer),
+      hasSetupPlayer: Boolean(setupPlayer),
+    });
     if (isPlayerReady) return true;
     if (!TrackPlayer || !setupPlayer) {
+      logger.warn("[Player] ensurePlayerReady: TrackPlayer or setupPlayer is null/undefined");
       return false;
     }
     try {
@@ -3051,71 +3006,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     });
   }, [appendRemainingTracksIfCurrent, buildPlaybackQueueForSong, clearUserQueuedSongIds, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, markPendingNativeTrack, playYouTubeSong, runSerializedPlaybackSwitch, showPlaybackNotice]);
 
-  useEffect(() => {
-    if (Platform.OS !== "android" || !AndroidAutoMedia) return;
 
-    const subscription = DeviceEventEmitter.addListener("MavrixfyAutoMediaPlayRequest", (mediaId: unknown) => {
-      const request = parseAndroidAutoPlayRequest(String(mediaId || ""));
-      if (!request) return;
-
-      const liveQueue = queueRef.current;
-      const searchPool = [
-        ...liveQueue,
-        ...originalQueueRef.current,
-        ...likedSongsRef.current,
-        currentSongRef.current,
-      ];
-
-      const targetSong = searchPool.find((item) => item?.id === request.id) || liveQueue[request.index];
-      if (!targetSong?.id) return;
-
-      const queueIndexForTarget = liveQueue.findIndex((item) => item.id === targetSong.id);
-      if (queueIndexForTarget >= 0) {
-        void loadAndPlaySong(targetSong, liveQueue, queueIndexForTarget);
-        return;
-      }
-
-      const nextQueue = uniqueSongsById([targetSong, ...liveQueue, ...originalQueueRef.current]);
-      void loadAndPlaySong(targetSong, nextQueue, 0);
-    });
-
-    return () => subscription.remove();
-  }, [loadAndPlaySong]);
-
-  useEffect(() => {
-    if (Platform.OS !== "android" || !AndroidAutoMedia?.publishBrowseState) return;
-
-    const visibleQueue = queue.length > 0
-      ? queue
-      : currentSong
-        ? [currentSong]
-        : [];
-    const safeQueueIndex = Math.min(Math.max(queueIndex, 0), Math.max(visibleQueue.length - 1, 0));
-    const activeSong = currentSong || visibleQueue[safeQueueIndex] || null;
-    const quickCandidates = [
-      activeSong,
-      ...visibleQueue.slice(safeQueueIndex + 1),
-      ...visibleQueue.slice(0, safeQueueIndex),
-      ...sourceQueue,
-      ...likedSongs,
-    ];
-
-    const payload = {
-      currentSong: songToAndroidAutoItem(activeSong),
-      queue: uniqueAndroidAutoSongs(visibleQueue, 30),
-      quickPicks: uniqueAndroidAutoSongs(quickCandidates, 24),
-      recentSongs: uniqueAndroidAutoSongs([activeSong, ...sourceQueue, ...visibleQueue], 24),
-      likedSongs: uniqueAndroidAutoSongs(likedSongs, 24),
-      queueIndex: safeQueueIndex,
-      isPlaying: resolvedIsPlaying,
-    };
-
-    try {
-      AndroidAutoMedia.publishBrowseState(JSON.stringify(payload));
-    } catch {
-      // Android Auto browse metadata is optional; phone playback must continue.
-    }
-  }, [currentSong, likedSongs, queue, queueIndex, resolvedIsPlaying, sourceQueue]);
 
   const playSong = useCallback(async (song: Song, newQueue?: Song[]) => {
     try {
@@ -3443,12 +3334,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         await playYouTubeSong(stripTransientYouTubeAudioUrl(nextTrack), cq, ni);
         return;
       }
-
-      logger.debug("[Playback] nextSong initiating", {
-        currentIndex: ci,
-        nextIndex: ni,
-        nextSongId: nextTrack.id,
-      });
 
       // 1. Update UI state immediately for responsiveness
       const requestId = ++playRequestIdRef.current;
@@ -4328,6 +4213,94 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       setYoutubePlayerFrame,
     ]
   );
+
+  const applyNewStreamingQuality = useCallback(async () => {
+    if (!currentSongRef.current) return;
+    if (isYouTubeSource(currentSongRef.current)) return;
+
+    logger.debug("[Player] Applying new streaming quality...");
+
+    const isPlaying = resolvedIsPlaying;
+    let currentPosition = 0;
+    if (TrackPlayer && setupPlayer) {
+      try {
+        const progress = await TrackPlayer.getProgress();
+        currentPosition = progress.position;
+      } catch {}
+    }
+
+    // Clear cached audioUrl so resolvePlaybackUrl re-picks quality from downloadUrl
+    const cleanedQueue = queueRef.current.map((song) =>
+      song.source === "jiosaavn" ? { ...song, audioUrl: "" } : song
+    );
+    const cleanedSong = { ...(cleanedQueue[queueIndexRef.current] ?? currentSongRef.current), audioUrl: "" };
+
+    setQueue(cleanedQueue);
+    queueRef.current = cleanedQueue;
+    setCurrentSong(cleanedSong);
+    currentSongRef.current = cleanedSong;
+
+    try {
+      if (isPlaying) {
+        if (TrackPlayer && setupPlayer) {
+          await TrackPlayer.reset().catch(() => {});
+          await loadAndPlaySong(cleanedSong, cleanedQueue, queueIndexRef.current);
+          if (currentPosition > 1) {
+            await TrackPlayer.seekTo(currentPosition).catch(() => {});
+          }
+        } else {
+          await playSong(cleanedSong, cleanedQueue);
+        }
+      } else if (TrackPlayer && setupPlayer) {
+        // Rebuild native queue with fresh URLs resolved asynchronously
+        await TrackPlayer.reset().catch(() => {});
+        const entries = await resolveNativeTrackEntries(cleanedQueue);
+        if (entries.length > 0) {
+          await TrackPlayer.add(entries.map((e) => e.track));
+          const idx = entries.findIndex((e) => e.song.id === cleanedSong.id);
+          const safeIdx = idx >= 0 ? idx : 0;
+          await TrackPlayer.skip(safeIdx).catch(() => {});
+          await publishNativeNowPlaying(entries[safeIdx].track, safeIdx);
+          await TrackPlayer.pause().catch(() => {});
+        }
+      }
+    } catch (err) {
+      logger.error("[Player] Failed to apply new streaming quality:", err);
+    }
+  }, [loadAndPlaySong, playSong, resolvedIsPlaying]);
+
+  const applyNewStreamingQualityRef = useRef(applyNewStreamingQuality);
+  useEffect(() => {
+    applyNewStreamingQualityRef.current = applyNewStreamingQuality;
+  }, [applyNewStreamingQuality]);
+
+  const previousQualityRef = useRef<string | null>(null);
+  const qualityApplyInProgressRef = useRef(false);
+
+  useEffect(() => {
+    void Storage.getSettings().then((s) => {
+      previousQualityRef.current = s.streamingQuality;
+    });
+
+    const unsubscribe = Storage.addSettingsListener((newSettings) => {
+      const nextQuality = newSettings.streamingQuality;
+      if (
+        previousQualityRef.current &&
+        previousQualityRef.current !== nextQuality &&
+        !qualityApplyInProgressRef.current
+      ) {
+        previousQualityRef.current = nextQuality;
+        qualityApplyInProgressRef.current = true;
+        void applyNewStreamingQualityRef.current().finally(() => {
+          qualityApplyInProgressRef.current = false;
+        });
+      } else {
+        previousQualityRef.current = nextQuality;
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   // Native audio is preferred. If we must fall back to the YouTube iframe on
   // the full player screen, give Android WebView a real visible surface so

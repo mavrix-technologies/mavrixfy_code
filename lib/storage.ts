@@ -11,6 +11,7 @@ const KEYS = {
   SEARCH_HISTORY: "@mavrixfy_search_history",
   SETTINGS: "@mavrixfy_settings",
   PLAYER_STATE: "@mavrixfy_player_state",
+  NEW_FEATURES_SEEN: "@mavrixfy_new_features_seen_v1",
 } as const;
 
 // Memory cache for frequently accessed data
@@ -61,12 +62,12 @@ export function getYouTubePlaybackQuality(
     case "low":
       return "small";
     case "medium":
-      return "medium";
+      return "small"; // cap medium at small for background video — audio quality is unaffected
     case "high":
-      return "hd720";
+      return "medium"; // cap high at medium for background video — 1080p is wasteful when muted
     case "auto":
     default:
-      return "default";
+      return "small"; // default to lowest quality — background video is decorative only
   }
 }
 
@@ -74,6 +75,7 @@ export type MiniPlayerSecondaryControl = "queue" | "next" | "prev" | "more";
 
 export interface AppSettings {
   streamingQuality: "low" | "medium" | "high";
+  highQualityUnlocked: boolean;
   videoBackgroundQuality: YouTubeVideoQualityPreference;
   smartAutoplayEnabled: boolean;
   smartAutoplayMode: SmartAutoplayMode;
@@ -89,7 +91,8 @@ export interface AppSettings {
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  streamingQuality: "high",
+  streamingQuality: "low",
+  highQualityUnlocked: false,
   videoBackgroundQuality: "auto",
   smartAutoplayEnabled: true,
   smartAutoplayMode: "similar-trending",
@@ -108,7 +111,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   crossfade: 0,
   gapless: true,
   normalizeVolume: false,
-  ambientBackdropEnabled: true,
+  ambientBackdropEnabled: false,
 };
 
 const EQUALIZER_PRESETS: Record<string, Record<string, number>> = {
@@ -496,9 +499,31 @@ export async function getSettings(): Promise<AppSettings> {
   };
 }
 
+type SettingsListener = (settings: AppSettings) => void;
+const settingsListeners = new Set<SettingsListener>();
+
+export function addSettingsListener(listener: SettingsListener): () => void {
+  settingsListeners.add(listener);
+  return () => {
+    settingsListeners.delete(listener);
+  };
+}
+
+function notifySettingsListeners(settings: AppSettings) {
+  for (const listener of settingsListeners) {
+    try {
+      listener(settings);
+    } catch (err) {
+      logger.error("[Storage] Error in settings listener:", err);
+    }
+  }
+}
+
 export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
   const current = await getSettings();
-  await setJSON(KEYS.SETTINGS, { ...current, ...settings });
+  const next = { ...current, ...settings };
+  await setJSON(KEYS.SETTINGS, next);
+  notifySettingsListeners(next);
 }
 
 export async function clearAppStorage(options?: { preserveSettings?: boolean }): Promise<void> {
@@ -545,4 +570,19 @@ export async function loadPlayerState(): Promise<PersistedPlayerState | null> {
   } catch {
     return null;
   }
+}
+
+export async function hasSeenNewFeatures(): Promise<boolean> {
+  try {
+    const val = await AsyncStorage.getItem(KEYS.NEW_FEATURES_SEEN);
+    return val === "1";
+  } catch {
+    return false;
+  }
+}
+
+export async function markNewFeaturesSeen(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(KEYS.NEW_FEATURES_SEEN, "1");
+  } catch {}
 }

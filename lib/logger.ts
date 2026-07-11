@@ -1,44 +1,18 @@
 /**
- * Production-safe logger
- * Automatically disabled in production builds
+ * Production-safe logger — all output suppressed in app builds.
  */
 
-const isDev = __DEV__;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const noop = (..._args: unknown[]) => undefined;
 
 export const logger = {
-  log: (...args: any[]) => {
-    if (isDev) console.log(...args);
-  },
-  
-  info: (...args: any[]) => {
-    if (isDev) console.info(...args);
-  },
-  
-  warn: (...args: any[]) => {
-    if (isDev) console.warn(...args);
-  },
-  
-  error: (...args: any[]) => {
-    if (isDev) console.error(...args);
-  },
-  
-  debug: (...args: any[]) => {
-    if (isDev) console.debug(...args);
-  },
-  
-  group: (label: string) => {
-    if (isDev) console.group(label);
-  },
-  
-  groupEnd: () => {
-    if (isDev) console.groupEnd();
-  },
-  
-  time: (label: string) => {
-    if (isDev) console.time(label);
-  },
-  
-  timeEnd: (label: string) => {
-    if (isDev) console.timeEnd(label);
-  },
+  log: noop,
+  info: noop,
+  warn: noop,
+  error: noop,
+  debug: noop,
+  group: noop,
+  groupEnd: noop,
+  time: noop,
+  timeEnd: noop,
 };

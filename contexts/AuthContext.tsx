@@ -27,6 +27,8 @@ import { compactMap } from "@/lib/arrayUtils";
 import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
 import { logger } from "@/lib/logger";
 import type { AppleMobileCredential } from "@/lib/appleAuth";
+import { safeValidate, loginSchema, registerSchema, emailSchema } from "@/lib/validation";
+import { checkRateLimit, clearRateLimit, formatRetryAfter } from "@/lib/rateLimiter";
 
 interface AppUser {
   id: string;
@@ -160,12 +162,35 @@ function useAuthProviderState() {
   }, [applyAuthenticatedSnapshot, applySignedOutSnapshot, buildAppUser]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const cred = await signInWithEmailAndPassword(auth, email, password);
-    const appUser = await buildAppUser(cred.user);
-    setUser(appUser);
-    setFirebaseUser(cred.user);
-    setIsGuest(false);
-    logLogin("email");
+    // Rate limit check
+    const emailLower = email.trim().toLowerCase();
+    const rateLimit = await checkRateLimit('auth:login', emailLower);
+    if (!rateLimit.allowed) {
+      throw new Error(`Too many login attempts. Please try again in ${formatRetryAfter(rateLimit.retryAfter!)}`);
+    }
+
+    // Validate input
+    const validation = safeValidate(loginSchema, { email, password });
+    if (!validation.success) {
+      throw new Error(validation.error);
+    }
+
+    const { email: validEmail, password: validPassword } = validation.data;
+
+    try {
+      const cred = await signInWithEmailAndPassword(auth, validEmail, validPassword);
+      const appUser = await buildAppUser(cred.user);
+      setUser(appUser);
+      setFirebaseUser(cred.user);
+      setIsGuest(false);
+      logLogin("email");
+      
+      // Clear rate limit on successful login
+      await clearRateLimit('auth:login', emailLower);
+    } catch (error: any) {
+      // Don't clear rate limit on failed login - let it accumulate
+      throw error;
+    }
   }, [buildAppUser]);
 
   const continueAsGuest = useCallback(() => {
@@ -185,9 +210,24 @@ function useAuthProviderState() {
   }, []);
 
   const register = useCallback(async (email: string, password: string, fullName: string) => {
-    const normalizedEmail = email.trim();
-    const displayName = fullName.trim();
-    const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+    // Rate limit check
+    const emailLower = email.trim().toLowerCase();
+    const rateLimit = await checkRateLimit('auth:register', emailLower);
+    if (!rateLimit.allowed) {
+      throw new Error(`Too many registration attempts. Please try again in ${formatRetryAfter(rateLimit.retryAfter!)}`);
+    }
+
+    // Validate input
+    const validation = safeValidate(registerSchema, { email, password, fullName });
+    if (!validation.success) {
+      throw new Error(validation.error);
+    }
+
+    const { email: validEmail, password: validPassword, fullName: validFullName } = validation.data;
+
+    const normalizedEmail = validEmail;
+    const displayName = validFullName;
+    const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, validPassword);
     await Promise.all([
       updateProfile(cred.user, { displayName }),
       // Create user doc WITHOUT onboardingCompleted — the onboarding flow sets it
@@ -217,6 +257,9 @@ function useAuthProviderState() {
     setFirebaseUser(cred.user);
     setIsGuest(false);
     logSignUp("email");
+    
+    // Clear rate limit on successful registration
+    await clearRateLimit('auth:register', emailLower);
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
@@ -401,12 +444,27 @@ function useAuthProviderState() {
   }, [buildAppUser]);
 
   const resetPassword = useCallback(async (email: string) => {
-    const trimmedEmail = email.trim();
+    // Rate limit check
+    const emailLower = email.trim().toLowerCase();
+    const rateLimit = await checkRateLimit('auth:passwordReset', emailLower);
+    if (!rateLimit.allowed) {
+      throw new Error(`Too many password reset requests. Please try again in ${formatRetryAfter(rateLimit.retryAfter!)}`);
+    }
+
+    // Validate email
+    const validation = safeValidate(emailSchema, email);
+    if (!validation.success) {
+      throw new Error(validation.error);
+    }
+
+    const trimmedEmail = validation.data;
     if (!trimmedEmail) {
       throw new Error("Please enter your email address first.");
     }
 
     await sendPasswordResetEmail(auth, trimmedEmail);
+    
+    // Don't clear rate limit for password reset - keep the limit
   }, []);
 
   const deleteAccount = useCallback(async (options?: {
@@ -415,10 +473,16 @@ function useAuthProviderState() {
     appleIdToken?: string;
     appleRawNonce?: string;
   }) => {
+    // Rate limit check
     const currentUser = auth.currentUser;
-
     if (!currentUser) {
       throw new Error("No signed-in account was found.");
+    }
+
+    const userEmail = currentUser.email || '';
+    const rateLimit = await checkRateLimit('auth:deleteAccount', userEmail.toLowerCase());
+    if (!rateLimit.allowed) {
+      throw new Error(`Too many deletion attempts. Please try again in ${formatRetryAfter(rateLimit.retryAfter!)}`);
     }
 
     const providerIds = compactMap(currentUser.providerData, (provider) => provider.providerId);
@@ -478,6 +542,9 @@ function useAuthProviderState() {
     ]);
     await deleteUser(currentUser);
     clearAuthState(currentUser.uid);
+    
+    // Clear rate limit after successful deletion
+    await clearRateLimit('auth:deleteAccount', userEmail.toLowerCase());
   }, [clearAuthState]);
 
   const logout = useCallback(async () => {

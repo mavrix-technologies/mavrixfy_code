@@ -90,7 +90,7 @@ const REQUEST_TIMEOUT_MS = 7500; // 7.5 seconds fast timeout to prevent player h
 const PRIVATE_DEVELOPMENT_REQUEST_TIMEOUT_MS = 15000;
 const OPTIONAL_HOME_SECTION_TIMEOUT_MS = 4500;
 const CURRENT_YEAR = new Date().getFullYear();
-const OFFICIAL_VISUAL_SEARCH_CACHE_VERSION = "v1";
+const OFFICIAL_VISUAL_SEARCH_CACHE_VERSION = "v2";
 const YOUTUBE_VIDEO_SEARCH_CACHE_VERSION = "v2";
 
 // Stream resolution is handled by the backend.
@@ -472,27 +472,46 @@ function getVisualArtistScore(seedArtist: unknown, candidateArtist: unknown): nu
 function scoreOfficialVisualCandidate(seed: Song, candidate: Song, index: number): number | null {
   const videoId = extractVideoId(candidate);
   if (!videoId) return null;
-  if (!isOfficialMusicVideoType(candidate.youtubeVideoType)) return null;
   if (hasBlockedVisualVersion(candidate.title, seed.title)) return null;
 
   const titleScore = getVisualTitleScore(seed.title, candidate.title);
-  if (!titleScore.strong) return null;
+  if (!titleScore.strong && titleScore.score < 40) return null;
 
-  let score = 140 + titleScore.score + getVisualArtistScore(seed.artist, candidate.artist);
-  if (normalizeComparableText(candidate.title).includes("official")) score += 18;
-  if (normalizeComparableText(candidate.title).includes("full video")) score += 12;
+  const candidateText = normalizeComparableText(candidate.title);
+  const isOfficialType = isOfficialMusicVideoType(candidate.youtubeVideoType);
 
+  let score = titleScore.score + getVisualArtistScore(seed.artist, candidate.artist);
+
+  // Strong bonus for confirmed official music video type
+  if (isOfficialType) score += 80;
+  if (titleScore.strong) score += 40;
+
+  // Keyword boosts for official-looking titles
+  if (candidateText.includes("official")) score += 30;
+  if (candidateText.includes("full video")) score += 20;
+  if (candidateText.includes("music video")) score += 18;
+  if (candidateText.includes("original")) score += 10;
+  if (candidateText.includes("hd") || candidateText.includes("4k")) score += 6;
+
+  // Duration match bonus — best signal that it's the same track
   const seedDuration = parseDurationSeconds(seed.duration);
   const candidateDuration = parseDurationSeconds(candidate.duration);
-  if (seedDuration && candidateDuration) {
+  if (seedDuration > 0 && candidateDuration > 0) {
     const diff = Math.abs(seedDuration - candidateDuration);
-    if (diff <= 35) score += 24;
+    if (diff <= 15) score += 40;
+    else if (diff <= 35) score += 24;
     else if (diff <= 90) score += 8;
-    else if (diff > 240) score -= 45;
+    else if (diff > 240) score -= 40;
   }
 
-  score -= index * 4;
-  return score >= 230 ? score : null;
+  // Slight penalty for position in results (first result is usually best)
+  score -= index * 3;
+
+  // Two tiers: strict (official type + strong title) vs relaxed (title match + keyword hints)
+  const strictPasses = isOfficialType && titleScore.strong && score >= 160;
+  const relaxedPasses = titleScore.strong && score >= 130;
+
+  return strictPasses || relaxedPasses ? score : null;
 }
 
 function selectOfficialVisualVideoId(seed: Song, candidates: Song[]): string | null {
@@ -1026,7 +1045,7 @@ function normalizeArtistPayload(artist: any, fallbackId: string): YouTubeMusicAr
 /**
  * Search YouTube Music for songs, albums, artists, or playlists
  */
-export async function searchYouTubeMusic(
+async function searchYouTubeMusic(
   query: string,
   type: "song" | "album" | "artist" | "playlist" = "song",
   limit: number = 20,
@@ -1181,7 +1200,6 @@ export async function searchYouTubeMusicVideos(
 
     const hasYouTubeVideo = songs.some(song => song.id && !song.id.startsWith("jiosaavn_"));
     if (!hasYouTubeVideo) {
-      console.log("DEBUG [VideoSearch] Backend returned no real YouTube videos (or JioSaavn fallbacks). Falling back to direct Piped search.");
       const pipedSongs = await searchPipedVideosDirectly(q, limit);
       if (pipedSongs.length > 0) {
         songs = pipedSongs;
@@ -1197,7 +1215,7 @@ export async function searchYouTubeMusicVideos(
     if (error?.message === "Request aborted" || signal?.aborted) {
       return [];
     }
-    logger.warn("[YouTube Music] Video search failed, attempting direct Piped search fallback:", error);
+    logger.debug("[YouTube Music] Video search aborted (expected on quick skip), falling back to Piped:", error);
     const pipedSongs = await searchPipedVideosDirectly(q, limit);
     if (pipedSongs.length > 0) {
       await setCache(cacheKey, pipedSongs);
@@ -1332,7 +1350,7 @@ export async function getYouTubeAudioStreamForPlayback(
   return getYouTubeMusicAudioStream(cleanVideoId, title, artist, signal);
 }
 
-export async function reportYouTubeMusicPlaybackFailure(payload: {
+async function reportYouTubeMusicPlaybackFailure(payload: {
   videoId?: string;
   status?: number;
   code?: string;
@@ -1360,7 +1378,7 @@ export async function reportYouTubeMusicPlaybackFailure(payload: {
   }
 }
 
-export async function prefetchYouTubeMusicAutoplay(
+async function prefetchYouTubeMusicAutoplay(
   videoId: string,
   limit = 20,
   signal?: AbortSignal
@@ -1428,7 +1446,7 @@ export async function getYouTubeMusicPlaylist(playlistId: string): Promise<YouTu
 /**
  * Get YouTube Music artist details
  */
-export async function getYouTubeMusicArtist(artistId: string): Promise<YouTubeMusicArtist | null> {
+async function getYouTubeMusicArtist(artistId: string): Promise<YouTubeMusicArtist | null> {
   const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:artist:${artistId}`;
   const cached = await getCached<YouTubeMusicArtist>(cacheKey, CACHE_TTL_MS);
   if (cached) return cached;
@@ -1454,7 +1472,7 @@ export async function getYouTubeMusicArtist(artistId: string): Promise<YouTubeMu
 /**
  * Get YouTube Music album details
  */
-export async function getYouTubeMusicAlbum(albumId: string): Promise<YouTubeMusicAlbum | null> {
+async function getYouTubeMusicAlbum(albumId: string): Promise<YouTubeMusicAlbum | null> {
   const cacheKey = `${YOUTUBE_MUSIC_CACHE_PREFIX}:album:${albumId}`;
   const cached = await getCached<YouTubeMusicAlbum>(cacheKey, CACHE_TTL_MS);
   if (cached) return cached;
@@ -1549,25 +1567,40 @@ export async function getYouTubeMusicVisualVideoId(song: Song): Promise<string |
     normalizeComparableText(song.artist),
   ].join(":");
   const cached = await getCached<{ videoId: string | null }>(visualCacheKey, CACHE_TTL_MS);
-  if (cached && cached.videoId) {
-    console.log("DEBUG [VisualVideoId] Cache hit:", { songId: song.id, videoId: cached.videoId });
-    return cached.videoId;
-  }
-
-  console.log("DEBUG [VisualVideoId] Cache miss / evaluating:", {
-    songId: song.id,
-    songTitle: song.title,
-    audioVideoId,
-    existingVisualId
-  });
+  if (cached !== null) return cached.videoId;
 
   const cacheAndReturn = async (videoId: string | null) => {
-    console.log("DEBUG [VisualVideoId] Caching & returning:", { songId: song.id, videoId });
     await setCache(visualCacheKey, { videoId });
     return videoId;
   };
 
+  // Helper: search using multiple query strategies and return the best scoring candidate
+  const searchForOfficialVideo = async (queries: string[]): Promise<string | null> => {
+    for (const query of queries) {
+      try {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- queries are sequential fallbacks, not parallelizable
+        const results = await searchYouTubeMusicVideos(query, 10);
+        if (results.length === 0) continue;
+        const scored = selectOfficialVisualVideoId(song, results);
+        if (scored) return scored;
+        // If scoring failed but first result title matches well, use it
+        const first = results[0];
+        if (first) {
+          const firstTitleScore = getVisualTitleScore(song.title, first.title);
+          if (firstTitleScore.strong && !hasBlockedVisualVersion(first.title, song.title)) {
+            return extractVideoId(first) || null;
+          }
+        }
+      } catch {
+        // continue to next query
+      }
+    }
+    return null;
+  };
+
+  // --- PATH A: no audioVideoId available (non-YouTube source, JioSaavn etc.) ---
   if (!audioVideoId) {
+    // Try existing visual ID first
     if (existingVisualId) {
       const candidateId = selectOfficialVisualVideoId(song, compactSongCandidates([
         {
@@ -1579,52 +1612,58 @@ export async function getYouTubeMusicVisualVideoId(song: Song): Promise<string |
           youtubeVideoType: source.youtubeVideoType,
         }
       ]));
-      if (candidateId) {
-        console.log("DEBUG [VisualVideoId] Found existingVisualId match:", candidateId);
-        return cacheAndReturn(candidateId);
-      }
+      if (candidateId) return cacheAndReturn(candidateId);
     }
 
     if (song.title && song.artist) {
-      try {
-        console.log("DEBUG [VisualVideoId] Searching YouTube for:", `${song.title} ${song.artist} official music video`);
-        const searchResults = await searchYouTubeMusicVideos(`${song.title} ${song.artist} official music video`, 10);
-        console.log("DEBUG [VisualVideoId] Search results count:", searchResults?.length || 0);
-        const searchCandidateId = selectOfficialVisualVideoId(song, searchResults) || (searchResults[0] ? extractVideoId(searchResults[0]) : null);
-        if (searchCandidateId) {
-          console.log("DEBUG [VisualVideoId] Found search candidate:", searchCandidateId);
-          return cacheAndReturn(searchCandidateId);
-        }
-      } catch (err) {
-        logger.warn("[YouTube Music] Visual fallback search failed:", err);
-      }
+      const cleanTitle = cleanSongTitle(song.title);
+      const queries = [
+        `${cleanTitle} ${song.artist} official music video`,
+        `${cleanTitle} ${song.artist} full video`,
+        `${song.title} ${song.artist} official`,
+      ];
+      const found = await searchForOfficialVideo(queries);
+      if (found) return cacheAndReturn(found);
     }
     return cacheAndReturn(null);
   }
 
+  // --- PATH B: we have an audioVideoId (YouTube source) ---
+
+  // Step 1: Try the watch playlist — it has the counterpart (official MV) data
   try {
-    console.log("DEBUG [VisualVideoId] Fetching watch playlist for audioVideoId:", audioVideoId);
     const watch = await getYouTubeMusicWatchPlaylist(audioVideoId, { limit: 5, radio: false });
     const currentTrack =
       watch?.tracks.find((track) => track.videoId === audioVideoId) ||
       watch?.tracks[0] ||
       null;
-    const watchCandidateId = selectOfficialVisualVideoId(song, compactSongCandidates([
-      trackToVisualCandidate(currentTrack, song),
-      counterpartToVisualCandidate(currentTrack, song),
-    ]));
 
-    if (watchCandidateId) {
-      console.log("DEBUG [VisualVideoId] Found watchCandidateId:", watchCandidateId);
-      return cacheAndReturn(watchCandidateId);
+    // Counterpart is the YouTube Music ↔ YouTube cross-reference (most reliable signal)
+    const counterpartCandidate = counterpartToVisualCandidate(currentTrack, song);
+    const trackCandidate = trackToVisualCandidate(currentTrack, song);
+
+    // Score both, prefer counterpart (it's the explicit official music video link)
+    const watchCandidateId = selectOfficialVisualVideoId(song, compactSongCandidates([
+      counterpartCandidate,
+      trackCandidate,
+    ]));
+    if (watchCandidateId) return cacheAndReturn(watchCandidateId);
+
+    // If counterpart exists but didn't pass strict scoring, trust it — it's YouTube's own cross-reference
+    if (counterpartCandidate) {
+      const counterpartId = extractVideoId(counterpartCandidate);
+      if (counterpartId && !hasBlockedVisualVersion(counterpartCandidate.title, song.title)) {
+        return cacheAndReturn(counterpartId);
+      }
     }
-  } catch (err) {
-    console.log("DEBUG [VisualVideoId] Watch playlist fetch failed:", err);
+  } catch {
+    // watch playlist unavailable — fall through to search
   }
 
-  const existingCandidateId = selectOfficialVisualVideoId(song, compactSongCandidates([
-    existingVisualId
-      ? {
+  // Step 2: Try existing visual ID (already on the song object)
+  if (existingVisualId && existingVisualId !== audioVideoId) {
+    const existingCandidateId = selectOfficialVisualVideoId(song, compactSongCandidates([
+      {
         ...song,
         id: `youtube_${existingVisualId}`,
         videoId: existingVisualId,
@@ -1632,34 +1671,25 @@ export async function getYouTubeMusicVisualVideoId(song: Song): Promise<string |
         youtubeVisualVideoId: existingVisualId,
         youtubeVideoType: source.youtubeVideoType,
       }
-      : null,
-  ]));
-
-  if (existingCandidateId) {
-    console.log("DEBUG [VisualVideoId] Found existingCandidateId:", existingCandidateId);
-    return cacheAndReturn(existingCandidateId);
+    ]));
+    if (existingCandidateId) return cacheAndReturn(existingCandidateId);
   }
 
+  // Step 3: Targeted search — multiple query strategies for best coverage
   if (song.title && song.artist) {
-    try {
-      console.log("DEBUG [VisualVideoId] Searching YouTube fallback for:", `${song.title} ${song.artist} official music video`);
-      const searchResults = await searchYouTubeMusicVideos(`${song.title} ${song.artist} official music video`, 10);
-      const searchCandidateId = selectOfficialVisualVideoId(song, searchResults) || (searchResults[0] ? extractVideoId(searchResults[0]) : null);
-      if (searchCandidateId) {
-        console.log("DEBUG [VisualVideoId] Found search fallback candidate:", searchCandidateId);
-        return cacheAndReturn(searchCandidateId);
-      }
-    } catch (err) {
-      logger.warn("[YouTube Music] Visual fallback search failed:", err);
-    }
+    const cleanTitle = cleanSongTitle(song.title);
+    const queries = [
+      `${cleanTitle} ${song.artist} official music video`,
+      `${cleanTitle} ${song.artist} full video`,
+      `${song.title} ${song.artist} official`,
+    ];
+    const found = await searchForOfficialVideo(queries);
+    if (found) return cacheAndReturn(found);
   }
 
-  if (audioVideoId) {
-    console.log("DEBUG [VisualVideoId] Fallback to direct audioVideoId:", audioVideoId);
-    return cacheAndReturn(audioVideoId);
-  }
-
-  return cacheAndReturn(null);
+  // Step 4: Last resort — use the audio video ID itself.
+  // This may show a static thumbnail but is better than nothing.
+  return cacheAndReturn(audioVideoId);
 }
 
 export interface YouTubeMusicPlaylistCard {
@@ -2702,7 +2732,7 @@ async function getYouTubeMusicBrowseCategorySections(
 }
 
 
-export async function getHomeYouTubeMusicCategories(options?: {
+async function getHomeYouTubeMusicCategories(options?: {
   limitPerCategory?: number;
 }): Promise<YouTubeMusicHomeCategoryData[]> {
   const limit = Math.min(options?.limitPerCategory ?? 8, 12);
@@ -2762,7 +2792,7 @@ export async function getHomeYouTubeMusicCategories(options?: {
 /**
  * Get search suggestions from YouTube Music
  */
-export async function getYouTubeMusicSearchSuggestions(query: string, signal?: AbortSignal): Promise<string[]> {
+async function getYouTubeMusicSearchSuggestions(query: string, signal?: AbortSignal): Promise<string[]> {
   const q = query.trim();
   if (!q) return [];
 
@@ -2786,7 +2816,7 @@ export async function getYouTubeMusicSearchSuggestions(query: string, signal?: A
   }
 }
 
-export async function clearYouTubeMusicCache(): Promise<void> {
+async function clearYouTubeMusicCache(): Promise<void> {
   try {
     const keys = await AsyncStorage.getAllKeys();
     const ytMusicKeys = keys.filter((key) => key.startsWith(YOUTUBE_MUSIC_CACHE_PREFIX));

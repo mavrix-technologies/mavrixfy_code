@@ -29,6 +29,8 @@ import {
   hasSufficientStorage,
 } from "@/lib/downloads/storagePolicy";
 import { getAudioUrlByQuality } from "@/lib/downloads/audioQuality";
+import { getMusicApiUrl } from "@/lib/api-config";
+import { getBestAudioUrlWithQuality } from "@/lib/musicData";
 import { logger } from "@/lib/logger";
 
 // ─── Concurrency config ───────────────────────────────────────────────────────
@@ -114,6 +116,63 @@ async function updateStatus(
   return updated;
 }
 
+// ─── URL refresh ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch a fresh downloadUrl for a JioSaavn song right before starting the
+ * actual download. CDN signed URLs expire in ~15–30 minutes, so the URL stored
+ * in the queue at the time the user tapped "Download" may already be stale by
+ * the time the download slot opens.
+ *
+ * Falls back to the original URL if the API call fails or times out.
+ */
+async function refreshAudioUrl(songId: string, originalUrl: string, quality: DownloadItem["quality"]): Promise<string> {
+  // Only attempt refresh for JioSaavn songs (numeric IDs or short alphanumeric)
+  // YouTube and Cloudinary URLs have their own expiry handling
+  if (!songId || songId.startsWith("youtube_") || originalUrl.includes("cloudinary")) {
+    return getAudioUrlByQuality(originalUrl, quality);
+  }
+
+  try {
+    const apiBase = getMusicApiUrl().replace(/\/$/, "");
+    const url = `${apiBase}/songs?id=${encodeURIComponent(songId)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+
+    const res = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) throw new Error(`API ${res.status}`);
+    const json = await res.json();
+
+    // Response shape: { success: true, data: { songs: [...] } } or { success: true, data: [...] }
+    const songs: any[] =
+      Array.isArray(json?.data) ? json.data :
+      Array.isArray(json?.data?.songs) ? json.data.songs :
+      Array.isArray(json?.data?.results) ? json.data.results :
+      [];
+
+    const song = songs[0];
+    const freshDownloadUrl = song?.downloadUrl ?? song?.download_url ?? song?.audioUrl;
+
+    if (freshDownloadUrl) {
+      const qualityMap = { low: "low" as const, medium: "medium" as const, high: "high" as const };
+      const resolved = getBestAudioUrlWithQuality(freshDownloadUrl, qualityMap[quality] ?? "high");
+      if (resolved && resolved.startsWith("http")) {
+        logger.debug("[DownloadQueue] Refreshed audio URL for", songId);
+        return resolved;
+      }
+    }
+  } catch (err: any) {
+    logger.warn("[DownloadQueue] URL refresh failed, using original", { songId, error: err?.message });
+  }
+
+  return getAudioUrlByQuality(originalUrl, quality);
+}
+
 // ─── Core download execution ──────────────────────────────────────────────────
 
 async function executeDownload(songId: string): Promise<void> {
@@ -131,8 +190,9 @@ async function executeDownload(songId: string): Promise<void> {
 
   await updateStatus(songId, "downloading");
 
-  // Select audio URL based on quality preference
-  const audioUrl = getAudioUrlByQuality(item.audioUrl, item.quality);
+  // Fetch a fresh audio URL — JioSaavn CDN URLs expire in ~15-30 min,
+  // and the URL stored at queue time is often already stale when the slot opens.
+  const audioUrl = await refreshAudioUrl(songId, item.audioUrl, item.quality);
 
   const handle = createDownloadResumable(
     audioUrl,

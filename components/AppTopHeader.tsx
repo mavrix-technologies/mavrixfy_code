@@ -1,4 +1,4 @@
-import React, { type ReactNode, useCallback, useState } from "react";
+import React, { type ReactNode, useCallback, useState, useRef, useEffect } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "@/contexts/AuthContext";
 import { triggerImpact } from "@/lib/haptics";
+import { getSettings } from "@/lib/storage";
 
 export const APP_TOP_HEADER_HEIGHT = 44;
 const DEFAULT_ELEVATION_SCROLL_THRESHOLD = 10;
@@ -149,28 +150,41 @@ export function AppTopHeaderIconButton({
 export function AppTopHeaderProfileButton() {
   const { push: routerPush } = useRouter();
   const { user, isAuthenticated } = useAuth();
+  const buttonRef = useRef<View>(null);
+  const [showNewDot, setShowNewDot] = useState(false);
+
+  useEffect(() => {
+    void getSettings().then((s) => setShowNewDot(!s.highQualityUnlocked));
+  }, []);
 
   const handlePress = useCallback(() => {
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
     routerPush("/profile");
   }, [routerPush]);
 
+  const handleLayout = useCallback(() => {
+    // no-op — tour removed
+  }, []);
+
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Open profile"
-      style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-      onPress={handlePress}
-      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-    >
-      {isAuthenticated && user?.picture ? (
-        <Image source={{ uri: user.picture }} style={styles.avatarImage} contentFit="cover" />
-      ) : (
-        <View style={styles.avatarFallback}>
-          <Ionicons name="person-circle-outline" size={28} color="#F8FBF9" />
-        </View>
-      )}
-    </Pressable>
+    <View ref={buttonRef} onLayout={handleLayout} collapsable={false}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Open profile"
+        style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+        onPress={handlePress}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        {isAuthenticated && user?.picture ? (
+          <Image source={{ uri: user.picture }} style={styles.avatarImage} contentFit="cover" />
+        ) : (
+          <View style={styles.avatarFallback}>
+            <Ionicons name="person-circle-outline" size={28} color="#F8FBF9" />
+          </View>
+        )}
+        {showNewDot && <View style={styles.newDot} />}
+      </Pressable>
+    </View>
   );
 }
 
@@ -283,5 +297,16 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
+  },
+  newDot: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: "#E8115B",
+    borderWidth: 1.5,
+    borderColor: "#000",
   },
 });

@@ -120,7 +120,7 @@ export function getImmediateArtworkPalette(imageUrl: string | null | undefined):
 /** @deprecated Use getImmediateArtworkPalette */
 const getImmediateArtworkColor = getImmediateArtworkPalette;
 
-export function createSpotifyColorTheme(palette: ArtworkPalette | string): SpotifyColorTheme {
+function createSpotifyColorTheme(palette: ArtworkPalette | string): SpotifyColorTheme {
   const colors =
     typeof palette === "string"
       ? {

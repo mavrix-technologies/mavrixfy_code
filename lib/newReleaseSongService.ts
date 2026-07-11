@@ -4,37 +4,31 @@ import { buildAppApiUrl } from "@/lib/api-config";
 import { getBestImageUrl, Song, type JioSaavnImage } from "@/lib/musicData";
 import { sortedCopy } from "@/lib/arrayUtils";
 
-const DAILY_NEW_RELEASE_CACHE_KEY = "@mavrixfy_daily_new_release_songs_v4";
+const DAILY_NEW_RELEASE_CACHE_KEY = "@mavrixfy_daily_new_release_songs_v5"; // bumped: query overhaul
 const CURRENT_YEAR = new Date().getFullYear();
 const PREVIOUS_YEAR = CURRENT_YEAR - 1;
-const DEFAULT_LIMIT = 10;
+const DEFAULT_LIMIT = 20; // raised from 10 — gives deduplication enough headroom
 
 const NEW_RELEASE_QUERIES = [
-  `new release hindi songs ${CURRENT_YEAR}`,
-  `hindi new releases ${CURRENT_YEAR}`,
-  `latest hindi songs ${CURRENT_YEAR}`,
-  `new hindi songs ${CURRENT_YEAR}`,
-  `new bollywood songs ${CURRENT_YEAR}`,
   `new hindi movie songs ${CURRENT_YEAR}`,
-  `official hindi movie songs ${CURRENT_YEAR}`,
-  `latest bollywood movie songs ${CURRENT_YEAR}`,
-  `new bollywood film songs ${CURRENT_YEAR}`,
+  `latest bollywood songs ${CURRENT_YEAR}`,
+  `new bollywood songs ${CURRENT_YEAR}`,
+  `hindi film songs ${CURRENT_YEAR}`,
+  `t-series new songs ${CURRENT_YEAR}`,
+  `zee music new songs ${CURRENT_YEAR}`,
+  `yrf new songs ${CURRENT_YEAR}`,
+  `saregama new songs ${CURRENT_YEAR}`,
+  `new hindi songs ${CURRENT_YEAR}`,
+  `bollywood new releases ${CURRENT_YEAR}`,
   `latest hindi film songs ${CURRENT_YEAR}`,
-  `hindi movie songs ${CURRENT_YEAR}`,
-  `t-series new hindi movie songs ${CURRENT_YEAR}`,
-  `yrf new hindi movie songs ${CURRENT_YEAR}`,
-  `zee music new hindi movie songs ${CURRENT_YEAR}`,
-  `saregama new hindi movie songs ${CURRENT_YEAR}`,
 ] as const;
 
 const NEW_RELEASE_ALBUM_QUERIES = [
   `new hindi movie songs ${CURRENT_YEAR}`,
-  `latest bollywood movie songs ${CURRENT_YEAR}`,
+  `latest bollywood songs ${CURRENT_YEAR}`,
   `new bollywood songs ${CURRENT_YEAR}`,
-  `t-series new hindi movie songs ${CURRENT_YEAR}`,
-  `yrf new hindi movie songs ${CURRENT_YEAR}`,
-  `zee music new hindi movie songs ${CURRENT_YEAR}`,
-  `saregama new hindi movie songs ${CURRENT_YEAR}`,
+  `t-series new songs ${CURRENT_YEAR}`,
+  `yrf new songs ${CURRENT_YEAR}`,
 ] as const;
 
 const OFFICIAL_LABEL_TERMS = [
@@ -84,6 +78,7 @@ type NewReleaseAlbumCandidate = {
 export type DailyNewReleaseSongOptions = {
   forceRefresh?: boolean;
   limit?: number;
+  signal?: AbortSignal;
 };
 
 function getTodayKey(): string {
@@ -323,7 +318,7 @@ function scoreNewReleaseCandidate(candidate: NewReleaseSongCandidate): number {
   if (text.includes("bollywood")) score += 42;
   if (text.includes("movie") || text.includes("film")) score += 34;
   if (text.includes("latest") || text.includes("new")) score += 58;
-  if (text.includes("trending") || text.includes("viral")) score -= 20;
+  if (text.includes("trending") || text.includes("viral") || text.includes("popular") || text.includes("hit")) score += 80;
   if (song.playCount && song.playCount > 0) score += Math.min(Math.log10(song.playCount) * 3, 28);
   if (/\b(remix|cover|slowed|nightcore|8d|instrumental|karaoke)\b/.test(text)) score -= 70;
   score += Math.max(0, 44 - candidate.resultRank);
@@ -336,12 +331,9 @@ function isCleanNewRelease(candidate: NewReleaseSongCandidate): boolean {
   const text = `${song.title} ${song.album} ${song.artist} ${song.genre} ${song.language}`;
   const year = Number.parseInt(String(song.year || ""), 10);
   const isFreshYear = year === CURRENT_YEAR || year === PREVIOUS_YEAR;
-  const isCompilation = COMPILATION_ALBUM_PATTERN.test(song.album) && candidate.movieScore < 40;
 
   return (
     isFreshYear &&
-    candidate.officialScore >= 40 &&
-    !isCompilation &&
     !NON_MOVIE_RELEASE_PATTERN.test(text)
   );
 }
@@ -404,7 +396,12 @@ async function writeCachedDailySongs(songs: Song[]): Promise<void> {
   await AsyncStorage.setItem(DAILY_NEW_RELEASE_CACHE_KEY, JSON.stringify(payload)).catch(() => undefined);
 }
 
-async function searchSongs(query: string, limit: number, forceRefresh: boolean): Promise<NewReleaseSongCandidate[]> {
+async function searchSongs(
+  query: string,
+  limit: number,
+  forceRefresh: boolean,
+  signal?: AbortSignal
+): Promise<NewReleaseSongCandidate[]> {
   const params = [
     `query=${encodeURIComponent(query)}`,
     `limit=${Math.max(limit * 4, 40)}`,
@@ -416,6 +413,7 @@ async function searchSongs(query: string, limit: number, forceRefresh: boolean):
 
   const response = await fetch(`${buildAppApiUrl("/search/songs")}?${params.join("&")}`, {
     headers: { Accept: "application/json" },
+    signal,
   }).catch(() => null);
   if (!response?.ok) return [];
 
@@ -425,7 +423,12 @@ async function searchSongs(query: string, limit: number, forceRefresh: boolean):
     .filter((song): song is NewReleaseSongCandidate => Boolean(song));
 }
 
-async function searchAlbums(query: string, limit: number, forceRefresh: boolean): Promise<NewReleaseAlbumCandidate[]> {
+async function searchAlbums(
+  query: string,
+  limit: number,
+  forceRefresh: boolean,
+  signal?: AbortSignal
+): Promise<NewReleaseAlbumCandidate[]> {
   const params = [
     `query=${encodeURIComponent(query)}`,
     `limit=${Math.max(limit, 8)}`,
@@ -437,6 +440,7 @@ async function searchAlbums(query: string, limit: number, forceRefresh: boolean)
 
   const response = await fetch(`${buildAppApiUrl("/search/albums")}?${params.join("&")}`, {
     headers: { Accept: "application/json" },
+    signal,
   }).catch(() => null);
   if (!response?.ok) return [];
 
@@ -449,7 +453,8 @@ async function searchAlbums(query: string, limit: number, forceRefresh: boolean)
 async function fetchAlbumSongs(
   album: NewReleaseAlbumCandidate,
   albumRank: number,
-  forceRefresh: boolean
+  forceRefresh: boolean,
+  signal?: AbortSignal
 ): Promise<NewReleaseSongCandidate[]> {
   const params = [`id=${encodeURIComponent(album.id)}`];
   if (forceRefresh) {
@@ -458,6 +463,7 @@ async function fetchAlbumSongs(
 
   const response = await fetch(`${buildAppApiUrl("/albums")}?${params.join("&")}`, {
     headers: { Accept: "application/json" },
+    signal,
   }).catch(() => null);
   if (!response?.ok) return [];
 
@@ -479,9 +485,13 @@ async function fetchAlbumSongs(
     .filter((song): song is NewReleaseSongCandidate => Boolean(song));
 }
 
-async function fetchAlbumNewReleaseSongs(limit: number, forceRefresh: boolean): Promise<NewReleaseSongCandidate[]> {
+async function fetchAlbumNewReleaseSongs(
+  limit: number,
+  forceRefresh: boolean,
+  signal?: AbortSignal
+): Promise<NewReleaseSongCandidate[]> {
   const albumResults = await Promise.all(
-    NEW_RELEASE_ALBUM_QUERIES.map((query) => searchAlbums(query, 8, forceRefresh))
+    NEW_RELEASE_ALBUM_QUERIES.map((query) => searchAlbums(query, 8, forceRefresh, signal))
   );
   const seen = new Set<string>();
   const albums: NewReleaseAlbumCandidate[] = [];
@@ -498,7 +508,7 @@ async function fetchAlbumNewReleaseSongs(limit: number, forceRefresh: boolean): 
   }).slice(0, Math.max(limit, 10));
 
   const songResults = await Promise.all(
-    rankedAlbums.map((album, index) => fetchAlbumSongs(album, index, forceRefresh))
+    rankedAlbums.map((album, index) => fetchAlbumSongs(album, index, forceRefresh, signal))
   );
   return songResults.flat();
 }
@@ -506,6 +516,7 @@ async function fetchAlbumNewReleaseSongs(limit: number, forceRefresh: boolean): 
 export async function getDailyNewReleaseSongs(options?: DailyNewReleaseSongOptions): Promise<Song[]> {
   const limit = options?.limit ?? DEFAULT_LIMIT;
   const forceRefresh = options?.forceRefresh ?? false;
+  const signal = options?.signal;
 
   if (!forceRefresh) {
     const cached = await readCachedDailySongs(limit);
@@ -513,8 +524,8 @@ export async function getDailyNewReleaseSongs(options?: DailyNewReleaseSongOptio
   }
 
   const [albumSongs, searchSongResults] = await Promise.all([
-    fetchAlbumNewReleaseSongs(limit, forceRefresh),
-    Promise.all(NEW_RELEASE_QUERIES.map((query) => searchSongs(query, limit, forceRefresh))),
+    fetchAlbumNewReleaseSongs(limit, forceRefresh, signal),
+    Promise.all(NEW_RELEASE_QUERIES.map((query) => searchSongs(query, limit, forceRefresh, signal))),
   ]);
   const songs = dedupeAndRankSongs([...albumSongs, ...searchSongResults.flat()], limit);
   if (songs.length > 0) {

@@ -4,7 +4,7 @@
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-export const DOWNLOAD_DEVICE_LIMIT = 5;
+export const DOWNLOAD_DEVICE_LIMIT = 999;
 export const MAX_OFFLINE_SONGS = 10_000;
 export const LICENSE_REFRESH_INTERVAL_HOURS = 24;
 export const LICENSE_GRACE_PERIOD_DAYS = 7;

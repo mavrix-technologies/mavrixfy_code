@@ -4,7 +4,6 @@ import {
   View,
   Text,
   FlatList,
-  ScrollView,
   Pressable,
   StyleSheet,
   Platform,
@@ -35,7 +34,7 @@ import Reanimated, {
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { AD_UNITS } from "@/constants/admob";
+
 import { safeGoBack } from "@/utils/navigation";
 import { usePlayerActions, usePlayerProgress, usePlayerRow } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
@@ -46,7 +45,6 @@ import { PingPongScroll } from "@/components/PingPongScroll";
 import { logger } from "@/lib/logger";
 import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
 import {
-  createSpotifyColorTheme,
   DEFAULT_ARTWORK_PALETTE,
   extractArtworkColors,
   getImmediateArtworkPalette,
@@ -57,15 +55,13 @@ import EqualizerBars from "@/components/EqualizerBars";
 import DownloadButton from "@/components/DownloadButton";
 import { mapFilter } from "@/lib/arrayUtils";
 import { globalQueueSheetRef } from "@/lib/queueRef";
-import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
+
 import YoutubePlayer from "react-native-youtube-iframe";
 import { getYouTubeMusicVisualVideoId } from "@/lib/youtubeMusicService";
 import { searchArtists, getArtistDetails } from "@/lib/artistService";
 import { getYouTubePlaybackQuality, getSettings } from "@/lib/storage";
 
 const PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING = 136;
-const PLAYER_AD_COVER_COOLDOWN_MS = 8 * 60 * 1000;
-const PLAYER_AD_COVER_COOLDOWN_SONGS = 4;
 const PLAYER_PRIMARY_DISMISS_START_PX = 8;
 const PLAYER_PRIMARY_DISMISS_CLOSE_PX = 62;
 const PLAYER_PRIMARY_DISMISS_FAST_VELOCITY = 650;
@@ -129,45 +125,19 @@ function SmoothControlButton({
   );
 }
 
-type CinematicGradientColors = readonly [string, string, string, string];
 type ArtworkQueueItem = {
   song: Song;
   artworkKey: string;
 };
 
-function areGradientColorsEqual(a: CinematicGradientColors, b: CinematicGradientColors): boolean {
-  return a.length === b.length && a.every((color, index) => color === b[index]);
-}
-
-const CinematicPlayerBackground = memo(function CinematicPlayerBackground({
-  colors,
-  coverUrl,
-}: {
-  colors: CinematicGradientColors;
-  coverUrl: string;
-}) {
-  return (
-    <View pointerEvents="none" style={styles.backgroundLayer}>
-      {coverUrl ? (
-        <Image
-          source={{ uri: coverUrl }}
-          style={styles.backgroundArtworkImage}
-          blurRadius={70}
-          contentFit="cover"
-        />
-      ) : null}
-      <LinearGradient
-        colors={["rgba(16,20,26,0.35)", "rgba(16,20,26,0.72)", Colors.background]}
-        locations={[0, 0.5, 1]}
-        style={StyleSheet.absoluteFillObject}
-      />
-    </View>
-  );
+const CinematicPlayerBackground = memo(function CinematicPlayerBackground() {
+  return <View pointerEvents="none" style={styles.backgroundLayer} />;
 });
 
 const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
 const BACKGROUND_YOUTUBE_CHROME_CROP_PX = 260;
 const BACKGROUND_YOUTUBE_CHROME_CROP_TOTAL_PX = BACKGROUND_YOUTUBE_CHROME_CROP_PX * 2;
+// Injected after DOM is ready (injectedJavaScript only — not Before — so window.innerHeight is valid on Android)
 const BACKGROUND_YOUTUBE_CROP_SCRIPT = `
 (function () {
   function applyAmbientCrop() {
@@ -203,6 +173,46 @@ const BACKGROUND_YOUTUBE_CROP_SCRIPT = `
   setTimeout(applyAmbientCrop, 250);
   setTimeout(applyAmbientCrop, 1000);
   window.addEventListener("resize", applyAmbientCrop);
+})();
+true;
+`;
+
+// Injected BEFORE content loads — patches the YT player hooks so playVideo() is called
+// the instant the player is ready, with no postMessage round-trip needed.
+const BACKGROUND_YOUTUBE_PRELOAD_HOOK = `
+(function () {
+  function wrapHooks() {
+    // onYouTubeIframeAPIReady is a function declaration in the inline <script> — hoisted.
+    // Wrap it so we can intercept onPlayerReady right after the player is constructed.
+    var _origAPIReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = function() {
+      if (_origAPIReady) _origAPIReady();
+      // onPlayerReady is also a hoisted function declaration — wrap it after _origAPIReady ran
+      var _origPlayerReady = window.onPlayerReady;
+      window.onPlayerReady = function(event) {
+        if (_origPlayerReady) _origPlayerReady(event);
+        try { player.mute(); } catch(e) {}
+        try { player.setVolume(0); } catch(e) {}
+        try { player.setPlaybackQuality("tiny"); } catch(e) {}
+        try { player.playVideo(); } catch(e) {}
+      };
+    };
+  }
+  wrapHooks();
+  // Fallback: poll for player object in case the hooks already fired before this ran
+  var attempts = 0;
+  function tryPlayDirect() {
+    attempts++;
+    if (typeof player !== "undefined" && player && typeof player.playVideo === "function") {
+      try { player.mute(); } catch(e) {}
+      try { player.setVolume(0); } catch(e) {}
+      try { player.setPlaybackQuality("tiny"); } catch(e) {}
+      try { player.playVideo(); } catch(e) {}
+      return;
+    }
+    if (attempts < 40) setTimeout(tryPlayDirect, 250);
+  }
+  setTimeout(tryPlayDirect, 600);
 })();
 true;
 `;
@@ -245,6 +255,7 @@ type BackgroundYoutubeVideoProps = {
   isPlaying: boolean;
   positionMillis: number;
   containerHeight: number;
+  isLowEnd?: boolean;
 };
 
 const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
@@ -252,39 +263,62 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   isPlaying,
   positionMillis,
   containerHeight,
+  isLowEnd = false,
 }: BackgroundYoutubeVideoProps) {
   const { width: winW } = useWindowDimensions();
   const playerRef = useRef<any>(null);
   const initialPositionSeconds = Math.max(0, Math.floor(positionMillis / 1000));
   const lastPositionRef = useRef(initialPositionSeconds);
   const [playerReady, setPlayerReady] = useState(false);
-  const [videoVisible, setVideoVisible] = useState(false);
+  const videoOpacity = useRef<Animated.Value | null>(null);
+  if (!videoOpacity.current) {
+    videoOpacity.current = new Animated.Value(0);
+  }
+  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const revealVideo = useCallback(() => {
+    if (revealTimerRef.current) {
+      clearTimeout(revealTimerRef.current);
+      revealTimerRef.current = null;
+    }
+    if (videoOpacity.current) {
+      Animated.timing(videoOpacity.current, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, []);
 
   const onReady = useCallback(() => {
     setPlayerReady(true);
-    playerRef.current?.mute?.();
-    void getSettings().then((settings) => {
-      playerRef.current?.setPlaybackQuality?.(getYouTubePlaybackQuality(settings.videoBackgroundQuality));
-    });
+    // Fallback reveal at 800ms — video is at minimum loading/buffering by then.
+    // If onChangeState fires first, revealVideo() cancels this and fades in immediately.
+    if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
+    revealTimerRef.current = setTimeout(revealVideo, 800);
+  }, [revealVideo]);
+
+  useEffect(() => {
+    return () => {
+      if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
+    };
   }, []);
 
   const handleBackgroundStateChange = useCallback((state: string) => {
-    setVideoVisible(state === "playing");
-  }, []);
-
-  useEffect(() => {
-    if (playerReady) {
-      playerRef.current?.mute?.();
+    if (state === "playing" || state === "buffering") {
+      revealVideo();
     }
-  }, [playerReady, isPlaying]);
+  }, [revealVideo]);
 
   useEffect(() => {
+    // Skip seek sync on low-end — saves a WebView injectJavaScript call on every audio tick
+    if (isLowEnd) return;
     const targetSeconds = Math.max(0, Math.floor(positionMillis / 1000));
     if (playerReady && Math.abs(targetSeconds - lastPositionRef.current) > 10) {
       playerRef.current?.seekTo?.(targetSeconds, true);
     }
     lastPositionRef.current = targetSeconds;
-  }, [positionMillis, playerReady]);
+  }, [positionMillis, playerReady, isLowEnd]);
 
   const dimensions = useMemo(() => {
     const frameW = Math.max(winW, 220);
@@ -324,14 +358,14 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
         { overflow: "hidden", backgroundColor: Colors.background },
       ]}
     >
-      <View
+      <Animated.View
         style={{
           position: "absolute",
           top: dimensions.offsetY,
           left: dimensions.offsetX,
           width: dimensions.frameW,
           height: dimensions.frameH,
-          opacity: videoVisible ? 1 : 0,
+          opacity: videoOpacity.current || 0,
         }}
       >
         <YoutubePlayer
@@ -339,12 +373,14 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
           ref={playerRef}
           height={dimensions.frameH}
           width={dimensions.frameW}
-          play={isPlaying}
+          // Backdrop is muted and decorative — always play while mounted; gated by shouldRenderBackgroundVideo
+          play={true}
           mute={true}
           volume={0}
           videoId={videoId}
           onReady={onReady}
           onChangeState={handleBackgroundStateChange}
+          onError={() => undefined}
           forceAndroidAutoplay
           useLocalHTML
           baseUrlOverride={YOUTUBE_PLAYER_REFERRER_URL}
@@ -361,16 +397,24 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
             playsinline: true,
             cc_load_policy: 0,
             enablejsapi: 1,
+            mute: 1,
           }}
           webViewProps={{
             javaScriptEnabled: true,
             domStorageEnabled: true,
             thirdPartyCookiesEnabled: true,
-            injectedJavaScriptBeforeContentLoaded: BACKGROUND_YOUTUBE_CROP_SCRIPT,
+            // Pre-load hook: patches onYouTubeIframeAPIReady/onPlayerReady before the YT API
+            // script loads, so playVideo() fires the instant the player is ready — no postMessage.
+            // Safe to use Before because we're only defining functions, not reading layout.
+            injectedJavaScriptBeforeContentLoaded: Platform.OS === "android"
+              ? BACKGROUND_YOUTUBE_PRELOAD_HOOK
+              : undefined,
+            // Post-load: crop script runs after layout so window.innerHeight is valid.
             injectedJavaScript: BACKGROUND_YOUTUBE_CROP_SCRIPT,
             setSupportMultipleWindows: false,
             allowsFullscreenVideo: false,
             allowsInlineMediaPlayback: true,
+            allowsBackgroundMediaPlayback: true,
             mediaPlaybackRequiresUserAction: false,
             scrollEnabled: false,
             overScrollMode: "never" as const,
@@ -383,7 +427,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
             { backgroundColor: "rgba(0, 0, 0, 0.36)" }
           ]}
         />
-      </View>
+      </Animated.View>
     </View>
   );
 });
@@ -738,9 +782,6 @@ type PlayerSpotifyProgressProps = {
   screenSongId: string;
   songDurationSeconds: number;
   isShortScreen: boolean;
-  isDevPreviewActive: boolean;
-  devPreviewProgress: number;
-  setDevPreviewProgress: React.Dispatch<React.SetStateAction<number>>;
   seekTo: (progress: number) => void;
   onSeekingChange: (isSeeking: boolean) => void;
 };
@@ -749,9 +790,6 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   screenSongId,
   songDurationSeconds,
   isShortScreen,
-  isDevPreviewActive,
-  devPreviewProgress,
-  setDevPreviewProgress,
   seekTo,
   onSeekingChange,
 }: PlayerSpotifyProgressProps) {
@@ -816,17 +854,14 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   }, [isPlaying, isBuffering, isLoading, duration, isScrubbing, progress]);
 
   const liveProgress = isPlaying && !isScrubbing ? localProgress : progress;
-  const playerProgress = isDevPreviewActive ? devPreviewProgress : liveProgress;
+  const playerProgress = liveProgress;
   const safeSongDuration = Number.isFinite(songDurationSeconds) ? Math.max(0, songDurationSeconds) : 0;
-  const playerDuration = isDevPreviewActive ? safeSongDuration * 1000 : duration;
-  const playerPositionMillis = isDevPreviewActive
-    ? Math.round(safeSongDuration * 1000 * devPreviewProgress)
-    : Math.round(playerDuration * playerProgress);
+  const playerDuration = duration;
+  const playerPositionMillis = Math.round(playerDuration * playerProgress);
   const currentTimeSec = Math.floor(playerPositionMillis / 1000);
   const totalDurationSec = Math.floor(playerDuration / 1000);
   const effectiveDurationSec = totalDurationSec > 0 ? totalDurationSec : safeSongDuration;
   const canSeek =
-    isDevPreviewActive ||
     effectiveDurationSec > 0 ||
     (Platform.OS === "android" && Boolean(screenSongId));
   const displayDuration =
@@ -855,32 +890,22 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
 
   const handleValueChange = useCallback((value: number) => {
     const normalized = clampUnit(value / SLIDER_MAX);
-    if (isDevPreviewActive) {
-      setDevPreviewProgress(normalized);
-      return;
-    }
     setLocalProgress(normalized);
-  }, [isDevPreviewActive, setDevPreviewProgress]);
+  }, []);
 
   const handleSlidingComplete = useCallback((value: number) => {
     const normalized = clampUnit(value / SLIDER_MAX);
     setIsScrubbing(false);
     updateSeeking(false);
-    if (isDevPreviewActive) {
-      setDevPreviewProgress(normalized);
-      return;
-    }
     setLocalProgress(normalized);
     seekTo(normalized);
-  }, [isDevPreviewActive, seekTo, setDevPreviewProgress, updateSeeking]);
+  }, [seekTo, updateSeeking]);
 
   const handleSlidingCancel = useCallback(() => {
     setIsScrubbing(false);
     updateSeeking(false);
-    if (!isDevPreviewActive) {
-      setLocalProgress(progress);
-    }
-  }, [isDevPreviewActive, progress, updateSeeking]);
+    setLocalProgress(progress);
+  }, [progress, updateSeeking]);
 
   return (
     <View
@@ -1102,41 +1127,8 @@ const RelatedSongsSection = memo(({
 
 RelatedSongsSection.displayName = "RelatedSongsSection";
 
-const DEV_PREVIEW_SONGS: Song[] = [
-  {
-    id: "dev-preview-1",
-    title: "Midnight Drive",
-    artist: "Mavrixfy Preview",
-    album: "UI Preview",
-    duration: 214,
-    coverUrl: "https://placehold.co/600x600/1b2d4b/f4f7fb?text=Preview+1",
-    genre: "Preview",
-    audioUrl: "",
-    source: "local",
-  },
-  {
-    id: "dev-preview-2",
-    title: "Afterglow",
-    artist: "Mavrixfy Preview",
-    album: "UI Preview",
-    duration: 187,
-    coverUrl: "https://placehold.co/600x600/3d2748/f4f7fb?text=Preview+2",
-    genre: "Preview",
-    audioUrl: "",
-    source: "local",
-  },
-  {
-    id: "dev-preview-3",
-    title: "Blue Avenue",
-    artist: "Mavrixfy Preview",
-    album: "UI Preview",
-    duration: 201,
-    coverUrl: "https://placehold.co/600x600/14385a/f4f7fb?text=Preview+3",
-    genre: "Preview",
-    audioUrl: "",
-    source: "local",
-  },
-];
+const DEV_PREVIEW_SONGS: Song[] = [];
+
 const EMPTY_PLAYER_SCROLL_SONGS: Song[] = [];
 
 function LegacyPlayerScreen() {
@@ -1147,7 +1139,7 @@ function useLegacyPlayerScreenView() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const [ambientBackdropEnabled, setAmbientBackdropEnabled] = useState(true);
+  const [ambientBackdropEnabled, setAmbientBackdropEnabled] = useState(false);
   const [isNavigationFocused, setIsNavigationFocused] = useState(() => navigation.isFocused());
   const [isAppActive, setIsAppActive] = useState(() => AppState.currentState === "active");
   const isScreenFocused = isNavigationFocused && isAppActive;
@@ -1229,20 +1221,7 @@ function useLegacyPlayerScreenView() {
     setIsProgressSeeking(false);
   }
   const [artworkPalette, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
-  const [playerAd, setPlayerAd] = useState<GoogleNativeAd | null>(null);
-  const [playerAdLoaded, setPlayerAdLoaded] = useState(false);
-  const [manualPlayerAdSongId, setManualPlayerAdSongId] = useState<string | null>(null);
-  const playerAdCoverCooldownUntilRef = useRef(0);
-  const playerAdSongsSinceCoverRef = useRef(PLAYER_AD_COVER_COOLDOWN_SONGS);
-  const lastPlayerAdSongIdRef = useRef<string | null>(currentSong?.id ?? null);
   const [isLoadingDevTrack, setIsLoadingDevTrack] = useState(false);
-  const [isDevPreviewEnabled, setIsDevPreviewEnabled] = useState(false);
-  const [devPreviewIndex, setDevPreviewIndex] = useState(0);
-  const [devPreviewIsPlaying, setDevPreviewIsPlaying] = useState(true);
-  const [devPreviewProgress, setDevPreviewProgress] = useState(0.18);
-  const [, setDevPreviewIsShuffled] = useState(false);
-  const [devPreviewRepeatMode, setDevPreviewRepeatMode] = useState<"off" | "all" | "one">("off");
-  const [devPreviewLikedSongIds, setDevPreviewLikedSongIds] = useState<string[]>([]);
   const skipCooldownRef = useRef(false);
   const skipCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const artScrollXRef = useRef<Animated.Value | null>(null);
@@ -1250,6 +1229,12 @@ function useLegacyPlayerScreenView() {
   const artScrollX = artScrollXRef.current;
   const artCarouselRef = useRef<FlatList<ArtworkQueueItem> | null>(null);
   const hasAlignedArtCarouselRef = useRef(false);
+  const lastAlignedSongIdRef = useRef<string | undefined>(currentSong?.id);
+  // Reset alignment flag when song changes so the carousel jumps (not animates) to new position
+  if (currentSong?.id !== lastAlignedSongIdRef.current) {
+    lastAlignedSongIdRef.current = currentSong?.id;
+    hasAlignedArtCarouselRef.current = false;
+  }
   const pendingArtworkTargetIndexRef = useRef<number | null>(null);
   const didHandleSheetDismissRef = useRef(false);
   const sheetDetentReadyAtRef = useRef(0);
@@ -1257,7 +1242,6 @@ function useLegacyPlayerScreenView() {
   const playerDismissGestureEnabledShared = useSharedValue(1);
   const playerDismissTranslateY = useSharedValue(0);
   const optionsPressLockRef = useRef(false);
-  const isDevPreviewActive = __DEV__ && !currentSong && isDevPreviewEnabled;
 
   const clearSkipCooldownTimer = useCallback(() => {
     if (!skipCooldownTimerRef.current) return;
@@ -1333,18 +1317,18 @@ function useLegacyPlayerScreenView() {
     };
   }, []);
 
-  const devPreviewSong =
-    DEV_PREVIEW_SONGS[Math.max(0, Math.min(devPreviewIndex, DEV_PREVIEW_SONGS.length - 1))] ??
-    DEV_PREVIEW_SONGS[0];
   const { positionMillis } = usePlayerProgress();
-  const screenSong = currentSong ?? (isDevPreviewActive ? devPreviewSong : null);
+  const screenSong = currentSong ?? null;
   const screenSongIsYouTube = Boolean(screenSong?.source === "youtube" || screenSong?.id?.startsWith("youtube_"));
 
   const [backgroundVideoId, setBackgroundVideoId] = useState<string | null>(null);
 
-  // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- background video id follows the current song after the resolver verifies an official visual match.
+  // Use only screenSong?.id as dep — the whole screenSong object changes reference
+  // on every queue update even when the song hasn't changed, which would flash
+  // backgroundVideoId to null and remount BackgroundYoutubeVideo unnecessarily.
+  const screenSongIdForVideo = screenSong?.id ?? null;
   useEffect(() => {
-    if (!screenSong) {
+    if (!screenSongIdForVideo || !screenSong) {
       setBackgroundVideoId(null);
       return;
     }
@@ -1362,63 +1346,30 @@ function useLegacyPlayerScreenView() {
     return () => {
       cancelled = true;
     };
-  }, [screenSong]);
-
-  const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
-  const [prevSongId, setPrevSongId] = useState(screenSong?.id);
-
-  if (screenSong?.id !== prevSongId) {
-    setPrevSongId(screenSong?.id);
-    setHasStartedPlaying(false);
-  }
-
-  useEffect(() => {
-    if (playbackState.isPlaying && !playbackState.isLoading && !playbackState.isBuffering) {
-      setHasStartedPlaying(true);
-    }
-  }, [playbackState.isPlaying, playbackState.isLoading, playbackState.isBuffering]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screenSongIdForVideo]); // intentionally excludes screenSong object — only song ID change should retrigger
 
   const ambientVideoLayoutActive = useMemo(() => Boolean(
     ambientBackdropEnabled &&
-    backgroundVideoId
-  ), [ambientBackdropEnabled, backgroundVideoId]);
+    backgroundVideoId &&
+    !isLowEnd
+  ), [ambientBackdropEnabled, backgroundVideoId, isLowEnd]);
+
+  // Delay mounting the backdrop WebView until after interaction settles.
+  // On low-end Android, add an extra 2 s so the audio WebView fully claims resources first.
+  const [backdropMountReady, setBackdropMountReady] = useState(false);
+  useEffect(() => {
+    if (!interactionReady || backdropMountReady) return;
+    const delay = isLowEnd ? 2000 : 0;
+    const t = setTimeout(() => setBackdropMountReady(true), delay);
+    return () => clearTimeout(t);
+  }, [interactionReady, backdropMountReady, isLowEnd]);
 
   const shouldRenderBackgroundVideo = useMemo(() => Boolean(
-    ambientVideoLayoutActive
-  ), [ambientVideoLayoutActive]);
+    ambientVideoLayoutActive && interactionReady && backdropMountReady
+  ), [ambientVideoLayoutActive, interactionReady, backdropMountReady]);
 
 
-
-  console.log("DEBUG [PlayerDetails] Ambient states:", {
-    ambientBackdropEnabled,
-    backgroundVideoId,
-    ambientVideoLayoutActive,
-    shouldRenderBackgroundVideo,
-    songId: screenSong?.id,
-    songTitle: screenSong?.title
-  });
-
-  const currentPlayerAdSongId = screenSong?.id ?? null;
-  if (currentPlayerAdSongId !== lastPlayerAdSongIdRef.current) {
-    if (lastPlayerAdSongIdRef.current) {
-      playerAdSongsSinceCoverRef.current = Math.min(
-        PLAYER_AD_COVER_COOLDOWN_SONGS,
-        playerAdSongsSinceCoverRef.current + 1
-      );
-    }
-    lastPlayerAdSongIdRef.current = currentPlayerAdSongId;
-  }
-  const isPlayerAdCoverCooldownActive =
-    Date.now() < playerAdCoverCooldownUntilRef.current ||
-    playerAdSongsSinceCoverRef.current < PLAYER_AD_COVER_COOLDOWN_SONGS;
-  const showAdInPlayer = Boolean(
-    currentPlayerAdSongId &&
-      !isLowEnd &&
-      playerAdLoaded &&
-      playerAd &&
-      !isDevPreviewActive &&
-      (manualPlayerAdSongId === currentPlayerAdSongId || !isPlayerAdCoverCooldownActive)
-  );
 
   useEffect(() => {
     didHandleSheetDismissRef.current = false;
@@ -1469,10 +1420,9 @@ function useLegacyPlayerScreenView() {
         pathname: "/song-options",
         params: {
           song: JSON.stringify(screenSong),
-          showDownload: isDevPreviewActive ? "0" : "1",
+          showDownload: "1",
           canRemove: "0",
           optionContext: "",
-          playlistId: "",
           playlistSource: "",
           playlistName: "",
         },
@@ -1483,7 +1433,7 @@ function useLegacyPlayerScreenView() {
     setTimeout(() => {
       optionsPressLockRef.current = false;
     }, 600);
-  }, [isDevPreviewActive, screenSong]);
+  }, [screenSong]);
   
   useEffect(() => {
     if (!interactionReady) return;
@@ -1635,7 +1585,9 @@ function useLegacyPlayerScreenView() {
       return queue;
     }
     return currentSong ? [currentSong] : [];
-  }, [currentSong, queue, sourceQueue]);
+  // currentSong only needed as fallback when both queues are empty (single song)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, sourceQueue, currentSong?.id]);
   const liveActiveQueueIndex = useMemo(() => {
     if (livePlayingQueue.length === 0) return 0;
     if (currentSong?.id) {
@@ -1647,8 +1599,8 @@ function useLegacyPlayerScreenView() {
     const rawIndex = queue.length > 0 ? queueIndex : 0;
     return Math.max(0, Math.min(rawIndex, livePlayingQueue.length - 1));
   }, [currentSong?.id, livePlayingQueue, queue.length, queueIndex]);
-  const playingQueue = isDevPreviewActive ? DEV_PREVIEW_SONGS : livePlayingQueue;
-  const activeQueueIndex = isDevPreviewActive ? devPreviewIndex : liveActiveQueueIndex;
+  const playingQueue = livePlayingQueue;
+  const activeQueueIndex = liveActiveQueueIndex;
 
   const [artistDetails, setArtistDetails] = useState<any>(null);
   const [artistLoading, setArtistLoading] = useState(false);
@@ -1676,8 +1628,7 @@ function useLegacyPlayerScreenView() {
         } else {
           setArtistDetails(null);
         }
-      } catch (err) {
-        console.warn("[PlayerArtistDetails] Failed to load artist:", err);
+      } catch {
       } finally {
         if (active) setArtistLoading(false);
       }
@@ -1691,7 +1642,7 @@ function useLegacyPlayerScreenView() {
 
   const relatedSongs = useMemo<Song[]>(() => {
     if (!artistDetails?.topSongs) return [];
-    const filtered = artistDetails.topSongs.flatMap((item) => {
+    const filtered = artistDetails.topSongs.flatMap((item: any) => {
       const s = convertJioSaavnSong(item);
       return s.id !== screenSong?.id ? [s] : [];
     });
@@ -1729,68 +1680,8 @@ function useLegacyPlayerScreenView() {
       };
     });
   }, [playingQueue]);
-  const playerIsPlaying = isDevPreviewActive ? devPreviewIsPlaying : playbackState.isPlaying;
-  const playerRepeatMode = isDevPreviewActive ? devPreviewRepeatMode : repeatMode;
-
-  useEffect(() => {
-    let active = true;
-    let loadedAd: GoogleNativeAd | null = null;
-
-    const loadPlayerNativeAd = async () => {
-      try {
-        const adsModule = getGoogleMobileAdsModule();
-        if (!adsModule || !AD_UNITS.NATIVE) {
-          return;
-        }
-
-        const { default: mobileAds, NativeAd } = adsModule;
-
-        if (Platform.OS === "ios") {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const { requestTrackingPermissionsAsync } = require("expo-tracking-transparency");
-            await requestTrackingPermissionsAsync();
-          } catch {
-            // Ignore tracking permission errors if unsupported
-          }
-        }
-
-        await mobileAds().initialize();
-        if (!active) return;
-
-        // Using centrally configured static native ad unit ID
-        const ad = await NativeAd.createForAdRequest(AD_UNITS.NATIVE, {
-          requestNonPersonalizedAdsOnly: true,
-        });
-
-        if (!active) {
-          ad.destroy();
-          return;
-        }
-
-        loadedAd = ad;
-        setPlayerAd(ad);
-        setPlayerAdLoaded(true);
-      } catch (err) {
-        logger.warn("Player screen native ad failed to load:", err);
-      }
-    };
-
-    loadPlayerNativeAd();
-
-    return () => {
-      active = false;
-      if (loadedAd) {
-        loadedAd.destroy();
-      }
-    };
-  }, []);
-
-  const adsModule = playerAd ? getGoogleMobileAdsModule() : null;
-  const NativeAdView = adsModule?.NativeAdView;
-  const NativeAsset = adsModule?.NativeAsset;
-  const NativeAssetType = adsModule?.NativeAssetType;
-  const NativeMediaView = adsModule?.NativeMediaView;
+  const playerIsPlaying = playbackState.isPlaying;
+  const playerRepeatMode = repeatMode;
 
 
   useEffect(() => {
@@ -1805,11 +1696,7 @@ function useLegacyPlayerScreenView() {
     preloadDominantColors(urls);
   }, [activeQueueIndex, playingQueue]);
 
-  const liked = screenSong
-    ? isDevPreviewActive
-      ? devPreviewLikedSongIds.includes(screenSong.id)
-      : isLiked(screenSong.id)
-    : false;
+  const liked = screenSong ? isLiked(screenSong.id) : false;
   const queueRowHeight = isShortScreen ? 48 : 54;
   const queueViewportHeight = Math.min(
     playingQueue.length * queueRowHeight + 18,
@@ -1823,11 +1710,6 @@ function useLegacyPlayerScreenView() {
   const artCarouselPageWidth = artCarouselViewportWidth;
   const artCarouselSnapInterval = artCarouselPageWidth;
 
-  const playerTheme = useMemo(
-    () => createSpotifyColorTheme(artworkPalette),
-    [artworkPalette]
-  );
-  const gradientColors = playerTheme.playerGradient;
   const sheetTextColor = Colors.text;
   const sheetMutedTextColor = "rgba(223,226,235,0.68)";
   // These are all static — define once outside the component (see bottom of file)
@@ -1962,14 +1844,7 @@ function useLegacyPlayerScreenView() {
   }, [isLoadingDevTrack, normalizePlayableSong, playSong, showDevLoadMessage]);
 
   const openDevPreview = useCallback(() => {
-    setIsDevPreviewEnabled(true);
-    setDevPreviewIndex(0);
-    setDevPreviewIsPlaying(true);
-    setDevPreviewProgress(0.18);
-    setDevPreviewIsShuffled(false);
-    setDevPreviewRepeatMode("off");
-    setDevPreviewLikedSongIds([]);
-    setIsProgressSeeking(false);
+    // dev preview removed
   }, []);
 
   const handleArtworkSongChange = useCallback(
@@ -1984,12 +1859,6 @@ function useLegacyPlayerScreenView() {
         skipCooldownRef.current = false;
         skipCooldownTimerRef.current = null;
       }, 400);
-
-      if (isDevPreviewActive) {
-        setDevPreviewIndex(targetIndex);
-        setDevPreviewProgress(0.18);
-        return;
-      }
 
       if (targetIndex === activeQueueIndex + 1) {
         void nextSong();
@@ -2008,21 +1877,9 @@ function useLegacyPlayerScreenView() {
 
       playSong(targetSong, playingQueue);
     },
-    [activeQueueIndex, clearSkipCooldownTimer, isDevPreviewActive, nextSong, playSong, playingQueue, prevSong]
+    [activeQueueIndex, clearSkipCooldownTimer, nextSong, playSong, playingQueue, prevSong]
   );
 
-  const handlePlayerAdToggle = useCallback((event: GestureResponderEvent) => {
-    event.stopPropagation();
-
-    if (showAdInPlayer) {
-      playerAdCoverCooldownUntilRef.current = Date.now() + PLAYER_AD_COVER_COOLDOWN_MS;
-      playerAdSongsSinceCoverRef.current = 0;
-      setManualPlayerAdSongId(null);
-      return;
-    }
-
-    setManualPlayerAdSongId(currentPlayerAdSongId);
-  }, [currentPlayerAdSongId, showAdInPlayer]);
 
   useEffect(() => {
     pendingArtworkTargetIndexRef.current = activeQueueIndex;
@@ -2217,42 +2074,7 @@ function useLegacyPlayerScreenView() {
             ]}
           >
             <View style={styles.albumArtParallax}>
-              {showAdInPlayer && isScreenFocused && isActiveCard && playerAd && NativeAdView && NativeMediaView && NativeAsset && NativeAssetType ? (
-                <NativeAdView
-                  nativeAd={playerAd}
-                  style={[styles.albumArt, styles.adCardContainer]}
-                >
-                  <NativeMediaView resizeMode="cover" style={styles.adCardMedia} />
-                  
-                  <View style={styles.adCardOverlay}>
-                    <View style={styles.adCardTextWrap}>
-                      <View style={styles.adCardBadgeRow}>
-                        <View style={styles.adCardBadge}>
-                          <Text style={styles.adCardBadgeText}>AD</Text>
-                        </View>
-                        <NativeAsset assetType={NativeAssetType.HEADLINE}>
-                          <Text style={styles.adCardHeadline} numberOfLines={1}>
-                            {playerAd.headline}
-                          </Text>
-                        </NativeAsset>
-                      </View>
-                      {playerAd.body && (
-                        <NativeAsset assetType={NativeAssetType.BODY}>
-                          <Text style={styles.adCardBody} numberOfLines={1}>
-                            {playerAd.body}
-                          </Text>
-                        </NativeAsset>
-                      )}
-                    </View>
-                    
-                    {playerAd.callToAction && (
-                      <NativeAsset assetType={NativeAssetType.CALL_TO_ACTION}>
-                        <Text style={styles.adCardCtaButton}>{playerAd.callToAction}</Text>
-                      </NativeAsset>
-                    )}
-                  </View>
-                </NativeAdView>
-              ) : song.coverUrl?.trim() ? (
+              {song.coverUrl?.trim() ? (
                 <StableArtworkImage
                   uri={song.coverUrl.trim()}
                   recyclingKey={item.artworkKey}
@@ -2264,34 +2086,6 @@ function useLegacyPlayerScreenView() {
                 </View>
               )}
             </View>
-
-            {/* Toggle ad/artwork overlay button */}
-            {isActiveCard && !isLowEnd && playerAdLoaded && (
-              <Pressable
-                style={[
-                  styles.adBadgeOverlay,
-                  {
-                    backgroundColor: showAdInPlayer ? "rgba(38, 225, 154, 0.9)" : "rgba(11, 13, 16, 0.82)",
-                    borderColor: showAdInPlayer ? "#26e19a" : "rgba(255, 255, 255, 0.12)",
-                  }
-                ]}
-                onPress={handlePlayerAdToggle}
-              >
-                <Ionicons
-                  name={showAdInPlayer ? "image-outline" : "megaphone-outline"}
-                  size={12}
-                  color={showAdInPlayer ? "#10141a" : "#FFFFFF"}
-                />
-                <Text
-                  style={[
-                    styles.adBadgeText,
-                    { color: showAdInPlayer ? "#10141a" : "#FFFFFF" }
-                  ]}
-                >
-                  {showAdInPlayer ? "Show Cover" : "Show Ad"}
-                </Text>
-              </Pressable>
-              )}
 
             </Animated.View>
         </Pressable>
@@ -2314,16 +2108,6 @@ function useLegacyPlayerScreenView() {
       artScrollX,
       artSize,
       handleArtworkSongChange,
-      handlePlayerAdToggle,
-      isLowEnd,
-      isScreenFocused,
-      NativeAdView,
-      NativeAsset,
-      NativeAssetType,
-      NativeMediaView,
-      playerAd,
-      playerAdLoaded,
-      showAdInPlayer,
       artworkDismissAnimatedStyle,
       ambientVideoLayoutActive,
     ]
@@ -2331,15 +2115,9 @@ function useLegacyPlayerScreenView() {
 
   const handleQueueItemPress = useCallback(
     (item: Song) => {
-      if (isDevPreviewActive) {
-        const idx = playingQueue.findIndex((s) => s.id === item.id);
-        setDevPreviewIndex(idx >= 0 ? idx : 0);
-        setDevPreviewProgress(0.18);
-        return;
-      }
       handleQueueSongPress(item);
     },
-    [isDevPreviewActive, playingQueue, handleQueueSongPress]
+    [handleQueueSongPress]
   );
   const renderQueueItem = useCallback(
     ({ item, index }: { item: Song; index: number }) => (
@@ -2398,9 +2176,8 @@ function useLegacyPlayerScreenView() {
                   </>
                 )}
               </Pressable>
-              <Pressable onPress={openDevPreview} style={styles.emptyDevSecondaryButton}>
-                <Ionicons name="eye-outline" size={16} color={Colors.text} />
-                <Text style={styles.emptyDevSecondaryButtonText}>Open UI Preview</Text>
+              <Pressable onPress={safeGoBack} style={styles.emptyBackButton}>
+                <Ionicons name="arrow-down" size={26} color={Colors.text} />
               </Pressable>
             </>
           ) : null}
@@ -2422,10 +2199,7 @@ function useLegacyPlayerScreenView() {
       />
       <Reanimated.View style={[styles.playerSheetSurface, playerDismissAnimatedStyle]}>
         <Reanimated.View style={[StyleSheet.absoluteFillObject, bgOpacityAnimatedStyle]}>
-          <CinematicPlayerBackground
-            colors={gradientColors}
-            coverUrl={screenSong.coverUrl || ""}
-          />
+          <CinematicPlayerBackground />
         </Reanimated.View>
 
         <View
@@ -2512,8 +2286,10 @@ function useLegacyPlayerScreenView() {
         ListHeaderComponent={
           <>
             {shouldRenderBackgroundVideo ? (() => {
+              // Low-end: use a smaller WebView surface (half height) to reduce GPU compositing load.
+              // The gradient still fills to black so the smaller frame is invisible at the seam.
               const containerH = Math.round(
-                screenWidth * (16 / 9)
+                screenWidth * (16 / 9) * (isLowEnd ? 0.5 : 1)
               );
               return (
                 <Animated.View
@@ -2540,6 +2316,7 @@ function useLegacyPlayerScreenView() {
                     isPlaying={isScreenFocused}
                     positionMillis={positionMillis}
                     containerHeight={containerH}
+                    isLowEnd={isLowEnd}
                   />
                   <LinearGradient
                     pointerEvents="none"
@@ -2673,14 +2450,6 @@ function useLegacyPlayerScreenView() {
                   <SmoothControlButton
                     style={[styles.songDetailActionButton, songDetailActionBtnStyle]}
                     onPress={() => {
-                      if (isDevPreviewActive) {
-                        setDevPreviewLikedSongIds((prev) =>
-                          prev.includes(screenSong.id)
-                            ? prev.filter((songId) => songId !== screenSong.id)
-                            : [...prev, screenSong.id]
-                        );
-                        return;
-                      }
                       toggleLike(screenSong);
                     }}
                   >
@@ -2693,20 +2462,12 @@ function useLegacyPlayerScreenView() {
 
                   {!screenSongIsYouTube ? (
                     <View style={[styles.songDetailActionButton, songDetailActionBtnStyle]}>
-                      {isDevPreviewActive ? (
-                        <Ionicons
-                          name="download-outline"
-                          size={songDetailIconSize}
-                          color="rgba(236,240,247,0.28)"
-                        />
-                      ) : (
-                        <DownloadButton
-                          song={screenSong}
-                          size={songDetailIconSize}
-                          color="#FFFFFF"
-                          style={[styles.playerDownloadButton, songDetailDownloadBtnStyle]}
-                        />
-                      )}
+                      <DownloadButton
+                        song={screenSong}
+                        size={songDetailIconSize}
+                        color="#FFFFFF"
+                        style={[styles.playerDownloadButton, songDetailDownloadBtnStyle]}
+                      />
                     </View>
                   ) : null}
                 </View>
@@ -2722,9 +2483,6 @@ function useLegacyPlayerScreenView() {
                 screenSongId={screenSong.id}
                 songDurationSeconds={screenSong.duration}
                 isShortScreen={isShortScreen}
-                isDevPreviewActive={isDevPreviewActive}
-                devPreviewProgress={devPreviewProgress}
-                setDevPreviewProgress={setDevPreviewProgress}
                 seekTo={seekTo}
                 onSeekingChange={setIsProgressSeeking}
               />
@@ -2746,11 +2504,7 @@ function useLegacyPlayerScreenView() {
                     playerIconBtnStyle,
                   ]}
                   onPress={() => {
-                    if (isDevPreviewActive) {
-                      setDevPreviewIsShuffled((p) => !p);
-                    } else {
-                      toggleShuffle();
-                    }
+                    toggleShuffle();
                   }}
                 >
                   <Ionicons
@@ -2763,41 +2517,25 @@ function useLegacyPlayerScreenView() {
                 <SmoothControlButton
                   style={[styles.prevNextButton, prevNextBtnSizeStyle]}
                   onPressIn={() => {
-                    if (isDevPreviewActive) {
-                      setDevPreviewIndex((p) => Math.max(0, p - 1));
-                      setDevPreviewProgress(0.18);
-                    } else {
-                      handleSkip("prev");
-                    }
+                    handleSkip("prev");
                   }}
                 >
                   <Ionicons name="play-skip-back" size={prevNextIconSize} color={activeControlIconColor} />
                 </SmoothControlButton>
 
                 <PlayerPlayButton
-                  isPlayingOverride={isDevPreviewActive ? devPreviewIsPlaying : undefined}
-                  isLoadingOverride={isDevPreviewActive ? false : undefined}
                   buttonSize={playButtonSize}
                   iconSize={playIconSize}
                   onAccentColor="#060A0F"
                   onPress={() => {
-                    if (isDevPreviewActive) {
-                      setDevPreviewIsPlaying((p) => !p);
-                    } else {
-                      togglePlay();
-                    }
+                    togglePlay();
                   }}
                 />
 
                 <SmoothControlButton
                   style={[styles.prevNextButton, prevNextBtnSizeStyle]}
                   onPressIn={() => {
-                    if (isDevPreviewActive) {
-                      setDevPreviewIndex((p) => Math.min(DEV_PREVIEW_SONGS.length - 1, p + 1));
-                      setDevPreviewProgress(0.18);
-                    } else {
-                      handleSkip("next");
-                    }
+                    handleSkip("next");
                   }}
                 >
                   <Ionicons name="play-skip-forward" size={prevNextIconSize} color={activeControlIconColor} />
@@ -2809,11 +2547,7 @@ function useLegacyPlayerScreenView() {
                     playerIconBtnStyle,
                   ]}
                   onPress={() => {
-                    if (isDevPreviewActive) {
-                      setDevPreviewRepeatMode((p) => (p === "off" ? "all" : p === "all" ? "one" : "off"));
-                    } else {
-                      toggleRepeat();
-                    }
+                    toggleRepeat();
                   }}
                 >
                   <Ionicons
@@ -2841,21 +2575,22 @@ function useLegacyPlayerScreenView() {
             <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
               <Text style={styles.playingListTitle}>Queue</Text>
             </View>
-            <ScrollView
+            <FlatList
+              data={playingQueue}
+              keyExtractor={queueKeyExtractor}
+              renderItem={renderQueueItem}
+              getItemLayout={getQueueItemLayout}
               style={[styles.queueListViewport, queueViewportStyle]}
-              showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.queueListContent}
-              nestedScrollEnabled={true}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
               bounces={false}
               overScrollMode="never"
-            >
-              {/* react-doctor-disable-next-line react-doctor/rn-no-scrollview-mapped-list -- queue viewport is small, height-constrained, and does not require virtualization overhead */}
-              {playingQueue.map((item, index) => (
-                <React.Fragment key={queueKeyExtractor(item, index)}>
-                  {renderQueueItem({ item, index })}
-                </React.Fragment>
-              ))}
-            </ScrollView>
+              initialNumToRender={8}
+              maxToRenderPerBatch={8}
+              windowSize={5}
+              removeClippedSubviews={Platform.OS === "android"}
+            />
           </View>
 
           <AboutArtistCard
@@ -2911,7 +2646,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     overflow: "hidden",
-    zIndex: -1,
+    zIndex: Platform.OS === "android" ? 0 : -1,
     borderBottomLeftRadius: 28,
     borderBottomRightRadius: 28,
   },
@@ -2924,15 +2659,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "#000000",
     overflow: "hidden",
-  },
-  backgroundArtworkImage: {
-    position: "absolute",
-    top: -96,
-    right: -96,
-    bottom: -96,
-    left: -96,
-    opacity: 0.36,
-    transform: [{ scale: 1.18 }],
   },
   backgroundColorWash: {
     opacity: 0.2,

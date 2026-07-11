@@ -3,7 +3,7 @@ import { InteractionManager, View, Text, StyleSheet, Platform } from "react-nati
 import { Image } from "expo-image";
 
 import { AD_UNITS } from "@/constants/admob";
-import { getGoogleMobileAdsModule, type GoogleNativeAd } from "@/lib/googleMobileAds";
+import { getGoogleMobileAdsModule, initializeMobileAds, type GoogleNativeAd } from "@/lib/googleMobileAds";
 import { logger } from "@/lib/logger";
 
 const NATIVE_AD_UNIT_ID = AD_UNITS.NATIVE;
@@ -30,7 +30,7 @@ export default function AdMobBanner({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }: { l
           return;
         }
 
-        const { default: mobileAds, NativeAd } = adsModule;
+        const { NativeAd } = adsModule;
 
         if (Platform.OS === "ios") {
           try {
@@ -42,7 +42,7 @@ export default function AdMobBanner({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }: { l
           }
         }
 
-        await mobileAds().initialize();
+        await initializeMobileAds();
         
         if (!active) return;
 

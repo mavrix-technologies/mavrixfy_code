@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import {
   Alert,
   Platform,
@@ -8,7 +8,10 @@ import {
   Switch,
   Text,
   View,
+  ActivityIndicator,
+  Modal,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,11 +21,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
 import { setHapticsPreference } from "@/lib/haptics";
 import { setMiniPlayerSecondaryControlPreference } from "@/lib/miniPlayerControls";
-import { getSettings, saveSettings, type AppSettings } from "@/lib/storage";
+import { getSettings, saveSettings, hasSeenNewFeatures, markNewFeaturesSeen, type AppSettings } from "@/lib/storage";
 import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
 import { safeGoBack } from "@/utils/navigation";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { clearJioSaavnPlaylistCache } from "@/lib/jioSaavnService";
+import { AD_UNITS } from "@/constants/admob";
+import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobileAds";
+import { logger } from "@/lib/logger";
 
 const QUALITY_OPTIONS: { label: string; value: "low" | "medium" | "high" }[] = [
   { label: "Low", value: "low" },
@@ -41,11 +47,11 @@ const SMART_AUTOPLAY_MODE_OPTIONS: { label: string; value: AppSettings["smartAut
   { label: "Artist", value: "artist-radio" },
   { label: "Mood", value: "mood-radio" },
 ];
-const MINI_PLAYER_SECONDARY_OPTIONS: { label: string; value: AppSettings["miniPlayerSecondaryControl"] }[] = [
-  { label: "Queue", value: "queue" },
-  { label: "Next", value: "next" },
-  { label: "Prev", value: "prev" },
-  { label: "More", value: "more" },
+const MINI_PLAYER_SECONDARY_OPTIONS: { label: string; value: AppSettings["miniPlayerSecondaryControl"]; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { label: "Queue", value: "queue", icon: "list" },
+  { label: "Next", value: "next", icon: "play-skip-forward" },
+  { label: "Prev", value: "prev", icon: "play-skip-back" },
+  { label: "More", value: "more", icon: "ellipsis-horizontal" },
 ];
 
 function SegmentGroup<T extends string>({
@@ -54,7 +60,7 @@ function SegmentGroup<T extends string>({
   onChange,
   compact = false,
 }: {
-  options: { label: string; value: T }[];
+  options: { label: string; value: T; icon?: keyof typeof Ionicons.glyphMap }[];
   value: T;
   onChange: (value: T) => void;
   compact?: boolean;
@@ -69,15 +75,23 @@ function SegmentGroup<T extends string>({
             style={[styles.segmentBtn, active && styles.segmentBtnActive]}
             onPress={() => onChange(opt.value)}
           >
-            <Text
-              style={[
-                styles.segmentText,
-                compact && styles.segmentTextCompact,
-                active && styles.segmentTextActive,
-              ]}
-            >
-              {opt.label}
-            </Text>
+            {opt.icon ? (
+              <Ionicons
+                name={opt.icon}
+                size={compact ? 16 : 18}
+                color={active ? Colors.black : Colors.subtext}
+              />
+            ) : (
+              <Text
+                style={[
+                  styles.segmentText,
+                  compact && styles.segmentTextCompact,
+                  active && styles.segmentTextActive,
+                ]}
+              >
+                {opt.label}
+              </Text>
+            )}
           </Pressable>
         );
       })}
@@ -132,7 +146,7 @@ function SettingsRow({
 type ProfileUser = ReturnType<typeof useAuth>["user"];
 type RouterPush = ReturnType<typeof useRouter>["push"];
 type RouterReplace = ReturnType<typeof useRouter>["replace"];
-type UpdateSettings = (partial: Partial<AppSettings>) => void;
+type UpdateSettings = (partial: Partial<AppSettings>) => Promise<void>;
 
 function ProfileHero({
   user,
@@ -166,10 +180,14 @@ function PlaybackSettingsSection({
   settings,
   lowEndDevice,
   updateSettings,
+  onChangeQuality,
+  showNewBadges,
 }: {
   settings: AppSettings;
   lowEndDevice: boolean;
   updateSettings: UpdateSettings;
+  onChangeQuality: (value: AppSettings["streamingQuality"]) => void;
+  showNewBadges: boolean;
 }) {
   const ambientBackdropSwitchValue = settings.ambientBackdropEnabled;
 
@@ -178,13 +196,23 @@ function PlaybackSettingsSection({
       <Text style={styles.sectionTitle}>Playback</Text>
       <View style={styles.rowsSurface}>
         <View style={styles.settingCard}>
-          <Text style={styles.settingLabel}>Streaming quality</Text>
-          <Text style={styles.settingHint}>Audio quality for online playback</Text>
-          <SegmentGroup
-            options={QUALITY_OPTIONS}
-            value={settings.streamingQuality}
-            onChange={(value) => updateSettings({ streamingQuality: value })}
-          />
+          <View style={styles.settingRowInline}>
+            <View style={styles.settingTextBlock}>
+              <Text style={styles.settingLabel}>Streaming quality</Text>
+              <Text style={styles.settingHint}>Audio quality for online playback</Text>
+            </View>
+            {showNewBadges && <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>}
+          </View>
+          <View>
+            <SegmentGroup
+              options={QUALITY_OPTIONS}
+              value={settings.streamingQuality}
+              onChange={onChangeQuality}
+            />
+          </View>
+          {!settings.highQualityUnlocked && (
+            <Text style={styles.settingHint}>Watch a short ad to unlock High quality</Text>
+          )}
         </View>
 
         <View style={[styles.settingCard, styles.settingCardBorder]}>
@@ -211,8 +239,13 @@ function PlaybackSettingsSection({
         </View>
 
         <View style={[styles.settingCard, styles.settingCardBorder]}>
-          <Text style={styles.settingLabel}>Mini player button</Text>
-          <Text style={styles.settingHint}>Right-side control next to play</Text>
+          <View style={styles.settingRowInline}>
+            <View style={styles.settingTextBlock}>
+              <Text style={styles.settingLabel}>Mini player button</Text>
+              <Text style={styles.settingHint}>Right-side control next to play</Text>
+            </View>
+            {showNewBadges && <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>}
+          </View>
           <SegmentGroup
             options={MINI_PLAYER_SECONDARY_OPTIONS}
             value={settings.miniPlayerSecondaryControl}
@@ -240,10 +273,9 @@ function PlaybackSettingsSection({
           <View style={styles.settingRowInline}>
             <View style={styles.settingTextBlock}>
               <Text style={styles.settingLabel}>Video backdrop</Text>
-              <Text style={styles.settingHint}>
-                Loop videos behind the player
-              </Text>
+              <Text style={styles.settingHint}>Loop videos behind the player</Text>
             </View>
+            {showNewBadges && <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>}
             <Switch
               value={ambientBackdropSwitchValue}
               disabled={false}
@@ -343,13 +375,9 @@ function LibrarySettingsSection({ routerPush }: { routerPush: RouterPush }) {
 }
 
 function CacheSettingsSection({
-  onClearCache,
-  onClearSearchHistory,
-  onClearRecentlyPlayed,
+  onClearAll,
 }: {
-  onClearCache: () => void;
-  onClearSearchHistory: () => void;
-  onClearRecentlyPlayed: () => void;
+  onClearAll: () => void;
 }) {
   return (
     <>
@@ -357,22 +385,10 @@ function CacheSettingsSection({
       <View style={styles.rowsSurface}>
         <SettingsRow
           icon="trash-bin-outline"
-          title="Clear App Cache"
-          subtitle="Clear cached images and API responses"
-          onPress={onClearCache}
+          title="Clear Cache & History"
+          subtitle="Clear app cache, search history, and recently played"
+          onPress={onClearAll}
           first
-        />
-        <SettingsRow
-          icon="time-outline"
-          title="Clear Search History"
-          subtitle="Clear all past search terms"
-          onPress={onClearSearchHistory}
-        />
-        <SettingsRow
-          icon="play-back-outline"
-          title="Clear Recently Played"
-          subtitle="Clear 'Jump Back In' list on home screen"
-          onPress={onClearRecentlyPlayed}
         />
       </View>
     </>
@@ -387,9 +403,14 @@ export default function ProfileScreen() {
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomContentInset = Platform.OS === "web" ? 0 : insets.bottom;
   const [lowEndDevice, setLowEndDevice] = useState(false);
+  const [isLoadingAd, setIsLoadingAd] = useState(false);
+  const [showNewBadges, setShowNewBadges] = useState(false);
+
+  const scrollRef = useRef<ScrollView>(null);
 
   const [settings, setSettings] = useState<AppSettings>({
-    streamingQuality: "high",
+    streamingQuality: "low",
+    highQualityUnlocked: false,
     videoBackgroundQuality: "auto",
     smartAutoplayEnabled: true,
     smartAutoplayMode: "similar-trending",
@@ -401,30 +422,162 @@ export default function ProfileScreen() {
     crossfade: 0,
     gapless: true,
     normalizeVolume: false,
-    ambientBackdropEnabled: true,
+    ambientBackdropEnabled: false,
   });
 
   useEffect(() => {
     let mounted = true;
-    void Promise.all([getSettings(), getDevicePerformanceProfile()]).then(([s, profile]) => {
+    void Promise.all([
+      getSettings(),
+      getDevicePerformanceProfile(),
+      hasSeenNewFeatures(),
+    ]).then(([s, profile, seen]) => {
       if (!mounted) return;
       setSettings(s);
       setLowEndDevice(profile.isLowEndDevice);
       setHapticsPreference(Boolean(s.hapticsEnabled));
+      setShowNewBadges(!seen);
+      if (!seen) void markNewFeaturesSeen();
     });
     return () => { mounted = false; };
   }, []);
 
-  const updateSettings = useCallback((partial: Partial<AppSettings>) => {
+  const updateSettings = useCallback(async (partial: Partial<AppSettings>) => {
+    // Update storage FIRST (await it)
+    await saveSettings(partial);
+    
+    // Then update UI state
     setSettings((current) => ({ ...current, ...partial }));
+    
+    // Handle side effects
     if (typeof partial.hapticsEnabled === "boolean") {
       setHapticsPreference(partial.hapticsEnabled);
     }
     if (partial.miniPlayerSecondaryControl) {
       setMiniPlayerSecondaryControlPreference(partial.miniPlayerSecondaryControl);
     }
-    void saveSettings(partial);
   }, []);
+
+  const handleQualityChange = useCallback(async (value: AppSettings["streamingQuality"]) => {
+    // Check if trying to select High quality without unlock
+    if (value === "high" && !settings.highQualityUnlocked) {
+      Alert.alert(
+        "Unlock High Quality Audio",
+        "Watch a short video ad to permanently unlock high quality streaming.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Watch Ad",
+            onPress: async () => {
+              const adsModule = getGoogleMobileAdsModule();
+              if (!adsModule || !AD_UNITS.REWARDED) {
+                Alert.alert("Error", "Ad service is not available");
+                return;
+              }
+
+              try {
+                setIsLoadingAd(true);
+                await initializeMobileAds();
+                
+                const { RewardedAd, RewardedAdEventType, AdEventType } = adsModule;
+                const rewarded = RewardedAd.createForAdRequest(AD_UNITS.REWARDED, {
+                  requestNonPersonalizedAdsOnly: true,
+                });
+
+                let rewardEarned = false;
+                let adShown = false;
+
+                // Listen for reward BEFORE loading
+                const unsubEarned = rewarded.addAdEventListener(
+                  RewardedAdEventType.EARNED_REWARD,
+                  () => {
+                    rewardEarned = true;
+                    logger.info("[Ads] Reward earned!");
+                  }
+                );
+
+                // Listen for ad loaded
+                const unsubLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
+                  logger.info("[Ads] Rewarded ad loaded, showing...");
+                  setIsLoadingAd(false);
+                  adShown = true;
+                  rewarded.show();
+                });
+
+                // Listen for ad closed
+                const unsubClosed = rewarded.addAdEventListener(AdEventType.CLOSED, async () => {
+                  logger.info(`[Ads] Ad closed. Reward earned: ${rewardEarned}`);
+                  
+                  // Clean up listeners
+                  unsubLoaded();
+                  unsubEarned();
+                  unsubClosed();
+                  unsubError();
+
+                  // Grant reward if earned
+                  if (rewardEarned) {
+                    // Save to storage FIRST, then update UI
+                    await saveSettings({ 
+                      streamingQuality: "high", 
+                      highQualityUnlocked: true 
+                    });
+                    
+                    // Update local state
+                    setSettings(prev => ({ 
+                      ...prev, 
+                      streamingQuality: "high", 
+                      highQualityUnlocked: true 
+                    }));
+
+                    Alert.alert("Success!", "High quality audio unlocked!");
+                  }
+                });
+
+                // Listen for errors
+                const unsubError = rewarded.addAdEventListener(AdEventType.ERROR, (error) => {
+                  logger.error("[Ads] Rewarded ad error:", error);
+                  
+                  unsubLoaded();
+                  unsubEarned();
+                  unsubClosed();
+                  unsubError();
+                  
+                  setIsLoadingAd(false);
+                  
+                  if (!adShown) {
+                    Alert.alert("Ad Not Available", "Please try again later.");
+                  }
+                });
+
+                // Load the ad (15 second timeout)
+                const loadTimeout = setTimeout(() => {
+                  if (!adShown) {
+                    unsubLoaded();
+                    unsubEarned();
+                    unsubClosed();
+                    unsubError();
+                    setIsLoadingAd(false);
+                    Alert.alert("Timeout", "Ad took too long to load. Please try again.");
+                  }
+                }, 15000);
+
+                rewarded.load();
+
+              } catch (e) {
+                logger.error("[Ads] Failed to show rewarded ad:", e);
+                setIsLoadingAd(false);
+                Alert.alert("Error", "Failed to load ad. Please try again.");
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      // Already unlocked or switching to low/medium
+      await saveSettings({ streamingQuality: value });
+      setSettings(prev => ({ ...prev, streamingQuality: value }));
+    }
+  }, [settings.highQualityUnlocked]);
 
   const handleLogout = useCallback(() => {
     Alert.alert("Log Out", "Are you sure you want to log out?", [
@@ -437,17 +590,18 @@ export default function ProfileScreen() {
     ]);
   }, [logout, routerReplace]);
 
-  const handleClearCache = useCallback(() => {
+  const handleClearAllData = useCallback(() => {
     Alert.alert(
-      "Clear App Cache",
-      "Are you sure you want to clear cached images and API response data? This will not delete your downloads or liked songs.",
+      "Clear Cache & History",
+      "Are you sure you want to clear the app cache, search history, and recently played list? This will not delete your downloads or liked songs.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Clear",
+          text: "Clear All",
           style: "destructive",
           onPress: async () => {
             try {
+              // 1. Clear app caches
               await clearJioSaavnPlaylistCache().catch(() => {});
               await AsyncStorage.multiRemove([
                 "@mavrixfy_home_public_playlists_v1",
@@ -455,53 +609,16 @@ export default function ProfileScreen() {
               ]).catch(() => {});
               await Image.clearDiskCache().catch(() => {});
               Image.clearMemoryCache();
-              Alert.alert("Success", "Cache cleared successfully.");
-            } catch (err) {
-              Alert.alert("Error", "Failed to clear cache.");
-            }
-          },
-        },
-      ]
-    );
-  }, []);
 
-  const handleClearSearchHistory = useCallback(() => {
-    Alert.alert(
-      "Clear Search History",
-      "Are you sure you want to delete all search history?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await AsyncStorage.setItem("@mavrixfy_search_history", JSON.stringify([]));
-              Alert.alert("Success", "Search history cleared successfully.");
-            } catch (err) {
-              Alert.alert("Error", "Failed to clear search history.");
-            }
-          },
-        },
-      ]
-    );
-  }, []);
+              // 2. Clear Search History
+              await AsyncStorage.setItem("@mavrixfy_search_history", JSON.stringify([])).catch(() => {});
 
-  const handleClearRecentlyPlayed = useCallback(() => {
-    Alert.alert(
-      "Clear Recently Played",
-      "Are you sure you want to clear your 'Jump Back In' recently played history?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await AsyncStorage.setItem("@mavrixfy_recently_played", JSON.stringify([]));
-              Alert.alert("Success", "Recently played history cleared.");
+              // 3. Clear Recently Played
+              await AsyncStorage.setItem("@mavrixfy_recently_played", JSON.stringify([])).catch(() => {});
+
+              Alert.alert("Success", "All cache and history cleared successfully.");
             } catch (err) {
-              Alert.alert("Error", "Failed to clear recently played history.");
+              Alert.alert("Error", "Failed to clear some cache or history data.");
             }
           },
         },
@@ -527,6 +644,7 @@ export default function ProfileScreen() {
       </View>
 
       <ScrollView
+        ref={scrollRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         contentInset={{ bottom: bottomContentInset }}
@@ -541,6 +659,8 @@ export default function ProfileScreen() {
           settings={settings}
           lowEndDevice={lowEndDevice}
           updateSettings={updateSettings}
+          onChangeQuality={handleQualityChange}
+          showNewBadges={showNewBadges}
         />
 
         <AccountSettingsSection
@@ -551,11 +671,20 @@ export default function ProfileScreen() {
         />
         <LibrarySettingsSection routerPush={routerPush} />
         <CacheSettingsSection
-          onClearCache={handleClearCache}
-          onClearSearchHistory={handleClearSearchHistory}
-          onClearRecentlyPlayed={handleClearRecentlyPlayed}
+          onClearAll={handleClearAllData}
         />
       </ScrollView>
+
+      {/* Ad Loading Overlay */}
+      <Modal transparent visible={isLoadingAd} animationType="fade">
+        <View style={styles.adLoaderOverlay}>
+          <View style={styles.adLoaderContent}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={styles.adLoaderText}>Preparing Video Ad...</Text>
+            <Text style={styles.adLoaderSubtext}>High quality audio will unlock after the ad.</Text>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -625,6 +754,18 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   settingTextBlock: { flex: 1, minWidth: 0 },
+  newBadge: {
+    backgroundColor: "#E8115B",
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  newBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.8,
+  },
   settingLabel: {
     color: Colors.text, fontSize: 15, fontFamily: "Inter_600SemiBold",
   },
@@ -659,5 +800,37 @@ const styles = StyleSheet.create({
   rowTitleDanger: { color: "#FF8B8B" },
   rowSubtitle: {
     color: Colors.subtext, fontSize: 13, marginTop: 2, fontFamily: "Inter_400Regular",
+  },
+
+  // Ad Loader Modal
+  adLoaderOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.85)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  adLoaderContent: {
+    backgroundColor: "#161920",
+    padding: 24,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    alignItems: "center",
+    width: "80%",
+    maxWidth: 320,
+    gap: 12,
+  },
+  adLoaderText: {
+    color: Colors.text,
+    fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
+    marginTop: 8,
+  },
+  adLoaderSubtext: {
+    color: Colors.subtext,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    lineHeight: 16,
   },
 });

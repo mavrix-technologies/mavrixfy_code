@@ -86,10 +86,12 @@ function DownloadedRow({ item, allSongs, queueKey }: DownloadedRowProps) {
   return <SongRow song={song} queue={allSongs} queueKey={queueKey} showDownload={false} />;
 }
 
-// Memoize to prevent unnecessary re-renders
+// Memoize to prevent unnecessary re-renders.
+// allSongs is compared by queueKey (a join of all songIds) — stable when section doesn't change.
 const MemoizedDownloadedRow = React.memo(DownloadedRow, (prev, next) => {
   return (
     prev.item.songId === next.item.songId &&
+    prev.item.status === next.item.status &&
     prev.collectionId === next.collectionId &&
     prev.queueKey === next.queueKey
   );
@@ -285,7 +287,7 @@ export default function DownloadedSongsScreen() {
         collectionId={section.collectionId}
       />
     ),
-    []
+    [] // section.songs is stable (memoized in sectionListData), so this is safe
   );
 
   return (

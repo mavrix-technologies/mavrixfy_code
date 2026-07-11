@@ -2,7 +2,7 @@
  * Catalog Service — fetches admin-uploaded songs from Firestore
  * and merges them into search results seamlessly.
  */
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Song } from '@/lib/musicData';
 import { logger } from '@/lib/logger';
@@ -39,7 +39,17 @@ export async function getCatalogSongs(): Promise<Song[]> {
 
 async function fetchCatalogSongs(): Promise<Song[]> {
   try {
-    const snap = await getDocs(collection(db, 'songs'));
+    if (!db) return [];
+
+    // Optimize: Keep a small local "featured/recent" cache by limiting documents retrieved
+    let snap;
+    try {
+      const q = query(collection(db, 'songs'), orderBy('popularity', 'desc'), limit(30));
+      snap = await getDocs(q);
+    } catch {
+      const q = query(collection(db, 'songs'), limit(30));
+      snap = await getDocs(q);
+    }
 
     const songs: Song[] = mapFilter(snap.docs, (d): Song | null => {
         const data = d.data();
@@ -92,14 +102,77 @@ async function fetchCatalogSongs(): Promise<Song[]> {
   }
 }
 
-export function searchCatalog(songs: Song[], query: string): Song[] {
-  if (!query.trim()) return [];
-  const q = query.toLowerCase().trim();
-  const results = songs.filter(s =>
-    s.title.toLowerCase().includes(q) ||
-    s.artist.toLowerCase().includes(q) ||
-    s.album.toLowerCase().includes(q) ||
-    q.split(' ').some(w => w.length > 2 && s.title.toLowerCase().includes(w))
+export async function searchCatalog(queryText: string): Promise<Song[]> {
+  if (!db || !queryText.trim()) return [];
+  const qClean = queryText.trim();
+  const qLower = qClean.toLowerCase();
+  const qCapitalized = qClean.charAt(0).toUpperCase() + qClean.slice(1);
+
+  const songsRef = collection(db, 'songs');
+
+  // Helper prefix query generator
+  const getPrefixQuery = (field: string, prefix: string) => {
+    return query(
+      songsRef,
+      where(field, '>=', prefix),
+      where(field, '<=', prefix + '\uf8ff'),
+      limit(15)
+    );
+  };
+
+  // Run multiple parallel prefix queries for maximum coverage with compact returns
+  const queries = [
+    getPrefixQuery('title', qClean),
+    getPrefixQuery('title', qCapitalized),
+    getPrefixQuery('titleLower', qLower),
+    getPrefixQuery('artist', qClean),
+    getPrefixQuery('artist', qCapitalized),
+    getPrefixQuery('artistLower', qLower),
+  ];
+
+  const snapshots = await Promise.allSettled(queries.map(q => getDocs(q)));
+
+  const seenIds = new Set<string>();
+  const results: Song[] = [];
+
+  for (const result of snapshots) {
+    if (result.status === 'fulfilled') {
+      result.value.forEach(d => {
+        if (seenIds.has(d.id)) return;
+        seenIds.add(d.id);
+
+        const data = d.data();
+        const audioUrl = data.audioUrl || data.streamUrl || data.url || '';
+        if (!audioUrl || !data.title) return;
+
+        let imageUrl = data.imageUrl || data.coverUrl || '';
+        if (!imageUrl && Array.isArray(data.image)) {
+          imageUrl = data.image[data.image.length - 1]?.url || '';
+        }
+
+        results.push({
+          id: d.id,
+          title: data.title || data.name || '',
+          artist: data.artist || data.primaryArtists || 'Unknown Artist',
+          album: typeof data.album === 'object' ? (data.album?.name || '') : (data.album || ''),
+          duration: data.duration ? Number(data.duration) : 0,
+          coverUrl: imageUrl,
+          genre: data.genre || '',
+          mood: data.mood || data.moods || undefined,
+          audioUrl,
+          year: data.year ? String(data.year) : '',
+          language: data.language || '',
+          popularity: Number(data.popularity || 0) || undefined,
+          source: 'local' as const,
+        });
+      });
+    }
+  }
+
+  // Filter precisely and return
+  return results.filter(s =>
+    s.title.toLowerCase().includes(qLower) ||
+    s.artist.toLowerCase().includes(qLower) ||
+    s.album.toLowerCase().includes(qLower)
   );
-  return results;
 }

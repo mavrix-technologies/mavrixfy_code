@@ -29,7 +29,7 @@ function useOnboardingScreenView() {
 
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [dob, setDob] = useState(new Date(2000, 0, 1));
+  const [dob, setDob] = useState(() => new Date(2000, 0, 1));
   const [name, setName] = useState(user?.name || "");
   const [gender, setGender] = useState("");
   const [genres, setGenres] = useState<string[]>([]);

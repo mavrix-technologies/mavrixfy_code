@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { logger } from "@/lib/logger";
 
 import { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/api-config";
@@ -12,6 +13,8 @@ export interface JioSaavnPlaylistResult {
   url?: string;
   description?: string;
   language?: string;
+  type?: string;
+  songData?: any;
 }
 
 export interface JioSaavnAlbumResult {
@@ -108,6 +111,9 @@ const AUTO_REFRESH_POLL_INTERVAL_MS = 30 * 1000;
 export const JIOSAAVN_CATEGORY_CACHE_TTL_MS = 30 * 60 * 1000;
 const CATEGORY_TTL_MS: Record<string, number> = {
   trending:      30 * 60 * 1000,
+  "top-charts":   45 * 60 * 1000,
+  bollywood:      60 * 60 * 1000,
+  popular:        45 * 60 * 1000,
   "new-arrivals": 45 * 60 * 1000,
   "most-viral":  45 * 60 * 1000,
   "party-mix":   60 * 60 * 1000,
@@ -128,6 +134,46 @@ const JIOSAAVN_SEARCH_BASE_URLS = [
 ];
 
 export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
+  {
+    id: "trending",
+    title: "Trending Now",
+    searchTerms: [
+      "trending hindi songs",
+      "trending now bollywood",
+      "popular songs india",
+      "chartbusters hindi",
+    ],
+  },
+  {
+    id: "top-charts",
+    title: "Top Charts",
+    searchTerms: [
+      "top charts hindi",
+      "top 50 india",
+      "official hits hindi",
+      "biggest hits bollywood",
+    ],
+  },
+  {
+    id: "bollywood",
+    title: "Bollywood Hits",
+    searchTerms: [
+      "bollywood hits",
+      "hindi movie songs",
+      "bollywood top songs",
+      "latest bollywood hits",
+    ],
+  },
+  {
+    id: "popular",
+    title: "Most Popular",
+    searchTerms: [
+      "most popular hindi songs",
+      "popular bollywood hits",
+      "top played indian songs",
+      "hit songs bollywood",
+    ],
+  },
   {
     id: "new-arrivals",
     title: "New Releases",
@@ -234,12 +280,7 @@ function getCurrentRefreshContext(now: Date = new Date()): AutoRefreshContext {
     // Keep default locale fallback
   }
 
-  let languageBias: AutoRefreshContext["languageBias"] = "english";
-  if (isWeekend) {
-    languageBias = "punjabi";
-  } else if (locale.startsWith("hi") || locale.startsWith("pa")) {
-    languageBias = "hindi";
-  }
+  const languageBias: AutoRefreshContext["languageBias"] = "hindi";
 
   // Keep cache fingerprints aligned with web home algorithm.
   const cacheFingerprint = `v5|${slot}|${isWeekend ? "weekend" : "weekday"}|${languageBias}`;
@@ -360,16 +401,41 @@ function normalizePlaylistList(raw: unknown): JioSaavnPlaylistResult[] {
         playlist?.image ?? playlist?.images ?? playlist?.imageUrl ?? playlist?.image_url
       );
       const songCount = parseSongCountValue(playlist);
+      const language =
+        toTrimmedString(playlist?.language) ||
+        toTrimmedString(playlist?.lang) ||
+        toTrimmedString(playlist?.more_info?.language) ||
+        toTrimmedString(playlist?.more_info?.lang);
 
       return {
         id,
         name,
         image,
         songCount,
+        language: language || undefined,
       };
     }, (playlist) => {
       if (!playlist.id || !playlist.name || playlist.songCount <= 0) return false;
       const lowerName = playlist.name.toLowerCase();
+      const lowerLang = playlist.language?.toLowerCase() || "";
+
+      // Filter out Urdu, Pakistani, or other unwanted language patterns
+      if (
+        lowerLang === "urdu" ||
+        lowerName.includes("urdu") ||
+        lowerName.includes("pakistani") ||
+        lowerName.includes("peshawar") ||
+        lowerName.includes("karachi")
+      ) {
+        return false;
+      }
+
+      // Filter out other unwanted foreign categories
+      const unwantedLangs = ["arabic", "spanish", "french", "portuguese", "turkish", "persian", "farsi"];
+      if (unwantedLangs.includes(lowerLang)) {
+        return false;
+      }
+
       if (
         lowerName.includes("recommended for you") ||
         lowerName.includes("fresh discoveries")
@@ -1117,59 +1183,131 @@ async function fetchTopDhurandharPlaylists(
   );
 }
 
+function unescapeHtml(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&apos;/g, "'");
+}
+
+async function fetchJioSaavnDetailsByLink(path: string, type: "song" | "album"): Promise<any | null> {
+  const isSong = type === "song";
+  const endpoint = isSong ? "songs" : "albums";
+  
+  for (const endpointBase of JIOSAAVN_SEARCH_BASE_URLS) {
+    const trimmed = endpointBase.replace(/\/+$/, "");
+    const requestUrl = `${trimmed}/${endpoint}?link=${encodeURIComponent(path)}`;
+    try {
+      const response = await withTimeout(
+        fetch(requestUrl, { headers: { Accept: "application/json" } }),
+        4500
+      );
+      if (response.ok) {
+        const json = await response.json();
+        const data = isSong
+          ? (json.data?.[0] || json?.[0] || json.data || json)
+          : (json.data || json);
+        if (data && data.id) {
+          return data;
+        }
+      }
+    } catch {
+      // try next
+    }
+  }
+  return null;
+}
+
 async function fetchNewArrivalPlaylists(
   limit: number,
   forceRefresh: boolean,
   context: AutoRefreshContext
 ): Promise<JioSaavnPlaylistResult[]> {
-  const primary = await fetchSignalPlaylists(
-    "new-arrivals",
-    limit,
-    forceRefresh,
-    context,
-    [
-      "new",
-      "latest",
-      "movie",
-      "hype",
-      "reels",
-      "social",
-      "trending",
-    ]
-  );
+  try {
+    const url = "https://www.jiosaavn.com/new-releases";
+    const response = await withTimeout(
+      fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+        }
+      }),
+      6500
+    );
 
-  if (primary.length >= Math.min(limit, 6)) {
-    return primary.slice(0, limit);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch new arrivals HTML: ${response.status}`);
+    }
+
+    const html = await response.text();
+    const regex = /href="(\/(song|album)\/[^"]+)"/g;
+    let match;
+    const items: Array<{ path: string; type: "song" | "album" }> = [];
+    const seen = new Set<string>();
+
+    while ((match = regex.exec(html)) !== null) {
+      const fullPath = match[1];
+      if (seen.has(fullPath)) continue;
+      seen.add(fullPath);
+      items.push({
+        path: `https://www.jiosaavn.com${fullPath}`,
+        type: fullPath.includes("/song/") ? "song" : "album"
+      });
+    }
+
+    if (items.length === 0) return [];
+
+    // Resolve details for the first 20 items in parallel
+    const resolvedItems = await Promise.all(
+      items.slice(0, 20).map(async (item) => {
+        try {
+          const data = await fetchJioSaavnDetailsByLink(item.path, item.type);
+          if (!data || !data.id) return null;
+
+          const isSong = item.type === "song";
+          const lang = String(data.language || "").trim().toLowerCase();
+
+          // Exclude Urdu and other unwanted Pakistani tracks per user requests
+          if (
+            lang === "urdu" ||
+            String(data.name || "").toLowerCase().includes("urdu") ||
+            String(data.name || "").toLowerCase().includes("pakistani")
+          ) {
+            return null;
+          }
+
+          const name = unescapeHtml(data.name || "Unknown Title");
+          const description = isSong
+            ? unescapeHtml(data.artists?.primary?.map((a: any) => a.name).join(", ") || data.album?.name || "New Release Song")
+            : unescapeHtml(data.description || data.artists?.map((a: any) => a.name).join(", ") || "New Release Album");
+
+          return {
+            id: data.id,
+            name,
+            image: data.image,
+            songCount: isSong ? 1 : (data.songCount || data.songs?.length || 5),
+            url: data.url || item.path,
+            description,
+            language: data.language,
+            type: item.type,
+            songData: isSong ? data : undefined,
+          } as JioSaavnPlaylistResult;
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    const filtered = resolvedItems.filter((x): x is JioSaavnPlaylistResult => x !== null);
+    return filtered.slice(0, limit);
+  } catch {
+    return [];
   }
-
-  const fallbackTerms = [
-    `latest movie songs ${CURRENT_YEAR}`,
-    `new bollywood songs ${CURRENT_YEAR}`,
-    "new release songs",
-    "social media hits",
-    "hype tracks",
-  ];
-
-  const fallbackResults = await Promise.all(
-    fallbackTerms.map(async (term) => {
-      try {
-        return await searchPlaylists(term, Math.max(limit, 10), "new-arrivals", forceRefresh);
-      } catch {
-        return [];
-      }
-    })
-  );
-
-  const merged = dedupeByPlaylistId([...primary, ...fallbackResults.flat()]).filter(
-    (playlist) => playlist.songCount >= 4
-  );
-  const ranked = rankByKeywords(
-    merged,
-    "new-arrivals",
-    ["new", "latest", "movie", "hype", "social", "reels", "viral"]
-  );
-
-  return forceRefresh ? shuffleArray(ranked).slice(0, limit) : ranked.slice(0, limit);
 }
 
 async function getCategoryCache(
@@ -1238,6 +1376,11 @@ async function getPlaylistsByCategory(
   forceRefresh: boolean,
   context: AutoRefreshContext
 ): Promise<JioSaavnPlaylistResult[]> {
+  const scraped = await fetchScrapedCategoryFromHomepage(category.id, limit, forceRefresh);
+  if (scraped && scraped.length > 0) {
+    return scraped;
+  }
+
   if (category.id === "trending") return fetchTrendingPlaylists(limit, forceRefresh, context);
   if (category.id === "most-viral") return fetchViralPlaylists(limit, forceRefresh, context);
   if (category.id === "most-played") return fetchMostPlayedPlaylists(limit, forceRefresh, context);
@@ -1650,6 +1793,30 @@ export async function getJioSaavnAlbumDetails(
   throw new JioSaavnPlaylistDetailsError("NETWORK", "Unable to fetch album details");
 }
 
+export async function getJioSaavnSongDetails(
+  songId: string,
+  link?: string
+): Promise<JioSaavnSong | null> {
+  const queryParam = link ? `link=${encodeURIComponent(link)}` : `id=${encodeURIComponent(songId)}`;
+  for (const endpointBase of JIOSAAVN_SEARCH_BASE_URLS) {
+    const trimmed = endpointBase.replace(/\/+$/, "");
+    const requestUrl = `${trimmed}/songs?${queryParam}`;
+    try {
+      const response = await fetch(requestUrl, { headers: { Accept: "application/json" } });
+      if (response.ok) {
+        const json = await response.json();
+        const data = json.data?.[0] || json?.[0] || json.data || json;
+        if (data && data.id) {
+          return data as JioSaavnSong;
+        }
+      }
+    } catch {
+      // try next
+    }
+  }
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // NEXT-LEVEL RANKING ENGINE
 // Multi-signal scoring: freshness + popularity + trend keywords + context +
@@ -1663,6 +1830,9 @@ const LAST_SHOWN_MAX = 40; // remember last 40 shown playlist IDs
 // One primary search term per category — fast, single request
 const FAST_SEARCH_TERMS: Record<string, string> = {
   trending:       `trending songs ${CURRENT_YEAR}`,
+  "top-charts":   `top charts hindi ${CURRENT_YEAR}`,
+  bollywood:      `bollywood hits ${CURRENT_YEAR}`,
+  popular:        `popular hindi songs ${CURRENT_YEAR}`,
   "new-arrivals": `new movie songs ${CURRENT_YEAR}`,
   "most-viral":   `viral reels hits ${CURRENT_YEAR}`,
   "party-mix":    "party songs hindi",
@@ -1695,6 +1865,18 @@ function calculatePlaylistScore(
   if (name.includes("popular") || name.includes("most played")) score += 24;
   if (name.includes("top") || name.includes("chart"))       score += 18;
   if (name.includes("hit") || name.includes("superhit"))    score += 16;
+
+  // Official curator boost (Weekly Top 50, Chartbusters, Let's Play, etc.)
+  if (
+    name.includes("weekly top") ||
+    name.includes("chartbusters") ||
+    name.includes("let's play") ||
+    name.includes("ultimate") ||
+    name.includes("best of") ||
+    name.includes("official")
+  ) {
+    score += 80;
+  }
 
   // Time-of-day context
   if (context.slot === "morning"   && (name.includes("morning") || name.includes("workout"))) score += 15;
@@ -1825,12 +2007,238 @@ async function runWithConcurrencyLimit<T, R>(
 }
 
 // ── 6. Full pipeline for one category ────────────────────────────────────────
+function buildImagesFromSingleUrl(imageUrl: string): JioSaavnImage[] {
+  if (!imageUrl) return [];
+  const match = imageUrl.match(/([-_])(50x50|150x150|500x500)\.jpg/);
+  if (match) {
+    const sep = match[1];
+    const cleanUrl = imageUrl.replace(/[-_](50x50|150x150|500x500)\.jpg/, ".jpg");
+    const urlWithoutParams = cleanUrl.split('?')[0];
+    const params = cleanUrl.includes('?') ? '?' + cleanUrl.split('?')[1] : '';
+    const base = urlWithoutParams.replace(/\.jpg$/, "");
+    return [
+      { quality: "50x50", url: `${base}${sep}50x50.jpg${params}` },
+      { quality: "150x150", url: `${base}${sep}150x150.jpg${params}` },
+      { quality: "500x500", url: `${base}${sep}500x500.jpg${params}` },
+    ];
+  }
+  return [
+    { quality: "50x50", url: imageUrl },
+    { quality: "150x150", url: imageUrl },
+    { quality: "500x500", url: imageUrl },
+  ];
+}
+
+function mapHomepageItemToPlaylistResult(item: any): JioSaavnPlaylistResult {
+  // Handles both the /modules API response shape and the old scraped HTML shape
+  const isSong = item.type === "song";
+  const isAlbum = item.type === "album" || item.type === "album_playlist";
+
+  // Name: API uses item.title (string) or item.name; scraped HTML uses item.title.text
+  const name =
+    (typeof item.title === "string" ? item.title : item.title?.text) ||
+    item.name ||
+    "Untitled";
+
+  // URL: API uses item.perma_url; scraped uses item.title.action or item.action
+  const rawPath =
+    item.perma_url ||
+    item.url ||
+    (typeof item.title === "object" ? item.title?.action : "") ||
+    item.action ||
+    "";
+  const url = rawPath.startsWith("/") ? `https://www.jiosaavn.com${rawPath}` : rawPath;
+
+  // Image: API returns image as array of { quality, url } OR a plain URL string
+  let imageList: JioSaavnImage[];
+  if (Array.isArray(item.image) && item.image.length > 0) {
+    const first = item.image[0];
+    if (typeof first === "object" && (first.url || first.link)) {
+      // Standard JioSaavn image array from API
+      imageList = item.image.map((img: any) => ({
+        quality: img.quality || "500x500",
+        url: img.url || img.link || "",
+      }));
+    } else {
+      // Scraped HTML: array of plain URLs
+      imageList = buildImagesFromSingleUrl(first);
+    }
+  } else {
+    imageList = buildImagesFromSingleUrl(
+      typeof item.image === "string" ? item.image : ""
+    );
+  }
+
+  // Description: API uses item.subtitle (string) or subtitles array; scraped uses be_subtitle/subtitle
+  let description = "";
+  if (typeof item.subtitle === "string" && item.subtitle) {
+    description = item.subtitle;
+  } else if (Array.isArray(item.be_subtitle) && item.be_subtitle.length > 0) {
+    description = item.be_subtitle[0]?.text || "";
+  } else if (Array.isArray(item.subtitle) && item.subtitle.length > 0) {
+    description = item.subtitle.map((s: any) => s.text || "").join(", ");
+  }
+
+  return {
+    id: item.id,
+    name,
+    image: imageList,
+    songCount: isSong ? 1 : Number(item.songCount || item.song_count || item.count || 5),
+    url,
+    description,
+    language: item.language || "hindi",
+    type: isSong ? "song" : isAlbum ? "album" : "playlist",
+  };
+}
+
+interface ScrapedHomepageData {
+  modules: any[];
+  timestamp: number;
+}
+
+let cachedScrapedHomeData: ScrapedHomepageData | null = null;
+let activeScrapedHomePromise: Promise<any[]> | null = null;
+const SCRAPED_HOME_CACHE_DURATION = 15 * 60 * 1000; // 15 minutes cache
+
+function getScrapedJioSaavnHomeModules(forceRefresh: boolean): Promise<any[]> {
+  const now = Date.now();
+  if (
+    !forceRefresh &&
+    cachedScrapedHomeData &&
+    now - cachedScrapedHomeData.timestamp < SCRAPED_HOME_CACHE_DURATION
+  ) {
+    return Promise.resolve(cachedScrapedHomeData.modules);
+  }
+
+  if (activeScrapedHomePromise) {
+    return activeScrapedHomePromise;
+  }
+
+  activeScrapedHomePromise = (async () => {
+    try {
+      // Use the JioSaavn API directly — more reliable than scraping the homepage HTML
+      // which requires eval() on raw JS and breaks on any CDN/structure change.
+      const apiUrls = JIOSAAVN_SEARCH_BASE_URLS.map((base) =>
+        `${base.replace(/\/+$/, "")}/modules?language=hindi`
+      );
+
+      let modules: any[] = [];
+
+      for (const url of apiUrls) {
+        try {
+          // react-doctor-disable-next-line react-doctor/async-await-in-loop -- sequential fallbacks
+          const res = await withTimeout(
+            fetch(url, { headers: { Accept: "application/json" } }),
+            6500
+          );
+          if (!res.ok) {
+            await consumeResponseBody(res);
+            continue;
+          }
+          const json = await res.json();
+          // Response: { data: { trending: {...}, charts: {...}, new_albums: {...}, ... } }
+          const data = json?.data ?? json;
+          if (data && typeof data === "object" && Object.keys(data).length > 0) {
+            // Normalise into the same modules array shape the rest of the code expects:
+            // [{ key: "new_trending", data: [...] }, ...]
+            // Combined map+filter into single pass with reduce
+            modules = Object.entries(data).reduce((acc: any[], [key, value]: [string, any]) => {
+              const dataArray = Array.isArray(value?.data) ? value.data :
+                               Array.isArray(value) ? value : [];
+              if (dataArray.length > 0) {
+                acc.push({ key, data: dataArray });
+              }
+              return acc;
+            }, []);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      cachedScrapedHomeData = { modules, timestamp: Date.now() };
+      return modules;
+    } catch (err) {
+      logger.warn("[JioSaavn] Failed to fetch home modules:", err);
+      return [];
+    } finally {
+      activeScrapedHomePromise = null;
+    }
+  })();
+
+  return activeScrapedHomePromise;
+}
+
+// Keys that the /modules API returns directly in the data object.
+// Also handles the old scraped window.__INITIAL_DATA__ keys as fallbacks.
+const HOMEPAGE_MODULE_MAP: Record<string, string[]> = {
+  trending:      ["trending", "new_trending"],
+  "top-charts":  ["charts"],
+  "new-arrivals": ["new_albums", "new-arrivals"],
+  bollywood:     ["top_playlists", "playlists"],
+  "most-viral":  ["viral", "most_viral"],
+  popular:       ["top_songs", "popular"],
+  retro:         ["retro"],
+};
+
+async function fetchScrapedCategoryFromHomepage(
+  categoryId: string,
+  limit: number,
+  forceRefresh: boolean
+): Promise<JioSaavnPlaylistResult[] | null> {
+  const moduleKeys = HOMEPAGE_MODULE_MAP[categoryId];
+  if (!moduleKeys || moduleKeys.length === 0) return null;
+
+  try {
+    const modules = await getScrapedJioSaavnHomeModules(forceRefresh);
+    // Try each key alias in order — API uses different keys than scraped HTML
+    const targetModule = moduleKeys
+      .map((key) => modules.find((m) => m.key === key))
+      .find((m) => m && Array.isArray(m.data) && m.data.length > 0);
+
+    if (!targetModule || !Array.isArray(targetModule.data) || targetModule.data.length === 0) {
+      return null;
+    }
+
+    const mapped = targetModule.data.map(mapHomepageItemToPlaylistResult);
+
+    return mapped.filter((item: JioSaavnPlaylistResult) => {
+      const titleLower = item.name.toLowerCase();
+      const descLower = (item.description || "").toLowerCase();
+      const isUrdu = titleLower.includes("urdu") || descLower.includes("urdu") ||
+                     titleLower.includes("pakistani") || descLower.includes("pakistani");
+      return !isUrdu;
+    }).slice(0, limit);
+  } catch (err) {
+    logger.warn(`[JioSaavn] fetchScrapedCategoryFromHomepage failed for ${categoryId}:`, err);
+    return null;
+  }
+}
+
 async function fetchAndRankCategory(
   cat: HomeJioSaavnCategory,
   limit: number,
   context: AutoRefreshContext,
   history: Set<string>
 ): Promise<JioSaavnPlaylistResult[]> {
+  const scraped = await fetchScrapedCategoryFromHomepage(cat.id, limit * 4, false);
+  if (scraped && scraped.length > 0) {
+    const deduped  = dedupeByPlaylistId(scraped);
+    const noRepeat = removeRecentlyShown(deduped, history);
+    const ranked   = rankPlaylists(noRepeat, context);
+    const rotated  = applyFreshnessRotation(ranked);
+    return rotated;
+  }
+
+  if (cat.id === "new-arrivals") {
+    try {
+      return await fetchNewArrivalPlaylists(limit, false, context);
+    } catch {
+      return [];
+    }
+  }
+
   // Fetch a larger pool — 4× limit gives the global dedupe enough unique candidates
   const raw = await fetchCategoryFast(cat.id, limit * 4);
   if (raw.length === 0) return [];
@@ -1864,10 +2272,11 @@ function mixForFeed(
 }
 
 // ── 8. Day-keyed cache fingerprint ────────────────────────────────────────────
-// Bumping to v6 + day ensures daily auto-refresh without manual invalidation.
+// Uses day + weekend/weekday only — removing time-slot avoids cache invalidation
+// every 6 hours which caused cold-load empty sections mid-session.
 function buildDayFingerprint(context: AutoRefreshContext): string {
   const day = new Date().getDate();
-  return `v6|${context.slot}|${context.isWeekend ? "weekend" : "weekday"}|${context.languageBias}|day${day}`;
+  return `v7|${context.isWeekend ? "weekend" : "weekday"}|${context.languageBias}|day${day}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1879,6 +2288,7 @@ export async function getHomeJioSaavnCategories(options?: {
   limitPerCategory?: number;
   realtime?: boolean;
   categoryIds?: string[];
+  signal?: AbortSignal;
 }): Promise<HomeJioSaavnCategoryData[]> {
   const forceRefresh = options?.forceRefresh ?? false;
   const limit        = Math.min(options?.limitPerCategory ?? 10, 12);
@@ -1962,14 +2372,4 @@ export async function getHomeJioSaavnCategories(options?: {
   void updateLastShownIds(shownIds);
 
   return nonEmpty;
-}
-
-// Exported so the home screen can use the mixed feed as a "For You" section
-function buildMixedFeed(
-  categories: HomeJioSaavnCategoryData[],
-  limit = 15
-): JioSaavnPlaylistResult[] {
-  const byId: Record<string, JioSaavnPlaylistResult[]> = {};
-  categories.forEach((c) => { byId[c.id] = c.results; });
-  return mixForFeed(byId, limit);
 }

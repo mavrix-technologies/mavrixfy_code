@@ -21,7 +21,7 @@ import Colors from "@/constants/colors";
 import { getBestImageUrl, Song } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
 import SongRow from "@/components/SongRow";
-import { getCatalogSongs, searchCatalog } from "@/lib/catalogService";
+import { searchCatalog } from "@/lib/catalogService";
 import {
   normalizeText,
   rankSongs,
@@ -788,19 +788,19 @@ function useSearchScreenView() {
     try {
       if (!requestIsActive()) return;
 
-      // OPTIMIZATION: Fetch catalog songs first (instant, local)
-      const catalogSongs = await getCatalogSongs().catch(() => [] as Song[]);
+      // OPTIMIZATION: Fetch catalog songs (now server-side search)
+      const catalogResults = await searchCatalog(normalizedQuery).catch(() => [] as Song[]);
 
       if (requestIsActive()) {
         // Show catalog results immediately
         const mergedSongs: Song[] = [];
-        for (const s of searchCatalog(catalogSongs, normalizedQuery)) {
+        for (const s of catalogResults) {
           mergeInto(mergedSongs, s);
         }
 
-        const catalogResults = toFinalList(mergedSongs);
-        if (catalogResults.length > 0) {
-          setSongResults(fastRank(catalogResults));
+        const finalCatalogResults = toFinalList(mergedSongs);
+        if (finalCatalogResults.length > 0) {
+          setSongResults(fastRank(finalCatalogResults));
           setSearchDisplayQuery(normalizedQuery);
         }
 

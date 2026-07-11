@@ -1,7 +1,7 @@
 import { Redirect, Tabs, usePathname, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import { Easing, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
+import { Easing, InteractionManager, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -111,6 +111,7 @@ function MiniPlayerSecondaryControlButton({
   onPrev,
   onMore,
 }: MiniPlayerSecondaryControlButtonProps) {
+  const buttonRef = useRef<View>(null);
   const action = (() => {
     switch (control) {
       case "next":
@@ -125,30 +126,32 @@ function MiniPlayerSecondaryControlButton({
   })();
 
   return (
-    <Pressable
-      android_disableSound
-      onPress={action.onPress}
-      hitSlop={14}
-      accessibilityRole="button"
-      accessibilityLabel={action.label}
-      style={({ pressed }) => [
-        shellStyle,
-        {
-          width: size,
-          height: size,
-          borderRadius: radius,
-          backgroundColor,
-          borderColor,
-        },
-        pressed && styles.miniButtonPressed,
-      ]}
-    >
-      <Ionicons
-        name={action.icon}
-        size={control === "more" ? 22 : 24}
-        color={iconColor}
-      />
-    </Pressable>
+    <View ref={buttonRef} collapsable={false}>
+      <Pressable
+        android_disableSound
+        onPress={action.onPress}
+        hitSlop={14}
+        accessibilityRole="button"
+        accessibilityLabel={action.label}
+        style={({ pressed }) => [
+          shellStyle,
+          {
+            width: size,
+            height: size,
+            borderRadius: radius,
+            backgroundColor,
+            borderColor,
+          },
+          pressed && styles.miniButtonPressed,
+        ]}
+      >
+        <Ionicons
+          name={action.icon}
+          size={control === "more" ? 22 : 24}
+          color={iconColor}
+        />
+      </Pressable>
+    </View>
   );
 }
 
@@ -448,6 +451,10 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const hasActiveMiniPlayer = Boolean(activeSong);
+  const miniPlayerRef = useRef<View>(null);
+  const handleMiniPlayerLayout = useCallback(() => {
+    // no-op — tour removed
+  }, []);
   const [coverFailed, setCoverFailed] = useState(false);
   const [artworkPalette, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
   const routePressLockRef = useRef({ href: "", time: 0 });
@@ -455,6 +462,18 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
 
   const handleTabPress = useCallback(
     (route: VisibleRoute, isFocused: boolean) => {
+      // If home tab is pressed while already on home, scroll to top
+      if (isFocused && route === "index") {
+        try {
+          const { globalHomeScrollRef } = require("@/app/(tabs)/index");
+          globalHomeScrollRef.current?.scrollToOffset({ offset: 0, animated: true });
+        } catch (error) {
+          // Fallback: navigate to reset scroll position
+          routerNavigate("/" as any);
+        }
+        return;
+      }
+      
       if (isFocused) return;
 
       const href = getTabHref(route);
@@ -537,17 +556,8 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   const chipOpacityRef = useRef<Animated.Value | null>(null);
   if (chipOpacityRef.current === null) chipOpacityRef.current = new Animated.Value(1);
   const chipOpacity = chipOpacityRef.current;
-  const coverOpacityRef = useRef<Animated.Value | null>(null);
-  if (coverOpacityRef.current === null) coverOpacityRef.current = new Animated.Value(1);
-  const coverOpacity = coverOpacityRef.current;
-
-  useEffect(() => {
-    Animated.timing(coverOpacity, {
-      toValue: 1,
-      duration: 160,
-      useNativeDriver: true,
-    }).start();
-  }, [coverOpacity]);
+  // Remove cover opacity animation - it's causing unnecessary re-renders
+  // Cover is always visible, no need to animate opacity
 
   const resetMixChip = useCallback(() => {
     Animated.parallel([
@@ -610,26 +620,39 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     [deleteMixWithAnimation, dragX, isDragging, resetMixChip]
   );
 
+  // Batch color updates to prevent flickering
   const applyMiniPlayerColors = useCallback((palette: ArtworkPalette) => {
-    setArtworkPalette(palette);
-    setAlbumColor(palette.accent);
-    setTextColor(palette.text);
+    // Use InteractionManager to batch updates after song change animation
+    InteractionManager.runAfterInteractions(() => {
+      setArtworkPalette(palette);
+      setAlbumColor(palette.accent);
+      setTextColor(palette.text);
+    });
   }, [setAlbumColor, setTextColor]);
 
+  // Single effect for song changes - depend only on ID to prevent double updates
   useEffect(() => {
     const coverUrl = activeSong?.coverUrl?.trim() ?? "";
+    const songId = activeSong?.id;
+    
+    // Reset cover failed state immediately
+    setCoverFailed(false);
+    
     if (!coverUrl) {
       applyMiniPlayerColors(DEFAULT_ARTWORK_PALETTE);
-      return () => { };
+      return;
     }
+    
     let active = true;
+    
+    // Apply immediate palette first (from cache)
     const immediatePalette = getImmediateArtworkPalette(coverUrl);
     applyMiniPlayerColors(immediatePalette);
 
+    // Then extract full colors asynchronously (only if not cached)
     extractArtworkColors(coverUrl)
       .then((palette) => {
-        if (!active) return;
-        if (activeSong?.coverUrl?.trim() !== coverUrl) return;
+        if (!active || activeSong?.id !== songId) return;
         applyMiniPlayerColors(palette);
       })
       .catch(() => { });
@@ -637,11 +660,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     return () => {
       active = false;
     };
-  }, [activeSong?.id, activeSong?.coverUrl, applyMiniPlayerColors]);
-
-  useEffect(() => {
-    setCoverFailed(false);
-  }, [activeSong?.id, activeSong?.coverUrl]);
+  }, [activeSong, applyMiniPlayerColors]);
 
   const resolvedBottomInset = isWeb ? 0 : Math.max(bottomInset, 0);
   const navIconSize = isNarrowMobile ? 20 : 22;
@@ -740,6 +759,9 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
 
           {hasActiveMiniPlayer && activeSong ? (
             <View
+              ref={miniPlayerRef}
+              onLayout={handleMiniPlayerLayout}
+              collapsable={false}
               style={[
                 styles.playerSection,
                 isIOS && styles.playerSectionIOS,
@@ -762,7 +784,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
                 onPress={openPlayer}
               >
                 <View style={styles.playerLeft}>
-                  <Animated.View style={[styles.coverWrap, { width: miniCoverSlotSize, opacity: coverOpacity }]}>
+                  <View style={[styles.coverWrap, { width: miniCoverSlotSize }]}>
                     {coverUrl && !coverFailed ? (
                       <Image
                         source={{ uri: coverUrl }}
@@ -771,8 +793,10 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
                           { width: miniCoverSize, height: miniCoverSize },
                         ]}
                         contentFit="cover"
+                        cachePolicy="memory-disk"
+                        priority="high"
                         decodeFormat="argb"
-                        transition={0}
+                        transition={100}
                         onError={() => setCoverFailed(true)}
                       />
                     ) : (
@@ -786,7 +810,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
                         <Ionicons name="musical-notes" size={20} color="rgba(255,255,255,0.72)" />
                       </View>
                     )}
-                  </Animated.View>
+                  </View>
                   <View style={[styles.songInfo, isDragging && styles.songInfoDuringMixDrag]}>
                     <PingPongScroll
                       text={activeSong.title}
@@ -931,7 +955,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
                 backgroundColor: navBaseBg,
                 paddingHorizontal: navHorizontalPadding,
                 paddingTop: 4,
-                paddingBottom: Math.min(resolvedBottomInset, 10),
+                paddingBottom: isAndroid ? Math.max(resolvedBottomInset, 10) : Math.min(resolvedBottomInset, 10),
                 borderTopWidth: hasActiveMiniPlayer ? StyleSheet.hairlineWidth : 0,
                 borderTopColor: "rgba(255, 255, 255, 0.08)",
               },
@@ -1028,17 +1052,9 @@ function useIOSMiniPlayerOverlayView() {
       setPlayerModalVisible(visible);
     });
   }, []);
-  const coverOpacityRef = useRef<Animated.Value | null>(null);
-  if (coverOpacityRef.current === null) coverOpacityRef.current = new Animated.Value(1);
-  const coverOpacity = coverOpacityRef.current;
-
-  useEffect(() => {
-    Animated.timing(coverOpacity, {
-      toValue: playerModalVisible ? 0 : 1,
-      duration: 160,
-      useNativeDriver: true,
-    }).start();
-  }, [playerModalVisible, coverOpacity]);
+  
+  // Remove unnecessary cover opacity animation
+  // Cover visibility is handled by CSS, no need for extra animations
 
   const { push: overlayRouterPush } = useRouter();
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
@@ -1133,26 +1149,39 @@ function useIOSMiniPlayerOverlayView() {
   }, [activeSongId, playbackState.isPlaying, mixSongIds, queue]);
   const [iosArtworkPalette, setIosArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
 
+  // Batch color updates to prevent flickering
   const applyMiniPlayerColors = useCallback((palette: ArtworkPalette) => {
-    setIosArtworkPalette(palette);
-    setAlbumColor(palette.accent);
-    setTextColor(palette.text);
+    // Use InteractionManager to batch updates after song change animation
+    InteractionManager.runAfterInteractions(() => {
+      setIosArtworkPalette(palette);
+      setAlbumColor(palette.accent);
+      setTextColor(palette.text);
+    });
   }, [setAlbumColor, setTextColor]);
 
+  // Single effect for song changes - depend only on ID to prevent double updates
   useEffect(() => {
     const coverUrl = activeSong?.coverUrl?.trim() ?? "";
+    const songId = activeSong?.id;
+    
+    // Reset cover failed state immediately
+    setCoverFailed(false);
+    
     if (!coverUrl) {
       applyMiniPlayerColors(DEFAULT_ARTWORK_PALETTE);
-      return () => { };
+      return;
     }
+    
     let active = true;
+    
+    // Apply immediate palette first (from cache)
     const immediatePalette = getImmediateArtworkPalette(coverUrl);
     applyMiniPlayerColors(immediatePalette);
 
+    // Then extract full colors asynchronously (only if not cached)
     extractArtworkColors(coverUrl)
       .then((palette) => {
-        if (!active) return;
-        if (activeSong?.coverUrl?.trim() !== coverUrl) return;
+        if (!active || activeSong?.id !== songId) return;
         applyMiniPlayerColors(palette);
       })
       .catch(() => { });
@@ -1160,11 +1189,7 @@ function useIOSMiniPlayerOverlayView() {
     return () => {
       active = false;
     };
-  }, [activeSong?.id, activeSong?.coverUrl, applyMiniPlayerColors]);
-
-  useEffect(() => {
-    setCoverFailed(false);
-  }, [activeSong?.id, activeSong?.coverUrl]);
+  }, [activeSong, applyMiniPlayerColors]);
 
   useEffect(() => {
     const resetBars = () => {
@@ -1239,13 +1264,15 @@ function useIOSMiniPlayerOverlayView() {
 
         <View style={styles.iosMiniPlayerRow}>
           <Pressable style={styles.iosMiniPlayerMain} onPress={openPlayer} android_disableSound>
-            <Animated.View style={[styles.iosMiniPlayerArtworkShell, { opacity: coverOpacity }]}>
+            <View style={styles.iosMiniPlayerArtworkShell}>
               {activeSong.coverUrl && !coverFailed ? (
                 <Image
                   source={{ uri: activeSong.coverUrl }}
                   style={styles.iosMiniPlayerCover}
                   contentFit="cover"
-                  transition={0}
+                  cachePolicy="memory-disk"
+                  priority="high"
+                  transition={100}
                   onError={() => setCoverFailed(true)}
                 />
               ) : (
@@ -1258,7 +1285,7 @@ function useIOSMiniPlayerOverlayView() {
                   <Ionicons name="musical-notes" size={20} color="rgba(255,255,255,0.72)" />
                 </View>
               )}
-            </Animated.View>
+            </View>
 
             <View style={styles.iosMiniPlayerText}>
               <PingPongScroll

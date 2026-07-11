@@ -36,7 +36,6 @@ import {
 } from "@/lib/downloads/entitlement";
 import {
   registerDevice,
-  getRegisteredDevices,
   writeLicenseCompleted,
   writeLicenseFailed,
   refreshLicenses,
@@ -93,16 +92,8 @@ export async function downloadSong(
       return { ok: false, reason: entitlement.blockedReason ?? "Downloads not available" };
     }
 
-    // 2. Register device and check device limit.
-    const devices = await getRegisteredDevices(uid);
-    const deviceId = await registerDevice(uid);
-    const isRegistered = devices.some((d) => d.deviceId === deviceId);
-    if (!isRegistered && devices.length >= entitlement.maxDevices) {
-      return {
-        ok: false,
-        reason: `Device limit reached (${entitlement.maxDevices} devices). Remove a device to continue.`,
-      };
-    }
+    // 2. Register device (no device limit enforced).
+    await registerDevice(uid);
 
     // 3. Check song cap.
     const allDownloads = await loadAllDownloads();

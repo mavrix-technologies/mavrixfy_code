@@ -122,7 +122,9 @@ if (__DEV__) {
     if (
       args[0] &&
       typeof args[0] === "string" &&
-      args[0].includes("expo-notifications")
+      (args[0].includes("expo-notifications") ||
+       args[0].includes("GO_BACK") ||
+       args[0].includes("was not handled by any navigator"))
     ) {
       return;
     }
@@ -133,17 +135,22 @@ if (__DEV__) {
 LogBox.ignoreLogs([
   "expo-notifications functionality is not fully supported in Expo Go",
   "expo-notifications: Android Push notifications",
+  // expo-av triggers keep-awake internally; this fails during hot reload when
+  // the activity briefly detaches. Harmless in production builds.
+  "Unable to activate keep awake",
+  // Same activity-detach race on hot reload — not a real error in production.
+  "setBackgroundColorAsync",
+  // Harmless navigation warning when pressing back on root screen
+  "The action 'GO_BACK' was not handled by any navigator",
 ]);
 
 // Screens where the docked mini player and tab bar must not cover the route.
 const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "profile", "delete-account", "notifications"]);
 // Root-stack routes (outside tabs) that still show the docked mini player + tab bar.
-const NAV_OVERLAY_SEGMENTS = new Set(["playlist", "player", "artist"]);
+const NAV_OVERLAY_SEGMENTS = new Set(["playlist", "artist"]);
 
-// Set navigation bar color on Android
-if (Platform.OS === "android") {
-  SystemUI.setBackgroundColorAsync(Colors.background);
-}
+// Navigation bar color is set inside RootLayout via useEffect to avoid
+// calling setBackgroundColorAsync before the Android activity is ready.
 
 type GlobalToastListener = (message: string) => void;
 
@@ -441,10 +448,12 @@ function useRootLayoutNavigation() {
 
   const activeSegment = segments[0] as string;
   const unmountNavBar = NAV_UNMOUNT_SEGMENTS.has(activeSegment);
+  const isPlayerScreen = activeSegment === "player";
   const showNavOverlay =
     !loading &&
     (isAuthenticated || isAllowedGuest) &&
     !unmountNavBar &&
+    !isPlayerScreen &&
     NAV_OVERLAY_SEGMENTS.has(activeSegment);
 
   // Close queue sheet when navigating to screens where it shouldn't appear
@@ -563,6 +572,17 @@ function RootLayoutNav() {
         />
         <Stack.Screen
           name="playlist"
+          options={{
+            presentation: "card",
+            animation: "default",
+            gestureEnabled: true,
+            gestureDirection: "horizontal",
+            fullScreenGestureEnabled: false,
+            contentStyle: { backgroundColor: Colors.background },
+          }}
+        />
+        <Stack.Screen
+          name="profile"
           options={{
             presentation: "card",
             animation: "default",
@@ -789,6 +809,15 @@ export default function RootLayout() {
   const [error, setError] = useState<Error | null>(null);
   const [safetyTimeoutActive, setSafetyTimeoutActive] = useState(false);
   const fontsLoadedRef = useRef(false);
+
+  // Set Android nav bar color inside the component so the activity is guaranteed
+  // to be alive. Top-level module calls fire before the activity is ready on
+  // hot reload and throw "current activity is no longer available".
+  useEffect(() => {
+    if (Platform.OS === "android") {
+      SystemUI.setBackgroundColorAsync(Colors.background).catch(() => {});
+    }
+  }, []);
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,

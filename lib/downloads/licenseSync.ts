@@ -102,7 +102,7 @@ async function unregisterDevice(uid: string, deviceId: string): Promise<void> {
 }
 
 /** Fetch all registered devices for a user. */
-export async function getRegisteredDevices(uid: string): Promise<DownloadDevice[]> {
+async function getRegisteredDevices(uid: string): Promise<DownloadDevice[]> {
   if (!db) return [];
   try {
     const snap = await getDocs(collection(db, "users", uid, "downloadDevices"));

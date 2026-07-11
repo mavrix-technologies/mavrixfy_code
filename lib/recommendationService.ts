@@ -51,12 +51,16 @@ const SESSION_STARTED_KEY = "@mavrixfy_recommendation_session_started_v1";
 const SESSION_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const LOCAL_FEED_LIMIT = 12;
 const LOCAL_SECTION_MIN_ITEMS = 4;
+const LOCAL_REQUEST_CONCURRENCY = 3;
+const LOCAL_BACKUP_QUERY_LIMIT = 6;
+const LOCAL_SEARCH_TIMEOUT_MS = 6_000;
 const CURRENT_YEAR = new Date().getFullYear();
 const PREVIOUS_YEAR = CURRENT_YEAR - 1;
 
 export type RecommendationHomeFeedOptions = {
   forceRefresh?: boolean;
   authUser?: { getIdToken: () => Promise<string> } | null;
+  signal?: AbortSignal;
 };
 
 const LOCAL_SECTION_QUERIES: Array<{
@@ -66,32 +70,32 @@ const LOCAL_SECTION_QUERIES: Array<{
   source: RecommendationSource;
   queries: string[];
 }> = [
-    {
-      id: "basedOnActivity",
-      title: "Based On Your Activity",
-      subtitle: "High-scoring Hindi and Bollywood moods",
-      source: "trending",
-      queries: [
-        "hindi romantic hits playlist",
-        "bollywood party hits playlist",
-        "hindi workout hits playlist",
-        "bollywood dance hits playlist",
-      ],
-    },
-    {
-      id: "newReleases",
-      title: "New Releases",
-      subtitle: "Latest Hindi and Bollywood drops",
-      source: "fresh",
-      queries: [
-        `latest hindi songs ${CURRENT_YEAR} playlist`,
-        `new bollywood songs ${CURRENT_YEAR} playlist`,
-        `latest bollywood movie songs ${CURRENT_YEAR}`,
-        "new hindi movie songs playlist",
-        "latest hindi hits playlist",
-      ],
-    },
-  ];
+  {
+    id: "basedOnActivity",
+    title: "Based On Your Activity",
+    subtitle: "High-scoring Hindi and Bollywood moods",
+    source: "trending",
+    queries: [
+      "hindi romantic hits playlist",
+      "bollywood party hits playlist",
+      "hindi workout hits playlist",
+      "bollywood dance hits playlist",
+    ],
+  },
+  {
+    id: "newReleases",
+    title: "New Releases",
+    subtitle: "Latest Hindi and Bollywood drops",
+    source: "fresh",
+    queries: [
+      `latest hindi songs ${CURRENT_YEAR} playlist`,
+      `new bollywood songs ${CURRENT_YEAR} playlist`,
+      `latest bollywood movie songs ${CURRENT_YEAR}`,
+      "new hindi movie songs playlist",
+      "latest hindi hits playlist",
+    ],
+  },
+];
 
 const LOCAL_BACKUP_QUERIES = [
   `popular hindi songs ${CURRENT_YEAR} playlist`,
@@ -290,15 +294,96 @@ function createRecommendationHomeUrl(sessionId: string, options?: Recommendation
   return `${buildAppApiUrl("/recommendations/home")}?${params.join("&")}`;
 }
 
-async function searchMavrixfyPlaylists(query: string, source: RecommendationSource): Promise<RecommendationItem[]> {
-  const url = `${buildAppApiUrl("/search/playlists")}?query=${encodeURIComponent(query)}&limit=18&page=1`;
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!response.ok) return [];
+const FEED_CACHE_KEY = "@mavrixfy_recommendation_feed_cache_v1";
+let _cachedFeed: RecommendationFeed | null = null;
 
-  const payload = await response.json().catch(() => null);
-  return unwrapPlaylistResults(payload)
-    .map((raw) => normalizePlaylistCandidate(raw, source))
-    .filter((item): item is RecommendationItem => Boolean(item));
+async function saveFeedToCache(feed: RecommendationFeed): Promise<void> {
+  try {
+    _cachedFeed = feed;
+    await AsyncStorage.setItem(FEED_CACHE_KEY, JSON.stringify(feed));
+  } catch {}
+}
+
+async function getFeedFromCache(): Promise<RecommendationFeed | null> {
+  if (_cachedFeed) return _cachedFeed;
+  try {
+    const raw = await AsyncStorage.getItem(FEED_CACHE_KEY);
+    if (raw) {
+      _cachedFeed = JSON.parse(raw);
+      return _cachedFeed;
+    }
+  } catch {}
+  return null;
+}
+
+async function searchMavrixfyPlaylists(
+  query: string,
+  source: RecommendationSource,
+  signal?: AbortSignal
+): Promise<RecommendationItem[]> {
+  const url = `${buildAppApiUrl("/search/playlists")}?query=${encodeURIComponent(query)}&limit=18&page=1`;
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) return [];
+    signal.addEventListener("abort", onAbort);
+  }
+
+  const timeout = setTimeout(() => controller.abort(), LOCAL_SEARCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (!response.ok) return [];
+
+    const payload = await response.json().catch(() => null);
+    return unwrapPlaylistResults(payload)
+      .map((raw) => normalizePlaylistCandidate(raw, source))
+      .filter((item): item is RecommendationItem => Boolean(item));
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeout);
+    if (signal) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
+}
+
+async function mapWithEarlyExit<T, R>(
+  items: readonly T[],
+  mapper: (item: T, signal: AbortSignal) => Promise<R>,
+  concurrency: number,
+  checkExit: (results: R[]) => boolean
+): Promise<R[]> {
+  if (items.length === 0) return [];
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  const controller = new AbortController();
+
+  const worker = async () => {
+    while (!controller.signal.aborted) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      try {
+        results[index] = await mapper(items[index], controller.signal);
+        if (checkExit(results)) {
+          controller.abort();
+          return;
+        }
+      } catch {
+        // Ignore errors
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
 }
 
 function takeUniquePlaylists(
@@ -320,20 +405,38 @@ function takeUniquePlaylists(
 }
 
 async function getLocalPlaylistRecommendationFeed(): Promise<RecommendationFeed> {
+  const cached = await getFeedFromCache();
+  if (cached) {
+    return {
+      ...cached,
+      cacheStatus: "hit",
+    };
+  }
+
   const shown = new Set<string>();
-  const sections: RecommendationSection[] = [];
-  const backupResultsPromise = Promise.all(
-    LOCAL_BACKUP_QUERIES.map((query) => searchMavrixfyPlaylists(query, "jiosaavn"))
-  );
-  const sectionResults = await Promise.all(
-    LOCAL_SECTION_QUERIES.map(async (sectionConfig) => {
-      const results = await Promise.all(
-        sectionConfig.queries.map((query) => searchMavrixfyPlaylists(query, sectionConfig.source))
-      );
-      return { sectionConfig, candidates: results.flat() };
-    })
-  );
-  const backupCandidates = (await backupResultsPromise).flat();
+  
+  // Run all section queries in parallel instead of sequentially
+  const sectionPromises = LOCAL_SECTION_QUERIES.map(async (sectionConfig) => {
+    const results = await mapWithEarlyExit(
+      sectionConfig.queries,
+      (query, sig) => searchMavrixfyPlaylists(query, sectionConfig.source, sig),
+      LOCAL_REQUEST_CONCURRENCY,
+      (allResults) => {
+        const flattened = allResults.filter(Boolean).flat();
+        const uniqueCount = flattened.filter(item => {
+          const key = canonicalPlaylistKey(item);
+          return !shown.has(key);
+        }).length;
+        return uniqueCount >= LOCAL_SECTION_MIN_ITEMS;
+      }
+    );
+
+    const candidates = results.filter(Boolean).flat();
+    return { sectionConfig, candidates };
+  });
+
+  const sectionResults = await Promise.all(sectionPromises);
+  const drafts = [];
 
   for (const { sectionConfig, candidates } of sectionResults) {
     const items = takeUniquePlaylists(
@@ -342,27 +445,40 @@ async function getLocalPlaylistRecommendationFeed(): Promise<RecommendationFeed>
       LOCAL_FEED_LIMIT
     );
 
-    if (items.length < LOCAL_SECTION_MIN_ITEMS) {
+    drafts.push({ sectionConfig, items });
+  }
+
+  const sparseDrafts = drafts.filter((draft) => draft.items.length < LOCAL_SECTION_MIN_ITEMS);
+  if (sparseDrafts.length > 0) {
+    const backupResults = await mapWithEarlyExit(
+      LOCAL_BACKUP_QUERIES.slice(0, LOCAL_BACKUP_QUERY_LIMIT),
+      (query, sig) => searchMavrixfyPlaylists(query, "jiosaavn", sig),
+      LOCAL_REQUEST_CONCURRENCY,
+      (allResults) => {
+        const flattened = allResults.filter(Boolean).flat();
+        return flattened.length >= LOCAL_SECTION_MIN_ITEMS * sparseDrafts.length;
+      }
+    );
+    const backupCandidates = backupResults.filter(Boolean).flat();
+
+    for (const draft of sparseDrafts) {
       const sectionBackup = rankRecommendationItems(
         backupCandidates.map((item) => ({
           ...item,
-          source: sectionConfig.source,
-          id: `${sectionConfig.source}:${item.contentId}`,
+          source: draft.sectionConfig.source,
+          id: `${draft.sectionConfig.source}:${item.contentId}`,
         })),
-        sectionConfig.id
+        draft.sectionConfig.id
       );
-      items.push(...takeUniquePlaylists(sectionBackup, shown, LOCAL_FEED_LIMIT - items.length));
-    }
-
-    if (items.length > 0) {
-      sections.push({
-        id: sectionConfig.id,
-        title: sectionConfig.title,
-        subtitle: sectionConfig.subtitle,
-        items,
-      });
+      draft.items.push(...takeUniquePlaylists(sectionBackup, shown, LOCAL_FEED_LIMIT - draft.items.length));
     }
   }
+
+  const sections: RecommendationSection[] = drafts.flatMap(({ sectionConfig, items }) =>
+    items.length > 0
+      ? [{ id: sectionConfig.id, title: sectionConfig.title, subtitle: sectionConfig.subtitle, items }]
+      : []
+  );
 
   if (sections.length === 0) {
     throw new Error("No local recommendation playlists were available.");
@@ -397,6 +513,18 @@ async function getRecommendationSessionId(): Promise<string> {
 
 export async function getRecommendationHomeFeed(options?: RecommendationHomeFeedOptions): Promise<RecommendationFeed> {
   const currentUser = options?.authUser ?? auth.currentUser;
+
+  // Return cached feed immediately on non-forced loads so the home screen
+  // never blocks on network. A background refresh will update on next open.
+  if (!options?.forceRefresh) {
+    const cached = await getFeedFromCache();
+    if (cached) {
+      // Kick off a background refresh without awaiting it
+      getRecommendationHomeFeed({ ...options, forceRefresh: true }).then(saveFeedToCache).catch(() => {});
+      return { ...cached, cacheStatus: "hit" };
+    }
+  }
+
   if (!currentUser) {
     return getLocalPlaylistRecommendationFeed();
   }
@@ -411,6 +539,7 @@ export async function getRecommendationHomeFeed(options?: RecommendationHomeFeed
       Accept: "application/json",
       Authorization: `Bearer ${token}`,
     },
+    signal: options?.signal,
   }).catch(() => null);
 
   if (!response?.ok) {
@@ -423,7 +552,7 @@ export async function getRecommendationHomeFeed(options?: RecommendationHomeFeed
     return getLocalPlaylistRecommendationFeed();
   }
 
-  return {
+  const parsedFeed: RecommendationFeed = {
     ...feed,
     sections: feed.sections.reduce<RecommendationSection[]>((sections, section) => {
       if (section.id === "recommendedForYou" || section.id === "freshDiscoveries") {
@@ -438,4 +567,8 @@ export async function getRecommendationHomeFeed(options?: RecommendationHomeFeed
       return sections;
     }, []),
   };
+
+  void saveFeedToCache(parsedFeed);
+
+  return parsedFeed;
 }

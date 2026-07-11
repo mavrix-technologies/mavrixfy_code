@@ -44,9 +44,14 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
 
   const formatErrorDetails = (): string => {
     let details = `Error: ${error.message}\n\n`;
-    if (error.stack) {
+    
+    // Only show stack traces in development mode for security
+    if (__DEV__ && error.stack) {
       details += `Stack Trace:\n${error.stack}`;
+    } else if (!__DEV__) {
+      details += 'Error details have been logged securely. Please contact support if this issue persists.';
     }
+    
     return details;
   };
 

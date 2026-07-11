@@ -2,7 +2,10 @@ import { Platform } from "react-native";
 import * as Device from "expo-device";
 
 const ANDROID_LOW_RAM_FEATURE = "android.hardware.ram.low";
-const AMBIENT_VIDEO_MIN_MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
+// Devices with ≤3 GB RAM get low-end treatment for the video backdrop.
+// 4 GB was too aggressive — caught most mid-range phones that can handle a muted WebView fine.
+// 3 GB covers the actual struggling tier (2/3 GB devices common in India/SE Asia markets).
+const AMBIENT_VIDEO_MIN_MEMORY_BYTES = 3 * 1024 * 1024 * 1024;
 
 export type DevicePerformanceProfile = {
   isLowEndDevice: boolean;

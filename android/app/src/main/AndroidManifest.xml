@@ -19,6 +19,10 @@
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
   <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:node="remove"/>
   <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
+  
+  <!-- Android Auto support -->
+  <uses-feature android:name="android.hardware.type.automotive" android:required="false"/>
+  
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -33,21 +37,12 @@
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ERROR_RECOVERY_ONLY"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://u.expo.dev/93293119-93b7-4dbb-acdd-7241771254c4"/>
-    <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc"/>
-    <service android:name="expo.modules.audio.service.AudioControlsService" android:exported="false" android:foregroundServiceType="mediaPlayback">
-      <intent-filter>
-        <action android:name="androidx.media3.session.MediaSessionService"/>
-      </intent-filter>
-    </service>
+    <!-- expo-audio service disabled — RNTP's MusicService is the sole media session owner -->
+    <service android:name="expo.modules.audio.service.AudioControlsService" android:enabled="false" tools:replace="android:enabled"/>
     <service android:name="com.doublesymmetry.trackplayer.service.MusicService" android:enabled="true" android:exported="true" android:foregroundServiceType="mediaPlayback" tools:replace="android:exported,android:foregroundServiceType">
       <intent-filter>
         <action android:name="android.intent.action.MEDIA_BUTTON"/>
       </intent-filter>
-      <intent-filter tools:node="remove">
-        <action android:name="android.media.browse.MediaBrowserService"/>
-      </intent-filter>
-    </service>
-    <service android:name=".auto.MavrixfyAutoService" android:exported="true">
       <intent-filter>
         <action android:name="android.media.browse.MediaBrowserService"/>
       </intent-filter>
@@ -64,6 +59,8 @@
         <data android:scheme="mavrixfy"/>
         <data android:scheme="exp+mavrixfy"/>
       </intent-filter>
+      <!-- Android Auto media app declaration -->
+      <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc"/>
     </activity>
   </application>
 </manifest>
