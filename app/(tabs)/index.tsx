@@ -24,7 +24,6 @@ import Animated, {
   withSequence,
   withTiming,
 } from "react-native-reanimated";
-import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Text as SvgText } from "react-native-svg";
 import { showGlobalToast } from "@/app/_layout";
 import { LinearGradient } from "expo-linear-gradient";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -185,17 +184,12 @@ const BRAND = {
 
 const MIN_PUBLIC_PLAYLIST_ITEMS = 1;
 const PUBLIC_PLAYLIST_FETCH_TIMEOUT_MS = 4500;
-const HOME_CATEGORY_FETCH_TIMEOUT_MS = 12000;
 const HOME_BOOTSTRAP_MAX_WAIT_MS = 15000;
 const HOME_NEW_RELEASE_SONG_TIMEOUT_MS = 12000; // raised: more queries need more time
 const MAX_ROW_ITEMS = 10;
 const NEW_RELEASE_SONG_LIMIT = 20; // raised from 10 — gives deduplication enough headroom
-const HOME_DEFAULT_BROWSE_CATEGORY_IDS = ["trending", "new-arrivals", "top-charts", "bollywood", "popular"] as const;
-const HOME_BROWSE_CATEGORY_FETCH_IDS = [
-  "trending",
-  "new-arrivals",
-  "top-charts",
-  "bollywood",
+const HOME_PRIORITY_BROWSE_CATEGORY_IDS = ["trending", "top-charts", "bollywood", "new-arrivals"] as const;
+const HOME_REMAINING_CATEGORY_IDS = [
   "popular",
   "party-mix",
   "romance",
@@ -207,13 +201,11 @@ const HOME_MAX_YOUTUBE_HOME_SECTIONS = 14;
 const HOME_MAX_RECOMMENDATION_SECTIONS = 2;
 const HOME_MAX_PUBLIC_PLAYLISTS = 12;
 const HOME_PRIORITY_CATEGORY_TIMEOUT_MS = 5500;
-const HOME_YOUTUBE_ROW_REVEAL_DELAY_MS = 85;
 const PLACEHOLDER_ROW_ITEMS = [0, 1, 2, 3];
 const QUICK_PICK_PLACEHOLDER_COLUMNS = [0, 1];
 const HORIZONTAL_ROW_GAP = 12;
 const RECENT_CARD_SIZE = 90;
 const RECT_CARD_WIDTH = 152;
-const HOME_CARD_IMAGE_SOURCE_SIZE = 480;
 const ARTIST_CARD_WIDTH = 120;
 const PINNED_HOME_HEADER_HEIGHT = 56;
 const HOME_VIDEO_CARD_GAP = 10;
@@ -233,19 +225,6 @@ const HOME_ROW_WINDOW_SIZE = 5;
 const HOME_VERTICAL_INITIAL_RENDER_COUNT = 3;
 const HOME_VERTICAL_MAX_RENDER_BATCH = 2;
 const HOME_VERTICAL_WINDOW_SIZE = 5;
-const QUICK_PICK_RANK_GRADIENTS = [
-  ["#51D4FF", "#168BDB"],
-  ["#FF4EA3", "#C21865"],
-  ["#FFC14A", "#F47A12"],
-  ["#49CBFF", "#117CC8"],
-  ["#96D85B", "#47A937"],
-  ["#FF67B7", "#C41E72"],
-  ["#FFC65A", "#EC8B16"],
-  ["#3EC4EF", "#0878BA"],
-  ["#EA3E82", "#9F114C"],
-  ["#80CA45", "#338D2C"],
-] as const;
-
 function hasHomeContent(source: {
   categories: HomeCategoryData[];
   publicPlaylists: FirestorePlaylist[];
@@ -264,10 +243,6 @@ function hasHomeContent(source: {
 
 function hasVisibleHomeSections(source: HomeSessionCache): boolean {
   return hasHomeContent(source) || source.featuredArtists.length > 0;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isRecentYouTubeSong(song: Partial<Song>): boolean {
@@ -1165,7 +1140,9 @@ function useHomeScreenInnerView() {
     }, [])
   );
 
-  homeHeroVideoCountRef.current = homeHeroVideos.length;
+  useEffect(() => {
+    homeHeroVideoCountRef.current = homeHeroVideos.length;
+  }, [homeHeroVideos.length]);
 
   const homeVideoViewabilityConfigRef = useRef({
     itemVisiblePercentThreshold: 70,
@@ -1247,15 +1224,14 @@ function useHomeScreenInnerView() {
   const [isLoadingNewReleaseSongs, setIsLoadingNewReleaseSongs] = useState(
     !HOME_SESSION_CACHE.hydrated && HOME_SESSION_CACHE.newReleaseSongs.length === 0
   );
+  const [isLoadingRemainingCategories, setIsLoadingRemainingCategories] = useState(false);
   const [recommendationFeed, setRecommendationFeed] = useState<RecommendationFeed | null>(null);
   const [isRecommendationFeedLoading, setIsRecommendationFeedLoading] = useState(false);
-  const [hasRecommendationFeedFailed, setHasRecommendationFeedFailed] = useState(false);
+  const [, setHasRecommendationFeedFailed] = useState(false);
   const latestLoadIdRef = useRef(0);
   const latestRecommendationLoadIdRef = useRef(0);
-  const quickPickRotationSeedRef = useRef<number | null>(null);
-  if (quickPickRotationSeedRef.current === null) {
-    quickPickRotationSeedRef.current = getQuickPickRotationSeed();
-  }
+  const remainingCategoriesLoadedRef = useRef(false);
+  const quickPickRotationSeed = useMemo(() => getQuickPickRotationSeed(), []);
   const hasHydratedRef = useRef(HOME_SESSION_CACHE.hydrated);
   const prefetchStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelPlaylistPrefetchRef = useRef<(() => void) | null>(null);
@@ -1329,6 +1305,42 @@ function useHomeScreenInnerView() {
     }, delayMs);
   }, [cancelScheduledPlaylistPrefetch]);
 
+  const loadRemainingCategories = useCallback(async () => {
+    // Don't load if already loaded or currently loading
+    if (remainingCategoriesLoadedRef.current || isLoadingRemainingCategories) {
+      return;
+    }
+
+    setIsLoadingRemainingCategories(true);
+    remainingCategoriesLoadedRef.current = true;
+
+    try {
+      const remainingCategoryData = await getHomeMixedCategories({
+        forceRefresh: false,
+        limitPerCategory: INITIAL_CATEGORY_LIMIT,
+        realtime: false,
+        categoryIds: [...HOME_REMAINING_CATEGORY_IDS],
+      });
+
+      // Merge with existing categories
+      const existingIds = new Set(categories.map(cat => cat.id));
+      const newCategories = remainingCategoryData.filter(
+        cat => !existingIds.has(cat.id) && cat.results.length > 0
+      );
+
+      if (newCategories.length > 0) {
+        const merged = [...categories, ...newCategories];
+        setCategories(merged);
+        HOME_SESSION_CACHE.categories = merged;
+        schedulePlaylistPrefetch(merged, 800);
+      }
+    } catch (error) {
+      logger.warn("[Home] Failed to load remaining categories:", error);
+    } finally {
+      setIsLoadingRemainingCategories(false);
+    }
+  }, [categories, isLoadingRemainingCategories, schedulePlaylistPrefetch]);
+
   const loadHomeData = useCallback(
     async (options?: {
       forceRefresh?: boolean;
@@ -1392,7 +1404,6 @@ function useHomeScreenInnerView() {
           "Home new release songs timeout"
         );
 
-        const youtubeHomeCategoriesPromise = Promise.resolve([]);
         const youtubeHomeCategoriesResultPromise = Promise.resolve({ status: "fulfilled" as const, value: [] });
 
         const publicPlaylistsResultPromise = publicPlaylistsPromise
@@ -1468,12 +1479,13 @@ function useHomeScreenInnerView() {
           let hasPartialCategories = false;
 
           try {
+            // Load priority categories first for fast initial render
             const priorityCategoryData = await withPromiseTimeout(
               (sig) => getHomeMixedCategories({
                 forceRefresh,
                 limitPerCategory: Math.min(limitPerCategory, 8),
                 realtime: realtimeRefresh,
-                categoryIds: [...HOME_DEFAULT_BROWSE_CATEGORY_IDS],
+                categoryIds: [...HOME_PRIORITY_BROWSE_CATEGORY_IDS],
                 signal: sig,
               }),
               HOME_PRIORITY_CATEGORY_TIMEOUT_MS,
@@ -1482,37 +1494,19 @@ function useHomeScreenInnerView() {
 
             if (loadId === latestLoadIdRef.current) {
               applyCategorySnapshot(priorityCategoryData);
+              // Mark that we need to load remaining categories later
+              remainingCategoriesLoadedRef.current = false;
             }
 
             partialCategories = priorityCategoryData;
             hasPartialCategories = priorityCategoryData.some((cat) => cat.results.length > 0);
-          } catch {
-            // Continue to full fetch fallback below.
-          }
-
-          try {
-            const fullCategoryData = await withPromiseTimeout(
-              (sig) => getHomeMixedCategories({
-                forceRefresh,
-                limitPerCategory,
-                realtime: realtimeRefresh,
-                categoryIds: [...HOME_BROWSE_CATEGORY_FETCH_IDS],
-                signal: sig,
-              }),
-              HOME_CATEGORY_FETCH_TIMEOUT_MS,
-              "Home categories timeout"
-            );
-
-            if (loadId === latestLoadIdRef.current) {
-              applyCategorySnapshot(fullCategoryData);
-            }
-
-            return { status: "fulfilled" as const, value: fullCategoryData };
+            
+            // Return early with priority categories - don't load all categories on initial load
+            return { status: "fulfilled" as const, value: priorityCategoryData };
           } catch (reason) {
             if (hasPartialCategories) {
               return { status: "fulfilled" as const, value: partialCategories };
             }
-
             return { status: "rejected" as const, reason };
           }
         })();
@@ -1585,6 +1579,7 @@ function useHomeScreenInnerView() {
     const clearUi = options?.clearUi ?? false;
     invalidateLatestLoad();
     hasHydratedRef.current = false;
+    remainingCategoriesLoadedRef.current = false;
     HOME_SESSION_CACHE.hydrated = false;
     HOME_SESSION_CACHE.categories = [];
     HOME_SESSION_CACHE.publicPlaylists = [];
@@ -1603,6 +1598,7 @@ function useHomeScreenInnerView() {
       setIsLoadingPublicPlaylists(true);
       setIsLoadingNewReleaseSongs(true);
       setIsLoadingYoutubeHomeCategories(false);
+      setIsLoadingRemainingCategories(false);
     }
 
     setHomeFeedState("empty");
@@ -1610,6 +1606,7 @@ function useHomeScreenInnerView() {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    remainingCategoriesLoadedRef.current = false;
     try {
       resetHomeState();
       await Promise.all([
@@ -1774,6 +1771,18 @@ function useHomeScreenInnerView() {
     return cancelScheduledPlaylistPrefetch;
   }, [cancelScheduledPlaylistPrefetch]);
 
+  // Lazy load remaining categories after initial render
+  useEffect(() => {
+    if (!loading && homeFeedState === "ready" && !remainingCategoriesLoadedRef.current) {
+      // Wait 1.5 seconds after initial content is visible before loading remaining categories
+      const timer = setTimeout(() => {
+        void loadRemainingCategories();
+      }, 1500);
+
+      return () => clearTimeout(timer);
+    }
+  }, [loading, homeFeedState, loadRemainingCategories]);
+
   const filteredCategories = useMemo(
     () => categories.filter((cat) => !HOME_HIDDEN_JIOSAAVN_CATEGORY_IDS.has(cat.id)),
     [categories]
@@ -1828,7 +1837,7 @@ function useHomeScreenInnerView() {
   );
 
   const quickPickSongs = useMemo(() => {
-    const seed = quickPickRotationSeedRef.current ?? 0;
+    const seed = quickPickRotationSeed;
     // newReleaseSongs are actual playable songs — use them first.
     // rowSongs from home category rows are typically playlists and rarely have itemType:"song",
     // so they serve as a secondary supplement only.
@@ -1845,7 +1854,7 @@ function useHomeScreenInnerView() {
     });
 
     return [...newReleaseSongsPicked, ...rowSongs].slice(0, 60);
-  }, [newReleaseSongs, visibleIndianHomeCategoryRows, visibleYoutubeHomeCategoryRows]);
+  }, [newReleaseSongs, quickPickRotationSeed, visibleIndianHomeCategoryRows, visibleYoutubeHomeCategoryRows]);
 
   const sections = useMemo<HomeSection[]>(() => {
     const data: HomeSection[] = [];
@@ -1861,7 +1870,7 @@ function useHomeScreenInnerView() {
       });
 
       if (visibleIndianHomeCategoryRows.length === 0 && isLoadingCategories) {
-        HOME_DEFAULT_BROWSE_CATEGORY_IDS.slice(0, HOME_MAX_JIOSAAVN_HOME_SECTIONS).forEach((priorityId) => {
+        HOME_PRIORITY_BROWSE_CATEGORY_IDS.slice(0, HOME_MAX_JIOSAAVN_HOME_SECTIONS).forEach((priorityId) => {
           data.push({
             id: `category-loading-${priorityId}`,
             type: "category",
@@ -1894,13 +1903,6 @@ function useHomeScreenInnerView() {
       }
       return data;
     }
-
-    const hasFallbackContent =
-      featuredArtists.length > 0 ||
-      recentlyPlayed.length > 0 ||
-      visibleIndianHomeCategoryRows.length > 0 ||
-      visibleYoutubeHomeCategoryRows.length > 0 ||
-      publicPlaylistsForSection.length >= MIN_PUBLIC_PLAYLIST_ITEMS;
 
     // Never show a blank screen while the recommendation feed loads —
     // always fall through to render categories/artists/recents immediately.
@@ -2166,6 +2168,7 @@ function useHomeScreenInnerView() {
         imageUrl: item.imageUrl,
       });
     },
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive navigation and playback deps are listed
     [currentSongId, openFirestorePlaylist, openJioSaavnPlaylist, playSong, routerPush]
   );
 
@@ -2389,7 +2392,6 @@ function useHomeScreenInnerView() {
       <View style={{ width: windowWidth * 0.86, gap: 10 }}>
         {columnSongs.map((song, songIndex) => {
           const isActive = currentSongId === song.id;
-          const rank = columnIndex * 4 + songIndex + 1;
           return (
             <View key={`${song.id}-${songIndex}`} style={styles.quickPickRow}>
               <Pressable
@@ -2451,6 +2453,7 @@ function useHomeScreenInnerView() {
         })}
       </View>
     ),
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (currentSongId, handler, routerPush, windowWidth) are listed
     [currentSongId, handleQuickPickSongPress, routerPush, windowWidth]
   );
 
@@ -2497,18 +2500,13 @@ function useHomeScreenInnerView() {
   const advanceHomeVideo = useCallback(() => {
     if (homeHeroVideos.length <= 1) return;
 
-    setActiveHomeVideoIndex((currentIndex) => {
-      const boundedIndex = Math.min(currentIndex, homeHeroVideos.length - 1);
-      const nextIndex = (boundedIndex + 1) % homeHeroVideos.length;
-      const offset = nextIndex * (liveVideoCardWidth + HOME_VIDEO_CARD_GAP);
+    const boundedIndex = Math.min(activeHomeVideoIndex, homeHeroVideos.length - 1);
+    const nextIndex = (boundedIndex + 1) % homeHeroVideos.length;
+    const offset = nextIndex * (liveVideoCardWidth + HOME_VIDEO_CARD_GAP);
 
-      requestAnimationFrame(() => {
-        homeVideoListRef.current?.scrollToOffset({ offset, animated: true });
-      });
-
-      return nextIndex;
-    });
-  }, [homeHeroVideos.length, liveVideoCardWidth]);
+    homeVideoListRef.current?.scrollToOffset({ offset, animated: true });
+    setActiveHomeVideoIndex(nextIndex);
+  }, [homeHeroVideos.length, activeHomeVideoIndex, liveVideoCardWidth]);
 
   const handleHomeVideoPress = useCallback(
     (item: HomeHeroVideoItem) => {
@@ -2594,6 +2592,7 @@ function useHomeScreenInnerView() {
         loop={homeHeroVideos.length <= 1}
       />
     ),
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive video/playback deps are listed
     [
       advanceHomeVideo,
       handleHomeVideoAdUnavailable,

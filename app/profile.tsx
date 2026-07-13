@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import {
   Alert,
   Platform,
@@ -11,7 +11,6 @@ import {
   ActivityIndicator,
   Modal,
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -28,7 +27,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { clearJioSaavnPlaylistCache } from "@/lib/jioSaavnService";
 import { AD_UNITS } from "@/constants/admob";
 import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobileAds";
-import { logger } from "@/lib/logger";
 
 const QUALITY_OPTIONS: { label: string; value: "low" | "medium" | "high" }[] = [
   { label: "Low", value: "low" },
@@ -459,125 +457,87 @@ export default function ProfileScreen() {
   }, []);
 
   const handleQualityChange = useCallback(async (value: AppSettings["streamingQuality"]) => {
-    // Check if trying to select High quality without unlock
+    // If selecting High quality and not unlocked, try to show ad
     if (value === "high" && !settings.highQualityUnlocked) {
-      Alert.alert(
-        "Unlock High Quality Audio",
-        "Watch a short video ad to permanently unlock high quality streaming.",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Watch Ad",
-            onPress: async () => {
-              const adsModule = getGoogleMobileAdsModule();
-              if (!adsModule || !AD_UNITS.REWARDED) {
-                Alert.alert("Error", "Ad service is not available");
-                return;
-              }
+      const adsModule = getGoogleMobileAdsModule();
+      
+      // No ads available? Just unlock High quality anyway
+      if (!adsModule || !AD_UNITS.REWARDED) {
+        await saveSettings({ streamingQuality: "high", highQualityUnlocked: true });
+        setSettings(prev => ({ ...prev, streamingQuality: "high", highQualityUnlocked: true }));
+        return;
+      }
 
-              try {
-                setIsLoadingAd(true);
-                await initializeMobileAds();
-                
-                const { RewardedAd, RewardedAdEventType, AdEventType } = adsModule;
-                const rewarded = RewardedAd.createForAdRequest(AD_UNITS.REWARDED, {
-                  requestNonPersonalizedAdsOnly: true,
-                });
+      try {
+        setIsLoadingAd(true);
+        await initializeMobileAds();
+        
+        const { RewardedAd, RewardedAdEventType, AdEventType } = adsModule;
+        const rewarded = RewardedAd.createForAdRequest(AD_UNITS.REWARDED, {
+          requestNonPersonalizedAdsOnly: true,
+        });
 
-                let rewardEarned = false;
-                let adShown = false;
+        const unsubLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
+          setIsLoadingAd(false);
+          rewarded.show();
+        });
 
-                // Listen for reward BEFORE loading
-                const unsubEarned = rewarded.addAdEventListener(
-                  RewardedAdEventType.EARNED_REWARD,
-                  () => {
-                    rewardEarned = true;
-                    logger.info("[Ads] Reward earned!");
-                  }
-                );
+        const unsubEarned = rewarded.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+          // Reward was earned; keep the flow simple and let the close handler unlock access.
+        });
 
-                // Listen for ad loaded
-                const unsubLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
-                  logger.info("[Ads] Rewarded ad loaded, showing...");
-                  setIsLoadingAd(false);
-                  adShown = true;
-                  rewarded.show();
-                });
+        const unsubClosed = rewarded.addAdEventListener(AdEventType.CLOSED, async () => {
+          unsubLoaded();
+          unsubEarned();
+          unsubClosed();
+          unsubError();
 
-                // Listen for ad closed
-                const unsubClosed = rewarded.addAdEventListener(AdEventType.CLOSED, async () => {
-                  logger.info(`[Ads] Ad closed. Reward earned: ${rewardEarned}`);
-                  
-                  // Clean up listeners
-                  unsubLoaded();
-                  unsubEarned();
-                  unsubClosed();
-                  unsubError();
+          // Unlock High quality (whether reward earned or not)
+          await saveSettings({ streamingQuality: "high", highQualityUnlocked: true });
+          setSettings(prev => ({ ...prev, streamingQuality: "high", highQualityUnlocked: true }));
+        });
 
-                  // Grant reward if earned
-                  if (rewardEarned) {
-                    // Save to storage FIRST, then update UI
-                    await saveSettings({ 
-                      streamingQuality: "high", 
-                      highQualityUnlocked: true 
-                    });
-                    
-                    // Update local state
-                    setSettings(prev => ({ 
-                      ...prev, 
-                      streamingQuality: "high", 
-                      highQualityUnlocked: true 
-                    }));
+        const unsubError = rewarded.addAdEventListener(AdEventType.ERROR, async () => {
+          unsubLoaded();
+          unsubEarned();
+          unsubClosed();
+          unsubError();
+          setIsLoadingAd(false);
+          
+          // Ad failed? Just unlock High quality anyway
+          await saveSettings({ streamingQuality: "high", highQualityUnlocked: true });
+          setSettings(prev => ({ ...prev, streamingQuality: "high", highQualityUnlocked: true }));
+        });
 
-                    Alert.alert("Success!", "High quality audio unlocked!");
-                  }
-                });
+        // 10 second timeout - if ad doesn't load, unlock anyway
+        setTimeout(() => {
+          if (isLoadingAd) {
+            setIsLoadingAd(false);
+            unsubLoaded();
+            unsubEarned();
+            unsubClosed();
+            unsubError();
+            
+            // Timeout? Unlock anyway
+            void saveSettings({ streamingQuality: "high", highQualityUnlocked: true }).then(() => {
+              setSettings(prev => ({ ...prev, streamingQuality: "high", highQualityUnlocked: true }));
+            });
+          }
+        }, 10000);
 
-                // Listen for errors
-                const unsubError = rewarded.addAdEventListener(AdEventType.ERROR, (error) => {
-                  logger.error("[Ads] Rewarded ad error:", error);
-                  
-                  unsubLoaded();
-                  unsubEarned();
-                  unsubClosed();
-                  unsubError();
-                  
-                  setIsLoadingAd(false);
-                  
-                  if (!adShown) {
-                    Alert.alert("Ad Not Available", "Please try again later.");
-                  }
-                });
-
-                // Load the ad (15 second timeout)
-                const loadTimeout = setTimeout(() => {
-                  if (!adShown) {
-                    unsubLoaded();
-                    unsubEarned();
-                    unsubClosed();
-                    unsubError();
-                    setIsLoadingAd(false);
-                    Alert.alert("Timeout", "Ad took too long to load. Please try again.");
-                  }
-                }, 15000);
-
-                rewarded.load();
-
-              } catch (e) {
-                logger.error("[Ads] Failed to show rewarded ad:", e);
-                setIsLoadingAd(false);
-                Alert.alert("Error", "Failed to load ad. Please try again.");
-              }
-            },
-          },
-        ]
-      );
+        rewarded.load();
+      } catch {
+        setIsLoadingAd(false);
+        // Any error? Just unlock High quality
+        await saveSettings({ streamingQuality: "high", highQualityUnlocked: true });
+        setSettings(prev => ({ ...prev, streamingQuality: "high", highQualityUnlocked: true }));
+      }
     } else {
       // Already unlocked or switching to low/medium
       await saveSettings({ streamingQuality: value });
       setSettings(prev => ({ ...prev, streamingQuality: value }));
     }
-  }, [settings.highQualityUnlocked]);
+  }, [settings.highQualityUnlocked, isLoadingAd]);
 
   const handleLogout = useCallback(() => {
     Alert.alert("Log Out", "Are you sure you want to log out?", [
@@ -617,7 +577,7 @@ export default function ProfileScreen() {
               await AsyncStorage.setItem("@mavrixfy_recently_played", JSON.stringify([])).catch(() => {});
 
               Alert.alert("Success", "All cache and history cleared successfully.");
-            } catch (err) {
+            } catch {
               Alert.alert("Error", "Failed to clear some cache or history data.");
             }
           },

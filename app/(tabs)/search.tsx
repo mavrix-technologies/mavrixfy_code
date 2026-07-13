@@ -50,7 +50,6 @@ import {
   type SearchHistoryItem,
 } from "@/lib/storage";
 import AdMobNativeVideo from "@/components/AdMobNativeVideo";
-import { logger } from "@/lib/logger";
 
 interface PlaylistResult {
   id: string;
@@ -97,6 +96,17 @@ interface BrowseCategory {
 
 type ResultFilter = "all" | "songs" | "albums" | "artists" | "playlists";
 
+async function fetchYouTubeSuggestions(query: string, signal: AbortSignal): Promise<string[]> {
+  const response = await fetch(
+    `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&client=firefox&q=${encodeURIComponent(query)}`,
+    { signal }
+  );
+  const data = await response.json();
+  return Array.isArray(data) && Array.isArray(data[1])
+    ? data[1].map((suggestion) => String(suggestion || ""))
+    : [];
+}
+
 const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "songs", label: "Songs" },
@@ -108,7 +118,6 @@ const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
 const CARD_ROTATION_PATTERN = [-11, 8, -7, 10, -5, 6] as const;
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 const MAX_SEARCH_SUGGESTIONS = 8;
-const MAX_JIOSAAVN_ENRICHMENT_QUERIES = 4;
 
 function getRouteSearchQuery(params: { q?: string | string[]; name?: string | string[] }) {
   const incomingQuery = Array.isArray(params.q)
@@ -119,29 +128,6 @@ function getRouteSearchQuery(params: { q?: string | string[]; name?: string | st
 
 function normalizeRecentSearchLabel(value: string): string {
   return value.trim().replace(/\s+/g, " ");
-}
-
-function getMeaningfulSearchTokens(value: string): string[] {
-  const normalized = normalizeText(value);
-  if (!normalized) return [];
-
-  const out: string[] = [];
-  for (const token of normalized.split(" ")) {
-    if (token.length > 1) out.push(token);
-  }
-  return out;
-}
-
-function getTokenOverlapScore(source: string, candidate: string): number {
-  const sourceTokens = getMeaningfulSearchTokens(source);
-  if (sourceTokens.length === 0) return 0;
-
-  const candidateText = normalizeText(candidate);
-  let hits = 0;
-  for (const token of sourceTokens) {
-    if (candidateText.includes(token)) hits += 1;
-  }
-  return hits / sourceTokens.length;
 }
 
 function normalizeSearchSuggestionList(query: string, items: string[]): string[] {
@@ -160,41 +146,6 @@ function normalizeSearchSuggestionList(query: string, items: string[]): string[]
   }
 
   return out;
-}
-
-function buildJioSaavnEnrichmentQueries(
-  searchTerm: string,
-  youtubeSuggestions: string[],
-  youtubeSongs: Song[]
-): string[] {
-  const originalKey = normalizeText(searchTerm);
-  const seen = new Set<string>([originalKey]);
-  const out: string[] = [];
-  const add = (value: string) => {
-    const label = normalizeRecentSearchLabel(value);
-    const key = normalizeText(label);
-    if (!key || key.length < 2 || seen.has(key)) return;
-    seen.add(key);
-    out.push(label);
-  };
-
-  for (const suggestion of youtubeSuggestions) {
-    const key = normalizeText(suggestion);
-    if (!key) continue;
-    const overlapsOriginal = getTokenOverlapScore(searchTerm, suggestion) >= 0.5;
-    if (overlapsOriginal) add(suggestion);
-    if (out.length >= 2) break;
-  }
-
-  for (const song of youtubeSongs.slice(0, 3)) {
-    const title = normalizeRecentSearchLabel(song.title || "");
-    const artist = normalizeRecentSearchLabel(song.artist || "");
-    if (title && artist && artist !== "Unknown Artist") add(`${title} ${artist}`);
-    if (title) add(title);
-    if (out.length >= MAX_JIOSAAVN_ENRICHMENT_QUERIES) break;
-  }
-
-  return out.slice(0, MAX_JIOSAAVN_ENRICHMENT_QUERIES);
 }
 
 function toRecentSearchItem(item: SearchHistoryItem): RecentSearchItem {
@@ -635,8 +586,6 @@ function useSearchScreenView() {
   } = useAppTopHeaderScrollElevation();
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeqRef = useRef(0);
-  const suggestionsSeqRef = useRef(0);
-  const latestSuggestionsRef = useRef<{ query: string; items: string[] } | null>(null);
   const suggestionsClosedForQueryRef = useRef<string | null>(null);
   const appliedRouteSearchQueryRef = useRef(routeSearchQuery);
   const activeSearchAbortRef = useRef<AbortController | null>(null);
@@ -938,6 +887,7 @@ function useSearchScreenView() {
     }, [])
   );
 
+  // react-doctor-disable-next-line react-doctor/no-fetch-in-effect -- requests are debounced, cancellation-aware, and discard aborted responses.
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed.length < 2) {
@@ -960,23 +910,12 @@ function useSearchScreenView() {
       const controller = new AbortController();
       suggestionsAbortRef.current = controller;
 
-      fetch(
-        `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&client=firefox&q=${encodeURIComponent(
-          trimmed
-        )}`,
-        {
-          signal: controller.signal,
-        }
-      )
-        .then((res) => res.json())
-        .then((data) => {
+      void fetchYouTubeSuggestions(trimmed, controller.signal)
+        .then((rawSuggestions) => {
           if (controller.signal.aborted) return;
-          if (Array.isArray(data) && Array.isArray(data[1])) {
-            const rawSuggestions = data[1].map((s) => String(s || ""));
-            const cleanSuggestions = normalizeSearchSuggestionList(trimmed, rawSuggestions);
-            setSuggestions(cleanSuggestions);
-            setSuggestionsOpen(cleanSuggestions.length > 0);
-          }
+          const cleanSuggestions = normalizeSearchSuggestionList(trimmed, rawSuggestions);
+          setSuggestions(cleanSuggestions);
+          setSuggestionsOpen(cleanSuggestions.length > 0);
         })
         .catch(() => {});
     }, 150);

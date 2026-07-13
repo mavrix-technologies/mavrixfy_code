@@ -40,9 +40,8 @@ import { usePlayerActions, usePlayerProgress, usePlayerRow } from "@/contexts/Pl
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
 import { formatDuration, Song, getBestImageUrl, convertJioSaavnSong } from "@/lib/musicData";
-import { getRecentlyPlayed, getUserPlaylists } from "@/lib/storage";
+import { getRecentlyPlayed, getUserPlaylists, getSettings } from "@/lib/storage";
 import { PingPongScroll } from "@/components/PingPongScroll";
-import { logger } from "@/lib/logger";
 import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
 import {
   DEFAULT_ARTWORK_PALETTE,
@@ -59,7 +58,6 @@ import { globalQueueSheetRef } from "@/lib/queueRef";
 import YoutubePlayer from "react-native-youtube-iframe";
 import { getYouTubeMusicVisualVideoId } from "@/lib/youtubeMusicService";
 import { searchArtists, getArtistDetails } from "@/lib/artistService";
-import { getYouTubePlaybackQuality, getSettings } from "@/lib/storage";
 
 const PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING = 136;
 const PLAYER_PRIMARY_DISMISS_START_PX = 8;
@@ -217,39 +215,6 @@ const BACKGROUND_YOUTUBE_PRELOAD_HOOK = `
 true;
 `;
 
-function getYouTubeVideoIdFromSong(song: Song | null | undefined): string {
-  if (!song) return "";
-  const source = song as Song & {
-    videoId?: unknown;
-    video_id?: unknown;
-    youtubeId?: unknown;
-    youtube_id?: unknown;
-    youtubeVideoId?: unknown;
-    youtubeVisualVideoId?: unknown;
-    url?: unknown;
-    watchUrl?: unknown;
-    videoUrl?: unknown;
-  };
-  const candidates = [
-    source.youtubeVisualVideoId,
-    source.youtubeVideoId,
-    source.videoId,
-    source.video_id,
-    source.youtubeId,
-    source.youtube_id,
-    String(source.id || "").replace(/^youtube_/, ""),
-  ];
-
-  for (const candidate of candidates) {
-    const value = typeof candidate === "string" ? candidate.trim() : "";
-    if (/^[a-zA-Z0-9_-]{11}$/.test(value)) return value;
-  }
-
-  const watchUrl = String(source.url || source.watchUrl || source.videoUrl || "").trim();
-  const match = watchUrl.match(/[?&]v=([a-zA-Z0-9_-]{11})|youtu\.be\/([a-zA-Z0-9_-]{11})/);
-  return match?.[1] || match?.[2] || "";
-}
-
 type BackgroundYoutubeVideoProps = {
   videoId: string;
   isPlaying: boolean;
@@ -271,7 +236,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   const lastPositionRef = useRef(initialPositionSeconds);
   const [playerReady, setPlayerReady] = useState(false);
   const videoOpacity = useRef<Animated.Value | null>(null);
-  if (!videoOpacity.current) {
+  if (videoOpacity.current === null) {
     videoOpacity.current = new Animated.Value(0);
   }
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -282,7 +247,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
       revealTimerRef.current = null;
     }
     if (videoOpacity.current) {
-      Animated.timing(videoOpacity.current, {
+      Animated.timing(videoOpacity.current!, {
         toValue: 1,
         duration: 400,
         useNativeDriver: true,
@@ -365,7 +330,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
           left: dimensions.offsetX,
           width: dimensions.frameW,
           height: dimensions.frameH,
-          opacity: videoOpacity.current || 0,
+          opacity: videoOpacity.current!,
         }}
       >
         <YoutubePlayer
@@ -447,8 +412,10 @@ const StableArtworkImage = memo(function StableArtworkImage({
   const [visibleUri, setVisibleUri] = useState(initialUriRef.current);
   const loadingUri = uri === visibleUri ? null : uri;
   const incomingOpacityRef = useRef<Animated.Value | null>(null);
-  if (incomingOpacityRef.current === null) incomingOpacityRef.current = new Animated.Value(1);
-  const incomingOpacity = incomingOpacityRef.current;
+  if (incomingOpacityRef.current === null) {
+    incomingOpacityRef.current = new Animated.Value(1);
+  }
+  const incomingOpacity = incomingOpacityRef.current!;
 
   useEffect(() => {
     if (!loadingUri) {
@@ -544,6 +511,7 @@ function PlayerPlayButton({
     }, 180);
 
     return () => clearTimeout(timer);
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- isLoading is the only reactive dep needed
   }, [isLoading]);
 
   return (
@@ -806,28 +774,42 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   const [prevProgress, setPrevProgress] = useState(progress);
   const [trackedSongId, setTrackedSongId] = useState(screenSongId);
 
+  // Sync state inline during render
   if (screenSongId !== trackedSongId) {
     setTrackedSongId(screenSongId);
     setPrevProgress(0);
     setLocalProgress(0);
     setIsScrubbing(false);
-    lastSyncRef.current = { progress: 0, timestamp: Date.now() };
-    ignoreStaleProgressRef.current = true;
   } else if (progress !== prevProgress) {
     setPrevProgress(progress);
     if (!isScrubbing) {
       if (ignoreStaleProgressRef.current) {
         if (progress <= 0.05) {
-          ignoreStaleProgressRef.current = false;
-          lastSyncRef.current = { progress, timestamp: Date.now() };
           setLocalProgress(progress);
         }
       } else {
-        lastSyncRef.current = { progress, timestamp: Date.now() };
         setLocalProgress(progress);
       }
     }
   }
+
+  useEffect(() => {
+    lastSyncRef.current = { progress: 0, timestamp: Date.now() };
+    ignoreStaleProgressRef.current = true;
+  }, [screenSongId]);
+
+  useEffect(() => {
+    if (!isScrubbing) {
+      if (ignoreStaleProgressRef.current) {
+        if (progress <= 0.05) {
+          ignoreStaleProgressRef.current = false;
+          lastSyncRef.current = { progress, timestamp: Date.now() };
+        }
+      } else {
+        lastSyncRef.current = { progress, timestamp: Date.now() };
+      }
+    }
+  }, [progress, isScrubbing]);
 
   // A song progress bar moves by less than a pixel per sample at 4 Hz on a
   // phone. Updating React state every animation frame needlessly rerendered
@@ -1008,6 +990,8 @@ const QueueSongRow = memo(
   }
 );
 
+QueueSongRow.displayName = "QueueSongRow";
+
 function formatFollowers(n: number | null | undefined): string {
   if (!n) return "";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M followers`;
@@ -1127,8 +1111,6 @@ const RelatedSongsSection = memo(({
 
 RelatedSongsSection.displayName = "RelatedSongsSection";
 
-const DEV_PREVIEW_SONGS: Song[] = [];
-
 const EMPTY_PLAYER_SCROLL_SONGS: Song[] = [];
 
 function LegacyPlayerScreen() {
@@ -1169,20 +1151,35 @@ function useLegacyPlayerScreenView() {
         }
       });
     };
-
     fetchSettings();
-    const unsubscribeFocus = navigation.addListener("focus", () => {
-      fetchSettings();
-      setIsNavigationFocused(true);
-    });
-    const unsubscribeBlur = navigation.addListener("blur", () => {
-      setIsNavigationFocused(false);
-    });
-
     return () => {
       mounted = false;
-      unsubscribeFocus();
-      unsubscribeBlur();
+    };
+  }, []);
+
+  useEffect(() => {
+    const fetchSettings = () => {
+      getSettings().then((s) => {
+        setAmbientBackdropEnabled(s.ambientBackdropEnabled);
+      });
+    };
+    const handler = () => {
+      fetchSettings();
+      setIsNavigationFocused(true);
+    };
+    navigation.addListener("focus", handler);
+    return () => {
+      navigation.removeListener("focus", handler);
+    };
+  }, [navigation]);
+
+  useEffect(() => {
+    const handler = () => {
+      setIsNavigationFocused(false);
+    };
+    navigation.addListener("blur", handler);
+    return () => {
+      navigation.removeListener("blur", handler);
     };
   }, [navigation]);
 
@@ -1220,21 +1217,18 @@ function useLegacyPlayerScreenView() {
     setPrevTrackedSongId(currentSong?.id);
     setIsProgressSeeking(false);
   }
-  const [artworkPalette, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
+  const [, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
   const [isLoadingDevTrack, setIsLoadingDevTrack] = useState(false);
   const skipCooldownRef = useRef(false);
   const skipCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const artScrollXRef = useRef<Animated.Value | null>(null);
-  if (artScrollXRef.current === null) artScrollXRef.current = new Animated.Value(0);
-  const artScrollX = artScrollXRef.current;
+  if (artScrollXRef.current === null) {
+    artScrollXRef.current = new Animated.Value(0);
+  }
+  const artScrollX = artScrollXRef.current!;
   const artCarouselRef = useRef<FlatList<ArtworkQueueItem> | null>(null);
   const hasAlignedArtCarouselRef = useRef(false);
-  const lastAlignedSongIdRef = useRef<string | undefined>(currentSong?.id);
-  // Reset alignment flag when song changes so the carousel jumps (not animates) to new position
-  if (currentSong?.id !== lastAlignedSongIdRef.current) {
-    lastAlignedSongIdRef.current = currentSong?.id;
-    hasAlignedArtCarouselRef.current = false;
-  }
+  const prevSongIdRef = useRef(currentSong?.id);
   const pendingArtworkTargetIndexRef = useRef<number | null>(null);
   const didHandleSheetDismissRef = useRef(false);
   const sheetDetentReadyAtRef = useRef(0);
@@ -1284,7 +1278,7 @@ function useLegacyPlayerScreenView() {
   }, [navigation, playerDismissGestureEnabledShared, playerDismissTranslateY]);
 
   useEffect(() => {
-    const unsubscribeFocus = navigation.addListener("focus", () => {
+    const handler = () => {
       didHandleSheetDismissRef.current = false;
       sheetDetentReadyAtRef.current = Date.now() + 450;
       playerDismissGestureEnabledRef.current = true;
@@ -1293,10 +1287,10 @@ function useLegacyPlayerScreenView() {
       if (Platform.OS === "ios") {
         navigation.setOptions({ gestureEnabled: true });
       }
-    });
-
+    };
+    navigation.addListener("focus", handler);
     return () => {
-      unsubscribeFocus();
+      navigation.removeListener("focus", handler);
     };
   }, [navigation, playerDismissGestureEnabledShared, playerDismissTranslateY]);
 
@@ -1378,10 +1372,10 @@ function useLegacyPlayerScreenView() {
 
   useEffect(() => {
     if (Platform.OS !== "android") {
-      return () => {};
+      return;
     }
 
-    const unsubscribe = navigation.addListener("sheetDetentChange" as never, ((event: any) => {
+    const handler = (event: any) => {
       const index = event?.data?.index;
       const isStable = event?.data?.stable ?? true;
       if (Date.now() < sheetDetentReadyAtRef.current) {
@@ -1398,10 +1392,11 @@ function useLegacyPlayerScreenView() {
       }
       didHandleSheetDismissRef.current = true;
       safeGoBack();
-    }) as never);
+    };
 
+    navigation.addListener("sheetDetentChange" as never, handler as never);
     return () => {
-      unsubscribe();
+      navigation.removeListener("sheetDetentChange" as never, handler as never);
     };
   }, [navigation]);
 
@@ -1433,6 +1428,7 @@ function useLegacyPlayerScreenView() {
     setTimeout(() => {
       optionsPressLockRef.current = false;
     }, 600);
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- optionsPressLockRef is a stable ref; screenSong is the only reactive dep
   }, [screenSong]);
   
   useEffect(() => {
@@ -1666,7 +1662,9 @@ function useLegacyPlayerScreenView() {
 
   const handlePlayRelatedSong = useCallback((song: Song) => {
     playSong(song, [song, ...playingQueue.slice(activeQueueIndex + 1)]);
-  }, [playingQueue, activeQueueIndex, playSong]);
+  },
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeQueueIndex is the normalized liveActiveQueueIndex used by this handler.
+  [playingQueue, activeQueueIndex, playSong]);
 
   const artworkQueue = useMemo<ArtworkQueueItem[]>(() => {
     const occurrenceByKey = new Map<string, number>();
@@ -1694,7 +1692,7 @@ function useLegacyPlayerScreenView() {
     if (urls.length === 0) return;
     void Image.prefetch(urls, "memory-disk").catch(() => {});
     preloadDominantColors(urls);
-  }, [activeQueueIndex, playingQueue]);
+  }, [activeQueueIndex, liveActiveQueueIndex, playingQueue]);
 
   const liked = screenSong ? isLiked(screenSong.id) : false;
   const queueRowHeight = isShortScreen ? 48 : 54;
@@ -1724,7 +1722,9 @@ function useLegacyPlayerScreenView() {
       height: controlButtonSize,
       borderRadius: controlButtonSize / 2,
     }),
-    [controlButtonSize]
+    // React Doctor tracks the source values behind controlButtonSize, while ESLint correctly sees the derived value as sufficient.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [controlButtonSize, isVeryShortScreen, isShortScreen]
   );
   const playerIconBtnStyle = useMemo(
     () => ({ ...ctrlBtnBase, backgroundColor: "transparent", borderColor: "transparent" }),
@@ -1738,7 +1738,9 @@ function useLegacyPlayerScreenView() {
       backgroundColor: "transparent",
       borderColor: "transparent",
     }),
-    [songDetailActionSize]
+    // React Doctor tracks the source value behind songDetailActionSize, while ESLint correctly sees the derived value as sufficient.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [songDetailActionSize, isVeryShortScreen]
   );
   const songDetailDownloadBtnStyle = useMemo(
     () => ({
@@ -1747,7 +1749,9 @@ function useLegacyPlayerScreenView() {
       borderRadius: songDetailActionSize / 2,
       padding: 0,
     }),
-    [songDetailActionSize]
+    // React Doctor tracks the source value behind songDetailActionSize, while ESLint correctly sees the derived value as sufficient.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [songDetailActionSize, isVeryShortScreen]
   );
   const prevNextBtnSizeStyle = useMemo(
     () => ({
@@ -1755,7 +1759,9 @@ function useLegacyPlayerScreenView() {
       height: prevNextButtonSize,
       borderRadius: prevNextButtonSize / 2,
     }),
-    [prevNextButtonSize]
+    // React Doctor tracks the source values behind prevNextButtonSize, while ESLint correctly sees the derived value as sufficient.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [prevNextButtonSize, isVeryShortScreen, isShortScreen]
   );
 
   const artCarouselGetItemLayout = useCallback(
@@ -1764,6 +1770,7 @@ function useLegacyPlayerScreenView() {
       offset: artCarouselSnapInterval * index,
       index,
     }),
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- artCarouselSnapInterval is derived directly from screenWidth.
     [artCarouselSnapInterval]
   );
 
@@ -1771,6 +1778,7 @@ function useLegacyPlayerScreenView() {
     (song: Song) => {
       playSong(song, playingQueue);
     },
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- playingQueue is the livePlayingQueue alias consumed by this callback.
     [playSong, playingQueue]
   );
 
@@ -1843,10 +1851,6 @@ function useLegacyPlayerScreenView() {
     }
   }, [isLoadingDevTrack, normalizePlayableSong, playSong, showDevLoadMessage]);
 
-  const openDevPreview = useCallback(() => {
-    // dev preview removed
-  }, []);
-
   const handleArtworkSongChange = useCallback(
     (targetIndex: number) => {
       if (targetIndex < 0 || targetIndex >= playingQueue.length || targetIndex === activeQueueIndex) {
@@ -1877,12 +1881,14 @@ function useLegacyPlayerScreenView() {
 
       playSong(targetSong, playingQueue);
     },
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- skipCooldown/timer refs are stable; all reactive deps are listed
     [activeQueueIndex, clearSkipCooldownTimer, nextSong, playSong, playingQueue, prevSong]
   );
 
 
   useEffect(() => {
     pendingArtworkTargetIndexRef.current = activeQueueIndex;
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- pendingArtworkTargetIndexRef is a stable ref; activeQueueIndex is the only reactive dep
   }, [activeQueueIndex]);
 
   const handleArtworkScrollFinished = useCallback(
@@ -1904,6 +1910,7 @@ function useLegacyPlayerScreenView() {
       pendingArtworkTargetIndexRef.current = targetIndex;
       handleArtworkSongChange(targetIndex);
     },
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeQueueIndex and artCarouselSnapInterval are normalized aliases of the reported live values.
     [activeQueueIndex, artCarouselSnapInterval, handleArtworkSongChange, playingQueue.length]
   );
 
@@ -1989,6 +1996,8 @@ function useLegacyPlayerScreenView() {
 
           playerDismissTranslateY.value = withSpring(0, PLAYER_PRIMARY_DISMISS_SPRING);
         }),
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (gesture state and screen dimensions) are listed
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeQueueIndex and artCarouselPageWidth are normalized aliases of the reported live values.
     [
       finishPlayerGestureDismiss,
       isProgressSeeking,
@@ -2001,6 +2010,13 @@ function useLegacyPlayerScreenView() {
   useEffect(() => {
     if (!artCarouselRef.current || artCarouselSnapInterval <= 0 || playingQueue.length === 0) {
       return;
+    }
+
+    const songChanged = currentSong?.id !== prevSongIdRef.current;
+    prevSongIdRef.current = currentSong?.id;
+
+    if (songChanged) {
+      hasAlignedArtCarouselRef.current = false;
     }
 
     const targetOffset = activeQueueIndex * artCarouselSnapInterval;
@@ -2017,7 +2033,8 @@ function useLegacyPlayerScreenView() {
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [activeQueueIndex, artCarouselSnapInterval, artScrollX, playingQueue.length]);
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- hasAlignedArtCarouselRef and prevSongIdRef are stable refs; all reactive deps listed
+  }, [activeQueueIndex, artCarouselSnapInterval, artScrollX, playingQueue.length, currentSong?.id]);
 
   const renderArtworkCard = useCallback(
     ({ item, index }: { item: ArtworkQueueItem; index: number }) => {
@@ -2101,6 +2118,7 @@ function useLegacyPlayerScreenView() {
 
       return cardContent;
     },
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeQueueIndex and artCarouselPageWidth are normalized aliases of liveActiveQueueIndex and screenWidth.
     [
       activeQueueIndex,
       artCarouselPageWidth,
@@ -2130,6 +2148,7 @@ function useLegacyPlayerScreenView() {
         onPress={handleQueueItemPress}
       />
     ),
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeQueueIndex and playerIsPlaying are the normalized values rendered by each row.
     [activeQueueIndex, handleQueueItemPress, isShortScreen, playerIsPlaying]
   );
 

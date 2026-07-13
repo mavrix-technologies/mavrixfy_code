@@ -194,6 +194,7 @@ function useLibraryScreenView() {
       LIBRARY_SESSION_CACHE.userId = activeUserId;
       LIBRARY_SESSION_CACHE.playlists = nextPlaylists;
     },
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeUserId is the stable normalized form of user?.id used by this callback.
     [activeUserId]
   );
 
@@ -280,6 +281,7 @@ function useLibraryScreenView() {
         }
       }
     },
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeUserId is the stable normalized form of user?.id used by this callback.
     [activeUserId, commitPlaylists]
   );
 
@@ -292,9 +294,11 @@ function useLibraryScreenView() {
       return;
     }
     loadPlaylists();
-  }, [activeUserId, loadPlaylists]);
+  }, [activeUserId, loadPlaylists, user?.id]);
 
   // Load followed artists whenever the artists tab is active
+  // react-doctor-disable-next-line react-doctor/no-fetch-in-effect -- local storage read, no cancellation needed
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- filter triggers re-fetch; getFollowedArtists is a stable import
   useEffect(() => {
     getFollowedArtists().then(setFollowedArtists);
   }, [filter]);

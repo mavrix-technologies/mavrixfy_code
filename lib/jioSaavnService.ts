@@ -165,16 +165,6 @@ export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
     ],
   },
   {
-    id: "popular",
-    title: "Most Popular",
-    searchTerms: [
-      "most popular hindi songs",
-      "popular bollywood hits",
-      "top played indian songs",
-      "hit songs bollywood",
-    ],
-  },
-  {
     id: "new-arrivals",
     title: "New Releases",
     searchTerms: [
@@ -192,6 +182,16 @@ export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
       "youtube shorts trending songs",
       "reels viral songs",
       "social media hits",
+    ],
+  },
+  {
+    id: "popular",
+    title: "Most Popular",
+    searchTerms: [
+      "most popular hindi songs",
+      "popular bollywood hits",
+      "top played indian songs",
+      "hit songs bollywood",
     ],
   },
   {
@@ -244,6 +244,14 @@ export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
       "evergreen songs",
     ],
   },
+];
+
+// Priority categories to load first (fast initial render)
+export const HOME_JIOSAAVN_PRIORITY_CATEGORIES = [
+  "trending",
+  "top-charts",
+  "bollywood",
+  "new-arrivals",
 ];
 
 function buildCategoryCacheKey(categoryId: string): string {

@@ -24,7 +24,6 @@ import { globalQueueSheetRef } from "@/lib/queueRef";
 import { useMiniPlayerSecondaryControl } from "@/lib/miniPlayerControls";
 import type { MiniPlayerSecondaryControl } from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
-import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
 
 const MIX_DELETE_THRESHOLD = -72;
 
@@ -162,6 +161,7 @@ const MiniPlayerProgressBar = React.memo(function MiniPlayerProgressBar({
 }) {
   const playerProgress = useOptionalPlayerProgress();
   const progress = playerProgress?.progress ?? 0;
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- `progress` is the destructured reactive value from playerProgress.progress
   const progressWidth = useMemo(() => toProgressWidth(progress), [progress]);
 
   return (
@@ -186,6 +186,7 @@ const IOSMiniPlayerProgressBar = React.memo(function IOSMiniPlayerProgressBar({
 }) {
   const playerProgress = useOptionalPlayerProgress();
   const progress = playerProgress?.progress ?? 0;
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- `progress` is the destructured reactive value from playerProgress.progress
   const progressWidth = useMemo(() => toProgressWidth(progress), [progress]);
 
   return (
@@ -400,12 +401,6 @@ export function AppNavBar(props: AppNavBarProps) {
 function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   const { push: routerPush, navigate: routerNavigate } = useRouter();
   const pathname = usePathname();
-  const [playerModalVisible, setPlayerModalVisible] = useState(() => globalPlayerDetailsVisibleRef.current);
-  useEffect(() => {
-    return globalPlayerDetailsVisibleRef.subscribe((visible) => {
-      setPlayerModalVisible(visible);
-    });
-  }, []);
   const [activeTab, setActiveTab] = useState<VisibleRoute>(() => {
     if (!pathname) return "index";
     if (pathname === "/" || pathname === "/index") return "index";
@@ -465,9 +460,10 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
       // If home tab is pressed while already on home, scroll to top
       if (isFocused && route === "index") {
         try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy import prevents a navigation-time circular dependency.
           const { globalHomeScrollRef } = require("@/app/(tabs)/index");
           globalHomeScrollRef.current?.scrollToOffset({ offset: 0, animated: true });
-        } catch (error) {
+        } catch {
           // Fallback: navigate to reset scroll position
           routerNavigate("/" as any);
         }
@@ -628,6 +624,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
       setAlbumColor(palette.accent);
       setTextColor(palette.text);
     });
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- setAlbumColor and setTextColor are stable dispatch functions from context
   }, [setAlbumColor, setTextColor]);
 
   // Single effect for song changes - depend only on ID to prevent double updates
@@ -684,6 +681,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
       if (brightness < 100) return conceptText;
     }
     return raw;
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- textColor is the only reactive value; static string constants are excluded intentionally
   }, [textColor]);
 
   const playerTitleColor = safeTextColor;
@@ -1046,12 +1044,6 @@ function IOSMiniPlayerOverlay() {
 
 function useIOSMiniPlayerOverlayView() {
   const insets = useSafeAreaInsets();
-  const [playerModalVisible, setPlayerModalVisible] = useState(() => globalPlayerDetailsVisibleRef.current);
-  useEffect(() => {
-    return globalPlayerDetailsVisibleRef.subscribe((visible) => {
-      setPlayerModalVisible(visible);
-    });
-  }, []);
   
   // Remove unnecessary cover opacity animation
   // Cover visibility is handled by CSS, no need for extra animations
@@ -1146,6 +1138,7 @@ function useIOSMiniPlayerOverlayView() {
     if (queue.length !== mixSongIds.length) return false;
     const mixSet = new Set(mixSongIds);
     return queue.every((song) => mixSet.has(song.id));
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive values (activeSongId, playbackState.isPlaying, mixSongIds, queue) are listed
   }, [activeSongId, playbackState.isPlaying, mixSongIds, queue]);
   const [iosArtworkPalette, setIosArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
 
@@ -1157,6 +1150,7 @@ function useIOSMiniPlayerOverlayView() {
       setAlbumColor(palette.accent);
       setTextColor(palette.text);
     });
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- setAlbumColor and setTextColor are stable dispatch functions from context
   }, [setAlbumColor, setTextColor]);
 
   // Single effect for song changes - depend only on ID to prevent double updates

@@ -36,7 +36,7 @@
     "android": {
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
-      "versionCode": 30000,
+      "versionCode": 30007,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icone.png",
@@ -162,7 +162,7 @@
       "checkAutomatically": "ON_ERROR_RECOVERY",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": "3.0.0-30000",
+    "runtimeVersion": "3.0.0-30002",
     "extra": {
       "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",

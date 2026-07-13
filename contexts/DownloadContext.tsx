@@ -216,6 +216,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     getDownloadEntitlement(uid)
       .then(setEntitlement)
       .catch(() => setEntitlement(null));
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- uid is the only reactive dep; getDownloadEntitlement is a stable import
   }, [uid]);
 
   // ─── Queue event subscriptions ──────────────────────────────────────────────
@@ -257,6 +258,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     ];
 
     return () => unsubs.forEach((fn) => fn());
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- uid and refreshDownloads are the only reactive deps; onQueueEvent is a stable import
   }, [uid, refreshDownloads]);
 
   // ─── License sync on app foreground ────────────────────────────────────────
@@ -281,6 +283,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     };
 
     return subscribeToAppStateChanges(handleAppState);
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- lastSyncRef is stable; uid is the only reactive dep
   }, [uid]);
 
   // ─── Storage summary ────────────────────────────────────────────────────────
@@ -300,6 +303,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       if (!uid) return { ok: false, reason: "Sign in to download songs." };
       return downloadSong(song, uid, prefsRef.current, options);
     },
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- prefsRef is stable; uid is the only reactive dep
     [uid]
   );
 
@@ -308,6 +312,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
       if (!uid) return { queued: 0, skipped: 0, failed: songs.length };
       return downloadCollection(songs, collectionId, uid, prefsRef.current);
     },
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- prefsRef is stable; uid is the only reactive dep
     [uid]
   );
 

@@ -96,6 +96,7 @@ attached_assets/
 .env
 .env.*
 !.env.example
+android/local.properties
 *.jks
 *.keystore
 *.p12

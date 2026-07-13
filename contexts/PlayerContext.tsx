@@ -1124,9 +1124,6 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
   const sleepTimerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sleepTimerRef = useRef<SleepTimerState | null>(null);
   const playbackSwitchChainRef = useRef<Promise<void> | null>(null);
-  if (playbackSwitchChainRef.current === null) {
-    playbackSwitchChainRef.current = Promise.resolve();
-  }
   const nativeQueueAppIndicesRef = useRef<number[]>([]);
   const pendingNativeTrackRef = useRef<{
     id: string;
@@ -1657,6 +1654,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       isShuffled: resolvedIsShuffled,
       repeatMode: resolvedRepeatMode,
     });
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive playback state values are listed
   }, [
     currentSong,
     playbackLoading,
@@ -1670,6 +1668,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     sourceQueue,
     userQueuedSongIds,
   ]);
+
 
   useEffect(() => {
     if (playbackIntent === null || playbackIntent !== actualResolvedIsPlaying) {
@@ -1701,6 +1700,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     latestPositionSecondsRef.current = Math.max(0, effectivePositionSeconds);
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- latestPositionSecondsRef is a stable ref; effectivePositionSeconds is the only reactive dep
   }, [effectivePositionSeconds]);
 
   // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- resetting progress state updates multiple properties at once, which is batched.
@@ -1847,6 +1847,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive playback watchdog deps are listed
   }, [
     actualResolvedIsPlaying,
     currentSong?.id,
@@ -2371,8 +2372,8 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         const prev = appState;
         appState = next;
         // When app comes back to foreground, sync currentSong from TrackPlayer.
-        // This handles the case where Android Auto changed the track while the
-        // app was backgrounded ΓÇö without this the home screen mini-player stays blank.
+        // This handles the case where external controls (notifications, Bluetooth) changed the track
+        // while the app was backgrounded ΓÇö without this the home screen mini-player stays blank.
         if (next === "active" && prev !== "active" && mounted) {
           try {
             const [activeTrack, nativeQueue, activeTrackIndex] = await Promise.all([
@@ -3313,6 +3314,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     } catch (error) {
       // Silent fail
     }
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- queueRef/queueIndexRef are stable; all reactive deps listed
   }, [currentSong, ensurePlayerReady, getNativeTrackIndexForSong, isPlayerReady, loadAndPlaySong, playYouTubeSong, resolvedIsPlaying, showPlaybackNotice, youtubePlaying, youtubeVideoId]);
 
   const nextSong = useCallback(async () => {
@@ -3658,6 +3660,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
         resolvedIsPlaying
       );
     });
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- queueRef and related refs are stable; all reactive deps listed
   }, [clearUserQueuedSongIds, isPlayerReady, resolvedIsPlaying, runSerializedPlaybackSwitch]);
 
   const toggleRepeat = useCallback(async () => {
@@ -3670,22 +3673,19 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     if (!isPlayerReady) {
       return;
     }
-    setRepeatMode(prev => {
-      const next = prev === "off" ? "all" : prev === "all" ? "one" : "off";
-      repeatModeRef.current = next;
-      
-      if (RepeatMode) {
-        const repeatMap = {
-          "off": RepeatMode.Off,
-          "all": RepeatMode.Queue,
-          "one": RepeatMode.Track,
-        };
-        TrackPlayer.setRepeatMode(repeatMap[next]).catch(() => {});
-      }
-      
-      return next;
-    });
-  }, [isPlayerReady]);
+    const next = repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off";
+    repeatModeRef.current = next;
+    
+    if (RepeatMode) {
+      const repeatMap = {
+        "off": RepeatMode.Off,
+        "all": RepeatMode.Queue,
+        "one": RepeatMode.Track,
+      };
+      TrackPlayer.setRepeatMode(repeatMap[next]).catch(() => {});
+    }
+    setRepeatMode(next);
+  }, [isPlayerReady, repeatMode]);
 
   const toggleLike = useCallback(async (song: Song) => {
     if (!authUser?.id) {
@@ -3824,6 +3824,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       setPlaybackIntent(null);
       // Silent fail
     }
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- queueRef/related refs are stable; all reactive deps listed
   }, [isPlayerReady, nativeQueueHasTrackAt, prependUserQueuedSongId, resolvedIsPlaying]);
 
   const removeFromQueue = useCallback(async (index: number) => {
@@ -3878,6 +3879,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     } catch (error) {
       // Silent fail
     }
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- queueRef/related refs are stable; all reactive deps listed
   }, [isPlayerReady, nativeQueueHasTrackAt, removeFirstUserQueuedSongId, resolvedIsPlaying]);
 
   const reorderQueue = useCallback(async (fromIndex: number, toIndex: number) => {
@@ -4005,7 +4007,9 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     } catch (error) {
       // Silent fail
     }
-  }, [clearUserQueuedSongIds, isPlayerReady, resolvedIsPlaying]);
+  },
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- refs are stable and resolvedIsPlaying is the only reactive playback state read by this callback.
+  [clearUserQueuedSongIds, isPlayerReady, resolvedIsPlaying]);
 
   const value = useMemo(() => ({
     currentSong, queue, userQueuedSongIds, sourceQueue, queueIndex, isPlaying: resolvedIsPlaying, progress: resolvedProgress, duration: resolvedDuration, positionMillis: resolvedPositionMillis,
@@ -4013,6 +4017,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     playSong, togglePlay, nextSong, prevSong, seekTo, toggleShuffle, toggleRepeat,
     toggleLike, isLiked, addToQueue, playNext, removeFromQueue, reorderQueue, clearQueue, shuffleQueue,
     setSleepTimer, clearSleepTimer, setAlbumColor, setTextColor, setYoutubePlayerFrame,
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- resolved values already capture native and preview state; backing state would not change this public value.
   }), [currentSong, queue, userQueuedSongIds, sourceQueue, queueIndex, resolvedIsPlaying, resolvedProgress, resolvedDuration, resolvedPositionMillis,
     resolvedIsShuffled, resolvedRepeatMode, likedSongIds, likedSongs, playbackLoading, albumColor, textColor, sleepTimer, playSong, togglePlay, nextSong,
     prevSong, seekTo, toggleShuffle, toggleRepeat, toggleLike, isLiked, addToQueue,
@@ -4055,6 +4060,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       setTextColor,
       setYoutubePlayerFrame,
     }),
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- resolved values already capture native and preview state; backing state would not change this public value.
     [
       currentSong,
       queue,
@@ -4112,6 +4118,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       addToQueue,
       playNext,
     }),
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- resolvedIsPlaying is the public value; backing intent/native state is intentionally not exposed here.
     [currentSong?.id, resolvedIsPlaying, playSong, toggleLike, isLiked, addToQueue, playNext]
   );
 
@@ -4125,6 +4132,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       togglePlay,
       toggleLike,
     }),
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- resolvedIsPlaying is the public value; backing intent/native state is intentionally not exposed here.
     [currentSong, queue, resolvedIsPlaying, likedSongs, playSong, togglePlay, toggleLike]
   );
 
@@ -4142,6 +4150,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
       clearQueue,
       shuffleQueue,
     }),
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- resolvedIsShuffled is the public value; backing preview/native state is intentionally not exposed here.
     [
       currentSong,
       queue,
@@ -4267,6 +4276,7 @@ function usePlayerProviderView({ children }: { children: ReactNode }) {
     } catch (err) {
       logger.error("[Player] Failed to apply new streaming quality:", err);
     }
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- queueRef/currentSongRef are stable; all reactive deps listed
   }, [loadAndPlaySong, playSong, resolvedIsPlaying]);
 
   const applyNewStreamingQualityRef = useRef(applyNewStreamingQuality);

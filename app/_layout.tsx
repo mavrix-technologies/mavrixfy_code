@@ -285,8 +285,11 @@ function useRootLayoutNavigation() {
   const splashReleasedRef = useRef(false);
 
   useEffect(() => {
+    let safetyTimer: ReturnType<typeof setTimeout> | null = null;
+    let frameId: number | null = null;
+
     // 5 seconds safety timeout to force hide the splash screen in case auth or database loading hangs.
-    const safetyTimer = setTimeout(() => {
+    safetyTimer = setTimeout(() => {
       if (!splashReleasedRef.current) {
         splashReleasedRef.current = true;
         hideSplashScreenSafely("safety_timeout");
@@ -296,14 +299,23 @@ function useRootLayoutNavigation() {
 
     if (!loading && !splashReleasedRef.current) {
       splashReleasedRef.current = true;
-      clearTimeout(safetyTimer);
-      const frame = requestAnimationFrame(() => {
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+        safetyTimer = null;
+      }
+      frameId = requestAnimationFrame(() => {
         hideSplashScreenSafely("auth_ready");
       });
-      return () => cancelAnimationFrame(frame);
     }
 
-    return () => clearTimeout(safetyTimer);
+    return () => {
+      if (safetyTimer) {
+        clearTimeout(safetyTimer);
+      }
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+    };
   }, [loading]);
 
   // ── Enterprise Notification Startup Sequence ────────────────────────────────
@@ -444,6 +456,7 @@ function useRootLayoutNavigation() {
     } else if (!isAuthenticated && !isAllowedGuest && inOnboarding) {
       routerReplace("/login");
     }
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive auth/routing deps (loading, isAuthenticated, isAllowedGuest, firebaseUser, segments, routerReplace) are listed
   }, [loading, isAuthenticated, isAllowedGuest, firebaseUser, segments, routerReplace]);
 
   const activeSegment = segments[0] as string;
@@ -706,6 +719,7 @@ function InAppPromotionPopup() {
       isActive = false;
       subscription.remove();
     };
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (firebaseUserCreationTime, firebaseUserUid) are listed; storeUrlRef and AsyncStorage are stable
   }, [firebaseUserCreationTime, firebaseUserUid]);
 
   useEffect(() => {
@@ -826,7 +840,9 @@ export default function RootLayout() {
     Inter_800ExtraBold,
   });
 
-  fontsLoadedRef.current = fontsLoaded;
+  useEffect(() => {
+    fontsLoadedRef.current = fontsLoaded;
+  }, [fontsLoaded]);
 
   useEffect(() => {
     const timer = setTimeout(() => {

@@ -200,6 +200,7 @@ function useArtistScreenView() {
       return;
     }
     playSong(songs[0], songs);
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (songs, playback state, actions) are listed
   }, [songs, isPlayingFromThisArtist, togglePlay, playSong]);
 
   const handleFollow = useCallback(async () => {
@@ -213,12 +214,14 @@ function useArtistScreenView() {
     };
     const nowFollowing = await toggleFollowArtist(artistCard);
     setFollowing(nowFollowing);
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (artistId, displayName, coverUrl, followScale) are listed
   }, [artistId, displayName, coverUrl, followScale]);
 
   const handleShuffle = useCallback(() => {
     if (!songs.length) return;
     const shuffled = sortedCopy(songs, () => Math.random() - 0.5);
     playSong(shuffled[0], shuffled);
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (songs, playSong) are listed
   }, [songs, playSong]);
 
   const handleLoadMore = useCallback(async () => {

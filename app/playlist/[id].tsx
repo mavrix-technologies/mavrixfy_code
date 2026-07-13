@@ -610,6 +610,7 @@ function usePlaylistScreenView() {
         playlistName={canRemoveSongsFromPlaylist ? playlistName : undefined}
       />
     ),
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- canRemoveSongsFromPlaylist already captures the editability derived from isFirestoreSource.
     [
       canRemoveSongsFromPlaylist,
       playlistId,

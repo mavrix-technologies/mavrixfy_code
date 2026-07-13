@@ -26,6 +26,27 @@ function ensureService(app, serviceDef) {
   existing.$ = { ...(existing.$ || {}), ...(serviceDef.$ || {}) };
 }
 
+function ensureUsesFeature(manifest, name) {
+  if (!manifest["uses-feature"]) manifest["uses-feature"] = [];
+  const existing = manifest["uses-feature"].find((f) => f.$?.["android:name"] === name);
+  if (!existing) {
+    manifest["uses-feature"].push({
+      $: { "android:name": name, "android:required": "false" },
+    });
+  }
+}
+
+const requiredFalseFeatures = [
+  "android.hardware.bluetooth",
+  "android.hardware.microphone",
+  "android.hardware.camera",
+  "android.hardware.camera.autofocus",
+  "android.hardware.location",
+  "android.hardware.location.gps",
+  "android.hardware.touchscreen",
+  "android.hardware.wifi",
+];
+
 const withTrackPlayer = (config) =>
   withAndroidManifest(config, (config) => {
     const manifest = config.modResults.manifest;
@@ -33,6 +54,7 @@ const withTrackPlayer = (config) =>
     if (!app) return config;
 
     ensureToolsNamespace(manifest);
+    requiredFalseFeatures.forEach((f) => ensureUsesFeature(manifest, f));
 
     // Required on Android 14+ for media playback foreground service
     if (!manifest["uses-permission"]) manifest["uses-permission"] = [];
