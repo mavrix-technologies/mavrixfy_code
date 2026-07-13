@@ -36,7 +36,7 @@
     "android": {
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
-      "versionCode": 30007,
+      "versionCode": 30008,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icone.png",
