@@ -142,7 +142,8 @@ export function upscaleYouTubeThumbnail(url: string, size = 500): string {
     const match = url.match(/\/vi\/([a-zA-Z0-9_-]{11})\//);
     if (match && match[1]) {
       const videoId = match[1];
-      return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+      // Use maxresdefault for highest quality (1280x720), fallback to sddefault (640x480)
+      return `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
     }
   }
   return url;
