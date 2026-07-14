@@ -123,14 +123,14 @@ const CATEGORY_TTL_MS: Record<string, number> = {
   retro:         90 * 60 * 1000,
 };
 const JIOSAAVN_PLAYLIST_BASE_URLS = [
-  "https://mavrixfy-api-drab.vercel.app/api",
   "https://mavrixfy-song-api.vercel.app/api",
   `${getApiUrl().replace(/\/$/, "")}/api`,
+  "https://mavrixfy-api-drab.vercel.app/api",
 ];
 const JIOSAAVN_SEARCH_BASE_URLS = [
-  "https://mavrixfy-api-drab.vercel.app/api",
   "https://mavrixfy-song-api.vercel.app/api",
   `${getApiUrl().replace(/\/$/, "")}/api`,
+  "https://mavrixfy-api-drab.vercel.app/api",
 ];
 
 export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
@@ -1320,7 +1320,7 @@ async function fetchNewArrivalPlaylists(
 
 async function getCategoryCache(
   categoryId: string,
-  context: AutoRefreshContext,
+  expectedFingerprint: string,
   options?: { allowFingerprintMismatch?: boolean }
 ): Promise<JioSaavnPlaylistResult[] | null> {
   const allowFingerprintMismatch = options?.allowFingerprintMismatch ?? false;
@@ -1346,7 +1346,7 @@ async function getCategoryCache(
 
     // If context changed (time-slot / weekend / language), prefer fresh content
     // but allow stale fallback when explicitly requested.
-    if (!allowFingerprintMismatch && rawFingerprint !== context.cacheFingerprint) return null;
+    if (!allowFingerprintMismatch && rawFingerprint !== expectedFingerprint) return null;
 
     const parsed = JSON.parse(rawData);
     const normalized = normalizePlaylistList(parsed);
@@ -1436,6 +1436,49 @@ export async function clearJioSaavnPlaylistCache(categoryId?: string): Promise<v
   }
 }
 
+async function fetchFromCandidates(
+  urls: string[],
+  timeoutMs = 6000
+): Promise<PlaylistDetailsPageResult> {
+  return new Promise<PlaylistDetailsPageResult>((resolve) => {
+    let completedCount = 0;
+    let resolved = false;
+    const results: { data: JioSaavnPlaylistDetailsData | null; notFound: boolean }[] = [];
+
+    urls.forEach(async (url, idx) => {
+      try {
+        const response = await withTimeout(
+          fetch(url, { headers: { Accept: "application/json" } }),
+          timeoutMs
+        );
+        if (!response.ok) {
+          const notFound = response.status === 404;
+          await consumeResponseBody(response);
+          results[idx] = { data: null, notFound };
+        } else {
+          const json = await response.json();
+          const normalized = parsePlaylistDetailsResponse(json);
+          results[idx] = { data: normalized, notFound: false };
+          if (normalized && !resolved) {
+            resolved = true;
+            resolve({ data: normalized, reason: "network" });
+            return;
+          }
+        }
+      } catch {
+        results[idx] = { data: null, notFound: false };
+      } finally {
+        completedCount++;
+        if (completedCount === urls.length && !resolved) {
+          resolved = true;
+          const allNotFound = results.every((r) => r && r.notFound);
+          resolve({ data: null, reason: allNotFound ? "not_found" : "network" });
+        }
+      }
+    });
+  });
+}
+
 async function fetchPlaylistDetailsPage(
   playlistId: string,
   page: number,
@@ -1452,35 +1495,7 @@ async function fetchPlaylistDetailsPage(
     (base) => `${base.replace(/\/+$/, "")}/playlists?${query}`
   );
 
-  const providerResults = await Promise.all(
-    candidateUrls.map(async (url) => {
-      try {
-        const response = await withTimeout(
-          fetch(url, { headers: { Accept: "application/json" } }),
-          6000
-        );
-        if (!response.ok) {
-          const notFound = response.status === 404;
-          await consumeResponseBody(response);
-          return { data: null, notFound };
-        }
-
-        const json = await response.json();
-        const normalized = parsePlaylistDetailsResponse(json);
-        return { data: normalized, notFound: false };
-      } catch {
-        return { data: null, notFound: false };
-      }
-    })
-  );
-
-  const networkResult = providerResults.find((result) => result.data);
-  if (networkResult?.data) {
-    return { data: networkResult.data, reason: "network" };
-  }
-
-  const allNotFound = providerResults.every((result) => result.notFound);
-  return { data: null, reason: allNotFound ? "not_found" : "network" };
+  return fetchFromCandidates(candidateUrls);
 }
 
 function buildAlbumDetailsQuery(albumId: string, albumLink?: string): string {
@@ -1504,35 +1519,7 @@ async function fetchAlbumDetails(
     (base) => `${base.replace(/\/+$/, "")}/albums?${query}`
   );
 
-  const providerResults = await Promise.all(
-    candidateUrls.map(async (url) => {
-      try {
-        const response = await withTimeout(
-          fetch(url, { headers: { Accept: "application/json" } }),
-          6000
-        );
-        if (!response.ok) {
-          const notFound = response.status === 404;
-          await consumeResponseBody(response);
-          return { data: null, notFound };
-        }
-
-        const json = await response.json();
-        const normalized = parsePlaylistDetailsResponse(json);
-        return { data: normalized, notFound: false };
-      } catch {
-        return { data: null, notFound: false };
-      }
-    })
-  );
-
-  const networkResult = providerResults.find((result) => result.data);
-  if (networkResult?.data) {
-    return { data: networkResult.data, reason: "network" };
-  }
-
-  const allNotFound = providerResults.every((result) => result.notFound);
-  return { data: null, reason: allNotFound ? "not_found" : "network" };
+  return fetchFromCandidates(candidateUrls);
 }
 
 function buildPlaylistDetailsCacheKey(playlistId: string): string {
@@ -1831,18 +1818,18 @@ export async function getJioSaavnSongDetails(
 // daily rotation + anti-repetition. Replaces the old keyword-sort approach.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const FAST_TIMEOUT_MS = 3800;
+const FAST_TIMEOUT_MS = 6500;
 const LAST_SHOWN_KEY = "@mavrixfy_last_shown_playlists_v1";
 const LAST_SHOWN_MAX = 40; // remember last 40 shown playlist IDs
 
 // One primary search term per category — fast, single request
 const FAST_SEARCH_TERMS: Record<string, string> = {
-  trending:       `trending songs ${CURRENT_YEAR}`,
-  "top-charts":   `top charts hindi ${CURRENT_YEAR}`,
-  bollywood:      `bollywood hits ${CURRENT_YEAR}`,
-  popular:        `popular hindi songs ${CURRENT_YEAR}`,
-  "new-arrivals": `new movie songs ${CURRENT_YEAR}`,
-  "most-viral":   `viral reels hits ${CURRENT_YEAR}`,
+  trending:       `trending now hindi`,
+  "top-charts":   `india superhits hindi`,
+  bollywood:      `latest bollywood hits ${CURRENT_YEAR}`,
+  popular:        `popular hindi songs`,
+  "new-arrivals": `new hits hindi ${CURRENT_YEAR}`,
+  "most-viral":   `reels trending hindi`,
   "party-mix":    "party songs hindi",
   "chill-vibes":  "chill hindi songs",
   romance:        "romantic hindi songs",
@@ -2325,7 +2312,7 @@ export async function getHomeJioSaavnCategories(options?: {
       const fetchLimit = limit + 8;
 
       if (!forceRefresh) {
-        const cached = await getCategoryCache(cat.id, context, { allowFingerprintMismatch: false });
+        const cached = await getCategoryCache(cat.id, dayFingerprint, { allowFingerprintMismatch: false });
         if (cached && cached.length > 0) {
           const ranked = rankPlaylists(cached, context);
           const rotated = applyFreshnessRotation(ranked);
@@ -2346,7 +2333,7 @@ export async function getHomeJioSaavnCategories(options?: {
       }
 
       // Stale fallback
-      const stale = await getCategoryCache(cat.id, context, { allowFingerprintMismatch: true });
+      const stale = await getCategoryCache(cat.id, dayFingerprint, { allowFingerprintMismatch: true });
       if (stale && stale.length > 0) {
         const rotated = applyFreshnessRotation(rankPlaylists(stale, context));
         return { cat, pool: rotated };
@@ -2359,10 +2346,13 @@ export async function getHomeJioSaavnCategories(options?: {
   // ── Step 2: Global cross-section dedupe ───────────────────────────────────
   // Walk categories in priority order. Once a playlist ID is claimed by a
   // section, it cannot appear in any later section.
+  // Uses a smart fallback to ensure no section becomes empty or excessively sparse due to duplicates.
   const globalUsed = new Set<string>();
 
   const deduped = rawResults.map(({ cat, pool }) => {
     const unique: JioSaavnPlaylistResult[] = [];
+    
+    // First pass: select completely unique playlists across sections
     for (const p of pool) {
       if (!globalUsed.has(p.id)) {
         globalUsed.add(p.id);
@@ -2370,6 +2360,20 @@ export async function getHomeJioSaavnCategories(options?: {
         if (unique.length >= limit) break;
       }
     }
+
+    // Fallback pass: if uniqueness constraints depleted the section below 4 items,
+    // fill it back up from its original candidate pool.
+    const targetMin = Math.min(pool.length, 4);
+    if (unique.length < targetMin) {
+      for (const p of pool) {
+        if (!unique.some((u) => u.id === p.id)) {
+          unique.push(p);
+          globalUsed.add(p.id); // track so subsequent sections still try to avoid it
+          if (unique.length >= targetMin) break;
+        }
+      }
+    }
+
     return { id: cat.id, title: cat.title, results: unique };
   });
 

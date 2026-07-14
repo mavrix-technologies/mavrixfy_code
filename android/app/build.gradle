@@ -92,8 +92,8 @@ android {
         applicationId 'com.mavrixfy.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 30008
-        versionName "3.0.0"
+        versionCode 30009
+        versionName "3.0.1"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -111,6 +111,11 @@ android {
                 storePassword findProperty('MAVRIXFY_UPLOAD_STORE_PASSWORD') ?: System.getenv('MAVRIXFY_UPLOAD_STORE_PASSWORD')
                 keyAlias findProperty('MAVRIXFY_UPLOAD_KEY_ALIAS') ?: System.getenv('MAVRIXFY_UPLOAD_KEY_ALIAS')
                 keyPassword findProperty('MAVRIXFY_UPLOAD_KEY_PASSWORD') ?: System.getenv('MAVRIXFY_UPLOAD_KEY_PASSWORD')
+            } else {
+                storeFile file('debug.keystore')
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
             }
         }
     }
