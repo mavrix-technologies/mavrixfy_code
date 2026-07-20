@@ -287,7 +287,6 @@ function LoginScreenView() {
         colors={[Colors.backgroundGradientStart, Colors.background, Colors.surface]}
         style={StyleSheet.absoluteFill}
       />
-      <View style={styles.glowOrb} />
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -455,7 +454,7 @@ function LoginScreenView() {
                         <AppleAuthentication.AppleAuthenticationButton
                           buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
                           buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-                          cornerRadius={24}
+                          cornerRadius={26}
                           style={styles.appleNativeBtn}
                           onPress={handleAppleSignIn}
                         />
@@ -522,25 +521,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
   },
-  glowOrb: {
-    position: "absolute",
-    width: 250,
-    height: 250,
-    borderRadius: 125,
-    top: "15%",
-    right: "-10%",
-    backgroundColor: Colors.primaryGlow,
-    opacity: 0.45,
-    filter: Platform.OS === "web" ? "blur(80px)" : undefined,
-  },
   authCard: {
     width: "100%",
-    backgroundColor: Colors.surfaceGlass,
-    borderRadius: 28,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    padding: 24,
-    boxShadow: "0px 4px 8px rgba(0, 0, 0, 0.3)",
+    paddingHorizontal: 8,
   },
   brandHeader: {
     alignItems: "center",
@@ -580,18 +563,18 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   fieldShell: {
-    height: 50,
-    borderRadius: 14,
+    height: 52,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
-    backgroundColor: "rgba(255, 255, 255, 0.02)",
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
   },
   fieldShellFocused: {
     borderColor: Colors.primary,
-    backgroundColor: "rgba(38, 225, 154, 0.02)",
+    backgroundColor: "rgba(38, 225, 154, 0.04)",
   },
   fieldIcon: {
     marginRight: 12,
@@ -616,8 +599,8 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
   },
   submitBtn: {
-    height: 48,
-    borderRadius: 24,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: Colors.primary,
     justifyContent: "center",
     alignItems: "center",
@@ -677,22 +660,22 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   oauthCircleBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
     justifyContent: "center",
     alignItems: "center",
   },
   appleButtonContainer: {
-    width: 48,
-    height: 48,
+    width: 52,
+    height: 52,
   },
   appleNativeBtn: {
-    width: 48,
-    height: 48,
+    width: 52,
+    height: 52,
   },
   legalText: {
     fontSize: 11,
