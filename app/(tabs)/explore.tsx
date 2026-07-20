@@ -21,7 +21,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "expo-router";
-import YoutubePlayer from "react-native-youtube-iframe";
+import { CleanYouTubePlayer } from "react-native-clean-youtube-iframe";
 
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackPlayState } from "@/lib/playbackEngine";
@@ -433,41 +433,26 @@ const ShortItem = React.memo(({
                 }
               ]}
             >
-              <YoutubePlayer
+              <CleanYouTubePlayer
                 ref={playerRef}
-                height={PORTRAIT_IFRAME_H}
-                width={PORTRAIT_IFRAME_W}
                 play={isActive && isPlaying}
                 mute={isMuted}
                 videoId={item.videoId}
                 onReady={() => setVideoReady(true)}
-                onChangeState={handleStateChange}
-                useLocalHTML={true}
-                baseUrlOverride="https://mavrixfy.site/"
-                webViewProps={{
-                  allowsFullscreenVideo: false,
-                  scrollEnabled: false,
-                  overScrollMode: "never",
-                  domStorageEnabled: true,
-                  javaScriptEnabled: true,
-                  mediaPlaybackRequiresUserAction: false,
-                  allowsInlineMediaPlayback: true,
-                  androidLayerType: "hardware",
-                  mixedContentMode: "always"
+                onStateChange={(state) => {
+                  const states: Record<number, string> = {
+                    1: "playing",
+                    2: "paused",
+                    3: "buffering",
+                    0: "ended",
+                  };
+                  handleStateChange(states[state] || "unstarted");
                 }}
-                initialPlayerParams={{
-                  controls: 0,
-                  modestbranding: 1,
-                  rel: 0,
-                  preventFullScreen: true,
-                  showClosedCaptions: false,
-                  iv_load_policy: 3,
-                  disablekb: 1,
-                  fs: 0,
-                  playsinline: 1,
-                  cc_load_policy: 0,
-                  enablejsapi: 1,
-                  start: item.startOffset
+                cropTopPercent={12}
+                cropBottomPercent={12}
+                style={{
+                  width: PORTRAIT_IFRAME_W,
+                  height: PORTRAIT_IFRAME_H,
                 }}
               />
             </View>
