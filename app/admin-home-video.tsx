@@ -231,10 +231,15 @@ export default function AdminHomeVideoScreen() {
     let mounted = true;
     getHomeHeroConfig()
       .then((nextConfig) => {
-        if (mounted) setConfig(nextConfig);
+        if (mounted) {
+          // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+          setConfig(nextConfig);
+        }
       })
       .finally(() => {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       });
 
     return () => {

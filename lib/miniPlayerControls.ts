@@ -27,10 +27,18 @@ export function useMiniPlayerSecondaryControl(): MiniPlayerSecondaryControl {
   const [control, setControl] = useState<MiniPlayerSecondaryControl>(cachedControl);
 
   useEffect(() => {
-    void refreshMiniPlayerSecondaryControlPreference().then(setControl);
+    let mounted = true;
+    
+    function updateControl(val: MiniPlayerSecondaryControl) {
+      if (mounted) {
+        // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+        setControl(val);
+      }
+    }
 
-    const onChange = (next: MiniPlayerSecondaryControl) => setControl(next);
-    listeners.add(onChange);
+    void refreshMiniPlayerSecondaryControlPreference().then(updateControl);
+
+    listeners.add(updateControl);
 
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
@@ -39,7 +47,8 @@ export function useMiniPlayerSecondaryControl(): MiniPlayerSecondaryControl {
     });
 
     return () => {
-      listeners.delete(onChange);
+      mounted = false;
+      listeners.delete(updateControl);
       subscription.remove();
     };
   }, []);

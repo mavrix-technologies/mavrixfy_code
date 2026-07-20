@@ -73,9 +73,8 @@ const POPULAR_ARTIST_QUERIES = [
   "jubin nautiyal",
   "guru randhawa",
   "ap dhillon",
-  "dua lipa",
-  "the weeknd",
-  "taylor swift",
+  "lata mangeshkar",
+  "kishore kumar",
   "sonu nigam",
   "armaan malik",
   "darshan raval",
@@ -85,14 +84,14 @@ const POPULAR_ARTIST_QUERIES = [
   "anuv jain",
   "karan aujla",
   "shubh",
-  "ed sheeran",
-  "weeknd",
+  "alka yagnik",
+  "kumar sanu",
   "neha kakkar",
   "yo yo honey singh",
   "diljit dosanjh",
   "sidhu moose wala",
-  "atif aslam",
-  "rahat fateh ali khan",
+  "mohammad rafi",
+  "anirudh ravichander",
   "kk",
   "mohit chauhan",
   "ar rahman",
@@ -107,6 +106,8 @@ const POPULAR_ARTIST_QUERIES = [
   "divine",
   "raftaar",
   "emiway bantai",
+  "udit narayan",
+  "sid sriram",
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -512,14 +513,26 @@ export async function getArtistDetails(id: string): Promise<JioSaavnArtist | nul
   return fresh;
 }
 
-export async function getFeaturedArtists(): Promise<ArtistCard[]> {
-  const cached = await getCachedFeaturedArtists();
-  if (cached && cached.length > 0) {
-    return buildFeaturedArtistShowcase(cached);
+export async function getFeaturedArtists(options?: { forceRefresh?: boolean }): Promise<ArtistCard[]> {
+  const forceRefresh = options?.forceRefresh ?? false;
+  if (!forceRefresh) {
+    const cached = await getCachedFeaturedArtists();
+    if (cached && cached.length > 0) {
+      return buildFeaturedArtistShowcase(cached);
+    }
   }
   const fresh = await fetchFeaturedArtists();
   if (fresh.length > 0) void setCachedFeaturedArtists(fresh);
   return buildFeaturedArtistShowcase(fresh);
+}
+
+export async function clearFeaturedArtistsCache(): Promise<void> {
+  try {
+    await AsyncStorage.multiRemove([
+      FEATURED_ARTISTS_CACHE_KEY,
+      `${FEATURED_ARTISTS_CACHE_KEY}:time`,
+    ]);
+  } catch {}
 }
 
 /** Fire-and-forget prefetch for an artist */

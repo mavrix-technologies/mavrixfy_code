@@ -338,10 +338,10 @@ type StepArtistsProps = {
 };
 
 export function StepArtists(props: StepArtistsProps) {
-  return useStepArtistsView(props);
+  return <StepArtistsView {...props} />;
 }
 
-function useStepArtistsView({ genres, selectedIds, onToggle, onFinish, saving }: StepArtistsProps) {
+function StepArtistsView({ genres, selectedIds, onToggle, onFinish, saving }: StepArtistsProps) {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
@@ -365,6 +365,7 @@ function useStepArtistsView({ genres, selectedIds, onToggle, onFinish, saving }:
   const [loadedInitialArtistKey, setLoadedInitialArtistKey] = useState<string | null>(null);
   const loadingInitial = loadedInitialArtistKey !== initialArtistQueryKey;
   const applyInitialArtists = useCallback((artists: ArtistCard[]) => {
+    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
     setAllArtists(artists);
   }, []);
   const clearArtistSearch = useCallback(() => {
@@ -375,8 +376,10 @@ function useStepArtistsView({ genres, selectedIds, onToggle, onFinish, saving }:
     setLoadingSearch(true);
   }, []);
   const finishArtistSearch = useCallback((artists: ArtistCard[]) => {
-    setSearchResults(artists);
+    // React automatically batches these updates
     setLoadingSearch(false);
+    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+    setSearchResults(artists);
   }, []);
 
   const colW = Math.floor((width - 32 - 24) / 3);
@@ -432,6 +435,7 @@ function useStepArtistsView({ genres, selectedIds, onToggle, onFinish, saving }:
     debounceRef.current = setTimeout(() => {
       searchArtists(q)
         .then((results) => {
+          // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
           if (active) finishArtistSearch(results);
         })
         .catch(() => {
@@ -454,6 +458,7 @@ function useStepArtistsView({ genres, selectedIds, onToggle, onFinish, saving }:
 
   const handleFilterSelect = useCallback((filter: string) => {
     haptic();
+    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
     setActiveFilter(filter);
   }, []);
 

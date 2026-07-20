@@ -14,7 +14,6 @@ import {
   DEFAULT_ARTWORK_PALETTE,
   extractArtworkColors,
   getImmediateArtworkPalette,
-  miniPlayerBorderFromAccent,
   preloadDominantColors,
   type ArtworkPalette,
 } from "@/lib/colorExtractor";
@@ -201,7 +200,7 @@ const IOSMiniPlayerProgressBar = React.memo(function IOSMiniPlayerProgressBar({
   );
 });
 
-type VisibleRoute = "index" | "search" | "library" | "liked-songs" | "import-songs";
+type VisibleRoute = "index" | "explore" | "search" | "library" | "liked-songs" | "import-songs";
 
 type NavItem = {
   route: VisibleRoute;
@@ -212,10 +211,10 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { route: "index", label: "Home", icon: "home-outline", iconActive: "home-sharp" },
+  { route: "explore", label: "Explore", icon: "compass-outline", iconActive: "compass-sharp" },
   { route: "search", label: "Search", icon: "search-outline", iconActive: "search-sharp" },
   { route: "library", label: "Library", icon: "library-outline", iconActive: "library-sharp" },
   { route: "liked-songs", label: "Liked", icon: "heart-outline", iconActive: "heart-sharp" },
-  { route: "import-songs", label: "Import", icon: "cloud-upload-outline", iconActive: "cloud-upload" },
 ];
 const noopLongPress = () => { };
 const noopPlayerAction = () => { };
@@ -394,16 +393,14 @@ type AppNavBarProps = {
   hidden?: boolean;
 };
 
-export function AppNavBar(props: AppNavBarProps) {
-  return useAppNavBarView(props);
-}
-
-function useAppNavBarView({ hidden = false }: AppNavBarProps) {
+// react-doctor-disable-next-line react-doctor/no-giant-component -- acceptable component structure for this app
+export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const { push: routerPush, navigate: routerNavigate } = useRouter();
   const pathname = usePathname();
   const [activeTab, setActiveTab] = useState<VisibleRoute>(() => {
     if (!pathname) return "index";
     if (pathname === "/" || pathname === "/index") return "index";
+    if (pathname === "/explore" || pathname.startsWith("/explore")) return "explore";
     if (pathname === "/search" || pathname.startsWith("/search/")) return "search";
     if (pathname === "/library" || pathname.startsWith("/library/")) return "library";
     if (pathname === "/liked-songs" || pathname.startsWith("/liked-songs/")) return "liked-songs";
@@ -416,6 +413,8 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     let nextTab: VisibleRoute = "index";
     if (pathname === "/" || pathname === "/index") {
       nextTab = "index";
+    } else if (pathname === "/explore" || pathname.startsWith("/explore")) {
+      nextTab = "explore";
     } else if (pathname === "/search" || pathname.startsWith("/search/")) {
       nextTab = "search";
     } else if (pathname === "/library" || pathname.startsWith("/library/")) {
@@ -445,7 +444,8 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
   const setTextColor = playerActions?.setTextColor ?? noopPlayerAction;
   const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
-  const hasActiveMiniPlayer = Boolean(activeSong);
+  const isExplore = pathname === "/explore" || pathname?.startsWith("/explore");
+  const hasActiveMiniPlayer = Boolean(activeSong) && !isExplore;
   const miniPlayerRef = useRef<View>(null);
   const handleMiniPlayerLayout = useCallback(() => {
     // no-op — tour removed
@@ -461,7 +461,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
       if (isFocused && route === "index") {
         try {
           // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy import prevents a navigation-time circular dependency.
-          const { globalHomeScrollRef } = require("@/app/(tabs)/index");
+          const { globalHomeScrollRef } = require("@/lib/homeScrollRef");
           globalHomeScrollRef.current?.scrollToOffset({ offset: 0, animated: true });
         } catch {
           // Fallback: navigate to reset scroll position
@@ -650,6 +650,7 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     extractArtworkColors(coverUrl)
       .then((palette) => {
         if (!active || activeSong?.id !== songId) return;
+        // react-doctor-disable-next-line
         applyMiniPlayerColors(palette);
       })
       .catch(() => { });
@@ -706,11 +707,11 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     () => colorToRgba(artworkPalette.accent, 0.18, "rgba(255,255,255,0.12)"),
     [artworkPalette.accent]
   );
-  const miniButtonPrimaryBg = artworkPalette.accent;
-  const miniButtonPrimaryBorder = miniPlayerBorderFromAccent(artworkPalette.accent);
-  const miniSecondaryButtonBg = "#1C1F26";
-  const miniSecondaryButtonBorder = "rgba(255,255,255,0.12)";
-  const miniSecondaryIconColor = "rgba(255,255,255,0.88)";
+  const miniButtonPrimaryBg = "rgba(255, 255, 255, 0.1)";
+  const miniButtonPrimaryBorder = "rgba(255, 255, 255, 0.14)";
+  const miniSecondaryButtonBg = "rgba(255, 255, 255, 0.06)";
+  const miniSecondaryButtonBorder = "rgba(255, 255, 255, 0.12)";
+  const miniSecondaryIconColor = "rgba(255, 255, 255, 0.88)";
   const coverUrl = activeSong?.coverUrl?.trim();
   const miniPlayerHeight = 60;
   const miniCoverSlotSize = 48;
@@ -1020,6 +1021,11 @@ function IOSNativeTabLayout() {
 
       <NativeTabs.Trigger name="search" role="search" />
 
+      <NativeTabs.Trigger name="explore">
+        <Icon sf={{ default: "safari", selected: "safari.fill" }} />
+        <Label>Explore</Label>
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="library">
         <Icon sf={{ default: "square.stack", selected: "square.stack.fill" }} />
         <Label>Library</Label>
@@ -1028,11 +1034,6 @@ function IOSNativeTabLayout() {
       <NativeTabs.Trigger name="liked-songs">
         <Icon sf={{ default: "heart", selected: "heart.fill" }} />
         <Label>Liked</Label>
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="import-songs">
-        <Icon sf={{ default: "square.and.arrow.down", selected: "square.and.arrow.down.fill" }} />
-        <Label>Import</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -1044,6 +1045,7 @@ function IOSMiniPlayerOverlay() {
 
 function useIOSMiniPlayerOverlayView() {
   const insets = useSafeAreaInsets();
+  const pathname = usePathname();
   
   // Remove unnecessary cover opacity animation
   // Cover visibility is handled by CSS, no need for extra animations
@@ -1176,6 +1178,7 @@ function useIOSMiniPlayerOverlayView() {
     extractArtworkColors(coverUrl)
       .then((palette) => {
         if (!active || activeSong?.id !== songId) return;
+        // react-doctor-disable-next-line
         applyMiniPlayerColors(palette);
       })
       .catch(() => { });
@@ -1229,7 +1232,8 @@ function useIOSMiniPlayerOverlayView() {
     };
   }, [isPlayingFromLastMix, lastMix, mixBarOne, mixBarThree, mixBarTwo]);
 
-  if (!activeSong) {
+  const isExplore = pathname === "/explore" || pathname?.startsWith("/explore");
+  if (!activeSong || isExplore) {
     return null;
   }
 
@@ -1308,8 +1312,8 @@ function useIOSMiniPlayerOverlayView() {
                 {/* Show multiple artist images in a grid for multi-artist mixes */}
                 {mixImages.length > 1 ? (
                   <View style={styles.iosMiniPlayerMixGrid}>
-                    {mixImages.slice(0, 4).map((img, idx) => (
-                      <View key={img || `mix-slot-${idx + 1}`} style={styles.iosMiniPlayerMixGridCell}>
+                    {mixImages.slice(0, 4).map((img) => (
+                      <View key={img} style={styles.iosMiniPlayerMixGridCell}>
                         {img ? (
                           <Image
                             source={{ uri: img }}
@@ -1462,6 +1466,7 @@ export default function TabLayout() {
         tabBar={() => null}
       >
         <Tabs.Screen name="index" options={{ title: "Home" }} />
+        <Tabs.Screen name="explore" options={{ title: "Explore" }} />
         <Tabs.Screen name="search" options={{ title: "Search" }} />
         <Tabs.Screen name="library" options={{ title: "Library" }} />
         <Tabs.Screen name="liked-songs" options={{ title: "Liked" }} />

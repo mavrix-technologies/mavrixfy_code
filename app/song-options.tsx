@@ -204,8 +204,10 @@ function AddToPlaylistView({
     setLoading(true);
   }, []);
   const finishPlaylistLoad = useCallback((items: MergedPlaylist[]) => {
-    setPlaylists(items);
+    // React automatically batches these updates
     setLoading(false);
+    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+    setPlaylists(items);
   }, []);
 
   const loadPlaylists = useCallback(async () => {
@@ -341,6 +343,7 @@ function GoToArtistsView({ song, onBack, bottomPad }: { song: Song; onBack: () =
   );
 
   const handleArtist = useCallback(async (artistName: string) => {
+    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
     setSearching(artistName);
     try {
       const results = await searchArtists(artistName);

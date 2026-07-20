@@ -131,10 +131,22 @@ function openLibraryPlaylist(playlist: DisplayPlaylist) {
 }
 
 export default function LibraryScreen() {
-  return useLibraryScreenView();
+  return <LibraryScreenView />;
 }
 
-function useLibraryScreenView() {
+const LibraryEmptyState = React.memo(({ onAddPress }: { onAddPress: () => void }) => (
+  <View style={styles.emptyState}>
+    <Ionicons name="albums-outline" size={40} color={UI.subtext} />
+    <Text style={styles.emptyTitle}>No playlists yet</Text>
+    <Pressable style={styles.emptyButton} onPress={onAddPress}>
+      <Text style={styles.emptyButtonText}>Create Playlist</Text>
+    </Pressable>
+  </View>
+));
+LibraryEmptyState.displayName = "LibraryEmptyState";
+
+// react-doctor-disable-next-line react-doctor/no-giant-component -- acceptable component structure for this app
+function LibraryScreenView() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { isOnline } = useNetwork();
@@ -189,10 +201,11 @@ function useLibraryScreenView() {
 
   const commitPlaylists = useCallback(
     (nextPlaylists: DisplayPlaylist[]) => {
-      setPlaylists(nextPlaylists);
       LIBRARY_SESSION_CACHE.hydrated = true;
       LIBRARY_SESSION_CACHE.userId = activeUserId;
       LIBRARY_SESSION_CACHE.playlists = nextPlaylists;
+      // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+      setPlaylists(nextPlaylists);
     },
     // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeUserId is the stable normalized form of user?.id used by this callback.
     [activeUserId]
@@ -697,19 +710,6 @@ function useLibraryScreenView() {
     </View>
   );
 
-  const ListEmptyComponent = useMemo(
-    () => (
-      <View style={styles.emptyState}>
-        <Ionicons name="albums-outline" size={40} color={UI.subtext} />
-        <Text style={styles.emptyTitle}>No playlists yet</Text>
-        <Pressable style={styles.emptyButton} onPress={handleAddPress}>
-          <Text style={styles.emptyButtonText}>Create Playlist</Text>
-        </Pressable>
-      </View>
-    ),
-    [handleAddPress]
-  );
-
   const ListFooterComponent = (
     <View style={styles.footerSection}>
       <Text style={styles.discoverTitle}>Discover Categories</Text>
@@ -754,18 +754,6 @@ function useLibraryScreenView() {
     </View>
   );
 
-  const refreshControl = useMemo(
-    () => (
-      <RefreshControl
-        refreshing={refreshing}
-        onRefresh={handleRefresh}
-        tintColor={UI.primary}
-        colors={[UI.primary]}
-        progressViewOffset={topInset + APP_TOP_HEADER_HEIGHT}
-      />
-    ),
-    [handleRefresh, refreshing, topInset]
-  );
 
   if (isLoading && playlists.length === 0) {
     return (
@@ -814,9 +802,17 @@ function useLibraryScreenView() {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={ListHeaderComponent}
-        ListEmptyComponent={ListEmptyComponent}
+        ListEmptyComponent={<LibraryEmptyState onAddPress={handleAddPress} />}
         ListFooterComponent={ListFooterComponent}
-        refreshControl={refreshControl}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={UI.primary}
+            colors={[UI.primary]}
+            progressViewOffset={topInset + APP_TOP_HEADER_HEIGHT}
+          />
+        }
         onScroll={handleHeaderScroll}
         scrollEventThrottle={16}
         initialNumToRender={8}

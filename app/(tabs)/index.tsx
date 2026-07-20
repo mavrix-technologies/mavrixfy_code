@@ -34,7 +34,7 @@ import Colors from "@/constants/colors";
 import { getBestImageUrl, JioSaavnImage, Song, convertJioSaavnSong } from "@/lib/musicData";
 import { getRecentlyPlayed, RecentlyPlayedItem } from "@/lib/storage";
 import { getPublicPlaylists, FirestorePlaylist } from "@/lib/firestore";
-import { getCachedHomePublicPlaylists, setCachedHomePublicPlaylists } from "@/lib/homeCache";
+import { getCachedHomePublicPlaylists, setCachedHomePublicPlaylists, clearCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { useScreenTracking } from "@/hooks/useScreenTracking";
@@ -54,13 +54,13 @@ import {
   RecommendationItem,
   RecommendationSection,
 } from "@/lib/recommendationService";
-import { getDailyNewReleaseSongs } from "@/lib/newReleaseSongService";
+import { getDailyNewReleaseSongs, clearDailyNewReleaseSongCache } from "@/lib/newReleaseSongService";
 import {
   subscribeNotifications,
   getUnreadNotificationsCount,
   loadNotifications,
 } from "@/stores/notificationStore";
-import { getFeaturedArtists, ArtistCard, prefetchArtist } from "@/lib/artistService";
+import { getFeaturedArtists, ArtistCard, prefetchArtist, clearFeaturedArtistsCache } from "@/lib/artistService";
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
 import AppTopHeader, {
@@ -75,11 +75,9 @@ import { filterMap, mapFilter } from "@/lib/arrayUtils";
 import { DISABLED_HOME_HERO_CONFIG, subscribeHomeHeroConfig, type HomeHeroVideoItem } from "@/lib/homeHeroConfig";
 import { getGoogleMobileAdsModule, initializeMobileAds, type GoogleNativeAd } from "@/lib/googleMobileAds";
 import { logger } from "@/lib/logger";
+import { globalHomeScrollRef } from "@/lib/homeScrollRef";
 
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
-
-// Global ref for home screen scroll - allows navigation to trigger scroll to top
-export const globalHomeScrollRef = { current: null as FlatList<any> | null };
 
 type HomeSection =
   | { id: "recents"; type: "recents" }
@@ -194,9 +192,11 @@ const HOME_REMAINING_CATEGORY_IDS = [
   "party-mix",
   "romance",
   "retro",
+  "workout",
+  "chill-vibes",
 ] as const;
-const HOME_HIDDEN_JIOSAAVN_CATEGORY_IDS = new Set(["new-releases", "workout"]);
-const HOME_MAX_JIOSAAVN_HOME_SECTIONS = 5;
+const HOME_HIDDEN_JIOSAAVN_CATEGORY_IDS = new Set(["new-releases"]);
+const HOME_MAX_JIOSAAVN_HOME_SECTIONS = 15;
 const HOME_MAX_YOUTUBE_HOME_SECTIONS = 14;
 const HOME_MAX_RECOMMENDATION_SECTIONS = 2;
 const HOME_MAX_PUBLIC_PLAYLISTS = 12;
@@ -369,12 +369,10 @@ function getQuickPickSongs(songs: Song[], seed: number): Song[] {
 
   if (latestSongs.length <= 5) return latestSongs;
 
-  const [latestSong, ...rotatingSongs] = latestSongs;
-  const offset = rotatingSongs.length > 0 ? seed % rotatingSongs.length : 0;
+  const offset = latestSongs.length > 0 ? seed % latestSongs.length : 0;
   return [
-    latestSong,
-    ...rotatingSongs.slice(offset),
-    ...rotatingSongs.slice(0, offset),
+    ...latestSongs.slice(offset),
+    ...latestSongs.slice(0, offset),
   ];
 }
 
@@ -1231,7 +1229,7 @@ function useHomeScreenInnerView() {
   const latestLoadIdRef = useRef(0);
   const latestRecommendationLoadIdRef = useRef(0);
   const remainingCategoriesLoadedRef = useRef(false);
-  const quickPickRotationSeed = useMemo(() => getQuickPickRotationSeed(), []);
+  const [quickPickRotationSeed, setQuickPickRotationSeed] = useState(() => getQuickPickRotationSeed());
   const hasHydratedRef = useRef(HOME_SESSION_CACHE.hydrated);
   const prefetchStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelPlaylistPrefetchRef = useRef<(() => void) | null>(null);
@@ -1305,9 +1303,10 @@ function useHomeScreenInnerView() {
     }, delayMs);
   }, [cancelScheduledPlaylistPrefetch]);
 
-  const loadRemainingCategories = useCallback(async () => {
+  const loadRemainingCategories = useCallback(async (options?: { forceRefresh?: boolean }) => {
+    const forceRefresh = options?.forceRefresh ?? false;
     // Don't load if already loaded or currently loading
-    if (remainingCategoriesLoadedRef.current || isLoadingRemainingCategories) {
+    if ((remainingCategoriesLoadedRef.current && !forceRefresh) || isLoadingRemainingCategories) {
       return;
     }
 
@@ -1316,7 +1315,7 @@ function useHomeScreenInnerView() {
 
     try {
       const remainingCategoryData = await getHomeMixedCategories({
-        forceRefresh: false,
+        forceRefresh,
         limitPerCategory: INITIAL_CATEGORY_LIMIT,
         realtime: false,
         categoryIds: [...HOME_REMAINING_CATEGORY_IDS],
@@ -1393,7 +1392,7 @@ function useHomeScreenInnerView() {
           : Promise.resolve<FirestorePlaylist[]>(HOME_SESSION_CACHE.publicPlaylists.slice(0, publicLimit));
 
         // Load artists in parallel — no separate timeout, it's fast from cache
-        const artistsPromise = getFeaturedArtists().catch(() => [] as ArtistCard[]);
+        const artistsPromise = getFeaturedArtists({ forceRefresh }).catch(() => [] as ArtistCard[]);
         const newReleaseSongsPromise = withPromiseTimeout(
           (sig) => getDailyNewReleaseSongs({
             forceRefresh,
@@ -1611,7 +1610,11 @@ function useHomeScreenInnerView() {
       resetHomeState();
       await Promise.all([
         clearJioSaavnPlaylistCache().catch(() => {}),
+        clearDailyNewReleaseSongCache().catch(() => {}),
+        clearCachedHomePublicPlaylists().catch(() => {}),
+        clearFeaturedArtistsCache().catch(() => {}),
       ]);
+      setQuickPickRotationSeed(Math.floor(Math.random() * 1000));
       const recommendationPromise = shouldUseRecommendationFeed
         ? loadRecommendationFeed({ forceRefresh: true })
         : Promise.resolve();
@@ -1639,7 +1642,7 @@ function useHomeScreenInnerView() {
     } finally {
       setRefreshing(false);
     }
-  }, [loadHomeData, loadRecommendationFeed, resetHomeState, shouldUseRecommendationFeed]);
+  }, [loadHomeData, loadRecommendationFeed, resetHomeState, shouldUseRecommendationFeed, setQuickPickRotationSeed]);
 
   const applyHomeCacheSnapshot = useCallback(() => {
     setRecentlyPlayed(HOME_SESSION_CACHE.recentlyPlayed);
@@ -1745,6 +1748,22 @@ function useHomeScreenInnerView() {
           HOME_BOOTSTRAP_MAX_WAIT_MS,
           "Home bootstrap timeout"
         );
+
+        if (!cancelled) {
+          // Stale-While-Revalidate: Trigger background refresh silently to get latest content
+          void loadHomeData({
+            forceRefresh: true,
+            showLoader: false,
+            refreshPublicPlaylists: true,
+            realtimeRefresh: false,
+            limitPerCategory: INITIAL_CATEGORY_LIMIT,
+            publicLimit: INITIAL_PUBLIC_LIMIT,
+          }).then(() => {
+            if (!cancelled) {
+              void loadRemainingCategories({ forceRefresh: true });
+            }
+          });
+        }
       } catch {
         if (!cancelled) {
           applyHomeBootstrapFailure(hasWarmContent);
@@ -1765,6 +1784,7 @@ function useHomeScreenInnerView() {
     invalidateLatestLoad,
     loadHomeData,
     revealWarmHomeContent,
+    loadRemainingCategories,
   ]);
 
   useEffect(() => {

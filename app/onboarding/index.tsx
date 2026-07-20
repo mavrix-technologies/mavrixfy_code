@@ -20,10 +20,10 @@ import {
 import { haptic, hapticSuccess, onboardingStyles as s } from "@/components/onboarding/onboardingShared";
 
 export default function OnboardingScreen() {
-  return useOnboardingScreenView();
+  return <OnboardingScreenView />;
 }
 
-function useOnboardingScreenView() {
+function OnboardingScreenView() {
   const insets = useSafeAreaInsets();
   const { user, firebaseUser } = useAuth();
 

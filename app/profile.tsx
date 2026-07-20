@@ -25,6 +25,8 @@ import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
 import { safeGoBack } from "@/utils/navigation";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { clearJioSaavnPlaylistCache } from "@/lib/jioSaavnService";
+import { clearCachedHomePublicPlaylists, notifyHomeCacheInvalidated } from "@/lib/homeCache";
+import { clearDailyNewReleaseSongCache } from "@/lib/newReleaseSongService";
 import { AD_UNITS } from "@/constants/admob";
 import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobileAds";
 
@@ -431,11 +433,14 @@ export default function ProfileScreen() {
       hasSeenNewFeatures(),
     ]).then(([s, profile, seen]) => {
       if (!mounted) return;
-      setSettings(s);
-      setLowEndDevice(profile.isLowEndDevice);
-      setHapticsPreference(Boolean(s.hapticsEnabled));
-      setShowNewBadges(!seen);
-      if (!seen) void markNewFeaturesSeen();
+      queueMicrotask(() => {
+        // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+        setSettings(s);
+        setLowEndDevice(profile.isLowEndDevice);
+        setHapticsPreference(Boolean(s.hapticsEnabled));
+        setShowNewBadges(!seen);
+        if (!seen) void markNewFeaturesSeen();
+      });
     });
     return () => { mounted = false; };
   }, []);
@@ -563,10 +568,10 @@ export default function ProfileScreen() {
             try {
               // 1. Clear app caches
               await clearJioSaavnPlaylistCache().catch(() => {});
-              await AsyncStorage.multiRemove([
-                "@mavrixfy_home_public_playlists_v1",
-                "@mavrixfy_home_public_playlists_time_v1",
-              ]).catch(() => {});
+              await Promise.all([
+                clearCachedHomePublicPlaylists(),
+                clearDailyNewReleaseSongCache(),
+              ]);
               await Image.clearDiskCache().catch(() => {});
               Image.clearMemoryCache();
 
@@ -575,6 +580,9 @@ export default function ProfileScreen() {
 
               // 3. Clear Recently Played
               await AsyncStorage.setItem("@mavrixfy_recently_played", JSON.stringify([])).catch(() => {});
+
+              // Make an already-mounted Home tab discard its session cache and reload fresh sections.
+              notifyHomeCacheInvalidated();
 
               Alert.alert("Success", "All cache and history cleared successfully.");
             } catch {

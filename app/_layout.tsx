@@ -207,11 +207,22 @@ function GlobalToast() {
   const [visible, setVisible] = useState(false);
 
   const showToast = useCallback((nextMessage: string) => {
-    opacity.stopAnimation();
-    opacity.setValue(0);
+    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
     setMessage(nextMessage);
     setVisible(true);
-    Animated.sequence([
+  }, []);
+
+  useEffect(() => {
+    return subscribeGlobalToast(showToast);
+  }, [showToast]);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    opacity.stopAnimation();
+    opacity.setValue(0);
+
+    const animation = Animated.sequence([
       Animated.timing(opacity, {
         toValue: 1,
         duration: 120,
@@ -225,16 +236,18 @@ function GlobalToast() {
         isInteraction: false,
         useNativeDriver: true,
       }),
-    ]).start(({ finished }) => {
+    ]);
+
+    animation.start(({ finished }) => {
       if (finished) {
         setVisible(false);
       }
     });
-  }, [opacity]);
 
-  useEffect(() => {
-    return subscribeGlobalToast(showToast);
-  }, [showToast]);
+    return () => {
+      animation.stop();
+    };
+  }, [visible, message, opacity]);
 
   if (!visible) return null;
 
@@ -871,6 +884,11 @@ export default function RootLayout() {
     }
   }, [fontsLoaded]);
 
+  const handleError = useCallback((err: Error) => {
+    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+    setError(err);
+  }, []);
+
   if (error) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#05070A', padding: 20 }}>
@@ -887,7 +905,7 @@ export default function RootLayout() {
   }
 
   return (
-    <ErrorBoundary onError={(err) => setError(err)}>
+    <ErrorBoundary onError={handleError}>
       <QueryClientProvider client={queryClient}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <ThemeProvider value={DarkTheme}>

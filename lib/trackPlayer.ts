@@ -28,6 +28,20 @@ let playerReady = false;
 export async function setupPlayer(): Promise<void> {
   if (playerReady) return;
 
+  // Android 13+ (API 33) requires a runtime grant for POST_NOTIFICATIONS.
+  // Without this the media notification is silently suppressed even if the
+  // permission is declared in AndroidManifest.xml.
+  if (Platform.OS === "android" && Number(Platform.Version) >= 33) {
+    try {
+      const { PermissionsAndroid } = require("react-native");
+      await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+      );
+    } catch {
+      // non-fatal — proceed even if the request fails
+    }
+  }
+
   await setupPlayerOnce({
     autoHandleInterruptions: true,
     autoUpdateMetadata: true,
@@ -62,6 +76,16 @@ export async function setupPlayer(): Promise<void> {
       Capability.SkipToPrevious,
       Capability.SeekTo,
       Capability.Stop,
+    ],
+    // notificationCapabilities controls the buttons shown in the Android
+    // media notification / lock screen. Without this the notification renders
+    // no controls even though capabilities are set.
+    notificationCapabilities: [
+      Capability.Play,
+      Capability.Pause,
+      Capability.SkipToNext,
+      Capability.SkipToPrevious,
+      Capability.SeekTo,
     ],
     compactCapabilities: [
       Capability.Play,

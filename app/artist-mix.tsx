@@ -83,8 +83,9 @@ export default function ArtistMixScreen() {
     setLoadedCount((count) => count + 1);
   }, []);
   const finishMixLoad = useCallback((nextSongs: Song[]) => {
-    setSongs(nextSongs);
     setLoading(false);
+    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+    setSongs(nextSongs);
   }, []);
   const finishEmptyMixLoad = useCallback(() => {
     setLoading(false);

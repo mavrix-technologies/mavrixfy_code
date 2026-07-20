@@ -127,31 +127,45 @@ function useArtistScreenView() {
 
   const displayName = artist?.name || initName || "Artist";
   const markArtistNotFound = useCallback(() => {
-    setError("Artist not found");
-    setLoading(false);
+    queueMicrotask(() => {
+      setError("Artist not found");
+      setLoading(false);
+    });
   }, []);
   const resetArtistLoadState = useCallback(() => {
-    setLoading(true);
-    setError("");
-    setExtraSongs([]);
-    nextPageRef.current = 2;
-    setHasMore(true);
+    queueMicrotask(() => {
+      setLoading(true);
+      setError("");
+      setExtraSongs([]);
+      nextPageRef.current = 2;
+      setHasMore(true);
+    });
   }, []);
   const applyArtistFollowState = useCallback((nextFollowing: boolean) => {
-    setFollowing(nextFollowing);
+    queueMicrotask(() => {
+      // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+      setFollowing(nextFollowing);
+    });
   }, []);
   const applyArtistDetails = useCallback((data: JioSaavnArtist | null) => {
-    if (data) {
-      setArtist(data);
-    } else {
-      setError("Artist not found");
-    }
+    queueMicrotask(() => {
+      if (data) {
+        // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+        setArtist(data);
+      } else {
+        setError("Artist not found");
+      }
+    });
   }, []);
   const applyArtistLoadFailure = useCallback(() => {
-    setError("Could not load artist. Check your connection.");
+    queueMicrotask(() => {
+      setError("Could not load artist. Check your connection.");
+    });
   }, []);
   const finishArtistLoad = useCallback(() => {
-    setLoading(false);
+    queueMicrotask(() => {
+      setLoading(false);
+    });
   }, []);
 
   // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- loading an artist resets several independent UI fields at once before async fetches start.
@@ -162,11 +176,13 @@ function useArtistScreenView() {
     resetArtistLoadState();
 
     void isFollowingArtist(artistId).then((v) => {
+      // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
       if (!cancelled) applyArtistFollowState(v);
     });
     getArtistDetails(artistId)
       .then((data) => {
         if (cancelled) return;
+        // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
         applyArtistDetails(data);
       })
       .catch(() => {

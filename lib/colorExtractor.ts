@@ -156,7 +156,7 @@ function createSpotifyColorTheme(palette: ArtworkPalette | string): SpotifyColor
   };
 }
 
-export function miniPlayerBorderFromAccent(accent: string): string {
+function miniPlayerBorderFromAccent(accent: string): string {
   return colorWithAlpha(accent, 0.45, "rgba(255,255,255,0.2)");
 }
 

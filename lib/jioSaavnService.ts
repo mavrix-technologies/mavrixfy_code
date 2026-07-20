@@ -1445,7 +1445,7 @@ async function fetchFromCandidates(
     let resolved = false;
     const results: { data: JioSaavnPlaylistDetailsData | null; notFound: boolean }[] = [];
 
-    urls.forEach(async (url, idx) => {
+    void Promise.all(urls.map(async (url, idx) => {
       try {
         const response = await withTimeout(
           fetch(url, { headers: { Accept: "application/json" } }),
@@ -1475,7 +1475,7 @@ async function fetchFromCandidates(
           resolve({ data: null, reason: allNotFound ? "not_found" : "network" });
         }
       }
-    });
+    }));
   });
 }
 

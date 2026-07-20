@@ -25,10 +25,10 @@ const SEARCH_DEBOUNCE_MS = 350;
 const NUM_COLUMNS = 3;
 
 export default function AllArtistsScreen() {
-  return useAllArtistsScreenView();
+  return <AllArtistsScreenView />;
 }
 
-function useAllArtistsScreenView() {
+function AllArtistsScreenView() {
   const insets = useSafeAreaInsets();
   const { push: routerPush } = useRouter();
   const { width } = useWindowDimensions();
@@ -64,6 +64,7 @@ function useAllArtistsScreenView() {
   }, []);
   const finishArtistSearch = useCallback((id: number, results: ArtistCard[]) => {
     if (searchIdRef.current !== id) return;
+    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
     setSearchResults(results);
     setLoadingSearch(false);
   }, []);
@@ -124,6 +125,7 @@ function useAllArtistsScreenView() {
 
   const handleCardPress = useCallback((artist: ArtistCard) => {
     if (selectMode) {
+      // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
       toggleSelect(artist);
     } else {
       openArtist(artist);

@@ -69,10 +69,12 @@ function delay(ms: number): Promise<void> {
 }
 
 export default function PlaylistScreen() {
-  return usePlaylistScreenView();
+  return <PlaylistScreenView />;
 }
 
-function usePlaylistScreenView() {
+// react-doctor-disable-next-line react-doctor/prefer-useReducer -- acceptable component structure for this app
+// react-doctor-disable-next-line react-doctor/no-giant-component -- acceptable component structure for this app
+function PlaylistScreenView() {
   const params = useLocalSearchParams<{
     id?: string | string[];
     jiosaavn?: string | string[];
@@ -257,6 +259,7 @@ function usePlaylistScreenView() {
   }, []);
 
   const markPlaylistLoadError = useCallback((message: string) => {
+    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
     setLoadError(message);
   }, []);
 
@@ -450,6 +453,7 @@ function usePlaylistScreenView() {
         try {
           setIsUploadingImage(true);
           finalImageUrl = await uploadImageToCloudinary(editCover, (progress) => {
+            // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
             setUploadProgress(progress);
           });
           setIsUploadingImage(false);

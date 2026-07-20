@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { DeviceEventEmitter } from "react-native";
 import { FirestorePlaylist } from "@/lib/firestore";
 import { mapFilter } from "@/lib/arrayUtils";
 
@@ -6,6 +7,9 @@ const HOME_PUBLIC_PLAYLISTS_CACHE_KEY = "@mavrixfy_home_public_playlists_v1";
 const HOME_PUBLIC_PLAYLISTS_CACHE_TIME_KEY = "@mavrixfy_home_public_playlists_time_v1";
 const HOME_PUBLIC_PLAYLISTS_TTL_MS = 20 * 60 * 1000;
 const HOME_PUBLIC_PLAYLISTS_MAX_STALE_MS = 12 * 60 * 60 * 1000;
+
+/** Emitted after Settings clears Home data so mounted Home screens can fetch a fresh feed. */
+export const HOME_CACHE_INVALIDATED_EVENT = "mavrixfy:home-cache-invalidated";
 
 function normalizePublicPlaylist(raw: any): FirestorePlaylist | null {
   if (!raw || typeof raw !== "object") return null;
@@ -85,3 +89,17 @@ export async function setCachedHomePublicPlaylists(playlists: FirestorePlaylist[
   }
 }
 
+export async function clearCachedHomePublicPlaylists(): Promise<void> {
+  try {
+    await AsyncStorage.multiRemove([
+      HOME_PUBLIC_PLAYLISTS_CACHE_KEY,
+      HOME_PUBLIC_PLAYLISTS_CACHE_TIME_KEY,
+    ]);
+  } catch {
+    // The in-memory Home feed is still invalidated below even if storage is unavailable.
+  }
+}
+
+export function notifyHomeCacheInvalidated(): void {
+  DeviceEventEmitter.emit(HOME_CACHE_INVALIDATED_EVENT);
+}
