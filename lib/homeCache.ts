@@ -85,3 +85,12 @@ export async function setCachedHomePublicPlaylists(playlists: FirestorePlaylist[
   }
 }
 
+export async function clearCachedHomePublicPlaylists(): Promise<void> {
+  try {
+    await AsyncStorage.multiRemove([
+      HOME_PUBLIC_PLAYLISTS_CACHE_KEY,
+      HOME_PUBLIC_PLAYLISTS_CACHE_TIME_KEY,
+    ]);
+  } catch {}
+}
+

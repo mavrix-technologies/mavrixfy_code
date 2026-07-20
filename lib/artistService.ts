@@ -517,17 +517,29 @@ export async function getArtistDetails(id: string): Promise<JioSaavnArtist | nul
   return fresh;
 }
 
-export async function getFeaturedArtists(): Promise<ArtistCard[]> {
-  const cached = await getCachedFeaturedArtists();
-  if (cached && cached.length > 0) {
-    void fetchFeaturedArtists().then((fresh) => {
-      if (fresh.length > 0) void setCachedFeaturedArtists(fresh);
-    });
-    return buildFeaturedArtistShowcase(cached);
+export async function getFeaturedArtists(options?: { forceRefresh?: boolean }): Promise<ArtistCard[]> {
+  const forceRefresh = options?.forceRefresh ?? false;
+  if (!forceRefresh) {
+    const cached = await getCachedFeaturedArtists();
+    if (cached && cached.length > 0) {
+      void fetchFeaturedArtists().then((fresh) => {
+        if (fresh.length > 0) void setCachedFeaturedArtists(fresh);
+      });
+      return buildFeaturedArtistShowcase(cached);
+    }
   }
   const fresh = await fetchFeaturedArtists();
   if (fresh.length > 0) void setCachedFeaturedArtists(fresh);
   return buildFeaturedArtistShowcase(fresh);
+}
+
+export async function clearFeaturedArtistsCache(): Promise<void> {
+  try {
+    await AsyncStorage.multiRemove([
+      FEATURED_ARTISTS_CACHE_KEY,
+      `${FEATURED_ARTISTS_CACHE_KEY}:time`,
+    ]);
+  } catch {}
 }
 
 /** Fire-and-forget prefetch for an artist */

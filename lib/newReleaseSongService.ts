@@ -86,6 +86,10 @@ export type DailyNewReleaseSongOptions = {
   limit?: number;
 };
 
+export async function clearDailyNewReleaseSongCache(): Promise<void> {
+  await AsyncStorage.removeItem(DAILY_NEW_RELEASE_CACHE_KEY).catch(() => undefined);
+}
+
 function getTodayKey(): string {
   const now = new Date();
   const month = String(now.getMonth() + 1).padStart(2, "0");

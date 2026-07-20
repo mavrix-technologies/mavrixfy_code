@@ -162,7 +162,7 @@
       "checkAutomatically": "ON_ERROR_RECOVERY",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": "2.6.0-20601",
+    "runtimeVersion": "2.6.0-20600",
     "extra": {
       "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",

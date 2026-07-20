@@ -14,7 +14,6 @@ import {
   DEFAULT_ARTWORK_PALETTE,
   extractArtworkColors,
   getImmediateArtworkPalette,
-  miniPlayerBorderFromAccent,
   preloadDominantColors,
   type ArtworkPalette,
 } from "@/lib/colorExtractor";
@@ -685,11 +684,11 @@ function useAppNavBarView({ hidden = false }: AppNavBarProps) {
     () => colorToRgba(artworkPalette.accent, 0.18, "rgba(255,255,255,0.12)"),
     [artworkPalette.accent]
   );
-  const miniButtonPrimaryBg = artworkPalette.accent;
-  const miniButtonPrimaryBorder = miniPlayerBorderFromAccent(artworkPalette.accent);
-  const miniSecondaryButtonBg = "#1C1F26";
-  const miniSecondaryButtonBorder = "rgba(255,255,255,0.12)";
-  const miniSecondaryIconColor = "rgba(255,255,255,0.88)";
+  const miniButtonPrimaryBg = "rgba(255, 255, 255, 0.1)";
+  const miniButtonPrimaryBorder = "rgba(255, 255, 255, 0.14)";
+  const miniSecondaryButtonBg = "rgba(255, 255, 255, 0.06)";
+  const miniSecondaryButtonBorder = "rgba(255, 255, 255, 0.12)";
+  const miniSecondaryIconColor = "rgba(255, 255, 255, 0.88)";
   const coverUrl = activeSong?.coverUrl?.trim();
   const miniPlayerHeight = 60;
   const miniCoverSlotSize = 48;

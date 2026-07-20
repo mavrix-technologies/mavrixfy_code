@@ -125,6 +125,36 @@ const JIOSAAVN_SEARCH_BASE_URLS = [
 
 export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
   {
+    id: "trending",
+    title: "Trending Now",
+    searchTerms: [
+      "trending hindi songs",
+      "trending now bollywood",
+      "popular songs india",
+      "chartbusters hindi",
+    ],
+  },
+  {
+    id: "top-charts",
+    title: "Top Charts",
+    searchTerms: [
+      "top charts hindi",
+      "top 50 india",
+      "official hits hindi",
+      "biggest hits bollywood",
+    ],
+  },
+  {
+    id: "bollywood",
+    title: "Bollywood Hits",
+    searchTerms: [
+      "bollywood hits",
+      "hindi movie songs",
+      "bollywood top songs",
+      "latest bollywood hits",
+    ],
+  },
+  {
     id: "new-arrivals",
     title: "New Releases",
     searchTerms: [
@@ -142,6 +172,16 @@ export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
       "youtube shorts trending songs",
       "reels viral songs",
       "social media hits",
+    ],
+  },
+  {
+    id: "popular",
+    title: "Most Popular",
+    searchTerms: [
+      "most popular hindi songs",
+      "popular bollywood hits",
+      "top played indian songs",
+      "hit songs bollywood",
     ],
   },
   {
@@ -1658,8 +1698,11 @@ const LAST_SHOWN_MAX = 40; // remember last 40 shown playlist IDs
 // One primary search term per category — fast, single request
 const FAST_SEARCH_TERMS: Record<string, string> = {
   trending:       `trending songs ${CURRENT_YEAR}`,
+  "top-charts":   "top charts hindi",
+  bollywood:      "bollywood hits",
   "new-arrivals": `new movie songs ${CURRENT_YEAR}`,
   "most-viral":   `viral reels hits ${CURRENT_YEAR}`,
+  popular:        "most popular hindi songs",
   "party-mix":    "party songs hindi",
   "chill-vibes":  "chill hindi songs",
   romance:        "romantic hindi songs",
