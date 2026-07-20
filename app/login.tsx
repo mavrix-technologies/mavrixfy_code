@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Alert,
   useWindowDimensions,
+  ScrollView,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -29,6 +30,20 @@ import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
 
 type AuthMode = "login" | "signup";
 
+interface AuthFieldProps {
+  icon: keyof typeof Ionicons.glyphMap;
+  placeholder: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  keyboardType?: "default" | "email-address";
+  autoCapitalize?: "none" | "words";
+  secureTextEntry?: boolean;
+  trailing?: React.ReactNode;
+  isFocused: boolean;
+  onFocus: () => void;
+  onBlur: () => void;
+}
+
 function AuthField({
   icon,
   placeholder,
@@ -38,21 +53,23 @@ function AuthField({
   autoCapitalize,
   secureTextEntry,
   trailing,
-  compact,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  placeholder: string;
-  value: string;
-  onChangeText: (value: string) => void;
-  keyboardType?: "default" | "email-address";
-  autoCapitalize?: "none" | "words";
-  secureTextEntry?: boolean;
-  trailing?: React.ReactNode;
-  compact?: boolean;
-}) {
+  isFocused,
+  onFocus,
+  onBlur,
+}: AuthFieldProps) {
   return (
-    <View style={[styles.fieldShell, compact ? styles.fieldShellCompact : null]}>
-      <Ionicons name={icon} size={18} color={Colors.inactive} />
+    <View
+      style={[
+        styles.fieldShell,
+        isFocused ? styles.fieldShellFocused : null,
+      ]}
+    >
+      <Ionicons
+        name={icon}
+        size={18}
+        color={isFocused ? Colors.primary : Colors.inactive}
+        style={styles.fieldIcon}
+      />
       <TextInput
         style={styles.fieldInput}
         placeholder={placeholder}
@@ -63,17 +80,27 @@ function AuthField({
         autoCapitalize={autoCapitalize}
         secureTextEntry={secureTextEntry}
         selectionColor={Colors.primary}
+        onFocus={onFocus}
+        onBlur={onBlur}
       />
       {trailing}
     </View>
   );
 }
 
+const handleUnavailableAppleSignIn = () => {
+  Alert.alert(
+    "Apple Sign-In Unavailable",
+    "Make sure you are on a compatible iOS device signed into iCloud with two-factor authentication enabled."
+  );
+};
+
 export default function LoginScreen() {
-  return useLoginScreenView();
+  return <LoginScreenView />;
 }
 
-function useLoginScreenView() {
+// react-doctor-disable-next-line react-doctor/no-giant-component -- acceptable component structure for this app
+function LoginScreenView() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { replace: routerReplace } = useRouter();
@@ -88,23 +115,12 @@ function useLoginScreenView() {
     continueAsGuest,
   } = useAuth();
 
-  const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 20 : insets.bottom;
-  const isShort = screenHeight <= 780;
-  const isUltraShort = screenHeight <= 690;
-  const isWide = screenWidth >= 960 && screenHeight >= 640;
-  const isNarrow = screenWidth <= 360;
+  const topInset = Platform.OS === "web" ? 30 : insets.top;
+  const bottomInset = Platform.OS === "web" ? 30 : insets.bottom;
   const isExpoGo = Constants.appOwnership === "expo";
   const guestLoginEnabled = GUEST_LOGIN_ENABLED;
   const showAppleLoginOption = Platform.OS === "ios" || Platform.OS === "web";
-  const shellMaxWidth = Math.min(isWide ? 980 : 460, screenWidth - 32);
-  const logoSize = isUltraShort ? 42 : 50;
-  const cardPadding = isUltraShort ? 16 : isShort ? 18 : 24;
-  const heroTitleSize = isWide ? 40 : isUltraShort ? 22 : isShort ? 26 : 30;
-  const heroLineHeight = isWide ? 46 : isUltraShort ? 27 : isShort ? 31 : 36;
-  const primaryButtonHeight = isUltraShort ? 44 : 48;
-  const fieldGap = isUltraShort ? 8 : 10;
-  const heroVisible = isWide;
+  const cardMaxWidth = Math.min(420, screenWidth - 32);
 
   const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
@@ -115,15 +131,11 @@ function useLoginScreenView() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
   const [appleAvailable, setAppleAvailable] = useState(false);
-  const [appleAvailabilityChecked, setAppleAvailabilityChecked] = useState(false);
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
+  const [focusedField, setFocusedField] = useState<"name" | "email" | "password" | null>(null);
 
   const isSignup = mode === "signup";
   const showAuthActionStack = !isSignup && (!isExpoGo || guestLoginEnabled || showAppleLoginOption);
-  const title = isSignup ? "Create your account" : "Log in to Mavrixfy";
-  const subtitle = isSignup
-    ? "Set up your profile and keep your library synced."
-    : "Music, playlists, and account access in one clean place.";
 
   useEffect(() => {
     let mounted = true;
@@ -132,13 +144,11 @@ function useLoginScreenView() {
       .then((available) => {
         if (mounted) {
           setAppleAvailable(available);
-          setAppleAvailabilityChecked(true);
         }
       })
       .catch(() => {
         if (mounted) {
           setAppleAvailable(false);
-          setAppleAvailabilityChecked(true);
         }
       });
 
@@ -149,15 +159,15 @@ function useLoginScreenView() {
 
   const handleSubmit = async () => {
     if (!email.trim() || !password.trim()) {
-      Alert.alert("Error", "Please fill in all fields");
+      Alert.alert("Required", "Please fill in all fields");
       return;
     }
     if (isSignup && !fullName.trim()) {
-      Alert.alert("Error", "Please enter your full name");
+      Alert.alert("Required", "Please enter your name");
       return;
     }
     if (isSignup && password.length < 6) {
-      Alert.alert("Error", "Password must be at least 6 characters");
+      Alert.alert("Invalid Password", "Password must be at least 6 characters");
       return;
     }
 
@@ -171,7 +181,7 @@ function useLoginScreenView() {
       void triggerNotification(Haptics.NotificationFeedbackType.Success);
       routerReplace("/(tabs)");
     } catch (error: any) {
-      const msg = error.message || "Something went wrong";
+      const msg = error.message || "An unexpected error occurred";
       const friendlyMsg = msg.includes("user-not-found")
         ? "No account found with this email"
         : msg.includes("wrong-password") || msg.includes("invalid-credential")
@@ -181,7 +191,7 @@ function useLoginScreenView() {
             : msg.includes("invalid-email")
               ? "Please enter a valid email address"
               : msg;
-      Alert.alert("Error", friendlyMsg);
+      Alert.alert("Authentication Failed", friendlyMsg);
     } finally {
       setLoading(false);
     }
@@ -208,7 +218,7 @@ function useLoginScreenView() {
       void triggerNotification(Haptics.NotificationFeedbackType.Success);
       routerReplace("/(tabs)");
     } catch (error: any) {
-      Alert.alert("Error", error.message || "Google Sign-In failed");
+      Alert.alert("Google Sign-In", error.message || "Failed to sign in with Google");
     } finally {
       setGoogleLoading(false);
     }
@@ -228,20 +238,12 @@ function useLoginScreenView() {
       void triggerNotification(Haptics.NotificationFeedbackType.Success);
       routerReplace("/(tabs)");
     } catch (error: any) {
-      Alert.alert("Error", error.message || "Apple Sign-In failed");
+      Alert.alert("Apple Sign-In", error.message || "Failed to sign in with Apple");
     } finally {
       setAppleLoading(false);
     }
   };
 
-  const handleUnavailableAppleSignIn = () => {
-    Alert.alert(
-      "Apple Sign-In unavailable",
-      isExpoGo
-        ? "Expo Go can test Apple Sign-In on iOS, but this device is reporting it unavailable. Make sure you are on an iPhone or iPad signed into iCloud with two-factor authentication enabled."
-        : "Apple Sign-In is not available on this device or this build is missing the Apple Sign-In entitlement."
-    );
-  };
 
   const handleForgotPassword = async () => {
     const trimmedEmail = email.trim();
@@ -261,320 +263,245 @@ function useLoginScreenView() {
         : msg.includes("user-not-found")
           ? "No account was found with that email address."
           : msg || "Could not send a reset email right now.";
-      Alert.alert("Unable to reset password", friendlyMsg);
+      Alert.alert("Reset Error", friendlyMsg);
     } finally {
       setResetPasswordLoading(false);
     }
   };
 
   const handleContinueAsGuest = () => {
-    if (!guestLoginEnabled) {
-      return;
-    }
-
+    if (!guestLoginEnabled) return;
     continueAsGuest();
     routerReplace("/(tabs)");
   };
 
-  const switchMode = (nextMode: AuthMode) => {
-    setMode(nextMode);
+  const toggleAuthMode = () => {
+    setMode((prev) => (prev === "login" ? "signup" : "login"));
     setPassword("");
-    if (nextMode === "login") {
-      setFullName("");
-    }
+    setFullName("");
   };
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={Colors.gradientDark as [string, string, string]} style={StyleSheet.absoluteFill} />
-      <View style={[styles.glowOrb, styles.glowOrbTop]} />
-      <View style={[styles.glowOrb, styles.glowOrbBottom]} />
+      <LinearGradient
+        colors={[Colors.backgroundGradientStart, Colors.background, Colors.surface]}
+        style={StyleSheet.absoluteFill}
+      />
 
       <KeyboardAvoidingView
-        style={styles.flex}
+        style={styles.keyboardView}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? topInset : 0}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 40 : 0}
       >
-        <View
-          style={[
-            styles.page,
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContainer,
             {
-              paddingTop: topInset + (isUltraShort ? 8 : 18),
-              paddingBottom: bottomInset + 12,
-              paddingHorizontal: 16,
+              paddingTop: topInset + 40,
+              paddingBottom: bottomInset + 40,
             },
           ]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
-          <View
-            style={[
-              styles.authShell,
-              {
-                maxWidth: shellMaxWidth,
-                flexDirection: isWide ? "row" : "column",
-              },
-            ]}
-          >
-            {heroVisible ? (
-              <View style={styles.heroPanel}>
-                <View style={styles.heroBrandRow}>
-                  <View style={[styles.logoBadge, { width: 58, height: 58, borderRadius: 29 }]}>
-                    <Image source={require("@/assets/images/mavrixfy_icone.png")} style={styles.logoImage} contentFit="contain" />
-                  </View>
-                  <View style={styles.heroBrandCopy}>
-                    <Text style={styles.heroBrandName}>Mavrixfy</Text>
-                    <Text style={styles.heroBrandTag}>Streaming, imports, and account control</Text>
-                  </View>
-                </View>
-
-                <Text style={[styles.heroTitle, { fontSize: heroTitleSize, lineHeight: heroLineHeight }]}>
-                  Focused music access that feels clean on every screen.
-                </Text>
-                <Text style={styles.heroText}>
-                  The auth flow stays compact, readable, and aligned with the Mavrixfy theme across phones and larger displays.
-                </Text>
-
-                <View style={styles.heroFeatureStack}>
-                  <View style={styles.heroFeature}>
-                    <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
-                    <Text style={styles.heroFeatureText}>
-                      {guestLoginEnabled ? "Fast sign in, sign up, and guest access" : "Fast sign in and sign up flows"}
-                    </Text>
-                  </View>
-                  <View style={styles.heroFeature}>
-                    <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
-                    <Text style={styles.heroFeatureText}>Responsive spacing for short and tall devices</Text>
-                  </View>
-                  <View style={styles.heroFeature}>
-                    <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
-                    <Text style={styles.heroFeatureText}>Matches the current Mavrixfy visual style</Text>
-                  </View>
-                </View>
+          <View style={[styles.authCard, { maxWidth: cardMaxWidth }]}>
+            {/* Header / Brand */}
+            <View style={styles.brandHeader}>
+              <View style={styles.logoContainer}>
+                <Image
+                  source={require("@/assets/images/mavrixfy_icone.png")}
+                  style={styles.logoImage}
+                  contentFit="contain"
+                />
               </View>
-            ) : null}
+              <Text style={styles.brandName}>Mavrixfy</Text>
+              <Text style={styles.brandSubtitle}>
+                {isSignup ? "Create an account to start streaming" : "Log in to access your music library"}
+              </Text>
+            </View>
 
-            <View
-              style={[
-                styles.card,
-                {
-                  padding: cardPadding,
-                  width: isWide ? 430 : "100%",
-                },
+            {/* Inputs Form */}
+            <View style={styles.formContainer}>
+              {isSignup && (
+                <AuthField
+                  icon="person-outline"
+                  placeholder="Full Name"
+                  value={fullName}
+                  onChangeText={setFullName}
+                  autoCapitalize="words"
+                  isFocused={focusedField === "name"}
+                  onFocus={() => setFocusedField("name")}
+                  onBlur={() => setFocusedField(null)}
+                />
+              )}
+
+              <AuthField
+                icon="mail-outline"
+                placeholder="Email Address"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                isFocused={focusedField === "email"}
+                onFocus={() => setFocusedField("email")}
+                onBlur={() => setFocusedField(null)}
+              />
+
+              <AuthField
+                icon="lock-closed-outline"
+                placeholder="Password"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                isFocused={focusedField === "password"}
+                onFocus={() => setFocusedField("password")}
+                onBlur={() => setFocusedField(null)}
+                trailing={
+                  <Pressable
+                    onPress={() => setShowPassword((prev) => !prev)}
+                    hitSlop={12}
+                    style={styles.eyeBtn}
+                  >
+                    <Ionicons
+                      name={showPassword ? "eye-off-outline" : "eye-outline"}
+                      size={20}
+                      color={Colors.inactive}
+                    />
+                  </Pressable>
+                }
+              />
+
+              {!isSignup && (
+                <Pressable
+                  style={styles.forgotBtn}
+                  onPress={handleForgotPassword}
+                  disabled={resetPasswordLoading}
+                >
+                  <Text style={styles.forgotText}>
+                    {resetPasswordLoading ? "Sending reset email..." : "Forgot Password?"}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+
+            {/* Primary Action Button */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.submitBtn,
+                pressed ? styles.btnPressed : null,
+                loading ? styles.submitBtnDisabled : null,
               ]}
+              onPress={handleSubmit}
+              disabled={loading}
             >
-              <View style={styles.cardTop}>
-                <View style={styles.mobileBrandRow}>
-                  {!heroVisible ? (
-                    <>
-                      <View style={[styles.logoBadge, { width: logoSize, height: logoSize, borderRadius: logoSize / 2 }]}>
-                        <Image source={require("@/assets/images/mavrixfy_icone.png")} style={styles.logoImage} contentFit="contain" />
-                      </View>
-                      <View style={styles.mobileBrandCopy}>
-                        <Text style={styles.mobileBrandName}>Mavrixfy</Text>
-                        <Text style={styles.mobileBrandTag}>
-                          {isSignup ? "Create your profile" : guestLoginEnabled ? "Login or guest access" : "Login or create an account"}
-                        </Text>
-                      </View>
-                    </>
-                  ) : (
-                    <View />
+              {loading ? (
+                <ActivityIndicator color={Colors.black} />
+              ) : (
+                <Text style={styles.submitBtnText}>
+                  {isSignup ? "Create Account" : "Log In"}
+                </Text>
+              )}
+            </Pressable>
+
+            {/* Switch Mode Link */}
+            <View style={styles.switchModeContainer}>
+              <Text style={styles.switchModeLabel}>
+                {isSignup ? "Already have an account? " : "Don't have an account? "}
+              </Text>
+              <Pressable onPress={toggleAuthMode}>
+                <Text style={styles.switchModeLink}>
+                  {isSignup ? "Log In" : "Sign Up"}
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* OAuth and Guest Stack */}
+            {showAuthActionStack && (
+              <View style={styles.oauthContainer}>
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or continue with</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                <View style={styles.oauthButtonsRow}>
+                  {/* Google */}
+                  {!isExpoGo && (
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.oauthCircleBtn,
+                        pressed ? styles.btnPressed : null,
+                      ]}
+                      onPress={handleGoogleSignIn}
+                      disabled={googleLoading}
+                    >
+                      {googleLoading ? (
+                        <ActivityIndicator size="small" color={Colors.text} />
+                      ) : (
+                        <MaterialCommunityIcons name="google" size={22} color={Colors.text} />
+                      )}
+                    </Pressable>
                   )}
 
-                  <View style={styles.modeBadge}>
-                    <Text style={styles.modeBadgeText}>{isSignup ? "SIGN UP" : "LOGIN"}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.modeSwitch}>
-                  <Pressable
-                    style={[styles.modeSwitchBtn, !isSignup ? styles.modeSwitchBtnActive : null]}
-                    onPress={() => switchMode("login")}
-                  >
-                    <Text style={[styles.modeSwitchText, !isSignup ? styles.modeSwitchTextActive : null]}>
-                      Log In
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.modeSwitchBtn, isSignup ? styles.modeSwitchBtnActive : null]}
-                    onPress={() => switchMode("signup")}
-                  >
-                    <Text style={[styles.modeSwitchText, isSignup ? styles.modeSwitchTextActive : null]}>
-                      Sign Up
-                    </Text>
-                  </Pressable>
-                </View>
-
-                <Text style={styles.cardTitle}>{title}</Text>
-                {!isUltraShort ? <Text style={styles.cardSubtitle}>{subtitle}</Text> : null}
-              </View>
-
-              {showAuthActionStack ? (
-                <View style={styles.authActionStack}>
-                  {showAppleLoginOption ? (
-                    <View style={[styles.appleButtonWrap, { height: primaryButtonHeight }]}>
+                  {/* Apple */}
+                  {showAppleLoginOption && (
+                    <View style={styles.appleButtonContainer}>
                       {appleLoading ? (
-                        <View style={styles.appleLoadingButton}>
-                          <ActivityIndicator size="small" color={Colors.black} />
-                          <Text style={styles.oauthButtonText}>Continue with Apple</Text>
+                        <View style={styles.oauthCircleBtn}>
+                          <ActivityIndicator size="small" color={Colors.text} />
                         </View>
                       ) : appleAvailable && Platform.OS === "ios" ? (
                         <AppleAuthentication.AppleAuthenticationButton
                           buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
                           buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-                          cornerRadius={primaryButtonHeight / 2}
-                          style={styles.appleButton}
+                          cornerRadius={26}
+                          style={styles.appleNativeBtn}
                           onPress={handleAppleSignIn}
                         />
-                      ) : Platform.OS === "web" ? (
-                        <Pressable
-                          style={styles.appleFallbackButton}
-                          onPress={handleAppleSignIn}
-                          accessibilityRole="button"
-                          accessibilityLabel="Continue with Apple"
-                        >
-                          <Ionicons name="logo-apple" size={20} color={Colors.black} />
-                          <Text style={styles.oauthButtonText}>Continue with Apple</Text>
-                        </Pressable>
                       ) : (
                         <Pressable
-                          style={[
-                            styles.appleFallbackButton,
-                            !appleAvailabilityChecked ? styles.appleFallbackButtonChecking : null,
+                          style={({ pressed }) => [
+                            styles.oauthCircleBtn,
+                            pressed ? styles.btnPressed : null,
                           ]}
-                          onPress={handleUnavailableAppleSignIn}
-                          accessibilityRole="button"
-                          accessibilityLabel="Continue with Apple"
+                          onPress={Platform.OS === "web" ? handleAppleSignIn : handleUnavailableAppleSignIn}
                         >
-                          {!appleAvailabilityChecked ? (
-                            <ActivityIndicator size="small" color={Colors.black} />
-                          ) : (
-                            <Ionicons name="logo-apple" size={20} color={Colors.black} />
-                          )}
-                          <Text style={styles.oauthButtonText}>Continue with Apple</Text>
+                          <Ionicons name="logo-apple" size={22} color={Colors.text} />
                         </Pressable>
                       )}
                     </View>
-                  ) : null}
+                  )}
 
-                  {!isExpoGo ? (
+                  {/* Guest */}
+                  {guestLoginEnabled && (
                     <Pressable
-                      style={[styles.oauthButton, { height: primaryButtonHeight }]}
-                      onPress={handleGoogleSignIn}
-                      disabled={googleLoading}
-                    >
-                      {googleLoading ? (
-                        <ActivityIndicator size="small" color={Colors.black} />
-                      ) : (
-                        <>
-                          <View style={styles.oauthIconWrap}>
-                            <MaterialCommunityIcons name="google" size={18} color="#DB4437" />
-                          </View>
-                          <Text style={styles.oauthButtonText}>Continue with Google</Text>
-                        </>
-                      )}
-                    </Pressable>
-                  ) : null}
-
-                  {guestLoginEnabled ? (
-                    <Pressable
-                      style={[styles.secondaryButton, { height: primaryButtonHeight }]}
+                      style={({ pressed }) => [
+                        styles.oauthCircleBtn,
+                        pressed ? styles.btnPressed : null,
+                      ]}
                       onPress={handleContinueAsGuest}
                     >
-                      <Ionicons name="person-circle-outline" size={18} color={Colors.text} />
-                      <Text style={styles.secondaryButtonText}>Continue As A Guest</Text>
+                      <Ionicons name="person-outline" size={22} color={Colors.text} />
                     </Pressable>
-                  ) : null}
-
-                  {!isExpoGo ? (
-                    <View style={styles.dividerRow}>
-                      <View style={styles.dividerLine} />
-                      <Text style={styles.dividerText}>or use email</Text>
-                      <View style={styles.dividerLine} />
-                    </View>
-                  ) : null}
+                  )}
                 </View>
-              ) : null}
-
-              <View style={[styles.formStack, { gap: fieldGap }]}>
-                {isSignup ? (
-                  <AuthField
-                    icon="person-outline"
-                    placeholder="Full Name"
-                    value={fullName}
-                    onChangeText={setFullName}
-                    autoCapitalize="words"
-                    compact={isUltraShort}
-                  />
-                ) : null}
-
-                <AuthField
-                  icon="mail-outline"
-                  placeholder="Email address"
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  compact={isUltraShort}
-                />
-
-                <AuthField
-                  icon="lock-closed-outline"
-                  placeholder="Password"
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry={!showPassword}
-                  compact={isUltraShort}
-                  trailing={
-                    <Pressable onPress={() => setShowPassword((prev) => !prev)} hitSlop={10}>
-                      <Ionicons
-                        name={showPassword ? "eye-off-outline" : "eye-outline"}
-                        size={20}
-                        color={Colors.inactive}
-                      />
-                    </Pressable>
-                  }
-                />
-
-                {!isSignup ? (
-                  <Pressable
-                    style={styles.inlineLink}
-                    onPress={handleForgotPassword}
-                    disabled={resetPasswordLoading}
-                  >
-                    <Text style={[styles.inlineLinkText, resetPasswordLoading ? styles.inlineLinkDisabled : null]}>
-                      {resetPasswordLoading ? "Sending reset link..." : "Forgot Password?"}
-                    </Text>
-                  </Pressable>
-                ) : (
-                  <Text style={styles.signupHint}>Use at least 6 characters for your password.</Text>
-                )}
               </View>
+            )}
 
-              <Pressable
-                style={[styles.primaryButton, { height: primaryButtonHeight }, loading ? styles.primaryButtonDisabled : null]}
-                onPress={handleSubmit}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color={Colors.black} />
-                ) : (
-                  <Text style={styles.primaryButtonText}>{isSignup ? "Create Account" : "Log In"}</Text>
-                )}
-              </Pressable>
-
-              <Text style={[styles.legalText, isNarrow ? styles.legalTextCompact : null]}>
-                By continuing, you agree to our{" "}
-                <Text style={styles.legalLink} onPress={() => { void openTermsOfService(); }}>
-                  Terms of Service
-                </Text>
-                {" "}and{" "}
-                <Text style={styles.legalLink} onPress={() => { void openPrivacyPolicy(); }}>
-                  Privacy Policy
-                </Text>
-                .
+            {/* Legal Links */}
+            <Text style={styles.legalText}>
+              By continuing, you agree to our{" "}
+              <Text style={styles.legalLink} onPress={() => { void openTermsOfService(); }}>
+                Terms
               </Text>
-            </View>
+              {" "}and{" "}
+              <Text style={styles.legalLink} onPress={() => { void openPrivacyPolicy(); }}>
+                Privacy Policy
+              </Text>
+              .
+            </Text>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
@@ -585,347 +512,177 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  flex: {
+  keyboardView: {
     flex: 1,
   },
-  page: {
-    flex: 1,
-    alignItems: "center",
+  scrollContainer: {
+    flexGrow: 1,
     justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 16,
   },
-  authShell: {
+  authCard: {
     width: "100%",
-    alignSelf: "center",
-    gap: 16,
-    alignItems: "stretch",
-    justifyContent: "center",
+    paddingHorizontal: 8,
   },
-  glowOrb: {
-    position: "absolute",
-    borderRadius: 999,
-    opacity: 0.18,
-  },
-  glowOrbTop: {
-    width: 220,
-    height: 220,
-    top: 40,
-    right: -50,
-    backgroundColor: Colors.primary,
-  },
-  glowOrbBottom: {
-    width: 200,
-    height: 200,
-    bottom: 20,
-    left: -50,
-    backgroundColor: "#1D4ED8",
-  },
-  heroPanel: {
-    flex: 1,
-    paddingRight: 14,
-    justifyContent: "center",
-  },
-  heroBrandRow: {
-    flexDirection: "row",
+  brandHeader: {
     alignItems: "center",
+    marginBottom: 28,
   },
-  heroBrandCopy: {
-    marginLeft: 14,
-    flex: 1,
-  },
-  heroBrandName: {
-    color: Colors.text,
-    fontSize: 19,
-    fontFamily: "Inter_700Bold",
-  },
-  heroBrandTag: {
-    marginTop: 2,
-    color: Colors.subtext,
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-  },
-  logoBadge: {
-    backgroundColor: "rgba(255,255,255,0.06)",
+  logoContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
     borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    alignItems: "center",
+    borderColor: "rgba(255, 255, 255, 0.08)",
     justifyContent: "center",
-    padding: 10,
+    alignItems: "center",
+    marginBottom: 16,
   },
   logoImage: {
-    width: "100%",
-    height: "100%",
+    width: 36,
+    height: 36,
   },
-  heroTitle: {
-    marginTop: 24,
-    color: Colors.text,
+  brandName: {
+    fontSize: 26,
     fontFamily: "Inter_700Bold",
-    letterSpacing: -0.7,
-    maxWidth: 520,
-  },
-  heroText: {
-    marginTop: 12,
-    color: Colors.subtext,
-    fontSize: 15,
-    lineHeight: 22,
-    maxWidth: 500,
-    fontFamily: "Inter_400Regular",
-  },
-  heroFeatureStack: {
-    marginTop: 20,
-    gap: 10,
-  },
-  heroFeature: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  heroFeatureText: {
     color: Colors.text,
+    letterSpacing: -0.5,
+    marginBottom: 6,
+  },
+  brandSubtitle: {
     fontSize: 13,
-    fontFamily: "Inter_500Medium",
-  },
-  card: {
-    borderRadius: 28,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    backgroundColor: "rgba(17,23,31,0.9)",
-    boxShadow: "none",
-    alignSelf: "center",
-  },
-  cardTop: {
-    marginBottom: 12,
-  },
-  mobileBrandRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    minHeight: 34,
-  },
-  mobileBrandCopy: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  mobileBrandName: {
-    color: Colors.text,
-    fontSize: 17,
-    fontFamily: "Inter_700Bold",
-  },
-  mobileBrandTag: {
-    marginTop: 2,
     color: Colors.subtext,
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    lineHeight: 18,
+    paddingHorizontal: 12,
   },
-  modeBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-  },
-  modeBadgeText: {
-    color: Colors.primary,
-    fontSize: 10,
-    letterSpacing: 0.8,
-    fontFamily: "Inter_700Bold",
-  },
-  modeSwitch: {
-    marginTop: 14,
-    flexDirection: "row",
-    padding: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-  },
-  modeSwitchBtn: {
-    flex: 1,
-    height: 38,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modeSwitchBtnActive: {
-    backgroundColor: Colors.primary,
-  },
-  modeSwitchText: {
-    color: Colors.subtext,
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
-  },
-  modeSwitchTextActive: {
-    color: Colors.black,
-  },
-  cardTitle: {
-    marginTop: 16,
-    color: Colors.text,
-    fontSize: 25,
-    lineHeight: 31,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: -0.4,
-  },
-  cardSubtitle: {
-    marginTop: 6,
-    color: Colors.subtext,
-    fontSize: 13,
-    lineHeight: 19,
-    fontFamily: "Inter_400Regular",
-  },
-  authActionStack: {
-    gap: 10,
-    marginBottom: 4,
-  },
-  appleButtonWrap: {
-    marginTop: 4,
-    width: "100%",
-  },
-  appleButton: {
-    width: "100%",
-    height: "100%",
-  },
-  appleLoadingButton: {
-    flex: 1,
-    borderRadius: 999,
-    backgroundColor: Colors.text,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-  },
-  appleFallbackButton: {
-    flex: 1,
-    borderRadius: 999,
-    backgroundColor: Colors.text,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-  },
-  appleFallbackButtonChecking: {
-    opacity: 0.82,
-  },
-  oauthButton: {
-    marginTop: 4,
-    borderRadius: 999,
-    backgroundColor: Colors.text,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-  },
-  oauthIconWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  oauthButtonText: {
-    color: Colors.black,
-    fontSize: 15,
-    fontFamily: "Inter_700Bold",
-  },
-  secondaryButton: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    backgroundColor: "rgba(255,255,255,0.04)",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  secondaryButtonText: {
-    color: Colors.text,
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
-  },
-  dividerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: Colors.cardBorder,
-  },
-  dividerText: {
-    color: Colors.inactive,
-    fontSize: 11,
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-    fontFamily: "Inter_600SemiBold",
-  },
-  formStack: {
-    marginTop: 2,
+  formContainer: {
+    gap: 12,
+    marginBottom: 20,
   },
   fieldShell: {
-    height: 48,
+    height: 52,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    backgroundColor: "rgba(255,255,255,0.04)",
-    paddingHorizontal: 14,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    paddingHorizontal: 16,
   },
-  fieldShellCompact: {
-    height: 44,
+  fieldShellFocused: {
+    borderColor: Colors.primary,
+    backgroundColor: "rgba(38, 225, 154, 0.04)",
+  },
+  fieldIcon: {
+    marginRight: 12,
   },
   fieldInput: {
     flex: 1,
     color: Colors.text,
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: "Inter_500Medium",
     paddingVertical: 0,
   },
-  inlineLink: {
-    alignSelf: "flex-end",
-    marginTop: 2,
+  eyeBtn: {
+    paddingLeft: 8,
   },
-  inlineLinkText: {
-    color: Colors.text,
-    fontSize: 13,
+  forgotBtn: {
+    alignSelf: "flex-end",
+    paddingVertical: 4,
+  },
+  forgotText: {
+    fontSize: 12.5,
+    color: Colors.subtext,
     fontFamily: "Inter_600SemiBold",
   },
-  inlineLinkDisabled: {
-    opacity: 0.7,
-  },
-  signupHint: {
-    color: Colors.inactive,
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-  },
-  primaryButton: {
-    marginTop: 14,
-    borderRadius: 999,
+  submitBtn: {
+    height: 52,
+    borderRadius: 26,
     backgroundColor: Colors.primary,
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
   },
-  primaryButtonDisabled: {
+  submitBtnDisabled: {
     opacity: 0.65,
   },
-  primaryButtonText: {
-    color: Colors.black,
+  submitBtnText: {
     fontSize: 15,
     fontFamily: "Inter_700Bold",
+    color: Colors.black,
+  },
+  btnPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
+  },
+  switchModeContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 24,
+  },
+  switchModeLabel: {
+    fontSize: 13,
+    color: Colors.subtext,
+  },
+  switchModeLink: {
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    color: Colors.primary,
+  },
+  oauthContainer: {
+    width: "100%",
+    marginBottom: 16,
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
+  dividerText: {
+    fontSize: 12,
+    color: Colors.inactive,
+    marginHorizontal: 12,
+    fontFamily: "Inter_500Medium",
+  },
+  oauthButtonsRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 16,
+  },
+  oauthCircleBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  appleButtonContainer: {
+    width: 52,
+    height: 52,
+  },
+  appleNativeBtn: {
+    width: 52,
+    height: 52,
   },
   legalText: {
-    marginTop: 12,
-    color: Colors.subtext,
-    fontSize: 11.5,
-    lineHeight: 17,
-    textAlign: "center",
-    fontFamily: "Inter_400Regular",
-  },
-  legalTextCompact: {
     fontSize: 11,
+    color: Colors.inactive,
+    textAlign: "center",
     lineHeight: 16,
+    marginTop: 8,
   },
   legalLink: {
     color: Colors.text,
