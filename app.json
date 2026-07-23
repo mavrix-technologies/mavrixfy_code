@@ -9,7 +9,7 @@
     "splash": {
       "image": "./assets/images/mavrixfy_icone.png",
       "resizeMode": "contain",
-      "backgroundColor": "#121212"
+      "backgroundColor": "#000000"
     },
     "ios": {
       "scheme": "mavrixfy",

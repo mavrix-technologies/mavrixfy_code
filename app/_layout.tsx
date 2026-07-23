@@ -302,38 +302,8 @@ function useRootLayoutNavigation() {
   const splashReleasedRef = useRef(false);
 
   useEffect(() => {
-    let safetyTimer: ReturnType<typeof setTimeout> | null = null;
-    let frameId: number | null = null;
-
-    // 5 seconds safety timeout to force hide the splash screen in case auth or database loading hangs.
-    safetyTimer = setTimeout(() => {
-      if (!splashReleasedRef.current) {
-        splashReleasedRef.current = true;
-        hideSplashScreenSafely("safety_timeout");
-        logger.warn("[RootLayoutNav] Splash screen hidden by safety timeout.");
-      }
-    }, 5000);
-
-    if (!loading && !splashReleasedRef.current) {
-      splashReleasedRef.current = true;
-      if (safetyTimer) {
-        clearTimeout(safetyTimer);
-        safetyTimer = null;
-      }
-      frameId = requestAnimationFrame(() => {
-        hideSplashScreenSafely("auth_ready");
-      });
-    }
-
-    return () => {
-      if (safetyTimer) {
-        clearTimeout(safetyTimer);
-      }
-      if (frameId !== null) {
-        cancelAnimationFrame(frameId);
-      }
-    };
-  }, [loading]);
+    hideSplashScreenSafely("instant_mount");
+  }, []);
 
   // ── Enterprise Notification Startup Sequence ────────────────────────────────
   // Runs once after auth resolves. Handles:
