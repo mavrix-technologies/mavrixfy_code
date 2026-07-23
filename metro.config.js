@@ -1,20 +1,11 @@
-const path = require("path");
 const { getDefaultConfig } = require("expo/metro-config");
 
 const config = getDefaultConfig(__dirname);
-
-// Watch the local package folder which is outside of Mavrixfy_App root
-const packagePath = path.resolve(__dirname, "../react-native-clean-youtube-iframe");
-config.watchFolders = [...(config.watchFolders || []), packagePath];
 
 // Keep Metro aligned with the current Expo config. New architecture is already
 // disabled in the native project settings where it actually matters.
 config.resolver = {
   ...config.resolver,
-  nodeModulesPaths: [
-    path.resolve(__dirname, "node_modules"),
-    path.resolve(packagePath, "node_modules"),
-  ],
   blockList: [
     /node_modules\/react-native-track-player\/lib\/web\/.*/,
     /node_modules\/react-native-track-player\/.*\.web\.js$/,

@@ -39,9 +39,6 @@
       <intent-filter>
         <action android:name="android.intent.action.MEDIA_BUTTON"/>
       </intent-filter>
-      <intent-filter>
-        <action android:name="android.media.browse.MediaBrowserService"/>
-      </intent-filter>
     </service>
     <service android:name="expo.modules.audio.service.AudioControlsService" android:enabled="false" tools:replace="android:enabled"/>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">

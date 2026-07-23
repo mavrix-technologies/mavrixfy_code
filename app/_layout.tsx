@@ -51,6 +51,8 @@ import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
 
 import QueueBottomSheet from "@/components/QueueBottomSheet";
 import { globalQueueSheetRef } from "@/lib/queueRef";
+import AddSongsBottomSheet from "@/components/AddSongsModal";
+import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import { logger } from "@/lib/logger";
 import { AppNavBar } from "@/app/(tabs)/_layout";
 
@@ -100,7 +102,7 @@ function hideSplashScreenSafely(reason: string) {
 }
 
 if (!isExpoGoRuntime()) {
-  SplashScreen.setOptions({ fade: true, duration: 320 });
+  SplashScreen.setOptions({ fade: false, duration: 0 });
 }
 
 // Filter out noisy expo-notifications warnings in the terminal console when testing in Expo Go
@@ -187,6 +189,7 @@ const paperTheme = {
   },
 };
 
+// react-doctor-disable-next-line react-doctor/only-export-components -- intentional global toast trigger
 export function showGlobalToast(message = "Added to queue") {
   globalToastListeners.forEach((listener) => listener(message));
 }
@@ -280,6 +283,7 @@ function GlobalToast() {
 // Kick off cache reads as early as possible so the home screen has data
 // ready the moment it mounts — no waiting spinner for returning users.
 let preWarmStarted = false;
+// react-doctor-disable-next-line react-doctor/only-export-components -- intentional cache pre-warm export
 export function preWarmHomeCache() {
   if (preWarmStarted) return;
   preWarmStarted = true;
@@ -631,9 +635,10 @@ function RootLayoutNav() {
         </View>
       ) : null}
 
-      {/* Queue sheet is always mounted but closed by default (index: -1) */}
+      {/* Queue & Add Songs sheets are mounted at root level above AppNavBar (zIndex: 999) */}
       <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
         <QueueBottomSheet ref={globalQueueSheetRef} />
+        <AddSongsBottomSheet ref={globalAddSongsSheetRef} />
       </View>
       <InAppPromotionPopup />
     </View>
@@ -863,7 +868,7 @@ export default function RootLayout() {
       if (!fontsLoadedRef.current) {
         logger.warn("[RootLayout] Safety timeout triggered. Proceeding without waiting for fonts/assets.");
       }
-    }, 3500);
+    }, 800);
 
     return () => clearTimeout(timer);
   }, []);
@@ -884,6 +889,14 @@ export default function RootLayout() {
     }
   }, [fontsLoaded]);
 
+  const isReady = safetyTimeoutActive || (appIsReady && fontsLoaded);
+
+  useEffect(() => {
+    if (isReady) {
+      hideSplashScreenSafely("isReady");
+    }
+  }, [isReady]);
+
   const handleError = useCallback((err: Error) => {
     // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
     setError(err);
@@ -897,8 +910,6 @@ export default function RootLayout() {
       </View>
     );
   }
-
-  const isReady = safetyTimeoutActive || (appIsReady && fontsLoaded);
 
   if (!isReady) {
     return null;

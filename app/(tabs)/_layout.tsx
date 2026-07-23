@@ -12,6 +12,7 @@ import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngin
 import { PingPongScroll } from "@/components/PingPongScroll";
 import {
   DEFAULT_ARTWORK_PALETTE,
+  ensureDarkHexColor,
   extractArtworkColors,
   getImmediateArtworkPalette,
   preloadDominantColors,
@@ -679,7 +680,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
       const g = parseInt(hex.slice(2, 4), 16);
       const b = parseInt(hex.slice(4, 6), 16);
       const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-      if (brightness < 100) return conceptText;
+      if (brightness < 120) return "#FFFFFF";
     }
     return raw;
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- textColor is the only reactive value; static string constants are excluded intentionally
@@ -691,7 +692,10 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     [safeTextColor]
   );
   const playIconColor = "#FFFFFF";
-  const playerSectionBg = artworkPalette.background;
+  const playerSectionBg = useMemo(
+    () => ensureDarkHexColor(artworkPalette.background),
+    [artworkPalette.background]
+  );
   const activeNavColor = "#FFFFFF";
   const navInactiveColor = conceptSubtext;
   const navBaseBg = "#0E1016";

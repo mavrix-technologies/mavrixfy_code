@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { FlatList, Platform, Pressable, StyleSheet, Text, View, TextInput, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
+import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, View, TextInput, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
@@ -12,6 +13,7 @@ import { triggerImpact } from "@/lib/haptics";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
 import OfflineBanner from "@/components/OfflineBanner";
 import SongRow from "@/components/SongRow";
+import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import AppTopHeader, {
   APP_TOP_HEADER_HEIGHT,
   AppTopHeaderDownloadButton,
@@ -31,8 +33,29 @@ const UI = {
   primaryB: "#00b87b",
 };
 
+const MOOD_SUGGESTIONS = [
+  "Smooth",
+  "Fast",
+  "Soothing",
+  "Pop",
+  "Peaceful",
+  "Love",
+  "Motivation",
+  "Mellow",
+  "Soft",
+  "Romantic",
+  "Slow",
+  "Soulful",
+  "Quiet",
+  "Relaxing",
+  "Moody",
+  "Party",
+  "Desi",
+] as const;
+
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export default function LikedSongsScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const { isAuthenticated } = useAuth();
@@ -41,6 +64,7 @@ export default function LikedSongsScreen() {
   const { isPlaying } = usePlaybackPlayState();
   const { playSong, likedSongs, togglePlay, toggleShuffle } = usePlayerActions();
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedMood, setSelectedMood] = useState<string | null>(null);
   const [isSearchMode, setIsSearchMode] = useState(false);
   const {
     isHeaderElevated,
@@ -64,12 +88,63 @@ export default function LikedSongsScreen() {
   }, [likedSongs]);
 
   const filteredSongs = useMemo(() => {
-    if (!searchQuery.trim()) return songs;
+    let list = songs;
+
+    if (selectedMood) {
+      const moodLower = selectedMood.toLowerCase();
+      const moodKeywords: Record<string, string[]> = {
+        smooth: ["smooth", "soothing", "mellow", "soft", "breeze", "quiet", "easy"],
+        fast: ["fast", "dance", "upbeat", "bhangra", "party", "beat", "rap"],
+        soothing: ["soothing", "relaxing", "peaceful", "calm", "unplugged", "chill", "soft", "meditation"],
+        pop: ["pop", "dance", "electronic", "synth", "party", "hit"],
+        peaceful: ["peaceful", "soothing", "quiet", "relaxing", "ambient", "prayer", "shanti"],
+        love: ["love", "dil", "pyar", "ishq", "heart", "pyaar", "valentine", "romantic", "forever"],
+        motivation: ["motivation", "gym", "power", "win", "hustle", "victory", "fire", "rise"],
+        mellow: ["mellow", "soft", "acoustic", "gentle", "chill", "quiet", "breeze"],
+        soft: ["soft", "gentle", "piano", "acoustic", "lofi", "lullaby", "slow"],
+        romantic: ["romantic", "love", "dil", "pyar", "ishq", "sanam", "tere", "humsafar", "heart"],
+        slow: ["slow", "unplugged", "reverb", "acoustic", "ballad", "subtle"],
+        soulful: ["soulful", "sufi", "sufism", "gazal", "ghazal", "khuda", "aayat", "duaa", "raahat"],
+        quiet: ["quiet", "peaceful", "silent", "night", "sleep", "rest", "lofi"],
+        relaxing: ["relaxing", "calm", "chill", "spa", "breeze", "nature", "waves"],
+        moody: ["moody", "sad", "alone", "dark", "broken", "judai", "pain", "tears"],
+        party: ["party", "club", "dj", "remix", "dance", "bhangra", "bass", "dhamaka"],
+        desi: ["desi", "punjabi", "hindi", "bollywood", "bhangra", "t-series", "filmi"],
+      };
+
+      const targetKeywords = moodKeywords[moodLower] || [moodLower];
+
+      const matches = list.filter((song) => {
+        const title = (song.title || "").toLowerCase();
+        const artist = (song.artist || "").toLowerCase();
+        const album = (song.album || "").toLowerCase();
+        const genre = (song.genre || "").toLowerCase();
+        const moodAttr = Array.isArray(song.mood)
+          ? song.mood.join(" ").toLowerCase()
+          : (song.mood || "").toLowerCase();
+
+        if (genre.includes(moodLower) || moodAttr.includes(moodLower)) return true;
+
+        return targetKeywords.some(
+          (kw) => title.includes(kw) || artist.includes(kw) || album.includes(kw)
+        );
+      });
+
+      if (matches.length > 0) {
+        list = matches;
+      } else {
+        const hashVal = moodLower.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        list = songs.filter((_, idx) => (idx + hashVal) % 3 !== 0);
+        if (list.length === 0) list = songs;
+      }
+    }
+
+    if (!searchQuery.trim()) return list;
     const query = searchQuery.toLowerCase();
-    return songs.filter((song) =>
+    return list.filter((song) =>
       song.title.toLowerCase().includes(query) || song.artist.toLowerCase().includes(query)
     );
-  }, [songs, searchQuery]);
+  }, [songs, selectedMood, searchQuery]);
 
   const isPlayingFromLikedSongs = useMemo(() => {
     if (!currentSong || songs.length === 0 || queue.length !== songs.length) return false;
@@ -122,7 +197,11 @@ export default function LikedSongsScreen() {
     [filteredSongs, filteredSongsQueueKey]
   );
 
-  const headerMeta = songs.length > 0 ? `${songs.length} songs` : "No songs";
+  const headerMeta = selectedMood
+    ? `${filteredSongs.length} songs • ${selectedMood}`
+    : songs.length > 0
+      ? `${songs.length} songs`
+      : "No songs";
 
   if (isSearchMode) {
     return (
@@ -297,6 +376,65 @@ export default function LikedSongsScreen() {
                 </Pressable>
               </View>
             </View>
+
+            {songs.length > 0 && (
+              <View style={styles.moodSection}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.moodScrollContent}
+                >
+                  {selectedMood && (
+                    <Pressable
+                      onPress={() => {
+                        void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                        setSelectedMood(null);
+                      }}
+                      style={[styles.moodChip, styles.moodChipActive]}
+                    >
+                      <Ionicons name="close" size={14} color="#042115" style={{ marginRight: 4 }} />
+                      <Text style={[styles.moodChipText, styles.moodChipTextActive]}>{selectedMood}</Text>
+                    </Pressable>
+                  )}
+                  {/* react-doctor-disable-next-line react-doctor/rn-no-scrollview-mapped-list -- static horizontal mood chips row */}
+                  {MOOD_SUGGESTIONS.map((mood) => {
+                    const isActive = selectedMood === mood;
+                    if (isActive) return null;
+                    return (
+                      <Pressable
+                        key={mood}
+                        onPress={() => {
+                          void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                          setSelectedMood(mood);
+                        }}
+                        style={({ pressed }) => [
+                          styles.moodChip,
+                          pressed && styles.moodChipPressed,
+                        ]}
+                      >
+                        <Text style={styles.moodChipText}>{mood}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+
+            <Pressable
+              onPress={() => {
+                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                globalAddSongsSheetRef.current?.expand();
+              }}
+              style={({ pressed }) => [
+                styles.addSongsContainer,
+                pressed && styles.addSongsContainerPressed,
+              ]}
+            >
+              <View style={styles.addSongsSquare}>
+                <Ionicons name="add" size={26} color={UI.text} />
+              </View>
+              <Text style={styles.addSongsText}>Add songs</Text>
+            </Pressable>
 
             {filteredSongs.length > 0 ? <View style={styles.songListSpacer} /> : null}
           </>
@@ -764,5 +902,68 @@ const styles = StyleSheet.create({
   stickyPlayButtonPressed: {
     backgroundColor: UI.primaryB,
     transform: [{ scale: 0.94 }],
+  },
+  moodSection: {
+    marginVertical: 10,
+    marginHorizontal: -14,
+  },
+  moodScrollContent: {
+    paddingHorizontal: 14,
+    gap: 8,
+    alignItems: "center",
+  },
+  moodChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: UI.highSurface,
+    borderWidth: 1,
+    borderColor: "rgba(61,74,61,0.38)",
+  },
+  moodChipActive: {
+    backgroundColor: UI.primaryA,
+    borderColor: "rgba(38,225,154,0.8)",
+  },
+  moodChipPressed: {
+    backgroundColor: "rgba(38,225,154,0.14)",
+    borderColor: UI.primaryA,
+    transform: [{ scale: 0.96 }],
+  },
+  moodChipText: {
+    color: UI.text,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  moodChipTextActive: {
+    color: "#042115",
+    fontFamily: "Inter_700Bold",
+  },
+  addSongsContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 2,
+    marginVertical: 4,
+    gap: 14,
+  },
+  addSongsContainerPressed: {
+    opacity: 0.7,
+  },
+  addSongsSquare: {
+    width: 52,
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: UI.highSurface,
+    borderWidth: 1,
+    borderColor: "rgba(61,74,61,0.38)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addSongsText: {
+    color: UI.text,
+    fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
   },
 });

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Mavrixfy",
     "slug": "mavrixfy",
-    "version": "3.0.1",
+    "version": "3.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/mavrixfy_icone.png",
     "userInterfaceStyle": "automatic",
@@ -16,7 +16,7 @@
       "supportsTablet": true,
       "icon": "./assets/images/mavrixfy_icon_ios.png",
       "bundleIdentifier": "com.mavrixfy.app",
-      "buildNumber": "30001",
+      "buildNumber": "31000",
       "bitcode": false,
       "usesAppleSignIn": true,
       "infoPlist": {
@@ -36,7 +36,7 @@
     "android": {
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
-      "versionCode": 30009,
+      "versionCode": 31000,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icone.png",
@@ -105,8 +105,8 @@
           },
           "android": {
             "minSdkVersion": 24,
-            "targetSdkVersion": 35,
-            "compileSdkVersion": 35,
+            "targetSdkVersion": 36,
+            "compileSdkVersion": 36,
             "AsyncStorage_db_size_in_MB": "200",
             "enableShrinkResourcesInReleaseBuilds": true,
             "enableProguardInReleaseBuilds": true,

@@ -30,8 +30,6 @@ if (!isRunningInExpoGo() && Platform.OS !== "web") {
   }
 }
 
-// Register the TrackPlayer background service for all non-Expo-Go native builds.
-// The player itself is still set up lazily from PlayerContext on first playback.
 if (!isRunningInExpoGo() && Platform.OS !== "web") {
   try {
     const trackPlayerModule = require("react-native-track-player");
@@ -40,7 +38,7 @@ if (!isRunningInExpoGo() && Platform.OS !== "web") {
       () => require("./lib/trackPlayerService").trackPlayerService
     );
   } catch {
-    // Native module unavailable in this runtime — silent fail.
+    // The native module is unavailable in Expo Go and on unsupported runtimes.
   }
 }
 

@@ -3,7 +3,7 @@
  *
  * Ensures required Android manifest entries are present after prebuild/EAS:
  * - FOREGROUND_SERVICE_MEDIA_PLAYBACK permission
- * - RNTP MusicService as the sole media session owner
+ * - RNTP MusicService as the sole media-session owner
  * - expo-audio AudioControlsService disabled (prevents competing media session)
  */
 const { withAndroidManifest } = require("expo/config-plugins");
@@ -67,7 +67,11 @@ const withTrackPlayer = (config) =>
       });
     }
 
-    // RNTP's MusicService — sole media session owner
+    // RNTP's MusicService is a media-session service, not a MediaBrowserService.
+    // Do not advertise the MediaBrowserService action here: Android Auto binds
+    // to that action and requires a real browser-service binder and a browse
+    // tree. Claiming it for RNTP's HeadlessJsTaskService is unsupported and
+    // prevents reliable Android Auto discovery.
     ensureService(app, {
       $: {
         "android:name": "com.doublesymmetry.trackplayer.service.MusicService",
@@ -78,12 +82,21 @@ const withTrackPlayer = (config) =>
       },
       "intent-filter": [
         { action: [{ $: { "android:name": "android.intent.action.MEDIA_BUTTON" } }] },
-        {
-          $: { "tools:node": "remove" },
-          action: [{ $: { "android:name": "android.media.browse.MediaBrowserService" } }],
-        },
       ],
     });
+
+    // Expo config plugins can run over an existing native project. Remove a
+    // stale, incorrect browser-service declaration from earlier builds.
+    const musicService = app.service.find(
+      (service) => service.$?.["android:name"] === "com.doublesymmetry.trackplayer.service.MusicService"
+    );
+    if (musicService?.["intent-filter"]) {
+      musicService["intent-filter"] = musicService["intent-filter"].filter(
+        (filter) => !filter.action?.some(
+          (action) => action.$?.["android:name"] === "android.media.browse.MediaBrowserService"
+        )
+      );
+    }
 
     // Disable expo-audio's AudioControlsService so it can't compete for the media session
     ensureService(app, {

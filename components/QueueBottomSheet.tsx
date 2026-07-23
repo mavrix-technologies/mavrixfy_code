@@ -38,7 +38,7 @@ import DraggableFlatList, {
   ScaleDecorator,
   type RenderItemParams,
 } from "react-native-draggable-flatlist";
-import { Swipeable } from "react-native-gesture-handler";
+import { Swipeable, Pressable as GHPressable } from "react-native-gesture-handler";
 import { ImpactFeedbackStyle } from "expo-haptics";
 
 import Colors from "@/constants/colors";
@@ -127,7 +127,7 @@ const QueueRow = React.memo(
             onSwipeableWillOpen={() => onSwipeOpen(swipeRef.current)}
           >
             <View style={s.rowLayer}>
-              <Pressable
+              <GHPressable
                 style={({ pressed }) => [s.row, pressed && s.rowPressed]}
                 onPress={handlePress}
                 accessibilityRole="button"
@@ -181,7 +181,7 @@ const QueueRow = React.memo(
                     color={isDragging ? Colors.primary : "#585858"}
                   />
                 </Pressable>
-              </Pressable>
+              </GHPressable>
             </View>
           </Swipeable>
         </View>
@@ -208,6 +208,7 @@ const QueueHeader = React.memo(({ upcomingQueueLength, onClose }: QueueHeaderPro
             </Text>
           )}
         </View>
+
         <Pressable
           style={s.closeBtn}
           onPress={onClose}

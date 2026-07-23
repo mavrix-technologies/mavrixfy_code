@@ -1281,9 +1281,7 @@ function useHomeScreenInnerView() {
       setRecommendationFeed(null);
       setHasRecommendationFeedFailed(true);
     } finally {
-      if (recommendationLoadId === latestRecommendationLoadIdRef.current) {
-        setIsRecommendationFeedLoading(false);
-      }
+      setIsRecommendationFeedLoading(false);
     }
   }, [firebaseUser, shouldUseRecommendationFeed]);
 
@@ -1559,16 +1557,11 @@ function useHomeScreenInnerView() {
           }
         }
       } finally {
-        // Always clear loading — whether we set it or it was already true from bootstrap
-        if (loadId === latestLoadIdRef.current) {
-          setLoading(false);
-          setIsLoadingCategories(false);
-          setIsLoadingNewReleaseSongs(false);
-          setIsLoadingYoutubeHomeCategories(false);
-          if (refreshPublicPlaylists) {
-            setIsLoadingPublicPlaylists(false);
-          }
-        }
+        setLoading(false);
+        setIsLoadingCategories(false);
+        setIsLoadingNewReleaseSongs(false);
+        setIsLoadingYoutubeHomeCategories(false);
+        setIsLoadingPublicPlaylists(false);
       }
     },
     [schedulePlaylistPrefetch]

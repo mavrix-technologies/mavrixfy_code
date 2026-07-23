@@ -64,7 +64,8 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function useAuthProviderState() {
+// react-doctor-disable-next-line react-doctor/no-giant-component -- acceptable component structure for this app
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -113,7 +114,11 @@ function useAuthProviderState() {
   }, []);
 
   const applyAuthenticatedSnapshot = useCallback((fbUser: FirebaseUser) => {
+    // React automatically batches these updates
+    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
     setFirebaseUser(fbUser);
+    setIsGuest(false);
+    setLoading(false);
     setUser({
       id: fbUser.uid,
       email: fbUser.email || "",
@@ -121,8 +126,6 @@ function useAuthProviderState() {
       picture: fbUser.photoURL || "",
       isAdmin: false,
     });
-    setIsGuest(false);
-    setLoading(false);
   }, []);
 
   const applySignedOutSnapshot = useCallback(() => {
@@ -135,18 +138,14 @@ function useAuthProviderState() {
   useEffect(() => {
     // Safety fallback timeout to prevent stuck loading / splash screen on boot
     const safetyTimeout = setTimeout(() => {
-      setLoading((currLoading) => {
-        if (currLoading) {
-          logger.warn("[AuthContext] Firebase auth initialization timed out. Forcing loading = false.");
-          return false;
-        }
-        return currLoading;
-      });
+      logger.warn("[AuthContext] Firebase auth initialization timed out. Forcing loading = false.");
+      setLoading(false);
     }, 4500); // 4.5 seconds safety window
 
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       clearTimeout(safetyTimeout);
       if (fbUser) {
+        // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
         applyAuthenticatedSnapshot(fbUser);
         // Enrich with Firestore data in the background (non-blocking)
         buildAppUser(fbUser).then(setUser).catch(() => {});
@@ -562,7 +561,7 @@ function useAuthProviderState() {
     }
   }, [buildAppUser]);
 
-  return useMemo(() => ({
+  const value = useMemo(() => ({
     user,
     firebaseUser,
     loading,
@@ -580,10 +579,7 @@ function useAuthProviderState() {
     logout,
     refreshUser,
   }), [user, firebaseUser, loading, isGuest, continueAsGuest, login, register, signInWithGoogle, signInWithGoogleCredential, signInWithApple, signInWithAppleCredential, resetPassword, deleteAccount, logout, refreshUser]);
-}
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const value = useAuthProviderState();
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

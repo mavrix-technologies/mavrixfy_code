@@ -289,9 +289,7 @@ function LibraryScreenView() {
           )
         );
       } finally {
-        if (!silent) {
-          setIsLoading(false);
-        }
+        setIsLoading(false);
       }
     },
     // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeUserId is the stable normalized form of user?.id used by this callback.

@@ -60,12 +60,29 @@ export interface SpotifyColorTheme {
 }
 
 export const DEFAULT_ARTWORK_PALETTE: ArtworkPalette = {
-  background: "#121212",
-  accent: "#535356",
+  background: "#0E1016",
+  accent: "#26e19a",
   text: "#FFFFFF",
   isDark: true,
-  primary: "#535356",
+  primary: "#26e19a",
 };
+
+export function ensureDarkHexColor(hexColor: string, maxLightness = 0.20, minLightness = 0.08): string {
+  const normalized = normalizeHexColor(hexColor) ?? DEFAULT_ARTWORK_PALETTE.background;
+  const r = parseInt(normalized.slice(1, 3), 16);
+  const g = parseInt(normalized.slice(3, 5), 16);
+  const b = parseInt(normalized.slice(5, 7), 16);
+  const { h, s, l } = rgbToHsl(r, g, b);
+
+  if (l > maxLightness) {
+    const clampedL = Math.max(minLightness, Math.min(maxLightness, l * 0.22));
+    const boostedS = Math.min(0.6, Math.max(s, 0.25));
+    const darkRgb = hslToRgb(h, boostedS, clampedL);
+    return rgbToHex(darkRgb.r, darkRgb.g, darkRgb.b);
+  }
+
+  return normalized;
+}
 
 const COLOR_CACHE_MAX_ENTRIES = 200;
 const paletteCache = new Map<string, ArtworkPalette>();
@@ -191,10 +208,9 @@ async function extractArtworkColorsUncached(cacheKey: string): Promise<ArtworkPa
   if (getColors) {
     const sources = await buildArtworkSources(cacheKey);
 
-    const trySource = async (index: number): Promise<ArtworkPalette | null> => {
-      if (index >= sources.length) return null;
+    for (let i = 0; i < sources.length; i++) {
       try {
-        const result = await getColors(sources[index], {
+        const result = await getColors(sources[i], {
           fallback: DEFAULT_ARTWORK_PALETTE.background,
           cache: false,
           quality: "high",
@@ -210,11 +226,7 @@ async function extractArtworkColorsUncached(cacheKey: string): Promise<ArtworkPa
       } catch {
         // Try next source.
       }
-      return trySource(index + 1);
-    };
-
-    const palette = await trySource(0);
-    if (palette) return palette;
+    }
   }
 
   try {
@@ -402,13 +414,25 @@ function mapImageColorsToPalette(result: ImageColorsResult): ArtworkPalette {
 
 function buildPalette(background: string, accent: string): ArtworkPalette {
   const bg = normalizeHexColor(background) ?? DEFAULT_ARTWORK_PALETTE.background;
+  const darkBg = ensureDarkHexColor(bg);
   const accentColor = normalizeHexColor(accent) ?? DEFAULT_ARTWORK_PALETTE.accent;
+
+  const r = parseInt(accentColor.slice(1, 3), 16);
+  const g = parseInt(accentColor.slice(3, 5), 16);
+  const b = parseInt(accentColor.slice(5, 7), 16);
+  const { h, s, l } = rgbToHsl(r, g, b);
+  let finalAccent = accentColor;
+  if (l < 0.35 || l > 0.85) {
+    const adjustedRgb = hslToRgb(h, Math.max(s, 0.45), Math.min(0.65, Math.max(0.45, l * 0.7)));
+    finalAccent = rgbToHex(adjustedRgb.r, adjustedRgb.g, adjustedRgb.b);
+  }
+
   return {
-    background: bg,
-    accent: accentColor,
+    background: darkBg,
+    accent: finalAccent,
     text: "#FFFFFF",
     isDark: true,
-    primary: accentColor,
+    primary: finalAccent,
   };
 }
 

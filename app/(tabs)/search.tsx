@@ -101,6 +101,7 @@ async function fetchYouTubeSuggestions(query: string, signal: AbortSignal): Prom
     `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&client=firefox&q=${encodeURIComponent(query)}`,
     { signal }
   );
+  if (!response.ok) return [];
   const data = await response.json();
   return Array.isArray(data) && Array.isArray(data[1])
     ? data[1].map((suggestion) => String(suggestion || ""))

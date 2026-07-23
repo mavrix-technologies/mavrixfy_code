@@ -23,7 +23,7 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useNavigation, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, Pressable as GHPressable, FlatList as GHFlatList } from "react-native-gesture-handler";
 import Reanimated, {
   Extrapolation,
   interpolate,
@@ -276,6 +276,16 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   }, [revealVideo]);
 
   useEffect(() => {
+    if (playerReady && playerRef.current) {
+      if (isPlaying) {
+        playerRef.current.playVideo?.();
+      } else {
+        playerRef.current.pauseVideo?.();
+      }
+    }
+  }, [isPlaying, playerReady]);
+
+  useEffect(() => {
     // Skip seek sync on low-end — saves a WebView injectJavaScript call on every audio tick
     if (isLowEnd) return;
     const targetSeconds = Math.max(0, Math.floor(positionMillis / 1000));
@@ -288,15 +298,15 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   const dimensions = useMemo(() => {
     const frameW = Math.max(winW, 220);
     const frameH = Math.max(containerHeight, 220);
-    
+
     const containerAspect = frameW / frameH;
     const videoAspect = 16 / 9;
-    
+
     let videoW = frameW;
     let videoH = frameH;
     let offsetX = 0;
     let offsetY = 0;
-    
+
     if (videoAspect > containerAspect) {
       videoH = frameH;
       videoW = Math.round(frameH * videoAspect);
@@ -306,7 +316,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
       videoH = Math.round(frameW / videoAspect);
       offsetY = Math.round(-(videoH - frameH) / 2);
     }
-    
+
     return {
       frameW: videoW,
       frameH: videoH,
@@ -339,7 +349,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
           height={dimensions.frameH}
           width={dimensions.frameW}
           // Backdrop is muted and decorative — always play while mounted; gated by shouldRenderBackgroundVideo
-          play={true}
+          play={isPlaying}
           mute={true}
           volume={0}
           videoId={videoId}
@@ -511,7 +521,7 @@ function PlayerPlayButton({
     }, 180);
 
     return () => clearTimeout(timer);
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- isLoading is the only reactive dep needed
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- isLoading is the only reactive dep needed
   }, [isLoading]);
 
   return (
@@ -951,7 +961,7 @@ const QueueSongRow = memo(
     );
 
     return (
-      <Pressable style={rowStyle} onPress={handlePress}>
+      <GHPressable style={rowStyle} onPress={handlePress}>
         <View style={styles.queueLead}>
           {isCurrent ? (
             <EqualizerBars isPlaying={isPlaying} size={3} color="#F7FAFF" />
@@ -986,7 +996,7 @@ const QueueSongRow = memo(
         <Text style={isCurrent ? styles.queueDurationActive : styles.queueDuration}>
           {formatDuration(item.duration)}
         </Text>
-      </Pressable>
+      </GHPressable>
     );
   }
 );
@@ -1342,7 +1352,7 @@ function LegacyPlayerScreenView() {
     return () => {
       cancelled = true;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screenSongIdForVideo]); // intentionally excludes screenSong object — only song ID change should retrigger
 
   const ambientVideoLayoutActive = useMemo(() => Boolean(
@@ -1409,7 +1419,7 @@ function LegacyPlayerScreenView() {
     setAlbumColor(palette.accent);
     setTextColor(palette.text);
   }, [setAlbumColor, setTextColor]);
-  
+
   const handleSongOptionsPress = useCallback(() => {
     if (!screenSong || optionsPressLockRef.current) return;
 
@@ -1432,16 +1442,16 @@ function LegacyPlayerScreenView() {
     setTimeout(() => {
       optionsPressLockRef.current = false;
     }, 600);
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- optionsPressLockRef is a stable ref; screenSong is the only reactive dep
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- optionsPressLockRef is a stable ref; screenSong is the only reactive dep
   }, [screenSong]);
-  
+
   useEffect(() => {
     if (!interactionReady) return;
     let active = true;
     const cover = screenSong?.coverUrl?.trim();
     if (!cover) {
       applyPlayerArtworkColors(DEFAULT_ARTWORK_PALETTE);
-      return () => {};
+      return () => { };
     }
 
     const immediatePalette = getImmediateArtworkPalette(cover);
@@ -1454,7 +1464,7 @@ function LegacyPlayerScreenView() {
         // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
         applyPlayerArtworkColors(palette);
       })
-      .catch(() => {});
+      .catch(() => { });
 
     return () => {
       active = false;
@@ -1503,7 +1513,7 @@ function LegacyPlayerScreenView() {
 
   const artworkDismissAnimatedStyle = useAnimatedStyle(() => {
     const translateYVal = Math.max(0, playerDismissTranslateY.value);
-    
+
     const scaleVal = interpolate(
       translateYVal,
       [0, screenHeight],
@@ -1586,8 +1596,8 @@ function LegacyPlayerScreenView() {
       return queue;
     }
     return currentSong ? [currentSong] : [];
-  // currentSong only needed as fallback when both queues are empty (single song)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // currentSong only needed as fallback when both queues are empty (single song)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queue, sourceQueue, currentSong?.id]);
   const liveActiveQueueIndex = useMemo(() => {
     if (livePlayingQueue.length === 0) return 0;
@@ -1668,8 +1678,8 @@ function LegacyPlayerScreenView() {
   const handlePlayRelatedSong = useCallback((song: Song) => {
     playSong(song, [song, ...playingQueue.slice(activeQueueIndex + 1)]);
   },
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeQueueIndex is the normalized liveActiveQueueIndex used by this handler.
-  [playingQueue, activeQueueIndex, playSong]);
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeQueueIndex is the normalized liveActiveQueueIndex used by this handler.
+    [playingQueue, activeQueueIndex, playSong]);
 
   const artworkQueue = useMemo<ArtworkQueueItem[]>(() => {
     const occurrenceByKey = new Map<string, number>();
@@ -1695,15 +1705,15 @@ function LegacyPlayerScreenView() {
     ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
-    void Image.prefetch(urls, "memory-disk").catch(() => {});
+    void Image.prefetch(urls, "memory-disk").catch(() => { });
     preloadDominantColors(urls);
   }, [activeQueueIndex, liveActiveQueueIndex, playingQueue]);
 
   const liked = screenSong ? isLiked(screenSong.id) : false;
   const queueRowHeight = isShortScreen ? 48 : 54;
   const queueViewportHeight = Math.min(
-    playingQueue.length * queueRowHeight + 18,
-    Math.round(screenHeight * 0.42)
+    playingQueue.length * queueRowHeight + 16,
+    Math.round(screenHeight * 0.55)
   );
   const queueViewportStyle = useMemo(
     () => ({ height: queueViewportHeight }),
@@ -1886,14 +1896,14 @@ function LegacyPlayerScreenView() {
 
       playSong(targetSong, playingQueue);
     },
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- skipCooldown/timer refs are stable; all reactive deps are listed
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- skipCooldown/timer refs are stable; all reactive deps are listed
     [activeQueueIndex, clearSkipCooldownTimer, nextSong, playSong, playingQueue, prevSong]
   );
 
 
   useEffect(() => {
     pendingArtworkTargetIndexRef.current = activeQueueIndex;
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- pendingArtworkTargetIndexRef is a stable ref; activeQueueIndex is the only reactive dep
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- pendingArtworkTargetIndexRef is a stable ref; activeQueueIndex is the only reactive dep
   }, [activeQueueIndex]);
 
   const handleArtworkScrollFinished = useCallback(
@@ -2001,7 +2011,7 @@ function LegacyPlayerScreenView() {
 
           playerDismissTranslateY.value = withSpring(0, PLAYER_PRIMARY_DISMISS_SPRING);
         }),
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (gesture state and screen dimensions) are listed
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (gesture state and screen dimensions) are listed
     // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeQueueIndex and artCarouselPageWidth are normalized aliases of the reported live values.
     [
       finishPlayerGestureDismiss,
@@ -2038,7 +2048,7 @@ function LegacyPlayerScreenView() {
     });
 
     return () => cancelAnimationFrame(frame);
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- hasAlignedArtCarouselRef and prevSongIdRef are stable refs; all reactive deps listed
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- hasAlignedArtCarouselRef and prevSongIdRef are stable refs; all reactive deps listed
   }, [activeQueueIndex, artCarouselSnapInterval, artScrollX, playingQueue.length, currentSong?.id]);
 
   const renderArtworkCard = useCallback(
@@ -2109,7 +2119,7 @@ function LegacyPlayerScreenView() {
               )}
             </View>
 
-            </Animated.View>
+          </Animated.View>
         </Pressable>
       );
 
@@ -2161,17 +2171,20 @@ function LegacyPlayerScreenView() {
     const baseKey = String(item.id || item.audioUrl || item.title || "queue-song");
     return `${baseKey}-${index}`;
   }, []);
-  
+
   // Optimize queue FlatList performance with getItemLayout
   const getQueueItemLayout = useCallback(
-    (_data: ArrayLike<Song> | null | undefined, index: number) => ({
-      length: isShortScreen ? 56 : 64, // Approximate height of QueueSongRow
-      offset: (isShortScreen ? 56 : 64) * index,
-      index,
-    }),
+    (_data: ArrayLike<Song> | null | undefined, index: number) => {
+      const rowH = isShortScreen ? 48 : 54;
+      return {
+        length: rowH,
+        offset: rowH * index,
+        index,
+      };
+    },
     [isShortScreen]
   );
-  
+
   const renderPlayerScrollItem = useCallback(() => null, []);
 
   if (!screenSong) {
@@ -2226,413 +2239,425 @@ function LegacyPlayerScreenView() {
           <CinematicPlayerBackground />
         </Reanimated.View>
 
-        <View
-          pointerEvents="none"
-          style={[
-            styles.lowerDarkBackdrop,
-            { top: Math.max(200, topInset + topBarHeight + artSize + (isShortScreen ? 92 : 116) - 160) },
-          ]}
-        >
-          <LinearGradient
+        {!shouldRenderBackgroundVideo ? (
+          <View
             pointerEvents="none"
-            colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.58)", "rgba(0,0,0,0.82)"]}
-            style={{ height: 160, width: "100%" }}
-          />
-          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.82)" }} />
-        </View>
-
-      <View style={[styles.playerForeground, { paddingBottom: 0 }]}>
-      <Reanimated.View
-        style={[
-          styles.topBar,
-          {
-            position: "absolute",
-            top: topInset,
-            left: 0,
-            right: 0,
-            height: topBarHeight,
-            paddingHorizontal: isShortScreen ? 14 : 18,
-            zIndex: 10,
-          },
-          controlsDismissAnimatedStyle,
-        ]}
-      >
-        <View style={styles.headerSideGroup}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.headerIconButton,
-              pressed && styles.headerIconButtonPressed,
+            style={[
+              styles.lowerDarkBackdrop,
+              { top: Math.max(200, topInset + topBarHeight + artSize + (isShortScreen ? 92 : 116) - 160) },
             ]}
-            onPress={safeGoBack}
-            hitSlop={10}
           >
-            <Ionicons name="chevron-down" size={30} color={sheetTextColor} />
-          </Pressable>
-        </View>
+            <LinearGradient
+              pointerEvents="none"
+              colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.58)", "rgba(0,0,0,0.82)"]}
+              style={{ height: 160, width: "100%" }}
+            />
+            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.82)" }} />
+          </View>
+        ) : null}
 
-        <View style={styles.headerCenter}>
-          <Text style={[styles.headerAlbum, { fontSize: isShortScreen ? 12 : 13 }]} numberOfLines={1}>
-            {screenSong.album || "Single"}
-          </Text>
-        </View>
-
-        <View style={[styles.headerSideGroup, styles.headerRightGroup]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open song options"
-            style={({ pressed }) => [
-              styles.headerIconButton,
-              pressed && styles.headerIconButtonPressed,
+        <View style={[styles.playerForeground, { paddingBottom: 0 }]}>
+          <Reanimated.View
+            style={[
+              styles.topBar,
+              {
+                position: "absolute",
+                top: topInset,
+                left: 0,
+                right: 0,
+                height: topBarHeight,
+                paddingHorizontal: isShortScreen ? 14 : 18,
+                zIndex: 10,
+              },
+              controlsDismissAnimatedStyle,
             ]}
-            onPress={handleSongOptionsPress}
-            hitSlop={10}
           >
-            <Ionicons name="ellipsis-horizontal" size={26} color={sheetTextColor} />
-          </Pressable>
-        </View>
-      </Reanimated.View>
+            <View style={styles.headerSideGroup}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.headerIconButton,
+                  pressed && styles.headerIconButtonPressed,
+                ]}
+                onPress={safeGoBack}
+                hitSlop={10}
+              >
+                <Ionicons name="chevron-down" size={30} color={sheetTextColor} />
+              </Pressable>
+            </View>
 
-      <FlatList
-        style={styles.playerScroll}
-        data={EMPTY_PLAYER_SCROLL_SONGS}
-        keyExtractor={(item) => item.id}
-        renderItem={renderPlayerScrollItem}
-        contentContainerStyle={[styles.playerScrollContent, { paddingBottom: listBottomPadding }]}
-        showsVerticalScrollIndicator={false}
-        nestedScrollEnabled
-        scrollEnabled={Platform.OS === "android" ? !isProgressSeeking : true}
-        keyboardShouldPersistTaps="handled"
-        bounces={Platform.OS === "ios"}
-        alwaysBounceVertical={Platform.OS === "ios"}
-        overScrollMode="never"
-        onScroll={handlePlayerScroll}
-        scrollEventThrottle={16}
-        ListHeaderComponent={
-          <>
-            {shouldRenderBackgroundVideo ? (() => {
-              // Low-end: use a smaller WebView surface (half height) to reduce GPU compositing load.
-              // The gradient still fills to black so the smaller frame is invisible at the seam.
-              const containerH = Math.round(
-                screenWidth * (16 / 9) * (isLowEnd ? 0.5 : 1)
-              );
-              return (
-                <Animated.View
-                  pointerEvents="none"
-                  style={[
-                    styles.backgroundYoutubeContainer,
-                    {
-                      height: containerH,
-                      opacity: artScrollX.interpolate({
-                        inputRange: [
-                          (activeQueueIndex - 1) * artCarouselSnapInterval,
-                          activeQueueIndex * artCarouselSnapInterval,
-                          (activeQueueIndex + 1) * artCarouselSnapInterval,
-                        ],
-                        outputRange: [0, 1, 0],
-                        extrapolate: "clamp",
-                      }),
-                    },
-                  ]}
-                >
-                  <BackgroundYoutubeVideo
-                    key={`bg-video-${backgroundVideoId}`}
-                    videoId={backgroundVideoId!}
-                    isPlaying={isScreenFocused}
-                    positionMillis={positionMillis}
-                    containerHeight={containerH}
-                    isLowEnd={isLowEnd}
-                  />
-                  <LinearGradient
-                    pointerEvents="none"
-                    colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.48)", "rgba(0,0,0,0.92)", "#000000"]}
-                    locations={[0, 0.45, 0.82, 1]}
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      height: 220,
-                    }}
-                  />
-                </Animated.View>
-              );
-            })() : null}
-            <View
-              style={[
-                styles.playerContent,
-                {
-                  paddingTop: topInset + topBarHeight,
-                  paddingBottom: isShortScreen ? 10 : 14,
-                },
-                ambientVideoLayoutActive && {
-                  minHeight: screenHeight - topInset - (isShortScreen ? 110 : 130),
-                  paddingBottom: 0,
-                },
-              ]}
-            >
-                <GestureDetector gesture={playerPrimaryDismissGesture}>
-                  <View
-                    style={[
-                      styles.playerPrimaryStack,
-                      ambientVideoLayoutActive && { flex: 1 },
-                    ]}
-                  >
+            <View style={styles.headerCenter}>
+              <Text style={[styles.headerAlbum, { fontSize: isShortScreen ? 12 : 13 }]} numberOfLines={1}>
+                {screenSong.album || "Single"}
+              </Text>
+            </View>
+
+            <View style={[styles.headerSideGroup, styles.headerRightGroup]}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open song options"
+                style={({ pressed }) => [
+                  styles.headerIconButton,
+                  pressed && styles.headerIconButtonPressed,
+                ]}
+                onPress={handleSongOptionsPress}
+                hitSlop={10}
+              >
+                <Ionicons name="ellipsis-horizontal" size={26} color={sheetTextColor} />
+              </Pressable>
+            </View>
+          </Reanimated.View>
+
+          <FlatList
+            style={styles.playerScroll}
+            data={EMPTY_PLAYER_SCROLL_SONGS}
+            keyExtractor={(item) => item.id}
+            renderItem={renderPlayerScrollItem}
+            contentContainerStyle={[styles.playerScrollContent, { paddingBottom: listBottomPadding }]}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+            scrollEnabled={Platform.OS === "android" ? !isProgressSeeking : true}
+            keyboardShouldPersistTaps="handled"
+            bounces={Platform.OS === "ios"}
+            alwaysBounceVertical={Platform.OS === "ios"}
+            overScrollMode="never"
+            onScroll={handlePlayerScroll}
+            scrollEventThrottle={16}
+            ListHeaderComponent={
+              <>
+                {shouldRenderBackgroundVideo ? (() => {
+                  // Low-end: use a smaller WebView surface (half height) to reduce GPU compositing load.
+                  // The gradient still fills to black so the smaller frame is invisible at the seam.
+                  const containerH = Math.max(
+                    Math.round(screenHeight * 0.90),
+                    Math.round(screenWidth * (16 / 9))
+                  ) * (isLowEnd ? 0.6 : 1);
+                  return (
+                    <Animated.View
+                      pointerEvents="none"
+                      style={[
+                        styles.backgroundYoutubeContainer,
+                        {
+                          height: containerH,
+                          opacity: artScrollX.interpolate({
+                            inputRange: [
+                              (activeQueueIndex - 1) * artCarouselSnapInterval,
+                              activeQueueIndex * artCarouselSnapInterval,
+                              (activeQueueIndex + 1) * artCarouselSnapInterval,
+                            ],
+                            outputRange: [0, 1, 0],
+                            extrapolate: "clamp",
+                          }),
+                        },
+                      ]}
+                    >
+                      <BackgroundYoutubeVideo
+                        key={`bg-video-${backgroundVideoId}`}
+                        videoId={backgroundVideoId!}
+                        isPlaying={isScreenFocused && playerIsPlaying}
+                        positionMillis={positionMillis}
+                        containerHeight={containerH}
+                        isLowEnd={isLowEnd}
+                      />
+                      <LinearGradient
+                        pointerEvents="none"
+                        colors={[
+                          "rgba(0,0,0,0)",
+                          "rgba(0,0,0,0.06)",
+                          "rgba(0,0,0,0.18)",
+                          "rgba(0,0,0,0.45)",
+                          "rgba(0,0,0,0.85)",
+                          "#000000",
+                        ]}
+                        locations={[0, 0.25, 0.50, 0.75, 0.90, 1.0]}
+                        style={{
+                          position: "absolute",
+                          left: 0,
+                          right: 0,
+                          bottom: -1,
+                          height: 280,
+                        }}
+                      />
+                    </Animated.View>
+                  );
+                })() : null}
                 <View
                   style={[
-                    styles.artWrap,
+                    styles.playerContent,
                     {
-                      marginTop: ambientVideoLayoutActive
-                        ? isShortScreen ? 4 : 8
-                        : isVeryShortScreen ? 8 : isShortScreen ? 12 : 18,
-                      paddingHorizontal: 0,
+                      paddingTop: topInset + topBarHeight,
+                      paddingBottom: isShortScreen ? 10 : 14,
+                    },
+                    ambientVideoLayoutActive && {
+                      minHeight: screenHeight - topInset - (isShortScreen ? 110 : 130),
+                      paddingBottom: 0,
                     },
                   ]}
                 >
-                  <AnimatedSongFlatList
-                    ref={(list: any) => {
-                      artCarouselRef.current = list as FlatList<ArtworkQueueItem> | null;
-                    }}
-                    data={artworkQueue}
-                    keyExtractor={(item: ArtworkQueueItem) => item.artworkKey}
-                    renderItem={renderArtworkCard}
-                    horizontal
-                    pagingEnabled={Platform.OS === "ios"}
-                    showsHorizontalScrollIndicator={false}
-                    bounces={false}
-                    scrollEnabled={playingQueue.length > 1 && !isProgressSeeking}
-                    decelerationRate="fast"
-                    disableIntervalMomentum
-                    snapToAlignment="start"
-                    snapToInterval={artCarouselSnapInterval}
-                    contentContainerStyle={styles.artCarouselContent}
-                    style={styles.artCarousel}
-                    getItemLayout={artCarouselGetItemLayout}
-                    initialNumToRender={3}
-                    maxToRenderPerBatch={2}
-                    windowSize={3}
-                    updateCellsBatchingPeriod={80}
-                    removeClippedSubviews={Platform.OS === "android"}
-                    onScroll={handleArtworkScroll}
-                    scrollEventThrottle={16}
-                    onMomentumScrollEnd={handleArtworkScrollFinished}
-                  />
+                  <GestureDetector gesture={playerPrimaryDismissGesture}>
+                    <View
+                      style={[
+                        styles.playerPrimaryStack,
+                        ambientVideoLayoutActive && { flex: 1 },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.artWrap,
+                          {
+                            marginTop: ambientVideoLayoutActive
+                              ? isShortScreen ? 4 : 8
+                              : isVeryShortScreen ? 8 : isShortScreen ? 12 : 18,
+                            paddingHorizontal: 0,
+                          },
+                        ]}
+                      >
+                        <AnimatedSongFlatList
+                          ref={(list: any) => {
+                            artCarouselRef.current = list as FlatList<ArtworkQueueItem> | null;
+                          }}
+                          data={artworkQueue}
+                          keyExtractor={(item: ArtworkQueueItem) => item.artworkKey}
+                          renderItem={renderArtworkCard}
+                          horizontal
+                          pagingEnabled={Platform.OS === "ios"}
+                          showsHorizontalScrollIndicator={false}
+                          bounces={false}
+                          scrollEnabled={playingQueue.length > 1 && !isProgressSeeking}
+                          decelerationRate="fast"
+                          disableIntervalMomentum
+                          snapToAlignment="start"
+                          snapToInterval={artCarouselSnapInterval}
+                          contentContainerStyle={styles.artCarouselContent}
+                          style={styles.artCarousel}
+                          getItemLayout={artCarouselGetItemLayout}
+                          initialNumToRender={3}
+                          maxToRenderPerBatch={2}
+                          windowSize={3}
+                          updateCellsBatchingPeriod={80}
+                          removeClippedSubviews={Platform.OS === "android"}
+                          onScroll={handleArtworkScroll}
+                          scrollEventThrottle={16}
+                          onMomentumScrollEnd={handleArtworkScrollFinished}
+                        />
+                      </View>
+
+                      {ambientVideoLayoutActive ? (
+                        <View style={{ flex: 1 }} />
+                      ) : null}
+
+                      <Reanimated.View style={[{ flexGrow: 0 }, controlsDismissAnimatedStyle]}>
+                        <View
+                          style={[
+                            styles.songBlock,
+                            {
+                              marginTop: ambientVideoLayoutActive
+                                ? isShortScreen ? 75 : 95
+                                : isVeryShortScreen ? 22 : isShortScreen ? 26 : 34,
+                              marginHorizontal: isShortScreen ? 14 : 20,
+                            },
+                          ]}
+                        >
+                          {/* Small album artwork on the left */}
+                          <Image
+                            source={{ uri: screenSong.coverUrl || "" }}
+                            style={styles.songBlockArtwork}
+                            contentFit="cover"
+                            transition={200}
+                            cachePolicy="memory-disk"
+                          />
+                          <View style={styles.songTextWrap}>
+                            <PingPongScroll
+                              text={screenSong.title}
+                              style={[
+                                styles.songTitle,
+                                {
+                                  color: sheetTextColor,
+                                  fontSize: isVeryShortScreen ? 21 : isShortScreen ? 23 : 25,
+                                  lineHeight: isVeryShortScreen ? 25 : isShortScreen ? 27 : 30,
+                                },
+                              ]}
+                              velocity={12}
+                              paused={!interactionReady}
+                            />
+                            <PingPongScroll
+                              text={screenSong.artist}
+                              style={[
+                                styles.songArtist,
+                                {
+                                  color: sheetMutedTextColor,
+                                  fontSize: isVeryShortScreen ? 12 : 13,
+                                  lineHeight: isVeryShortScreen ? 16 : 18,
+                                },
+                              ]}
+                              velocity={10}
+                              paused={!interactionReady}
+                            />
+                          </View>
+                          <View style={styles.songDetailActions}>
+                            <SmoothControlButton
+                              style={[styles.songDetailActionButton, songDetailActionBtnStyle]}
+                              onPress={() => {
+                                toggleLike(screenSong);
+                              }}
+                            >
+                              <Ionicons
+                                name={liked ? "heart" : "heart-outline"}
+                                size={songDetailIconSize}
+                                color={liked ? selectedControlIconColor : "#FFFFFF"}
+                              />
+                            </SmoothControlButton>
+
+                            {!screenSongIsYouTube ? (
+                              <View style={[styles.songDetailActionButton, songDetailActionBtnStyle]}>
+                                <DownloadButton
+                                  song={screenSong}
+                                  size={songDetailIconSize}
+                                  color="#FFFFFF"
+                                  style={[styles.playerDownloadButton, songDetailDownloadBtnStyle]}
+                                />
+                              </View>
+                            ) : null}
+                          </View>
+                        </View>
+                      </Reanimated.View>
+                    </View>
+                  </GestureDetector>
+
+                  <Reanimated.View style={controlsDismissAnimatedStyle}>
+                    <View style={styles.playerActionStack}>
+                      <PlayerSpotifyProgress
+                        key={screenSong.id}
+                        screenSongId={screenSong.id}
+                        songDurationSeconds={screenSong.duration}
+                        isShortScreen={isShortScreen}
+                        seekTo={seekTo}
+                        onSeekingChange={setIsProgressSeeking}
+                      />
+
+                      <View
+                        style={[
+                          styles.controlsRow,
+                          {
+                            marginTop: isShortScreen ? 6 : 8,
+                            marginHorizontal: isShortScreen ? 14 : 20,
+                            marginBottom: isShortScreen ? 6 : 8,
+                            gap: controlsRowGap,
+                          },
+                        ]}
+                      >
+                        <SmoothControlButton
+                          style={[
+                            styles.roundIconButton,
+                            playerIconBtnStyle,
+                          ]}
+                          onPress={() => {
+                            toggleShuffle();
+                          }}
+                        >
+                          <Ionicons
+                            name="shuffle"
+                            size={shuffleRepeatIconSize}
+                            color={sideControlIconColor}
+                          />
+                        </SmoothControlButton>
+
+                        <SmoothControlButton
+                          style={[styles.prevNextButton, prevNextBtnSizeStyle]}
+                          onPressIn={() => {
+                            handleSkip("prev");
+                          }}
+                        >
+                          <Ionicons name="play-skip-back" size={prevNextIconSize} color={activeControlIconColor} />
+                        </SmoothControlButton>
+
+                        <PlayerPlayButton
+                          buttonSize={playButtonSize}
+                          iconSize={playIconSize}
+                          onAccentColor="#060A0F"
+                          onPress={() => {
+                            togglePlay();
+                          }}
+                        />
+
+                        <SmoothControlButton
+                          style={[styles.prevNextButton, prevNextBtnSizeStyle]}
+                          onPressIn={() => {
+                            handleSkip("next");
+                          }}
+                        >
+                          <Ionicons name="play-skip-forward" size={prevNextIconSize} color={activeControlIconColor} />
+                        </SmoothControlButton>
+
+                        <SmoothControlButton
+                          style={[
+                            styles.roundIconButton,
+                            playerIconBtnStyle,
+                          ]}
+                          onPress={() => {
+                            toggleRepeat();
+                          }}
+                        >
+                          <Ionicons
+                            name="repeat"
+                            size={shuffleRepeatIconSize}
+                            color={sideControlIconColor}
+                          />
+                          {playerRepeatMode === "one" && (
+                            <Text style={[styles.repeatOneBadge, { color: sideControlIconColor }]}>1</Text>
+                          )}
+                        </SmoothControlButton>
+                      </View>
+
+                    </View>
+                  </Reanimated.View>
                 </View>
 
-                {ambientVideoLayoutActive ? (
-                  <View style={{ flex: 1 }} />
-                ) : null}
-
-                <Reanimated.View style={[{ flexGrow: 0 }, controlsDismissAnimatedStyle]}>
+                <Reanimated.View style={controlsDismissAnimatedStyle}>
                   <View
                     style={[
-                      styles.songBlock,
-                      {
-                        marginTop: ambientVideoLayoutActive
-                          ? isShortScreen ? 75 : 95
-                          : isVeryShortScreen ? 22 : isShortScreen ? 26 : 34,
-                        marginHorizontal: isShortScreen ? 14 : 20,
-                      },
+                      styles.playingListSection,
+                      ambientVideoLayoutActive && styles.playingListSectionAmbient,
                     ]}
                   >
-                {/* Small album artwork on the left */}
-                <Image
-                  source={{ uri: screenSong.coverUrl || "" }}
-                  style={styles.songBlockArtwork}
-                  contentFit="cover"
-                  transition={200}
-                  cachePolicy="memory-disk"
-                />
-                <View style={styles.songTextWrap}>
-                  <PingPongScroll
-                    text={screenSong.title}
-                    style={[
-                      styles.songTitle,
-                      {
-                        color: sheetTextColor,
-                        fontSize: isVeryShortScreen ? 21 : isShortScreen ? 23 : 25,
-                        lineHeight: isVeryShortScreen ? 25 : isShortScreen ? 27 : 30,
-                      },
-                    ]}
-                    velocity={12}
-                    paused={!interactionReady}
-                  />
-                  <PingPongScroll
-                    text={screenSong.artist}
-                    style={[
-                      styles.songArtist,
-                      {
-                        color: sheetMutedTextColor,
-                        fontSize: isVeryShortScreen ? 12 : 13,
-                        lineHeight: isVeryShortScreen ? 16 : 18,
-                      },
-                    ]}
-                    velocity={10}
-                    paused={!interactionReady}
-                  />
-                </View>
-                <View style={styles.songDetailActions}>
-                  <SmoothControlButton
-                    style={[styles.songDetailActionButton, songDetailActionBtnStyle]}
-                    onPress={() => {
-                      toggleLike(screenSong);
-                    }}
-                  >
-                    <Ionicons
-                      name={liked ? "heart" : "heart-outline"}
-                      size={songDetailIconSize}
-                      color={liked ? selectedControlIconColor : "#FFFFFF"}
-                    />
-                  </SmoothControlButton>
-
-                  {!screenSongIsYouTube ? (
-                    <View style={[styles.songDetailActionButton, songDetailActionBtnStyle]}>
-                      <DownloadButton
-                        song={screenSong}
-                        size={songDetailIconSize}
-                        color="#FFFFFF"
-                        style={[styles.playerDownloadButton, songDetailDownloadBtnStyle]}
+                    <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
+                      <Text style={styles.playingListTitle}>Queue</Text>
+                    </View>
+                    <View style={[styles.queueListViewport, queueViewportStyle]}>
+                      <GHFlatList
+                        data={playingQueue}
+                        keyExtractor={queueKeyExtractor}
+                        renderItem={renderQueueItem}
+                        getItemLayout={getQueueItemLayout}
+                        contentContainerStyle={styles.queueListContent}
+                        showsVerticalScrollIndicator={false}
+                        nestedScrollEnabled
+                        bounces={false}
+                        overScrollMode="never"
+                        removeClippedSubviews={false}
+                        initialNumToRender={5}
+                        maxToRenderPerBatch={5}
+                        windowSize={5}
+                        updateCellsBatchingPeriod={50}
                       />
                     </View>
-                  ) : null}
-                </View>
-              </View>
-            </Reanimated.View>
-            </View>
-                </GestureDetector>
+                  </View>
 
-            <Reanimated.View style={controlsDismissAnimatedStyle}>
-              <View style={styles.playerActionStack}>
-              <PlayerSpotifyProgress
-                key={screenSong.id}
-                screenSongId={screenSong.id}
-                songDurationSeconds={screenSong.duration}
-                isShortScreen={isShortScreen}
-                seekTo={seekTo}
-                onSeekingChange={setIsProgressSeeking}
-              />
-
-              <View
-                style={[
-                  styles.controlsRow,
-                  {
-                    marginTop: isShortScreen ? 6 : 8,
-                    marginHorizontal: isShortScreen ? 14 : 20,
-                    marginBottom: isShortScreen ? 6 : 8,
-                    gap: controlsRowGap,
-                  },
-                ]}
-              >
-                <SmoothControlButton
-                  style={[
-                    styles.roundIconButton,
-                    playerIconBtnStyle,
-                  ]}
-                  onPress={() => {
-                    toggleShuffle();
-                  }}
-                >
-                  <Ionicons
-                    name="shuffle"
-                    size={shuffleRepeatIconSize}
-                    color={sideControlIconColor}
+                  <AboutArtistCard
+                    artistDetails={artistDetails}
+                    loading={artistLoading}
+                    onPress={handleViewArtistProfile}
                   />
-                </SmoothControlButton>
 
-                <SmoothControlButton
-                  style={[styles.prevNextButton, prevNextBtnSizeStyle]}
-                  onPressIn={() => {
-                    handleSkip("prev");
-                  }}
-                >
-                  <Ionicons name="play-skip-back" size={prevNextIconSize} color={activeControlIconColor} />
-                </SmoothControlButton>
-
-                <PlayerPlayButton
-                  buttonSize={playButtonSize}
-                  iconSize={playIconSize}
-                  onAccentColor="#060A0F"
-                  onPress={() => {
-                    togglePlay();
-                  }}
-                />
-
-                <SmoothControlButton
-                  style={[styles.prevNextButton, prevNextBtnSizeStyle]}
-                  onPressIn={() => {
-                    handleSkip("next");
-                  }}
-                >
-                  <Ionicons name="play-skip-forward" size={prevNextIconSize} color={activeControlIconColor} />
-                </SmoothControlButton>
-
-                <SmoothControlButton
-                  style={[
-                    styles.roundIconButton,
-                    playerIconBtnStyle,
-                  ]}
-                  onPress={() => {
-                    toggleRepeat();
-                  }}
-                >
-                  <Ionicons
-                    name="repeat"
-                    size={shuffleRepeatIconSize}
-                    color={sideControlIconColor}
+                  <RelatedSongsSection
+                    songs={relatedSongs}
+                    onSongPress={handlePlayRelatedSong}
                   />
-                  {playerRepeatMode === "one" && (
-                    <Text style={[styles.repeatOneBadge, { color: sideControlIconColor }]}>1</Text>
-                  )}
-                </SmoothControlButton>
-              </View>
-
-            </View>
-            </Reanimated.View>
-          </View>
-
-          <Reanimated.View style={controlsDismissAnimatedStyle}>
-            <View
-              style={[
-                styles.playingListSection,
-                ambientVideoLayoutActive && styles.playingListSectionAmbient,
-              ]}
-            >
-            <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>
-              <Text style={styles.playingListTitle}>Queue</Text>
-            </View>
-            <FlatList
-              data={playingQueue}
-              keyExtractor={queueKeyExtractor}
-              renderItem={renderQueueItem}
-              getItemLayout={getQueueItemLayout}
-              style={[styles.queueListViewport, queueViewportStyle]}
-              contentContainerStyle={styles.queueListContent}
-              showsVerticalScrollIndicator={false}
-              nestedScrollEnabled
-              bounces={false}
-              overScrollMode="never"
-              initialNumToRender={8}
-              maxToRenderPerBatch={8}
-              windowSize={5}
-              removeClippedSubviews={Platform.OS === "android"}
-            />
-          </View>
-
-          <AboutArtistCard
-            artistDetails={artistDetails}
-            loading={artistLoading}
-            onPress={handleViewArtistProfile}
+                </Reanimated.View>
+              </>
+            }
           />
 
-          <RelatedSongsSection
-            songs={relatedSongs}
-            onSongPress={handlePlayRelatedSong}
-          />
-          </Reanimated.View>
-          </>
-        }
-      />
-
-      </View>
+        </View>
       </Reanimated.View>
     </View>
   );
@@ -2671,8 +2696,6 @@ const styles = StyleSheet.create({
     right: 0,
     overflow: "hidden",
     zIndex: Platform.OS === "android" ? 0 : -1,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
   },
   activeCardReanimatedContainer: {
     alignItems: "center",
@@ -3111,8 +3134,8 @@ const styles = StyleSheet.create({
   },
   queueListContent: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 64,
+    paddingTop: 0,
+    paddingBottom: 16,
   },
   queueListViewport: {
     flexGrow: 0,
