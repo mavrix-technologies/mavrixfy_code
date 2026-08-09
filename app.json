@@ -159,7 +159,7 @@
     "updates": {
       "enabled": true,
       "url": "https://u.expo.dev/93293119-93b7-4dbb-acdd-7241771254c4",
-      "checkAutomatically": "ON_ERROR_RECOVERY",
+      "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
     "runtimeVersion": "3.0.0-30002",

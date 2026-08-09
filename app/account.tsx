@@ -1,5 +1,1 @@
-import { Redirect } from "expo-router";
-
-export default function AccountScreen() {
-  return <Redirect href="/profile" />;
-}
+export { default } from "@/src/features/settings/screens/AccountScreen";

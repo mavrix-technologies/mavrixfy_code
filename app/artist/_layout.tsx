@@ -7,18 +7,7 @@ export default function ArtistLayout() {
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: Colors.background },
-        animation: "default",
-        gestureEnabled: true,
-        // fullScreenGestureEnabled causes conflicts with vertical ScrollView —
-        // only use the standard left-edge swipe
-        fullScreenGestureEnabled: false,
       }}
-    >
-      <Stack.Screen name="index" />
-      <Stack.Screen
-        name="[id]"
-        options={{ gestureEnabled: true, fullScreenGestureEnabled: false }}
-      />
-    </Stack>
+    />
   );
 }

@@ -1,35 +1,14 @@
 import TrackPlayer, { Event } from "react-native-track-player";
 
+// Headless service registered via TrackPlayer.registerPlaybackService in index.js.
+// autoHandleInterruptions (set in setupPlayer) owns audio-focus management natively,
+// so no RemoteDuck handler is needed here.
 export async function trackPlayerService() {
-  TrackPlayer.addEventListener(Event.RemotePlay, () => {
-    TrackPlayer.play().catch(err => console.error("[trackPlayerService] RemotePlay failed:", err));
-  });
-
-  TrackPlayer.addEventListener(Event.RemotePause, () => {
-    TrackPlayer.pause().catch(err => console.error("[trackPlayerService] RemotePause failed:", err));
-  });
-
-  TrackPlayer.addEventListener(Event.RemoteStop, () => {
-    TrackPlayer.pause().catch(err => console.error("[trackPlayerService] RemoteStop failed:", err));
-  });
-
-  TrackPlayer.addEventListener(Event.RemoteNext, () => {
-    TrackPlayer.skipToNext().catch(err => console.error("[trackPlayerService] RemoteNext failed:", err));
-  });
-
-  TrackPlayer.addEventListener(Event.RemotePrevious, () => {
-    TrackPlayer.skipToPrevious().catch(err => console.error("[trackPlayerService] RemotePrevious failed:", err));
-  });
-
-  TrackPlayer.addEventListener(Event.RemoteSeek, (event) => {
-    TrackPlayer.seekTo(event.position).catch(err => console.error("[trackPlayerService] RemoteSeek failed:", err));
-  });
-
-  TrackPlayer.addEventListener(Event.RemoteDuck, async (event) => {
-    if (event.paused) {
-      await TrackPlayer.pause().catch(err => console.error("[trackPlayerService] RemoteDuck pause failed:", err));
-    } else {
-      await TrackPlayer.play().catch(err => console.error("[trackPlayerService] RemoteDuck play failed:", err));
-    }
-  });
+  TrackPlayer.addEventListener(Event.RemotePlay, () => TrackPlayer.play());
+  TrackPlayer.addEventListener(Event.RemotePause, () => TrackPlayer.pause());
+  // stop() (not pause()) lets the foreground service wind down via stopForegroundGracePeriod.
+  TrackPlayer.addEventListener(Event.RemoteStop, () => TrackPlayer.stop());
+  TrackPlayer.addEventListener(Event.RemoteNext, () => TrackPlayer.skipToNext());
+  TrackPlayer.addEventListener(Event.RemotePrevious, () => TrackPlayer.skipToPrevious());
+  TrackPlayer.addEventListener(Event.RemoteSeek, (event) => TrackPlayer.seekTo(event.position));
 }

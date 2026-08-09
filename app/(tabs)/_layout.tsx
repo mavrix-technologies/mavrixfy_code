@@ -285,9 +285,7 @@ function NavTabItem({
   activeNavColor,
   navInactiveColor,
 }: NavTabItemProps) {
-  const focusAnimRef = React.useRef<Animated.Value | null>(null);
-  if (focusAnimRef.current === null) focusAnimRef.current = new Animated.Value(isFocused ? 1 : 0);
-  const focusAnim = focusAnimRef.current;
+  const [focusAnim] = React.useState(() => new Animated.Value(isFocused ? 1 : 0));
 
   useEffect(() => {
     Animated.timing(focusAnim, {

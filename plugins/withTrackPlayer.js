@@ -1,10 +1,16 @@
 /**
  * withTrackPlayer — Expo config plugin for react-native-track-player.
  *
- * Ensures required Android manifest entries are present after prebuild/EAS:
- * - FOREGROUND_SERVICE_MEDIA_PLAYBACK permission
- * - RNTP MusicService as the sole media-session owner
- * - expo-audio AudioControlsService disabled (prevents competing media session)
+ * - FOREGROUND_SERVICE_MEDIA_PLAYBACK permission (Android 14+ requirement)
+ * - MusicService: exported, foregroundServiceType=mediaPlayback, MEDIA_BUTTON filter
+ * - Disables expo-audio AudioControlsService (prevents MediaSession conflict)
+ * - Hardware features marked required=false (car/tablet compatibility)
+ *
+ * Android Auto (RNTP v4): MusicService extends HeadlessJsTaskService, not
+ * MediaBrowserServiceCompat. The MediaBrowserService intent-filter is intentionally
+ * absent — advertising it without implementing onGetRoot/onLoadChildren hangs the
+ * car UI. Media controls appear in the Auto notification area via the active
+ * MediaSession. Full browse-tree support requires RNTP v5.
  */
 const { withAndroidManifest } = require("expo/config-plugins");
 
@@ -24,19 +30,48 @@ function ensureService(app, serviceDef) {
     return;
   }
   existing.$ = { ...(existing.$ || {}), ...(serviceDef.$ || {}) };
+  if (serviceDef["intent-filter"]) {
+    if (!existing["intent-filter"]) {
+      existing["intent-filter"] = serviceDef["intent-filter"];
+    } else {
+      for (const incoming of serviceDef["intent-filter"]) {
+        const incomingActions = new Set(
+          (incoming.action || []).flatMap((a) => (a.$?.["android:name"] ? [a.$["android:name"]] : []))
+        );
+        const alreadyPresent = existing["intent-filter"].some((ef) =>
+          (ef.action || []).some((a) => incomingActions.has(a.$?.["android:name"]))
+        );
+        if (!alreadyPresent) {
+          existing["intent-filter"].push(incoming);
+        }
+      }
+    }
+  }
 }
 
-function ensureUsesFeature(manifest, name) {
+function ensureUsesPermission(manifest, permissionName) {
+  if (!manifest["uses-permission"]) manifest["uses-permission"] = [];
+  const already = manifest["uses-permission"].some(
+    (p) => p.$?.["android:name"] === permissionName
+  );
+  if (!already) {
+    manifest["uses-permission"].push({ $: { "android:name": permissionName } });
+  }
+}
+
+function ensureUsesFeature(manifest, featureName) {
   if (!manifest["uses-feature"]) manifest["uses-feature"] = [];
-  const existing = manifest["uses-feature"].find((f) => f.$?.["android:name"] === name);
-  if (!existing) {
+  const already = manifest["uses-feature"].find(
+    (f) => f.$?.["android:name"] === featureName
+  );
+  if (!already) {
     manifest["uses-feature"].push({
-      $: { "android:name": name, "android:required": "false" },
+      $: { "android:name": featureName, "android:required": "false" },
     });
   }
 }
 
-const requiredFalseFeatures = [
+const OPTIONAL_HARDWARE_FEATURES = [
   "android.hardware.bluetooth",
   "android.hardware.microphone",
   "android.hardware.camera",
@@ -54,24 +89,9 @@ const withTrackPlayer = (config) =>
     if (!app) return config;
 
     ensureToolsNamespace(manifest);
-    requiredFalseFeatures.forEach((f) => ensureUsesFeature(manifest, f));
+    ensureUsesPermission(manifest, "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK");
+    OPTIONAL_HARDWARE_FEATURES.forEach((f) => ensureUsesFeature(manifest, f));
 
-    // Required on Android 14+ for media playback foreground service
-    if (!manifest["uses-permission"]) manifest["uses-permission"] = [];
-    const hasPerm = manifest["uses-permission"].some(
-      (p) => p.$?.["android:name"] === "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
-    );
-    if (!hasPerm) {
-      manifest["uses-permission"].push({
-        $: { "android:name": "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" },
-      });
-    }
-
-    // RNTP's MusicService is a media-session service, not a MediaBrowserService.
-    // Do not advertise the MediaBrowserService action here: Android Auto binds
-    // to that action and requires a real browser-service binder and a browse
-    // tree. Claiming it for RNTP's HeadlessJsTaskService is unsupported and
-    // prevents reliable Android Auto discovery.
     ensureService(app, {
       $: {
         "android:name": "com.doublesymmetry.trackplayer.service.MusicService",
@@ -85,20 +105,19 @@ const withTrackPlayer = (config) =>
       ],
     });
 
-    // Expo config plugins can run over an existing native project. Remove a
-    // stale, incorrect browser-service declaration from earlier builds.
+    // Remove any stale MediaBrowserService filter added by older builds.
     const musicService = app.service.find(
-      (service) => service.$?.["android:name"] === "com.doublesymmetry.trackplayer.service.MusicService"
+      (s) => s.$?.["android:name"] === "com.doublesymmetry.trackplayer.service.MusicService"
     );
     if (musicService?.["intent-filter"]) {
       musicService["intent-filter"] = musicService["intent-filter"].filter(
-        (filter) => !filter.action?.some(
-          (action) => action.$?.["android:name"] === "android.media.browse.MediaBrowserService"
-        )
+        (f) =>
+          !f.action?.some(
+            (a) => a.$?.["android:name"] === "android.media.browse.MediaBrowserService"
+          )
       );
     }
 
-    // Disable expo-audio's AudioControlsService so it can't compete for the media session
     ensureService(app, {
       $: {
         "android:name": "expo.modules.audio.service.AudioControlsService",

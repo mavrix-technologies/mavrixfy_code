@@ -1,21 +1,29 @@
 import * as Animated from "@/lib/nativeAnimated";
 import {
-  QueryClientProvider } from "@tanstack/react-query";
-import { DarkTheme,
-  ThemeProvider } from "@react-navigation/native";
-import { Stack,
+  QueryClientProvider
+} from "@tanstack/react-query";
+import {
+  DarkTheme,
+  ThemeProvider
+} from "@react-navigation/native";
+import {
+  Stack,
   useRouter,
   useSegments,
-  router } from "expo-router";
+  router
+} from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
 import * as SplashScreen from "expo-splash-screen";
 import React,
-  { useCallback,
+{
+  useCallback,
   useEffect,
   useRef,
-  useState } from "react";
-import { InteractionManager,
+  useState
+} from "react";
+import {
+  InteractionManager,
   LogBox,
   Platform,
   StyleSheet,
@@ -34,7 +42,7 @@ import { Inter_500Medium } from "@expo-google-fonts/inter/500Medium";
 import { Inter_600SemiBold } from "@expo-google-fonts/inter/600SemiBold";
 import { Inter_700Bold } from "@expo-google-fonts/inter/700Bold";
 import { Inter_800ExtraBold } from "@expo-google-fonts/inter/800ExtraBold";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ErrorBoundary } from "@/src/components/ErrorBoundary";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { Image } from "expo-image";
@@ -46,9 +54,12 @@ import { NetworkProvider } from "@/contexts/NetworkContext";
 import Colors from "@/constants/colors";
 import { logAppOpen } from "@/lib/analytics";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
-import { getRecentlyPlayed } from "@/lib/storage";
+import { getRecentlyPlayed, runOneTimeMigrations } from "@/lib/storage";
+import { useScreenTracking } from "@/hooks/useScreenTracking";
+import { MUSIC_PROVIDER_KEY } from "@/src/data/providers/IMusicProvider";
+import { AUDIO_ENGINE_KEY } from "@/src/services/audio/IAudioEngine";
+import { EmptyState, LoadingScreen, PressableRow, ScreenHeader } from "@/src/components";
 import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
-
 import QueueBottomSheet from "@/components/QueueBottomSheet";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import AddSongsBottomSheet from "@/components/AddSongsModal";
@@ -125,8 +136,8 @@ if (__DEV__) {
       args[0] &&
       typeof args[0] === "string" &&
       (args[0].includes("expo-notifications") ||
-       args[0].includes("GO_BACK") ||
-       args[0].includes("was not handled by any navigator"))
+        args[0].includes("GO_BACK") ||
+        args[0].includes("was not handled by any navigator"))
     ) {
       return;
     }
@@ -142,21 +153,14 @@ LogBox.ignoreLogs([
   "Unable to activate keep awake",
   // Same activity-detach race on hot reload — not a real error in production.
   "setBackgroundColorAsync",
-  // Harmless navigation warning when pressing back on root screen
   "The action 'GO_BACK' was not handled by any navigator",
 ]);
 
-// Screens where the docked mini player and tab bar must not cover the route.
 const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "profile", "delete-account", "notifications"]);
-// Root-stack routes (outside tabs) that still show the docked mini player + tab bar.
 const NAV_OVERLAY_SEGMENTS = new Set(["playlist", "artist"]);
 
-// Navigation bar color is set inside RootLayout via useEffect to avoid
-// calling setBackgroundColorAsync before the Android activity is ready.
+import { showGlobalToast, subscribeGlobalToast } from "@/utils/globalToast";
 
-type GlobalToastListener = (message: string) => void;
-
-const globalToastListeners = new Set<GlobalToastListener>();
 const GLOBAL_TOAST_VISIBLE_MS = 1050;
 
 function parseAppVersion(version: string) {
@@ -189,17 +193,7 @@ const paperTheme = {
   },
 };
 
-// react-doctor-disable-next-line react-doctor/only-export-components -- intentional global toast trigger
-export function showGlobalToast(message = "Added to queue") {
-  globalToastListeners.forEach((listener) => listener(message));
-}
-
-function subscribeGlobalToast(listener: GlobalToastListener) {
-  globalToastListeners.add(listener);
-  return () => {
-    globalToastListeners.delete(listener);
-  };
-}
+export { showGlobalToast };
 
 function GlobalToast() {
   const insets = useSafeAreaInsets();
@@ -288,19 +282,20 @@ export function preWarmHomeCache() {
   if (preWarmStarted) return;
   preWarmStarted = true;
   // Fire-and-forget — results land in AsyncStorage / memory cache
+  // Also run one-time migrations to clean up stale data from old app versions
   Promise.allSettled([
     getCachedHomePublicPlaylists({ allowStale: true }),
     getRecentlyPlayed(),
-  ]).catch(() => {});
+    runOneTimeMigrations(),
+  ]).catch(() => { });
 }
 
 function useRootLayoutNavigation() {
+  useScreenTracking();
   const { replace: routerReplace } = useRouter();
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
   const isAllowedGuest = GUEST_LOGIN_ENABLED && isGuest;
-  const splashReleasedRef = useRef(false);
-
   useEffect(() => {
     hideSplashScreenSafely("instant_mount");
   }, []);
@@ -416,8 +411,8 @@ function useRootLayoutNavigation() {
     if (loading) return;
 
     const seg0 = segments[0] as string | undefined;
-    const inProtected  = seg0 === "(tabs)";
-    const inAuthOnly   = seg0 === "login";
+    const inProtected = seg0 === "(tabs)";
+    const inAuthOnly = seg0 === "login";
     const inOnboarding = seg0 === "onboarding";
 
     if (isAuthenticated && inAuthOnly) {
@@ -429,7 +424,7 @@ function useRootLayoutNavigation() {
                 if (snap.exists() && snap.data()?.onboardingCompleted) {
                   routerReplace("/(tabs)");
                 } else {
-                  routerReplace("/onboarding");
+                  routerReplace("/login");
                 }
               })
               .catch(() => routerReplace("/(tabs)"));
@@ -443,7 +438,7 @@ function useRootLayoutNavigation() {
     } else if (!isAuthenticated && !isAllowedGuest && inOnboarding) {
       routerReplace("/login");
     }
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive auth/routing deps (loading, isAuthenticated, isAllowedGuest, firebaseUser, segments, routerReplace) are listed
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive auth/routing deps (loading, isAuthenticated, isAllowedGuest, firebaseUser, segments, routerReplace) are listed
   }, [loading, isAuthenticated, isAllowedGuest, firebaseUser, segments, routerReplace]);
 
   const activeSegment = segments[0] as string;
@@ -475,17 +470,14 @@ function RootLayoutNav() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: Colors.background },
-          gestureEnabled: false,
         }}
       >
-        <Stack.Screen name="(tabs)" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="(tabs)" />
         <Stack.Screen
           name="player"
           options={{
             presentation: "transparentModal",
             animation: "slide_from_bottom",
-            gestureEnabled: false,
-            headerShown: false,
             contentStyle: { backgroundColor: "transparent" },
           }}
         />
@@ -494,10 +486,6 @@ function RootLayoutNav() {
           options={{
             presentation: Platform.OS === "android" ? "transparentModal" : "modal",
             animation: "slide_from_bottom",
-            gestureEnabled: true,
-            gestureDirection: "vertical",
-            headerShown: false,
-            fullScreenGestureEnabled: true,
             contentStyle: { backgroundColor: Platform.OS === "android" ? "transparent" : "#1E1E1E" },
           }}
         />
@@ -505,13 +493,8 @@ function RootLayoutNav() {
           name="song-options"
           options={{
             presentation: "formSheet",
-            animation: "slide_from_bottom",
             sheetAllowedDetents: [0.88, 1],
-            sheetInitialDetentIndex: 0,
             sheetCornerRadius: 24,
-            sheetGrabberVisible: false,
-            sheetExpandsWhenScrolledToEdge: false,
-            gestureEnabled: true,
             contentStyle: { backgroundColor: "#1E1E1E" },
           }}
         />
@@ -519,84 +502,28 @@ function RootLayoutNav() {
           name="sleep-timer"
           options={{
             presentation: "formSheet",
-            animation: "slide_from_bottom",
             sheetAllowedDetents: [0.62],
-            sheetInitialDetentIndex: 0,
             sheetCornerRadius: 24,
-            sheetGrabberVisible: false,
-            gestureEnabled: true,
             contentStyle: { backgroundColor: Colors.background },
           }}
         />
-        <Stack.Screen
-          name="notifications"
-          options={{
-            presentation: "card",
-            animation: "slide_from_right",
-            headerShown: false,
-            gestureEnabled: true,
-            gestureDirection: "horizontal",
-            contentStyle: { backgroundColor: "#000000" },
-          }}
-        />
+        <Stack.Screen name="notifications" />
         <Stack.Screen
           name="artist-mix"
           options={{
-            ...(Platform.OS === "android"
-              ? {
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [1],
-                  sheetInitialDetentIndex: 0,
-                  sheetCornerRadius: 24,
-                  sheetGrabberVisible: true,
-                }
-              : IOS_VERTICAL_SHEET_OPTIONS),
+            presentation: Platform.OS === "android" ? "formSheet" : "card",
+            ...(Platform.OS === "android" && {
+              sheetAllowedDetents: [1],
+              sheetCornerRadius: 24,
+            }),
           }}
         />
-        <Stack.Screen
-          name="downloaded-songs"
-          options={{
-            presentation: "card",
-            gestureEnabled: true,
-          }}
-        />
-        <Stack.Screen
-          name="downloads"
-          options={{
-            presentation: "card",
-            animation: "default",
-            gestureEnabled: true,
-            contentStyle: { backgroundColor: Colors.background },
-          }}
-        />
-        <Stack.Screen
-          name="playlist"
-          options={{
-            presentation: "card",
-            animation: "default",
-            gestureEnabled: true,
-            gestureDirection: "horizontal",
-            fullScreenGestureEnabled: false,
-            contentStyle: { backgroundColor: Colors.background },
-          }}
-        />
-        <Stack.Screen
-          name="profile"
-          options={{
-            presentation: "card",
-            animation: "default",
-            gestureEnabled: true,
-            gestureDirection: "horizontal",
-            fullScreenGestureEnabled: false,
-            contentStyle: { backgroundColor: Colors.background },
-          }}
-        />
-        <Stack.Screen name="login" options={{ gestureEnabled: false }} />
-        <Stack.Screen
-          name="onboarding/index"
-          options={{ gestureEnabled: false }}
-        />
+        <Stack.Screen name="downloaded-songs" />
+        <Stack.Screen name="downloads" />
+        <Stack.Screen name="playlist" />
+        <Stack.Screen name="artist" />
+        <Stack.Screen name="profile" />
+        <Stack.Screen name="login" />
       </Stack>
 
       {showNavOverlay ? (
@@ -707,7 +634,7 @@ function InAppPromotionPopup() {
       isActive = false;
       subscription.remove();
     };
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (firebaseUserCreationTime, firebaseUserUid) are listed; storeUrlRef and AsyncStorage are stable
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (firebaseUserCreationTime, firebaseUserUid) are listed; storeUrlRef and AsyncStorage are stable
   }, [firebaseUserCreationTime, firebaseUserUid]);
 
   useEffect(() => {
@@ -724,7 +651,7 @@ function InAppPromotionPopup() {
           storeUrlRef.current = info.storeUrl;
         }
       })
-      .catch(() => {});
+      .catch(() => { });
 
     return () => {
       isActive = false;
@@ -744,7 +671,7 @@ function InAppPromotionPopup() {
         AsyncStorage.setItem(seenKey, "true"),
       ]);
       await markNotificationAsRead(activePopup.id, firebaseUserUid);
-    } catch {}
+    } catch { }
     setActivePopup(null);
   };
 
@@ -817,7 +744,7 @@ export default function RootLayout() {
   // hot reload and throw "current activity is no longer available".
   useEffect(() => {
     if (Platform.OS === "android") {
-      SystemUI.setBackgroundColorAsync(Colors.background).catch(() => {});
+      SystemUI.setBackgroundColorAsync(Colors.background).catch(() => { });
     }
   }, []);
   const [fontsLoaded] = useFonts({
@@ -882,7 +809,15 @@ export default function RootLayout() {
   }
 
   if (!isReady) {
-    return null;
+    return (
+      <View style={{ flex: 1, backgroundColor: "#000000", justifyContent: "center", alignItems: "center" }}>
+        <Image
+          source={require("@/assets/images/mavrixfy_icone.png")}
+          style={{ width: 110, height: 110, borderRadius: 26 }}
+          contentFit="contain"
+        />
+      </View>
+    );
   }
 
   return (

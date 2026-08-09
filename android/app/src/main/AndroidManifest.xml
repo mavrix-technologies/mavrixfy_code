@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+
+  <!-- ── Permissions ──────────────────────────────────────────────────── -->
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove"/>
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove"/>
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
@@ -19,6 +21,17 @@
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
   <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:node="remove"/>
   <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
+
+  <!-- ── Hardware features (required=false for car/tablet compatibility) ── -->
+  <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>
+  <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+  <uses-feature android:name="android.hardware.camera" android:required="false"/>
+  <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+  <uses-feature android:name="android.hardware.location" android:required="false"/>
+  <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
+  <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+  <uses-feature android:name="android.hardware.wifi" android:required="false"/>
+
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -26,22 +39,73 @@
       <data android:scheme="https"/>
     </intent>
   </queries>
-  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false" android:usesCleartextTraffic="false">
+
+  <application
+    android:name=".MainApplication"
+    android:label="@string/app_name"
+    android:icon="@mipmap/ic_launcher"
+    android:roundIcon="@mipmap/ic_launcher_round"
+    android:allowBackup="true"
+    android:theme="@style/AppTheme"
+    android:supportsRtl="true"
+    android:enableOnBackInvokedCallback="false"
+    android:usesCleartextTraffic="false">
+
+    <!-- Google Mobile Ads -->
     <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-6003470714469240~2133470244" tools:replace="android:value"/>
     <meta-data android:name="com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING" android:value="true" tools:replace="android:value"/>
     <meta-data android:name="com.google.android.gms.ads.flag.OPTIMIZE_INITIALIZATION" android:value="true" tools:replace="android:value"/>
+
+    <!-- Expo Updates -->
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="true"/>
     <meta-data android:name="expo.modules.updates.EXPO_RUNTIME_VERSION" android:value="@string/expo_runtime_version"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ERROR_RECOVERY_ONLY"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://u.expo.dev/93293119-93b7-4dbb-acdd-7241771254c4"/>
-    <service android:name="com.doublesymmetry.trackplayer.service.MusicService" android:enabled="true" android:exported="true" android:foregroundServiceType="mediaPlayback" tools:replace="android:exported,android:foregroundServiceType">
+
+    <!--
+      RNTP MusicService — sole owner of the Android MediaSession.
+
+      foregroundServiceType="mediaPlayback" is required on Android 10+ for a
+      service that plays audio while backgrounded.  exported="true" lets the
+      system bind the media session for lock-screen / notification controls.
+
+      MEDIA_BUTTON is the only intent-filter declared here.
+      android.media.browse.MediaBrowserService is intentionally absent:
+      RNTP v4's MusicService extends HeadlessJsTaskService, not
+      MediaBrowserServiceCompat.  Android Auto binds to the browse action and
+      expects onGetRoot / onLoadChildren — advertising it without implementing
+      those callbacks hangs the car UI.  Media controls appear in Android Auto's
+      notification area automatically via the active MediaSession.
+    -->
+    <service
+      android:name="com.doublesymmetry.trackplayer.service.MusicService"
+      android:enabled="true"
+      android:exported="true"
+      android:foregroundServiceType="mediaPlayback"
+      tools:replace="android:exported,android:foregroundServiceType">
       <intent-filter>
         <action android:name="android.intent.action.MEDIA_BUTTON"/>
       </intent-filter>
     </service>
-    <service android:name="expo.modules.audio.service.AudioControlsService" android:enabled="false" tools:replace="android:enabled"/>
-    <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
+
+    <!--
+      Disable expo-audio's AudioControlsService so it cannot compete with
+      RNTP for the MediaSession (would suppress media notification controls).
+    -->
+    <service
+      android:name="expo.modules.audio.service.AudioControlsService"
+      android:enabled="false"
+      tools:replace="android:enabled"/>
+
+    <activity
+      android:name=".MainActivity"
+      android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode"
+      android:launchMode="singleTask"
+      android:windowSoftInputMode="adjustResize"
+      android:theme="@style/Theme.App.SplashScreen"
+      android:exported="true"
+      android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>
@@ -53,5 +117,6 @@
         <data android:scheme="mavrixfy"/>
       </intent-filter>
     </activity>
+
   </application>
 </manifest>

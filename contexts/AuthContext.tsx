@@ -161,13 +161,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applyAuthenticatedSnapshot, applySignedOutSnapshot, buildAppUser]);
 
   const login = useCallback(async (email: string, password: string) => {
-    // Rate limit check
-    const emailLower = email.trim().toLowerCase();
-    const rateLimit = await checkRateLimit('auth:login', emailLower);
-    if (!rateLimit.allowed) {
-      throw new Error(`Too many login attempts. Please try again in ${formatRetryAfter(rateLimit.retryAfter!)}`);
-    }
-
     // Validate input
     const validation = safeValidate(loginSchema, { email, password });
     if (!validation.success) {
@@ -176,20 +169,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { email: validEmail, password: validPassword } = validation.data;
 
-    try {
-      const cred = await signInWithEmailAndPassword(auth, validEmail, validPassword);
-      const appUser = await buildAppUser(cred.user);
-      setUser(appUser);
-      setFirebaseUser(cred.user);
-      setIsGuest(false);
-      logLogin("email");
-      
-      // Clear rate limit on successful login
-      await clearRateLimit('auth:login', emailLower);
-    } catch (error: any) {
-      // Don't clear rate limit on failed login - let it accumulate
-      throw error;
-    }
+    // Firebase handles server-side brute-force protection
+    const cred = await signInWithEmailAndPassword(auth, validEmail, validPassword);
+    const appUser = await buildAppUser(cred.user);
+    setUser(appUser);
+    setFirebaseUser(cred.user);
+    setIsGuest(false);
+    logLogin("email");
   }, [buildAppUser]);
 
   const continueAsGuest = useCallback(() => {

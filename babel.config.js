@@ -7,8 +7,12 @@ module.exports = function (api) {
       {
         root: ["./"],
         alias: {
-          "@": "./",
-          "@shared": "./shared"
+          "@src": "./src",
+          "@features": "./src/features",
+          "@shared": "./src/shared",
+          "@domain": "./src/domain",
+          "@data": "./src/data",
+          "@": "./"
         },
         extensions: [
           ".js",

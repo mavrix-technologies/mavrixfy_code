@@ -3,9 +3,6 @@ const { Platform } = require("react-native");
 
 const LINKING_FALLBACK_SCHEME = "mavrixfy";
 
-// Expo Router calls Linking.createURL("/") during startup. Some standalone
-// release builds can miss the runtime manifest scheme even when the native app
-// is configured correctly, so fall back to the explicit app scheme.
 if (!isRunningInExpoGo() && Platform.OS !== "web") {
   try {
     const Linking = require("expo-linking");
@@ -26,7 +23,7 @@ if (!isRunningInExpoGo() && Platform.OS !== "web") {
       }
     };
   } catch {
-    // expo-linking unavailable in this runtime — nothing to patch.
+    // expo-linking unavailable in this runtime
   }
 }
 
@@ -38,7 +35,7 @@ if (!isRunningInExpoGo() && Platform.OS !== "web") {
       () => require("./lib/trackPlayerService").trackPlayerService
     );
   } catch {
-    // The native module is unavailable in Expo Go and on unsupported runtimes.
+    // native module unavailable in Expo Go and unsupported runtimes
   }
 }
 

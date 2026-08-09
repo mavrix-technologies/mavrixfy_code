@@ -93,8 +93,11 @@ export async function checkRateLimit(
   // Check if limit exceeded
   if (data.attempts.length >= config.maxAttempts) {
     data.blockedUntil = now + config.blockDurationMs;
-    await AsyncStorage.setItem(key, JSON.stringify(data));
-    
+    try {
+      await AsyncStorage.setItem(key, JSON.stringify(data));
+    } catch {
+      // Storage full or unavailable — still enforce the block in-memory for this session
+    }
     const retryAfter = Math.ceil(config.blockDurationMs / 1000);
     return { allowed: false, retryAfter };
   }
@@ -104,7 +107,11 @@ export async function checkRateLimit(
 
   // Record this attempt
   data.attempts.push(now);
-  await AsyncStorage.setItem(key, JSON.stringify(data));
+  try {
+    await AsyncStorage.setItem(key, JSON.stringify(data));
+  } catch {
+    // Storage full or unavailable — allow the action; rate limit state is best-effort
+  }
 
   return { allowed: true, attemptsRemaining };
 }

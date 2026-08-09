@@ -55,7 +55,7 @@ function normalizeYouTubeVideoQuality(value: unknown): YouTubeVideoQualityPrefer
     : "auto";
 }
 
-export function getYouTubePlaybackQuality(
+function getYouTubePlaybackQuality(
   quality: YouTubeVideoQualityPreference
 ): "default" | "small" | "medium" | "hd720" {
   switch (quality) {
@@ -211,6 +211,9 @@ export async function pruneNonEssentialStorageCaches(): Promise<void> {
   try {
     const keys = await AsyncStorage.getAllKeys();
     const keysToRemove = keys.filter(key => {
+      // Always prune rate limit keys — they are ephemeral and non-critical
+      if (key.startsWith("ratelimit:")) return true;
+
       if (!key.startsWith("@mavrixfy_")) return false;
 
       const isCritical =
@@ -238,6 +241,28 @@ export async function pruneNonEssentialStorageCaches(): Promise<void> {
     }
   } catch (err) {
     logger.error("[Storage] Failed to prune storage caches:", err);
+  }
+}
+
+/**
+ * One-time migration: clears accumulated ratelimit:auth:login:* keys that
+ * filled SQLite on devices where users retried login many times.
+ * Runs once on first app launch after this update, then never again.
+ */
+const MIGRATION_KEY = "@mavrixfy_migration_ratelimit_login_cleared_v1";
+export async function runOneTimeMigrations(): Promise<void> {
+  try {
+    const done = await AsyncStorage.getItem(MIGRATION_KEY);
+    if (done === "1") return;
+
+    const keys = await AsyncStorage.getAllKeys();
+    const staleKeys = keys.filter((k) => k.startsWith("ratelimit:auth:login:"));
+    if (staleKeys.length > 0) {
+      await AsyncStorage.multiRemove(staleKeys);
+    }
+    await AsyncStorage.setItem(MIGRATION_KEY, "1");
+  } catch {
+    // Best-effort — never block app startup
   }
 }
 

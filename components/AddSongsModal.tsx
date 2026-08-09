@@ -9,7 +9,6 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   Pressable,
   StyleSheet,
   Text,
@@ -18,6 +17,7 @@ import {
 } from "react-native";
 import BottomSheet, {
   BottomSheetBackdrop,
+  BottomSheetFlatList,
   type BottomSheetBackdropProps,
 } from "@gorhom/bottom-sheet";
 import { Image } from "expo-image";
@@ -70,7 +70,7 @@ function parseApiSong(s: any): Song | null {
 }
 
 const AddSongsBottomSheet = memo(
-  forwardRef<AddSongsBottomSheetRef, {}>((_, ref) => {
+  forwardRef<AddSongsBottomSheetRef, object>((_, ref) => {
     const sheetRef = useRef<BottomSheet>(null);
     const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isSheetMounted, setIsSheetMounted] = useState(false);
@@ -78,7 +78,7 @@ const AddSongsBottomSheet = memo(
     const [loading, setLoading] = useState(false);
     const [songs, setSongs] = useState<Song[]>([]);
 
-    const { likedSongs, likedSongIds, isLiked, toggleLike, playSong } = usePlayerActions();
+    const { likedSongIds, isLiked, toggleLike, playSong } = usePlayerActions();
 
     const loadInitialSongs = useCallback(async () => {
       try {
@@ -322,7 +322,7 @@ const AddSongsBottomSheet = memo(
               </Text>
             </View>
           ) : (
-            <FlatList
+            <BottomSheetFlatList
               data={songs}
               keyExtractor={(item) => item.id}
               renderItem={renderSongItem}
