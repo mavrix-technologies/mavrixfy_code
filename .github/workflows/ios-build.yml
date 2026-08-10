@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-ios:
     name: 🎉 iOS Build (No Code Signing)
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 60
 
     steps:
@@ -23,8 +23,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -46,14 +46,17 @@ jobs:
             echo "No XCode version check found in Podfile"
           fi
 
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+          working-directory: ios
 
       - name: Install CocoaPods dependencies
         run: |
           cd ios
           pod install
-
-      - name: Export NODE_BINARY for xcodebuild scripts
-        run: echo "NODE_BINARY=$(which node)" >> $GITHUB_ENV
 
       - name: Build iOS app (no codesign)
         run: |
@@ -68,13 +71,6 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
-            CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            EXPANDED_CODE_SIGN_IDENTITY="" \
-            EXPANDED_CODE_SIGN_IDENTITY_HASH="" \
-            NODE_BINARY="$NODE_BINARY" \
             build
 
       - name: Create IPA
@@ -101,10 +97,10 @@ jobs:
           name: iOS Build v${{ github.run_number }} (Unsigned)
           body: |
             iOS IPA Build - Unsigned (No Code Signing)
-            
+
             ⚠️ This IPA is NOT signed and cannot be installed directly on un-jailbroken devices without Sideloadly/AltStore.
             Built automatically without any Apple Developer Account.
-            
+
             **Build Details:**
             - Build Number: ${{ github.run_number }}
             - Commit: ${{ github.sha }}
