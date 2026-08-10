@@ -1,4 +1,4 @@
-name: iOS Simulator Build (Unsigned)
+name: iOS IPA Build (Unsigned)
 
 on:
   workflow_dispatch:
@@ -11,9 +11,9 @@ permissions:
   contents: write
 
 jobs:
-  build-ios-simulator:
-    name: 🎉 iOS Simulator Build
-    runs-on: macos-15
+  build-ios:
+    name: 🎉 iOS Build (No Code Signing)
+    runs-on: macos-latest
     timeout-minutes: 60
 
     steps:
@@ -23,7 +23,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -32,122 +32,61 @@ jobs:
       - name: Prebuild iOS
         run: npx expo prebuild --platform ios --clean
 
+      - name: Patch Podfile for XCode compatibility (if needed)
+        run: |
+          cd ios
+          # Check XCode version
+          xcodebuild -version
+          
+          # Remove strict XCode version check if present
+          if grep -q "React Native requires XCode" Podfile; then
+            echo "Patching Podfile to remove XCode version requirement..."
+            sed -i.bak '/React Native requires XCode/,/raise.*XCode/d' Podfile
+            echo "Podfile patched successfully"
+          else
+            echo "No XCode version check found in Podfile"
+          fi
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: ios
+
       - name: Install CocoaPods dependencies
         run: |
           cd ios
           pod install
 
-      - name: Validate build configuration
+      - name: Build iOS app (no codesign)
         run: |
           cd ios
-          echo "🔍 Validating build configuration..."
-          
-          # Check if workspace exists
-          if [ ! -f "Mavrixfy.xcworkspace/contents.xcworkspacedata" ]; then
-            echo "❌ Workspace not found!"
-            exit 1
-          fi
-          echo "✅ Workspace exists"
-          
-          # List available schemes
-          echo ""
-          echo "📋 Available schemes:"
-          xcodebuild -list -workspace Mavrixfy.xcworkspace
-          
-          # Check SDK
-          echo ""
-          echo "📱 Available simulator SDKs:"
-          xcodebuild -showsdks | grep simulator
-          
-          # Verify scheme exists
-          if ! xcodebuild -list -workspace Mavrixfy.xcworkspace | grep -q "Mavrixfy"; then
-            echo "❌ Scheme 'Mavrixfy' not found!"
-            exit 1
-          fi
-          echo "✅ Scheme 'Mavrixfy' exists"
-          
-          echo ""
-          echo "✅ All validations passed!"
-
-      - name: Build iOS Simulator app
-        run: |
-          cd ios
-          echo "🔨 Starting xcodebuild..."
-          echo "Workspace: Mavrixfy.xcworkspace"
-          echo "Scheme: Mavrixfy"
-          echo "SDK: iphonesimulator"
-          echo ""
-          
-          # Build with quiet mode (only shows warnings and errors)
-          set -o pipefail
-          xcodebuild \
-            -workspace Mavrixfy.xcworkspace \
+          xcodebuild -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
             -configuration Release \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -sdk iphoneos \
             -derivedDataPath build \
-            -quiet \
+            -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO \
-            build 2>&1 | tee build.log
-          
-          BUILD_EXIT_CODE=${PIPESTATUS[0]}
-          
-          if [ $BUILD_EXIT_CODE -ne 0 ]; then
-            echo ""
-            echo "❌ Build failed with exit code: $BUILD_EXIT_CODE"
-            echo ""
-            echo "📋 Last 100 lines of build log:"
-            tail -100 build.log
-            echo ""
-            echo "💾 Full log saved to artifact 'build-logs'"
-            exit $BUILD_EXIT_CODE
-          fi
-          
-          echo ""
-          echo "✅ Build completed successfully!"
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
 
-      - name: Upload build logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: ios/build.log
-          retention-days: 7
-
-      - name: Create IPA from Simulator app
+      - name: Create IPA
         run: |
-          cd ios/build/Build/Products/Release-iphonesimulator
-          
-          # Verify the app exists
-          if [ ! -d "Mavrixfy.app" ]; then
-            echo "❌ Mavrixfy.app not found!"
-            ls -la
-            exit 1
-          fi
-          
-          echo "✅ Found Mavrixfy.app"
-          
-          # Create Payload directory (IPA structure)
+          cd ios/build/Build/Products/Release-iphoneos
           mkdir -p Payload
-          
-          # Copy app into Payload
-          cp -r Mavrixfy.app Payload/
-          
-          # Create IPA (zip file with Payload folder)
-          zip -r -q -9 Mavrixfy-Simulator.ipa Payload
-          
-          # Move to workspace root
-          mv Mavrixfy-Simulator.ipa ${{ github.workspace }}/
-          
-          echo "✅ IPA created successfully!"
-          ls -lh ${{ github.workspace }}/Mavrixfy-Simulator.ipa
+          mv Mavrixfy.app Payload/
+          zip -qq -r -9 Mavrixfy.ipa Payload
+          mv Mavrixfy.ipa ${{ github.workspace }}/
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Mavrixfy-iOS-Simulator-IPA
-          path: Mavrixfy-Simulator.ipa
+          name: Mavrixfy-iOS-IPA-Unsigned
+          path: Mavrixfy.ipa
           compression-level: 0
           retention-days: 14
 
@@ -155,51 +94,45 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         with:
-          tag_name: ios-simulator-v${{ github.run_number }}
-          name: iOS Simulator Build v${{ github.run_number }}
+          tag_name: ios-v${{ github.run_number }}
+          name: iOS Build v${{ github.run_number }} (Unsigned)
           body: |
-            # 📱 iOS Simulator IPA (Unsigned)
+            # 📱 iOS IPA Build - Unsigned (No Code Signing)
 
-            ⚠️ **This IPA is for iOS Simulator ONLY**
-            - Cannot be installed on physical devices
-            - Works on macOS with Xcode/iOS Simulator
-            - No code signing required
+            ⚠️ **This IPA is NOT signed and cannot be installed directly on un-jailbroken devices without Sideloadly/AltStore.**
 
-            📋 **Installation Instructions:**
-            
-            **Method 1: Extract and Drag (Easiest)**
-            ```bash
-            # Unzip the IPA
-            unzip Mavrixfy-Simulator.ipa
-            
-            # Open iOS Simulator, then drag Mavrixfy.app onto it
-            ```
-            
-            **Method 2: Command Line**
-            ```bash
-            # Unzip the IPA
-            unzip Mavrixfy-Simulator.ipa
-            
-            # Install on booted simulator
-            xcrun simctl install booted Payload/Mavrixfy.app
-            ```
-            
-            **Method 3: Sideloadly (Windows/Mac)**
-            - Open Sideloadly
-            - Select iOS Simulator as target
-            - Drag the IPA file
-            - Install
+            Built automatically without any Apple Developer Account.
 
-            🔧 **Build Details:**
-            - Build Number: `${{ github.run_number }}`
-            - Commit: `${{ github.sha }}`
-            - SDK: iOS Simulator (iphonesimulator)
-            - Configuration: Release
-            - Format: IPA (standard iOS app package)
+            ## 🔧 Installation Methods
+
+            ### Method 1: Sideloadly (Recommended)
+            1. Download [Sideloadly](https://sideloadly.io/)
+            2. Download the IPA file below
+            3. Connect your iPhone/iPad via USB
+            4. Use your Apple ID (free account works)
+            5. Drag IPA into Sideloadly and install
+
+            ### Method 2: AltStore
+            1. Install [AltStore](https://altstore.io/)
+            2. Download the IPA file
+            3. Open in AltStore to install
+
+            ### Method 3: Xcode (Mac only)
+            1. Unzip the IPA
+            2. Open Xcode → Window → Devices and Simulators
+            3. Select your device
+            4. Drag the .app file into the "Installed Apps" section
+
+            ## 📋 Build Details
+            - **Build Number:** `${{ github.run_number }}`
+            - **Commit:** `${{ github.sha }}`
+            - **SDK:** iphoneos (iOS Device)
+            - **Configuration:** Release
+            - **Signing:** Unsigned (use sideloading tools)
             
             ---
             Built automatically using GitHub Actions ✨
           draft: false
           prerelease: false
-          files: Mavrixfy-Simulator.ipa
+          files: Mavrixfy.ipa
           make_latest: true
