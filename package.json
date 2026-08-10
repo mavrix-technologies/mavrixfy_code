@@ -21,7 +21,8 @@
     "firestore:deploy:indexes": "npx firebase-tools deploy --only firestore:indexes",
     "firestore:deploy:rules": "npx firebase-tools deploy --only firestore:rules",
     "postinstall": "npx patch-package",
-    "doctor": "npx react-doctor@latest --max-duration 15"
+    "doctor": "npx react-doctor@latest --max-duration 15",
+    "verify:ios": "pwsh -File scripts/verify-ios-config.ps1"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
