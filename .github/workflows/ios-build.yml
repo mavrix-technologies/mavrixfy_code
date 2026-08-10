@@ -30,25 +30,20 @@ jobs:
         run: npm ci
 
       - name: Prebuild iOS
-        run: npx expo prebuild --platform ios --clean --no-install
+        run: npx expo prebuild --platform ios --clean
 
-      - name: Strip signing from Xcode project and entitlements
+      - name: Patch Podfile for XCode compatibility (if needed)
         run: |
           cd ios
-          sed -i.bak 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' Mavrixfy.xcodeproj/project.pbxproj
-          sed -i.bak 's/DEVELOPMENT_TEAM = [A-Z0-9]*;/DEVELOPMENT_TEAM = "";/g' Mavrixfy.xcodeproj/project.pbxproj
-          sed -i.bak 's/CODE_SIGN_IDENTITY = "iPhone Developer";/CODE_SIGN_IDENTITY = "";/g' Mavrixfy.xcodeproj/project.pbxproj
-          sed -i.bak 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "";/g' Mavrixfy.xcodeproj/project.pbxproj
-          ENTITLEMENTS_FILE=$(find . -name "*.entitlements" | head -1)
-          if [ -n "$ENTITLEMENTS_FILE" ]; then
-            echo "Emptying entitlements: $ENTITLEMENTS_FILE"
-            cat > "$ENTITLEMENTS_FILE" << 'ENTEOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict/>
-          </plist>
-          ENTEOF
+          # Check XCode version
+          xcodebuild -version
+          # Remove strict XCode version check if present
+          if grep -q "React Native requires XCode" Podfile; then
+            echo "Patching Podfile to remove XCode version requirement..."
+            sed -i.bak '/React Native requires XCode/,/raise.*XCode/d' Podfile
+            echo "Podfile patched successfully"
+          else
+            echo "No XCode version check found in Podfile"
           fi
 
       - name: Install CocoaPods dependencies
@@ -56,34 +51,28 @@ jobs:
           cd ios
           pod install
 
-      - name: Export NODE_BINARY for xcodebuild subprocesses
-        run: echo "NODE_BINARY=$(which node)" >> $GITHUB_ENV
-
-      - name: Archive iOS app (unsigned)
+      - name: Build iOS app (no codesign)
         run: |
           cd ios
-          xcodebuild archive \
-            -workspace Mavrixfy.xcworkspace \
+          xcodebuild -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
-            -sdk iphoneos \
             -configuration Release \
-            -archivePath $PWD/build/Mavrixfy.xcarchive \
-            SKIP_INSTALL=NO \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES \
-            NODE_BINARY="$NODE_BINARY" \
-            EXPO_UPDATES_RELEASE_CHANNEL=production
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
 
-      - name: Package IPA from archive
+      - name: Create IPA
         run: |
+          cd ios/build/Build/Products/Release-iphoneos
           mkdir -p Payload
-          cp -R "ios/build/Mavrixfy.xcarchive/Products/Applications/Mavrixfy.app" Payload/
+          mv Mavrixfy.app Payload/
           zip -qq -r -9 Mavrixfy.ipa Payload
+          mv Mavrixfy.ipa ${{ github.workspace }}/
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
