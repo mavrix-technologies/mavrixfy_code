@@ -1,0 +1,98 @@
+name: iOS Build Validation (Fast)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/ios-build.yml'
+      - 'ios/**'
+      - 'app.json'
+      - 'package.json'
+
+jobs:
+  validate-ios:
+    name: 🧪 Validate iOS Build Config
+    runs-on: macos-15
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prebuild iOS
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios
+          pod install
+
+      - name: Validate build configuration
+        run: |
+          cd ios
+          echo "🔍 Validating build configuration..."
+          
+          # Check workspace
+          if [ ! -f "Mavrixfy.xcworkspace/contents.xcworkspacedata" ]; then
+            echo "❌ Workspace not found!"
+            exit 1
+          fi
+          echo "✅ Workspace exists"
+          
+          # List schemes
+          echo ""
+          echo "📋 Available schemes:"
+          xcodebuild -list -workspace Mavrixfy.xcworkspace
+          
+          # Check SDK
+          echo ""
+          echo "📱 iOS Simulator SDK:"
+          xcodebuild -showsdks | grep iphonesimulator
+          
+          # Verify scheme
+          if ! xcodebuild -list -workspace Mavrixfy.xcworkspace | grep -q "Mavrixfy"; then
+            echo "❌ Scheme 'Mavrixfy' not found!"
+            exit 1
+          fi
+          echo "✅ Scheme 'Mavrixfy' exists"
+          
+          echo ""
+          echo "✅ All validations passed!"
+
+      - name: Test build (dry-run)
+        run: |
+          cd ios
+          echo "🧪 Testing xcodebuild (dry-run only)..."
+          xcodebuild \
+            -workspace Mavrixfy.xcworkspace \
+            -scheme Mavrixfy \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            -dry-run
+          
+          echo "✅ Dry-run successful! Build should work."
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "🎉 Validation Complete!"
+          echo ""
+          echo "✅ Dependencies installed"
+          echo "✅ iOS prebuild successful"
+          echo "✅ CocoaPods installed"
+          echo "✅ Workspace valid"
+          echo "✅ Scheme found"
+          echo "✅ xcodebuild dry-run passed"
+          echo ""
+          echo "The full build should work in the main workflow."

@@ -80,28 +80,32 @@ Mavrixfy-Simulator.ipa (ZIP file)
 
 ## Installation on Simulator
 
-### Method 1: Drag & Drop
-1. Download `Mavrixfy-Simulator.app.tar.gz`
-2. Extract: `tar -xzf Mavrixfy-Simulator.app.tar.gz`
-3. Open iOS Simulator (Xcode → Open Developer Tool → Simulator)
-4. Drag `Mavrixfy.app` onto the simulator window
+### Method 1: Extract and Drag (Easiest)
+```bash
+# Unzip the IPA
+unzip Mavrixfy-Simulator.ipa
+
+# Open iOS Simulator (Xcode → Open Developer Tool → Simulator)
+# Drag Payload/Mavrixfy.app onto the simulator window
+```
 
 ### Method 2: Command Line
 ```bash
-# Extract the app
-tar -xzf Mavrixfy-Simulator.app.tar.gz
+# Extract the IPA
+unzip Mavrixfy-Simulator.ipa
 
 # Install on booted simulator
-xcrun simctl install booted Mavrixfy.app
+xcrun simctl install booted Payload/Mavrixfy.app
 
 # Launch the app
 xcrun simctl launch booted com.mavrixfy.app
 ```
 
-### Method 3: From Finder
-1. Extract the `.app`
-2. Right-click the `.app` → Show Package Contents (to verify it's valid)
-3. Drag to simulator home screen
+### Method 3: Double-click
+1. Download `Mavrixfy-Simulator.ipa`
+2. Change extension to `.zip`: `Mavrixfy-Simulator.zip`
+3. Double-click to extract
+4. Drag `Payload/Mavrixfy.app` to simulator
 
 ## Running the Workflow
 
@@ -118,12 +122,12 @@ xcrun simctl launch booted com.mavrixfy.app
 
 **From Artifacts:**
 1. Go to completed workflow run
-2. Download `Mavrixfy-iOS-Simulator`
+2. Download `Mavrixfy-iOS-Simulator-IPA`
 
 **From Releases:**
 1. Go to Releases page
 2. Find `ios-simulator-v*` release
-3. Download `Mavrixfy-Simulator.app.tar.gz`
+3. Download `Mavrixfy-Simulator.ipa`
 
 ## Why Simulator Instead of Device?
 
@@ -163,7 +167,7 @@ If you later want a device build, you'll need to:
 - **Runner:** `macos-15` (consistent Xcode version)
 - **Node:** 22
 - **Build Time:** ~15-20 minutes
-- **Output:** `.app.tar.gz` (~50-100 MB)
+- **Output:** `.ipa` (standard iOS package, ~50-100 MB)
 - **Retention:** 14 days
 - **Cost:** FREE (GitHub Actions)
 
@@ -215,9 +219,10 @@ ios/build/Build/Products/Release-iphonesimulator/
 ```
 
 ### Package Format
-- **Format:** tar.gz (gzipped tar archive)
-- **Why not zip?** tar preserves Unix permissions better
-- **Compression:** -9 (maximum)
+- **Format:** IPA (iOS App Store Package)
+- **Structure:** ZIP file containing Payload/Mavrixfy.app
+- **Compatible with:** iOS Simulator, some sideloading tools
+- **Standard:** Same format as App Store IPAs (but unsigned)
 
 ## Official References
 

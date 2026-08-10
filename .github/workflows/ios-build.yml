@@ -37,9 +37,49 @@ jobs:
           cd ios
           pod install
 
+      - name: Validate build configuration
+        run: |
+          cd ios
+          echo "🔍 Validating build configuration..."
+          
+          # Check if workspace exists
+          if [ ! -f "Mavrixfy.xcworkspace/contents.xcworkspacedata" ]; then
+            echo "❌ Workspace not found!"
+            exit 1
+          fi
+          echo "✅ Workspace exists"
+          
+          # List available schemes
+          echo ""
+          echo "📋 Available schemes:"
+          xcodebuild -list -workspace Mavrixfy.xcworkspace
+          
+          # Check SDK
+          echo ""
+          echo "📱 Available simulator SDKs:"
+          xcodebuild -showsdks | grep simulator
+          
+          # Verify scheme exists
+          if ! xcodebuild -list -workspace Mavrixfy.xcworkspace | grep -q "Mavrixfy"; then
+            echo "❌ Scheme 'Mavrixfy' not found!"
+            exit 1
+          fi
+          echo "✅ Scheme 'Mavrixfy' exists"
+          
+          echo ""
+          echo "✅ All validations passed!"
+
       - name: Build iOS Simulator app
         run: |
           cd ios
+          echo "🔨 Starting xcodebuild..."
+          echo "Workspace: Mavrixfy.xcworkspace"
+          echo "Scheme: Mavrixfy"
+          echo "SDK: iphonesimulator"
+          echo ""
+          
+          # Build with better error handling
+          set -o pipefail
           xcodebuild \
             -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
@@ -48,7 +88,31 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee build.log
+          
+          BUILD_EXIT_CODE=${PIPESTATUS[0]}
+          
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo "❌ Build failed with exit code: $BUILD_EXIT_CODE"
+            echo ""
+            echo "📋 Last 50 lines of build log:"
+            tail -50 build.log
+            echo ""
+            echo "💾 Full log saved to artifact 'build-logs'"
+            exit $BUILD_EXIT_CODE
+          fi
+          
+          echo ""
+          echo "✅ Build completed successfully!"
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: ios/build.log
+          retention-days: 7
 
       - name: Create IPA from Simulator app
         run: |
