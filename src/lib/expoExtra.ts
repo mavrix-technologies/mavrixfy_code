@@ -2,7 +2,7 @@ import Constants from "expo-constants";
 
 type ExpoExtra = Record<string, unknown>;
 
-const bundledAppConfig = require("../app.json");
+const bundledAppConfig = require("../../app.json");
 const bundledExtra = (bundledAppConfig?.expo?.extra ?? {}) as ExpoExtra;
 
 export function getExpoExtra(): ExpoExtra {

@@ -65,7 +65,7 @@ import { globalQueueSheetRef } from "@/lib/queueRef";
 import AddSongsBottomSheet from "@/components/AddSongsModal";
 import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import { logger } from "@/lib/logger";
-import { AppNavBar } from "@/app/(tabs)/_layout";
+import { AppNavBar } from "./(tabs)/_layout";
 
 function isExpoGoRuntime(): boolean {
   return Constants.executionEnvironment === "storeClient" || Constants.appOwnership === "expo";

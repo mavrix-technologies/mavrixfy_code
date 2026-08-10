@@ -5,14 +5,9 @@ module.exports = function (api) {
     [
       "module-resolver",
       {
-        root: ["./"],
+        root: ["./src"],
         alias: {
-          "@": "./src",
-          "@src": "./src",
-          "@features": "./src/features",
-          "@shared": "./src/shared",
-          "@domain": "./src/domain",
-          "@data": "./src/data"
+          "@": "./src"
         },
         extensions: [
           ".js",

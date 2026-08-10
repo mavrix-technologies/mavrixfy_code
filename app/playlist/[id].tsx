@@ -1,1 +1,1 @@
-export { default } from "@/src/features/playlists/screens/PlaylistDetailScreen";
+export { default } from "@/features/playlists/screens/PlaylistDetailScreen";

@@ -18,7 +18,7 @@ import { triggerImpact } from "@/lib/haptics";
 import { usePlayerRowActions } from "@/contexts/PlayerContext";
 import { usePlaybackRowState } from "@/lib/playbackEngine";
 import EqualizerBars from "@/components/EqualizerBars";
-import { showGlobalToast } from "@/app/_layout";
+import { showGlobalToast } from "@/utils/globalToast";
 import DownloadButton from "@/components/DownloadButton";
 import { logger } from "@/lib/logger";
 

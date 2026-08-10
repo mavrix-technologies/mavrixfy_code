@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useScreenTracking } from "@/hooks/useScreenTracking";
 import {
   View,
   Text,

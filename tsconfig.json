@@ -6,25 +6,7 @@
     "skipLibCheck": true,
     "paths": {
       "@/*": [
-        "./src/*",
-        "./*"
-      ],
-      "@src/*": [
         "./src/*"
-      ],
-      "@features/*": [
-        "./src/features/*",
-        "./features/*"
-      ],
-      "@shared/*": [
-        "./src/shared/*",
-        "./shared/*"
-      ],
-      "@domain/*": [
-        "./src/domain/*"
-      ],
-      "@data/*": [
-        "./src/data/*"
       ]
     }
   },
