@@ -32,31 +32,29 @@ jobs:
       - name: Prebuild iOS
         run: npx expo prebuild --platform ios --clean --no-install
 
-      - name: Patch Xcode Project for Unsigned Release Build
+      - name: Patch Xcode Project for Unsigned Build
         run: |
           cd ios
-          xcodebuild -version
-
-          # Switch code signing style to Manual and clear identities
+          # Switch to Manual signing and clear identity in project file
           sed -i.bak 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' Mavrixfy.xcodeproj/project.pbxproj
+          sed -i.bak 's/DEVELOPMENT_TEAM = [A-Z0-9]*;/DEVELOPMENT_TEAM = "";/g' Mavrixfy.xcodeproj/project.pbxproj
           sed -i.bak 's/CODE_SIGN_IDENTITY = "iPhone Developer";/CODE_SIGN_IDENTITY = "";/g' Mavrixfy.xcodeproj/project.pbxproj
           sed -i.bak 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "";/g' Mavrixfy.xcodeproj/project.pbxproj
-          sed -i.bak 's/CODE_SIGNING_ALLOWED = YES;/CODE_SIGNING_ALLOWED = NO;/g' Mavrixfy.xcodeproj/project.pbxproj
 
       - name: Install CocoaPods dependencies
         run: |
           cd ios
           pod install
 
-      - name: Build iOS app (no codesign)
+      - name: Archive iOS app (no codesign)
         run: |
           cd ios
-          xcodebuild -workspace Mavrixfy.xcworkspace \
+          xcodebuild archive \
+            -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
             -configuration Release \
             -sdk iphoneos \
-            -derivedDataPath build \
-            -destination 'generic/platform=iOS' \
+            -archivePath build/Mavrixfy.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -64,13 +62,12 @@ jobs:
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            build
+            COMPILER_INDEX_STORE_ENABLE=NO
 
-      - name: Create IPA
+      - name: Create IPA from archive
         run: |
           mkdir -p Payload
-          cp -R ios/build/Build/Products/Release-iphoneos/*.app Payload/
+          cp -R ios/build/Mavrixfy.xcarchive/Products/Applications/Mavrixfy.app Payload/
           zip -qq -r -9 Mavrixfy.ipa Payload
 
       - name: Upload IPA artifact
