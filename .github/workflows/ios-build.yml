@@ -30,28 +30,19 @@ jobs:
         run: npm ci
 
       - name: Prebuild iOS
-        run: npx expo prebuild --platform ios --clean
+        run: npx expo prebuild --platform ios --clean --no-install
 
-      - name: Patch Podfile for XCode compatibility (if needed)
+      - name: Patch Podfile for Xcode compatibility (if needed)
         run: |
           cd ios
-          # Check XCode version
           xcodebuild -version
-          # Remove strict XCode version check if present
           if grep -q "React Native requires XCode" Podfile; then
-            echo "Patching Podfile to remove XCode version requirement..."
+            echo "Patching Podfile to remove Xcode version requirement..."
             sed -i.bak '/React Native requires XCode/,/raise.*XCode/d' Podfile
             echo "Podfile patched successfully"
           else
-            echo "No XCode version check found in Podfile"
+            echo "No Xcode version check found in Podfile"
           fi
-
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.2'
-          bundler-cache: true
-          working-directory: ios
 
       - name: Install CocoaPods dependencies
         run: |
@@ -71,15 +62,15 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             build
 
       - name: Create IPA
         run: |
-          cd ios/build/Build/Products/Release-iphoneos
           mkdir -p Payload
-          mv Mavrixfy.app Payload/
+          cp -R ios/build/Build/Products/Release-iphoneos/*.app Payload/
           zip -qq -r -9 Mavrixfy.ipa Payload
-          mv Mavrixfy.ipa ${{ github.workspace }}/
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
@@ -93,12 +84,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: ios-v${{ github.run_number }}
-          name: iOS Build v${{ github.run_number }} (Unsigned)
+          tag_name: ios-v1.${{ github.run_number }}
+          name: iOS Build v1.${{ github.run_number }} (Unsigned)
           body: |
             iOS IPA Build - Unsigned (No Code Signing)
             
-            ⚠️ This IPA is NOT signed and cannot be installed directly on un-jailbroken devices without Sideloadly/AltStore.
+            ⚠️ This IPA is NOT signed and cannot be installed directly on un-jailbroken devices without Sideloadly / AltStore / TrollStore / Scarlet.
             Built automatically without any Apple Developer Account.
             
             **Build Details:**

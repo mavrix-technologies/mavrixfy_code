@@ -2408,15 +2408,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           };
           await TrackPlayer.setRepeatMode(repeatMap[repeatModeRef.current]);
         }
-        if (requestId === playRequestIdRef.current) {
-          setPlaybackLoading(false);
-          updatePlaybackEngineSnapshot({ isLoading: false });
-        }
       } catch (error) {
-        if (requestId === playRequestIdRef.current) {
-          setPlaybackLoading(false);
-          updatePlaybackEngineSnapshot({ isLoading: false });
-        }
         if (isYouTubeSource(targetSong)) {
           await playYouTubeSong(
             stripTransientYouTubeAudioUrl(targetSong),
@@ -2434,6 +2426,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           songAudioUrl: song?.audioUrl,
         });
         showPlaybackNotice("Could not start playback.");
+      } finally {
+        setPlaybackLoading(false);
+        if (requestId === playRequestIdRef.current) {
+          updatePlaybackEngineSnapshot({ isLoading: false });
+        }
       }
     });
   }, [appendRemainingTracksIfCurrent, buildPlaybackQueueForSong, clearUserQueuedSongIds, ensurePlayerReady, failPendingNativeTrack, getNativeTrackIndexForSong, markPendingNativeTrack, playYouTubeSong, runSerializedPlaybackSwitch, showPlaybackNotice]);
