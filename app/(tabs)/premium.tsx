@@ -1,1 +1,1 @@
-export { default } from "@/src/features/settings/screens/PremiumScreen";
+export { default } from "@/features/settings/screens/PremiumScreen";

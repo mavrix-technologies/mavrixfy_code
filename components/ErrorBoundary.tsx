@@ -1,1 +1,1 @@
-export * from "@/src/components/ErrorBoundary";
+export * from "@/components/ErrorBoundary";

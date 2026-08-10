@@ -28,7 +28,7 @@ import {
   removeSongFromFirestorePlaylist,
   FirestorePlaylist,
 } from "@/lib/firestore";
-import { searchArtists } from "@/src/data/providers/ArtistProvider";
+import { searchArtists } from "@/data/providers/ArtistProvider";
 import { safeGoBack } from "@/utils/navigation";
 import { compactMap } from "@/lib/arrayUtils";
 

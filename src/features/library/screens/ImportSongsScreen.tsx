@@ -22,7 +22,7 @@ import AppTopHeader, {
   APP_TOP_HEADER_HEIGHT,
   AppTopHeaderProfileButton,
   useAppTopHeaderScrollElevation,
-} from "@/src/components/AppTopHeader";
+} from "@/components/AppTopHeader";
 
 const EXPORTIFY_URL = "https://exportify.net/";
 

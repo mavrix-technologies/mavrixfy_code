@@ -1,1 +1,1 @@
-export { default } from "@/src/features/library/screens/ImportSongsScreen";
+export { default } from "@/features/library/screens/ImportSongsScreen";

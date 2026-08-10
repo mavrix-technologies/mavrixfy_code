@@ -37,7 +37,7 @@ import Colors from "@/constants/colors";
 
 import { safeGoBack } from "@/utils/navigation";
 import { usePlayerActions, usePlayerProgress, usePlayerRow } from "@/contexts/PlayerContext";
-import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/src/services/audio/PlaybackEngine";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
 import { formatDuration, Song, getBestImageUrl, convertJioSaavnSong } from "@/lib/musicData";
 import { getRecentlyPlayed, getUserPlaylists, getSettings } from "@/lib/storage";
@@ -50,14 +50,14 @@ import {
   preloadDominantColors,
   type ArtworkPalette,
 } from "@/lib/colorExtractor";
-import EqualizerBars from "@/src/components/EqualizerBars";
+import EqualizerBars from "@/components/EqualizerBars";
 import DownloadButton from "@/components/DownloadButton";
 import { mapFilter } from "@/lib/arrayUtils";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 
 import YoutubePlayer from "react-native-youtube-iframe";
-import { getYouTubeMusicVisualVideoId } from "@/src/data/providers/YouTubeMusicProvider";
-import { searchArtists, getArtistDetails } from "@/src/data/providers/ArtistProvider";
+import { getYouTubeMusicVisualVideoId } from "@/data/providers/YouTubeMusicProvider";
+import { searchArtists, getArtistDetails } from "@/data/providers/ArtistProvider";
 
 const PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING = 136;
 const PLAYER_PRIMARY_DISMISS_START_PX = 8;

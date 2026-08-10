@@ -20,28 +20,28 @@ import { LinearGradient } from "expo-linear-gradient";
 import Colors from "@/constants/colors";
 import { getBestImageUrl, Song } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
-import SongRow from "@/src/components/SongRow";
+import SongRow from "@/components/SongRow";
 import { searchCatalog } from "@/lib/catalogService";
 import {
   normalizeText,
   rankSongs,
   parseStructuredQuery
 } from "@/lib/searchUtils";
-import OfflineScreen from "@/src/components/OfflineScreen";
-import OfflineBanner from "@/src/components/OfflineBanner";
+import OfflineScreen from "@/components/OfflineScreen";
+import OfflineBanner from "@/components/OfflineBanner";
 import AppTopHeader, {
   APP_TOP_HEADER_HEIGHT,
   AppTopHeaderDownloadButton,
   AppTopHeaderProfileButton,
   useAppTopHeaderScrollElevation,
-} from "@/src/components/AppTopHeader";
-import SearchHeaderField from "@/src/components/SearchHeaderField";
+} from "@/components/AppTopHeader";
+import SearchHeaderField from "@/components/SearchHeaderField";
 import SearchResultFilterChip from "@/components/SearchResultFilterChip";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { filterMap, sortedCopy } from "@/lib/arrayUtils";
-import { searchJioSaavnAlbums, type JioSaavnAlbumResult } from "@/src/data/providers/JioSaavnProvider";
-import type { ArtistCard } from "@/src/data/providers/ArtistProvider";
+import { searchJioSaavnAlbums, type JioSaavnAlbumResult } from "@/data/providers/JioSaavnProvider";
+import type { ArtistCard } from "@/data/providers/ArtistProvider";
 import {
   addSongSearchHistoryItem,
   addSearchHistoryItem,

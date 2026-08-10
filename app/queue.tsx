@@ -1,1 +1,1 @@
-export { default } from "@/src/features/player/screens/QueueScreen";
+export { default } from "@/features/player/screens/QueueScreen";

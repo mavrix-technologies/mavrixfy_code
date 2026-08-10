@@ -35,18 +35,18 @@ import {
 } from "@/lib/musicData";
 
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/src/services/audio/PlaybackEngine";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { getUserPlaylists, updateUserPlaylist, deleteUserPlaylist, UserPlaylist } from "@/lib/storage";
 import { firestorePlaylistToLocalSongs, getPlaylistById, updateFirestorePlaylist, deleteFirestorePlaylist } from "@/lib/firestore";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { sortedCopy } from "@/lib/arrayUtils";
-import SongRow from "@/src/components/SongRow";
-import SongRowSkeleton from "@/src/components/SongRowSkeleton";
-import { getJioSaavnAlbumDetails, getJioSaavnPlaylistDetails } from "@/src/data/providers/JioSaavnProvider";
+import SongRow from "@/components/SongRow";
+import SongRowSkeleton from "@/components/SongRowSkeleton";
+import { getJioSaavnAlbumDetails, getJioSaavnPlaylistDetails } from "@/data/providers/JioSaavnProvider";
 import { useAuth } from "@/contexts/AuthContext";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
-import OfflineBanner from "@/src/components/OfflineBanner";
+import OfflineBanner from "@/components/OfflineBanner";
 import { useNetwork } from "@/contexts/NetworkContext";
 
 const subscribeToPlaylistSongRemoved = (

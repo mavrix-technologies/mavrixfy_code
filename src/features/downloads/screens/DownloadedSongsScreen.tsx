@@ -27,7 +27,7 @@ import { onQueueEvent } from "@/lib/downloads/downloadManager";
 import { DownloadItem } from "@/types/downloads";
 import { Song } from "@/lib/musicData";
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import SongRow from "@/src/components/SongRow";
+import SongRow from "@/components/SongRow";
 import {
   getCollectionMetadataSnapshot,
   loadAllCollectionMetadata,

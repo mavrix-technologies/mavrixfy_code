@@ -1,1 +1,1 @@
-export { default } from "@/src/features/player/screens/SongOptionsScreen";
+export { default } from "@/features/player/screens/SongOptionsScreen";

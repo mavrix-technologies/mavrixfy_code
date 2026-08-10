@@ -37,7 +37,7 @@ import { getPublicPlaylists, FirestorePlaylist } from "@/lib/firestore";
 import { getCachedHomePublicPlaylists, setCachedHomePublicPlaylists, clearCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
-import { ErrorBoundary } from "@/src/components/ErrorBoundary";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { triggerImpact } from "@/lib/haptics";
 import {
   clearJioSaavnPlaylistCache,
@@ -45,27 +45,27 @@ import {
   getJioSaavnSongDetails,
   HomeJioSaavnCategoryData,
   prefetchVisiblePlaylists,
-} from "@/src/data/providers/JioSaavnProvider";
+} from "@/data/providers/JioSaavnProvider";
 import {
   getRecommendationHomeFeed,
   recommendationFeedEnabled,
   RecommendationFeed,
   RecommendationItem,
   RecommendationSection,
-} from "@/src/data/providers/RecommendationProvider";
-import { getDailyNewReleaseSongs, clearDailyNewReleaseSongCache } from "@/src/data/providers/NewReleaseProvider";
+} from "@/data/providers/RecommendationProvider";
+import { getDailyNewReleaseSongs, clearDailyNewReleaseSongCache } from "@/data/providers/NewReleaseProvider";
 import {
   subscribeNotifications,
   getUnreadNotificationsCount,
   loadNotifications,
 } from "@/stores/notificationStore";
-import { getFeaturedArtists, ArtistCard, prefetchArtist, clearFeaturedArtistsCache } from "@/src/data/providers/ArtistProvider";
-import OfflineScreen from "@/src/components/OfflineScreen";
-import OfflineBanner from "@/src/components/OfflineBanner";
+import { getFeaturedArtists, ArtistCard, prefetchArtist, clearFeaturedArtistsCache } from "@/data/providers/ArtistProvider";
+import OfflineScreen from "@/components/OfflineScreen";
+import OfflineBanner from "@/components/OfflineBanner";
 import AppTopHeader, {
   AppTopHeaderProfileButton,
   useAppTopHeaderScrollElevation,
-} from "@/src/components/AppTopHeader";
+} from "@/components/AppTopHeader";
 import AdMobBanner from "@/components/AdMobBanner";
 import AppPromotionModal from "@/components/AppPromotionModal";
 import PromotionBanner from "@/components/PromotionBanner";

@@ -34,13 +34,13 @@ import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import { triggerImpact } from "@/lib/haptics";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { getFollowedArtists, FollowedArtist } from "@/lib/followedArtists";
-import OfflineBanner from "@/src/components/OfflineBanner";
+import OfflineBanner from "@/components/OfflineBanner";
 import AppTopHeader, {
   APP_TOP_HEADER_HEIGHT,
   AppTopHeaderIconButton,
   AppTopHeaderProfileButton,
   useAppTopHeaderScrollElevation,
-} from "@/src/components/AppTopHeader";
+} from "@/components/AppTopHeader";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { sortedCopy } from "@/lib/arrayUtils";
 

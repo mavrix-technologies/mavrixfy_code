@@ -1,1 +1,1 @@
-export * from "@/src/components/ErrorFallback";
+export * from "@/components/ErrorFallback";

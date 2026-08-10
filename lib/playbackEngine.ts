@@ -1,1 +1,1 @@
-export * from "@/src/services/audio/PlaybackEngine";
+export * from "@/services/audio/PlaybackEngine";

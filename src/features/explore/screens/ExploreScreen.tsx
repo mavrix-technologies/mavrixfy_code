@@ -23,12 +23,12 @@ import { useNavigation } from "expo-router";
 import YoutubePlayer from "react-native-youtube-iframe";
 
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import { usePlaybackPlayState } from "@/src/services/audio/PlaybackEngine";
+import { usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { Song } from "@/lib/musicData";
 
-import { searchYouTubeMusicVideos } from "@/src/data/providers/YouTubeMusicProvider";
+import { searchYouTubeMusicVideos } from "@/data/providers/YouTubeMusicProvider";
 
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");

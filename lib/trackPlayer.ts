@@ -1,1 +1,1 @@
-export * from "@/src/services/audio/TrackPlayerAdapter";
+export * from "@/services/audio/TrackPlayerAdapter";

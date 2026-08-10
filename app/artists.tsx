@@ -1,1 +1,1 @@
-export { default } from "@/src/features/artists/screens/AllArtistsScreen";
+export { default } from "@/features/artists/screens/AllArtistsScreen";

@@ -15,12 +15,12 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import { convertJioSaavnSong, Song } from "@/lib/musicData";
-import { getArtistDetails } from "@/src/data/providers/ArtistProvider";
+import { getArtistDetails } from "@/data/providers/ArtistProvider";
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/src/services/audio/PlaybackEngine";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { triggerImpact } from "@/lib/haptics";
-import SongRow from "@/src/components/SongRow";
-import SongRowSkeleton from "@/src/components/SongRowSkeleton";
+import SongRow from "@/components/SongRow";
+import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { setLastMix } from "@/lib/lastMix";
 import { mapFilter, sortedCopy } from "@/lib/arrayUtils";
 

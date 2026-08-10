@@ -1,1 +1,1 @@
-export { default } from "@/src/features/downloads/screens/DownloadedSongsScreen";
+export { default } from "@/features/downloads/screens/DownloadedSongsScreen";

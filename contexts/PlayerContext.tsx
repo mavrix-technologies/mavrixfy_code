@@ -6,7 +6,7 @@ import { Song, convertJioSaavnSong } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
 import { getCatalogSongs } from "@/lib/catalogService";
 import { searchSong } from "@/lib/song-matcher";
-import { getYouTubeAudioStreamForPlayback, getYouTubeMusicVisualVideoId } from "@/src/data/providers/YouTubeMusicProvider";
+import { getYouTubeAudioStreamForPlayback, getYouTubeMusicVisualVideoId } from "@/data/providers/YouTubeMusicProvider";
 import { useAuth } from "@/contexts/AuthContext";
 import * as ExpoAvPlayer from "@/lib/expoAvPlayer";
 import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
@@ -716,7 +716,7 @@ async function resolveNativeTrackEntry(song: Song, appIndex: number): Promise<Na
 
   if (!audioUrl && !isYouTubeSource(song) && song.source !== "local" && song.id) {
     try {
-      const { getJioSaavnSongDetails } = await import("@/src/data/providers/JioSaavnProvider");
+      const { getJioSaavnSongDetails } = await import("@/data/providers/JioSaavnProvider");
       const { convertJioSaavnSong } = await import("@/lib/musicData");
       const fresh = await getJioSaavnSongDetails(song.id);
       if (fresh) {

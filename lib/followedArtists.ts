@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { ArtistCard } from "@/src/data/providers/ArtistProvider";
+import { ArtistCard } from "@/data/providers/ArtistProvider";
 
 const KEY = "@mavrixfy_followed_artists_v1";
 

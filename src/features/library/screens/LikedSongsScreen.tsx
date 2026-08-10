@@ -6,19 +6,19 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/src/services/audio/PlaybackEngine";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
-import OfflineBanner from "@/src/components/OfflineBanner";
-import SongRow from "@/src/components/SongRow";
+import OfflineBanner from "@/components/OfflineBanner";
+import SongRow from "@/components/SongRow";
 import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import AppTopHeader, {
   APP_TOP_HEADER_HEIGHT,
   AppTopHeaderDownloadButton,
   AppTopHeaderProfileButton,
   useAppTopHeaderScrollElevation,
-} from "@/src/components/AppTopHeader";
+} from "@/components/AppTopHeader";
 import { useNetwork } from "@/contexts/NetworkContext";
 
 const UI = {

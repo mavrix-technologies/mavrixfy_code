@@ -18,7 +18,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import { getBestImageUrl } from "@/lib/musicData";
-import { ArtistCard, getFeaturedArtists, searchArtists } from "@/src/data/providers/ArtistProvider";
+import { ArtistCard, getFeaturedArtists, searchArtists } from "@/data/providers/ArtistProvider";
 import { triggerImpact } from "@/lib/haptics";
 
 const SEARCH_DEBOUNCE_MS = 350;

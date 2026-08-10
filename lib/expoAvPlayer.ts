@@ -1,1 +1,1 @@
-export * from "@/src/services/audio/ExpoAvAdapter";
+export * from "@/services/audio/ExpoAvAdapter";

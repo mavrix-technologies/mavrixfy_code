@@ -24,9 +24,9 @@ import { getSettings, saveSettings, hasSeenNewFeatures, markNewFeaturesSeen, typ
 import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
 import { safeGoBack } from "@/utils/navigation";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { clearJioSaavnPlaylistCache } from "@/src/data/providers/JioSaavnProvider";
+import { clearJioSaavnPlaylistCache } from "@/data/providers/JioSaavnProvider";
 import { clearCachedHomePublicPlaylists, notifyHomeCacheInvalidated } from "@/lib/homeCache";
-import { clearDailyNewReleaseSongCache } from "@/src/data/providers/NewReleaseProvider";
+import { clearDailyNewReleaseSongCache } from "@/data/providers/NewReleaseProvider";
 import { AD_UNITS } from "@/constants/admob";
 import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobileAds";
 

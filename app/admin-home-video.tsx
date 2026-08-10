@@ -1,1 +1,1 @@
-export { default } from "@/src/features/settings/screens/AdminHomeVideoScreen";
+export { default } from "@/features/settings/screens/AdminHomeVideoScreen";
