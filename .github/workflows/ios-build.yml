@@ -74,17 +74,30 @@ jobs:
         run: |
           cd ios
           echo "🔨 Creating unsigned archive..."
+          set -o pipefail
           xcodebuild archive \
             -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
             -configuration Release \
             -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -archivePath "${{ github.workspace }}/Mavrixfy.xcarchive" \
+            -quiet \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER=""
+            PROVISIONING_PROFILE_SPECIFIER="" | tee xcodebuild.log
+          
+          echo ""
+          echo "📊 Build Summary:"
+          if grep -q "ARCHIVE SUCCEEDED" xcodebuild.log; then
+            echo "✅ Archive build completed successfully!"
+          else
+            echo "❌ Archive build may have failed. Check logs above."
+            tail -50 xcodebuild.log
+            exit 1
+          fi
 
       - name: Verify archive was created
         run: |
@@ -96,6 +109,15 @@ jobs:
             echo "❌ Archive was not created"
             exit 1
           fi
+
+      - name: Upload build logs (if needed)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-logs
+          path: ios/xcodebuild.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Create IPA from archive
         run: |
