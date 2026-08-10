@@ -78,7 +78,7 @@ jobs:
           echo "SDK: iphonesimulator"
           echo ""
           
-          # Build with better error handling
+          # Build with quiet mode (only shows warnings and errors)
           set -o pipefail
           xcodebuild \
             -workspace Mavrixfy.xcworkspace \
@@ -87,6 +87,7 @@ jobs:
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build \
+            -quiet \
             CODE_SIGNING_ALLOWED=NO \
             build 2>&1 | tee build.log
           
@@ -96,8 +97,8 @@ jobs:
             echo ""
             echo "❌ Build failed with exit code: $BUILD_EXIT_CODE"
             echo ""
-            echo "📋 Last 50 lines of build log:"
-            tail -50 build.log
+            echo "📋 Last 100 lines of build log:"
+            tail -100 build.log
             echo ""
             echo "💾 Full log saved to artifact 'build-logs'"
             exit $BUILD_EXIT_CODE
