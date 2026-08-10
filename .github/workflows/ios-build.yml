@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-ios:
     name: 🎉 iOS Build (No Code Signing)
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
@@ -23,8 +23,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "npm"
+          node-version: '22'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
@@ -46,110 +46,33 @@ jobs:
             echo "No XCode version check found in Podfile"
           fi
 
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.2"
-          bundler-cache: true
-          working-directory: ios
-
       - name: Install CocoaPods dependencies
         run: |
           cd ios
           pod install
 
-      - name: List available schemes
+      - name: Build iOS app (no codesign)
         run: |
           cd ios
-          echo "📋 Listing available schemes..."
-          xcodebuild -list -workspace Mavrixfy.xcworkspace
-          echo ""
-          echo "🔍 Xcode version:"
-          xcodebuild -version
-          echo ""
-          echo "📱 Available SDKs:"
-          xcodebuild -showsdks
-
-      - name: Build iOS archive (unsigned)
-        run: |
-          cd ios
-          echo "🔨 Creating unsigned archive..."
-          set -o pipefail
-          xcodebuild archive \
-            -workspace Mavrixfy.xcworkspace \
+          xcodebuild -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
             -configuration Release \
             -sdk iphoneos \
+            -derivedDataPath build \
             -destination 'generic/platform=iOS' \
-            -archivePath "${{ github.workspace }}/Mavrixfy.xcarchive" \
-            -quiet \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER="" | tee xcodebuild.log
-          
-          echo ""
-          echo "📊 Build Summary:"
-          if grep -q "ARCHIVE SUCCEEDED" xcodebuild.log; then
-            echo "✅ Archive build completed successfully!"
-          else
-            echo "❌ Archive build may have failed. Check logs above."
-            tail -50 xcodebuild.log
-            exit 1
-          fi
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
 
-      - name: Verify archive was created
+      - name: Create IPA
         run: |
-          if [ -d "${{ github.workspace }}/Mavrixfy.xcarchive" ]; then
-            echo "✅ Archive created successfully"
-            echo "📂 Archive contents:"
-            ls -la "${{ github.workspace }}/Mavrixfy.xcarchive/Products/"
-          else
-            echo "❌ Archive was not created"
-            exit 1
-          fi
-
-      - name: Upload build logs (if needed)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: xcodebuild-logs
-          path: ios/xcodebuild.log
-          retention-days: 7
-          if-no-files-found: ignore
-
-      - name: Create IPA from archive
-        run: |
-          echo "📦 Creating IPA package..."
-          cd "${{ github.workspace }}/Mavrixfy.xcarchive/Products"
-          
-          # Verify the Applications folder exists
-          if [ ! -d "Applications" ]; then
-            echo "❌ Applications folder not found in archive"
-            echo "📂 Current directory contents:"
-            ls -la
-            exit 1
-          fi
-          
-          # Rename Applications to Payload
-          mv Applications Payload
-          
-          # Verify the app exists in Payload
-          if [ ! -d "Payload/Mavrixfy.app" ]; then
-            echo "❌ Mavrixfy.app not found in Payload"
-            echo "📂 Payload contents:"
-            ls -la Payload/
-            exit 1
-          fi
-          
-          echo "✅ Found Mavrixfy.app in Payload"
-          
-          # Create IPA by zipping the Payload folder
-          zip -r -q "${{ github.workspace }}/Mavrixfy.ipa" Payload
-          
-          echo "✅ IPA created successfully!"
-          ls -lh "${{ github.workspace }}/Mavrixfy.ipa"
+          cd ios/build/Build/Products/Release-iphoneos
+          mkdir -p Payload
+          mv Mavrixfy.app Payload/
+          zip -qq -r -9 Mavrixfy.ipa Payload
+          mv Mavrixfy.ipa ${{ github.workspace }}/
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
@@ -161,34 +84,19 @@ jobs:
 
       - name: Create Release and Upload IPA
         uses: softprops/action-gh-release@v2
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: ios-unsigned-v${{ github.run_number }}
-          name: iOS Unsigned Build v${{ github.run_number }}
+          tag_name: ios-v${{ github.run_number }}
+          name: iOS Build v${{ github.run_number }} (Unsigned)
           body: |
-            # 📱 iOS IPA Build - Unsigned (No Code Signing)
+            iOS IPA Build - Unsigned (No Code Signing)
 
-            ⚠️ **Installation Instructions:**
-            This IPA is **NOT signed** and requires one of these tools to install:
-            - **Sideloadly** (Windows/Mac)
-            - **AltStore** (Free, with 7-day expiry)
-            - **AltServer** (Self-hosted)
-            - **TrollStore** (Jailbroken devices)
+            ⚠️ This IPA is NOT signed and cannot be installed directly on un-jailbroken devices without Sideloadly/AltStore.
+            Built automatically without any Apple Developer Account.
 
-            📋 **Build Details:**
-            - Build Number: `${{ github.run_number }}`
-            - Commit: `${{ github.sha }}`
-            - Workflow: `${{ github.workflow }}`
-            - Triggered by: `${{ github.event_name }}`
-            
-            🔧 **Technical Info:**
-            - Bundle ID: `com.mavrixfy.app`
-            - Configuration: Release (Unsigned)
-            - No Apple Developer Account Required
-            
-            ---
-            Built automatically using GitHub Actions ✨
+            **Build Details:**
+            - Build Number: ${{ github.run_number }}
+            - Commit: ${{ github.sha }}
           draft: false
           prerelease: false
           files: Mavrixfy.ipa
-          make_latest: true
