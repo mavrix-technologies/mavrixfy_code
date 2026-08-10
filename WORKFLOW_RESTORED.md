@@ -60,8 +60,22 @@ ios/build/Build/Products/Release-iphonesimulator/Mavrixfy.app
 
 ### 3. Packaging
 ```bash
-# Uses tar.gz (better for preserving permissions)
-tar -czf Mavrixfy-Simulator.app.tar.gz Mavrixfy.app
+# Create IPA structure
+mkdir -p Payload
+cp -r Mavrixfy.app Payload/
+
+# Create IPA (zip file)
+zip -r -q -9 Mavrixfy-Simulator.ipa Payload
+```
+
+**IPA Structure:**
+```
+Mavrixfy-Simulator.ipa (ZIP file)
+└── Payload/
+    └── Mavrixfy.app/
+        ├── Info.plist
+        ├── Mavrixfy (binary)
+        └── ... (resources)
 ```
 
 ## Installation on Simulator
