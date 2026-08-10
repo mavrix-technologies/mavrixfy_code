@@ -64,6 +64,8 @@ jobs:
             CODE_SIGN_ENTITLEMENTS="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             COMPILER_INDEX_STORE_ENABLE=NO \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            DEVELOPMENT_TEAM="" \
             build
 
       - name: Create IPA
@@ -86,6 +88,7 @@ jobs:
         with:
           tag_name: ios-v1.${{ github.run_number }}
           name: iOS Build v1.${{ github.run_number }} (Unsigned)
+          target_commitish: ${{ github.sha }}
           body: |
             iOS IPA Build - Unsigned (No Code Signing)
             
