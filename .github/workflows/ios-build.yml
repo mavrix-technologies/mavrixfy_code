@@ -51,6 +51,9 @@ jobs:
           cd ios
           pod install
 
+      - name: Export NODE_BINARY for xcodebuild scripts
+        run: echo "NODE_BINARY=$(which node)" >> $GITHUB_ENV
+
       - name: Build iOS app (no codesign)
         run: |
           cd ios
@@ -64,6 +67,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
+            NODE_BINARY="$NODE_BINARY" \
             build
 
       - name: Create IPA
