@@ -35,15 +35,13 @@ jobs:
       - name: Strip signing from Xcode project and entitlements
         run: |
           cd ios
-          # Switch to manual signing, clear team and identities in pbxproj
           sed -i.bak 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' Mavrixfy.xcodeproj/project.pbxproj
           sed -i.bak 's/DEVELOPMENT_TEAM = [A-Z0-9]*;/DEVELOPMENT_TEAM = "";/g' Mavrixfy.xcodeproj/project.pbxproj
           sed -i.bak 's/CODE_SIGN_IDENTITY = "iPhone Developer";/CODE_SIGN_IDENTITY = "";/g' Mavrixfy.xcodeproj/project.pbxproj
           sed -i.bak 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "";/g' Mavrixfy.xcodeproj/project.pbxproj
-          # Empty the entitlements file to remove capabilities that force signing
           ENTITLEMENTS_FILE=$(find . -name "*.entitlements" | head -1)
           if [ -n "$ENTITLEMENTS_FILE" ]; then
-            echo "Found entitlements: $ENTITLEMENTS_FILE — emptying it"
+            echo "Emptying entitlements: $ENTITLEMENTS_FILE"
             cat > "$ENTITLEMENTS_FILE" << 'ENTEOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -57,6 +55,9 @@ jobs:
         run: |
           cd ios
           pod install
+
+      - name: Export NODE_BINARY for xcodebuild subprocesses
+        run: echo "NODE_BINARY=$(which node)" >> $GITHUB_ENV
 
       - name: Archive iOS app (unsigned)
         run: |
@@ -74,7 +75,9 @@ jobs:
             CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            NODE_BINARY="$NODE_BINARY" \
+            EXPO_UPDATES_RELEASE_CHANNEL=production
 
       - name: Package IPA from archive
         run: |
