@@ -45,22 +45,7 @@ jobs:
           else
             echo "No XCode version check found in Podfile"
           fi
-          # Disable code signing on ALL Pod targets so xcodebuild does not
-          # attempt to sign embedded frameworks (the main cause of 7-min failures)
-          cat >> Podfile << 'PODEOF'
 
-          post_install do |installer|
-            installer.pods_project.targets.each do |target|
-              target.build_configurations.each do |config|
-                config.build_settings['CODE_SIGNING_ALLOWED']  = 'NO'
-                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
-                config.build_settings['CODE_SIGN_IDENTITY']    = ''
-                config.build_settings['DEVELOPMENT_TEAM']      = ''
-              end
-            end
-          end
-          PODEOF
-          echo "Podfile post_install signing patch applied"
 
       - name: Install CocoaPods dependencies
         run: |
@@ -87,6 +72,8 @@ jobs:
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            EXPANDED_CODE_SIGN_IDENTITY_HASH="" \
             NODE_BINARY="$NODE_BINARY" \
             build
 
