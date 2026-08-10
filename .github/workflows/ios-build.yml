@@ -32,16 +32,22 @@ jobs:
       - name: Prebuild iOS
         run: npx expo prebuild --platform ios --clean --no-install
 
-      - name: Patch Podfile for Xcode compatibility (if needed)
+      - name: Patch Xcode Project and Podfile for Unsigned Build
         run: |
           cd ios
           xcodebuild -version
+
+          # Patch Xcode project file to switch to manual signing without identities
+          sed -i.bak 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' Mavrixfy.xcodeproj/project.pbxproj
+          sed -i.bak 's/CODE_SIGN_IDENTITY = "iPhone Developer";/CODE_SIGN_IDENTITY = "";/g' Mavrixfy.xcodeproj/project.pbxproj
+          sed -i.bak 's/CODE_SIGN_IDENTITY = "Apple Development";/CODE_SIGN_IDENTITY = "";/g' Mavrixfy.xcodeproj/project.pbxproj
+          sed -i.bak 's/CODE_SIGNING_ALLOWED = YES;/CODE_SIGNING_ALLOWED = NO;/g' Mavrixfy.xcodeproj/project.pbxproj
+          sed -i.bak 's/CODE_SIGNING_REQUIRED = YES;/CODE_SIGNING_REQUIRED = NO;/g' Mavrixfy.xcodeproj/project.pbxproj
+
+          # Patch Podfile for Xcode version check if present
           if grep -q "React Native requires XCode" Podfile; then
             echo "Patching Podfile to remove Xcode version requirement..."
             sed -i.bak '/React Native requires XCode/,/raise.*XCode/d' Podfile
-            echo "Podfile patched successfully"
-          else
-            echo "No Xcode version check found in Podfile"
           fi
 
       - name: Install CocoaPods dependencies
@@ -62,10 +68,11 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            DEVELOPMENT_TEAM="" \
             build
 
       - name: Create IPA
