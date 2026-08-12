@@ -499,32 +499,10 @@ function getStableSongIdKey(song: Song): string {
 }
 
 function areDuplicateSearchSongs(next: Song, existing: Song, keepVersionWords: boolean): boolean {
+  // Only treat as duplicate if they have the exact same ID
   const nextId = getStableSongIdKey(next);
   const existingId = getStableSongIdKey(existing);
-  if (nextId && nextId === existingId) return true;
-
-  const nextTitle = normalizeSongDuplicateTitle(next.title, keepVersionWords);
-  const existingTitle = normalizeSongDuplicateTitle(existing.title, keepVersionWords);
-  if (!nextTitle || nextTitle !== existingTitle) return false;
-
-  const nextArtist = normalizeSongPeopleKey(next.artist);
-  const existingArtist = normalizeSongPeopleKey(existing.artist);
-  if (nextArtist !== "unknown" && existingArtist !== "unknown" && nextArtist === existingArtist) {
-    return true;
-  }
-
-  const nextAlbum = normalizeSongAlbumKey(next.album);
-  const existingAlbum = normalizeSongAlbumKey(existing.album);
-  if (nextAlbum && existingAlbum && nextAlbum === existingAlbum) {
-    return true;
-  }
-
-  const nextDuration = Number(next.duration) || 0;
-  const existingDuration = Number(existing.duration) || 0;
-  return nextTitle.length >= 4
-    && nextDuration > 30
-    && existingDuration > 30
-    && Math.abs(nextDuration - existingDuration) <= 5;
+  return !!(nextId && nextId === existingId);
 }
 
 function uniqueSongResultIds(songs: Song[]): Song[] {
@@ -669,45 +647,90 @@ function SearchScreenView() {
         .then(r => (r.ok ? r.json() : null))
         .catch(() => null);
 
-    // Which version of a song is better?
+    // Keep all versions - don't filter by quality or type
     const isBetter = (n: Song, e: Song): boolean => {
+      // Only prefer local songs over remote
       if (n.source === "local" && e.source !== "local") return true;
       if (n.source !== "local" && e.source === "local") return false;
-      if (n.artist === 'Unknown Artist' && e.artist !== 'Unknown Artist') return false;
-      if (n.artist !== 'Unknown Artist' && e.artist === 'Unknown Artist') return true;
-      const remix = /\b(remix|lofi|slowed|cover|live|acoustic|instrumental|8d|nightcore)\b/i;
-      const nR = remix.test(n.title), eR = remix.test(e.title);
-      if (!nR && eR) return true;
-      if (nR && !eR) return false;
-      return (n.playCount || 0) > (e.playCount || 0);
+      // Otherwise keep the first one found
+      return false;
     };
 
     // Parse song results that may use .link or .url media fields.
     const parseBackup = (s: any): Song | null => {
-      if (!s?.id) return null;
-      const dl: any[] = Array.isArray(s.downloadUrl) ? s.downloadUrl : [];
-      const audioUrl =
-        dl.find(d => d.quality === '320kbps')?.link ||
-        dl.find(d => d.quality === '320kbps')?.url ||
-        dl.find(d => d.quality === '160kbps')?.link ||
-        dl.find(d => d.quality === '160kbps')?.url ||
-        dl[dl.length - 1]?.link || dl[dl.length - 1]?.url || '';
-      if (!audioUrl) return null;
-      const imgs: any[] = Array.isArray(s.image) ? s.image : [];
-      const coverUrl =
-        imgs.find(i => i.quality === '500x500')?.link ||
-        imgs.find(i => i.quality === '500x500')?.url ||
-        imgs.find(i => i.quality === '150x150')?.link ||
-        imgs[imgs.length - 1]?.link || imgs[imgs.length - 1]?.url || '';
-      const artist = (typeof s.primaryArtists === 'string' && s.primaryArtists.trim())
-        ? s.primaryArtists.trim()
-        : (s.artists?.primary || []).map((a: any) => a.name).join(', ') || 'Unknown Artist';
+      if (!s?.id && !s?.name && !s?.title) return null;
+      
+      // Generate ID if missing
+      const songId = s.id || `jiosaavn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Get audio URL - allow empty string if not available yet
+      let audioUrl = '';
+      if (typeof s.downloadUrl === 'string') {
+        audioUrl = s.downloadUrl;
+      } else if (Array.isArray(s.downloadUrl)) {
+        const dl = s.downloadUrl;
+        audioUrl =
+          dl.find((d: any) => d.quality === '320kbps')?.link ||
+          dl.find((d: any) => d.quality === '320kbps')?.url ||
+          dl.find((d: any) => d.quality === '160kbps')?.link ||
+          dl.find((d: any) => d.quality === '160kbps')?.url ||
+          dl[dl.length - 1]?.link || 
+          dl[dl.length - 1]?.url || 
+          '';
+      } else if (s.url) {
+        audioUrl = s.url;
+      }
+      
+      // Get cover image
+      let coverUrl = '';
+      if (typeof s.image === 'string') {
+        coverUrl = s.image;
+      } else if (Array.isArray(s.image)) {
+        const imgs = s.image;
+        coverUrl =
+          imgs.find((i: any) => i.quality === '500x500')?.link ||
+          imgs.find((i: any) => i.quality === '500x500')?.url ||
+          imgs.find((i: any) => i.quality === '150x150')?.link ||
+          imgs.find((i: any) => i.quality === '150x150')?.url ||
+          imgs[imgs.length - 1]?.link || 
+          imgs[imgs.length - 1]?.url || 
+          '';
+      }
+      
+      // Get artist name
+      let artist = 'Unknown Artist';
+      if (typeof s.primaryArtists === 'string' && s.primaryArtists.trim()) {
+        artist = s.primaryArtists.trim();
+      } else if (typeof s.artist === 'string' && s.artist.trim()) {
+        artist = s.artist.trim();
+      } else if (Array.isArray(s.artists?.primary) && s.artists.primary.length > 0) {
+        artist = s.artists.primary.map((a: any) => a.name).join(', ');
+      }
+      
+      // Get title
+      const title = s.name || s.title || 'Unknown Song';
+      
+      // Get album
+      let album = '';
+      if (typeof s.album === 'string') {
+        album = s.album;
+      } else if (s.album?.name) {
+        album = s.album.name;
+      }
+      
       const sec = Number(s.duration) || 0;
+      
       return {
-        id: s.id, title: s.name || s.title || '', artist,
-        album: typeof s.album === "string" ? s.album : s.album?.name || '', duration: sec,
-        coverUrl, genre: s.language || '', audioUrl,
-        year: s.year ? String(s.year) : '', source: 'jiosaavn',
+        id: songId, 
+        title, 
+        artist,
+        album, 
+        duration: sec,
+        coverUrl, 
+        genre: s.language || s.genre || '', 
+        audioUrl,
+        year: s.year ? String(s.year) : '', 
+        source: 'jiosaavn',
         playCount: Number(s.playCount) || 0,
       };
     };
@@ -733,9 +756,9 @@ function SearchScreenView() {
       return uniqueSongResultIds(songs);
     };
 
-    // Fast rank using JioSaavn playCount only — no network wait
+    // Show all results without ranking restrictions
     const fastRank = (songs: Song[]) =>
-      rankSongs(songs, normalizedQuery, 5).map(r => r.song).slice(0, 15);
+      rankSongs(songs, normalizedQuery, 5).map(r => r.song);
     const requestIsActive = () =>
       requestId === requestSeqRef.current && !controller.signal.aborted;
 
@@ -765,15 +788,24 @@ function SearchScreenView() {
         let artistsData: any = null;
         let playlistsData: any = null;
 
+        console.log('[Search Debug] Fetching from API:', {
+          apiUrl,
+          searchTerm,
+          resultFilter,
+          fullSongsUrl: `${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`
+        });
+
         if (resultFilter === "all") {
           const [g, s] = await Promise.all([
             safeFetch(`${apiUrl}api/search?query=${encodeURIComponent(searchTerm)}`),
-            safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=15`),
+            safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`),
           ]);
           globalData = g;
           songsData = s;
+          console.log('[Search Debug] Raw songsData:', songsData);
         } else if (resultFilter === "songs") {
-          songsData = await safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=25`);
+          songsData = await safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`);
+          console.log('[Search Debug] Raw songsData:', songsData);
         } else if (resultFilter === "albums") {
           albumSectionResults = await searchJioSaavnAlbums(searchTerm, 20, controller.signal).catch(() => []);
         } else if (resultFilter === "artists") {
@@ -785,10 +817,34 @@ function SearchScreenView() {
         if (requestIsActive()) {
           // Merge network results with catalog results
           if (songsData) {
-            for (const s of (songsData?.data?.results || songsData?.results || [])) {
+            const rawResults = songsData?.data?.results || songsData?.results || [];
+            console.log('[Search Debug] API Response:', {
+              totalResults: rawResults.length,
+              hasData: !!songsData?.data,
+              hasResults: !!songsData?.results,
+              firstSong: rawResults[0] ? {
+                id: rawResults[0].id,
+                name: rawResults[0].name || rawResults[0].title,
+                artist: rawResults[0].primaryArtists,
+                hasDownloadUrl: !!rawResults[0].downloadUrl,
+                hasImage: !!rawResults[0].image
+              } : null
+            });
+            
+            for (const s of rawResults) {
               const song = parseBackup(s);
-              if (song) mergeInto(mergedSongs, song);
+              if (song) {
+                mergeInto(mergedSongs, song);
+              } else {
+                console.log('[Search Debug] Song rejected:', {
+                  id: s?.id,
+                  name: s?.name || s?.title,
+                  reason: !s?.id ? 'No ID' : 'Parse failed'
+                });
+              }
             }
+            
+            console.log('[Search Debug] Merged songs count:', mergedSongs.length);
           }
 
           const parsedYoutubeSongs: Song[] = [];

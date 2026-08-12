@@ -87,7 +87,7 @@ const AddSongsBottomSheet = memo(
         
         // Fetch trending songs from API for suggestion list
         const apiUrl = getApiUrl();
-        const res = await fetch(`${apiUrl}api/search/songs?query=trending hindi songs&limit=20`).catch(
+        const res = await fetch(`${apiUrl}api/search/songs?query=trending hindi songs&limit=50`).catch(
           () => null
         );
         let apiSongs: Song[] = [];
@@ -156,7 +156,7 @@ const AddSongsBottomSheet = memo(
         // 2. JioSaavn song search
         const apiUrl = getApiUrl();
         const res = await fetch(
-          `${apiUrl}api/search/songs?query=${encodeURIComponent(qTerm)}&limit=25`
+          `${apiUrl}api/search/songs?query=${encodeURIComponent(qTerm)}&limit=100`
         ).catch(() => null);
 
         let apiSongs: Song[] = [];
