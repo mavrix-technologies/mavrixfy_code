@@ -6,12 +6,31 @@ import { logger } from "@/lib/logger";
 
 // Music catalogue is served directly by the dedicated song API.
 const API_CONFIG = {
-  songBaseUrl: "https://mavrixfy-song-api.vercel.app",
-  appBaseUrl: "https://mavrixfy-song-api.vercel.app",
+  songBaseUrl: __DEV__ ? "http://localhost:3000" : "https://mavrixfy-song-api.vercel.app",
+  appBaseUrl: __DEV__ ? "http://localhost:3000" : "https://mavrixfy-song-api.vercel.app",
 } as const;
 
+function getExpoHostIp(): string | undefined {
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    (Constants as any).manifest?.debuggerHost ||
+    (Constants as any).manifest2?.extra?.expoGo?.developer?.manifest?.debuggerHost;
+  if (!hostUri) return undefined;
+  const ip = hostUri.split(":")[0];
+  return ip && ip !== "localhost" && ip !== "127.0.0.1" ? ip : undefined;
+}
+
 function normalizeBaseUrl(value: string): string {
-  return value.replace(/\/+$/, "");
+  let url = value.replace(/\/+$/, "");
+  if (url.includes("localhost") || url.includes("127.0.0.1")) {
+    const expoIp = getExpoHostIp();
+    if (expoIp) {
+      url = url.replace(/localhost|127\.0\.0\.1/, expoIp);
+    } else if (Platform.OS === "android") {
+      url = url.replace(/localhost|127\.0\.0\.1/, "10.0.2.2");
+    }
+  }
+  return url;
 }
 
 function toUrlFromDomain(value: string | undefined): string | undefined {
@@ -66,6 +85,10 @@ const APP_API_BASE_URL = getConfiguredApiBaseUrl(
   process.env.EXPO_PUBLIC_APP_API_URL,
   API_CONFIG.appBaseUrl
 );
+
+if (__DEV__) {
+  logger.info(`[Music API Config] Active local API URL: ${SONG_API_BASE_URL}`);
+}
 
 function isPrivateHost(hostname: string): boolean {
   const host = hostname.toLowerCase();

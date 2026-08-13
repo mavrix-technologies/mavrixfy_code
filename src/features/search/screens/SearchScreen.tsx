@@ -730,7 +730,7 @@ function SearchScreenView() {
         genre: s.language || s.genre || '', 
         audioUrl,
         year: s.year ? String(s.year) : '', 
-        source: 'jiosaavn',
+        source: (s.provider || 'jiosaavn') as any,
         playCount: Number(s.playCount) || 0,
       };
     };

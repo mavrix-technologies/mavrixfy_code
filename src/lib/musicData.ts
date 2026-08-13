@@ -12,7 +12,7 @@ export interface Song {
   year?: string;
   language?: string;
   popularity?: number;
-  source?: "jiosaavn" | "local" | "youtube";
+  source?: "jiosaavn" | "gaana" | "local" | "youtube";
   playCount?: number;
   videoId?: string;
   youtubeVideoId?: string;
