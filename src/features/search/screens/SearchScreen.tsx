@@ -24,7 +24,6 @@ import SongRow from "@/components/SongRow";
 import { searchCatalog } from "@/lib/catalogService";
 import {
   normalizeText,
-  rankSongs,
   parseStructuredQuery
 } from "@/lib/searchUtils";
 import OfflineScreen from "@/components/OfflineScreen";
@@ -392,134 +391,7 @@ function mergeUniqueById<T extends { id: string }>(items: T[], limit: number): T
   return out;
 }
 
-const SONG_METADATA_TITLE_WORDS = new Set([
-  "from",
-  "original",
-  "motion",
-  "picture",
-  "soundtrack",
-  "ost",
-  "movie",
-  "film",
-  "album",
-  "official",
-  "full",
-  "song",
-  "video",
-  "audio",
-]);
-
-const SONG_VERSION_TITLE_WORDS = new Set([
-  "remix",
-  "remixed",
-  "rmx",
-  "lofi",
-  "lo",
-  "fi",
-  "slowed",
-  "reverb",
-  "cover",
-  "live",
-  "acoustic",
-  "instrumental",
-  "karaoke",
-  "8d",
-  "nightcore",
-  "mashup",
-  "version",
-]);
-
-const SONG_METADATA_PATTERN =
-  "from|original|motion\\s+picture|soundtrack|ost|movie|film|album|official|full\\s+song|video|audio";
-const SONG_VERSION_PATTERN =
-  "remix|remixed|rmx|lofi|lo-fi|lo\\s+fi|slowed|reverb|cover|live|acoustic|instrumental|karaoke|8d|nightcore|mashup|version";
-
-function hasSongVersionIntent(query: string): boolean {
-  return new RegExp(`\\b(${SONG_VERSION_PATTERN})\\b`, "i").test(query);
-}
-
-function decodeSongText(value: string): string {
-  return value
-    .replace(/&amp;/gi, " and ")
-    .replace(/&quot;/gi, " ")
-    .replace(/&#039;|&apos;/gi, " ")
-    .replace(/&nbsp;/gi, " ");
-}
-
-function normalizeSongDuplicateTitle(title: string, keepVersionWords = false): string {
-  let raw = decodeSongText(String(title || ""));
-  const bracketNoise = keepVersionWords
-    ? SONG_METADATA_PATTERN
-    : `${SONG_METADATA_PATTERN}|${SONG_VERSION_PATTERN}`;
-
-  raw = raw
-    .replace(new RegExp(`\\([^)]*\\b(${bracketNoise})\\b[^)]*\\)`, "gi"), " ")
-    .replace(new RegExp(`\\[[^\\]]*\\b(${bracketNoise})\\b[^\\]]*\\]`, "gi"), " ")
-    .replace(new RegExp(`\\{[^}]*\\b(${bracketNoise})\\b[^}]*\\}`, "gi"), " ")
-    .replace(new RegExp(`\\s[-–—:|]\\s*(${SONG_METADATA_PATTERN}).*$`, "i"), " ");
-
-  if (!keepVersionWords) {
-    raw = raw.replace(new RegExp(`\\s[-–—:|]\\s*(${SONG_VERSION_PATTERN}).*$`, "i"), " ");
-  }
-
-  if (!/^\s*from\b/i.test(raw)) {
-    raw = raw.replace(/\s+\bfrom\b.*$/i, " ");
-  }
-
-  const normalized = normalizeText(raw);
-  const words = normalized.split(/\s+/).filter(Boolean);
-  return words
-    .filter((word) =>
-      !SONG_METADATA_TITLE_WORDS.has(word)
-      && (keepVersionWords || !SONG_VERSION_TITLE_WORDS.has(word))
-    )
-    .join(" ");
-}
-
-function normalizeSongPeopleKey(artist: string): string {
-  const normalized = normalizeText(artist);
-  if (!normalized || normalized === "unknown artist") return "unknown";
-
-  const parts = normalized
-    .split(/\s*,\s*|\s+\b(?:feat|ft|featuring|and|x)\b\s+|\s*&\s+/i)
-    .map((part) => part.trim())
-    .filter((part) => part && part !== "unknown artist");
-
-  const uniqueParts = Array.from(new Set(parts.length > 0 ? parts : [normalized]));
-  return uniqueParts.sort().slice(0, 3).join("|") || "unknown";
-}
-
-function normalizeSongAlbumKey(album: string): string {
-  return normalizeSongDuplicateTitle(album, true);
-}
-
-function getStableSongIdKey(song: Song): string {
-  const id = normalizeText(String(song.id || ""));
-  return id ? `${song.source || "song"}:${id}` : "";
-}
-
-function areDuplicateSearchSongs(next: Song, existing: Song, keepVersionWords: boolean): boolean {
-  // Only treat as duplicate if they have the exact same ID
-  const nextId = getStableSongIdKey(next);
-  const existingId = getStableSongIdKey(existing);
-  return !!(nextId && nextId === existingId);
-}
-
-function uniqueSongResultIds(songs: Song[]): Song[] {
-  const seen = new Set<string>();
-  return songs.map((song, index) => {
-    const fallbackId = `${normalizeSongDuplicateTitle(song.title, true)}-${normalizeSongPeopleKey(song.artist)}-${index}`;
-    const baseId = String(song.id || fallbackId).trim() || fallbackId;
-    let nextId = baseId;
-    let suffix = 1;
-    while (seen.has(nextId)) {
-      nextId = `${baseId}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(nextId);
-    return nextId === song.id ? song : { ...song, id: nextId };
-  });
-}
+// Simplified search - removed all complex deduplication logic
 
 function isYouTubeCollectionResult(id: string, url?: string, description?: string): boolean {
   return false;
@@ -600,6 +472,13 @@ function SearchScreenView() {
   const performSearch = useCallback(async (searchQuery: string) => {
     const requestId = ++requestSeqRef.current;
     const normalizedQuery = searchQuery.trim();
+    
+    console.log('[SearchScreen] performSearch called:', {
+      requestId,
+      query: normalizedQuery,
+      filter: resultFilter
+    });
+    
     if (normalizedQuery.length < 2) {
       activeSearchAbortRef.current?.abort();
       activeSearchAbortRef.current = null;
@@ -642,158 +521,94 @@ function SearchScreenView() {
     const searchTerm = parsedQuery.freeText || normalizedQuery;
 
     // Safe fetch — returns parsed JSON or null, never throws
-    const safeFetch = (url: string) =>
-      fetch(url, { signal: controller.signal })
-        .then(r => (r.ok ? r.json() : null))
-        .catch(() => null);
-
-    // Keep all versions - don't filter by quality or type
-    const isBetter = (n: Song, e: Song): boolean => {
-      // Only prefer local songs over remote
-      if (n.source === "local" && e.source !== "local") return true;
-      if (n.source !== "local" && e.source === "local") return false;
-      // Otherwise keep the first one found
-      return false;
+    const safeFetch = async (url: string) => {
+      try {
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            "Accept": "application/json",
+            "Cache-Control": "no-cache",
+          },
+        });
+        if (!response.ok) {
+          console.error('[SearchScreen] API returned error:', {
+            url,
+            status: response.status,
+            statusText: response.statusText
+          });
+          return null;
+        }
+        const data = await response.json();
+        console.log('[SearchScreen] API success:', {
+          url,
+          hasData: !!data,
+          songCount: data?.data?.results?.length || data?.results?.length || 0
+        });
+        return data;
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          console.log('[SearchScreen] Request aborted:', url);
+          return null;
+        }
+        console.error('[SearchScreen] Fetch error:', {
+          url,
+          error: err?.message || String(err),
+          name: err?.name
+        });
+        return null;
+      }
     };
 
-    // Parse song results that may use .link or .url media fields.
-    const parseBackup = (s: any): Song | null => {
-      if (!s?.id && !s?.name && !s?.title) return null;
+
+    // Simple parser - direct mapping from API response to Song object
+    const parseSong = (s: any): Song | null => {
+      if (!s?.id || !s?.name && !s?.title) return null;
       
-      // Generate ID if missing
-      const songId = s.id || `jiosaavn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Get audio URL - allow empty string if not available yet
-      let audioUrl = '';
-      if (typeof s.downloadUrl === 'string') {
-        audioUrl = s.downloadUrl;
-      } else if (Array.isArray(s.downloadUrl)) {
-        const dl = s.downloadUrl;
-        audioUrl =
-          dl.find((d: any) => d.quality === '320kbps')?.link ||
-          dl.find((d: any) => d.quality === '320kbps')?.url ||
-          dl.find((d: any) => d.quality === '160kbps')?.link ||
-          dl.find((d: any) => d.quality === '160kbps')?.url ||
-          dl[dl.length - 1]?.link || 
-          dl[dl.length - 1]?.url || 
-          '';
-      } else if (s.url) {
-        audioUrl = s.url;
-      }
-      
-      // Get cover image
-      let coverUrl = '';
-      if (typeof s.image === 'string') {
-        coverUrl = s.image;
-      } else if (Array.isArray(s.image)) {
-        const imgs = s.image;
-        coverUrl =
-          imgs.find((i: any) => i.quality === '500x500')?.link ||
-          imgs.find((i: any) => i.quality === '500x500')?.url ||
-          imgs.find((i: any) => i.quality === '150x150')?.link ||
-          imgs.find((i: any) => i.quality === '150x150')?.url ||
-          imgs[imgs.length - 1]?.link || 
-          imgs[imgs.length - 1]?.url || 
-          '';
-      }
-      
-      // Get artist name
-      let artist = 'Unknown Artist';
-      if (typeof s.primaryArtists === 'string' && s.primaryArtists.trim()) {
-        artist = s.primaryArtists.trim();
-      } else if (typeof s.artist === 'string' && s.artist.trim()) {
-        artist = s.artist.trim();
-      } else if (Array.isArray(s.artists?.primary) && s.artists.primary.length > 0) {
-        artist = s.artists.primary.map((a: any) => a.name).join(', ');
-      }
-      
-      // Get title
+      // Use API response directly - no fallback ID generation
+      const audioUrl = s.downloadUrl?.[0]?.url || s.downloadUrl?.[0]?.link || s.url || '';
+      const coverUrl = s.image?.[0]?.url || s.image?.[0]?.link || s.image || '';
+      const artist = s.artists?.primary?.[0]?.name || s.primaryArtists || s.artist || 'Unknown Artist';
       const title = s.name || s.title || 'Unknown Song';
-      
-      // Get album
-      let album = '';
-      if (typeof s.album === 'string') {
-        album = s.album;
-      } else if (s.album?.name) {
-        album = s.album.name;
-      }
-      
-      const sec = Number(s.duration) || 0;
+      const album = s.album?.name || s.album || '';
       
       return {
-        id: songId, 
-        title, 
+        id: String(s.id),
+        title,
         artist,
-        album, 
-        duration: sec,
-        coverUrl, 
-        genre: s.language || s.genre || '', 
+        album,
+        duration: Number(s.duration) || 0,
+        coverUrl,
+        genre: s.language || s.genre || '',
         audioUrl,
-        year: s.year ? String(s.year) : '', 
+        year: s.year ? String(s.year) : '',
         source: (s.provider || 'jiosaavn') as any,
         playCount: Number(s.playCount) || 0,
       };
     };
-
-    const keepVersionWords = hasSongVersionIntent(normalizedQuery);
-
-    const mergeInto = (items: Song[], song: Song) => {
-      const duplicateIndex = items.findIndex((existing) =>
-        areDuplicateSearchSongs(song, existing, keepVersionWords)
-      );
-
-      if (duplicateIndex === -1) {
-        items.push(song);
-        return;
-      }
-
-      if (isBetter(song, items[duplicateIndex])) {
-        items[duplicateIndex] = song;
-      }
-    };
-
-    const toFinalList = (songs: Song[]) => {
-      return uniqueSongResultIds(songs);
-    };
-
-    // Show all results without ranking restrictions
-    const fastRank = (songs: Song[]) =>
-      rankSongs(songs, normalizedQuery, 5).map(r => r.song);
     const requestIsActive = () =>
       requestId === requestSeqRef.current && !controller.signal.aborted;
 
     try {
       if (!requestIsActive()) return;
 
-      // OPTIMIZATION: Fetch catalog songs (now server-side search)
+      // Fetch catalog results (local songs)
       const catalogResults = await searchCatalog(normalizedQuery).catch(() => [] as Song[]);
 
       if (requestIsActive()) {
-        // Show catalog results immediately
-        const mergedSongs: Song[] = [];
-        for (const s of catalogResults) {
-          mergeInto(mergedSongs, s);
-        }
+        // Simple array - no complex merging
+        let allSongs: Song[] = [...catalogResults];
 
-        const finalCatalogResults = toFinalList(mergedSongs);
-        if (finalCatalogResults.length > 0) {
-          setSongResults(fastRank(finalCatalogResults));
+        // Show catalog results immediately
+        if (allSongs.length > 0) {
+          setSongResults(allSongs);
           setSearchDisplayQuery(normalizedQuery);
         }
 
-        // Fetch only endpoints needed for the active resultFilter
         let globalData: any = null;
         let songsData: any = null;
         let albumSectionResults: JioSaavnAlbumResult[] = [];
         let artistsData: any = null;
         let playlistsData: any = null;
-
-        console.log('[Search Debug] Fetching from API:', {
-          apiUrl,
-          searchTerm,
-          resultFilter,
-          fullSongsUrl: `${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`
-        });
 
         if (resultFilter === "all") {
           const [g, s] = await Promise.all([
@@ -802,10 +617,8 @@ function SearchScreenView() {
           ]);
           globalData = g;
           songsData = s;
-          console.log('[Search Debug] Raw songsData:', songsData);
         } else if (resultFilter === "songs") {
           songsData = await safeFetch(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`);
-          console.log('[Search Debug] Raw songsData:', songsData);
         } else if (resultFilter === "albums") {
           albumSectionResults = await searchJioSaavnAlbums(searchTerm, 20, controller.signal).catch(() => []);
         } else if (resultFilter === "artists") {
@@ -815,37 +628,12 @@ function SearchScreenView() {
         }
 
         if (requestIsActive()) {
-          // Merge network results with catalog results
+          // Parse API results directly - no merging or deduplication
           const rawResults = songsData?.data?.results || songsData?.results || globalData?.data?.songs?.results || [];
-          if (rawResults.length > 0) {
-            console.log('[Search Debug] API Response:', {
-              totalResults: rawResults.length,
-              hasData: !!songsData?.data || !!globalData?.data,
-              firstSong: rawResults[0] ? {
-                id: rawResults[0].id,
-                name: rawResults[0].name || rawResults[0].title,
-                artist: rawResults[0].primaryArtists || rawResults[0].artists,
-                provider: rawResults[0].provider,
-                hasDownloadUrl: !!rawResults[0].downloadUrl,
-                hasImage: !!rawResults[0].image
-              } : null
-            });
-            
-            for (const s of rawResults) {
-              const song = parseBackup(s);
-              if (song) {
-                mergeInto(mergedSongs, song);
-              } else {
-                console.log('[Search Debug] Song rejected:', {
-                  id: s?.id,
-                  name: s?.name || s?.title,
-                  reason: !s?.id ? 'No ID' : 'Parse failed'
-                });
-              }
-            }
-            
-            console.log('[Search Debug] Merged songs count:', mergedSongs.length);
-          }
+          const apiSongs = rawResults.map(parseSong).filter((s): s is Song => s !== null);
+          
+          // Combine catalog + API songs (no deduplication)
+          allSongs = [...catalogResults, ...apiSongs];
 
           const parsedYoutubeSongs: Song[] = [];
 
@@ -861,10 +649,8 @@ function SearchScreenView() {
             ? mergeUniqueById(normalizeArtistResults(artistsData?.data?.results || artistsData?.results), 20)
             : mergeUniqueById(normalizeArtistResults(globalData?.data?.artists?.results), 12);
 
-          const songs = toFinalList(mergedSongs);
-          const rankedSongs = fastRank(songs);
-
-          setSongResults(rankedSongs);
+          // Direct display - no ranking, no filtering
+          setSongResults(allSongs);
           setYoutubeMusicResults(parsedYoutubeSongs);
           setAlbumResults(albums);
           setArtistResults(artists);
@@ -882,7 +668,7 @@ function SearchScreenView() {
 
           const loadDiscoverySections = async () => {
             writeCache({
-              songs: rankedSongs,
+              songs: allSongs,
               youtubeSongs: parsedYoutubeSongs,
               albums,
               artists,
