@@ -469,14 +469,22 @@ function SearchScreenView() {
     [shuffledBrowseCategories]
   );
 
-  const performSearch = useCallback(async (searchQuery: string) => {
+  const resultFilterRef = useRef<ResultFilter>(resultFilter);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    resultFilterRef.current = resultFilter;
+  }, [resultFilter]);
+
+  const performSearch = useCallback(async (searchQuery: string, filterOverride?: ResultFilter) => {
     const requestId = ++requestSeqRef.current;
     const normalizedQuery = searchQuery.trim();
+    const currentFilter = filterOverride || resultFilterRef.current;
     
     console.log('[SearchScreen] performSearch called:', {
       requestId,
       query: normalizedQuery,
-      filter: resultFilter
+      filter: currentFilter
     });
     
     if (normalizedQuery.length < 2) {
@@ -497,7 +505,7 @@ function SearchScreenView() {
     activeSearchAbortRef.current = controller;
 
     // Check cache first (5 minute TTL, specific to filter)
-    const cacheKey = `${resultFilter}:${normalizedQuery.toLowerCase()}`;
+    const cacheKey = `${currentFilter}:${normalizedQuery.toLowerCase()}`;
     const cached = searchCache.get(cacheKey);
     const now = Date.now();
     if (cached && (now - cached.timestamp) < 300000) { // 5 minutes
@@ -610,20 +618,20 @@ function SearchScreenView() {
         let artistsData: any = null;
         let playlistsData: any = null;
 
-        if (resultFilter === "all") {
+        if (currentFilter === "all") {
           const [g, s] = await Promise.all([
             safeFetch(`${apiUrl}/api/search?query=${encodeURIComponent(searchTerm)}`),
             safeFetch(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`),
           ]);
           globalData = g;
           songsData = s;
-        } else if (resultFilter === "songs") {
+        } else if (currentFilter === "songs") {
           songsData = await safeFetch(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`);
-        } else if (resultFilter === "albums") {
+        } else if (currentFilter === "albums") {
           albumSectionResults = await searchJioSaavnAlbums(searchTerm, 20, controller.signal).catch(() => []);
-        } else if (resultFilter === "artists") {
+        } else if (currentFilter === "artists") {
           artistsData = await safeFetch(`${apiUrl}/api/search/artists?query=${encodeURIComponent(searchTerm)}&limit=20&page=1`);
-        } else if (resultFilter === "playlists") {
+        } else if (currentFilter === "playlists") {
           playlistsData = await safeFetch(`${apiUrl}/api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=20`);
         }
 
@@ -699,7 +707,7 @@ function SearchScreenView() {
         activeSearchAbortRef.current = null;
       }
     }
-  }, [searchCache, resultFilter]);
+  }, [searchCache]);  // Removed resultFilter dependency
 
 
 
@@ -1006,9 +1014,9 @@ function SearchScreenView() {
     }
 
     if (trimmed === lastQueryRef.current) {
-      // Just filter tab changed, search immediately without debounce
+      // Filter changed - search immediately with new filter
       startSearchLoading();
-      void performSearch(trimmed);
+      void performSearch(trimmed, resultFilter);  // Pass current filter
       return;
     }
 
@@ -1019,7 +1027,7 @@ function SearchScreenView() {
     startSearchLoading();
     const searchTimer = setTimeout(() => {
       lastQueryRef.current = trimmed;
-      void performSearch(trimmed);
+      void performSearch(trimmed);  // Use ref'd filter for normal search
     }, 300);
     debounceTimer.current = searchTimer;
 

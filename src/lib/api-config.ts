@@ -86,9 +86,7 @@ const APP_API_BASE_URL = getConfiguredApiBaseUrl(
   API_CONFIG.appBaseUrl
 );
 
-if (__DEV__) {
-  logger.info(`[Music API Config] Active local API URL: ${SONG_API_BASE_URL}`);
-}
+
 
 function isPrivateHost(hostname: string): boolean {
   const host = hostname.toLowerCase();

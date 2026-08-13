@@ -119,6 +119,51 @@ async function updateStatus(
 // ─── URL refresh ─────────────────────────────────────────────────────────────
 
 /**
+ * Resolve all redirects to get the final download URL.
+ * This is critical for Gaana URLs which use multiple redirects.
+ */
+async function resolveRedirects(url: string): Promise<string> {
+  try {
+    let currentUrl = url;
+    let redirectCount = 0;
+    const MAX_REDIRECTS = 10;
+
+    while (redirectCount < MAX_REDIRECTS) {
+      const response = await fetch(currentUrl, {
+        method: 'HEAD',
+        redirect: 'manual', // Don't follow redirects automatically
+      });
+
+      // Check if it's a redirect (301, 302, 307, 308)
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (!location) break;
+        
+        // Handle relative URLs
+        currentUrl = location.startsWith('http') 
+          ? location 
+          : new URL(location, currentUrl).href;
+        
+        redirectCount++;
+        logger.debug(`[DownloadQueue] Redirect ${redirectCount}: ${currentUrl.substring(0, 100)}...`);
+      } else {
+        // No more redirects
+        break;
+      }
+    }
+
+    if (currentUrl !== url) {
+      logger.info(`[DownloadQueue] Resolved ${redirectCount} redirects for download`);
+    }
+
+    return currentUrl;
+  } catch (err) {
+    logger.warn('[DownloadQueue] Failed to resolve redirects, using original URL', err);
+    return url;
+  }
+}
+
+/**
  * Fetch a fresh downloadUrl for a JioSaavn song right before starting the
  * actual download. CDN signed URLs expire in ~15–30 minutes, so the URL stored
  * in the queue at the time the user tapped "Download" may already be stale by
@@ -192,7 +237,11 @@ async function executeDownload(songId: string): Promise<void> {
 
   // Fetch a fresh audio URL — JioSaavn CDN URLs expire in ~15-30 min,
   // and the URL stored at queue time is often already stale when the slot opens.
-  const audioUrl = await refreshAudioUrl(songId, item.audioUrl, item.quality);
+   let audioUrl = await refreshAudioUrl(songId, item.audioUrl, item.quality);
+  
+  // Resolve all redirects to get the final download URL
+  // This is critical for Gaana URLs which use multiple redirects
+  audioUrl = await resolveRedirects(audioUrl);
 
   const handle = createDownloadResumable(
     audioUrl,
