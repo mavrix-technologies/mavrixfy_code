@@ -107,6 +107,28 @@ function calculateTextMatchScore(
 }
 
 /**
+ * Detect provider from song properties
+ * JioSaavn: numeric IDs, jiosaavn.com URLs
+ * Gaana: alphanumeric IDs with hyphens, gaana.com URLs
+ */
+function detectProvider(song: Song): 'jiosaavn' | 'gaana' | 'unknown' {
+  // Check source field first (for local/youtube tracking)
+  if (song.source === "jiosaavn") return 'jiosaavn';
+  if (song.source === "gaana") return 'gaana';
+  
+  // Check URL (most reliable)
+  const url = (song as any).url || '';
+  if (url.includes('jiosaavn.com')) return 'jiosaavn';
+  if (url.includes('gaana.com')) return 'gaana';
+  
+  // Check ID pattern (JioSaavn = numeric, Gaana = alphanumeric)
+  if (/^\d+$/.test(song.id || "")) return 'jiosaavn';
+  if (/^[a-z0-9-]+$/.test(song.id || "")) return 'gaana';
+  
+  return 'unknown';
+}
+
+/**
  * JioSaavn playCount → 0–50 score (log scale).
  *
  *   500M plays → 50
@@ -121,6 +143,11 @@ function calculatePopularityScore(song: Song): number {
   if (song.playCount && song.playCount > 0) {
     return Math.min(50, Math.max(0, (Math.log10(song.playCount) / 9) * 50));
   }
+  // Baseline popularity for Gaana songs without JioSaavn playCount metrics
+  const provider = detectProvider(song);
+  if (provider === 'gaana') {
+    return 35;
+  }
   // No playCount fallback — year recency only
   if (song.year) {
     const diff = new Date().getFullYear() - parseInt(song.year);
@@ -130,7 +157,7 @@ function calculatePopularityScore(song: Song): number {
       if (diff <= 10) return 6;
     }
   }
-  return 0;
+  return 20;
 }
 
 /**
@@ -181,7 +208,7 @@ function calculateFinalScore(
 export function rankSongs(
   songs: Song[],
   query: string,
-  minScore: number = 5
+  minScore: number = 0
 ): Array<{ song: Song; score: number; isBestMatch: boolean }> {
   const queryIntent = detectQueryIntent(query);
 
@@ -196,8 +223,8 @@ export function rankSongs(
   }, item => item.score >= minScore);
 
   scored.sort((a, b) => {
-    // 1. Clear score gap
-    if (Math.abs(a.score - b.score) > 5) return b.score - a.score;
+    // 1. Clear score gap (allow multi-provider interleaving for scores within 15 points)
+    if (Math.abs(a.score - b.score) > 15) return b.score - a.score;
 
     // 2. Original beats remix/cover within gap
     if (a.versionInfo.isOriginal !== b.versionInfo.isOriginal)
@@ -206,15 +233,8 @@ export function rankSongs(
     // 3. Better text match
     if (a.textMatch !== b.textMatch) return b.textMatch - a.textMatch;
 
-    // 4. Higher JioSaavn plays (Indian popularity)
-    if (a.jiosaavnPop !== b.jiosaavnPop) return b.jiosaavnPop - a.jiosaavnPop;
-
-    // 5. Newer release
-    const yearA = parseInt(a.song.year || "0");
-    const yearB = parseInt(b.song.year || "0");
-    if (yearA !== yearB) return yearB - yearA;
-
-    return a.song.title.localeCompare(b.song.title);
+    // 4. Preserve multi-provider interleaved order if scores are close
+    return 0;
   });
 
   return scored.map((item, index) => ({

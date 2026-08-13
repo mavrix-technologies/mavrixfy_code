@@ -4,13 +4,11 @@ import { Platform } from "react-native";
 
 import { logger } from "@/lib/logger";
 
-// Music catalogue (JioSaavn) is served directly by the dedicated song API.
-// We no longer route music requests through the drab web backend.
+// Music catalogue is served directly by the dedicated song API.
 const API_CONFIG = {
   songBaseUrl: "https://mavrixfy-song-api.vercel.app",
   appBaseUrl: "https://mavrixfy-song-api.vercel.app",
 } as const;
-
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
@@ -91,7 +89,7 @@ function isPrivateDevelopmentApiUrl(value: string): boolean {
 }
 
 export function getMusicApiUrl(): string {
-  return `${SONG_API_BASE_URL}/`;
+  return SONG_API_BASE_URL;
 }
 
 export function getApiUrl(): string {
@@ -122,10 +120,10 @@ function getYouTubeMusicBaseUrl(): string {
 }
 
 export function getYouTubeMusicApiUrl(): string {
-  return `${getYouTubeMusicBaseUrl()}/`;
+  return getYouTubeMusicBaseUrl();
 }
 
-function buildMusicApiUrl(path: string): string {
+export function buildMusicApiUrl(path: string): string {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${SONG_API_BASE_URL}${normalizedPath}`;
 }

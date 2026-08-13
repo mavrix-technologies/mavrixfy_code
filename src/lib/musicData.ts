@@ -189,6 +189,11 @@ export function getBestAudioUrlWithQuality(downloadUrls: unknown, quality: "low"
 
 export function convertJioSaavnSong(song: JioSaavnSong): Song {
   const artistNames = song.artists?.primary?.map(a => a.name).join(", ") || "Unknown Artist";
+  
+  // Detect provider from song ID or URL
+  // JioSaavn IDs are numeric, Gaana IDs are alphanumeric with hyphens
+  const isGaanaSong = !/^\d+$/.test(song.id) || song.url?.includes('gaana.com');
+  
   return {
     id: song.id,
     title: song.name || "Unknown",
@@ -201,7 +206,7 @@ export function convertJioSaavnSong(song: JioSaavnSong): Song {
     downloadUrl: song.downloadUrl || song.audioUrl || song.url,
     year: song.year,
     language: song.language,
-    source: "jiosaavn",
+    source: isGaanaSong ? undefined : "jiosaavn",  // Don't set source for Gaana songs
   };
 }
 

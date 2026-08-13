@@ -792,40 +792,40 @@ function SearchScreenView() {
           apiUrl,
           searchTerm,
           resultFilter,
-          fullSongsUrl: `${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`
+          fullSongsUrl: `${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`
         });
 
         if (resultFilter === "all") {
           const [g, s] = await Promise.all([
-            safeFetch(`${apiUrl}api/search?query=${encodeURIComponent(searchTerm)}`),
-            safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`),
+            safeFetch(`${apiUrl}/api/search?query=${encodeURIComponent(searchTerm)}`),
+            safeFetch(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`),
           ]);
           globalData = g;
           songsData = s;
           console.log('[Search Debug] Raw songsData:', songsData);
         } else if (resultFilter === "songs") {
-          songsData = await safeFetch(`${apiUrl}api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`);
+          songsData = await safeFetch(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`);
           console.log('[Search Debug] Raw songsData:', songsData);
         } else if (resultFilter === "albums") {
           albumSectionResults = await searchJioSaavnAlbums(searchTerm, 20, controller.signal).catch(() => []);
         } else if (resultFilter === "artists") {
-          artistsData = await safeFetch(`${apiUrl}api/search/artists?query=${encodeURIComponent(searchTerm)}&limit=20&page=1`);
+          artistsData = await safeFetch(`${apiUrl}/api/search/artists?query=${encodeURIComponent(searchTerm)}&limit=20&page=1`);
         } else if (resultFilter === "playlists") {
-          playlistsData = await safeFetch(`${apiUrl}api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=20`);
+          playlistsData = await safeFetch(`${apiUrl}/api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=20`);
         }
 
         if (requestIsActive()) {
           // Merge network results with catalog results
-          if (songsData) {
-            const rawResults = songsData?.data?.results || songsData?.results || [];
+          const rawResults = songsData?.data?.results || songsData?.results || globalData?.data?.songs?.results || [];
+          if (rawResults.length > 0) {
             console.log('[Search Debug] API Response:', {
               totalResults: rawResults.length,
-              hasData: !!songsData?.data,
-              hasResults: !!songsData?.results,
+              hasData: !!songsData?.data || !!globalData?.data,
               firstSong: rawResults[0] ? {
                 id: rawResults[0].id,
                 name: rawResults[0].name || rawResults[0].title,
-                artist: rawResults[0].primaryArtists,
+                artist: rawResults[0].primaryArtists || rawResults[0].artists,
+                provider: rawResults[0].provider,
                 hasDownloadUrl: !!rawResults[0].downloadUrl,
                 hasImage: !!rawResults[0].image
               } : null

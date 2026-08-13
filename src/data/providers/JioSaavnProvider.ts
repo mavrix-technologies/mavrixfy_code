@@ -123,14 +123,10 @@ const CATEGORY_TTL_MS: Record<string, number> = {
   retro:         90 * 60 * 1000,
 };
 const JIOSAAVN_PLAYLIST_BASE_URLS = [
-  "https://mavrixfy-song-api.vercel.app/api",
-  `${getApiUrl().replace(/\/$/, "")}/api`,
-  "https://mavrixfy-api-drab.vercel.app/api",
+  `${getApiUrl().replace(/\/+$/, "")}/api`,
 ];
 const JIOSAAVN_SEARCH_BASE_URLS = [
-  "https://mavrixfy-song-api.vercel.app/api",
-  `${getApiUrl().replace(/\/$/, "")}/api`,
-  "https://mavrixfy-api-drab.vercel.app/api",
+  `${getApiUrl().replace(/\/+$/, "")}/api`,
 ];
 
 export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [

@@ -248,11 +248,11 @@ function isKnownNonAudioPageUrl(value: string): boolean {
     const host = parsed.hostname.toLowerCase();
     const path = parsed.pathname.toLowerCase();
 
-    if (host.includes("saavncdn.com")) return false;
-    if (host.includes("jiosaavn.com")) return true;
+    if (host.includes("saavncdn.com") || host.includes("gaanacdn.com") || host.includes("akamaized.net")) return false;
+    if (host.includes("jiosaavn.com") || host.includes("gaana.com")) return true;
     if (host.includes("youtube.com") || host.includes("youtu.be")) return true;
     if (host.includes("spotify.com") || host.includes("music.apple.com")) return true;
-    if (/\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac)(?:$|[?#])/i.test(path)) return false;
+    if (/\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac|m3u8)(?:$|[?#])/i.test(path)) return false;
   } catch {
     return false;
   }
@@ -275,12 +275,12 @@ function isTrustedNativeAudioUrl(value: unknown): boolean {
     const host = parsed.hostname.toLowerCase();
     const path = parsed.pathname.toLowerCase();
 
-    if (host.includes("saavncdn.com")) return true;
+    if (host.includes("saavncdn.com") || host.includes("akamaized.net") || host.includes("gaanacdn.com")) return true;
     if (host.includes("googlevideo.com")) {
       const mime = parsed.searchParams.get("mime")?.toLowerCase() || "";
       return path.includes("/videoplayback") || mime.startsWith("audio/");
     }
-    return /\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac)(?:$|[?#])/i.test(path);
+    return /\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac|m3u8)(?:$|[?#])/i.test(path);
   } catch {
     return url.startsWith("file://");
   }
@@ -716,13 +716,32 @@ async function resolveNativeTrackEntry(song: Song, appIndex: number): Promise<Na
 
   if (!audioUrl && !isYouTubeSource(song) && song.source !== "local" && song.id) {
     try {
-      const { getJioSaavnSongDetails } = await import("@/data/providers/JioSaavnProvider");
-      const { convertJioSaavnSong } = await import("@/lib/musicData");
-      const fresh = await getJioSaavnSongDetails(song.id);
-      if (fresh) {
-        const refreshed: Song = { ...nativeSong, ...convertJioSaavnSong(fresh) };
-        audioUrl = await resolvePlaybackUrl(refreshed);
-        if (audioUrl) nativeSong = refreshed;
+      if (song.source === "gaana" || !/^\d+$/.test(song.id)) {
+        const apiUrl = getApiUrl();
+        const res = await fetch(`${apiUrl}/api/gaana/songs/${encodeURIComponent(song.id)}`);
+        if (res.ok) {
+          const json = await res.json();
+          const freshData = Array.isArray(json.data) ? json.data[0] : json.data;
+          if (freshData) {
+            const freshUrl = resolveAudioUrl(freshData);
+            if (freshUrl) {
+              audioUrl = freshUrl;
+              nativeSong = { ...nativeSong, audioUrl: freshUrl, downloadUrl: freshData.downloadUrl };
+            }
+          }
+        }
+      } else {
+        const { getJioSaavnSongDetails } = await import("@/data/providers/JioSaavnProvider");
+        const { convertJioSaavnSong } = await import("@/lib/musicData");
+        const fresh = await getJioSaavnSongDetails(song.id);
+        if (fresh) {
+          const refreshed: Song = { ...nativeSong, ...convertJioSaavnSong(fresh) };
+          const freshUrl = resolveAudioUrl(refreshed);
+          if (freshUrl) {
+            audioUrl = freshUrl;
+            nativeSong = refreshed;
+          }
+        }
       }
     } catch {
       // fall through to search fallback
