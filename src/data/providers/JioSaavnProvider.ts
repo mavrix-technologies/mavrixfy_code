@@ -98,16 +98,16 @@ export interface AutoRefreshContext {
 }
 
 const CURRENT_YEAR = new Date().getFullYear();
-const CACHE_PREFIX = "@mavrixfy_jiosaavn_home";
+const CACHE_PREFIX = "@mavrixfy_jiosaavn_home_v2";
 const PLAYLIST_DETAILS_CACHE_PREFIX = "@mavrixfy_jiosaavn_playlist_details";
 const ALBUM_DETAILS_CACHE_PREFIX = "@mavrixfy_jiosaavn_album_details";
 const REQUEST_TIMEOUT_MS = 8500;
 const PLAYLIST_FETCH_LIMIT = 50;
-export const PLAYLIST_MAX_PAGES = 10;
+const PLAYLIST_MAX_PAGES = 10;
 const PLAYLIST_DETAILS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CATEGORY_STALE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const HOME_FETCH_CATEGORY_CONCURRENCY = 3;
-export const AUTO_REFRESH_POLL_INTERVAL_MS = 30 * 1000;
+const AUTO_REFRESH_POLL_INTERVAL_MS = 30 * 1000;
 export const JIOSAAVN_CATEGORY_CACHE_TTL_MS = 30 * 60 * 1000;
 const CATEGORY_TTL_MS: Record<string, number> = {
   trending:      30 * 60 * 1000,
@@ -142,32 +142,33 @@ export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
   },
   {
     id: "top-charts",
-    title: "Top Charts",
+    title: "Official Biggest Hits",
     searchTerms: [
-      "top charts hindi",
-      "top 50 india",
-      "official hits hindi",
-      "biggest hits bollywood",
+      `Chartbusters ${CURRENT_YEAR} Hindi`,
+      `Pop Hits ${CURRENT_YEAR} Hindi`,
+      `Dance Hits ${CURRENT_YEAR} Hindi`,
+      `Romantic Hits ${CURRENT_YEAR} Hindi`,
+      `Top Charts ${CURRENT_YEAR}`,
     ],
   },
   {
     id: "bollywood",
     title: "Bollywood Hits",
     searchTerms: [
-      "bollywood hits",
-      "hindi movie songs",
-      "bollywood top songs",
-      "latest bollywood hits",
+      `Latest Bollywood ${CURRENT_YEAR}`,
+      "Bollywood Central",
+      `New Bollywood Songs ${CURRENT_YEAR}`,
+      "Bollywood Top Hits",
     ],
   },
   {
     id: "new-arrivals",
     title: "New Releases",
     searchTerms: [
-      `new movie songs ${CURRENT_YEAR}`,
-      `latest bollywood songs ${CURRENT_YEAR}`,
-      "new hindi songs",
-      "latest releases",
+      `New Releases ${CURRENT_YEAR} Hindi`,
+      `Latest Songs ${CURRENT_YEAR}`,
+      `Chartbusters ${CURRENT_YEAR} Hindi`,
+      `Trending Songs India ${CURRENT_YEAR}`,
     ],
   },
   {
@@ -194,10 +195,11 @@ export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
     id: "party-mix",
     title: "Party Mix",
     searchTerms: [
-      "party songs hindi",
-      "dance hits bollywood",
-      "dj remix songs",
-      "party anthems",
+      `Dance Hits ${CURRENT_YEAR} Hindi`,
+      `Party Anthems ${CURRENT_YEAR}`,
+      "Dance Party Hindi",
+      "Party Songs Bollywood",
+      "DJ Party Hits Hindi",
     ],
   },
   {
@@ -214,10 +216,11 @@ export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
     id: "romance",
     title: "Love & Romance",
     searchTerms: [
-      "romantic hindi songs",
-      "love songs bollywood",
-      "best romantic songs",
-      "hindi love songs",
+      `Romantic Hits ${CURRENT_YEAR} Hindi`,
+      "Love Songs Bollywood",
+      `Valentine Songs ${CURRENT_YEAR}`,
+      "Hindi Romantic Hits",
+      "Best Love Songs Hindi",
     ],
   },
   {
@@ -243,7 +246,7 @@ export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
 ];
 
 // Priority categories to load first (fast initial render)
-export const HOME_JIOSAAVN_PRIORITY_CATEGORIES = [
+const HOME_JIOSAAVN_PRIORITY_CATEGORIES = [
   "trending",
   "top-charts",
   "bollywood",
@@ -1367,7 +1370,7 @@ async function setCategoryCache(
   }
 }
 
-export async function getPlaylistsByCategory(
+async function getPlaylistsByCategory(
   category: HomeJioSaavnCategory,
   limit: number,
   forceRefresh: boolean,
@@ -1639,7 +1642,7 @@ function prefetchPlaylistDetails(playlistId: string): void {
  * Called after the home feed renders — staggered so it doesn't compete
  * with the initial render or image loading.
  */
-export function prefetchVisiblePlaylists(
+function prefetchVisiblePlaylists(
   categories: HomeJioSaavnCategoryData[],
   perSection = 3
 ): () => void {
@@ -2236,7 +2239,7 @@ async function fetchAndRankCategory(
 }
 
 // ── 7. Mix strategy — interleave trending + new + viral for the feed ──────────
-export function mixForFeed(
+function mixForFeed(
   byCategory: Record<string, JioSaavnPlaylistResult[]>,
   limit: number
 ): JioSaavnPlaylistResult[] {

@@ -41,7 +41,7 @@ import AppTopHeader, {
   AppTopHeaderProfileButton,
   useAppTopHeaderScrollElevation,
 } from "@/components/AppTopHeader";
-import { useNetwork } from "@/contexts/NetworkContext";
+import { useNetwork, useOnReconnect } from "@/contexts/NetworkContext";
 import { sortedCopy } from "@/lib/arrayUtils";
 
 type Filter = "playlists" | "artists" | "favorite" | null;
@@ -324,6 +324,14 @@ function LibraryScreenView() {
       setRefreshing(false);
     }
   }, [loadPlaylists]);
+
+  // Silently reload playlists when connectivity is restored
+  useOnReconnect(
+    useCallback(() => {
+      void loadPlaylists({ silent: true });
+    }, [loadPlaylists])
+  );
+
 
   const handleSelectImage = async () => {
     try {

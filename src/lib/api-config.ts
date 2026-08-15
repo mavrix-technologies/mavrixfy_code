@@ -4,11 +4,8 @@ import { Platform } from "react-native";
 
 import { logger } from "@/lib/logger";
 
-// Music catalogue is served directly by the dedicated song API.
-const API_CONFIG = {
-  songBaseUrl: __DEV__ ? "http://localhost:3000" : "https://mavrixfy-song-api.vercel.app",
-  appBaseUrl: __DEV__ ? "http://localhost:3000" : "https://mavrixfy-song-api.vercel.app",
-} as const;
+// All API URLs are configured via .env (EXPO_PUBLIC_MUSIC_API_URL / EXPO_PUBLIC_APP_API_URL).
+// Do NOT hardcode URLs here — change them in .env only.
 
 function getExpoHostIp(): string | undefined {
   const hostUri =
@@ -78,15 +75,18 @@ const SONG_API_BASE_URL = getConfiguredApiBaseUrl(
   process.env.EXPO_PUBLIC_MUSIC_API_URL ||
     process.env.EXPO_PUBLIC_APP_API_URL ||
     toUrlFromDomain(process.env.EXPO_PUBLIC_MUSIC_API_DOMAIN),
-  API_CONFIG.songBaseUrl
+  "" // No hardcoded fallback — must be set in .env
 );
 const APP_API_BASE_URL = getConfiguredApiBaseUrl(
   "App API",
-  process.env.EXPO_PUBLIC_APP_API_URL,
-  API_CONFIG.appBaseUrl
+  process.env.EXPO_PUBLIC_APP_API_URL ||
+    process.env.EXPO_PUBLIC_MUSIC_API_URL,
+  "" // No hardcoded fallback — must be set in .env
 );
 
-
+if (__DEV__) {
+  logger.info(`[Music API Config] Active local API URL: ${SONG_API_BASE_URL}`);
+}
 
 function isPrivateHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
@@ -110,6 +110,18 @@ function isPrivateDevelopmentApiUrl(value: string): boolean {
 }
 
 export function getMusicApiUrl(): string {
+  // Dynamic priority: Firebase Remote Config > EXPO_PUBLIC_MUSIC_API_URL > empty
+  try {
+    // Lazy import to avoid circular dep at module load time
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getRemoteConfigMusicApiUrl } = require("./remoteConfig") as {
+      getRemoteConfigMusicApiUrl: () => string;
+    };
+    const remoteUrl = getRemoteConfigMusicApiUrl().trim();
+    if (remoteUrl) return remoteUrl;
+  } catch {
+    // remoteConfig not yet initialized — fall through to env
+  }
   return SONG_API_BASE_URL;
 }
 
@@ -117,39 +129,18 @@ export function getApiUrl(): string {
   return getMusicApiUrl();
 }
 
-export const PRODUCTION_YOUTUBE_MUSIC_API_URL = "https://mavrixfy-api-drab.vercel.app/api/youtube-music";
-
-function getYouTubeMusicBaseUrl(): string {
-  const envUrl = process.env.EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL?.trim();
-  const extraUrl = Constants.expoConfig?.extra?.youtubeMusicApiUrl?.trim();
-  const fallbackUrl = extraUrl || PRODUCTION_YOUTUBE_MUSIC_API_URL;
-
-  if (__DEV__ && envUrl && Platform.OS !== "web" && Device.isDevice && isPrivateDevelopmentApiUrl(envUrl)) {
-    logger.warn(
-      "[YouTube Music Config] Ignoring host-only development URL on a physical device. Use a LAN IP or the production proxy."
-    );
-    return normalizeBaseUrl(fallbackUrl);
-  }
-
-  if (envUrl) return normalizeBaseUrl(envUrl);
-  if (extraUrl) return normalizeBaseUrl(extraUrl);
-
-  logger.warn(
-    "[YouTube Music Config] Using production YouTube Music proxy. Set EXPO_PUBLIC_YOUTUBE_MUSIC_API_URL for a different backend."
-  );
-  return normalizeBaseUrl(PRODUCTION_YOUTUBE_MUSIC_API_URL);
-}
-
-export function getYouTubeMusicApiUrl(): string {
-  return getYouTubeMusicBaseUrl();
-}
-
-export function buildMusicApiUrl(path: string): string {
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `${SONG_API_BASE_URL}${normalizedPath}`;
-}
-
 export function buildAppApiUrl(path: string): string {
+  let baseUrl = APP_API_BASE_URL;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getRemoteConfigAppApiUrl } = require("./remoteConfig") as {
+      getRemoteConfigAppApiUrl: () => string;
+    };
+    const remoteUrl = getRemoteConfigAppApiUrl().trim();
+    if (remoteUrl) baseUrl = remoteUrl;
+  } catch {
+    // Fall back to env
+  }
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `${APP_API_BASE_URL}${normalizedPath.startsWith("/api/") ? normalizedPath : `/api${normalizedPath}`}`;
+  return `${baseUrl}${normalizedPath.startsWith("/api/") ? normalizedPath : `/api${normalizedPath}`}`;
 }

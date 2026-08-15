@@ -67,7 +67,7 @@ export function ArtistMixScreen() {
 
   const { currentSong, queue } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
-  const { playSong, togglePlay } = usePlayerActions();
+  const { playSong, shufflePlay, togglePlay } = usePlayerActions();
 
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
@@ -167,9 +167,8 @@ export function ArtistMixScreen() {
   const handleShuffle = useCallback(() => {
     if (!songs.length) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-    const shuffled = sortedCopy(songs, () => Math.random() - 0.5);
-    playSong(shuffled[0], shuffled);
-  }, [songs, playSong]);
+    shufflePlay(songs);
+  }, [songs, shufflePlay]);
 
   const title = names.length > 0
     ? names.length === 1 ? names[0] : `${names.slice(0, 2).join(" & ")}${names.length > 2 ? ` +${names.length - 2}` : ""}`

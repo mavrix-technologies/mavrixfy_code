@@ -4,6 +4,7 @@
  * - Expo Go: pure-JS decode fallback (native ImageColors module is unavailable).
  */
 
+import React, { useState, useEffect } from "react";
 import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
@@ -61,11 +62,30 @@ export interface SpotifyColorTheme {
 
 export const DEFAULT_ARTWORK_PALETTE: ArtworkPalette = {
   background: "#0E1016",
-  accent: "#26e19a",
+  accent: "#0E1016",
   text: "#FFFFFF",
   isDark: true,
-  primary: "#26e19a",
+  primary: "#0E1016",
 };
+
+export function getSpotifyMiniPlayerBg(accentColor: string, defaultBg = "#16181D"): string {
+  const normalized = normalizeHexColor(accentColor);
+  if (!normalized) return defaultBg;
+  const r = parseInt(normalized.slice(1, 3), 16);
+  const g = parseInt(normalized.slice(3, 5), 16);
+  const b = parseInt(normalized.slice(5, 7), 16);
+  const { h, s } = rgbToHsl(r, g, b);
+
+  if (s < 0.10) {
+    return "#181A20";
+  }
+
+  // Spotify solid dark hue: lightness ~0.16, saturation ~0.45-0.60
+  const solidLightness = 0.16;
+  const solidSaturation = Math.max(0.42, Math.min(0.65, s));
+  const darkRgb = hslToRgb(h, solidSaturation, solidLightness);
+  return rgbToHex(darkRgb.r, darkRgb.g, darkRgb.b);
+}
 
 export function ensureDarkHexColor(hexColor: string, maxLightness = 0.20, minLightness = 0.08): string {
   const normalized = normalizeHexColor(hexColor) ?? DEFAULT_ARTWORK_PALETTE.background;
@@ -132,6 +152,36 @@ export function getImmediateArtworkPalette(imageUrl: string | null | undefined):
   paletteCache.delete(cacheKey);
   paletteCache.set(cacheKey, cached);
   return cached;
+}
+
+/**
+ * Reusable hook for reactive artwork color extraction with instant cache retrieval.
+ */
+export function useArtworkPalette(imageUrl: string | null | undefined): ArtworkPalette {
+  const [palette, setPalette] = useState<ArtworkPalette>(() =>
+    getImmediateArtworkPalette(imageUrl)
+  );
+
+  useEffect(() => {
+    const key = (imageUrl || "").trim();
+    if (!key) {
+      setPalette(DEFAULT_ARTWORK_PALETTE);
+      return;
+    }
+
+    let isMounted = true;
+    void extractArtworkColors(key).then((extracted) => {
+      if (isMounted) {
+        setPalette(extracted);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [imageUrl]);
+
+  return palette;
 }
 
 /** @deprecated Use getImmediateArtworkPalette */
@@ -592,7 +642,7 @@ function toHex(channel: number): string {
   return clamp(Math.round(channel), 0, 255).toString(16).padStart(2, "0").toUpperCase();
 }
 
-function colorWithAlpha(hex: string, alpha: number, fallback = "rgba(255,255,255,1)"): string {
+export function colorWithAlpha(hex: string, alpha: number, fallback = "rgba(255,255,255,1)"): string {
   const normalized = normalizeHexColor(hex);
   if (!normalized) return fallback;
   const r = parseInt(normalized.slice(1, 3), 16);

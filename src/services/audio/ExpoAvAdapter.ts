@@ -46,7 +46,7 @@ let statusCb: StatusCallback | null = null;
 let errorCb: ErrorCallback | null = null;
 
 export function onStatusUpdate(cb: StatusCallback) { statusCb = cb; }
-export function onError(cb: ErrorCallback) { errorCb = cb; }
+function onError(cb: ErrorCallback) { errorCb = cb; }
 function clearListeners(): void {
   statusCb = null;
   errorCb = null;
@@ -188,7 +188,7 @@ function stop(): void {
   resetPlaybackAudioLevels();
 }
 
-export function destroy(): void {
+function destroy(): void {
   clearListeners();
   stop();
 }
@@ -208,5 +208,5 @@ export async function seekTo(seconds: number): Promise<void> {
   } catch {}
 }
 
-export function isLoaded(): boolean { return activePlayer !== null; }
+function isLoaded(): boolean { return activePlayer !== null; }
 function getCurrentUrl(): string | null { return currentUrl; }

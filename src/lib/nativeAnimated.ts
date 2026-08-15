@@ -16,6 +16,9 @@ export const sequence = NativeAnimated.sequence;
 export const parallel = NativeAnimated.parallel;
 export const delay = NativeAnimated.delay;
 export const event = NativeAnimated.event;
+export const multiply = NativeAnimated.multiply;
+export const add = NativeAnimated.add;
+export const divide = NativeAnimated.divide;
 
 export type Value = ReactNative.Animated.Value;
 export type CompositeAnimation = ReactNative.Animated.CompositeAnimation;

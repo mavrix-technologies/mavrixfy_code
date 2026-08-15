@@ -60,7 +60,7 @@ export function LikedSongsScreen() {
   const { isOnline } = useNetwork();
   const { currentSong, queue, isShuffled } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
-  const { playSong, likedSongs, togglePlay, toggleShuffle } = usePlayerActions();
+  const { playSong, shufflePlay, likedSongs, togglePlay, toggleShuffle } = usePlayerActions();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
   const [isSearchMode, setIsSearchMode] = useState(false);
@@ -145,43 +145,32 @@ export function LikedSongsScreen() {
   }, [songs, selectedMood, searchQuery]);
 
   const isPlayingFromLikedSongs = useMemo(() => {
-    if (!currentSong || songs.length === 0 || queue.length !== songs.length) return false;
+    if (!currentSong || songs.length === 0) return false;
     const songIds = new Set(songs.map((s) => s.id));
-    return queue.every((qs) => songIds.has(qs.id));
-  }, [currentSong, queue, songs]);
+    return songIds.has(currentSong.id);
+  }, [currentSong, songs]);
 
   const handlePlayAll = useCallback(() => {
-    if (songs.length === 0) return;
+    const listToPlay = filteredSongs.length > 0 ? filteredSongs : songs;
+    if (listToPlay.length === 0) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
     if (isPlayingFromLikedSongs) {
       togglePlay();
       return;
     }
-    playSong(songs[0], songs);
+    playSong(listToPlay[0], listToPlay);
     if (isShuffled) {
-      void toggleShuffle();
+      toggleShuffle();
     }
-  }, [songs, isPlayingFromLikedSongs, togglePlay, playSong, isShuffled, toggleShuffle]);
+  }, [filteredSongs, songs, isPlayingFromLikedSongs, togglePlay, playSong, isShuffled, toggleShuffle]);
 
   const handleShufflePlay = useCallback(() => {
-    if (songs.length === 0) return;
+    const listToPlay = filteredSongs.length > 0 ? filteredSongs : songs;
+    if (listToPlay.length === 0) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
     
-    if (isPlayingFromLikedSongs) {
-      void toggleShuffle();
-      return;
-    }
-
-    const shuffled = [...songs];
-    for (let index = shuffled.length - 1; index > 0; index -= 1) {
-      const rand = Math.floor(Math.random() * (index + 1));
-      [shuffled[index], shuffled[rand]] = [shuffled[rand], shuffled[index]];
-    }
-    playSong(shuffled[0], shuffled);
-    if (!isShuffled) {
-      void toggleShuffle();
-    }
-  }, [songs, isPlayingFromLikedSongs, playSong, isShuffled, toggleShuffle]);
+    shufflePlay(listToPlay);
+  }, [filteredSongs, songs, shufflePlay]);
 
   const filteredSongsQueueKey = useMemo(
     () => filteredSongs.map((song) => song.id).join("|"),

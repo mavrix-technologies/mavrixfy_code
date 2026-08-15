@@ -1,15 +1,16 @@
-import TrackPlayer, {
-  AndroidAudioContentType,
-  AppKilledPlaybackBehavior,
-  Capability,
-  IOSCategory,
-  IOSCategoryMode,
-  IOSCategoryOptions,
-} from "react-native-track-player";
 import { PermissionsAndroid, Platform } from "react-native";
 
 let playerReady = false;
 let setupPromise: Promise<void> | null = null;
+
+function getTrackPlayerModule(): any {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("react-native-track-player");
+  } catch {
+    return null;
+  }
+}
 
 function isAlreadyInitialized(error: unknown): boolean {
   return (error as { code?: string } | undefined)?.code === "player_already_initialized";
@@ -30,6 +31,15 @@ export async function setupPlayer(): Promise<void> {
 }
 
 async function setupPlayerInternal(): Promise<void> {
+  const TrackPlayerModule = getTrackPlayerModule();
+  if (!TrackPlayerModule) {
+    return;
+  }
+  const TrackPlayer = TrackPlayerModule.default ?? TrackPlayerModule;
+  if (!TrackPlayer?.setupPlayer) {
+    return;
+  }
+
   if (Platform.OS === "android" && Number(Platform.Version) >= 33) {
     try {
       await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
@@ -42,19 +52,19 @@ async function setupPlayerInternal(): Promise<void> {
     await TrackPlayer.setupPlayer({
       autoHandleInterruptions: true,
       autoUpdateMetadata: true,
-      androidAudioContentType: AndroidAudioContentType.Music,
+      androidAudioContentType: TrackPlayerModule.AndroidAudioContentType?.Music ?? 2,
       minBuffer: 15,
       maxBuffer: 50,
       playBuffer: 2,
       backBuffer: 30,
       ...(Platform.OS === "ios"
         ? {
-            iosCategory: IOSCategory.Playback,
-            iosCategoryMode: IOSCategoryMode.Default,
+            iosCategory: TrackPlayerModule.IOSCategory?.Playback ?? "playback",
+            iosCategoryMode: TrackPlayerModule.IOSCategoryMode?.Default ?? "default",
             iosCategoryOptions: [
-              IOSCategoryOptions.AllowAirPlay,
-              IOSCategoryOptions.AllowBluetooth,
-              IOSCategoryOptions.AllowBluetoothA2DP,
+              TrackPlayerModule.IOSCategoryOptions?.AllowAirPlay ?? 1,
+              TrackPlayerModule.IOSCategoryOptions?.AllowBluetooth ?? 2,
+              TrackPlayerModule.IOSCategoryOptions?.AllowBluetoothA2DP ?? 8,
             ],
           }
         : {}),
@@ -63,32 +73,36 @@ async function setupPlayerInternal(): Promise<void> {
     if (!isAlreadyInitialized(error)) throw error;
   }
 
-  await TrackPlayer.updateOptions({
-    android: {
-      appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
-      alwaysPauseOnInterruption: true,
-      stopForegroundGracePeriod: 5,
-    },
-    capabilities: [
-      Capability.Play,
-      Capability.Pause,
-      Capability.SkipToNext,
-      Capability.SkipToPrevious,
-      Capability.SeekTo,
-      Capability.Stop,
-    ],
-    notificationCapabilities: [
-      Capability.Play,
-      Capability.Pause,
-      Capability.SkipToNext,
-      Capability.SkipToPrevious,
-      Capability.SeekTo,
-    ],
-    compactCapabilities: [
-      Capability.Play,
-      Capability.Pause,
-      Capability.SkipToNext,
-    ],
-    progressUpdateEventInterval: 1,
-  });
+  if (TrackPlayer.updateOptions) {
+    const Cap = TrackPlayerModule.Capability ?? {};
+    const AppKilled = TrackPlayerModule.AppKilledPlaybackBehavior ?? {};
+    await TrackPlayer.updateOptions({
+      android: {
+        appKilledPlaybackBehavior: AppKilled.ContinuePlayback ?? 0,
+        alwaysPauseOnInterruption: true,
+        stopForegroundGracePeriod: 5,
+      },
+      capabilities: [
+        Cap.Play,
+        Cap.Pause,
+        Cap.SkipToNext,
+        Cap.SkipToPrevious,
+        Cap.SeekTo,
+        Cap.Stop,
+      ].filter(Boolean),
+      notificationCapabilities: [
+        Cap.Play,
+        Cap.Pause,
+        Cap.SkipToNext,
+        Cap.SkipToPrevious,
+        Cap.SeekTo,
+      ].filter(Boolean),
+      compactCapabilities: [
+        Cap.Play,
+        Cap.Pause,
+        Cap.SkipToNext,
+      ].filter(Boolean),
+      progressUpdateEventInterval: 1,
+    });
+  }
 }

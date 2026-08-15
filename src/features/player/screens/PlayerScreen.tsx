@@ -4,6 +4,7 @@ import {
   View,
   Text,
   FlatList,
+  ScrollView,
   Pressable,
   StyleSheet,
   Platform,
@@ -221,6 +222,7 @@ type BackgroundYoutubeVideoProps = {
   positionMillis: number;
   containerHeight: number;
   isLowEnd?: boolean;
+  onVideoActive?: (active: boolean) => void;
 };
 
 const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
@@ -229,6 +231,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   positionMillis,
   containerHeight,
   isLowEnd = false,
+  onVideoActive,
 }: BackgroundYoutubeVideoProps) {
   const { width: winW } = useWindowDimensions();
   const playerRef = useRef<any>(null);
@@ -239,6 +242,11 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   if (videoOpacity.current === null) {
     videoOpacity.current = new Animated.Value(0);
   }
+  const videoScaleRef = useRef<Animated.Value | null>(null);
+  if (videoScaleRef.current === null) {
+    videoScaleRef.current = new Animated.Value(1.05);
+  }
+  const videoScale = videoScaleRef.current;
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const revealVideo = useCallback(() => {
@@ -247,20 +255,26 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
       revealTimerRef.current = null;
     }
     if (videoOpacity.current) {
-      Animated.timing(videoOpacity.current!, {
-        toValue: 1,
-        duration: 400,
-        useNativeDriver: true,
-      }).start();
+      onVideoActive?.(true);
+      Animated.parallel([
+        Animated.timing(videoOpacity.current!, {
+          toValue: 1,
+          duration: 650,
+          useNativeDriver: true,
+        }),
+        Animated.timing(videoScale, {
+          toValue: 1,
+          duration: 850,
+          useNativeDriver: true,
+        }),
+      ]).start();
     }
-  }, []);
+  }, [onVideoActive, videoScale]);
 
   const onReady = useCallback(() => {
     setPlayerReady(true);
-    // Fallback reveal at 800ms — video is at minimum loading/buffering by then.
-    // If onChangeState fires first, revealVideo() cancels this and fades in immediately.
     if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
-    revealTimerRef.current = setTimeout(revealVideo, 800);
+    revealTimerRef.current = setTimeout(revealVideo, 600);
   }, [revealVideo]);
 
   useEffect(() => {
@@ -341,6 +355,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
           width: dimensions.frameW,
           height: dimensions.frameH,
           opacity: videoOpacity.current!,
+          transform: [{ scale: videoScale }],
         }}
       >
         <YoutubePlayer
@@ -491,7 +506,6 @@ const StableArtworkImage = memo(function StableArtworkImage({
 
 function PlayerPlayButton({
   isPlayingOverride,
-  isLoadingOverride,
   buttonSize,
   iconSize,
   onAccentColor,
@@ -506,23 +520,6 @@ function PlayerPlayButton({
 }) {
   const playbackState = usePlaybackPlayState();
   const isPlaying = isPlayingOverride ?? playbackState.isPlaying;
-  const isLoading = isLoadingOverride ?? (playbackState.isBuffering || playbackState.isLoading);
-  const [showSpinner, setShowSpinner] = useState(false);
-
-  if (!isLoading && showSpinner) {
-    setShowSpinner(false);
-  }
-
-  useEffect(() => {
-    if (!isLoading) return;
-
-    const timer = setTimeout(() => {
-      setShowSpinner(true);
-    }, 180);
-
-    return () => clearTimeout(timer);
-    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- isLoading is the only reactive dep needed
-  }, [isLoading]);
 
   return (
     <SmoothControlButton
@@ -539,16 +536,12 @@ function PlayerPlayButton({
         },
       ]}
     >
-      {showSpinner ? (
-        <ActivityIndicator size="small" color={onAccentColor} />
-      ) : (
-        <Ionicons
-          name={isPlaying ? "pause" : "play"}
-          size={iconSize}
-          color={onAccentColor}
-          style={!isPlaying ? { marginLeft: 2 } : undefined}
-        />
-      )}
+      <Ionicons
+        name={isPlaying ? "pause" : "play"}
+        size={iconSize}
+        color={onAccentColor}
+        style={!isPlaying ? { marginLeft: 2 } : undefined}
+      />
     </SmoothControlButton>
   );
 }
@@ -1010,7 +1003,7 @@ function formatFollowers(n: number | null | undefined): string {
   return `${n} followers`;
 }
 
-// About Artist Card Component
+// About Artist Card Component — Spotify style
 const AboutArtistCard = memo(({
   artistDetails,
   loading,
@@ -1023,9 +1016,11 @@ const AboutArtistCard = memo(({
   if (loading) {
     return (
       <View style={styles.artistCardContainer}>
-        <Text style={styles.artistSectionTitle}>About the Artist</Text>
-        <View style={[styles.artistCard, { height: 120, justifyContent: "center", alignItems: "center" }]}>
-          <ActivityIndicator size="small" color="#F7FAFF" />
+        <View style={styles.artistSectionHeader}>
+          <Text style={styles.artistSectionTitle}>About the Artist</Text>
+        </View>
+        <View style={styles.artistSpotifyCard}>
+          <ActivityIndicator size="small" color="rgba(255,255,255,0.35)" />
         </View>
       </View>
     );
@@ -1036,40 +1031,66 @@ const AboutArtistCard = memo(({
   const imageUrl = artistDetails.image?.length ? getBestImageUrl(artistDetails.image) : "";
   const followerText = artistDetails.followerCount ? formatFollowers(artistDetails.followerCount) : "";
   const bioText = artistDetails.bio?.[0]?.text || "";
+  const dominantType = artistDetails.dominantType || artistDetails.dominantLanguage || "";
 
   return (
     <View style={styles.artistCardContainer}>
-      <Text style={styles.artistSectionTitle}>About the Artist</Text>
-      <Pressable style={styles.artistCard} onPress={onPress}>
+      <View style={styles.artistSectionHeader}>
+        <Text style={styles.artistSectionTitle}>About the Artist</Text>
+      </View>
+
+      <Pressable
+        style={({ pressed }) => [styles.artistSpotifyCard, pressed && { opacity: 0.88 }]}
+        onPress={onPress}
+      >
+        {/* Artist banner image at top */}
         {imageUrl ? (
           <Image
             source={{ uri: imageUrl }}
-            style={StyleSheet.absoluteFillObject}
+            style={styles.artistSpotifyBanner}
             contentFit="cover"
             transition={200}
           />
-        ) : null}
-        <LinearGradient
-          colors={["rgba(7,10,16,0.2)", "rgba(7,10,16,0.65)", "#070A10"]}
-          locations={[0, 0.5, 1]}
-          style={StyleSheet.absoluteFillObject}
-        />
-        <View style={styles.artistCardContent}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            {artistDetails.isVerified && (
-              <Ionicons name="checkmark-circle" size={16} color="#F7FAFF" />
-            )}
-            <Text style={styles.artistCardName}>{artistDetails.name}</Text>
+        ) : (
+          <View style={[styles.artistSpotifyBanner, styles.artistSpotifyBannerFallback]}>
+            <Ionicons name="person" size={40} color="rgba(255,255,255,0.2)" />
           </View>
-          {followerText ? <Text style={styles.artistCardFollowers}>{followerText}</Text> : null}
+        )}
+
+        {/* Info body */}
+        <View style={styles.artistSpotifyBody}>
+          {/* Name row + Follow button */}
+          <View style={styles.artistSpotifyNameRow}>
+            <View style={styles.artistSpotifyNameWrap}>
+              <Text style={styles.artistSpotifyName} numberOfLines={1}>
+                {artistDetails.name}
+              </Text>
+              {artistDetails.isVerified && (
+                <Ionicons name="checkmark-circle" size={16} color="#1ED760" style={{ marginLeft: 5 }} />
+              )}
+            </View>
+            <View style={styles.artistFollowBtn}>
+              <Text style={styles.artistFollowBtnText}>Follow</Text>
+            </View>
+          </View>
+
+          {/* Monthly listeners */}
+          {followerText ? (
+            <Text style={styles.artistSpotifyListeners}>
+              {followerText} monthly listeners
+            </Text>
+          ) : null}
+
+          {/* Bio */}
           {bioText ? (
-            <Text style={styles.artistCardBio} numberOfLines={2}>
+            <Text style={styles.artistSpotifyBio} numberOfLines={3}>
               {bioText}
             </Text>
           ) : null}
-          <View style={styles.artistCardButton}>
-            <Text style={styles.artistCardButtonText}>View Profile</Text>
-          </View>
+
+          {dominantType ? (
+            <Text style={styles.artistSpotifyTag}>{dominantType}</Text>
+          ) : null}
         </View>
       </Pressable>
     </View>
@@ -1078,7 +1099,48 @@ const AboutArtistCard = memo(({
 
 AboutArtistCard.displayName = "AboutArtistCard";
 
-// Related Songs Component
+// Related Songs Component — horizontal video card scroller (Spotify "Explore" style)
+const RELATED_GRADIENT_COLORS = ["transparent", "rgba(0,0,0,0.75)"] as const;
+const RELATED_GRADIENT_LOCATIONS = [0.4, 1] as const;
+
+const RelatedSongCard = memo(({ song, onPress }: { song: Song; onPress: (song: Song) => void }) => {
+  const handlePress = useCallback(() => {
+    onPress(song);
+  }, [onPress, song]);
+
+  const imageSource = useMemo(() => ({ uri: song.coverUrl || undefined }), [song.coverUrl]);
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.relatedVideoCard,
+        pressed && styles.relatedVideoCardPressed,
+      ]}
+      onPress={handlePress}
+    >
+      <Image
+        source={imageSource}
+        style={StyleSheet.absoluteFillObject}
+        contentFit="cover"
+        transition={150}
+      />
+      <LinearGradient
+        colors={RELATED_GRADIENT_COLORS}
+        locations={RELATED_GRADIENT_LOCATIONS}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <View style={styles.relatedVideoCardInfo}>
+        <Text style={styles.relatedVideoCardTitle} numberOfLines={2}>
+          {song.title}
+        </Text>
+        <Text style={styles.relatedVideoCardArtist} numberOfLines={1}>
+          {song.artist}
+        </Text>
+      </View>
+    </Pressable>
+  );
+});
+
 const RelatedSongsSection = memo(({
   songs,
   onSongPress,
@@ -1086,36 +1148,31 @@ const RelatedSongsSection = memo(({
   songs: Song[];
   onSongPress: (song: Song) => void;
 }) => {
+  const renderItem = useCallback(
+    ({ item }: { item: Song }) => (
+      <RelatedSongCard song={item} onPress={onSongPress} />
+    ),
+    [onSongPress]
+  );
+
   if (songs.length === 0) return null;
 
   return (
     <View style={styles.relatedSongsContainer}>
-      <Text style={styles.artistSectionTitle}>You Might Also Like</Text>
-      <View style={styles.relatedSongsList}>
-        {songs.map((song) => (
-          <Pressable
-            key={song.id}
-            style={styles.relatedSongRow}
-            onPress={() => onSongPress(song)}
-          >
-            <Image
-              source={{ uri: song.coverUrl || undefined }}
-              style={styles.relatedSongThumb}
-              contentFit="cover"
-              transition={120}
-            />
-            <View style={styles.relatedSongTextWrap}>
-              <Text style={styles.relatedSongTitle} numberOfLines={1}>
-                {song.title}
-              </Text>
-              <Text style={styles.relatedSongArtist} numberOfLines={1}>
-                {song.artist}
-              </Text>
-            </View>
-            <Ionicons name="play-circle-outline" size={24} color="rgba(255,255,255,0.6)" />
-          </Pressable>
-        ))}
+      <View style={styles.artistSectionHeader}>
+        <Text style={styles.artistSectionTitle}>You Might Also Like</Text>
       </View>
+      <FlatList
+        data={songs}
+        keyExtractor={(song) => song.id}
+        renderItem={renderItem}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.relatedCardsScroll}
+        decelerationRate="fast"
+        snapToInterval={148}
+        snapToAlignment="start"
+      />
     </View>
   );
 });
@@ -1204,6 +1261,7 @@ function LegacyPlayerScreenView() {
     queue,
     sourceQueue,
     queueIndex,
+    isShuffled,
     repeatMode,
   } = usePlaybackNowPlaying();
   const playbackState = usePlaybackPlayState();
@@ -1373,6 +1431,24 @@ function LegacyPlayerScreenView() {
   const shouldRenderBackgroundVideo = useMemo(() => Boolean(
     ambientVideoLayoutActive && interactionReady && backdropMountReady
   ), [ambientVideoLayoutActive, interactionReady, backdropMountReady]);
+
+  const videoCrossfadeAnimRef = useRef<Animated.Value | null>(null);
+  if (videoCrossfadeAnimRef.current === null) {
+    videoCrossfadeAnimRef.current = new Animated.Value(0);
+  }
+  const videoCrossfadeAnim = videoCrossfadeAnimRef.current;
+
+  useEffect(() => {
+    videoCrossfadeAnim.setValue(0);
+  }, [screenSong?.id, videoCrossfadeAnim]);
+
+  const handleVideoActive = useCallback((active: boolean) => {
+    Animated.timing(videoCrossfadeAnim, {
+      toValue: active ? 1 : 0,
+      duration: 650,
+      useNativeDriver: true,
+    }).start();
+  }, [videoCrossfadeAnim]);
 
 
 
@@ -1694,6 +1770,7 @@ function LegacyPlayerScreenView() {
   }, [playingQueue]);
   const playerIsPlaying = playbackState.isPlaying;
   const playerRepeatMode = repeatMode;
+  const playerIsShuffled = isShuffled;
 
 
   useEffect(() => {
@@ -2356,6 +2433,7 @@ function LegacyPlayerScreenView() {
                         positionMillis={positionMillis}
                         containerHeight={containerH}
                         isLowEnd={isLowEnd}
+                        onVideoActive={handleVideoActive}
                       />
                       <LinearGradient
                         pointerEvents="none"
@@ -2403,9 +2481,7 @@ function LegacyPlayerScreenView() {
                         style={[
                           styles.artWrap,
                           {
-                            marginTop: ambientVideoLayoutActive
-                              ? isShortScreen ? 4 : 8
-                              : isVeryShortScreen ? 8 : isShortScreen ? 12 : 18,
+                            marginTop: isVeryShortScreen ? 8 : isShortScreen ? 12 : 18,
                             paddingHorizontal: 0,
                           },
                         ]}
@@ -2440,30 +2516,16 @@ function LegacyPlayerScreenView() {
                         />
                       </View>
 
-                      {ambientVideoLayoutActive ? (
-                        <View style={{ flex: 1 }} />
-                      ) : null}
-
                       <Reanimated.View style={[{ flexGrow: 0 }, controlsDismissAnimatedStyle]}>
                         <View
                           style={[
                             styles.songBlock,
                             {
-                              marginTop: ambientVideoLayoutActive
-                                ? isShortScreen ? 75 : 95
-                                : isVeryShortScreen ? 22 : isShortScreen ? 26 : 34,
+                              marginTop: isVeryShortScreen ? 18 : isShortScreen ? 22 : 28,
                               marginHorizontal: isShortScreen ? 14 : 20,
                             },
                           ]}
                         >
-                          {/* Small album artwork on the left */}
-                          <Image
-                            source={{ uri: screenSong.coverUrl || "" }}
-                            style={styles.songBlockArtwork}
-                            contentFit="cover"
-                            transition={200}
-                            cachePolicy="memory-disk"
-                          />
                           <View style={styles.songTextWrap}>
                             <PingPongScroll
                               text={screenSong.title}
@@ -2556,7 +2618,7 @@ function LegacyPlayerScreenView() {
                           <Ionicons
                             name="shuffle"
                             size={shuffleRepeatIconSize}
-                            color={sideControlIconColor}
+                            color={playerIsShuffled ? selectedControlIconColor : sideControlIconColor}
                           />
                         </SmoothControlButton>
 
@@ -2599,10 +2661,10 @@ function LegacyPlayerScreenView() {
                           <Ionicons
                             name="repeat"
                             size={shuffleRepeatIconSize}
-                            color={sideControlIconColor}
+                            color={playerRepeatMode !== "off" ? selectedControlIconColor : sideControlIconColor}
                           />
                           {playerRepeatMode === "one" && (
-                            <Text style={[styles.repeatOneBadge, { color: sideControlIconColor }]}>1</Text>
+                            <Text style={[styles.repeatOneBadge, { color: selectedControlIconColor }]}>1</Text>
                           )}
                         </SmoothControlButton>
                       </View>
@@ -2969,8 +3031,8 @@ const styles = StyleSheet.create({
   songBlockArtwork: {
     width: 48,
     height: 48,
-    borderRadius: 0,
-    backgroundColor: "transparent",
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   songTextWrap: {
     flex: 1,
@@ -3119,39 +3181,31 @@ const styles = StyleSheet.create({
   playingListSection: {
     alignSelf: "stretch",
     marginTop: 0,
-    marginHorizontal: 16,
     overflow: "hidden",
-    borderRadius: 22,
-    backgroundColor: "#14171E",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: "transparent",
   },
   playingListSectionAmbient: {
-    marginHorizontal: 16,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    backgroundColor: "#191C23",
+    backgroundColor: "transparent",
   },
   queueListContent: {
     paddingHorizontal: 16,
     paddingTop: 0,
-    paddingBottom: 16,
+    paddingBottom: 24,
   },
   queueListViewport: {
     flexGrow: 0,
   },
 
   playingListHeader: {
-    height: 48,
+    height: 44,
     paddingHorizontal: 16,
-    paddingTop: 4,
+    paddingTop: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   playingListHeaderCompact: {
-    height: 40,
+    height: 38,
   },
   playingListHeaderRight: {
     flexDirection: "row",
@@ -3162,10 +3216,12 @@ const styles = StyleSheet.create({
   },
   playingListTitle: {
     color: Colors.text,
-    fontSize: 25,
-    lineHeight: 30,
-    fontFamily: "Inter_600SemiBold",
-    letterSpacing: 0,
+    fontSize: 14,
+    lineHeight: 20,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    opacity: 0.7,
   },
 
   playingListCount: {
@@ -3186,7 +3242,6 @@ const styles = StyleSheet.create({
   },
   queueRowActive: {
     backgroundColor: "rgba(223,226,235,0.055)",
-    borderRadius: 10,
     borderBottomColor: "transparent",
   },
   queueRowCompact: {
@@ -3375,99 +3430,157 @@ const styles = StyleSheet.create({
     borderColor: Colors.cardBorder,
   },
   artistCardContainer: {
-    marginHorizontal: 16,
-    marginTop: 24,
-    marginBottom: 12,
+    marginTop: 28,
+    marginBottom: 8,
   },
-  artistSectionTitle: {
-    color: "#FFFFFF",
-    fontSize: 18,
-    fontFamily: "Inter_700Bold",
-    marginBottom: 12,
-  },
-  artistCard: {
-    height: 180,
-    borderRadius: 16,
-    overflow: "hidden",
-    backgroundColor: "#14171E",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-  },
-  artistCardContent: {
-    flex: 1,
-    justifyContent: "flex-end",
-    padding: 16,
-  },
-  artistCardName: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    fontFamily: "Inter_700Bold",
-  },
-  artistCardFollowers: {
-    color: "rgba(255, 255, 255, 0.7)",
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
-    marginTop: 2,
-  },
-  artistCardBio: {
-    color: "rgba(255, 255, 255, 0.5)",
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    marginTop: 6,
-    lineHeight: 16,
-  },
-  artistCardButton: {
-    alignSelf: "flex-start",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.3)",
-    borderRadius: 18,
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    marginTop: 10,
-  },
-  artistCardButtonText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-  },
-  relatedSongsContainer: {
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 48,
-  },
-  relatedSongsList: {
-    backgroundColor: "#14171E",
-    borderRadius: 16,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-  },
-  relatedSongRow: {
+  artistSectionHeader: {
+    paddingHorizontal: 16,
+    marginBottom: 10,
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+  },
+  artistSectionTitle: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 1.1,
+    textTransform: "uppercase",
+  },
+
+  // ── Spotify-style artist card ──────────────────────────────────────────────
+  artistSpotifyCard: {
+    marginHorizontal: 16,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#1A1E27",
+  },
+  artistSpotifyBanner: {
+    width: "100%",
+    height: 180,
+  },
+  artistSpotifyBannerFallback: {
+    backgroundColor: "#1E2330",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  artistSpotifyBody: {
+    padding: 16,
+    paddingTop: 14,
+  },
+  artistSpotifyNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 12,
+    marginBottom: 5,
   },
-  relatedSongThumb: {
-    width: 40,
-    height: 40,
-    borderRadius: 6,
-  },
-  relatedSongTextWrap: {
+  artistSpotifyNameWrap: {
     flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
     minWidth: 0,
   },
-  relatedSongTitle: {
+  artistSpotifyName: {
     color: "#FFFFFF",
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
+    fontSize: 20,
+    fontFamily: "Inter_800ExtraBold",
+    flexShrink: 1,
   },
-  relatedSongArtist: {
-    color: "rgba(255, 255, 255, 0.5)",
-    fontSize: 12,
+  artistFollowBtn: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.45)",
+    borderRadius: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  artistFollowBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+  },
+  artistSpotifyListeners: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    marginBottom: 10,
+  },
+  artistSpotifyBio: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 19,
+    marginBottom: 8,
+  },
+  artistSpotifyTag: {
+    color: "rgba(255,255,255,0.35)",
+    fontSize: 11,
+    fontFamily: "Inter_500Medium",
+    textTransform: "capitalize",
+    marginTop: 4,
+  },
+
+  // ── Legacy stubs kept to avoid unused-style warnings ──────────────────────
+  artistCardSkeleton: {},
+  artistCard: {},
+  artistCardContent: {},
+  artistCardNameRow: {},
+  artistCardName: {},
+  artistCardMeta: {},
+  artistFollowerChip: {},
+  artistFollowerText: {},
+  artistCardFollowers: {},
+  artistCardBio: {},
+  artistCardButton: {},
+  artistCardButtonText: {},
+
+  // ── You Might Also Like ── horizontal video cards ──────────────────────────
+  relatedSongsContainer: {
+    marginTop: 28,
+    marginBottom: 48,
+  },
+  relatedCardsScroll: {
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  relatedVideoCard: {
+    width: 140,
+    height: 190,
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: "#1A1E27",
+  },
+  relatedVideoCardPressed: {
+    opacity: 0.82,
+  },
+  relatedVideoCardInfo: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    padding: 10,
+    paddingBottom: 11,
+  },
+  relatedVideoCardTitle: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    lineHeight: 17,
+  },
+  relatedVideoCardArtist: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 11,
     fontFamily: "Inter_400Regular",
     marginTop: 2,
   },
+
+  // ── Legacy stubs (old row layout) ─────────────────────────────────────────
+  relatedSongsList: {},
+  relatedSongIndex: {},
+  relatedSongRow: {},
+  relatedSongRowPressed: {},
+  relatedSongThumb: {},
+  relatedSongTextWrap: {},
+  relatedSongTitle: {},
+  relatedSongArtist: {},
 
 });

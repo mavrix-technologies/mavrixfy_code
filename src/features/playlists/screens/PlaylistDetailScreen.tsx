@@ -92,9 +92,8 @@ function PlaylistScreenView() {
 
   const playlistId       = pickFirstParam(params.id).trim();
   const isAlbumSource    = pickFirstParam(params.album) === "true";
-  const isYouTubeSource  = false;
-  const isJioSaavnSource = (pickFirstParam(params.jiosaavn) === "true" || isAlbumSource) && !isYouTubeSource;
   const isFirestoreSource = pickFirstParam(params.firestore) === "true";
+  const isJioSaavnSource = !isFirestoreSource;
   const sourceLink       = pickFirstParam(params.link).trim();
   const initialTitle     = pickFirstParam(params.title).trim();
   const initialCover     = pickFirstParam(params.cover).trim();
@@ -107,7 +106,7 @@ function PlaylistScreenView() {
   const { isOnline } = useNetwork();
   const { currentSong, queue } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
-  const { playSong, togglePlay } = usePlayerActions();
+  const { playSong, shufflePlay, togglePlay } = usePlayerActions();
   const topInset  = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 132 : Math.max(150, insets.bottom + 126);
 
@@ -181,7 +180,7 @@ function PlaylistScreenView() {
     return 20;
   }, [playlistName]);
 
-  const canRemoveSongsFromPlaylist = !isJioSaavnSource && !isYouTubeSource && (!isFirestoreSource || Boolean(user?.id));
+  const canRemoveSongsFromPlaylist = !isJioSaavnSource && (!isFirestoreSource || Boolean(user?.id));
   const playlistRowSource = isFirestoreSource ? "firestore" : "local";
 
   useEffect(() => {
@@ -345,7 +344,7 @@ function PlaylistScreenView() {
     void load();
     return () => { cancelled = true; };
   }, [
-    playlistId, isAlbumSource, isYouTubeSource, sourceLink, isFirestoreSource, isJioSaavnSource,
+    playlistId, isAlbumSource, sourceLink, isFirestoreSource, isJioSaavnSource,
     applyFirestorePlaylistData, applyJioPlaylistData,
     applyLocalPlaylistData, finishPlaylistLoad,
     hasPrefilledHeader, markPlaylistLoadError, markPlaylistNotFound,
@@ -376,9 +375,8 @@ function PlaylistScreenView() {
   const handleShufflePlay = useCallback(() => {
     if (!songs.length) return;
     if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const shuffled = sortedCopy(songs, () => Math.random() - 0.5);
-    playSong(shuffled[0], shuffled);
-  }, [songs, playSong]);
+    shufflePlay(songs);
+  }, [songs, shufflePlay]);
 
   // Edit handlers
   const handleOpenEdit = useCallback(() => {

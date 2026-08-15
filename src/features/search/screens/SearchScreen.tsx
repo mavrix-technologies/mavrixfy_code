@@ -24,6 +24,7 @@ import SongRow from "@/components/SongRow";
 import { searchCatalog } from "@/lib/catalogService";
 import {
   normalizeText,
+  rankSongs,
   parseStructuredQuery
 } from "@/lib/searchUtils";
 import OfflineScreen from "@/components/OfflineScreen";
@@ -36,7 +37,7 @@ import AppTopHeader, {
 } from "@/components/AppTopHeader";
 import SearchHeaderField from "@/components/SearchHeaderField";
 import SearchResultFilterChip from "@/components/SearchResultFilterChip";
-import { useNetwork } from "@/contexts/NetworkContext";
+import { useNetwork, useOnReconnect } from "@/contexts/NetworkContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { filterMap, sortedCopy } from "@/lib/arrayUtils";
 import { searchJioSaavnAlbums, type JioSaavnAlbumResult } from "@/data/providers/JioSaavnProvider";
@@ -78,7 +79,6 @@ interface RecentSearchItem {
 
 type SearchCacheEntry = {
   songs: Song[];
-  youtubeSongs: Song[];
   albums: AlbumResult[];
   artists: ArtistResult[];
   playlists: PlaylistResult[];
@@ -391,10 +391,133 @@ function mergeUniqueById<T extends { id: string }>(items: T[], limit: number): T
   return out;
 }
 
-// Simplified search - removed all complex deduplication logic
+const SONG_METADATA_TITLE_WORDS = new Set([
+  "from",
+  "original",
+  "motion",
+  "picture",
+  "soundtrack",
+  "ost",
+  "movie",
+  "film",
+  "album",
+  "official",
+  "full",
+  "song",
+  "video",
+  "audio",
+]);
 
-function isYouTubeCollectionResult(id: string, url?: string, description?: string): boolean {
-  return false;
+const SONG_VERSION_TITLE_WORDS = new Set([
+  "remix",
+  "remixed",
+  "rmx",
+  "lofi",
+  "lo",
+  "fi",
+  "slowed",
+  "reverb",
+  "cover",
+  "live",
+  "acoustic",
+  "instrumental",
+  "karaoke",
+  "8d",
+  "nightcore",
+  "mashup",
+  "version",
+]);
+
+const SONG_METADATA_PATTERN =
+  "from|original|motion\\s+picture|soundtrack|ost|movie|film|album|official|full\\s+song|video|audio";
+const SONG_VERSION_PATTERN =
+  "remix|remixed|rmx|lofi|lo-fi|lo\\s+fi|slowed|reverb|cover|live|acoustic|instrumental|karaoke|8d|nightcore|mashup|version";
+
+function hasSongVersionIntent(query: string): boolean {
+  return new RegExp(`\\b(${SONG_VERSION_PATTERN})\\b`, "i").test(query);
+}
+
+function decodeSongText(value: string): string {
+  return value
+    .replace(/&amp;/gi, " and ")
+    .replace(/&quot;/gi, " ")
+    .replace(/&#039;|&apos;/gi, " ")
+    .replace(/&nbsp;/gi, " ");
+}
+
+function normalizeSongDuplicateTitle(title: string, keepVersionWords = false): string {
+  let raw = decodeSongText(String(title || ""));
+  const bracketNoise = keepVersionWords
+    ? SONG_METADATA_PATTERN
+    : `${SONG_METADATA_PATTERN}|${SONG_VERSION_PATTERN}`;
+
+  raw = raw
+    .replace(new RegExp(`\\([^)]*\\b(${bracketNoise})\\b[^)]*\\)`, "gi"), " ")
+    .replace(new RegExp(`\\[[^\\]]*\\b(${bracketNoise})\\b[^\\]]*\\]`, "gi"), " ")
+    .replace(new RegExp(`\\{[^}]*\\b(${bracketNoise})\\b[^}]*\\}`, "gi"), " ")
+    .replace(new RegExp(`\\s[-–—:|]\\s*(${SONG_METADATA_PATTERN}).*$`, "i"), " ");
+
+  if (!keepVersionWords) {
+    raw = raw.replace(new RegExp(`\\s[-–—:|]\\s*(${SONG_VERSION_PATTERN}).*$`, "i"), " ");
+  }
+
+  if (!/^\s*from\b/i.test(raw)) {
+    raw = raw.replace(/\s+\bfrom\b.*$/i, " ");
+  }
+
+  const normalized = normalizeText(raw);
+  const words = normalized.split(/\s+/).filter(Boolean);
+  return words
+    .filter((word) =>
+      !SONG_METADATA_TITLE_WORDS.has(word)
+      && (keepVersionWords || !SONG_VERSION_TITLE_WORDS.has(word))
+    )
+    .join(" ");
+}
+
+function normalizeSongPeopleKey(artist: string): string {
+  const normalized = normalizeText(artist);
+  if (!normalized || normalized === "unknown artist") return "unknown";
+
+  const parts = normalized
+    .split(/\s*,\s*|\s+\b(?:feat|ft|featuring|and|x)\b\s+|\s*&\s+/i)
+    .map((part) => part.trim())
+    .filter((part) => part && part !== "unknown artist");
+
+  const uniqueParts = Array.from(new Set(parts.length > 0 ? parts : [normalized]));
+  return uniqueParts.sort().slice(0, 3).join("|") || "unknown";
+}
+
+function normalizeSongAlbumKey(album: string): string {
+  return normalizeSongDuplicateTitle(album, true);
+}
+
+function getStableSongIdKey(song: Song): string {
+  const id = normalizeText(String(song.id || ""));
+  return id ? `${song.source || "song"}:${id}` : "";
+}
+
+function areDuplicateSearchSongs(next: Song, existing: Song, keepVersionWords: boolean): boolean {
+  // Only treat as duplicate if they have the exact same ID
+  const nextId = getStableSongIdKey(next);
+  const existingId = getStableSongIdKey(existing);
+  return !!(nextId && nextId === existingId);
+}
+
+function uniqueSongResultIds(songs: Song[]): Song[] {
+  const seen = new Set<string>();
+  return songs.map((song, index) => {
+    const fallbackId = `${normalizeSongDuplicateTitle(song.title, true)}-${normalizeSongPeopleKey(song.artist)}-${index}`;
+    const baseId = String(song.id || fallbackId).trim() || fallbackId;
+    let nextId = baseId;
+    let suffix = 1;
+    while (seen.has(nextId)) {
+      nextId = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(nextId);
+    return nextId === song.id ? song : { ...song, id: nextId };
+  });
 }
 
 function stableHash(input: string): number {
@@ -423,7 +546,6 @@ function SearchScreenView() {
   const routeSearchQuery = getRouteSearchQuery(params);
   const [query, setQuery] = useState(routeSearchQuery);
   const [songResults, setSongResults] = useState<Song[]>([]);
-  const [youtubeMusicResults, setYoutubeMusicResults] = useState<Song[]>([]);
   const [albumResults, setAlbumResults] = useState<AlbumResult[]>([]);
   const [artistResults, setArtistResults] = useState<ArtistResult[]>([]);
   const [playlistResults, setPlaylistResults] = useState<PlaylistResult[]>([]);
@@ -469,29 +591,13 @@ function SearchScreenView() {
     [shuffledBrowseCategories]
   );
 
-  const resultFilterRef = useRef<ResultFilter>(resultFilter);
-  
-  // Keep ref in sync with state
-  useEffect(() => {
-    resultFilterRef.current = resultFilter;
-  }, [resultFilter]);
-
-  const performSearch = useCallback(async (searchQuery: string, filterOverride?: ResultFilter) => {
+  const performSearch = useCallback(async (searchQuery: string) => {
     const requestId = ++requestSeqRef.current;
     const normalizedQuery = searchQuery.trim();
-    const currentFilter = filterOverride || resultFilterRef.current;
-    
-    console.log('[SearchScreen] performSearch called:', {
-      requestId,
-      query: normalizedQuery,
-      filter: currentFilter
-    });
-    
     if (normalizedQuery.length < 2) {
       activeSearchAbortRef.current?.abort();
       activeSearchAbortRef.current = null;
       setSongResults([]);
-      setYoutubeMusicResults([]);
       setAlbumResults([]);
       setArtistResults([]);
       setPlaylistResults([]);
@@ -505,12 +611,11 @@ function SearchScreenView() {
     activeSearchAbortRef.current = controller;
 
     // Check cache first (5 minute TTL, specific to filter)
-    const cacheKey = `${currentFilter}:${normalizedQuery.toLowerCase()}`;
+    const cacheKey = `${resultFilter}:${normalizedQuery.toLowerCase()}`;
     const cached = searchCache.get(cacheKey);
     const now = Date.now();
     if (cached && (now - cached.timestamp) < 300000) { // 5 minutes
       setSongResults(cached.songs || []);
-      setYoutubeMusicResults(cached.youtubeSongs || []);
       setAlbumResults(cached.albums || []);
       setArtistResults(cached.artists || []);
       setPlaylistResults(cached.playlists || []);
@@ -523,7 +628,6 @@ function SearchScreenView() {
     }
 
     setSearchLoading(true);
-    setYoutubeMusicResults([]);
     const apiUrl = getApiUrl();
     const parsedQuery = parseStructuredQuery(normalizedQuery);
     const searchTerm = parsedQuery.freeText || normalizedQuery;
@@ -539,111 +643,196 @@ function SearchScreenView() {
           },
         });
         if (!response.ok) {
-          console.error('[SearchScreen] API returned error:', {
-            url,
-            status: response.status,
-            statusText: response.statusText
-          });
+          console.warn(`[Search Debug] safeFetch HTTP error ${response.status} for ${url}`);
           return null;
         }
-        const data = await response.json();
-        console.log('[SearchScreen] API success:', {
-          url,
-          hasData: !!data,
-          songCount: data?.data?.results?.length || data?.results?.length || 0
-        });
-        return data;
+        return await response.json();
       } catch (err: any) {
-        if (err?.name === "AbortError") {
-          console.log('[SearchScreen] Request aborted:', url);
-          return null;
+        if (err?.name !== "AbortError") {
+          console.error(`[Search Debug] safeFetch error for ${url}:`, err?.message || err);
         }
-        console.error('[SearchScreen] Fetch error:', {
-          url,
-          error: err?.message || String(err),
-          name: err?.name
-        });
         return null;
       }
     };
 
+    // Keep all versions - don't filter by quality or type
+    const isBetter = (n: Song, e: Song): boolean => {
+      // Only prefer local songs over remote
+      if (n.source === "local" && e.source !== "local") return true;
+      if (n.source !== "local" && e.source === "local") return false;
+      // Otherwise keep the first one found
+      return false;
+    };
 
-    // Simple parser - direct mapping from API response to Song object
-    const parseSong = (s: any): Song | null => {
-      if (!s?.id || !s?.name && !s?.title) return null;
+    // Parse song results that may use .link or .url media fields.
+    const parseBackup = (s: any): Song | null => {
+      if (!s?.id && !s?.name && !s?.title) return null;
       
-      // Use API response directly - no fallback ID generation
-      const audioUrl = s.downloadUrl?.[0]?.url || s.downloadUrl?.[0]?.link || s.url || '';
-      const coverUrl = s.image?.[0]?.url || s.image?.[0]?.link || s.image || '';
-      const artist = s.artists?.primary?.[0]?.name || s.primaryArtists || s.artist || 'Unknown Artist';
+      // Generate ID if missing
+      const songId = s.id || `jiosaavn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Get audio URL - allow empty string if not available yet
+      let audioUrl = '';
+      if (typeof s.downloadUrl === 'string') {
+        audioUrl = s.downloadUrl;
+      } else if (Array.isArray(s.downloadUrl)) {
+        const dl = s.downloadUrl;
+        audioUrl =
+          dl.find((d: any) => d.quality === '320kbps')?.link ||
+          dl.find((d: any) => d.quality === '320kbps')?.url ||
+          dl.find((d: any) => d.quality === '160kbps')?.link ||
+          dl.find((d: any) => d.quality === '160kbps')?.url ||
+          dl[dl.length - 1]?.link || 
+          dl[dl.length - 1]?.url || 
+          '';
+      } else if (s.url) {
+        audioUrl = s.url;
+      }
+      
+      // Get cover image
+      let coverUrl = '';
+      if (typeof s.image === 'string') {
+        coverUrl = s.image;
+      } else if (Array.isArray(s.image)) {
+        const imgs = s.image;
+        coverUrl =
+          imgs.find((i: any) => i.quality === '500x500')?.link ||
+          imgs.find((i: any) => i.quality === '500x500')?.url ||
+          imgs.find((i: any) => i.quality === '150x150')?.link ||
+          imgs.find((i: any) => i.quality === '150x150')?.url ||
+          imgs[imgs.length - 1]?.link || 
+          imgs[imgs.length - 1]?.url || 
+          '';
+      }
+      
+      // Get artist name
+      let artist = 'Unknown Artist';
+      if (typeof s.primaryArtists === 'string' && s.primaryArtists.trim()) {
+        artist = s.primaryArtists.trim();
+      } else if (typeof s.artist === 'string' && s.artist.trim()) {
+        artist = s.artist.trim();
+      } else if (Array.isArray(s.artists?.primary) && s.artists.primary.length > 0) {
+        artist = s.artists.primary.map((a: any) => a.name).join(', ');
+      }
+      
+      // Get title
       const title = s.name || s.title || 'Unknown Song';
-      const album = s.album?.name || s.album || '';
+      
+      // Get album
+      let album = '';
+      if (typeof s.album === 'string') {
+        album = s.album;
+      } else if (s.album?.name) {
+        album = s.album.name;
+      }
+      
+      const sec = Number(s.duration) || 0;
       
       return {
-        id: String(s.id),
-        title,
+        id: songId, 
+        title, 
         artist,
-        album,
-        duration: Number(s.duration) || 0,
-        coverUrl,
-        genre: s.language || s.genre || '',
+        album, 
+        duration: sec,
+        coverUrl, 
+        genre: s.language || s.genre || '', 
         audioUrl,
-        year: s.year ? String(s.year) : '',
+        year: s.year ? String(s.year) : '', 
         source: (s.provider || 'jiosaavn') as any,
         playCount: Number(s.playCount) || 0,
       };
     };
+
+    const keepVersionWords = hasSongVersionIntent(normalizedQuery);
+
+    const mergeInto = (items: Song[], song: Song) => {
+      const duplicateIndex = items.findIndex((existing) =>
+        areDuplicateSearchSongs(song, existing, keepVersionWords)
+      );
+
+      if (duplicateIndex === -1) {
+        items.push(song);
+        return;
+      }
+
+      if (isBetter(song, items[duplicateIndex])) {
+        items[duplicateIndex] = song;
+      }
+    };
+
+    const toFinalList = (songs: Song[]) => {
+      return uniqueSongResultIds(songs);
+    };
+
+    // Show all results without ranking restrictions
+    const fastRank = (songs: Song[]) =>
+      rankSongs(songs, normalizedQuery, 5).map(r => r.song);
     const requestIsActive = () =>
       requestId === requestSeqRef.current && !controller.signal.aborted;
 
     try {
       if (!requestIsActive()) return;
 
-      // Fetch catalog results (local songs)
+      // OPTIMIZATION: Fetch catalog songs (now server-side search)
       const catalogResults = await searchCatalog(normalizedQuery).catch(() => [] as Song[]);
 
       if (requestIsActive()) {
-        // Simple array - no complex merging
-        let allSongs: Song[] = [...catalogResults];
-
         // Show catalog results immediately
-        if (allSongs.length > 0) {
-          setSongResults(allSongs);
+        const mergedSongs: Song[] = [];
+        for (const s of catalogResults) {
+          mergeInto(mergedSongs, s);
+        }
+
+        const finalCatalogResults = toFinalList(mergedSongs);
+        if (finalCatalogResults.length > 0) {
+          setSongResults(fastRank(finalCatalogResults));
           setSearchDisplayQuery(normalizedQuery);
         }
 
+        // Fetch only endpoints needed for the active resultFilter
         let globalData: any = null;
         let songsData: any = null;
         let albumSectionResults: JioSaavnAlbumResult[] = [];
         let artistsData: any = null;
         let playlistsData: any = null;
 
-        if (currentFilter === "all") {
+        console.log('[Search Debug] Fetching from API:', {
+          apiUrl,
+          searchTerm,
+          resultFilter,
+          fullSongsUrl: `${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`
+        });
+
+        if (resultFilter === "all") {
           const [g, s] = await Promise.all([
             safeFetch(`${apiUrl}/api/search?query=${encodeURIComponent(searchTerm)}`),
             safeFetch(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`),
           ]);
           globalData = g;
           songsData = s;
-        } else if (currentFilter === "songs") {
+          console.log('[Search Debug] Raw songsData:', songsData);
+        } else if (resultFilter === "songs") {
           songsData = await safeFetch(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=100`);
-        } else if (currentFilter === "albums") {
+          console.log('[Search Debug] Raw songsData:', songsData);
+        } else if (resultFilter === "albums") {
           albumSectionResults = await searchJioSaavnAlbums(searchTerm, 20, controller.signal).catch(() => []);
-        } else if (currentFilter === "artists") {
+        } else if (resultFilter === "artists") {
           artistsData = await safeFetch(`${apiUrl}/api/search/artists?query=${encodeURIComponent(searchTerm)}&limit=20&page=1`);
-        } else if (currentFilter === "playlists") {
+        } else if (resultFilter === "playlists") {
           playlistsData = await safeFetch(`${apiUrl}/api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=20`);
         }
 
         if (requestIsActive()) {
-          // Parse API results directly - no merging or deduplication
+          // Merge network results with catalog results
           const rawResults = songsData?.data?.results || songsData?.results || globalData?.data?.songs?.results || [];
-          const apiSongs = rawResults.map(parseSong).filter((s): s is Song => s !== null);
-          
-          // Combine catalog + API songs (no deduplication)
-          allSongs = [...catalogResults, ...apiSongs];
-
-          const parsedYoutubeSongs: Song[] = [];
+          if (rawResults.length > 0) {
+            for (const s of rawResults) {
+              const song = parseBackup(s);
+              if (song) {
+                mergeInto(mergedSongs, song);
+              }
+            }
+          }
 
           const playlists = playlistsData
             ? mergeUniqueById(normalizePlaylistResults(playlistsData.data?.results || playlistsData.results), 20)
@@ -657,9 +846,10 @@ function SearchScreenView() {
             ? mergeUniqueById(normalizeArtistResults(artistsData?.data?.results || artistsData?.results), 20)
             : mergeUniqueById(normalizeArtistResults(globalData?.data?.artists?.results), 12);
 
-          // Direct display - no ranking, no filtering
-          setSongResults(allSongs);
-          setYoutubeMusicResults(parsedYoutubeSongs);
+          const songs = toFinalList(mergedSongs);
+          const rankedSongs = fastRank(songs);
+
+          setSongResults(rankedSongs);
           setAlbumResults(albums);
           setArtistResults(artists);
           setPlaylistResults(playlists);
@@ -676,8 +866,7 @@ function SearchScreenView() {
 
           const loadDiscoverySections = async () => {
             writeCache({
-              songs: allSongs,
-              youtubeSongs: parsedYoutubeSongs,
+              songs: rankedSongs,
               albums,
               artists,
               playlists,
@@ -697,7 +886,6 @@ function SearchScreenView() {
     } catch {
       if (!requestIsActive()) return;
       setSongResults([]);
-      setYoutubeMusicResults([]);
       setAlbumResults([]);
       setArtistResults([]);
       setPlaylistResults([]);
@@ -707,7 +895,7 @@ function SearchScreenView() {
         activeSearchAbortRef.current = null;
       }
     }
-  }, [searchCache]);  // Removed resultFilter dependency
+  }, [searchCache, resultFilter]);
 
 
 
@@ -743,6 +931,18 @@ function SearchScreenView() {
         isActive = false;
       };
     }, [])
+  );
+
+  // Re-run the active search when connectivity is restored
+  useOnReconnect(
+    useCallback(() => {
+      const trimmed = query.trim();
+      if (trimmed.length >= 2) {
+        // Clear stale cache so we get fresh results from the network
+        searchCache.clear();
+        void performSearch(trimmed);
+      }
+    }, [query, searchCache, performSearch])
   );
 
   // react-doctor-disable-next-line react-doctor/no-fetch-in-effect -- requests are debounced, cancellation-aware, and discard aborted responses.
@@ -946,7 +1146,6 @@ function SearchScreenView() {
   const applyEmptySearchState = useCallback((displayQuery = "") => {
     // React automatically batches these state updates
     setSongResults([]);
-    setYoutubeMusicResults([]);
     setAlbumResults([]);
     setArtistResults([]);
     setPlaylistResults([]);
@@ -1014,9 +1213,9 @@ function SearchScreenView() {
     }
 
     if (trimmed === lastQueryRef.current) {
-      // Filter changed - search immediately with new filter
+      // Just filter tab changed, search immediately without debounce
       startSearchLoading();
-      void performSearch(trimmed, resultFilter);  // Pass current filter
+      void performSearch(trimmed);
       return;
     }
 
@@ -1027,7 +1226,7 @@ function SearchScreenView() {
     startSearchLoading();
     const searchTimer = setTimeout(() => {
       lastQueryRef.current = trimmed;
-      void performSearch(trimmed);  // Use ref'd filter for normal search
+      void performSearch(trimmed);
     }, 300);
     debounceTimer.current = searchTimer;
 
@@ -1058,40 +1257,13 @@ function SearchScreenView() {
 
   const hasResults =
     songResults.length > 0 ||
-    youtubeMusicResults.length > 0 ||
     albumResults.length > 0 ||
     artistResults.length > 0 ||
     playlistResults.length > 0;
   const showFocusedRecentSearches = isSearchMode && query.trim().length < 2;
   const showBrowse = !isSearchMode && query.trim().length < 2;
   const resultDataKey =
-    `${query.trim()}-${resultFilter}-${songResults.length}-${youtubeMusicResults.length}-${albumResults.length}-${artistResults.length}-${playlistResults.length}-${searchLoading ? 1 : 0}`;
-  const searchHeaderNode = useMemo(
-    () => (
-      <SearchHeaderField
-        value={query}
-        onChangeText={handleChangeText}
-        onSubmit={handleSubmitSearch}
-        onClear={handleClear}
-        autoFocus={isSearchMode}
-      />
-    ),
-    [handleChangeText, handleClear, handleSubmitSearch, isSearchMode, query]
-  );
-  const cancelSearchNode = useMemo(
-    () => (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Cancel search"
-        onPress={handleCancelSearchMode}
-        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-        style={({ pressed }) => [styles.searchCancelButton, pressed && styles.searchCancelButtonPressed]}
-      >
-        <Text style={styles.searchCancelText}>Cancel</Text>
-      </Pressable>
-    ),
-    [handleCancelSearchMode]
-  );
+    `${query.trim()}-${resultFilter}-${songResults.length}-${albumResults.length}-${artistResults.length}-${playlistResults.length}-${searchLoading ? 1 : 0}`;
 
   useEffect(() => {
     if (showBrowse || showFocusedRecentSearches || searchLoading) return;
@@ -1107,7 +1279,7 @@ function SearchScreenView() {
         resultsSongsListRef.current?.scrollToOffset({ offset: 0, animated: false });
       }
     });
-  }, [searchLoading, resultFilter, showBrowse, showFocusedRecentSearches, songResults.length, youtubeMusicResults.length, albumResults.length, artistResults.length, playlistResults.length]);
+  }, [searchLoading, resultFilter, showBrowse, showFocusedRecentSearches, songResults.length, albumResults.length, artistResults.length, playlistResults.length]);
 
   const showAlbumResults = (resultFilter === "all" || resultFilter === "albums") && albumResults.length > 0;
   const showArtistResults = (resultFilter === "all" || resultFilter === "artists") && artistResults.length > 0;
@@ -1209,7 +1381,6 @@ function SearchScreenView() {
         album.year,
         album.language,
       ].filter((value): value is string => Boolean(value));
-      const isYt = isYouTubeCollectionResult(album.id, album.url, album.description);
       const meta = album.songCount > 0
         ? `${album.songCount} songs`
         : metaParts.join(" · ") || "Album";
@@ -1226,8 +1397,8 @@ function SearchScreenView() {
               pathname: "/playlist/[id]",
               params: {
                 id: String(album.id).trim(),
-                jiosaavn: isYt ? "false" : "true",
-                youtube: isYt ? "true" : "false",
+                jiosaavn: "true",
+                youtube: "false",
                 album: "true",
                 firestore: "false",
                 link: album.url || "",
@@ -1257,11 +1428,7 @@ function SearchScreenView() {
               style={StyleSheet.absoluteFill}
             />
             <View pointerEvents="none" style={styles.brandCoverBadge}>
-              {isYt ? (
-                <Ionicons name="videocam-outline" size={15} color="#FFFFFF" />
-              ) : (
-                <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
-              )}
+              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
             </View>
           </View>
           <View style={styles.playlistGridContent}>
@@ -1292,7 +1459,6 @@ function SearchScreenView() {
       const tiltPattern = [-1.1, 0.9, -0.8, 1.2, -0.6, 0.8] as const;
       const staggerOffset = staggerPattern[seed % staggerPattern.length];
       const tilt = tiltPattern[(Math.floor(seed / 7)) % tiltPattern.length];
-      const isYt = isYouTubeCollectionResult(playlist.id, playlist.url, playlist.description);
       const meta = playlist.songCount > 0
         ? `${Math.max(0, playlist.songCount || 0)} songs`
         : playlist.language || playlist.description || "Playlist";
@@ -1309,8 +1475,8 @@ function SearchScreenView() {
               pathname: "/playlist/[id]",
               params: {
                 id: String(playlist.id).trim(),
-                jiosaavn: isYt ? "false" : "true",
-                youtube: isYt ? "true" : "false",
+                jiosaavn: "true",
+                youtube: "false",
                 firestore: "false",
                 link: playlist.url || "",
                 title: playlist.name,
@@ -1339,11 +1505,7 @@ function SearchScreenView() {
               style={StyleSheet.absoluteFill}
             />
             <View pointerEvents="none" style={styles.brandCoverBadge}>
-              {isYt ? (
-                <Ionicons name="videocam-outline" size={15} color="#FFFFFF" />
-              ) : (
-                <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
-              )}
+              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
             </View>
           </View>
           <View style={styles.playlistGridContent}>
@@ -1367,24 +1529,54 @@ function SearchScreenView() {
     [getPlaylistCardElement]
   );
 
-  return (
-    <View style={styles.container}>
-      {/* Offline: show banner when searching, full screen when idle */}
-      {!isOnline && query.length === 0 && (
+  // Early return for offline idle state - avoids broken layout when offline
+  if (!isOnline && query.length === 0) {
+    return (
+      <View style={styles.container}>
+        <AppTopHeader
+          topInset={topInset}
+          elevated={false}
+          title="Search"
+          left={<AppTopHeaderProfileButton />}
+          right={<AppTopHeaderDownloadButton />}
+        />
         <OfflineScreen
           message="Search requires an internet connection."
           hideDownloadsButton={false}
         />
-      )}
-      {!isOnline && query.length > 0 && <OfflineBanner />}
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {!isOnline && <OfflineBanner />}
       {isSearchMode ? (
         <AppTopHeader
           topInset={topInset}
           elevated={isHeaderElevated}
-          titleNode={searchHeaderNode}
+          titleNode={
+            <SearchHeaderField
+              value={query}
+              onChangeText={handleChangeText}
+              onSubmit={handleSubmitSearch}
+              onClear={handleClear}
+              autoFocus={isSearchMode}
+            />
+          }
           leftWidth={0}
           rightWidth={68}
-          right={cancelSearchNode}
+          right={
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel search"
+              onPress={handleCancelSearchMode}
+              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+              style={({ pressed }) => [styles.searchCancelButton, pressed && styles.searchCancelButtonPressed]}
+            >
+              <Text style={styles.searchCancelText}>Cancel</Text>
+            </Pressable>
+          }
         />
       ) : (
         <AppTopHeader
@@ -1411,8 +1603,9 @@ function SearchScreenView() {
         </View>
       ) : null}
 
+      {/* Inline suggestions below search bar — not a popup overlay */}
       {isSearchMode && suggestionsOpen && suggestions.length > 0 && query.trim().length >= 2 && (
-        <View style={[styles.suggestionsDropdown, { top: topInset + APP_TOP_HEADER_HEIGHT + 8 }]}>
+        <View style={[styles.suggestionsDropdown, { top: topInset + APP_TOP_HEADER_HEIGHT }]}>
           <FlatList
             data={suggestions}
             keyboardDismissMode="none"
@@ -2226,33 +2419,38 @@ const styles = StyleSheet.create({
   filterTabChipText: {},
   filterTabChipTextActive: {},
 
-  // ── Suggestions Dropdown ──────────────────────────────────────────────────
+  // ── Suggestions Dropdown — inline below search bar, never full-screen ────────
   suggestionsDropdown: {
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: 0,
-    backgroundColor: Colors.background,
-    zIndex: 99,
+    // height auto — expands up to maxHeight, never covers full screen
+    maxHeight: 360,
+    backgroundColor: "rgba(18, 22, 28, 0.98)",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+    zIndex: 999,
+    boxShadow: "0 4px 8px rgba(0, 0, 0, 0.3)",
   },
   suggestionRow: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingVertical: 13,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "rgba(255,255,255,0.06)",
   },
   suggestionRowPressed: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.07)",
   },
   suggestionIcon: {
-    marginRight: 12,
+    marginRight: 14,
+    opacity: 0.6,
   },
   suggestionText: {
     flex: 1,
     color: Colors.text,
-    fontSize: 16,
-    fontFamily: "Inter_500Medium",
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
   },
 });

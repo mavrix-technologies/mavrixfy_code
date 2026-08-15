@@ -16,6 +16,7 @@ import React, {
   useState,
   useCallback,
   useMemo,
+  useRef,
   ReactNode,
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
@@ -86,4 +87,44 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
 export function useNetwork(): NetworkContextValue {
   return use(NetworkContext);
+}
+
+/**
+ * useOnReconnect — fires `callback` exactly once each time the network
+ * transitions from offline → online. Safe to call from any screen.
+ */
+export function useOnReconnect(callback: () => void): void {
+  const { isOnline, isChecking } = useNetwork();
+  const callbackRef = useRef(callback);
+
+  useEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+
+  // Track whether we've gone offline at least once this session
+  const wasOfflineRef = useRef(false);
+  // Skip the very first render (initial online state)
+  const isFirstRenderRef = useRef(true);
+
+  useEffect(() => {
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false;
+      // Record initial offline state so reconnect fires on first reconnect
+      if (!isOnline && !isChecking) {
+        wasOfflineRef.current = true;
+      }
+      return;
+    }
+
+    if (!isOnline) {
+      wasOfflineRef.current = true;
+      return;
+    }
+
+    // isOnline just became true and we were previously offline
+    if (wasOfflineRef.current) {
+      wasOfflineRef.current = false;
+      callbackRef.current();
+    }
+  }, [isOnline, isChecking]);
 }

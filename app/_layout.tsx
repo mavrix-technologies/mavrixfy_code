@@ -65,6 +65,7 @@ import { globalQueueSheetRef } from "@/lib/queueRef";
 import AddSongsBottomSheet from "@/components/AddSongsModal";
 import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import { logger } from "@/lib/logger";
+import { initRemoteConfig } from "@/lib/remoteConfig";
 import { AppNavBar } from "./(tabs)/_layout";
 
 function isExpoGoRuntime(): boolean {
@@ -739,10 +740,9 @@ export default function RootLayout() {
   const [safetyTimeoutActive, setSafetyTimeoutActive] = useState(false);
   const fontsLoadedRef = useRef(false);
 
-  // Set Android nav bar color inside the component so the activity is guaranteed
-  // to be alive. Top-level module calls fire before the activity is ready on
-  // hot reload and throw "current activity is no longer available".
+  // Set Android nav bar color and start Remote Config fetch immediately
   useEffect(() => {
+    void initRemoteConfig();
     if (Platform.OS === "android") {
       SystemUI.setBackgroundColorAsync(Colors.background).catch(() => { });
     }
@@ -773,6 +773,8 @@ export default function RootLayout() {
   useEffect(() => {
     async function prepare() {
       try {
+        // Fire Remote Config fetch early — resolves API URL for the whole session
+        void initRemoteConfig();
         void logAppOpen(); // fire-and-forget, no await
       } catch {
         // Silent fail

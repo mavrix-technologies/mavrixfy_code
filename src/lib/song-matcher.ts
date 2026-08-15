@@ -37,31 +37,52 @@ export async function searchSong(
  */
 async function searchJioSaavn(baseUrl: string, title: string, artist: string): Promise<MatchResult | null> {
   try {
-    const query = `${title} ${artist}`.trim();
-    const url = `${baseUrl}/api/search/songs?query=${encodeURIComponent(query)}&limit=10`;
-    
-    const response = await fetch(url, { timeout: 10000 } as any);
-    if (!response.ok) return null;
-    
-    const data = await response.json();
-    const results = data.data?.results || data.results || [];
-    
-    if (results.length === 0) return null;
-    
-    // Return first result with valid media
-    const song = results.find((r: any) => {
-      const hasAudio = Array.isArray(r.downloadUrl) ? r.downloadUrl.length > 0 : !!r.downloadUrl;
-      const hasImage = Array.isArray(r.image) ? r.image.length > 0 : !!r.image;
-      return hasAudio && hasImage;
-    });
-    
-    if (!song) return null;
-    
-    return {
-      song,
-      confidence: 0.8,
-      matchScore: 0.8
-    };
+    const cleanTitle = title
+      .replace(/\(.*?\)/g, "")
+      .replace(/\[.*?\]/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/["'“”]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const cleanArtist = artist
+      .replace(/\(.*?\)/g, "")
+      .replace(/\[.*?\]/g, "")
+      .replace(/&amp;/g, "&")
+      .replace(/["'“”]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const queryCandidates = [
+      `${cleanTitle} ${cleanArtist}`.trim(),
+      cleanTitle,
+      `${title} ${artist}`.trim(),
+    ].filter(Boolean);
+
+    for (const q of queryCandidates) {
+      const url = `${baseUrl}/api/search/songs?query=${encodeURIComponent(q)}&limit=10`;
+      const response = await fetch(url, { timeout: 10000 } as any);
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      const results = data.data?.results || data.results || [];
+      if (results.length === 0) continue;
+
+      const song = results.find((r: any) => {
+        const hasAudio = Array.isArray(r.downloadUrl) ? r.downloadUrl.length > 0 : !!r.downloadUrl;
+        const hasImage = Array.isArray(r.image) ? r.image.length > 0 : !!r.image;
+        return hasAudio && hasImage;
+      });
+
+      if (song) {
+        return {
+          song,
+          confidence: 0.85,
+          matchScore: 0.85,
+        };
+      }
+    }
+
+    return null;
   } catch {
     return null;
   }

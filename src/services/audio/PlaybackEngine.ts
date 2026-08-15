@@ -132,7 +132,7 @@ export function updatePlaybackEngineSnapshot(update: SnapshotUpdater): void {
   emit();
 }
 
-export function beginPlaybackTransaction({
+function beginPlaybackTransaction({
   type,
   targetSongId = null,
   targetIndex = null,
@@ -172,7 +172,7 @@ function isPlaybackTransactionCurrent(id: number, targetSongId?: string | null):
   );
 }
 
-export function completePlaybackTransaction(id: number): void {
+function completePlaybackTransaction(id: number): void {
   updatePlaybackEngineSnapshot((current) => {
     if (current.transitionId !== id) return {};
     return {
@@ -185,7 +185,7 @@ export function completePlaybackTransaction(id: number): void {
   });
 }
 
-export function failPlaybackTransaction(id: number, error: string): void {
+function failPlaybackTransaction(id: number, error: string): void {
   updatePlaybackEngineSnapshot((current) => {
     if (current.transitionId !== id) return {};
     return {

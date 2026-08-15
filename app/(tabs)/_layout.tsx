@@ -13,6 +13,8 @@ import { PingPongScroll } from "@/components/PingPongScroll";
 import {
   DEFAULT_ARTWORK_PALETTE,
   ensureDarkHexColor,
+  getSpotifyMiniPlayerBg,
+  useArtworkPalette,
   extractArtworkColors,
   getImmediateArtworkPalette,
   preloadDominantColors,
@@ -450,7 +452,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     // no-op — tour removed
   }, []);
   const [coverFailed, setCoverFailed] = useState(false);
-  const [artworkPalette, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
+  const artworkPalette = useArtworkPalette(activeSong?.coverUrl);
   const routePressLockRef = useRef({ href: "", time: 0 });
   const openPlayerLockRef = useRef(0);
 
@@ -615,49 +617,11 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     [deleteMixWithAnimation, dragX, isDragging, resetMixChip]
   );
 
-  // Batch color updates to prevent flickering
-  const applyMiniPlayerColors = useCallback((palette: ArtworkPalette) => {
-    // Use InteractionManager to batch updates after song change animation
-    InteractionManager.runAfterInteractions(() => {
-      setArtworkPalette(palette);
-      setAlbumColor(palette.accent);
-      setTextColor(palette.text);
-    });
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- setAlbumColor and setTextColor are stable dispatch functions from context
-  }, [setAlbumColor, setTextColor]);
-
-  // Single effect for song changes - depend only on ID to prevent double updates
   useEffect(() => {
-    const coverUrl = activeSong?.coverUrl?.trim() ?? "";
-    const songId = activeSong?.id;
-    
-    // Reset cover failed state immediately
     setCoverFailed(false);
-    
-    if (!coverUrl) {
-      applyMiniPlayerColors(DEFAULT_ARTWORK_PALETTE);
-      return;
-    }
-    
-    let active = true;
-    
-    // Apply immediate palette first (from cache)
-    const immediatePalette = getImmediateArtworkPalette(coverUrl);
-    applyMiniPlayerColors(immediatePalette);
-
-    // Then extract full colors asynchronously (only if not cached)
-    extractArtworkColors(coverUrl)
-      .then((palette) => {
-        if (!active || activeSong?.id !== songId) return;
-        // react-doctor-disable-next-line
-        applyMiniPlayerColors(palette);
-      })
-      .catch(() => { });
-
-    return () => {
-      active = false;
-    };
-  }, [activeSong, applyMiniPlayerColors]);
+    setAlbumColor(artworkPalette.accent);
+    setTextColor(artworkPalette.text);
+  }, [activeSong?.id, artworkPalette.accent, artworkPalette.text, setAlbumColor, setTextColor]);
 
   const resolvedBottomInset = isWeb ? 0 : Math.max(bottomInset, 0);
   const navIconSize = isNarrowMobile ? 20 : 22;
@@ -691,24 +655,17 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   );
   const playIconColor = "#FFFFFF";
   const playerSectionBg = useMemo(
-    () => ensureDarkHexColor(artworkPalette.background),
-    [artworkPalette.background]
+    () => getSpotifyMiniPlayerBg(artworkPalette.accent, artworkPalette.background),
+    [artworkPalette.accent, artworkPalette.background]
   );
   const activeNavColor = "#FFFFFF";
   const navInactiveColor = conceptSubtext;
   const navBaseBg = "#0E1016";
   const containerGlassBase = "#0E1016";
-  const playerSectionDivider = useMemo(
-    () => colorToRgba(artworkPalette.accent, 0.14, "rgba(223,226,235,0.08)"),
-    [artworkPalette.accent]
-  );
-  const playerProgressFillColor = artworkPalette.accent;
-
-
-  const playerTopEdgeTint = useMemo(
-    () => colorToRgba(artworkPalette.accent, 0.18, "rgba(255,255,255,0.12)"),
-    [artworkPalette.accent]
-  );
+  // Solid neutral divider — no accent bleed on load
+  const playerSectionDivider = "rgba(255,255,255,0.06)";
+  const playerProgressFillColor = "rgba(255,255,255,0.90)";
+  const playerTopEdgeTint = "transparent";
   const miniButtonPrimaryBg = "rgba(255, 255, 255, 0.1)";
   const miniButtonPrimaryBorder = "rgba(255, 255, 255, 0.14)";
   const miniSecondaryButtonBg = "rgba(255, 255, 255, 0.06)";
@@ -1144,51 +1101,13 @@ function useIOSMiniPlayerOverlayView() {
     return queue.every((song) => mixSet.has(song.id));
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive values (activeSongId, playbackState.isPlaying, mixSongIds, queue) are listed
   }, [activeSongId, playbackState.isPlaying, mixSongIds, queue]);
-  const [iosArtworkPalette, setIosArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
+  const iosArtworkPalette = useArtworkPalette(activeSong?.coverUrl);
 
-  // Batch color updates to prevent flickering
-  const applyMiniPlayerColors = useCallback((palette: ArtworkPalette) => {
-    // Use InteractionManager to batch updates after song change animation
-    InteractionManager.runAfterInteractions(() => {
-      setIosArtworkPalette(palette);
-      setAlbumColor(palette.accent);
-      setTextColor(palette.text);
-    });
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- setAlbumColor and setTextColor are stable dispatch functions from context
-  }, [setAlbumColor, setTextColor]);
-
-  // Single effect for song changes - depend only on ID to prevent double updates
   useEffect(() => {
-    const coverUrl = activeSong?.coverUrl?.trim() ?? "";
-    const songId = activeSong?.id;
-    
-    // Reset cover failed state immediately
     setCoverFailed(false);
-    
-    if (!coverUrl) {
-      applyMiniPlayerColors(DEFAULT_ARTWORK_PALETTE);
-      return;
-    }
-    
-    let active = true;
-    
-    // Apply immediate palette first (from cache)
-    const immediatePalette = getImmediateArtworkPalette(coverUrl);
-    applyMiniPlayerColors(immediatePalette);
-
-    // Then extract full colors asynchronously (only if not cached)
-    extractArtworkColors(coverUrl)
-      .then((palette) => {
-        if (!active || activeSong?.id !== songId) return;
-        // react-doctor-disable-next-line
-        applyMiniPlayerColors(palette);
-      })
-      .catch(() => { });
-
-    return () => {
-      active = false;
-    };
-  }, [activeSong, applyMiniPlayerColors]);
+    setAlbumColor(iosArtworkPalette.accent);
+    setTextColor(iosArtworkPalette.text);
+  }, [activeSong?.id, iosArtworkPalette.accent, iosArtworkPalette.text, setAlbumColor, setTextColor]);
 
   useEffect(() => {
     const resetBars = () => {
@@ -1234,6 +1153,11 @@ function useIOSMiniPlayerOverlayView() {
     };
   }, [isPlayingFromLastMix, lastMix, mixBarOne, mixBarThree, mixBarTwo]);
 
+  const shellBgColor = useMemo(
+    () => getSpotifyMiniPlayerBg(iosArtworkPalette.accent, iosArtworkPalette.background),
+    [iosArtworkPalette.accent, iosArtworkPalette.background]
+  );
+
   const isExplore = pathname === "/explore" || pathname?.startsWith("/explore");
   if (!activeSong || isExplore) {
     return null;
@@ -1252,16 +1176,17 @@ function useIOSMiniPlayerOverlayView() {
     return raw;
   })();
   const secondaryColor = colorToRgba(resolvedTextColor, 0.7, "rgba(235,235,245,0.7)");
-  const progressFillColor = iosArtworkPalette.accent;
+  const progressFillColor = "rgba(255,255,255,0.90)";
   const tabBarVisualHeight = 49;
   const tabBarGap = 6;
   const bottomOffset = Math.max(insets.bottom + tabBarVisualHeight + tabBarGap, 80);
 
+  // Solid neutral border — no accent bleed on load
+  const shellBorderColor = "rgba(255,255,255,0.08)";
+
   return (
     <View pointerEvents="box-none" style={[styles.iosMiniPlayerRoot, { bottom: bottomOffset }]}>
-      <View style={styles.iosMiniPlayerShell}>
-        <View pointerEvents="none" style={styles.iosMiniPlayerTopHairline} />
-
+      <View style={[styles.iosMiniPlayerShell, { backgroundColor: shellBgColor, borderColor: shellBorderColor }]}>
         <View style={styles.iosMiniPlayerRow}>
           <Pressable style={styles.iosMiniPlayerMain} onPress={openPlayer} android_disableSound>
             <View style={styles.iosMiniPlayerArtworkShell}>
@@ -1290,12 +1215,12 @@ function useIOSMiniPlayerOverlayView() {
             <View style={styles.iosMiniPlayerText}>
               <PingPongScroll
                 text={activeSong.title}
-                style={[styles.iosMiniPlayerTitle, { color: resolvedTextColor }]}
+                style={[styles.iosMiniPlayerTitle, { color: "#FFFFFF" }]}
                 velocity={14}
               />
               <PingPongScroll
                 text={activeSong.artist}
-                style={[styles.iosMiniPlayerArtist, { color: secondaryColor }]}
+                style={[styles.iosMiniPlayerArtist, { color: "rgba(255, 255, 255, 0.70)" }]}
                 velocity={11}
               />
             </View>
@@ -1311,7 +1236,6 @@ function useIOSMiniPlayerOverlayView() {
               style={styles.iosMiniPlayerInlineMixBtn}
             >
               <View style={styles.iosMiniPlayerMixCard}>
-                {/* Show multiple artist images in a grid for multi-artist mixes */}
                 {mixImages.length > 1 ? (
                   <View style={styles.iosMiniPlayerMixGrid}>
                     {mixImages.slice(0, 4).map((img) => (
@@ -1387,25 +1311,24 @@ function useIOSMiniPlayerOverlayView() {
               hitSlop={14}
               style={({ pressed }) => [
                 styles.iosMiniPlayerButton,
-                styles.iosMiniPlayerPrimaryButton,
                 pressed && styles.miniButtonPressed,
               ]}
             >
               <Ionicons
                 name={playbackState.isPlaying ? "pause" : "play"}
-                size={25}
-                color="rgba(255,255,255,0.96)"
+                size={26}
+                color="#FFFFFF"
                 style={!playbackState.isPlaying ? { marginLeft: 2 } : undefined}
               />
             </Pressable>
             <MiniPlayerSecondaryControlButton
               control={miniPlayerSecondaryControl}
-              size={42}
-              radius={21}
-              backgroundColor="rgba(255,255,255,0.06)"
-              borderColor="rgba(255,255,255,0.12)"
-              iconColor="rgba(255,255,255,0.88)"
-              shellStyle={[styles.iosMiniPlayerButton, styles.iosMiniPlayerSecondaryButton]}
+              size={40}
+              radius={20}
+              backgroundColor="transparent"
+              borderColor="transparent"
+              iconColor="rgba(255,255,255,0.80)"
+              shellStyle={styles.iosMiniPlayerButton}
               onQueue={openMiniPlayerQueue}
               onNext={nextSong}
               onPrev={prevSong}

@@ -71,7 +71,7 @@ function useArtistScreenView() {
   const { push: routerPush } = useRouter();
   const { currentSong, queue } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
-  const { playSong, togglePlay } = usePlayerActions();
+  const { playSong, shufflePlay, togglePlay } = usePlayerActions();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Math.max(140, insets.bottom + 120);
 
@@ -237,10 +237,8 @@ function useArtistScreenView() {
 
   const handleShuffle = useCallback(() => {
     if (!songs.length) return;
-    const shuffled = sortedCopy(songs, () => Math.random() - 0.5);
-    playSong(shuffled[0], shuffled);
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (songs, playSong) are listed
-  }, [songs, playSong]);
+    shufflePlay(songs);
+  }, [songs, shufflePlay]);
 
   const handleLoadMore = useCallback(async () => {
     if (loadingMore || !hasMore || !artistId) return;

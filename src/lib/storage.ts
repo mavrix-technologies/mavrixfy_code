@@ -527,7 +527,7 @@ export async function getSettings(): Promise<AppSettings> {
 type SettingsListener = (settings: AppSettings) => void;
 const settingsListeners = new Set<SettingsListener>();
 
-export function addSettingsListener(listener: SettingsListener): () => void {
+function addSettingsListener(listener: SettingsListener): () => void {
   settingsListeners.add(listener);
   return () => {
     settingsListeners.delete(listener);

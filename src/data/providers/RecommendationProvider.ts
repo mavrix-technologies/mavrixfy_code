@@ -118,7 +118,7 @@ const LOCAL_BACKUP_QUERIES = [
   "bollywood workout playlist",
 ];
 
-export function recommendationFeedEnabled(): boolean {
+function recommendationFeedEnabled(): boolean {
   return String(process.env.EXPO_PUBLIC_RECOMMENDATION_FEED_V1 || "").trim().toLowerCase() !== "false";
 }
 
