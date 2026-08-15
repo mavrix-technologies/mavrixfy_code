@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useFocusEffect } from "expo-router";
 import { type Song, convertJioSaavnSong } from "@/lib/musicData";
 import { getRecentlyPlayed, type RecentlyPlayedItem } from "@/lib/storage";
@@ -7,6 +7,8 @@ import {
   getCachedHomePublicPlaylists,
   setCachedHomePublicPlaylists,
   clearCachedHomePublicPlaylists,
+  getCachedHomeFeedSnapshot,
+  setCachedHomeFeedSnapshot,
 } from "@/lib/homeCache";
 import {
   clearJioSaavnPlaylistCache,
@@ -39,6 +41,9 @@ const HOME_ESSENTIAL_CATEGORY_IDS = [
   "top-charts",
 ] as const;
 
+const HOME_SECTION_TIMEOUT_MS = 8000;
+const HOME_SECONDARY_TIMEOUT_MS = 6000;
+
 interface HomeSessionCache {
   hydrated: boolean;
   categories: HomeJioSaavnCategoryData[];
@@ -59,7 +64,23 @@ const HOME_CACHE: HomeSessionCache = {
   recommendations: [],
 };
 
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const timeout = new Promise<T>((resolve) => {
+    timeoutId = setTimeout(() => {
+      logger.warn(`[Home] ${label} timed out after ${ms}ms`);
+      resolve(fallback);
+    }, ms);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
+
 export function useHomeFeedData() {
+  const loadRunRef = useRef(0);
   const [categories, setCategories] = useState<HomeJioSaavnCategoryData[]>(
     HOME_CACHE.hydrated ? HOME_CACHE.categories : []
   );
@@ -78,85 +99,170 @@ export function useHomeFeedData() {
   const [recommendations, setRecommendations] = useState<RecommendationSection[]>(
     HOME_CACHE.hydrated ? HOME_CACHE.recommendations : []
   );
+  const [loading, setLoading] = useState(!HOME_CACHE.hydrated);
+  const [loadingMainContent, setLoadingMainContent] = useState(!HOME_CACHE.hydrated);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadHomeFeed = useCallback(
     async (forceRefresh = false) => {
+      const runId = ++loadRunRef.current;
+      const isActiveRun = () => loadRunRef.current === runId;
+
+      const applyRecentlyPlayed = (items: RecentlyPlayedItem[]) => {
+        if (!isActiveRun()) return;
+        setRecentlyPlayed(items);
+        HOME_CACHE.recentlyPlayed = items;
+        if (items.length > 0) setLoading(false);
+      };
+
+      const applyPublicPlaylists = (items: FirestorePlaylist[]) => {
+        if (!isActiveRun() || items.length === 0) return;
+        setPublicPlaylists(items);
+        HOME_CACHE.publicPlaylists = items;
+        setLoading(false);
+      };
+
+      const applyCategories = (items: HomeJioSaavnCategoryData[]) => {
+        if (!isActiveRun() || items.length === 0) return;
+        setCategories(items);
+        HOME_CACHE.categories = items;
+        setLoading(false);
+      };
+
+      const applyArtists = (items: ArtistCard[]) => {
+        if (!isActiveRun() || items.length === 0) return;
+        setFeaturedArtists(items);
+        HOME_CACHE.featuredArtists = items;
+        setLoading(false);
+      };
+
+      const applyNewReleaseSongs = (items: Song[]) => {
+        if (!isActiveRun() || items.length === 0) return;
+        setNewReleaseSongs(items);
+        HOME_CACHE.newReleaseSongs = items;
+        setLoading(false);
+      };
+
+      const applyRecommendations = (items: RecommendationSection[]) => {
+        if (!isActiveRun() || items.length === 0) return;
+        setRecommendations(items);
+        HOME_CACHE.recommendations = items;
+        setLoading(false);
+      };
+
+      const applyHomeSnapshot = (snapshot: {
+        categories: HomeJioSaavnCategoryData[];
+        publicPlaylists: FirestorePlaylist[];
+        featuredArtists: ArtistCard[];
+        newReleaseSongs: Song[];
+        recommendations: RecommendationSection[];
+      }) => {
+        applyCategories(snapshot.categories);
+        applyPublicPlaylists(snapshot.publicPlaylists);
+        applyArtists(snapshot.featuredArtists);
+        applyNewReleaseSongs(snapshot.newReleaseSongs);
+        applyRecommendations(snapshot.recommendations);
+      };
+
       try {
-        const [
-          jioRes,
-          playlistsRes,
-          artistsRes,
-          releasesRes,
-          recRes,
-          recentRes,
-        ] = await Promise.allSettled([
+        if (!HOME_CACHE.hydrated) setLoading(true);
+        setLoadingMainContent(true);
+
+        await Promise.allSettled([
+          getRecentlyPlayed()
+            .then((recent) => applyRecentlyPlayed(recent.slice(0, 8)))
+            .catch(() => applyRecentlyPlayed([])),
+          !forceRefresh
+            ? getCachedHomePublicPlaylists({ allowStale: true }).then(applyPublicPlaylists)
+            : Promise.resolve(),
+          !forceRefresh
+            ? getCachedHomeFeedSnapshot({ allowStale: true }).then((snapshot) => {
+                if (snapshot) applyHomeSnapshot(snapshot);
+              })
+            : Promise.resolve(),
+        ]);
+
+        const jioTask = withTimeout(
           getHomeJioSaavnCategories({
             forceRefresh,
             limitPerCategory: 15,
             categoryIds: [...HOME_ESSENTIAL_CATEGORY_IDS],
           }),
+          HOME_SECTION_TIMEOUT_MS,
+          [] as HomeJioSaavnCategoryData[],
+          "JioSaavn home categories"
+        ).then((homeCategories) => {
+          applyCategories(homeCategories.filter((cat) => cat.results.length > 0));
+        });
+
+        const playlistsTask = withTimeout(
           getCachedHomePublicPlaylists().then(async (cached) => {
-            if (cached && cached.length > 0 && !forceRefresh) return cached;
-            const remote = await getPublicPlaylists(8);
-            if (remote && remote.length > 0) {
-              await setCachedHomePublicPlaylists(remote);
-            }
-            return remote;
-          }),
-          getFeaturedArtists(),
-          getDailyNewReleaseSongs({ limit: 20, forceRefresh }),
-          getRecommendationHomeFeed({ forceRefresh }),
-          getRecentlyPlayed().then((r) => r.slice(0, 8)).catch(() => []),
-        ]);
-
-        if (recentRes.status === "fulfilled" && recentRes.value) {
-          setRecentlyPlayed(recentRes.value);
-          HOME_CACHE.recentlyPlayed = recentRes.value;
-        }
-
-        if (jioRes.status === "fulfilled" && jioRes.value?.length) {
-          // Filter category rows to only show playlists & albums (single songs are dedicated to Quick Picks)
-          const filteredCategories: HomeJioSaavnCategoryData[] = [];
-          for (const cat of jioRes.value) {
-            const results = cat.results.filter((item) => item.type !== "song");
-            if (results.length > 0) {
-              filteredCategories.push({ ...cat, results });
-            }
+          if (cached && cached.length > 0 && !forceRefresh) {
+            applyPublicPlaylists(cached);
+            return cached;
           }
 
-          setCategories(filteredCategories);
-          HOME_CACHE.categories = filteredCategories;
-        }
+          const remote = await getPublicPlaylists(8);
+          if (remote && remote.length > 0) {
+            applyPublicPlaylists(remote);
+            await setCachedHomePublicPlaylists(remote);
+          }
+          return remote;
+          }),
+          HOME_SECONDARY_TIMEOUT_MS,
+          [] as FirestorePlaylist[],
+          "public playlists"
+        );
 
-        if (playlistsRes.status === "fulfilled" && playlistsRes.value?.length) {
-          setPublicPlaylists(playlistsRes.value);
-          HOME_CACHE.publicPlaylists = playlistsRes.value;
-        }
+        const artistsTask = withTimeout(
+          getFeaturedArtists(),
+          HOME_SECONDARY_TIMEOUT_MS,
+          [] as ArtistCard[],
+          "featured artists"
+        ).then(applyArtists);
+        const releasesTask = withTimeout(
+          getDailyNewReleaseSongs({ limit: 20, forceRefresh }),
+          HOME_SECTION_TIMEOUT_MS,
+          [] as Song[],
+          "new releases"
+        ).then(applyNewReleaseSongs);
+        const recommendationsTask = withTimeout(
+          getRecommendationHomeFeed({ forceRefresh }).then((feed) => feed.sections),
+          HOME_SECONDARY_TIMEOUT_MS,
+          [] as RecommendationSection[],
+          "recommendations"
+        ).then(applyRecommendations);
 
-        if (artistsRes.status === "fulfilled" && artistsRes.value?.length) {
-          setFeaturedArtists(artistsRes.value);
-          HOME_CACHE.featuredArtists = artistsRes.value;
-        }
+        await Promise.allSettled([
+          jioTask,
+          playlistsTask,
+          artistsTask,
+          releasesTask,
+          recommendationsTask,
+        ]);
 
-        if (releasesRes.status === "fulfilled" && releasesRes.value?.length) {
-          setNewReleaseSongs(releasesRes.value);
-          HOME_CACHE.newReleaseSongs = releasesRes.value;
+        if (isActiveRun()) {
+          HOME_CACHE.hydrated = true;
+          setLoading(false);
+          setLoadingMainContent(false);
+          void setCachedHomeFeedSnapshot({
+            categories: HOME_CACHE.categories,
+            publicPlaylists: HOME_CACHE.publicPlaylists,
+            featuredArtists: HOME_CACHE.featuredArtists,
+            newReleaseSongs: HOME_CACHE.newReleaseSongs,
+            recommendations: HOME_CACHE.recommendations,
+          });
         }
-
-        if (recRes.status === "fulfilled" && recRes.value?.sections?.length) {
-          setRecommendations(recRes.value.sections);
-          HOME_CACHE.recommendations = recRes.value.sections;
-        }
-
-        HOME_CACHE.hydrated = true;
       } catch (error) {
+        if (isActiveRun()) {
+          setLoading(false);
+          setLoadingMainContent(false);
+        }
         logger.error("[Home] Feed load failed:", error);
       }
     },
     []
   );
-
   useEffect(() => {
     void loadHomeFeed(false);
   }, [loadHomeFeed]);
@@ -251,6 +357,8 @@ export function useHomeFeedData() {
     featuredArtists,
     quickPickSongs,
     recommendations,
+    loading,
+    loadingMainContent,
     refreshing,
     hasContent,
     loadHomeFeed,

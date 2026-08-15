@@ -75,13 +75,13 @@ const SONG_API_BASE_URL = getConfiguredApiBaseUrl(
   process.env.EXPO_PUBLIC_MUSIC_API_URL ||
     process.env.EXPO_PUBLIC_APP_API_URL ||
     toUrlFromDomain(process.env.EXPO_PUBLIC_MUSIC_API_DOMAIN),
-  "" // No hardcoded fallback — must be set in .env
+  toUrlFromDomain(Constants.expoConfig?.extra?.musicApiDomain as string | undefined) || ""
 );
 const APP_API_BASE_URL = getConfiguredApiBaseUrl(
   "App API",
   process.env.EXPO_PUBLIC_APP_API_URL ||
     process.env.EXPO_PUBLIC_MUSIC_API_URL,
-  "" // No hardcoded fallback — must be set in .env
+  toUrlFromDomain(Constants.expoConfig?.extra?.musicApiDomain as string | undefined) || ""
 );
 
 if (__DEV__) {

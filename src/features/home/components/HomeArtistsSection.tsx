@@ -14,6 +14,9 @@ import { triggerImpact } from "@/lib/haptics";
 import { getBestImageUrl } from "@/lib/musicData";
 import type { ArtistCard } from "@/data/providers/ArtistProvider";
 
+const ARTIST_CARD_WIDTH = 104;
+const ARTIST_CARD_GAP = 14;
+
 const ArtistItem = memo(function ArtistItem({
   artist,
   onPress,
@@ -39,6 +42,7 @@ const ArtistItem = memo(function ArtistItem({
         source={{ uri: imageUrl || undefined }}
         style={styles.artistImage}
         contentFit="cover"
+        cachePolicy="memory-disk"
         transition={150}
       />
       <Text style={styles.artistName} numberOfLines={1}>
@@ -82,7 +86,15 @@ export const HomeArtistsSection = memo(function HomeArtistsSection({
   );
 
   const keyExtractor = useCallback((item: ArtistCard) => `artist-${item.id}`, []);
-  const ItemSeparatorComponent = useCallback(() => <View style={{ width: 14 }} />, []);
+  const ItemSeparatorComponent = useCallback(() => <View style={{ width: ARTIST_CARD_GAP }} />, []);
+  const getItemLayout = useCallback(
+    (_: ArrayLike<ArtistCard> | null | undefined, index: number) => ({
+      length: ARTIST_CARD_WIDTH + ARTIST_CARD_GAP,
+      offset: (ARTIST_CARD_WIDTH + ARTIST_CARD_GAP) * index,
+      index,
+    }),
+    []
+  );
 
   if (artists.length === 0) return null;
 
@@ -100,6 +112,11 @@ export const HomeArtistsSection = memo(function HomeArtistsSection({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={ItemSeparatorComponent}
+        getItemLayout={getItemLayout}
+        initialNumToRender={6}
+        maxToRenderPerBatch={5}
+        windowSize={5}
+        removeClippedSubviews
       />
     </View>
   );
@@ -123,7 +140,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   artistCard: {
-    width: 104,
+    width: ARTIST_CARD_WIDTH,
     alignItems: "center",
   },
   artistCardPressed: {

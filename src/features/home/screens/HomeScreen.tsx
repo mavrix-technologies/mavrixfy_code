@@ -49,8 +49,62 @@ type HomeSectionItem =
   | { id: "recently-played"; type: "recently-played" }
   | { id: string; type: "category"; category: HomeJioSaavnCategoryData; showAd: boolean }
   | { id: "artists"; type: "artists" }
-  | { id: "public-playlists"; type: "public-playlists" };
+  | { id: "public-playlists"; type: "public-playlists" }
+  | { id: "loading-quick"; type: "loading-quick" }
+  | { id: "loading-main"; type: "loading-main" };
 
+function HomeQuickPicksSkeleton() {
+  return (
+    <View style={styles.skeletonContainer}>
+      <View style={styles.skeletonTitle} />
+      <View style={styles.quickSkeletonGrid}>
+        {[0, 1].map((column) => (
+          <View key={`quick-skeleton-${column}`} style={styles.quickSkeletonColumn}>
+            {[0, 1, 2, 3].map((row) => (
+              <View key={`quick-skeleton-${column}-${row}`} style={styles.quickSkeletonRow}>
+                <View style={styles.quickSkeletonCover} />
+                <View style={styles.quickSkeletonTextBlock}>
+                  <View style={styles.quickSkeletonLineWide} />
+                  <View style={styles.quickSkeletonLineShort} />
+                </View>
+              </View>
+            ))}
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function HomeSectionSkeleton() {
+  return (
+    <View style={styles.skeletonContainer}>
+      {[0, 1, 2].map((section) => (
+        <View key={`section-skeleton-${section}`} style={styles.skeletonSection}>
+          <View style={styles.skeletonTitle} />
+          <View style={styles.cardSkeletonRow}>
+            {[0, 1, 2].map((card) => (
+              <View key={`section-skeleton-${section}-${card}`} style={styles.cardSkeleton}>
+                <View style={styles.cardSkeletonImage} />
+                <View style={styles.cardSkeletonLineWide} />
+                <View style={styles.cardSkeletonLineShort} />
+              </View>
+            ))}
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function HomeLoadingSkeleton() {
+  return (
+    <>
+      <HomeQuickPicksSkeleton />
+      <HomeSectionSkeleton />
+    </>
+  );
+}
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { isOnline } = useNetwork();
@@ -65,6 +119,8 @@ export function HomeScreen() {
     recentlyPlayed,
     featuredArtists,
     quickPickSongs,
+    loading,
+    loadingMainContent,
     refreshing,
     hasContent,
     handleRefresh,
@@ -75,7 +131,11 @@ export function HomeScreen() {
   const sectionData = useMemo<HomeSectionItem[]>(() => {
     const items: HomeSectionItem[] = [];
 
-    if (quickPickSongs.length > 0) items.push({ id: "quick-picks", type: "quick-picks" });
+    if (quickPickSongs.length > 0) {
+      items.push({ id: "quick-picks", type: "quick-picks" });
+    } else if (loadingMainContent) {
+      items.push({ id: "loading-quick", type: "loading-quick" });
+    }
     if (recentlyPlayed.length > 0) items.push({ id: "recently-played", type: "recently-played" });
     if (featuredArtists.length > 0) items.push({ id: "artists", type: "artists" });
 
@@ -89,9 +149,16 @@ export function HomeScreen() {
     });
 
     if (publicPlaylists.length > 0) items.push({ id: "public-playlists", type: "public-playlists" });
+    const hasBelowRecentContent =
+      featuredArtists.length > 0 ||
+      categories.length > 0 ||
+      publicPlaylists.length > 0;
+    if (loadingMainContent && !hasBelowRecentContent) {
+      items.push({ id: "loading-main", type: "loading-main" });
+    }
 
     return items;
-  }, [categories, featuredArtists.length, publicPlaylists.length, quickPickSongs.length, recentlyPlayed.length]);
+  }, [categories, featuredArtists.length, loadingMainContent, publicPlaylists, quickPickSongs.length, recentlyPlayed.length]);
 
   const renderSectionItem = useCallback(
     ({ item }: ListRenderItemInfo<HomeSectionItem>) => {
@@ -105,6 +172,8 @@ export function HomeScreen() {
               playSong={playSong}
             />
           );
+        case "loading-quick":
+          return <HomeQuickPicksSkeleton />;
         case "recently-played":
           return <HomeRecentlyPlayed items={recentlyPlayed} playSong={playSong} />;
         case "category":
@@ -114,7 +183,11 @@ export function HomeScreen() {
                 title={HOME_CATEGORY_TITLES[item.category.id] || item.category.title}
                 items={item.category.results as unknown as HomeCardItem[]}
               />
-              {item.showAd ? <AdMobBanner /> : null}
+              {item.showAd ? (
+                <View style={styles.adSlot}>
+                  {!loadingMainContent ? <AdMobBanner loadDelayMs={1200} /> : null}
+                </View>
+              ) : null}
             </React.Fragment>
           );
         case "artists":
@@ -127,6 +200,8 @@ export function HomeScreen() {
               isFirestore
             />
           );
+        case "loading-main":
+          return <HomeSectionSkeleton />;
         default:
           return null;
       }
@@ -135,6 +210,7 @@ export function HomeScreen() {
       currentSong,
       currentSongId,
       featuredArtists,
+      loadingMainContent,
       playSong,
       publicPlaylists,
       quickPickSongs,
@@ -184,11 +260,17 @@ export function HomeScreen() {
         keyExtractor={keyExtractor}
         renderItem={renderSectionItem}
         ListHeaderComponent={<HomeAmbientBackdrop currentSong={currentSong} />}
+        ListEmptyComponent={loading ? <HomeLoadingSkeleton /> : null}
         style={styles.scroll}
         contentContainerStyle={contentContainerStyle}
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
         scrollEventThrottle={16}
+        initialNumToRender={4}
+        maxToRenderPerBatch={3}
+        updateCellsBatchingPeriod={40}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS === "android"}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -225,5 +307,92 @@ const styles = StyleSheet.create({
     letterSpacing: 6,
     textTransform: "uppercase",
     textAlign: "center",
+  },
+  skeletonContainer: {
+    paddingBottom: 24,
+  },
+  skeletonSection: {
+    marginTop: 20,
+  },
+  skeletonTitle: {
+    width: 152,
+    height: 22,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 7,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  quickSkeletonGrid: {
+    flexDirection: "row",
+    gap: 14,
+    paddingHorizontal: 16,
+    overflow: "hidden",
+  },
+  quickSkeletonColumn: {
+    width: 340,
+    gap: 8,
+  },
+  quickSkeletonRow: {
+    height: 62,
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 7,
+    gap: 12,
+    backgroundColor: "rgba(255,255,255,0.04)",
+  },
+  quickSkeletonCover: {
+    width: 48,
+    height: 48,
+    borderRadius: 4,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  quickSkeletonTextBlock: {
+    flex: 1,
+    gap: 8,
+  },
+  quickSkeletonLineWide: {
+    width: "74%",
+    height: 13,
+    borderRadius: 5,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  quickSkeletonLineShort: {
+    width: "48%",
+    height: 11,
+    borderRadius: 5,
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  cardSkeletonRow: {
+    flexDirection: "row",
+    gap: 14,
+    paddingHorizontal: 16,
+    overflow: "hidden",
+  },
+  cardSkeleton: {
+    width: 148,
+  },
+  cardSkeletonImage: {
+    width: 148,
+    height: 148,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  cardSkeletonLineWide: {
+    width: 118,
+    height: 13,
+    borderRadius: 5,
+    marginTop: 8,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  cardSkeletonLineShort: {
+    width: 82,
+    height: 11,
+    borderRadius: 5,
+    marginTop: 6,
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  adSlot: {
+    minHeight: 88,
+    justifyContent: "center",
   },
 });

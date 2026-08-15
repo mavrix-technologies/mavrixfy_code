@@ -66,6 +66,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
   try {
     const Constants = require("expo-constants");
     appVersion =
+      Constants.default?.nativeAppVersion ??
       Constants.default?.expoConfig?.version ??
       Constants.default?.manifest?.version ??
       "1.0.0";

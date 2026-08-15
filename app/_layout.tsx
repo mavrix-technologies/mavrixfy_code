@@ -28,14 +28,12 @@ import {
   Platform,
   StyleSheet,
   View,
-  Text,
-  Pressable,
-  AppState
+  Text
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MD3DarkTheme, PaperProvider, Modal, Portal } from "react-native-paper";
+import { MD3DarkTheme, PaperProvider } from "react-native-paper";
 import { useFonts } from "expo-font";
 import { Inter_400Regular } from "@expo-google-fonts/inter/400Regular";
 import { Inter_500Medium } from "@expo-google-fonts/inter/500Medium";
@@ -163,13 +161,6 @@ const NAV_OVERLAY_SEGMENTS = new Set(["playlist", "artist"]);
 import { showGlobalToast, subscribeGlobalToast } from "@/utils/globalToast";
 
 const GLOBAL_TOAST_VISIBLE_MS = 1050;
-
-function parseAppVersion(version: string) {
-  return version
-    .split(".")
-    .map(Number)
-    .reduce((acc, part, index) => acc + part * 10 ** (6 - index * 2), 0);
-}
 
 const IOS_VERTICAL_SHEET_OPTIONS = {
   presentation: "card" as const,
@@ -305,7 +296,7 @@ function useRootLayoutNavigation() {
   // Runs once after auth resolves. Handles:
   //  1. Device registration (token + version + language + timezone → Firestore)
   //  2. Firestore activity feed sync
-  //  3. Version check (force update / optional update)
+  //  3. Simple Firestore version check
   //  4. Notification listeners (foreground receive + tap → Activity store)
   useEffect(() => {
     if (loading) return;
@@ -336,8 +327,8 @@ function useRootLayoutNavigation() {
 
       // Step 4 — Version check (non-blocking)
       const versionInfo = await checkAppVersion().catch(() => null);
-      if (versionInfo?.forceUpdate && isActive) {
-        // Navigate to force update screen
+      if (versionInfo?.hasUpdate && isActive) {
+        // Firestore-driven update screen. No notification popup/update alert.
         try { routerReplace("/force-update" as any); } catch { /* ignore */ }
         return;
       }
@@ -538,199 +529,7 @@ function RootLayoutNav() {
         <QueueBottomSheet ref={globalQueueSheetRef} />
         <AddSongsBottomSheet ref={globalAddSongsSheetRef} />
       </View>
-      <InAppPromotionPopup />
     </View>
-  );
-}
-
-function InAppPromotionPopup() {
-  const { firebaseUser } = useAuth();
-  const firebaseUserUid = firebaseUser?.uid;
-  const firebaseUserCreationTime = firebaseUser?.metadata?.creationTime;
-  const [activePopup, setActivePopup] = useState<any>(null);
-  const storeUrlRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!firebaseUserUid) return;
-
-    let isActive = true;
-
-    const checkPopup = async () => {
-      try {
-        const { getNotifications } = await import("@/stores/notificationStore");
-        const items = getNotifications();
-
-        const creationTimeMs = firebaseUserCreationTime
-          ? new Date(firebaseUserCreationTime).getTime()
-          : 0;
-
-        const currentVersion = Constants.expoConfig?.version ?? "0.0.0";
-
-        // Fetch last time activity screen was opened
-        const lastViewedStr = await AsyncStorage.getItem("@Mavrixfy:lastNotificationScreenViewed");
-        const lastViewedTimeMs = lastViewedStr ? new Date(lastViewedStr).getTime() : 0;
-
-        // Filter: only unread promotions/updates sent after user creation
-        const campaignPromos = items.filter((n) => {
-          if (n.type !== "promotion" && n.type !== "update") return false;
-          if (n.read) return false;
-
-          const notifTimeMs = new Date(n.timestamp).getTime();
-
-          // Skip if this notification was already received before user opened the activity feed screen
-          if (lastViewedTimeMs > 0 && notifTimeMs <= lastViewedTimeMs) {
-            return false;
-          }
-
-          // If this is an update, bypass if the user's version is already >= target max version
-          if (n.type === "update" && n.meta?.maxAppVersion) {
-            try {
-              const current = parseAppVersion(currentVersion);
-              const maxTarget = parseAppVersion(n.meta.maxAppVersion);
-              if (current >= maxTarget) {
-                return false;
-              }
-            } catch (err) {
-              logger.warn("[InAppPromotionPopup] Failed to parse version for popup skip:", err);
-            }
-          }
-
-          // Skip notifications sent before the user was registered (with 5s clock buffer)
-          if (creationTimeMs > 0 && notifTimeMs < creationTimeMs - 5000) {
-            return false;
-          }
-          return true;
-        });
-
-        if (campaignPromos.length === 0) return;
-
-        // Sort newest first to ensure we pick the most recent one
-        campaignPromos.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        const promo = campaignPromos[0];
-
-        // Check if we have already shown a popup for this notification ID
-        const seenKey = `@Mavrixfy:seenPopup:${promo.id}`;
-        const seen = await AsyncStorage.getItem(seenKey);
-        if (seen === "true") return;
-
-        if (isActive) {
-          setActivePopup(promo);
-        }
-      } catch (err) {
-        logger.error("[InAppPromotionPopup] Error checking popups:", err);
-      }
-    };
-
-    // Check on mount (app start)
-    checkPopup();
-
-    // Recheck only when user opens/reopens the app (transitions back to active)
-    const subscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "active") {
-        checkPopup();
-      }
-    });
-
-    return () => {
-      isActive = false;
-      subscription.remove();
-    };
-    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (firebaseUserCreationTime, firebaseUserUid) are listed; storeUrlRef and AsyncStorage are stable
-  }, [firebaseUserCreationTime, firebaseUserUid]);
-
-  useEffect(() => {
-    storeUrlRef.current = null;
-    if (activePopup?.type !== "update") {
-      return;
-    }
-
-    let isActive = true;
-    import("@/services/notificationService")
-      .then(({ checkAppVersion }) => checkAppVersion())
-      .then((info) => {
-        if (isActive && info?.storeUrl) {
-          storeUrlRef.current = info.storeUrl;
-        }
-      })
-      .catch(() => { });
-
-    return () => {
-      isActive = false;
-    };
-  }, [activePopup?.id, activePopup?.type]);
-
-  if (!activePopup) return null;
-
-  const imageUri = activePopup.imageUrl || activePopup.meta?.imageUrl || activePopup.meta?.coverUrl;
-  const isUpdate = activePopup.type === "update";
-
-  const handleClose = async () => {
-    try {
-      const seenKey = `@Mavrixfy:seenPopup:${activePopup.id}`;
-      const [{ markNotificationAsRead }] = await Promise.all([
-        import("@/stores/notificationStore"),
-        AsyncStorage.setItem(seenKey, "true"),
-      ]);
-      await markNotificationAsRead(activePopup.id, firebaseUserUid);
-    } catch { }
-    setActivePopup(null);
-  };
-
-  const handlePressCta = async () => {
-    await handleClose();
-    if (isUpdate) {
-      const targetUrl = storeUrlRef.current || (Platform.OS === 'ios'
-        ? "https://apps.apple.com/app/mavrixfy/id123456789"
-        : "https://play.google.com/store/apps/details?id=com.mavrixfy.app");
-      try {
-        const { Linking } = await import("react-native");
-        await Linking.openURL(targetUrl);
-      } catch (err) {
-        logger.error("[InAppPromotionPopup] Failed to open store URL:", err);
-      }
-    } else {
-      const route = activePopup.meta?.route || activePopup.meta?.deeplink;
-      if (route) {
-        try {
-          router.push(route as any);
-        } catch (err) {
-          logger.error("[InAppPromotionPopup] Navigation to deep link failed:", err);
-        }
-      }
-    }
-  };
-
-  return (
-    <Portal>
-      <Modal
-        visible={true}
-        onDismiss={handleClose}
-        contentContainerStyle={styles.popupModalContainer}
-      >
-        <View style={styles.popupCard}>
-          {imageUri && (
-            <Image source={{ uri: imageUri }} style={styles.popupImage} contentFit="cover" />
-          )}
-          <View style={styles.popupContent}>
-            <Text style={styles.popupTitle}>{activePopup.title}</Text>
-            <Text style={styles.popupBody}>{activePopup.body}</Text>
-
-            <View style={styles.popupActions}>
-              <Pressable style={styles.popupCloseBtn} onPress={handleClose}>
-                <Text style={styles.popupCloseBtnText}>Close</Text>
-              </Pressable>
-              {(isUpdate || activePopup.meta?.route || activePopup.meta?.deeplink) && (
-                <Pressable style={styles.popupCtaBtn} onPress={handlePressCta}>
-                  <Text style={styles.popupCtaBtnText}>
-                    {isUpdate ? "Update Now" : "Check Out"}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </Portal>
   );
 }
 
@@ -871,66 +670,5 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontSize: 13,
     fontFamily: "Inter_700Bold",
-  },
-  popupModalContainer: {
-    padding: 24,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  popupCard: {
-    width: "100%",
-    backgroundColor: "#181C22",
-    borderRadius: 24,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
-  popupImage: {
-    width: "100%",
-    aspectRatio: 16 / 9,
-    backgroundColor: "rgba(255,255,255,0.05)",
-  },
-  popupContent: {
-    padding: 20,
-  },
-  popupTitle: {
-    fontSize: 18,
-    fontFamily: "Inter_700Bold",
-    color: "#FFFFFF",
-    marginBottom: 8,
-  },
-  popupBody: {
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.7)",
-    lineHeight: 20,
-    marginBottom: 20,
-  },
-  popupActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 12,
-  },
-  popupCloseBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  popupCloseBtnText: {
-    fontSize: 13,
-    fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
-  },
-  popupCtaBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
-  },
-  popupCtaBtnText: {
-    fontSize: 13,
-    fontFamily: "Inter_700Bold",
-    color: "#000000",
   },
 });

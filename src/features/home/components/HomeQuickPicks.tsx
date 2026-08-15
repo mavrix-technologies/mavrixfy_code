@@ -102,6 +102,7 @@ const QuickPickItem = memo(function QuickPickItem({
           source={{ uri: song.coverUrl || undefined }}
           style={styles.quickPickCover}
           contentFit="cover"
+          cachePolicy="memory-disk"
           transition={150}
         />
         <View style={styles.quickPickInfo}>
@@ -243,6 +244,14 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
 
   const keyExtractor = useCallback((_: Song[], idx: number) => `col-${idx}`, []);
   const ItemSeparatorComponent = useCallback(() => <View style={{ width: 14 }} />, []);
+  const getItemLayout = useCallback(
+    (_: ArrayLike<Song[]> | null | undefined, index: number) => ({
+      length: columnWidth + 14,
+      offset: (columnWidth + 14) * index,
+      index,
+    }),
+    [columnWidth]
+  );
 
   if (songs.length === 0) return null;
 
@@ -262,6 +271,11 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
         decelerationRate="fast"
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={ItemSeparatorComponent}
+        getItemLayout={getItemLayout}
+        initialNumToRender={2}
+        maxToRenderPerBatch={2}
+        windowSize={5}
+        removeClippedSubviews
       />
     </View>
   );

@@ -14,6 +14,9 @@ import { triggerImpact } from "@/lib/haptics";
 import type { Song } from "@/lib/musicData";
 import type { RecentlyPlayedItem } from "@/lib/storage";
 
+const RECENT_CARD_WIDTH = 100;
+const RECENT_CARD_GAP = 12;
+
 const RecentCard = memo(function RecentCard({
   item,
   onPress,
@@ -37,6 +40,7 @@ const RecentCard = memo(function RecentCard({
         source={{ uri: item.imageUrl || undefined }}
         style={styles.recentImage}
         contentFit="cover"
+        cachePolicy="memory-disk"
         transition={150}
       />
       <Text style={styles.recentTitle} numberOfLines={1}>
@@ -95,7 +99,15 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
   );
 
   const keyExtractor = useCallback((item: RecentlyPlayedItem) => `recent-${item.id}-${item.type}`, []);
-  const ItemSeparatorComponent = useCallback(() => <View style={{ width: 12 }} />, []);
+  const ItemSeparatorComponent = useCallback(() => <View style={{ width: RECENT_CARD_GAP }} />, []);
+  const getItemLayout = useCallback(
+    (_: ArrayLike<RecentlyPlayedItem> | null | undefined, index: number) => ({
+      length: RECENT_CARD_WIDTH + RECENT_CARD_GAP,
+      offset: (RECENT_CARD_WIDTH + RECENT_CARD_GAP) * index,
+      index,
+    }),
+    []
+  );
 
   if (items.length === 0) return null;
 
@@ -113,6 +125,11 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={ItemSeparatorComponent}
+        getItemLayout={getItemLayout}
+        initialNumToRender={5}
+        maxToRenderPerBatch={4}
+        windowSize={5}
+        removeClippedSubviews
       />
     </View>
   );
@@ -136,14 +153,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   recentCard: {
-    width: 100,
+    width: RECENT_CARD_WIDTH,
   },
   recentCardPressed: {
     opacity: 0.8,
   },
   recentImage: {
-    width: 100,
-    height: 100,
+    width: RECENT_CARD_WIDTH,
+    height: RECENT_CARD_WIDTH,
     borderRadius: 8,
     backgroundColor: "#161B22",
   },

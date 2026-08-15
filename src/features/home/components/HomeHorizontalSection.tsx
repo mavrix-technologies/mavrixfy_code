@@ -13,6 +13,9 @@ import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
 import type { JioSaavnImage } from "@/lib/musicData";
 
+const CARD_WIDTH = 148;
+const CARD_GAP = 14;
+
 export interface HomeCardItem {
   id: string;
   name: string;
@@ -50,6 +53,7 @@ const HorizontalCard = memo(function HorizontalCard({
         source={{ uri: imageUrl || undefined }}
         style={styles.cardImage}
         contentFit="cover"
+        cachePolicy="memory-disk"
         transition={150}
       />
       <Text style={styles.cardTitle} numberOfLines={1}>
@@ -112,6 +116,14 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
 
   const keyExtractor = useCallback((item: HomeCardItem) => `sec-${item.id}`, []);
   const ItemSeparatorComponent = useCallback(() => <View style={styles.separator} />, []);
+  const getItemLayout = useCallback(
+    (_: ArrayLike<HomeCardItem> | null | undefined, index: number) => ({
+      length: CARD_WIDTH + CARD_GAP,
+      offset: (CARD_WIDTH + CARD_GAP) * index,
+      index,
+    }),
+    []
+  );
 
   if (items.length === 0) return null;
 
@@ -129,6 +141,11 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={ItemSeparatorComponent}
+        getItemLayout={getItemLayout}
+        initialNumToRender={5}
+        maxToRenderPerBatch={4}
+        windowSize={5}
+        removeClippedSubviews
       />
     </View>
   );
@@ -136,7 +153,7 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
 
 const styles = StyleSheet.create({
   separator: {
-    width: 14,
+    width: CARD_GAP,
   },
   container: {
     marginVertical: 14,
@@ -155,14 +172,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   card: {
-    width: 148,
+    width: CARD_WIDTH,
   },
   cardPressed: {
     opacity: 0.8,
   },
   cardImage: {
-    width: 148,
-    height: 148,
+    width: CARD_WIDTH,
+    height: CARD_WIDTH,
     borderRadius: 10,
     backgroundColor: "#161B22",
   },

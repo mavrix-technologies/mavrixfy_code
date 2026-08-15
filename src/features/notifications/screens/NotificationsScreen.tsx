@@ -21,7 +21,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
-import Constants from "expo-constants";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import Colors from "@/constants/colors";
@@ -32,6 +31,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   requestNotificationPermission,
   registerForPushNotificationsAsync,
+  getInstalledAppVersion,
 } from "@/services/notificationService";
 import {
   loadNotifications,
@@ -482,7 +482,7 @@ export function NotificationsScreen() {
   }, [firebaseUser?.uid]);
 
   // Group notifications
-  const currentVersion = Constants.expoConfig?.version ?? "0.0.0";
+  const currentVersion = getInstalledAppVersion();
   const filteredNotifs = useMemo(() => notifications.filter((n) => {
     if (n.type === "update" && n.meta?.maxAppVersion) {
       try {

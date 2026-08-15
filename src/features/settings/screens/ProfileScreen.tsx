@@ -29,6 +29,7 @@ import { clearCachedHomePublicPlaylists, notifyHomeCacheInvalidated } from "@/li
 import { clearDailyNewReleaseSongCache } from "@/data/providers/NewReleaseProvider";
 import { AD_UNITS } from "@/constants/admob";
 import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobileAds";
+import { checkAppVersion, getInstalledAppVersion, getInstalledBuildNumber } from "@/services/notificationService";
 
 const QUALITY_OPTIONS: { label: string; value: "low" | "medium" | "high" }[] = [
   { label: "Low", value: "low" },
@@ -335,6 +336,46 @@ function AccountSettingsSection({
             first
           />
         )}
+        {isAuthenticated ? (
+          <SettingsRow
+            icon="trash-outline"
+            title="Delete Account"
+            onPress={() => routerPush("/delete-account")}
+            danger
+          />
+        ) : null}
+      </View>
+    </>
+  );
+}
+
+function AboutOfficialInfoSection({
+  onCheckStoreUpdate,
+  checkingStoreUpdate,
+}: {
+  onCheckStoreUpdate: () => void;
+  checkingStoreUpdate: boolean;
+}) {
+  const appVersion = getInstalledAppVersion();
+  const buildNumber = getInstalledBuildNumber();
+
+  return (
+    <>
+      <Text style={styles.sectionTitle}>About & Official Info</Text>
+      <View style={styles.rowsSurface}>
+        <SettingsRow
+          icon="information-circle-outline"
+          title="App Version"
+          subtitle={`Mavrixfy v${appVersion} (Build ${buildNumber})`}
+          first
+        />
+        <SettingsRow
+          icon="arrow-up-circle-outline"
+          title="Check Store Update"
+          subtitle="Check for newer release on store"
+          onPress={onCheckStoreUpdate}
+          trailing={checkingStoreUpdate ? <ActivityIndicator size="small" color={Colors.primary} /> : undefined}
+        />
         <SettingsRow
           icon="shield-checkmark-outline"
           title="Privacy Policy"
@@ -345,14 +386,6 @@ function AccountSettingsSection({
           title="Terms of Service"
           onPress={() => void openTermsOfService()}
         />
-        {isAuthenticated ? (
-          <SettingsRow
-            icon="trash-outline"
-            title="Delete Account"
-            onPress={() => routerPush("/delete-account")}
-            danger
-          />
-        ) : null}
       </View>
     </>
   );
@@ -405,6 +438,7 @@ export function ProfileScreen() {
   const [lowEndDevice, setLowEndDevice] = useState(false);
   const [isLoadingAd, setIsLoadingAd] = useState(false);
   const [showNewBadges, setShowNewBadges] = useState(false);
+  const [checkingStoreUpdate, setCheckingStoreUpdate] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
 
@@ -555,6 +589,23 @@ export function ProfileScreen() {
     ]);
   }, [logout, routerReplace]);
 
+  const handleCheckStoreUpdate = useCallback(async () => {
+    if (checkingStoreUpdate) return;
+    setCheckingStoreUpdate(true);
+    try {
+      const versionInfo = await checkAppVersion();
+      if (versionInfo?.hasUpdate) {
+        routerPush("/force-update" as any);
+        return;
+      }
+      Alert.alert("You're up to date", "You already have the latest version of Mavrixfy.");
+    } catch {
+      Alert.alert("Unable to check", "Please check your internet connection and try again.");
+    } finally {
+      setCheckingStoreUpdate(false);
+    }
+  }, [checkingStoreUpdate, routerPush]);
+
   const handleClearAllData = useCallback(() => {
     Alert.alert(
       "Clear Cache & History",
@@ -640,6 +691,10 @@ export function ProfileScreen() {
         <LibrarySettingsSection routerPush={routerPush} />
         <CacheSettingsSection
           onClearAll={handleClearAllData}
+        />
+        <AboutOfficialInfoSection
+          onCheckStoreUpdate={() => void handleCheckStoreUpdate()}
+          checkingStoreUpdate={checkingStoreUpdate}
         />
       </ScrollView>
 

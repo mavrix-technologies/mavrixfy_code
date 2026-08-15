@@ -4,7 +4,7 @@
  * Responsibilities:
  *  - Permission handling
  *  - Device registration (token + metadata → Firestore)
- *  - Version checking (force update / optional update)
+ *  - Version checking (Firestore latestVersion)
  *  - Notification channel setup (Android)
  *  - Foreground / tap listeners
  */
@@ -14,6 +14,7 @@ import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { Platform, NativeModules } from "react-native";
 import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import appConfig from "../../app.json";
 import { db } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
 
@@ -22,9 +23,7 @@ import { logger } from "@/lib/logger";
 export interface AppVersionInfo {
   currentVersion: string;
   latestVersion: string;
-  minimumVersion: string;
-  forceUpdate: boolean;
-  optionalUpdate: boolean;
+  hasUpdate: boolean;
   releaseNotes: string;
   storeUrl: string;
 }
@@ -41,6 +40,33 @@ export interface DeviceRegistration {
   deviceModel: string;
   osVersion: string;
   enabled: boolean;
+}
+
+export function getInstalledAppVersion(): string {
+  return appConfig.expo.version ?? Constants.expoConfig?.version ?? Constants.nativeAppVersion ?? "0.0.0";
+}
+
+export function getInstalledBuildNumber(): string {
+  const configuredBuildNumber =
+    Platform.OS === "android"
+      ? appConfig.expo.android.versionCode?.toString()
+      : appConfig.expo.ios.buildNumber;
+  const runtimeBuildNumber =
+    Platform.OS === "android"
+      ? Constants.expoConfig?.android?.versionCode?.toString()
+      : Constants.expoConfig?.ios?.buildNumber;
+
+  return configuredBuildNumber ?? runtimeBuildNumber ?? Constants.nativeBuildVersion ?? "0";
+}
+
+function parseVersionNumber(version: string): number {
+  const parts = String(version || "0.0.0")
+    .trim()
+    .split("-")[0]
+    .split(".")
+    .map((part) => Number.parseInt(part.replace(/\D/g, ""), 10) || 0);
+
+  return parts.slice(0, 3).reduce((acc, n, i) => acc + n * 10 ** (6 - i * 2), 0);
 }
 
 // ─── Notification Handler ─────────────────────────────────────────────────────
@@ -183,11 +209,8 @@ export async function registerForPushNotificationsAsync(
       logger.warn("[NotifService] Could not get native token:", err);
     }
 
-    const appVersion = Constants.expoConfig?.version ?? "0.0.0";
-    const buildNumber =
-      (Platform.OS === "android"
-        ? Constants.expoConfig?.android?.versionCode?.toString()
-        : Constants.expoConfig?.ios?.buildNumber) ?? "0";
+    const appVersion = getInstalledAppVersion();
+    const buildNumber = getInstalledBuildNumber();
     const language = getDeviceLanguage();
     const timezone = getTimezone();
     const deviceModel = Device.modelName ?? "Unknown";
@@ -231,38 +254,35 @@ export async function registerForPushNotificationsAsync(
 /**
  * Check app version against Firestore document:
  *   appVersions/mavrixfy
- *   { latestVersion, minimumVersion, forceUpdate, releaseNotes, storeUrl }
+ *   { latestVersion, releaseNotes, storeUrl }
  *
- * Returns force/optional update info.
+ * Shows the update screen only when Firestore latestVersion is newer than
+ * the app version bundled in this build/OTA.
  */
+function toAppVersionInfo(data: Record<string, unknown>): AppVersionInfo {
+  const currentVersion = getInstalledAppVersion();
+  const latestVersion = String(data.latestVersion ?? currentVersion).trim();
+
+  const current = parseVersionNumber(currentVersion);
+  const latest = parseVersionNumber(latestVersion);
+  const hasUpdate = latest > current;
+
+  return {
+    currentVersion,
+    latestVersion,
+    hasUpdate,
+    releaseNotes: (data.releaseNotes as string) ?? "",
+    storeUrl:
+      (data.storeUrl as string) ??
+      "https://play.google.com/store/apps/details?id=com.mavrixfy.app",
+  };
+}
+
 export async function checkAppVersion(): Promise<AppVersionInfo | null> {
   try {
     const snap = await getDoc(doc(db, "appVersions", "mavrixfy"));
     if (!snap.exists()) return null;
-
-    const data = snap.data();
-    const currentVersion = Constants.expoConfig?.version ?? "0.0.0";
-    const latestVersion = (data.latestVersion as string) ?? currentVersion;
-    const minimumVersion = (data.minimumVersion as string) ?? "0.0.0";
-
-    const parseVersion = (v: string) =>
-      v.split(".").map(Number).reduce((acc, n, i) => acc + n * 10 ** (6 - i * 2), 0);
-
-    const current = parseVersion(currentVersion);
-    const latest = parseVersion(latestVersion);
-    const minimum = parseVersion(minimumVersion);
-
-    return {
-      currentVersion,
-      latestVersion,
-      minimumVersion,
-      forceUpdate: current < minimum,
-      optionalUpdate: current < latest,
-      releaseNotes: (data.releaseNotes as string) ?? "",
-      storeUrl:
-        (data.storeUrl as string) ??
-        "https://play.google.com/store/apps/details?id=com.mavrixfy.app",
-    };
+    return toAppVersionInfo(snap.data());
   } catch (err) {
     const code = String((err as { code?: unknown } | null | undefined)?.code || "");
     if (code === "permission-denied") {
