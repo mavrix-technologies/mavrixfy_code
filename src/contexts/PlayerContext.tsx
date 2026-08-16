@@ -492,6 +492,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const sleepTimerRef = useRef<SleepTimerState | null>(null);
   const likePendingSongsRef = useRef<Map<string, Promise<void>>>(new Map());
   const nextSongRef = useRef<() => void>(() => {});
+  const prevSongRef = useRef<() => void>(() => {});
+  const togglePlayRef = useRef<() => Promise<void> | void>(() => {});
+  const seekToRef = useRef<(progress: number) => Promise<void> | void>(() => {});
   const playSongRef = useRef<(song: Song, queue?: Song[]) => Promise<void> | void>(() => {});
 
   // In-memory stream URL cache for instant zero-latency queue navigation
@@ -956,6 +959,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [playSong]);
 
+  useEffect(() => {
+    togglePlayRef.current = togglePlay;
+  }, [togglePlay]);
+
   const nextSong = useCallback(async () => {
     const cq = queueRef.current;
     const ci = queueIndexRef.current;
@@ -1011,6 +1018,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [resolvedDuration]);
 
+  useEffect(() => {
+    seekToRef.current = seekTo;
+  }, [seekTo]);
+
   const prevSong = useCallback(async () => {
     const cq = queueRef.current;
     const ci = queueIndexRef.current;
@@ -1036,6 +1047,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       void playSong(prevTrack, cq);
     }
   }, [playSong, resolvedPositionSeconds, seekTo]);
+
+  useEffect(() => {
+    prevSongRef.current = prevSong;
+  }, [prevSong]);
 
   const toggleShuffle = useCallback(() => {
     const { nextIsShuffled, nextQueue, nextIndex } = toggleQueueShuffleState({
@@ -1347,12 +1362,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           nextSongRef.current();
         }
       }),
+      subscribeTrackPlayerEvent(Event.RemoteNext, () => {
+        nextSongRef.current();
+      }),
+      subscribeTrackPlayerEvent(Event.RemotePrevious, () => {
+        prevSongRef.current();
+      }),
+      subscribeTrackPlayerEvent(Event.RemotePlay, () => {
+        if (!isPlayingRef.current) {
+          void togglePlayRef.current();
+        }
+      }),
+      subscribeTrackPlayerEvent(Event.RemotePause, () => {
+        if (isPlayingRef.current) {
+          void togglePlayRef.current();
+        }
+      }),
+      subscribeTrackPlayerEvent(Event.RemoteStop, () => {
+        if (isPlayingRef.current) {
+          void togglePlayRef.current();
+        }
+      }),
+      subscribeTrackPlayerEvent(Event.RemoteSeek, (event: { position: number }) => {
+        if (typeof event?.position === "number") {
+          const dur = resolvedDuration;
+          if (dur > 0) {
+            void seekToRef.current(event.position / dur);
+          }
+        }
+      }),
     ];
 
     return () => {
       unsubs.forEach((unsub) => unsub?.());
     };
-  }, [isPlayerReady]);
+  }, [isPlayerReady, resolvedDuration]);
 
   // Load liked songs from Firestore when user auth state changes
   useEffect(() => {

@@ -6,12 +6,16 @@ export async function trackPlayerService() {
     const Event = trackPlayerModule.Event;
     if (!TrackPlayer?.addEventListener || !Event) return;
 
-    TrackPlayer.addEventListener(Event.RemotePlay, () => TrackPlayer.play());
-    TrackPlayer.addEventListener(Event.RemotePause, () => TrackPlayer.pause());
-    TrackPlayer.addEventListener(Event.RemoteStop, () => TrackPlayer.stop());
-    TrackPlayer.addEventListener(Event.RemoteNext, () => TrackPlayer.skipToNext());
-    TrackPlayer.addEventListener(Event.RemotePrevious, () => TrackPlayer.skipToPrevious());
-    TrackPlayer.addEventListener(Event.RemoteSeek, (event: { position: number }) => TrackPlayer.seekTo(event.position));
+    TrackPlayer.addEventListener(Event.RemotePlay, () => { TrackPlayer.play().catch(() => {}); });
+    TrackPlayer.addEventListener(Event.RemotePause, () => { TrackPlayer.pause().catch(() => {}); });
+    TrackPlayer.addEventListener(Event.RemoteStop, () => { TrackPlayer.stop().catch(() => {}); });
+    TrackPlayer.addEventListener(Event.RemoteNext, () => { TrackPlayer.skipToNext().catch(() => {}); });
+    TrackPlayer.addEventListener(Event.RemotePrevious, () => { TrackPlayer.skipToPrevious().catch(() => {}); });
+    TrackPlayer.addEventListener(Event.RemoteSeek, (event: { position: number }) => {
+      if (typeof event?.position === "number") {
+        TrackPlayer.seekTo(event.position).catch(() => {});
+      }
+    });
   } catch {
     // Non-fatal fallback
   }

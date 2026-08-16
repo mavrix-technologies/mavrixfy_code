@@ -101,6 +101,7 @@ async function setupPlayerInternal(): Promise<void> {
         Cap.Play,
         Cap.Pause,
         Cap.SkipToNext,
+        Cap.SkipToPrevious,
       ].filter(Boolean),
       progressUpdateEventInterval: 1,
     });
