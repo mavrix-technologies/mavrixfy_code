@@ -1,37 +1,21 @@
 import * as Animated from "@/lib/nativeAnimated";
-import {
-  QueryClientProvider
-} from "@tanstack/react-query";
-import {
-  DarkTheme,
-  ThemeProvider
-} from "@react-navigation/native";
-import {
-  Stack,
-  useRouter,
-  useSegments,
-  router
-} from "expo-router";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { DarkTheme, ThemeProvider } from "@react-navigation/native";
+import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
 import * as SplashScreen from "expo-splash-screen";
-import React,
-{
-  useCallback,
-  useEffect,
-  useRef,
-  useState
-} from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   InteractionManager,
   LogBox,
   Platform,
   StyleSheet,
   View,
-  Text
+  Text,
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons, MaterialCommunityIcons, Feather, FontAwesome } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MD3DarkTheme, PaperProvider } from "react-native-paper";
 import { useFonts } from "expo-font";
@@ -41,7 +25,6 @@ import { Inter_600SemiBold } from "@expo-google-fonts/inter/600SemiBold";
 import { Inter_700Bold } from "@expo-google-fonts/inter/700Bold";
 import { Inter_800ExtraBold } from "@expo-google-fonts/inter/800ExtraBold";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { Image } from "expo-image";
 import { queryClient } from "@/lib/query-client";
@@ -54,9 +37,6 @@ import { logAppOpen } from "@/lib/analytics";
 import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { getRecentlyPlayed, runOneTimeMigrations } from "@/lib/storage";
 import { useScreenTracking } from "@/hooks/useScreenTracking";
-import { MUSIC_PROVIDER_KEY } from "@/data/providers/IMusicProvider";
-import { AUDIO_ENGINE_KEY } from "@/services/audio/IAudioEngine";
-import { EmptyState, LoadingScreen, PressableRow, ScreenHeader } from "@/components";
 import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
 import QueueBottomSheet from "@/components/QueueBottomSheet";
 import { globalQueueSheetRef } from "@/lib/queueRef";
@@ -64,6 +44,7 @@ import AddSongsBottomSheet from "@/components/AddSongsModal";
 import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import { logger } from "@/lib/logger";
 import { initRemoteConfig } from "@/lib/remoteConfig";
+import { showGlobalToast, subscribeGlobalToast } from "@/utils/globalToast";
 import { AppNavBar } from "./(tabs)/_layout";
 
 function isExpoGoRuntime(): boolean {
@@ -147,10 +128,7 @@ if (__DEV__) {
 LogBox.ignoreLogs([
   "expo-notifications functionality is not fully supported in Expo Go",
   "expo-notifications: Android Push notifications",
-  // expo-av triggers keep-awake internally; this fails during hot reload when
-  // the activity briefly detaches. Harmless in production builds.
   "Unable to activate keep awake",
-  // Same activity-detach race on hot reload — not a real error in production.
   "setBackgroundColorAsync",
   "The action 'GO_BACK' was not handled by any navigator",
 ]);
@@ -158,19 +136,7 @@ LogBox.ignoreLogs([
 const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "profile", "delete-account", "notifications"]);
 const NAV_OVERLAY_SEGMENTS = new Set(["playlist", "artist"]);
 
-import { showGlobalToast, subscribeGlobalToast } from "@/utils/globalToast";
-
 const GLOBAL_TOAST_VISIBLE_MS = 1050;
-
-const IOS_VERTICAL_SHEET_OPTIONS = {
-  presentation: "card" as const,
-  animation: "slide_from_bottom" as const,
-  animationMatchesGesture: true,
-  gestureEnabled: true,
-  gestureDirection: "vertical" as const,
-  fullScreenGestureEnabled: true,
-  contentStyle: { backgroundColor: Colors.background },
-};
 
 const paperTheme = {
   ...MD3DarkTheme,
@@ -264,17 +230,12 @@ function GlobalToast() {
   );
 }
 
-
 // ─── Background content pre-warm ─────────────────────────────────────────────
-// Kick off cache reads as early as possible so the home screen has data
-// ready the moment it mounts — no waiting spinner for returning users.
 let preWarmStarted = false;
 // react-doctor-disable-next-line react-doctor/only-export-components -- intentional cache pre-warm export
 export function preWarmHomeCache() {
   if (preWarmStarted) return;
   preWarmStarted = true;
-  // Fire-and-forget — results land in AsyncStorage / memory cache
-  // Also run one-time migrations to clean up stale data from old app versions
   Promise.allSettled([
     getCachedHomePublicPlaylists({ allowStale: true }),
     getRecentlyPlayed(),
@@ -288,16 +249,8 @@ function useRootLayoutNavigation() {
   const segments = useSegments();
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
   const isAllowedGuest = GUEST_LOGIN_ENABLED && isGuest;
-  useEffect(() => {
-    hideSplashScreenSafely("instant_mount");
-  }, []);
 
   // ── Enterprise Notification Startup Sequence ────────────────────────────────
-  // Runs once after auth resolves. Handles:
-  //  1. Device registration (token + version + language + timezone → Firestore)
-  //  2. Firestore activity feed sync
-  //  3. Simple Firestore version check
-  //  4. Notification listeners (foreground receive + tap → Activity store)
   useEffect(() => {
     if (loading) return;
 
@@ -328,7 +281,6 @@ function useRootLayoutNavigation() {
       // Step 4 — Version check (non-blocking)
       const versionInfo = await checkAppVersion().catch(() => null);
       if (versionInfo?.hasUpdate && isActive) {
-        // Firestore-driven update screen. No notification popup/update alert.
         try { routerReplace("/force-update" as any); } catch { /* ignore */ }
         return;
       }
@@ -360,7 +312,6 @@ function useRootLayoutNavigation() {
           const data = content.data as Record<string, string> | null;
           const notificationId = data?.notificationId ?? response.notification.request.identifier;
 
-          // Add to activity feed (will dedup by notificationId)
           void addNotification(
             content.title ?? "Mavrixfy",
             content.body ?? "",
@@ -374,7 +325,6 @@ function useRootLayoutNavigation() {
             firebaseUser?.uid
           );
 
-          // Deep link routing
           const route = data?.route;
           if (route) {
             try { routerReplace(route as any); } catch (err) {
@@ -385,7 +335,6 @@ function useRootLayoutNavigation() {
       );
     };
 
-    // Delay slightly to not block first paint
     const timer = setTimeout(() => {
       InteractionManager.runAfterInteractions(() => {
         run().catch((err) => logger.error("[Layout] Notification startup failed:", err));
@@ -430,7 +379,6 @@ function useRootLayoutNavigation() {
     } else if (!isAuthenticated && !isAllowedGuest && inOnboarding) {
       routerReplace("/login");
     }
-    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive auth/routing deps (loading, isAuthenticated, isAllowedGuest, firebaseUser, segments, routerReplace) are listed
   }, [loading, isAuthenticated, isAllowedGuest, firebaseUser, segments, routerReplace]);
 
   const activeSegment = segments[0] as string;
@@ -443,7 +391,6 @@ function useRootLayoutNavigation() {
     !isPlayerScreen &&
     NAV_OVERLAY_SEGMENTS.has(activeSegment);
 
-  // Close queue sheet when navigating to screens where it shouldn't appear
   useEffect(() => {
     if (unmountNavBar) {
       globalQueueSheetRef.current?.collapse();
@@ -524,7 +471,6 @@ function RootLayoutNav() {
         </View>
       ) : null}
 
-      {/* Queue & Add Songs sheets are mounted at root level above AppNavBar (zIndex: 999) */}
       <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
         <QueueBottomSheet ref={globalQueueSheetRef} />
         <AddSongsBottomSheet ref={globalAddSongsSheetRef} />
@@ -539,19 +485,24 @@ export default function RootLayout() {
   const [safetyTimeoutActive, setSafetyTimeoutActive] = useState(false);
   const fontsLoadedRef = useRef(false);
 
-  // Set Android nav bar color and start Remote Config fetch immediately
   useEffect(() => {
     void initRemoteConfig();
     if (Platform.OS === "android") {
       SystemUI.setBackgroundColorAsync(Colors.background).catch(() => { });
     }
   }, []);
+
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
     Inter_800ExtraBold,
+    ...Ionicons.font,
+    ...MaterialIcons.font,
+    ...MaterialCommunityIcons.font,
+    ...Feather.font,
+    ...FontAwesome.font,
   });
 
   useEffect(() => {
@@ -572,9 +523,8 @@ export default function RootLayout() {
   useEffect(() => {
     async function prepare() {
       try {
-        // Fire Remote Config fetch early — resolves API URL for the whole session
         void initRemoteConfig();
-        void logAppOpen(); // fire-and-forget, no await
+        void logAppOpen();
       } catch {
         // Silent fail
       } finally {
@@ -602,9 +552,9 @@ export default function RootLayout() {
 
   if (error) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#05070A', padding: 20 }}>
-        <Text style={{ color: '#ff0000', fontSize: 20, marginBottom: 10 }}>Error Loading App</Text>
-        <Text style={{ color: '#fff', fontSize: 14 }}>{error.message}</Text>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#05070A", padding: 20 }}>
+        <Text style={{ color: "#ff0000", fontSize: 20, marginBottom: 10 }}>Error Loading App</Text>
+        <Text style={{ color: "#fff", fontSize: 14 }}>{error.message}</Text>
       </View>
     );
   }

@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "@/contexts/AuthContext";
-import { usePlayerActions } from "@/contexts/PlayerContext";
+import { useLikedSongs, usePlayerBrowse } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
@@ -60,7 +60,8 @@ export function LikedSongsScreen() {
   const { isOnline } = useNetwork();
   const { currentSong, queue, isShuffled } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
-  const { playSong, shufflePlay, likedSongs, togglePlay, toggleShuffle } = usePlayerActions();
+  const { likedSongs } = useLikedSongs();
+  const { playSong, shufflePlay, togglePlay, toggleShuffle } = usePlayerBrowse();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
   const [isSearchMode, setIsSearchMode] = useState(false);
@@ -172,16 +173,13 @@ export function LikedSongsScreen() {
     shufflePlay(listToPlay);
   }, [filteredSongs, songs, shufflePlay]);
 
-  const filteredSongsQueueKey = useMemo(
-    () => filteredSongs.map((song) => song.id).join("|"),
-    [filteredSongs]
-  );
+  const keyExtractor = useCallback((item: Song) => item.id, []);
 
   const renderSong = useCallback(
-    ({ item }: { item: Song; index: number }) => {
-      return <SongRow song={item} queue={filteredSongs} queueKey={filteredSongsQueueKey} horizontalPadding={8} />;
+    ({ item }: { item: Song }) => {
+      return <SongRow song={item} queue={filteredSongs} queueKey="liked-songs" horizontalPadding={8} />;
     },
-    [filteredSongs, filteredSongsQueueKey]
+    [filteredSongs]
   );
 
   const headerMeta = selectedMood
@@ -235,11 +233,15 @@ export function LikedSongsScreen() {
         {/* Results List */}
         <FlatList
           data={filteredSongs}
-          keyExtractor={(item) => item.id}
+          keyExtractor={keyExtractor}
           renderItem={renderSong}
           contentContainerStyle={styles.searchModeListContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          initialNumToRender={15}
+          maxToRenderPerBatch={15}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS !== "web"}
           ListEmptyComponent={
             searchQuery ? (
               <View style={styles.searchModeEmptyWrap}>
@@ -291,8 +293,12 @@ export function LikedSongsScreen() {
 
       <FlatList
         data={filteredSongs}
-        keyExtractor={(item) => item.id}
+        keyExtractor={keyExtractor}
         renderItem={renderSong}
+        initialNumToRender={15}
+        maxToRenderPerBatch={15}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS !== "web"}
         ListHeaderComponent={
           <>
             <Pressable 
@@ -454,10 +460,6 @@ export function LikedSongsScreen() {
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
         scrollEventThrottle={16}
-        removeClippedSubviews={false}
-        initialNumToRender={12}
-        maxToRenderPerBatch={12}
-        windowSize={8}
       />
     </View>
   );

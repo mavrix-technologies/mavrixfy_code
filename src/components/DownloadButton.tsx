@@ -8,7 +8,9 @@
 import React, { useState } from 'react';
 import { Pressable, ActivityIndicator, StyleSheet, View, Alert, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
+import { triggerImpact } from '@/lib/haptics';
 import { useDownloads, useSongDownload } from '@/contexts/DownloadContext';
 import type { Song } from '@/lib/musicData';
 import { logger } from '@/lib/logger';
@@ -154,7 +156,14 @@ export default function DownloadButton({
 
   return (
     <Pressable
-      onPress={isDownloaded ? handleDelete : handleDownload}
+      onPress={() => {
+        void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+        if (isDownloaded) {
+          void handleDelete();
+        } else {
+          void handleDownload();
+        }
+      }}
       disabled={isDownloading}
       style={({ pressed }) => [
         showLabel ? styles.rowButton : styles.button,
@@ -174,7 +183,7 @@ export default function DownloadButton({
           </View>
         ) : (
           <Ionicons
-            name={isDownloaded ? 'checkmark-circle' : 'download-outline'}
+            name={isDownloaded ? "checkmark-circle" : "arrow-down-circle-outline"}
             size={size}
             color={isDownloaded ? Colors.primary : color}
           />
@@ -183,10 +192,10 @@ export default function DownloadButton({
       {showLabel && (
         <Text style={[styles.rowText, isDownloaded && styles.labelActive]}>
           {isDownloading
-            ? `Downloading...`
+            ? "Downloading..."
             : isDownloaded
-            ? `Downloaded`
-            : `Download`}
+            ? "Downloaded"
+            : "Download"}
         </Text>
       )}
     </Pressable>

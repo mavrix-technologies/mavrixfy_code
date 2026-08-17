@@ -112,42 +112,36 @@ export function useHomeFeedData() {
         if (!isActiveRun()) return;
         setRecentlyPlayed(items);
         HOME_CACHE.recentlyPlayed = items;
-        if (items.length > 0) setLoading(false);
       };
 
       const applyPublicPlaylists = (items: FirestorePlaylist[]) => {
         if (!isActiveRun() || items.length === 0) return;
         setPublicPlaylists(items);
         HOME_CACHE.publicPlaylists = items;
-        setLoading(false);
       };
 
       const applyCategories = (items: HomeJioSaavnCategoryData[]) => {
         if (!isActiveRun() || items.length === 0) return;
         setCategories(items);
         HOME_CACHE.categories = items;
-        setLoading(false);
       };
 
       const applyArtists = (items: ArtistCard[]) => {
         if (!isActiveRun() || items.length === 0) return;
         setFeaturedArtists(items);
         HOME_CACHE.featuredArtists = items;
-        setLoading(false);
       };
 
       const applyNewReleaseSongs = (items: Song[]) => {
         if (!isActiveRun() || items.length === 0) return;
         setNewReleaseSongs(items);
         HOME_CACHE.newReleaseSongs = items;
-        setLoading(false);
       };
 
       const applyRecommendations = (items: RecommendationSection[]) => {
         if (!isActiveRun() || items.length === 0) return;
         setRecommendations(items);
         HOME_CACHE.recommendations = items;
-        setLoading(false);
       };
 
       const applyHomeSnapshot = (snapshot: {
@@ -221,7 +215,7 @@ export function useHomeFeedData() {
           "featured artists"
         ).then(applyArtists);
         const releasesTask = withTimeout(
-          getDailyNewReleaseSongs({ limit: 20, forceRefresh }),
+          getDailyNewReleaseSongs({ limit: 24, forceRefresh }),
           HOME_SECTION_TIMEOUT_MS,
           [] as Song[],
           "new releases"
@@ -243,8 +237,6 @@ export function useHomeFeedData() {
 
         if (isActiveRun()) {
           HOME_CACHE.hydrated = true;
-          setLoading(false);
-          setLoadingMainContent(false);
           void setCachedHomeFeedSnapshot({
             categories: HOME_CACHE.categories,
             publicPlaylists: HOME_CACHE.publicPlaylists,
@@ -254,11 +246,10 @@ export function useHomeFeedData() {
           });
         }
       } catch (error) {
-        if (isActiveRun()) {
-          setLoading(false);
-          setLoadingMainContent(false);
-        }
         logger.error("[Home] Feed load failed:", error);
+      } finally {
+        setLoading(false);
+        setLoadingMainContent(false);
       }
     },
     []
@@ -319,9 +310,9 @@ export function useHomeFeedData() {
       }
     }
 
-    // 2. Add top single songs from Most Popular & New Arrivals categories only
+    // 2. Add top single songs from Most Popular, New Arrivals, Trending & Bollywood categories
     const priorityCategories = categories.filter(
-      (c) => c.id === "popular" || c.id === "new-arrivals" || c.id === "trending"
+      (c) => c.id === "popular" || c.id === "new-arrivals" || c.id === "trending" || c.id === "bollywood"
     );
 
     for (const cat of priorityCategories) {

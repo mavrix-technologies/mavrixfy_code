@@ -90,7 +90,11 @@ const LOCAL_SECTION_QUERIES: {
     queries: [
       `latest hindi songs ${CURRENT_YEAR} playlist`,
       `new bollywood songs ${CURRENT_YEAR} playlist`,
+      `trending bollywood songs ${CURRENT_YEAR} playlist`,
       `latest bollywood movie songs ${CURRENT_YEAR}`,
+      `t-series new songs ${CURRENT_YEAR} playlist`,
+      `zee music new songs ${CURRENT_YEAR} playlist`,
+      `yrf new songs ${CURRENT_YEAR} playlist`,
       "new hindi movie songs playlist",
       "latest hindi hits playlist",
     ],
@@ -98,6 +102,7 @@ const LOCAL_SECTION_QUERIES: {
 ];
 
 const LOCAL_BACKUP_QUERIES = [
+  `trending bollywood songs ${CURRENT_YEAR} playlist`,
   `popular hindi songs ${CURRENT_YEAR} playlist`,
   `top bollywood songs ${CURRENT_YEAR} playlist`,
   `new bollywood songs ${CURRENT_YEAR} playlist`,
@@ -106,6 +111,10 @@ const LOCAL_BACKUP_QUERIES = [
   "hindi top hits playlist",
   "hindi bollywood hits playlist",
   "arijit singh hindi playlist",
+  "t-series top hits playlist",
+  "zee music top hits playlist",
+  "yrf top hits playlist",
+  "sony music hindi playlist",
   "bollywood party playlist",
   "hindi romantic playlist",
   "punjabi hits playlist",

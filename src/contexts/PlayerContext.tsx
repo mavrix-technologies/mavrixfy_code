@@ -137,6 +137,7 @@ interface PlayerBrowseContextValue {
   shufflePlay: (songs: Song[], startSong?: Song) => void;
   togglePlay: () => void;
   toggleLike: (song: Song) => void;
+  toggleShuffle: () => void;
 }
 
 const PlayerBrowseContext = createContext<PlayerBrowseContextValue | null>(null);
@@ -187,6 +188,16 @@ interface PlayerActionsContextValue {
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
 }
+
+interface PlayerLikedContextValue {
+  likedSongs: Song[];
+  likedSongIds: string[];
+  likedSongsCount: number;
+  isLiked: (songId: string) => boolean;
+  toggleLike: (song: Song) => void;
+}
+
+const PlayerLikedContext = createContext<PlayerLikedContextValue | null>(null);
 
 const PlayerActionsContext = createContext<PlayerActionsContextValue | null>(null);
 
@@ -446,6 +457,7 @@ const canUseLightweightAudioFallback = Boolean(isRunningInExpoGo() || !TrackPlay
 // react-doctor-disable-next-line react-doctor/prefer-useReducer -- acceptable component structure for this app
 // react-doctor-disable-next-line react-doctor/no-giant-component -- acceptable component structure for this app
 export function PlayerProvider({ children }: { children: ReactNode }) {
+  // Android Auto service integration
   const [isPlayerReady, setIsPlayerReady] = useState(false);
   const { user: authUser } = useAuth();
 
@@ -870,10 +882,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           }
 
           const track = songToTrack(resolvedSong, audioUrl);
-          await TrackPlayer.reset().catch(() => {});
-          if (reqId !== playRequestIdRef.current) return;
 
-          await TrackPlayer.add([track]);
+          // Use load() (RNTP v4+) for atomic in-place track swap.
+          // load() replaces the current track without going through IDLE,
+          // so the MediaSession stays "playing/buffering" the whole time —
+          // no flicker of the pause icon on notification / lock screen.
+          if (typeof TrackPlayer.load === "function") {
+            await TrackPlayer.load(track);
+          } else {
+            // Fallback: full teardown (causes flicker — only for very old RNTP)
+            await TrackPlayer.reset().catch(() => {});
+            if (reqId !== playRequestIdRef.current) return;
+            await TrackPlayer.add([track]);
+          }
           if (reqId !== playRequestIdRef.current) return;
 
           await publishNativeNowPlaying(resolvedSong, targetIndex);
@@ -1355,6 +1376,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           }
         }
       }),
+      subscribeTrackPlayerEvent(Event.PlaybackError, (error: any) => {
+        // Handle playback errors (stream failures, network issues, codec problems)
+        logger.error("[Player] PlaybackError event", error);
+        
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+        setPlaybackLoading(false);
+        updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
+        
+        // Show user-friendly error message
+        const errorMsg = error?.message || error?.code || "Playback failed";
+        showPlaybackNotice(`Playback error: ${errorMsg}`);
+        
+        // Log detailed error for debugging
+        if (error?.code) logger.error("[Player] Error code:", error.code);
+        if (currentSongRef.current) {
+          logger.error("[Player] Failed song:", currentSongRef.current.title);
+        }
+      }),
       subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, () => {
         if (repeatModeRef.current === "one" && currentSongRef.current) {
           void playSongRef.current(currentSongRef.current, queueRef.current);
@@ -1629,8 +1669,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       shufflePlay,
       togglePlay,
       toggleLike,
+      toggleShuffle,
     }),
-    [currentSong, queue, resolvedIsPlaying, likedSongs, playSong, shufflePlay, togglePlay, toggleLike]
+    [currentSong, queue, resolvedIsPlaying, likedSongs, playSong, shufflePlay, togglePlay, toggleLike, toggleShuffle]
   );
 
   const queueValue = useMemo(
@@ -1725,18 +1766,31 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     ]
   );
 
+  const likedValue = useMemo<PlayerLikedContextValue>(
+    () => ({
+      likedSongs,
+      likedSongIds,
+      likedSongsCount: likedSongs.length,
+      isLiked,
+      toggleLike,
+    }),
+    [likedSongs, likedSongIds, isLiked, toggleLike]
+  );
+
   return (
     <PlayerContext.Provider value={value}>
       <PlayerLiteContext.Provider value={liteValue}>
         <PlayerProgressContext.Provider value={progressValue}>
           <PlayerActionsContext.Provider value={actionsValue}>
-            <PlayerBrowseContext.Provider value={browseValue}>
-              <PlayerQueueContext.Provider value={queueValue}>
-                <PlayerRowContext.Provider value={rowValue}>
-                  <View style={{ flex: 1 }}>{children}</View>
-                </PlayerRowContext.Provider>
-              </PlayerQueueContext.Provider>
-            </PlayerBrowseContext.Provider>
+            <PlayerLikedContext.Provider value={likedValue}>
+              <PlayerBrowseContext.Provider value={browseValue}>
+                <PlayerQueueContext.Provider value={queueValue}>
+                  <PlayerRowContext.Provider value={rowValue}>
+                    <View style={{ flex: 1 }}>{children}</View>
+                  </PlayerRowContext.Provider>
+                </PlayerQueueContext.Provider>
+              </PlayerBrowseContext.Provider>
+            </PlayerLikedContext.Provider>
           </PlayerActionsContext.Provider>
         </PlayerProgressContext.Provider>
       </PlayerLiteContext.Provider>
@@ -1762,6 +1816,12 @@ export function usePlayerActions() {
 
 export function useOptionalPlayerActions() {
   return use(PlayerActionsContext);
+}
+
+export function useLikedSongs() {
+  const ctx = use(PlayerLikedContext);
+  if (!ctx) throw new Error("useLikedSongs must be used within PlayerProvider");
+  return ctx;
 }
 
 export function usePlayerRow() {

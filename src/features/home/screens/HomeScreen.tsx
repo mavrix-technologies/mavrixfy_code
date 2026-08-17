@@ -33,6 +33,7 @@ import {
   type HomeCardItem,
 } from "../components/HomeHorizontalSection";
 import { useHomeFeedData } from "../hooks/useHomeFeedData";
+import { useArtworkPalette } from "@/lib/colorExtractor";
 
 const HOME_CATEGORY_TITLES: Record<string, string> = {
   "new-arrivals": "New Releases",
@@ -126,7 +127,8 @@ export function HomeScreen() {
     handleRefresh,
   } = useHomeFeedData();
 
-  const { isHeaderElevated, handleHeaderScroll } = useAppTopHeaderScrollElevation();
+  const { isHeaderElevated, elevationProgress, handleHeaderScroll } = useAppTopHeaderScrollElevation();
+  const artworkPalette = useArtworkPalette(currentSong?.coverUrl);
 
   const sectionData = useMemo<HomeSectionItem[]>(() => {
     const items: HomeSectionItem[] = [];
@@ -183,10 +185,8 @@ export function HomeScreen() {
                 title={HOME_CATEGORY_TITLES[item.category.id] || item.category.title}
                 items={item.category.results as unknown as HomeCardItem[]}
               />
-              {item.showAd ? (
-                <View style={styles.adSlot}>
-                  {!loadingMainContent ? <AdMobBanner loadDelayMs={1200} /> : null}
-                </View>
+              {item.showAd && !loadingMainContent ? (
+                <AdMobBanner loadDelayMs={1200} />
               ) : null}
             </React.Fragment>
           );
@@ -246,6 +246,8 @@ export function HomeScreen() {
       <AppTopHeader
         topInset={topInset}
         elevated={isHeaderElevated}
+        elevationProgress={elevationProgress}
+        ambientColor={artworkPalette.accent}
         titleNode={
           <Text style={styles.appNameTitle}>MAVRIXFY</Text>
         }
@@ -390,9 +392,5 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     marginTop: 6,
     backgroundColor: "rgba(255,255,255,0.06)",
-  },
-  adSlot: {
-    minHeight: 88,
-    justifyContent: "center",
   },
 });

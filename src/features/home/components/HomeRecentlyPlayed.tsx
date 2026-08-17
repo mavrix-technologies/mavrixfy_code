@@ -137,7 +137,7 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 14,
+    marginVertical: 12,
   },
   header: {
     paddingHorizontal: 16,

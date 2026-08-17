@@ -8,51 +8,39 @@ set ADB="%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"
 set DHU="%LOCALAPPDATA%\Android\Sdk\extras\google\auto\desktop-head-unit.exe"
 
 REM Step 1: Check device
-echo [1/5] Checking device connection...
+echo [1/4] Checking device connection...
+%ADB% wait-for-device
 %ADB% devices | findstr "device$" >nul
 if errorlevel 1 (
-    echo [ERROR] No device connected!
+    echo [ERROR] No authorized device connected!
     echo.
     echo Please:
     echo 1. Connect phone via USB
     echo 2. Enable USB Debugging on phone
-    echo 3. Allow USB debugging when prompted
+    echo 3. Unlock phone and tap "Allow USB debugging"
     echo.
     pause
     exit /b 1
 )
-echo [OK] Device connected
+echo [OK] Device connected and authorized
 echo.
 
-REM Step 2: Kill any existing ADB server
-echo [2/5] Restarting ADB server...
-%ADB% kill-server >nul 2>&1
-timeout /t 1 /nobreak >nul
-%ADB% start-server >nul 2>&1
-timeout /t 2 /nobreak >nul
-echo [OK] ADB server ready
-echo.
-
-REM Step 3: Setup port forwarding
-echo [3/5] Setting up port forwarding...
-%ADB% forward --remove-all >nul 2>&1
+REM Step 2: Setup port forwarding
+echo [2/4] Setting up port forwarding...
 %ADB% forward tcp:5277 tcp:5277
 if errorlevel 1 (
-    echo [ERROR] Failed to setup port forwarding
+    echo [ERROR] Failed to setup port forwarding. Ensure phone is unlocked and connected.
     pause
     exit /b 1
 )
 echo [OK] Port forwarding: tcp:5277 -^> tcp:5277
 echo.
 
-REM Step 4: Start Head Unit Server on phone
-echo [4/5] Starting Android Auto Head Unit Server on phone...
-echo This may take a few seconds...
-%ADB% shell am force-stop com.google.android.projection.gearhead >nul 2>&1
-timeout /t 1 /nobreak >nul
-%ADB% shell am start-foreground-service -a com.google.android.gms.car.service.START com.google.android.projection.gearhead/.HeadUnitService
-timeout /t 3 /nobreak >nul
-echo [OK] Server started
+REM Step 3: Try to start Head Unit Server on phone
+echo [3/4] Starting Android Auto Head Unit Server on phone...
+%ADB% shell am start-foreground-service -a com.google.android.gms.car.service.START com.google.android.projection.gearhead/.HeadUnitService >nul 2>&1
+echo Note: If DHU screen is black, open Android Auto on your phone,
+echo tap 3-dots (top right) -> "Start head unit server".
 echo.
 
 REM Step 5: Launch DHU

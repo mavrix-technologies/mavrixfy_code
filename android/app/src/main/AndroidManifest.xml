@@ -63,20 +63,27 @@
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://u.expo.dev/93293119-93b7-4dbb-acdd-7241771254c4"/>
 
+    <!-- Official Android Auto Media Application Declaration -->
+    <meta-data
+      android:name="com.google.android.gms.car.application"
+      android:resource="@xml/automotive_app_desc"/>
+
     <!--
-      RNTP MusicService — sole owner of the Android MediaSession.
+      Android Auto MediaBrowserService implementation.
+      Handles Android Auto discovery, browsing tree, and bridges MediaSession to RNTP.
+    -->
+    <service
+      android:name=".MavrixfyMediaBrowserService"
+      android:enabled="true"
+      android:exported="true"
+      android:foregroundServiceType="mediaPlayback">
+      <intent-filter>
+        <action android:name="android.media.browse.MediaBrowserService"/>
+      </intent-filter>
+    </service>
 
-      foregroundServiceType="mediaPlayback" is required on Android 10+ for a
-      service that plays audio while backgrounded.  exported="true" lets the
-      system bind the media session for lock-screen / notification controls.
-
-      MEDIA_BUTTON is the only intent-filter declared here.
-      android.media.browse.MediaBrowserService is intentionally absent:
-      RNTP v4's MusicService extends HeadlessJsTaskService, not
-      MediaBrowserServiceCompat.  Android Auto binds to the browse action and
-      expects onGetRoot / onLoadChildren — advertising it without implementing
-      those callbacks hangs the car UI.  Media controls appear in Android Auto's
-      notification area automatically via the active MediaSession.
+    <!--
+      TrackPlayer's MusicService for playback and media button handling.
     -->
     <service
       android:name="com.doublesymmetry.trackplayer.service.MusicService"

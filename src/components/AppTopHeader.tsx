@@ -1,4 +1,4 @@
-import React, { type ReactNode, useCallback, useState, useRef, useEffect } from "react";
+import React, { type ReactNode, useCallback, useState, useRef, useEffect, useMemo } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -11,10 +11,12 @@ import {
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "@/contexts/AuthContext";
 import { triggerImpact } from "@/lib/haptics";
 import { getSettings } from "@/lib/storage";
+import { colorWithAlpha } from "@/lib/colorExtractor";
 
 export const APP_TOP_HEADER_HEIGHT = 44;
 const DEFAULT_ELEVATION_SCROLL_THRESHOLD = 10;
@@ -22,6 +24,8 @@ const DEFAULT_ELEVATION_SCROLL_THRESHOLD = 10;
 type AppTopHeaderProps = {
   topInset: number;
   elevated?: boolean;
+  elevationProgress?: number;
+  ambientColor?: string;
   title?: string;
   titleNode?: ReactNode;
   left?: ReactNode;
@@ -43,23 +47,29 @@ type AppTopHeaderIconButtonProps = {
 
 export function useAppTopHeaderScrollElevation(threshold = DEFAULT_ELEVATION_SCROLL_THRESHOLD) {
   const [isHeaderElevated, setIsHeaderElevated] = useState(false);
+  const [elevationProgress, setElevationProgress] = useState(0);
 
   const handleHeaderScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const shouldElevateHeader = event.nativeEvent.contentOffset.y > threshold;
+      const offsetY = event.nativeEvent.contentOffset.y;
+      const shouldElevateHeader = offsetY > threshold;
       setIsHeaderElevated((current) => (
         current === shouldElevateHeader ? current : shouldElevateHeader
       ));
+      const progress = Math.min(1, Math.max(0, offsetY / 70));
+      setElevationProgress(progress);
     },
     [threshold]
   );
 
   const resetHeaderElevation = useCallback(() => {
     setIsHeaderElevated(false);
+    setElevationProgress(0);
   }, []);
 
   return {
     isHeaderElevated,
+    elevationProgress,
     handleHeaderScroll,
     resetHeaderElevation,
   };
@@ -68,6 +78,8 @@ export function useAppTopHeaderScrollElevation(threshold = DEFAULT_ELEVATION_SCR
 export default function AppTopHeader({
   topInset,
   elevated = false,
+  elevationProgress,
+  ambientColor,
   title,
   titleNode,
   left,
@@ -84,18 +96,52 @@ export default function AppTopHeader({
     ) : null
   );
 
+  const effectiveProgress = elevationProgress !== undefined
+    ? elevationProgress
+    : elevated
+    ? 1
+    : 0;
+
+  const bgOpacity = effectiveProgress;
+  const borderAlpha = 0.15 * effectiveProgress;
+
+  const gradientColors = useMemo<readonly [string, string]>(() => {
+    if (ambientColor) {
+      return [
+        colorWithAlpha(ambientColor, 0.45, "rgba(38, 225, 154, 0.35)"),
+        "#0B0F14",
+      ] as const;
+    }
+    return ["#14171F", "#0B0F14"] as const;
+  }, [ambientColor]);
+
   return (
     <View
       pointerEvents="box-none"
       style={[
         styles.header,
-        elevated ? styles.headerElevated : styles.headerSeamless,
-        { paddingTop: topInset },
+        {
+          paddingTop: topInset,
+          borderBottomColor: `rgba(223, 226, 235, ${borderAlpha})`,
+          borderBottomWidth: borderAlpha > 0.01 ? StyleSheet.hairlineWidth : 0,
+        },
       ]}
+    >
+      <View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          styles.headerElevatedBg,
+          { opacity: bgOpacity },
+        ]}
       >
-      {elevated ? (
-        <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.headerElevatedBg]} />
-      ) : null}
+        <LinearGradient
+          colors={gradientColors}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+      </View>
       <View style={styles.content}>
         <View style={[styles.sideSlot, { width: leftWidth }]}>{left}</View>
         <View
@@ -198,7 +244,8 @@ export function AppTopHeaderDownloadButton() {
 
   return (
     <AppTopHeaderIconButton
-      iconName="download-outline"
+      iconName="arrow-down-circle-outline"
+      iconSize={22}
       accessibilityLabel="Open downloads"
       onPress={handlePress}
       haptic={false}

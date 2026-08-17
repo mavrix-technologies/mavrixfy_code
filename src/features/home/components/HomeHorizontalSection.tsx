@@ -89,13 +89,17 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
     (item: HomeCardItem) => {
       void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
       const imageUrl = item.imageUrl || (Array.isArray(item.image) && item.image.length > 0 ? item.image[item.image.length - 1]?.url || item.image[0]?.url : "");
+      const isSong = item.type === "song" || Boolean(item.url?.includes("/song/"));
+      const isAlbumItem = isAlbum || item.type === "album" || Boolean(item.url?.includes("/album/"));
 
       router.push({
         pathname: "/playlist/[id]",
         params: {
           id: item.id,
           jiosaavn: String(!isFirestore),
-          album: String(isAlbum || item.type === "album"),
+          album: String(isAlbumItem),
+          song: String(isSong),
+          type: item.type || (isSong ? "song" : isAlbumItem ? "album" : "playlist"),
           firestore: String(isFirestore || item.source === "firestore"),
           title: item.name,
           cover: imageUrl || "",
@@ -156,7 +160,7 @@ const styles = StyleSheet.create({
     width: CARD_GAP,
   },
   container: {
-    marginVertical: 14,
+    marginVertical: 12,
   },
   header: {
     paddingHorizontal: 16,

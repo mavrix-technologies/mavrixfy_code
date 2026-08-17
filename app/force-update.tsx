@@ -23,6 +23,11 @@ function releaseNoteItems(releaseNotes: string) {
   return notes.length > 0 ? notes : ["Performance improvements, new features, and stability fixes."];
 }
 
+function dismiss() {
+  // This screen is opened with replace(), so there may be no back stack.
+  router.replace("/(tabs)" as any);
+}
+
 export default function ForceUpdateScreen() {
   const { width } = useWindowDimensions();
   const [versionInfo, setVersionInfo] = useState<AppVersionInfo | null>(null);
@@ -62,11 +67,6 @@ export default function ForceUpdateScreen() {
     } finally {
       setOpeningStore(false);
     }
-  };
-
-  const dismiss = () => {
-    // This screen is opened with replace(), so there may be no back stack.
-    router.replace("/(tabs)" as any);
   };
 
   if (loading || !versionInfo) {
@@ -119,8 +119,8 @@ export default function ForceUpdateScreen() {
             {!loading && (
               <View style={styles.notesSection}>
                 <Text style={styles.notesLabel}>WHAT’S NEW:</Text>
-                {notes.map((note, index) => (
-                  <View key={`${note}-${index}`} style={styles.noteRow}>
+                {notes.map((note) => (
+                  <View key={note} style={styles.noteRow}>
                     <Ionicons name="checkmark-circle" size={14} color={Colors.primary} />
                     <Text style={styles.noteText}>{note}</Text>
                   </View>
@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
   noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 11, marginBottom: 9 },
   noteText: { flex: 1, color: "#D5DDE1", fontFamily: "Inter_400Regular", fontSize: 14, lineHeight: 20, letterSpacing: -0.12 },
   actions: { width: "100%", gap: 4, paddingTop: 12, paddingBottom: 4 },
-  updateButton: { width: "100%", minHeight: 64, borderRadius: 32, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF", elevation: 2 },
+  updateButton: { width: "100%", minHeight: 64, borderRadius: 32, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF", boxShadow: "0 2px 4px rgba(0, 0, 0, 0.2)" },
   updateButtonText: { color: "#101116", fontFamily: "Inter_800ExtraBold", fontSize: 18, letterSpacing: -0.25 },
   notNowButton: { width: "100%", minHeight: 48, alignItems: "center", justifyContent: "center" },
   notNowText: { color: "#A5AAB1", fontFamily: "Inter_700Bold", fontSize: 15 },

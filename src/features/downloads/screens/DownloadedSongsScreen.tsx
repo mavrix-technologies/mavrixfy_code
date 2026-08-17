@@ -1,62 +1,65 @@
 /**
- * Downloaded Songs — Spotify-style offline library.
+ * Downloaded Songs — Spotify-style offline library with tabs.
  *
- * Shows all fully downloaded tracks grouped by playlist/collection.
- * Accessible from the Downloads screen header.
+ * Clean, premium, and unified with LikedSongsScreen and Settings.
  */
 
-import React, { useCallback, useEffect, useState, useMemo, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
+  FlatList,
   Platform,
-  SectionList,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+  Alert,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
 } from "react-native";
-import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
 import { useDownloads } from "@/contexts/DownloadContext";
 import { onQueueEvent } from "@/lib/downloads/downloadManager";
-import { DownloadItem } from "@/types/downloads";
+import { DownloadItem, DownloadQuality } from "@/types/downloads";
 import { Song } from "@/lib/musicData";
-import { usePlayerActions } from "@/contexts/PlayerContext";
+import { usePlayerBrowse } from "@/contexts/PlayerContext";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import SongRow from "@/components/SongRow";
-import {
-  getCollectionMetadataSnapshot,
-  loadAllCollectionMetadata,
-  subscribeCollectionMetadata,
-} from "@/lib/downloads/collectionMetadata";
+import AppTopHeader, {
+  APP_TOP_HEADER_HEIGHT,
+  AppTopHeaderIconButton,
+  useAppTopHeaderScrollElevation,
+} from "@/components/AppTopHeader";
+import { formatBytes } from "@/lib/downloads/storagePolicy";
 
 const UI = {
-  bg: Colors.background,
-  text: Colors.text,
-  subtext: Colors.subtext,
-  surface: Colors.surface,
-  surfaceLight: Colors.surfaceLight,
-  primary: Colors.primary,
-  error: Colors.error,
-  border: Colors.cardBorder,
+  bg: "#10141a",
+  card: "#181c22",
+  cardHover: "#20242b",
+  border: "rgba(255, 255, 255, 0.08)",
+  text: "#dfe2eb",
+  subtext: "#8e99a8",
+  lowSurface: "#181c22",
+  highSurface: "#262a31",
+  primaryA: "#26e19a",
+  primaryB: "#00b87b",
+  error: "#ff5449",
 };
-type CollectionMetadataSummary = Record<string, { name: string; imageUrl: string }>;
 
-function toCollectionMetadataSummary(metadata: ReturnType<typeof getCollectionMetadataSnapshot>): CollectionMetadataSummary {
-  const mapped: CollectionMetadataSummary = {};
-  for (const [id, data] of Object.entries(metadata)) {
-    mapped[id] = { name: data.name, imageUrl: data.imageUrl };
-  }
-  return mapped;
-}
+const QUALITY_OPTIONS: { label: string; sub: string; value: DownloadQuality }[] = [
+  { label: "High Quality", sub: "~320 kbps · Full studio fidelity audio", value: "high" },
+  { label: "Normal Quality", sub: "~128 kbps · Standard balance of speed & quality", value: "medium" },
+  { label: "Low Quality", sub: "~48 kbps · Uses minimal device storage", value: "low" },
+];
 
-// Convert a DownloadItem to a Song for the player.
-// audioUrl must be the REMOTE url — the player resolves the local file
-// from the download store automatically via resolvePlaybackUrl.
 function downloadItemToSong(item: DownloadItem): Song {
   return {
     id: item.songId,
@@ -64,121 +67,40 @@ function downloadItemToSong(item: DownloadItem): Song {
     artist: item.artist,
     album: item.album,
     coverUrl: item.coverUrl,
-    audioUrl: item.audioUrl,   // remote URL — player will use local file from store
+    audioUrl: item.audioUrl,
     duration: item.duration,
     genre: "",
     source: "jiosaavn",
   };
 }
 
-// ─── Single downloaded song row ───────────────────────────────────────────────
-
-interface DownloadedRowProps {
-  item: DownloadItem;
-  allSongs: Song[];
-  queueKey: string;
-  collectionId?: string;
-}
-
-function DownloadedRow({ item, allSongs, queueKey }: DownloadedRowProps) {
-  const song = downloadItemToSong(item);
-
-  return <SongRow song={song} queue={allSongs} queueKey={queueKey} showDownload={false} />;
-}
-
-// Memoize to prevent unnecessary re-renders.
-// allSongs is compared by queueKey (a join of all songIds) — stable when section doesn't change.
-const MemoizedDownloadedRow = React.memo(DownloadedRow, (prev, next) => {
-  return (
-    prev.item.songId === next.item.songId &&
-    prev.item.status === next.item.status &&
-    prev.collectionId === next.collectionId &&
-    prev.queueKey === next.queueKey
-  );
-});
-
-// ─── Playlist/Collection Section ──────────────────────────────────────────────
-
-interface PlaylistSection {
-  collectionId: string;
-  collectionName: string;
-  items: DownloadItem[];
-  coverUrl?: string;
-}
-
-interface DownloadedSongSection {
-  title: string;
-  data: DownloadItem[];
-  collectionId: string;
-  coverUrl?: string;
-  songs: Song[];
-  queueKey: string;
-}
-
-function DownloadedSectionHeader({
-  section,
-  onPlay,
-}: {
-  section: DownloadedSongSection;
-  onPlay: (songs: Song[]) => void;
-}) {
-  const handlePlay = useCallback(() => onPlay(section.songs), [onPlay, section.songs]);
-
-  return (
-    <View style={styles.sectionHeader}>
-      {section.coverUrl ? (
-        <Image
-          recyclingKey={section.collectionId}
-          source={{ uri: section.coverUrl }}
-          style={styles.sectionCover}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-        />
-      ) : (
-        <View style={[styles.sectionCover, styles.sectionCoverPlaceholder]}>
-          <Ionicons name="musical-notes" size={20} color={UI.subtext} />
-        </View>
-      )}
-      <View style={styles.sectionInfo}>
-        <Text style={styles.sectionTitle}>{section.title}</Text>
-        <Text style={styles.sectionCount}>
-          {section.data.length} song{section.data.length !== 1 ? "s" : ""}
-        </Text>
-      </View>
-      <Pressable
-        style={styles.sectionPlayBtn}
-        onPress={handlePlay}
-        disabled={section.songs.length === 0}
-      >
-        <Ionicons name="play-circle" size={32} color={UI.primary} />
-      </Pressable>
-    </View>
-  );
-}
-
-// ─── Main screen ──────────────────────────────────────────────────────────────
-
+// react-doctor-disable-next-line react-doctor/no-giant-component -- screen layout component containing downloads and storage settings tabs
 export function DownloadedSongsScreen() {
   const insets = useSafeAreaInsets();
-  const topPadding = Platform.OS === "web" ? 67 : insets.top + 8;
+  const topInset = Platform.OS === "web" ? 67 : insets.top;
 
-  const { getAllDownloadItems, storageSummary } = useDownloads();
-  const { playSong } = usePlayerActions();
+  const {
+    getAllDownloadItems,
+    storageSummary,
+    preferences,
+    updatePreferences,
+    removeAllDownloads,
+    refreshSummary,
+  } = useDownloads();
 
-  // Load collection metadata
-  const collectionMetadataSnapshot = useSyncExternalStore(
-    subscribeCollectionMetadata,
-    getCollectionMetadataSnapshot,
-    getCollectionMetadataSnapshot
-  );
+  const { currentSong, isShuffled } = usePlaybackNowPlaying();
+  const { isPlaying } = usePlaybackPlayState();
+  const { playSong, shufflePlay, togglePlay, toggleShuffle } = usePlayerBrowse();
 
-  useEffect(() => {
-    void loadAllCollectionMetadata();
-  }, []);
-  const collectionMetadata = useMemo(
-    () => toCollectionMetadataSummary(collectionMetadataSnapshot),
-    [collectionMetadataSnapshot]
-  );
+  const [activeTab, setActiveTab] = useState<"songs" | "settings">("songs");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const [showStickyPlay, setShowStickyPlay] = useState(false);
+
+  const {
+    isHeaderElevated,
+    handleHeaderScroll,
+  } = useAppTopHeaderScrollElevation();
 
   // Re-render when download statuses change
   const [, setTick] = useState(0);
@@ -190,417 +112,721 @@ export function DownloadedSongsScreen() {
     return () => unsubs.forEach((fn) => fn());
   }, []);
 
-  const completedItems = getAllDownloadItems()
-    .filter((item) => item.status === "completed")
-    .sort((a, b) => {
-      // Sort by completedAt descending (newest first)
-      const aTime = a.completedAt ? new Date(a.completedAt).getTime() : 0;
-      const bTime = b.completedAt ? new Date(b.completedAt).getTime() : 0;
-      return bTime - aTime;
-    });
+  const completedSongs = useMemo<Song[]>(() => {
+    return getAllDownloadItems()
+      .filter((item) => item.status === "completed")
+      .sort((a, b) => {
+        const aTime = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+        const bTime = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+        return bTime - aTime;
+      })
+      .map(downloadItemToSong);
+  }, [getAllDownloadItems]);
 
-  // Group songs by collection/playlist
-  const playlistSections = useMemo<PlaylistSection[]>(() => {
-    const collectionMap = new Map<string, DownloadItem[]>();
-    const uncategorized: DownloadItem[] = [];
+  const filteredSongs = useMemo(() => {
+    if (!searchQuery.trim()) return completedSongs;
+    const query = searchQuery.toLowerCase().trim();
+    return completedSongs.filter(
+      (song) =>
+        (song.title && song.title.toLowerCase().includes(query)) ||
+        (song.artist && song.artist.toLowerCase().includes(query)) ||
+        (song.album && song.album.toLowerCase().includes(query))
+    );
+  }, [completedSongs, searchQuery]);
 
-    for (const item of completedItems) {
-      if (item.collectionRefs && item.collectionRefs.length > 0) {
-        // Add to each collection it belongs to
-        for (const collectionId of item.collectionRefs) {
-          if (!collectionMap.has(collectionId)) {
-            collectionMap.set(collectionId, []);
-          }
-          collectionMap.get(collectionId)!.push(item);
-        }
-      } else {
-        // No collection reference
-        uncategorized.push(item);
-      }
-    }
+  const isPlayingFromDownloaded = useMemo(() => {
+    if (!currentSong || completedSongs.length === 0) return false;
+    const songIds = new Set(completedSongs.map((s) => s.id));
+    return songIds.has(currentSong.id);
+  }, [currentSong, completedSongs]);
 
-    const sections: PlaylistSection[] = [];
-
-    // Add collection sections
-    for (const [collectionId, items] of collectionMap.entries()) {
-      // Get metadata for this collection
-      const metadata = collectionMetadata[collectionId];
-      const collectionName = metadata?.name || `Playlist ${collectionId.slice(0, 8)}`;
-      const coverUrl = metadata?.imageUrl || items[0]?.coverUrl;
-
-      sections.push({
-        collectionId,
-        collectionName,
-        items,
-        coverUrl,
-      });
-    }
-
-    // Add uncategorized section if any
-    if (uncategorized.length > 0) {
-      sections.push({
-        collectionId: "uncategorized",
-        collectionName: "Individual Downloads",
-        items: uncategorized,
-      });
-    }
-
-    return sections;
-  }, [completedItems, collectionMetadata]);
-
-  const sectionListData = useMemo<DownloadedSongSection[]>(
-    () => playlistSections.map((section) => ({
-      title: section.collectionName,
-      data: section.items,
-      collectionId: section.collectionId,
-      coverUrl: section.coverUrl,
-      songs: section.items.map(downloadItemToSong),
-      queueKey: section.items.map((item) => item.songId).join("|"),
-    })),
-    [playlistSections]
-  );
-
-  const allSongs = useMemo(() => completedItems.map(downloadItemToSong), [completedItems]);
-
-  const handleSectionPlay = useCallback(
-    (songs: Song[]) => {
-      if (songs.length === 0) return;
-      void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-      playSong(songs[0], songs);
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      handleHeaderScroll(event);
+      const offsetY = event.nativeEvent.contentOffset.y;
+      const shouldShowSticky = offsetY > 240;
+      setShowStickyPlay((prev) => (prev === shouldShowSticky ? prev : shouldShowSticky));
     },
-    [playSong]
+    [handleHeaderScroll]
   );
 
-  const renderSectionHeader = useCallback(
-    ({ section }: { section: DownloadedSongSection }) => (
-      <DownloadedSectionHeader section={section} onPlay={handleSectionPlay} />
-    ),
-    [handleSectionPlay]
+  const handlePlayAll = useCallback(() => {
+    const listToPlay = filteredSongs.length > 0 ? filteredSongs : completedSongs;
+    if (listToPlay.length === 0) return;
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
+    if (isPlayingFromDownloaded) {
+      togglePlay();
+      return;
+    }
+    playSong(listToPlay[0], listToPlay);
+    if (isShuffled) {
+      toggleShuffle();
+    }
+  }, [filteredSongs, completedSongs, isPlayingFromDownloaded, togglePlay, playSong, isShuffled, toggleShuffle]);
+
+  const handleShufflePlay = useCallback(() => {
+    const listToPlay = filteredSongs.length > 0 ? filteredSongs : completedSongs;
+    if (listToPlay.length === 0) return;
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    shufflePlay(listToPlay);
+  }, [filteredSongs, completedSongs, shufflePlay]);
+
+  const handleQualityChange = useCallback(
+    (quality: DownloadQuality) => {
+      void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+      updatePreferences({ quality });
+    },
+    [updatePreferences]
   );
 
-  const renderDownloadedItem = useCallback(
-    ({ item, section }: { item: DownloadItem; section: DownloadedSongSection }) => (
-      <MemoizedDownloadedRow
-        item={item}
-        allSongs={section.songs}
-        queueKey={section.queueKey}
-        collectionId={section.collectionId}
-      />
-    ),
-    [] // section.songs is stable (memoized in sectionListData), so this is safe
+  const handleRemoveAll = useCallback(() => {
+    Alert.alert(
+      "Remove All Downloads",
+      "This will delete all downloaded songs from this device to free up storage space. Continue?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete All",
+          style: "destructive",
+          onPress: async () => {
+            await triggerImpact(Haptics.ImpactFeedbackStyle.Heavy);
+            await removeAllDownloads();
+            refreshSummary();
+          },
+        },
+      ]
+    );
+  }, [removeAllDownloads, refreshSummary]);
+
+  const keyExtractor = useCallback((item: Song) => item.id, []);
+
+  const renderSong = useCallback(
+    ({ item }: { item: Song }) => {
+      return (
+        <SongRow
+          song={item}
+          queue={filteredSongs}
+          queueKey="downloaded-songs"
+          horizontalPadding={8}
+          showDownload={false}
+        />
+      );
+    },
+    [filteredSongs]
   );
+
+  const totalBytesFormatted = useMemo(() => {
+    return storageSummary.totalDownloadedBytes > 0
+      ? formatBytes(storageSummary.totalDownloadedBytes)
+      : "0 B";
+  }, [storageSummary.totalDownloadedBytes]);
+
+  const headerMeta = `${completedSongs.length} SONGS • ${totalBytesFormatted} OFFLINE`;
+
+  if (isSearchMode) {
+    return (
+      <View style={styles.searchModeContainer}>
+        <LinearGradient colors={["#09111B", "#10141a", "#10141a"]} style={StyleSheet.absoluteFillObject} />
+
+        {/* Search Header */}
+        <View style={[styles.searchModeHeader, { paddingTop: topInset + 10 }]}>
+          <View style={styles.searchModeInputWrapper}>
+            <Ionicons name="search" size={18} color={UI.subtext} />
+            <TextInput
+              style={styles.searchModeInput}
+              placeholder="Search downloaded songs..."
+              placeholderTextColor={UI.subtext}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+              selectionColor={UI.primaryA}
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
+              <Pressable
+                onPress={() => setSearchQuery("")}
+                hitSlop={8}
+                style={{ padding: 4 }}
+              >
+                <Ionicons name="close-circle" size={18} color={UI.subtext} />
+              </Pressable>
+            )}
+          </View>
+          <Pressable
+            onPress={() => {
+              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+              setIsSearchMode(false);
+              setSearchQuery("");
+            }}
+            hitSlop={12}
+            style={styles.searchModeCancelButton}
+          >
+            <Text style={styles.searchModeCancelText}>Cancel</Text>
+          </Pressable>
+        </View>
+
+        {/* Results List */}
+        <FlatList
+          data={filteredSongs}
+          keyExtractor={keyExtractor}
+          renderItem={renderSong}
+          contentContainerStyle={styles.searchModeListContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={15}
+          maxToRenderPerBatch={15}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS !== "web"}
+          ListEmptyComponent={
+            searchQuery ? (
+              <View style={styles.searchModeEmptyWrap}>
+                <Ionicons name="search-outline" size={48} color={UI.subtext} style={{ opacity: 0.7 }} />
+                <Text style={styles.searchModeEmptyTitle}>No results found</Text>
+                <Text style={styles.searchModeEmptySubtitle}>
+                  {`No downloaded songs matched "${searchQuery}"`}
+                </Text>
+              </View>
+            ) : null
+          }
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={[Colors.backgroundGradientStart, Colors.background, Colors.background]}
-        style={StyleSheet.absoluteFillObject}
-      />
+      <LinearGradient colors={["#09111B", "#10141a", "#10141a"]} style={StyleSheet.absoluteFillObject} />
 
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: topPadding }]}>
-        <Pressable
-          onPress={() => router.back()}
-          style={styles.backBtn}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Ionicons name="chevron-back" size={24} color={UI.text} />
-        </Pressable>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Downloaded Songs</Text>
-          <Text style={styles.headerSub}>
-            {completedItems.length} song{completedItems.length !== 1 ? "s" : ""} · offline
-          </Text>
-        </View>
-        <Pressable
-          onPress={() => router.push("/downloads")}
-          style={styles.manageBtn}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Ionicons name="settings-outline" size={20} color={UI.subtext} />
-        </Pressable>
-      </View>
-
-      {/* Hero banner */}
-      {completedItems.length > 0 && (
-        <View style={styles.heroBanner}>
-          {/* Mini cover grid */}
-          <View style={styles.coverGrid}>
-            {completedItems.slice(0, 4).map((item, i) =>
-              item.coverUrl ? (
-                <Image
-                  recyclingKey={item.songId}
-                  key={item.songId}
-                  source={{ uri: item.coverUrl }}
-                  style={styles.coverGridItem}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
+      <AppTopHeader
+        topInset={topInset}
+        elevated={isHeaderElevated}
+        title={activeTab === "songs" ? "Downloads" : "Download Settings"}
+        left={
+          <AppTopHeaderIconButton
+            iconName="chevron-back"
+            iconSize={24}
+            accessibilityLabel="Back"
+            onPress={() => {
+              if (activeTab === "settings") {
+                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                setActiveTab("songs");
+              } else {
+                router.back();
+              }
+            }}
+          />
+        }
+        rightWidth={activeTab === "songs" && showStickyPlay ? 80 : 40}
+        right={
+          <View style={styles.headerRightContainer}>
+            <AppTopHeaderIconButton
+              iconName={activeTab === "songs" ? "options-outline" : "musical-notes-outline"}
+              iconSize={20}
+              accessibilityLabel={activeTab === "songs" ? "Settings" : "Songs"}
+              onPress={() => {
+                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                setActiveTab((prev) => (prev === "songs" ? "settings" : "songs"));
+              }}
+            />
+            {activeTab === "songs" && showStickyPlay && (
+              <Pressable
+                onPress={handlePlayAll}
+                style={({ pressed }) => [
+                  styles.stickyPlayButton,
+                  pressed && styles.stickyPlayButtonPressed,
+                ]}
+              >
+                <Ionicons
+                  name={isPlayingFromDownloaded && isPlaying ? "pause" : "play"}
+                  size={15}
+                  color="#06241a"
+                  style={!isPlayingFromDownloaded || !isPlaying ? { marginLeft: 1 } : undefined}
                 />
-              ) : (
-                <View key={item.songId} style={[styles.coverGridItem, styles.coverGridPlaceholder]}>
-                  <Ionicons name="musical-note" size={14} color={UI.subtext} />
-                </View>
-              )
+              </Pressable>
             )}
           </View>
-          <View style={styles.heroInfo}>
-            <Text style={styles.heroTitle}>Downloads</Text>
-            <Text style={styles.heroSub}>
-              {storageSummary.completedTracks} songs saved offline
-            </Text>
-          </View>
-          <DownloadedPlayAllButton songs={allSongs} />
-        </View>
-      )}
+        }
+      />
 
-      {/* Song list */}
-      <SectionList
-        sections={sectionListData}
-        keyExtractor={(item) => item.songId}
-        renderSectionHeader={renderSectionHeader}
-        renderItem={renderDownloadedItem}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="arrow-down-circle-outline" size={56} color={UI.subtext} />
-            <Text style={styles.emptyTitle}>No downloaded songs</Text>
-            <Text style={styles.emptySub}>
-              Tap the{" "}
-              <Ionicons name="arrow-down-circle-outline" size={14} color={UI.subtext} />
-              {" "}icon on any song to save it for offline playback.
-            </Text>
+      <View style={[styles.mainWrap, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT }]}>
+        {/* Segmented Tab Bar */}
+        <View style={styles.tabBarWrap}>
+          <View style={styles.tabBar}>
             <Pressable
-              style={styles.browseBtn}
-              onPress={() => router.push("/(tabs)/search")}
+              style={[styles.tabBtn, activeTab === "songs" && styles.tabBtnActive]}
+              onPress={() => {
+                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                setActiveTab("songs");
+              }}
             >
-              <Text style={styles.browseBtnText}>Browse Songs</Text>
+              <Ionicons
+                name="musical-notes"
+                size={15}
+                color={activeTab === "songs" ? "#042115" : UI.subtext}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={[styles.tabBtnText, activeTab === "songs" && styles.tabBtnTextActive]}>
+                Songs ({completedSongs.length})
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[styles.tabBtn, activeTab === "settings" && styles.tabBtnActive]}
+              onPress={() => {
+                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                setActiveTab("settings");
+              }}
+            >
+              <Ionicons
+                name="settings-outline"
+                size={15}
+                color={activeTab === "settings" ? "#042115" : UI.subtext}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={[styles.tabBtnText, activeTab === "settings" && styles.tabBtnTextActive]}>
+                Storage & Settings
+              </Text>
             </Pressable>
           </View>
-        }
-        contentContainerStyle={[
-          styles.listContent,
-          completedItems.length === 0 && styles.listContentEmpty,
-        ]}
-        showsVerticalScrollIndicator={false}
-        stickySectionHeadersEnabled={false}
-        removeClippedSubviews={Platform.OS === "android"}
-        maxToRenderPerBatch={10}
-        updateCellsBatchingPeriod={50}
-        windowSize={21}
-        initialNumToRender={10}
-      />
+        </View>
+
+        {/* Tab 1: Downloaded Songs View */}
+        {activeTab === "songs" ? (
+          <FlatList
+            data={filteredSongs}
+            keyExtractor={keyExtractor}
+            renderItem={renderSong}
+            initialNumToRender={15}
+            maxToRenderPerBatch={15}
+            windowSize={7}
+            removeClippedSubviews={Platform.OS !== "web"}
+            ListHeaderComponent={
+              <>
+                <Pressable
+                  onPress={() => {
+                    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                    setIsSearchMode(true);
+                  }}
+                  style={styles.searchContainer}
+                >
+                  <View style={styles.searchInputWrapper}>
+                    <Ionicons name="search" size={16} color={UI.subtext} />
+                    <Text style={styles.searchPlaceholderText}>Search downloaded songs...</Text>
+                  </View>
+                </Pressable>
+
+                <View style={styles.heroSection}>
+                  <LinearGradient
+                    colors={[UI.primaryA, UI.primaryB]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.heroIconCard}
+                  >
+                    <Ionicons name="arrow-down-circle" size={38} color="#042115" />
+                  </LinearGradient>
+                  <Text style={styles.heroTitle}>Downloaded Songs</Text>
+                  <Text style={styles.heroMeta}>{headerMeta}</Text>
+                </View>
+
+                <View style={styles.actionSection}>
+                  <Pressable
+                    onPress={() => {
+                      void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                      setActiveTab("settings");
+                    }}
+                    style={styles.storageBadge}
+                  >
+                    <Ionicons name="phone-portrait-outline" size={14} color={UI.primaryA} />
+                    <Text style={styles.storageBadgeText}>{totalBytesFormatted}</Text>
+                    <Ionicons name="chevron-forward" size={12} color={UI.primaryA} style={{ marginLeft: 2 }} />
+                  </Pressable>
+
+                  <View style={styles.rightActions}>
+                    <Pressable
+                      onPress={handleShufflePlay}
+                      style={({ pressed }) => [
+                        styles.shuffleButton,
+                        isShuffled && isPlayingFromDownloaded && styles.shuffleButtonActive,
+                        pressed && styles.shuffleButtonPressed,
+                      ]}
+                      android_ripple={{ color: "rgba(255,255,255,0.12)", borderless: false }}
+                    >
+                      <Ionicons
+                        name="shuffle"
+                        size={24}
+                        color={isShuffled && isPlayingFromDownloaded ? UI.primaryA : UI.text}
+                      />
+                    </Pressable>
+
+                    <Pressable
+                      onPress={handlePlayAll}
+                      style={({ pressed }) => [styles.playAllButton, pressed && styles.playAllButtonPressed]}
+                      android_ripple={{ color: "rgba(0,0,0,0.15)", borderless: false }}
+                    >
+                      <Ionicons
+                        name={isPlayingFromDownloaded && isPlaying ? "pause" : "play"}
+                        size={28}
+                        color="#06241a"
+                        style={!isPlayingFromDownloaded || !isPlaying ? { marginLeft: 3 } : undefined}
+                      />
+                    </Pressable>
+                  </View>
+                </View>
+
+                {filteredSongs.length > 0 ? <View style={styles.songListSpacer} /> : null}
+              </>
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyWrap}>
+                <Ionicons
+                  name={searchQuery ? "search-outline" : "arrow-down-circle-outline"}
+                  size={56}
+                  color={UI.subtext}
+                />
+                <Text style={styles.emptyTitle}>
+                  {searchQuery ? "No songs found" : "No downloaded songs"}
+                </Text>
+                <Text style={styles.emptySubtitle}>
+                  {searchQuery
+                    ? `No results for "${searchQuery}"`
+                    : "Tap the download icon on any song or playlist to save it for offline playback."}
+                </Text>
+                {!searchQuery && (
+                  <Pressable
+                    style={styles.browseBtn}
+                    onPress={() => router.push("/(tabs)/search")}
+                  >
+                    <Text style={styles.browseBtnText}>Browse Music</Text>
+                  </Pressable>
+                )}
+              </View>
+            }
+            style={styles.list}
+            contentContainerStyle={[
+              styles.listContent,
+              completedSongs.length === 0 ? styles.listContentEmpty : undefined,
+            ]}
+            showsVerticalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+          />
+        ) : (
+          /* Tab 2: Settings & Storage View */
+          <ScrollView
+            style={styles.settingsScrollView}
+            contentContainerStyle={[styles.settingsScrollContent, { paddingBottom: Math.max(insets.bottom + 20, 100) }]}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Storage Hero Card */}
+            <View style={styles.storageCard}>
+              <View style={styles.storageTopRow}>
+                <View style={styles.storageTextGroup}>
+                  <Text style={styles.storageTitle}>Offline Storage</Text>
+                  <Text style={styles.storageValue}>{totalBytesFormatted}</Text>
+                </View>
+                <View style={styles.storageIconWrap}>
+                  <Ionicons name="phone-portrait-outline" size={24} color={UI.primaryA} />
+                </View>
+              </View>
+
+              <View style={styles.storageMetricsRow}>
+                <View style={styles.metricItem}>
+                  <Text style={styles.metricNum}>{storageSummary.completedTracks}</Text>
+                  <Text style={styles.metricLabel}>Saved</Text>
+                </View>
+                <View style={styles.metricDivider} />
+                <View style={styles.metricItem}>
+                  <Text style={styles.metricNum}>{storageSummary.pendingTracks}</Text>
+                  <Text style={styles.metricLabel}>Pending</Text>
+                </View>
+                <View style={styles.metricDivider} />
+                <View style={styles.metricItem}>
+                  <Text style={[styles.metricNum, storageSummary.failedTracks > 0 && { color: UI.error }]}>
+                    {storageSummary.failedTracks}
+                  </Text>
+                  <Text style={styles.metricLabel}>Failed</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Audio Quality Section */}
+            <Text style={styles.sectionHeaderTitle}>Audio Download Quality</Text>
+            <View style={styles.groupedCard}>
+              {QUALITY_OPTIONS.map((opt, idx) => {
+                const isSelected = preferences.quality === opt.value;
+                return (
+                  <React.Fragment key={opt.value}>
+                    {idx > 0 && <View style={styles.settingDivider} />}
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.qualityItemRow,
+                        isSelected && styles.qualityItemRowActive,
+                        pressed && styles.qualityItemRowPressed,
+                      ]}
+                      onPress={() => handleQualityChange(opt.value)}
+                    >
+                      <View style={styles.qualityTextCol}>
+                        <Text style={[styles.qualityItemTitle, isSelected && styles.qualityItemTitleActive]}>
+                          {opt.label}
+                        </Text>
+                        <Text style={styles.qualityItemSub}>{opt.sub}</Text>
+                      </View>
+                      <View style={[styles.radioCircle, isSelected && styles.radioCircleActive]}>
+                        {isSelected && <View style={styles.radioDot} />}
+                      </View>
+                    </Pressable>
+                  </React.Fragment>
+                );
+              })}
+            </View>
+
+            {/* Network & Power Section */}
+            <Text style={[styles.sectionHeaderTitle, { marginTop: 22 }]}>Network & Power</Text>
+            <View style={styles.groupedCard}>
+              <View style={styles.settingRow}>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingLabel}>Download over Wi-Fi only</Text>
+                  <Text style={styles.settingDesc}>Prevents using mobile cellular data</Text>
+                </View>
+                <Switch
+                  value={preferences.wifiOnly}
+                  onValueChange={(v) => updatePreferences({ wifiOnly: v })}
+                  trackColor={{ false: "#2a2f38", true: UI.primaryA }}
+                  thumbColor="#fff"
+                />
+              </View>
+
+              <View style={styles.settingDivider} />
+
+              <View style={styles.settingRow}>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingLabel}>Download only when charging</Text>
+                  <Text style={styles.settingDesc}>Preserves battery when running unplugged</Text>
+                </View>
+                <Switch
+                  value={preferences.chargingOnly}
+                  onValueChange={(v) => updatePreferences({ chargingOnly: v })}
+                  trackColor={{ false: "#2a2f38", true: UI.primaryA }}
+                  thumbColor="#fff"
+                />
+              </View>
+
+              <View style={styles.settingDivider} />
+
+              <View style={styles.settingRow}>
+                <View style={styles.settingInfo}>
+                  <Text style={styles.settingLabel}>Auto-delete expired</Text>
+                  <Text style={styles.settingDesc}>Cleans up expired offline tracks</Text>
+                </View>
+                <Switch
+                  value={preferences.autoDeleteExpired}
+                  onValueChange={(v) => updatePreferences({ autoDeleteExpired: v })}
+                  trackColor={{ false: "#2a2f38", true: UI.primaryA }}
+                  thumbColor="#fff"
+                />
+              </View>
+            </View>
+
+            {/* Delete All Section */}
+            <Text style={[styles.sectionHeaderTitle, { marginTop: 22 }]}>Storage Cleanup</Text>
+            <Pressable
+              style={({ pressed }) => [styles.dangerCard, pressed && styles.dangerCardPressed]}
+              onPress={handleRemoveAll}
+            >
+              <Ionicons name="trash-outline" size={18} color={UI.error} style={{ marginRight: 8 }} />
+              <Text style={styles.dangerText}>Delete All Offline Downloads</Text>
+            </Pressable>
+          </ScrollView>
+        )}
+      </View>
     </View>
   );
 }
 
-// ─── Play All button (needs player context) ───────────────────────────────────
-
-function DownloadedPlayAllButton({ songs }: { songs: Song[] }) {
-  const { playSong } = usePlayerActions();
-
-  if (songs.length === 0) return null;
-
-  return (
-    <Pressable
-      style={({ pressed }) => [styles.playAllBtn, pressed && { opacity: 0.8 }]}
-      onPress={() => {
-        void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-        playSong(songs[0], songs);
-      }}
-    >
-      <Ionicons name="play" size={18} color={Colors.black} />
-    </Pressable>
-  );
-}
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: UI.bg },
-
-  // Header
-  header: {
+  container: {
+    flex: 1,
+    backgroundColor: UI.bg,
+  },
+  mainWrap: {
+    flex: 1,
+  },
+  headerRightContainer: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingBottom: 10,
+    justifyContent: "flex-end",
     gap: 8,
   },
-  backBtn: {
-    width: 36,
-    height: 36,
+  stickyPlayButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: UI.primaryA,
     alignItems: "center",
     justifyContent: "center",
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.3)",
   },
-  headerCenter: { flex: 1 },
-  headerTitle: {
-    color: UI.text,
-    fontSize: 17,
-    fontFamily: "Inter_700Bold",
+  stickyPlayButtonPressed: {
+    transform: [{ scale: 0.94 }],
+    opacity: 0.9,
   },
-  headerSub: {
-    color: UI.subtext,
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    marginTop: 1,
+  tabBarWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 8,
   },
-  manageBtn: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  // Hero banner
-  heroBanner: {
+  tabBar: {
     flexDirection: "row",
-    alignItems: "center",
-    marginHorizontal: 16,
-    marginBottom: 12,
-    backgroundColor: UI.surface,
-    borderRadius: 12,
-    padding: 12,
-    gap: 12,
+    backgroundColor: UI.card,
+    borderRadius: 24,
+    padding: 3,
     borderWidth: 1,
-    borderColor: Colors.cardBorder,
+    borderColor: UI.border,
   },
-  coverGrid: {
-    width: 56,
-    height: 56,
+  tabBtn: {
+    flex: 1,
     flexDirection: "row",
-    flexWrap: "wrap",
-    borderRadius: 6,
-    overflow: "hidden",
-  },
-  coverGridItem: {
-    width: 28,
-    height: 28,
-  },
-  coverGridPlaceholder: {
-    backgroundColor: UI.surfaceLight,
     alignItems: "center",
     justifyContent: "center",
+    paddingVertical: 9,
+    borderRadius: 20,
   },
-  heroInfo: { flex: 1 },
-  heroTitle: {
-    color: UI.text,
-    fontSize: 15,
+  tabBtnActive: {
+    backgroundColor: UI.primaryA,
+  },
+  tabBtnText: {
+    color: UI.subtext,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  tabBtnTextActive: {
+    color: "#042115",
     fontFamily: "Inter_700Bold",
   },
-  heroSub: {
-    color: UI.subtext,
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    marginTop: 2,
+  searchContainer: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 16,
   },
-  playAllBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: UI.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  // Section headers (playlist groups)
-  sectionHeader: {
+  searchInputWrapper: {
     flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: UI.lowSurface,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 40,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  searchPlaceholderText: {
+    color: UI.subtext,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    marginLeft: 8,
+  },
+  heroSection: {
     alignItems: "center",
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: UI.bg,
-    marginTop: 8,
-    gap: 12,
   },
-  sectionCover: {
-    width: 48,
-    height: 48,
-    borderRadius: 6,
-  },
-  sectionCoverPlaceholder: {
-    backgroundColor: UI.surface,
-    alignItems: "center",
+  heroIconCard: {
+    width: 96,
+    height: 96,
+    borderRadius: 18,
     justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 14,
+    boxShadow: "0 8px 16px rgba(38, 225, 154, 0.35)",
   },
-  sectionInfo: {
-    flex: 1,
-  },
-  sectionTitle: {
+  heroTitle: {
     color: UI.text,
-    fontSize: 16,
+    fontSize: 26,
     fontFamily: "Inter_700Bold",
+    letterSpacing: -0.5,
+    textAlign: "center",
   },
-  sectionCount: {
+  heroMeta: {
     color: UI.subtext,
     fontSize: 12,
-    fontFamily: "Inter_500Medium",
-    marginTop: 2,
+    fontFamily: "Inter_600SemiBold",
+    marginTop: 6,
+    letterSpacing: 0.5,
+    textAlign: "center",
   },
-  sectionPlayBtn: {
-    padding: 4,
-  },
-
-  // Song rows
-  listContent: {
+  actionSection: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  storageBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: "rgba(38, 225, 154, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(38, 225, 154, 0.2)",
+  },
+  storageBadgeText: {
+    color: UI.primaryA,
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
+  rightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+  },
+  shuffleButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  shuffleButtonActive: {
+    backgroundColor: "rgba(38, 225, 154, 0.12)",
+  },
+  shuffleButtonPressed: {
+    transform: [{ scale: 0.92 }],
+    opacity: 0.8,
+  },
+  playAllButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: UI.primaryA,
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0 4px 10px rgba(38, 225, 154, 0.35)",
+  },
+  playAllButtonPressed: {
+    transform: [{ scale: 0.94 }],
+    opacity: 0.9,
+  },
+  songListSpacer: {
+    height: 8,
+  },
+  list: {
+    flex: 1,
+  },
+  listContent: {
     paddingBottom: 120,
   },
   listContentEmpty: {
     flexGrow: 1,
   },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    gap: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.cardBorder,
-  },
-  rowPressed: {
-    opacity: 0.65,
-    backgroundColor: "rgba(255,255,255,0.03)",
-  },
-  cover: {
-    width: 50,
-    height: 50,
-    borderRadius: 6,
-  },
-  coverPlaceholder: {
-    backgroundColor: UI.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  info: { flex: 1, minWidth: 0 },
-  title: {
-    color: UI.text,
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
-  },
-  titleActive: { color: UI.primary },
-  metaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 3,
-  },
-  artist: {
-    color: UI.subtext,
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    flex: 1,
-  },
-  duration: {
-    color: UI.subtext,
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    width: 36,
-    textAlign: "right",
-  },
-
-  // Empty state
-  empty: {
+  emptyWrap: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 80,
+    paddingTop: 60,
     paddingHorizontal: 32,
     gap: 12,
   },
@@ -610,7 +836,7 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     textAlign: "center",
   },
-  emptySub: {
+  emptySubtitle: {
     color: UI.subtext,
     fontSize: 14,
     fontFamily: "Inter_400Regular",
@@ -622,12 +848,259 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 24,
-    backgroundColor: UI.primary,
+    backgroundColor: UI.primaryA,
   },
   browseBtnText: {
-    color: Colors.black,
+    color: "#042115",
     fontSize: 14,
     fontFamily: "Inter_700Bold",
+  },
+  searchModeContainer: {
+    flex: 1,
+    backgroundColor: UI.bg,
+  },
+  searchModeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255, 255, 255, 0.1)",
+  },
+  searchModeInputWrapper: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: UI.lowSurface,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 40,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  searchModeInput: {
+    flex: 1,
+    color: UI.text,
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
+    marginLeft: 8,
+    paddingVertical: 0,
+  },
+  searchModeCancelButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  searchModeCancelText: {
+    color: UI.subtext,
+    fontSize: 15,
+    fontFamily: "Inter_500Medium",
+  },
+  searchModeListContent: {
+    paddingTop: 8,
+    paddingBottom: 120,
+  },
+  searchModeEmptyWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 80,
+    paddingHorizontal: 32,
+    gap: 12,
+  },
+  searchModeEmptyTitle: {
+    color: UI.text,
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+    textAlign: "center",
+  },
+  searchModeEmptySubtitle: {
+    color: UI.subtext,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    lineHeight: 20,
+  },
+
+  // Settings tab styles
+  settingsScrollView: {
+    flex: 1,
+  },
+  settingsScrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  storageCard: {
+    backgroundColor: UI.card,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: UI.border,
+    marginBottom: 20,
+  },
+  storageTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  storageTextGroup: {
+    flex: 1,
+  },
+  storageTitle: {
+    color: UI.subtext,
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  storageValue: {
+    color: UI.text,
+    fontSize: 24,
+    fontFamily: "Inter_700Bold",
+    marginTop: 2,
+  },
+  storageIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(38, 225, 154, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  storageMetricsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    backgroundColor: "#13171d",
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
+  metricItem: {
+    alignItems: "center",
+    flex: 1,
+  },
+  metricNum: {
+    color: UI.text,
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+  },
+  metricLabel: {
+    color: UI.subtext,
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    marginTop: 2,
+  },
+  metricDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
+  sectionHeaderTitle: {
+    color: UI.subtext,
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  groupedCard: {
+    backgroundColor: UI.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: UI.border,
+    overflow: "hidden",
+  },
+  settingDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    marginHorizontal: 14,
+  },
+  qualityItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+  },
+  qualityItemRowActive: {
+    backgroundColor: "#1c222b",
+  },
+  qualityItemRowPressed: {
+    backgroundColor: UI.cardHover,
+  },
+  qualityTextCol: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  qualityItemTitle: {
+    color: UI.text,
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
+  },
+  qualityItemTitleActive: {
+    color: UI.primaryA,
+  },
+  qualityItemSub: {
+    color: UI.subtext,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    marginTop: 2,
+  },
+  radioCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: UI.subtext,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radioCircleActive: {
+    borderColor: UI.primaryA,
+  },
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: UI.primaryA,
+  },
+  settingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 14,
+  },
+  settingInfo: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  settingLabel: {
+    color: UI.text,
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+  },
+  settingDesc: {
+    color: UI.subtext,
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+    marginTop: 2,
+  },
+  dangerCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 84, 73, 0.08)",
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255, 84, 73, 0.2)",
+    marginTop: 4,
+  },
+  dangerCardPressed: {
+    backgroundColor: "rgba(255, 84, 73, 0.16)",
+  },
+  dangerText: {
+    color: UI.error,
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
   },
 });
 

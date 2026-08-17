@@ -53,10 +53,10 @@ async function setupPlayerInternal(): Promise<void> {
       autoHandleInterruptions: true,
       autoUpdateMetadata: true,
       androidAudioContentType: TrackPlayerModule.AndroidAudioContentType?.Music ?? 2,
-      minBuffer: 15,
+      minBuffer: 30,
       maxBuffer: 50,
-      playBuffer: 2,
-      backBuffer: 30,
+      playBuffer: 5,
+      backBuffer: 10,
       ...(Platform.OS === "ios"
         ? {
             iosCategory: TrackPlayerModule.IOSCategory?.Playback ?? "playback",
@@ -78,8 +78,15 @@ async function setupPlayerInternal(): Promise<void> {
     const AppKilled = TrackPlayerModule.AppKilledPlaybackBehavior ?? {};
     await TrackPlayer.updateOptions({
       android: {
-        appKilledPlaybackBehavior: AppKilled.ContinuePlayback ?? 0,
-        alwaysPauseOnInterruption: true,
+        // Official RNTP AppKilledPlaybackBehavior:
+        // StopPlaybackAndRemoveNotification — stops audio AND removes the
+        // media notification when user swipes the app away from recents.
+        // (ContinuePlayback was set before, which caused music to keep
+        //  playing even after the app was fully killed — wrong behavior.)
+        appKilledPlaybackBehavior:
+          AppKilled.StopPlaybackAndRemoveNotification ??
+          'stop-playback-and-remove-notification',
+        alwaysPauseOnInterruption: false,
         stopForegroundGracePeriod: 5,
       },
       capabilities: [
@@ -90,18 +97,17 @@ async function setupPlayerInternal(): Promise<void> {
         Cap.SeekTo,
         Cap.Stop,
       ].filter(Boolean),
+      // Official Android MediaStyle notification: 3 compact slots (Previous, Play/Pause, Next).
+      // Play maps to the PLAY_PAUSE toggle button in KotlinAudio.
       notificationCapabilities: [
-        Cap.Play,
-        Cap.Pause,
-        Cap.SkipToNext,
         Cap.SkipToPrevious,
-        Cap.SeekTo,
+        Cap.Play,
+        Cap.SkipToNext,
       ].filter(Boolean),
       compactCapabilities: [
-        Cap.Play,
-        Cap.Pause,
-        Cap.SkipToNext,
         Cap.SkipToPrevious,
+        Cap.Play,
+        Cap.SkipToNext,
       ].filter(Boolean),
       progressUpdateEventInterval: 1,
     });

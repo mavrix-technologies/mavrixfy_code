@@ -4,23 +4,27 @@ import { buildAppApiUrl } from "@/lib/api-config";
 import { getBestImageUrl, Song, type JioSaavnImage } from "@/lib/musicData";
 import { sortedCopy } from "@/lib/arrayUtils";
 
-const DAILY_NEW_RELEASE_CACHE_KEY = "@mavrixfy_daily_new_release_songs_v5"; // bumped: query overhaul
+const DAILY_NEW_RELEASE_CACHE_KEY = "@mavrixfy_daily_new_release_songs_v6"; // bumped: official labels & trending expansion
 const CURRENT_YEAR = new Date().getFullYear();
 const PREVIOUS_YEAR = CURRENT_YEAR - 1;
-const DEFAULT_LIMIT = 20; // raised from 10 — gives deduplication enough headroom
+const DEFAULT_LIMIT = 24;
 
 const NEW_RELEASE_QUERIES = [
-  `new hindi movie songs ${CURRENT_YEAR}`,
   `latest bollywood songs ${CURRENT_YEAR}`,
   `new bollywood songs ${CURRENT_YEAR}`,
-  `hindi film songs ${CURRENT_YEAR}`,
+  `trending bollywood songs ${CURRENT_YEAR}`,
+  `new hindi movie songs ${CURRENT_YEAR}`,
+  `latest hindi film songs ${CURRENT_YEAR}`,
+  `trending hindi songs ${CURRENT_YEAR}`,
+  `latest hindi hits ${CURRENT_YEAR}`,
   `t-series new songs ${CURRENT_YEAR}`,
-  `zee music new songs ${CURRENT_YEAR}`,
+  `zee music company new songs ${CURRENT_YEAR}`,
   `yrf new songs ${CURRENT_YEAR}`,
   `saregama new songs ${CURRENT_YEAR}`,
-  `new hindi songs ${CURRENT_YEAR}`,
+  `sony music india new songs ${CURRENT_YEAR}`,
+  `tips official new songs ${CURRENT_YEAR}`,
   `bollywood new releases ${CURRENT_YEAR}`,
-  `latest hindi film songs ${CURRENT_YEAR}`,
+  `new hindi songs ${CURRENT_YEAR}`,
 ] as const;
 
 const NEW_RELEASE_ALBUM_QUERIES = [
@@ -28,12 +32,17 @@ const NEW_RELEASE_ALBUM_QUERIES = [
   `latest bollywood songs ${CURRENT_YEAR}`,
   `new bollywood songs ${CURRENT_YEAR}`,
   `t-series new songs ${CURRENT_YEAR}`,
+  `zee music new songs ${CURRENT_YEAR}`,
   `yrf new songs ${CURRENT_YEAR}`,
+  `sony music hindi ${CURRENT_YEAR}`,
+  `saregama hindi ${CURRENT_YEAR}`,
 ] as const;
 
 const OFFICIAL_LABEL_TERMS = [
   "t-series",
+  "tseries",
   "yrf",
+  "yash raj",
   "zee music",
   "saregama",
   "sony music",
@@ -45,8 +54,15 @@ const OFFICIAL_LABEL_TERMS = [
   "hitz music",
   "venus",
   "eros music",
+  "eros now",
   "jjust music",
   "maddock",
+  "desi music factory",
+  "white hill",
+  "speed records",
+  "dharma",
+  "excel entertainment",
+  "svf",
 ] as const;
 
 const COMPILATION_ALBUM_PATTERN =

@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
@@ -102,6 +103,17 @@ export const HomeArtistsSection = memo(function HomeArtistsSection({
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Featured Artists</Text>
+        <Pressable
+          hitSlop={12}
+          style={({ pressed }) => [styles.viewAllBtn, pressed && styles.viewAllBtnPressed]}
+          onPress={() => {
+            void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+            router.push("/artists");
+          }}
+        >
+          <Text style={styles.viewAllText}>View all</Text>
+          <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
+        </Pressable>
       </View>
 
       <FlatList
@@ -124,9 +136,12 @@ export const HomeArtistsSection = memo(function HomeArtistsSection({
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 14,
+    marginVertical: 12,
   },
   header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     marginBottom: 10,
   },
@@ -135,6 +150,21 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     color: "#FFFFFF",
     letterSpacing: -0.3,
+  },
+  viewAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+  },
+  viewAllBtnPressed: {
+    opacity: 0.7,
+  },
+  viewAllText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.primary,
   },
   listContent: {
     paddingHorizontal: 16,

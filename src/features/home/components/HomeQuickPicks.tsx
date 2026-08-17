@@ -283,7 +283,7 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 14,
+    marginVertical: 12,
   },
   header: {
     paddingHorizontal: 16,

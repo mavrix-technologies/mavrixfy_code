@@ -32,7 +32,7 @@ import {
 } from "@/lib/firestore";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import { triggerImpact } from "@/lib/haptics";
-import { usePlayerActions } from "@/contexts/PlayerContext";
+import { useLikedSongs } from "@/contexts/PlayerContext";
 import { getFollowedArtists, FollowedArtist } from "@/lib/followedArtists";
 import OfflineBanner from "@/components/OfflineBanner";
 import AppTopHeader, {
@@ -152,7 +152,7 @@ function LibraryScreenView() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { isOnline } = useNetwork();
-  const { likedSongs } = usePlayerActions();
+  const { likedSongs, likedSongsCount } = useLikedSongs();
   const activeUserId = user?.id ?? null;
   const hasCachedPlaylists =
     LIBRARY_SESSION_CACHE.hydrated && LIBRARY_SESSION_CACHE.userId === activeUserId;
@@ -435,10 +435,7 @@ function LibraryScreenView() {
       }, 0),
     [playlists]
   );
-  const likedSongCount = useMemo(
-    () => likedSongs.filter((song) => song && song.id && song.title).length,
-    [likedSongs]
-  );
+  const likedSongCount = likedSongsCount;
 
   const listData = useMemo<LibraryListItem[]>(() => {
     // Hide playlist rows when "artists" filter is active

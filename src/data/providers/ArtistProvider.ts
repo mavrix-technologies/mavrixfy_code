@@ -55,10 +55,10 @@ export interface ArtistCard {
 
 const ARTIST_CACHE_PREFIX = "@mavrixfy_artist";
 const ARTIST_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
-const FEATURED_ARTISTS_CACHE_KEY = "@mavrixfy_featured_artists_v5";
+const FEATURED_ARTISTS_CACHE_KEY = "@mavrixfy_featured_artists_v7";
 const FEATURED_ARTISTS_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
-const FEATURED_ARTIST_QUERY_LIMIT = 12;
-const FEATURED_ARTIST_SHOWCASE_LIMIT = 12;
+const FEATURED_ARTIST_QUERY_LIMIT = 40;
+const FEATURED_ARTIST_SHOWCASE_LIMIT = 24;
 const FEATURED_ARTIST_ROTATION_WINDOW_MS = 6 * 60 * 60 * 1000;
 const TIMEOUT_MS = 6000;
 
@@ -384,7 +384,7 @@ async function setCachedFeaturedArtists(artists: ArtistCard[]): Promise<void> {
 
 // ─── Fetch ────────────────────────────────────────────────────────────────────
 
-async function fetchArtistRaw(id: string, songCount = 20): Promise<JioSaavnArtist | null> {
+async function fetchArtistRaw(id: string, songCount = 50): Promise<JioSaavnArtist | null> {
   const appBase = getApiUrl().replace(/\/+$/, "");
   const urls = [
     `${appBase}/api/artists/${encodeURIComponent(id)}?songCount=${songCount}&albumCount=10&sortBy=popularity&sortOrder=desc`,
@@ -524,6 +524,20 @@ export async function getFeaturedArtists(options?: { forceRefresh?: boolean }): 
   const fresh = await fetchFeaturedArtists();
   if (fresh.length > 0) void setCachedFeaturedArtists(fresh);
   return buildFeaturedArtistShowcase(fresh);
+}
+
+/** Returns the full ranked list of all discovered popular artists (used for All Artists screen) */
+export async function getAllPopularArtists(options?: { forceRefresh?: boolean }): Promise<ArtistCard[]> {
+  const forceRefresh = options?.forceRefresh ?? false;
+  if (!forceRefresh) {
+    const cached = await getCachedFeaturedArtists();
+    if (cached && cached.length > 0) {
+      return rankFeaturedArtists(cached);
+    }
+  }
+  const fresh = await fetchFeaturedArtists();
+  if (fresh.length > 0) void setCachedFeaturedArtists(fresh);
+  return rankFeaturedArtists(fresh);
 }
 
 export async function clearFeaturedArtistsCache(): Promise<void> {
