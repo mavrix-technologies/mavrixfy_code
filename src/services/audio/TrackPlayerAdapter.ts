@@ -1,16 +1,15 @@
 import { PermissionsAndroid, Platform } from "react-native";
+import TrackPlayer, {
+  Capability,
+  AppKilledPlaybackBehavior,
+  AndroidAudioContentType,
+  IOSCategory,
+  IOSCategoryMode,
+  IOSCategoryOptions,
+} from "react-native-track-player";
 
 let playerReady = false;
 let setupPromise: Promise<void> | null = null;
-
-function getTrackPlayerModule(): any {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require("react-native-track-player");
-  } catch {
-    return null;
-  }
-}
 
 function isAlreadyInitialized(error: unknown): boolean {
   return (error as { code?: string } | undefined)?.code === "player_already_initialized";
@@ -31,11 +30,6 @@ export async function setupPlayer(): Promise<void> {
 }
 
 async function setupPlayerInternal(): Promise<void> {
-  const TrackPlayerModule = getTrackPlayerModule();
-  if (!TrackPlayerModule) {
-    return;
-  }
-  const TrackPlayer = TrackPlayerModule.default ?? TrackPlayerModule;
   if (!TrackPlayer?.setupPlayer) {
     return;
   }
@@ -52,19 +46,19 @@ async function setupPlayerInternal(): Promise<void> {
     await TrackPlayer.setupPlayer({
       autoHandleInterruptions: true,
       autoUpdateMetadata: true,
-      androidAudioContentType: TrackPlayerModule.AndroidAudioContentType?.Music ?? 2,
+      androidAudioContentType: AndroidAudioContentType?.Music ?? 2,
       minBuffer: 30,
       maxBuffer: 50,
       playBuffer: 5,
       backBuffer: 10,
       ...(Platform.OS === "ios"
         ? {
-            iosCategory: TrackPlayerModule.IOSCategory?.Playback ?? "playback",
-            iosCategoryMode: TrackPlayerModule.IOSCategoryMode?.Default ?? "default",
+            iosCategory: IOSCategory?.Playback ?? "playback",
+            iosCategoryMode: IOSCategoryMode?.Default ?? "default",
             iosCategoryOptions: [
-              TrackPlayerModule.IOSCategoryOptions?.AllowAirPlay ?? 1,
-              TrackPlayerModule.IOSCategoryOptions?.AllowBluetooth ?? 2,
-              TrackPlayerModule.IOSCategoryOptions?.AllowBluetoothA2DP ?? 8,
+              IOSCategoryOptions?.AllowAirPlay ?? 1,
+              IOSCategoryOptions?.AllowBluetooth ?? 2,
+              IOSCategoryOptions?.AllowBluetoothA2DP ?? 8,
             ],
           }
         : {}),
@@ -74,41 +68,37 @@ async function setupPlayerInternal(): Promise<void> {
   }
 
   if (TrackPlayer.updateOptions) {
-    const Cap = TrackPlayerModule.Capability ?? {};
-    const AppKilled = TrackPlayerModule.AppKilledPlaybackBehavior ?? {};
     await TrackPlayer.updateOptions({
       android: {
-        // Official RNTP AppKilledPlaybackBehavior:
-        // StopPlaybackAndRemoveNotification — stops audio AND removes the
-        // media notification when user swipes the app away from recents.
-        // (ContinuePlayback was set before, which caused music to keep
-        //  playing even after the app was fully killed — wrong behavior.)
         appKilledPlaybackBehavior:
-          AppKilled.StopPlaybackAndRemoveNotification ??
-          'stop-playback-and-remove-notification',
+          AppKilledPlaybackBehavior?.StopPlaybackAndRemoveNotification ??
+          "stop-playback-and-remove-notification",
         alwaysPauseOnInterruption: false,
         stopForegroundGracePeriod: 5,
       },
+      // Capabilities exposed to MediaSession (Android Auto, lock screen, Android 13+ player state)
       capabilities: [
-        Cap.Play,
-        Cap.Pause,
-        Cap.SkipToNext,
-        Cap.SkipToPrevious,
-        Cap.SeekTo,
-        Cap.Stop,
-      ].filter(Boolean),
-      // Official Android MediaStyle notification: 3 compact slots (Previous, Play/Pause, Next).
-      // Play maps to the PLAY_PAUSE toggle button in KotlinAudio.
+        Capability.Play,
+        Capability.Pause,
+        Capability.SkipToNext,
+        Capability.SkipToPrevious,
+        Capability.SeekTo,
+        Capability.Stop,
+      ],
+      // Exactly 3 notification buttons: [0: Previous, 1: Play/Pause Toggle, 2: Next]
+      // DO NOT add Capability.Pause here, because KotlinAudio creates a PLAY_PAUSE toggle button for Play.
+      // Adding Pause creates a duplicate toggle button that pushes Next to index 3, cutting it off.
       notificationCapabilities: [
-        Cap.SkipToPrevious,
-        Cap.Play,
-        Cap.SkipToNext,
-      ].filter(Boolean),
+        Capability.SkipToPrevious,
+        Capability.Play,
+        Capability.SkipToNext,
+      ],
+      // Compact notification view (indices 0, 1, 2)
       compactCapabilities: [
-        Cap.SkipToPrevious,
-        Cap.Play,
-        Cap.SkipToNext,
-      ].filter(Boolean),
+        Capability.SkipToPrevious,
+        Capability.Play,
+        Capability.SkipToNext,
+      ],
       progressUpdateEventInterval: 1,
     });
   }

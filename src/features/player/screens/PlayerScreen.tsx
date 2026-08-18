@@ -33,10 +33,11 @@ import Reanimated, {
   withSpring,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 
 import { safeGoBack } from "@/utils/navigation";
+import { playerUIStateStore } from "@/lib/playerUIState";
 import { usePlayerActions, usePlayerProgress, usePlayerRow } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
@@ -53,6 +54,7 @@ import {
 } from "@/lib/colorExtractor";
 import EqualizerBars from "@/components/EqualizerBars";
 import DownloadButton from "@/components/DownloadButton";
+import { KaraokeLyricsView, FullscreenKaraokeModal } from "@/components/KaraokeLyricsView";
 import { mapFilter } from "@/lib/arrayUtils";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 
@@ -67,9 +69,9 @@ const PLAYER_PRIMARY_DISMISS_FAST_VELOCITY = 650;
 const PLAYER_PRIMARY_DISMISS_FAIL_X_PX = 34;
 const PLAYER_PRIMARY_DISMISS_MAX_DRAG_RATIO = 0.58;
 const PLAYER_PRIMARY_DISMISS_SPRING = {
-  damping: 24,
-  mass: 0.9,
-  stiffness: 270,
+  damping: 28,
+  mass: 1.0,
+  stiffness: 190,
 };
 
 const AnimatedSongFlatList = Animated.createAnimatedComponent(
@@ -130,7 +132,14 @@ type ArtworkQueueItem = {
 };
 
 const CinematicPlayerBackground = memo(function CinematicPlayerBackground() {
-  return <View pointerEvents="none" style={styles.backgroundLayer} />;
+  return (
+    <View
+      pointerEvents="none"
+      style={styles.backgroundLayer}
+      renderToHardwareTextureAndroid={true}
+      needsOffscreenAlphaCompositing={true}
+    />
+  );
 });
 
 const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
@@ -555,7 +564,7 @@ PlayerPlayButton.displayName = "PlayerPlayButton";
 const PLAYER_SLIDER_MINIMUM_TRACK_COLOR = "#F7FAFF";
 const PLAYER_SLIDER_MAXIMUM_TRACK_COLOR = "rgba(247,250,255,0.28)";
 const PLAYER_SLIDER_THUMB_COLOR = "#F7FAFF";
-const PLAYER_SLIDER_TOUCH_HEIGHT = 36;
+const PLAYER_SLIDER_TOUCH_HEIGHT = 12;
 const PLAYER_SLIDER_THUMB_SIZE = 10;
 
 function clampUnit(value: number): number {
@@ -897,7 +906,7 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
     <View
       style={[
         styles.spotifyProgressWrap,
-        { marginTop: isShortScreen ? 8 : 10, marginHorizontal: isShortScreen ? 14 : 20 },
+        { marginTop: isShortScreen ? 14 : 18, marginHorizontal: isShortScreen ? 16 : 20 },
       ]}
     >
       <PlayerSlider
@@ -1233,18 +1242,24 @@ function LegacyPlayerScreenView() {
       setIsNavigationFocused(true);
     };
     navigation.addListener("focus", handler);
-    return () => {
-      navigation.removeListener("focus", handler);
-    };
-  }, [navigation]);
-
-  useEffect(() => {
-    const handler = () => {
+    const blurHandler = () => {
       setIsNavigationFocused(false);
     };
-    navigation.addListener("blur", handler);
+    navigation.addListener("blur", blurHandler);
+
+    // Sync with GlobalPlayerSheet state: pause heavy background rendering when collapsed
+    const unsubscribe = playerUIStateStore.subscribe((state) => {
+      const isExpanded = state === "expanded";
+      setIsNavigationFocused(isExpanded);
+      if (isExpanded) {
+        fetchSettings();
+      }
+    });
+
     return () => {
-      navigation.removeListener("blur", handler);
+      navigation.removeListener("focus", handler);
+      navigation.removeListener("blur", blurHandler);
+      unsubscribe();
     };
   }, [navigation]);
 
@@ -1288,7 +1303,8 @@ function LegacyPlayerScreenView() {
   const playerDismissGestureEnabledShared = useSharedValue(1);
   const playerDismissTranslateY = useSharedValue(0);
   const optionsPressLockRef = useRef(false);
-  const { positionMillis } = usePlayerProgress();
+  const { positionMillis, duration, progress } = usePlayerProgress();
+  const [fullscreenLyricsVisible, setFullscreenLyricsVisible] = useState(false);
   
   const {
     togglePlay,
@@ -1309,6 +1325,18 @@ function LegacyPlayerScreenView() {
     setIsProgressSeeking(false);
   }
   const artScrollX = artScrollXRef.current!;
+
+  const currentPositionSeconds = positionMillis > 0 ? positionMillis / 1000 : ((progress || 0) * (duration || 0)) / 1000;
+
+  const handleLyricSeek = useCallback(
+    (seconds: number) => {
+      const totalSec = (duration > 0 ? duration / 1000 : currentSong?.duration) || 0;
+      if (totalSec > 0) {
+        seekTo(Math.max(0, Math.min(1, seconds / totalSec)));
+      }
+    },
+    [duration, currentSong?.duration, seekTo]
+  );
 
   const clearSkipCooldownTimer = useCallback(() => {
     if (!skipCooldownTimerRef.current) return;
@@ -1362,8 +1390,21 @@ function LegacyPlayerScreenView() {
       }
     };
     navigation.addListener("focus", handler);
+
+    // Also listen to playerUIStateStore so re-opening via GlobalPlayerSheet resets dismissal state
+    const unsubscribe = playerUIStateStore.subscribe((state) => {
+      if (state === "expanded") {
+        didHandleSheetDismissRef.current = false;
+        sheetDetentReadyAtRef.current = Date.now() + 450;
+        playerDismissGestureEnabledRef.current = true;
+        playerDismissGestureEnabledShared.value = 1;
+        playerDismissTranslateY.value = 0;
+      }
+    });
+
     return () => {
       navigation.removeListener("focus", handler);
+      unsubscribe();
     };
   }, [navigation, playerDismissGestureEnabledShared, playerDismissTranslateY]);
 
@@ -1579,46 +1620,6 @@ function LegacyPlayerScreenView() {
     };
   }, []);
 
-  const targetScale = (Platform.OS === "ios" ? 40 : 48) / artSize;
-  const targetCenterX = Platform.OS === "ios" ? 40 : 48;
-  const cardTop = topInset + 54 + (isVeryShortScreen ? 8 : isShortScreen ? 12 : 18);
-  const cardCenterY = cardTop + artSize / 2;
-  const targetCenterY = screenHeight - bottomInset - 30;
-  const targetTranslateYRelative = targetCenterY - screenHeight - cardCenterY;
-
-  const artworkDismissAnimatedStyle = useAnimatedStyle(() => {
-    const translateYVal = Math.max(0, playerDismissTranslateY.value);
-
-    const scaleVal = interpolate(
-      translateYVal,
-      [0, screenHeight],
-      [1, targetScale],
-      Extrapolation.CLAMP
-    );
-
-    const translateXVal = interpolate(
-      translateYVal,
-      [0, screenHeight],
-      [0, targetCenterX - screenWidth / 2],
-      Extrapolation.CLAMP
-    );
-
-    const translateYValRelative = interpolate(
-      translateYVal,
-      [0, screenHeight],
-      [0, targetTranslateYRelative],
-      Extrapolation.CLAMP
-    );
-
-    return {
-      transform: [
-        { translateX: translateXVal },
-        { translateY: translateYValRelative },
-        { scale: scaleVal },
-      ],
-    };
-  }, [screenHeight, screenWidth, targetScale, targetCenterX, targetTranslateYRelative]);
-
   const controlsDismissAnimatedStyle = useAnimatedStyle(() => {
     const translateY = Math.max(0, playerDismissTranslateY.value);
     const opacity = interpolate(
@@ -1817,43 +1818,19 @@ function LegacyPlayerScreenView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [controlButtonSize, isVeryShortScreen, isShortScreen]
   );
-  const playerIconBtnStyle = useMemo(
-    () => ({ ...ctrlBtnBase, backgroundColor: "transparent", borderColor: "transparent" }),
-    [ctrlBtnBase]
-  );
-  const songDetailActionBtnStyle = useMemo(
-    () => ({
-      width: songDetailActionSize,
-      height: songDetailActionSize,
-      borderRadius: songDetailActionSize / 2,
-      backgroundColor: "transparent",
-      borderColor: "transparent",
-    }),
-    // React Doctor tracks the source value behind songDetailActionSize, while ESLint correctly sees the derived value as sufficient.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [songDetailActionSize, isVeryShortScreen]
-  );
-  const songDetailDownloadBtnStyle = useMemo(
-    () => ({
-      width: songDetailActionSize,
-      height: songDetailActionSize,
-      borderRadius: songDetailActionSize / 2,
-      padding: 0,
-    }),
-    // React Doctor tracks the source value behind songDetailActionSize, while ESLint correctly sees the derived value as sufficient.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [songDetailActionSize, isVeryShortScreen]
-  );
-  const prevNextBtnSizeStyle = useMemo(
-    () => ({
-      width: prevNextButtonSize,
-      height: prevNextButtonSize,
-      borderRadius: prevNextButtonSize / 2,
-    }),
-    // React Doctor tracks the source values behind prevNextButtonSize, while ESLint correctly sees the derived value as sufficient.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [prevNextButtonSize, isVeryShortScreen, isShortScreen]
-  );
+  const playerIconBtnStyle = { ...ctrlBtnBase, backgroundColor: "transparent", borderColor: "transparent" };
+  const songDetailActionBtnStyle = {
+    width: songDetailActionSize,
+    height: songDetailActionSize,
+    borderRadius: songDetailActionSize / 2,
+    backgroundColor: "transparent",
+    borderColor: "transparent",
+  };
+  const prevNextBtnSizeStyle = {
+    width: prevNextButtonSize,
+    height: prevNextButtonSize,
+    borderRadius: prevNextButtonSize / 2,
+  };
 
   const artCarouselGetItemLayout = useCallback(
     (_: ArtworkQueueItem[] | null | undefined, index: number) => ({
@@ -2025,7 +2002,6 @@ function LegacyPlayerScreenView() {
     didHandleSheetDismissRef.current = true;
     safeGoBack();
   }, []);
-
 
   const playerPrimaryDismissGesture = useMemo(
     () =>
@@ -2199,14 +2175,6 @@ function LegacyPlayerScreenView() {
         </Pressable>
       );
 
-      if (isActiveCard) {
-        return (
-          <Reanimated.View style={[styles.activeCardReanimatedContainer, artworkDismissAnimatedStyle]}>
-            {cardContent}
-          </Reanimated.View>
-        );
-      }
-
       return cardContent;
     },
     // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeQueueIndex and artCarouselPageWidth are normalized aliases of liveActiveQueueIndex and screenWidth.
@@ -2217,7 +2185,6 @@ function LegacyPlayerScreenView() {
       artScrollX,
       artSize,
       handleArtworkSongChange,
-      artworkDismissAnimatedStyle,
       ambientVideoLayoutActive,
     ]
   );
@@ -2304,12 +2271,6 @@ function LegacyPlayerScreenView() {
 
   return (
     <View style={styles.container}>
-      <Reanimated.View
-        style={[
-          styles.backdropOverlay,
-          backdropAnimatedStyle,
-        ]}
-      />
       <Reanimated.View style={[styles.playerSheetSurface, playerDismissAnimatedStyle]}>
         <Reanimated.View style={[StyleSheet.absoluteFillObject, bgOpacityAnimatedStyle]}>
           <CinematicPlayerBackground />
@@ -2462,30 +2423,13 @@ function LegacyPlayerScreenView() {
                     styles.playerContent,
                     {
                       paddingTop: topInset + topBarHeight,
-                      paddingBottom: isShortScreen ? 10 : 14,
-                    },
-                    ambientVideoLayoutActive && {
-                      minHeight: screenHeight - topInset - (isShortScreen ? 110 : 130),
-                      paddingBottom: 0,
+                      minHeight: screenHeight - topInset - 44,
                     },
                   ]}
                 >
                   <GestureDetector gesture={playerPrimaryDismissGesture}>
-                    <View
-                      style={[
-                        styles.playerPrimaryStack,
-                        ambientVideoLayoutActive && { flex: 1 },
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.artWrap,
-                          {
-                            marginTop: isVeryShortScreen ? 8 : isShortScreen ? 12 : 18,
-                            paddingHorizontal: 0,
-                          },
-                        ]}
-                      >
+                    <View style={styles.playerPrimaryStack}>
+                      <View style={styles.artWrap}>
                         <AnimatedSongFlatList
                           ref={(list: any) => {
                             artCarouselRef.current = list as FlatList<ArtworkQueueItem> | null;
@@ -2516,13 +2460,14 @@ function LegacyPlayerScreenView() {
                         />
                       </View>
 
+                      {/* Unified Bottom Control & Info Cluster (Connected Together) */}
                       <Reanimated.View style={[{ flexGrow: 0 }, controlsDismissAnimatedStyle]}>
                         <View
                           style={[
                             styles.songBlock,
                             {
-                              marginTop: isVeryShortScreen ? 18 : isShortScreen ? 22 : 28,
-                              marginHorizontal: isShortScreen ? 14 : 20,
+                              marginTop: isVeryShortScreen ? 12 : isShortScreen ? 16 : 20,
+                              marginHorizontal: isShortScreen ? 16 : 20,
                             },
                           ]}
                         >
@@ -2563,117 +2508,113 @@ function LegacyPlayerScreenView() {
                             >
                               <Ionicons
                                 name={liked ? "heart" : "heart-outline"}
-                                size={songDetailIconSize}
+                                size={songDetailIconSize + 2}
                                 color={liked ? selectedControlIconColor : "#FFFFFF"}
                               />
                             </SmoothControlButton>
+                          </View>
+                        </View>
 
-                            {!screenSongIsYouTube ? (
-                              <View style={[styles.songDetailActionButton, songDetailActionBtnStyle]}>
-                                <DownloadButton
-                                  song={screenSong}
-                                  size={songDetailIconSize}
-                                  color="#FFFFFF"
-                                  style={[styles.playerDownloadButton, songDetailDownloadBtnStyle]}
-                                />
-                              </View>
-                            ) : null}
+                        <View style={styles.playerActionStack}>
+                          <PlayerSpotifyProgress
+                            key={screenSong.id}
+                            screenSongId={screenSong.id}
+                            songDurationSeconds={screenSong.duration}
+                            isShortScreen={isShortScreen}
+                            seekTo={seekTo}
+                            onSeekingChange={setIsProgressSeeking}
+                          />
+
+                          <View
+                            style={[
+                              styles.controlsRow,
+                              {
+                                marginTop: isShortScreen ? 2 : 4,
+                                marginHorizontal: isShortScreen ? 16 : 20,
+                                marginBottom: isShortScreen ? 2 : 4,
+                                gap: controlsRowGap,
+                              },
+                            ]}
+                          >
+                            <SmoothControlButton
+                              style={[
+                                styles.roundIconButton,
+                                playerIconBtnStyle,
+                              ]}
+                              onPress={() => {
+                                toggleShuffle();
+                              }}
+                            >
+                              <Ionicons
+                                name="shuffle"
+                                size={shuffleRepeatIconSize}
+                                color={playerIsShuffled ? selectedControlIconColor : sideControlIconColor}
+                              />
+                            </SmoothControlButton>
+
+                            <SmoothControlButton
+                              style={[styles.prevNextButton, prevNextBtnSizeStyle]}
+                              onPressIn={() => {
+                                handleSkip("prev");
+                              }}
+                            >
+                              <Ionicons name="play-skip-back" size={prevNextIconSize} color={activeControlIconColor} />
+                            </SmoothControlButton>
+
+                            <PlayerPlayButton
+                              buttonSize={playButtonSize}
+                              iconSize={playIconSize}
+                              onAccentColor="#060A0F"
+                              onPress={() => {
+                                togglePlay();
+                              }}
+                            />
+
+                            <SmoothControlButton
+                              style={[styles.prevNextButton, prevNextBtnSizeStyle]}
+                              onPressIn={() => {
+                                handleSkip("next");
+                              }}
+                            >
+                              <Ionicons name="play-skip-forward" size={prevNextIconSize} color={activeControlIconColor} />
+                            </SmoothControlButton>
+
+                            <SmoothControlButton
+                              style={[
+                                styles.roundIconButton,
+                                playerIconBtnStyle,
+                              ]}
+                              onPress={() => {
+                                toggleRepeat();
+                              }}
+                            >
+                              <Ionicons
+                                name="repeat"
+                                size={shuffleRepeatIconSize}
+                                color={playerRepeatMode !== "off" ? selectedControlIconColor : sideControlIconColor}
+                              />
+                              {playerRepeatMode === "one" && (
+                                <Text style={[styles.repeatOneBadge, { color: selectedControlIconColor }]}>1</Text>
+                              )}
+                            </SmoothControlButton>
                           </View>
                         </View>
                       </Reanimated.View>
                     </View>
                   </GestureDetector>
-
-                  <Reanimated.View style={controlsDismissAnimatedStyle}>
-                    <View style={styles.playerActionStack}>
-                      <PlayerSpotifyProgress
-                        key={screenSong.id}
-                        screenSongId={screenSong.id}
-                        songDurationSeconds={screenSong.duration}
-                        isShortScreen={isShortScreen}
-                        seekTo={seekTo}
-                        onSeekingChange={setIsProgressSeeking}
-                      />
-
-                      <View
-                        style={[
-                          styles.controlsRow,
-                          {
-                            marginTop: isShortScreen ? 6 : 8,
-                            marginHorizontal: isShortScreen ? 14 : 20,
-                            marginBottom: isShortScreen ? 6 : 8,
-                            gap: controlsRowGap,
-                          },
-                        ]}
-                      >
-                        <SmoothControlButton
-                          style={[
-                            styles.roundIconButton,
-                            playerIconBtnStyle,
-                          ]}
-                          onPress={() => {
-                            toggleShuffle();
-                          }}
-                        >
-                          <Ionicons
-                            name="shuffle"
-                            size={shuffleRepeatIconSize}
-                            color={playerIsShuffled ? selectedControlIconColor : sideControlIconColor}
-                          />
-                        </SmoothControlButton>
-
-                        <SmoothControlButton
-                          style={[styles.prevNextButton, prevNextBtnSizeStyle]}
-                          onPressIn={() => {
-                            handleSkip("prev");
-                          }}
-                        >
-                          <Ionicons name="play-skip-back" size={prevNextIconSize} color={activeControlIconColor} />
-                        </SmoothControlButton>
-
-                        <PlayerPlayButton
-                          buttonSize={playButtonSize}
-                          iconSize={playIconSize}
-                          onAccentColor="#060A0F"
-                          onPress={() => {
-                            togglePlay();
-                          }}
-                        />
-
-                        <SmoothControlButton
-                          style={[styles.prevNextButton, prevNextBtnSizeStyle]}
-                          onPressIn={() => {
-                            handleSkip("next");
-                          }}
-                        >
-                          <Ionicons name="play-skip-forward" size={prevNextIconSize} color={activeControlIconColor} />
-                        </SmoothControlButton>
-
-                        <SmoothControlButton
-                          style={[
-                            styles.roundIconButton,
-                            playerIconBtnStyle,
-                          ]}
-                          onPress={() => {
-                            toggleRepeat();
-                          }}
-                        >
-                          <Ionicons
-                            name="repeat"
-                            size={shuffleRepeatIconSize}
-                            color={playerRepeatMode !== "off" ? selectedControlIconColor : sideControlIconColor}
-                          />
-                          {playerRepeatMode === "one" && (
-                            <Text style={[styles.repeatOneBadge, { color: selectedControlIconColor }]}>1</Text>
-                          )}
-                        </SmoothControlButton>
-                      </View>
-
-                    </View>
-                  </Reanimated.View>
                 </View>
 
                 <Reanimated.View style={controlsDismissAnimatedStyle}>
+                  <KaraokeLyricsView
+                    song={screenSong}
+                    currentPositionSeconds={currentPositionSeconds}
+                    durationSeconds={duration > 0 ? duration / 1000 : screenSong?.duration || 0}
+                    isPlaying={playbackState.isPlaying}
+                    onTogglePlay={togglePlay}
+                    onSeek={handleLyricSeek}
+                    onToggleFullScreen={() => setFullscreenLyricsVisible(true)}
+                  />
+
                   <View
                     style={[
                       styles.playingListSection,
@@ -2720,6 +2661,17 @@ function LegacyPlayerScreenView() {
 
         </View>
       </Reanimated.View>
+
+      <FullscreenKaraokeModal
+        visible={fullscreenLyricsVisible}
+        song={screenSong}
+        currentPositionSeconds={currentPositionSeconds}
+        durationSeconds={duration > 0 ? duration / 1000 : screenSong?.duration || 0}
+        isPlaying={playbackState.isPlaying}
+        onTogglePlay={togglePlay}
+        onSeek={handleLyricSeek}
+        onClose={() => setFullscreenLyricsVisible(false)}
+      />
     </View>
   );
 }
@@ -2810,7 +2762,8 @@ const styles = StyleSheet.create({
     flexGrow: 0,
   },
   playerPrimaryStack: {
-    flexGrow: 0,
+    flex: 1,
+    justifyContent: "space-between",
   },
   playerActionStack: {
     flexGrow: 0,
@@ -2856,10 +2809,11 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
   },
   artWrap: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 0,
-    marginTop: 8,
+    marginTop: 6,
   },
   artCarousel: {
     width: "100%",
@@ -3098,7 +3052,7 @@ const styles = StyleSheet.create({
   playerSlider: {
     width: "100%",
     height: PLAYER_SLIDER_TOUCH_HEIGHT,
-    marginVertical: 4,
+    marginVertical: 0,
     justifyContent: "center",
     position: "relative",
   },
@@ -3130,7 +3084,7 @@ const styles = StyleSheet.create({
     backgroundColor: PLAYER_SLIDER_THUMB_COLOR,
   },
   spotifyTimeRow: {
-    marginTop: 2,
+    marginTop: 1,
     flexDirection: "row",
     justifyContent: "space-between",
   },

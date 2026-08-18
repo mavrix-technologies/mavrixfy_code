@@ -409,6 +409,11 @@ function RootLayoutNav() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: Colors.background },
+          animation: "slide_from_right",
+          animationDuration: 240,
+          freezeOnBlur: true,
+          gestureEnabled: true,
+          fullScreenGestureEnabled: true,
         }}
       >
         <Stack.Screen name="(tabs)" />
@@ -417,6 +422,7 @@ function RootLayoutNav() {
           options={{
             presentation: "transparentModal",
             animation: "slide_from_bottom",
+            animationDuration: 250,
             contentStyle: { backgroundColor: "transparent" },
           }}
         />
@@ -425,6 +431,7 @@ function RootLayoutNav() {
           options={{
             presentation: Platform.OS === "android" ? "transparentModal" : "modal",
             animation: "slide_from_bottom",
+            animationDuration: 250,
             contentStyle: { backgroundColor: Platform.OS === "android" ? "transparent" : "#1E1E1E" },
           }}
         />

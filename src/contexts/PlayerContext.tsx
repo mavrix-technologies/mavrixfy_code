@@ -327,12 +327,15 @@ function withResolvedPlaybackUrl(song: Song, audioUrl: string): Song {
 function songToTrack(song: Song, localUrl?: string | null): any {
   const audioUrl = localUrl || resolveAudioUrl(song as SongPlaybackSource);
   const durationSeconds = toDurationSeconds(song.duration);
+  const title = cleanHtmlEntities(readNonEmptyString(song.title) || "Unknown");
+  const artist = cleanHtmlEntities(readNonEmptyString(song.artist) || "Mavrixfy");
+  const album = song.album ? cleanHtmlEntities(readNonEmptyString(song.album) || "") : undefined;
   return {
     id: song.id,
     url: audioUrl,
-    title: readNonEmptyString(song.title) || "Unknown",
-    artist: readNonEmptyString(song.artist) || "Mavrixfy",
-    album: readNonEmptyString(song.album),
+    title,
+    artist,
+    album,
     genre: readNonEmptyString(song.genre),
     artwork: song.coverUrl,
     duration: durationSeconds > 0 ? durationSeconds : undefined,
@@ -352,16 +355,31 @@ type NowPlayingMetadataSource = {
   coverUrl?: unknown;
 };
 
+function cleanHtmlEntities(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&apos;/g, "'");
+}
+
 function getNowPlayingMetadata(track: NowPlayingMetadataSource) {
-  const title = readNonEmptyString(track.title) || "Mavrixfy";
-  const artist = readNonEmptyString(track.artist) || "Mavrixfy";
+  const rawTitle = readNonEmptyString(track.title) || "Mavrixfy";
+  const rawArtist = readNonEmptyString(track.artist) || "Mavrixfy";
+  const rawAlbum = readNonEmptyString(track.album);
+  const title = cleanHtmlEntities(rawTitle);
+  const artist = cleanHtmlEntities(rawArtist);
+  const album = rawAlbum ? cleanHtmlEntities(rawAlbum) : undefined;
   const duration = toDurationSeconds(track.duration);
   const artwork = readNonEmptyString(track.artwork) || readNonEmptyString(track.coverUrl);
 
   return {
     title,
     artist,
-    album: readNonEmptyString(track.album),
+    album,
     genre: readNonEmptyString(track.genre) || "Mavrixfy",
     duration: duration > 0 ? duration : undefined,
     artwork: artwork || undefined,
@@ -938,47 +956,69 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       playRequestIdRef.current += 1;
     }
 
-    if (!currentSongRef.current && queueRef.current.length > 0) {
-      const target = queueRef.current[queueIndexRef.current] || queueRef.current[0];
-      if (target) {
-        void playSong(target, queueRef.current);
-        return;
+    if (!currentSongRef.current) {
+      if (queueRef.current.length > 0) {
+        const target = queueRef.current[queueIndexRef.current] || queueRef.current[0];
+        if (target) {
+          void playSong(target, queueRef.current);
+        }
       }
+      return;
     }
-
-    setIsPlaying(nextPlayState);
-    isPlayingRef.current = nextPlayState;
-    updatePlaybackEngineSnapshot({
-      desiredPlayState: nextPlayState,
-      isPlaying: nextPlayState,
-    });
 
     try {
       if (TrackPlayer && setupPlayer) {
         if (nextPlayState) {
-          const activeTrack = await TrackPlayer.getActiveTrack().catch(() => null);
-          if (!activeTrack && currentSongRef.current) {
+          const ready = isPlayerReady || (await ensurePlayerReady());
+          const activeTrack = ready ? await TrackPlayer.getActiveTrack().catch(() => null) : null;
+          const playbackState = ready ? await TrackPlayer.getPlaybackState().catch(() => null) : null;
+          const rawState = playbackState?.state ?? playbackState;
+
+          // If no active track is loaded in native TrackPlayer, or player is idle/stopped/unloaded
+          if (
+            !activeTrack ||
+            rawState === "none" ||
+            rawState === "stopped" ||
+            rawState === "idle" ||
+            rawState === 0 ||
+            rawState === undefined
+          ) {
             void playSong(currentSongRef.current, queueRef.current);
             return;
           }
+
+          setIsPlaying(true);
+          isPlayingRef.current = true;
+          updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
+
           await TrackPlayer.play();
           if (currentSongRef.current) {
             void publishNativeNowPlaying(currentSongRef.current, queueIndexRef.current);
           }
         } else {
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
           await TrackPlayer.pause();
         }
       } else if (canUseLightweightAudioFallback) {
         if (nextPlayState) {
-          await ExpoAvPlayer.play();
+          // If ExpoAvPlayer has no loaded sound yet (e.g. cold start restored song)
+          void playSong(currentSongRef.current, queueRef.current);
         } else {
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
           await ExpoAvPlayer.pause();
         }
       }
     } catch (error) {
       logger.error("[Player] togglePlay failed", error);
+      if (nextPlayState && currentSongRef.current) {
+        void playSong(currentSongRef.current, queueRef.current);
+      }
     }
-  }, [playSong]);
+  }, [ensurePlayerReady, isPlayerReady, playSong]);
 
   useEffect(() => {
     togglePlayRef.current = togglePlay;

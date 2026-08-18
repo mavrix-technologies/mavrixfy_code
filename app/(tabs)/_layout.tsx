@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import * as Animated from "@/lib/nativeAnimated";
 import { Easing, InteractionManager, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import * as Haptics from "expo-haptics";
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
@@ -10,6 +11,7 @@ import Colors from "@/constants/colors";
 import { useOptionalPlayerActions, useOptionalPlayerProgress } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
 import { PingPongScroll } from "@/components/PingPongScroll";
+import { triggerImpact } from "@/lib/haptics";
 import {
   DEFAULT_ARTWORK_PALETTE,
   ensureDarkHexColor,
@@ -26,8 +28,11 @@ import { globalQueueSheetRef } from "@/lib/queueRef";
 import { useMiniPlayerSecondaryControl } from "@/lib/miniPlayerControls";
 import type { MiniPlayerSecondaryControl } from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
+import { expandPlayer } from "@/lib/playerUIState";
+import { GlobalPlayerSheet } from "@/components/GlobalPlayerSheet";
 
 const MIX_DELETE_THRESHOLD = -72;
+const MINI_SWIPE_THRESHOLD = 26;
 
 type NativeTabsModule = typeof import("expo-router/unstable-native-tabs");
 
@@ -487,10 +492,9 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const openPlayer = useCallback(() => {
     const now = Date.now();
     if (now - openPlayerLockRef.current < 240) return;
-
     openPlayerLockRef.current = now;
-    routerPush("/player");
-  }, [routerPush]);
+    expandPlayer();
+  }, []);
 
   const openMiniPlayerQueue = useCallback(() => {
     globalQueueSheetRef.current?.expand();
@@ -617,6 +621,106 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     [deleteMixWithAnimation, dragX, isDragging, resetMixChip]
   );
 
+  // ── Mini Player Swipe Gestures (Skip next / previous) ──────────────────────
+  const miniSwipeXRef = useRef<Animated.Value | null>(null);
+  if (miniSwipeXRef.current === null) miniSwipeXRef.current = new Animated.Value(0);
+  const miniSwipeX = miniSwipeXRef.current;
+
+  const miniSwipeOpacity = useMemo(
+    () =>
+      miniSwipeX.interpolate({
+        inputRange: [-60, 0, 60],
+        outputRange: [0.75, 1, 0.75],
+        extrapolate: "clamp",
+      }),
+    [miniSwipeX]
+  );
+
+  const miniSwipeScale = useMemo(
+    () =>
+      miniSwipeX.interpolate({
+        inputRange: [-60, 0, 60],
+        outputRange: [0.99, 1, 0.99],
+        extrapolate: "clamp",
+      }),
+    [miniSwipeX]
+  );
+
+  const miniPanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-4, 4])
+        .failOffsetY([-12, 12])
+        .runOnJS(true)
+        .onUpdate((event) => {
+          const rawDx = event.translationX;
+          // Apply subtle elastic tension curve for a tight, high-end feel
+          const clampedDx = Math.sign(rawDx) * Math.min(50, Math.abs(rawDx) * 0.8);
+          miniSwipeX.setValue(clampedDx);
+        })
+        .onEnd((event) => {
+          const dx = event.translationX;
+          const vx = event.velocityX;
+
+          // Swipe Left -> Skip to Next Track (clean continuous spring, zero jump)
+          if (dx < -MINI_SWIPE_THRESHOLD || (dx < -10 && vx < -240)) {
+            if (Platform.OS !== "web") {
+              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+            }
+            nextSong();
+            Animated.spring(miniSwipeX, {
+              toValue: 0,
+              useNativeDriver: true,
+              speed: 28,
+              bounciness: 4,
+            }).start();
+            return;
+          }
+
+          // Swipe Right -> Skip to Previous Track (clean continuous spring, zero jump)
+          if (dx > MINI_SWIPE_THRESHOLD || (dx > 10 && vx > 240)) {
+            if (Platform.OS !== "web") {
+              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+            }
+            prevSong();
+            Animated.spring(miniSwipeX, {
+              toValue: 0,
+              useNativeDriver: true,
+              speed: 28,
+              bounciness: 4,
+            }).start();
+            return;
+          }
+
+          // Incomplete swipe -> snap back instantly and smoothly
+          Animated.spring(miniSwipeX, {
+            toValue: 0,
+            useNativeDriver: true,
+            speed: 30,
+            bounciness: 2,
+          }).start();
+        }),
+    [miniSwipeX, nextSong, prevSong]
+  );
+
+  const miniTapGesture = useMemo(
+    () =>
+      Gesture.Tap()
+        .runOnJS(true)
+        .onEnd(() => {
+          if (Platform.OS !== "web") {
+            void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+          }
+          openPlayer();
+        }),
+    [openPlayer]
+  );
+
+  const miniSwipeGesture = useMemo(
+    () => Gesture.Exclusive(miniPanGesture, miniTapGesture),
+    [miniPanGesture, miniTapGesture]
+  );
+
   useEffect(() => {
     setCoverFailed(false);
     setAlbumColor(artworkPalette.accent);
@@ -736,52 +840,61 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                 pointerEvents="none"
                 style={[styles.playerCornerAccentRight, { borderColor: playerTopEdgeTint }]}
               />
-              <Pressable
-                android_disableSound
-                style={[styles.playerRow, { height: miniPlayerHeight }]}
-                onPress={openPlayer}
-              >
-                <View style={styles.playerLeft}>
-                  <View style={[styles.coverWrap, { width: miniCoverSlotSize }]}>
-                    {coverUrl && !coverFailed ? (
-                      <Image
-                        source={{ uri: coverUrl }}
-                        style={[
-                          styles.cover,
-                          { width: miniCoverSize, height: miniCoverSize },
-                        ]}
-                        contentFit="cover"
-                        cachePolicy="memory-disk"
-                        priority="high"
-                        decodeFormat="argb"
-                        transition={100}
-                        onError={() => setCoverFailed(true)}
+              <View style={[styles.playerRow, { height: miniPlayerHeight }]}>
+                <GestureDetector gesture={miniSwipeGesture}>
+                  <Animated.View
+                    style={[
+                      styles.playerLeft,
+                      {
+                        opacity: miniSwipeOpacity,
+                        transform: [
+                          { translateX: miniSwipeX },
+                          { scale: miniSwipeScale },
+                        ],
+                      },
+                    ]}
+                  >
+                    <View style={[styles.coverWrap, { width: miniCoverSlotSize }]}>
+                      {coverUrl && !coverFailed ? (
+                        <Image
+                          source={{ uri: coverUrl }}
+                          style={[
+                            styles.cover,
+                            { width: miniCoverSize, height: miniCoverSize },
+                          ]}
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
+                          priority="high"
+                          decodeFormat="argb"
+                          transition={100}
+                          onError={() => setCoverFailed(true)}
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.cover,
+                            styles.coverFallback,
+                            { width: miniCoverSize, height: miniCoverSize },
+                          ]}
+                        >
+                          <Ionicons name="musical-notes" size={20} color="rgba(255,255,255,0.72)" />
+                        </View>
+                      )}
+                    </View>
+                    <View style={[styles.songInfo, isDragging && styles.songInfoDuringMixDrag]}>
+                      <PingPongScroll
+                        text={activeSong.title}
+                        style={[styles.songTitle, { color: playerTitleColor }]}
+                        velocity={15}
                       />
-                    ) : (
-                      <View
-                        style={[
-                          styles.cover,
-                          styles.coverFallback,
-                          { width: miniCoverSize, height: miniCoverSize },
-                        ]}
-                      >
-                        <Ionicons name="musical-notes" size={20} color="rgba(255,255,255,0.72)" />
-                      </View>
-                    )}
-                  </View>
-                  <View style={[styles.songInfo, isDragging && styles.songInfoDuringMixDrag]}>
-                    <PingPongScroll
-                      text={activeSong.title}
-                      style={[styles.songTitle, { color: playerTitleColor }]}
-                      velocity={15}
-                    />
-                    <PingPongScroll
-                      text={activeSong.artist}
-                      style={[styles.songArtist, { color: playerSecondaryColor }]}
-                      velocity={12}
-                    />
-                  </View>
-                </View>
+                      <PingPongScroll
+                        text={activeSong.artist}
+                        style={[styles.songArtist, { color: playerSecondaryColor }]}
+                        velocity={12}
+                      />
+                    </View>
+                  </Animated.View>
+                </GestureDetector>
 
                 <View style={styles.playerControls}>
                   {lastMix ? (
@@ -877,7 +990,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                     onMore={openMiniPlayerSongOptions}
                   />
                 </View>
-              </Pressable>
+              </View>
 
               <MiniPlayerProgressBar fillColor={playerProgressFillColor} />
 
@@ -1027,10 +1140,9 @@ function useIOSMiniPlayerOverlayView() {
   const openPlayer = useCallback(() => {
     const now = Date.now();
     if (now - openPlayerLockRef.current < 240) return;
-
     openPlayerLockRef.current = now;
-    overlayRouterPush("/player");
-  }, [overlayRouterPush]);
+    expandPlayer();
+  }, []);
 
   const openMiniPlayerQueue = useCallback(() => {
     globalQueueSheetRef.current?.expand();
@@ -1398,6 +1510,8 @@ export default function TabLayout() {
         <Tabs.Screen name="import-songs" options={{ title: "Import" }} />
       </Tabs>
       <AppNavBar hidden={shouldHideTabBar} />
+      {/* Persistent global player overlay — replaces navigation-based PlayerScreen */}
+      <GlobalPlayerSheet />
     </View>
   );
 }

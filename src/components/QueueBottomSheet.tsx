@@ -429,147 +429,29 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     const lastPlaceholderRef = useRef<number | null>(null);
     const currentSheetIndexRef = useRef(-1);
     const isClosingRef = useRef(false);
-    const openAfterCloseRef = useRef(false);
-    const closeFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const openRetryRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
     const [isSheetMounted, setIsSheetMounted] = useState(false);
-    const [listReady, setListReady] = useState(false);
-    const didMountRef = useRef(false);
-
-    // Deferred list mount — avoids janking the sheet open animation
-    const showList = useCallback(() => {
-      if (didMountRef.current) return;
-      didMountRef.current = true;
-      setListReady(true);
-    }, []);
-
-    useEffect(() => {
-      if (!isSheetMounted) {
-        didMountRef.current = false;
-        setListReady(false);
-        return;
-      }
-
-      didMountRef.current = false;
-      setListReady(false);
-      let listTimer: ReturnType<typeof setTimeout> | null = null;
-      const task = InteractionManager.runAfterInteractions(() => {
-        listTimer = setTimeout(showList, 60);
-      });
-      const fallback = setTimeout(showList, 240);
-      return () => {
-        task.cancel();
-        if (listTimer) clearTimeout(listTimer);
-        clearTimeout(fallback);
-      };
-    }, [isSheetMounted, showList]);
-
-    const clearCloseFallback = useCallback(() => {
-      if (closeFallbackRef.current) {
-        clearTimeout(closeFallbackRef.current);
-        closeFallbackRef.current = null;
-      }
-    }, []);
-
-    const clearOpenRetries = useCallback(() => {
-      openRetryRefs.current.forEach(clearTimeout);
-      openRetryRefs.current = [];
-    }, []);
-
-    const queueOpenRetries = useCallback(() => {
-      clearOpenRetries();
-
-      [120, 280, 560, 1000].forEach((delay) => {
-        const timer = setTimeout(() => {
-          openRetryRefs.current = openRetryRefs.current.filter((item) => item !== timer);
-          if (isSheetMounted && currentSheetIndexRef.current < 0) {
-            sheetRef.current?.snapToIndex(0);
-          }
-        }, delay);
-        openRetryRefs.current.push(timer);
-      });
-    }, [clearOpenRetries, isSheetMounted]);
-
-    useEffect(() => {
-      return () => {
-        clearCloseFallback();
-        clearOpenRetries();
-      };
-    }, [clearCloseFallback, clearOpenRetries]);
-
-    const remountOpenSheet = useCallback(() => {
-      currentSheetIndexRef.current = -1;
-      setListReady(false);
-      setIsSheetMounted(false);
-
-      requestAnimationFrame(() => {
-        setIsSheetMounted(true);
-      });
-    }, []);
+    const [listReady] = useState(true);
 
     const finishClosedSheet = useCallback(() => {
-      clearCloseFallback();
-      clearOpenRetries();
       isClosingRef.current = false;
       currentSheetIndexRef.current = -1;
       openSwipeRef.current?.close();
-      setListReady(false);
-
-      if (openAfterCloseRef.current) {
-        openAfterCloseRef.current = false;
-        remountOpenSheet();
-        return;
-      }
-
-      setIsSheetMounted(false);
-    }, [clearCloseFallback, clearOpenRetries, remountOpenSheet]);
+    }, []);
 
     const expandSheet = useCallback(() => {
-      if (isClosingRef.current) {
-        openAfterCloseRef.current = true;
-        return;
-      }
-
-      clearCloseFallback();
-      clearOpenRetries();
       openSwipeRef.current?.close();
-
-      if (isSheetMounted && sheetRef.current) {
-        sheetRef.current.snapToIndex(0);
-        queueOpenRetries();
-        return;
+      if (!isSheetMounted) {
+        setIsSheetMounted(true);
       }
-
-      setIsSheetMounted(true);
-    }, [clearCloseFallback, clearOpenRetries, isSheetMounted, queueOpenRetries]);
-
-    useEffect(() => {
-      if (!isSheetMounted) return;
-      queueOpenRetries();
-    }, [isSheetMounted, queueOpenRetries]);
+      requestAnimationFrame(() => {
+        sheetRef.current?.snapToIndex(0);
+      });
+    }, [isSheetMounted]);
 
     const closeSheet = useCallback(() => {
-      openAfterCloseRef.current = false;
       openSwipeRef.current?.close();
-      clearCloseFallback();
-      clearOpenRetries();
-
-      if (sheetRef.current && currentSheetIndexRef.current >= 0) {
-        isClosingRef.current = true;
-        sheetRef.current.forceClose();
-        closeFallbackRef.current = setTimeout(() => {
-          closeFallbackRef.current = null;
-          finishClosedSheet();
-        }, 360);
-        return;
-      }
-
-      sheetRef.current?.forceClose();
-      isClosingRef.current = false;
-      currentSheetIndexRef.current = -1;
-      setIsSheetMounted(false);
-      setListReady(false);
-    }, [clearCloseFallback, clearOpenRetries, finishClosedSheet]);
+      sheetRef.current?.close();
+    }, []);
 
     // Expose imperative handle
     React.useImperativeHandle(ref, () => ({
@@ -732,11 +614,10 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
         currentSheetIndexRef.current = index;
         if (index >= 0) {
           isClosingRef.current = false;
-          clearOpenRetries();
         }
         onSheetChange?.(index);
       },
-      [clearOpenRetries, onSheetChange]
+      [onSheetChange]
     );
 
     if (!isSheetMounted) {
@@ -759,10 +640,10 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
         style={{ zIndex: 999 }}
         // Native spring physics identical to Spotify feel
         animationConfigs={{
-          damping: 80,
-          mass: 1,
-          stiffness: 400,
-          overshootClamping: true,
+          damping: 24,
+          mass: 0.8,
+          stiffness: 260,
+          overshootClamping: false,
         }}
       >
         {/* ── Now playing ──────────────────────────────────────────────── */}

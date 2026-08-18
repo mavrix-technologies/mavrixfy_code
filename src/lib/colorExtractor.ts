@@ -1,7 +1,21 @@
 /**
- * Album artwork colors.
- * - Dev/production builds: react-native-image-colors (Palette / UIImageColors).
- * - Expo Go: pure-JS decode fallback (native ImageColors module is unavailable).
+ * colorExtractor.ts — Artwork Color Extraction Architecture
+ *
+ * 1. Native Layer (Android):
+ *    - Uses AndroidX Palette (`androidx.palette.graphics.Palette`) to extract:
+ *      • 6 Standard Color Profiles: Vibrant, Vibrant Dark, Vibrant Light, Muted, Muted Dark, Muted Light
+ *      • Dominant Swatch: Swatch with greatest pixel population (`getDominantSwatch()`)
+ *      • Safely handles nullable profile swatches with prioritized fallback chaining.
+ *
+ * 2. Native Layer (iOS):
+ *    - Uses `UIImageColors` to extract background, primary, secondary, and detail.
+ *
+ * 3. JS Fallback Layer (Expo Go / Web):
+ *    - Pure-JS decode + sampled RGB/HSL extraction.
+ *
+ * 4. Mavrixfy Presentation Layer:
+ *    - Custom Spotify-inspired transforms (`getSpotifyMiniPlayerBg`, `ensureDarkHexColor`)
+ *      to ensure consistent dark-mode styling and WCAG readable text contrast across the UI.
  */
 
 import React, { useState, useEffect } from "react";

@@ -68,15 +68,12 @@
       android:name="com.google.android.gms.car.application"
       android:resource="@xml/automotive_app_desc"/>
 
-    <!--
-      Android Auto MediaBrowserService implementation.
-      Handles Android Auto discovery, browsing tree, and bridges MediaSession to RNTP.
-    -->
+    <!-- Android Auto + media resumption. stopWithTask=false keeps it alive after app swipe for Quick Settings carousel. -->
     <service
       android:name=".MavrixfyMediaBrowserService"
       android:enabled="true"
       android:exported="true"
-      android:foregroundServiceType="mediaPlayback">
+      android:stopWithTask="false">
       <intent-filter>
         <action android:name="android.media.browse.MediaBrowserService"/>
       </intent-filter>
