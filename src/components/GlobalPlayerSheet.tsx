@@ -14,12 +14,18 @@ import Reanimated, {
   useSharedValue,
   withSpring,
 } from "react-native-reanimated";
+import { runOnJS } from "react-native-worklets";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { usePlaybackNowPlaying } from "@/lib/playbackEngine";
 import { playerUIStateStore, type PlayerUIState } from "@/lib/playerUIState";
 import PlayerScreen from "@/features/player/screens/PlayerScreen";
 
-const SPRING_CONFIG = { damping: 26, mass: 0.9, stiffness: 200 };
+const SPRING_CONFIG = { damping: 28, mass: 0.8, stiffness: 220 };
+
+function collapseOnJS() {
+  playerUIStateStore.collapsePlayer();
+}
 
 export const GlobalPlayerSheet = memo(function GlobalPlayerSheet() {
   const { height: screenHeight } = useWindowDimensions();
@@ -63,6 +69,22 @@ export const GlobalPlayerSheet = memo(function GlobalPlayerSheet() {
     return () => sub.remove();
   }, []);
 
+  const panGesture = Gesture.Pan()
+    .activeOffsetY([0, 10])
+    .onUpdate((e) => {
+      if (e.translationY > 0) {
+        translateY.value = e.translationY;
+      }
+    })
+    .onEnd((e) => {
+      if (e.translationY > 120 || e.velocityY > 500) {
+        translateY.value = withSpring(screenHeight, SPRING_CONFIG);
+        runOnJS(collapseOnJS)();
+      } else {
+        translateY.value = withSpring(0, SPRING_CONFIG);
+      }
+    });
+
   const containerStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: Math.max(0, translateY.value) }],
   }));
@@ -81,7 +103,11 @@ export const GlobalPlayerSheet = memo(function GlobalPlayerSheet() {
         containerStyle,
       ]}
     >
-      <PlayerScreen />
+      <GestureDetector gesture={panGesture}>
+        <Reanimated.View style={styles.contentWrap}>
+          <PlayerScreen />
+        </Reanimated.View>
+      </GestureDetector>
     </Reanimated.View>
   );
 });
@@ -91,8 +117,11 @@ GlobalPlayerSheet.displayName = "GlobalPlayerSheet";
 const styles = StyleSheet.create({
   sheetContainer: {
     position: "absolute",
-    zIndex: 50,
+    zIndex: 998,
     overflow: "hidden",
+  },
+  contentWrap: {
+    flex: 1,
   },
 });
 

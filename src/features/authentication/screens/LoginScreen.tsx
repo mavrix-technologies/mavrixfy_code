@@ -13,7 +13,6 @@ import {
   ScrollView,
 } from "react-native";
 import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -22,7 +21,7 @@ import * as Haptics from "expo-haptics";
 import Constants from "expo-constants";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
-import { triggerNotification } from "@/lib/haptics";
+import { triggerNotification, triggerImpact } from "@/lib/haptics";
 import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
 import { getAppleMobileCredential, isAppleSignInAvailable } from "@/lib/appleAuth";
 import { getGoogleMobileIdToken } from "@/lib/googleAuth";
@@ -67,13 +66,13 @@ function AuthField({
       <Ionicons
         name={icon}
         size={18}
-        color={isFocused ? Colors.primary : Colors.inactive}
+        color={isFocused ? Colors.primary : "rgba(255,255,255,0.4)"}
         style={styles.fieldIcon}
       />
       <TextInput
         style={styles.fieldInput}
         placeholder={placeholder}
-        placeholderTextColor={Colors.inactive}
+        placeholderTextColor="rgba(255,255,255,0.35)"
         value={value}
         onChangeText={onChangeText}
         keyboardType={keyboardType}
@@ -84,6 +83,272 @@ function AuthField({
         onBlur={onBlur}
       />
       {trailing}
+    </View>
+  );
+}
+
+function BrandHeader() {
+  return (
+    <View style={styles.brandHeader}>
+      <View style={styles.logoContainer}>
+        <Image
+          source={require("@/assets/images/mavrixfy_transparent_master.png")}
+          style={styles.logoImage}
+          contentFit="contain"
+        />
+      </View>
+      <Text style={styles.heroTitle}>Millions of songs.</Text>
+      <Text style={styles.heroSubtitle}>Free on Mavrixfy.</Text>
+    </View>
+  );
+}
+
+function AuthLegalFooter() {
+  return (
+    <Text style={styles.legalText}>
+      By continuing, you agree to Mavrixfy's{" "}
+      <Text style={styles.legalLink} onPress={() => { void openTermsOfService(); }}>
+        Terms of Service
+      </Text>
+      {" "}and{" "}
+      <Text style={styles.legalLink} onPress={() => { void openPrivacyPolicy(); }}>
+        Privacy Policy
+      </Text>
+      .
+    </Text>
+  );
+}
+
+interface ModeSwitcherProps {
+  isSignup: boolean;
+  onSelectMode: (mode: AuthMode) => void;
+}
+
+function AuthModeSwitcher({
+  isSignup,
+  onSelectMode,
+}: ModeSwitcherProps) {
+  return (
+    <View style={styles.modeSwitcherWrap}>
+      <Pressable
+        style={[
+          styles.modeSwitcherTab,
+          !isSignup && styles.modeSwitcherTabActive,
+        ]}
+        onPress={() => onSelectMode("login")}
+      >
+        <Text
+          style={[
+            styles.modeSwitcherText,
+            !isSignup && styles.modeSwitcherTextActive,
+          ]}
+        >
+          Log In
+        </Text>
+      </Pressable>
+      <Pressable
+        style={[
+          styles.modeSwitcherTab,
+          isSignup && styles.modeSwitcherTabActive,
+        ]}
+        onPress={() => onSelectMode("signup")}
+      >
+        <Text
+          style={[
+            styles.modeSwitcherText,
+            isSignup && styles.modeSwitcherTextActive,
+          ]}
+        >
+          Sign Up
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+interface FormFieldsProps {
+  isSignup: boolean;
+  fullName: string;
+  onFullNameChange: (v: string) => void;
+  email: string;
+  onEmailChange: (v: string) => void;
+  password: string;
+  onPasswordChange: (v: string) => void;
+  showPassword: boolean;
+  onToggleShowPassword: () => void;
+  focusedField: "name" | "email" | "password" | null;
+  onFocusField: (field: "name" | "email" | "password" | null) => void;
+  onForgotPassword: () => void;
+  resetPasswordLoading: boolean;
+}
+
+function AuthFormFields({
+  isSignup,
+  fullName,
+  onFullNameChange,
+  email,
+  onEmailChange,
+  password,
+  onPasswordChange,
+  showPassword,
+  onToggleShowPassword,
+  focusedField,
+  onFocusField,
+  onForgotPassword,
+  resetPasswordLoading,
+}: FormFieldsProps) {
+  return (
+    <View style={styles.formContainer}>
+      {isSignup && (
+        <AuthField
+          icon="person-outline"
+          placeholder="Full Name"
+          value={fullName}
+          onChangeText={onFullNameChange}
+          autoCapitalize="words"
+          isFocused={focusedField === "name"}
+          onFocus={() => onFocusField("name")}
+          onBlur={() => onFocusField(null)}
+        />
+      )}
+
+      <AuthField
+        icon="mail-outline"
+        placeholder="Email Address"
+        value={email}
+        onChangeText={onEmailChange}
+        keyboardType="email-address"
+        autoCapitalize="none"
+        isFocused={focusedField === "email"}
+        onFocus={() => onFocusField("email")}
+        onBlur={() => onFocusField(null)}
+      />
+
+      <AuthField
+        icon="lock-closed-outline"
+        placeholder="Password"
+        value={password}
+        onChangeText={onPasswordChange}
+        secureTextEntry={!showPassword}
+        isFocused={focusedField === "password"}
+        onFocus={() => onFocusField("password")}
+        onBlur={() => onFocusField(null)}
+        trailing={
+          <Pressable
+            onPress={onToggleShowPassword}
+            hitSlop={12}
+            style={styles.eyeBtn}
+          >
+            <Ionicons
+              name={showPassword ? "eye-off-outline" : "eye-outline"}
+              size={20}
+              color="rgba(255,255,255,0.4)"
+            />
+          </Pressable>
+        }
+      />
+
+      {!isSignup && (
+        <Pressable
+          style={styles.forgotBtn}
+          onPress={onForgotPassword}
+          disabled={resetPasswordLoading}
+        >
+          <Text style={styles.forgotText}>
+            {resetPasswordLoading ? "Sending reset link..." : "Forgot password?"}
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+interface SocialButtonsProps {
+  isExpoGo: boolean;
+  googleLoading: boolean;
+  onGoogleSignIn: () => void;
+  showAppleLoginOption: boolean;
+  appleLoading: boolean;
+  appleAvailable: boolean;
+  onAppleSignIn: () => void;
+  guestLoginEnabled: boolean;
+  onContinueAsGuest: () => void;
+}
+
+function AuthSocialButtons({
+  isExpoGo,
+  googleLoading,
+  onGoogleSignIn,
+  showAppleLoginOption,
+  appleLoading,
+  appleAvailable,
+  onAppleSignIn,
+  guestLoginEnabled,
+  onContinueAsGuest,
+}: SocialButtonsProps) {
+  return (
+    <View style={styles.socialStack}>
+      {!isExpoGo && (
+        <Pressable
+          style={({ pressed }) => [
+            styles.socialBtn,
+            pressed && styles.btnPressed,
+          ]}
+          onPress={onGoogleSignIn}
+          disabled={googleLoading}
+        >
+          {googleLoading ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <>
+              <MaterialCommunityIcons name="google" size={20} color="#FFFFFF" style={styles.socialIcon} />
+              <Text style={styles.socialBtnText}>Continue with Google</Text>
+            </>
+          )}
+        </Pressable>
+      )}
+
+      {showAppleLoginOption && (
+        <View style={styles.appleWrap}>
+          {appleLoading ? (
+            <View style={styles.socialBtn}>
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            </View>
+          ) : appleAvailable && Platform.OS === "ios" ? (
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+              cornerRadius={24}
+              style={styles.appleNativeBtn}
+              onPress={onAppleSignIn}
+            />
+          ) : (
+            <Pressable
+              style={({ pressed }) => [
+                styles.socialBtn,
+                pressed && styles.btnPressed,
+              ]}
+              onPress={Platform.OS === "web" ? onAppleSignIn : handleUnavailableAppleSignIn}
+            >
+              <Ionicons name="logo-apple" size={20} color="#FFFFFF" style={styles.socialIcon} />
+              <Text style={styles.socialBtnText}>Continue with Apple</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
+      {guestLoginEnabled && (
+        <Pressable
+          style={({ pressed }) => [
+            styles.guestBtn,
+            pressed && styles.btnPressed,
+          ]}
+          onPress={onContinueAsGuest}
+        >
+          <Ionicons name="musical-notes-outline" size={18} color="rgba(255,255,255,0.7)" style={styles.socialIcon} />
+          <Text style={styles.guestBtnText}>Continue as Guest</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -101,7 +366,6 @@ export function LoginScreen() {
 
 export default LoginScreen;
 
-// react-doctor-disable-next-line react-doctor/no-giant-component -- acceptable component structure for this app
 function LoginScreenView() {
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -117,12 +381,12 @@ function LoginScreenView() {
     continueAsGuest,
   } = useAuth();
 
-  const topInset = Platform.OS === "web" ? 30 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 30 : insets.bottom;
+  const topInset = Platform.OS === "web" ? 24 : insets.top;
+  const bottomInset = Platform.OS === "web" ? 24 : insets.bottom;
   const isExpoGo = Constants.appOwnership === "expo";
   const guestLoginEnabled = GUEST_LOGIN_ENABLED;
   const showAppleLoginOption = Platform.OS === "ios" || Platform.OS === "web";
-  const cardMaxWidth = Math.min(420, screenWidth - 32);
+  const cardMaxWidth = Math.min(420, screenWidth - 36);
 
   const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
@@ -135,13 +399,10 @@ function LoginScreenView() {
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
   const [focusedField, setFocusedField] = useState<"name" | "email" | "password" | null>(null);
-
   const isSignup = mode === "signup";
-  const showAuthActionStack = !isSignup && (!isExpoGo || guestLoginEnabled || showAppleLoginOption);
 
   useEffect(() => {
     let mounted = true;
-
     void isAppleSignInAvailable()
       .then((available) => {
         if (mounted) {
@@ -184,10 +445,7 @@ function LoginScreenView() {
       routerReplace("/(tabs)");
     } catch (error: any) {
       const msg = String(error?.message || "An unexpected error occurred");
-      // Storage-full errors (SQLITE_FULL) should never surface as auth failures
       if (msg.toLowerCase().includes("full") || error?.code === 13 || msg.includes("SQLITE_FULL")) {
-        // Storage is full — login may still have succeeded (Firebase auth doesn't need local storage)
-        // Just proceed silently; if auth truly failed Firebase would have thrown a different error
         return;
       }
       const friendlyMsg = msg.includes("user-not-found")
@@ -254,7 +512,6 @@ function LoginScreenView() {
     }
   };
 
-
   const handleForgotPassword = async () => {
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
@@ -281,23 +538,21 @@ function LoginScreenView() {
 
   const handleContinueAsGuest = () => {
     if (!guestLoginEnabled) return;
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
     continueAsGuest();
     routerReplace("/(tabs)");
   };
 
-  const toggleAuthMode = () => {
-    setMode((prev) => (prev === "login" ? "signup" : "login"));
+  const setAuthMode = (newMode: AuthMode) => {
+    if (mode === newMode) return;
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    setMode(newMode);
     setPassword("");
     setFullName("");
   };
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={[Colors.backgroundGradientStart, Colors.background, Colors.surface]}
-        style={StyleSheet.absoluteFill}
-      />
-
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -307,105 +562,49 @@ function LoginScreenView() {
           contentContainerStyle={[
             styles.scrollContainer,
             {
-              paddingTop: topInset + 40,
-              paddingBottom: bottomInset + 40,
+              paddingTop: topInset + 20,
+              paddingBottom: bottomInset + 24,
             },
           ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
           <View style={[styles.authCard, { maxWidth: cardMaxWidth }]}>
-            {/* Header / Brand */}
-            <View style={styles.brandHeader}>
-              <View style={styles.logoContainer}>
-                <Image
-                  source={require("@/assets/images/mavrixfy_icone.png")}
-                  style={styles.logoImage}
-                  contentFit="contain"
-                />
-              </View>
-              <Text style={styles.brandName}>Mavrixfy</Text>
-              <Text style={styles.brandSubtitle}>
-                {isSignup ? "Create an account to start streaming" : "Log in to access your music library"}
-              </Text>
-            </View>
+            <BrandHeader />
 
-            {/* Inputs Form */}
-            <View style={styles.formContainer}>
-              {isSignup && (
-                <AuthField
-                  icon="person-outline"
-                  placeholder="Full Name"
-                  value={fullName}
-                  onChangeText={setFullName}
-                  autoCapitalize="words"
-                  isFocused={focusedField === "name"}
-                  onFocus={() => setFocusedField("name")}
-                  onBlur={() => setFocusedField(null)}
-                />
-              )}
+            <AuthModeSwitcher
+              isSignup={isSignup}
+              onSelectMode={setAuthMode}
+            />
 
-              <AuthField
-                icon="mail-outline"
-                placeholder="Email Address"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                isFocused={focusedField === "email"}
-                onFocus={() => setFocusedField("email")}
-                onBlur={() => setFocusedField(null)}
-              />
-
-              <AuthField
-                icon="lock-closed-outline"
-                placeholder="Password"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                isFocused={focusedField === "password"}
-                onFocus={() => setFocusedField("password")}
-                onBlur={() => setFocusedField(null)}
-                trailing={
-                  <Pressable
-                    onPress={() => setShowPassword((prev) => !prev)}
-                    hitSlop={12}
-                    style={styles.eyeBtn}
-                  >
-                    <Ionicons
-                      name={showPassword ? "eye-off-outline" : "eye-outline"}
-                      size={20}
-                      color={Colors.inactive}
-                    />
-                  </Pressable>
-                }
-              />
-
-              {!isSignup && (
-                <Pressable
-                  style={styles.forgotBtn}
-                  onPress={handleForgotPassword}
-                  disabled={resetPasswordLoading}
-                >
-                  <Text style={styles.forgotText}>
-                    {resetPasswordLoading ? "Sending reset email..." : "Forgot Password?"}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
+            <AuthFormFields
+              isSignup={isSignup}
+              fullName={fullName}
+              onFullNameChange={setFullName}
+              email={email}
+              onEmailChange={setEmail}
+              password={password}
+              onPasswordChange={setPassword}
+              showPassword={showPassword}
+              onToggleShowPassword={() => setShowPassword((prev) => !prev)}
+              focusedField={focusedField}
+              onFocusField={setFocusedField}
+              onForgotPassword={handleForgotPassword}
+              resetPasswordLoading={resetPasswordLoading}
+            />
 
             {/* Primary Action Button */}
             <Pressable
               style={({ pressed }) => [
                 styles.submitBtn,
-                pressed ? styles.btnPressed : null,
-                loading ? styles.submitBtnDisabled : null,
+                pressed && styles.btnPressed,
+                loading && styles.submitBtnDisabled,
               ]}
               onPress={handleSubmit}
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color={Colors.black} />
+                <ActivityIndicator color="#000000" size="small" />
               ) : (
                 <Text style={styles.submitBtnText}>
                   {isSignup ? "Create Account" : "Log In"}
@@ -413,103 +612,40 @@ function LoginScreenView() {
               )}
             </Pressable>
 
-            {/* Switch Mode Link */}
-            <View style={styles.switchModeContainer}>
-              <Text style={styles.switchModeLabel}>
-                {isSignup ? "Already have an account? " : "Don't have an account? "}
+            {/* Switch Mode Prompt */}
+            <Pressable
+              style={styles.switchPromptRow}
+              onPress={() => setAuthMode(isSignup ? "login" : "signup")}
+            >
+              <Text style={styles.switchPromptText}>
+                {isSignup ? "Already have an account?" : "Don't have an account?"}
               </Text>
-              <Pressable onPress={toggleAuthMode}>
-                <Text style={styles.switchModeLink}>
-                  {isSignup ? "Log In" : "Sign Up"}
-                </Text>
-              </Pressable>
+              <Text style={styles.switchPromptAction}>
+                {isSignup ? "Log In" : "Sign Up"}
+              </Text>
+            </Pressable>
+
+            {/* Social Divider */}
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
             </View>
 
-            {/* OAuth and Guest Stack */}
-            {showAuthActionStack && (
-              <View style={styles.oauthContainer}>
-                <View style={styles.dividerRow}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>or continue with</Text>
-                  <View style={styles.dividerLine} />
-                </View>
+            {/* Social Actions */}
+            <AuthSocialButtons
+              isExpoGo={isExpoGo}
+              googleLoading={googleLoading}
+              onGoogleSignIn={handleGoogleSignIn}
+              showAppleLoginOption={showAppleLoginOption}
+              appleLoading={appleLoading}
+              appleAvailable={appleAvailable}
+              onAppleSignIn={handleAppleSignIn}
+              guestLoginEnabled={guestLoginEnabled}
+              onContinueAsGuest={handleContinueAsGuest}
+            />
 
-                <View style={styles.oauthButtonsRow}>
-                  {/* Google */}
-                  {!isExpoGo && (
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.oauthCircleBtn,
-                        pressed ? styles.btnPressed : null,
-                      ]}
-                      onPress={handleGoogleSignIn}
-                      disabled={googleLoading}
-                    >
-                      {googleLoading ? (
-                        <ActivityIndicator size="small" color={Colors.text} />
-                      ) : (
-                        <MaterialCommunityIcons name="google" size={22} color={Colors.text} />
-                      )}
-                    </Pressable>
-                  )}
-
-                  {/* Apple */}
-                  {showAppleLoginOption && (
-                    <View style={styles.appleButtonContainer}>
-                      {appleLoading ? (
-                        <View style={styles.oauthCircleBtn}>
-                          <ActivityIndicator size="small" color={Colors.text} />
-                        </View>
-                      ) : appleAvailable && Platform.OS === "ios" ? (
-                        <AppleAuthentication.AppleAuthenticationButton
-                          buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-                          cornerRadius={26}
-                          style={styles.appleNativeBtn}
-                          onPress={handleAppleSignIn}
-                        />
-                      ) : (
-                        <Pressable
-                          style={({ pressed }) => [
-                            styles.oauthCircleBtn,
-                            pressed ? styles.btnPressed : null,
-                          ]}
-                          onPress={Platform.OS === "web" ? handleAppleSignIn : handleUnavailableAppleSignIn}
-                        >
-                          <Ionicons name="logo-apple" size={22} color={Colors.text} />
-                        </Pressable>
-                      )}
-                    </View>
-                  )}
-
-                  {/* Guest */}
-                  {guestLoginEnabled && (
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.oauthCircleBtn,
-                        pressed ? styles.btnPressed : null,
-                      ]}
-                      onPress={handleContinueAsGuest}
-                    >
-                      <Ionicons name="person-outline" size={22} color={Colors.text} />
-                    </Pressable>
-                  )}
-                </View>
-              </View>
-            )}
-
-            {/* Legal Links */}
-            <Text style={styles.legalText}>
-              By continuing, you agree to our{" "}
-              <Text style={styles.legalLink} onPress={() => { void openTermsOfService(); }}>
-                Terms
-              </Text>
-              {" "}and{" "}
-              <Text style={styles.legalLink} onPress={() => { void openPrivacyPolicy(); }}>
-                Privacy Policy
-              </Text>
-              .
-            </Text>
+            <AuthLegalFooter />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -520,7 +656,7 @@ function LoginScreenView() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: "#000000",
   },
   keyboardView: {
     flex: 1,
@@ -529,88 +665,137 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
   },
   authCard: {
     width: "100%",
-    paddingHorizontal: 8,
   },
   brandHeader: {
     alignItems: "center",
-    marginBottom: 28,
+    marginBottom: 26,
   },
   logoContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "#121212",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderColor: "rgba(255, 255, 255, 0.12)",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,
   },
   logoImage: {
-    width: 36,
-    height: 36,
+    width: 42,
+    height: 42,
   },
-  brandName: {
+  heroTitle: {
     fontSize: 26,
     fontFamily: "Inter_700Bold",
-    color: Colors.text,
+    color: "#FFFFFF",
     letterSpacing: -0.5,
-    marginBottom: 6,
-  },
-  brandSubtitle: {
-    fontSize: 13,
-    color: Colors.subtext,
     textAlign: "center",
-    lineHeight: 18,
-    paddingHorizontal: 12,
+  },
+  heroSubtitle: {
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+    color: "rgba(255, 255, 255, 0.6)",
+    letterSpacing: -0.2,
+    textAlign: "center",
+    marginTop: 4,
+  },
+  modeSwitcherWrap: {
+    flexDirection: "row",
+    backgroundColor: "#121212",
+    borderRadius: 24,
+    padding: 3,
+    marginBottom: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  modeSwitcherTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 21,
+  },
+  modeSwitcherTabActive: {
+    backgroundColor: "#222222",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  modeSwitcherText: {
+    fontSize: 13.5,
+    fontFamily: "Inter_600SemiBold",
+    color: "rgba(255, 255, 255, 0.5)",
+  },
+  modeSwitcherTextActive: {
+    color: "#FFFFFF",
+    fontFamily: "Inter_700Bold",
+  },
+  switchPromptRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 14,
+    marginBottom: 4,
+  },
+  switchPromptText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: "rgba(255, 255, 255, 0.55)",
+  },
+  switchPromptAction: {
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    color: "#FFFFFF",
+    marginLeft: 5,
   },
   formContainer: {
     gap: 12,
-    marginBottom: 20,
+    marginBottom: 18,
   },
   fieldShell: {
-    height: 52,
-    borderRadius: 16,
+    height: 50,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    backgroundColor: "#121212",
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
   },
   fieldShellFocused: {
-    borderColor: Colors.primary,
-    backgroundColor: "rgba(38, 225, 154, 0.04)",
+    borderColor: "rgba(255, 255, 255, 0.4)",
+    backgroundColor: "#181818",
   },
   fieldIcon: {
-    marginRight: 12,
+    marginRight: 10,
   },
   fieldInput: {
     flex: 1,
-    color: Colors.text,
+    color: "#FFFFFF",
     fontSize: 14,
     fontFamily: "Inter_500Medium",
     paddingVertical: 0,
   },
   eyeBtn: {
-    paddingLeft: 8,
+    paddingLeft: 6,
   },
   forgotBtn: {
     alignSelf: "flex-end",
-    paddingVertical: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 2,
   },
   forgotText: {
-    fontSize: 12.5,
-    color: Colors.subtext,
+    fontSize: 12,
+    color: Colors.primary,
     fontFamily: "Inter_600SemiBold",
   },
   submitBtn: {
-    height: 52,
-    borderRadius: 26,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: Colors.primary,
     justifyContent: "center",
     alignItems: "center",
@@ -620,82 +805,88 @@ const styles = StyleSheet.create({
     opacity: 0.65,
   },
   submitBtnText: {
-    fontSize: 15,
+    fontSize: 14.5,
     fontFamily: "Inter_700Bold",
-    color: Colors.black,
+    color: "#000000",
   },
   btnPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
-  },
-  switchModeContainer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 24,
-  },
-  switchModeLabel: {
-    fontSize: 13,
-    color: Colors.subtext,
-  },
-  switchModeLink: {
-    fontSize: 13,
-    fontFamily: "Inter_700Bold",
-    color: Colors.primary,
-  },
-  oauthContainer: {
-    width: "100%",
-    marginBottom: 16,
+    opacity: 0.82,
+    transform: [{ scale: 0.985 }],
   },
   dividerRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: 16,
   },
   dividerLine: {
     flex: 1,
-    height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
   },
   dividerText: {
     fontSize: 12,
-    color: Colors.inactive,
+    color: "rgba(255,255,255,0.4)",
     marginHorizontal: 12,
     fontFamily: "Inter_500Medium",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
-  oauthButtonsRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 16,
+  socialStack: {
+    gap: 10,
+    marginBottom: 20,
   },
-  oauthCircleBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
+  socialBtn: {
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(255, 255, 255, 0.07)",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    justifyContent: "center",
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
   },
-  appleButtonContainer: {
-    width: 52,
-    height: 52,
+  socialIcon: {
+    marginRight: 8,
+  },
+  socialBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13.5,
+    fontFamily: "Inter_600SemiBold",
+  },
+  appleWrap: {
+    width: "100%",
+    height: 48,
   },
   appleNativeBtn: {
-    width: 52,
-    height: 52,
+    width: "100%",
+    height: 48,
+  },
+  guestBtn: {
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  guestBtnText: {
+    color: "rgba(255, 255, 255, 0.72)",
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
   },
   legalText: {
     fontSize: 11,
-    color: Colors.inactive,
+    color: "rgba(255,255,255,0.35)",
     textAlign: "center",
     lineHeight: 16,
-    marginTop: 8,
+    paddingHorizontal: 12,
   },
   legalLink: {
-    color: Colors.text,
+    color: "rgba(255,255,255,0.7)",
     textDecorationLine: "underline",
     fontFamily: "Inter_600SemiBold",
   },

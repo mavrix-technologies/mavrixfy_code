@@ -213,13 +213,13 @@ function useArtistScreenView() {
 
   const handlePlayAll = useCallback(() => {
     if (!songs.length) return;
-    if (isPlayingFromThisArtist) {
+    if (isPlayingFromThisArtist && isPlaying) {
       togglePlay();
       return;
     }
     playSong(songs[0], songs);
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (songs, playback state, actions) are listed
-  }, [songs, isPlayingFromThisArtist, togglePlay, playSong]);
+  }, [songs, isPlayingFromThisArtist, isPlaying, togglePlay, playSong]);
 
   const handleFollow = useCallback(async () => {
     Animated.sequence([

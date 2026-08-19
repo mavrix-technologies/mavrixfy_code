@@ -29,7 +29,12 @@ import { useMiniPlayerSecondaryControl } from "@/lib/miniPlayerControls";
 import type { MiniPlayerSecondaryControl } from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
 import { expandPlayer } from "@/lib/playerUIState";
-import { GlobalPlayerSheet } from "@/components/GlobalPlayerSheet";
+import {
+  subscribeToMiniPlayerBannerConfig,
+  DEFAULT_MINI_PLAYER_BANNER_CONFIG,
+  openMiniPlayerBannerLink,
+  type MiniPlayerBannerConfig,
+} from "@/lib/miniPlayerBannerConfig";
 
 const MIX_DELETE_THRESHOLD = -72;
 const MINI_SWIPE_THRESHOLD = 26;
@@ -208,7 +213,7 @@ const IOSMiniPlayerProgressBar = React.memo(function IOSMiniPlayerProgressBar({
   );
 });
 
-type VisibleRoute = "index" | "explore" | "search" | "library" | "liked-songs" | "import-songs";
+type VisibleRoute = "index" | "search" | "library" | "liked-songs" | "import-songs";
 
 type NavItem = {
   route: VisibleRoute;
@@ -219,21 +224,13 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { route: "index", label: "Home", icon: "home-outline", iconActive: "home-sharp" },
-  { route: "explore", label: "Explore", icon: "compass-outline", iconActive: "compass-sharp" },
   { route: "search", label: "Search", icon: "search-outline", iconActive: "search-sharp" },
   { route: "library", label: "Library", icon: "library-outline", iconActive: "library-sharp" },
   { route: "liked-songs", label: "Liked", icon: "heart-outline", iconActive: "heart-sharp" },
+  { route: "import-songs", label: "Import", icon: "cloud-upload-outline", iconActive: "cloud-upload" },
 ];
 const noopLongPress = () => { };
 const noopPlayerAction = () => { };
-
-const TAB_TRANSITION_SPEC = {
-  animation: "timing" as const,
-  config: {
-    duration: 170,
-    easing: Easing.out(Easing.cubic),
-  },
-};
 
 function getTabHref(route: VisibleRoute) {
   return route === "index" ? "/" : `/${route}`;
@@ -292,33 +289,12 @@ function NavTabItem({
   activeNavColor,
   navInactiveColor,
 }: NavTabItemProps) {
-  const [focusAnim] = React.useState(() => new Animated.Value(isFocused ? 1 : 0));
-
-  useEffect(() => {
-    Animated.timing(focusAnim, {
-      toValue: isFocused ? 1 : 0,
-      duration: 155,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-      isInteraction: false,
-    }).start();
-  }, [focusAnim, isFocused]);
-
   const handlePress = React.useCallback(() => {
     onPress(item.route, isFocused);
   }, [isFocused, item.route, onPress]);
 
-  const inactiveIconOpacity = focusAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 0],
-    extrapolate: "clamp",
-  });
-  const activeIconOpacity = focusAnim;
-  const activeIconScale = focusAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.92, 1],
-    extrapolate: "clamp",
-  });
+  const iconName = isFocused ? item.iconActive : item.icon;
+  const itemColor = isFocused ? activeNavColor : navInactiveColor;
 
   return (
     <View style={styles.navItemAnimWrap}>
@@ -328,31 +304,21 @@ function NavTabItem({
         accessibilityState={{ selected: isFocused }}
         onPress={handlePress}
         onLongPress={onLongPress}
-        hitSlop={6}
+        hitSlop={8}
         style={({ pressed }) => [
           styles.navItem,
           isIOS && styles.navItemIOS,
           { paddingTop: navItemPaddingTop, paddingBottom: navItemPaddingBottom },
-          isFocused && styles.navItemActive,
-          isFocused && isIOS && styles.navItemIOSActive,
           pressed && styles.navItemPressed,
         ]}
       >
         <View style={styles.navIconWrap}>
-          <Animated.View style={[styles.navIconLayer, { opacity: inactiveIconOpacity }]}>
-            <TabIcon route={item.route} name={item.icon} size={navIconSize} color={navInactiveColor} />
-          </Animated.View>
-          <Animated.View
-            style={[
-              styles.navIconLayer,
-              {
-                opacity: activeIconOpacity,
-                transform: [{ scale: activeIconScale }],
-              },
-            ]}
-          >
-            <TabIcon route={item.route} name={item.iconActive} size={navIconSize} color={activeNavColor} />
-          </Animated.View>
+          <TabIcon
+            route={item.route}
+            name={iconName}
+            size={navIconSize}
+            color={itemColor}
+          />
         </View>
         <Text
           allowFontScaling={false}
@@ -363,12 +329,11 @@ function NavTabItem({
             {
               fontSize: navLabelSize,
               lineHeight: navLabelLineHeight,
-              marginTop: isAndroid ? 2 : 2,
-              textAlignVertical: "center",
+              marginTop: isAndroid ? 3 : 2,
+              color: itemColor,
+              fontFamily: isFocused ? "Inter_700Bold" : "Inter_500Medium",
             },
             isIOS && styles.navLabelIOS,
-            isFocused && styles.navLabelActive,
-            isFocused && { color: activeNavColor },
           ]}
         >
           {item.label}
@@ -406,7 +371,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const [activeTab, setActiveTab] = useState<VisibleRoute>(() => {
     if (!pathname) return "index";
     if (pathname === "/" || pathname === "/index") return "index";
-    if (pathname === "/explore" || pathname.startsWith("/explore")) return "explore";
     if (pathname === "/search" || pathname.startsWith("/search/")) return "search";
     if (pathname === "/library" || pathname.startsWith("/library/")) return "library";
     if (pathname === "/liked-songs" || pathname.startsWith("/liked-songs/")) return "liked-songs";
@@ -419,8 +383,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     let nextTab: VisibleRoute = "index";
     if (pathname === "/" || pathname === "/index") {
       nextTab = "index";
-    } else if (pathname === "/explore" || pathname.startsWith("/explore")) {
-      nextTab = "explore";
     } else if (pathname === "/search" || pathname.startsWith("/search/")) {
       nextTab = "search";
     } else if (pathname === "/library" || pathname.startsWith("/library/")) {
@@ -450,8 +412,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const setTextColor = playerActions?.setTextColor ?? noopPlayerAction;
   const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
-  const isExplore = pathname === "/explore" || pathname?.startsWith("/explore");
-  const hasActiveMiniPlayer = Boolean(activeSong) && !isExplore;
+  const hasActiveMiniPlayer = Boolean(activeSong);
   const miniPlayerRef = useRef<View>(null);
   const handleMiniPlayerLayout = useCallback(() => {
     // no-op — tour removed
@@ -460,6 +421,11 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const artworkPalette = useArtworkPalette(activeSong?.coverUrl);
   const routePressLockRef = useRef({ href: "", time: 0 });
   const openPlayerLockRef = useRef(0);
+  const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(DEFAULT_MINI_PLAYER_BANNER_CONFIG);
+
+  useEffect(() => {
+    return subscribeToMiniPlayerBannerConfig(setBannerConfig);
+  }, []);
 
   const handleTabPress = useCallback(
     (route: VisibleRoute, isFocused: boolean) => {
@@ -476,14 +442,8 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
         return;
       }
       
-      if (isFocused) return;
-
       const href = getTabHref(route);
-      const now = Date.now();
-      const previous = routePressLockRef.current;
-      if (previous.href === href && now - previous.time < 280) return;
-
-      routePressLockRef.current = { href, time: now };
+      setActiveTab(route);
       routerNavigate(href as any);
     },
     [routerNavigate]
@@ -831,15 +791,48 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
               ]}
             >
 
-              <View pointerEvents="none" style={[styles.playerTopEdge, { backgroundColor: playerTopEdgeTint }]} />
-              <View
-                pointerEvents="none"
-                style={[styles.playerCornerAccentLeft, { borderColor: playerTopEdgeTint }]}
-              />
-              <View
-                pointerEvents="none"
-                style={[styles.playerCornerAccentRight, { borderColor: playerTopEdgeTint }]}
-              />
+              {bannerConfig.enabled && bannerConfig.text ? (
+                <Pressable
+                  android_disableSound
+                  onPress={() => openMiniPlayerBannerLink(bannerConfig.linkUrl)}
+                  style={({ pressed }) => [
+                    styles.miniBannerRow,
+                    bannerConfig.backgroundColor ? { backgroundColor: bannerConfig.backgroundColor } : null,
+                    pressed && styles.miniBannerRowPressed,
+                  ]}
+                  hitSlop={{ top: 4, bottom: 4 }}
+                >
+                  <Ionicons
+                    name={(bannerConfig.iconName as any) || "paper-plane"}
+                    size={13}
+                    color={bannerConfig.iconColor || "#38BDF8"}
+                    style={styles.miniBannerIcon}
+                  />
+                  <Text
+                    style={[
+                      styles.miniBannerText,
+                      bannerConfig.textColor ? { color: bannerConfig.textColor } : null,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {bannerConfig.text}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={11} color="rgba(255,255,255,0.4)" style={styles.miniBannerChevron} />
+                </Pressable>
+              ) : (
+                <>
+                  <View pointerEvents="none" style={[styles.playerTopEdge, { backgroundColor: playerTopEdgeTint }]} />
+                  <View
+                    pointerEvents="none"
+                    style={[styles.playerCornerAccentLeft, { borderColor: playerTopEdgeTint }]}
+                  />
+                  <View
+                    pointerEvents="none"
+                    style={[styles.playerCornerAccentRight, { borderColor: playerTopEdgeTint }]}
+                  />
+                </>
+              )}
+
               <View style={[styles.playerRow, { height: miniPlayerHeight }]}>
                 <GestureDetector gesture={miniSwipeGesture}>
                   <Animated.View
@@ -1093,11 +1086,6 @@ function IOSNativeTabLayout() {
 
       <NativeTabs.Trigger name="search" role="search" />
 
-      <NativeTabs.Trigger name="explore">
-        <Icon sf={{ default: "safari", selected: "safari.fill" }} />
-        <Label>Explore</Label>
-      </NativeTabs.Trigger>
-
       <NativeTabs.Trigger name="library">
         <Icon sf={{ default: "square.stack", selected: "square.stack.fill" }} />
         <Label>Library</Label>
@@ -1270,8 +1258,7 @@ function useIOSMiniPlayerOverlayView() {
     [iosArtworkPalette.accent, iosArtworkPalette.background]
   );
 
-  const isExplore = pathname === "/explore" || pathname?.startsWith("/explore");
-  if (!activeSong || isExplore) {
+  if (!activeSong) {
     return null;
   }
 
@@ -1491,27 +1478,21 @@ export default function TabLayout() {
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <Tabs
-        detachInactiveScreens
         screenOptions={{
           headerShown: false,
           lazy: true,
-          freezeOnBlur: true,
-          animation: "shift",
-          transitionSpec: TAB_TRANSITION_SPEC,
+          animation: "none",
           sceneStyle: { backgroundColor: Colors.background },
         }}
         tabBar={() => null}
       >
         <Tabs.Screen name="index" options={{ title: "Home" }} />
-        <Tabs.Screen name="explore" options={{ title: "Explore" }} />
         <Tabs.Screen name="search" options={{ title: "Search" }} />
         <Tabs.Screen name="library" options={{ title: "Library" }} />
         <Tabs.Screen name="liked-songs" options={{ title: "Liked" }} />
         <Tabs.Screen name="import-songs" options={{ title: "Import" }} />
       </Tabs>
       <AppNavBar hidden={shouldHideTabBar} />
-      {/* Persistent global player overlay — replaces navigation-based PlayerScreen */}
-      <GlobalPlayerSheet />
     </View>
   );
 }
@@ -1791,6 +1772,31 @@ const styles = StyleSheet.create({
   },
   playerSectionIOS: {
     borderBottomColor: "rgba(255,255,255,0.07)",
+  },
+  miniBannerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    backgroundColor: "#162838",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  miniBannerRowPressed: {
+    opacity: 0.75,
+  },
+  miniBannerIcon: {
+    marginRight: 7,
+  },
+  miniBannerText: {
+    flex: 1,
+    fontSize: 11.5,
+    fontFamily: "Inter_600SemiBold",
+    color: "#E2E8F0",
+    letterSpacing: -0.2,
+  },
+  miniBannerChevron: {
+    marginLeft: 4,
   },
 
   playerTopEdge: {

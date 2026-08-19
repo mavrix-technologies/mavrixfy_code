@@ -404,9 +404,12 @@ function PlaylistScreenView() {
   const handlePlayAll = useCallback(() => {
     if (!songs.length) return;
     if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (isPlayingFromThisPlaylist) { togglePlay(); return; }
+    if (isPlayingFromThisPlaylist && isPlaying) {
+      togglePlay();
+      return;
+    }
     playSong(songs[0], songs);
-  }, [songs, isPlayingFromThisPlaylist, togglePlay, playSong]);
+  }, [songs, isPlayingFromThisPlaylist, isPlaying, togglePlay, playSong]);
 
   const handleShufflePlay = useCallback(() => {
     if (!songs.length) return;

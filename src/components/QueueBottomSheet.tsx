@@ -21,6 +21,7 @@ import React, {
 } from "react";
 import {
   InteractionManager,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -32,13 +33,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import BottomSheet, {
   BottomSheetBackdrop,
+  BottomSheetFooter,
   type BottomSheetBackdropProps,
+  type BottomSheetFooterProps,
 } from "@gorhom/bottom-sheet";
 import DraggableFlatList, {
   ScaleDecorator,
   type RenderItemParams,
 } from "react-native-draggable-flatlist";
-import { Swipeable, Pressable as GHPressable } from "react-native-gesture-handler";
 import { ImpactFeedbackStyle } from "expo-haptics";
 
 import Colors from "@/constants/colors";
@@ -68,7 +70,17 @@ type QueueItem = {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-/** A single swipeable + draggable queue row */
+type QueueRowProps = {
+  item: Song;
+  itemIndex: number;
+  isCurrent: boolean;
+  isPlaying: boolean;
+  onPress: (song: Song) => void;
+  onDrag: () => void;
+  isDragging?: boolean;
+};
+
+/** A single high-performance draggable queue row */
 const QueueRow = React.memo(
   ({
     item,
@@ -76,116 +88,73 @@ const QueueRow = React.memo(
     isCurrent,
     isPlaying,
     onPress,
-    onRemoveAt,
-    onSwipeOpen,
     onDrag,
     isDragging,
-  }: {
-    item: Song;
-    itemIndex: number;
-    isCurrent: boolean;
-    isPlaying: boolean;
-    onPress: (song: Song) => void;
-    onRemoveAt: (index: number) => void;
-    onSwipeOpen: (ref: Swipeable | null) => void;
-    onDrag: () => void;
-    isDragging?: boolean;
-  }) => {
-    const swipeRef = useRef<Swipeable | null>(null);
-
-    const handleRemove = useCallback(() => {
-      swipeRef.current?.close();
-      triggerImpact(ImpactFeedbackStyle.Light);
-      onRemoveAt(itemIndex);
-    }, [itemIndex, onRemoveAt]);
-
+  }: QueueRowProps) => {
     const handlePress = useCallback(() => {
-      swipeRef.current?.close();
+      if (isDragging) return;
       onPress(item);
-    }, [item, onPress]);
-
-    const renderRight = useCallback(
-      () => (
-        <Pressable style={s.removeAction} onPress={handleRemove}>
-          <Ionicons name="trash" size={20} color="#FFFFFF" />
-          <Text style={s.removeText}>Remove</Text>
-        </Pressable>
-      ),
-      [handleRemove]
-    );
+    }, [isDragging, item, onPress]);
 
     return (
-      <ScaleDecorator activeScale={1.03}>
-        <View style={[s.swipeWrap, isDragging && s.draggingRow]}>
-          <Swipeable
-            ref={swipeRef}
-            enabled={!isDragging}
-            friction={1.25}
-            rightThreshold={22}
-            overshootRight={false}
-            renderRightActions={renderRight}
-            onSwipeableWillOpen={() => onSwipeOpen(swipeRef.current)}
+      <View style={[s.rowLayer, isDragging && s.draggingRow]}>
+        <Pressable
+          style={({ pressed }) => [s.row, pressed && !isDragging && s.rowPressed]}
+          onPress={handlePress}
+          disabled={isDragging}
+          accessibilityRole="button"
+          accessibilityLabel={`${isCurrent ? "Now playing: " : ""}${item.title} by ${item.artist || "Unknown"}`}
+        >
+          {/* Artwork */}
+          <View style={s.artWrap}>
+            <Image
+              recyclingKey={item.id}
+              source={{ uri: item.coverUrl }}
+              style={s.artwork}
+              contentFit="cover"
+            />
+            {isCurrent && (
+              <View style={s.artOverlay}>
+                <Ionicons
+                  name={isPlaying ? "pause" : "play"}
+                  size={14}
+                  color="#FFFFFF"
+                  style={!isPlaying ? { marginLeft: 1 } : undefined}
+                />
+              </View>
+            )}
+          </View>
+
+          {/* Text */}
+          <View style={s.textWrap}>
+            <Text
+              style={[s.title, isCurrent && s.titleActive]}
+              numberOfLines={1}
+            >
+              {item.title}
+            </Text>
+            <Text style={s.artist} numberOfLines={1}>
+              {item.artist || "Unknown Artist"}
+            </Text>
+          </View>
+
+          {/* Drag Handle — Long press initiates smooth lift and reorder */}
+          <Pressable
+            style={s.dragHandle}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 14 }}
+            delayLongPress={100}
+            onLongPress={onDrag}
+            accessibilityRole="button"
+            accessibilityLabel="Drag to reorder"
           >
-            <View style={s.rowLayer}>
-              <GHPressable
-                style={({ pressed }) => [s.row, pressed && s.rowPressed]}
-                onPress={handlePress}
-                accessibilityRole="button"
-                accessibilityLabel={`${isCurrent ? "Now playing: " : ""}${item.title} by ${item.artist || "Unknown"}`}
-              >
-                {/* Artwork */}
-                <View style={s.artWrap}>
-                  <Image
-                    recyclingKey={item.id}
-                    source={{ uri: item.coverUrl }}
-                    style={s.artwork}
-                    contentFit="cover"
-                  />
-                  {isCurrent && (
-                    <View style={s.artOverlay}>
-                      <Ionicons
-                        name={isPlaying ? "pause" : "play"}
-                        size={14}
-                        color="#FFFFFF"
-                        style={!isPlaying ? { marginLeft: 1 } : undefined}
-                      />
-                    </View>
-                  )}
-                </View>
-
-                {/* Text */}
-                <View style={s.textWrap}>
-                  <Text
-                    style={[s.title, isCurrent && s.titleActive]}
-                    numberOfLines={1}
-                  >
-                    {item.title}
-                  </Text>
-                  <Text style={s.artist} numberOfLines={1}>
-                    {item.artist || "Unknown Artist"}
-                  </Text>
-                </View>
-
-                {/* Drag handle */}
-                <Pressable
-                  style={s.dragHandle}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  delayLongPress={120}
-                  onLongPress={onDrag}
-                  accessibilityRole="button"
-                  accessibilityLabel="Drag to reorder"
-                >
-                  <Ionicons
-                    name="menu"
-                    size={22}
-                    color={isDragging ? Colors.primary : "#585858"}
-                  />
-                </Pressable>
-              </GHPressable>
-            </View>
-          </Swipeable>
-        </View>
-      </ScaleDecorator>
+            <Ionicons
+              name="menu"
+              size={22}
+              color={isDragging ? Colors.primary : "#8E8E93"}
+            />
+          </Pressable>
+        </Pressable>
+      </View>
     );
   }
 );
@@ -193,9 +162,8 @@ QueueRow.displayName = "QueueRow";
 
 type QueueHeaderProps = {
   upcomingQueueLength: number;
-  onClose: () => void;
 };
-const QueueHeader = React.memo(({ upcomingQueueLength, onClose }: QueueHeaderProps) => {
+const QueueHeader = React.memo(({ upcomingQueueLength }: QueueHeaderProps) => {
   return (
     <View style={s.handleContainer}>
       <View style={s.handle} />
@@ -208,16 +176,6 @@ const QueueHeader = React.memo(({ upcomingQueueLength, onClose }: QueueHeaderPro
             </Text>
           )}
         </View>
-
-        <Pressable
-          style={s.closeBtn}
-          onPress={onClose}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityRole="button"
-          accessibilityLabel="Close queue"
-        >
-          <Ionicons name="close" size={20} color="#FFFFFF" />
-        </Pressable>
       </View>
     </View>
   );
@@ -425,7 +383,6 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
 
     const smartAutoplayStatus = SMART_AUTOPLAY_STATUS;
 
-    const openSwipeRef = useRef<Swipeable | null>(null);
     const lastPlaceholderRef = useRef<number | null>(null);
     const currentSheetIndexRef = useRef(-1);
     const isClosingRef = useRef(false);
@@ -435,11 +392,9 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     const finishClosedSheet = useCallback(() => {
       isClosingRef.current = false;
       currentSheetIndexRef.current = -1;
-      openSwipeRef.current?.close();
     }, []);
 
     const expandSheet = useCallback(() => {
-      openSwipeRef.current?.close();
       if (!isSheetMounted) {
         setIsSheetMounted(true);
       }
@@ -449,7 +404,6 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     }, [isSheetMounted]);
 
     const closeSheet = useCallback(() => {
-      openSwipeRef.current?.close();
       sheetRef.current?.close();
     }, []);
 
@@ -495,21 +449,12 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     // ── Handlers ─────────────────────────────────────────────────────────────
     const handleSongPress = useCallback(
       (song: Song) => {
-        openSwipeRef.current?.close();
         playSong(song, queue);
       },
       [playSong, queue]
     );
 
-    const handleSwipeOpen = useCallback((ref: Swipeable | null) => {
-      if (openSwipeRef.current && openSwipeRef.current !== ref) {
-        openSwipeRef.current.close();
-      }
-      openSwipeRef.current = ref;
-    }, []);
-
     const handleDragBegin = useCallback(() => {
-      openSwipeRef.current?.close();
       lastPlaceholderRef.current = null;
       triggerImpact(ImpactFeedbackStyle.Medium);
     }, []);
@@ -539,32 +484,32 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     // ── Render item ──────────────────────────────────────────────────────────
     const renderItem = useCallback(
       ({ item, drag, isActive }: RenderItemParams<QueueItem>) => (
-        <View>
-          {item.isFirstInSection ? (
-            <View style={s.sectionHeader}>
-              <Text style={s.sectionTitle}>
-                {item.section === "user"
-                  ? "Added to queue"
-                  : smartAutoplayStatus.enabled
-                    ? "Generated for You"
-                    : "Playing next"}
-              </Text>
-            </View>
-          ) : null}
-          <QueueRow
-            item={item.song}
-            itemIndex={item.index}
-            isCurrent={false}
-            isPlaying={isPlaying}
-            onPress={handleSongPress}
-            onRemoveAt={removeFromQueue}
-            onSwipeOpen={handleSwipeOpen}
-            onDrag={drag}
-            isDragging={isActive}
-          />
-        </View>
+        <ScaleDecorator activeScale={1.03}>
+          <View style={isActive ? s.draggingRow : undefined}>
+            {item.isFirstInSection ? (
+              <View style={s.sectionHeader}>
+                <Text style={s.sectionTitle}>
+                  {item.section === "user"
+                    ? "Added to queue"
+                    : smartAutoplayStatus.enabled
+                      ? "Generated for You"
+                      : "Playing next"}
+                </Text>
+              </View>
+            ) : null}
+            <QueueRow
+              item={item.song}
+              itemIndex={item.index}
+              isCurrent={false}
+              isPlaying={isPlaying}
+              onPress={handleSongPress}
+              onDrag={drag}
+              isDragging={isActive}
+            />
+          </View>
+        </ScaleDecorator>
       ),
-      [handleSongPress, handleSwipeOpen, isPlaying, removeFromQueue, smartAutoplayStatus.enabled]
+      [handleSongPress, isPlaying, smartAutoplayStatus.enabled]
     );
 
     const keyExtractor = useCallback((item: QueueItem) => item.key, []);
@@ -583,26 +528,34 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
       []
     );
 
-    const handleClose = useCallback(() => {
-      triggerImpact(ImpactFeedbackStyle.Light);
-      closeSheet();
-    }, [closeSheet]);
-
     const renderHandle = useCallback(
       () => (
         <QueueHeader
           upcomingQueueLength={upcomingQueue.length}
-          onClose={handleClose}
         />
       ),
-      [upcomingQueue.length, handleClose]
+      [upcomingQueue.length]
     );
 
     // ── Snap points ──────────────────────────────────────────────────────────
-    // Keep a single open state so swipe-down never leaves a small collapsed strip.
-    const snapPoints = useMemo(() => ["92%"], []);
+    // Full Spotify height queue sheet with downward swipe to dismiss.
+    const snapPoints = useMemo(() => ["94%"], []);
 
     const bottomPad = Math.max(insets.bottom, 12);
+
+    const renderFooter = useCallback(
+      (props: BottomSheetFooterProps) => (
+        <BottomSheetFooter {...props} bottomInset={0}>
+          <QueueFooter
+            sleepTimer={sleepTimer}
+            bottomPad={bottomPad}
+            handleShuffle={handleShuffle}
+            handleTimer={handleTimer}
+          />
+        </BottomSheetFooter>
+      ),
+      [sleepTimer, bottomPad, handleShuffle, handleTimer]
+    );
 
     const handleNowPlayingPress = useCallback(() => {
       closeSheet();
@@ -634,6 +587,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
         enableDynamicSizing={false}
         handleComponent={renderHandle}
         backdropComponent={renderBackdrop}
+        footerComponent={renderFooter}
         backgroundStyle={s.sheetBg}
         onChange={handleSheetChange}
         onClose={finishClosedSheet}
@@ -675,14 +629,14 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
             onPlaceholderIndexChange={(i) => {
               lastPlaceholderRef.current = i;
             }}
-            activationDistance={8}
-            autoscrollThreshold={148}
-            autoscrollSpeed={140}
+            activationDistance={10}
+            autoscrollThreshold={120}
+            autoscrollSpeed={160}
             dragItemOverflow
             animationConfig={{
-              damping: 26,
-              mass: 0.55,
-              stiffness: 180,
+              damping: 28,
+              mass: 0.5,
+              stiffness: 220,
               overshootClamping: true,
             }}
             containerStyle={s.list}
@@ -690,10 +644,10 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
             contentContainerStyle={s.listContent}
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled={true}
-            removeClippedSubviews={false}
-            initialNumToRender={10}
-            maxToRenderPerBatch={8}
-            windowSize={9}
+            removeClippedSubviews={Platform.OS === "android"}
+            initialNumToRender={12}
+            maxToRenderPerBatch={10}
+            windowSize={7}
             ListEmptyComponent={
               <View style={s.emptyState}>
                 <Ionicons name="list" size={40} color="#4A4A4A" />
@@ -703,19 +657,11 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
                 </Text>
               </View>
             }
-            ListFooterComponent={<View style={{ height: bottomPad + 32 }} />}
+            ListFooterComponent={<View style={{ height: bottomPad + 76 }} />}
           />
         ) : (
           <View style={s.listPlaceholder} />
         )}
-
-        {/* ── Footer controls ──────────────────────────────────────────── */}
-        <QueueFooter
-          sleepTimer={sleepTimer}
-          bottomPad={bottomPad}
-          handleShuffle={handleShuffle}
-          handleTimer={handleTimer}
-        />
       </BottomSheet>
     );
   };
@@ -977,26 +923,19 @@ const s = StyleSheet.create({
     lineHeight: 16,
     marginTop: 2,
   },
+  rowRemoveBtn: {
+    width: 36,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
   dragHandle: {
     width: 40,
     height: 48,
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
-  },
-
-  // Swipe remove action
-  removeAction: {
-    width: SWIPE_WIDTH,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 3,
-    backgroundColor: "rgba(255,60,60,0.85)",
-  },
-  removeText: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontFamily: "Inter_700Bold",
   },
 
   // List
@@ -1035,33 +974,35 @@ const s = StyleSheet.create({
   footer: {
     flexDirection: "row",
     justifyContent: "center",
-    gap: 10,
-    paddingTop: 8,
+    gap: 12,
+    paddingTop: 10,
     paddingHorizontal: 18,
     backgroundColor: SHEET_BG,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.06)",
+    borderTopColor: "rgba(255,255,255,0.08)",
+    flexShrink: 0,
+    zIndex: 10,
   },
   ctrlBtn: {
-    width: 102,
-    maxWidth: "46%",
-    minHeight: 48,
-    borderRadius: 10,
+    flex: 1,
+    maxWidth: 160,
+    minHeight: 46,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    gap: 3,
-    backgroundColor: "rgba(255,255,255,0.07)",
+    flexDirection: "row",
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(255,255,255,0.12)",
   },
   ctrlBtnPressed: {
     opacity: 0.72,
   },
   ctrlLabel: {
     color: "#FFFFFF",
-    fontSize: 11,
-    fontFamily: "Inter_500Medium",
-    lineHeight: 14,
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
   },
   ctrlLabelActive: {
     color: Colors.primary,

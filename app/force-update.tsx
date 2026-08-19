@@ -4,7 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { AppVersionInfo, checkAppVersion } from "@/services/notificationService";
@@ -87,7 +87,13 @@ export default function ForceUpdateScreen() {
       <StatusBar style="light" />
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.page}>
-          <View>
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            keyboardShouldPersistTaps="handled"
+          >
             <View style={styles.brandRow}>
               <Image source={require("@/assets/images/mavrixfy_icone.png")} style={styles.brandIcon} contentFit="cover" />
               <Text style={styles.brandName}>Mavrixfy</Text>
@@ -121,13 +127,13 @@ export default function ForceUpdateScreen() {
                 <Text style={styles.notesLabel}>WHAT’S NEW:</Text>
                 {notes.map((note) => (
                   <View key={note} style={styles.noteRow}>
-                    <Ionicons name="checkmark-circle" size={14} color={Colors.primary} />
+                    <Ionicons name="checkmark-circle" size={14} color={Colors.primary} style={styles.noteIcon} />
                     <Text style={styles.noteText}>{note}</Text>
                   </View>
                 ))}
               </View>
             )}
-          </View>
+          </ScrollView>
 
           <View style={styles.actions}>
             <Pressable
@@ -159,24 +165,27 @@ const styles = StyleSheet.create({
   gradient: { flex: 1 },
   safeArea: { flex: 1 },
   loadingGate: { flex: 1, alignItems: "center", justifyContent: "center" },
-  page: { flex: 1, justifyContent: "space-between", paddingHorizontal: 27, paddingTop: 52, paddingBottom: 18 },
+  page: { flex: 1, paddingHorizontal: 27, paddingTop: 16, paddingBottom: 18 },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingTop: 28, paddingBottom: 24 },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   brandIcon: { width: 35, height: 35, borderRadius: 9 },
   brandName: { color: "#D8E0E5", fontFamily: "Inter_700Bold", fontSize: 17, letterSpacing: -0.3 },
-  hero: { marginTop: 36, minHeight: 244, overflow: "visible" },
+  hero: { marginTop: 28, minHeight: 220, overflow: "visible" },
   versionWatermark: { position: "absolute", top: -52, right: -8, color: "rgba(116, 203, 187, 0.13)", fontFamily: "Inter_800ExtraBold", fontSize: 100, lineHeight: 118, letterSpacing: -6.5, textAlign: "right" },
   heading: { color: "#FFFFFF", fontFamily: "Inter_800ExtraBold", fontSize: 48, lineHeight: 56, letterSpacing: -2.4 },
   headingAccent: { color: Colors.primary, fontFamily: "Inter_800ExtraBold", fontSize: 48, lineHeight: 55, letterSpacing: -2.6 },
-  description: { color: "#C8D1D5", fontFamily: "Inter_400Regular", fontSize: 15, lineHeight: 22, marginTop: 20, letterSpacing: -0.15 },
+  description: { color: "#C8D1D5", fontFamily: "Inter_400Regular", fontSize: 15, lineHeight: 22, marginTop: 16, letterSpacing: -0.15 },
   loader: { alignSelf: "flex-start", marginTop: 21 },
-  notesSection: { marginTop: 41 },
-  notesLabel: { color: Colors.primary, fontFamily: "Inter_800ExtraBold", fontSize: 13, letterSpacing: 0.3, marginBottom: 15 },
-  noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 11, marginBottom: 9 },
+  notesSection: { marginTop: 32 },
+  notesLabel: { color: Colors.primary, fontFamily: "Inter_800ExtraBold", fontSize: 13, letterSpacing: 0.3, marginBottom: 14 },
+  noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 11, marginBottom: 10 },
+  noteIcon: { marginTop: 2 },
   noteText: { flex: 1, color: "#D5DDE1", fontFamily: "Inter_400Regular", fontSize: 14, lineHeight: 20, letterSpacing: -0.12 },
   actions: { width: "100%", gap: 4, paddingTop: 12, paddingBottom: 4 },
-  updateButton: { width: "100%", minHeight: 64, borderRadius: 32, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF", boxShadow: "0 2px 4px rgba(0, 0, 0, 0.2)" },
+  updateButton: { width: "100%", minHeight: 60, borderRadius: 30, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF", boxShadow: "0 2px 4px rgba(0, 0, 0, 0.2)" },
   updateButtonText: { color: "#101116", fontFamily: "Inter_800ExtraBold", fontSize: 18, letterSpacing: -0.25 },
-  notNowButton: { width: "100%", minHeight: 48, alignItems: "center", justifyContent: "center" },
+  notNowButton: { width: "100%", minHeight: 44, alignItems: "center", justifyContent: "center" },
   notNowText: { color: "#A5AAB1", fontFamily: "Inter_700Bold", fontSize: 15 },
   pressed: { opacity: 0.76 },
 });

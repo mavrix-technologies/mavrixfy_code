@@ -155,7 +155,7 @@ export function LikedSongsScreen() {
     const listToPlay = filteredSongs.length > 0 ? filteredSongs : songs;
     if (listToPlay.length === 0) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-    if (isPlayingFromLikedSongs) {
+    if (isPlayingFromLikedSongs && isPlaying) {
       togglePlay();
       return;
     }
@@ -163,7 +163,7 @@ export function LikedSongsScreen() {
     if (isShuffled) {
       toggleShuffle();
     }
-  }, [filteredSongs, songs, isPlayingFromLikedSongs, togglePlay, playSong, isShuffled, toggleShuffle]);
+  }, [filteredSongs, songs, isPlayingFromLikedSongs, isPlaying, togglePlay, playSong, isShuffled, toggleShuffle]);
 
   const handleShufflePlay = useCallback(() => {
     const listToPlay = filteredSongs.length > 0 ? filteredSongs : songs;

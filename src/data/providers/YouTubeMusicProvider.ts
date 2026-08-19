@@ -1,6 +1,6 @@
 import { Song } from "@/lib/musicData";
 
-export async function searchYouTubeMusicVideos(
+async function searchYouTubeMusicVideos(
   _query: string,
   _limit?: number,
   _signal?: AbortSignal

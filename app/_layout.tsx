@@ -46,6 +46,7 @@ import { logger } from "@/lib/logger";
 import { initRemoteConfig } from "@/lib/remoteConfig";
 import { showGlobalToast, subscribeGlobalToast } from "@/utils/globalToast";
 import { AppNavBar } from "./(tabs)/_layout";
+import { GlobalPlayerSheet } from "@/components/GlobalPlayerSheet";
 
 function isExpoGoRuntime(): boolean {
   return Constants.executionEnvironment === "storeClient" || Constants.appOwnership === "expo";
@@ -354,32 +355,13 @@ function useRootLayoutNavigation() {
     const seg0 = segments[0] as string | undefined;
     const inProtected = seg0 === "(tabs)";
     const inAuthOnly = seg0 === "login";
-    const inOnboarding = seg0 === "onboarding";
 
     if (isAuthenticated && inAuthOnly) {
-      if (firebaseUser) {
-        import("firebase/firestore").then(({ doc, getDoc }) => {
-          import("@/lib/firebase").then(({ db }) => {
-            getDoc(doc(db, "users", firebaseUser.uid))
-              .then((snap) => {
-                if (snap.exists() && snap.data()?.onboardingCompleted) {
-                  routerReplace("/(tabs)");
-                } else {
-                  routerReplace("/login");
-                }
-              })
-              .catch(() => routerReplace("/(tabs)"));
-          });
-        });
-      } else {
-        routerReplace("/(tabs)");
-      }
+      routerReplace("/(tabs)");
     } else if (!isAuthenticated && !isAllowedGuest && inProtected) {
       routerReplace("/login");
-    } else if (!isAuthenticated && !isAllowedGuest && inOnboarding) {
-      routerReplace("/login");
     }
-  }, [loading, isAuthenticated, isAllowedGuest, firebaseUser, segments, routerReplace]);
+  }, [loading, isAuthenticated, isAllowedGuest, segments, routerReplace]);
 
   const activeSegment = segments[0] as string;
   const unmountNavBar = NAV_UNMOUNT_SEGMENTS.has(activeSegment);
@@ -473,10 +455,13 @@ function RootLayoutNav() {
       </Stack>
 
       {showNavOverlay ? (
-        <View style={[StyleSheet.absoluteFill, { zIndex: 998 }]} pointerEvents="box-none">
+        <View style={[StyleSheet.absoluteFill, { zIndex: 997 }]} pointerEvents="box-none">
           <AppNavBar />
         </View>
       ) : null}
+
+      {/* Global Player Overlay — always mounted globally above all screens (tabs, playlist, artist, etc.) */}
+      <GlobalPlayerSheet />
 
       <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
         <QueueBottomSheet ref={globalQueueSheetRef} />
