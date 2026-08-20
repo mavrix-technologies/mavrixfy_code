@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import * as Haptics from "expo-haptics";
+import { ImpactFeedbackStyle } from "expo-haptics";
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
 import type { Song } from "@/lib/musicData";
@@ -64,13 +64,27 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
 
   const handleRecentPress = useCallback(
     (item: RecentlyPlayedItem) => {
-      void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+      void triggerImpact(ImpactFeedbackStyle.Light);
 
-      if (item.type === "song" && item.data) {
-        const song = item.data as Song;
+      if (item.type === "song") {
+        let song: Song | null = null;
+        if (item.data && typeof item.data === "object" && item.data.id) {
+          song = item.data as Song;
+        } else {
+          song = {
+            id: item.id,
+            title: item.name || "Unknown Song",
+            artist: (item as any).artist || "Unknown Artist",
+            coverUrl: item.imageUrl || "",
+            audioUrl: (item as any).audioUrl || "",
+            duration: (item as any).duration || 0,
+            album: (item as any).album || "",
+            genre: (item as any).genre || "",
+          };
+        }
+
         if (song?.id) {
           playSong(song, [song]);
-          router.push("/player");
           return;
         }
       }

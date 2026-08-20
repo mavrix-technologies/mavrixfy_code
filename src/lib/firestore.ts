@@ -15,6 +15,10 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { sortedCopy } from "@/lib/arrayUtils";
+import {
+  setCachedPlaylist,
+  removeCachedPlaylist,
+} from "@/lib/playlistMemoryCache";
 
 export interface FirestorePlaylist {
   id: string;
@@ -142,7 +146,7 @@ export async function createFirestorePlaylist(
       updatedAt: serverTimestamp(),
     });
 
-    return {
+    const createdPlaylist: FirestorePlaylist = {
       id: docRef.id,
       name,
       description,
@@ -157,6 +161,17 @@ export async function createFirestorePlaylist(
       isPublic: false,
       songCount: 0,
     };
+
+    setCachedPlaylist(docRef.id, {
+      id: docRef.id,
+      name,
+      description,
+      songs: [],
+      isFirestore: true,
+      isPublic: false,
+    });
+
+    return createdPlaylist;
   } catch {
     return null;
   }
@@ -171,6 +186,7 @@ export async function deleteFirestorePlaylist(playlistId: string): Promise<boole
 
     const playlistRef = doc(db, "playlists", playlistId);
     await deleteDoc(playlistRef);
+    removeCachedPlaylist(playlistId);
     return true;
   } catch {
     return false;
@@ -274,7 +290,18 @@ export async function getPlaylistById(playlistId: string): Promise<FirestorePlay
       return null;
     }
 
-    return { id: docSnap.id, ...docSnap.data() } as FirestorePlaylist;
+    const playlist = { id: docSnap.id, ...docSnap.data() } as FirestorePlaylist;
+    setCachedPlaylist(docSnap.id, {
+      id: docSnap.id,
+      name: playlist.name,
+      description: playlist.description,
+      imageUrl: playlist.imageUrl,
+      coverUrl: playlist.imageUrl,
+      songs: Array.isArray(playlist.songs) ? playlist.songs : [],
+      isFirestore: true,
+      isPublic: playlist.isPublic,
+    });
+    return playlist;
   } catch {
     return null;
   }
@@ -417,6 +444,11 @@ export async function addSongToFirestorePlaylist(playlistId: string, song: any):
       updatedAt: serverTimestamp(),
     });
 
+    setCachedPlaylist(playlistId, {
+      id: playlistId,
+      songs,
+    });
+
     return true;
   } catch {
     return false;
@@ -450,6 +482,12 @@ export async function updateFirestorePlaylist(
       updatedAt: serverTimestamp(),
     });
 
+    setCachedPlaylist(playlistId, {
+      id: playlistId,
+      ...cleanUpdates,
+      coverUrl: updates.imageUrl,
+    });
+
     return true;
   } catch {
     return false;
@@ -480,6 +518,11 @@ export async function removeSongFromFirestorePlaylist(playlistId: string, songId
       songs: updatedSongs,
       songCount: updatedSongs.length,
       updatedAt: serverTimestamp(),
+    });
+
+    setCachedPlaylist(playlistId, {
+      id: playlistId,
+      songs: updatedSongs,
     });
 
     return true;

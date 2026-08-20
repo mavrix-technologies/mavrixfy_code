@@ -22,13 +22,15 @@ import BottomSheet, {
 } from "@gorhom/bottom-sheet";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
+import { ImpactFeedbackStyle } from "expo-haptics";
 
 import Colors from "@/constants/colors";
 import { getBestImageUrl, Song } from "@/lib/musicData";
 import { searchCatalog, getCatalogSongs } from "@/lib/catalogService";
 import { getApiUrl } from "@/lib/query-client";
-import { usePlayerActions } from "@/contexts/PlayerContext";
+import { useLikedSongs, usePlayerBrowse } from "@/contexts/PlayerContext";
+import { triggerImpact } from "@/lib/haptics";
+import { showGlobalToast } from "@/utils/globalToast";
 
 export interface AddSongsBottomSheetRef {
   expand: () => void;
@@ -42,22 +44,28 @@ function parseApiSong(s: any): Song | null {
     (Array.isArray(s.downloadUrl)
       ? s.downloadUrl.find?.((d: any) => d.quality === "320kbps" || d.quality === "160kbps")?.url ||
         s.downloadUrl[s.downloadUrl.length - 1]?.url
-      : "") ||
+      : typeof s.downloadUrl === "string" ? s.downloadUrl : "") ||
     s.audioUrl ||
+    s.media_url ||
     s.url ||
     "";
 
-  if (!audioUrl || (!s.name && !s.title)) return null;
+  const title = s.name || s.title || "";
+  if (!title) return null;
 
-  const coverUrl = getBestImageUrl(s.image || s.coverUrl);
+  const coverUrl = getBestImageUrl(s.image || s.coverUrl || s.imageUrl);
   const artist =
     typeof s.primaryArtists === "string" && s.primaryArtists.trim()
       ? s.primaryArtists.trim()
-      : (s.artists?.primary || []).map((a: any) => a.name).join(", ") || "Unknown Artist";
+      : typeof s.artist === "string" && s.artist.trim()
+      ? s.artist.trim()
+      : Array.isArray(s.artists?.primary)
+      ? s.artists.primary.map((a: any) => a.name).join(", ")
+      : "Unknown Artist";
 
   return {
-    id: String(s.id),
-    title: s.name || s.title || "",
+    id: String(s.id || Math.random().toString(36).substring(7)),
+    title,
     artist,
     album: typeof s.album === "string" ? s.album : s.album?.name || "",
     duration: Number(s.duration) || 0,
@@ -78,7 +86,8 @@ const AddSongsBottomSheet = memo(
     const [loading, setLoading] = useState(false);
     const [songs, setSongs] = useState<Song[]>([]);
 
-    const { likedSongIds, isLiked, toggleLike, playSong } = usePlayerActions();
+    const { likedSongIds, isLiked, toggleLike } = useLikedSongs();
+    const { playSong } = usePlayerBrowse();
 
     const loadInitialSongs = useCallback(async () => {
       try {
@@ -86,18 +95,20 @@ const AddSongsBottomSheet = memo(
         const catalog = await getCatalogSongs().catch(() => []);
         
         // Fetch trending songs from API for suggestion list
-        const apiUrl = getApiUrl();
-        const res = await fetch(`${apiUrl}api/search/songs?query=trending hindi songs&limit=50`).catch(
+        const apiUrl = getApiUrl().replace(/\/+$/, "");
+        const res = await fetch(`${apiUrl}/api/search/songs?query=trending hindi songs&limit=50`).catch(
           () => null
         );
         let apiSongs: Song[] = [];
         if (res && res.ok) {
           const json = await res.json().catch(() => null);
-          const results = json?.data?.results || json?.results || [];
-          apiSongs = results.flatMap((item: any) => {
-            const parsed = parseApiSong(item);
-            return parsed ? [parsed] : [];
-          });
+          const results = json?.data?.results || json?.results || json?.data || [];
+          if (Array.isArray(results)) {
+            apiSongs = results.flatMap((item: any) => {
+              const parsed = parseApiSong(item);
+              return parsed ? [parsed] : [];
+            });
+          }
         }
 
         // Deduplicate songs by id
@@ -121,6 +132,9 @@ const AddSongsBottomSheet = memo(
     const expandSheet = useCallback(() => {
       setIsSheetMounted(true);
       void loadInitialSongs();
+      setTimeout(() => {
+        sheetRef.current?.snapToIndex(0);
+      }, 50);
     }, [loadInitialSongs]);
 
     const closeSheet = useCallback(() => {
@@ -154,19 +168,21 @@ const AddSongsBottomSheet = memo(
         const catalogResults = await searchCatalog(qTerm).catch(() => []);
 
         // 2. JioSaavn song search
-        const apiUrl = getApiUrl();
+        const apiUrl = getApiUrl().replace(/\/+$/, "");
         const res = await fetch(
-          `${apiUrl}api/search/songs?query=${encodeURIComponent(qTerm)}&limit=100`
+          `${apiUrl}/api/search/songs?query=${encodeURIComponent(qTerm)}&limit=100`
         ).catch(() => null);
 
         let apiSongs: Song[] = [];
         if (res && res.ok) {
           const json = await res.json().catch(() => null);
-          const results = json?.data?.results || json?.results || [];
-          apiSongs = results.flatMap((item: any) => {
-            const parsed = parseApiSong(item);
-            return parsed ? [parsed] : [];
-          });
+          const results = json?.data?.results || json?.results || json?.data || [];
+          if (Array.isArray(results)) {
+            apiSongs = results.flatMap((item: any) => {
+              const parsed = parseApiSong(item);
+              return parsed ? [parsed] : [];
+            });
+          }
         }
 
         // Combine & deduplicate
@@ -216,8 +232,10 @@ const AddSongsBottomSheet = memo(
     );
 
     const handleToggleAdd = (song: Song) => {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      void triggerImpact(ImpactFeedbackStyle.Medium);
+      const currentlyLiked = isSongLiked(song.id);
       toggleLike(song);
+      showGlobalToast(currentlyLiked ? "Removed from Liked Songs" : "Added to Liked Songs");
     };
 
     const renderSongItem = ({ item }: { item: Song }) => {
@@ -226,7 +244,7 @@ const AddSongsBottomSheet = memo(
         <Pressable
           style={s.songRow}
           onPress={() => {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            void triggerImpact(ImpactFeedbackStyle.Light);
             playSong(item);
           }}
         >
@@ -247,8 +265,13 @@ const AddSongsBottomSheet = memo(
 
           <Pressable
             style={[s.addBtn, liked && s.addBtnActive]}
-            onPress={() => handleToggleAdd(item)}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleToggleAdd(item);
+            }}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={liked ? `Remove ${item.title} from liked songs` : `Add ${item.title} to liked songs`}
           >
             <Ionicons
               name={liked ? "checkmark" : "add"}
@@ -343,44 +366,49 @@ export default AddSongsBottomSheet;
 
 const s = StyleSheet.create({
   sheetBackground: {
-    backgroundColor: "#181C22",
+    backgroundColor: "#181C24",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
   },
   handleIndicator: {
-    backgroundColor: "#4A4A4A",
-    width: 40,
+    backgroundColor: "rgba(255, 255, 255, 0.28)",
+    width: 36,
+    height: 4,
   },
   container: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingTop: 8,
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
   },
   headerTitle: {
     color: "#FFFFFF",
-    fontSize: 20,
+    fontSize: 18,
     fontFamily: "Inter_700Bold",
   },
   closeBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
     alignItems: "center",
     justifyContent: "center",
   },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.07)",
-    borderRadius: 12,
+    backgroundColor: "#10141A",
+    borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 12,
+    height: 44,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
   },
   searchIcon: {
     marginRight: 8,
@@ -388,14 +416,14 @@ const s = StyleSheet.create({
   searchInput: {
     flex: 1,
     color: "#FFFFFF",
-    fontSize: 15,
+    fontSize: 14,
     fontFamily: "Inter_400Regular",
   },
   sectionHeader: {
-    color: "#A0A0A0",
+    color: "#A0AEC0",
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
-    marginBottom: 10,
+    marginBottom: 12,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -405,50 +433,48 @@ const s = StyleSheet.create({
   songRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255,255,255,0.06)",
+    borderBottomColor: "rgba(255, 255, 255, 0.06)",
   },
   artwork: {
     width: 48,
     height: 48,
-    borderRadius: 8,
-    backgroundColor: "#282C34",
+    borderRadius: 6,
+    backgroundColor: "#242C38",
   },
   songMeta: {
     flex: 1,
     marginLeft: 12,
-    marginRight: 12,
+    marginRight: 8,
   },
   songTitle: {
     color: "#FFFFFF",
     fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
-    marginBottom: 4,
+    fontFamily: "Inter_500Medium",
+    marginBottom: 3,
   },
   songArtist: {
-    color: "#A0A0A0",
+    color: "#8A8A8A",
     fontSize: 13,
     fontFamily: "Inter_400Regular",
   },
   addBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     alignItems: "center",
     justifyContent: "center",
   },
   addBtnActive: {
     backgroundColor: "#26e19a",
-    borderColor: "#26e19a",
   },
   centerContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 40,
+    paddingVertical: 60,
   },
   emptyText: {
     color: "#8A8A8A",

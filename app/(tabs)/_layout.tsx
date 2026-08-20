@@ -191,6 +191,128 @@ const MiniPlayerProgressBar = React.memo(function MiniPlayerProgressBar({
   );
 });
 
+const MiniPlayerBannerView = React.memo(function MiniPlayerBannerView({
+  config,
+}: {
+  config: MiniPlayerBannerConfig;
+}) {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const items = config.items;
+  const count = items.length;
+
+  const [fadeAnim] = useState(() => new Animated.Value(1));
+  const [slideAnim] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    if (count <= 1) {
+      setCurrentIndex(0);
+      fadeAnim.setValue(1);
+      slideAnim.setValue(0);
+      return;
+    }
+    const intervalMs = Math.max(2500, (config.intervalSeconds || 4.5) * 1000);
+    const timer = setInterval(() => {
+      // Step 1: Smoothly fade and slide out upwards
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 140,
+          useNativeDriver: true,
+          isInteraction: false,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: -6,
+          duration: 140,
+          useNativeDriver: true,
+          isInteraction: false,
+        }),
+      ]).start(({ finished }) => {
+        if (!finished) return;
+        // Step 2: Advance index and reset position to bottom offset
+        setCurrentIndex((prev) => (prev + 1) % count);
+        slideAnim.setValue(6);
+
+        // Step 3: Smoothly fade and slide in from bottom
+        Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 180,
+            useNativeDriver: true,
+            isInteraction: false,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: 180,
+            useNativeDriver: true,
+            isInteraction: false,
+          }),
+        ]).start();
+      });
+    }, intervalMs);
+
+    return () => clearInterval(timer);
+  }, [count, config.intervalSeconds, fadeAnim, slideAnim]);
+
+  const activeItem = items[currentIndex % count] || items[0];
+  if (!config.enabled || !activeItem) return null;
+
+  return (
+    <Pressable
+      android_disableSound
+      onPress={() => openMiniPlayerBannerLink(activeItem.linkUrl)}
+      style={({ pressed }) => [
+        styles.miniBannerRow,
+        activeItem.backgroundColor ? { backgroundColor: activeItem.backgroundColor } : null,
+        pressed && styles.miniBannerRowPressed,
+      ]}
+      hitSlop={{ top: 4, bottom: 4 }}
+      accessibilityRole="button"
+      accessibilityLabel={`Banner: ${activeItem.text}`}
+    >
+      <Animated.View
+        style={[
+          styles.miniBannerContent,
+          {
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+          },
+        ]}
+      >
+        <Ionicons
+          name={(activeItem.iconName as any) || "paper-plane"}
+          size={12.5}
+          color={activeItem.iconColor || "#38BDF8"}
+          style={styles.miniBannerIcon}
+        />
+        <Text
+          style={[
+            styles.miniBannerText,
+            activeItem.textColor ? { color: activeItem.textColor } : null,
+          ]}
+          numberOfLines={1}
+        >
+          {activeItem.text}
+        </Text>
+      </Animated.View>
+
+      {count > 1 ? (
+        <View style={styles.miniBannerDots}>
+          {items.map((item, idx) => (
+            <View
+              key={`${item.linkUrl}-${item.text}`}
+              style={[
+                styles.miniBannerDot,
+                idx === (currentIndex % count) && styles.miniBannerDotActive,
+              ]}
+            />
+          ))}
+        </View>
+      ) : null}
+    </Pressable>
+  );
+});
+MiniPlayerBannerView.displayName = "MiniPlayerBannerView";
+
 const IOSMiniPlayerProgressBar = React.memo(function IOSMiniPlayerProgressBar({
   fillColor,
 }: {
@@ -791,34 +913,8 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
               ]}
             >
 
-              {bannerConfig.enabled && bannerConfig.text ? (
-                <Pressable
-                  android_disableSound
-                  onPress={() => openMiniPlayerBannerLink(bannerConfig.linkUrl)}
-                  style={({ pressed }) => [
-                    styles.miniBannerRow,
-                    bannerConfig.backgroundColor ? { backgroundColor: bannerConfig.backgroundColor } : null,
-                    pressed && styles.miniBannerRowPressed,
-                  ]}
-                  hitSlop={{ top: 4, bottom: 4 }}
-                >
-                  <Ionicons
-                    name={(bannerConfig.iconName as any) || "paper-plane"}
-                    size={13}
-                    color={bannerConfig.iconColor || "#38BDF8"}
-                    style={styles.miniBannerIcon}
-                  />
-                  <Text
-                    style={[
-                      styles.miniBannerText,
-                      bannerConfig.textColor ? { color: bannerConfig.textColor } : null,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {bannerConfig.text}
-                  </Text>
-                  <Ionicons name="chevron-forward" size={11} color="rgba(255,255,255,0.4)" style={styles.miniBannerChevron} />
-                </Pressable>
+              {bannerConfig.enabled && bannerConfig.items.length > 0 ? (
+                <MiniPlayerBannerView config={bannerConfig} />
               ) : (
                 <>
                   <View pointerEvents="none" style={[styles.playerTopEdge, { backgroundColor: playerTopEdgeTint }]} />
@@ -1777,7 +1873,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingVertical: 5.5,
+    minHeight: 28,
     backgroundColor: "#162838",
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "rgba(255,255,255,0.08)",
@@ -1785,8 +1882,14 @@ const styles = StyleSheet.create({
   miniBannerRowPressed: {
     opacity: 0.75,
   },
+  miniBannerContent: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    minWidth: 0,
+  },
   miniBannerIcon: {
-    marginRight: 7,
+    marginRight: 6.5,
   },
   miniBannerText: {
     flex: 1,
@@ -1795,8 +1898,23 @@ const styles = StyleSheet.create({
     color: "#E2E8F0",
     letterSpacing: -0.2,
   },
-  miniBannerChevron: {
-    marginLeft: 4,
+  miniBannerDots: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3.5,
+    marginRight: 6,
+    marginLeft: 6,
+  },
+  miniBannerDot: {
+    width: 3.5,
+    height: 3.5,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.28)",
+  },
+  miniBannerDotActive: {
+    width: 8,
+    borderRadius: 2,
+    backgroundColor: "#FFFFFF",
   },
 
   playerTopEdge: {

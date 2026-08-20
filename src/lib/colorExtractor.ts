@@ -306,7 +306,7 @@ async function extractArtworkColorsWithJsDecoder(cacheKey: string): Promise<Artw
   const sources = await buildArtworkSources(cacheKey);
   const localUri = sources[0];
   const base64 = await FileSystem.readAsStringAsync(localUri, {
-    encoding: FileSystem.EncodingType.Base64,
+    encoding: "base64",
   });
   const bytes = base64ToBytes(base64);
 

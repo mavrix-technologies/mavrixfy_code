@@ -168,7 +168,6 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
             : [song, ...playableQueue];
 
           playSong(song, queue);
-          router.push("/player");
           return;
         }
 
@@ -192,7 +191,6 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
           ];
 
           playSong(playable, updatedQueue);
-          router.push("/player");
           return;
         }
 
@@ -202,7 +200,7 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
         showGlobalToast("Could not play this song");
       }
     },
-    [playSong, playableQueue, router]
+    [playSong, playableQueue]
   );
 
   const handleOptionsPress = useCallback(

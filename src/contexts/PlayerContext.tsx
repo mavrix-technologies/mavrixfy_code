@@ -1,5 +1,5 @@
 import React, { createContext, use, useState, useCallback, useMemo, useRef, ReactNode, useEffect } from "react";
-import { Alert, AppState, Platform, ToastAndroid, View } from "react-native";
+import { Alert, AppState, Platform, View } from "react-native";
 import { isRunningInExpoGo } from "expo";
 import * as Network from "expo-network";
 import { Song } from "@/lib/musicData";
@@ -8,11 +8,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import * as ExpoAvPlayer from "@/lib/expoAvPlayer";
 import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
 import { logger } from "@/lib/logger";
-import {
-  updatePlaybackEngineSnapshot,
-} from "@/lib/playbackEngine";
+import { updatePlaybackEngineSnapshot } from "@/lib/playbackEngine";
 import { mapFilter } from "@/lib/arrayUtils";
 import { createShuffledPlaybackQueue, toggleQueueShuffleState } from "@/services/audio/ShuffleManager";
+import { showGlobalToast } from "@/utils/globalToast";
 
 let TrackPlayer: any = null;
 let Event: any = null;
@@ -686,16 +685,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const showPlaybackNotice = useCallback((message: string) => {
     const now = Date.now();
-    if (now - lastPlaybackNoticeAtRef.current < 1500) return;
+    if (now - lastPlaybackNoticeAtRef.current < 1200) return;
     lastPlaybackNoticeAtRef.current = now;
 
-    if (Platform.OS === "android") {
-      ToastAndroid.show(message, ToastAndroid.SHORT);
-      return;
-    }
-    if (Platform.OS === "ios") {
-      Alert.alert("Playback", message);
-    }
+    showGlobalToast(message);
   }, []);
 
   const ensurePlayerReady = useCallback(async (): Promise<boolean> => {
@@ -854,22 +847,24 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         isBuffering: false,
       });
 
-      // 3. Save to recently played and persisted player state asynchronously
-      Storage.addRecentlyPlayed({
-        id: targetSong.id,
-        name: targetSong.title,
-        imageUrl: targetSong.coverUrl,
-        type: "song",
-        data: targetSong,
-      }).catch(() => {});
+      // 3. Save to recently played and persisted player state asynchronously (deferred off the critical tap path)
+      setTimeout(() => {
+        Storage.addRecentlyPlayed({
+          id: targetSong.id,
+          name: targetSong.title,
+          imageUrl: targetSong.coverUrl,
+          type: "song",
+          data: targetSong,
+        }).catch(() => {});
 
-      Storage.savePlayerState({
-        currentSong: targetSong,
-        queue: q,
-        queueIndex: targetIndex,
-        positionSeconds: 0,
-        updatedAt: Date.now(),
-      }).catch(() => {});
+        Storage.savePlayerState({
+          currentSong: targetSong,
+          queue: q,
+          queueIndex: targetIndex,
+          positionSeconds: 0,
+          updatedAt: Date.now(),
+        }).catch(() => {});
+      }, 150);
 
       // 4. Resolve audio URL (cached or network)
       try {
@@ -1237,7 +1232,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (!song?.id) return;
 
       if (queueRef.current.some((s) => s.id === song.id)) {
-        showPlaybackNotice(`Already in queue: ${song.title}`);
+        showPlaybackNotice("Already in queue");
         return;
       }
 
@@ -1250,7 +1245,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setSourceQueue(nextSourceQueue);
 
       setUserQueuedSongIds((prev) => (prev.includes(song.id) ? prev : [...prev, song.id]));
-      showPlaybackNotice(`Added to queue: ${song.title}`);
+      showPlaybackNotice("Added to queue");
     },
     [showPlaybackNotice]
   );
@@ -1286,7 +1281,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setSourceQueue(nextSourceQueue);
 
       setUserQueuedSongIds((prev) => [song.id, ...prev.filter((id) => id !== song.id)]);
-      showPlaybackNotice(`Playing next: ${song.title}`);
+      showPlaybackNotice("Playing next");
     },
     [showPlaybackNotice]
   );

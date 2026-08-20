@@ -18,11 +18,12 @@ import {
   NativeSyntheticEvent,
   StyleProp,
   useWindowDimensions,
-  ViewStyle
+  ViewStyle,
+  BackHandler,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { router, useNavigation, useLocalSearchParams } from "expo-router";
+import { router, useNavigation } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Gesture, GestureDetector, Pressable as GHPressable, FlatList as GHFlatList } from "react-native-gesture-handler";
 import Reanimated, {
@@ -32,12 +33,12 @@ import Reanimated, {
   useSharedValue,
   withSpring,
 } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
+import { runOnJS, scheduleOnRN } from "react-native-worklets";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 
 import { safeGoBack } from "@/utils/navigation";
-import { playerUIStateStore } from "@/lib/playerUIState";
+import { playerUIStateStore, type PlayerUIState } from "@/lib/playerUIState";
 import { usePlayerActions, usePlayerProgress, usePlayerRow } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
@@ -292,16 +293,27 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
     };
   }, []);
 
-  const handleBackgroundStateChange = useCallback((state: string) => {
-    if (state === "playing" || state === "buffering") {
-      revealVideo();
-    }
-  }, [revealVideo]);
+  const handleBackgroundStateChange = useCallback(
+    (state: string) => {
+      if (state === "playing" || state === "buffering") {
+        revealVideo();
+      } else if (state === "paused" || state === "ended") {
+        if (isPlaying && playerRef.current) {
+          playerRef.current.playVideo?.();
+        }
+      }
+    },
+    [isPlaying, revealVideo]
+  );
 
   useEffect(() => {
     if (playerReady && playerRef.current) {
       if (isPlaying) {
         playerRef.current.playVideo?.();
+        const targetSeconds = lastPositionRef.current;
+        if (targetSeconds > 0) {
+          playerRef.current.seekTo?.(targetSeconds, true);
+        }
       } else {
         playerRef.current.pauseVideo?.();
       }
@@ -557,206 +569,15 @@ function PlayerPlayButton({
 
 PlayerPlayButton.displayName = "PlayerPlayButton";
 
-// ─── PlayerSlider ────────────────────────────────────────────────────────────
-// Custom Spotify-style scrubber. The visual fill/thumb stay in-app, while the
-// gesture runs on the UI thread so dragging remains smooth.
-
-const PLAYER_SLIDER_MINIMUM_TRACK_COLOR = "#F7FAFF";
-const PLAYER_SLIDER_MAXIMUM_TRACK_COLOR = "rgba(247,250,255,0.28)";
-const PLAYER_SLIDER_THUMB_COLOR = "#F7FAFF";
-const PLAYER_SLIDER_TOUCH_HEIGHT = 12;
-const PLAYER_SLIDER_THUMB_SIZE = 10;
-
-function clampUnit(value: number): number {
-  "worklet";
-  return Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
-}
-
-function progressFromGestureX(x: number, width: number): number {
-  "worklet";
-  const safeWidth = Math.max(1, width);
-  return clampUnit(x / safeWidth);
-}
-
-type PlayerSliderProps = {
-  value: number;
-  minimumValue: number;
-  maximumValue: number;
-  disabled?: boolean;
-  onSlidingStart?: () => void;
-  onValueChange?: (value: number) => void;
-  onSlidingComplete?: (value: number) => void;
-  onSlidingCancel?: () => void;
-  accessible?: boolean;
-  accessibilityLabel?: string;
-  accessibilityRole?: React.ComponentProps<typeof View>["accessibilityRole"];
-  accessibilityValue?: React.ComponentProps<typeof View>["accessibilityValue"];
-};
-
-function PlayerSlider({
-  value,
-  minimumValue,
-  maximumValue,
-  disabled = false,
-  onSlidingStart,
-  onValueChange,
-  onSlidingComplete,
-  onSlidingCancel,
-  accessible,
-  accessibilityLabel,
-  accessibilityRole,
-  accessibilityValue,
-}: PlayerSliderProps) {
-  const trackWidth = useSharedValue(0);
-  const visualProgress = useSharedValue(0);
-  const isSlidingShared = useSharedValue(0);
-  const didCompleteGesture = useSharedValue(0);
-  const isSlidingRef = useRef(false);
-  const range = maximumValue - minimumValue;
-  const normalizedValue = range > 0 ? clampUnit((value - minimumValue) / range) : 0;
-
-  useEffect(() => {
-    if (!isSlidingRef.current) {
-      visualProgress.value = normalizedValue;
-    }
-  }, [normalizedValue, visualProgress]);
-
-  useEffect(() => {
-    if (!disabled) return;
-    isSlidingRef.current = false;
-    isSlidingShared.value = 0;
-  }, [disabled, isSlidingShared]);
-
-  const emitValue = useCallback(
-    (nextProgress: number, shouldComplete: boolean) => {
-      const nextValue = minimumValue + clampUnit(nextProgress) * range;
-      onValueChange?.(nextValue);
-      if (!shouldComplete) return;
-
-      isSlidingRef.current = false;
-      onSlidingComplete?.(nextValue);
-    },
-    [minimumValue, onSlidingComplete, onValueChange, range]
-  );
-
-  const beginSliding = useCallback(() => {
-    if (isSlidingRef.current) return;
-    isSlidingRef.current = true;
-    onSlidingStart?.();
-  }, [onSlidingStart]);
-
-  const cancelSliding = useCallback(() => {
-    if (!isSlidingRef.current) return;
-    isSlidingRef.current = false;
-    onSlidingCancel?.();
-  }, [onSlidingCancel]);
-
-  const handleAccessibilityAction = useCallback(
-    (event: { nativeEvent: { actionName: string } }) => {
-      if (disabled || range <= 0) return;
-      const step = range / 20;
-      const direction = event.nativeEvent.actionName === "increment" ? 1 : -1;
-      const nextValue = Math.min(maximumValue, Math.max(minimumValue, value + step * direction));
-      onSlidingStart?.();
-      onValueChange?.(nextValue);
-      onSlidingComplete?.(nextValue);
-    },
-    [disabled, maximumValue, minimumValue, onSlidingComplete, onSlidingStart, onValueChange, range, value]
-  );
-
-  const panGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(!disabled)
-        .minDistance(0)
-        .onTouchesDown((event) => {
-          const touch = event.allTouches[0] ?? event.changedTouches[0];
-          if (!touch) return;
-
-          didCompleteGesture.value = 0;
-          isSlidingShared.value = 1;
-          const nextProgress = progressFromGestureX(touch.x, trackWidth.value);
-          visualProgress.value = nextProgress;
-          scheduleOnRN(beginSliding);
-          scheduleOnRN(emitValue, nextProgress, false);
-        })
-        .onBegin((event) => {
-          if (isSlidingShared.value > 0) return;
-
-          didCompleteGesture.value = 0;
-          isSlidingShared.value = 1;
-          const nextProgress = progressFromGestureX(event.x, trackWidth.value);
-          visualProgress.value = nextProgress;
-          scheduleOnRN(beginSliding);
-          scheduleOnRN(emitValue, nextProgress, false);
-        })
-        .onUpdate((event) => {
-          const nextProgress = progressFromGestureX(event.x, trackWidth.value);
-          visualProgress.value = nextProgress;
-          scheduleOnRN(emitValue, nextProgress, false);
-        })
-        .onEnd(() => {
-          if (didCompleteGesture.value === 1) return;
-
-          didCompleteGesture.value = 1;
-          scheduleOnRN(emitValue, visualProgress.value, true);
-        })
-        .onTouchesUp((event) => {
-          if (didCompleteGesture.value === 1) return;
-
-          const touch = event.changedTouches[0] ?? event.allTouches[0];
-          if (!touch) return;
-
-          const nextProgress = progressFromGestureX(touch.x, trackWidth.value);
-          visualProgress.value = nextProgress;
-          didCompleteGesture.value = 1;
-          scheduleOnRN(emitValue, nextProgress, true);
-        })
-        .onFinalize(() => {
-          isSlidingShared.value = 0;
-          if (didCompleteGesture.value === 0) {
-            scheduleOnRN(cancelSliding);
-          }
-        }),
-    [beginSliding, cancelSliding, didCompleteGesture, disabled, emitValue, isSlidingShared, trackWidth, visualProgress]
-  );
-
-  const fillAnimatedStyle = useAnimatedStyle(() => ({
-    width: Math.max(0, trackWidth.value * visualProgress.value),
-  }));
-
-  const thumbAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: disabled ? 0.45 : 1,
-    transform: [
-      {
-        translateX: Math.max(0, trackWidth.value * visualProgress.value) - PLAYER_SLIDER_THUMB_SIZE / 2,
-      },
-      { scale: isSlidingShared.value ? 1.16 : 1 },
-    ],
-  }));
-
-  return (
-    <GestureDetector gesture={panGesture}>
-      <View
-        accessible={accessible}
-        accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
-        accessibilityLabel={accessibilityLabel}
-        accessibilityRole={accessibilityRole}
-        accessibilityValue={accessibilityValue}
-        onAccessibilityAction={handleAccessibilityAction}
-        onLayout={(event) => {
-          trackWidth.value = Math.max(1, event.nativeEvent.layout.width);
-        }}
-        style={[styles.playerSlider, disabled && styles.playerSliderDisabled]}
-      >
-        <View style={styles.playerSliderTrack}>
-          <Reanimated.View style={[styles.playerSliderFill, fillAnimatedStyle]} />
-        </View>
-        <Reanimated.View pointerEvents="none" style={[styles.playerSliderThumb, thumbAnimatedStyle]} />
-      </View>
-    </GestureDetector>
-  );
-}
+import { PlayerSlider } from "@/components/PlayerSlider";
+import {
+  clampUnit,
+  PLAYER_SLIDER_TOUCH_HEIGHT,
+  PLAYER_SLIDER_THUMB_SIZE,
+  PLAYER_SLIDER_MINIMUM_TRACK_COLOR,
+  PLAYER_SLIDER_MAXIMUM_TRACK_COLOR,
+  PLAYER_SLIDER_THUMB_COLOR,
+} from "@/lib/sliderUtils";
 
 type PlayerSpotifyProgressProps = {
   screenSongId: string;
@@ -1283,7 +1104,7 @@ function LegacyPlayerScreenView() {
 
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
   const [prevTrackedSongId, setPrevTrackedSongId] = useState(currentSong?.id);
-  const [, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
+  const [artworkPalette, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
   const [isLoadingDevTrack, setIsLoadingDevTrack] = useState(false);
   const [interactionReady, setInteractionReady] = useState(false);
   const [backgroundVideoId, setBackgroundVideoId] = useState<string | null>(null);
@@ -2390,7 +2211,7 @@ function LegacyPlayerScreenView() {
                       <BackgroundYoutubeVideo
                         key={`bg-video-${backgroundVideoId}`}
                         videoId={backgroundVideoId!}
-                        isPlaying={isScreenFocused && playerIsPlaying}
+                        isPlaying={isScreenFocused && playerIsPlaying && !fullscreenLyricsVisible}
                         positionMillis={positionMillis}
                         containerHeight={containerH}
                         isLowEnd={isLowEnd}
@@ -2610,6 +2431,7 @@ function LegacyPlayerScreenView() {
                     currentPositionSeconds={currentPositionSeconds}
                     durationSeconds={duration > 0 ? duration / 1000 : screenSong?.duration || 0}
                     isPlaying={playbackState.isPlaying}
+                    accentColor={artworkPalette.accent}
                     onTogglePlay={togglePlay}
                     onSeek={handleLyricSeek}
                     onToggleFullScreen={() => setFullscreenLyricsVisible(true)}
@@ -2668,6 +2490,7 @@ function LegacyPlayerScreenView() {
         currentPositionSeconds={currentPositionSeconds}
         durationSeconds={duration > 0 ? duration / 1000 : screenSong?.duration || 0}
         isPlaying={playbackState.isPlaying}
+        accentColor={artworkPalette.accent}
         onTogglePlay={togglePlay}
         onSeek={handleLyricSeek}
         onClose={() => setFullscreenLyricsVisible(false)}
@@ -2676,21 +2499,110 @@ function LegacyPlayerScreenView() {
   );
 }
 
-export function PlayerScreen() {
-  const { fromQueue } = useLocalSearchParams<{ fromQueue?: string }>();
+const SPRING_CONFIG = { damping: 28, mass: 0.8, stiffness: 220 };
+
+function collapseOnJS() {
+  playerUIStateStore.collapsePlayer();
+}
+
+export const PlayerScreen = memo(function PlayerScreen() {
+  const { height: screenHeight } = useWindowDimensions();
+  const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
+  const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
+
+  // ── UI State ────────────────────────────────────────────────────────────────
+  const [uiState, setUiState] = useState<PlayerUIState>(() => playerUIStateStore.current);
+
+  useEffect(() => playerUIStateStore.subscribe(setUiState), []);
+
+  // Auto-show mini when a song starts
+  useEffect(() => {
+    if (activeSong && playerUIStateStore.current === "hidden") {
+      playerUIStateStore.showMini();
+    } else if (!activeSong && playerUIStateStore.current !== "hidden") {
+      playerUIStateStore.hidePlayer();
+    }
+  }, [activeSong]);
+
+  const translateY = useSharedValue(screenHeight);
 
   useEffect(() => {
-    if (fromQueue !== "true") {
-      globalQueueSheetRef.current?.close();
+    if (uiState === "expanded") {
+      translateY.value = withSpring(0, SPRING_CONFIG);
+    } else if (uiState === "mini" || uiState === "hidden") {
+      translateY.value = withSpring(screenHeight, SPRING_CONFIG);
     }
-  }, [fromQueue]);
+  }, [uiState, screenHeight, translateY]);
 
-  return <LegacyPlayerScreenView />;
-}
+  // ── Android Back Handler ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (playerUIStateStore.current === "expanded") {
+        playerUIStateStore.collapsePlayer();
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, []);
+
+  const panGesture = Gesture.Pan()
+    .activeOffsetY([0, 10])
+    .onUpdate((e) => {
+      if (e.translationY > 0) {
+        translateY.value = e.translationY;
+      }
+    })
+    .onEnd((e) => {
+      if (e.translationY > 120 || e.velocityY > 500) {
+        translateY.value = withSpring(screenHeight, SPRING_CONFIG);
+        runOnJS(collapseOnJS)();
+      } else {
+        translateY.value = withSpring(0, SPRING_CONFIG);
+      }
+    });
+
+  const containerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: Math.max(0, translateY.value) }],
+  }));
+
+  // If no song is loaded or player is hidden, render nothing
+  if (!activeSong || uiState === "hidden") return null;
+
+  const isExpanded = uiState === "expanded";
+
+  return (
+    <Reanimated.View
+      pointerEvents={isExpanded ? "auto" : "none"}
+      style={[
+        styles.sheetContainer,
+        StyleSheet.absoluteFillObject,
+        containerStyle,
+      ]}
+    >
+      <GestureDetector gesture={panGesture}>
+        <Reanimated.View style={styles.contentWrap}>
+          <LegacyPlayerScreenView />
+        </Reanimated.View>
+      </GestureDetector>
+    </Reanimated.View>
+  );
+});
+
+PlayerScreen.displayName = "PlayerScreen";
 
 export default PlayerScreen;
 
 const styles = StyleSheet.create({
+  sheetContainer: {
+    position: "absolute",
+    zIndex: 998,
+    overflow: "hidden",
+  },
+  contentWrap: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: "transparent",
@@ -3473,20 +3385,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  // ── Legacy stubs kept to avoid unused-style warnings ──────────────────────
-  artistCardSkeleton: {},
-  artistCard: {},
-  artistCardContent: {},
-  artistCardNameRow: {},
-  artistCardName: {},
-  artistCardMeta: {},
-  artistFollowerChip: {},
-  artistFollowerText: {},
-  artistCardFollowers: {},
-  artistCardBio: {},
-  artistCardButton: {},
-  artistCardButtonText: {},
-
   // ── You Might Also Like ── horizontal video cards ──────────────────────────
   relatedSongsContainer: {
     marginTop: 28,
@@ -3526,15 +3424,4 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     marginTop: 2,
   },
-
-  // ── Legacy stubs (old row layout) ─────────────────────────────────────────
-  relatedSongsList: {},
-  relatedSongIndex: {},
-  relatedSongRow: {},
-  relatedSongRowPressed: {},
-  relatedSongThumb: {},
-  relatedSongTextWrap: {},
-  relatedSongTitle: {},
-  relatedSongArtist: {},
-
 });

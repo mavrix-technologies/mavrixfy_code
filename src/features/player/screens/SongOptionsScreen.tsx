@@ -653,7 +653,6 @@ export function SongOptionsScreen() {
       icon: "list-outline",
       onPress: () => closeThen(() => {
         addToQueue(song);
-        showGlobalToast("Added to queue");
       }),
     },
     {

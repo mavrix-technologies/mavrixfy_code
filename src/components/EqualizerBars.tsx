@@ -1,7 +1,6 @@
 /**
- * Premium Music Equalizer Bars Component
- * Built using react-native-reanimated for 60fps native thread performance.
- * Emulates the clean, official equalizer look found in apps like Spotify and Apple Music.
+ * Equalizer Bars — Spotify-style animated bars shown inline with the song title.
+ * Runs 100% on the Reanimated UI thread (no JS frame budget used during animation).
  */
 import React, { useEffect } from "react";
 import { StyleSheet, View } from "react-native";
@@ -12,80 +11,75 @@ import Animated, {
   withSequence,
   withTiming,
   cancelAnimation,
+  Easing,
 } from "react-native-reanimated";
 import Colors from "@/constants/colors";
 
 interface Props {
   isPlaying: boolean;
   color?: string;
-  size?: number; // width of each bar
+  /** Width of each bar in dp. Default 3. */
+  size?: number;
+  /** Gap between bars in dp. Default 2. */
+  gap?: number;
 }
 
-// 4 distinct bars with different heights and speeds to look organic and professional
+// 3 bars — matches Spotify's look closely
 const BARS = [
-  { id: "bar-1", minScale: 0.2, maxScale: 1.0, duration: 320 },
-  { id: "bar-2", minScale: 0.2, maxScale: 0.8, duration: 420 },
-  { id: "bar-3", minScale: 0.2, maxScale: 0.95, duration: 360 },
-  { id: "bar-4", minScale: 0.2, maxScale: 0.7, duration: 480 },
-];
+  { id: "bar-1", minH: 3,  maxH: 14, duration: 380 },
+  { id: "bar-2", minH: 6,  maxH: 18, duration: 300 },
+  { id: "bar-3", minH: 4,  maxH: 12, duration: 440 },
+] as const;
 
-function Bar({
+const MAX_HEIGHT = 18; // tallest possible bar (container height)
+
+const Bar = React.memo(function Bar({
   isPlaying,
-  minScale,
-  maxScale,
+  minH,
+  maxH,
   duration,
   color,
   width,
-  height,
 }: {
   isPlaying: boolean;
-  minScale: number;
-  maxScale: number;
+  minH: number;
+  maxH: number;
   duration: number;
   color: string;
   width: number;
-  height: number;
 }) {
-  const scaleY = useSharedValue(minScale);
+  const height = useSharedValue(minH);
 
   useEffect(() => {
     if (!isPlaying) {
-      // Settle down smoothly to the minimum paused scale
-      scaleY.value = withTiming(minScale, { duration: 350 });
+      cancelAnimation(height);
+      height.value = withTiming(minH, { duration: 220, easing: Easing.out(Easing.quad) });
       return;
     }
 
-    // Run infinite bounce sequence on the native thread
-    scaleY.value = withRepeat(
+    height.value = withRepeat(
       withSequence(
-        withTiming(maxScale, { duration }),
-        withTiming(minScale, { duration })
+        withTiming(maxH, { duration, easing: Easing.inOut(Easing.sin) }),
+        withTiming(minH, { duration, easing: Easing.inOut(Easing.sin) })
       ),
-      -1, // infinite loop
-      true // reverse direction (ping-pong)
+      -1,
+      false
     );
 
     return () => {
-      cancelAnimation(scaleY);
+      cancelAnimation(height);
     };
-  }, [isPlaying, minScale, maxScale, duration, scaleY]);
+  }, [isPlaying, minH, maxH, duration, height]);
 
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [
-        // Anchors the scale to the bottom of the bar
-        { translateY: (height / 2) * (1 - scaleY.value) },
-        { scaleY: scaleY.value },
-      ],
-    };
-  });
+  const animatedStyle = useAnimatedStyle(() => ({
+    height: height.value,
+  }));
 
   return (
     <Animated.View
       style={[
         {
           width,
-          height,
           backgroundColor: color,
           borderRadius: width / 2,
           alignSelf: "flex-end",
@@ -94,36 +88,48 @@ function Bar({
       ]}
     />
   );
-}
+});
 
-export default function EqualizerBars({ isPlaying, color, size = 2.5 }: Props) {
+const EqualizerBars = React.memo(function EqualizerBars({
+  isPlaying,
+  color,
+  size = 3,
+  gap = 2,
+}: Props) {
   const barColor = color ?? Colors.primary;
-  const gap = 1.5;
-  const height = 15;
-  const totalWidth = BARS.length * size + (BARS.length - 1) * gap;
 
   return (
-    <View style={[styles.container, { width: totalWidth, height }]}>
+    <View
+      style={[
+        styles.container,
+        {
+          height: MAX_HEIGHT,
+          gap,
+        },
+      ]}
+    >
       {BARS.map((cfg) => (
         <Bar
           key={cfg.id}
           isPlaying={isPlaying}
-          minScale={cfg.minScale}
-          maxScale={cfg.maxScale}
+          minH={cfg.minH}
+          maxH={cfg.maxH}
           duration={cfg.duration}
           color={barColor}
           width={size}
-          height={height}
         />
       ))}
     </View>
   );
-}
+});
+EqualizerBars.displayName = "EqualizerBars";
+
+export default EqualizerBars;
 
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "flex-end",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
   },
 });

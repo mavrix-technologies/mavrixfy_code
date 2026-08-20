@@ -6,10 +6,17 @@
  * Tier 3: JioSaavn Catalogue Lyrics (Indian catalogue songs fallback)
  */
 
+export interface LyricWord {
+  text: string;
+  start: number;
+  end: number;
+}
+
 export interface LyricLine {
   id?: string;
   time: number; // in seconds (e.g. 14.25)
   text: string;
+  words?: LyricWord[];
   isBreak?: boolean;
   duration?: number; // duration of instrumental section in seconds
 }
@@ -221,14 +228,16 @@ export function romanizeToHinglish(input: string): string {
 }
 
 /**
- * Parse standard LRC timestamped text format: [mm:ss.xx] Lyric text
+ * Parse standard or enhanced LRC timestamped text format: [mm:ss.xx] Lyric text
+ * Supports enhanced word tags <mm:ss.xx> and calculates word-level timings for progressive karaoke.
  */
 export function parseLrc(lrcContent: string): LyricLine[] {
   if (!lrcContent || typeof lrcContent !== "string") return [];
 
-  const lines: LyricLine[] = [];
+  const lines: { time: number; text: string; words?: LyricWord[] }[] = [];
   const rawLines = lrcContent.split(/\r?\n/);
   const timeRegex = /\[(\d{1,2}):(\d{1,2}(?:\.\d{1,3})?)\]/g;
+  const wordTagRegex = /<(\d{1,2}):(\d{1,2}(?:\.\d{1,3})?)>/g;
 
   for (const rawLine of rawLines) {
     const trimmed = rawLine.trim();
@@ -241,8 +250,55 @@ export function parseLrc(lrcContent: string): LyricLine[] {
     const matches = Array.from(trimmed.matchAll(timeRegex));
     if (matches.length === 0) continue;
 
-    const rawText = trimmed.replace(timeRegex, "").trim();
-    const text = romanizeToHinglish(rawText);
+    const lineWithoutLineTags = trimmed.replace(timeRegex, "").trim();
+
+    // Check if line contains word tags like <00:12.30>word
+    const hasWordTags = wordTagRegex.test(lineWithoutLineTags);
+    wordTagRegex.lastIndex = 0;
+
+    let parsedWords: LyricWord[] | undefined;
+    let cleanLineText = "";
+
+    if (hasWordTags) {
+      const parts: { time: number; text: string }[] = [];
+      let match: RegExpExecArray | null;
+      let lastIndex = 0;
+      let lastTime = 0;
+
+      while ((match = wordTagRegex.exec(lineWithoutLineTags)) !== null) {
+        const min = parseInt(match[1], 10);
+        const sec = parseFloat(match[2]);
+        const wordTime = isNaN(min) || isNaN(sec) ? lastTime : min * 60 + sec;
+        const textBefore = lineWithoutLineTags.substring(lastIndex, match.index).trim();
+        if (textBefore) {
+          parts.push({ time: lastTime, text: textBefore });
+        }
+        lastTime = wordTime;
+        lastIndex = match.index + match[0].length;
+      }
+      const textAfter = lineWithoutLineTags.substring(lastIndex).trim();
+      if (textAfter) {
+        parts.push({ time: lastTime, text: textAfter });
+      }
+
+      if (parts.length > 0) {
+        parsedWords = [];
+        for (let pIdx = 0; pIdx < parts.length; pIdx++) {
+          const p = parts[pIdx];
+          const nextTime = parts[pIdx + 1]?.time ?? (p.time + 0.6);
+          parsedWords.push({
+            text: romanizeToHinglish(p.text),
+            start: p.time,
+            end: Math.max(p.time + 0.15, nextTime),
+          });
+        }
+        cleanLineText = parsedWords.map((w) => w.text).join(" ");
+      }
+    }
+
+    if (!cleanLineText) {
+      cleanLineText = romanizeToHinglish(lineWithoutLineTags.replace(wordTagRegex, "").trim());
+    }
 
     for (const match of matches) {
       const minutes = parseInt(match[1], 10);
@@ -252,7 +308,8 @@ export function parseLrc(lrcContent: string): LyricLine[] {
       const totalSeconds = Math.max(0, minutes * 60 + seconds);
       lines.push({
         time: totalSeconds,
-        text: text,
+        text: cleanLineText,
+        words: parsedWords,
       });
     }
   }
@@ -277,14 +334,52 @@ export function parseLrc(lrcContent: string): LyricLine[] {
     if (curr.text === "" && filtered[filtered.length - 1]?.text === "") {
       continue;
     }
+
+    const next = lines[i + 1];
+    let words: LyricWord[] | undefined = curr.words;
+
+    // If word timestamps weren't in the raw LRC, generate word segments
+    if (!words || words.length === 0) {
+      const tokens = curr.text.split(/\s+/).filter(Boolean);
+      if (tokens.length > 0) {
+        const lineStart = curr.time;
+        const nextTime =
+          next && next.time > lineStart
+            ? next.time
+            : lineStart + Math.max(2.5, tokens.length * 0.45);
+        const lineDuration = Math.max(
+          0.8,
+          Math.min(nextTime - lineStart, Math.max(1.8, tokens.length * 0.55))
+        );
+
+        let totalWeight = 0;
+        for (const token of tokens) {
+          totalWeight += Math.max(1, token.length);
+        }
+
+        let currStart = lineStart;
+        words = [];
+        for (const token of tokens) {
+          const weight = Math.max(1, token.length);
+          const dur = (weight / totalWeight) * lineDuration;
+          words.push({
+            text: token,
+            start: currStart,
+            end: currStart + dur,
+          });
+          currStart += dur;
+        }
+      }
+    }
+
     filtered.push({
       id: `lrc_${curr.time}_${i}`,
       time: curr.time,
       text: curr.text,
+      words: words && words.length > 0 ? words : undefined,
     });
 
     // Check for instrumental break between verses (> 6.5s gap)
-    const next = lines[i + 1];
     if (next && curr.text.trim() !== "") {
       const gap = next.time - curr.time;
       if (gap > 6.5) {
@@ -458,7 +553,7 @@ async function fetchLrclibSearch(
 }
 
 /**
- * Query JioSaavn official lyrics endpoint.
+ * Query JioSaavn lyrics fallback endpoint.
  */
 async function fetchJioSaavnLyrics(songId?: string): Promise<LyricsResult | null> {
   if (!songId) return null;

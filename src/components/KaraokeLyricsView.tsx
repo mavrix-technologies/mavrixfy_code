@@ -8,7 +8,6 @@ import {
   StyleSheet,
   Text,
   View,
-  InteractionManager,
   useWindowDimensions,
   type ListRenderItemInfo,
 } from "react-native";
@@ -26,6 +25,8 @@ import { triggerImpact } from "@/lib/haptics";
 import { getSongLyrics, type LyricLine, type LyricsResult } from "@/services/lyricsService";
 import { formatDuration, Song } from "@/lib/musicData";
 import { useArtworkPalette } from "@/lib/colorExtractor";
+import { PlayerSlider } from "@/components/PlayerSlider";
+import { Image } from "expo-image";
 
 interface KaraokeLyricsViewProps {
   song: Song | null;
@@ -39,17 +40,41 @@ interface KaraokeLyricsViewProps {
 }
 
 /**
- * Convert accent color to the signature Spotify lyrics card/screen background hue.
+ * Convert accent color or image palette to the signature Spotify lyrics card/screen background hue.
  */
-function getSpotifyLyricsBg(accentColor?: string, defaultBg = "#2E6B94"): string {
-  if (!accentColor || accentColor === "#0E1016" || accentColor === "#000000") {
-    return defaultBg;
+function getSpotifyLyricsBg(accentColor?: string, songFallbackSeed?: string): string {
+  let hex = (accentColor || "").replace("#", "").trim();
+
+  // If no valid accent color or default fallback (#0E1016 / #000000 / #16181D), derive distinct hue from song seed
+  if (hex.length !== 6 || hex === "0E1016" || hex === "000000" || hex === "16181D" || hex === "181A20") {
+    if (!songFallbackSeed) return "#24527A";
+    let hash = 0;
+    for (let i = 0; i < songFallbackSeed.length; i++) {
+      hash = songFallbackSeed.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const h = Math.abs(hash % 360) / 360;
+    const s = 0.55;
+    const l = 0.32;
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const hue2rgb = (pVal: number, qVal: number, tVal: number) => {
+      let t = tVal;
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return pVal + (qVal - pVal) * 6 * t;
+      if (t < 1 / 2) return qVal;
+      if (t < 2 / 3) return pVal + (qVal - pVal) * (2 / 3 - t) * 6;
+      return pVal;
+    };
+    const r = Math.round(hue2rgb(p, q, h + 1 / 3) * 255);
+    const g = Math.round(hue2rgb(p, q, h) * 255);
+    const b = Math.round(hue2rgb(p, q, h - 1 / 3) * 255);
+    return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
   }
-  const hex = accentColor.replace("#", "");
-  if (hex.length !== 6) return defaultBg;
+
   const r = parseInt(hex.slice(0, 2), 16);
   const g = parseInt(hex.slice(2, 4), 16);
-  const b = parseInt(hex.slice(5, 7), 16) || parseInt(hex.slice(4, 6), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
 
   // RGB to HSL
   const max = Math.max(r, g, b) / 255;
@@ -75,17 +100,18 @@ function getSpotifyLyricsBg(accentColor?: string, defaultBg = "#2E6B94"): string
     h /= 6;
   }
 
-  // Saturated rich slate tone (lightness 0.32-0.38, saturation 0.45-0.65)
-  const targetL = Math.max(0.28, Math.min(0.38, l < 0.15 ? 0.32 : l > 0.65 ? 0.35 : l));
-  const targetS = Math.max(0.42, Math.min(0.68, s < 0.2 ? 0.48 : s));
+  // Saturated rich slate tone (lightness 0.28-0.36, saturation 0.45-0.65)
+  const targetL = Math.max(0.26, Math.min(0.36, l < 0.15 ? 0.30 : l > 0.65 ? 0.32 : l));
+  const targetS = Math.max(0.45, Math.min(0.70, s < 0.2 ? 0.50 : s));
 
-  const hue2rgb = (p: number, q: number, t: number) => {
+  const hue2rgb = (pVal: number, qVal: number, tVal: number) => {
+    let t = tVal;
     if (t < 0) t += 1;
     if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
+    if (t < 1 / 6) return pVal + (qVal - pVal) * 6 * t;
+    if (t < 1 / 2) return qVal;
+    if (t < 2 / 3) return pVal + (qVal - pVal) * (2 / 3 - t) * 6;
+    return pVal;
   };
   const q = targetL < 0.5 ? targetL * (1 + targetS) : targetL + targetS - targetL * targetS;
   const p = 2 * targetL - q;
@@ -97,113 +123,156 @@ function getSpotifyLyricsBg(accentColor?: string, defaultBg = "#2E6B94"): string
 }
 
 /**
- * 60 FPS Spotify-Style Instrumental Break Pill with pulsing music dots
+ * Clean & Minimal Spotify-Style Pulsing 3-Dots Instrumental Break
  */
 const SpotifyInstrumentalBreak = memo(function SpotifyInstrumentalBreak({
   item,
   isActive,
   isPassed,
   onPress,
+  isCompact = false,
 }: {
   item: LyricLine;
   isActive: boolean;
   isPassed: boolean;
-  onPress: (time: number) => void;
+  onPress?: (time: number) => void;
+  isCompact?: boolean;
 }) {
-  const [pulseAnim] = useState(() => new Animated.Value(0));
+  const [dot1] = useState(() => new Animated.Value(0));
+  const [dot2] = useState(() => new Animated.Value(0));
+  const [dot3] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     if (isActive) {
-      const loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 750,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 0,
-            duration: 750,
-            useNativeDriver: true,
-          }),
-        ])
-      );
-      loop.start();
-      return () => loop.stop();
-    } else {
-      pulseAnim.setValue(0);
-    }
-  }, [isActive, pulseAnim]);
+      const makePulse = (anim: Animated.Value, delay: number) => {
+        return Animated.loop(
+          Animated.sequence([
+            Animated.delay(delay),
+            Animated.timing(anim, {
+              toValue: 1,
+              duration: 450,
+              useNativeDriver: true,
+            }),
+            Animated.timing(anim, {
+              toValue: 0,
+              duration: 450,
+              useNativeDriver: true,
+            }),
+          ])
+        );
+      };
 
-  const dot1Opacity = pulseAnim.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [0.35, 1.0, 0.35],
+      const anim1 = makePulse(dot1, 0);
+      const anim2 = makePulse(dot2, 180);
+      const anim3 = makePulse(dot3, 360);
+
+      Animated.parallel([anim1, anim2, anim3]).start();
+
+      return () => {
+        anim1.stop();
+        anim2.stop();
+        anim3.stop();
+      };
+    } else {
+      dot1.setValue(0);
+      dot2.setValue(0);
+      dot3.setValue(0);
+    }
+  }, [isActive, dot1, dot2, dot3]);
+
+  const dot1Scale = dot1.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1.0, 1.35],
   });
-  const dot2Opacity = pulseAnim.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [0.65, 0.35, 1.0],
+  const dot1Opacity = dot1.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.45, 1.0],
   });
-  const dot3Opacity = pulseAnim.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: [1.0, 0.65, 0.35],
+
+  const dot2Scale = dot2.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1.0, 1.35],
   });
+  const dot2Opacity = dot2.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.45, 1.0],
+  });
+
+  const dot3Scale = dot3.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1.0, 1.35],
+  });
+  const dot3Opacity = dot3.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.45, 1.0],
+  });
+
+  const handlePress = useCallback(() => {
+    onPress?.(item.time);
+  }, [item.time, onPress]);
 
   return (
     <Pressable
       android_disableSound
-      onPress={() => onPress(item.time)}
-      style={styles.spotifyBreakContainer}
+      onPress={onPress ? handlePress : undefined}
+      disabled={!onPress}
+      style={[
+        styles.spotifyBreakContainer,
+        isCompact && styles.spotifyBreakContainerCompact,
+      ]}
     >
-      <View
-        style={[
-          styles.spotifyBreakPill,
-          isActive && styles.spotifyBreakPillActive,
-          isPassed && styles.spotifyBreakPillPassed,
-        ]}
-      >
-        <Ionicons
-          name="musical-notes"
-          size={16}
-          color={isActive ? "#FFFFFF" : isPassed ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.35)"}
+      <View style={[styles.spotifyBreakDotsRow, isCompact && styles.spotifyBreakDotsRowCompact]}>
+        <Animated.View
+          style={[
+            styles.spotifyBreakDot,
+            isCompact && styles.spotifyBreakDotCompact,
+            {
+              backgroundColor: isActive || isPassed ? "#FFFFFF" : "rgba(0, 0, 0, 0.40)",
+              opacity: isActive ? dot1Opacity : isPassed ? 0.70 : 0.40,
+              transform: [{ scale: isActive ? dot1Scale : 1 }],
+            },
+          ]}
         />
-        <View style={styles.spotifyBreakDotsRow}>
-          <Animated.View
-            style={[
-              styles.spotifyBreakDot,
-              { opacity: isActive ? dot1Opacity : isPassed ? 0.7 : 0.35 },
-            ]}
-          />
-          <Animated.View
-            style={[
-              styles.spotifyBreakDot,
-              { opacity: isActive ? dot2Opacity : isPassed ? 0.7 : 0.35 },
-            ]}
-          />
-          <Animated.View
-            style={[
-              styles.spotifyBreakDot,
-              { opacity: isActive ? dot3Opacity : isPassed ? 0.7 : 0.35 },
-            ]}
-          />
-        </View>
+        <Animated.View
+          style={[
+            styles.spotifyBreakDot,
+            isCompact && styles.spotifyBreakDotCompact,
+            {
+              backgroundColor: isActive || isPassed ? "#FFFFFF" : "rgba(0, 0, 0, 0.40)",
+              opacity: isActive ? dot2Opacity : isPassed ? 0.70 : 0.40,
+              transform: [{ scale: isActive ? dot2Scale : 1 }],
+            },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.spotifyBreakDot,
+            isCompact && styles.spotifyBreakDotCompact,
+            {
+              backgroundColor: isActive || isPassed ? "#FFFFFF" : "rgba(0, 0, 0, 0.40)",
+              opacity: isActive ? dot3Opacity : isPassed ? 0.70 : 0.40,
+              transform: [{ scale: isActive ? dot3Scale : 1 }],
+            },
+          ]}
+        />
       </View>
     </Pressable>
   );
 });
 
+const PREVIEW_LINE_HEIGHT = 44;
+
 /**
- * 60 FPS Spotify-Style Fullscreen Lyric Line with smooth transition animation
+ * 60 FPS Spotify-Style Fullscreen Lyric Line
  */
 const SpotifyLyricLine = memo(function SpotifyLyricLine({
   item,
-  index,
   isActive,
   isPassed,
   isSynced,
   onPress,
 }: {
   item: LyricLine;
-  index: number;
   isActive: boolean;
   isPassed: boolean;
   isSynced: boolean;
@@ -211,18 +280,36 @@ const SpotifyLyricLine = memo(function SpotifyLyricLine({
 }) {
   const [animValue] = useState(() => new Animated.Value(isActive ? 2 : isPassed ? 1 : 0));
 
+  const handlePress = useCallback(() => {
+    if (isSynced) {
+      onPress(item.time);
+    }
+  }, [isSynced, item.time, onPress]);
+
   useEffect(() => {
-    const toValue = isActive ? 2 : isPassed ? 1 : 0;
-    Animated.timing(animValue, {
-      toValue,
-      duration: 260,
+    Animated.spring(animValue, {
+      toValue: isActive ? 2 : isPassed ? 1 : 0,
+      damping: 20,
+      stiffness: 140,
+      mass: 0.8,
       useNativeDriver: true,
     }).start();
   }, [isActive, isPassed, animValue]);
 
+  if (item.isBreak || item.text === "♪ ♪ ♪" || !item.text?.trim()) {
+    return (
+      <SpotifyInstrumentalBreak
+        item={item}
+        isActive={isActive}
+        isPassed={isPassed}
+        onPress={onPress}
+      />
+    );
+  }
+
   const opacity = animValue.interpolate({
     inputRange: [0, 1, 2],
-    outputRange: [0.32, 0.78, 1.0],
+    outputRange: [isSynced ? 0.35 : 0.85, 0.72, 1.0],
   });
 
   const scale = animValue.interpolate({
@@ -234,12 +321,6 @@ const SpotifyLyricLine = memo(function SpotifyLyricLine({
     inputRange: [0, 1, 2],
     outputRange: [2, 0, 0],
   });
-
-  const handlePress = useCallback(() => {
-    if (isSynced) {
-      onPress(item.time);
-    }
-  }, [isSynced, item.time, onPress]);
 
   return (
     <Pressable
@@ -274,27 +355,110 @@ const SpotifyLyricLine = memo(function SpotifyLyricLine({
 });
 
 /**
+ * 60 FPS Spotify-Style Preview Line on Player Screen
+ */
+const SpotifyCardPreviewLine = memo(function SpotifyCardPreviewLine({
+  item,
+  isActive,
+  isPassed,
+  isSynced,
+}: {
+  item: LyricLine;
+  isActive: boolean;
+  isPassed: boolean;
+  isSynced: boolean;
+}) {
+  const [animValue] = useState(() => new Animated.Value(isActive ? 2 : isPassed ? 1 : 0));
+
+  useEffect(() => {
+    Animated.spring(animValue, {
+      toValue: isActive ? 2 : isPassed ? 1 : 0,
+      damping: 20,
+      stiffness: 140,
+      mass: 0.8,
+      useNativeDriver: true,
+    }).start();
+  }, [isActive, isPassed, animValue]);
+
+  if (item.isBreak || item.text === "♪ ♪ ♪" || !item.text?.trim()) {
+    return (
+      <Animated.View
+        style={[
+          styles.spotifyCardLineWrap,
+          {
+            opacity: isActive ? 1 : 0.6,
+          },
+        ]}
+      >
+        <SpotifyInstrumentalBreak
+          item={item}
+          isActive={isActive}
+          isPassed={isPassed}
+          isCompact={true}
+        />
+      </Animated.View>
+    );
+  }
+
+  const opacity = animValue.interpolate({
+    inputRange: [0, 1, 2],
+    outputRange: [isSynced ? 0.38 : 0.85, 0.72, 1.0],
+  });
+
+  const scale = animValue.interpolate({
+    inputRange: [0, 1, 2],
+    outputRange: [0.97, 1.0, 1.025],
+  });
+
+  return (
+    <Animated.View
+      style={[
+        styles.spotifyCardLineWrap,
+        {
+          opacity,
+          transform: [{ scale }],
+        },
+      ]}
+    >
+      <Text
+        numberOfLines={1}
+        style={[
+          styles.spotifyCardLineText,
+          isActive
+            ? styles.spotifyCardLineActive
+            : isPassed
+            ? styles.spotifyCardLinePassed
+            : styles.spotifyCardLineUpcoming,
+        ]}
+      >
+        {item.text || "♪ ♪ ♪"}
+      </Text>
+    </Animated.View>
+  );
+});
+
+/**
  * 1. Inline Spotify Preview Card on Player Screen (Screenshot 1)
  */
 export const KaraokeLyricsView = memo(function KaraokeLyricsView({
   song,
   currentPositionSeconds,
+  isPlaying,
   accentColor,
   onToggleFullScreen,
 }: KaraokeLyricsViewProps) {
   const [lyricsData, setLyricsData] = useState<LyricsResult | null>(null);
   const [loading, setLoading] = useState(false);
   const artworkPalette = useArtworkPalette(song?.coverUrl);
+  const [offsetAnim] = useState(() => new Animated.Value(0));
 
-  const previewFadeRef = useRef<Animated.Value | null>(null);
-  if (previewFadeRef.current === null) {
-    previewFadeRef.current = new Animated.Value(1);
-  }
-  const previewFade = previewFadeRef.current;
+  const songSeed = useMemo(() => `${song?.id || ""}_${song?.title || ""}_${song?.artist || ""}`, [song?.id, song?.title, song?.artist]);
+
+  const effectiveAccent = accentColor || (artworkPalette.accent !== "#0E1016" ? artworkPalette.accent : undefined) || (artworkPalette.primary !== "#0E1016" ? artworkPalette.primary : undefined);
 
   const cardBgColor = useMemo(
-    () => getSpotifyLyricsBg(accentColor || artworkPalette.accent),
-    [accentColor, artworkPalette.accent]
+    () => getSpotifyLyricsBg(effectiveAccent, songSeed),
+    [effectiveAccent, songSeed]
   );
 
   useEffect(() => {
@@ -330,6 +494,32 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
     };
   }, [song?.id, song?.title, song?.artist, song?.duration]);
 
+  // High-frequency live position interpolation for zero-lag word karaoke sync
+  const [interpolatedSeconds, setInterpolatedSeconds] = useState(currentPositionSeconds);
+  const lastSyncRef = useRef<{ pos: number; time: number }>({
+    pos: currentPositionSeconds,
+    time: Date.now(),
+  });
+
+  useEffect(() => {
+    lastSyncRef.current = {
+      pos: currentPositionSeconds,
+      time: Date.now(),
+    };
+    setInterpolatedSeconds(currentPositionSeconds);
+  }, [currentPositionSeconds]);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    const interval = setInterval(() => {
+      const elapsed = (Date.now() - lastSyncRef.current.time) / 1000;
+      setInterpolatedSeconds(lastSyncRef.current.pos + elapsed);
+    }, 40);
+    return () => clearInterval(interval);
+  }, [isPlaying]);
+
+  const livePosition = isPlaying ? interpolatedSeconds : currentPositionSeconds;
+
   // Active line index calculation
   const activeIndex = useMemo(() => {
     if (!lyricsData || !lyricsData.synced || lyricsData.lines.length === 0) {
@@ -338,32 +528,30 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
     const lines = lyricsData.lines;
     let foundIndex = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].time <= currentPositionSeconds + 0.15) {
+      if (lines[i].time <= livePosition + 0.05) {
         foundIndex = i;
       } else {
         break;
       }
     }
     return foundIndex >= 0 ? foundIndex : 0;
-  }, [lyricsData, currentPositionSeconds]);
+  }, [lyricsData, livePosition]);
 
+  // Smooth continuous gliding translation to active line
   useEffect(() => {
-    previewFade.setValue(0.55);
-    Animated.timing(previewFade, {
-      toValue: 1,
-      duration: 240,
+    const targetOffset = activeIndex > 0 ? -Math.max(0, activeIndex - 1) * PREVIEW_LINE_HEIGHT : 0;
+    Animated.spring(offsetAnim, {
+      toValue: targetOffset,
+      damping: 22,
+      stiffness: 130,
+      mass: 0.8,
       useNativeDriver: true,
     }).start();
-  }, [activeIndex, previewFade]);
+  }, [activeIndex, offsetAnim]);
 
   if (!song) return null;
 
-  const hasLyrics = lyricsData && lyricsData.lines.length > 0;
-  const lines = hasLyrics ? lyricsData.lines : [];
-
-  // Preview lines window (shows up to 5 lines)
-  const previewStart = Math.max(0, activeIndex >= 0 ? Math.max(0, activeIndex - 2) : 0);
-  const previewLines = lines.slice(previewStart, previewStart + 5);
+  const hasLyrics = Boolean(lyricsData && lyricsData.lines.length > 0);
 
   return (
     <Pressable
@@ -394,35 +582,29 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
           <ActivityIndicator size="small" color="#FFFFFF" />
           <Text style={styles.spotifyCardSubtext}>Loading lyrics...</Text>
         </View>
-      ) : !hasLyrics ? (
+      ) : !hasLyrics || !lyricsData ? (
         <View style={styles.spotifyCardLoading}>
           <Ionicons name="musical-notes-outline" size={22} color="rgba(255,255,255,0.4)" />
           <Text style={styles.spotifyCardSubtext}>No lyrics available for this song</Text>
         </View>
       ) : (
-        <Animated.View style={[styles.spotifyCardLyricsBlock, { opacity: previewFade }]}>
-          {previewLines.map((line, idx) => {
-            const actualIndex = previewStart + idx;
-            const isActive = actualIndex === activeIndex;
-            const isPassed = actualIndex < activeIndex;
-            return (
-              <Text
-                key={line.id || `preview_${line.time}_${line.text}`}
-                numberOfLines={2}
-                style={[
-                  styles.spotifyCardLineText,
-                  isActive
-                    ? styles.spotifyCardLineActive
-                    : isPassed
-                    ? styles.spotifyCardLinePassed
-                    : styles.spotifyCardLineUpcoming,
-                ]}
-              >
-                {line.text}
-              </Text>
-            );
-          })}
-        </Animated.View>
+        <View style={styles.spotifyCardViewport} pointerEvents="none">
+          <Animated.View style={{ transform: [{ translateY: offsetAnim }] }}>
+            {lyricsData.lines.map((line, index) => {
+              const isActive = index === activeIndex;
+              const isPassed = index < activeIndex;
+              return (
+                <SpotifyCardPreviewLine
+                  key={line.id || `card_line_${line.time}_${line.text}`}
+                  item={line}
+                  isActive={isActive}
+                  isPassed={isPassed}
+                  isSynced={Boolean(lyricsData.synced)}
+                />
+              );
+            })}
+          </Animated.View>
+        </View>
       )}
 
       {/* Bottom Button Pill */}
@@ -456,19 +638,21 @@ const SpotifyModalHeader = memo(function SpotifyModalHeader({
   return (
     <GestureDetector gesture={gesture}>
       <View style={styles.spotifyModalHeader}>
-        <Pressable
-          onPress={() => {
-            if (Platform.OS !== "web") {
-              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-            }
-            onClose();
-          }}
-          hitSlop={14}
-          style={styles.spotifyHeaderBackBtn}
-        >
-          <Ionicons name="chevron-down" size={24} color="#FFFFFF" />
-        </Pressable>
+        {/* Left: Artwork thumbnail */}
+        {song.coverUrl ? (
+          <Image
+            source={{ uri: song.coverUrl }}
+            style={styles.spotifyHeaderArtwork}
+            contentFit="cover"
+            transition={200}
+          />
+        ) : (
+          <View style={[styles.spotifyHeaderArtwork, styles.spotifyHeaderArtworkFallback]}>
+            <Ionicons name="musical-notes" size={20} color="rgba(255,255,255,0.7)" />
+          </View>
+        )}
 
+        {/* Middle: Title & Artist info */}
         <View style={styles.spotifyHeaderSongInfo}>
           <Text numberOfLines={1} style={styles.spotifyHeaderTitle}>
             {song.title}
@@ -478,7 +662,19 @@ const SpotifyModalHeader = memo(function SpotifyModalHeader({
           </Text>
         </View>
 
-        <View style={{ width: 32 }} />
+        {/* Right: Circular close button pill */}
+        <Pressable
+          onPress={() => {
+            if (Platform.OS !== "web") {
+              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+            }
+            onClose();
+          }}
+          hitSlop={12}
+          style={styles.spotifyHeaderCloseBtn}
+        >
+          <Ionicons name="close" size={16} color="#FFFFFF" />
+        </Pressable>
       </View>
     </GestureDetector>
   );
@@ -488,6 +684,7 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
   lyricsData,
   loading,
   activeIndex,
+  currentPositionSeconds,
   screenHeight,
   visible,
   onSeek,
@@ -495,6 +692,7 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
   lyricsData: LyricsResult | null;
   loading: boolean;
   activeIndex: number;
+  currentPositionSeconds: number;
   screenHeight: number;
   visible: boolean;
   onSeek: (seconds: number) => void;
@@ -572,7 +770,6 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
       return (
         <SpotifyLyricLine
           item={item}
-          index={index}
           isActive={isActive}
           isPassed={isPassed}
           isSynced={Boolean(lyricsData?.synced)}
@@ -613,6 +810,7 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
       data={lyricsData.lines}
       keyExtractor={keyExtractor}
       renderItem={renderItem}
+      extraData={activeIndex}
       onScrollToIndexFailed={(info) => {
         setTimeout(() => {
           flatListRef.current?.scrollToIndex({
@@ -655,103 +853,72 @@ const SpotifyModalBottomBar = memo(function SpotifyModalBottomBar({
   onSeek: (seconds: number) => void;
 }) {
   const totalDuration = durationSeconds > 0 ? durationSeconds : 180;
-  const progressRatio = Math.max(0, Math.min(1, currentPositionSeconds / totalDuration));
+  const [seekingSeconds, setSeekingSeconds] = useState<number | null>(null);
 
-  const [scrubbingRatio, setScrubbingRatio] = useState<number | null>(null);
-  const progressBarWidthRef = useRef<number>(1);
+  const displaySeconds = seekingSeconds !== null ? seekingSeconds : currentPositionSeconds;
+  const displayRemaining = Math.max(0, totalDuration - displaySeconds);
 
-  const panGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .runOnJS(true)
-        .onBegin((e) => {
-          const ratio = Math.max(0, Math.min(1, e.x / (progressBarWidthRef.current || 1)));
-          setScrubbingRatio(ratio);
-          if (Platform.OS !== "web") {
-            void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-          }
-        })
-        .onUpdate((e) => {
-          const ratio = Math.max(0, Math.min(1, e.x / (progressBarWidthRef.current || 1)));
-          setScrubbingRatio(ratio);
-        })
-        .onEnd((e) => {
-          const ratio = Math.max(0, Math.min(1, e.x / (progressBarWidthRef.current || 1)));
-          const targetSeconds = ratio * totalDuration;
-          if (Platform.OS !== "web") {
-            void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-          }
-          onSeek(targetSeconds);
-          setScrubbingRatio(null);
-        })
-        .onFinalize(() => {
-          setScrubbingRatio(null);
-        }),
-    [totalDuration, onSeek]
+  const handleSlidingStart = useCallback(() => {
+    setSeekingSeconds(currentPositionSeconds);
+  }, [currentPositionSeconds]);
+
+  const handleValueChange = useCallback((val: number) => {
+    setSeekingSeconds(val);
+  }, []);
+
+  const handleSlidingComplete = useCallback(
+    (val: number) => {
+      setSeekingSeconds(null);
+      if (Platform.OS !== "web") {
+        void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
+      }
+      onSeek(val);
+    },
+    [onSeek]
   );
 
-  const displayRatio = scrubbingRatio !== null ? scrubbingRatio : progressRatio;
-  const displayCurrentSeconds =
-    scrubbingRatio !== null ? scrubbingRatio * totalDuration : currentPositionSeconds;
-  const displayRemainingSeconds = Math.max(0, totalDuration - displayCurrentSeconds);
+  const handleSlidingCancel = useCallback(() => {
+    setSeekingSeconds(null);
+  }, []);
 
   return (
     <View style={styles.spotifyBottomBar}>
-      <GestureDetector gesture={panGesture}>
-        <View
-          style={styles.spotifyProgressContainer}
-          onLayout={(e) => {
-            progressBarWidthRef.current = e.nativeEvent.layout.width;
-          }}
-        >
-          <View style={styles.spotifyProgressTouchArea}>
-            <View style={styles.spotifyProgressTrack}>
-              <View
-                style={[
-                  styles.spotifyProgressFill,
-                  { width: `${Math.round(displayRatio * 100)}%` },
-                ]}
-              />
-              <View
-                style={[
-                  styles.spotifyProgressThumb,
-                  { left: `${Math.max(0, Math.min(97, displayRatio * 100))}%` },
-                  scrubbingRatio !== null && styles.spotifyProgressThumbActive,
-                ]}
-              />
-            </View>
-          </View>
-
-          <View style={styles.spotifyTimeRow}>
-            <Text style={styles.spotifyTimeText}>
-              {formatDuration(Math.floor(displayCurrentSeconds))}
-            </Text>
-            <Text style={styles.spotifyTimeText}>
-              -{formatDuration(Math.floor(displayRemainingSeconds))}
-            </Text>
-          </View>
-        </View>
-      </GestureDetector>
-
+      {/* Left: Play/Pause button */}
       {onTogglePlay ? (
-        <View style={styles.spotifyPlayBtnWrap}>
-          <Pressable
-            android_disableSound
-            onPress={onTogglePlay}
-            style={({ pressed }) => [
-              styles.spotifyBigPlayBtn,
-              pressed && styles.spotifyBigPlayBtnPressed,
-            ]}
-          >
-            <Ionicons
-              name={isPlaying ? "pause" : "play"}
-              size={30}
-              color="#000000"
-              style={!isPlaying ? { marginLeft: 2 } : undefined}
-            />
-          </Pressable>
-        </View>
+        <Pressable
+          android_disableSound
+          onPress={onTogglePlay}
+          style={({ pressed }) => [
+            styles.spotifyBottomPlayBtn,
+            pressed && styles.spotifyBottomPlayBtnPressed,
+          ]}
+        >
+          <Ionicons
+            name={isPlaying ? "pause" : "play"}
+            size={18}
+            color="#FFFFFF"
+            style={!isPlaying ? { marginLeft: 2 } : undefined}
+          />
+        </Pressable>
       ) : null}
+
+      {/* Middle: Progress Scrubber Slider */}
+      <View style={styles.spotifyBottomSliderWrap}>
+        <PlayerSlider
+          value={displaySeconds}
+          minimumValue={0}
+          maximumValue={totalDuration}
+          onSlidingStart={handleSlidingStart}
+          onValueChange={handleValueChange}
+          onSlidingComplete={handleSlidingComplete}
+          onSlidingCancel={handleSlidingCancel}
+        />
+      </View>
+
+      {/* Right: Time string e.g. 0:02 / 0:20 */}
+      <Text style={styles.spotifyBottomTimeText}>
+        {formatDuration(Math.floor(displaySeconds))} / {formatDuration(Math.floor(totalDuration))}
+      </Text>
     </View>
   );
 });
@@ -785,9 +952,12 @@ export const FullscreenKaraokeModal = memo(function FullscreenKaraokeModal({
   const [loading, setLoading] = useState(false);
 
   const artworkPalette = useArtworkPalette(song?.coverUrl);
+  const songSeed = useMemo(() => `${song?.id || ""}_${song?.title || ""}_${song?.artist || ""}`, [song?.id, song?.title, song?.artist]);
+  const effectiveAccent = accentColor || (artworkPalette.accent !== "#0E1016" ? artworkPalette.accent : undefined) || (artworkPalette.primary !== "#0E1016" ? artworkPalette.primary : undefined);
+
   const screenBgColor = useMemo(
-    () => getSpotifyLyricsBg(accentColor || artworkPalette.accent),
-    [accentColor, artworkPalette.accent]
+    () => getSpotifyLyricsBg(effectiveAccent, songSeed),
+    [effectiveAccent, songSeed]
   );
 
   const translateY = useSharedValue(0);
@@ -833,38 +1003,60 @@ export const FullscreenKaraokeModal = memo(function FullscreenKaraokeModal({
     [handleDismiss, translateY]
   );
 
-  // Defer heavy lyrics loading to 0ms post-interaction
   useEffect(() => {
     if (!visible || !song?.title) return;
 
     let isCurrent = true;
-    const task = InteractionManager.runAfterInteractions(() => {
-      setLoading(true);
-      getSongLyrics({
-        id: song.id,
-        title: song.title,
-        artist: song.artist,
-        duration: song.duration,
+    setLoading(true);
+    getSongLyrics({
+      id: song.id,
+      title: song.title,
+      artist: song.artist,
+      duration: song.duration,
+    })
+      .then((res) => {
+        if (isCurrent) {
+          setLyricsData(res);
+          setLoading(false);
+        }
       })
-        .then((res) => {
-          if (isCurrent) {
-            setLyricsData(res);
-            setLoading(false);
-          }
-        })
-        .catch(() => {
-          if (isCurrent) {
-            setLyricsData({ synced: false, lines: [], provider: "none" });
-            setLoading(false);
-          }
-        });
-    });
+      .catch(() => {
+        if (isCurrent) {
+          setLyricsData({ synced: false, lines: [], provider: "none" });
+          setLoading(false);
+        }
+      });
 
     return () => {
       isCurrent = false;
-      task.cancel();
     };
   }, [visible, song?.id, song?.title, song?.artist, song?.duration]);
+
+  // High-frequency live position interpolation for zero-lag word karaoke sync
+  const [interpolatedSeconds, setInterpolatedSeconds] = useState(currentPositionSeconds);
+  const lastSyncRef = useRef<{ pos: number; time: number }>({
+    pos: currentPositionSeconds,
+    time: Date.now(),
+  });
+
+  useEffect(() => {
+    lastSyncRef.current = {
+      pos: currentPositionSeconds,
+      time: Date.now(),
+    };
+    setInterpolatedSeconds(currentPositionSeconds);
+  }, [currentPositionSeconds]);
+
+  useEffect(() => {
+    if (!isPlaying || !visible) return;
+    const interval = setInterval(() => {
+      const elapsed = (Date.now() - lastSyncRef.current.time) / 1000;
+      setInterpolatedSeconds(lastSyncRef.current.pos + elapsed);
+    }, 40);
+    return () => clearInterval(interval);
+  }, [isPlaying, visible]);
+
+  const livePosition = isPlaying ? interpolatedSeconds : currentPositionSeconds;
 
   // Compute active line index
   const activeIndex = useMemo(() => {
@@ -874,14 +1066,14 @@ export const FullscreenKaraokeModal = memo(function FullscreenKaraokeModal({
     const lines = lyricsData.lines;
     let foundIndex = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].time <= currentPositionSeconds + 0.15) {
+      if (lines[i].time <= livePosition + 0.05) {
         foundIndex = i;
       } else {
         break;
       }
     }
     return foundIndex >= 0 ? foundIndex : 0;
-  }, [lyricsData, currentPositionSeconds]);
+  }, [lyricsData, livePosition]);
 
   if (!visible || !song) return null;
 
@@ -899,12 +1091,13 @@ export const FullscreenKaraokeModal = memo(function FullscreenKaraokeModal({
           lyricsData={lyricsData}
           loading={loading}
           activeIndex={activeIndex}
+          currentPositionSeconds={livePosition}
           screenHeight={screenHeight}
           visible={visible}
           onSeek={onSeek}
         />
         <SpotifyModalBottomBar
-          currentPositionSeconds={currentPositionSeconds}
+          currentPositionSeconds={livePosition}
           durationSeconds={totalDuration}
           isPlaying={isPlaying}
           onTogglePlay={onTogglePlay}
@@ -947,15 +1140,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: "Inter_700Bold",
   },
-  spotifyCardLyricsBlock: {
-    gap: 8,
-    marginBottom: 20,
+  spotifyCardViewport: {
+    height: 132,
+    overflow: "hidden",
+    marginBottom: 16,
+    justifyContent: "flex-start",
+  },
+  spotifyCardLineWrap: {
+    height: 44,
+    justifyContent: "center",
   },
   spotifyCardLineText: {
     fontSize: 21,
     lineHeight: 28,
     fontFamily: "Inter_700Bold",
-    letterSpacing: -0.4,
+    letterSpacing: -0.35,
   },
   spotifyCardLineActive: {
     color: "#FFFFFF",
@@ -1004,32 +1203,48 @@ const styles = StyleSheet.create({
   spotifyModalHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     paddingTop: Platform.OS === "ios" ? 54 : 36,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    gap: 12,
   },
-  spotifyHeaderBackBtn: {
-    width: 32,
-    height: 32,
+  spotifyHeaderArtwork: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
+  spotifyHeaderArtworkFallback: {
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
   },
   spotifyHeaderSongInfo: {
     flex: 1,
-    alignItems: "center",
-    paddingHorizontal: 8,
+    minWidth: 0,
+    justifyContent: "center",
   },
   spotifyHeaderTitle: {
     color: "#FFFFFF",
-    fontSize: 13,
+    fontSize: 16,
+    lineHeight: 21,
     fontFamily: "Inter_700Bold",
   },
   spotifyHeaderArtist: {
-    color: "rgba(255,255,255,0.75)",
-    fontSize: 11,
+    color: "rgba(255, 255, 255, 0.65)",
+    fontSize: 12.5,
+    lineHeight: 16,
     fontFamily: "Inter_500Medium",
-    marginTop: 1,
+    marginTop: 2,
+  },
+  spotifyHeaderCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0, 0, 0, 0.32)",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
   },
   spotifyModalListContent: {
     paddingHorizontal: 22,
@@ -1055,39 +1270,39 @@ const styles = StyleSheet.create({
   spotifyLineUpcoming: {
     color: "rgba(0, 0, 0, 0.90)",
   },
+  spotifyWordActive: {
+    color: "#FFFFFF",
+  },
+  spotifyWordUpcoming: {
+    color: "rgba(0, 0, 0, 0.40)",
+  },
   spotifyBreakContainer: {
     paddingVertical: 14,
     alignItems: "flex-start",
+    justifyContent: "center",
   },
-  spotifyBreakPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.10)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.15)",
-  },
-  spotifyBreakPillActive: {
-    backgroundColor: "rgba(255, 255, 255, 0.22)",
-    borderColor: "rgba(255, 255, 255, 0.45)",
-    transform: [{ scale: 1.04 }],
-  },
-  spotifyBreakPillPassed: {
-    opacity: 0.65,
+  spotifyBreakContainerCompact: {
+    paddingVertical: 4,
   },
   spotifyBreakDotsRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
+    gap: 9,
+    paddingVertical: 6,
+  },
+  spotifyBreakDotsRowCompact: {
+    gap: 6,
+    paddingVertical: 2,
   },
   spotifyBreakDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  spotifyBreakDotCompact: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#FFFFFF",
   },
   spotifyModalCenterState: {
     flex: 1,
@@ -1113,73 +1328,38 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
   },
 
-  // Bottom Control Bar
+  // Bottom Control Bar matching screenshot
   spotifyBottomBar: {
-    paddingHorizontal: 24,
-    paddingBottom: Platform.OS === "ios" ? 38 : 24,
-    paddingTop: 8,
-  },
-  spotifyProgressContainer: {
-    marginBottom: 8,
-  },
-  spotifyProgressTouchArea: {
-    paddingVertical: 2,
-    justifyContent: "center",
-  },
-  spotifyProgressTrack: {
-    height: 4,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    borderRadius: 2,
-    position: "relative",
-  },
-  spotifyProgressFill: {
-    height: "100%",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 2,
-  },
-  spotifyProgressThumb: {
-    position: "absolute",
-    top: -4,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#FFFFFF",
-  },
-  spotifyProgressThumbActive: {
-    top: -6,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
-  },
-  spotifyTimeRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 1,
+    paddingHorizontal: 20,
+    paddingBottom: Platform.OS === "ios" ? 38 : 24,
+    paddingTop: 12,
+    gap: 10,
   },
-  spotifyTimeText: {
-    color: "rgba(255,255,255,0.75)",
+  spotifyBottomPlayBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  spotifyBottomPlayBtnPressed: {
+    opacity: 0.8,
+    transform: [{ scale: 0.94 }],
+  },
+  spotifyBottomSliderWrap: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center",
+  },
+  spotifyBottomTimeText: {
+    color: "rgba(255, 255, 255, 0.65)",
     fontSize: 11,
-    fontFamily: "Inter_500Medium",
-  },
-  spotifyPlayBtnWrap: {
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 4,
-  },
-  spotifyBigPlayBtn: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    boxShadow: "0 6px 16px rgba(0,0,0,0.3)",
-  },
-  spotifyBigPlayBtnPressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.96 }],
+    fontFamily: "Inter_600SemiBold",
+    fontVariant: ["tabular-nums"],
+    flexShrink: 0,
   },
 });

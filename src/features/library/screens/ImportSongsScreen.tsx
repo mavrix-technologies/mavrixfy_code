@@ -11,7 +11,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
+import { ImpactFeedbackStyle } from "expo-haptics";
 import * as DocumentPicker from "expo-document-picker";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
@@ -50,7 +50,7 @@ const exportSteps = [
 ] as const;
 
 async function handleOpenExportify() {
-  void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+  void triggerImpact(ImpactFeedbackStyle.Light);
 
   try {
     if (Platform.OS === "web") {
@@ -65,7 +65,7 @@ async function handleOpenExportify() {
 }
 
 async function handleFileImport() {
-  void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
+  void triggerImpact(ImpactFeedbackStyle.Medium);
 
   try {
     const result = await DocumentPicker.getDocumentAsync({

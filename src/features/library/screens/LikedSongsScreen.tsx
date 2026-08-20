@@ -1,9 +1,26 @@
-import React, { useCallback, useMemo, useState } from "react";
-import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, View, TextInput, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import {
+  FlatList,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  TextInput,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+} from "react-native";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import * as Haptics from "expo-haptics";
+import { ImpactFeedbackStyle } from "expo-haptics";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLikedSongs, usePlayerBrowse } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
@@ -52,33 +69,90 @@ const MOOD_SUGGESTIONS = [
   "Desi",
 ] as const;
 
+function normalizeText(text: string | undefined): string {
+  if (!text) return "";
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export function LikedSongsScreen() {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const { isAuthenticated } = useAuth();
   const { isOnline } = useNetwork();
-  const { currentSong, queue, isShuffled } = usePlaybackNowPlaying();
+  const { currentSong, isShuffled } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
   const { likedSongs } = useLikedSongs();
-  const { playSong, shufflePlay, togglePlay, toggleShuffle } = usePlayerBrowse();
+  const { playSong, shufflePlay, togglePlay } = usePlayerBrowse();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
   const [isSearchMode, setIsSearchMode] = useState(false);
-  const {
-    isHeaderElevated,
-    handleHeaderScroll,
-  } = useAppTopHeaderScrollElevation();
-  const [showStickyPlay, setShowStickyPlay] = useState(false);
+  const searchInputRef = useRef<TextInput>(null);
+  const { isHeaderElevated, handleHeaderScroll } = useAppTopHeaderScrollElevation();
+
+  // Reanimated shared values for the search overlay
+  const searchOverlayOpacity = useSharedValue(0);
+  const searchOverlayY = useSharedValue(-12);
+
+  // Reanimated shared values for the smooth sticky play button and download readjustment
+  const stickyPlayOpacity = useSharedValue(0);
+  const stickyPlayScale = useSharedValue(0.82);
+  const stickyPlayIsVisible = useSharedValue(false);
+  const downloadTranslateX = useSharedValue(52);
+
+  const stickyPlayStyle = useAnimatedStyle(() => ({
+    opacity: stickyPlayOpacity.value,
+    transform: [{ scale: stickyPlayScale.value }],
+  }));
+
+  const downloadAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: downloadTranslateX.value }],
+  }));
+
+  const openSearch = useCallback(() => {
+    setIsSearchMode(true);
+    searchOverlayOpacity.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.quad) });
+    searchOverlayY.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.quad) });
+    setTimeout(() => searchInputRef.current?.focus(), 80);
+  }, [searchOverlayOpacity, searchOverlayY]);
+
+  const closeSearch = useCallback(() => {
+    searchOverlayOpacity.value = withTiming(0, { duration: 170, easing: Easing.in(Easing.quad) });
+    searchOverlayY.value = withTiming(-10, { duration: 170, easing: Easing.in(Easing.quad) });
+    setTimeout(() => {
+      setIsSearchMode(false);
+      setSearchQuery("");
+    }, 170);
+  }, [searchOverlayOpacity, searchOverlayY]);
+
+  const searchOverlayStyle = useAnimatedStyle(() => ({
+    opacity: searchOverlayOpacity.value,
+    transform: [{ translateY: searchOverlayY.value }],
+  }));
 
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       handleHeaderScroll(event);
       const offsetY = event.nativeEvent.contentOffset.y;
-      const shouldShowSticky = offsetY > 240;
-      setShowStickyPlay((prev) => (prev === shouldShowSticky ? prev : shouldShowSticky));
+      const shouldShow = offsetY > 240;
+      if (shouldShow !== stickyPlayIsVisible.value) {
+        stickyPlayIsVisible.value = shouldShow;
+        if (shouldShow) {
+          downloadTranslateX.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
+          stickyPlayOpacity.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.quad) });
+          stickyPlayScale.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.back(1.4)) });
+        } else {
+          downloadTranslateX.value = withTiming(52, { duration: 180, easing: Easing.inOut(Easing.cubic) });
+          stickyPlayOpacity.value = withTiming(0, { duration: 140, easing: Easing.in(Easing.quad) });
+          stickyPlayScale.value = withTiming(0.82, { duration: 140, easing: Easing.in(Easing.quad) });
+        }
+      }
     },
-    [handleHeaderScroll]
+    [handleHeaderScroll, stickyPlayIsVisible, stickyPlayOpacity, stickyPlayScale, downloadTranslateX]
   );
 
   const songs = useMemo(() => {
@@ -90,7 +164,7 @@ export function LikedSongsScreen() {
     let list = songs;
 
     if (selectedMood) {
-      const moodLower = selectedMood.toLowerCase();
+      const moodLower = normalizeText(selectedMood);
       const moodKeywords: Record<string, string[]> = {
         smooth: ["smooth", "soothing", "mellow", "soft", "breeze", "quiet", "easy"],
         fast: ["fast", "dance", "upbeat", "bhangra", "party", "beat", "rap"],
@@ -111,16 +185,16 @@ export function LikedSongsScreen() {
         desi: ["desi", "punjabi", "hindi", "bollywood", "bhangra", "t-series", "filmi"],
       };
 
-      const targetKeywords = moodKeywords[moodLower] || [moodLower];
+      const targetKeywords = (moodKeywords[moodLower] || [moodLower]).map(normalizeText);
 
-      const matches = list.filter((song) => {
-        const title = (song.title || "").toLowerCase();
-        const artist = (song.artist || "").toLowerCase();
-        const album = (song.album || "").toLowerCase();
-        const genre = (song.genre || "").toLowerCase();
+      list = list.filter((song) => {
+        const title = normalizeText(song.title);
+        const artist = normalizeText(song.artist);
+        const album = normalizeText(song.album);
+        const genre = normalizeText(song.genre);
         const moodAttr = Array.isArray(song.mood)
-          ? song.mood.join(" ").toLowerCase()
-          : (song.mood || "").toLowerCase();
+          ? song.mood.map((m) => normalizeText(m)).join(" ")
+          : normalizeText(song.mood);
 
         if (genre.includes(moodLower) || moodAttr.includes(moodLower)) return true;
 
@@ -128,21 +202,20 @@ export function LikedSongsScreen() {
           (kw) => title.includes(kw) || artist.includes(kw) || album.includes(kw)
         );
       });
-
-      if (matches.length > 0) {
-        list = matches;
-      } else {
-        const hashVal = moodLower.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
-        list = songs.filter((_, idx) => (idx + hashVal) % 3 !== 0);
-        if (list.length === 0) list = songs;
-      }
     }
 
     if (!searchQuery.trim()) return list;
-    const query = searchQuery.toLowerCase();
-    return list.filter((song) =>
-      song.title.toLowerCase().includes(query) || song.artist.toLowerCase().includes(query)
-    );
+    const normalizedQuery = normalizeText(searchQuery);
+    return list.filter((song) => {
+      const title = normalizeText(song.title);
+      const artist = normalizeText(song.artist);
+      const album = normalizeText(song.album);
+      return (
+        title.includes(normalizedQuery) ||
+        artist.includes(normalizedQuery) ||
+        album.includes(normalizedQuery)
+      );
+    });
   }, [songs, selectedMood, searchQuery]);
 
   const isPlayingFromLikedSongs = useMemo(() => {
@@ -154,32 +227,57 @@ export function LikedSongsScreen() {
   const handlePlayAll = useCallback(() => {
     const listToPlay = filteredSongs.length > 0 ? filteredSongs : songs;
     if (listToPlay.length === 0) return;
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
+    void triggerImpact(ImpactFeedbackStyle.Light);
     if (isPlayingFromLikedSongs && isPlaying) {
       togglePlay();
       return;
     }
-    playSong(listToPlay[0], listToPlay);
     if (isShuffled) {
-      toggleShuffle();
+      shufflePlay(listToPlay);
+    } else {
+      playSong(listToPlay[0], listToPlay);
     }
-  }, [filteredSongs, songs, isPlayingFromLikedSongs, isPlaying, togglePlay, playSong, isShuffled, toggleShuffle]);
+  }, [filteredSongs, songs, isPlayingFromLikedSongs, isPlaying, togglePlay, isShuffled, shufflePlay, playSong]);
 
   const handleShufflePlay = useCallback(() => {
     const listToPlay = filteredSongs.length > 0 ? filteredSongs : songs;
     if (listToPlay.length === 0) return;
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-    
+    void triggerImpact(ImpactFeedbackStyle.Light);
     shufflePlay(listToPlay);
   }, [filteredSongs, songs, shufflePlay]);
 
+  const handleSongPress = useCallback(
+    (song: Song) => {
+      playSong(song, filteredSongs);
+    },
+    [filteredSongs, playSong]
+  );
+
   const keyExtractor = useCallback((item: Song) => item.id, []);
+
+  const getItemLayout = useCallback(
+    (_: unknown, index: number) => ({
+      length: 68,
+      offset: 68 * index,
+      index,
+    }),
+    []
+  );
 
   const renderSong = useCallback(
     ({ item }: { item: Song }) => {
-      return <SongRow song={item} queue={filteredSongs} queueKey="liked-songs" horizontalPadding={8} />;
+      return (
+        <SongRow
+          song={item}
+          queue={filteredSongs}
+          queueKey="liked-songs"
+          horizontalPadding={8}
+          showDownload={false}
+          onSongPress={handleSongPress}
+        />
+      );
     },
-    [filteredSongs]
+    [filteredSongs, handleSongPress]
   );
 
   const headerMeta = selectedMood
@@ -188,105 +286,55 @@ export function LikedSongsScreen() {
       ? `${songs.length} songs`
       : "No songs";
 
-  if (isSearchMode) {
-    return (
-      <View style={styles.searchModeContainer}>
-        <LinearGradient colors={["#09111B", "#10141a", "#10141a"]} style={StyleSheet.absoluteFillObject} />
-        
-        {/* Search Header */}
-        <View style={[styles.searchModeHeader, { paddingTop: topInset + 10 }]}>
-          <View style={styles.searchModeInputWrapper}>
-            <Ionicons name="search" size={18} color={UI.subtext} />
-            <TextInput
-              style={styles.searchModeInput}
-              placeholder="Search liked songs..."
-              placeholderTextColor={UI.subtext}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoFocus
-              selectionColor={UI.primaryA}
-              returnKeyType="search"
-            />
-            {searchQuery.length > 0 && (
-              <Pressable
-                onPress={() => setSearchQuery("")}
-                hitSlop={8}
-                style={{ padding: 4 }}
-              >
-                <Ionicons name="close-circle" size={18} color={UI.subtext} />
-              </Pressable>
-            )}
-          </View>
-          <Pressable 
-            onPress={() => {
-              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-              setIsSearchMode(false);
-              setSearchQuery("");
-            }}
-            hitSlop={12}
-            style={styles.searchModeCancelButton}
-          >
-            <Text style={styles.searchModeCancelText}>Cancel</Text>
-          </Pressable>
-        </View>
-
-        {/* Results List */}
-        <FlatList
-          data={filteredSongs}
-          keyExtractor={keyExtractor}
-          renderItem={renderSong}
-          contentContainerStyle={styles.searchModeListContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          initialNumToRender={15}
-          maxToRenderPerBatch={15}
-          windowSize={7}
-          removeClippedSubviews={Platform.OS !== "web"}
-          ListEmptyComponent={
-            searchQuery ? (
-              <View style={styles.searchModeEmptyWrap}>
-                <Ionicons name="search-outline" size={48} color={UI.subtext} style={{ opacity: 0.7 }} />
-                <Text style={styles.searchModeEmptyTitle}>No results found</Text>
-                <Text style={styles.searchModeEmptySubtitle}>
-                  {`No liked songs matched "${searchQuery}"`}
-                </Text>
-              </View>
-            ) : null
-          }
-        />
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
+      {/* Base background */}
       <LinearGradient colors={["#09111B", "#10141a", "#10141a"]} style={StyleSheet.absoluteFillObject} />
+
+      {/* Ambient glow — bleeds the primary green from top header area downward */}
+      <LinearGradient
+        colors={[
+          "rgba(38,225,154,0.22)",
+          "rgba(20,180,120,0.10)",
+          "rgba(10,100,70,0.04)",
+          "transparent",
+        ]}
+        locations={[0, 0.38, 0.62, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={styles.ambientGlow}
+      />
+
       {!isOnline && <OfflineBanner />}
       <AppTopHeader
         topInset={topInset}
         elevated={isHeaderElevated}
         title="Liked Songs"
         left={<AppTopHeaderProfileButton />}
-        rightWidth={showStickyPlay ? 84 : 40}
+        rightWidth={96}
         right={
           <View style={styles.headerRightContainer}>
-            <AppTopHeaderDownloadButton />
-            {showStickyPlay && (
+            <Animated.View style={downloadAnimStyle}>
+              <AppTopHeaderDownloadButton />
+            </Animated.View>
+            <Animated.View style={[styles.stickyPlayButton, stickyPlayStyle]}>
               <Pressable
                 onPress={handlePlayAll}
+                accessibilityRole="button"
+                accessibilityLabel={isPlayingFromLikedSongs && isPlaying ? "Pause liked songs" : "Play liked songs"}
                 style={({ pressed }) => [
-                  styles.stickyPlayButton,
+                  styles.stickyPlayInner,
                   pressed && styles.stickyPlayButtonPressed,
                 ]}
               >
                 <Ionicons
                   name={isPlayingFromLikedSongs && isPlaying ? "pause" : "play"}
-                  size={15}
+                  size={18}
                   color="#06241a"
                   style={!isPlayingFromLikedSongs || !isPlaying ? { marginLeft: 1 } : undefined}
                 />
               </Pressable>
-            )}
+            </Animated.View>
           </View>
         }
       />
@@ -295,17 +343,18 @@ export function LikedSongsScreen() {
         data={filteredSongs}
         keyExtractor={keyExtractor}
         renderItem={renderSong}
-        initialNumToRender={15}
-        maxToRenderPerBatch={15}
-        windowSize={7}
-        removeClippedSubviews={Platform.OS !== "web"}
+        getItemLayout={getItemLayout}
+        initialNumToRender={12}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        updateCellsBatchingPeriod={50}
+        removeClippedSubviews={Platform.OS === "android"}
         ListHeaderComponent={
           <>
-            <Pressable 
-              onPress={() => {
-                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                setIsSearchMode(true);
-              }}
+            <Pressable
+              onPress={openSearch}
+              accessibilityRole="button"
+              accessibilityLabel="Search liked songs"
               style={styles.searchContainer}
             >
               <View style={styles.searchInputWrapper}>
@@ -339,24 +388,29 @@ export function LikedSongsScreen() {
               </View>
 
               <View style={styles.rightActions}>
-                <Pressable 
+                <Pressable
                   onPress={handleShufflePlay}
+                  accessibilityRole="button"
+                  accessibilityLabel={isShuffled ? "Shuffle on" : "Shuffle off"}
+                  accessibilityState={{ checked: isShuffled }}
                   style={({ pressed }) => [
                     styles.shuffleButton,
-                    isShuffled && isPlayingFromLikedSongs && styles.shuffleButtonActive,
-                    pressed && styles.shuffleButtonPressed
+                    pressed && styles.shuffleButtonPressed,
                   ]}
-                  android_ripple={{ color: "rgba(255,255,255,0.12)", borderless: false }}
+                  android_ripple={{ color: "rgba(255,255,255,0.1)", borderless: true, radius: 28 }}
                 >
-                  <Ionicons 
-                    name="shuffle" 
-                    size={24} 
-                    color={isShuffled && isPlayingFromLikedSongs ? UI.primaryA : UI.text} 
+                  <Ionicons
+                    name="shuffle"
+                    size={22}
+                    color={isShuffled ? UI.primaryA : UI.subtext}
                   />
+                  {isShuffled && <View style={styles.shuffleDot} />}
                 </Pressable>
 
-                <Pressable 
-                  onPress={handlePlayAll} 
+                <Pressable
+                  onPress={handlePlayAll}
+                  accessibilityRole="button"
+                  accessibilityLabel={isPlayingFromLikedSongs && isPlaying ? "Pause liked songs" : "Play liked songs"}
                   style={({ pressed }) => [styles.playAllButton, pressed && styles.playAllButtonPressed]}
                   android_ripple={{ color: "rgba(0,0,0,0.15)", borderless: false }}
                 >
@@ -379,10 +433,10 @@ export function LikedSongsScreen() {
                 >
                   {selectedMood && (
                     <Pressable
-                      onPress={() => {
-                        void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                        setSelectedMood(null);
-                      }}
+                      onPress={() => setSelectedMood(null)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${selectedMood} mood filter, selected`}
+                      accessibilityState={{ selected: true }}
                       style={[styles.moodChip, styles.moodChipActive]}
                     >
                       <Ionicons name="close" size={14} color="#042115" style={{ marginRight: 4 }} />
@@ -396,10 +450,10 @@ export function LikedSongsScreen() {
                     return (
                       <Pressable
                         key={mood}
-                        onPress={() => {
-                          void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                          setSelectedMood(mood);
-                        }}
+                        onPress={() => setSelectedMood(mood)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Filter by ${mood}`}
+                        accessibilityState={{ selected: false }}
                         style={({ pressed }) => [
                           styles.moodChip,
                           pressed && styles.moodChipPressed,
@@ -415,9 +469,11 @@ export function LikedSongsScreen() {
 
             <Pressable
               onPress={() => {
-                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                void triggerImpact(ImpactFeedbackStyle.Light);
                 globalAddSongsSheetRef.current?.expand();
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Add songs to liked songs"
               style={({ pressed }) => [
                 styles.addSongsContainer,
                 pressed && styles.addSongsContainerPressed,
@@ -434,20 +490,24 @@ export function LikedSongsScreen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
-            <Ionicons name={searchQuery ? "search-outline" : "heart-outline"} size={56} color={UI.subtext} />
+            <Ionicons name={selectedMood ? "funnel-outline" : searchQuery ? "search-outline" : "heart-outline"} size={56} color={UI.subtext} />
             <Text style={styles.emptyTitle}>
-              {searchQuery
-                ? "No songs found"
-                : isAuthenticated
-                  ? "No liked songs yet"
-                  : "Sign in to view liked songs"}
+              {selectedMood
+                ? `No ${selectedMood} songs found`
+                : searchQuery
+                  ? "No songs found"
+                  : isAuthenticated
+                    ? "No liked songs yet"
+                    : "Sign in to view liked songs"}
             </Text>
             <Text style={styles.emptySubtitle}>
-              {searchQuery
-                ? `No results for "${searchQuery}"`
-                : isAuthenticated
-                  ? "Tap the heart on a song to save it here."
-                  : "Liked songs now come only from your account in Firebase."}
+              {selectedMood
+                ? `None of your liked songs matched the ${selectedMood} mood.`
+                : searchQuery
+                  ? `No results for "${searchQuery}"`
+                  : isAuthenticated
+                    ? "Tap the heart on any song to save it here."
+                    : "Sign in to sync your liked songs across all your devices."}
             </Text>
           </View>
         }
@@ -455,12 +515,86 @@ export function LikedSongsScreen() {
         contentContainerStyle={[
           styles.listContent,
           { paddingTop: topInset + APP_TOP_HEADER_HEIGHT },
-          songs.length === 0 ? styles.listContentEmpty : undefined,
+          filteredSongs.length === 0 ? styles.listContentEmpty : undefined,
         ]}
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
         scrollEventThrottle={16}
       />
+
+      {/* Animated search overlay — slides in smoothly over the main screen */}
+      {isSearchMode && (
+        <Animated.View style={[styles.searchOverlay, searchOverlayStyle]}>
+          <LinearGradient colors={["#09111B", "#10141a"]} style={StyleSheet.absoluteFillObject} />
+          <LinearGradient
+            colors={["rgba(38,225,154,0.14)", "transparent"]}
+            style={[styles.ambientGlow, { height: 160 }]}
+          />
+
+          {/* Search header */}
+          <View style={[styles.searchModeHeader, { paddingTop: topInset + 10 }]}>
+            <View style={styles.searchModeInputWrapper}>
+              <Ionicons name="search" size={18} color={UI.subtext} />
+              <TextInput
+                ref={searchInputRef}
+                style={styles.searchModeInput}
+                placeholder="Search liked songs..."
+                placeholderTextColor={UI.subtext}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                selectionColor={UI.primaryA}
+                returnKeyType="search"
+                accessibilityLabel="Search liked songs input"
+              />
+              {searchQuery.length > 0 && (
+                <Pressable
+                  onPress={() => setSearchQuery("")}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search text"
+                  style={styles.searchClearButton}
+                >
+                  <Ionicons name="close-circle" size={18} color={UI.subtext} />
+                </Pressable>
+              )}
+            </View>
+            <Pressable
+              onPress={closeSearch}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel search"
+              style={styles.searchModeCancelButton}
+            >
+              <Text style={styles.searchModeCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+
+          {/* Results list */}
+          <FlatList
+            data={filteredSongs}
+            keyExtractor={keyExtractor}
+            renderItem={renderSong}
+            getItemLayout={getItemLayout}
+            contentContainerStyle={styles.searchModeListContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            initialNumToRender={12}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            updateCellsBatchingPeriod={50}
+            removeClippedSubviews={Platform.OS === "android"}
+            ListEmptyComponent={
+              searchQuery ? (
+                <View style={styles.searchModeEmptyWrap}>
+                  <Ionicons name="search-outline" size={48} color={UI.subtext} style={{ opacity: 0.7 }} />
+                  <Text style={styles.searchModeEmptyTitle}>No results found</Text>
+                  <Text style={styles.searchModeEmptySubtitle}>
+                    {`No liked songs matched "${searchQuery}"`}
+                  </Text>
+                </View>
+              ) : null
+            }
+          />
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -470,57 +604,30 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: UI.bg,
   },
-  topBar: {
-    height: 54,
-    paddingHorizontal: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  ambientGlow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 320,
+    zIndex: 0,
   },
   searchContainer: {
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(61,74,61,0.22)",
   },
   searchInputWrapper: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
-    height: 40,
-    borderRadius: 10,
+    height: 42,
     backgroundColor: UI.lowSurface,
-    borderWidth: 1,
-    borderColor: "rgba(61,74,61,0.34)",
     gap: 8,
   },
-  searchInput: {
-    flex: 1,
-    color: UI.text,
+  searchPlaceholderText: {
+    color: UI.subtext,
     fontSize: 14,
     fontFamily: "Inter_500Medium",
-  },
-  topIconButton: {
-    width: 28,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 14,
-    backgroundColor: "rgba(38,225,154,0.08)",
-  },
-  topIconButtonPressed: {
-    backgroundColor: "rgba(38,225,154,0.2)",
-    transform: [{ scale: 0.92 }],
-  },
-  topBarTitle: {
-    color: UI.primaryA,
-    fontSize: 18,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: -0.2,
-  },
-  topBarSpacer: {
-    width: 28,
-    height: 28,
   },
   list: {
     flex: 1,
@@ -534,36 +641,34 @@ const styles = StyleSheet.create({
   },
   heroSection: {
     alignItems: "center",
-    marginTop: 12,
+    marginTop: 14,
   },
   heroIconCard: {
-    width: 136,
-    height: 136,
-    borderRadius: 22,
+    width: 112,
+    height: 112,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
-    transform: [{ rotate: "2deg" }],
-    boxShadow: "none",
   },
   heroTitle: {
-    marginTop: 16,
+    marginTop: 14,
     color: UI.text,
-    fontSize: 52,
-    lineHeight: 57,
-    letterSpacing: -1.4,
+    fontSize: 40,
+    lineHeight: 46,
+    letterSpacing: -1,
     fontFamily: "Inter_700Bold",
     textAlign: "center",
   },
   heroMeta: {
-    marginTop: 7,
+    marginTop: 6,
     color: UI.subtext,
     fontSize: 11,
     letterSpacing: 1.2,
     fontFamily: "Inter_600SemiBold",
   },
   actionSection: {
-    marginTop: 20,
-    marginBottom: 16,
+    marginTop: 18,
+    marginBottom: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -593,21 +698,18 @@ const styles = StyleSheet.create({
   shuffleButton: {
     width: 48,
     height: 48,
-    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: UI.highSurface,
-    borderWidth: 1.5,
-    borderColor: "rgba(61,74,61,0.48)",
+    gap: 3,
   },
-  shuffleButtonActive: {
-    backgroundColor: "rgba(38,225,154,0.08)",
-    borderColor: UI.primaryA,
+  shuffleDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: UI.primaryA,
   },
   shuffleButtonPressed: {
-    backgroundColor: UI.lowSurface,
-    borderColor: "rgba(61,74,61,0.72)",
-    transform: [{ scale: 0.96 }],
+    opacity: 0.55,
   },
   rightActions: {
     flexDirection: "row",
@@ -615,182 +717,24 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   utilityIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(38,42,49,0.48)",
     borderWidth: 1,
     borderColor: "rgba(61,74,61,0.2)",
   },
-  utilityIconPressed: {
-    backgroundColor: "rgba(38,42,49,0.68)",
-    borderColor: "rgba(61,74,61,0.45)",
-    transform: [{ scale: 0.92 }],
-  },
-  tableHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 2,
-    marginBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(61,74,61,0.22)",
-    paddingBottom: 10,
-  },
-  tableHeaderText: {
-    color: UI.subtext,
-    fontSize: 10,
-    letterSpacing: 1,
-    fontFamily: "Inter_700Bold",
-  },
-  tableIndexHeader: {
-    width: 32,
-    textAlign: "center",
-  },
-  tableTitleHeader: {
-    flex: 1,
-    marginLeft: 8,
-  },
-  tableDurationHeader: {
-    width: 74,
-    alignItems: "center",
-  },
-  tableMoreHeader: {
-    width: 28,
-  },
   songListSpacer: {
     height: 10,
-  },
-  trackRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 2,
-    marginBottom: 4,
-    overflow: "hidden",
-  },
-  trackRowPressed: {
-    backgroundColor: "rgba(38,42,49,0.55)",
-  },
-  indexCell: {
-    width: 32,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  indexText: {
-    color: UI.text,
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-  },
-  trackMain: {
-    flex: 1,
-    flexShrink: 1,
-    minWidth: 0,
-    marginLeft: 10,
-    marginRight: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  coverWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
-    overflow: "hidden",
-    backgroundColor: UI.lowSurface,
-    borderWidth: 1,
-    borderColor: UI.outline,
-  },
-  cover: {
-    width: "100%",
-    height: "100%",
-  },
-  coverFallback: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  trackTextWrap: {
-    flex: 1,
-    flexShrink: 1,
-    minWidth: 0,
-    maxWidth: "100%",
-    paddingRight: 2,
-    justifyContent: "center",
-  },
-  trackTitle: {
-    color: UI.text,
-    fontSize: 14,
-    lineHeight: 17,
-    fontFamily: "Inter_700Bold",
-    width: "100%",
-    flexShrink: 1,
-  },
-  trackArtist: {
-    marginTop: 1,
-    color: UI.subtext,
-    fontSize: 11,
-    lineHeight: 13,
-    fontFamily: "Inter_500Medium",
-    width: "100%",
-    flexShrink: 1,
-  },
-  metaCell: {
-    width: 74,
-    flexShrink: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  likeButton: {
-    width: 28,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 14,
-    backgroundColor: "rgba(38,225,154,0.08)",
-  },
-  likeButtonPressed: {
-    backgroundColor: "rgba(38,225,154,0.22)",
-    transform: [{ scale: 0.92 }],
-  },
-  downloadBtn: {
-    width: 28,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 14,
-    backgroundColor: "rgba(38,42,49,0.3)",
-  },
-  downloadBtnInner: {
-    width: "100%",
-    height: "100%",
-  },
-  trackDuration: {
-    color: UI.subtext,
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
-    minWidth: 40,
-    textAlign: "right",
-  },
-  moreButton: {
-    width: 28,
-    flexShrink: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 14,
-    backgroundColor: "rgba(188,203,185,0.06)",
-  },
-  moreButtonPressed: {
-    backgroundColor: "rgba(188,203,185,0.18)",
-    transform: [{ scale: 0.92 }],
   },
   emptyWrap: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 30,
+    paddingTop: 40,
     gap: 8,
   },
   emptyTitle: {
@@ -804,35 +748,26 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
+    lineHeight: 18,
   },
-  searchPlaceholderText: {
-    color: UI.subtext,
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-  },
-  searchModeContainer: {
-    flex: 1,
-    backgroundColor: UI.bg,
+  searchOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 99,
   },
   searchModeHeader: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
     paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(61,74,61,0.22)",
-    gap: 12,
+    gap: 8,
   },
   searchModeInputWrapper: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    height: 42,
-    borderRadius: 10,
+    paddingLeft: 12,
+    height: 48,
     backgroundColor: UI.lowSurface,
-    borderWidth: 1,
-    borderColor: "rgba(61,74,61,0.34)",
     gap: 8,
   },
   searchModeInput: {
@@ -841,10 +776,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Inter_500Medium",
   },
+  searchClearButton: {
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   searchModeCancelButton: {
+    height: 48,
+    paddingHorizontal: 12,
     justifyContent: "center",
     alignItems: "center",
-    paddingVertical: 6,
   },
   searchModeCancelText: {
     color: UI.primaryA,
@@ -878,15 +820,23 @@ const styles = StyleSheet.create({
   headerRightContainer: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 4,
   },
   stickyPlayButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stickyPlayInner: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: UI.primaryA,
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 8,
   },
   stickyPlayButtonPressed: {
     backgroundColor: UI.primaryB,
@@ -904,8 +854,9 @@ const styles = StyleSheet.create({
   moodChip: {
     flexDirection: "row",
     alignItems: "center",
+    minHeight: 40,
     paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingVertical: 8,
     borderRadius: 20,
     backgroundColor: UI.highSurface,
     borderWidth: 1,
@@ -941,8 +892,8 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   addSongsSquare: {
-    width: 52,
-    height: 52,
+    width: 48,
+    height: 48,
     borderRadius: 8,
     backgroundColor: UI.highSurface,
     borderWidth: 1,

@@ -46,7 +46,7 @@ import { logger } from "@/lib/logger";
 import { initRemoteConfig } from "@/lib/remoteConfig";
 import { showGlobalToast, subscribeGlobalToast } from "@/utils/globalToast";
 import { AppNavBar } from "./(tabs)/_layout";
-import { GlobalPlayerSheet } from "@/components/GlobalPlayerSheet";
+import PlayerScreen from "@/features/player/screens/PlayerScreen";
 
 function isExpoGoRuntime(): boolean {
   return Constants.executionEnvironment === "storeClient" || Constants.appOwnership === "expo";
@@ -395,7 +395,7 @@ function RootLayoutNav() {
           animationDuration: 240,
           freezeOnBlur: true,
           gestureEnabled: true,
-          fullScreenGestureEnabled: true,
+          fullScreenGestureEnabled: false,
         }}
       >
         <Stack.Screen name="(tabs)" />
@@ -461,7 +461,7 @@ function RootLayoutNav() {
       ) : null}
 
       {/* Global Player Overlay — always mounted globally above all screens (tabs, playlist, artist, etc.) */}
-      <GlobalPlayerSheet />
+      <PlayerScreen />
 
       <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
         <QueueBottomSheet ref={globalQueueSheetRef} />
