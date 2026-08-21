@@ -392,7 +392,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const nextSongRef = useRef<() => void>(() => {});
   const prevSongRef = useRef<() => void>(() => {});
   const togglePlayRef = useRef<() => Promise<void> | void>(() => {});
-  const togglePlayInFlightRef = useRef(false);
   const seekToRef = useRef<(progress: number) => Promise<void> | void>(() => {});
   const playSongRef = useRef<(song: Song, queue?: Song[]) => Promise<void> | void>(() => {});
 
@@ -470,22 +469,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (typeof status.duration === "number" && status.duration > 0) {
         setNativeDuration(status.duration);
       }
-
-      // Maintain persistent play intent during track buffering/loading so play button never flickers to pause/play
-      const isBufferingOrPreparing = Boolean(status.isBuffering || !status.isLoaded || playbackLoadingRef.current);
-      const effectiveIsPlaying = status.isPlaying || (isPlayingRef.current && isBufferingOrPreparing);
-
-      if (effectiveIsPlaying !== isPlayingRef.current) {
-        setIsPlaying(effectiveIsPlaying);
-        isPlayingRef.current = effectiveIsPlaying;
+      if (typeof status.isPlaying === "boolean" && status.isPlaying !== isPlayingRef.current) {
+        if (!status.isPlaying && playbackLoadingRef.current) {
+          return;
+        }
+        setIsPlaying(status.isPlaying);
+        isPlayingRef.current = status.isPlaying;
+        updatePlaybackEngineSnapshot({
+          isPlaying: status.isPlaying,
+          isLoading: false,
+          isBuffering: Boolean(status.isBuffering),
+        });
       }
-
-      updatePlaybackEngineSnapshot({
-        isPlaying: effectiveIsPlaying,
-        isLoading: playbackLoadingRef.current,
-        isBuffering: Boolean(status.isBuffering),
-      });
-
       if (status.didJustFinish) {
         if (repeatModeRef.current === "one" && currentSongRef.current) {
           void playSongRef.current(currentSongRef.current, queueRef.current);
@@ -744,16 +739,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [playSong]);
 
   const togglePlay = useCallback(async () => {
-    if (togglePlayInFlightRef.current) return;
-    togglePlayInFlightRef.current = true;
-
-    const nextPlayState = !isPlayingRef.current;
-
-    if (!nextPlayState) {
-      // Invalidate any in-flight playSong requests so they don't force playback to resume
-      playRequestIdRef.current += 1;
-    }
-
     if (!currentSongRef.current) {
       if (queueRef.current.length > 0) {
         const target = queueRef.current[queueIndexRef.current] || queueRef.current[0];
@@ -761,33 +746,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           void playSong(target, queueRef.current);
         }
       }
-      togglePlayInFlightRef.current = false;
+      return;
+    }
+
+    if (!expoAudioEngine.getCurrentSong()) {
+      void playSong(currentSongRef.current, queueRef.current);
       return;
     }
 
     try {
-      if (nextPlayState) {
-        if (!expoAudioEngine.getCurrentSong()) {
-          void playSong(currentSongRef.current, queueRef.current);
-        } else {
-          setIsPlaying(true);
-          isPlayingRef.current = true;
-          updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
-          await expoAudioEngine.play();
-        }
-      } else {
-        setIsPlaying(false);
-        isPlayingRef.current = false;
-        updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
-        expoAudioEngine.pause();
-      }
+      await expoAudioEngine.togglePlay();
     } catch (error) {
       logger.error("[Player] togglePlay failed", error);
-      if (nextPlayState && currentSongRef.current) {
-        void playSong(currentSongRef.current, queueRef.current);
-      }
-    } finally {
-      togglePlayInFlightRef.current = false;
     }
   }, [playSong]);
 

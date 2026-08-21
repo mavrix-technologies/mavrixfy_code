@@ -160,6 +160,8 @@ class ExpoAudioEngine {
     }
   }
 
+  private toggleInProgress = false;
+
   public async play(): Promise<void> {
     if (!this.player) return;
     await this.ensureAudioMode();
@@ -173,11 +175,19 @@ class ExpoAudioEngine {
   }
 
   public async togglePlay(): Promise<void> {
-    if (!this.player) return;
-    if (this.player.playing) {
-      this.pause();
-    } else {
-      await this.play();
+    if (this.toggleInProgress) return;
+    const player = this.player;
+    if (!player || !player.isLoaded) return;
+
+    this.toggleInProgress = true;
+    try {
+      if (player.playing) {
+        this.pause();
+      } else {
+        await this.play();
+      }
+    } finally {
+      this.toggleInProgress = false;
     }
   }
 
