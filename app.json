@@ -81,8 +81,6 @@
           "username": "satvik1234"
         }
       ],
-      "./plugins/withTrackPlayer",
-      "./plugins/withIOSAVPlayer",
       [
         "expo-build-properties",
         {
@@ -129,6 +127,7 @@
       [
         "expo-audio",
         {
+          "enableBackgroundPlayback": true,
           "recordAudioAndroid": false,
           "microphonePermission": false
         }

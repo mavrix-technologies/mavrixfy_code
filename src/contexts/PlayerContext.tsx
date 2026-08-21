@@ -1,65 +1,16 @@
 import React, { createContext, use, useState, useCallback, useMemo, useRef, ReactNode, useEffect } from "react";
-import { Alert, AppState, Platform, View } from "react-native";
-import { isRunningInExpoGo } from "expo";
+import { AppState, View } from "react-native";
 import * as Network from "expo-network";
 import { Song } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
-import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
+import { expoAudioEngine } from "@/services/audio/ExpoAudioEngine";
 import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
 import { logger } from "@/lib/logger";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { mapFilter } from "@/lib/arrayUtils";
 import { createShuffledPlaybackQueue, toggleQueueShuffleState } from "@/services/audio/ShuffleManager";
 import { showGlobalToast } from "@/utils/globalToast";
-
-let TrackPlayer: any = null;
-let Event: any = null;
-let RepeatMode: any = {
-  Off: "off",
-  Queue: "queue",
-  Track: "track",
-};
-let State: any = {
-  Playing: "playing",
-  Paused: "paused",
-  Stopped: "stopped",
-  Buffering: "buffering",
-  Loading: "loading",
-  Ready: "ready",
-  None: "none",
-};
-let setupPlayer: any = null;
-
-type NativeSubscription = {
-  remove: () => void;
-};
-
-const cleanupNativeSubscription = (subscription: NativeSubscription | null | undefined) => {
-  subscription?.remove();
-};
-
-const subscribeTrackPlayerEvent = (eventName: unknown, listener: (...args: any[]) => void) => {
-  if (!TrackPlayer?.addEventListener || !eventName) return () => {};
-  const subscription = TrackPlayer.addEventListener(eventName, listener) as NativeSubscription;
-  return () => cleanupNativeSubscription(subscription);
-};
-
-const isExpoGoRuntime = isRunningInExpoGo();
-const isNativeTrackPlayerAvailable = Platform.OS !== "web" && !isExpoGoRuntime;
-
-if (isNativeTrackPlayerAvailable) {
-  try {
-    const trackPlayerModule = require("react-native-track-player");
-    TrackPlayer = trackPlayerModule.default ?? trackPlayerModule;
-    Event = trackPlayerModule.Event;
-    RepeatMode = trackPlayerModule.RepeatMode;
-    State = trackPlayerModule.State ?? State;
-    setupPlayer = require("@/services/audio/TrackPlayerAdapter").setupPlayer;
-  } catch (error) {
-    logger.error("[Player] Failed to load native TrackPlayer module", error);
-  }
-}
 
 export type SleepTimerSelection = 5 | 10 | 15 | 30 | 45 | 60 | "end-of-stack";
 
@@ -333,93 +284,6 @@ function withResolvedPlaybackUrl(song: Song, audioUrl: string): Song {
   return { ...song, audioUrl: resolvedUrl };
 }
 
-function songToTrack(song: Song, localUrl?: string | null): any {
-  const audioUrl = localUrl || resolveAudioUrl(song as SongPlaybackSource);
-  const durationSeconds = toDurationSeconds(song.duration);
-  const title = cleanHtmlEntities(readNonEmptyString(song.title) || "Unknown");
-  const artist = cleanHtmlEntities(readNonEmptyString(song.artist) || "Mavrixfy");
-  const album = song.album ? cleanHtmlEntities(readNonEmptyString(song.album) || "") : undefined;
-  return {
-    id: song.id,
-    url: audioUrl,
-    title,
-    artist,
-    album,
-    genre: readNonEmptyString(song.genre),
-    artwork: song.coverUrl,
-    duration: durationSeconds > 0 ? durationSeconds : undefined,
-    ...(song.playbackHeaders && Object.keys(song.playbackHeaders).length > 0
-      ? { headers: song.playbackHeaders }
-      : {}),
-  };
-}
-
-type NowPlayingMetadataSource = {
-  title?: unknown;
-  artist?: unknown;
-  album?: unknown;
-  genre?: unknown;
-  duration?: unknown;
-  artwork?: unknown;
-  coverUrl?: unknown;
-};
-
-function cleanHtmlEntities(str: string): string {
-  if (!str) return "";
-  return str
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&apos;/g, "'");
-}
-
-function getNowPlayingMetadata(track: NowPlayingMetadataSource) {
-  const rawTitle = readNonEmptyString(track.title) || "Mavrixfy";
-  const rawArtist = readNonEmptyString(track.artist) || "Mavrixfy";
-  const rawAlbum = readNonEmptyString(track.album);
-  const title = cleanHtmlEntities(rawTitle);
-  const artist = cleanHtmlEntities(rawArtist);
-  const album = rawAlbum ? cleanHtmlEntities(rawAlbum) : undefined;
-  const duration = toDurationSeconds(track.duration);
-  const artwork = readNonEmptyString(track.artwork) || readNonEmptyString(track.coverUrl);
-
-  return {
-    title,
-    artist,
-    album,
-    genre: readNonEmptyString(track.genre) || "Mavrixfy",
-    duration: duration > 0 ? duration : undefined,
-    artwork: artwork || undefined,
-  };
-}
-
-async function publishNativeNowPlaying(track: NowPlayingMetadataSource, trackIndex?: number): Promise<void> {
-  if (!TrackPlayer) return;
-  const metadata = getNowPlayingMetadata(track);
-
-  try {
-    if (
-      typeof trackIndex === "number" &&
-      trackIndex >= 0 &&
-      typeof TrackPlayer.updateMetadataForTrack === "function"
-    ) {
-      await TrackPlayer.updateMetadataForTrack(trackIndex, metadata);
-    }
-  } catch {
-    // Non-fatal
-  }
-
-  try {
-    if (typeof TrackPlayer.updateNowPlayingMetadata === "function") {
-      await TrackPlayer.updateNowPlayingMetadata(metadata);
-    }
-  } catch {
-    // Non-fatal
-  }
-}
-
 let cachedAdaptiveQuality: { quality: "low" | "medium" | "high"; timestamp: number } | null = null;
 
 async function getAdaptiveStreamingQuality(): Promise<"low" | "medium" | "high"> {
@@ -479,13 +343,9 @@ async function resolvePlaybackUrl(song: Song): Promise<string | null> {
   return fallbackUrl;
 }
 
-const canUseLightweightAudioFallback = Boolean(isRunningInExpoGo() || !TrackPlayer);
-
 // react-doctor-disable-next-line react-doctor/prefer-useReducer -- acceptable component structure for this app
 // react-doctor-disable-next-line react-doctor/no-giant-component -- acceptable component structure for this app
 export function PlayerProvider({ children }: { children: ReactNode }) {
-  // Android Auto service integration
-  const [isPlayerReady, setIsPlayerReady] = useState(false);
   const { user: authUser } = useAuth();
 
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
@@ -525,7 +385,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const playbackLoadingRef = useRef(false);
   const playRequestIdRef = useRef(0);
   const positionSecondsRef = useRef(0);
-  const playerSetupPromiseRef = useRef<Promise<boolean> | null>(null);
   const lastPlaybackNoticeAtRef = useRef(0);
   const sleepTimerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sleepTimerRef = useRef<SleepTimerState | null>(null);
@@ -536,6 +395,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const togglePlayInFlightRef = useRef(false);
   const seekToRef = useRef<(progress: number) => Promise<void> | void>(() => {});
   const playSongRef = useRef<(song: Song, queue?: Song[]) => Promise<void> | void>(() => {});
+
+  const showPlaybackNotice = useCallback((message: string) => {
+    const now = Date.now();
+    if (now - lastPlaybackNoticeAtRef.current < 1200) return;
+    lastPlaybackNoticeAtRef.current = now;
+
+    showGlobalToast(message);
+  }, []);
 
   // In-memory stream URL cache for instant zero-latency queue navigation
   const streamUrlCache = useRef<Map<string, string>>(new Map());
@@ -591,68 +458,58 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Fast 250ms progress tracking loop (Spotify/Apple Music style)
+  // Status and progress listener from native expo-audio engine
   useEffect(() => {
     let mounted = true;
 
-    if (canUseLightweightAudioFallback) {
-      ExpoAvPlayer.onStatusUpdate((status) => {
-        if (!mounted) return;
-        if (typeof status.position === "number") {
-          setNativePosition(status.position);
-        }
-        if (typeof status.duration === "number" && status.duration > 0) {
-          setNativeDuration(status.duration);
-        }
-        if (typeof status.isPlaying === "boolean" && status.isPlaying !== isPlayingRef.current) {
-          // If a new track is in the process of loading, do not let transient buffering false flip the state
-          if (!status.isPlaying && playbackLoadingRef.current) {
-            return;
-          }
-          setIsPlaying(status.isPlaying);
-          isPlayingRef.current = status.isPlaying;
-          updatePlaybackEngineSnapshot({ isPlaying: status.isPlaying, isLoading: false, isBuffering: false });
-        }
-        if (status.didJustFinish) {
-          if (repeatModeRef.current === "one" && currentSongRef.current) {
-            void playSongRef.current(currentSongRef.current, queueRef.current);
-          } else {
-            nextSongRef.current();
-          }
-        }
-      });
-      return () => {
-        mounted = false;
-      };
-    }
-
-    let progressInFlight = false;
-    const interval = setInterval(async () => {
-      if (!isPlayingRef.current || progressInFlight) return;
-      try {
-        if (TrackPlayer && setupPlayer) {
-          progressInFlight = true;
-          const prog = await TrackPlayer.getProgress();
-          if (mounted && prog) {
-            if (typeof prog.position === "number") {
-              setNativePosition(prog.position);
-            }
-            if (typeof prog.duration === "number" && prog.duration > 0) {
-              setNativeDuration(prog.duration);
-            }
-          }
-        }
-      } catch {
-      } finally {
-        progressInFlight = false;
+    const unsubStatus = expoAudioEngine.addStatusListener((status) => {
+      if (!mounted) return;
+      if (typeof status.position === "number") {
+        setNativePosition(status.position);
       }
-    }, 250);
+      if (typeof status.duration === "number" && status.duration > 0) {
+        setNativeDuration(status.duration);
+      }
+
+      // Maintain persistent play intent during track buffering/loading so play button never flickers to pause/play
+      const isBufferingOrPreparing = Boolean(status.isBuffering || !status.isLoaded || playbackLoadingRef.current);
+      const effectiveIsPlaying = status.isPlaying || (isPlayingRef.current && isBufferingOrPreparing);
+
+      if (effectiveIsPlaying !== isPlayingRef.current) {
+        setIsPlaying(effectiveIsPlaying);
+        isPlayingRef.current = effectiveIsPlaying;
+      }
+
+      updatePlaybackEngineSnapshot({
+        isPlaying: effectiveIsPlaying,
+        isLoading: playbackLoadingRef.current,
+        isBuffering: Boolean(status.isBuffering),
+      });
+
+      if (status.didJustFinish) {
+        if (repeatModeRef.current === "one" && currentSongRef.current) {
+          void playSongRef.current(currentSongRef.current, queueRef.current);
+        } else {
+          nextSongRef.current();
+        }
+      }
+    });
+
+    const unsubError = expoAudioEngine.addErrorListener((errMsg) => {
+      if (!mounted) return;
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+      setPlaybackLoading(false);
+      updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
+      showPlaybackNotice(`Playback error: ${errMsg}`);
+    });
 
     return () => {
       mounted = false;
-      clearInterval(interval);
+      unsubStatus();
+      unsubError();
     };
-  }, []);
+  }, [showPlaybackNotice]);
 
   const resolvedIsPlaying = isPlaying;
 
@@ -674,10 +531,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         return seekOverride.seconds;
       }
     }
-    if ((TrackPlayer && setupPlayer) || canUseLightweightAudioFallback) {
-      return nativePosition;
-    }
-    return 0;
+    return nativePosition;
   }, [seekOverride, currentSong?.id, nativePosition]);
 
   const resolvedProgress = useMemo(() => {
@@ -693,39 +547,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     positionSecondsRef.current = resolvedPositionSeconds;
   }, [resolvedPositionSeconds]);
-
-  const showPlaybackNotice = useCallback((message: string) => {
-    const now = Date.now();
-    if (now - lastPlaybackNoticeAtRef.current < 1200) return;
-    lastPlaybackNoticeAtRef.current = now;
-
-    showGlobalToast(message);
-  }, []);
-
-  const ensurePlayerReady = useCallback(async (): Promise<boolean> => {
-    if (isPlayerReady) return true;
-    if (!TrackPlayer || !setupPlayer) return false;
-
-    if (playerSetupPromiseRef.current) {
-      return playerSetupPromiseRef.current;
-    }
-
-    const promise = (async () => {
-      try {
-        await setupPlayer();
-        setIsPlayerReady(true);
-        return true;
-      } catch (error) {
-        logger.error("[Player] TrackPlayer setup failed", error);
-        return false;
-      } finally {
-        playerSetupPromiseRef.current = null;
-      }
-    })();
-
-    playerSetupPromiseRef.current = promise;
-    return promise;
-  }, [isPlayerReady]);
 
   // Bounded LRU Stream Cache updater
   const setStreamCache = useCallback((songId: string, url: string) => {
@@ -894,45 +715,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         currentSongRef.current = resolvedSong;
         setCurrentSong(resolvedSong);
 
-        // 5. Playback execution
-        if (TrackPlayer && setupPlayer) {
-          const ready = isPlayerReady || (await ensurePlayerReady());
-          if (reqId !== playRequestIdRef.current) return;
-          if (!ready) {
-            setIsPlaying(false);
-            isPlayingRef.current = false;
-            showPlaybackNotice("Audio player initialization failed.");
-            return;
-          }
+        // 5. Playback execution using unified ExpoAudioEngine
+        if (reqId !== playRequestIdRef.current) return;
+        await expoAudioEngine.loadAndPlay(resolvedSong, audioUrl);
+        if (reqId !== playRequestIdRef.current) return;
 
-          const track = songToTrack(resolvedSong, audioUrl);
-
-          // Use load() (RNTP v4+) for atomic in-place track swap.
-          // load() replaces the current track without going through IDLE,
-          // so the MediaSession stays "playing/buffering" the whole time —
-          // no flicker of the pause icon on notification / lock screen.
-          if (typeof TrackPlayer.load === "function") {
-            await TrackPlayer.load(track);
-          } else {
-            // Fallback: full teardown (causes flicker — only for very old RNTP)
-            await TrackPlayer.reset().catch(() => {});
-            if (reqId !== playRequestIdRef.current) return;
-            await TrackPlayer.add([track]);
-          }
-          if (reqId !== playRequestIdRef.current) return;
-
-          await publishNativeNowPlaying(resolvedSong, targetIndex);
-          if (reqId !== playRequestIdRef.current) return;
-
-          await TrackPlayer.play();
-          if (reqId !== playRequestIdRef.current) return;
-
-          // Prefetch next track in background
-          prefetchAdjacentTrackStreams(q, targetIndex);
-        } else if (canUseLightweightAudioFallback) {
-          if (reqId !== playRequestIdRef.current) return;
-          await ExpoAvPlayer.loadAndPlay(audioUrl);
-        }
+        // Prefetch next track in background for instant transitions
+        prefetchAdjacentTrackStreams(q, targetIndex);
       } catch (error) {
         if (reqId !== playRequestIdRef.current) return;
         logger.error("[Player] playSong failed", error);
@@ -947,7 +736,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [ensurePlayerReady, isPlayerReady, prefetchAdjacentTrackStreams, resolvePlaybackUrlCached, showPlaybackNotice]
+    [prefetchAdjacentTrackStreams, resolvePlaybackUrlCached, showPlaybackNotice]
   );
 
   useEffect(() => {
@@ -977,50 +766,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      if (TrackPlayer && setupPlayer) {
-        if (nextPlayState) {
-          const ready = isPlayerReady || (await ensurePlayerReady());
-          const activeTrack = ready ? await TrackPlayer.getActiveTrack().catch(() => null) : null;
-          const playbackState = ready ? await TrackPlayer.getPlaybackState().catch(() => null) : null;
-          const rawState = playbackState?.state ?? playbackState;
-
-          // If no active track is loaded in native TrackPlayer, or player is idle/stopped/unloaded
-          if (
-            !activeTrack ||
-            rawState === "none" ||
-            rawState === "stopped" ||
-            rawState === "idle" ||
-            rawState === 0 ||
-            rawState === undefined
-          ) {
-            void playSong(currentSongRef.current, queueRef.current);
-            return;
-          }
-
+      if (nextPlayState) {
+        if (!expoAudioEngine.getCurrentSong()) {
+          void playSong(currentSongRef.current, queueRef.current);
+        } else {
           setIsPlaying(true);
           isPlayingRef.current = true;
           updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
-
-          await TrackPlayer.play();
-          if (currentSongRef.current) {
-            void publishNativeNowPlaying(currentSongRef.current, queueIndexRef.current);
-          }
-        } else {
-          setIsPlaying(false);
-          isPlayingRef.current = false;
-          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
-          await TrackPlayer.pause();
+          await expoAudioEngine.play();
         }
-      } else if (canUseLightweightAudioFallback) {
-        if (nextPlayState) {
-          // If ExpoAvPlayer has no loaded sound yet (e.g. cold start restored song)
-          void playSong(currentSongRef.current, queueRef.current);
-        } else {
-          setIsPlaying(false);
-          isPlayingRef.current = false;
-          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
-          await ExpoAvPlayer.pause();
-        }
+      } else {
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+        updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
+        expoAudioEngine.pause();
       }
     } catch (error) {
       logger.error("[Player] togglePlay failed", error);
@@ -1030,7 +789,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     } finally {
       togglePlayInFlightRef.current = false;
     }
-  }, [ensurePlayerReady, isPlayerReady, playSong]);
+  }, [playSong]);
 
   useEffect(() => {
     togglePlayRef.current = togglePlay;
@@ -1081,11 +840,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setNativePosition(targetSeconds);
 
     try {
-      if (TrackPlayer && setupPlayer) {
-        await TrackPlayer.seekTo(targetSeconds);
-      } else if (canUseLightweightAudioFallback) {
-        await ExpoAvPlayer.seekTo(targetSeconds);
-      }
+      await expoAudioEngine.seekTo(targetSeconds);
     } catch (error) {
       logger.error("[Player] seekTo failed", error);
     }
@@ -1179,15 +934,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     updatePlaybackEngineSnapshot({
       repeatMode: next,
     });
-
-    if (TrackPlayer && RepeatMode) {
-      const repeatMap: Record<string, any> = {
-        off: RepeatMode.Off,
-        all: RepeatMode.Queue,
-        one: RepeatMode.Track,
-      };
-      TrackPlayer.setRepeatMode(repeatMap[next] || RepeatMode.Off).catch(() => {});
-    }
   }, []);
 
   const isLiked = useCallback((songId: string) => {
@@ -1402,121 +1148,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       clearSleepTimer();
     }, Math.max(0, endsAt - Date.now()));
   }, [clearSleepTimer, clearSleepTimerTimeout, togglePlay]);
-
-  // TrackPlayer native event handlers
-  useEffect(() => {
-    if (!isPlayerReady || !TrackPlayer) return;
-
-    const unsubs = [
-      subscribeTrackPlayerEvent(Event.PlaybackState, (event: any) => {
-        const nextState = event && typeof event === "object" && "state" in event ? event.state : event;
-
-        switch (nextState) {
-          case State.Playing:
-            setIsPlaying(true);
-            isPlayingRef.current = true;
-            setPlaybackLoading(false);
-            updatePlaybackEngineSnapshot({ isPlaying: true, isLoading: false, isBuffering: false });
-            break;
-
-          case State.Paused:
-          case State.Stopped:
-            if (!playbackLoadingRef.current) {
-              setIsPlaying(false);
-              isPlayingRef.current = false;
-              setPlaybackLoading(false);
-              updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
-            }
-            break;
-
-          case State.Buffering:
-          case State.Loading:
-            updatePlaybackEngineSnapshot({ isBuffering: true });
-            break;
-        }
-      }),
-      subscribeTrackPlayerEvent(Event.PlaybackError, (error: any) => {
-        // Handle playback errors (stream failures, network issues, codec problems)
-        logger.error("[Player] PlaybackError event", error);
-        
-        setIsPlaying(false);
-        isPlayingRef.current = false;
-        setPlaybackLoading(false);
-        updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
-        
-        // Show user-friendly error message
-        const errorMsg = error?.message || error?.code || "Playback failed";
-        showPlaybackNotice(`Playback error: ${errorMsg}`);
-        
-        // Log detailed error for debugging
-        if (error?.code) logger.error("[Player] Error code:", error.code);
-        if (currentSongRef.current) {
-          logger.error("[Player] Failed song:", currentSongRef.current.title);
-        }
-      }),
-      subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, () => {
-        nextSongRef.current();
-      }),
-      subscribeTrackPlayerEvent(Event.RemoteNext, () => {
-        nextSongRef.current();
-      }),
-      subscribeTrackPlayerEvent(Event.RemotePrevious, () => {
-        prevSongRef.current();
-      }),
-      subscribeTrackPlayerEvent(Event.RemotePlay, async () => {
-        try {
-          setIsPlaying(true);
-          isPlayingRef.current = true;
-          updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
-          if (TrackPlayer) {
-            await TrackPlayer.play();
-          }
-        } catch (err) {
-          logger.error("[Player] RemotePlay error", err);
-        }
-      }),
-      subscribeTrackPlayerEvent(Event.RemotePause, async () => {
-        try {
-          setIsPlaying(false);
-          isPlayingRef.current = false;
-          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
-          if (TrackPlayer) {
-            await TrackPlayer.pause();
-          }
-        } catch (err) {
-          logger.error("[Player] RemotePause error", err);
-        }
-      }),
-      subscribeTrackPlayerEvent(Event.RemoteStop, async () => {
-        try {
-          setIsPlaying(false);
-          isPlayingRef.current = false;
-          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
-          if (TrackPlayer) {
-            await TrackPlayer.stop();
-          }
-        } catch (err) {
-          logger.error("[Player] RemoteStop error", err);
-        }
-      }),
-      subscribeTrackPlayerEvent(Event.RemoteSeek, async (event: { position: number }) => {
-        if (typeof event?.position === "number") {
-          try {
-            if (TrackPlayer) {
-              await TrackPlayer.seekTo(event.position);
-            }
-            setNativePosition(event.position);
-          } catch (err) {
-            logger.error("[Player] RemoteSeek error", err);
-          }
-        }
-      }),
-    ];
-
-    return () => {
-      unsubs.forEach((unsub) => unsub?.());
-    };
-  }, [isPlayerReady, resolvedDuration]);
 
   // Load liked songs from Firestore when user auth state changes
   useEffect(() => {

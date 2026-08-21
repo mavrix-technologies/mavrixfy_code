@@ -27,16 +27,5 @@ if (!isRunningInExpoGo() && Platform.OS !== "web") {
   }
 }
 
-if (!isRunningInExpoGo() && Platform.OS !== "web") {
-  try {
-    const trackPlayerModule = require("react-native-track-player");
-    const TrackPlayer = trackPlayerModule.default || trackPlayerModule;
-    TrackPlayer.registerPlaybackService(
-      () => require("./src/lib/trackPlayerService").trackPlayerService
-    );
-  } catch {
-    // native module unavailable in Expo Go and unsupported runtimes
-  }
-}
-
 require("expo-router/entry");
+
