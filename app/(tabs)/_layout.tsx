@@ -412,6 +412,9 @@ function NavTabItem({
   navInactiveColor,
 }: NavTabItemProps) {
   const handlePress = React.useCallback(() => {
+    if (Platform.OS !== "web") {
+      void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    }
     onPress(item.route, isFocused);
   }, [isFocused, item.route, onPress]);
 
@@ -434,7 +437,7 @@ function NavTabItem({
           pressed && styles.navItemPressed,
         ]}
       >
-        <View style={styles.navIconWrap}>
+        <View style={[styles.navIconWrap, isAndroid && isFocused && styles.navIconWrapAndroidActive]}>
           <TabIcon
             route={item.route}
             name={iconName}
@@ -453,7 +456,7 @@ function NavTabItem({
               lineHeight: navLabelLineHeight,
               marginTop: isAndroid ? 3 : 2,
               color: itemColor,
-              fontFamily: isFocused ? "Inter_700Bold" : "Inter_500Medium",
+              fontFamily: isFocused ? (isIOS ? "Inter_600SemiBold" : "Inter_700Bold") : "Inter_500Medium",
             },
             isIOS && styles.navLabelIOS,
           ]}
@@ -2128,6 +2131,10 @@ const styles = StyleSheet.create({
     height: 28,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 14,
+  },
+  navIconWrapAndroidActive: {
+    backgroundColor: "rgba(38, 225, 154, 0.12)",
     borderRadius: 14,
   },
   navIconLayer: {

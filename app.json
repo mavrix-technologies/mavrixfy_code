@@ -83,7 +83,6 @@
       ],
       "./plugins/withTrackPlayer",
       "./plugins/withIOSAVPlayer",
-      "./plugins/withIOSLiquidGlass",
       [
         "expo-build-properties",
         {
