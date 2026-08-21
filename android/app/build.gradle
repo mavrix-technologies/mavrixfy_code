@@ -193,6 +193,7 @@ dependencies {
     }
 
     implementation "androidx.media:media:1.7.0"
+    implementation project(':react-native-track-player')
 }
 
 apply plugin: 'com.google.gms.google-services'

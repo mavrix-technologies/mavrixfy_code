@@ -1,4 +1,4 @@
-import { Platform } from "react-native";
+import { PermissionsAndroid, Platform } from "react-native";
 import TrackPlayer, {
   Capability,
   AppKilledPlaybackBehavior,
@@ -16,6 +16,7 @@ function isAlreadyInitialized(error: unknown): boolean {
 }
 
 export async function setupPlayer(): Promise<void> {
+  console.log("[TrackPlayerAdapter] setupPlayer called, playerReady =", playerReady);
   if (playerReady) return;
   if (setupPromise) return setupPromise;
 
@@ -23,7 +24,9 @@ export async function setupPlayer(): Promise<void> {
   try {
     await setupPromise;
     playerReady = true;
+    console.log("[TrackPlayerAdapter] setupPlayer completed successfully!");
   } catch (error) {
+    console.error("[TrackPlayerAdapter] setupPlayer failed:", error);
     setupPromise = null;
     throw error;
   }
@@ -31,18 +34,28 @@ export async function setupPlayer(): Promise<void> {
 
 async function setupPlayerInternal(): Promise<void> {
   if (!TrackPlayer?.setupPlayer) {
+    console.error("[TrackPlayerAdapter] TrackPlayer.setupPlayer method is missing!");
     return;
   }
 
+  if (Platform.OS === "android" && Number(Platform.Version) >= 33) {
+    try {
+      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    } catch {
+      // non-fatal
+    }
+  }
+
   try {
+    console.log("[TrackPlayerAdapter] Calling TrackPlayer.setupPlayer...");
     await TrackPlayer.setupPlayer({
       autoHandleInterruptions: true,
       autoUpdateMetadata: true,
       androidAudioContentType: AndroidAudioContentType?.Music ?? 2,
       minBuffer: 15,
-      maxBuffer: 30,
-      playBuffer: 2.5,
-      backBuffer: 5,
+      maxBuffer: 50,
+      playBuffer: 2,
+      backBuffer: 30,
       ...(Platform.OS === "ios"
         ? {
             iosCategory: IOSCategory?.Playback ?? "playback",
@@ -60,15 +73,15 @@ async function setupPlayerInternal(): Promise<void> {
   }
 
   if (TrackPlayer.updateOptions) {
+    console.log("[TrackPlayerAdapter] Calling TrackPlayer.updateOptions...");
     await TrackPlayer.updateOptions({
       android: {
         appKilledPlaybackBehavior:
           AppKilledPlaybackBehavior?.StopPlaybackAndRemoveNotification ??
           "stop-playback-and-remove-notification",
-        alwaysPauseOnInterruption: false,
+        alwaysPauseOnInterruption: true,
         stopForegroundGracePeriod: 5,
       },
-      // Capabilities exposed to MediaSession (Android Auto, lock screen, Android 13+ player state)
       capabilities: [
         Capability.Play,
         Capability.Pause,
@@ -77,19 +90,20 @@ async function setupPlayerInternal(): Promise<void> {
         Capability.SeekTo,
         Capability.Stop,
       ],
-      // Exactly 3 notification buttons: [0: Previous, 1: Play/Pause Toggle, 2: Next]
       notificationCapabilities: [
-        Capability.SkipToPrevious,
         Capability.Play,
+        Capability.Pause,
         Capability.SkipToNext,
+        Capability.SkipToPrevious,
+        Capability.SeekTo,
       ],
-      // Compact notification view
       compactCapabilities: [
-        Capability.SkipToPrevious,
         Capability.Play,
+        Capability.Pause,
         Capability.SkipToNext,
       ],
-      progressUpdateEventInterval: 0.5,
+      progressUpdateEventInterval: 1,
     });
+    console.log("[TrackPlayerAdapter] TrackPlayer.updateOptions configured successfully!");
   }
 }
