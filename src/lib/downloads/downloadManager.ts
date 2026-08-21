@@ -46,11 +46,9 @@ import {
   trackFileExists,
   getTrackFileSize,
   getTrackFileUri,
-} from "@/lib/downloads/storagePolicy";
-import {
-  removeCollectionRef,
-  addCollectionRef,
-} from "@/lib/downloads/trackReferences";
+  getValidatedTrackFileUri,
+  hasSufficientStorage,
+} from "@/lib/downloads/filesystem";
 import { logger } from "@/lib/logger";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -70,8 +68,7 @@ export { onQueueEvent };
  *
  * Enforces:
  * - Entitlement (premium required)
- * - Device registration and device limit
- * - Song cap (MAX_OFFLINE_SONGS)
+ * - Device registration
  * - Track rights (offlineAllowed, territory)
  * - Storage safety
  * - Duplicate detection (idempotent)
@@ -92,40 +89,31 @@ export async function downloadSong(
       return { ok: false, reason: entitlement.blockedReason ?? "Downloads not available" };
     }
 
-    // 2. Register device (no device limit enforced).
+    // 2. Register device.
     await registerDevice(uid);
 
-    // 3. Check song cap.
-    const allDownloads = await loadAllDownloads();
-    const completedCount = allDownloads.filter(
-      (d) => d.status === "completed"
-    ).length;
-    if (completedCount >= entitlement.maxOfflineSongs) {
+    // 3. Storage safety check.
+    const storageOk = await hasSufficientStorage();
+    if (!storageOk) {
       return {
         ok: false,
-        reason: `Offline song limit reached (${entitlement.maxOfflineSongs.toLocaleString()} songs).`,
+        reason: "Low device storage. Free up space to continue downloading.",
       };
     }
 
-    // 4. Check track rights.
+    // 4. Track rights check.
     const rights = await getTrackRights(song.id);
     if (!rights.offlineAllowed) {
-      return { ok: false, reason: "This track is not available for offline playback." };
-    }
-    if (!rights.downloadable) {
-      return { ok: false, reason: "This track cannot be downloaded." };
+      return { ok: false, reason: "This track is not available for offline download." };
     }
     if (!isTerritoryAllowed(rights.territoryRights, options?.userCountry ?? null)) {
       return { ok: false, reason: "This track is not available in your region." };
     }
 
-    // 5. Idempotency — if already downloaded or in progress, just add the ref.
+    // 5. Idempotency — if already downloaded or in progress, return ok.
     const existing = await loadDownload(song.id);
     if (existing) {
       if (existing.status === "completed") {
-        if (options?.collectionId) {
-          await addCollectionRef(song.id, options.collectionId);
-        }
         return { ok: true };
       }
       if (
@@ -134,9 +122,6 @@ export async function downloadSong(
         existing.status === "waiting_for_wifi" ||
         existing.status === "waiting_for_charging"
       ) {
-        if (options?.collectionId) {
-          await addCollectionRef(song.id, options.collectionId);
-        }
         return { ok: true };
       }
     }
@@ -146,88 +131,83 @@ export async function downloadSong(
       songId: song.id,
       title: song.title,
       artist: song.artist,
-      album: song.album,
-      coverUrl: song.coverUrl,
+      album: song.album ?? "",
+      coverUrl: song.coverUrl ?? "",
       audioUrl: song.audioUrl,
       duration: song.duration,
+      quality: prefs.quality,
       status: "queued",
       progress: 0,
       bytesDownloaded: 0,
       totalBytes: 0,
-      quality: prefs.quality,
       localPath: null,
       collectionRefs: options?.collectionId ? [options.collectionId] : [],
       retryCount: 0,
-      failedAt: null,
-      failureReason: null,
       queuedAt: new Date().toISOString(),
       completedAt: null,
+      failedAt: null,
+      failureReason: null,
       licenseExpiresAt: null,
     };
 
-    // 7. Enqueue.
+    // 7. Persist and enqueue.
+    await saveDownload(item);
     await enqueueDownload(item, prefs);
 
     return { ok: true };
   } catch (err: any) {
     logger.error("[DownloadManager] downloadSong failed", err);
-    return { ok: false, reason: err?.message ?? "Unexpected error" };
+    return { ok: false, reason: err?.message ?? "Download failed unexpectedly" };
   }
 }
 
-/**
- * Download all songs in a playlist or album.
- * Skips songs that are already downloaded or in progress.
- */
+// ─── Download a collection (album / playlist) ────────────────────────────────
+
 export async function downloadCollection(
   songs: Song[],
   collectionId: string,
   uid: string,
   prefs: DownloadPreferences,
-  options?: { userCountry?: string | null }
+  userCountry?: string | null
 ): Promise<{ queued: number; skipped: number; failed: number }> {
-  const results = await Promise.all(songs.map(async (song) => {
-    const result = await downloadSong(song, uid, prefs, {
-      collectionId,
-      userCountry: options?.userCountry,
-    });
-    if (result.ok) {
-      const item = await loadDownload(song.id);
-      if (item?.status === "completed") {
-        return "skipped" as const;
-      }
-      return "queued" as const;
-    }
-    return "failed" as const;
-  }));
+  let queued = 0;
+  let skipped = 0;
+  let failed = 0;
 
-  return {
-    queued: results.filter((result) => result === "queued").length,
-    skipped: results.filter((result) => result === "skipped").length,
-    failed: results.filter((result) => result === "failed").length,
-  };
+  for (const song of songs) {
+    const existing = await loadDownload(song.id);
+    if (existing?.status === "completed") {
+      skipped++;
+      continue;
+    }
+
+    const res = await downloadSong(song, uid, prefs, {
+      collectionId,
+      userCountry,
+    });
+
+    if (res.ok) {
+      queued++;
+    } else {
+      failed++;
+    }
+  }
+
+  return { queued, skipped, failed };
 }
 
-// ─── Playback handoff ─────────────────────────────────────────────────────────
+// ─── Playback URL resolution ─────────────────────────────────────────────────
 
 /**
  * Returns the local file URI for a song if it is fully downloaded and the
- * file exists on disk. Returns null otherwise (caller should stream).
- *
- * IMPORTANT: We always recompute the path from songId using getTrackFileUri()
- * rather than trusting the stored localPath. On iOS the app container path
- * changes on reinstall/update, making stored absolute paths stale.
+ * file physically exists and is non-empty on disk. Returns null otherwise.
  */
 export async function getLocalPlaybackUrl(songId: string): Promise<string | null> {
   try {
     const item = await loadDownload(songId);
     if (!item || item.status !== "completed") return null;
 
-    // Always recompute from songId — never trust the stored absolute path
-    const exists = await trackFileExists(songId);
-    if (!exists) return null;
-
-    return getTrackFileUri(songId);
+    return getValidatedTrackFileUri(songId);
   } catch {
     return null;
   }
@@ -254,20 +234,10 @@ export async function retrySongDownload(
 }
 
 /**
- * Remove a song download.
- * If a collectionId is provided, only removes that reference.
- * Bytes are deleted only when no references remain.
+ * Remove a song download and delete its local audio and artwork files.
  */
-export async function removeSongDownload(
-  songId: string,
-  collectionId?: string
-): Promise<void> {
+export async function removeSongDownload(songId: string): Promise<void> {
   try {
-    if (collectionId) {
-      const noRefs = await removeCollectionRef(songId, collectionId);
-      if (!noRefs) return; // other collections still reference this track
-    }
-
     await Promise.all([
       cancelDownload(songId),
       deleteTrackFiles(songId),
@@ -278,24 +248,19 @@ export async function removeSongDownload(
   }
 }
 
-/** Remove all downloads and delete all local files. */
+/** Remove all downloaded songs and delete all track files. */
 export async function removeAllDownloads(): Promise<void> {
   try {
-    await loadAllDownloads().then((all) =>
-      Promise.all(all.map((item) => cancelDownload(item.songId))).then(() =>
-        Promise.all([
-          deleteAllTrackFiles(),
-          // Clear the store after queued jobs have stopped touching these entries.
-          Promise.all(all.map((item) => removeDownload(item.songId))),
-        ])
-      )
-    );
+    const all = await loadAllDownloads();
+    await Promise.all(all.map((item) => cancelDownload(item.songId)));
+    await deleteAllTrackFiles();
+    await Promise.all(all.map((item) => removeDownload(item.songId)));
   } catch (err) {
     logger.error("[DownloadManager] removeAllDownloads failed", err);
   }
 }
 
-// ─── License sync ─────────────────────────────────────────────────────────────
+// ─── License sync ────────────────────────────────────────────────────────────
 
 /**
  * Sync licenses with Firestore. Revokes local playback for any tracks whose
@@ -305,10 +270,14 @@ export async function syncLicenses(uid: string): Promise<void> {
   try {
     const revokedIds = await refreshLicenses(uid);
 
-    await Promise.all([...revokedIds].map((songId) => patchDownload(songId, {
-        status: "revoked",
-        licenseExpiresAt: null,
-      })));
+    await Promise.all(
+      [...revokedIds].map((songId) =>
+        patchDownload(songId, {
+          status: "revoked",
+          licenseExpiresAt: null,
+        })
+      )
+    );
   } catch (err) {
     logger.error("[DownloadManager] syncLicenses failed", err);
   }
@@ -342,24 +311,26 @@ export async function getStorageSummary(): Promise<StorageSummary> {
     let pending = 0;
     let failed = 0;
 
-    const completedSizes = await Promise.all(all.map(async (item) => {
-      if (item.status === "completed") {
-        return { status: "completed" as const, size: await getTrackFileSize(item.songId) };
-      }
-      if (
-        item.status === "queued" ||
-        item.status === "downloading" ||
-        item.status === "paused" ||
-        item.status === "waiting_for_wifi" ||
-        item.status === "waiting_for_charging"
-      ) {
-        return { status: "pending" as const, size: 0 };
-      }
-      if (item.status === "failed") {
-        return { status: "failed" as const, size: 0 };
-      }
-      return { status: "other" as const, size: 0 };
-    }));
+    const completedSizes = await Promise.all(
+      all.map(async (item) => {
+        if (item.status === "completed") {
+          return { status: "completed" as const, size: await getTrackFileSize(item.songId) };
+        }
+        if (
+          item.status === "queued" ||
+          item.status === "downloading" ||
+          item.status === "paused" ||
+          item.status === "waiting_for_wifi" ||
+          item.status === "waiting_for_charging"
+        ) {
+          return { status: "pending" as const, size: 0 };
+        }
+        if (item.status === "failed") {
+          return { status: "failed" as const, size: 0 };
+        }
+        return { status: "other" as const, size: 0 };
+      })
+    );
 
     for (const item of completedSizes) {
       if (item.status === "completed") {
@@ -374,11 +345,6 @@ export async function getStorageSummary(): Promise<StorageSummary> {
 
     return {
       totalDownloadedBytes: totalBytes,
-      // Count only active library entries (completed + pending + failed).
-      // Excludes terminal/bookkeeping statuses like "deleted", "expired",
-      // "revoked" that fall into the "other" bucket — those should not inflate
-      // the user-visible track count or break the sum
-      // completedTracks + pendingTracks + failedTracks.
       totalDownloadedTracks: completed + pending + failed,
       completedTracks: completed,
       pendingTracks: pending,
@@ -407,5 +373,6 @@ export async function getSongDownload(songId: string): Promise<DownloadItem | nu
 
 export async function isDownloaded(songId: string): Promise<boolean> {
   const item = await loadDownload(songId);
-  return item?.status === "completed";
+  if (item?.status !== "completed") return false;
+  return trackFileExists(songId);
 }

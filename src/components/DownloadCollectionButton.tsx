@@ -137,7 +137,7 @@ export default function DownloadCollectionButton({
             text: "Remove All",
             style: "destructive",
             onPress: async () => {
-              await Promise.all(songs.map((song) => ctx.removeDownload(song.id, collectionId)));
+              await Promise.all(songs.map((song) => ctx.removeDownload(song.id)));
             },
           },
         ]

@@ -30,7 +30,7 @@ export function setCachedPlaylist(
 }
 
 export function setCachedPlaylists(
-  playlists: Array<Partial<CachedPlaylistData> & { id: string }>
+  playlists: (Partial<CachedPlaylistData> & { id: string })[]
 ): void {
   for (const p of playlists) {
     if (p && p.id) {

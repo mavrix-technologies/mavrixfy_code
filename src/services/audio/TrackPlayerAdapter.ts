@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform } from "react-native";
+import { Platform } from "react-native";
 import TrackPlayer, {
   Capability,
   AppKilledPlaybackBehavior,
@@ -34,23 +34,15 @@ async function setupPlayerInternal(): Promise<void> {
     return;
   }
 
-  if (Platform.OS === "android" && Number(Platform.Version) >= 33) {
-    try {
-      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
-    } catch {
-      // non-fatal
-    }
-  }
-
   try {
     await TrackPlayer.setupPlayer({
       autoHandleInterruptions: true,
       autoUpdateMetadata: true,
       androidAudioContentType: AndroidAudioContentType?.Music ?? 2,
-      minBuffer: 30,
-      maxBuffer: 50,
-      playBuffer: 5,
-      backBuffer: 10,
+      minBuffer: 15,
+      maxBuffer: 30,
+      playBuffer: 2.5,
+      backBuffer: 5,
       ...(Platform.OS === "ios"
         ? {
             iosCategory: IOSCategory?.Playback ?? "playback",
@@ -86,20 +78,18 @@ async function setupPlayerInternal(): Promise<void> {
         Capability.Stop,
       ],
       // Exactly 3 notification buttons: [0: Previous, 1: Play/Pause Toggle, 2: Next]
-      // DO NOT add Capability.Pause here, because KotlinAudio creates a PLAY_PAUSE toggle button for Play.
-      // Adding Pause creates a duplicate toggle button that pushes Next to index 3, cutting it off.
       notificationCapabilities: [
         Capability.SkipToPrevious,
         Capability.Play,
         Capability.SkipToNext,
       ],
-      // Compact notification view (indices 0, 1, 2)
+      // Compact notification view
       compactCapabilities: [
         Capability.SkipToPrevious,
         Capability.Play,
         Capability.SkipToNext,
       ],
-      progressUpdateEventInterval: 1,
+      progressUpdateEventInterval: 0.5,
     });
   }
 }

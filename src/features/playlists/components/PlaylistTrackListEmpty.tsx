@@ -15,13 +15,7 @@ export const PlaylistTrackListEmpty: React.FC<PlaylistTrackListEmptyProps> = ({
   loadError,
 }) => {
   if (loading) {
-    return (
-      <View style={styles.skeletonList}>
-        {Array.from({ length: 7 }).map((_, i) => (
-          <SongRowSkeleton key={i} />
-        ))}
-      </View>
-    );
+    return <SongRowSkeleton count={6} />;
   }
 
   return (
@@ -34,12 +28,6 @@ export const PlaylistTrackListEmpty: React.FC<PlaylistTrackListEmptyProps> = ({
 };
 
 const styles = StyleSheet.create({
-  skeletonList: {
-    width: "100%",
-    paddingHorizontal: 16,
-    gap: 8,
-    marginTop: 8,
-  },
   inlineWrap: {
     paddingVertical: 40,
     alignItems: "center",

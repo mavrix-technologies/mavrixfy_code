@@ -29,7 +29,8 @@
         "NSUserTrackingUsageDescription": "This identifier will be used to deliver personalized ads to you.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true
+          "NSAllowsArbitraryLoads": false,
+          "NSAllowsArbitraryLoadsForMedia": true
         }
       }
     },
@@ -82,6 +83,7 @@
       ],
       "./plugins/withTrackPlayer",
       "./plugins/withIOSAVPlayer",
+      "./plugins/withIOSLiquidGlass",
       [
         "expo-build-properties",
         {

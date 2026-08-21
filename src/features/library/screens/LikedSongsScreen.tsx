@@ -29,6 +29,7 @@ import { triggerImpact } from "@/lib/haptics";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
 import OfflineBanner from "@/components/OfflineBanner";
 import SongRow from "@/components/SongRow";
+import SearchHeaderField from "@/components/SearchHeaderField";
 import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import AppTopHeader, {
   APP_TOP_HEADER_HEIGHT,
@@ -357,9 +358,13 @@ export function LikedSongsScreen() {
               accessibilityLabel="Search liked songs"
               style={styles.searchContainer}
             >
-              <View style={styles.searchInputWrapper}>
-                <Ionicons name="search" size={16} color={UI.subtext} />
-                <Text style={styles.searchPlaceholderText}>Search liked songs...</Text>
+              <View pointerEvents="none">
+                <SearchHeaderField
+                  value=""
+                  onChangeText={() => {}}
+                  onClear={() => {}}
+                  placeholder="Search liked songs..."
+                />
               </View>
             </Pressable>
             <View style={styles.heroSection}>
@@ -533,29 +538,14 @@ export function LikedSongsScreen() {
 
           {/* Search header */}
           <View style={[styles.searchModeHeader, { paddingTop: topInset + 10 }]}>
-            <View style={styles.searchModeInputWrapper}>
-              <Ionicons name="search" size={18} color={UI.subtext} />
-              <TextInput
-                ref={searchInputRef}
-                style={styles.searchModeInput}
-                placeholder="Search liked songs..."
-                placeholderTextColor={UI.subtext}
+            <View style={{ flex: 1 }}>
+              <SearchHeaderField
                 value={searchQuery}
                 onChangeText={setSearchQuery}
-                selectionColor={UI.primaryA}
-                returnKeyType="search"
-                accessibilityLabel="Search liked songs input"
+                onClear={() => setSearchQuery("")}
+                placeholder="Search liked songs..."
+                autoFocus={true}
               />
-              {searchQuery.length > 0 && (
-                <Pressable
-                  onPress={() => setSearchQuery("")}
-                  accessibilityRole="button"
-                  accessibilityLabel="Clear search text"
-                  style={styles.searchClearButton}
-                >
-                  <Ionicons name="close-circle" size={18} color={UI.subtext} />
-                </Pressable>
-              )}
             </View>
             <Pressable
               onPress={closeSearch}

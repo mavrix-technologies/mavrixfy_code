@@ -148,7 +148,7 @@ export async function extractArtworkColors(imageUrl: string): Promise<ArtworkPal
 /** @deprecated Use extractArtworkColors */
 const extractDominantColor = extractArtworkColors;
 
-export function preloadDominantColors(imageUrls: Array<string | null | undefined>): void {
+export function preloadDominantColors(imageUrls: (string | null | undefined)[]): void {
   for (const rawUrl of imageUrls) {
     const url = rawUrl?.trim();
     if (!url || paletteCache.has(url) || pendingRequests.has(url)) continue;
@@ -516,7 +516,7 @@ function setCachedPalette(key: string, value: ArtworkPalette): void {
   }
 }
 
-function pickColor(...candidates: Array<string | undefined | null>): string | null {
+function pickColor(...candidates: (string | undefined | null)[]): string | null {
   for (const candidate of candidates) {
     const normalized = normalizeHexColor(candidate);
     if (normalized) return normalized;

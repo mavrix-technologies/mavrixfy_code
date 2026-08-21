@@ -48,9 +48,9 @@ export const PlaylistStickyHeader: React.FC<PlaylistStickyHeaderProps> = ({
       ]}
     >
       <Pressable style={styles.stickyBack} onPress={safeGoBack} hitSlop={8}>
-        <Ionicons name="arrow-back" size={20} color="#fff" />
+        <Ionicons name="arrow-back" size={20} color={Colors.text} />
       </Pressable>
-      <Text style={styles.stickyTitle} numberOfLines={1}>
+      <Text style={styles.stickyName} numberOfLines={1}>
         {playlistName}
       </Text>
       <Pressable
@@ -60,7 +60,7 @@ export const PlaylistStickyHeader: React.FC<PlaylistStickyHeaderProps> = ({
       >
         <Ionicons
           name={isPlayingFromThisPlaylist && isPlaying ? "pause" : "play"}
-          size={16}
+          size={14}
           color="#000"
         />
       </Pressable>
@@ -74,33 +74,32 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 90,
-    backgroundColor: "rgba(11, 15, 20, 0.94)",
+    backgroundColor: "rgba(16,20,26,0.97)",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255,255,255,0.08)",
+    borderBottomColor: "rgba(255,255,255,0.1)",
     flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    gap: 12,
+    alignItems: "flex-end",
+    paddingBottom: 10,
+    paddingHorizontal: 12,
+    gap: 10,
     zIndex: 20,
   },
   stickyBack: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
     alignItems: "center",
     justifyContent: "center",
   },
-  stickyTitle: {
+  stickyName: {
     flex: 1,
-    color: "#fff",
-    fontSize: 15,
+    color: Colors.text,
+    fontSize: 16,
     fontFamily: "Inter_700Bold",
   },
   stickyPlay: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",

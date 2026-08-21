@@ -124,7 +124,7 @@ interface DownloadContextValue {
   pauseDownload: (songId: string) => Promise<void>;
   resumeDownload: (songId: string) => Promise<void>;
   retryDownload: (songId: string) => Promise<void>;
-  removeDownload: (songId: string, collectionId?: string) => Promise<void>;
+  removeDownload: (songId: string) => Promise<void>;
   removeAllDownloads: () => Promise<void>;
   updatePreferences: (patch: Partial<DownloadPreferences>) => Promise<void>;
   refreshSummary: () => Promise<void>;
@@ -328,8 +328,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     await retrySongDownload(songId, prefsRef.current);
   }, []);
 
-  const handleRemove = useCallback(async (songId: string, collectionId?: string) => {
-    await removeSongDownload(songId, collectionId);
+  const handleRemove = useCallback(async (songId: string) => {
+    await removeSongDownload(songId);
     downloadItemStore.delete(songId);
     refreshSummary();
   }, [refreshSummary]);

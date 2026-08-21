@@ -24,10 +24,13 @@ import {
   updateDownloadMemory,
 } from "@/lib/downloads/downloadStore";
 import {
-  ensureTrackDir,
+  ensureDownloadsDirs,
+  getTempDownloadUri,
   getTrackFileUri,
+  getArtworkFileUri,
+  promoteTempToTrack,
   hasSufficientStorage,
-} from "@/lib/downloads/storagePolicy";
+} from "@/lib/downloads/filesystem";
 import { getAudioUrlByQuality } from "@/lib/downloads/audioQuality";
 import { getMusicApiUrl } from "@/lib/api-config";
 import { getBestAudioUrlWithQuality } from "@/lib/musicData";
@@ -230,22 +233,22 @@ async function executeDownload(songId: string): Promise<void> {
   // If it was cancelled while waiting in the pending queue, skip it
   if (item.status === "deleted" || item.status === "completed") return;
 
-  await ensureTrackDir(songId);
-  const destUri = getTrackFileUri(songId);
+  await ensureDownloadsDirs();
+  const tempUri = getTempDownloadUri(songId);
+  const finalUri = getTrackFileUri(songId);
 
   await updateStatus(songId, "downloading");
 
   // Fetch a fresh audio URL — JioSaavn CDN URLs expire in ~15-30 min,
   // and the URL stored at queue time is often already stale when the slot opens.
-   let audioUrl = await refreshAudioUrl(songId, item.audioUrl, item.quality);
+  let audioUrl = await refreshAudioUrl(songId, item.audioUrl, item.quality);
   
   // Resolve all redirects to get the final download URL
-  // This is critical for Gaana URLs which use multiple redirects
   audioUrl = await resolveRedirects(audioUrl);
 
   const handle = createDownloadResumable(
     audioUrl,
-    destUri,
+    tempUri,
     {},
     (progress) => {
       // Progress callback: update cache only — no AsyncStorage read per tick
@@ -289,39 +292,38 @@ async function executeDownload(songId: string): Promise<void> {
       return;
     }
 
-    const [completedItem, fileSystem] = await Promise.all([
-      updateStatus(songId, "completed", {
-        progress: 100,
-        localPath: result.uri,          // kept for reference but not used for playback
-        totalBytes: result.headers?.["Content-Length"]
-          ? parseInt(result.headers["Content-Length"], 10)
-          : (result as any).totalBytesExpectedToWrite ?? 0,
-        bytesDownloaded: (result as any).totalBytesWritten ?? 0,
-        completedAt: new Date().toISOString(),
-        failureReason: null,
-        failedAt: null,
-      }),
-      import("expo-file-system/legacy"),
-    ]);
-
-    // Verify the file actually has content — a 0-byte file means the URL was
-    // expired or the download silently failed (common with JioSaavn stream URLs)
-    const info = await fileSystem.getInfoAsync(result.uri);
-    const fileSize = (info as any).size ?? 0;
-    if (!info.exists || fileSize < 1024) {
-      // File is empty or missing — mark as failed so it can be retried
-      logger.warn("[DownloadQueue] Downloaded file is empty or too small", { songId, fileSize });
+    // Atomically promote verified temp file to final permanent track location
+    const promoted = await promoteTempToTrack(songId);
+    if (!promoted) {
+      logger.warn("[DownloadQueue] Downloaded temp file verification failed", { songId });
       const { deleteAsync } = await import("expo-file-system/legacy");
-      await Promise.all([
-        deleteAsync(result.uri, { idempotent: true }).catch(() => {}),
-        updateStatus(songId, "failed", {
-          failureReason: "Downloaded file was empty — stream URL may have expired",
-          failedAt: new Date().toISOString(),
-        }),
-      ]);
+      await deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+      await updateStatus(songId, "failed", {
+        failureReason: "Downloaded file was empty or missing — stream URL may have expired",
+        failedAt: new Date().toISOString(),
+      });
       releaseSlot(songId);
       return;
     }
+
+    // Optional background artwork download (non-blocking)
+    if (item.coverUrl && item.coverUrl.startsWith("http")) {
+      const artworkUri = getArtworkFileUri(songId);
+      const { downloadAsync } = await import("expo-file-system/legacy");
+      downloadAsync(item.coverUrl, artworkUri).catch(() => {});
+    }
+
+    const completedItem = await updateStatus(songId, "completed", {
+      progress: 100,
+      localPath: finalUri,
+      totalBytes: result.headers?.["Content-Length"]
+        ? parseInt(result.headers["Content-Length"], 10)
+        : (result as any).totalBytesExpectedToWrite ?? 0,
+      bytesDownloaded: (result as any).totalBytesWritten ?? 0,
+      completedAt: new Date().toISOString(),
+      failureReason: null,
+      failedAt: null,
+    });
 
     if (completedItem) emit("completed", songId, completedItem);
     releaseSlot(songId);

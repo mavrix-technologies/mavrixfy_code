@@ -204,12 +204,14 @@ export function PlaylistDetailScreen() {
 
   if (notFound) {
     return (
-      <View style={[styles.container, styles.center, { paddingTop: topInset }]}>
-        <Ionicons name="musical-notes-outline" size={64} color={Colors.subtext} />
-        <Text style={styles.emptyText}>{collectionKind} not found</Text>
-        <Pressable style={styles.backBtnSolo} onPress={safeGoBack}>
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
+      <View style={[styles.container, { paddingTop: topInset }]}>
+        <Pressable onPress={safeGoBack} style={styles.backBtnSolo}>
+          <Ionicons name="arrow-back" size={22} color={Colors.text} />
         </Pressable>
+        <View style={styles.center}>
+          <Ionicons name="musical-notes-outline" size={40} color={Colors.subtext} />
+          <Text style={styles.emptyText}>{collectionKind} not found</Text>
+        </View>
       </View>
     );
   }
@@ -241,11 +243,8 @@ export function PlaylistDetailScreen() {
         </View>
       )}
 
-      <View style={styles.tracksHeader}>
-        <Text style={styles.tracksTitle}>Tracks</Text>
-        <Text style={styles.tracksMeta}>
-          {songs.length > 0 ? `${songs.length} tracks` : loading ? "Loading..." : "0 tracks"}
-        </Text>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Tracks</Text>
       </View>
     </>
   );
@@ -313,29 +312,22 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   backBtnSolo: { width: 36, height: 36, marginLeft: 12, alignItems: "center", justifyContent: "center" },
-  emptyText: { color: Colors.subtext, fontSize: 16, fontFamily: "Inter_500Medium" },
+  emptyText: { color: Colors.subtext, fontSize: 14, fontFamily: "Inter_500Medium", textAlign: "center" },
 
   offlineBannerWrap: {
     paddingHorizontal: 16,
     paddingTop: 8,
   },
 
-  tracksHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
+  section: {
     paddingTop: 16,
-    paddingBottom: 8,
   },
-  tracksTitle: {
+  sectionTitle: {
     color: Colors.text,
-    fontSize: 18,
+    fontSize: 20,
     fontFamily: "Inter_700Bold",
-  },
-  tracksMeta: {
-    color: Colors.subtext,
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
+    letterSpacing: -0.2,
+    paddingHorizontal: 16,
+    marginBottom: 8,
   },
 });

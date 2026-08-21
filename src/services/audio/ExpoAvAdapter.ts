@@ -4,7 +4,7 @@
  */
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import type { AudioPlayer, AudioSample } from "expo-audio";
-import { publishPlaybackAudioSample, resetPlaybackAudioLevels } from "@/lib/playbackAudioLevels";
+import { publishPlaybackAudioSample, resetPlaybackAudioLevels } from "./PlaybackAudioLevels";
 
 // ─── singletons ───────────────────────────────────────────────────────────────
 

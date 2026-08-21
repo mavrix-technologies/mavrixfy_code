@@ -48,7 +48,7 @@ import { usePlayerActions } from "@/contexts/PlayerContext";
 import {
   usePlaybackQueueState,
   usePlaybackPlayState,
-} from "@/lib/playbackEngine";
+} from "@/services/audio/PlaybackEngine";
 import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import { getSmartAutoplayModeLabel } from "@/lib/smartAutoplayConfig";

@@ -38,7 +38,7 @@ import AppTopHeader, {
   AppTopHeaderIconButton,
   useAppTopHeaderScrollElevation,
 } from "@/components/AppTopHeader";
-import { formatBytes } from "@/lib/downloads/storagePolicy";
+import { formatBytes, getTrackFileUri } from "@/lib/downloads/storagePolicy";
 
 const UI = {
   bg: "#10141a",
@@ -67,10 +67,10 @@ function downloadItemToSong(item: DownloadItem): Song {
     artist: item.artist,
     album: item.album,
     coverUrl: item.coverUrl,
-    audioUrl: item.audioUrl,
+    audioUrl: getTrackFileUri(item.songId),
     duration: item.duration,
     genre: "",
-    source: "jiosaavn",
+    source: "local",
   };
 }
 
@@ -102,18 +102,20 @@ export function DownloadedSongsScreen() {
     handleHeaderScroll,
   } = useAppTopHeaderScrollElevation();
 
-  // Re-render when download statuses change
-  const [, setTick] = useState(0);
+  // Reactive download items state updated on queue events
+  const [downloadItems, setDownloadItems] = useState<DownloadItem[]>(() => getAllDownloadItems());
+
   useEffect(() => {
+    setDownloadItems(getAllDownloadItems());
     const unsubs = [
-      onQueueEvent("completed", () => setTick((n) => n + 1)),
-      onQueueEvent("status", () => setTick((n) => n + 1)),
+      onQueueEvent("completed", () => setDownloadItems(getAllDownloadItems())),
+      onQueueEvent("status", () => setDownloadItems(getAllDownloadItems())),
     ];
     return () => unsubs.forEach((fn) => fn());
-  }, []);
+  }, [getAllDownloadItems]);
 
   const completedSongs = useMemo<Song[]>(() => {
-    return getAllDownloadItems()
+    return downloadItems
       .filter((item) => item.status === "completed")
       .sort((a, b) => {
         const aTime = a.completedAt ? new Date(a.completedAt).getTime() : 0;
@@ -121,7 +123,7 @@ export function DownloadedSongsScreen() {
         return bTime - aTime;
       })
       .map(downloadItemToSong);
-  }, [getAllDownloadItems]);
+  }, [downloadItems]);
 
   const filteredSongs = useMemo(() => {
     if (!searchQuery.trim()) return completedSongs;

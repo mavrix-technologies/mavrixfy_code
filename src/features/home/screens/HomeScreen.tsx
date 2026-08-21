@@ -1,7 +1,6 @@
-import React, { useCallback, useMemo, useRef } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   View,
-  Text,
   StyleSheet,
   Platform,
   RefreshControl,
@@ -16,11 +15,7 @@ import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { type HomeJioSaavnCategoryData } from "@/data/providers/JioSaavnProvider";
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
-import AppTopHeader, {
-  AppTopHeaderProfileButton,
-  AppTopHeaderDownloadButton,
-  useAppTopHeaderScrollElevation,
-} from "@/components/AppTopHeader";
+import { useAppTopHeaderScrollElevation } from "@/components/AppTopHeader";
 import AdMobBanner from "@/components/AdMobBanner";
 import AppPromotionModal from "@/components/AppPromotionModal";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -32,6 +27,7 @@ import {
   HomeHorizontalSection,
   type HomeCardItem,
 } from "../components/HomeHorizontalSection";
+import { HomeLiquidGlassNav } from "../components/HomeLiquidGlassNav";
 import { useHomeFeedData } from "../hooks/useHomeFeedData";
 import { useArtworkPalette } from "@/lib/colorExtractor";
 
@@ -113,6 +109,7 @@ export function HomeScreen() {
   const currentSongId = currentSong?.id || null;
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const flatListRef = useRef<FlatList<HomeSectionItem> | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
 
   const {
     categories,
@@ -133,34 +130,94 @@ export function HomeScreen() {
   const sectionData = useMemo<HomeSectionItem[]>(() => {
     const items: HomeSectionItem[] = [];
 
-    if (quickPickSongs.length > 0) {
-      items.push({ id: "quick-picks", type: "quick-picks" });
-    } else if (loadingMainContent) {
-      items.push({ id: "loading-quick", type: "loading-quick" });
-    }
-    if (recentlyPlayed.length > 0) items.push({ id: "recently-played", type: "recently-played" });
-    if (featuredArtists.length > 0) items.push({ id: "artists", type: "artists" });
+    if (selectedCategory === "all") {
+      if (quickPickSongs.length > 0) {
+        items.push({ id: "quick-picks", type: "quick-picks" });
+      } else if (loadingMainContent) {
+        items.push({ id: "loading-quick", type: "loading-quick" });
+      }
+      if (recentlyPlayed.length > 0) items.push({ id: "recently-played", type: "recently-played" });
+      if (featuredArtists.length > 0) items.push({ id: "artists", type: "artists" });
 
-    categories.forEach((cat, idx) => {
-      items.push({
-        id: `cat-${cat.id}`,
-        type: "category",
-        category: cat,
-        showAd: idx === 1,
+      categories.forEach((cat, idx) => {
+        items.push({
+          id: `cat-${cat.id}`,
+          type: "category",
+          category: cat,
+          showAd: idx === 1,
+        });
       });
+
+      if (publicPlaylists.length > 0) items.push({ id: "public-playlists", type: "public-playlists" });
+      const hasBelowRecentContent =
+        featuredArtists.length > 0 ||
+        categories.length > 0 ||
+        publicPlaylists.length > 0;
+      if (loadingMainContent && !hasBelowRecentContent) {
+        items.push({ id: "loading-main", type: "loading-main" });
+      }
+      return items;
+    }
+
+    if (selectedCategory === "recently-played") {
+      if (recentlyPlayed.length > 0) items.push({ id: "recently-played", type: "recently-played" });
+      if (quickPickSongs.length > 0) items.push({ id: "quick-picks", type: "quick-picks" });
+      return items;
+    }
+
+    if (selectedCategory === "new-releases") {
+      if (quickPickSongs.length > 0) items.push({ id: "quick-picks", type: "quick-picks" });
+      const newCat = categories.find((c) => c.id === "new-arrivals");
+      if (newCat) items.push({ id: `cat-${newCat.id}`, type: "category", category: newCat, showAd: false });
+      return items;
+    }
+
+    if (selectedCategory === "trending") {
+      const trendingCat = categories.find((c) => c.id === "trending");
+      if (trendingCat) items.push({ id: `cat-${trendingCat.id}`, type: "category", category: trendingCat, showAd: false });
+      if (quickPickSongs.length > 0) items.push({ id: "quick-picks", type: "quick-picks" });
+      return items;
+    }
+
+    if (selectedCategory === "charts") {
+      const chartCat = categories.find((c) => c.id === "top-charts" || c.id === "popular");
+      if (chartCat) items.push({ id: `cat-${chartCat.id}`, type: "category", category: chartCat, showAd: false });
+      if (quickPickSongs.length > 0) items.push({ id: "quick-picks", type: "quick-picks" });
+      return items;
+    }
+
+    if (selectedCategory === "bollywood") {
+      const bollyCat = categories.find((c) => c.id === "bollywood");
+      if (bollyCat) items.push({ id: `cat-${bollyCat.id}`, type: "category", category: bollyCat, showAd: false });
+      return items;
+    }
+
+    if (selectedCategory === "romantic") {
+      const romanceCat = categories.find((c) => c.id === "romance");
+      if (romanceCat) items.push({ id: `cat-${romanceCat.id}`, type: "category", category: romanceCat, showAd: false });
+      return items;
+    }
+
+    // Filter categories or playlists matching the selected category keyword
+    const matchedCategories = categories.filter((c) => {
+      const idMatch = c.id.toLowerCase().includes(selectedCategory.toLowerCase());
+      const titleMatch = c.title.toLowerCase().includes(selectedCategory.toLowerCase());
+      return idMatch || titleMatch;
     });
 
-    if (publicPlaylists.length > 0) items.push({ id: "public-playlists", type: "public-playlists" });
-    const hasBelowRecentContent =
-      featuredArtists.length > 0 ||
-      categories.length > 0 ||
-      publicPlaylists.length > 0;
-    if (loadingMainContent && !hasBelowRecentContent) {
-      items.push({ id: "loading-main", type: "loading-main" });
+    if (matchedCategories.length > 0) {
+      matchedCategories.forEach((cat) => {
+        items.push({ id: `cat-${cat.id}`, type: "category", category: cat, showAd: false });
+      });
+    } else {
+      // Fallback: show quick picks + public playlists if specific subset not loaded
+      if (quickPickSongs.length > 0) items.push({ id: "quick-picks", type: "quick-picks" });
+      if (publicPlaylists.length > 0) items.push({ id: "public-playlists", type: "public-playlists" });
+      if (featuredArtists.length > 0) items.push({ id: "artists", type: "artists" });
     }
 
     return items;
-  }, [categories, featuredArtists.length, loadingMainContent, publicPlaylists, quickPickSongs.length, recentlyPlayed.length]);
+  }, [categories, featuredArtists, loadingMainContent, publicPlaylists, quickPickSongs, recentlyPlayed, selectedCategory]);
 
   const renderSectionItem = useCallback(
     ({ item }: ListRenderItemInfo<HomeSectionItem>) => {
@@ -230,7 +287,7 @@ export function HomeScreen() {
   const contentContainerStyle = useMemo(
     () => [
       styles.scrollContent,
-      { paddingTop: topInset + 60, paddingBottom: 120 },
+      { paddingTop: topInset + 96, paddingBottom: 120 },
     ],
     [topInset]
   );
@@ -243,17 +300,13 @@ export function HomeScreen() {
     <View style={styles.container}>
       {!isOnline && <OfflineBanner />}
 
-      <AppTopHeader
+      <HomeLiquidGlassNav
         topInset={topInset}
         elevated={isHeaderElevated}
         elevationProgress={elevationProgress}
         ambientColor={artworkPalette.accent}
-        titleNode={
-          <Text style={styles.appNameTitle}>MAVRIXFY</Text>
-        }
-        left={<AppTopHeaderProfileButton />}
-        right={<AppTopHeaderDownloadButton />}
-        rightWidth={44}
+        selectedCategory={selectedCategory}
+        onSelectCategory={setSelectedCategory}
       />
 
       <FlatList

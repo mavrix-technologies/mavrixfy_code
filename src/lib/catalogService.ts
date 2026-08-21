@@ -1,178 +1,97 @@
-/**
- * Catalog Service — fetches admin-uploaded songs from Firestore
- * and merges them into search results seamlessly.
- */
-import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { Song } from '@/lib/musicData';
-import { logger } from '@/lib/logger';
-import { mapFilter } from "@/lib/arrayUtils";
+import { collection, getDocs, limit, orderBy, query, where, Firestore } from "firebase/firestore";
+import { Song } from "@/lib/musicData";
 
-let _cache: Song[] | null = null;
-let _cacheTime = 0;
-let _inFlight: Promise<Song[]> | null = null;
-const CACHE_TTL = 15 * 60 * 1000; // 15 minutes
-const FAILURE_CACHE_TTL = 60 * 1000; // Avoid repeated permission-denied reads in dev.
-let _lastFailureAt = 0;
+const SONG_LIMIT = 30;
+
+let _db: Firestore | null = null;
+function getDb(): Firestore | null {
+  if (_db) return _db;
+  try {
+    const { db } = require("@/lib/firebase");
+    _db = db;
+    return _db;
+  } catch {
+    return null;
+  }
+}
+
+function mapSong(id: string, data: Record<string, any>): Song | null {
+  const audioUrl = data.audioUrl || data.streamUrl || data.url;
+  if (!data.title || !audioUrl) {
+    return null;
+  }
+
+  let imageUrl = data.imageUrl || data.coverUrl || "";
+  if (!imageUrl && Array.isArray(data.image)) {
+    imageUrl = data.image[data.image.length - 1]?.url || data.image[data.image.length - 1]?.link || "";
+  }
+
+  return {
+    id,
+    title: String(data.title || data.name || ""),
+    artist: String(data.artist || data.primaryArtists || "Unknown Artist"),
+    album: typeof data.album === "object" ? String(data.album?.name || "") : String(data.album || ""),
+    duration: Number(data.duration) || 0,
+    coverUrl: imageUrl,
+    genre: String(data.genre || data.language || ""),
+    mood: data.mood || data.moods || undefined,
+    audioUrl: String(audioUrl),
+    year: data.year ? String(data.year) : "",
+    language: String(data.language || ""),
+    popularity: Number(data.popularity || 0) || undefined,
+    source: "local",
+  };
+}
 
 export async function getCatalogSongs(): Promise<Song[]> {
-  const now = Date.now();
-  if (_cache && now - _cacheTime < CACHE_TTL) {
-    return _cache;
-  }
+  const db = getDb();
+  if (!db) return [];
 
-  if (_lastFailureAt && now - _lastFailureAt < FAILURE_CACHE_TTL) {
-    return _cache || [];
-  }
-
-  if (_inFlight) {
-    return _inFlight;
-  }
-
-  _inFlight = fetchCatalogSongs();
   try {
-    return await _inFlight;
-  } finally {
-    _inFlight = null;
-  }
-}
-
-async function fetchCatalogSongs(): Promise<Song[]> {
-  try {
-    if (!db) return [];
-
-    // Optimize: Keep a small local "featured/recent" cache by limiting documents retrieved
-    let snap;
+    let snapshot;
     try {
-      const q = query(collection(db, 'songs'), orderBy('popularity', 'desc'), limit(30));
-      snap = await getDocs(q);
-    } catch {
-      const q = query(collection(db, 'songs'), limit(30));
-      snap = await getDocs(q);
-    }
-
-    const songs: Song[] = mapFilter(snap.docs, (d): Song | null => {
-        const data = d.data();
-        const audioUrl = data.audioUrl || data.streamUrl || data.url || '';
-        if (!audioUrl || !data.title) {
-          return null;
-        }
-
-        let imageUrl = data.imageUrl || data.coverUrl || '';
-        if (!imageUrl && Array.isArray(data.image)) {
-          imageUrl = data.image[data.image.length - 1]?.url || '';
-        }
-
-        return {
-          id: d.id,
-          title: data.title || data.name || '',
-          artist: data.artist || data.primaryArtists || 'Unknown Artist',
-          album: typeof data.album === 'object' ? (data.album?.name || '') : (data.album || ''),
-          duration: data.duration ? Number(data.duration) : 0,
-          coverUrl: imageUrl,
-          genre: data.genre || '',
-          mood: data.mood || data.moods || undefined,
-          audioUrl,
-          year: data.year ? String(data.year) : '',
-          language: data.language || '',
-          popularity: Number(data.popularity || 0) || undefined,
-          source: 'local' as const,
-        };
-      }, (s): s is Song => s !== null);
-
-    _cache = songs;
-    _cacheTime = Date.now();
-    _lastFailureAt = 0;
-    return songs;
-  } catch (e) {
-    _lastFailureAt = Date.now();
-    const error = e as { code?: string; message?: string };
-    const message = error?.message || '';
-
-    if (error?.code === 'permission-denied' || message.includes('Missing or insufficient permissions')) {
-      logger.warn(
-        '[CatalogService] Firestore /songs is not readable for this user. Ensure public song docs match firestore.rules public catalog fields.',
-        e
+      const songsQuery = query(
+        collection(db, "songs"),
+        orderBy("popularity", "desc"),
+        limit(SONG_LIMIT)
       );
-      return _cache || [];
+      snapshot = await getDocs(songsQuery);
+    } catch {
+      const fallbackQuery = query(collection(db, "songs"), limit(SONG_LIMIT));
+      snapshot = await getDocs(fallbackQuery);
     }
 
-    logger.warn('[CatalogService] Failed to fetch catalog songs.', e);
-    return _cache || [];
+    return snapshot.docs
+      .map((doc) => mapSong(doc.id, doc.data()))
+      .filter((song): song is Song => song !== null);
+  } catch {
+    return [];
   }
 }
 
-export async function searchCatalog(queryText: string): Promise<Song[]> {
-  if (!db || !queryText.trim()) return [];
-  const qClean = queryText.trim();
-  const qLower = qClean.toLowerCase();
-  const qCapitalized = qClean.charAt(0).toUpperCase() + qClean.slice(1);
+export async function searchCatalog(searchText: string): Promise<Song[]> {
+  const db = getDb();
+  if (!db) return [];
 
-  const songsRef = collection(db, 'songs');
-
-  // Helper prefix query generator
-  const getPrefixQuery = (field: string, prefix: string) => {
-    return query(
-      songsRef,
-      where(field, '>=', prefix),
-      where(field, '<=', prefix + '\uf8ff'),
-      limit(15)
-    );
-  };
-
-  // Run multiple parallel prefix queries for maximum coverage with compact returns
-  const queries = [
-    getPrefixQuery('title', qClean),
-    getPrefixQuery('title', qCapitalized),
-    getPrefixQuery('titleLower', qLower),
-    getPrefixQuery('artist', qClean),
-    getPrefixQuery('artist', qCapitalized),
-    getPrefixQuery('artistLower', qLower),
-  ];
-
-  const snapshots = await Promise.allSettled(queries.map(q => getDocs(q)));
-
-  const seenIds = new Set<string>();
-  const results: Song[] = [];
-
-  for (const result of snapshots) {
-    if (result.status === 'fulfilled') {
-      result.value.forEach(d => {
-        if (seenIds.has(d.id)) return;
-        seenIds.add(d.id);
-
-        const data = d.data();
-        const audioUrl = data.audioUrl || data.streamUrl || data.url || '';
-        if (!audioUrl || !data.title) return;
-
-        let imageUrl = data.imageUrl || data.coverUrl || '';
-        if (!imageUrl && Array.isArray(data.image)) {
-          imageUrl = data.image[data.image.length - 1]?.url || '';
-        }
-
-        results.push({
-          id: d.id,
-          title: data.title || data.name || '',
-          artist: data.artist || data.primaryArtists || 'Unknown Artist',
-          album: typeof data.album === 'object' ? (data.album?.name || '') : (data.album || ''),
-          duration: data.duration ? Number(data.duration) : 0,
-          coverUrl: imageUrl,
-          genre: data.genre || '',
-          mood: data.mood || data.moods || undefined,
-          audioUrl,
-          year: data.year ? String(data.year) : '',
-          language: data.language || '',
-          popularity: Number(data.popularity || 0) || undefined,
-          source: 'local' as const,
-        });
-      });
-    }
+  const text = searchText.trim();
+  if (text.length < 2) {
+    return [];
   }
 
-  // Filter precisely and return
-  return results.filter(s =>
-    s.title.toLowerCase().includes(qLower) ||
-    s.artist.toLowerCase().includes(qLower) ||
-    s.album.toLowerCase().includes(qLower)
-  );
+  try {
+    const normalized = text.toLowerCase();
+    const songsQuery = query(
+      collection(db, "songs"),
+      where("titleLower", ">=", normalized),
+      where("titleLower", "<=", `${normalized}\uf8ff`),
+      limit(20)
+    );
+    const snapshot = await getDocs(songsQuery);
+
+    return snapshot.docs
+      .map((doc) => mapSong(doc.id, doc.data()))
+      .filter((song): song is Song => song !== null);
+  } catch {
+    return [];
+  }
 }

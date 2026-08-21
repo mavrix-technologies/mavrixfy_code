@@ -5,10 +5,10 @@ import * as Network from "expo-network";
 import { Song } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
-import * as ExpoAvPlayer from "@/lib/expoAvPlayer";
+import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
 import { logger } from "@/lib/logger";
-import { updatePlaybackEngineSnapshot } from "@/lib/playbackEngine";
+import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { mapFilter } from "@/lib/arrayUtils";
 import { createShuffledPlaybackQueue, toggleQueueShuffleState } from "@/services/audio/ShuffleManager";
 import { showGlobalToast } from "@/utils/globalToast";
@@ -19,6 +19,15 @@ let RepeatMode: any = {
   Off: "off",
   Queue: "queue",
   Track: "track",
+};
+let State: any = {
+  Playing: "playing",
+  Paused: "paused",
+  Stopped: "stopped",
+  Buffering: "buffering",
+  Loading: "loading",
+  Ready: "ready",
+  None: "none",
 };
 let setupPlayer: any = null;
 
@@ -45,7 +54,8 @@ if (isNativeTrackPlayerAvailable) {
     TrackPlayer = trackPlayerModule.default ?? trackPlayerModule;
     Event = trackPlayerModule.Event;
     RepeatMode = trackPlayerModule.RepeatMode;
-    setupPlayer = require("@/lib/trackPlayer").setupPlayer;
+    State = trackPlayerModule.State ?? State;
+    setupPlayer = require("@/services/audio/TrackPlayerAdapter").setupPlayer;
   } catch (error) {
     logger.error("[Player] Failed to load native TrackPlayer module", error);
   }
@@ -523,6 +533,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const nextSongRef = useRef<() => void>(() => {});
   const prevSongRef = useRef<() => void>(() => {});
   const togglePlayRef = useRef<() => Promise<void> | void>(() => {});
+  const togglePlayInFlightRef = useRef(false);
   const seekToRef = useRef<(progress: number) => Promise<void> | void>(() => {});
   const playSongRef = useRef<(song: Song, queue?: Song[]) => Promise<void> | void>(() => {});
 
@@ -944,6 +955,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [playSong]);
 
   const togglePlay = useCallback(async () => {
+    if (togglePlayInFlightRef.current) return;
+    togglePlayInFlightRef.current = true;
+
     const nextPlayState = !isPlayingRef.current;
 
     if (!nextPlayState) {
@@ -958,6 +972,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           void playSong(target, queueRef.current);
         }
       }
+      togglePlayInFlightRef.current = false;
       return;
     }
 
@@ -1012,6 +1027,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (nextPlayState && currentSongRef.current) {
         void playSong(currentSongRef.current, queueRef.current);
       }
+    } finally {
+      togglePlayInFlightRef.current = false;
     }
   }, [ensurePlayerReady, isPlayerReady, playSong]);
 
@@ -1393,22 +1410,29 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const unsubs = [
       subscribeTrackPlayerEvent(Event.PlaybackState, (event: any) => {
         const nextState = event && typeof event === "object" && "state" in event ? event.state : event;
-        const stateStr = String(nextState || "").toLowerCase();
-        const isCurrentlyPlaying = stateStr.includes("playing");
-        const isBuffering = stateStr.includes("buffering") || stateStr.includes("loading");
 
-        if (isCurrentlyPlaying) {
-          setIsPlaying(true);
-          isPlayingRef.current = true;
-          setPlaybackLoading(false);
-          updatePlaybackEngineSnapshot({ isPlaying: true, isLoading: false, isBuffering: false });
-        } else if (stateStr.includes("paused") || stateStr.includes("stopped")) {
-          if (!isBuffering && !playbackLoadingRef.current) {
-            setIsPlaying(false);
-            isPlayingRef.current = false;
+        switch (nextState) {
+          case State.Playing:
+            setIsPlaying(true);
+            isPlayingRef.current = true;
             setPlaybackLoading(false);
-            updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
-          }
+            updatePlaybackEngineSnapshot({ isPlaying: true, isLoading: false, isBuffering: false });
+            break;
+
+          case State.Paused:
+          case State.Stopped:
+            if (!playbackLoadingRef.current) {
+              setIsPlaying(false);
+              isPlayingRef.current = false;
+              setPlaybackLoading(false);
+              updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
+            }
+            break;
+
+          case State.Buffering:
+          case State.Loading:
+            updatePlaybackEngineSnapshot({ isBuffering: true });
+            break;
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackError, (error: any) => {
@@ -1431,11 +1455,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, () => {
-        if (repeatModeRef.current === "one" && currentSongRef.current) {
-          void playSongRef.current(currentSongRef.current, queueRef.current);
-        } else {
-          nextSongRef.current();
-        }
+        nextSongRef.current();
       }),
       subscribeTrackPlayerEvent(Event.RemoteNext, () => {
         nextSongRef.current();
@@ -1443,26 +1463,51 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       subscribeTrackPlayerEvent(Event.RemotePrevious, () => {
         prevSongRef.current();
       }),
-      subscribeTrackPlayerEvent(Event.RemotePlay, () => {
-        if (!isPlayingRef.current) {
-          void togglePlayRef.current();
+      subscribeTrackPlayerEvent(Event.RemotePlay, async () => {
+        try {
+          setIsPlaying(true);
+          isPlayingRef.current = true;
+          updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
+          if (TrackPlayer) {
+            await TrackPlayer.play();
+          }
+        } catch (err) {
+          logger.error("[Player] RemotePlay error", err);
         }
       }),
-      subscribeTrackPlayerEvent(Event.RemotePause, () => {
-        if (isPlayingRef.current) {
-          void togglePlayRef.current();
+      subscribeTrackPlayerEvent(Event.RemotePause, async () => {
+        try {
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
+          if (TrackPlayer) {
+            await TrackPlayer.pause();
+          }
+        } catch (err) {
+          logger.error("[Player] RemotePause error", err);
         }
       }),
-      subscribeTrackPlayerEvent(Event.RemoteStop, () => {
-        if (isPlayingRef.current) {
-          void togglePlayRef.current();
+      subscribeTrackPlayerEvent(Event.RemoteStop, async () => {
+        try {
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
+          if (TrackPlayer) {
+            await TrackPlayer.stop();
+          }
+        } catch (err) {
+          logger.error("[Player] RemoteStop error", err);
         }
       }),
-      subscribeTrackPlayerEvent(Event.RemoteSeek, (event: { position: number }) => {
+      subscribeTrackPlayerEvent(Event.RemoteSeek, async (event: { position: number }) => {
         if (typeof event?.position === "number") {
-          const dur = resolvedDuration;
-          if (dur > 0) {
-            void seekToRef.current(event.position / dur);
+          try {
+            if (TrackPlayer) {
+              await TrackPlayer.seekTo(event.position);
+            }
+            setNativePosition(event.position);
+          } catch (err) {
+            logger.error("[Player] RemoteSeek error", err);
           }
         }
       }),

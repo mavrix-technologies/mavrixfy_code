@@ -59,6 +59,7 @@ function parseSongParam(value: string | string[] | undefined): Song | null {
       coverUrl: parsed.coverUrl || "",
       genre: parsed.genre || "",
       audioUrl: parsed.audioUrl || "",
+      downloadUrl: parsed.downloadUrl,
       year: parsed.year,
       language: parsed.language,
       source: parsed.source,

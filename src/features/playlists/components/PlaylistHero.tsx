@@ -48,10 +48,8 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
   playlistDescription,
   collectionKind,
   collectionKindLower,
-  playlistTitleSize,
   effectiveSongCount,
   totalMinutes,
-  totalDurationLabel,
   stateFlags,
   songs,
   downloadCollectionId,
@@ -68,8 +66,10 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
     isPlaying,
   } = stateFlags;
 
+  const displayName = playlistName || `${collectionKind} Details`;
+
   return (
-    <View style={styles.hero}>
+    <View style={[styles.hero, { paddingTop: topInset + 8 }]}>
       {playlistCover ? (
         <Image
           source={{ uri: playlistCover }}
@@ -85,25 +85,28 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
         </View>
       )}
 
+      {/* Gradient matching ArtistDetailScreen */}
       <LinearGradient
-        colors={["rgba(0,0,0,0.15)", "rgba(0,0,0,0.5)", "#0B0F14"]}
-        locations={[0, 0.45, 1]}
+        colors={["transparent", "rgba(16,20,26,0.7)", Colors.background]}
+        locations={[0.3, 0.7, 1]}
         style={StyleSheet.absoluteFill}
       />
 
-      <Pressable style={[styles.heroBack, { top: topInset + 10 }]} onPress={safeGoBack} hitSlop={8}>
+      {/* Floating Circular Back Button */}
+      <Pressable
+        style={[styles.heroBack, { top: topInset + 8 }]}
+        onPress={safeGoBack}
+        hitSlop={8}
+      >
         <Ionicons name="arrow-back" size={22} color="#fff" />
       </Pressable>
 
-      {canEdit && (
-        <Pressable style={[styles.heroEdit, { top: topInset + 10 }]} onPress={onOpenEdit} hitSlop={8}>
-          <Ionicons name="pencil" size={18} color="#fff" />
-        </Pressable>
-      )}
-
+      {/* Hero Info */}
       <View style={styles.heroInfo}>
-        <View style={styles.heroKindRow}>
-          <Text style={styles.heroKind}>{collectionKind.toUpperCase()}</Text>
+        {/* Kind badge / visibility */}
+        <View style={styles.verifiedBadge}>
+          <Ionicons name="musical-notes" size={14} color={Colors.primary} />
+          <Text style={styles.verifiedText}>{collectionKind.toUpperCase()}</Text>
           {isFirestoreSource && (
             <View
               style={[
@@ -128,48 +131,67 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
           )}
         </View>
 
-        <Text style={[styles.heroTitle, { fontSize: playlistTitleSize }]} numberOfLines={2}>
-          {playlistName || `${collectionKind} Details`}
+        {/* Playlist / Album Name */}
+        <Text style={styles.artistName} numberOfLines={2}>
+          {displayName}
         </Text>
 
+        {/* Description & Meta info */}
         {playlistDescription ? (
-          <Text style={styles.heroSub} numberOfLines={2}>
+          <Text style={styles.followers} numberOfLines={2}>
             {playlistDescription}
           </Text>
-        ) : null}
+        ) : (
+          <Text style={styles.followers}>
+            {effectiveSongCount} {effectiveSongCount === 1 ? "track" : "tracks"}
+            {totalMinutes > 0 ? ` • ${totalMinutes} min` : ""}
+          </Text>
+        )}
 
-        <Text style={styles.heroMeta}>
-          {effectiveSongCount} songs
-          {totalMinutes > 0 ? ` • ${totalMinutes} min` : ""}
-          {totalDurationLabel ? ` (${totalDurationLabel})` : ""}
-        </Text>
-
+        {/* Actions Row */}
         <View style={styles.heroActions}>
-          <Pressable style={styles.playBtn} onPress={onPlayAll} disabled={loading || songs.length === 0}>
+          {/* Play All button */}
+          <Pressable
+            style={styles.playAllBtn}
+            onPress={onPlayAll}
+            disabled={loading || songs.length === 0}
+          >
             <Ionicons
               name={isPlayingFromThisPlaylist && isPlaying ? "pause" : "play"}
-              size={20}
+              size={16}
               color="#000"
             />
-            <Text style={styles.playBtnText}>
+            <Text style={styles.playAllText}>
               {isPlayingFromThisPlaylist && isPlaying ? "Pause" : "Play"}
             </Text>
           </Pressable>
 
-          <Pressable style={styles.shuffleBtn} onPress={onShufflePlay} disabled={loading || songs.length === 0}>
-            <Ionicons name="shuffle" size={18} color={Colors.text} />
-            <Text style={styles.shuffleBtnText}>Shuffle</Text>
+          {/* Shuffle icon-only circle button */}
+          <Pressable
+            style={styles.iconCircleBtn}
+            onPress={onShufflePlay}
+            disabled={loading || songs.length === 0}
+          >
+            <Ionicons name="shuffle" size={18} color="rgba(255,255,255,0.85)" />
           </Pressable>
 
+          {/* Download button */}
           {songs.length > 0 && (
             <DownloadCollectionButton
               collectionId={downloadCollectionId}
-              collectionName={playlistName || `${collectionKind} Tracks`}
+              collectionName={displayName}
               collectionImage={playlistCover}
               collectionType={collectionKindLower as "playlist" | "album"}
               songs={songs}
               compact
             />
+          )}
+
+          {/* Edit button */}
+          {canEdit && (
+            <Pressable style={styles.iconCircleBtn} onPress={onOpenEdit} hitSlop={8}>
+              <Ionicons name="pencil" size={16} color="rgba(255,255,255,0.85)" />
+            </Pressable>
           )}
         </View>
       </View>
@@ -179,7 +201,7 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
 
 const styles = StyleSheet.create({
   hero: {
-    height: 340,
+    height: 320,
     justifyContent: "flex-end",
     overflow: "hidden",
   },
@@ -199,108 +221,84 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  heroEdit: {
-    position: "absolute",
-    right: 16,
-    zIndex: 10,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   heroInfo: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingBottom: 20,
+    gap: 6,
   },
-  heroKindRow: {
+  verifiedBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginBottom: 4,
+    gap: 6,
   },
-  heroKind: {
+  verifiedText: {
     color: Colors.primary,
-    fontSize: 11,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 1.2,
-  },
-  heroTitle: {
-    color: "#fff",
-    fontFamily: "Inter_800ExtraBold",
-    lineHeight: 38,
-    letterSpacing: -0.5,
-    marginBottom: 4,
-  },
-  heroSub: {
-    color: "rgba(255,255,255,0.72)",
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    marginBottom: 4,
-  },
-  heroMeta: {
-    color: "rgba(255,255,255,0.50)",
     fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 0.5,
+  },
+  artistName: {
+    color: "#fff",
+    fontSize: 32,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.5,
+  },
+  followers: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 13,
     fontFamily: "Inter_400Regular",
-    marginBottom: 16,
   },
   heroActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
+    marginTop: 6,
   },
-  shuffleBtn: {
+  playAllBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.10)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-  },
-  shuffleBtnText: {
-    color: Colors.text,
-    fontSize: 13,
-    fontFamily: "Inter_600SemiBold",
-  },
-  playBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingVertical: 10,
     paddingHorizontal: 20,
-    borderRadius: 22,
+    paddingVertical: 10,
+    borderRadius: 999,
     backgroundColor: Colors.primary,
   },
-  playBtnText: {
+  playAllText: {
     color: "#000",
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: "Inter_700Bold",
+  },
+  iconCircleBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   visibilityBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginLeft: 4,
   },
   visibilityBadgePublic: {
-    backgroundColor: "rgba(108, 92, 231, 0.3)",
+    backgroundColor: "rgba(108, 92, 231, 0.25)",
     borderWidth: 1,
-    borderColor: "rgba(108, 92, 231, 0.5)",
+    borderColor: "rgba(108, 92, 231, 0.4)",
   },
   visibilityBadgePrivate: {
-    backgroundColor: "rgba(255, 107, 107, 0.3)",
+    backgroundColor: "rgba(255, 107, 107, 0.25)",
     borderWidth: 1,
-    borderColor: "rgba(255, 107, 107, 0.5)",
+    borderColor: "rgba(255, 107, 107, 0.4)",
   },
   visibilityBadgeText: {
-    color: "#fff",
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: "Inter_600SemiBold",
   },
 });

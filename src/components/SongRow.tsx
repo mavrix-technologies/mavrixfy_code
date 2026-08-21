@@ -23,7 +23,7 @@ import Colors from "@/constants/colors";
 import { Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import { usePlayerRowActions } from "@/contexts/PlayerContext";
-import { usePlaybackRowState } from "@/lib/playbackEngine";
+import { usePlaybackRowState } from "@/services/audio/PlaybackEngine";
 import EqualizerBars from "@/components/EqualizerBars";
 import { showGlobalToast } from "@/utils/globalToast";
 import DownloadButton from "@/components/DownloadButton";
@@ -231,10 +231,12 @@ const SongRow = memo(function SongRow({
             album: song.album || "",
             duration: song.duration || 0,
             coverUrl: song.coverUrl || "",
-            audioUrl: song.audioUrl ? song.audioUrl.split("?")[0] : "",
+            audioUrl: song.audioUrl || "",
+            downloadUrl: song.downloadUrl,
             source: song.source,
+            genre: song.genre || "",
           }),
-          showDownload: showDownload && !onRemove && !canRemoveFromPlaylist ? "1" : "0",
+          showDownload: showDownload ? "1" : "0",
           canRemove: onRemove || canRemoveFromPlaylist ? "1" : "0",
           optionContext: optionContext ?? "",
           playlistId: playlistId ?? "",

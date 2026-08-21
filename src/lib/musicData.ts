@@ -38,9 +38,9 @@ export interface JioSaavnSong {
   language: string;
   album: { id: string; name: string; url: string };
   artists: {
-    primary: Array<{ id: string; name: string; image: JioSaavnImage[]; url: string }>;
-    featured: Array<{ id: string; name: string; image: JioSaavnImage[]; url: string }>;
-    all: Array<{ id: string; name: string; role: string; image: JioSaavnImage[]; url: string }>;
+    primary: { id: string; name: string; image: JioSaavnImage[]; url: string }[];
+    featured: { id: string; name: string; image: JioSaavnImage[]; url: string }[];
+    all: { id: string; name: string; role: string; image: JioSaavnImage[]; url: string }[];
   };
   image: JioSaavnImage[];
   downloadUrl?: unknown;

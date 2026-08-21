@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import Colors from "@/constants/colors";
 import { useOptionalPlayerActions, useOptionalPlayerProgress } from "@/contexts/PlayerContext";
-import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/lib/playbackEngine";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { triggerImpact } from "@/lib/haptics";
 import {

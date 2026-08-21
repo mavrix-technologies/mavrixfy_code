@@ -1,8 +1,8 @@
 /**
  * NetworkContext — app-wide online/offline state.
  *
- * Uses expo-network to detect connectivity. Provides:
- * - `isOnline`  — true when the device has internet access
+ * Uses expo-network's addNetworkStateListener for push-based network change events. Provides:
+ * - `isOnline`  — true when the device has validated internet access
  * - `isChecking` — true during the initial check
  *
  * Components can call `useNetwork()` to read state, or use the
@@ -19,13 +19,7 @@ import React, {
   useRef,
   ReactNode,
 } from "react";
-import { AppState, AppStateStatus } from "react-native";
 import * as Network from "expo-network";
-
-const subscribeToAppStateChanges = (listener: (state: AppStateStatus) => void) => {
-  const subscription = AppState.addEventListener("change", listener);
-  return () => subscription.remove();
-};
 
 interface NetworkContextValue {
   isOnline: boolean;
@@ -40,46 +34,44 @@ const NetworkContext = createContext<NetworkContextValue>({
 });
 
 export function NetworkProvider({ children }: { children: ReactNode }) {
-  const [isOnline, setIsOnline]     = useState(true);
+  const [isOnline, setIsOnline] = useState(true);
   const [isChecking, setIsChecking] = useState(true);
 
   const check = useCallback(async () => {
     try {
       const state = await Network.getNetworkStateAsync();
-      // isInternetReachable is the most reliable — it confirms actual internet
-      // access, not just being connected to a Wi-Fi/cellular network.
-      const online =
-        state.isConnected === true && state.isInternetReachable !== false;
+      const online = state.isConnected === true && state.isInternetReachable !== false;
       setIsOnline(online);
     } catch {
-      // If the check itself fails, assume online to avoid false offline screens
       setIsOnline(true);
     } finally {
       setIsChecking(false);
     }
   }, []);
 
-  // Initial check
   useEffect(() => {
-    check();
-  }, [check]);
+    // Initial check
+    void check();
 
-  // Re-check when app comes back to foreground
-  useEffect(() => {
-    return subscribeToAppStateChanges((state: AppStateStatus) => {
-      if (state === "active") check();
+    // Push-based subscription for network state transitions
+    const subscription = Network.addNetworkStateListener((state) => {
+      const online = state.isConnected === true && state.isInternetReachable !== false;
+      setIsOnline(online);
+      setIsChecking(false);
     });
+
+    return () => {
+      subscription.remove();
+    };
   }, [check]);
 
-  // Poll every 10 seconds when offline to detect reconnection
-  useEffect(() => {
-    if (isOnline) return;
-    const id = setInterval(check, 10_000);
-    return () => clearInterval(id);
-  }, [isOnline, check]);
+  const value = useMemo(
+    () => ({ isOnline, isChecking, recheck: check }),
+    [isOnline, isChecking, check]
+  );
 
   return (
-    <NetworkContext.Provider value={useMemo(() => ({ isOnline, isChecking, recheck: check }), [isOnline, isChecking, check])}>
+    <NetworkContext.Provider value={value}>
       {children}
     </NetworkContext.Provider>
   );
@@ -103,13 +95,11 @@ export function useOnReconnect(callback: () => void): void {
 
   // Track whether we've gone offline at least once this session
   const wasOfflineRef = useRef(false);
-  // Skip the very first render (initial online state)
   const isFirstRenderRef = useRef(true);
 
   useEffect(() => {
     if (isFirstRenderRef.current) {
       isFirstRenderRef.current = false;
-      // Record initial offline state so reconnect fires on first reconnect
       if (!isOnline && !isChecking) {
         wasOfflineRef.current = true;
       }
@@ -121,7 +111,7 @@ export function useOnReconnect(callback: () => void): void {
       return;
     }
 
-    // isOnline just became true and we were previously offline
+    // isOnline transitioned to true from offline
     if (wasOfflineRef.current) {
       wasOfflineRef.current = false;
       callbackRef.current();

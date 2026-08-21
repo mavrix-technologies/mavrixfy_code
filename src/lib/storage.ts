@@ -151,7 +151,7 @@ function getSearchHistoryKey(item: Pick<SearchHistoryItem, "label" | "type" | "s
   return `query:${item.label.toLowerCase()}`;
 }
 
-function normalizeSearchHistoryItems(items: Array<Partial<SearchHistoryItem>>): SearchHistoryItem[] {
+function normalizeSearchHistoryItems(items: Partial<SearchHistoryItem>[]): SearchHistoryItem[] {
   const seen = new Set<string>();
   const normalized: SearchHistoryItem[] = [];
 
@@ -442,7 +442,7 @@ export async function addRecentlyPlayed(item: Omit<RecentlyPlayedItem, "lastPlay
 }
 
 export async function getSearchHistory(): Promise<SearchHistoryItem[]> {
-  const items = await getJSON<Array<Partial<SearchHistoryItem>>>(KEYS.SEARCH_HISTORY, []);
+  const items = await getJSON<Partial<SearchHistoryItem>[]>(KEYS.SEARCH_HISTORY, []);
   return normalizeSearchHistoryItems(items);
 }
 

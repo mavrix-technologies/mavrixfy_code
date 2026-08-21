@@ -1,13 +1,15 @@
 import React from "react";
-import { Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { Platform, Pressable, StyleSheet, TextInput, View, ViewStyle, StyleProp } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 type SearchHeaderFieldProps = {
   value: string;
   onChangeText: (text: string) => void;
-  onSubmit: () => void;
+  onSubmit?: () => void;
   onClear: () => void;
+  placeholder?: string;
   autoFocus?: boolean;
+  style?: StyleProp<ViewStyle>;
 };
 
 export default function SearchHeaderField({
@@ -15,14 +17,16 @@ export default function SearchHeaderField({
   onChangeText,
   onSubmit,
   onClear,
+  placeholder = "Search songs, albums, artists, playlists",
   autoFocus = false,
+  style,
 }: SearchHeaderFieldProps) {
   return (
-    <View style={styles.field}>
+    <View style={[styles.field, style]}>
       <Ionicons name="search" size={16} color="#8E949B" />
       <TextInput
         style={styles.input}
-        placeholder="Search songs, albums, artists, playlists"
+        placeholder={placeholder}
         placeholderTextColor="#8E949B"
         value={value}
         onChangeText={onChangeText}
@@ -34,6 +38,7 @@ export default function SearchHeaderField({
         autoCapitalize="none"
         clearButtonMode={Platform.OS === "ios" ? "while-editing" : "never"}
         keyboardAppearance="dark"
+        selectionColor="#26e19a"
       />
       {Platform.OS !== "ios" && value.length > 0 ? (
         <Pressable
