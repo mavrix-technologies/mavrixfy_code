@@ -481,6 +481,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           isBuffering: Boolean(status.isBuffering),
         });
       }
+      if (status.remoteAction === "next") {
+        nextSongRef.current();
+      } else if (status.remoteAction === "previous") {
+        prevSongRef.current();
+      }
       if (status.didJustFinish) {
         if (repeatModeRef.current === "one" && currentSongRef.current) {
           void playSongRef.current(currentSongRef.current, queueRef.current);

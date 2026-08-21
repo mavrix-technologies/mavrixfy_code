@@ -10,6 +10,7 @@ export type PlaybackStatusListener = (status: {
   isBuffering: boolean;
   isLoaded: boolean;
   didJustFinish: boolean;
+  remoteAction?: "previous" | "next";
 }) => void;
 
 export type PlaybackErrorListener = (error: string) => void;
@@ -80,6 +81,7 @@ class ExpoAudioEngine {
     const isBuffering = Boolean(status.isBuffering);
     const isLoaded = Boolean(status.isLoaded);
     const didJustFinish = Boolean(status.didJustFinish);
+    const remoteAction = (status as any)?.remoteAction as "previous" | "next" | undefined;
 
     if (!isPlaying) {
       resetPlaybackAudioLevels();
@@ -92,6 +94,7 @@ class ExpoAudioEngine {
       isBuffering,
       isLoaded,
       didJustFinish,
+      remoteAction,
     };
 
     this.statusListeners.forEach((listener) => {
