@@ -124,7 +124,7 @@ class ExpoAudioEngine {
       // 1. Replace the audio source
       player.replace({ uri: streamUrl });
 
-      // 2. Set native Lock Screen / Notification metadata
+      // 2. Set native Lock Screen / Notification metadata (music player mode with Next/Previous track controls)
       try {
         player.setActiveForLockScreen(true, {
           title: song.title || "Unknown Title",
@@ -132,8 +132,8 @@ class ExpoAudioEngine {
           albumTitle: song.album || song.title || "Mavrixfy",
           artworkUrl: typeof song.coverUrl === "string" ? song.coverUrl : undefined,
         }, {
-          showSeekForward: true,
-          showSeekBackward: true,
+          showSeekForward: false,
+          showSeekBackward: false,
         });
       } catch (metaErr) {
         logger.warn("[ExpoAudioEngine] Failed to set lock screen metadata:", metaErr);
