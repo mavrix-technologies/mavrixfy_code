@@ -129,20 +129,7 @@ async function validateFileSignature(
   }
 }
 
-/**
- * Validate image dimensions
- * @param uri Image URI
- * @param maxWidth Maximum width (optional)
- * @param maxHeight Maximum height (optional)
- * @returns Validation result
- */
-async function validateImageDimensions(
-  _uri: string,
-  _maxWidth?: number,
-  _maxHeight?: number
-): Promise<ValidationResult> {
-  return { valid: true };
-}
+
 
 /**
  * Sanitize filename to prevent path traversal attacks

@@ -52,55 +52,9 @@ export const registerSchema = z.object({
 });
 
 // ============================================================================
-// PLAYLIST SCHEMAS
-// ============================================================================
-
-const playlistNameSchema = z
-  .string()
-  .trim()
-  .min(1, 'Playlist name is required')
-  .max(100, 'Playlist name is too long')
-  .regex(/^[a-zA-Z0-9\s'-_.!?&()]+$/, 'Playlist name contains invalid characters');
-
-const playlistDescriptionSchema = z
-  .string()
-  .trim()
-  .max(500, 'Description is too long')
-  .optional();
-
-const playlistSchema = z.object({
-  name: playlistNameSchema,
-  description: playlistDescriptionSchema,
-  isPublic: z.boolean(),
-});
-
-// ============================================================================
-// FILE UPLOAD SCHEMAS
-// ============================================================================
-
-const imageFileSchema = z.object({
-  uri: z.string().min(1, 'File URI is required'),
-  name: z.string().min(1).max(255, 'Filename is too long'),
-  size: z.number().max(5 * 1024 * 1024, 'File must be under 5MB'),
-  mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/jpg']).refine(
-    (val) => ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'].includes(val),
-    { message: 'Only JPEG, PNG, and WebP images are allowed' }
-  ),
-});
-
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
-
-/**
- * Validate data against a schema and throw on error
- * @param schema Zod schema
- * @param data Data to validate
- * @returns Validated and typed data
- */
-function validate<T>(schema: z.ZodSchema<T>, data: unknown): T {
-  return schema.parse(data);
-}
 
 /**
  * Safely validate data and return result with success/error
@@ -122,32 +76,4 @@ export function safeValidate<T>(
   const error = firstError?.message || 'Validation failed';
   
   return { success: false, error };
-}
-
-/**
- * Calculate password strength
- * @param password Password string
- * @returns Strength score 0-4
- */
-function getPasswordStrength(password: string): {
-  score: number;
-  feedback: string;
-} {
-  let score = 0;
-  
-  if (password.length >= 8) score++;
-  if (password.length >= 12) score++;
-  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
-  if (/[0-9]/.test(password)) score++;
-  if (/[^a-zA-Z0-9]/.test(password)) score++;
-  
-  const feedback = [
-    'Very weak',
-    'Weak',
-    'Fair',
-    'Good',
-    'Strong',
-  ][Math.min(score, 4)];
-  
-  return { score: Math.min(score, 4), feedback };
 }

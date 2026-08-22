@@ -55,22 +55,6 @@ function normalizeYouTubeVideoQuality(value: unknown): YouTubeVideoQualityPrefer
     : "auto";
 }
 
-function getYouTubePlaybackQuality(
-  quality: YouTubeVideoQualityPreference
-): "default" | "small" | "medium" | "hd720" {
-  switch (quality) {
-    case "low":
-      return "small";
-    case "medium":
-      return "small"; // cap medium at small for background video — audio quality is unaffected
-    case "high":
-      return "medium"; // cap high at medium for background video — 1080p is wasteful when muted
-    case "auto":
-    default:
-      return "small"; // default to lowest quality — background video is decorative only
-  }
-}
-
 export type MiniPlayerSecondaryControl = "queue" | "next" | "prev" | "more";
 
 export interface AppSettings {
@@ -114,20 +98,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   ambientBackdropEnabled: false,
 };
 
-const EQUALIZER_PRESETS: Record<string, Record<string, number>> = {
-  Flat: { "60Hz": 0, "150Hz": 0, "400Hz": 0, "1KHz": 0, "2.4KHz": 0, "15KHz": 0 },
-  Bass: { "60Hz": 6, "150Hz": 5, "400Hz": 2, "1KHz": 0, "2.4KHz": -1, "15KHz": -2 },
-  Treble: { "60Hz": -2, "150Hz": -1, "400Hz": 0, "1KHz": 2, "2.4KHz": 5, "15KHz": 6 },
-  Rock: { "60Hz": 5, "150Hz": 3, "400Hz": -1, "1KHz": 2, "2.4KHz": 4, "15KHz": 5 },
-  Pop: { "60Hz": -1, "150Hz": 2, "400Hz": 4, "1KHz": 4, "2.4KHz": 2, "15KHz": -1 },
-  Jazz: { "60Hz": 3, "150Hz": 1, "400Hz": -1, "1KHz": 1, "2.4KHz": 3, "15KHz": 4 },
-  Classical: { "60Hz": 4, "150Hz": 3, "400Hz": 0, "1KHz": 0, "2.4KHz": 2, "15KHz": 4 },
-  "Hip-Hop": { "60Hz": 6, "150Hz": 5, "400Hz": 1, "1KHz": -1, "2.4KHz": 2, "15KHz": 0 },
-  Electronic: { "60Hz": 5, "150Hz": 4, "400Hz": 0, "1KHz": -1, "2.4KHz": 3, "15KHz": 5 },
-  Vocal: { "60Hz": -2, "150Hz": 0, "400Hz": 3, "1KHz": 5, "2.4KHz": 3, "15KHz": 0 },
-  "Late Night": { "60Hz": 3, "150Hz": 2, "400Hz": 1, "1KHz": -1, "2.4KHz": -2, "15KHz": -3 },
-  Bollywood: { "60Hz": 4, "150Hz": 3, "400Hz": 1, "1KHz": 2, "2.4KHz": 4, "15KHz": 3 },
-};
 
 const SEARCH_HISTORY_LIMIT = 12;
 
@@ -266,42 +236,6 @@ export async function runOneTimeMigrations(): Promise<void> {
   }
 }
 
-async function safeAsyncStorageSetItem(key: string, value: string): Promise<void> {
-  try {
-    await AsyncStorage.setItem(key, value);
-  } catch (err: any) {
-    const errMsg = String(err?.message || "").toLowerCase();
-    if (errMsg.includes("full") || err?.code === 13 || err?.code === "SQLITE_FULL") {
-      await pruneNonEssentialStorageCaches();
-      try {
-        await AsyncStorage.setItem(key, value);
-      } catch (retryErr) {
-        logger.error(`[Storage] Failed to set key ${key} even after pruning:`, retryErr);
-      }
-    } else {
-      logger.error(`[Storage] Failed to set key ${key}:`, err);
-    }
-  }
-}
-
-async function safeAsyncStorageMultiSet(pairs: [string, string][]): Promise<void> {
-  try {
-    await AsyncStorage.multiSet(pairs);
-  } catch (err: any) {
-    const errMsg = String(err?.message || "").toLowerCase();
-    if (errMsg.includes("full") || err?.code === 13 || err?.code === "SQLITE_FULL") {
-      await pruneNonEssentialStorageCaches();
-      try {
-        await AsyncStorage.multiSet(pairs);
-      } catch (retryErr) {
-        logger.error("[Storage] Failed to multiSet even after pruning:", retryErr);
-      }
-    } else {
-      logger.error("[Storage] Failed to multiSet:", err);
-    }
-  }
-}
-
 async function setJSON(key: string, value: unknown): Promise<void> {
   try {
     // Update memory cache immediately
@@ -321,45 +255,6 @@ async function setJSON(key: string, value: unknown): Promise<void> {
 }
 
 export { setJSON };
-
-async function getLikedSongIds(): Promise<string[]> {
-  return getJSON<string[]>(KEYS.LIKED_SONGS, []);
-}
-
-async function getLikedSongsData(): Promise<Song[]> {
-  return getJSON<Song[]>(KEYS.LIKED_SONGS_DATA, []);
-}
-
-async function addLikedSong(song: Song): Promise<void> {
-  const [ids, data] = await Promise.all([
-    getLikedSongIds(),
-    getLikedSongsData(),
-  ]);
-  if (!ids.includes(song.id)) {
-    ids.unshift(song.id);
-    data.unshift(song);
-    await Promise.all([
-      setJSON(KEYS.LIKED_SONGS, ids),
-      setJSON(KEYS.LIKED_SONGS_DATA, data),
-    ]);
-  }
-}
-
-async function removeLikedSong(songId: string): Promise<void> {
-  const [ids, data] = await Promise.all([
-    getLikedSongIds(),
-    getLikedSongsData(),
-  ]);
-  await Promise.all([
-    setJSON(KEYS.LIKED_SONGS, ids.filter(id => id !== songId)),
-    setJSON(KEYS.LIKED_SONGS_DATA, data.filter(s => s.id !== songId)),
-  ]);
-}
-
-async function isLikedSong(songId: string): Promise<boolean> {
-  const ids = await getLikedSongIds();
-  return ids.includes(songId);
-}
 
 export async function getUserPlaylists(): Promise<UserPlaylist[]> {
   return getJSON<UserPlaylist[]>(KEYS.USER_PLAYLISTS, []);
@@ -524,31 +419,10 @@ export async function getSettings(): Promise<AppSettings> {
   };
 }
 
-type SettingsListener = (settings: AppSettings) => void;
-const settingsListeners = new Set<SettingsListener>();
-
-function addSettingsListener(listener: SettingsListener): () => void {
-  settingsListeners.add(listener);
-  return () => {
-    settingsListeners.delete(listener);
-  };
-}
-
-function notifySettingsListeners(settings: AppSettings) {
-  for (const listener of settingsListeners) {
-    try {
-      listener(settings);
-    } catch (err) {
-      logger.error("[Storage] Error in settings listener:", err);
-    }
-  }
-}
-
 export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
   const current = await getSettings();
   const next = { ...current, ...settings };
   await setJSON(KEYS.SETTINGS, next);
-  notifySettingsListeners(next);
 }
 
 export async function clearAppStorage(options?: { preserveSettings?: boolean }): Promise<void> {

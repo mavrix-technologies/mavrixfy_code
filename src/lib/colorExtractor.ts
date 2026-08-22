@@ -145,9 +145,6 @@ export async function extractArtworkColors(imageUrl: string): Promise<ArtworkPal
   return request;
 }
 
-/** @deprecated Use extractArtworkColors */
-const extractDominantColor = extractArtworkColors;
-
 export function preloadDominantColors(imageUrls: (string | null | undefined)[]): void {
   for (const rawUrl of imageUrls) {
     const url = rawUrl?.trim();
@@ -196,49 +193,6 @@ export function useArtworkPalette(imageUrl: string | null | undefined): ArtworkP
   }, [imageUrl]);
 
   return palette;
-}
-
-/** @deprecated Use getImmediateArtworkPalette */
-const getImmediateArtworkColor = getImmediateArtworkPalette;
-
-function createSpotifyColorTheme(palette: ArtworkPalette | string): SpotifyColorTheme {
-  const colors =
-    typeof palette === "string"
-      ? {
-          ...DEFAULT_ARTWORK_PALETTE,
-          accent: normalizeHexColor(palette) ?? DEFAULT_ARTWORK_PALETTE.accent,
-          primary: normalizeHexColor(palette) ?? DEFAULT_ARTWORK_PALETTE.accent,
-        }
-      : palette;
-
-  const accent = colors.accent;
-  const accentSoft = colors.background;
-  const onAccent = getHexLuminance(accent) > 0.55 ? "#0B141A" : "#F5FBFF";
-  const border = getHexLuminance(accent) > 0.55 ? "rgba(11,20,26,0.24)" : "rgba(255,255,255,0.28)";
-
-  return {
-    accent,
-    accentSoft,
-    onAccent,
-    border,
-    playerGradient: [
-      colorWithAlpha(accent, 0.9, "rgba(83,83,86,0.9)"),
-      colorWithAlpha(accentSoft, 0.72, "rgba(18,18,18,0.72)"),
-      colorWithAlpha(accentSoft, 0.96, "rgba(18,18,18,0.96)"),
-      "#000000",
-    ],
-    playlistBackdrop: [
-      colorWithAlpha(accent, 0.94, "rgba(83,83,86,0.94)"),
-      colorWithAlpha(accentSoft, 0.78, "rgba(18,18,18,0.78)"),
-      colorWithAlpha(accentSoft, 0.5, "rgba(18,18,18,0.5)"),
-      "rgba(12,12,12,0.58)",
-      "rgba(18,18,18,0)",
-    ],
-  };
-}
-
-function miniPlayerBorderFromAccent(accent: string): string {
-  return colorWithAlpha(accent, 0.45, "rgba(255,255,255,0.2)");
 }
 
 function canUseNativeImageColors(): boolean {
@@ -637,16 +591,7 @@ function normalizeHexColor(value: unknown): string | null {
   return null;
 }
 
-function getHexLuminance(hex: string): number {
-  const normalized = normalizeHexColor(hex);
-  if (!normalized) return 0;
 
-  const r = parseInt(normalized.slice(1, 3), 16) / 255;
-  const g = parseInt(normalized.slice(3, 5), 16) / 255;
-  const b = parseInt(normalized.slice(5, 7), 16) / 255;
-
-  return 0.299 * r + 0.587 * g + 0.114 * b;
-}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
