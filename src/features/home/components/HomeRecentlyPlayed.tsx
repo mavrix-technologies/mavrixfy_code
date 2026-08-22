@@ -9,7 +9,6 @@ import {
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { ImpactFeedbackStyle } from "expo-haptics";
-import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
 import type { Song } from "@/lib/musicData";
 import type { RecentlyPlayedItem } from "@/lib/storage";

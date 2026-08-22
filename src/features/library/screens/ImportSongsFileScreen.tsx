@@ -7,7 +7,6 @@ import {
   Pressable,
   StyleSheet,
   Platform,
-  Alert,
   ActivityIndicator,
   Modal,
   TextInput,

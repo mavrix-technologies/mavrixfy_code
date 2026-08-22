@@ -22,7 +22,7 @@ import { triggerImpact } from "@/lib/haptics";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { setLastMix } from "@/lib/lastMix";
-import { mapFilter, sortedCopy } from "@/lib/arrayUtils";
+import { mapFilter } from "@/lib/arrayUtils";
 
 function pickFirst(v: string | string[] | undefined): string {
   if (Array.isArray(v)) return v[0] ?? "";

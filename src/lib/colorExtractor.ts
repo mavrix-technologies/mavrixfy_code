@@ -18,7 +18,7 @@
  *      to ensure consistent dark-mode styling and WCAG readable text contrast across the UI.
  */
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";

@@ -137,24 +137,11 @@ async function validateFileSignature(
  * @returns Validation result
  */
 async function validateImageDimensions(
-  uri: string,
-  maxWidth?: number,
-  maxHeight?: number
+  _uri: string,
+  _maxWidth?: number,
+  _maxHeight?: number
 ): Promise<ValidationResult> {
-  try {
-    // Use expo-image-manipulator or similar to get dimensions
-    // This is a placeholder - implement based on your image library
-    
-    // For now, we'll skip this check as it requires additional dependencies
-    // In production, use expo-image-manipulator or react-native-image-size
-    
-    return { valid: true };
-  } catch (error: any) {
-    return {
-      valid: false,
-      error: 'Failed to validate image dimensions',
-    };
-  }
+  return { valid: true };
 }
 
 /**

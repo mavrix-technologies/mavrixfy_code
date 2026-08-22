@@ -4,7 +4,6 @@ import {
   View,
   Text,
   FlatList,
-  ScrollView,
   Pressable,
   StyleSheet,
   Platform,
@@ -27,14 +26,13 @@ import { router, useNavigation } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Gesture, GestureDetector, Pressable as GHPressable, FlatList as GHFlatList } from "react-native-gesture-handler";
 import Reanimated, {
-  Extrapolation,
-  interpolate,
+  type SharedValue,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
 } from "react-native-reanimated";
-import { runOnJS, scheduleOnRN } from "react-native-worklets";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { runOnJS } from "react-native-worklets";
+import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 
 import { safeGoBack } from "@/utils/navigation";
@@ -54,26 +52,21 @@ import {
   type ArtworkPalette,
 } from "@/lib/colorExtractor";
 import EqualizerBars from "@/components/EqualizerBars";
-import DownloadButton from "@/components/DownloadButton";
 import { KaraokeLyricsView, FullscreenKaraokeModal } from "@/components/KaraokeLyricsView";
 import { mapFilter } from "@/lib/arrayUtils";
-import { globalQueueSheetRef } from "@/lib/queueRef";
+import { PlayerSlider } from "@/components/PlayerSlider";
+import {
+  clampUnit,
+  PLAYER_SLIDER_TOUCH_HEIGHT,
+  PLAYER_SLIDER_THUMB_SIZE,
+  PLAYER_SLIDER_MINIMUM_TRACK_COLOR,
+  PLAYER_SLIDER_MAXIMUM_TRACK_COLOR,
+  PLAYER_SLIDER_THUMB_COLOR,
+} from "@/lib/sliderUtils";
 
 import YoutubePlayer from "react-native-youtube-iframe";
 import { getYouTubeMusicVisualVideoId } from "@/data/providers/YouTubeMusicProvider";
 import { searchArtists, getArtistDetails } from "@/data/providers/ArtistProvider";
-
-const PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING = 136;
-const PLAYER_PRIMARY_DISMISS_START_PX = 8;
-const PLAYER_PRIMARY_DISMISS_CLOSE_PX = 62;
-const PLAYER_PRIMARY_DISMISS_FAST_VELOCITY = 650;
-const PLAYER_PRIMARY_DISMISS_FAIL_X_PX = 34;
-const PLAYER_PRIMARY_DISMISS_MAX_DRAG_RATIO = 0.58;
-const PLAYER_PRIMARY_DISMISS_SPRING = {
-  damping: 28,
-  mass: 1.0,
-  stiffness: 190,
-};
 
 const AnimatedSongFlatList = Animated.createAnimatedComponent(
   FlatList as React.ComponentType<any>
@@ -137,8 +130,6 @@ const CinematicPlayerBackground = memo(function CinematicPlayerBackground() {
     <View
       pointerEvents="none"
       style={styles.backgroundLayer}
-      renderToHardwareTextureAndroid={true}
-      needsOffscreenAlphaCompositing={true}
     />
   );
 });
@@ -202,7 +193,6 @@ const BACKGROUND_YOUTUBE_PRELOAD_HOOK = `
         if (_origPlayerReady) _origPlayerReady(event);
         try { player.mute(); } catch(e) {}
         try { player.setVolume(0); } catch(e) {}
-        try { player.setPlaybackQuality("tiny"); } catch(e) {}
         try { player.playVideo(); } catch(e) {}
       };
     };
@@ -215,7 +205,6 @@ const BACKGROUND_YOUTUBE_PRELOAD_HOOK = `
     if (typeof player !== "undefined" && player && typeof player.playVideo === "function") {
       try { player.mute(); } catch(e) {}
       try { player.setVolume(0); } catch(e) {}
-      try { player.setPlaybackQuality("tiny"); } catch(e) {}
       try { player.playVideo(); } catch(e) {}
       return;
     }
@@ -369,6 +358,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
       ]}
     >
       <Animated.View
+        pointerEvents="none"
         style={{
           position: "absolute",
           top: dimensions.offsetY,
@@ -396,6 +386,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
           useLocalHTML
           baseUrlOverride={YOUTUBE_PLAYER_REFERRER_URL}
           initialPlayerParams={{
+            autoplay: true,
             controls: false,
             modestbranding: true,
             rel: false,
@@ -429,7 +420,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
             mediaPlaybackRequiresUserAction: false,
             scrollEnabled: false,
             overScrollMode: "never" as const,
-            androidLayerType: "hardware" as const,
+            pointerEvents: "none",
           }}
         />
         <View
@@ -569,18 +560,7 @@ function PlayerPlayButton({
 
 PlayerPlayButton.displayName = "PlayerPlayButton";
 
-import { PlayerSlider } from "@/components/PlayerSlider";
-import {
-  clampUnit,
-  PLAYER_SLIDER_TOUCH_HEIGHT,
-  PLAYER_SLIDER_THUMB_SIZE,
-  PLAYER_SLIDER_MINIMUM_TRACK_COLOR,
-  PLAYER_SLIDER_MAXIMUM_TRACK_COLOR,
-  PLAYER_SLIDER_THUMB_COLOR,
-} from "@/lib/sliderUtils";
-
 type PlayerSpotifyProgressProps = {
-  screenSongId: string;
   songDurationSeconds: number;
   isShortScreen: boolean;
   seekTo: (progress: number) => void;
@@ -588,7 +568,6 @@ type PlayerSpotifyProgressProps = {
 };
 
 const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
-  screenSongId,
   songDurationSeconds,
   isShortScreen,
   seekTo,
@@ -601,47 +580,11 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   const [localProgress, setLocalProgress] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const lastSyncRef = useRef({ progress: 0, timestamp: Date.now() });
-  const ignoreStaleProgressRef = useRef(false);
-
-  // Sync with global progress changes during render phase
-  const [prevProgress, setPrevProgress] = useState(progress);
-  const [trackedSongId, setTrackedSongId] = useState(screenSongId);
-
-  // Sync state inline during render
-  if (screenSongId !== trackedSongId) {
-    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
-    setTrackedSongId(screenSongId);
-    setPrevProgress(0);
-    setLocalProgress(0);
-    setIsScrubbing(false);
-  } else if (progress !== prevProgress) {
-    setPrevProgress(progress);
-    if (!isScrubbing) {
-      if (ignoreStaleProgressRef.current) {
-        if (progress <= 0.05) {
-          setLocalProgress(progress);
-        }
-      } else {
-        setLocalProgress(progress);
-      }
-    }
-  }
-
-  useEffect(() => {
-    lastSyncRef.current = { progress: 0, timestamp: Date.now() };
-    ignoreStaleProgressRef.current = true;
-  }, [screenSongId]);
 
   useEffect(() => {
     if (!isScrubbing) {
-      if (ignoreStaleProgressRef.current) {
-        if (progress <= 0.05) {
-          ignoreStaleProgressRef.current = false;
-          lastSyncRef.current = { progress, timestamp: Date.now() };
-        }
-      } else {
-        lastSyncRef.current = { progress, timestamp: Date.now() };
-      }
+      setLocalProgress(progress);
+      lastSyncRef.current = { progress, timestamp: Date.now() };
     }
   }, [progress, isScrubbing]);
 
@@ -677,9 +620,7 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   const currentTimeSec = Math.floor(playerPositionMillis / 1000);
   const totalDurationSec = Math.floor(playerDuration / 1000);
   const effectiveDurationSec = totalDurationSec > 0 ? totalDurationSec : safeSongDuration;
-  const canSeek =
-    effectiveDurationSec > 0 ||
-    (Platform.OS === "android" && Boolean(screenSongId));
+  const canSeek = effectiveDurationSec > 0 || safeSongDuration > 0;
   const displayDuration =
     totalDurationSec > 0 ? formatDuration(totalDurationSec) : formatDuration(safeSongDuration);
 
@@ -971,6 +912,8 @@ const RelatedSongCard = memo(({ song, onPress }: { song: Song; onPress: (song: S
   );
 });
 
+RelatedSongCard.displayName = "RelatedSongCard";
+
 const RelatedSongsSection = memo(({
   songs,
   onSongPress,
@@ -1012,7 +955,7 @@ RelatedSongsSection.displayName = "RelatedSongsSection";
 const EMPTY_PLAYER_SCROLL_SONGS: Song[] = [];
 
 // react-doctor-disable-next-line react-doctor/no-giant-component -- acceptable component structure for this app
-function LegacyPlayerScreenView() {
+function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<number> }) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -1090,7 +1033,7 @@ function LegacyPlayerScreenView() {
     });
     return () => subscription.remove();
   }, []);
-  
+
   // ALL HOOKS - must be called unconditionally at top level
   const {
     currentSong,
@@ -1103,7 +1046,6 @@ function LegacyPlayerScreenView() {
   const playbackState = usePlaybackPlayState();
 
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
-  const [prevTrackedSongId, setPrevTrackedSongId] = useState(currentSong?.id);
   const [artworkPalette, setArtworkPalette] = useState<ArtworkPalette>(DEFAULT_ARTWORK_PALETTE);
   const [isLoadingDevTrack, setIsLoadingDevTrack] = useState(false);
   const [interactionReady, setInteractionReady] = useState(false);
@@ -1118,15 +1060,10 @@ function LegacyPlayerScreenView() {
   const hasAlignedArtCarouselRef = useRef(false);
   const prevSongIdRef = useRef(currentSong?.id);
   const pendingArtworkTargetIndexRef = useRef<number | null>(null);
-  const didHandleSheetDismissRef = useRef(false);
-  const sheetDetentReadyAtRef = useRef(0);
-  const playerDismissGestureEnabledRef = useRef(true);
-  const playerDismissGestureEnabledShared = useSharedValue(1);
-  const playerDismissTranslateY = useSharedValue(0);
   const optionsPressLockRef = useRef(false);
   const { positionMillis, duration, progress } = usePlayerProgress();
   const [fullscreenLyricsVisible, setFullscreenLyricsVisible] = useState(false);
-  
+
   const {
     togglePlay,
     playSong,
@@ -1140,11 +1077,10 @@ function LegacyPlayerScreenView() {
     setAlbumColor,
     setTextColor,
   } = usePlayerActions();
-  
-  if (currentSong?.id !== prevTrackedSongId) {
-    setPrevTrackedSongId(currentSong?.id);
+
+  useEffect(() => {
     setIsProgressSeeking(false);
-  }
+  }, [currentSong?.id]);
   const artScrollX = artScrollXRef.current!;
 
   const currentPositionSeconds = positionMillis > 0 ? positionMillis / 1000 : ((progress || 0) * (duration || 0)) / 1000;
@@ -1171,63 +1107,33 @@ function LegacyPlayerScreenView() {
     };
   }, [clearSkipCooldownTimer]);
 
-  const setPlayerDismissGestureEnabled = useCallback((enabled: boolean) => {
-    if (playerDismissGestureEnabledRef.current === enabled) return;
+  const playerPrimaryDismissGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(!isProgressSeeking)
+        .activeOffsetY(8)
+        .failOffsetY(-8)
+        .failOffsetX([-40, 40])
+        .onUpdate((event) => {
+          if (event.translationY > 0 && translateY) {
+            translateY.value = event.translationY;
+          }
+        })
+        .onEnd((event) => {
+          if (!translateY) return;
+          const flickedDown = event.translationY > 15 && event.velocityY > 500;
+          const draggedFarEnough = event.translationY > 80 || event.translationY > screenHeight * 0.12;
 
-    playerDismissGestureEnabledRef.current = enabled;
-    playerDismissGestureEnabledShared.value = enabled ? 1 : 0;
-    if (!enabled) {
-      playerDismissTranslateY.value = withSpring(0, PLAYER_PRIMARY_DISMISS_SPRING);
-    }
-    if (Platform.OS !== "ios") return;
+          if (draggedFarEnough || flickedDown) {
+            translateY.value = withSpring(screenHeight, SPRING_CONFIG);
+            runOnJS(collapseOnJS)();
+            return;
+          }
 
-    navigation.setOptions({ gestureEnabled: enabled });
-  }, [navigation, playerDismissGestureEnabledShared, playerDismissTranslateY]);
-
-  useEffect(() => {
-    playerDismissGestureEnabledRef.current = true;
-    playerDismissGestureEnabledShared.value = 1;
-    playerDismissTranslateY.value = 0;
-    if (Platform.OS === "ios") {
-      navigation.setOptions({ gestureEnabled: true });
-    }
-
-    return () => {
-      if (Platform.OS === "ios") {
-        navigation.setOptions({ gestureEnabled: true });
-      }
-    };
-  }, [navigation, playerDismissGestureEnabledShared, playerDismissTranslateY]);
-
-  useEffect(() => {
-    const handler = () => {
-      didHandleSheetDismissRef.current = false;
-      sheetDetentReadyAtRef.current = Date.now() + 450;
-      playerDismissGestureEnabledRef.current = true;
-      playerDismissGestureEnabledShared.value = 1;
-      playerDismissTranslateY.value = 0;
-      if (Platform.OS === "ios") {
-        navigation.setOptions({ gestureEnabled: true });
-      }
-    };
-    navigation.addListener("focus", handler);
-
-    // Also listen to playerUIStateStore so re-opening via GlobalPlayerSheet resets dismissal state
-    const unsubscribe = playerUIStateStore.subscribe((state) => {
-      if (state === "expanded") {
-        didHandleSheetDismissRef.current = false;
-        sheetDetentReadyAtRef.current = Date.now() + 450;
-        playerDismissGestureEnabledRef.current = true;
-        playerDismissGestureEnabledShared.value = 1;
-        playerDismissTranslateY.value = 0;
-      }
-    });
-
-    return () => {
-      navigation.removeListener("focus", handler);
-      unsubscribe();
-    };
-  }, [navigation, playerDismissGestureEnabledShared, playerDismissTranslateY]);
+          translateY.value = withSpring(0, SPRING_CONFIG);
+        }),
+    [isProgressSeeking, screenHeight, translateY]
+  );
 
   // ── Defer heavy work until after the open animation completes ───────────────
   useEffect(() => {
@@ -1246,7 +1152,6 @@ function LegacyPlayerScreenView() {
   }, []);
 
   const screenSong = currentSong ?? null;
-  const screenSongIsYouTube = Boolean(screenSong?.source === "youtube" || screenSong?.id?.startsWith("youtube_"));
 
   // Use only screenSong?.id as dep — the whole screenSong object changes reference
   // on every queue update even when the song hasn't changed, which would flash
@@ -1314,40 +1219,7 @@ function LegacyPlayerScreenView() {
 
 
 
-  useEffect(() => {
-    didHandleSheetDismissRef.current = false;
-    sheetDetentReadyAtRef.current = Date.now() + 450;
-  }, [screenSong?.id]);
 
-  useEffect(() => {
-    if (Platform.OS !== "android") {
-      return;
-    }
-
-    const handler = (event: any) => {
-      const index = event?.data?.index;
-      const isStable = event?.data?.stable ?? true;
-      if (Date.now() < sheetDetentReadyAtRef.current) {
-        return;
-      }
-      if (!isStable || index !== 0) {
-        return;
-      }
-      if (!playerDismissGestureEnabledRef.current) {
-        return;
-      }
-      if (didHandleSheetDismissRef.current) {
-        return;
-      }
-      didHandleSheetDismissRef.current = true;
-      safeGoBack();
-    };
-
-    navigation.addListener("sheetDetentChange" as never, handler as never);
-    return () => {
-      navigation.removeListener("sheetDetentChange" as never, handler as never);
-    };
-  }, [navigation]);
 
   const applyPlayerArtworkColors = useCallback((palette: ArtworkPalette) => {
     // React automatically batches these updates
@@ -1408,9 +1280,7 @@ function LegacyPlayerScreenView() {
     };
   }, [applyPlayerArtworkColors, interactionReady, screenSong?.id, screenSong?.coverUrl]);
 
-  const rawTopInset = Platform.OS === "web" ? 67 : insets.top;
-  const topInset = rawTopInset;
-  const bottomInset = Platform.OS === "web" ? 28 : insets.bottom;
+  const topInset = Platform.OS === "web" ? 67 : insets.top;
   const isShortScreen = screenHeight <= 760;
   const isVeryShortScreen = screenHeight <= 700;
   const topBarHeight = isShortScreen ? 50 : 54;
@@ -1423,62 +1293,16 @@ function LegacyPlayerScreenView() {
   const controlsRowGap = isVeryShortScreen ? 8 : isShortScreen ? 10 : 12;
   const songDetailActionSize = isVeryShortScreen ? 38 : 42;
   const songDetailIconSize = isVeryShortScreen ? 21 : 23;
-  const listBottomPadding =
+  const bottomContentPadding =
     Platform.OS === "web"
       ? 16
-      : Math.max(PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING, bottomInset + PLAYER_DETAIL_BOTTOM_OVERLAY_PADDING);
+      : Math.max(insets.bottom, 0) + 24;
   const largeArtworkByWidth = Math.min(screenWidth - (isShortScreen ? 44 : 38), isShortScreen ? 348 : 388);
   const largeArtworkByHeight = Math.max(
     isVeryShortScreen ? 220 : 240,
     Math.floor(screenHeight * (isVeryShortScreen ? 0.34 : isShortScreen ? 0.38 : 0.42))
   );
   const artSize = Math.min(largeArtworkByWidth, largeArtworkByHeight);
-
-  const playerDismissAnimatedStyle = useAnimatedStyle(() => {
-    const translateY = Math.max(0, playerDismissTranslateY.value);
-    return {
-      transform: [{ translateY }],
-    };
-  }, []);
-
-  const controlsDismissAnimatedStyle = useAnimatedStyle(() => {
-    const translateY = Math.max(0, playerDismissTranslateY.value);
-    const opacity = interpolate(
-      translateY,
-      [0, screenHeight * 0.22],
-      [1, 0],
-      Extrapolation.CLAMP
-    );
-    return {
-      opacity,
-    };
-  }, [screenHeight]);
-
-  const backdropAnimatedStyle = useAnimatedStyle(() => {
-    const translateY = Math.max(0, playerDismissTranslateY.value);
-    const opacity = interpolate(
-      translateY,
-      [0, screenHeight],
-      [1, 0],
-      Extrapolation.CLAMP
-    );
-    return {
-      opacity,
-    };
-  }, [screenHeight]);
-
-  const bgOpacityAnimatedStyle = useAnimatedStyle(() => {
-    const translateY = Math.max(0, playerDismissTranslateY.value);
-    const opacity = interpolate(
-      translateY,
-      [0, screenHeight * 0.45],
-      [1, 0],
-      Extrapolation.CLAMP
-    );
-    return {
-      opacity,
-    };
-  }, [screenHeight]);
 
   const livePlayingQueue = useMemo(() => {
     const hasFullActiveQueue = queue.length > 1;
@@ -1811,89 +1635,7 @@ function LegacyPlayerScreenView() {
     [artScrollX]
   );
 
-  const handlePlayerScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const offsetY = Math.max(0, event.nativeEvent.contentOffset.y);
-    setPlayerDismissGestureEnabled(offsetY <= 2);
-  }, [setPlayerDismissGestureEnabled]);
 
-  const finishPlayerGestureDismiss = useCallback(() => {
-    if (didHandleSheetDismissRef.current) {
-      return;
-    }
-    didHandleSheetDismissRef.current = true;
-    safeGoBack();
-  }, []);
-
-  const playerPrimaryDismissGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(!isProgressSeeking)
-        .activeOffsetY([-100000, PLAYER_PRIMARY_DISMISS_START_PX])
-        .failOffsetX([-PLAYER_PRIMARY_DISMISS_FAIL_X_PX, PLAYER_PRIMARY_DISMISS_FAIL_X_PX])
-        .onBegin(() => {
-          if (playerDismissGestureEnabledShared.value <= 0) {
-            playerDismissTranslateY.value = 0;
-          }
-        })
-        .onUpdate((event) => {
-          if (playerDismissGestureEnabledShared.value <= 0) {
-            playerDismissTranslateY.value = 0;
-            return;
-          }
-
-          const rawTranslateY = Math.max(0, event.translationY);
-          const maxDrag = Math.max(120, screenHeight * PLAYER_PRIMARY_DISMISS_MAX_DRAG_RATIO);
-          const resistedTranslateY =
-            rawTranslateY > maxDrag
-              ? maxDrag + (rawTranslateY - maxDrag) * 0.18
-              : rawTranslateY;
-
-          playerDismissTranslateY.value = resistedTranslateY;
-        })
-        .onEnd((event) => {
-          if (playerDismissGestureEnabledShared.value <= 0) {
-            playerDismissTranslateY.value = withSpring(0, PLAYER_PRIMARY_DISMISS_SPRING);
-            return;
-          }
-
-          const horizontalDistance = Math.abs(event.translationX);
-          const mostlyVertical = event.translationY > horizontalDistance * 1.08;
-          const draggedFarEnough = event.translationY > PLAYER_PRIMARY_DISMISS_CLOSE_PX;
-          const flickedDown =
-            event.translationY > 28 &&
-            event.velocityY > PLAYER_PRIMARY_DISMISS_FAST_VELOCITY;
-
-          if (mostlyVertical && (draggedFarEnough || flickedDown)) {
-            playerDismissGestureEnabledShared.value = 0;
-            playerDismissTranslateY.value = withSpring(
-              screenHeight + 40,
-              {
-                damping: 26,
-                mass: 0.8,
-                stiffness: 220,
-                velocity: Math.max(0, event.velocityY || 0),
-              },
-              (finished) => {
-                if (finished) {
-                  scheduleOnRN(finishPlayerGestureDismiss);
-                }
-              }
-            );
-            return;
-          }
-
-          playerDismissTranslateY.value = withSpring(0, PLAYER_PRIMARY_DISMISS_SPRING);
-        }),
-    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (gesture state and screen dimensions) are listed
-    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeQueueIndex and artCarouselPageWidth are normalized aliases of the reported live values.
-    [
-      finishPlayerGestureDismiss,
-      isProgressSeeking,
-      playerDismissGestureEnabledShared,
-      playerDismissTranslateY,
-      screenHeight,
-    ]
-  );
 
   useEffect(() => {
     if (!artCarouselRef.current || artCarouselSnapInterval <= 0 || playingQueue.length === 0) {
@@ -1998,7 +1740,6 @@ function LegacyPlayerScreenView() {
 
       return cardContent;
     },
-    // react-doctor-disable-next-line react-doctor/exhaustive-deps -- activeQueueIndex and artCarouselPageWidth are normalized aliases of liveActiveQueueIndex and screenWidth.
     [
       activeQueueIndex,
       artCarouselPageWidth,
@@ -2092,30 +1833,32 @@ function LegacyPlayerScreenView() {
 
   return (
     <View style={styles.container}>
-      <Reanimated.View style={[styles.playerSheetSurface, playerDismissAnimatedStyle]}>
-        <Reanimated.View style={[StyleSheet.absoluteFillObject, bgOpacityAnimatedStyle]}>
+      <View style={styles.playerSheetSurface}>
+        <View style={StyleSheet.absoluteFillObject}>
           <CinematicPlayerBackground />
-        </Reanimated.View>
+        </View>
 
         {!shouldRenderBackgroundVideo ? (
           <View
             pointerEvents="none"
             style={[
               styles.lowerDarkBackdrop,
-              { top: Math.max(200, topInset + topBarHeight + artSize + (isShortScreen ? 92 : 116) - 160) },
+              { top: Math.max(180, topInset + topBarHeight + artSize - (isShortScreen ? 20 : 10)) },
             ]}
           >
             <LinearGradient
               pointerEvents="none"
-              colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.58)", "rgba(0,0,0,0.82)"]}
-              style={{ height: 160, width: "100%" }}
+              colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.40)", "rgba(0,0,0,0.75)", "#000000"]}
+              locations={[0, 0.40, 0.75, 1]}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
             />
-            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.82)" }} />
           </View>
         ) : null}
 
         <View style={[styles.playerForeground, { paddingBottom: 0 }]}>
-          <Reanimated.View
+          <View
             style={[
               styles.topBar,
               {
@@ -2127,7 +1870,6 @@ function LegacyPlayerScreenView() {
                 paddingHorizontal: isShortScreen ? 14 : 18,
                 zIndex: 10,
               },
-              controlsDismissAnimatedStyle,
             ]}
           >
             <View style={styles.headerSideGroup}>
@@ -2163,22 +1905,21 @@ function LegacyPlayerScreenView() {
                 <Ionicons name="ellipsis-horizontal" size={26} color={sheetTextColor} />
               </Pressable>
             </View>
-          </Reanimated.View>
+          </View>
 
-          <FlatList
+          <GHFlatList
             style={styles.playerScroll}
             data={EMPTY_PLAYER_SCROLL_SONGS}
             keyExtractor={(item) => item.id}
             renderItem={renderPlayerScrollItem}
-            contentContainerStyle={[styles.playerScrollContent, { paddingBottom: listBottomPadding }]}
+            contentContainerStyle={[styles.playerScrollContent, { paddingBottom: bottomContentPadding }]}
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled
-            scrollEnabled={Platform.OS === "android" ? !isProgressSeeking : true}
+            scrollEnabled={!isProgressSeeking}
             keyboardShouldPersistTaps="handled"
             bounces={Platform.OS === "ios"}
             alwaysBounceVertical={Platform.OS === "ios"}
             overScrollMode="never"
-            onScroll={handlePlayerScroll}
             scrollEventThrottle={16}
             ListHeaderComponent={
               <>
@@ -2219,21 +1960,16 @@ function LegacyPlayerScreenView() {
                       />
                       <LinearGradient
                         pointerEvents="none"
-                        colors={[
-                          "rgba(0,0,0,0)",
-                          "rgba(0,0,0,0.06)",
-                          "rgba(0,0,0,0.18)",
-                          "rgba(0,0,0,0.45)",
-                          "rgba(0,0,0,0.85)",
-                          "#000000",
-                        ]}
-                        locations={[0, 0.25, 0.50, 0.75, 0.90, 1.0]}
+                        colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.40)", "rgba(0,0,0,0.75)", "#000000"]}
+                        locations={[0, 0.40, 0.75, 1]}
+                        start={{ x: 0.5, y: 0 }}
+                        end={{ x: 0.5, y: 1 }}
                         style={{
                           position: "absolute",
                           left: 0,
                           right: 0,
                           bottom: -1,
-                          height: 280,
+                          height: 320,
                         }}
                       />
                     </Animated.View>
@@ -2243,189 +1979,189 @@ function LegacyPlayerScreenView() {
                   style={[
                     styles.playerContent,
                     {
+                      height: screenHeight - (isShortScreen ? 48 : 58),
                       paddingTop: topInset + topBarHeight,
-                      minHeight: screenHeight - topInset - 44,
+                      paddingBottom: 6,
                     },
                   ]}
                 >
                   <GestureDetector gesture={playerPrimaryDismissGesture}>
                     <View style={styles.playerPrimaryStack}>
-                      <View style={styles.artWrap}>
-                        <AnimatedSongFlatList
-                          ref={(list: any) => {
-                            artCarouselRef.current = list as FlatList<ArtworkQueueItem> | null;
-                          }}
-                          data={artworkQueue}
-                          keyExtractor={(item: ArtworkQueueItem) => item.artworkKey}
-                          renderItem={renderArtworkCard}
-                          horizontal
-                          pagingEnabled={Platform.OS === "ios"}
-                          showsHorizontalScrollIndicator={false}
-                          bounces={false}
-                          scrollEnabled={playingQueue.length > 1 && !isProgressSeeking}
-                          decelerationRate="fast"
-                          disableIntervalMomentum
-                          snapToAlignment="start"
-                          snapToInterval={artCarouselSnapInterval}
-                          contentContainerStyle={styles.artCarouselContent}
-                          style={styles.artCarousel}
-                          getItemLayout={artCarouselGetItemLayout}
-                          initialNumToRender={3}
-                          maxToRenderPerBatch={2}
-                          windowSize={3}
-                          updateCellsBatchingPeriod={80}
-                          removeClippedSubviews={Platform.OS === "android"}
-                          onScroll={handleArtworkScroll}
-                          scrollEventThrottle={16}
-                          onMomentumScrollEnd={handleArtworkScrollFinished}
-                        />
+                    <View style={styles.artWrap}>
+                      <AnimatedSongFlatList
+                        ref={(list: any) => {
+                          artCarouselRef.current = list as FlatList<ArtworkQueueItem> | null;
+                        }}
+                        data={artworkQueue}
+                        keyExtractor={(item: ArtworkQueueItem) => item.artworkKey}
+                        renderItem={renderArtworkCard}
+                        horizontal
+                        pagingEnabled={Platform.OS === "ios"}
+                        showsHorizontalScrollIndicator={false}
+                        bounces={false}
+                        scrollEnabled={playingQueue.length > 1 && !isProgressSeeking}
+                        decelerationRate="fast"
+                        disableIntervalMomentum
+                        snapToAlignment="start"
+                        snapToInterval={artCarouselSnapInterval}
+                        contentContainerStyle={styles.artCarouselContent}
+                        style={styles.artCarousel}
+                        getItemLayout={artCarouselGetItemLayout}
+                        initialNumToRender={3}
+                        maxToRenderPerBatch={2}
+                        windowSize={3}
+                        updateCellsBatchingPeriod={80}
+                        removeClippedSubviews={false}
+                        onScroll={handleArtworkScroll}
+                        scrollEventThrottle={16}
+                        onMomentumScrollEnd={handleArtworkScrollFinished}
+                      />
+                    </View>
+
+                    {/* Unified Bottom Control & Info Cluster (Connected Together) */}
+                    <View style={{ flexGrow: 0 }}>
+                      <View
+                        style={[
+                          styles.songBlock,
+                          {
+                            marginTop: isVeryShortScreen ? 12 : isShortScreen ? 16 : 20,
+                            marginHorizontal: isShortScreen ? 16 : 20,
+                          },
+                        ]}
+                      >
+                        <View style={styles.songTextWrap}>
+                          <PingPongScroll
+                            text={screenSong.title}
+                            style={[
+                              styles.songTitle,
+                              {
+                                color: sheetTextColor,
+                                fontSize: isVeryShortScreen ? 21 : isShortScreen ? 23 : 25,
+                                lineHeight: isVeryShortScreen ? 25 : isShortScreen ? 27 : 30,
+                              },
+                            ]}
+                            velocity={12}
+                            paused={!interactionReady}
+                          />
+                          <PingPongScroll
+                            text={screenSong.artist}
+                            style={[
+                              styles.songArtist,
+                              {
+                                color: sheetMutedTextColor,
+                                fontSize: isVeryShortScreen ? 12 : 13,
+                                lineHeight: isVeryShortScreen ? 16 : 18,
+                              },
+                            ]}
+                            velocity={10}
+                            paused={!interactionReady}
+                          />
+                        </View>
+                        <View style={styles.songDetailActions}>
+                          <SmoothControlButton
+                            style={[styles.songDetailActionButton, songDetailActionBtnStyle]}
+                            onPress={() => {
+                              toggleLike(screenSong);
+                            }}
+                          >
+                            <Ionicons
+                              name={liked ? "heart" : "heart-outline"}
+                              size={songDetailIconSize + 2}
+                              color={liked ? selectedControlIconColor : "#FFFFFF"}
+                            />
+                          </SmoothControlButton>
+                        </View>
                       </View>
 
-                      {/* Unified Bottom Control & Info Cluster (Connected Together) */}
-                      <Reanimated.View style={[{ flexGrow: 0 }, controlsDismissAnimatedStyle]}>
+                      <View style={styles.playerActionStack}>
+                        <PlayerSpotifyProgress
+                          key={screenSong.id}
+                          songDurationSeconds={screenSong.duration}
+                          isShortScreen={isShortScreen}
+                          seekTo={seekTo}
+                          onSeekingChange={setIsProgressSeeking}
+                        />
+
                         <View
                           style={[
-                            styles.songBlock,
+                            styles.controlsRow,
                             {
-                              marginTop: isVeryShortScreen ? 12 : isShortScreen ? 16 : 20,
+                              marginTop: isShortScreen ? 2 : 4,
                               marginHorizontal: isShortScreen ? 16 : 20,
+                              marginBottom: isShortScreen ? 2 : 4,
+                              gap: controlsRowGap,
                             },
                           ]}
                         >
-                          <View style={styles.songTextWrap}>
-                            <PingPongScroll
-                              text={screenSong.title}
-                              style={[
-                                styles.songTitle,
-                                {
-                                  color: sheetTextColor,
-                                  fontSize: isVeryShortScreen ? 21 : isShortScreen ? 23 : 25,
-                                  lineHeight: isVeryShortScreen ? 25 : isShortScreen ? 27 : 30,
-                                },
-                              ]}
-                              velocity={12}
-                              paused={!interactionReady}
+                          <SmoothControlButton
+                            style={[
+                              styles.roundIconButton,
+                              playerIconBtnStyle,
+                            ]}
+                            onPress={() => {
+                              toggleShuffle();
+                            }}
+                          >
+                            <Ionicons
+                              name="shuffle"
+                              size={shuffleRepeatIconSize}
+                              color={playerIsShuffled ? selectedControlIconColor : sideControlIconColor}
                             />
-                            <PingPongScroll
-                              text={screenSong.artist}
-                              style={[
-                                styles.songArtist,
-                                {
-                                  color: sheetMutedTextColor,
-                                  fontSize: isVeryShortScreen ? 12 : 13,
-                                  lineHeight: isVeryShortScreen ? 16 : 18,
-                                },
-                              ]}
-                              velocity={10}
-                              paused={!interactionReady}
-                            />
-                          </View>
-                          <View style={styles.songDetailActions}>
-                            <SmoothControlButton
-                              style={[styles.songDetailActionButton, songDetailActionBtnStyle]}
-                              onPress={() => {
-                                toggleLike(screenSong);
-                              }}
-                            >
-                              <Ionicons
-                                name={liked ? "heart" : "heart-outline"}
-                                size={songDetailIconSize + 2}
-                                color={liked ? selectedControlIconColor : "#FFFFFF"}
-                              />
-                            </SmoothControlButton>
-                          </View>
-                        </View>
+                          </SmoothControlButton>
 
-                        <View style={styles.playerActionStack}>
-                          <PlayerSpotifyProgress
-                            key={screenSong.id}
-                            screenSongId={screenSong.id}
-                            songDurationSeconds={screenSong.duration}
-                            isShortScreen={isShortScreen}
-                            seekTo={seekTo}
-                            onSeekingChange={setIsProgressSeeking}
+                          <SmoothControlButton
+                            style={[styles.prevNextButton, prevNextBtnSizeStyle]}
+                            onPressIn={() => {
+                              handleSkip("prev");
+                            }}
+                          >
+                            <Ionicons name="play-skip-back" size={prevNextIconSize} color={activeControlIconColor} />
+                          </SmoothControlButton>
+
+                          <PlayerPlayButton
+                            buttonSize={playButtonSize}
+                            iconSize={playIconSize}
+                            onAccentColor="#060A0F"
+                            onPress={() => {
+                              togglePlay();
+                            }}
                           />
 
-                          <View
-                            style={[
-                              styles.controlsRow,
-                              {
-                                marginTop: isShortScreen ? 2 : 4,
-                                marginHorizontal: isShortScreen ? 16 : 20,
-                                marginBottom: isShortScreen ? 2 : 4,
-                                gap: controlsRowGap,
-                              },
-                            ]}
+                          <SmoothControlButton
+                            style={[styles.prevNextButton, prevNextBtnSizeStyle]}
+                            onPressIn={() => {
+                              handleSkip("next");
+                            }}
                           >
-                            <SmoothControlButton
-                              style={[
-                                styles.roundIconButton,
-                                playerIconBtnStyle,
-                              ]}
-                              onPress={() => {
-                                toggleShuffle();
-                              }}
-                            >
-                              <Ionicons
-                                name="shuffle"
-                                size={shuffleRepeatIconSize}
-                                color={playerIsShuffled ? selectedControlIconColor : sideControlIconColor}
-                              />
-                            </SmoothControlButton>
+                            <Ionicons name="play-skip-forward" size={prevNextIconSize} color={activeControlIconColor} />
+                          </SmoothControlButton>
 
-                            <SmoothControlButton
-                              style={[styles.prevNextButton, prevNextBtnSizeStyle]}
-                              onPressIn={() => {
-                                handleSkip("prev");
-                              }}
-                            >
-                              <Ionicons name="play-skip-back" size={prevNextIconSize} color={activeControlIconColor} />
-                            </SmoothControlButton>
-
-                            <PlayerPlayButton
-                              buttonSize={playButtonSize}
-                              iconSize={playIconSize}
-                              onAccentColor="#060A0F"
-                              onPress={() => {
-                                togglePlay();
-                              }}
+                          <SmoothControlButton
+                            style={[
+                              styles.roundIconButton,
+                              playerIconBtnStyle,
+                            ]}
+                            onPress={() => {
+                              toggleRepeat();
+                            }}
+                          >
+                            <Ionicons
+                              name="repeat"
+                              size={shuffleRepeatIconSize}
+                              color={playerRepeatMode !== "off" ? selectedControlIconColor : sideControlIconColor}
                             />
-
-                            <SmoothControlButton
-                              style={[styles.prevNextButton, prevNextBtnSizeStyle]}
-                              onPressIn={() => {
-                                handleSkip("next");
-                              }}
-                            >
-                              <Ionicons name="play-skip-forward" size={prevNextIconSize} color={activeControlIconColor} />
-                            </SmoothControlButton>
-
-                            <SmoothControlButton
-                              style={[
-                                styles.roundIconButton,
-                                playerIconBtnStyle,
-                              ]}
-                              onPress={() => {
-                                toggleRepeat();
-                              }}
-                            >
-                              <Ionicons
-                                name="repeat"
-                                size={shuffleRepeatIconSize}
-                                color={playerRepeatMode !== "off" ? selectedControlIconColor : sideControlIconColor}
-                              />
-                              {playerRepeatMode === "one" && (
-                                <Text style={[styles.repeatOneBadge, { color: selectedControlIconColor }]}>1</Text>
-                              )}
-                            </SmoothControlButton>
-                          </View>
+                            {playerRepeatMode === "one" && (
+                              <Text style={[styles.repeatOneBadge, { color: selectedControlIconColor }]}>1</Text>
+                            )}
+                          </SmoothControlButton>
                         </View>
-                      </Reanimated.View>
+                      </View>
                     </View>
-                  </GestureDetector>
-                </View>
+                  </View>
+                </GestureDetector>
+              </View>
 
-                <Reanimated.View style={controlsDismissAnimatedStyle}>
+                <View>
                   <KaraokeLyricsView
                     song={screenSong}
                     currentPositionSeconds={currentPositionSeconds}
@@ -2476,13 +2212,13 @@ function LegacyPlayerScreenView() {
                     songs={relatedSongs}
                     onSongPress={handlePlayRelatedSong}
                   />
-                </Reanimated.View>
+                </View>
               </>
             }
           />
 
         </View>
-      </Reanimated.View>
+      </View>
 
       <FullscreenKaraokeModal
         visible={fullscreenLyricsVisible}
@@ -2507,6 +2243,7 @@ function collapseOnJS() {
 
 export const PlayerScreen = memo(function PlayerScreen() {
   const { height: screenHeight } = useWindowDimensions();
+
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
 
@@ -2548,14 +2285,16 @@ export const PlayerScreen = memo(function PlayerScreen() {
   }, []);
 
   const panGesture = Gesture.Pan()
-    .activeOffsetY([0, 10])
+    .activeOffsetY(8)
+    .failOffsetY(-8)
+    .failOffsetX([-35, 35])
     .onUpdate((e) => {
       if (e.translationY > 0) {
         translateY.value = e.translationY;
       }
     })
     .onEnd((e) => {
-      if (e.translationY > 120 || e.velocityY > 500) {
+      if (e.translationY > 100 || (e.translationY > 20 && e.velocityY > 500)) {
         translateY.value = withSpring(screenHeight, SPRING_CONFIG);
         runOnJS(collapseOnJS)();
       } else {
@@ -2563,9 +2302,13 @@ export const PlayerScreen = memo(function PlayerScreen() {
       }
     });
 
-  const containerStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: Math.max(0, translateY.value) }],
-  }));
+  const containerStyle = useAnimatedStyle(() => {
+    const isHidden = translateY.value >= screenHeight - 100;
+    return {
+      transform: [{ translateY: Math.max(0, translateY.value) }],
+      opacity: isHidden ? 0 : 1,
+    };
+  });
 
   // If no song is loaded or player is hidden, render nothing
   if (!activeSong || uiState === "hidden") return null;
@@ -2583,7 +2326,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
     >
       <GestureDetector gesture={panGesture}>
         <Reanimated.View style={styles.contentWrap}>
-          <LegacyPlayerScreenView />
+          <LegacyPlayerScreenView translateY={translateY} />
         </Reanimated.View>
       </GestureDetector>
     </Reanimated.View>

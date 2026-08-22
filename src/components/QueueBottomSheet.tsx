@@ -20,7 +20,6 @@ import React, {
   useState,
 } from "react";
 import {
-  InteractionManager,
   Platform,
   Pressable,
   StyleSheet,
@@ -57,7 +56,6 @@ import { getSmartAutoplayModeLabel } from "@/lib/smartAutoplayConfig";
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SHEET_BG = "#1A1A1A";
 const HANDLE_COLOR = "#4A4A4A";
-const SWIPE_WIDTH = 92;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type QueueItem = {
@@ -374,7 +372,6 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     const { isPlaying } = usePlaybackPlayState();
     const {
       playSong,
-      removeFromQueue,
       reorderQueue,
       shuffleQueue,
       sleepTimer,
@@ -392,6 +389,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     const finishClosedSheet = useCallback(() => {
       isClosingRef.current = false;
       currentSheetIndexRef.current = -1;
+      setIsSheetMounted(false);
     }, []);
 
     const expandSheet = useCallback(() => {

@@ -1,5 +1,5 @@
 import React, { createContext, use, useState, useCallback, useMemo, useRef, ReactNode, useEffect } from "react";
-import { Alert, AppState, Platform, View } from "react-native";
+import { AppState, Platform, View } from "react-native";
 import { isRunningInExpoGo } from "expo";
 import * as Network from "expo-network";
 import { Song } from "@/lib/musicData";
@@ -12,12 +12,12 @@ import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { mapFilter } from "@/lib/arrayUtils";
 import { createShuffledPlaybackQueue, toggleQueueShuffleState } from "@/services/audio/ShuffleManager";
 import { showGlobalToast } from "@/utils/globalToast";
+import { setupPlayer } from "@/services/audio/TrackPlayerAdapter";
 
 let TrackPlayer: typeof import("react-native-track-player").default | null = null;
 let Event: any = {};
 let RepeatMode: any = {};
 let State: any = {};
-let Capability: any = {};
 
 if (!isRunningInExpoGo() && Platform.OS !== "web") {
   try {
@@ -26,13 +26,10 @@ if (!isRunningInExpoGo() && Platform.OS !== "web") {
     Event = rntp.Event || {};
     RepeatMode = rntp.RepeatMode || {};
     State = rntp.State || {};
-    Capability = rntp.Capability || {};
   } catch {
     // Non-fatal fallback for Expo Go / unlinked runtimes
   }
 }
-
-import { setupPlayer } from "@/services/audio/TrackPlayerAdapter";
 
 type NativeSubscription = {
   remove: () => void;
@@ -380,31 +377,6 @@ function getNowPlayingMetadata(track: NowPlayingMetadataSource) {
     duration: duration > 0 ? duration : undefined,
     artwork: artwork || undefined,
   };
-}
-
-async function publishNativeNowPlaying(track: NowPlayingMetadataSource, trackIndex?: number): Promise<void> {
-  if (!TrackPlayer) return;
-  const metadata = getNowPlayingMetadata(track);
-
-  try {
-    if (
-      typeof trackIndex === "number" &&
-      trackIndex >= 0 &&
-      typeof TrackPlayer.updateMetadataForTrack === "function"
-    ) {
-      await TrackPlayer.updateMetadataForTrack(trackIndex, metadata);
-    }
-  } catch {
-    // Non-fatal
-  }
-
-  try {
-    if (typeof TrackPlayer.updateNowPlayingMetadata === "function") {
-      await TrackPlayer.updateNowPlayingMetadata(metadata);
-    }
-  } catch {
-    // Non-fatal
-  }
 }
 
 let cachedAdaptiveQuality: { quality: "low" | "medium" | "high"; timestamp: number } | null = null;
@@ -1521,6 +1493,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => {
       unsubs.forEach((unsub) => unsub?.());
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- TrackPlayer event callbacks use mutable refs
   }, [isPlayerReady, resolvedDuration]);
 
   // Load liked songs from Firestore when user auth state changes

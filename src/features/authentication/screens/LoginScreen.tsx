@@ -105,17 +105,19 @@ function BrandHeader() {
 
 function AuthLegalFooter() {
   return (
-    <Text style={styles.legalText}>
-      By continuing, you agree to Mavrixfy's{" "}
-      <Text style={styles.legalLink} onPress={() => { void openTermsOfService(); }}>
-        Terms of Service
+    <View style={styles.legalFooterContainer}>
+      <Text style={styles.legalText}>
+        {"By continuing, you agree to Mavrixfy's "}
+        <Text style={styles.legalLink} onPress={() => { void openTermsOfService(); }}>
+          Terms of Service
+        </Text>
+        {" "}and{" "}
+        <Text style={styles.legalLink} onPress={() => { void openPrivacyPolicy(); }}>
+          Privacy Policy
+        </Text>
+        .
       </Text>
-      {" "}and{" "}
-      <Text style={styles.legalLink} onPress={() => { void openPrivacyPolicy(); }}>
-        Privacy Policy
-      </Text>
-      .
-    </Text>
+    </View>
   );
 }
 
@@ -555,7 +557,7 @@ function LoginScreenView() {
     <View style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboardView}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={Platform.OS === "ios" ? 40 : 0}
       >
         <ScrollView
@@ -563,7 +565,7 @@ function LoginScreenView() {
             styles.scrollContainer,
             {
               paddingTop: topInset + 20,
-              paddingBottom: bottomInset + 24,
+              paddingBottom: Math.max(bottomInset, 16) + 40,
             },
           ]}
           showsVerticalScrollIndicator={false}
@@ -663,7 +665,6 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     flexGrow: 1,
-    justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 18,
   },
@@ -878,15 +879,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_500Medium",
   },
+  legalFooterContainer: {
+    marginTop: 18,
+    paddingTop: 8,
+    paddingHorizontal: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   legalText: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.35)",
+    fontSize: 11.5,
+    color: "rgba(255,255,255,0.42)",
     textAlign: "center",
-    lineHeight: 16,
+    lineHeight: 17,
     paddingHorizontal: 12,
   },
   legalLink: {
-    color: "rgba(255,255,255,0.7)",
+    color: "rgba(255,255,255,0.75)",
     textDecorationLine: "underline",
     fontFamily: "Inter_600SemiBold",
   },

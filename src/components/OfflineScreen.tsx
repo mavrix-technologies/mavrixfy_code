@@ -45,7 +45,7 @@ export default function OfflineScreen({
           <Ionicons name="cloud-offline-outline" size={38} color="#26E19A" />
         </View>
 
-        <Text style={styles.title}>You're Offline</Text>
+        <Text style={styles.title}>{"You're Offline"}</Text>
         <Text style={styles.message}>{message}</Text>
 
         <View style={styles.actions}>

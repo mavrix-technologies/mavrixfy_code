@@ -26,7 +26,6 @@ import AdMobBanner from "@/components/AdMobBanner";
 import AppPromotionModal from "@/components/AppPromotionModal";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { HomeLiquidGlassNav } from "../components/HomeLiquidGlassNav";
-import { HOME_TOP_MENU_HEIGHT } from "../constants/homeNavConstants";
 import { HomeQuickPicks } from "../components/HomeQuickPicks";
 import { HomeRecentlyPlayed } from "../components/HomeRecentlyPlayed";
 import { HomeArtistsSection } from "../components/HomeArtistsSection";
@@ -301,10 +300,10 @@ export function HomeScreen() {
       styles.scrollContent,
       {
         paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 6,
-        paddingBottom: 120,
+        paddingBottom: Math.max(insets.bottom, 0) + 140,
       },
     ],
-    [topInset]
+    [insets.bottom, topInset]
   );
 
   if (!isOnline && !hasContent) {
@@ -431,6 +430,8 @@ const styles = StyleSheet.create({
     padding: 7,
     gap: 12,
     backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 6,
+    overflow: "hidden",
   },
   quickSkeletonCover: {
     width: 48,

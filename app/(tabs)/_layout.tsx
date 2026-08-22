@@ -1,7 +1,7 @@
 import { Redirect, Tabs, usePathname, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import { Easing, InteractionManager, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type DimensionValue } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import * as Haptics from "expo-haptics";
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -13,14 +13,9 @@ import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/Pl
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { triggerImpact } from "@/lib/haptics";
 import {
-  DEFAULT_ARTWORK_PALETTE,
-  ensureDarkHexColor,
   getSpotifyMiniPlayerBg,
   useArtworkPalette,
-  extractArtworkColors,
-  getImmediateArtworkPalette,
   preloadDominantColors,
-  type ArtworkPalette,
 } from "@/lib/colorExtractor";
 import { useLastMix, clearLastMix } from "@/lib/lastMix";
 import { compactMap, mapFilter } from "@/lib/arrayUtils";
@@ -381,19 +376,17 @@ function TabIcon({ route, name, size, color }: { route: VisibleRoute; name: stri
 }
 
 type NavTabItemProps = {
-  item: NavItem;
+  item: (typeof NAV_ITEMS)[number];
   isFocused: boolean;
   isAndroid: boolean;
   isIOS: boolean;
-  onPress: (route: VisibleRoute, isFocused: boolean) => void;
-  onLongPress: () => void;
   navIconSize: number;
   navLabelSize: number;
   navLabelLineHeight: number;
-  navItemPaddingTop: number;
-  navItemPaddingBottom: number;
   activeNavColor: string;
   navInactiveColor: string;
+  onPress: (route: VisibleRoute, isFocused: boolean) => void;
+  onLongPress: () => void;
 };
 
 function NavTabItem({
@@ -406,8 +399,6 @@ function NavTabItem({
   navIconSize,
   navLabelSize,
   navLabelLineHeight,
-  navItemPaddingTop,
-  navItemPaddingBottom,
   activeNavColor,
   navInactiveColor,
 }: NavTabItemProps) {
@@ -433,11 +424,10 @@ function NavTabItem({
         style={({ pressed }) => [
           styles.navItem,
           isIOS && styles.navItemIOS,
-          { paddingTop: navItemPaddingTop, paddingBottom: navItemPaddingBottom },
           pressed && styles.navItemPressed,
         ]}
       >
-        <View style={[styles.navIconWrap, isAndroid && isFocused && styles.navIconWrapAndroidActive]}>
+        <View style={styles.navIconWrap}>
           <TabIcon
             route={item.route}
             name={iconName}
@@ -478,8 +468,6 @@ const MemoizedNavTabItem = React.memo(NavTabItem, (prev, next) => {
     prev.navIconSize === next.navIconSize &&
     prev.navLabelSize === next.navLabelSize &&
     prev.navLabelLineHeight === next.navLabelLineHeight &&
-    prev.navItemPaddingTop === next.navItemPaddingTop &&
-    prev.navItemPaddingBottom === next.navItemPaddingBottom &&
     prev.activeNavColor === next.activeNavColor &&
     prev.navInactiveColor === next.navInactiveColor
   );
@@ -544,7 +532,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   }, []);
   const [coverFailed, setCoverFailed] = useState(false);
   const artworkPalette = useArtworkPalette(activeSong?.coverUrl);
-  const routePressLockRef = useRef({ href: "", time: 0 });
   const openPlayerLockRef = useRef(0);
   const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(DEFAULT_MINI_PLAYER_BANNER_CONFIG);
 
@@ -812,22 +799,12 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     setTextColor(artworkPalette.text);
   }, [activeSong?.id, artworkPalette.accent, artworkPalette.text, setAlbumColor, setTextColor]);
 
+  const TAB_BAR_HEIGHT = 52;
   const resolvedBottomInset = isWeb ? 0 : Math.max(bottomInset, 0);
-  const navPaddingBottom = useMemo(() => {
-    if (isWeb) return 8;
-    if (isIOS) return Math.max(resolvedBottomInset, 12);
-    // On Android: 3-button navigation (bottom inset >= 28) doesn't need huge padding
-    if (resolvedBottomInset >= 28) return 8;
-    // On Android gesture navigation (bottom inset ~ 12-24px):
-    if (resolvedBottomInset > 0) return Math.max(resolvedBottomInset, 6);
-    return 8;
-  }, [isWeb, isIOS, resolvedBottomInset]);
   const navIconSize = isNarrowMobile ? 20 : 22;
   const navLabelSize = isNarrowMobile ? 9 : 10;
   const navLabelLineHeight = 12;
   const navHorizontalPadding = isNarrowMobile ? 6 : 8;
-  const navItemPaddingTop = 6;
-  const navItemPaddingBottom = 4;
   const conceptText = "#dfe2eb";
   const conceptSubtext = "#bccbb9";
 
@@ -851,7 +828,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     () => colorToRgba(safeTextColor, 0.72, conceptSubtext),
     [safeTextColor]
   );
-  const playIconColor = "#FFFFFF";
+  const playIconColor = "#060A0F";
   const playerSectionBg = useMemo(
     () => getSpotifyMiniPlayerBg(artworkPalette.accent, artworkPalette.background),
     [artworkPalette.accent, artworkPalette.background]
@@ -864,17 +841,17 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const playerSectionDivider = "rgba(255,255,255,0.06)";
   const playerProgressFillColor = "rgba(255,255,255,0.90)";
   const playerTopEdgeTint = "transparent";
-  const miniButtonPrimaryBg = "rgba(255, 255, 255, 0.1)";
-  const miniButtonPrimaryBorder = "rgba(255, 255, 255, 0.14)";
-  const miniSecondaryButtonBg = "rgba(255, 255, 255, 0.06)";
-  const miniSecondaryButtonBorder = "rgba(255, 255, 255, 0.12)";
-  const miniSecondaryIconColor = "rgba(255, 255, 255, 0.88)";
+  const miniButtonPrimaryBg = "#FFFFFF";
+  const miniButtonPrimaryBorder = "transparent";
+  const miniSecondaryButtonBg = "transparent";
+  const miniSecondaryButtonBorder = "transparent";
+  const miniSecondaryIconColor = "rgba(255, 255, 255, 0.90)";
   const coverUrl = activeSong?.coverUrl?.trim();
   const miniPlayerHeight = 60;
   const miniCoverSlotSize = 48;
   const miniCoverSize = 48;
-  const miniControlSize = 42;
-  const miniControlRadius = Math.round(miniControlSize / 2);
+  const miniControlSize = 40;
+  const miniControlRadius = 20;
   const trashShiftX = trashOpacity.interpolate({
     inputRange: [0, 1],
     outputRange: [16, 0],
@@ -1126,8 +1103,8 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
               {
                 backgroundColor: navBaseBg,
                 paddingHorizontal: navHorizontalPadding,
-                paddingTop: 4,
-                paddingBottom: navPaddingBottom,
+                height: TAB_BAR_HEIGHT + resolvedBottomInset,
+                paddingBottom: resolvedBottomInset,
                 borderTopWidth: hasActiveMiniPlayer ? StyleSheet.hairlineWidth : 0,
                 borderTopColor: "rgba(255, 255, 255, 0.08)",
               },
@@ -1148,8 +1125,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                   navIconSize={navIconSize}
                   navLabelSize={navLabelSize}
                   navLabelLineHeight={navLabelLineHeight}
-                  navItemPaddingTop={navItemPaddingTop}
-                  navItemPaddingBottom={navItemPaddingBottom}
                   activeNavColor={activeNavColor}
                   navInactiveColor={navInactiveColor}
                   onPress={handleTabPress}
@@ -1213,7 +1188,6 @@ function IOSMiniPlayerOverlay() {
 
 function useIOSMiniPlayerOverlayView() {
   const insets = useSafeAreaInsets();
-  const pathname = usePathname();
   
   // Remove unnecessary cover opacity animation
   // Cover visibility is handled by CSS, no need for extra animations
@@ -1382,7 +1356,6 @@ function useIOSMiniPlayerOverlayView() {
     }
     return raw;
   })();
-  const secondaryColor = colorToRgba(resolvedTextColor, 0.7, "rgba(235,235,245,0.7)");
   const progressFillColor = "rgba(255,255,255,0.90)";
   const tabBarVisualHeight = 49;
   const tabBarGap = 6;
@@ -1518,13 +1491,14 @@ function useIOSMiniPlayerOverlayView() {
               hitSlop={14}
               style={({ pressed }) => [
                 styles.iosMiniPlayerButton,
+                styles.iosMiniPlayerPrimaryButton,
                 pressed && styles.miniButtonPressed,
               ]}
             >
               <Ionicons
                 name={playbackState.isPlaying ? "pause" : "play"}
-                size={26}
-                color="#FFFFFF"
+                size={22}
+                color="#060A0F"
                 style={!playbackState.isPlaying ? { marginLeft: 2 } : undefined}
               />
             </Pressable>
@@ -1534,7 +1508,7 @@ function useIOSMiniPlayerOverlayView() {
               radius={20}
               backgroundColor="transparent"
               borderColor="transparent"
-              iconColor="rgba(255,255,255,0.80)"
+              iconColor="rgba(255,255,255,0.90)"
               shellStyle={styles.iosMiniPlayerButton}
               onQueue={openMiniPlayerQueue}
               onNext={nextSong}
@@ -1792,9 +1766,9 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   iosMiniPlayerPrimaryButton: {
-    backgroundColor: "rgba(255,255,255,0.1)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 21,
+    borderWidth: 0,
   },
   iosMiniPlayerSecondaryButton: {
     backgroundColor: "rgba(255,255,255,0.06)",
@@ -2100,18 +2074,17 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   iconButton: {
-    minWidth: 42,
-    minHeight: 42,
+    minWidth: 40,
+    minHeight: 40,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 21,
-    backgroundColor: "rgba(38, 42, 49, 0.72)",
-    borderWidth: 1,
-    borderColor: "rgba(61, 74, 61, 0.38)",
+    borderRadius: 20,
+    backgroundColor: "transparent",
   },
   iconButtonPrimary: {
-    backgroundColor: "#26e19a",
-    borderColor: "rgba(38, 225, 154, 0.72)",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    borderWidth: 0,
   },
   navContent: {
     flexDirection: "row",
@@ -2140,11 +2113,6 @@ const styles = StyleSheet.create({
     height: 28,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 14,
-  },
-  navIconWrapAndroidActive: {
-    backgroundColor: "rgba(38, 225, 154, 0.12)",
-    borderRadius: 14,
   },
   navIconLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -2153,6 +2121,7 @@ const styles = StyleSheet.create({
   },
   navItem: {
     flex: 1,
+    height: 52,
     minWidth: 0,
     alignItems: "center",
     justifyContent: "center",

@@ -301,6 +301,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "rgba(255, 255, 255, 0.04)",
     padding: 7,
+    borderRadius: 6,
+    overflow: "hidden",
   },
   quickPickRowActive: {
     backgroundColor: "rgba(38, 225, 154, 0.10)",

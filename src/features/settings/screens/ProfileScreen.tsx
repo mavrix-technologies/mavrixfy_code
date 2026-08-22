@@ -665,7 +665,7 @@ export function ProfileScreen() {
       <ScrollView
         ref={scrollRef}
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(bottomContentInset, 16) + 48 }]}
         contentInset={{ bottom: bottomContentInset }}
         scrollIndicatorInsets={{ bottom: bottomContentInset }}
         contentInsetAdjustmentBehavior="automatic"

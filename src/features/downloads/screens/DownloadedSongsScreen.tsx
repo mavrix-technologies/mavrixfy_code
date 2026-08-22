@@ -24,7 +24,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
 import { useDownloads } from "@/contexts/DownloadContext";
 import { onQueueEvent } from "@/lib/downloads/downloadManager";
@@ -507,6 +506,7 @@ export function DownloadedSongsScreen() {
             contentContainerStyle={[
               styles.listContent,
               completedSongs.length === 0 ? styles.listContentEmpty : undefined,
+              { paddingBottom: Math.max(insets.bottom, 0) + 140 },
             ]}
             showsVerticalScrollIndicator={false}
             onScroll={handleScroll}

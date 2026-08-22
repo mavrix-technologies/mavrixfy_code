@@ -569,10 +569,10 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
         <Pressable
           android_disableSound
           onPress={onToggleFullScreen}
-          hitSlop={8}
+          hitSlop={10}
           style={styles.spotifyCardHeaderIconBtn}
         >
-          <MaterialIcons name="lyrics" size={20} color="#FFFFFF" />
+          <MaterialIcons name="lyrics" size={22} color="rgba(255, 255, 255, 0.9)" />
         </Pressable>
       </View>
 
@@ -831,10 +831,11 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
       onScrollBeginDrag={handleScrollBeginDrag}
       onScrollEndDrag={handleScrollEndDrag}
       onMomentumScrollEnd={handleScrollEndDrag}
-      initialNumToRender={25}
-      maxToRenderPerBatch={15}
-      windowSize={9}
-      removeClippedSubviews={false}
+      initialNumToRender={12}
+      maxToRenderPerBatch={8}
+      windowSize={5}
+      updateCellsBatchingPeriod={50}
+      removeClippedSubviews={Platform.OS === "android"}
     />
   );
 });
@@ -856,7 +857,6 @@ const SpotifyModalBottomBar = memo(function SpotifyModalBottomBar({
   const [seekingSeconds, setSeekingSeconds] = useState<number | null>(null);
 
   const displaySeconds = seekingSeconds !== null ? seekingSeconds : currentPositionSeconds;
-  const displayRemaining = Math.max(0, totalDuration - displaySeconds);
 
   const handleSlidingStart = useCallback(() => {
     setSeekingSeconds(currentPositionSeconds);
@@ -1129,9 +1129,6 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   spotifyCardHeaderIconBtn: {
-    padding: 4,
-    borderRadius: 12,
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
     alignItems: "center",
     justifyContent: "center",
   },
