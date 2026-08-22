@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import React, { useState, useReducer, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -79,6 +79,10 @@ const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
 ];
 
 const CARD_ROTATION_PATTERN = [-11, 8, -7, 10, -5, 6] as const;
+const ALBUM_STAGGER_PATTERN = [0, 7, 3, 9, 2, 5] as const;
+const ALBUM_TILT_PATTERN = [0.8, -1.0, 1.1, -0.7, 0.6, -0.9] as const;
+const PLAYLIST_STAGGER_PATTERN = [0, 8, 4, 10, 2, 6] as const;
+const PLAYLIST_TILT_PATTERN = [-1.1, 0.9, -0.8, 1.2, -0.6, 0.8] as const;
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
 const MAX_SEARCH_SUGGESTIONS = 8;
 
@@ -230,23 +234,736 @@ export function SearchScreen() {
 
 export default SearchScreen;
 
-function SearchScreenView() {
+interface SearchScreenState {
+  query: string;
+  results: SearchResults;
+  searchDisplayQuery: string;
+  resultFilter: ResultFilter;
+  searchLoading: boolean;
+  isSearchMode: boolean;
+  suggestions: string[];
+  suggestionsOpen: boolean;
+}
+
+type SearchScreenAction =
+  | { type: "SET_QUERY"; query: string }
+  | { type: "SET_SEARCH_LOADING"; loading: boolean }
+  | { type: "SEARCH_SUCCESS"; results: SearchResults; displayQuery: string }
+  | { type: "SEARCH_RESET"; displayQuery: string }
+  | { type: "SET_SUGGESTIONS"; suggestions: string[] }
+  | { type: "SET_SUGGESTIONS_OPEN"; open: boolean }
+  | { type: "CLOSE_SUGGESTIONS" }
+  | { type: "SELECT_QUERY"; query: string; resetFilter?: boolean }
+  | { type: "APPLY_PROGRAMMATIC_QUERY"; query: string }
+  | { type: "SET_RESULT_FILTER"; filter: ResultFilter }
+  | { type: "ACTIVATE_SEARCH_MODE" }
+  | { type: "CLEAR_SEARCH" }
+  | { type: "CANCEL_SEARCH_MODE" };
+
+function searchScreenReducer(
+  state: SearchScreenState,
+  action: SearchScreenAction
+): SearchScreenState {
+  switch (action.type) {
+    case "SET_QUERY": {
+      const trimmed = action.query.trim();
+      if (trimmed.length < 2) {
+        return {
+          ...state,
+          query: action.query,
+          resultFilter: "all",
+          suggestions: [],
+          suggestionsOpen: false,
+        };
+      }
+      return {
+        ...state,
+        query: action.query,
+        suggestionsOpen: true,
+      };
+    }
+    case "SET_SEARCH_LOADING":
+      return {
+        ...state,
+        searchLoading: action.loading,
+      };
+    case "SEARCH_SUCCESS":
+      return {
+        ...state,
+        results: action.results,
+        searchDisplayQuery: action.displayQuery,
+        searchLoading: false,
+      };
+    case "SEARCH_RESET":
+      return {
+        ...state,
+        results: EMPTY_RESULTS,
+        searchDisplayQuery: action.displayQuery,
+        searchLoading: false,
+      };
+    case "SET_SUGGESTIONS":
+      return {
+        ...state,
+        suggestions: action.suggestions,
+        suggestionsOpen: action.suggestions.length > 0,
+      };
+    case "SET_SUGGESTIONS_OPEN":
+      return {
+        ...state,
+        suggestionsOpen: action.open,
+      };
+    case "CLOSE_SUGGESTIONS":
+      return {
+        ...state,
+        suggestionsOpen: false,
+        suggestions: [],
+      };
+    case "SELECT_QUERY":
+      return {
+        ...state,
+        isSearchMode: true,
+        query: action.query,
+        suggestionsOpen: false,
+        suggestions: [],
+        ...(action.resetFilter ? { resultFilter: "all" } : {}),
+      };
+    case "APPLY_PROGRAMMATIC_QUERY":
+      return {
+        ...state,
+        isSearchMode: true,
+        suggestionsOpen: false,
+        query: action.query,
+      };
+    case "SET_RESULT_FILTER":
+      return {
+        ...state,
+        resultFilter: state.query.trim().length < 2 ? "all" : action.filter,
+      };
+    case "ACTIVATE_SEARCH_MODE":
+      return {
+        ...state,
+        isSearchMode: true,
+      };
+    case "CLEAR_SEARCH":
+      return {
+        ...state,
+        query: "",
+        suggestionsOpen: false,
+        suggestions: [],
+        results: EMPTY_RESULTS,
+        searchDisplayQuery: "",
+        searchLoading: false,
+      };
+    case "CANCEL_SEARCH_MODE":
+      return {
+        ...state,
+        isSearchMode: false,
+        query: "",
+        suggestionsOpen: false,
+        suggestions: [],
+        results: EMPTY_RESULTS,
+        searchDisplayQuery: "",
+        searchLoading: false,
+      };
+    default:
+      return state;
+  }
+}
+
+const createInitialSearchState = (routeSearchQuery: string): SearchScreenState => ({
+  query: routeSearchQuery,
+  results: EMPTY_RESULTS,
+  searchDisplayQuery: "",
+  resultFilter: "all",
+  searchLoading: false,
+  isSearchMode: routeSearchQuery.length > 0,
+  suggestions: [],
+  suggestionsOpen: false,
+});
+
+interface SearchBrowseSectionProps {
+  browseCategories: BrowseCategory[];
+  onScroll: (event: any) => void;
+  onGenrePress: (genreName: string) => void;
+}
+
+const SearchBrowseSection = React.memo(function SearchBrowseSection({
+  browseCategories,
+  onScroll,
+  onGenrePress,
+}: SearchBrowseSectionProps) {
+  const renderBrowseCategory = useCallback(
+    ({ item, index }: { item: BrowseCategory; index: number }) => (
+      <BrowseCategoryCard category={item} index={index} onPress={onGenrePress} />
+    ),
+    [onGenrePress]
+  );
+
+  return (
+    <ScrollView
+      style={styles.scrollView}
+      contentContainerStyle={[styles.content, { paddingBottom: 146 }]}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      onScroll={onScroll}
+      scrollEventThrottle={16}
+    >
+      <AdMobNativeVideo />
+
+      <View style={styles.browseSection}>
+        <Text style={styles.browseTitle}>Browse all</Text>
+        <FlatList
+          data={browseCategories}
+          keyExtractor={(category) => category.id}
+          renderItem={renderBrowseCategory}
+          numColumns={2}
+          scrollEnabled={false}
+          contentContainerStyle={styles.browseGridList}
+          columnWrapperStyle={styles.browseGridRow}
+        />
+      </View>
+    </ScrollView>
+  );
+});
+
+interface SearchRecentSectionProps {
+  topInset: number;
+  recentSearches: RecentSearchItem[];
+  onScroll: (event: any) => void;
+  onRecentSearchPress: (item: RecentSearchItem) => void;
+  onRemoveRecentSearch: (id: string) => void;
+}
+
+const SearchRecentSection = React.memo(function SearchRecentSection({
+  topInset,
+  recentSearches,
+  onScroll,
+  onRecentSearchPress,
+  onRemoveRecentSearch,
+}: SearchRecentSectionProps) {
+  return (
+    <ScrollView
+      style={styles.scrollView}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 14, paddingBottom: 146 },
+      ]}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      onScroll={onScroll}
+      scrollEventThrottle={16}
+    >
+      <View style={styles.recentSection}>
+        <Text style={styles.recentTitle}>Recent searches</Text>
+        {recentSearches.length > 0 ? (
+          recentSearches.map((item) => (
+            <Pressable
+              key={item.id}
+              style={({ pressed }) => [styles.recentRow, pressed && styles.recentRowPressed]}
+              onPress={() => onRecentSearchPress(item)}
+            >
+              {item.imageUrl ? (
+                <Image
+                  source={{ uri: item.imageUrl }}
+                  style={[styles.recentThumb, item.type === "artist" && styles.recentThumbRound]}
+                  contentFit="cover"
+                  transition={100}
+                />
+              ) : (
+                <View style={[styles.recentThumb, styles.recentThumbRound, styles.recentThumbFallback]}>
+                  <Ionicons name={item.icon ?? "search"} size={24} color={Colors.subtext} />
+                </View>
+              )}
+              <View style={styles.recentInfo}>
+                <Text style={styles.recentLabel} numberOfLines={1}>{item.label}</Text>
+                {item.subtitle ? (
+                  <Text style={styles.recentSubtitle} numberOfLines={1}>{item.subtitle}</Text>
+                ) : null}
+              </View>
+              <Pressable
+                hitSlop={10}
+                style={styles.recentActionBtn}
+                onPress={(e) => { e.stopPropagation(); onRemoveRecentSearch(item.id); }}
+              >
+                <Ionicons name="close" size={18} color={Colors.subtext} />
+              </Pressable>
+            </Pressable>
+          ))
+        ) : (
+          <View style={styles.recentEmpty}>
+            <Ionicons name="search-outline" size={34} color={Colors.subtext} />
+            <Text style={styles.recentEmptyText}>No recent searches</Text>
+          </View>
+        )}
+      </View>
+    </ScrollView>
+  );
+});
+
+interface SearchResultAlbumCardProps {
+  album: AlbumResult;
+  index: number;
+  onPress: (album: AlbumResult, meta: string) => void;
+}
+
+const SearchResultAlbumCard = React.memo(function SearchResultAlbumCard({
+  album,
+  index,
+  onPress,
+}: SearchResultAlbumCardProps) {
+  const seed = stableHash(`album-${album.id}-${index}`);
+  const staggerOffset = ALBUM_STAGGER_PATTERN[seed % ALBUM_STAGGER_PATTERN.length];
+  const tilt = ALBUM_TILT_PATTERN[Math.floor(seed / 7) % ALBUM_TILT_PATTERN.length];
+  const metaParts = [album.artist || "Album", album.year, album.language].filter(
+    (value): value is string => Boolean(value)
+  );
+  const meta =
+    album.songCount > 0 ? `${album.songCount} songs` : metaParts.join(" · ") || "Album";
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.playlistGridCard,
+        { marginTop: staggerOffset },
+        pressed && styles.playlistClassicCardPressed,
+      ]}
+      onPress={() => onPress(album, meta)}
+    >
+      <View style={[styles.playlistGridImageWrap, { transform: [{ rotate: `${tilt}deg` }] }]}>
+        <Image
+          recyclingKey={`album-${album.id}`}
+          source={{ uri: getBestImageUrl(album.image) }}
+          style={styles.playlistGridImage}
+          contentFit="cover"
+          transition={160}
+        />
+        <LinearGradient
+          colors={["transparent", "rgba(0,0,0,0.42)"]}
+          start={{ x: 0.5, y: 0.22 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+        <View pointerEvents="none" style={styles.brandCoverBadge}>
+          <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
+        </View>
+      </View>
+      <View style={styles.playlistGridContent}>
+        <Text style={styles.playlistGridName} numberOfLines={2}>
+          {album.name}
+        </Text>
+        <Text style={styles.playlistGridMeta} numberOfLines={1}>
+          {meta}
+        </Text>
+      </View>
+    </Pressable>
+  );
+});
+
+interface SearchResultPlaylistCardProps {
+  playlist: PlaylistResult;
+  index: number;
+  onPress: (playlist: PlaylistResult, meta: string) => void;
+}
+
+const SearchResultPlaylistCard = React.memo(function SearchResultPlaylistCard({
+  playlist,
+  index,
+  onPress,
+}: SearchResultPlaylistCardProps) {
+  const seed = stableHash(`${playlist.id}-${index}`);
+  const staggerOffset = PLAYLIST_STAGGER_PATTERN[seed % PLAYLIST_STAGGER_PATTERN.length];
+  const tilt = PLAYLIST_TILT_PATTERN[Math.floor(seed / 7) % PLAYLIST_TILT_PATTERN.length];
+  const meta =
+    playlist.songCount > 0
+      ? `${Math.max(0, playlist.songCount || 0)} songs`
+      : playlist.language || playlist.description || "Playlist";
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.playlistGridCard,
+        { marginTop: staggerOffset },
+        pressed && styles.playlistClassicCardPressed,
+      ]}
+      onPress={() => onPress(playlist, meta)}
+    >
+      <View style={[styles.playlistGridImageWrap, { transform: [{ rotate: `${tilt}deg` }] }]}>
+        <Image
+          recyclingKey={playlist.id}
+          source={{ uri: getBestImageUrl(playlist.image) }}
+          style={styles.playlistGridImage}
+          contentFit="contain"
+          transition={160}
+        />
+        <LinearGradient
+          colors={["transparent", "rgba(0,0,0,0.42)"]}
+          start={{ x: 0.5, y: 0.22 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+        <View pointerEvents="none" style={styles.brandCoverBadge}>
+          <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
+        </View>
+      </View>
+      <View style={styles.playlistGridContent}>
+        <Text style={styles.playlistGridName} numberOfLines={2}>
+          {playlist.name}
+        </Text>
+        <Text style={styles.playlistGridMeta} numberOfLines={1}>
+          {meta}
+        </Text>
+      </View>
+    </Pressable>
+  );
+});
+
+interface SearchResultArtistRowProps {
+  artist: ArtistResult;
+  onPress: (artist: ArtistResult) => void;
+}
+
+const SearchResultArtistRow = React.memo(function SearchResultArtistRow({
+  artist,
+  onPress,
+}: SearchResultArtistRowProps) {
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.artistResultRow, pressed && styles.recentRowPressed]}
+      onPress={() => onPress(artist)}
+    >
+      {getBestImageUrl(artist.image) ? (
+        <Image
+          recyclingKey={`artist-search-${artist.id}`}
+          source={{ uri: getBestImageUrl(artist.image) }}
+          style={styles.artistResultImage}
+          contentFit="cover"
+          transition={100}
+        />
+      ) : (
+        <View style={[styles.artistResultImage, styles.artistResultImageFallback]}>
+          <Ionicons name="person" size={25} color={Colors.subtext} />
+        </View>
+      )}
+      <View style={styles.artistResultInfo}>
+        <Text style={styles.artistResultName} numberOfLines={1}>
+          {artist.name}
+        </Text>
+        <Text style={styles.artistResultMeta} numberOfLines={1}>
+          {artist.subtitle || artist.dominantLanguage || "Artist"}
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={Colors.subtext} />
+    </Pressable>
+  );
+});
+
+interface SearchResultsSectionProps {
+  topInset: number;
+  resultFilter: ResultFilter;
+  searchLoading: boolean;
+  hasResults: boolean;
+  searchDisplayQuery: string;
+  resultDataKey: string;
+  displayedSongs: Song[];
+  songResults: Song[];
+  albumResults: AlbumResult[];
+  artistResults: ArtistResult[];
+  playlistResults: PlaylistResult[];
+  featuredAlbums: AlbumResult[];
+  featuredArtists: ArtistResult[];
+  featuredPlaylists: PlaylistResult[];
+  onScroll: (event: any) => void;
+  onFilterSelect: (filter: ResultFilter) => void;
+  onSongPress: (song: Song) => void;
+  onArtistPress: (artist: ArtistResult) => void;
+  onAlbumPress: (album: AlbumResult, meta: string) => void;
+  onPlaylistPress: (playlist: PlaylistResult, meta: string) => void;
+  resultsPlaylistsListRef: React.RefObject<FlatList<PlaylistResult> | null>;
+  resultsAlbumsListRef: React.RefObject<FlatList<AlbumResult> | null>;
+  resultsArtistsListRef: React.RefObject<FlatList<ArtistResult> | null>;
+  resultsSongsListRef: React.RefObject<FlatList<Song> | null>;
+}
+
+const SearchResultsSection = React.memo(function SearchResultsSection({
+  topInset,
+  resultFilter,
+  searchLoading,
+  hasResults,
+  searchDisplayQuery,
+  resultDataKey,
+  displayedSongs,
+  songResults,
+  albumResults,
+  artistResults,
+  playlistResults,
+  featuredAlbums,
+  featuredArtists,
+  featuredPlaylists,
+  onScroll,
+  onFilterSelect,
+  onSongPress,
+  onArtistPress,
+  onAlbumPress,
+  onPlaylistPress,
+  resultsPlaylistsListRef,
+  resultsAlbumsListRef,
+  resultsArtistsListRef,
+  resultsSongsListRef,
+}: SearchResultsSectionProps) {
+  const showAlbumResults = (resultFilter === "all" || resultFilter === "albums") && albumResults.length > 0;
+  const showArtistResults = (resultFilter === "all" || resultFilter === "artists") && artistResults.length > 0;
+  const showPlaylistResults = (resultFilter === "all" || resultFilter === "playlists") && playlistResults.length > 0;
+  const showSongResults = (resultFilter === "all" || resultFilter === "songs") && songResults.length > 0;
+  const renderResultFilter = useCallback(
+    ({ item }: { item: { key: ResultFilter; label: string } }) => (
+      <SearchResultFilterChip
+        filter={item}
+        activeFilter={resultFilter}
+        onSelect={onFilterSelect}
+      />
+    ),
+    [onFilterSelect, resultFilter]
+  );
+
+  const renderSong = useCallback(
+    ({ item }: { item: Song }) => (
+      <SongRow
+        song={item}
+        queue={songResults}
+        onSongPress={onSongPress}
+        showSearchSourceMeta
+      />
+    ),
+    [onSongPress, songResults]
+  );
+
+  const renderArtistResult = useCallback(
+    ({ item }: { item: ArtistResult }) => (
+      <SearchResultArtistRow artist={item} onPress={onArtistPress} />
+    ),
+    [onArtistPress]
+  );
+
+  const renderAlbumResult = useCallback(
+    ({ item, index }: { item: AlbumResult; index: number }) => (
+      <View style={styles.playlistGridItemWrap}>
+        <SearchResultAlbumCard album={item} index={index} onPress={onAlbumPress} />
+      </View>
+    ),
+    [onAlbumPress]
+  );
+
+  const renderPlaylistResult = useCallback(
+    ({ item, index }: { item: PlaylistResult; index: number }) => (
+      <View style={styles.playlistGridItemWrap}>
+        <SearchResultPlaylistCard playlist={item} index={index} onPress={onPlaylistPress} />
+      </View>
+    ),
+    [onPlaylistPress]
+  );
+
+  return (
+    <View style={[styles.resultsWrap, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 8 }]}>
+      {/* Filter chips */}
+      <View style={styles.filterRow}>
+        <FlatList
+          data={RESULT_FILTERS}
+          keyExtractor={(filter) => filter.key}
+          renderItem={renderResultFilter}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRowContent}
+        />
+      </View>
+
+      {searchLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#FFFFFF" />
+        </View>
+      ) : !hasResults ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>{`No results for "${searchDisplayQuery}"`}</Text>
+          <Text style={styles.emptySubtext}>Check the spelling, or search for something else.</Text>
+        </View>
+      ) : resultFilter === "playlists" ? (
+        <FlatList
+          ref={resultsPlaylistsListRef}
+          key={`pl-${resultDataKey}`}
+          data={showPlaylistResults ? playlistResults : []}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPlaylistResult}
+          style={styles.scrollView}
+          contentContainerStyle={[styles.playlistGridContentContainer, { paddingBottom: 146 }]}
+          showsVerticalScrollIndicator={false}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          numColumns={2}
+          columnWrapperStyle={styles.playlistGridRow}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          ListEmptyComponent={<View style={styles.emptyInline}><Text style={styles.emptyInlineText}>No playlists found.</Text></View>}
+        />
+      ) : resultFilter === "albums" ? (
+        <FlatList
+          ref={resultsAlbumsListRef}
+          key={`al-${resultDataKey}`}
+          data={showAlbumResults ? albumResults : []}
+          keyExtractor={(item) => item.id}
+          renderItem={renderAlbumResult}
+          style={styles.scrollView}
+          contentContainerStyle={[styles.playlistGridContentContainer, { paddingBottom: 146 }]}
+          showsVerticalScrollIndicator={false}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          numColumns={2}
+          columnWrapperStyle={styles.playlistGridRow}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          ListEmptyComponent={<View style={styles.emptyInline}><Text style={styles.emptyInlineText}>No albums found.</Text></View>}
+        />
+      ) : resultFilter === "artists" ? (
+        <FlatList
+          ref={resultsArtistsListRef}
+          key={`ar-${resultDataKey}`}
+          data={showArtistResults ? artistResults : []}
+          keyExtractor={(item) => item.id}
+          renderItem={renderArtistResult}
+          style={styles.scrollView}
+          contentContainerStyle={[styles.artistListContentContainer, { paddingBottom: 146 }]}
+          showsVerticalScrollIndicator={false}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          ListEmptyComponent={<View style={styles.emptyInline}><Text style={styles.emptyInlineText}>No artists found.</Text></View>}
+        />
+      ) : !showSongResults && resultFilter === "songs" ? (
+        <View style={styles.emptyInline}><Text style={styles.emptyInlineText}>No songs found.</Text></View>
+      ) : resultFilter === "all" &&
+          !showSongResults &&
+          !showAlbumResults &&
+          !showArtistResults &&
+          !showPlaylistResults ? (
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+        >
+          <View style={styles.emptyInline}>
+            <Text style={styles.emptyInlineText}>No app results found.</Text>
+          </View>
+        </ScrollView>
+      ) : (
+        <FlatList
+          ref={resultsSongsListRef}
+          key={`sg-${resultDataKey}`}
+          data={displayedSongs}
+          keyExtractor={(item) => item.id}
+          renderItem={renderSong}
+          style={styles.scrollView}
+          contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          initialNumToRender={10}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          ListFooterComponent={
+            showAlbumResults || showArtistResults || showPlaylistResults ? (
+              <>
+                {showAlbumResults ? (
+                  <View style={styles.sectionBlock}>
+                    <View style={styles.sectionHeaderRow}>
+                      <Text style={styles.sectionTitle}>Albums</Text>
+                      {resultFilter === "all" ? (
+                        <Pressable onPress={() => onFilterSelect("albums")}>
+                          <Text style={styles.sectionActionText}>See all</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                    <View style={styles.playlistGridWrap}>
+                      {featuredAlbums.map((album, index) => (
+                        <View key={album.id} style={styles.playlistGridItemWrap}>
+                          <SearchResultAlbumCard album={album} index={index} onPress={onAlbumPress} />
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+                {showArtistResults ? (
+                  <View style={styles.sectionBlock}>
+                    <View style={styles.sectionHeaderRow}>
+                      <Text style={styles.sectionTitle}>Artists</Text>
+                      {resultFilter === "all" ? (
+                        <Pressable onPress={() => onFilterSelect("artists")}>
+                          <Text style={styles.sectionActionText}>See all</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                    <View style={styles.artistSectionList}>
+                      {featuredArtists.map((artist) => (
+                        <View key={artist.id}>
+                          <SearchResultArtistRow artist={artist} onPress={onArtistPress} />
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+                {showPlaylistResults ? (
+                  <View style={styles.sectionBlock}>
+                    <View style={styles.sectionHeaderRow}>
+                      <Text style={styles.sectionTitle}>Playlists</Text>
+                      {resultFilter === "all" ? (
+                        <Pressable onPress={() => onFilterSelect("playlists")}>
+                          <Text style={styles.sectionActionText}>See all</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                    <View style={styles.playlistGridWrap}>
+                      {featuredPlaylists.map((playlist, index) => (
+                        <View key={playlist.id} style={styles.playlistGridItemWrap}>
+                          <SearchResultPlaylistCard playlist={playlist} index={index} onPress={onPlaylistPress} />
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+              </>
+            ) : null
+          }
+        />
+      )}
+    </View>
+  );
+});
+
+function useSearchEngine(params: { q?: string | string[]; name?: string | string[] }) {
   const insets = useSafeAreaInsets();
   const { push: routerPush } = useRouter();
-  const params = useLocalSearchParams<{ q?: string | string[]; name?: string | string[] }>();
   const { isOnline } = useNetwork();
   const { playSong } = usePlayerActions();
 
   const routeSearchQuery = getRouteSearchQuery(params);
-  const [query, setQuery] = useState(routeSearchQuery);
-  const [results, setResults] = useState<SearchResults>(EMPTY_RESULTS);
-  const [searchDisplayQuery, setSearchDisplayQuery] = useState("");
+  const [state, dispatch] = useReducer(
+    searchScreenReducer,
+    routeSearchQuery,
+    createInitialSearchState
+  );
+  const {
+    query,
+    results,
+    searchDisplayQuery,
+    resultFilter,
+    searchLoading,
+    isSearchMode,
+    suggestions,
+    suggestionsOpen,
+  } = state;
   const [recentSearches, setRecentSearches] = useState<RecentSearchItem[]>([]);
-  const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [isSearchMode, setIsSearchMode] = useState(routeSearchQuery.length > 0);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 
   const {
     isHeaderElevated,
@@ -291,9 +1008,7 @@ function SearchScreenView() {
       if (normalizedQuery.length < 2) {
         activeSearchAbortRef.current?.abort();
         activeSearchAbortRef.current = null;
-        setResults(EMPTY_RESULTS);
-        setSearchDisplayQuery("");
-        setSearchLoading(false);
+        dispatch({ type: "SEARCH_RESET", displayQuery: "" });
         return;
       }
 
@@ -304,16 +1019,14 @@ function SearchScreenView() {
       const cacheKey = `${resultFilter}:${normalizedQuery.toLowerCase()}`;
       const cached = searchCache.get(cacheKey);
       if (cached) {
-        setResults(cached);
-        setSearchDisplayQuery(normalizedQuery);
-        setSearchLoading(false);
+        dispatch({ type: "SEARCH_SUCCESS", results: cached, displayQuery: normalizedQuery });
         if (activeSearchAbortRef.current === controller) {
           activeSearchAbortRef.current = null;
         }
         return;
       }
 
-      setSearchLoading(true);
+      dispatch({ type: "SET_SEARCH_LOADING", loading: true });
 
       try {
         const nextResults = await searchRepository(normalizedQuery, resultFilter, controller.signal);
@@ -322,9 +1035,7 @@ function SearchScreenView() {
           return;
         }
 
-        setResults(nextResults);
-        setSearchDisplayQuery(normalizedQuery);
-        setSearchLoading(false);
+        dispatch({ type: "SEARCH_SUCCESS", results: nextResults, displayQuery: normalizedQuery });
 
         searchCache.set(cacheKey, nextResults);
         if (searchCache.size > 25) {
@@ -339,9 +1050,7 @@ function SearchScreenView() {
         if (requestId !== requestSeqRef.current || controller.signal.aborted) {
           return;
         }
-        setResults(EMPTY_RESULTS);
-        setSearchDisplayQuery(normalizedQuery);
-        setSearchLoading(false);
+        dispatch({ type: "SEARCH_RESET", displayQuery: normalizedQuery });
         if (activeSearchAbortRef.current === controller) {
           activeSearchAbortRef.current = null;
         }
@@ -351,17 +1060,8 @@ function SearchScreenView() {
   );
 
   const handleChangeText = useCallback((text: string) => {
-    const trimmedText = text.trim();
-    setQuery(text);
-    if (trimmedText.length < 2) {
-      setResultFilter("all");
-      setSuggestions([]);
-      setSuggestionsOpen(false);
-      suggestionsClosedForQueryRef.current = null;
-      return;
-    }
+    dispatch({ type: "SET_QUERY", query: text });
     suggestionsClosedForQueryRef.current = null;
-    setSuggestionsOpen(true);
   }, []);
 
   useFocusEffect(
@@ -396,13 +1096,12 @@ function SearchScreenView() {
   useEffect(() => {
     const trimmed = query.trim();
     if (trimmed.length < 2) {
-      setSuggestions([]);
-      setSuggestionsOpen(false);
+      dispatch({ type: "CLOSE_SUGGESTIONS" });
       return;
     }
 
     if (suggestionsClosedForQueryRef.current === normalizeText(trimmed)) {
-      setSuggestionsOpen(false);
+      dispatch({ type: "SET_SUGGESTIONS_OPEN", open: false });
       return;
     }
 
@@ -419,8 +1118,7 @@ function SearchScreenView() {
         .then((rawSuggestions) => {
           if (controller.signal.aborted) return;
           const cleanSuggestions = normalizeSearchSuggestionList(trimmed, rawSuggestions);
-          setSuggestions(cleanSuggestions);
-          setSuggestionsOpen(cleanSuggestions.length > 0);
+          dispatch({ type: "SET_SUGGESTIONS", suggestions: cleanSuggestions });
         })
         .catch(() => {});
     }, 150);
@@ -456,9 +1154,7 @@ function SearchScreenView() {
   }, []);
 
   const applyProgrammaticSearchQuery = useCallback((next: string) => {
-    setIsSearchMode(true);
-    setSuggestionsOpen(false);
-    setQuery(next);
+    dispatch({ type: "APPLY_PROGRAMMATIC_QUERY", query: next });
   }, []);
 
   useEffect(() => {
@@ -480,11 +1176,8 @@ function SearchScreenView() {
       const next = genreName.trim();
       if (!next) return;
       resetHeaderElevation();
-      setIsSearchMode(true);
-      setQuery(next);
+      dispatch({ type: "SELECT_QUERY", query: next });
       suggestionsClosedForQueryRef.current = normalizeText(next);
-      setSuggestionsOpen(false);
-      setSuggestions([]);
       rememberRecentSearch(next);
       if (debounceTimer.current) {
         clearTimeout(debounceTimer.current);
@@ -492,13 +1185,6 @@ function SearchScreenView() {
       void performSearch(next);
     },
     [performSearch, rememberRecentSearch, resetHeaderElevation]
-  );
-
-  const renderBrowseCategory = useCallback(
-    ({ item, index }: { item: BrowseCategory; index: number }) => (
-      <BrowseCategoryCard category={item} index={index} onPress={handleGenrePress} />
-    ),
-    [handleGenrePress]
   );
 
   const handleRecentSearchPress = useCallback(
@@ -514,11 +1200,8 @@ function SearchScreenView() {
       const next = item.label.trim();
       if (next.length < 2) return;
       resetHeaderElevation();
-      setIsSearchMode(true);
-      setQuery(next);
+      dispatch({ type: "SELECT_QUERY", query: next });
       suggestionsClosedForQueryRef.current = normalizeText(next);
-      setSuggestionsOpen(false);
-      setSuggestions([]);
       rememberRecentSearch(next);
       if (debounceTimer.current) {
         clearTimeout(debounceTimer.current);
@@ -533,12 +1216,8 @@ function SearchScreenView() {
       const next = normalizeRecentSearchLabel(suggestion);
       if (next.length < 2) return;
       resetHeaderElevation();
-      setIsSearchMode(true);
-      setResultFilter("all");
+      dispatch({ type: "SELECT_QUERY", query: next, resetFilter: true });
       suggestionsClosedForQueryRef.current = normalizeText(next);
-      setSuggestionsOpen(false);
-      setQuery(next);
-      setSuggestions([]);
       Keyboard.dismiss();
       rememberRecentSearch(next);
       if (debounceTimer.current) {
@@ -548,21 +1227,6 @@ function SearchScreenView() {
       void performSearch(next);
     },
     [performSearch, rememberRecentSearch, resetHeaderElevation]
-  );
-
-  const renderSuggestion = useCallback(
-    ({ item: suggestion }: { item: string }) => (
-      <Pressable
-        style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]}
-        onPressIn={() => handleSuggestionPress(suggestion)}
-      >
-        <Ionicons name="search-outline" size={18} color={Colors.subtext} style={styles.suggestionIcon} />
-        <Text style={styles.suggestionText} numberOfLines={1}>
-          {suggestion}
-        </Text>
-      </Pressable>
-    ),
-    [handleSuggestionPress]
   );
 
   const handleRemoveRecentSearch = useCallback((id: string) => {
@@ -575,20 +1239,9 @@ function SearchScreenView() {
   const handleResultFilterSelect = useCallback(
     (filter: ResultFilter) => {
       resetHeaderElevation();
-      setResultFilter(query.trim().length < 2 ? "all" : filter);
+      dispatch({ type: "SET_RESULT_FILTER", filter });
     },
-    [query, resetHeaderElevation]
-  );
-
-  const renderResultFilter = useCallback(
-    ({ item }: { item: { key: ResultFilter; label: string } }) => (
-      <SearchResultFilterChip
-        filter={item}
-        activeFilter={resultFilter}
-        onSelect={handleResultFilterSelect}
-      />
-    ),
-    [handleResultFilterSelect, resultFilter]
+    [resetHeaderElevation]
   );
 
   const cancelActiveSearchWork = useCallback(() => {
@@ -604,8 +1257,7 @@ function SearchScreenView() {
     const trimmed = query.trim();
     if (trimmed.length < 2) return;
     suggestionsClosedForQueryRef.current = normalizeText(trimmed);
-    setSuggestionsOpen(false);
-    setSuggestions([]);
+    dispatch({ type: "CLOSE_SUGGESTIONS" });
     Keyboard.dismiss();
     rememberRecentSearch(trimmed);
     if (debounceTimer.current) {
@@ -617,25 +1269,22 @@ function SearchScreenView() {
   const handleClear = useCallback(() => {
     requestSeqRef.current += 1;
     cancelActiveSearchWork();
-    setQuery("");
     suggestionsClosedForQueryRef.current = null;
-    setSuggestionsOpen(false);
-    setSuggestions([]);
-    setResults(EMPTY_RESULTS);
-    setSearchDisplayQuery("");
-    setSearchLoading(false);
+    dispatch({ type: "CLEAR_SEARCH" });
   }, [cancelActiveSearchWork]);
 
   const handleActivateSearchMode = useCallback(() => {
     resetHeaderElevation();
-    setIsSearchMode(true);
+    dispatch({ type: "ACTIVATE_SEARCH_MODE" });
   }, [resetHeaderElevation]);
 
   const handleCancelSearchMode = useCallback(() => {
-    handleClear();
+    requestSeqRef.current += 1;
+    cancelActiveSearchWork();
+    suggestionsClosedForQueryRef.current = null;
     resetHeaderElevation();
-    setIsSearchMode(false);
-  }, [handleClear, resetHeaderElevation]);
+    dispatch({ type: "CANCEL_SEARCH_MODE" });
+  }, [cancelActiveSearchWork, resetHeaderElevation]);
 
   // Main search debounce pipeline
   useEffect(() => {
@@ -643,15 +1292,13 @@ function SearchScreenView() {
     if (trimmed.length < 2) {
       requestSeqRef.current += 1;
       cancelActiveSearchWork();
-      setResults(EMPTY_RESULTS);
-      setSearchDisplayQuery("");
-      setSearchLoading(false);
+      dispatch({ type: "SEARCH_RESET", displayQuery: "" });
       lastQueryRef.current = "";
       return;
     }
 
     if (trimmed === lastQueryRef.current) {
-      setSearchLoading(true);
+      dispatch({ type: "SET_SEARCH_LOADING", loading: true });
       void performSearch(trimmed);
       return;
     }
@@ -660,7 +1307,7 @@ function SearchScreenView() {
       clearTimeout(debounceTimer.current);
     }
 
-    setSearchLoading(true);
+    dispatch({ type: "SET_SEARCH_LOADING", loading: true });
     const searchTimer = setTimeout(() => {
       lastQueryRef.current = trimmed;
       void performSearch(trimmed);
@@ -698,23 +1345,14 @@ function SearchScreenView() {
   const featuredArtists = useMemo(() => artistResults.slice(0, 5), [artistResults]);
   const featuredPlaylists = useMemo(() => playlistResults.slice(0, 6), [playlistResults]);
 
-  const handleSongResultPress = useCallback((song: Song) => {
-    void addSongSearchHistoryItem(song)
-      .then((items) => setRecentSearches(toRecentSearchItems(items)))
-      .catch(() => undefined);
-  }, []);
-
-  const renderSong = useCallback(
-    ({ item }: { item: Song }) => {
-      return (
-        <SongRow
-          song={item}
-          onSongPress={handleSongResultPress}
-          showSearchSourceMeta
-        />
-      );
+  const handleSongResultPress = useCallback(
+    (song: Song) => {
+      playSong(song, songResults);
+      void addSongSearchHistoryItem(song)
+        .then((items) => setRecentSearches(toRecentSearchItems(items)))
+        .catch(() => undefined);
     },
-    [handleSongResultPress]
+    [playSong, songResults]
   );
 
   const handleArtistPress = useCallback(
@@ -737,206 +1375,177 @@ function SearchScreenView() {
     [routerPush]
   );
 
-  const getArtistRowElement = useCallback(
-    (artist: ArtistResult) => (
+  const handleAlbumPress = useCallback(
+    (album: AlbumResult, meta: string) => {
+      routerPush(
+        {
+          pathname: "/playlist/[id]",
+          params: {
+            id: String(album.id).trim(),
+            jiosaavn: "true",
+            youtube: "false",
+            album: "true",
+            firestore: "false",
+            link: album.url || "",
+            title: album.name,
+            description: album.description || meta,
+            cover: getBestImageUrl(album.image),
+            songCount: String(Math.max(0, album.songCount || 0)),
+          },
+        },
+        {
+          withAnchor: true,
+          dangerouslySingular: () => "playlist-details",
+        }
+      );
+    },
+    [routerPush]
+  );
+
+  const handlePlaylistPress = useCallback(
+    (playlist: PlaylistResult, meta: string) => {
+      routerPush(
+        {
+          pathname: "/playlist/[id]",
+          params: {
+            id: String(playlist.id).trim(),
+            jiosaavn: "true",
+            youtube: "false",
+            firestore: "false",
+            link: playlist.url || "",
+            title: playlist.name,
+            description: playlist.description || meta,
+            cover: getBestImageUrl(playlist.image),
+            songCount: String(Math.max(0, playlist.songCount || 0)),
+          },
+        },
+        {
+          withAnchor: true,
+          dangerouslySingular: () => "playlist-details",
+        }
+      );
+    },
+    [routerPush]
+  );
+
+  return {
+    isOnline,
+    topInset,
+    query,
+    isSearchMode,
+    isHeaderElevated,
+    suggestionsOpen,
+    suggestions,
+    showFocusedRecentSearches,
+    showBrowse,
+    recentSearches,
+    browseCategories,
+    resultFilter,
+    searchLoading,
+    hasResults,
+    searchDisplayQuery,
+    resultDataKey,
+    displayedSongs,
+    songResults,
+    albumResults,
+    artistResults,
+    playlistResults,
+    featuredAlbums,
+    featuredArtists,
+    featuredPlaylists,
+    showAlbumResults,
+    showArtistResults,
+    showPlaylistResults,
+    showSongResults,
+    resultsPlaylistsListRef,
+    resultsAlbumsListRef,
+    resultsArtistsListRef,
+    resultsSongsListRef,
+    handleHeaderScroll,
+    handleChangeText,
+    handleSubmitSearch,
+    handleClear,
+    handleActivateSearchMode,
+    handleCancelSearchMode,
+    handleGenrePress,
+    handleRecentSearchPress,
+    handleSuggestionPress,
+    handleRemoveRecentSearch,
+    handleResultFilterSelect,
+    handleSongResultPress,
+    handleArtistPress,
+    handleAlbumPress,
+    handlePlaylistPress,
+  };
+}
+
+function SearchScreenView() {
+  const params = useLocalSearchParams<{ q?: string | string[]; name?: string | string[] }>();
+  const searchEngine = useSearchEngine(params);
+
+  const {
+    isOnline,
+    topInset,
+    query,
+    isSearchMode,
+    isHeaderElevated,
+    suggestionsOpen,
+    suggestions,
+    showFocusedRecentSearches,
+    showBrowse,
+    recentSearches,
+    browseCategories,
+    resultFilter,
+    searchLoading,
+    hasResults,
+    searchDisplayQuery,
+    resultDataKey,
+    displayedSongs,
+    songResults,
+    albumResults,
+    artistResults,
+    playlistResults,
+    featuredAlbums,
+    featuredArtists,
+    featuredPlaylists,
+    showAlbumResults,
+    showArtistResults,
+    showPlaylistResults,
+    showSongResults,
+    resultsPlaylistsListRef,
+    resultsAlbumsListRef,
+    resultsArtistsListRef,
+    resultsSongsListRef,
+    handleHeaderScroll,
+    handleChangeText,
+    handleSubmitSearch,
+    handleClear,
+    handleActivateSearchMode,
+    handleCancelSearchMode,
+    handleGenrePress,
+    handleRecentSearchPress,
+    handleSuggestionPress,
+    handleRemoveRecentSearch,
+    handleResultFilterSelect,
+    handleSongResultPress,
+    handleArtistPress,
+    handleAlbumPress,
+    handlePlaylistPress,
+  } = searchEngine;
+
+  const renderSuggestion = useCallback(
+    ({ item: suggestion }: { item: string }) => (
       <Pressable
-        style={({ pressed }) => [styles.artistResultRow, pressed && styles.recentRowPressed]}
-        onPress={() => handleArtistPress(artist)}
+        style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]}
+        onPressIn={() => handleSuggestionPress(suggestion)}
       >
-        {getBestImageUrl(artist.image) ? (
-          <Image
-            recyclingKey={`artist-search-${artist.id}`}
-            source={{ uri: getBestImageUrl(artist.image) }}
-            style={styles.artistResultImage}
-            contentFit="cover"
-            transition={100}
-          />
-        ) : (
-          <View style={[styles.artistResultImage, styles.artistResultImageFallback]}>
-            <Ionicons name="person" size={25} color={Colors.subtext} />
-          </View>
-        )}
-        <View style={styles.artistResultInfo}>
-          <Text style={styles.artistResultName} numberOfLines={1}>
-            {artist.name}
-          </Text>
-          <Text style={styles.artistResultMeta} numberOfLines={1}>
-            {artist.subtitle || artist.dominantLanguage || "Artist"}
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={18} color={Colors.subtext} />
+        <Ionicons name="search-outline" size={18} color={Colors.subtext} style={styles.suggestionIcon} />
+        <Text style={styles.suggestionText} numberOfLines={1}>
+          {suggestion}
+        </Text>
       </Pressable>
     ),
-    [handleArtistPress]
-  );
-
-  const renderArtistResult = useCallback(
-    ({ item }: { item: ArtistResult }) => getArtistRowElement(item),
-    [getArtistRowElement]
-  );
-
-  const getAlbumCardElement = useCallback(
-    (album: AlbumResult, index: number) => {
-      const seed = stableHash(`album-${album.id}-${index}`);
-      const staggerPattern = [0, 7, 3, 9, 2, 5] as const;
-      const tiltPattern = [0.8, -1.0, 1.1, -0.7, 0.6, -0.9] as const;
-      const staggerOffset = staggerPattern[seed % staggerPattern.length];
-      const tilt = tiltPattern[Math.floor(seed / 7) % tiltPattern.length];
-      const metaParts = [album.artist || "Album", album.year, album.language].filter(
-        (value): value is string => Boolean(value)
-      );
-      const meta =
-        album.songCount > 0 ? `${album.songCount} songs` : metaParts.join(" · ") || "Album";
-
-      return (
-        <Pressable
-          style={({ pressed }) => [
-            styles.playlistGridCard,
-            { marginTop: staggerOffset },
-            pressed && styles.playlistClassicCardPressed,
-          ]}
-          onPress={() => {
-            routerPush(
-              {
-                pathname: "/playlist/[id]",
-                params: {
-                  id: String(album.id).trim(),
-                  jiosaavn: "true",
-                  youtube: "false",
-                  album: "true",
-                  firestore: "false",
-                  link: album.url || "",
-                  title: album.name,
-                  description: album.description || meta,
-                  cover: getBestImageUrl(album.image),
-                  songCount: String(Math.max(0, album.songCount || 0)),
-                },
-              },
-              {
-                withAnchor: true,
-                dangerouslySingular: () => "playlist-details",
-              }
-            );
-          }}
-        >
-          <View style={[styles.playlistGridImageWrap, { transform: [{ rotate: `${tilt}deg` }] }]}>
-            <Image
-              recyclingKey={`album-${album.id}`}
-              source={{ uri: getBestImageUrl(album.image) }}
-              style={styles.playlistGridImage}
-              contentFit="cover"
-              transition={160}
-            />
-            <LinearGradient
-              colors={["transparent", "rgba(0,0,0,0.42)"]}
-              start={{ x: 0.5, y: 0.22 }}
-              end={{ x: 0.5, y: 1 }}
-              style={StyleSheet.absoluteFill}
-            />
-            <View pointerEvents="none" style={styles.brandCoverBadge}>
-              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
-            </View>
-          </View>
-          <View style={styles.playlistGridContent}>
-            <Text style={styles.playlistGridName} numberOfLines={2}>
-              {album.name}
-            </Text>
-            <Text style={styles.playlistGridMeta} numberOfLines={1}>
-              {meta}
-            </Text>
-          </View>
-        </Pressable>
-      );
-    },
-    [routerPush]
-  );
-
-  const renderAlbumResult = useCallback(
-    ({ item, index }: { item: AlbumResult; index: number }) => (
-      <View style={styles.playlistGridItemWrap}>{getAlbumCardElement(item, index)}</View>
-    ),
-    [getAlbumCardElement]
-  );
-
-  const getPlaylistCardElement = useCallback(
-    (playlist: PlaylistResult, index: number) => {
-      const seed = stableHash(`${playlist.id}-${index}`);
-      const staggerPattern = [0, 8, 4, 10, 2, 6] as const;
-      const tiltPattern = [-1.1, 0.9, -0.8, 1.2, -0.6, 0.8] as const;
-      const staggerOffset = staggerPattern[seed % staggerPattern.length];
-      const tilt = tiltPattern[Math.floor(seed / 7) % tiltPattern.length];
-      const meta =
-        playlist.songCount > 0
-          ? `${Math.max(0, playlist.songCount || 0)} songs`
-          : playlist.language || playlist.description || "Playlist";
-
-      return (
-        <Pressable
-          style={({ pressed }) => [
-            styles.playlistGridCard,
-            { marginTop: staggerOffset },
-            pressed && styles.playlistClassicCardPressed,
-          ]}
-          onPress={() => {
-            routerPush(
-              {
-                pathname: "/playlist/[id]",
-                params: {
-                  id: String(playlist.id).trim(),
-                  jiosaavn: "true",
-                  youtube: "false",
-                  firestore: "false",
-                  link: playlist.url || "",
-                  title: playlist.name,
-                  description: playlist.description || meta,
-                  cover: getBestImageUrl(playlist.image),
-                  songCount: String(Math.max(0, playlist.songCount || 0)),
-                },
-              },
-              {
-                withAnchor: true,
-                dangerouslySingular: () => "playlist-details",
-              }
-            );
-          }}
-        >
-          <View style={[styles.playlistGridImageWrap, { transform: [{ rotate: `${tilt}deg` }] }]}>
-            <Image
-              recyclingKey={playlist.id}
-              source={{ uri: getBestImageUrl(playlist.image) }}
-              style={styles.playlistGridImage}
-              contentFit="contain"
-              transition={160}
-            />
-            <LinearGradient
-              colors={["transparent", "rgba(0,0,0,0.42)"]}
-              start={{ x: 0.5, y: 0.22 }}
-              end={{ x: 0.5, y: 1 }}
-              style={StyleSheet.absoluteFill}
-            />
-            <View pointerEvents="none" style={styles.brandCoverBadge}>
-              <Image source={APP_BRAND_ICON} style={styles.brandCoverBadgeImage} contentFit="cover" />
-            </View>
-          </View>
-          <View style={styles.playlistGridContent}>
-            <Text style={styles.playlistGridName} numberOfLines={2}>
-              {playlist.name}
-            </Text>
-            <Text style={styles.playlistGridMeta} numberOfLines={1}>
-              {meta}
-            </Text>
-          </View>
-        </Pressable>
-      );
-    },
-    [routerPush]
-  );
-
-  const renderPlaylistResult = useCallback(
-    ({ item, index }: { item: PlaylistResult; index: number }) => (
-      <View style={styles.playlistGridItemWrap}>{getPlaylistCardElement(item, index)}</View>
-    ),
-    [getPlaylistCardElement]
+    [handleSuggestionPress]
   );
 
   // Early return for offline idle state
@@ -1027,262 +1636,46 @@ function SearchScreenView() {
       )}
 
       {showFocusedRecentSearches ? (
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={[
-            styles.content,
-            { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 14, paddingBottom: 146 },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+        <SearchRecentSection
+          topInset={topInset}
+          recentSearches={recentSearches}
           onScroll={handleHeaderScroll}
-          scrollEventThrottle={16}
-        >
-          <View style={styles.recentSection}>
-            <Text style={styles.recentTitle}>Recent searches</Text>
-            {recentSearches.length > 0 ? (
-              recentSearches.map((item) => (
-                <Pressable
-                  key={item.id}
-                  style={({ pressed }) => [styles.recentRow, pressed && styles.recentRowPressed]}
-                  onPress={() => handleRecentSearchPress(item)}
-                >
-                  {item.imageUrl ? (
-                    <Image
-                      source={{ uri: item.imageUrl }}
-                      style={[styles.recentThumb, item.type === "artist" && styles.recentThumbRound]}
-                      contentFit="cover"
-                      transition={100}
-                    />
-                  ) : (
-                    <View style={[styles.recentThumb, styles.recentThumbRound, styles.recentThumbFallback]}>
-                      <Ionicons name={item.icon ?? "search"} size={24} color={Colors.subtext} />
-                    </View>
-                  )}
-                  <View style={styles.recentInfo}>
-                    <Text style={styles.recentLabel} numberOfLines={1}>{item.label}</Text>
-                    {item.subtitle ? (
-                      <Text style={styles.recentSubtitle} numberOfLines={1}>{item.subtitle}</Text>
-                    ) : null}
-                  </View>
-                  <Pressable
-                    hitSlop={10}
-                    style={styles.recentActionBtn}
-                    onPress={(e) => { e.stopPropagation(); handleRemoveRecentSearch(item.id); }}
-                  >
-                    <Ionicons name="close" size={18} color={Colors.subtext} />
-                  </Pressable>
-                </Pressable>
-              ))
-            ) : (
-              <View style={styles.recentEmpty}>
-                <Ionicons name="search-outline" size={34} color={Colors.subtext} />
-                <Text style={styles.recentEmptyText}>No recent searches</Text>
-              </View>
-            )}
-          </View>
-        </ScrollView>
+          onRecentSearchPress={handleRecentSearchPress}
+          onRemoveRecentSearch={handleRemoveRecentSearch}
+        />
       ) : showBrowse ? (
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={[
-            styles.content,
-            { paddingBottom: 146 },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+        <SearchBrowseSection
+          browseCategories={browseCategories}
           onScroll={handleHeaderScroll}
-          scrollEventThrottle={16}
-        >
-          <AdMobNativeVideo />
-
-          <View style={styles.browseSection}>
-            <Text style={styles.browseTitle}>Browse all</Text>
-            <FlatList
-              data={browseCategories}
-              keyExtractor={(category) => category.id}
-              renderItem={renderBrowseCategory}
-              numColumns={2}
-              scrollEnabled={false}
-              contentContainerStyle={styles.browseGridList}
-              columnWrapperStyle={styles.browseGridRow}
-            />
-          </View>
-        </ScrollView>
+          onGenrePress={handleGenrePress}
+        />
       ) : (
-        <View style={[styles.resultsWrap, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 8 }]}>
-          {/* Filter chips */}
-          <View style={styles.filterRow}>
-            <FlatList
-              data={RESULT_FILTERS}
-              keyExtractor={(filter) => filter.key}
-              renderItem={renderResultFilter}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterRowContent}
-            />
-          </View>
-
-          {searchLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#FFFFFF" />
-            </View>
-          ) : !hasResults ? (
-            <View style={styles.empty}>
-              <Text style={styles.emptyText}>{`No results for "${searchDisplayQuery}"`}</Text>
-              <Text style={styles.emptySubtext}>Check the spelling, or search for something else.</Text>
-            </View>
-          ) : resultFilter === "playlists" ? (
-            <FlatList
-              ref={resultsPlaylistsListRef}
-              key={`pl-${resultDataKey}`}
-              data={showPlaylistResults ? playlistResults : []}
-              keyExtractor={(item) => item.id}
-              renderItem={renderPlaylistResult}
-              style={styles.scrollView}
-              contentContainerStyle={[styles.playlistGridContentContainer, { paddingBottom: 146 }]}
-              showsVerticalScrollIndicator={false}
-              onScroll={handleHeaderScroll}
-              scrollEventThrottle={16}
-              numColumns={2}
-              columnWrapperStyle={styles.playlistGridRow}
-              initialNumToRender={8}
-              maxToRenderPerBatch={8}
-              ListEmptyComponent={<View style={styles.emptyInline}><Text style={styles.emptyInlineText}>No playlists found.</Text></View>}
-            />
-          ) : resultFilter === "albums" ? (
-            <FlatList
-              ref={resultsAlbumsListRef}
-              key={`al-${resultDataKey}`}
-              data={showAlbumResults ? albumResults : []}
-              keyExtractor={(item) => item.id}
-              renderItem={renderAlbumResult}
-              style={styles.scrollView}
-              contentContainerStyle={[styles.playlistGridContentContainer, { paddingBottom: 146 }]}
-              showsVerticalScrollIndicator={false}
-              onScroll={handleHeaderScroll}
-              scrollEventThrottle={16}
-              numColumns={2}
-              columnWrapperStyle={styles.playlistGridRow}
-              initialNumToRender={8}
-              maxToRenderPerBatch={8}
-              ListEmptyComponent={<View style={styles.emptyInline}><Text style={styles.emptyInlineText}>No albums found.</Text></View>}
-            />
-          ) : resultFilter === "artists" ? (
-            <FlatList
-              ref={resultsArtistsListRef}
-              key={`ar-${resultDataKey}`}
-              data={showArtistResults ? artistResults : []}
-              keyExtractor={(item) => item.id}
-              renderItem={renderArtistResult}
-              style={styles.scrollView}
-              contentContainerStyle={[styles.artistListContentContainer, { paddingBottom: 146 }]}
-              showsVerticalScrollIndicator={false}
-              onScroll={handleHeaderScroll}
-              scrollEventThrottle={16}
-              initialNumToRender={10}
-              maxToRenderPerBatch={10}
-              ListEmptyComponent={<View style={styles.emptyInline}><Text style={styles.emptyInlineText}>No artists found.</Text></View>}
-            />
-          ) : !showSongResults && resultFilter === "songs" ? (
-            <View style={styles.emptyInline}><Text style={styles.emptyInlineText}>No songs found.</Text></View>
-          ) : resultFilter === "all" &&
-              !showSongResults &&
-              !showAlbumResults &&
-              !showArtistResults &&
-              !showPlaylistResults ? (
-            <ScrollView
-              style={styles.scrollView}
-              contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              onScroll={handleHeaderScroll}
-              scrollEventThrottle={16}
-            >
-              <View style={styles.emptyInline}>
-                <Text style={styles.emptyInlineText}>No app results found.</Text>
-              </View>
-            </ScrollView>
-          ) : (
-            <FlatList
-              ref={resultsSongsListRef}
-              key={`sg-${resultDataKey}`}
-              data={displayedSongs}
-              keyExtractor={(item) => item.id}
-              renderItem={renderSong}
-              style={styles.scrollView}
-              contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-              onScroll={handleHeaderScroll}
-              scrollEventThrottle={16}
-              initialNumToRender={10}
-              maxToRenderPerBatch={8}
-              windowSize={7}
-              ListFooterComponent={
-                showAlbumResults || showArtistResults || showPlaylistResults ? (
-                  <>
-                    {showAlbumResults ? (
-                      <View style={styles.sectionBlock}>
-                        <View style={styles.sectionHeaderRow}>
-                          <Text style={styles.sectionTitle}>Albums</Text>
-                          {resultFilter === "all" ? (
-                            <Pressable onPress={() => handleResultFilterSelect("albums")}>
-                              <Text style={styles.sectionActionText}>See all</Text>
-                            </Pressable>
-                          ) : null}
-                        </View>
-                        <View style={styles.playlistGridWrap}>
-                          {featuredAlbums.map((album, index) => (
-                            <View key={album.id} style={styles.playlistGridItemWrap}>
-                              {getAlbumCardElement(album, index)}
-                            </View>
-                          ))}
-                        </View>
-                      </View>
-                    ) : null}
-                    {showArtistResults ? (
-                      <View style={styles.sectionBlock}>
-                        <View style={styles.sectionHeaderRow}>
-                          <Text style={styles.sectionTitle}>Artists</Text>
-                          {resultFilter === "all" ? (
-                            <Pressable onPress={() => handleResultFilterSelect("artists")}>
-                              <Text style={styles.sectionActionText}>See all</Text>
-                            </Pressable>
-                          ) : null}
-                        </View>
-                        <View style={styles.artistSectionList}>
-                          {featuredArtists.map((artist) => (
-                            <View key={artist.id}>{getArtistRowElement(artist)}</View>
-                          ))}
-                        </View>
-                      </View>
-                    ) : null}
-                    {showPlaylistResults ? (
-                      <View style={styles.sectionBlock}>
-                        <View style={styles.sectionHeaderRow}>
-                          <Text style={styles.sectionTitle}>Playlists</Text>
-                          {resultFilter === "all" ? (
-                            <Pressable onPress={() => handleResultFilterSelect("playlists")}>
-                              <Text style={styles.sectionActionText}>See all</Text>
-                            </Pressable>
-                          ) : null}
-                        </View>
-                        <View style={styles.playlistGridWrap}>
-                          {featuredPlaylists.map((playlist, index) => (
-                            <View key={playlist.id} style={styles.playlistGridItemWrap}>
-                              {getPlaylistCardElement(playlist, index)}
-                            </View>
-                          ))}
-                        </View>
-                      </View>
-                    ) : null}
-                  </>
-                ) : null
-              }
-            />
-          )}
-        </View>
+        <SearchResultsSection
+          topInset={topInset}
+          resultFilter={resultFilter}
+          searchLoading={searchLoading}
+          hasResults={hasResults}
+          searchDisplayQuery={searchDisplayQuery}
+          resultDataKey={resultDataKey}
+          displayedSongs={displayedSongs}
+          songResults={songResults}
+          albumResults={albumResults}
+          artistResults={artistResults}
+          playlistResults={playlistResults}
+          featuredAlbums={featuredAlbums}
+          featuredArtists={featuredArtists}
+          featuredPlaylists={featuredPlaylists}
+          onScroll={handleHeaderScroll}
+          onFilterSelect={handleResultFilterSelect}
+          onSongPress={handleSongResultPress}
+          onArtistPress={handleArtistPress}
+          onAlbumPress={handleAlbumPress}
+          onPlaylistPress={handlePlaylistPress}
+          resultsPlaylistsListRef={resultsPlaylistsListRef}
+          resultsAlbumsListRef={resultsAlbumsListRef}
+          resultsArtistsListRef={resultsArtistsListRef}
+          resultsSongsListRef={resultsSongsListRef}
+        />
       )}
     </View>
   );

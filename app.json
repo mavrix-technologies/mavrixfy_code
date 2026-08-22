@@ -65,7 +65,17 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.WRITE_SETTINGS",
         "android.permission.SYSTEM_ALERT_WINDOW"
-      ]
+      ],
+      "navigationBar": {
+        "visible": "always",
+        "barStyle": "light-content",
+        "backgroundColor": "#0E1016"
+      }
+    },
+    "androidNavigationBar": {
+      "visible": "always",
+      "barStyle": "light-content",
+      "backgroundColor": "#0E1016"
     },
     "plugins": [
       "expo-router",

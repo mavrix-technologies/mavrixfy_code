@@ -813,6 +813,15 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   }, [activeSong?.id, artworkPalette.accent, artworkPalette.text, setAlbumColor, setTextColor]);
 
   const resolvedBottomInset = isWeb ? 0 : Math.max(bottomInset, 0);
+  const navPaddingBottom = useMemo(() => {
+    if (isWeb) return 8;
+    if (isIOS) return Math.max(resolvedBottomInset, 12);
+    // On Android: 3-button navigation (bottom inset >= 28) doesn't need huge padding
+    if (resolvedBottomInset >= 28) return 8;
+    // On Android gesture navigation (bottom inset ~ 12-24px):
+    if (resolvedBottomInset > 0) return Math.max(resolvedBottomInset, 6);
+    return 8;
+  }, [isWeb, isIOS, resolvedBottomInset]);
   const navIconSize = isNarrowMobile ? 20 : 22;
   const navLabelSize = isNarrowMobile ? 9 : 10;
   const navLabelLineHeight = 12;
@@ -1118,7 +1127,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                 backgroundColor: navBaseBg,
                 paddingHorizontal: navHorizontalPadding,
                 paddingTop: 4,
-                paddingBottom: isAndroid ? Math.max(resolvedBottomInset, 10) : Math.min(resolvedBottomInset, 10),
+                paddingBottom: navPaddingBottom,
                 borderTopWidth: hasActiveMiniPlayer ? StyleSheet.hairlineWidth : 0,
                 borderTopColor: "rgba(255, 255, 255, 0.08)",
               },

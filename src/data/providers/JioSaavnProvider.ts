@@ -861,7 +861,7 @@ async function searchPlaylistsRaw(
   return providerResults.find((parsed) => parsed.length > 0) ?? [];
 }
 
-export async function searchJioSaavnAlbums(
+async function searchJioSaavnAlbums(
   query: string,
   limit = 8,
   signal?: AbortSignal

@@ -170,24 +170,31 @@ export async function downloadCollection(
   prefs: DownloadPreferences,
   userCountry?: string | null
 ): Promise<{ queued: number; skipped: number; failed: number }> {
+  const results = await Promise.all(
+    songs.map(async (song) => {
+      const existing = await loadDownload(song.id);
+      if (existing?.status === "completed") {
+        return "skipped" as const;
+      }
+
+      const res = await downloadSong(song, uid, prefs, {
+        collectionId,
+        userCountry,
+      });
+
+      return res.ok ? ("queued" as const) : ("failed" as const);
+    })
+  );
+
   let queued = 0;
   let skipped = 0;
   let failed = 0;
 
-  for (const song of songs) {
-    const existing = await loadDownload(song.id);
-    if (existing?.status === "completed") {
-      skipped++;
-      continue;
-    }
-
-    const res = await downloadSong(song, uid, prefs, {
-      collectionId,
-      userCountry,
-    });
-
-    if (res.ok) {
+  for (const result of results) {
+    if (result === "queued") {
       queued++;
+    } else if (result === "skipped") {
+      skipped++;
     } else {
       failed++;
     }

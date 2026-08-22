@@ -58,14 +58,14 @@ async function setupPlayerInternal(): Promise<void> {
       backBuffer: 30,
       ...(Platform.OS === "ios"
         ? {
-            iosCategory: IOSCategory?.Playback ?? "playback",
-            iosCategoryMode: IOSCategoryMode?.Default ?? "default",
-            iosCategoryOptions: [
-              IOSCategoryOptions?.AllowAirPlay ?? 1,
-              IOSCategoryOptions?.AllowBluetooth ?? 2,
-              IOSCategoryOptions?.AllowBluetoothA2DP ?? 8,
-            ],
-          }
+          iosCategory: IOSCategory?.Playback ?? "playback",
+          iosCategoryMode: IOSCategoryMode?.Default ?? "default",
+          iosCategoryOptions: [
+            IOSCategoryOptions?.AllowAirPlay ?? 1,
+            IOSCategoryOptions?.AllowBluetooth ?? 2,
+            IOSCategoryOptions?.AllowBluetoothA2DP ?? 8,
+          ],
+        }
         : {}),
     });
   } catch (error) {

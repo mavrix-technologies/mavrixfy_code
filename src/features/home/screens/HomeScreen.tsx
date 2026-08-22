@@ -25,10 +25,8 @@ import AppTopHeader, {
 import AdMobBanner from "@/components/AdMobBanner";
 import AppPromotionModal from "@/components/AppPromotionModal";
 import { useNetwork } from "@/contexts/NetworkContext";
-import {
-  HomeLiquidGlassNav,
-  HOME_TOP_MENU_HEIGHT,
-} from "../components/HomeLiquidGlassNav";
+import { HomeLiquidGlassNav } from "../components/HomeLiquidGlassNav";
+import { HOME_TOP_MENU_HEIGHT } from "../constants/homeNavConstants";
 import { HomeQuickPicks } from "../components/HomeQuickPicks";
 import { HomeRecentlyPlayed } from "../components/HomeRecentlyPlayed";
 import { HomeArtistsSection } from "../components/HomeArtistsSection";

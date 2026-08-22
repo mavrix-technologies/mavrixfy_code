@@ -80,7 +80,10 @@ export async function fetchYouTubeSuggestions(query: string, signal?: AbortSigna
   const url = `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&client=firefox&q=${encodeURIComponent(query)}`;
   const data = await fetchJson<[string, string[]]>(url, signal);
   return Array.isArray(data) && Array.isArray(data[1])
-    ? data[1].map((s) => String(s || "").trim()).filter(Boolean)
+    ? data[1].flatMap((s) => {
+        const trimmed = String(s || "").trim();
+        return trimmed ? [trimmed] : [];
+      })
     : [];
 }
 

@@ -24,55 +24,54 @@ interface Props {
   gap?: number;
 }
 
-// 3 bars — matches Spotify's look closely
-const BARS = [
-  { id: "bar-1", minH: 3,  maxH: 14, duration: 380 },
-  { id: "bar-2", minH: 6,  maxH: 18, duration: 300 },
-  { id: "bar-3", minH: 4,  maxH: 12, duration: 440 },
-] as const;
-
 const MAX_HEIGHT = 18; // tallest possible bar (container height)
+
+const BARS = [
+  { id: "bar-1", minScale: 3 / MAX_HEIGHT,  maxScale: 14 / MAX_HEIGHT, duration: 380 },
+  { id: "bar-2", minScale: 6 / MAX_HEIGHT,  maxScale: 18 / MAX_HEIGHT, duration: 300 },
+  { id: "bar-3", minScale: 4 / MAX_HEIGHT,  maxScale: 12 / MAX_HEIGHT, duration: 440 },
+] as const;
 
 const Bar = React.memo(function Bar({
   isPlaying,
-  minH,
-  maxH,
+  minScale,
+  maxScale,
   duration,
   color,
   width,
 }: {
   isPlaying: boolean;
-  minH: number;
-  maxH: number;
+  minScale: number;
+  maxScale: number;
   duration: number;
   color: string;
   width: number;
 }) {
-  const height = useSharedValue(minH);
+  const scale = useSharedValue(minScale);
 
   useEffect(() => {
     if (!isPlaying) {
-      cancelAnimation(height);
-      height.value = withTiming(minH, { duration: 220, easing: Easing.out(Easing.quad) });
+      cancelAnimation(scale);
+      scale.value = withTiming(minScale, { duration: 220, easing: Easing.out(Easing.quad) });
       return;
     }
 
-    height.value = withRepeat(
+    scale.value = withRepeat(
       withSequence(
-        withTiming(maxH, { duration, easing: Easing.inOut(Easing.sin) }),
-        withTiming(minH, { duration, easing: Easing.inOut(Easing.sin) })
+        withTiming(maxScale, { duration, easing: Easing.inOut(Easing.sin) }),
+        withTiming(minScale, { duration, easing: Easing.inOut(Easing.sin) })
       ),
       -1,
       false
     );
 
     return () => {
-      cancelAnimation(height);
+      cancelAnimation(scale);
     };
-  }, [isPlaying, minH, maxH, duration, height]);
+  }, [isPlaying, minScale, maxScale, duration, scale]);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    height: height.value,
+    transform: [{ scaleY: scale.value }],
   }));
 
   return (
@@ -80,9 +79,10 @@ const Bar = React.memo(function Bar({
       style={[
         {
           width,
+          height: MAX_HEIGHT,
           backgroundColor: color,
           borderRadius: width / 2,
-          alignSelf: "flex-end",
+          transformOrigin: "bottom",
         },
         animatedStyle,
       ]}
@@ -112,8 +112,8 @@ const EqualizerBars = React.memo(function EqualizerBars({
         <Bar
           key={cfg.id}
           isPlaying={isPlaying}
-          minH={cfg.minH}
-          maxH={cfg.maxH}
+          minScale={cfg.minScale}
+          maxScale={cfg.maxScale}
           duration={cfg.duration}
           color={barColor}
           width={size}
