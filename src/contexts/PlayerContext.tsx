@@ -12,7 +12,7 @@ import { mapFilter } from "@/lib/arrayUtils";
 import { createShuffledPlaybackQueue, toggleQueueShuffleState } from "@/services/audio/ShuffleManager";
 import { showGlobalToast } from "@/utils/globalToast";
 import { setupPlayer } from "@/services/audio/TrackPlayerAdapter";
-import { recordSkipAndCheckInterstitial } from "@/services/ads/interstitialAdService";
+import { carPlayService } from "@/services/carPlayService";
 
 let TrackPlayer: typeof import("react-native-track-player").default | null = null;
 let Event: any = {};
@@ -1112,7 +1112,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [togglePlay]);
 
   const nextSong = useCallback(async () => {
-    recordSkipAndCheckInterstitial();
     if (TrackPlayer && isPlayerReady) {
       try {
         await TrackPlayer.skipToNext();
@@ -1701,6 +1700,51 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       persist();
     };
   }, [currentSong]);
+
+  // Sync state and listen for playback requests from Apple CarPlay
+  useEffect(() => {
+    if (Platform.OS !== "ios" || !carPlayService.isAvailable()) return;
+
+    if (likedSongs.length > 0) {
+      void carPlayService.syncFavorites(likedSongs);
+    }
+
+    Storage.getUserPlaylists()
+      .then((playlists) => {
+        if (playlists && playlists.length > 0) {
+          void carPlayService.syncPlaylists(playlists);
+        }
+      })
+      .catch(() => {});
+
+    Storage.getRecentlyPlayed()
+      .then((recent) => {
+        const recentSongs: Song[] = (recent || [])
+          .map((item) => item.data as Song)
+          .filter((s): s is Song => Boolean(s && s.id));
+        if (recentSongs.length > 0) {
+          void carPlayService.syncRecent(recentSongs);
+        }
+      })
+      .catch(() => {});
+
+    const unsubPlay = carPlayService.onPlaySong((event) => {
+      if (event.song && (event.song as Song).id) {
+        void playSong(event.song as Song);
+      } else if (event.songId) {
+        const found =
+          queueRef.current.find((s) => s.id === event.songId) ||
+          likedSongsRef.current.find((s) => s.id === event.songId);
+        if (found) {
+          void playSong(found);
+        }
+      }
+    });
+
+    return () => {
+      unsubPlay();
+    };
+  }, [likedSongs, playSong]);
 
   // Context Values
   const value = useMemo<PlayerContextValue>(

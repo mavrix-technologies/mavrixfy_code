@@ -36,15 +36,5 @@ export const AD_UNITS = {
       : "ca-app-pub-6003470714469240/1484577834", // Android production Rewarded ID
     default: "",
   }) || "",
-
-  // 4. Interstitial Ad (Natural navigation transitions with frequency capping)
-  INTERSTITIAL: Platform.select({
-    ios: IS_TEST_MODE
-      ? "ca-app-pub-3940256099942544/4411468910" // iOS official test Interstitial ID
-      : "ca-app-pub-6003470714469240/1788794195", // iOS production Interstitial ID
-    android: IS_TEST_MODE
-      ? "ca-app-pub-3940256099942544/1033173712" // Android official test Interstitial ID
-      : "ca-app-pub-6003470714469240/1788794195", // Android production Interstitial ID
-    default: "",
-  }) || "",
 };
+
