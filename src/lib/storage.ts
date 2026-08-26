@@ -60,6 +60,7 @@ export type MiniPlayerSecondaryControl = "queue" | "next" | "prev" | "more";
 export interface AppSettings {
   streamingQuality: "low" | "medium" | "high";
   highQualityUnlocked: boolean;
+  highQualityExpiresAt?: number | null;
   videoBackgroundQuality: YouTubeVideoQualityPreference;
   smartAutoplayEnabled: boolean;
   smartAutoplayMode: SmartAutoplayMode;
@@ -75,8 +76,9 @@ export interface AppSettings {
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  streamingQuality: "low",
+  streamingQuality: "medium",
   highQualityUnlocked: false,
+  highQualityExpiresAt: null,
   videoBackgroundQuality: "auto",
   smartAutoplayEnabled: true,
   smartAutoplayMode: "similar-trending",
@@ -423,6 +425,28 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<void
   const current = await getSettings();
   const next = { ...current, ...settings };
   await setJSON(KEYS.SETTINGS, next);
+}
+
+export function isHighQualityEntitled(settings: AppSettings): boolean {
+  if (!settings.highQualityUnlocked) return false;
+  if (typeof settings.highQualityExpiresAt === "number" && settings.highQualityExpiresAt > 0) {
+    return settings.highQualityExpiresAt > Date.now();
+  }
+  return true;
+}
+
+export function getEffectiveStreamingQuality(settings: AppSettings): "low" | "medium" | "high" {
+  if (settings.streamingQuality === "high") {
+    return isHighQualityEntitled(settings) ? "high" : "medium";
+  }
+  return settings.streamingQuality || "medium";
+}
+
+export async function setHighQualityEntitlement(unlocked: boolean, expiresAt?: number | null): Promise<void> {
+  await saveSettings({
+    highQualityUnlocked: unlocked,
+    highQualityExpiresAt: unlocked ? (expiresAt ?? null) : null,
+  });
 }
 
 export async function clearAppStorage(options?: { preserveSettings?: boolean }): Promise<void> {

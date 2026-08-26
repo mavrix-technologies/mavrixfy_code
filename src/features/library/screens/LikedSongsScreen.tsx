@@ -38,6 +38,7 @@ import AppTopHeader, {
   useAppTopHeaderScrollElevation,
 } from "@/components/AppTopHeader";
 import { useNetwork } from "@/contexts/NetworkContext";
+import AdMobBanner from "@/components/AdMobBanner";
 
 const UI = {
   bg: "#10141a",
@@ -471,6 +472,8 @@ export function LikedSongsScreen() {
                 </ScrollView>
               </View>
             )}
+
+            <AdMobBanner loadDelayMs={800} />
 
             <Pressable
               onPress={() => {

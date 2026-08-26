@@ -166,25 +166,84 @@ function getBestAudioUrl(downloadUrls: unknown): string {
   return sorted[0]?.url || "";
 }
 
-export function getBestAudioUrlWithQuality(downloadUrls: unknown, quality: "low" | "medium" | "high"): string {
-  const candidates = normalizeAudioCandidates(downloadUrls);
-  if (candidates.length === 0) return "";
+export type StreamingQuality = "low" | "medium" | "high";
 
-  const targetQualityOrder: Record<string, string[]> = {
-    low: ["96kbps", "48kbps", "12kbps", "160kbps", "320kbps"],
-    medium: ["160kbps", "96kbps", "320kbps", "48kbps", "12kbps"],
-    high: ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"],
+export interface ResolvedAudioStream {
+  url: string;
+  bitrate: number;
+  qualityLabel: string;
+  isFallback: boolean;
+}
+
+export function parseBitrateFromQuality(quality: string | undefined): number {
+  if (!quality) return 0;
+  const match = String(quality).match(/(\d+)\s*k/i);
+  if (match) return parseInt(match[1], 10);
+  const direct: Record<string, number> = {
+    "320kbps": 320,
+    "160kbps": 160,
+    "96kbps": 96,
+    "48kbps": 48,
+    "12kbps": 12,
   };
+  return direct[quality.toLowerCase()] || 0;
+}
 
-  const preference = targetQualityOrder[quality] || targetQualityOrder.high;
-  const candidatesByQuality = new Map(candidates.map((candidate) => [candidate.quality, candidate]));
+export const QUALITY_LADDER: Record<StreamingQuality, number[]> = {
+  low: [96, 48, 12, 160, 320],
+  medium: [160, 96, 48, 320, 12],
+  high: [320, 160, 96, 48, 12],
+} as const;
 
-  for (const pref of preference) {
+export const QUALITY_LABELS: Record<StreamingQuality, string[]> = {
+  low: ["96kbps", "48kbps", "12kbps", "160kbps", "320kbps"],
+  medium: ["160kbps", "96kbps", "48kbps", "320kbps", "12kbps"],
+  high: ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"],
+};
+
+export function resolveAudioStreamWithQuality(
+  downloadUrls: unknown,
+  quality: StreamingQuality = "medium"
+): ResolvedAudioStream | null {
+  const candidates = normalizeAudioCandidates(downloadUrls);
+  if (candidates.length === 0) return null;
+
+  const targetPreferences = QUALITY_LABELS[quality] || QUALITY_LABELS.medium;
+  const candidatesByQuality = new Map(
+    candidates.map((candidate) => [candidate.quality.toLowerCase(), candidate])
+  );
+
+  for (let i = 0; i < targetPreferences.length; i++) {
+    const pref = targetPreferences[i].toLowerCase();
     const found = candidatesByQuality.get(pref);
-    if (found) return found.url;
+    if (found && found.url) {
+      const bitrate = parseBitrateFromQuality(found.quality) || (quality === "high" ? 320 : quality === "medium" ? 160 : 96);
+      return {
+        url: found.url,
+        bitrate,
+        qualityLabel: found.quality || `${bitrate}kbps`,
+        isFallback: i > 0,
+      };
+    }
   }
 
-  return getBestAudioUrl(downloadUrls);
+  const bestUrl = getBestAudioUrl(downloadUrls);
+  if (!bestUrl) return null;
+
+  return {
+    url: bestUrl,
+    bitrate: 160,
+    qualityLabel: "160kbps",
+    isFallback: true,
+  };
+}
+
+export function getBestAudioUrlWithQuality(
+  downloadUrls: unknown,
+  quality: StreamingQuality = "medium"
+): string {
+  const resolved = resolveAudioStreamWithQuality(downloadUrls, quality);
+  return resolved?.url || "";
 }
 
 export function convertJioSaavnSong(song: JioSaavnSong): Song {

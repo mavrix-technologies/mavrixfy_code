@@ -36,6 +36,7 @@ import {
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { mapFilter } from "@/lib/arrayUtils";
+import AdMobBanner from "@/components/AdMobBanner";
 
 function pickFirst(v: string | string[] | undefined): string {
   if (Array.isArray(v)) return v[0] ?? "";
@@ -471,6 +472,8 @@ function useArtistScreenView() {
             <Text style={styles.emptyText}>No songs available</Text>
           )}
         </View>
+
+        <AdMobBanner loadDelayMs={800} />
 
         {/* ── Albums ── */}
         {topAlbums.length ? (

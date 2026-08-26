@@ -15,6 +15,7 @@ import { useDownloads, useSongDownload } from '@/contexts/DownloadContext';
 import type { Song } from '@/lib/musicData';
 import { logger } from '@/lib/logger';
 import { formatBytes } from '@/lib/downloads/storagePolicy';
+import { requestDownloadWithRewardedAd } from '@/services/ads/rewardedDownloadAdService';
 
 function resolveSongAudioUrl(song: Song): string {
   if (song.audioUrl) return song.audioUrl;
@@ -119,6 +120,9 @@ export default function DownloadButton({
             text: 'Download',
             onPress: async () => {
               try {
+                const allowed = await requestDownloadWithRewardedAd(targetSong.title);
+                if (!allowed) return;
+
                 const res = await downloadSong(targetSong);
                 if (!res.ok) {
                   Alert.alert('Download Failed', res.reason || 'Could not queue download');

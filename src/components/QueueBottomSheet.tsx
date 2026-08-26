@@ -43,6 +43,7 @@ import DraggableFlatList, {
 import { ImpactFeedbackStyle } from "expo-haptics";
 
 import Colors from "@/constants/colors";
+import AdMobBanner from "@/components/AdMobBanner";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import {
   usePlaybackQueueState,
@@ -615,6 +616,8 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
           basisLabels={smartAutoplayStatus.basisLabels}
           generatedCount={smartAutoplayStatus.generatedCount}
         />
+
+        <AdMobBanner loadDelayMs={600} />
 
         {/* ── Upcoming queue list ──────────────────────────────────────── */}
         {listReady ? (

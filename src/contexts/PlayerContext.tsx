@@ -1,7 +1,6 @@
 import React, { createContext, use, useState, useCallback, useMemo, useRef, ReactNode, useEffect } from "react";
 import { AppState, Platform, View } from "react-native";
 import { isRunningInExpoGo } from "expo";
-import * as Network from "expo-network";
 import { Song } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,6 +12,7 @@ import { mapFilter } from "@/lib/arrayUtils";
 import { createShuffledPlaybackQueue, toggleQueueShuffleState } from "@/services/audio/ShuffleManager";
 import { showGlobalToast } from "@/utils/globalToast";
 import { setupPlayer } from "@/services/audio/TrackPlayerAdapter";
+import { recordSkipAndCheckInterstitial } from "@/services/ads/interstitialAdService";
 
 let TrackPlayer: typeof import("react-native-track-player").default | null = null;
 let Event: any = {};
@@ -53,6 +53,14 @@ export interface SleepTimerState {
   endsAt: number | null;
 }
 
+export interface PlaybackQualityState {
+  requested: "low" | "medium" | "high";
+  actualBitrate: number;
+  qualityLabel: string;
+  unlocked: boolean;
+  isFallback: boolean;
+}
+
 interface PlayerState {
   currentSong: Song | null;
   queue: Song[];
@@ -71,6 +79,7 @@ interface PlayerState {
   albumColor: string;
   textColor: string;
   sleepTimer: SleepTimerState | null;
+  playbackQuality: PlaybackQualityState;
 }
 
 interface PlayerContextValue extends PlayerState {
@@ -94,6 +103,7 @@ interface PlayerContextValue extends PlayerState {
   clearSleepTimer: () => void;
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
+  changeStreamingQuality: (quality: "low" | "medium" | "high") => Promise<void>;
 }
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -160,6 +170,7 @@ interface PlayerActionsContextValue {
   albumColor: string;
   textColor: string;
   sleepTimer: SleepTimerState | null;
+  playbackQuality: PlaybackQualityState;
   playSong: (song: Song, queue?: Song[]) => void;
   shufflePlay: (songs: Song[], startSong?: Song) => void;
   togglePlay: () => void;
@@ -180,6 +191,7 @@ interface PlayerActionsContextValue {
   clearSleepTimer: () => void;
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
+  changeStreamingQuality: (quality: "low" | "medium" | "high") => Promise<void>;
 }
 
 interface PlayerLikedContextValue {
@@ -319,7 +331,7 @@ function withResolvedPlaybackUrl(song: Song, audioUrl: string): Song {
 
 function songToTrack(song: Song, localUrl?: string | null): any {
   const audioUrl = localUrl || resolveAudioUrl(song as SongPlaybackSource);
-  const durationSeconds = toDurationSeconds(song.duration);
+  const duration = toDurationSeconds(song.duration);
   const title = cleanHtmlEntities(readNonEmptyString(song.title) || "Unknown");
   const artist = cleanHtmlEntities(readNonEmptyString(song.artist) || "Mavrixfy");
   const album = song.album ? cleanHtmlEntities(readNonEmptyString(song.album) || "") : undefined;
@@ -331,7 +343,7 @@ function songToTrack(song: Song, localUrl?: string | null): any {
     album,
     genre: readNonEmptyString(song.genre),
     artwork: song.coverUrl,
-    duration: durationSeconds > 0 ? durationSeconds : undefined,
+    ...(duration > 0 ? { duration } : {}),
     ...(song.playbackHeaders && Object.keys(song.playbackHeaders).length > 0
       ? { headers: song.playbackHeaders }
       : {}),
@@ -379,54 +391,84 @@ function getNowPlayingMetadata(track: NowPlayingMetadataSource) {
   };
 }
 
-let cachedAdaptiveQuality: { quality: "low" | "medium" | "high"; timestamp: number } | null = null;
-
-async function getAdaptiveStreamingQuality(): Promise<"low" | "medium" | "high"> {
-  const now = Date.now();
-  if (cachedAdaptiveQuality && now - cachedAdaptiveQuality.timestamp < 30000) {
-    return cachedAdaptiveQuality.quality;
-  }
-  try {
-    const settings = await Storage.getSettings();
-    if (settings.streamingQuality === "low" || settings.streamingQuality === "medium") {
-      cachedAdaptiveQuality = { quality: settings.streamingQuality, timestamp: now };
-      return settings.streamingQuality;
-    }
-    const netState = await Network.getNetworkStateAsync();
-    if (netState.type === Network.NetworkStateType.CELLULAR) {
-      cachedAdaptiveQuality = { quality: "medium", timestamp: now };
-      return "medium";
-    }
-  } catch (e) {
-    logger.error("[Player] Failed to determine adaptive streaming quality", e);
-  }
-  cachedAdaptiveQuality = { quality: "high", timestamp: now };
-  return "high";
+export interface ResolvedPlaybackResult {
+  url: string | null;
+  qualityState: PlaybackQualityState;
 }
 
-/** Resolve the best playback URL for a song — local file first, then quality-specific stream, then direct candidate. */
-async function resolvePlaybackUrl(song: Song): Promise<string | null> {
+async function getRequestedQualityPreference(): Promise<{
+  requested: "low" | "medium" | "high";
+  effective: "low" | "medium" | "high";
+  unlocked: boolean;
+}> {
+  try {
+    const settings = await Storage.getSettings();
+    const unlocked = Storage.isHighQualityEntitled(settings);
+    const requested = settings.streamingQuality || "medium";
+    const effective = Storage.getEffectiveStreamingQuality(settings);
+    return { requested, effective, unlocked };
+  } catch (e) {
+    logger.error("[Player] Failed to determine streaming quality preference", e);
+    return { requested: "medium", effective: "medium", unlocked: false };
+  }
+}
+
+/** Resolve the best playback URL and metadata for a song based on explicit quality entitlement. */
+async function resolvePlaybackUrlWithDetails(
+  song: Song,
+  forcedQuality?: "low" | "medium" | "high"
+): Promise<ResolvedPlaybackResult> {
+  const { requested, effective, unlocked } = await getRequestedQualityPreference();
+  const targetQuality = forcedQuality || effective;
+
+  const defaultQualityState: PlaybackQualityState = {
+    requested: forcedQuality || requested,
+    actualBitrate: targetQuality === "high" ? 320 : targetQuality === "medium" ? 160 : 96,
+    qualityLabel: targetQuality === "high" ? "320kbps" : targetQuality === "medium" ? "160kbps" : "96kbps",
+    unlocked,
+    isFallback: false,
+  };
+
   try {
     // 1. Local downloaded file
     const { getLocalPlaybackUrl } = await import("@/lib/downloads/downloadManager");
     const local = await getLocalPlaybackUrl(song.id);
     if (local) {
-      if (local.startsWith("file://") || local.startsWith("http")) return local;
-      return `file://${local}`;
+      const url = local.startsWith("file://") || local.startsWith("http") ? local : `file://${local}`;
+      return {
+        url,
+        qualityState: {
+          requested,
+          actualBitrate: 320,
+          qualityLabel: "Offline (320kbps)",
+          unlocked,
+          isFallback: false,
+        },
+      };
     }
   } catch {
     // Fall through
   }
 
-  // 2. JioSaavn / Catalogue Songs -> Quality adaptive selection
+  // 2. JioSaavn / Catalogue Songs -> Quality ladder selection
   if (song.downloadUrl) {
     try {
-      const { getBestAudioUrlWithQuality } = await import("@/lib/musicData");
-      const targetQuality = await getAdaptiveStreamingQuality();
-      const resolvedUrl = getBestAudioUrlWithQuality(song.downloadUrl, targetQuality);
-      const playableUrl = readAudioCandidate(resolvedUrl);
-      if (playableUrl) {
-        return playableUrl;
+      const { resolveAudioStreamWithQuality } = await import("@/lib/musicData");
+      const stream = resolveAudioStreamWithQuality(song.downloadUrl, targetQuality);
+      if (stream?.url) {
+        const playableUrl = readAudioCandidate(stream.url);
+        if (playableUrl) {
+          return {
+            url: playableUrl,
+            qualityState: {
+              requested,
+              actualBitrate: stream.bitrate,
+              qualityLabel: stream.qualityLabel,
+              unlocked,
+              isFallback: stream.isFallback,
+            },
+          };
+        }
       }
     } catch (e) {
       logger.error("[Player] Failed to resolve quality-specific audio URL:", e);
@@ -435,7 +477,19 @@ async function resolvePlaybackUrl(song: Song): Promise<string | null> {
 
   // 3. Direct audio URL fallback
   const fallbackUrl = resolveAudioUrl(song as SongPlaybackSource) || null;
-  return fallbackUrl;
+  return {
+    url: fallbackUrl,
+    qualityState: {
+      ...defaultQualityState,
+      isFallback: true,
+    },
+  };
+}
+
+/** Resolve the best playback URL for a song — local file first, then quality-specific stream, then direct candidate. */
+async function resolvePlaybackUrl(song: Song): Promise<string | null> {
+  const result = await resolvePlaybackUrlWithDetails(song);
+  return result.url;
 }
 
 const canUseLightweightAudioFallback = Boolean(isRunningInExpoGo() || !TrackPlayer);
@@ -461,6 +515,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [albumColor, setAlbumColor] = useState("#282828");
   const [textColor, setTextColor] = useState("#FFFFFF");
   const [sleepTimer, setSleepTimerState] = useState<SleepTimerState | null>(null);
+  const [playbackQuality, setPlaybackQuality] = useState<PlaybackQualityState>({
+    requested: "medium",
+    actualBitrate: 160,
+    qualityLabel: "160kbps",
+    unlocked: false,
+    isFallback: false,
+  });
 
   // Position and progress state
   const [nativePosition, setNativePosition] = useState(0);
@@ -713,18 +774,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // Deduplicated in-flight stream URL resolver
   const resolvePlaybackUrlCached = useCallback(
-    async (song: Song): Promise<string | null> => {
+    async (song: Song, forcedQuality?: "low" | "medium" | "high"): Promise<string | null> => {
       if (!song?.id) return null;
       const cached = streamUrlCache.current.get(song.id);
-      if (cached) return cached;
+      if (cached && !forcedQuality) return cached;
 
       const pending = streamResolveCache.current.get(song.id);
-      if (pending) return pending;
+      if (pending && !forcedQuality) return pending;
 
-      const request = resolvePlaybackUrl(song)
-        .then((url) => {
+      const request = resolvePlaybackUrlWithDetails(song, forcedQuality)
+        .then(({ url, qualityState }) => {
           if (url) {
             setStreamCache(song.id, url);
+          }
+          if (song.id === currentSongRef.current?.id) {
+            setPlaybackQuality(qualityState);
           }
           return url;
         })
@@ -888,6 +952,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             const nativeTracks = q.map((s, idx) =>
               songToTrack(s, idx === targetIndex ? audioUrl : null)
             );
+
+            if (__DEV__) {
+              const missingDuration = nativeTracks.filter(
+                (track: any) => !Number.isFinite(track.duration) || track.duration <= 0
+              );
+              if (missingDuration.length > 0) {
+                logger.warn(
+                  "[Playback] Queue tracks missing duration:",
+                  missingDuration.map((track: any) => ({
+                    id: track.id,
+                    title: track.title,
+                    duration: track.duration,
+                  }))
+                );
+              }
+            }
+
             if (typeof TrackPlayer.setQueue === "function") {
               await TrackPlayer.setQueue(nativeTracks).catch(async () => {
                 await TrackPlayer.reset().catch(() => {});
@@ -905,6 +986,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
           await TrackPlayer.play();
           if (reqId !== playRequestIdRef.current) return;
+
+          if (__DEV__) {
+            void Promise.all([
+              TrackPlayer.getActiveTrack().catch(() => null),
+              TrackPlayer.getProgress().catch(() => null),
+            ]).then(([active, prog]) => {
+              logger.info("[Playback Duration Diagnostic]", {
+                id: targetSong.id,
+                title: targetSong.title,
+                catalogDuration: targetSong.duration,
+                activeTrackDuration: active?.duration,
+                progressDuration: prog?.duration,
+                position: prog?.position,
+              });
+            });
+          }
 
           // Prefetch next track in background
           prefetchAdjacentTrackStreams(q, targetIndex);
@@ -1015,6 +1112,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [togglePlay]);
 
   const nextSong = useCallback(async () => {
+    recordSkipAndCheckInterstitial();
     if (TrackPlayer && isPlayerReady) {
       try {
         await TrackPlayer.skipToNext();
@@ -1400,14 +1498,76 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       endsAt,
     };
     sleepTimerRef.current = nextTimer;
-    setSleepTimerState(nextTimer);
-    sleepTimerTimeoutRef.current = setTimeout(() => {
+    setSleepTimerState(nextTimer);    sleepTimerTimeoutRef.current = setTimeout(() => {
       if (isPlayingRef.current) {
         void togglePlay();
       }
       clearSleepTimer();
     }, Math.max(0, endsAt - Date.now()));
   }, [clearSleepTimer, clearSleepTimerTimeout, togglePlay]);
+
+  const changeStreamingQuality = useCallback(
+    async (quality: "low" | "medium" | "high") => {
+      await Storage.saveSettings({ streamingQuality: quality });
+      // Invalidate stream cache so new tracks and retries fetch the new quality ladder
+      streamUrlCache.current.clear();
+      streamResolveCache.current.clear();
+
+      const activeSong = currentSongRef.current;
+      if (!activeSong) return;
+
+      const positionSec = positionSecondsRef.current > 0 ? positionSecondsRef.current : 0;
+      const wasPlaying = isPlayingRef.current;
+
+      try {
+        const { url: newAudioUrl, qualityState } = await resolvePlaybackUrlWithDetails(activeSong, quality);
+        if (!newAudioUrl) return;
+
+        setPlaybackQuality(qualityState);
+        const resolvedSong = withResolvedPlaybackUrl(activeSong, newAudioUrl);
+        currentSongRef.current = resolvedSong;
+        setCurrentSong(resolvedSong);
+
+        if (TrackPlayer && (isPlayerReady || (await ensurePlayerReady()))) {
+          const currentNativeQueue = await TrackPlayer.getQueue().catch(() => []);
+          const activeIdx = queueIndexRef.current;
+          const currentQ = queueRef.current;
+          if (Array.isArray(currentNativeQueue) && currentNativeQueue.length > 0) {
+            const updatedQueue = currentQ.map((s, idx) =>
+              songToTrack(s, idx === activeIdx ? newAudioUrl : null)
+            );
+            if (typeof TrackPlayer.setQueue === "function") {
+              await TrackPlayer.setQueue(updatedQueue).catch(async () => {
+                await TrackPlayer.reset().catch(() => {});
+                await TrackPlayer.add(updatedQueue).catch(() => {});
+              });
+            } else {
+              await TrackPlayer.reset().catch(() => {});
+              await TrackPlayer.add(updatedQueue).catch(() => {});
+            }
+            await TrackPlayer.skip(activeIdx).catch(() => {});
+            if (positionSec > 0.5) {
+              await TrackPlayer.seekTo(positionSec).catch(() => {});
+            }
+            if (wasPlaying) {
+              await TrackPlayer.play().catch(() => {});
+            }
+          }
+        } else if (canUseLightweightAudioFallback) {
+          await ExpoAvPlayer.loadAndPlay(newAudioUrl);
+          if (positionSec > 0.5) {
+            await ExpoAvPlayer.seekTo(positionSec);
+          }
+          if (!wasPlaying) {
+            ExpoAvPlayer.pause();
+          }
+        }
+      } catch (err) {
+        logger.error("[Player] Failed to reload playback stream on quality change:", err);
+      }
+    },
+    [ensurePlayerReady, isPlayerReady]
+  );
 
   // TrackPlayer native event handlers
   useEffect(() => {
@@ -1508,18 +1668,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           }
         })
         .catch(() => {});
+    } else {
+      setLikedSongs([]);
+      setLikedSongIds([]);
+      likedSongsRef.current = [];
     }
   }, [authUser?.id]);
 
-  // Save player state periodically and on background (only dependent on currentSong)
+  // Save current player state to AsyncStorage
   useEffect(() => {
     if (!currentSong) return;
+
     const persist = () => {
-      const song = currentSongRef.current;
-      if (!song) return;
+      if (!currentSongRef.current) return;
       Storage.savePlayerState({
-        currentSong: song,
-        queue: queueRef.current.length > 0 ? queueRef.current : [song],
+        currentSong: currentSongRef.current,
+        queue: queueRef.current,
         queueIndex: queueIndexRef.current,
         positionSeconds: positionSecondsRef.current,
         updatedAt: Date.now(),
@@ -1558,6 +1722,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       albumColor,
       textColor,
       sleepTimer,
+      playbackQuality,
       playSong,
       shufflePlay,
       togglePlay,
@@ -1578,6 +1743,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
+      changeStreamingQuality,
     }),
     [
       currentSong,
@@ -1597,6 +1763,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       albumColor,
       textColor,
       sleepTimer,
+      playbackQuality,
       playSong,
       shufflePlay,
       togglePlay,
@@ -1617,6 +1784,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
+      changeStreamingQuality,
     ]
   );
 
@@ -1636,6 +1804,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       albumColor,
       textColor,
       sleepTimer,
+      playbackQuality,
       playSong,
       shufflePlay,
       togglePlay,
@@ -1656,6 +1825,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
+      changeStreamingQuality,
     }),
     [
       currentSong,
@@ -1672,6 +1842,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       albumColor,
       textColor,
       sleepTimer,
+      playbackQuality,
       playSong,
       shufflePlay,
       togglePlay,
@@ -1692,6 +1863,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
+      changeStreamingQuality,
     ]
   );
 
@@ -1772,6 +1944,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       albumColor,
       textColor,
       sleepTimer,
+      playbackQuality,
       playSong,
       shufflePlay,
       togglePlay,
@@ -1792,6 +1965,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
+      changeStreamingQuality,
     }),
     [
       isShuffled,
@@ -1801,6 +1975,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       albumColor,
       textColor,
       sleepTimer,
+      playbackQuality,
       playSong,
       shufflePlay,
       togglePlay,
@@ -1821,6 +1996,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       clearSleepTimer,
       setAlbumColor,
       setTextColor,
+      changeStreamingQuality,
     ]
   );
 

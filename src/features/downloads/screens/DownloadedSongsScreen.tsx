@@ -38,6 +38,7 @@ import AppTopHeader, {
   useAppTopHeaderScrollElevation,
 } from "@/components/AppTopHeader";
 import { formatBytes, getTrackFileUri } from "@/lib/downloads/storagePolicy";
+import AdMobBanner from "@/components/AdMobBanner";
 
 const UI = {
   bg: "#10141a",
@@ -473,6 +474,8 @@ export function DownloadedSongsScreen() {
                     </Pressable>
                   </View>
                 </View>
+
+                <AdMobBanner loadDelayMs={800} />
 
                 {filteredSongs.length > 0 ? <View style={styles.songListSpacer} /> : null}
               </>

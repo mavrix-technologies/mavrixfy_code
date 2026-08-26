@@ -53,6 +53,8 @@ import {
 } from "@/lib/colorExtractor";
 import EqualizerBars from "@/components/EqualizerBars";
 import { KaraokeLyricsView, FullscreenKaraokeModal } from "@/components/KaraokeLyricsView";
+import AdMobBanner from "@/components/AdMobBanner";
+import { recordSkipAndCheckInterstitial } from "@/services/ads/interstitialAdService";
 import { mapFilter } from "@/lib/arrayUtils";
 import { PlayerSlider } from "@/components/PlayerSlider";
 import {
@@ -1497,6 +1499,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
 
   const handleSkip = useCallback(
     (direction: "next" | "prev") => {
+      recordSkipAndCheckInterstitial();
       if (direction === "next") {
         void nextSong();
       } else {
@@ -2172,6 +2175,8 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
                     onSeek={handleLyricSeek}
                     onToggleFullScreen={() => setFullscreenLyricsVisible(true)}
                   />
+
+                  <AdMobBanner loadDelayMs={1200} />
 
                   <View
                     style={[

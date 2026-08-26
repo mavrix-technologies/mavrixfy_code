@@ -3,7 +3,6 @@
   "main": "index.js",
   "version": "3.2.0",
   "scripts": {
-    "expo:dev": "EXPO_PACKAGER_PROXY_URL=https://$REPLIT_DEV_DOMAIN REACT_NATIVE_PACKAGER_HOSTNAME=$REPLIT_DEV_DOMAIN npx expo start --localhost",
     "expo:start:static:build": "npx expo start --no-dev --minify --localhost",
     "start": "npx expo start",
     "start:expo-go": "npx expo start",

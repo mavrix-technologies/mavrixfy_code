@@ -43,6 +43,8 @@ import { globalQueueSheetRef } from "@/lib/queueRef";
 import AddSongsBottomSheet from "@/components/AddSongsModal";
 import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import { logger } from "@/lib/logger";
+import { initializeMobileAds } from "@/lib/googleMobileAds";
+import { preloadInterstitialAd, recordNavigationAndCheckInterstitial } from "@/services/ads/interstitialAdService";
 import { initRemoteConfig } from "@/lib/remoteConfig";
 import { showGlobalToast, subscribeGlobalToast } from "@/utils/globalToast";
 import { AppNavBar } from "./(tabs)/_layout";
@@ -241,6 +243,7 @@ export function preWarmHomeCache() {
     getCachedHomePublicPlaylists({ allowStale: true }),
     getRecentlyPlayed(),
     runOneTimeMigrations(),
+    initializeMobileAds().then(() => preloadInterstitialAd()),
   ]).catch(() => { });
 }
 
@@ -372,6 +375,12 @@ function useRootLayoutNavigation() {
     !unmountNavBar &&
     !isPlayerScreen &&
     NAV_OVERLAY_SEGMENTS.has(activeSegment);
+
+  useEffect(() => {
+    if (activeSegment && !isPlayerScreen) {
+      recordNavigationAndCheckInterstitial();
+    }
+  }, [activeSegment, isPlayerScreen]);
 
   useEffect(() => {
     if (unmountNavBar) {

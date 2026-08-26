@@ -17,18 +17,18 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
 import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
 import { setHapticsPreference } from "@/lib/haptics";
 import { setMiniPlayerSecondaryControlPreference } from "@/lib/miniPlayerControls";
-import { getSettings, saveSettings, hasSeenNewFeatures, markNewFeaturesSeen, type AppSettings } from "@/lib/storage";
+import { getSettings, saveSettings, hasSeenNewFeatures, markNewFeaturesSeen, isHighQualityEntitled, type AppSettings } from "@/lib/storage";
 import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
 import { safeGoBack } from "@/utils/navigation";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { clearJioSaavnPlaylistCache } from "@/data/providers/JioSaavnProvider";
 import { clearCachedHomePublicPlaylists, notifyHomeCacheInvalidated } from "@/lib/homeCache";
 import { clearDailyNewReleaseSongCache } from "@/data/providers/NewReleaseProvider";
-import { AD_UNITS } from "@/constants/admob";
-import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobileAds";
+import { requestHighQualityUnlockWithRewardedAd } from "@/services/ads/highQualityEntitlementService";
 import { checkAppVersion, getInstalledAppVersion, getInstalledBuildNumber } from "@/services/notificationService";
 
 const QUALITY_OPTIONS: { label: string; value: "low" | "medium" | "high" }[] = [
@@ -36,18 +36,21 @@ const QUALITY_OPTIONS: { label: string; value: "low" | "medium" | "high" }[] = [
   { label: "Medium", value: "medium" },
   { label: "High", value: "high" },
 ];
+
 const VIDEO_BACKGROUND_QUALITY_OPTIONS: { label: string; value: AppSettings["videoBackgroundQuality"] }[] = [
   { label: "Auto", value: "auto" },
   { label: "Low", value: "low" },
   { label: "Medium", value: "medium" },
   { label: "High", value: "high" },
 ];
+
 const SMART_AUTOPLAY_MODE_OPTIONS: { label: string; value: AppSettings["smartAutoplayMode"] }[] = [
   { label: "Mix", value: "similar-trending" },
   { label: "Similar", value: "similar-only" },
   { label: "Artist", value: "artist-radio" },
   { label: "Mood", value: "mood-radio" },
 ];
+
 const MINI_PLAYER_SECONDARY_OPTIONS: { label: string; value: AppSettings["miniPlayerSecondaryControl"]; icon: keyof typeof Ionicons.glyphMap }[] = [
   { label: "Queue", value: "queue", icon: "list" },
   { label: "Next", value: "next", icon: "play-skip-forward" },
@@ -191,6 +194,11 @@ function PlaybackSettingsSection({
   showNewBadges: boolean;
 }) {
   const ambientBackdropSwitchValue = settings.ambientBackdropEnabled;
+  const isHighUnlocked = isHighQualityEntitled(settings);
+  const remainingHours =
+    typeof settings.highQualityExpiresAt === "number" && settings.highQualityExpiresAt > Date.now()
+      ? Math.ceil((settings.highQualityExpiresAt - Date.now()) / (1000 * 60 * 60))
+      : null;
 
   return (
     <>
@@ -211,9 +219,13 @@ function PlaybackSettingsSection({
               onChange={onChangeQuality}
             />
           </View>
-          {!settings.highQualityUnlocked && (
-            <Text style={styles.settingHint}>Watch a short ad to unlock High quality</Text>
-          )}
+          <Text style={styles.settingHint}>
+            {isHighUnlocked
+              ? remainingHours
+                ? `High Quality active (Up to 320 kbps) — ~${remainingHours}h remaining`
+                : "High Quality active (Up to 320 kbps)"
+              : "Low: 96 kbps • Medium: 160 kbps • High: 320 kbps (Unlock via short ad)"}
+          </Text>
         </View>
 
         <View style={[styles.settingCard, styles.settingCardBorder]}>
@@ -428,11 +440,11 @@ function CacheSettingsSection({
   );
 }
 
-
 export function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { push: routerPush, replace: routerReplace } = useRouter();
   const { user, isAuthenticated, isGuest, logout } = useAuth();
+  const { changeStreamingQuality } = usePlayerActions();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const bottomContentInset = Platform.OS === "web" ? 0 : insets.bottom;
   const [lowEndDevice, setLowEndDevice] = useState(false);
@@ -443,8 +455,9 @@ export function ProfileScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   const [settings, setSettings] = useState<AppSettings>({
-    streamingQuality: "low",
+    streamingQuality: "medium",
     highQualityUnlocked: false,
+    highQualityExpiresAt: null,
     videoBackgroundQuality: "auto",
     smartAutoplayEnabled: true,
     smartAutoplayMode: "similar-trending",
@@ -468,7 +481,6 @@ export function ProfileScreen() {
     ]).then(([s, profile, seen]) => {
       if (!mounted) return;
       queueMicrotask(() => {
-        // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
         setSettings(s);
         setLowEndDevice(profile.isLowEndDevice);
         setHapticsPreference(Boolean(s.hapticsEnabled));
@@ -480,13 +492,9 @@ export function ProfileScreen() {
   }, []);
 
   const updateSettings = useCallback(async (partial: Partial<AppSettings>) => {
-    // Update storage FIRST (await it)
     await saveSettings(partial);
-    
-    // Then update UI state
     setSettings((current) => ({ ...current, ...partial }));
     
-    // Handle side effects
     if (typeof partial.hapticsEnabled === "boolean") {
       setHapticsPreference(partial.hapticsEnabled);
     }
@@ -496,87 +504,33 @@ export function ProfileScreen() {
   }, []);
 
   const handleQualityChange = useCallback(async (value: AppSettings["streamingQuality"]) => {
-    // If selecting High quality and not unlocked, try to show ad
-    if (value === "high" && !settings.highQualityUnlocked) {
-      const adsModule = getGoogleMobileAdsModule();
-      
-      // No ads available? Just unlock High quality anyway
-      if (!adsModule || !AD_UNITS.REWARDED) {
-        await saveSettings({ streamingQuality: "high", highQualityUnlocked: true });
-        setSettings(prev => ({ ...prev, streamingQuality: "high", highQualityUnlocked: true }));
+    if (value === "high") {
+      const isEntitled = isHighQualityEntitled(settings);
+      if (isEntitled) {
+        await saveSettings({ streamingQuality: "high" });
+        setSettings((prev) => ({ ...prev, streamingQuality: "high" }));
+        await changeStreamingQuality("high");
         return;
       }
 
+      setIsLoadingAd(true);
       try {
-        setIsLoadingAd(true);
-        await initializeMobileAds();
-        
-        const { RewardedAd, RewardedAdEventType, AdEventType } = adsModule;
-        const rewarded = RewardedAd.createForAdRequest(AD_UNITS.REWARDED, {
-          requestNonPersonalizedAdsOnly: true,
-        });
-
-        const unsubLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
-          setIsLoadingAd(false);
-          rewarded.show();
-        });
-
-        const unsubEarned = rewarded.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
-          // Reward was earned; keep the flow simple and let the close handler unlock access.
-        });
-
-        const unsubClosed = rewarded.addAdEventListener(AdEventType.CLOSED, async () => {
-          unsubLoaded();
-          unsubEarned();
-          unsubClosed();
-          unsubError();
-
-          // Unlock High quality (whether reward earned or not)
-          await saveSettings({ streamingQuality: "high", highQualityUnlocked: true });
-          setSettings(prev => ({ ...prev, streamingQuality: "high", highQualityUnlocked: true }));
-        });
-
-        const unsubError = rewarded.addAdEventListener(AdEventType.ERROR, async () => {
-          unsubLoaded();
-          unsubEarned();
-          unsubClosed();
-          unsubError();
-          setIsLoadingAd(false);
-          
-          // Ad failed? Just unlock High quality anyway
-          await saveSettings({ streamingQuality: "high", highQualityUnlocked: true });
-          setSettings(prev => ({ ...prev, streamingQuality: "high", highQualityUnlocked: true }));
-        });
-
-        // 10 second timeout - if ad doesn't load, unlock anyway
-        setTimeout(() => {
-          if (isLoadingAd) {
-            setIsLoadingAd(false);
-            unsubLoaded();
-            unsubEarned();
-            unsubClosed();
-            unsubError();
-            
-            // Timeout? Unlock anyway
-            void saveSettings({ streamingQuality: "high", highQualityUnlocked: true }).then(() => {
-              setSettings(prev => ({ ...prev, streamingQuality: "high", highQualityUnlocked: true }));
-            });
-          }
-        }, 10000);
-
-        rewarded.load();
-      } catch {
+        const unlocked = await requestHighQualityUnlockWithRewardedAd();
+        if (unlocked) {
+          const updated = await getSettings();
+          setSettings(updated);
+          await changeStreamingQuality("high");
+        }
+      } finally {
         setIsLoadingAd(false);
-        // Any error? Just unlock High quality
-        await saveSettings({ streamingQuality: "high", highQualityUnlocked: true });
-        setSettings(prev => ({ ...prev, streamingQuality: "high", highQualityUnlocked: true }));
       }
-    } else {
-      // Already unlocked or switching to low/medium
-      await saveSettings({ streamingQuality: value });
-      setSettings(prev => ({ ...prev, streamingQuality: value }));
+      return;
     }
-  }, [settings.highQualityUnlocked, isLoadingAd]);
+
+    await saveSettings({ streamingQuality: value });
+    setSettings((prev) => ({ ...prev, streamingQuality: value }));
+    await changeStreamingQuality(value);
+  }, [settings, changeStreamingQuality]);
 
   const handleLogout = useCallback(() => {
     Alert.alert("Log Out", "Are you sure you want to log out?", [
@@ -617,7 +571,6 @@ export function ProfileScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              // 1. Clear app caches
               await clearJioSaavnPlaylistCache().catch(() => {});
               await Promise.all([
                 clearCachedHomePublicPlaylists(),
@@ -626,13 +579,9 @@ export function ProfileScreen() {
               await Image.clearDiskCache().catch(() => {});
               Image.clearMemoryCache();
 
-              // 2. Clear Search History
               await AsyncStorage.setItem("@mavrixfy_search_history", JSON.stringify([])).catch(() => {});
-
-              // 3. Clear Recently Played
               await AsyncStorage.setItem("@mavrixfy_recently_played", JSON.stringify([])).catch(() => {});
 
-              // Make an already-mounted Home tab discard its session cache and reload fresh sections.
               notifyHomeCacheInvalidated();
 
               Alert.alert("Success", "All cache and history cleared successfully.");

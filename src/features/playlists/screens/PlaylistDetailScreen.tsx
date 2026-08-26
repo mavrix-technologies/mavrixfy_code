@@ -30,6 +30,7 @@ import { PlaylistEditModal } from "../components/PlaylistEditModal";
 import { PlaylistHero } from "../components/PlaylistHero";
 import { PlaylistStickyHeader } from "../components/PlaylistStickyHeader";
 import { PlaylistTrackListEmpty } from "../components/PlaylistTrackListEmpty";
+import AdMobBanner from "@/components/AdMobBanner";
 
 export function PlaylistDetailScreen() {
   const params = usePlaylistDetailParams();
@@ -242,6 +243,8 @@ export function PlaylistDetailScreen() {
           <OfflineBanner />
         </View>
       )}
+
+      <AdMobBanner loadDelayMs={800} />
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Tracks</Text>

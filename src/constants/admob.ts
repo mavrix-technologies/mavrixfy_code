@@ -1,8 +1,7 @@
 import { Platform } from "react-native";
 
-// Toggle this to true to force test ads, false to use real production ads.
-// In __DEV__ mode test ads are always used to ensure the rewarded ad loads reliably.
-const IS_TEST_MODE = __DEV__;
+// Toggle to false to use real production AdMob ad unit IDs.
+const IS_TEST_MODE = true;
 
 export const AD_UNITS = {
   // 1. Standard Native Ad (Used inside standard banner blocks and song lists)
@@ -35,6 +34,17 @@ export const AD_UNITS = {
     android: IS_TEST_MODE
       ? "ca-app-pub-3940256099942544/5224354917" // Android official test Rewarded ID
       : "ca-app-pub-6003470714469240/1484577834", // Android production Rewarded ID
+    default: "",
+  }) || "",
+
+  // 4. Interstitial Ad (Natural navigation transitions with frequency capping)
+  INTERSTITIAL: Platform.select({
+    ios: IS_TEST_MODE
+      ? "ca-app-pub-3940256099942544/4411468910" // iOS official test Interstitial ID
+      : "ca-app-pub-6003470714469240/1788794195", // iOS production Interstitial ID
+    android: IS_TEST_MODE
+      ? "ca-app-pub-3940256099942544/1033173712" // Android official test Interstitial ID
+      : "ca-app-pub-6003470714469240/1788794195", // Android production Interstitial ID
     default: "",
   }) || "",
 };
