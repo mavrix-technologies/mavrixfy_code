@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, StyleSheet } from "react-native";
+import { View, StyleSheet, useWindowDimensions } from "react-native";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
   Easing,
 } from "react-native-reanimated";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { type Song } from "@/lib/musicData";
 import { extractArtworkColors, colorWithAlpha } from "@/lib/colorExtractor";
+import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 
 type GradientStops = readonly [string, string, string, string];
 
@@ -28,10 +30,6 @@ const TRANSITION_EASING = Easing.bezier(0.25, 0.1, 0.25, 1);
 let gCachedCoverUrl: string | null = null;
 let gCachedColorStops: GradientStops = DEFAULT_GRADIENT_COLORS;
 
-interface HomeAmbientBackdropProps {
-  currentSong: Song | null;
-}
-
 function buildColorStopsFromPalette(accent: string, background: string): GradientStops {
   return [
     colorWithAlpha(accent, 0.42, "rgba(38, 225, 154, 0.30)"),
@@ -41,14 +39,29 @@ function buildColorStopsFromPalette(accent: string, background: string): Gradien
   ];
 }
 
-export function HomeAmbientBackdrop({ currentSong }: HomeAmbientBackdropProps) {
+interface HomeAmbientBackdropProps {
+  currentSong?: Song | null;
+  topInset?: number;
+  themeConfig?: FestivalThemeConfig;
+  scrollY?: number;
+}
+
+export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
+  currentSong,
+  themeConfig,
+  scrollY = 0,
+}: HomeAmbientBackdropProps) {
+  const isFestivalMode = themeConfig?.enabled === true;
+  const { width: windowWidth } = useWindowDimensions();
+  const screenWidth = windowWidth || 390;
+
+  // Dynamic Song Ambient Color Extraction State (Original Git Logic)
   const [colorsA, setColorsA] = useState<GradientStops>(gCachedColorStops);
   const [colorsB, setColorsB] = useState<GradientStops>(DEFAULT_GRADIENT_COLORS);
 
   const activeLayerRef = useRef<0 | 1>(0);
   const opacityA = useSharedValue(1);
   const opacityB = useSharedValue(0);
-
   const activeCoverUrlRef = useRef<string | null>(gCachedCoverUrl);
 
   const animatedStyleA = useAnimatedStyle(() => ({
@@ -60,6 +73,8 @@ export function HomeAmbientBackdrop({ currentSong }: HomeAmbientBackdropProps) {
   }));
 
   useEffect(() => {
+    if (isFestivalMode) return;
+
     let isCancelled = false;
     const coverUrl = currentSong?.coverUrl || null;
 
@@ -68,16 +83,13 @@ export function HomeAmbientBackdrop({ currentSong }: HomeAmbientBackdropProps) {
         activeCoverUrlRef.current = null;
         gCachedCoverUrl = null;
         gCachedColorStops = DEFAULT_GRADIENT_COLORS;
-
         opacityA.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
         opacityB.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
       }
       return;
     }
 
-    if (coverUrl === activeCoverUrlRef.current) {
-      return;
-    }
+    if (coverUrl === activeCoverUrlRef.current) return;
 
     void extractArtworkColors(coverUrl)
       .then((palette) => {
@@ -104,10 +116,95 @@ export function HomeAmbientBackdrop({ currentSong }: HomeAmbientBackdropProps) {
     return () => {
       isCancelled = true;
     };
-  }, [currentSong?.coverUrl, opacityA, opacityB]);
+  }, [currentSong?.coverUrl, isFestivalMode, opacityA, opacityB]);
+
+  // 1. FESTIVAL THEME MODE: Remote Image or Themed Ambient Glow
+  if (isFestivalMode) {
+    const remoteImageUrl = themeConfig?.backgroundImageUrl;
+    const scrollTranslateY = -Math.max(0, scrollY);
+
+    if (remoteImageUrl) {
+      const heroImageHeight = Math.round(screenWidth * 1.30);
+      return (
+        <View
+          style={[
+            styles.topGlowContainer,
+            {
+              top: 0,
+              height: heroImageHeight,
+              transform: [{ translateY: scrollTranslateY }],
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <View style={styles.imageBackgroundLayer}>
+            <Image
+              source={{ uri: remoteImageUrl }}
+              style={styles.festiveImage}
+              contentFit="cover"
+              contentPosition="top center"
+              cachePolicy="memory-disk"
+            />
+            <LinearGradient
+              colors={[
+                "rgba(11, 15, 20, 0.08)",
+                "transparent",
+                "rgba(11, 15, 20, 0.15)",
+                "rgba(11, 15, 20, 0.50)",
+                "rgba(11, 15, 20, 0.88)",
+                "#0B0F14",
+              ]}
+              locations={[0, 0.35, 0.58, 0.76, 0.90, 1]}
+              style={StyleSheet.absoluteFillObject}
+            />
+          </View>
+        </View>
+      );
+    }
+
+    // Festive Color Glow if no background image URL is specified
+    const festiveAccent = themeConfig?.themeAccentColor || "#014D52";
+    const festiveStops: GradientStops = [
+      colorWithAlpha(festiveAccent, 0.45, "rgba(1, 77, 82, 0.45)"),
+      colorWithAlpha(festiveAccent, 0.25, "rgba(1, 77, 82, 0.25)"),
+      "rgba(11, 15, 20, 0.90)",
+      "#0B0F14",
+    ];
+
+    return (
+      <View
+        style={[
+          styles.originalGlowContainer,
+          {
+            transform: [{ translateY: scrollTranslateY }],
+          },
+        ]}
+        pointerEvents="none"
+      >
+        <LinearGradient
+          colors={festiveStops}
+          locations={GRADIENT_LOCATIONS}
+          start={GRADIENT_START}
+          end={GRADIENT_END}
+          style={styles.gradientFill}
+        />
+      </View>
+    );
+  }
+
+  // 2. DEFAULT NORMAL MODE: Original Git Ambient Song Color Glow
+  const normalScrollTranslateY = -Math.max(0, scrollY);
 
   return (
-    <View style={styles.topGlowContainer} pointerEvents="none">
+    <View
+      style={[
+        styles.originalGlowContainer,
+        {
+          transform: [{ translateY: normalScrollTranslateY }],
+        },
+      ]}
+      pointerEvents="none"
+    >
       <Animated.View style={[styles.gradientFill, animatedStyleA]}>
         <LinearGradient
           colors={colorsA}
@@ -128,17 +225,35 @@ export function HomeAmbientBackdrop({ currentSong }: HomeAmbientBackdropProps) {
       </Animated.View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
-  topGlowContainer: {
+  originalGlowContainer: {
     position: "absolute",
     top: -300,
     left: 0,
     right: 0,
     height: 780,
+    zIndex: 0,
+  },
+  topGlowContainer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    zIndex: 0,
   },
   gradientFill: {
     ...StyleSheet.absoluteFillObject,
   },
+  imageBackgroundLayer: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: "hidden",
+  },
+  festiveImage: {
+    width: "100%",
+    height: "100%",
+    opacity: 1,
+  },
 });
+
+export default HomeAmbientBackdrop;

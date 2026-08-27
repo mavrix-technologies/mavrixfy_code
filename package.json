@@ -20,10 +20,12 @@
     "firestore:deploy:indexes": "npx firebase-tools deploy --only firestore:indexes",
     "firestore:deploy:rules": "npx firebase-tools deploy --only firestore:rules",
     "storage:deploy:rules": "npx firebase-tools deploy --only storage",
-    "postinstall": "npx patch-package",
     "doctor": "npx react-doctor@latest --max-duration 15",
-    "verify:ios": "pwsh -File scripts/verify-ios-config.ps1"
+    "verify:ios": "pwsh -File scripts/verify-ios-config.ps1",
+    "festival": "npx tsx scripts/switch-festival.ts"
   },
+
+
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",

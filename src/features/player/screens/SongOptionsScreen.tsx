@@ -458,6 +458,13 @@ function formatDuration(seconds: number): string {
 function SheetWrap({ children }: { children: React.ReactNode }) {
   return (
     <View style={styles.root}>
+      {Platform.OS === "android" && (
+        <Pressable
+          style={styles.backdrop}
+          onPress={safeGoBack}
+          accessible={false}
+        />
+      )}
       <View style={styles.sheet}>
         <View style={styles.grabberRow}>
           <View style={styles.grabber} />
@@ -698,6 +705,13 @@ export function SongOptionsScreen() {
 
   return (
     <View style={styles.root}>
+      {Platform.OS === "android" && (
+        <Pressable
+          style={styles.backdrop}
+          onPress={safeGoBack}
+          accessible={false}
+        />
+      )}
       <View style={styles.sheet}>
         {/* Grabber + song header */}
         <GestureDetector gesture={androidSheetSwipeGesture}>
@@ -753,10 +767,23 @@ export function SongOptionsScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: SHEET_BACKGROUND,
+    backgroundColor: Platform.OS === "android" ? "transparent" : SHEET_BACKGROUND,
+    justifyContent: Platform.OS === "android" ? "flex-end" : "flex-start",
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
   },
   sheet: {
-    flex: 1,
+    ...(Platform.OS === "android"
+      ? {
+          maxHeight: "85%",
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+        }
+      : {
+          flex: 1,
+        }),
     overflow: "hidden",
     backgroundColor: SHEET_BACKGROUND,
   },

@@ -61,11 +61,9 @@ const styles = StyleSheet.create({
     height: 40,
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 12,
-    backgroundColor: "rgba(118,118,128,0.22)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(248,251,249,0.12)",
-    paddingLeft: 11,
+    borderRadius: 20,
+    backgroundColor: "#FFFFFF",
+    paddingLeft: 12,
     paddingRight: 8,
     gap: 8,
     overflow: "hidden",
@@ -73,7 +71,7 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     minWidth: 0,
-    color: "#F8FBF9",
+    color: "#0F172A",
     fontSize: 15,
     lineHeight: 19,
     fontFamily: "Inter_500Medium",
@@ -90,3 +88,4 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
 });
+

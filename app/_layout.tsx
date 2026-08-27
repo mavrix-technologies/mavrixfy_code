@@ -422,19 +422,23 @@ function RootLayoutNav() {
         <Stack.Screen
           name="song-options"
           options={{
-            presentation: "formSheet",
+            presentation: Platform.OS === "android" ? "transparentModal" : "formSheet",
+            animation: "slide_from_bottom",
+            animationDuration: 220,
             sheetAllowedDetents: [0.88, 1],
             sheetCornerRadius: 24,
-            contentStyle: { backgroundColor: "#1E1E1E" },
+            contentStyle: { backgroundColor: Platform.OS === "android" ? "transparent" : "#1E1E1E" },
           }}
         />
         <Stack.Screen
           name="sleep-timer"
           options={{
-            presentation: "formSheet",
+            presentation: Platform.OS === "android" ? "transparentModal" : "formSheet",
+            animation: "slide_from_bottom",
+            animationDuration: 220,
             sheetAllowedDetents: [0.62],
             sheetCornerRadius: 24,
-            contentStyle: { backgroundColor: Colors.background },
+            contentStyle: { backgroundColor: Platform.OS === "android" ? "transparent" : Colors.background },
           }}
         />
         <Stack.Screen name="notifications" />

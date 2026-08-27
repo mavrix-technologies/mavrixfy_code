@@ -24,11 +24,12 @@ import { showGlobalToast } from "@/utils/globalToast";
 import { logger } from "@/lib/logger";
 import { type Song, convertJioSaavnSong } from "@/lib/musicData";
 import { getJioSaavnSongDetails } from "@/data/providers/JioSaavnProvider";
-
 import {
   useArtworkPalette,
   colorWithAlpha,
 } from "@/lib/colorExtractor";
+
+
 
 function chunkArray<T>(arr: readonly T[], size: number): T[][] {
   const result: T[][] = [];
@@ -71,7 +72,7 @@ const QuickPickItem = memo(function QuickPickItem({
   }, [isActive, activeProgress]);
 
   const activeBg = useMemo(
-    () => colorWithAlpha(accentColor, 0.18, "rgba(38, 225, 154, 0.14)"),
+    () => colorWithAlpha(accentColor, 0.16, "rgba(38, 225, 154, 0.12)"),
     [accentColor]
   );
 
@@ -79,9 +80,12 @@ const QuickPickItem = memo(function QuickPickItem({
     backgroundColor: interpolateColor(
       activeProgress.value,
       [0, 1],
-      ["rgba(255, 255, 255, 0.04)", activeBg]
+      ["transparent", activeBg]
     ),
   }));
+
+
+
 
   return (
     <Animated.View
@@ -281,17 +285,19 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 12,
+    marginTop: 28,
+    marginBottom: 18,
   },
+
   header: {
     paddingHorizontal: 16,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   title: {
-    fontSize: 20,
+    fontSize: 18.5,
     fontFamily: "Inter_700Bold",
     color: "#FFFFFF",
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
   },
   listContent: {
     paddingHorizontal: 16,
@@ -299,11 +305,13 @@ const styles = StyleSheet.create({
   quickPickRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-    padding: 7,
-    borderRadius: 6,
+    backgroundColor: "transparent",
+    paddingVertical: 5,
+    paddingHorizontal: 6,
+    borderRadius: 0,
     overflow: "hidden",
   },
+
   quickPickRowActive: {
     backgroundColor: "rgba(38, 225, 154, 0.10)",
   },
@@ -311,23 +319,24 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 11,
   },
   quickPickRowPressed: {
     opacity: 0.75,
   },
   quickPickCover: {
-    width: 48,
-    height: 48,
-    borderRadius: 4,
+    width: 44,
+    height: 44,
+    borderRadius: 6,
     backgroundColor: "#1C2128",
   },
+
   quickPickInfo: {
     flex: 1,
     paddingRight: 6,
   },
   quickPickTitle: {
-    fontSize: 14,
+    fontSize: 13.5,
     fontFamily: "Inter_600SemiBold",
     color: "#FFFFFF",
   },
@@ -336,12 +345,13 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
   },
   quickPickArtist: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontFamily: "Inter_400Regular",
-    color: "rgba(255, 255, 255, 0.70)",
-    marginTop: 2,
+    color: "rgba(255, 255, 255, 0.65)",
+    marginTop: 1.5,
   },
   quickPickMore: {
     padding: 6,
   },
 });
+

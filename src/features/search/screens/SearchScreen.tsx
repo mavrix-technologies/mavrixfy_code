@@ -1603,20 +1603,25 @@ function SearchScreenView() {
         />
       )}
       {!isSearchMode ? (
-        <View style={[styles.searchBarRow, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 10 }]}>
+        <View style={[styles.searchBarRow, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 8 }]}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Search songs, albums, artists, playlists"
             style={({ pressed }) => [styles.searchBar, pressed && styles.searchBarPressed]}
             onPress={handleActivateSearchMode}
           >
-            <Ionicons name="search" size={17} color="#6A6A6A" />
+            <Ionicons name="search" size={20} color="#1E293B" style={styles.searchIcon} />
             <Text style={styles.inactiveSearchText} numberOfLines={1}>
-              What do you want to listen to?
+              Search "songs, artists, albums..."
             </Text>
+            <View style={styles.rightSearchGroup}>
+              <View style={styles.searchDivider} />
+              <Ionicons name="mic" size={19} color="#1E293B" />
+            </View>
           </Pressable>
         </View>
       ) : null}
+
 
       {/* Inline suggestions below search bar */}
       {isSearchMode && suggestionsOpen && suggestions.length > 0 && query.trim().length >= 2 && (
@@ -1693,25 +1698,43 @@ const styles = StyleSheet.create({
   },
   searchBar: {
     flex: 1,
-    height: 42,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#FFFFFF",
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 4,
-    paddingHorizontal: 12,
-    gap: 9,
+    paddingHorizontal: 14,
+    boxShadow: "0 4px 10px rgba(0, 0, 0, 0.15)",
   },
+
+
   searchBarPressed: {
-    opacity: 0.9,
+    opacity: 0.92,
     transform: [{ scale: 0.99 }],
+  },
+  searchIcon: {
+    marginRight: 9,
   },
   inactiveSearchText: {
     flex: 1,
     minWidth: 0,
-    color: "#121212",
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
+    color: "#64748B",
+    fontSize: 14.5,
+    fontFamily: "Inter_500Medium",
+    letterSpacing: -0.1,
   },
+  rightSearchGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 6,
+  },
+  searchDivider: {
+    width: 1,
+    height: 18,
+    backgroundColor: "rgba(0, 0, 0, 0.12)",
+    marginRight: 10,
+  },
+
   searchCancelButton: {
     minHeight: 40,
     minWidth: 58,

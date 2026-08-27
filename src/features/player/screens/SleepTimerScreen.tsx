@@ -50,6 +50,13 @@ export function SleepTimerScreen() {
 
   return (
     <View style={styles.root}>
+      {Platform.OS === "android" && (
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => router.back()}
+          accessible={false}
+        />
+      )}
       <View style={styles.sheet}>
         <View style={styles.headerContent}>
           <View style={styles.grabber} />
@@ -103,13 +110,25 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     justifyContent: "flex-end",
-    backgroundColor: "#000000",
+    backgroundColor: Platform.OS === "android" ? "transparent" : "#000000",
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
   },
   sheet: {
-    flex: 1,
-    marginTop: 10,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
+    ...(Platform.OS === "android"
+      ? {
+          maxHeight: "75%",
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+        }
+      : {
+          flex: 1,
+          marginTop: 10,
+          borderTopLeftRadius: 22,
+          borderTopRightRadius: 22,
+        }),
     overflow: "hidden",
     backgroundColor: SHEET_BACKGROUND,
   },
