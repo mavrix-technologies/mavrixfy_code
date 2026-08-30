@@ -53,43 +53,25 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
     >
       {/* Animated Sparkling Particles */}
       {themeConfig?.enableSparkles !== false && (
-        <FestiveSparklesParticleOverlay colors={themeConfig?.sparkleColors} />
+        <FestiveSparklesParticleOverlay />
       )}
 
       {hasAnyText && (
         <View style={styles.textCenterWrapper}>
           {subTitle.length > 0 && (
-            <Text
-              allowFontScaling={false}
-              style={[
-                styles.subTitle,
-                themeConfig?.subTitleColor ? { color: themeConfig.subTitleColor } : null,
-              ]}
-            >
+            <Text allowFontScaling={false} style={styles.subTitle}>
               {subTitle}
             </Text>
           )}
 
           {mainTitle.length > 0 && (
-            <Text
-              allowFontScaling={false}
-              style={[
-                styles.mainTitle,
-                themeConfig?.mainTitleColor ? { color: themeConfig.mainTitleColor } : null,
-              ]}
-            >
+            <Text allowFontScaling={false} style={styles.mainTitle}>
               {mainTitle}
             </Text>
           )}
 
           {badgeText.length > 0 && (
-            <Text
-              allowFontScaling={false}
-              style={[
-                styles.dateBadge,
-                themeConfig?.badgeTextColor ? { color: themeConfig.badgeTextColor } : null,
-              ]}
-            >
+            <Text allowFontScaling={false} style={styles.dateBadge}>
               {badgeText}
             </Text>
           )}
@@ -102,16 +84,17 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
 const styles = StyleSheet.create({
   bannerContainer: {
     width: "100%",
-    minHeight: 160,
+    minHeight: 270,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "transparent",
-    paddingVertical: 28,
+    paddingTop: 44,
+    paddingBottom: 72,
     paddingHorizontal: 20,
   },
   bannerContainerImageOnly: {
-    minHeight: 120,
-    paddingVertical: 10,
+    minHeight: 240,
+    paddingVertical: 36,
   },
   textCenterWrapper: {
     width: "100%",

@@ -45,7 +45,7 @@ type AppTopHeaderIconButtonProps = {
   haptic?: boolean;
 };
 
-export function useAppTopHeaderScrollElevation(threshold = 28) {
+export function useAppTopHeaderScrollElevation(threshold = DEFAULT_ELEVATION_SCROLL_THRESHOLD) {
   const [isHeaderElevated, setIsHeaderElevated] = useState(false);
   const [elevationProgress, setElevationProgress] = useState(0);
 
@@ -56,13 +56,12 @@ export function useAppTopHeaderScrollElevation(threshold = 28) {
       setIsHeaderElevated((current) => (
         current === shouldElevateHeader ? current : shouldElevateHeader
       ));
-      // Smooth linear-to-ease curve over 100px range starting after 18px scroll
-      const progress = Math.min(1, Math.max(0, (offsetY - 18) / 90));
+      // Slower, smooth transition matching natural mobile scroll speed (~120px)
+      const progress = Math.min(1, Math.max(0, offsetY / 120));
       setElevationProgress(progress);
     },
     [threshold]
   );
-
 
   const resetHeaderElevation = useCallback(() => {
     setIsHeaderElevated(false);

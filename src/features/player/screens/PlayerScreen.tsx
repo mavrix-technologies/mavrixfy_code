@@ -589,6 +589,11 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
     }
   }, [progress, isScrubbing]);
 
+  useEffect(() => {
+    setLocalProgress(progress);
+    lastSyncRef.current = { progress, timestamp: Date.now() };
+  }, [songDurationSeconds]);
+
   // A song progress bar moves by less than a pixel per sample at 4 Hz on a
   // phone. Updating React state every animation frame needlessly rerendered
   // the player around 60 times per second and kept multiple CPU cores busy.

@@ -43,12 +43,6 @@
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://u.expo.dev/93293119-93b7-4dbb-acdd-7241771254c4"/>
-    <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc"/>
-    <service android:name=".MavrixfyMediaBrowserService" android:enabled="true" android:exported="true" android:stopWithTask="false">
-      <intent-filter>
-        <action android:name="android.media.browse.MediaBrowserService"/>
-      </intent-filter>
-    </service>
     <service android:name="com.doublesymmetry.trackplayer.service.MusicService" android:enabled="true" android:exported="true" android:foregroundServiceType="mediaPlayback" tools:replace="android:exported,android:foregroundServiceType">
       <intent-filter>
         <action android:name="android.intent.action.MEDIA_BUTTON"/>

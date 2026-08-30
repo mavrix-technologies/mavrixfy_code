@@ -52,10 +52,10 @@ async function setupPlayerInternal(): Promise<void> {
       autoHandleInterruptions: true,
       autoUpdateMetadata: true,
       androidAudioContentType: AndroidAudioContentType?.Music ?? 2,
-      minBuffer: 15,
+      minBuffer: 30,
       maxBuffer: 50,
-      playBuffer: 2,
-      backBuffer: 30,
+      playBuffer: 5,
+      backBuffer: 10,
       ...(Platform.OS === "ios"
         ? {
           iosCategory: IOSCategory?.Playback ?? "playback",

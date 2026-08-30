@@ -1620,6 +1620,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           logger.error("[Player] Failed song:", currentSongRef.current.title);
         }
       }),
+      subscribeTrackPlayerEvent(Event.PlaybackProgressUpdated, (event: any) => {
+        if (typeof event?.position === "number") {
+          setNativePosition(event.position);
+        }
+        if (typeof event?.duration === "number" && event.duration > 0) {
+          setNativeDuration(event.duration);
+        }
+      }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
         const nextIndex =
           typeof event?.index === "number"
@@ -1635,6 +1643,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           setCurrentSong(targetSong);
           setQueueIndex(nextIndex);
           queueIndexRef.current = nextIndex;
+          setSeekOverride(null);
+          setNativePosition(0);
+          const initialDuration = toDurationSeconds(event?.track?.duration || targetSong.duration);
+          setNativeDuration(initialDuration > 0 ? initialDuration : 0);
           updatePlaybackEngineSnapshot({
             currentSong: targetSong,
             queueIndex: nextIndex,
@@ -1700,6 +1712,43 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       persist();
     };
   }, [currentSong]);
+
+  // Synchronize playback progress and active track immediately when returning to foreground
+  useEffect(() => {
+    const handleAppStateChange = async (nextState: string) => {
+      if (nextState === "active" && TrackPlayer && isPlayerReady) {
+        try {
+          const [activeTrack, prog] = await Promise.all([
+            TrackPlayer.getActiveTrack().catch(() => null),
+            TrackPlayer.getProgress().catch(() => null),
+          ]);
+          if (activeTrack?.id && activeTrack.id !== currentSongRef.current?.id) {
+            const foundIdx = queueRef.current.findIndex((s) => s.id === activeTrack.id);
+            if (foundIdx >= 0) {
+              const target = queueRef.current[foundIdx];
+              currentSongRef.current = target;
+              setCurrentSong(target);
+              setQueueIndex(foundIdx);
+              queueIndexRef.current = foundIdx;
+            }
+          }
+          if (prog) {
+            if (typeof prog.position === "number") {
+              setNativePosition(prog.position);
+            }
+            if (typeof prog.duration === "number" && prog.duration > 0) {
+              setNativeDuration(prog.duration);
+            }
+          }
+        } catch {
+          // ignore non-fatal sync errors
+        }
+      }
+    };
+
+    const sub = AppState.addEventListener("change", handleAppStateChange);
+    return () => sub.remove();
+  }, [isPlayerReady]);
 
   // Sync state and listen for playback requests from Apple CarPlay
   useEffect(() => {

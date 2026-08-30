@@ -22,8 +22,6 @@ export async function trackPlayerService() {
         TrackPlayer.stop().catch(() => {});
       } else if (event?.paused) {
         TrackPlayer.pause().catch(() => {});
-      } else if (!event?.ducking) {
-        TrackPlayer.play().catch(() => {});
       }
     });
 

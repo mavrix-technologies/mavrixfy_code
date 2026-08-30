@@ -20,7 +20,6 @@ import AdMobBanner from "@/components/AdMobBanner";
 import AppPromotionModal from "@/components/AppPromotionModal";
 import * as Haptics from "expo-haptics";
 import { triggerImpact } from "@/lib/haptics";
-import { useArtworkPalette } from "@/lib/colorExtractor";
 
 import { HomeQuickPicks } from "../components/HomeQuickPicks";
 import { HomeRecentlyPlayed } from "../components/HomeRecentlyPlayed";
@@ -71,7 +70,6 @@ export function HomeScreen() {
   } = useHomeFeedData();
 
   const { elevationProgress, handleHeaderScroll } = useAppTopHeaderScrollElevation();
-  const artworkPalette = useArtworkPalette(currentSong?.coverUrl);
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
 
   const handleSelectCategory = useCallback((category: string) => {
@@ -193,7 +191,7 @@ export function HomeScreen() {
     () => [
       styles.scrollContent,
       {
-        paddingTop: topInset + UNIFIED_HEADER_TOTAL_HEIGHT + 4,
+        paddingTop: topInset + UNIFIED_HEADER_TOTAL_HEIGHT,
         paddingBottom: Math.max(insets.bottom, 0) + 140,
       },
     ],
@@ -222,13 +220,7 @@ export function HomeScreen() {
         topInset={topInset}
         selectedCategory={selectedCategory}
         onSelectCategory={handleSelectCategory}
-        ambientColor={
-          festivalTheme?.enabled
-            ? (festivalTheme?.themeAccentColor || artworkPalette.accent)
-            : artworkPalette.accent
-        }
-        elevationProgress={elevationProgress}
-        festivalTheme={festivalTheme}
+        scrollY={scrollY}
       />
 
       {/* ── Dedicated Mavrixfy Reanimated Refresh Indicator (Top Visual Overlay) ── */}
@@ -280,7 +272,6 @@ const styles = StyleSheet.create({
   },
   listHeaderWrap: {
     position: "relative",
-    paddingBottom: 4,
   },
   scroll: {
     flex: 1,

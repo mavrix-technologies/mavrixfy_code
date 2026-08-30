@@ -14,8 +14,6 @@ import { Image } from "expo-image";
 import { triggerImpact } from "@/lib/haptics";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "@/contexts/AuthContext";
-import { colorWithAlpha } from "@/lib/colorExtractor";
-import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 import {
   MAVRIXFY_MUSIC_CATEGORIES,
   type MusicCategoryItem,
@@ -31,18 +29,18 @@ interface HomeUnifiedTopHeaderProps {
   topInset: number;
   selectedCategory: string;
   onSelectCategory: (category: string) => void;
-  ambientColor?: string;
+  scrollY?: number;
+  isElevated?: boolean;
   elevationProgress?: number;
-  festivalTheme?: FestivalThemeConfig;
 }
 
 export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
   topInset,
   selectedCategory,
   onSelectCategory,
-  ambientColor = "#014D52",
+  scrollY = 0,
+  isElevated = false,
   elevationProgress = 0,
-  festivalTheme,
 }: HomeUnifiedTopHeaderProps) {
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
@@ -119,18 +117,16 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
 
   const keyExtractor = useCallback((item: MusicCategoryItem) => item.id, []);
 
-  // Smooth scroll interpolation: Top bar collapses on scroll down, leaving only the Category Menu Rail sticky
-  const progress = Math.min(1, Math.max(0, elevationProgress));
-  const topBarHeight = Math.max(0, UNIFIED_HEADER_TOP_BAR_HEIGHT * (1 - Math.pow(progress, 1.2)));
-  const topBarOpacity = Math.max(0, 1 - progress * 1.6);
-  const topBarTranslateY = -progress * 10;
+  // Synchronized 1:1 scroll translation with background image
+  const clampedScrollY = Math.max(0, scrollY);
+  const headerTranslateY = -Math.min(UNIFIED_HEADER_TOP_BAR_HEIGHT, clampedScrollY);
+  const scrollProgress = Math.min(1, clampedScrollY / UNIFIED_HEADER_TOP_BAR_HEIGHT);
 
-  // Solid, non-transparent fill on sticky scroll with smooth progressive ease
-  const headerBgColor =
-    progress > 0.01
-      ? colorWithAlpha(ambientColor || "#014D52", Math.min(1, 0.35 + progress * 0.65), "#0B0F14")
-      : "transparent";
-  const borderAlpha = Math.min(0.08, progress * 0.08);
+  // Smooth continuous background fade for sticky dock state
+  const bgOpacity = Math.min(1, Math.max(0, (clampedScrollY - 10) / 38));
+  const headerBgColor = bgOpacity > 0.01 ? `rgba(11, 15, 20, ${bgOpacity.toFixed(3)})` : "transparent";
+  const borderAlpha = Math.min(0.08, scrollProgress * 0.08);
+  const topBarOpacity = Math.max(0, 1 - scrollProgress * 1.15);
 
   return (
     <View
@@ -139,70 +135,67 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
         {
           paddingTop: topInset,
           backgroundColor: headerBgColor,
-          borderBottomColor: `rgba(255, 255, 255, ${borderAlpha})`,
+          borderBottomColor: borderAlpha > 0.005 ? `rgba(255, 255, 255, ${borderAlpha.toFixed(3)})` : "transparent",
           borderBottomWidth: borderAlpha > 0.005 ? StyleSheet.hairlineWidth : 0,
+          transform: [{ translateY: headerTranslateY }],
         },
       ]}
     >
-      {/* ── Top Bar Row: Visible at top, smoothly collapses during scroll ── */}
-      {topBarHeight > 0.5 ? (
-        <View
-          style={[
-            styles.topBarRow,
-            {
-              height: topBarHeight,
-              opacity: topBarOpacity,
-              transform: [{ translateY: topBarTranslateY }],
-              overflow: "hidden",
-            },
+      {/* ── Top Bar Row: Moves up 1:1 with background image on scroll ── */}
+      <View
+        style={[
+          styles.topBarRow,
+          {
+            opacity: topBarOpacity,
+            overflow: "hidden",
+          },
+        ]}
+      >
+        {/* Profile Avatar */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Profile"
+          onPress={handleProfilePress}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.avatarButton,
+            pressed && styles.buttonPressed,
           ]}
         >
-          {/* Profile Avatar */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Profile"
-            onPress={handleProfilePress}
-            hitSlop={8}
-            style={({ pressed }) => [
-              styles.avatarButton,
-              pressed && styles.buttonPressed,
-            ]}
-          >
-            {isAuthenticated && user?.picture ? (
-              <Image
-                source={{ uri: user.picture }}
-                style={styles.avatarImage}
-                contentFit="cover"
-              />
-            ) : (
-              <View style={styles.avatarFallback}>
-                <Ionicons name="person" size={16} color="#FFFFFF" />
-              </View>
-            )}
-          </Pressable>
+          {isAuthenticated && user?.picture ? (
+            <Image
+              source={{ uri: user.picture }}
+              style={styles.avatarImage}
+              contentFit="cover"
+            />
+          ) : (
+            <View style={styles.avatarFallback}>
+              <Ionicons name="person" size={16} color="#FFFFFF" />
+            </View>
+          )}
+        </Pressable>
 
-          {/* App Branding */}
-          <View style={styles.titleContainer}>
-            <Text allowFontScaling={false} style={styles.appTitle}>
-              MAVRIXFY
-            </Text>
-          </View>
-
-          {/* Downloads Action */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Downloads"
-            onPress={handleDownloadPress}
-            hitSlop={8}
-            style={({ pressed }) => [
-              styles.downloadButton,
-              pressed && styles.buttonPressed,
-            ]}
-          >
-            <Ionicons name="arrow-down-circle-outline" size={23} color="#FFFFFF" />
-          </Pressable>
+        {/* App Branding */}
+        <View style={styles.titleContainer}>
+          <Text allowFontScaling={false} style={styles.appTitle}>
+            MAVRIXFY
+          </Text>
         </View>
-      ) : null}
+
+        {/* Downloads Action */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Downloads"
+          onPress={handleDownloadPress}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.downloadButton,
+            pressed && styles.buttonPressed,
+          ]}
+        >
+          <Ionicons name="arrow-down-circle-outline" size={23} color="#FFFFFF" />
+        </Pressable>
+      </View>
 
       {/* ── Sticky Menu Rail Row: Always cleanly visible and docked ── */}
       <View style={styles.menuRailRow}>
@@ -289,8 +282,6 @@ const styles = StyleSheet.create({
   menuRailRow: {
     height: UNIFIED_HEADER_MENU_HEIGHT,
     justifyContent: "center",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255, 255, 255, 0.08)",
   },
   menuFlatList: {
     flexGrow: 0,

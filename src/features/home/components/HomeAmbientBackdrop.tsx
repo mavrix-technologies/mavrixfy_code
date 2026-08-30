@@ -147,14 +147,13 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
             />
             <LinearGradient
               colors={[
-                "rgba(11, 15, 20, 0.08)",
                 "transparent",
-                "rgba(11, 15, 20, 0.15)",
-                "rgba(11, 15, 20, 0.50)",
-                "rgba(11, 15, 20, 0.88)",
+                "transparent",
+                "rgba(11, 15, 20, 0.35)",
+                "rgba(11, 15, 20, 0.82)",
                 "#0B0F14",
               ]}
-              locations={[0, 0.35, 0.58, 0.76, 0.90, 1]}
+              locations={[0, 0.52, 0.72, 0.88, 1]}
               style={StyleSheet.absoluteFillObject}
             />
           </View>

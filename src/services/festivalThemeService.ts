@@ -7,13 +7,9 @@ export interface FestivalItemData {
   mainTitle: string;
   badgeText: string;
   backgroundImageUrl: string | null;
-  themeAccentColor: string;
+  themeAccentColor?: string;
   targetQuery?: string;
   enableSparkles?: boolean;
-  subTitleColor?: string;
-  mainTitleColor?: string;
-  badgeTextColor?: string;
-  sparkleColors?: string[];
 }
 
 export interface FestivalThemeConfig {
@@ -23,13 +19,9 @@ export interface FestivalThemeConfig {
   mainTitle: string;
   badgeText: string;
   backgroundImageUrl: string | null;
-  themeAccentColor: string;
+  themeAccentColor?: string;
   targetQuery?: string;
   enableSparkles?: boolean;
-  subTitleColor?: string;
-  mainTitleColor?: string;
-  badgeTextColor?: string;
-  sparkleColors?: string[];
 }
 
 const STORAGE_KEY = "mavrixfy_remote_festival_theme_v6";
@@ -44,10 +36,6 @@ export const DEFAULT_FESTIVAL_THEME: FestivalThemeConfig = {
   themeAccentColor: "#014D52",
   targetQuery: "",
   enableSparkles: true,
-  subTitleColor: "#C5E6DA",
-  mainTitleColor: "#FFFDF2",
-  badgeTextColor: "#FDE6A6",
-  sparkleColors: ["#FFE899", "#FFD166", "#FFB3D9"],
 };
 
 let gCachedTheme: FestivalThemeConfig = DEFAULT_FESTIVAL_THEME;
@@ -142,14 +130,6 @@ export function subscribeRemoteFestivalTheme(
                 mainData.targetQuery || subData.targetQuery || mainData.mainTitle || subData.mainTitle || "",
               enableSparkles:
                 mainData.enableSparkles ?? subData.enableSparkles ?? true,
-              subTitleColor:
-                mainData.subTitleColor || subData.subTitleColor || DEFAULT_FESTIVAL_THEME.subTitleColor,
-              mainTitleColor:
-                mainData.mainTitleColor || subData.mainTitleColor || DEFAULT_FESTIVAL_THEME.mainTitleColor,
-              badgeTextColor:
-                mainData.badgeTextColor || subData.badgeTextColor || DEFAULT_FESTIVAL_THEME.badgeTextColor,
-              sparkleColors:
-                mainData.sparkleColors || subData.sparkleColors || DEFAULT_FESTIVAL_THEME.sparkleColors,
             };
 
             gCachedTheme = merged;
@@ -167,10 +147,6 @@ export function subscribeRemoteFestivalTheme(
               themeAccentColor: mainData.themeAccentColor || DEFAULT_FESTIVAL_THEME.themeAccentColor,
               targetQuery: mainData.targetQuery || mainData.mainTitle || "",
               enableSparkles: mainData.enableSparkles ?? true,
-              subTitleColor: mainData.subTitleColor || DEFAULT_FESTIVAL_THEME.subTitleColor,
-              mainTitleColor: mainData.mainTitleColor || DEFAULT_FESTIVAL_THEME.mainTitleColor,
-              badgeTextColor: mainData.badgeTextColor || DEFAULT_FESTIVAL_THEME.badgeTextColor,
-              sparkleColors: mainData.sparkleColors || DEFAULT_FESTIVAL_THEME.sparkleColors,
             };
             gCachedTheme = fallback;
             onUpdate(fallback);
