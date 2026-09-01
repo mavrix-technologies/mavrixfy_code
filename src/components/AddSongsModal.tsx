@@ -32,11 +32,8 @@ import { useLikedSongs, usePlayerBrowse } from "@/contexts/PlayerContext";
 import { triggerImpact } from "@/lib/haptics";
 import { showGlobalToast } from "@/utils/globalToast";
 
-export interface AddSongsBottomSheetRef {
-  expand: () => void;
-  collapse: () => void;
-  close: () => void;
-}
+import { type AddSongsBottomSheetRef } from "@/lib/addSongsSheetRef";
+export type { AddSongsBottomSheetRef };
 
 function parseApiSong(s: any): Song | null {
   if (!s) return null;

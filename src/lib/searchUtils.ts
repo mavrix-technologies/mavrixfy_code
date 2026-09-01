@@ -12,12 +12,12 @@ import { type Song } from "./musicData";
  *  version    – original vs remix/karaoke/cover penalty
  */
 export const RANKING_WEIGHTS = {
-  relevance:  0.45,
-  popularity: 0.20,
-  artist:     0.10,
-  engagement: 0.10,
-  recency:    0.08,
-  version:    0.07,
+  relevance:  0.35,
+  popularity: 0.35,
+  version:    0.15,
+  artist:     0.07,
+  engagement: 0.05,
+  recency:    0.03,
 } as const;
 
 export type RankingWeights = typeof RANKING_WEIGHTS;
@@ -75,8 +75,10 @@ const STOPWORDS = new Set([
 export function tokenizeQuery(normalizedQuery: string): string[] {
   const all = normalizedQuery
     .split(/[\s\-_/|]+/)
-    .map((t) => t.replace(/[^a-z0-9\u0900-\u097f\u0a80-\u0aff\u0a00-\u0a7f\u0b80-\u0bff]/gi, "").trim())
-    .filter(Boolean);
+    .flatMap((t) => {
+      const cleaned = t.replace(/[^a-z0-9\u0900-\u097f\u0a80-\u0aff\u0a00-\u0a7f\u0b80-\u0bff]/gi, "").trim();
+      return cleaned ? [cleaned] : [];
+    });
 
   const meaningful = all.filter((t) => t.length >= 2 && !STOPWORDS.has(t));
   return meaningful.length > 0 ? meaningful : all;
@@ -125,19 +127,19 @@ export function classifySongVersion(title: string): SongVersion {
 export function getVersionScore(version: SongVersion): number {
   const scores: Record<SongVersion, number> = {
     original:      1.00,
-    radio_edit:    0.92,
-    extended:      0.85,
-    acoustic:      0.80,
-    live:          0.75,
-    remix:         0.70,
-    other_version: 0.65,
-    lofi:          0.60,
-    sped_up:       0.55,
-    slowed:        0.55,
-    instrumental:  0.50,
-    mashup:        0.45,
-    cover:         0.40,
-    karaoke:       0.20,
+    radio_edit:    0.95,
+    extended:      0.90,
+    acoustic:      0.82,
+    live:          0.78,
+    remix:         0.75,
+    other_version: 0.60,
+    lofi:          0.50,
+    sped_up:       0.45,
+    slowed:        0.45,
+    instrumental:  0.30,
+    mashup:        0.35,
+    cover:         0.25,
+    karaoke:       0.10,
   };
   return scores[version];
 }
@@ -374,14 +376,32 @@ export function rankSongs(
 
   const ranked = scored.map((item) => item.song);
 
-  // Pin the topQuery song to position #0 if provided.
-  // This ensures JioSaavn's own best-match judgment always wins,
-  // even when its title includes version qualifiers that lower its tier.
-  if (pinnedSongId) {
+  // Pin the topQuery song to position #0 only if it is a legitimate top match
+  // and does not displace a much more popular official original track.
+  if (pinnedSongId && ranked.length > 0) {
     const pinnedIndex = ranked.findIndex((s) => s.id === pinnedSongId);
     if (pinnedIndex > 0) {
-      const [pinned] = ranked.splice(pinnedIndex, 1);
-      ranked.unshift(pinned);
+      const pinned = ranked[pinnedIndex];
+      const topNatural = ranked[0];
+      const pinnedVersion = classifySongVersion(pinned.title);
+      const topVersion = classifySongVersion(topNatural.title);
+
+      const isPinnedCoverOrInstrumental =
+        pinnedVersion === "instrumental" ||
+        pinnedVersion === "cover" ||
+        pinnedVersion === "karaoke" ||
+        pinnedVersion === "sped_up" ||
+        pinnedVersion === "slowed";
+
+      const topIsMuchMorePopular =
+        (topNatural.playCount || 0) > (pinned.playCount || 0) * 5 &&
+        (topNatural.playCount || 0) > 20000 &&
+        topVersion === "original";
+
+      if (!isPinnedCoverOrInstrumental && !topIsMuchMorePopular) {
+        ranked.splice(pinnedIndex, 1);
+        ranked.unshift(pinned);
+      }
     }
   }
 

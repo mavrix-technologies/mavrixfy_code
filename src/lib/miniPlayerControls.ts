@@ -28,7 +28,7 @@ export function useMiniPlayerSecondaryControl(): MiniPlayerSecondaryControl {
 
   useEffect(() => {
     let mounted = true;
-    
+
     function updateControl(val: MiniPlayerSecondaryControl) {
       if (mounted) {
         // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback

@@ -40,8 +40,10 @@ function formatFullName(fullName: AppleFullName | null | undefined): string | nu
     fullName.familyName,
     fullName.nameSuffix,
   ]
-    .map((part) => String(part || "").trim())
-    .filter(Boolean)
+    .flatMap((part) => {
+      const trimmed = String(part || "").trim();
+      return trimmed ? [trimmed] : [];
+    })
     .join(" ")
     .trim();
 

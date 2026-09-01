@@ -19,6 +19,8 @@ function qualityToBitrate(quality: DownloadQuality): string {
   }
 }
 
+const JIOSAAVN_HOST_SUFFIXES = ["saavncdn.com", "saavn.com", "jiosaavn.com"] as const;
+
 /**
  * Attempt to construct a quality-specific audio URL
  * JioSaavn CDN URLs encode the bitrate in the filename, e.g.:
@@ -34,17 +36,12 @@ export function getAudioUrlByQuality(baseUrl: string, quality: DownloadQuality):
   const targetBitrate = qualityToBitrate(quality);
   const bitrateNum = targetBitrate.replace("kbps", "");
 
-  // Known JioSaavn CDN hosts whose path layout reliably uses a bitrate segment.
-  // Constraining the slash pattern to these hosts avoids rewriting arbitrary
-  // numeric path segments (e.g. .../users/128/... or .../albums/64/...) that
-  // happen to collide with a bitrate value.
-  const JIOSAAVN_HOSTS = ["saavncdn.com", "saavn.com", "jiosaavn.com"];
-
   // Pattern 1: /320/ or /128/ or /96/ etc — but only on known audio CDN hosts
   // to avoid false positives on unrelated numeric path segments.
   try {
     const { host } = new URL(baseUrl);
-    if (JIOSAAVN_HOSTS.some((h) => host.includes(h))) {
+    const isJioHost = JIOSAAVN_HOST_SUFFIXES.some((h) => host.endsWith(h));
+    if (isJioHost) {
       const withSlashes = baseUrl.replace(
         /\/(?:320|256|192|160|128|96|64|48|32)\//g,
         `/${bitrateNum}/`

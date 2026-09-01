@@ -1,5 +1,5 @@
-import React from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback } from "react";
+import { FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons, FontAwesome } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
@@ -41,12 +41,12 @@ function PremiumActionRow({ action }: { action: PremiumAction }) {
     <Pressable
       onPress={() => {
         void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-        router.push(action.href);
+        router.push(action.href as any);
       }}
       style={({ pressed }) => [styles.actionRow, pressed && styles.actionRowPressed]}
     >
       <View style={styles.actionIcon}>
-        <Ionicons name={action.icon} size={22} color={Colors.primary} />
+        <Ionicons name={action.icon} size={23} color="#FFFFFF" />
       </View>
       <View style={styles.actionText}>
         <Text style={styles.actionTitle}>{action.title}</Text>
@@ -62,28 +62,34 @@ export function PremiumScreen() {
   const topPadding = Platform.OS === "web" ? 91 : insets.top + 24;
   const bottomPadding = Platform.OS === "web" ? 154 : Math.max(154, insets.bottom + 146);
 
+  const renderItem = useCallback(
+    ({ item }: { item: PremiumAction }) => <PremiumActionRow action={item} />,
+    []
+  );
+
   return (
     <View style={styles.container}>
       <LinearGradient colors={["#121212", Colors.background]} style={StyleSheet.absoluteFillObject} />
-      <ScrollView
+      <FlatList
         style={styles.scroll}
         contentContainerStyle={[styles.content, { paddingTop: topPadding, paddingBottom: bottomPadding }]}
         showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.heroIcon}>
-          <FontAwesome name="spotify" size={34} color="#FFFFFF" />
-        </View>
-        <Text style={styles.title}>Premium</Text>
-        <Text style={styles.subtitle}>
-          Account, discovery, and import tools gathered in one tab.
-        </Text>
-
-        <View style={styles.actionList}>
-          {PREMIUM_ACTIONS.map((action) => (
-            <PremiumActionRow key={action.title} action={action} />
-          ))}
-        </View>
-      </ScrollView>
+        data={PREMIUM_ACTIONS}
+        keyExtractor={(action) => action.title}
+        ListHeaderComponent={
+          <>
+            <View style={styles.heroIcon}>
+              <FontAwesome name="spotify" size={34} color="#FFFFFF" />
+            </View>
+            <Text style={styles.title}>Premium</Text>
+            <Text style={styles.subtitle}>
+              Account, discovery, and import tools gathered in one tab.
+            </Text>
+            <View style={{ height: 16 }} />
+          </>
+        }
+        renderItem={renderItem}
+      />
     </View>
   );
 }

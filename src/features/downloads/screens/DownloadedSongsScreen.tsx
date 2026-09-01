@@ -180,7 +180,7 @@ export function DownloadedSongsScreen() {
           text: "Delete All",
           style: "destructive",
           onPress: async () => {
-            await triggerImpact(Haptics.ImpactFeedbackStyle.Heavy);
+            void triggerImpact(Haptics.ImpactFeedbackStyle.Heavy);
             await removeAllDownloads();
             refreshSummary();
           },

@@ -3,8 +3,8 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, FlatList, Linking, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { AppVersionInfo, checkAppVersion } from "@/services/notificationService";
@@ -17,8 +17,10 @@ const DEFAULT_STORE_URL = Platform.select({
 function releaseNoteItems(releaseNotes: string) {
   const notes = releaseNotes
     .split(/\n|•/)
-    .map((note) => note.replace(/^[-*]\s*/, "").trim())
-    .filter(Boolean);
+    .flatMap((note) => {
+      const cleaned = note.replace(/^[-*]\s*/, "").trim();
+      return cleaned ? [cleaned] : [];
+    });
 
   return notes.length > 0 ? notes : ["Performance improvements, new features, and stability fixes."];
 }
@@ -69,6 +71,16 @@ export default function ForceUpdateScreen() {
     }
   };
 
+  const renderItem = useCallback(
+    ({ item }: { item: string }) => (
+      <View style={styles.noteRow}>
+        <Ionicons name="checkmark-circle" size={14} color={Colors.primary} style={styles.noteIcon} />
+        <Text style={styles.noteText}>{item}</Text>
+      </View>
+    ),
+    []
+  );
+
   if (loading || !versionInfo) {
     return (
       <LinearGradient colors={["#115B50", "#123D46", "#10141A"]} locations={[0, 0.48, 0.94]} style={styles.gradient}>
@@ -87,53 +99,52 @@ export default function ForceUpdateScreen() {
       <StatusBar style="light" />
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.page}>
-          <ScrollView
-            style={styles.scrollView}
+          <FlatList
+            data={loading ? [] : notes}
+            keyExtractor={(note) => note}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             bounces={false}
             keyboardShouldPersistTaps="handled"
-          >
-            <View style={styles.brandRow}>
-              <Image source={require("@/assets/images/mavrixfy_icone.png")} style={styles.brandIcon} contentFit="cover" />
-              <Text style={styles.brandName}>Mavrixfy</Text>
-            </View>
+            ListHeaderComponent={
+              <>
+                <View style={styles.brandRow}>
+                  <Image source={require("@/assets/images/mavrixfy_icone.png")} style={styles.brandIcon} contentFit="cover" />
+                  <Text style={styles.brandName}>Mavrixfy</Text>
+                </View>
 
-            <View style={styles.hero}>
-              {latestVersion ? (
-                <Text
-                  accessibilityElementsHidden
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.55}
-                  numberOfLines={1}
-                  style={[styles.versionWatermark, { width: watermarkWidth }]}
-                >
-                  {latestVersion}
-                </Text>
-              ) : null}
-              <Text style={styles.heading}>New{"\n"}Update</Text>
-              <Text style={styles.headingAccent}>Available</Text>
-              {loading ? (
-                <ActivityIndicator color={Colors.primary} style={styles.loader} />
-              ) : (
-                <Text style={styles.description}>
-                  A newer version of Mavrixfy{latestVersion ? ` (v${latestVersion})` : ""} is available on the store. Please navigate to the store to install it.
-                </Text>
-              )}
-            </View>
+                <View style={styles.hero}>
+                  {latestVersion ? (
+                    <Text
+                      accessibilityElementsHidden
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.55}
+                      numberOfLines={1}
+                      style={[styles.versionWatermark, { width: watermarkWidth }]}
+                    >
+                      {latestVersion}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.heading}>New{"\n"}Update</Text>
+                  <Text style={styles.headingAccent}>Available</Text>
+                  {loading ? (
+                    <ActivityIndicator color={Colors.primary} style={styles.loader} />
+                  ) : (
+                    <Text style={styles.description}>
+                      A newer version of Mavrixfy{latestVersion ? ` (v${latestVersion})` : ""} is available on the store. Please navigate to the store to install it.
+                    </Text>
+                  )}
+                </View>
 
-            {!loading && (
-              <View style={styles.notesSection}>
-                <Text style={styles.notesLabel}>WHAT’S NEW:</Text>
-                {notes.map((note) => (
-                  <View key={note} style={styles.noteRow}>
-                    <Ionicons name="checkmark-circle" size={14} color={Colors.primary} style={styles.noteIcon} />
-                    <Text style={styles.noteText}>{note}</Text>
+                {!loading && notes.length > 0 ? (
+                  <View style={styles.notesSection}>
+                    <Text style={styles.notesLabel}>WHAT’S NEW:</Text>
                   </View>
-                ))}
-              </View>
-            )}
-          </ScrollView>
+                ) : null}
+              </>
+            }
+            renderItem={renderItem}
+          />
 
           <View style={styles.actions}>
             <Pressable

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  FlatList,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -175,6 +175,18 @@ export function ArtistMixScreen() {
     : "Artist Mix";
   const songsQueueKey = useMemo(() => songs.map((song) => song.id).join("|"), [songs]);
 
+  const renderSong = useCallback(
+    ({ item, index }: { item: Song; index: number }) => (
+      <SongRow song={item} index={index} queue={songs} queueKey={songsQueueKey} />
+    ),
+    [songs, songsQueueKey]
+  );
+
+  const listContentStyle = useMemo(
+    () => ({ paddingBottom: bottomPad }),
+    [bottomPad]
+  );
+
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
       {/* Header */}
@@ -186,79 +198,80 @@ export function ArtistMixScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView
-        contentInset={{ bottom: bottomPad }}
-        scrollIndicatorInsets={{ bottom: bottomPad }}
+      <FlatList
+        data={loading ? [] : songs}
+        keyExtractor={(song) => song.id}
+        renderItem={renderSong}
+        contentContainerStyle={listContentStyle}
         showsVerticalScrollIndicator={false}
-      >
-        {/* Artist avatars row */}
-        <View style={styles.avatarRow}>
-          {ids.map((id, i) => (
-            <View key={id} style={[styles.avatarWrap, i > 0 && { marginLeft: -24 }]}>
-              <Image
-                recyclingKey={id}
-                source={{ uri: images[i] || undefined }}
-                style={styles.avatar}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-              />
+        ListHeaderComponent={
+          <>
+            {/* Artist avatars row */}
+            <View style={styles.avatarRow}>
+              {ids.map((id, i) => (
+                <View key={id} style={[styles.avatarWrap, i > 0 && { marginLeft: -24 }]}>
+                  <Image
+                    recyclingKey={id}
+                    source={{ uri: images[i] || undefined }}
+                    style={styles.avatar}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                  />
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
 
-        {/* Artist names row - show all selected artists */}
-        {ids.length > 1 && (
-          <View style={styles.artistNamesContainer}>
-            {names.map((name) => (
-              <View key={name} style={styles.artistNameBadge}>
-                <Text style={styles.artistNameText} numberOfLines={1}>{name}</Text>
+            {/* Artist names row - show all selected artists */}
+            {ids.length > 1 && (
+              <View style={styles.artistNamesContainer}>
+                {names.map((name) => (
+                  <View key={name} style={styles.artistNameBadge}>
+                    <Text style={styles.artistNameText} numberOfLines={1}>{name}</Text>
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
-        )}
+            )}
 
-        {/* Mix title + meta */}
-        <Text style={styles.mixTitle}>{title}</Text>
-        <Text style={styles.mixMeta}>
-          {loading
-            ? `Loading songs… (${loadedCount}/${ids.length} artists)`
-            : `${songs.length} songs · ${ids.length} artist${ids.length > 1 ? "s" : ""}`}
-        </Text>
+            {/* Mix title + meta */}
+            <Text style={styles.mixTitle}>{title}</Text>
+            <Text style={styles.mixMeta}>
+              {loading
+                ? `Loading songs… (${loadedCount}/${ids.length} artists)`
+                : `${songs.length} songs · ${ids.length} artist${ids.length > 1 ? "s" : ""}`}
+            </Text>
 
-        {/* Action buttons */}
-        {!loading && songs.length > 0 ? (
-          <View style={styles.actions}>
-            <Pressable style={styles.shuffleBtn} onPress={handleShuffle}>
-              <Ionicons name="shuffle" size={17} color={Colors.text} />
-              <Text style={styles.shuffleBtnText}>Shuffle</Text>
-            </Pressable>
-            <Pressable style={styles.playBtn} onPress={handlePlayAll}>
-              <Ionicons
-                name={isPlayingFromMix && isPlaying ? "pause" : "play"}
-                size={18}
-                color="#000"
-              />
-              <Text style={styles.playBtnText}>
-                {isPlayingFromMix && isPlaying ? "Pause" : "Play All"}
-              </Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {/* Song list */}
-        {loading ? (
-          <SongRowSkeleton count={10} />
-        ) : songs.length > 0 ? (
-          songs.map((song, i) => (
-            <SongRow key={song.id} song={song} index={i} queue={songs} queueKey={songsQueueKey} />
-          ))
-        ) : (
-          <View style={styles.empty}>
-            <Ionicons name="musical-notes-outline" size={40} color={Colors.subtext} />
-            <Text style={styles.emptyText}>No songs found for these artists.</Text>
-          </View>
-        )}
-      </ScrollView>
+            {/* Action buttons */}
+            {!loading && songs.length > 0 ? (
+              <View style={styles.actions}>
+                <Pressable style={styles.shuffleBtn} onPress={handleShuffle}>
+                  <Ionicons name="shuffle" size={17} color={Colors.text} />
+                  <Text style={styles.shuffleBtnText}>Shuffle</Text>
+                </Pressable>
+                <Pressable style={styles.playBtn} onPress={handlePlayAll}>
+                  <Ionicons
+                    name={isPlayingFromMix && isPlaying ? "pause" : "play"}
+                    size={18}
+                    color="#000"
+                  />
+                  <Text style={styles.playBtnText}>
+                    {isPlayingFromMix && isPlaying ? "Pause" : "Play All"}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </>
+        }
+        ListEmptyComponent={
+          loading ? (
+            <SongRowSkeleton count={10} />
+          ) : (
+            <View style={styles.empty}>
+              <Ionicons name="musical-notes-outline" size={40} color={Colors.subtext} />
+              <Text style={styles.emptyText}>No songs found for these artists.</Text>
+            </View>
+          )
+        }
+      />
     </View>
   );
 }

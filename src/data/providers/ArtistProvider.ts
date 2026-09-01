@@ -386,26 +386,17 @@ async function setCachedFeaturedArtists(artists: ArtistCard[]): Promise<void> {
 
 async function fetchArtistRaw(id: string, songCount = 50): Promise<JioSaavnArtist | null> {
   const appBase = getApiUrl().replace(/\/+$/, "");
-  const urls = [
-    `${appBase}/api/artists/${encodeURIComponent(id)}?songCount=${songCount}&albumCount=10&sortBy=popularity&sortOrder=desc`,
-  ];
+  const url = `${appBase}/api/artists/${encodeURIComponent(id)}?songCount=${songCount}&albumCount=10&sortBy=popularity&sortOrder=desc`;
 
-  const results = await Promise.allSettled(
-    urls.map(async (url) => {
-      const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const data = json?.data ?? json;
-      const normalized = normalizeArtist(data);
-      if (!normalized) throw new Error("parse failed");
-      return normalized;
-    })
-  );
-
-  for (const r of results) {
-    if (r.status === "fulfilled") return r.value;
+  try {
+    const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
+    if (!res.ok) return null;
+    const json = await res.json();
+    const data = json?.data ?? json;
+    return normalizeArtist(data);
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /** Search artists by name — returns lightweight ArtistCard[] */
@@ -415,33 +406,28 @@ export async function searchArtists(query: string): Promise<ArtistCard[]> {
 
   const appBase = getApiUrl().replace(/\/+$/, "");
   const encoded = encodeURIComponent(q);
-  const urls = [
-    `${appBase}/api/search/artists?query=${encoded}&limit=20&page=1`,
-  ];
+  const url = `${appBase}/api/search/artists?query=${encoded}&limit=20&page=1`;
 
-  const results = await Promise.allSettled(
-    urls.map(async (url) => {
-      const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const arr = firstArray(
-        json?.data?.results,
-        json?.data?.artists?.results,
-        json?.data?.artists,
-        json?.data,
-        json?.artists?.results,
-        json?.artists,
-        json?.results
-      );
-      return mapFilter(arr, normalizeArtistCard, (x): x is ArtistCard => Boolean(x));
-    })
-  );
-
-  for (const r of results) {
-    if (r.status === "fulfilled" && r.value.length > 0) return r.value;
+  try {
+    const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
+    if (!res.ok) return [];
+    const json = await res.json();
+    const arr = firstArray(
+      json?.data?.results,
+      json?.data?.artists?.results,
+      json?.data?.artists,
+      json?.data,
+      json?.artists?.results,
+      json?.artists,
+      json?.results
+    );
+    if (!Array.isArray(arr) || arr.length === 0) {
+      return searchArtistsFromSongs(appBase, encoded);
+    }
+    return compactMap(arr, normalizeArtistCard);
+  } catch {
+    return searchArtistsFromSongs(appBase, encoded);
   }
-
-  return searchArtistsFromSongs(appBase, encoded);
 }
 
 async function searchArtistsFromSongs(appBase: string, encodedQuery: string): Promise<ArtistCard[]> {
@@ -570,23 +556,16 @@ export async function getArtistSongs(
   sortBy = "popularity"
 ): Promise<JioSaavnSong[]> {
   const appBase = getApiUrl().replace(/\/+$/, "");
-  const urls = [
-    `${appBase}/api/artists/${encodeURIComponent(id)}/songs?page=${page}&sortBy=${sortBy}&sortOrder=desc`,
-  ];
+  const url = `${appBase}/api/artists/${encodeURIComponent(id)}/songs?page=${page}&sortBy=${sortBy}&sortOrder=desc`;
 
-  const results = await Promise.allSettled(
-    urls.map(async (url) => {
-      const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      const arr = firstArray(json?.data?.songs, json?.songs, json?.data?.results, json?.data);
-      if (!Array.isArray(arr)) throw new Error("no songs array");
-      return compactMap(arr, normalizeSong) as JioSaavnSong[];
-    })
-  );
-
-  for (const r of results) {
-    if (r.status === "fulfilled" && r.value.length > 0) return r.value;
+  try {
+    const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
+    if (!res.ok) return [];
+    const json = await res.json();
+    const arr = firstArray(json?.data?.songs, json?.songs, json?.data?.results, json?.data);
+    if (!Array.isArray(arr)) return [];
+    return compactMap(arr, normalizeSong) as JioSaavnSong[];
+  } catch {
+    return [];
   }
-  return [];
 }

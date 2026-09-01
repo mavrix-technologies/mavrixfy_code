@@ -151,8 +151,10 @@ export function updateDownloadMemory(item: DownloadItem): void {
 export async function removeDownload(songId: string): Promise<void> {
   memCache.delete(songId);
   try {
-    await AsyncStorage.removeItem(itemKey(songId));
-    await removeFromIndex(songId);
+    await Promise.all([
+      AsyncStorage.removeItem(itemKey(songId)),
+      removeFromIndex(songId),
+    ]);
   } catch (err) {
     logger.error("[DownloadStore] removeDownload failed", err);
   }

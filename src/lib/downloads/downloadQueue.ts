@@ -229,18 +229,18 @@ async function executeDownload(songId: string): Promise<void> {
   // If it was cancelled while waiting in the pending queue, skip it
   if (item.status === "deleted" || item.status === "completed") return;
 
-  await ensureDownloadsDirs();
   const tempUri = getTempDownloadUri(songId);
   const finalUri = getTrackFileUri(songId);
 
-  await updateStatus(songId, "downloading");
+  // Fetch fresh audio URL while updating status and ensuring directories in parallel
+  const [, , freshUrl] = await Promise.all([
+    ensureDownloadsDirs(),
+    updateStatus(songId, "downloading"),
+    refreshAudioUrl(songId, item.audioUrl, item.quality),
+  ]);
 
-  // Fetch a fresh audio URL — JioSaavn CDN URLs expire in ~15-30 min,
-  // and the URL stored at queue time is often already stale when the slot opens.
-  let audioUrl = await refreshAudioUrl(songId, item.audioUrl, item.quality);
-  
   // Resolve all redirects to get the final download URL
-  audioUrl = await resolveRedirects(audioUrl);
+  const audioUrl = await resolveRedirects(freshUrl);
 
   const handle = createDownloadResumable(
     audioUrl,

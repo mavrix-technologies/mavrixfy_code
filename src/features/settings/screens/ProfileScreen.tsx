@@ -123,9 +123,11 @@ export function ProfileScreen() {
         return;
       }
 
-      await saveSettings({ streamingQuality: value });
       setSettings((prev) => ({ ...prev, streamingQuality: value }));
-      await changeStreamingQuality(value);
+      await Promise.all([
+        saveSettings({ streamingQuality: value }),
+        changeStreamingQuality(value),
+      ]);
     },
     [settings, changeStreamingQuality]
   );

@@ -61,9 +61,10 @@ export async function getCatalogSongs(): Promise<Song[]> {
       snapshot = await getDocs(fallbackQuery);
     }
 
-    return snapshot.docs
-      .map((doc) => mapSong(doc.id, doc.data()))
-      .filter((song): song is Song => song !== null);
+    return snapshot.docs.flatMap((doc) => {
+      const song = mapSong(doc.id, doc.data());
+      return song !== null ? [song] : [];
+    });
   } catch {
     return [];
   }
@@ -88,9 +89,10 @@ export async function searchCatalog(searchText: string): Promise<Song[]> {
     );
     const snapshot = await getDocs(songsQuery);
 
-    return snapshot.docs
-      .map((doc) => mapSong(doc.id, doc.data()))
-      .filter((song): song is Song => song !== null);
+    return snapshot.docs.flatMap((doc) => {
+      const song = mapSong(doc.id, doc.data());
+      return song !== null ? [song] : [];
+    });
   } catch {
     return [];
   }

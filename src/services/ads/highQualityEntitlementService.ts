@@ -25,8 +25,10 @@ export async function isHighQualityUnlocked(): Promise<boolean> {
  */
 export async function unlockHighQuality(durationHours: number = DEFAULT_HIGH_QUALITY_DURATION_HOURS): Promise<void> {
   const expiresAt = Date.now() + Math.max(0.5, durationHours) * 60 * 60 * 1000;
-  await setHighQualityEntitlement(true, expiresAt);
-  await saveSettings({ streamingQuality: "high" });
+  await Promise.all([
+    setHighQualityEntitlement(true, expiresAt),
+    saveSettings({ streamingQuality: "high" }),
+  ]);
 }
 
 /**

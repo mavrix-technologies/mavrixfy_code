@@ -160,18 +160,18 @@ function unwrapAlbumResults(payload: any): any[] {
 
 function getImageList(value: unknown): JioSaavnImage[] {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const record = item as { quality?: unknown; url?: unknown; link?: unknown };
-      const url = cleanText(record.url || record.link);
-      if (!url) return null;
-      return {
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as { quality?: unknown; url?: unknown; link?: unknown };
+    const url = cleanText(record.url || record.link);
+    if (!url) return [];
+    return [
+      {
         quality: cleanText(record.quality),
         url,
-      };
-    })
-    .filter((item): item is JioSaavnImage => Boolean(item));
+      },
+    ];
+  });
 }
 
 function getBestAudioUrl(value: unknown): string {
@@ -186,19 +186,17 @@ function getBestAudioUrl(value: unknown): string {
     "12kbps": 1,
   };
 
-  const candidates = value
-    .map((item) => {
-      if (typeof item === "string") {
-        const url = item.trim();
-        return url ? { quality: "", url } : null;
-      }
-      if (!item || typeof item !== "object") return null;
-      const record = item as { quality?: unknown; url?: unknown; link?: unknown };
-      const url = cleanText(record.url || record.link);
-      if (!url) return null;
-      return { quality: cleanText(record.quality), url };
-    })
-    .filter((item): item is { quality: string; url: string } => Boolean(item));
+  const candidates = value.flatMap((item) => {
+    if (typeof item === "string") {
+      const url = item.trim();
+      return url ? [{ quality: "", url }] : [];
+    }
+    if (!item || typeof item !== "object") return [];
+    const record = item as { quality?: unknown; url?: unknown; link?: unknown };
+    const url = cleanText(record.url || record.link);
+    if (!url) return [];
+    return [{ quality: cleanText(record.quality), url }];
+  });
 
   return sortedCopy(
     candidates,
@@ -438,9 +436,10 @@ async function searchSongs(
   if (!response?.ok) return [];
 
   const payload = await response.json().catch(() => null);
-  return unwrapSongResults(payload)
-    .map((raw, index) => normalizeNewReleaseCandidate(raw, index))
-    .filter((song): song is NewReleaseSongCandidate => Boolean(song));
+  return unwrapSongResults(payload).flatMap((raw, index) => {
+    const song = normalizeNewReleaseCandidate(raw, index);
+    return song ? [song] : [];
+  });
 }
 
 async function searchAlbums(
@@ -465,9 +464,10 @@ async function searchAlbums(
   if (!response?.ok) return [];
 
   const payload = await response.json().catch(() => null);
-  return unwrapAlbumResults(payload)
-    .map((raw, index) => normalizeAlbumCandidate(raw, index))
-    .filter((album): album is NewReleaseAlbumCandidate => Boolean(album));
+  return unwrapAlbumResults(payload).flatMap((raw, index) => {
+    const album = normalizeAlbumCandidate(raw, index);
+    return album ? [album] : [];
+  });
 }
 
 async function fetchAlbumSongs(
@@ -489,8 +489,8 @@ async function fetchAlbumSongs(
 
   const payload = await response.json().catch(() => null);
   const albumData = payload?.data || {};
-  return unwrapSongResults(payload)
-    .map((raw, index) => normalizeNewReleaseCandidate(
+  return unwrapSongResults(payload).flatMap((raw, index) => {
+    const song = normalizeNewReleaseCandidate(
       {
         ...raw,
         album: raw?.album || {
@@ -501,8 +501,9 @@ async function fetchAlbumSongs(
         year: raw?.year || albumData?.year || album.year,
       },
       albumRank * 50 + index
-    ))
-    .filter((song): song is NewReleaseSongCandidate => Boolean(song));
+    );
+    return song ? [song] : [];
+  });
 }
 
 async function fetchAlbumNewReleaseSongs(

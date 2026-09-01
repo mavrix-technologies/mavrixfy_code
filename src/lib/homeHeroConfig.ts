@@ -165,9 +165,10 @@ function normalizeHomeHeroConfig(data: unknown): HomeHeroConfig {
   const adSlotEnabled =
     typeof record.adSlotEnabled === "boolean" ? record.adSlotEnabled : Boolean(adUnitId);
   const configuredItems = Array.isArray(record.items)
-    ? record.items
-        .map((item, index) => normalizeVideoItem(item, index))
-        .filter((item): item is HomeHeroVideoItem => Boolean(item))
+    ? record.items.flatMap((item, index) => {
+        const normalized = normalizeVideoItem(item, index);
+        return normalized ? [normalized] : [];
+      })
     : [];
   const fallbackItems = [
     {

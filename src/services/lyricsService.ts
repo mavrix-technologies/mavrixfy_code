@@ -406,15 +406,21 @@ export function parseLrc(lrcContent: string): LyricLine[] {
  */
 function parsePlainText(plain: string): LyricLine[] {
   if (!plain) return [];
-  return plain
-    .split(/\r?\n/)
-    .map((line) => romanizeToHinglish(line.trim()))
-    .filter((line) => line.length > 0)
-    .map((text, index) => ({
-      id: `plain_${index * 4}_${index}`,
-      time: index * 4,
-      text,
-    }));
+  const lines = plain.split(/\r?\n/);
+  const result: LyricLine[] = [];
+  let validIndex = 0;
+  for (const rawLine of lines) {
+    const text = romanizeToHinglish(rawLine.trim());
+    if (text.length > 0) {
+      result.push({
+        id: `plain_${validIndex * 4}_${validIndex}`,
+        time: validIndex * 4,
+        text,
+      });
+      validIndex++;
+    }
+  }
+  return result;
 }
 
 interface FetchSongParams {

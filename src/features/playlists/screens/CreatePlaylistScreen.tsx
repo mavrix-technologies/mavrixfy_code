@@ -1,7 +1,6 @@
-import React from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback } from "react";
+import { FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
@@ -30,19 +29,21 @@ const CREATE_ACTIONS: CreateAction[] = [
   },
   {
     icon: "search-outline",
-    title: "Find tracks",
-    subtitle: "Search for songs to play, save, or queue next.",
+    title: "Search & add",
+    subtitle: "Find tracks and build a playlist directly from search results.",
     href: "/search",
   },
 ];
 
 function CreateActionRow({ action }: { action: CreateAction }) {
+  const handlePress = () => {
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    router.push(action.href as any);
+  };
+
   return (
     <Pressable
-      onPress={() => {
-        void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-        router.push(action.href);
-      }}
+      onPress={handlePress}
       style={({ pressed }) => [styles.actionRow, pressed && styles.actionRowPressed]}
     >
       <View style={styles.actionIcon}>
@@ -59,31 +60,36 @@ function CreateActionRow({ action }: { action: CreateAction }) {
 
 export function CreatePlaylistScreen() {
   const insets = useSafeAreaInsets();
-  const topPadding = Platform.OS === "web" ? 91 : insets.top + 24;
-  const bottomPadding = Platform.OS === "web" ? 154 : Math.max(154, insets.bottom + 146);
+  const topPadding = insets.top + (Platform.OS === "android" ? 18 : 12);
+  const bottomPadding = insets.bottom + 96;
+
+  const renderItem = useCallback(
+    ({ item }: { item: CreateAction }) => <CreateActionRow action={item} />,
+    []
+  );
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#121212", Colors.background]} style={StyleSheet.absoluteFillObject} />
-      <ScrollView
+      <FlatList
         style={styles.scroll}
         contentContainerStyle={[styles.content, { paddingTop: topPadding, paddingBottom: bottomPadding }]}
         showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.heroIcon}>
-          <Ionicons name="add" size={42} color="#FFFFFF" />
-        </View>
-        <Text style={styles.title}>Create</Text>
-        <Text style={styles.subtitle}>
-          Start from an import, a playlist, or a fresh search.
-        </Text>
-
-        <View style={styles.actionList}>
-          {CREATE_ACTIONS.map((action) => (
-            <CreateActionRow key={action.title} action={action} />
-          ))}
-        </View>
-      </ScrollView>
+        data={CREATE_ACTIONS}
+        keyExtractor={(action) => action.title}
+        ListHeaderComponent={
+          <>
+            <View style={styles.heroIcon}>
+              <Ionicons name="add" size={42} color="#FFFFFF" />
+            </View>
+            <Text style={styles.title}>Create</Text>
+            <Text style={styles.subtitle}>
+              Start from an import, a playlist, or a fresh search.
+            </Text>
+            <View style={{ height: 16 }} />
+          </>
+        }
+        renderItem={renderItem}
+      />
     </View>
   );
 }

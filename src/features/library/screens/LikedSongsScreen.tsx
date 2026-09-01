@@ -178,7 +178,9 @@ export function LikedSongsScreen() {
         desi: ["desi", "punjabi", "hindi", "bollywood", "bhangra", "t-series", "filmi"],
       };
 
-      const targetKeywords = (moodKeywords[moodLower] || [moodLower]).map(normalizeText);
+      const rawKeywords = moodKeywords[moodLower] || [moodLower];
+      const escapedKeywords = rawKeywords.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      const moodRegex = new RegExp(`(?:${escapedKeywords.join("|")})`, "i");
 
       list = list.filter((song) => {
         const title = normalizeText(song.title);
@@ -189,25 +191,17 @@ export function LikedSongsScreen() {
           ? song.mood.map((m) => normalizeText(m)).join(" ")
           : normalizeText(song.mood);
 
-        if (genre.includes(moodLower) || moodAttr.includes(moodLower)) return true;
-
-        return targetKeywords.some(
-          (kw) => title.includes(kw) || artist.includes(kw) || album.includes(kw)
-        );
+        const combined = `${title} ${artist} ${album} ${genre} ${moodAttr}`;
+        return moodRegex.test(combined);
       });
     }
 
     if (!searchQuery.trim()) return list;
-    const normalizedQuery = normalizeText(searchQuery);
+    const escapedQuery = searchQuery.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const searchRegex = new RegExp(escapedQuery, "i");
     return list.filter((song) => {
-      const title = normalizeText(song.title);
-      const artist = normalizeText(song.artist);
-      const album = normalizeText(song.album);
-      return (
-        title.includes(normalizedQuery) ||
-        artist.includes(normalizedQuery) ||
-        album.includes(normalizedQuery)
-      );
+      const combined = `${normalizeText(song.title)} ${normalizeText(song.artist)} ${normalizeText(song.album)}`;
+      return searchRegex.test(combined);
     });
   }, [songs, selectedMood, searchQuery]);
 

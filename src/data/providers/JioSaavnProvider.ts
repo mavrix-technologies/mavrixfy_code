@@ -915,23 +915,24 @@ async function searchJioSaavnAlbums(
 function sortPlaylists(playlists: JioSaavnPlaylistResult[], categoryId: string): JioSaavnPlaylistResult[] {
   const trendingKeywords = ["trending", "top", "hit", "superhit", "chart", "viral"];
   const freshKeywords = ["latest", "new", "fresh", "updated", String(CURRENT_YEAR)];
+  const isTrending = categoryId === "trending";
+
+  const scoreMap = new Map<string, number>();
+  for (const p of playlists) {
+    const name = p.name.toLowerCase();
+    let score = 0;
+    if (freshKeywords.some((kw) => name.includes(kw))) score += 100;
+    if (isTrending && trendingKeywords.some((kw) => name.includes(kw))) score += 80;
+    scoreMap.set(p.id, score);
+  }
 
   return sortedCopy(playlists, (a, b) => {
-    const aName = a.name.toLowerCase();
-    const bName = b.name.toLowerCase();
-
-    const aFreshScore = freshKeywords.some((keyword) => aName.includes(keyword)) ? 100 : 0;
-    const bFreshScore = freshKeywords.some((keyword) => bName.includes(keyword)) ? 100 : 0;
-    if (aFreshScore !== bFreshScore) return bFreshScore - aFreshScore;
-
-    if (categoryId === "trending") {
-      const aTrendScore = trendingKeywords.some((keyword) => aName.includes(keyword)) ? 80 : 0;
-      const bTrendScore = trendingKeywords.some((keyword) => bName.includes(keyword)) ? 80 : 0;
-      if (aTrendScore !== bTrendScore) return bTrendScore - aTrendScore;
-    }
+    const aScore = scoreMap.get(a.id) ?? 0;
+    const bScore = scoreMap.get(b.id) ?? 0;
+    if (aScore !== bScore) return bScore - aScore;
 
     if (a.songCount !== b.songCount) return b.songCount - a.songCount;
-    return aName.localeCompare(bName);
+    return a.name.localeCompare(b.name);
   });
 }
 

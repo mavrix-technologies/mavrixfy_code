@@ -1759,9 +1759,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     Storage.getRecentlyPlayed()
       .then((recent) => {
-        const recentSongs: Song[] = (recent || [])
-          .map((item) => item.data as Song)
-          .filter((s): s is Song => Boolean(s && s.id));
+        const recentSongs: Song[] = (recent || []).flatMap((item) => {
+          const s = item.data as Song;
+          return s && s.id ? [s] : [];
+        });
         if (recentSongs.length > 0) {
           void carPlayService.syncRecent(recentSongs);
         }

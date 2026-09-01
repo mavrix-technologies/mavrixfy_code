@@ -348,9 +348,10 @@ async function searchMavrixfyPlaylists(
     if (!response.ok) return [];
 
     const payload = await response.json().catch(() => null);
-    return unwrapPlaylistResults(payload)
-      .map((raw) => normalizePlaylistCandidate(raw, source))
-      .filter((item): item is RecommendationItem => Boolean(item));
+    return unwrapPlaylistResults(payload).flatMap((raw) => {
+      const item = normalizePlaylistCandidate(raw, source);
+      return item ? [item] : [];
+    });
   } catch {
     return [];
   } finally {

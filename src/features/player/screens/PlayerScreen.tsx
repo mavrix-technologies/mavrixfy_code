@@ -999,13 +999,11 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
   const [backgroundVideoId, setBackgroundVideoId] = useState<string | null>(null);
   const skipCooldownRef = useRef(false);
   const skipCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const artScrollXRef = useRef<Animated.Value | null>(null);
-  if (artScrollXRef.current === null) {
-    artScrollXRef.current = new Animated.Value(0);
-  }
+  const [artScrollX] = useState(() => new Animated.Value(0));
   const artCarouselRef = useRef<FlatList<ArtworkQueueItem> | null>(null);
   const hasAlignedArtCarouselRef = useRef(false);
-  const prevSongIdRef = useRef(currentSong?.id);
+  const [prevSongId, setPrevSongId] = useState(currentSong?.id);
+  const prevCarouselSongIdRef = useRef(currentSong?.id);
   const pendingArtworkTargetIndexRef = useRef<number | null>(null);
   const optionsPressLockRef = useRef(false);
   const { positionMillis, duration, progress } = usePlayerProgress();
@@ -1025,10 +1023,12 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
     setTextColor,
   } = usePlayerActions();
 
-  useEffect(() => {
-    setIsProgressSeeking(false);
-  }, [currentSong?.id]);
-  const artScrollX = artScrollXRef.current!;
+  if (prevSongId !== currentSong?.id) {
+    setPrevSongId(currentSong?.id);
+    if (isProgressSeeking) {
+      setIsProgressSeeking(false);
+    }
+  }
 
   const currentPositionSeconds = positionMillis > 0 ? positionMillis / 1000 : ((progress || 0) * (duration || 0)) / 1000;
 
@@ -1589,8 +1589,8 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
       return;
     }
 
-    const songChanged = currentSong?.id !== prevSongIdRef.current;
-    prevSongIdRef.current = currentSong?.id;
+    const songChanged = currentSong?.id !== prevCarouselSongIdRef.current;
+    prevCarouselSongIdRef.current = currentSong?.id;
 
     if (songChanged) {
       hasAlignedArtCarouselRef.current = false;

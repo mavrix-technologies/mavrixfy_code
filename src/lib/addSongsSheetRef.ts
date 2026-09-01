@@ -1,4 +1,9 @@
 import { createRef } from "react";
-import type { AddSongsBottomSheetRef } from "@/components/AddSongsModal";
+
+export interface AddSongsBottomSheetRef {
+  expand: () => void;
+  collapse: () => void;
+  close: () => void;
+}
 
 export const globalAddSongsSheetRef = createRef<AddSongsBottomSheetRef>();
