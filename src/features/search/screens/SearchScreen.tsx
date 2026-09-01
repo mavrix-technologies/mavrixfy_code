@@ -648,76 +648,6 @@ const SearchResultArtistRow = React.memo(function SearchResultArtistRow({
   );
 });
 
-interface SearchTopResultCardProps {
-  song?: Song;
-  artist?: ArtistResult;
-  onSongPress: (song: Song) => void;
-  onArtistPress: (artist: ArtistResult) => void;
-}
-
-const SearchTopResultCard = React.memo(function SearchTopResultCard({
-  song,
-  artist,
-  onSongPress,
-  onArtistPress,
-}: SearchTopResultCardProps) {
-  if (!song && !artist) return null;
-
-  const isSong = Boolean(song);
-  const title = isSong ? song!.title : artist!.name;
-  const subtitle = isSong ? song!.artist : (artist!.subtitle || "Artist");
-  const imageUrl = isSong ? song!.coverUrl : getBestImageUrl(artist!.image);
-
-  const handlePress = () => {
-    if (isSong && song) {
-      onSongPress(song);
-    } else if (artist) {
-      onArtistPress(artist);
-    }
-  };
-
-  return (
-    <View style={styles.topResultSection}>
-      <Text style={styles.topResultSectionTitle}>Top result</Text>
-      <Pressable
-        style={({ pressed }) => [styles.topResultCard, pressed && styles.topResultCardPressed]}
-        onPress={handlePress}
-      >
-        {imageUrl ? (
-          <Image
-            source={{ uri: imageUrl }}
-            style={[styles.topResultImage, !isSong && styles.topResultImageRound]}
-            contentFit="cover"
-            transition={150}
-          />
-        ) : (
-          <View style={[styles.topResultImage, styles.artistResultImageFallback, !isSong && styles.topResultImageRound]}>
-            <Ionicons name={isSong ? "musical-notes" : "person"} size={28} color={Colors.subtext} />
-          </View>
-        )}
-        <View style={styles.topResultInfo}>
-          <Text style={styles.topResultTitle} numberOfLines={1}>
-            {title}
-          </Text>
-          <View style={styles.topResultMetaRow}>
-            <View style={styles.topResultBadge}>
-              <Text style={styles.topResultBadgeText}>{isSong ? "Song" : "Artist"}</Text>
-            </View>
-            <Text style={styles.topResultSubtitle} numberOfLines={1}>
-              {subtitle}
-            </Text>
-          </View>
-        </View>
-        {isSong && (
-          <View style={styles.topResultPlayButton}>
-            <Ionicons name="play" size={19} color="#000000" style={{ marginLeft: 2 }} />
-          </View>
-        )}
-      </Pressable>
-    </View>
-  );
-});
-
 interface SearchResultsSectionProps {
   topInset: number;
   resultFilter: ResultFilter;
@@ -730,8 +660,6 @@ interface SearchResultsSectionProps {
   albumResults: AlbumResult[];
   artistResults: ArtistResult[];
   playlistResults: PlaylistResult[];
-  topSong?: Song;
-  topArtist?: ArtistResult;
   featuredAlbums: AlbumResult[];
   featuredArtists: ArtistResult[];
   featuredPlaylists: PlaylistResult[];
@@ -759,8 +687,6 @@ const SearchResultsSection = React.memo(function SearchResultsSection({
   albumResults,
   artistResults,
   playlistResults,
-  topSong,
-  topArtist,
   featuredAlbums,
   featuredArtists,
   featuredPlaylists,
@@ -937,26 +863,6 @@ const SearchResultsSection = React.memo(function SearchResultsSection({
           initialNumToRender={10}
           maxToRenderPerBatch={8}
           windowSize={7}
-          ListHeaderComponent={
-            resultFilter === "all" ? (
-              <>
-                <SearchTopResultCard
-                  song={topSong}
-                  artist={topArtist}
-                  onSongPress={onSongPress}
-                  onArtistPress={onArtistPress}
-                />
-                {showSongResults ? (
-                  <View style={styles.sectionHeaderRow}>
-                    <Text style={styles.sectionTitle}>Songs</Text>
-                    <Pressable onPress={() => onFilterSelect("songs")}>
-                      <Text style={styles.sectionActionText}>See all</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
-              </>
-            ) : null
-          }
           ListFooterComponent={
             showAlbumResults || showArtistResults || showPlaylistResults ? (
               <>
@@ -1425,13 +1331,7 @@ function useSearchEngine(params: { q?: string | string[]; name?: string | string
   const showPlaylistResults = (resultFilter === "all" || resultFilter === "playlists") && playlistResults.length > 0;
   const showSongResults = (resultFilter === "all" || resultFilter === "songs") && songResults.length > 0;
 
-  const topSong = songResults[0];
-  const topArtist = artistResults[0];
-
-  const displayedSongs = useMemo(
-    () => (showSongResults ? songResults : []),
-    [showSongResults, songResults]
-  );
+  const displayedSongs = useMemo(() => (showSongResults ? songResults : []), [showSongResults, songResults]);
   const featuredAlbums = useMemo(() => albumResults.slice(0, 6), [albumResults]);
   const featuredArtists = useMemo(() => artistResults.slice(0, 5), [artistResults]);
   const featuredPlaylists = useMemo(() => playlistResults.slice(0, 6), [playlistResults]);
@@ -1541,8 +1441,6 @@ function useSearchEngine(params: { q?: string | string[]; name?: string | string
     albumResults,
     artistResults,
     playlistResults,
-    topSong,
-    topArtist,
     featuredAlbums,
     featuredArtists,
     featuredPlaylists,
@@ -1598,8 +1496,6 @@ function SearchScreenView() {
     albumResults,
     artistResults,
     playlistResults,
-    topSong,
-    topArtist,
     featuredAlbums,
     featuredArtists,
     featuredPlaylists,
@@ -1758,8 +1654,6 @@ function SearchScreenView() {
           albumResults={albumResults}
           artistResults={artistResults}
           playlistResults={playlistResults}
-          topSong={topSong}
-          topArtist={topArtist}
           featuredAlbums={featuredAlbums}
           featuredArtists={featuredArtists}
           featuredPlaylists={featuredPlaylists}
@@ -1960,87 +1854,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   resultsContent: { paddingTop: 8 },
-
-  // ── Top Result Card ────────────────────────────────────────────────────────
-  topResultSection: {
-    paddingHorizontal: 16,
-    marginBottom: 16,
-    marginTop: 4,
-  },
-  topResultSectionTitle: {
-    fontSize: 19,
-    fontFamily: "Inter_700Bold",
-    color: Colors.text,
-    marginBottom: 10,
-  },
-  topResultCard: {
-    backgroundColor: "#181818",
-    borderRadius: 10,
-    padding: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    position: "relative",
-  },
-  topResultCardPressed: {
-    opacity: 0.85,
-    backgroundColor: "#222222",
-  },
-  topResultImage: {
-    width: 64,
-    height: 64,
-    borderRadius: 8,
-    backgroundColor: Colors.surface,
-  },
-  topResultImageRound: {
-    borderRadius: 32,
-  },
-  topResultInfo: {
-    flex: 1,
-    marginLeft: 14,
-    marginRight: 10,
-  },
-  topResultTitle: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontFamily: "Inter_700Bold",
-    marginBottom: 6,
-  },
-  topResultMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  topResultBadge: {
-    backgroundColor: "rgba(255, 255, 255, 0.14)",
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  topResultBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontFamily: "Inter_600SemiBold",
-  },
-  topResultSubtitle: {
-    color: Colors.subtext,
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-    flex: 1,
-  },
-  topResultPlayButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: Colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-
   sectionBlock: {
     paddingHorizontal: 16,
     marginBottom: 14,
