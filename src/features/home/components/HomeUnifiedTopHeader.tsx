@@ -137,8 +137,8 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
         {
           paddingTop: topInset,
           backgroundColor: headerBgColor,
-          borderBottomColor: borderAlpha > 0.005 ? `rgba(255, 255, 255, ${borderAlpha.toFixed(3)})` : "transparent",
-          borderBottomWidth: borderAlpha > 0.005 ? StyleSheet.hairlineWidth : 0,
+          borderBottomColor: borderAlpha > 0.005 ? `rgba(255, 255, 255, ${Math.max(0.08, borderAlpha).toFixed(3)})` : "rgba(255, 255, 255, 0.06)",
+          borderBottomWidth: StyleSheet.hairlineWidth,
           transform: [{ translateY: headerTranslateY }],
         },
       ]}
@@ -284,13 +284,16 @@ const styles = StyleSheet.create({
   menuRailRow: {
     height: UNIFIED_HEADER_MENU_HEIGHT,
     justifyContent: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255, 255, 255, 0.16)",
+    position: "relative",
   },
   menuFlatList: {
     flexGrow: 0,
     height: UNIFIED_HEADER_MENU_HEIGHT,
   },
   menuScrollContent: {
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     alignItems: "center",
   },
   categoryItem: {
@@ -299,24 +302,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 14,
-    marginRight: 4,
+    marginRight: 6,
     position: "relative",
+    paddingBottom: 4,
   },
   categoryItemIOS: {
-    paddingHorizontal: 15,
+    paddingHorizontal: 16,
   },
   categoryItemPressed: {
     opacity: 0.75,
   },
   iconWrap: {
-    height: 22,
+    height: 24,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 3,
+    marginBottom: 2,
   },
   categoryText: {
-    color: "rgba(255, 255, 255, 0.65)",
-    fontSize: 11,
+    color: "rgba(255, 255, 255, 0.68)",
+    fontSize: 12,
     fontFamily: "Inter_500Medium",
     fontWeight: "500",
   },
@@ -326,16 +330,19 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   categoryTextIOS: {
-    fontSize: 11.5,
+    fontSize: 12,
   },
   activeIndicator: {
     position: "absolute",
-    bottom: 0,
-    left: 8,
-    right: 8,
-    height: 3,
+    bottom: -StyleSheet.hairlineWidth,
+    left: 4,
+    right: 4,
+    height: 3.5,
+    borderTopLeftRadius: 3,
+    borderTopRightRadius: 3,
     borderRadius: 2,
     backgroundColor: "#FFFFFF",
+    zIndex: 10,
   },
 });
 

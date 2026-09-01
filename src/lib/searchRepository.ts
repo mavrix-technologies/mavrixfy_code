@@ -1,6 +1,6 @@
 import { Song, type JioSaavnImage } from "@/lib/musicData";
 import { searchCatalog } from "@/lib/catalogService";
-import { rankSongs, parseStructuredQuery } from "@/lib/searchUtils";
+import { rankSongs, parseStructuredQuery, deduplicateSongs } from "@/lib/searchUtils";
 
 export type ResultFilter = "all" | "songs" | "albums" | "artists" | "playlists";
 
@@ -131,6 +131,12 @@ function parseApiSong(s: any): Song | null {
     artist = s.artist.trim();
   } else if (Array.isArray(s.artists?.primary) && s.artists.primary.length > 0) {
     artist = s.artists.primary.map((a: any) => a.name).join(", ");
+  } else if (typeof s.singers === "string" && s.singers.trim()) {
+    artist = s.singers.trim();
+  } else if (Array.isArray(s.artists?.all) && s.artists.all.length > 0) {
+    artist = s.artists.all.map((a: any) => a.name).join(", ");
+  } else if (typeof s.description === "string" && s.description.trim()) {
+    artist = s.description.trim();
   }
 
   const title = String(s.name || s.title || "Unknown Song");
@@ -157,17 +163,7 @@ function parseApiSong(s: any): Song | null {
   };
 }
 
-function uniqueSongs(songs: Song[]): Song[] {
-  const seen = new Set<string>();
-  return songs.filter((song) => {
-    const key = `${song.source}:${song.id}`;
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
+
 
 function normalizePlaylists(raw: unknown, limit = 20): PlaylistResult[] {
   if (!Array.isArray(raw)) return [];
@@ -286,8 +282,54 @@ export async function searchRepository(
       if (parsed) parsedApiSongs.push(parsed);
     }
 
-    const mergedSongs = uniqueSongs([...catalogSongs, ...parsedApiSongs]);
-    const rankedSongs = rankSongs(mergedSongs, normalizedQuery);
+    // Extract topQuery song ID — JioSaavn's own "best match" signal
+    const topQueryResult = globalRes?.data?.topQuery?.results?.[0];
+    const topQueryId: string | null =
+      topQueryResult?.type === "song" && topQueryResult?.id ? String(topQueryResult.id) : null;
+    const topQueryInResults = topQueryId
+      ? parsedApiSongs.some((s) => s.id === topQueryId)
+      : false;
+
+    // Fetch topQuery song by ID if it's not already in search results,
+    // and fetch its suggestions to expand the candidate pool with songs
+    // that are on JioSaavn but not returned by the search API.
+    const extraFetches: Promise<Song[]>[] = [];
+
+    if (topQueryId && !topQueryInResults) {
+      extraFetches.push(
+        fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}`, signal)
+          .then((res) => {
+            const items: Song[] = [];
+            for (const item of res?.data || []) {
+              const parsed = parseApiSong(item);
+              if (parsed) items.push(parsed);
+            }
+            return items;
+          })
+          .catch(() => [])
+      );
+    }
+
+    if (topQueryId) {
+      extraFetches.push(
+        fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}/suggestions?limit=20`, signal)
+          .then((res) => {
+            const items: Song[] = [];
+            for (const item of res?.data || []) {
+              const parsed = parseApiSong(item);
+              if (parsed) items.push(parsed);
+            }
+            return items;
+          })
+          .catch(() => [])
+      );
+    }
+
+    const extraResults = await Promise.all(extraFetches);
+    const extraSongs: Song[] = extraResults.flat();
+
+    const mergedSongs = deduplicateSongs([...catalogSongs, ...parsedApiSongs, ...extraSongs]);
+    const rankedSongs = rankSongs(mergedSongs, normalizedQuery, {}, topQueryId);
 
     const albums = normalizeAlbums(globalRes?.data?.albums?.results, 12);
     const artists = normalizeArtists(globalRes?.data?.artists?.results, 12);
@@ -302,7 +344,8 @@ export async function searchRepository(
   }
 
   if (filter === "songs") {
-    const [songsRes, catalogSongs] = await Promise.all([
+    const [globalRes, songsRes, catalogSongs] = await Promise.all([
+      fetchJson<any>(`${apiUrl}/api/search?query=${encodeURIComponent(searchTerm)}`, signal),
       fetchJson<any>(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=50`, signal),
       catalogPromise,
     ]);
@@ -314,8 +357,48 @@ export async function searchRepository(
       if (parsed) parsedApiSongs.push(parsed);
     }
 
-    const mergedSongs = uniqueSongs([...catalogSongs, ...parsedApiSongs]);
-    const rankedSongs = rankSongs(mergedSongs, normalizedQuery);
+    // Same topQuery + suggestions expansion for dedicated songs filter
+    const topQueryId: string | null = (() => {
+      const tq = globalRes?.data?.topQuery?.results?.[0];
+      return tq?.type === "song" && tq?.id ? String(tq.id) : null;
+    })();
+    const topQueryInResults = topQueryId
+      ? parsedApiSongs.some((s) => s.id === topQueryId)
+      : false;
+
+    const extraFetches: Promise<Song[]>[] = [];
+    if (topQueryId && !topQueryInResults) {
+      extraFetches.push(
+        fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}`, signal)
+          .then((res) => {
+            const items: Song[] = [];
+            for (const item of res?.data || []) {
+              const parsed = parseApiSong(item);
+              if (parsed) items.push(parsed);
+            }
+            return items;
+          })
+          .catch(() => [])
+      );
+    }
+    if (topQueryId) {
+      extraFetches.push(
+        fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}/suggestions?limit=20`, signal)
+          .then((res) => {
+            const items: Song[] = [];
+            for (const item of res?.data || []) {
+              const parsed = parseApiSong(item);
+              if (parsed) items.push(parsed);
+            }
+            return items;
+          })
+          .catch(() => [])
+      );
+    }
+    const extraSongs: Song[] = (await Promise.all(extraFetches)).flat();
+
+    const mergedSongs = deduplicateSongs([...catalogSongs, ...parsedApiSongs, ...extraSongs]);
+    const rankedSongs = rankSongs(mergedSongs, normalizedQuery, {}, topQueryId);
 
     return {
       ...EMPTY_RESULTS,
