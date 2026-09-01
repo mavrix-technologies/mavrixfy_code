@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { FollowedArtist } from "@/lib/followedArtists";
+import { type FollowedArtist } from "@/lib/followedArtists";
 import { ArtistRow } from "./ArtistRow";
 
 export type Filter = "playlists" | "artists" | "favorite" | null;

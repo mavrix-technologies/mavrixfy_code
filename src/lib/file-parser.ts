@@ -1,4 +1,4 @@
-import { ParsedSong, FileParseResult } from "@/types/import";
+import { type ParsedSong, type FileParseResult } from "@/types/import";
 
 /**
  * Parse CSV file content

@@ -7,6 +7,7 @@ import TrackPlayer, {
   IOSCategoryMode,
   IOSCategoryOptions,
 } from "react-native-track-player";
+import { logger } from "@/lib/logger";
 
 let playerReady = false;
 let setupPromise: Promise<void> | null = null;
@@ -16,7 +17,7 @@ function isAlreadyInitialized(error: unknown): boolean {
 }
 
 export async function setupPlayer(): Promise<void> {
-  console.log("[TrackPlayerAdapter] setupPlayer called, playerReady =", playerReady);
+  logger.info("[TrackPlayerAdapter] setupPlayer called, playerReady =", playerReady);
   if (playerReady) return;
   if (setupPromise) return setupPromise;
 
@@ -24,9 +25,9 @@ export async function setupPlayer(): Promise<void> {
   try {
     await setupPromise;
     playerReady = true;
-    console.log("[TrackPlayerAdapter] setupPlayer completed successfully!");
+    logger.info("[TrackPlayerAdapter] setupPlayer completed successfully!");
   } catch (error) {
-    console.error("[TrackPlayerAdapter] setupPlayer failed:", error);
+    logger.error("[TrackPlayerAdapter] setupPlayer failed:", error);
     setupPromise = null;
     throw error;
   }
@@ -34,7 +35,7 @@ export async function setupPlayer(): Promise<void> {
 
 async function setupPlayerInternal(): Promise<void> {
   if (!TrackPlayer?.setupPlayer) {
-    console.error("[TrackPlayerAdapter] TrackPlayer.setupPlayer method is missing!");
+    logger.error("[TrackPlayerAdapter] TrackPlayer.setupPlayer method is missing!");
     return;
   }
 
@@ -47,7 +48,7 @@ async function setupPlayerInternal(): Promise<void> {
   }
 
   try {
-    console.log("[TrackPlayerAdapter] Calling TrackPlayer.setupPlayer...");
+    logger.info("[TrackPlayerAdapter] Calling TrackPlayer.setupPlayer...");
     await TrackPlayer.setupPlayer({
       autoHandleInterruptions: true,
       autoUpdateMetadata: true,
@@ -73,7 +74,7 @@ async function setupPlayerInternal(): Promise<void> {
   }
 
   if (TrackPlayer.updateOptions) {
-    console.log("[TrackPlayerAdapter] Calling TrackPlayer.updateOptions...");
+    logger.info("[TrackPlayerAdapter] Calling TrackPlayer.updateOptions...");
     await TrackPlayer.updateOptions({
       android: {
         appKilledPlaybackBehavior:
@@ -104,6 +105,6 @@ async function setupPlayerInternal(): Promise<void> {
       ],
       progressUpdateEventInterval: 1,
     });
-    console.log("[TrackPlayerAdapter] TrackPlayer.updateOptions configured successfully!");
+    logger.info("[TrackPlayerAdapter] TrackPlayer.updateOptions configured successfully!");
   }
 }

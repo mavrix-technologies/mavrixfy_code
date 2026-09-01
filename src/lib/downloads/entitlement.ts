@@ -7,13 +7,7 @@
 
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import {
-  DownloadEntitlement,
-  TrackRights,
-  DOWNLOAD_DEVICE_LIMIT,
-  MAX_OFFLINE_SONGS,
-  LICENSE_GRACE_PERIOD_DAYS,
-} from "@/types/downloads";
+import { type DownloadEntitlement, type TrackRights, DOWNLOAD_DEVICE_LIMIT, MAX_OFFLINE_SONGS, LICENSE_GRACE_PERIOD_DAYS } from "@/types/downloads";
 import { logger } from "@/lib/logger";
 
 // ─── Entitlement ──────────────────────────────────────────────────────────────

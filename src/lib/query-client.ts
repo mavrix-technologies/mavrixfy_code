@@ -1,5 +1,5 @@
 
-import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { QueryClient, type QueryFunction } from "@tanstack/react-query";
 import { getMusicApiUrl } from "./api-config";
 
 export class ApiError extends Error {

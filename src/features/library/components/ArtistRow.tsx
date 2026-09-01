@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { FollowedArtist } from "@/lib/followedArtists";
+import { type FollowedArtist } from "@/lib/followedArtists";
 
 interface ArtistRowProps {
   artist: FollowedArtist;

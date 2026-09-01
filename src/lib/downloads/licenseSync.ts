@@ -12,16 +12,7 @@
  * pause/resume events must NEVER be written to Firestore.
  */
 
-import {
-  doc,
-  setDoc,
-  getDoc,
-  deleteDoc,
-  collection,
-  getDocs,
-  serverTimestamp,
-  Timestamp,
-} from "firebase/firestore";
+import { doc, setDoc, getDoc, deleteDoc, collection, getDocs, serverTimestamp, type Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
   OfflineLicense,

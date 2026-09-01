@@ -6,14 +6,8 @@
  * delegating to the queue.
  */
 
-import { Song } from "@/lib/musicData";
-import {
-  DownloadItem,
-  DownloadPreferences,
-  DownloadEntitlement,
-  StorageSummary,
-  DownloadStatus,
-} from "@/types/downloads";
+import { type Song } from "@/lib/musicData";
+import { type DownloadItem, type DownloadPreferences, type StorageSummary } from "@/types/downloads";
 import {
   loadAllDownloads,
   loadDownload,
@@ -40,15 +34,7 @@ import {
   writeLicenseFailed,
   refreshLicenses,
 } from "@/lib/downloads/licenseSync";
-import {
-  deleteTrackFiles,
-  deleteAllTrackFiles,
-  trackFileExists,
-  getTrackFileSize,
-  getTrackFileUri,
-  getValidatedTrackFileUri,
-  hasSufficientStorage,
-} from "@/lib/downloads/filesystem";
+import { deleteTrackFiles, deleteAllTrackFiles, trackFileExists, getTrackFileSize, type getTrackFileUri, getValidatedTrackFileUri, hasSufficientStorage } from "@/lib/downloads/filesystem";
 import { logger } from "@/lib/logger";
 
 // ─── Types ────────────────────────────────────────────────────────────────────

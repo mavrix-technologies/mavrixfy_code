@@ -1,4 +1,4 @@
-import { Song } from "./musicData";
+import { type Song } from "./musicData";
 
 export interface CachedPlaylistData {
   id: string;

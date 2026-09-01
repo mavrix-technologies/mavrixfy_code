@@ -13,10 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
-import {
-  Song,
-  formatDuration,
-} from "@/lib/musicData";
+import { type Song, formatDuration } from "@/lib/musicData";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import SongRow from "@/components/SongRow";

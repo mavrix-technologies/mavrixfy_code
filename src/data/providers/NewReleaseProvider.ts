@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { buildAppApiUrl } from "@/lib/api-config";
-import { getBestImageUrl, Song, type JioSaavnImage } from "@/lib/musicData";
+import { getBestImageUrl, type Song, type JioSaavnImage } from "@/lib/musicData";
 import { sortedCopy } from "@/lib/arrayUtils";
 
 const DAILY_NEW_RELEASE_CACHE_KEY = "@mavrixfy_daily_new_release_songs_v6"; // bumped: official labels & trending expansion

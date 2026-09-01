@@ -18,11 +18,11 @@ import React, {
   useCallback,
   useRef,
   useMemo,
-  ReactNode,
+  type ReactNode,
   useSyncExternalStore,
 } from "react";
-import { AppState, AppStateStatus } from "react-native";
-import { Song } from "@/lib/musicData";
+import { AppState, type AppStateStatus } from "react-native";
+import { type Song } from "@/lib/musicData";
 import {
   DownloadItem,
   DownloadPreferences,
@@ -30,21 +30,7 @@ import {
   StorageSummary,
   DEFAULT_DOWNLOAD_PREFERENCES,
 } from "@/types/downloads";
-import {
-  getAllDownloads,
-  downloadSong,
-  downloadCollection,
-  pauseSongDownload,
-  resumeSongDownload,
-  retrySongDownload,
-  removeSongDownload,
-  removeAllDownloads,
-  syncLicenses,
-  getStorageSummary,
-  getLocalPlaybackUrl,
-  onQueueEvent,
-  DownloadResult,
-} from "@/lib/downloads/downloadManager";
+import { getAllDownloads, downloadSong, downloadCollection, pauseSongDownload, resumeSongDownload, retrySongDownload, removeSongDownload, removeAllDownloads, syncLicenses, getStorageSummary, getLocalPlaybackUrl, onQueueEvent, type DownloadResult } from "@/lib/downloads/downloadManager";
 import {
   loadDownloadPreferences,
   saveDownloadPreferences,

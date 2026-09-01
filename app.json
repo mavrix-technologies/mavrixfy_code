@@ -27,6 +27,8 @@
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to upload images.",
         "NSAppleMusicUsageDescription": "This app streams music content.",
         "NSUserTrackingUsageDescription": "This identifier will be used to deliver personalized ads to you.",
+        "NSMicrophoneUsageDescription": "Mavrixfy uses the microphone for voice search.",
+        "NSSpeechRecognitionUsageDescription": "Mavrixfy uses speech recognition for voice search.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false,
@@ -51,6 +53,7 @@
         "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "VIBRATE",
         "POST_NOTIFICATIONS",
+        "RECORD_AUDIO",
         "com.google.android.gms.permission.AD_ID"
       ],
       "blockedPermissions": [
@@ -62,7 +65,6 @@
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO",
         "android.permission.WRITE_SETTINGS",
         "android.permission.SYSTEM_ALERT_WINDOW"
       ],

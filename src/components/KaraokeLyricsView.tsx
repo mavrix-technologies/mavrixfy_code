@@ -23,7 +23,7 @@ import * as Animated from "@/lib/nativeAnimated";
 import * as Haptics from "expo-haptics";
 import { triggerImpact } from "@/lib/haptics";
 import { getSongLyrics, type LyricLine, type LyricsResult } from "@/services/lyricsService";
-import { formatDuration, Song } from "@/lib/musicData";
+import { formatDuration, type Song } from "@/lib/musicData";
 import { useArtworkPalette } from "@/lib/colorExtractor";
 import { PlayerSlider } from "@/components/PlayerSlider";
 import { Image } from "expo-image";
@@ -489,36 +489,9 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
         }
       });
 
-    return () => {
-      isCurrent = false;
-    };
-  }, [song?.id, song?.title, song?.artist, song?.duration]);
+}, [song?.id, song?.title, song?.artist, song?.duration]);
 
-  // High-frequency live position interpolation for zero-lag word karaoke sync
-  const [interpolatedSeconds, setInterpolatedSeconds] = useState(currentPositionSeconds);
-  const lastSyncRef = useRef<{ pos: number; time: number }>({
-    pos: currentPositionSeconds,
-    time: Date.now(),
-  });
-
-  useEffect(() => {
-    lastSyncRef.current = {
-      pos: currentPositionSeconds,
-      time: Date.now(),
-    };
-    setInterpolatedSeconds(currentPositionSeconds);
-  }, [currentPositionSeconds]);
-
-  useEffect(() => {
-    if (!isPlaying) return;
-    const interval = setInterval(() => {
-      const elapsed = (Date.now() - lastSyncRef.current.time) / 1000;
-      setInterpolatedSeconds(lastSyncRef.current.pos + elapsed);
-    }, 40);
-    return () => clearInterval(interval);
-  }, [isPlaying]);
-
-  const livePosition = isPlaying ? interpolatedSeconds : currentPositionSeconds;
+  const livePosition = currentPositionSeconds;
 
   // Active line index calculation
   const activeIndex = useMemo(() => {
@@ -1032,31 +1005,7 @@ export const FullscreenKaraokeModal = memo(function FullscreenKaraokeModal({
     };
   }, [visible, song?.id, song?.title, song?.artist, song?.duration]);
 
-  // High-frequency live position interpolation for zero-lag word karaoke sync
-  const [interpolatedSeconds, setInterpolatedSeconds] = useState(currentPositionSeconds);
-  const lastSyncRef = useRef<{ pos: number; time: number }>({
-    pos: currentPositionSeconds,
-    time: Date.now(),
-  });
-
-  useEffect(() => {
-    lastSyncRef.current = {
-      pos: currentPositionSeconds,
-      time: Date.now(),
-    };
-    setInterpolatedSeconds(currentPositionSeconds);
-  }, [currentPositionSeconds]);
-
-  useEffect(() => {
-    if (!isPlaying || !visible) return;
-    const interval = setInterval(() => {
-      const elapsed = (Date.now() - lastSyncRef.current.time) / 1000;
-      setInterpolatedSeconds(lastSyncRef.current.pos + elapsed);
-    }, 40);
-    return () => clearInterval(interval);
-  }, [isPlaying, visible]);
-
-  const livePosition = isPlaying ? interpolatedSeconds : currentPositionSeconds;
+  const livePosition = currentPositionSeconds;
 
   // Compute active line index
   const activeIndex = useMemo(() => {

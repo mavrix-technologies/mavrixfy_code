@@ -1,3 +1,5 @@
+import { logger } from "@/lib/logger";
+
 export async function trackPlayerService() {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -28,11 +30,11 @@ export async function trackPlayerService() {
     // CRITICAL: Handle playback errors (network failures, invalid URLs, codec issues)
     // Without this, songs silently stop when streams fail
     TrackPlayer.addEventListener(Event.PlaybackError, async (error: any) => {
-      console.error('[TrackPlayer] Playback error:', error);
+      logger.error('[TrackPlayer] Playback error:', error);
       
       // Log detailed error information for debugging
-      if (error?.code) console.error('[TrackPlayer] Error code:', error.code);
-      if (error?.message) console.error('[TrackPlayer] Error message:', error.message);
+      if (error?.code) logger.error('[TrackPlayer] Error code:', error.code);
+      if (error?.message) logger.error('[TrackPlayer] Error message:', error.message);
       
       // TrackPlayer will automatically stop on error
       // The PlayerContext will handle UI updates and user notification

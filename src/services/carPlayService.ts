@@ -1,5 +1,6 @@
 import { NativeModules, NativeEventEmitter, Platform } from "react-native";
-import { Song } from "@/lib/musicData";
+import { type Song } from "@/lib/musicData";
+import { logger } from "@/lib/logger";
 
 const { MavrixfyCarPlayModule } = NativeModules;
 
@@ -27,23 +28,22 @@ export const carPlayService = {
     }
   },
 
-  async syncPlaylists(playlists: { id: string; name: string; songs?: any[]; songCount?: number }[]): Promise<void> {
+  async syncPlaylists(playlists: any[]): Promise<void> {
     if (!this.isAvailable()) return;
     try {
       const sanitized = (playlists || []).map((p) => ({
         id: String(p.id || ""),
-        name: String(p.name || "Untitled Playlist"),
-        songCount: typeof p.songCount === "number" ? p.songCount : (p.songs?.length || 0),
-        songs: (p.songs || []).map((s) => ({
+        title: String(p.name || p.title || "Playlist"),
+        songs: (p.songs || []).map((s: any) => ({
           id: String(s.id || ""),
-          title: String(s.title || s.name || "Unknown Track"),
+          title: String(s.title || "Unknown Track"),
           artist: String(s.artist || "Mavrixfy"),
           coverUrl: s.coverUrl || "",
         })),
       }));
       await MavrixfyCarPlayModule.updatePlaylists(sanitized);
     } catch (err) {
-      console.warn("[CarPlayService] Failed to sync playlists:", err);
+      logger.warn("[CarPlayService] Failed to sync playlists:", err);
     }
   },
 
@@ -58,7 +58,7 @@ export const carPlayService = {
       }));
       await MavrixfyCarPlayModule.updateFavorites(sanitized);
     } catch (err) {
-      console.warn("[CarPlayService] Failed to sync favorites:", err);
+      logger.warn("[CarPlayService] Failed to sync favorites:", err);
     }
   },
 
@@ -73,7 +73,7 @@ export const carPlayService = {
       }));
       await MavrixfyCarPlayModule.updateRecent(sanitized);
     } catch (err) {
-      console.warn("[CarPlayService] Failed to sync recent songs:", err);
+      logger.warn("[CarPlayService] Failed to sync recent songs:", err);
     }
   },
 

@@ -17,7 +17,7 @@ import {
 import Svg, { Circle, G } from "react-native-svg";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { Song } from "@/lib/musicData";
+import type { Song } from "@/lib/musicData";
 import { useDownloadsSafe } from "@/contexts/DownloadContext";
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";

@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
+import type { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
 import { compactMap, mapFilter, sortedCopy } from "@/lib/arrayUtils";
 

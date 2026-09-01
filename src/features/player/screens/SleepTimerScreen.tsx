@@ -11,7 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
-import { usePlayerActions, SleepTimerSelection } from "@/contexts/PlayerContext";
+import { usePlayerActions, type SleepTimerSelection } from "@/contexts/PlayerContext";
 
 const SHEET_BACKGROUND = "#1E1E1E";
 const HANDLE_COLOR = "#6D6D6D";
@@ -54,8 +54,11 @@ export function SleepTimerScreen() {
         <Pressable
           style={styles.backdrop}
           onPress={() => router.back()}
-          accessible={false}
-        />
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss sleep timer"
+        >
+          <View pointerEvents="none" />
+        </Pressable>
       )}
       <View style={styles.sheet}>
         <View style={styles.headerContent}>

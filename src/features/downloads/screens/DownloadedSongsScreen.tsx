@@ -5,20 +5,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  FlatList,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  View,
-  Alert,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-} from "react-native";
+import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, Alert, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -27,7 +14,7 @@ import * as Haptics from "expo-haptics";
 import { triggerImpact } from "@/lib/haptics";
 import { useDownloads } from "@/contexts/DownloadContext";
 import { onQueueEvent } from "@/lib/downloads/downloadManager";
-import { DownloadItem, DownloadQuality } from "@/types/downloads";
+import { DownloadItem, type DownloadQuality } from "@/types/downloads";
 import { Song } from "@/lib/musicData";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
@@ -73,6 +60,8 @@ function downloadItemToSong(item: DownloadItem): Song {
     source: "local",
   };
 }
+
+const songKeyExtractor = (item: Song) => item.id;
 
 // react-doctor-disable-next-line react-doctor/no-giant-component -- screen layout component containing downloads and storage settings tabs
 export function DownloadedSongsScreen() {
@@ -200,7 +189,7 @@ export function DownloadedSongsScreen() {
     );
   }, [removeAllDownloads, refreshSummary]);
 
-  const keyExtractor = useCallback((item: Song) => item.id, []);
+  const keyExtractor = songKeyExtractor;
 
   const renderSong = useCallback(
     ({ item }: { item: Song }) => {

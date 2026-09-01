@@ -24,15 +24,12 @@ import { useMiniPlayerSecondaryControl } from "@/lib/miniPlayerControls";
 import type { MiniPlayerSecondaryControl } from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
 import { expandPlayer } from "@/lib/playerUIState";
-import {
-  subscribeToMiniPlayerBannerConfig,
-  DEFAULT_MINI_PLAYER_BANNER_CONFIG,
-  openMiniPlayerBannerLink,
-  type MiniPlayerBannerConfig,
-} from "@/lib/miniPlayerBannerConfig";
 
 const MIX_DELETE_THRESHOLD = -72;
 const MINI_SWIPE_THRESHOLD = 26;
+const IS_WEB = Platform.OS === "web";
+const IS_IOS = Platform.OS === "ios";
+const IS_ANDROID = Platform.OS === "android";
 
 type NativeTabsModule = typeof import("expo-router/unstable-native-tabs");
 
@@ -186,127 +183,7 @@ const MiniPlayerProgressBar = React.memo(function MiniPlayerProgressBar({
   );
 });
 
-const MiniPlayerBannerView = React.memo(function MiniPlayerBannerView({
-  config,
-}: {
-  config: MiniPlayerBannerConfig;
-}) {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const items = config.items;
-  const count = items.length;
 
-  const [fadeAnim] = useState(() => new Animated.Value(1));
-  const [slideAnim] = useState(() => new Animated.Value(0));
-
-  useEffect(() => {
-    if (count <= 1) {
-      setCurrentIndex(0);
-      fadeAnim.setValue(1);
-      slideAnim.setValue(0);
-      return;
-    }
-    const intervalMs = Math.max(2500, (config.intervalSeconds || 4.5) * 1000);
-    const timer = setInterval(() => {
-      // Step 1: Smoothly fade and slide out upwards
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 140,
-          useNativeDriver: true,
-          isInteraction: false,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: -6,
-          duration: 140,
-          useNativeDriver: true,
-          isInteraction: false,
-        }),
-      ]).start(({ finished }) => {
-        if (!finished) return;
-        // Step 2: Advance index and reset position to bottom offset
-        setCurrentIndex((prev) => (prev + 1) % count);
-        slideAnim.setValue(6);
-
-        // Step 3: Smoothly fade and slide in from bottom
-        Animated.parallel([
-          Animated.timing(fadeAnim, {
-            toValue: 1,
-            duration: 180,
-            useNativeDriver: true,
-            isInteraction: false,
-          }),
-          Animated.timing(slideAnim, {
-            toValue: 0,
-            duration: 180,
-            useNativeDriver: true,
-            isInteraction: false,
-          }),
-        ]).start();
-      });
-    }, intervalMs);
-
-    return () => clearInterval(timer);
-  }, [count, config.intervalSeconds, fadeAnim, slideAnim]);
-
-  const activeItem = items[currentIndex % count] || items[0];
-  if (!config.enabled || !activeItem) return null;
-
-  return (
-    <Pressable
-      android_disableSound
-      onPress={() => openMiniPlayerBannerLink(activeItem.linkUrl)}
-      style={({ pressed }) => [
-        styles.miniBannerRow,
-        activeItem.backgroundColor ? { backgroundColor: activeItem.backgroundColor } : null,
-        pressed && styles.miniBannerRowPressed,
-      ]}
-      hitSlop={{ top: 4, bottom: 4 }}
-      accessibilityRole="button"
-      accessibilityLabel={`Banner: ${activeItem.text}`}
-    >
-      <Animated.View
-        style={[
-          styles.miniBannerContent,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-      >
-        <Ionicons
-          name={(activeItem.iconName as any) || "paper-plane"}
-          size={12.5}
-          color={activeItem.iconColor || "#38BDF8"}
-          style={styles.miniBannerIcon}
-        />
-        <Text
-          style={[
-            styles.miniBannerText,
-            activeItem.textColor ? { color: activeItem.textColor } : null,
-          ]}
-          numberOfLines={1}
-        >
-          {activeItem.text}
-        </Text>
-      </Animated.View>
-
-      {count > 1 ? (
-        <View style={styles.miniBannerDots}>
-          {items.map((item, idx) => (
-            <View
-              key={`${item.linkUrl}-${item.text}`}
-              style={[
-                styles.miniBannerDot,
-                idx === (currentIndex % count) && styles.miniBannerDotActive,
-              ]}
-            />
-          ))}
-        </View>
-      ) : null}
-    </Pressable>
-  );
-});
-MiniPlayerBannerView.displayName = "MiniPlayerBannerView";
 
 const IOSMiniPlayerProgressBar = React.memo(function IOSMiniPlayerProgressBar({
   fillColor,
@@ -403,7 +280,7 @@ function NavTabItem({
   navInactiveColor,
 }: NavTabItemProps) {
   const handlePress = React.useCallback(() => {
-    if (Platform.OS !== "web") {
+    if (!IS_WEB) {
       void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
     }
     onPress(item.route, isFocused);
@@ -507,12 +384,13 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     }
     setActiveTab(nextTab);
   }, [pathname]);
-  const isWeb = Platform.OS === "web";
-  const isIOS = Platform.OS === "ios";
+
+  const isWeb = IS_WEB;
+  const isIOS = IS_IOS;
   const safeInsets = useSafeAreaInsets();
   const bottomInset = Math.max(safeInsets.bottom ?? 0, 0);
   const { width } = useWindowDimensions();
-  const isAndroid = Platform.OS === "android";
+  const isAndroid = IS_ANDROID;
   const isNarrowMobile = !isWeb && width <= 380;
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
   const playbackState = usePlaybackPlayState();
@@ -533,11 +411,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const [coverFailed, setCoverFailed] = useState(false);
   const artworkPalette = useArtworkPalette(activeSong?.coverUrl);
   const openPlayerLockRef = useRef(0);
-  const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(DEFAULT_MINI_PLAYER_BANNER_CONFIG);
 
-  useEffect(() => {
-    return subscribeToMiniPlayerBannerConfig(setBannerConfig);
-  }, []);
 
   const handleTabPress = useCallback(
     (route: VisibleRoute, isFocused: boolean) => {
@@ -736,7 +610,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
 
           // Swipe Left -> Skip to Next Track (clean continuous spring, zero jump)
           if (dx < -MINI_SWIPE_THRESHOLD || (dx < -10 && vx < -240)) {
-            if (Platform.OS !== "web") {
+            if (!IS_WEB) {
               void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
             }
             nextSong();
@@ -751,7 +625,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
 
           // Swipe Right -> Skip to Previous Track (clean continuous spring, zero jump)
           if (dx > MINI_SWIPE_THRESHOLD || (dx > 10 && vx > 240)) {
-            if (Platform.OS !== "web") {
+            if (!IS_WEB) {
               void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
             }
             prevSong();
@@ -780,7 +654,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
       Gesture.Tap()
         .runOnJS(true)
         .onEnd(() => {
-          if (Platform.OS !== "web") {
+          if (!IS_WEB) {
             void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
           }
           openPlayer();
@@ -902,21 +776,15 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
               ]}
             >
 
-              {bannerConfig.enabled && bannerConfig.items.length > 0 ? (
-                <MiniPlayerBannerView config={bannerConfig} />
-              ) : (
-                <>
-                  <View pointerEvents="none" style={[styles.playerTopEdge, { backgroundColor: playerTopEdgeTint }]} />
-                  <View
-                    pointerEvents="none"
-                    style={[styles.playerCornerAccentLeft, { borderColor: playerTopEdgeTint }]}
-                  />
-                  <View
-                    pointerEvents="none"
-                    style={[styles.playerCornerAccentRight, { borderColor: playerTopEdgeTint }]}
-                  />
-                </>
-              )}
+              <View pointerEvents="none" style={[styles.playerTopEdge, { backgroundColor: playerTopEdgeTint }]} />
+              <View
+                pointerEvents="none"
+                style={[styles.playerCornerAccentLeft, { borderColor: playerTopEdgeTint }]}
+              />
+              <View
+                pointerEvents="none"
+                style={[styles.playerCornerAccentRight, { borderColor: playerTopEdgeTint }]}
+              />
 
               <View style={[styles.playerRow, { height: miniPlayerHeight }]}>
                 <GestureDetector gesture={miniSwipeGesture}>

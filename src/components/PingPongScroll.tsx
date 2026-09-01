@@ -1,17 +1,6 @@
 import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import {
-  View,
-  Text,
-  Easing,
-  StyleSheet,
-  LayoutChangeEvent,
-  NativeSyntheticEvent,
-  Platform,
-  StyleProp,
-  TextStyle,
-  TextLayoutEventData
-} from "react-native";
+import { View, Text, Easing, StyleSheet, type LayoutChangeEvent, type NativeSyntheticEvent, Platform, type StyleProp, TextStyle, type TextLayoutEventData } from "react-native";
 
 interface PingPongScrollProps {
   text: string;

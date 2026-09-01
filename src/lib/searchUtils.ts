@@ -1,4 +1,4 @@
-import { Song } from "./musicData";
+import { type Song } from "./musicData";
 
 export function normalizeText(text: string): string {
   if (!text) return "";

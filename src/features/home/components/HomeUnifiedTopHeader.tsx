@@ -24,6 +24,8 @@ export const UNIFIED_HEADER_MENU_HEIGHT = 58;
 export const UNIFIED_HEADER_TOTAL_HEIGHT =
   UNIFIED_HEADER_TOP_BAR_HEIGHT + UNIFIED_HEADER_MENU_HEIGHT;
 
+const categoryKeyExtractor = (item: MusicCategoryItem) => item.id;
+
 
 interface HomeUnifiedTopHeaderProps {
   topInset: number;
@@ -115,7 +117,7 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
     [handleCategoryPress, isIOS, selectedCategory]
   );
 
-  const keyExtractor = useCallback((item: MusicCategoryItem) => item.id, []);
+  const keyExtractor = categoryKeyExtractor;
 
   // Synchronized 1:1 scroll translation with background image
   const clampedScrollY = Math.max(0, scrollY);

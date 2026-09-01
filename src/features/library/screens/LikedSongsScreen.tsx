@@ -1,16 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import {
-  FlatList,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  TextInput,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-} from "react-native";
+import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, View, TextInput, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -24,7 +13,7 @@ import { ImpactFeedbackStyle } from "expo-haptics";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLikedSongs, usePlayerBrowse } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
-import { Song } from "@/lib/musicData";
+import { type Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
 import OfflineBanner from "@/components/OfflineBanner";
@@ -79,6 +68,8 @@ function normalizeText(text: string | undefined): string {
     .toLowerCase()
     .trim();
 }
+
+const likedSongKeyExtractor = (item: Song) => item.id;
 
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export function LikedSongsScreen() {
@@ -255,7 +246,7 @@ export function LikedSongsScreen() {
     [filteredSongs, playSong]
   );
 
-  const keyExtractor = useCallback((item: Song) => item.id, []);
+  const keyExtractor = likedSongKeyExtractor;
 
   const getItemLayout = useCallback(
     (_: unknown, index: number) => ({

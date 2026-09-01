@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Song } from "./musicData";
+import { type Song } from "./musicData";
 import { logger } from "@/lib/logger";
 import { normalizeSmartAutoplayMode, type SmartAutoplayMode } from "@/lib/smartAutoplayConfig";
 

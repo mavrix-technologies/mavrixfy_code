@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { DisplayPlaylist } from "./PlaylistListItem";
+import { type DisplayPlaylist } from "./PlaylistListItem";
 
 interface PlaylistGridItemProps {
   item: DisplayPlaylist;

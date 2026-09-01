@@ -20,7 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
-import { Song } from "@/lib/musicData";
+import { type Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import { usePlayerRowActions } from "@/contexts/PlayerContext";
 import { usePlaybackRowState } from "@/services/audio/PlaybackEngine";

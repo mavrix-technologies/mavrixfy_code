@@ -1,5 +1,5 @@
-import { collection, getDocs, limit, orderBy, query, where, Firestore } from "firebase/firestore";
-import { Song } from "@/lib/musicData";
+import { collection, getDocs, limit, orderBy, query, where, type Firestore } from "firebase/firestore";
+import { type Song } from "@/lib/musicData";
 
 const SONG_LIMIT = 30;
 

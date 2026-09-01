@@ -1,6 +1,4 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { ArtistCard } from "@/data/providers/ArtistProvider";
-
 const KEY = "@mavrixfy_followed_artists_v1";
 
 export interface FollowedArtist {

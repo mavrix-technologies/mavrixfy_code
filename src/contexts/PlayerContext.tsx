@@ -1,7 +1,7 @@
-import React, { createContext, use, useState, useCallback, useMemo, useRef, ReactNode, useEffect } from "react";
+import React, { createContext, use, useState, useCallback, useMemo, useRef, type ReactNode, useEffect } from "react";
 import { AppState, Platform, View } from "react-native";
 import { isRunningInExpoGo } from "expo";
-import { Song } from "@/lib/musicData";
+import type { Song } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
@@ -612,7 +612,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Fast 250ms progress tracking loop (Spotify/Apple Music style)
+  // Event-driven progress tracking (Spotify/Apple Music style)
   useEffect(() => {
     let mounted = true;
 
@@ -652,31 +652,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    let progressInFlight = false;
-    const interval = setInterval(async () => {
-      if (!isPlayingRef.current || progressInFlight) return;
-      try {
-        if (TrackPlayer) {
-          progressInFlight = true;
-          const prog = await TrackPlayer.getProgress();
-          if (mounted && prog) {
-            if (typeof prog.position === "number") {
-              setNativePosition(prog.position);
-            }
-            if (typeof prog.duration === "number" && prog.duration > 0) {
-              setNativeDuration(prog.duration);
-            }
-          }
+    const subProgress = TrackPlayer?.addEventListener?.(
+      Event.PlaybackProgressUpdated,
+      (event: { position?: number; duration?: number }) => {
+        if (!mounted) return;
+        if (typeof event?.position === "number") {
+          setNativePosition(event.position);
         }
-      } catch {
-      } finally {
-        progressInFlight = false;
+        if (typeof event?.duration === "number" && event.duration > 0) {
+          setNativeDuration(event.duration);
+        }
       }
-    }, 250);
+    );
 
     return () => {
       mounted = false;
-      clearInterval(interval);
+      subProgress?.remove?.();
     };
   }, []);
 
@@ -1686,7 +1677,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [authUser?.id]);
 
-  // Save current player state to AsyncStorage
+  // Save current player state to AsyncStorage (event-driven)
   useEffect(() => {
     if (!currentSong) return;
 
@@ -1701,17 +1692,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }).catch(() => {});
     };
 
-    const interval = setInterval(persist, 6000);
+    persist();
+
     const sub = AppState.addEventListener("change", (state) => {
       if (state !== "active") persist();
     });
 
     return () => {
-      clearInterval(interval);
       sub.remove();
       persist();
     };
-  }, [currentSong]);
+  }, [currentSong, queueIndex]);
 
   // Synchronize playback progress and active track immediately when returning to foreground
   useEffect(() => {

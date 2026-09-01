@@ -1,4 +1,4 @@
-import { MatchResult, ParsedSong } from "@/types/import";
+import { type MatchResult, type ParsedSong } from "@/types/import";
 import { getApiUrl } from "./api-config";
 
 /**

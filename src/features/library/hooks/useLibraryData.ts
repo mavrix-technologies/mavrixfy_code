@@ -9,13 +9,7 @@ import {
   createUserPlaylist,
   deleteUserPlaylist,
 } from "@/lib/storage";
-import {
-  getUserFirestorePlaylists,
-  createFirestorePlaylist,
-  deleteFirestorePlaylist,
-  updateFirestorePlaylist,
-  FirestorePlaylist,
-} from "@/lib/firestore";
+import { getUserFirestorePlaylists, createFirestorePlaylist, deleteFirestorePlaylist, updateFirestorePlaylist, type FirestorePlaylist } from "@/lib/firestore";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import { getFollowedArtists, FollowedArtist } from "@/lib/followedArtists";
 import { useOnReconnect } from "@/contexts/NetworkContext";

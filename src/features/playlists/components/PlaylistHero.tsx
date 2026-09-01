@@ -10,7 +10,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
-import { Song } from "@/lib/musicData";
+import { type Song } from "@/lib/musicData";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
 
 export interface PlaylistHeroStateFlags {

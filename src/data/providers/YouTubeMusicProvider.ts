@@ -1,4 +1,4 @@
-import { Song } from "@/lib/musicData";
+import { type Song } from "@/lib/musicData";
 
 async function searchYouTubeMusicVideos(
   _query: string,

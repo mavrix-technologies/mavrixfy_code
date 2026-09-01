@@ -384,6 +384,48 @@ function useRootLayoutNavigation() {
   return { showNavOverlay };
 }
 
+const isAndroid = Platform.OS === "android";
+
+const playerScreenOptions = {
+  presentation: "transparentModal" as const,
+  animation: "slide_from_bottom" as const,
+  animationDuration: 250,
+  contentStyle: { backgroundColor: "transparent" },
+};
+
+const queueScreenOptions = {
+  presentation: isAndroid ? ("transparentModal" as const) : ("modal" as const),
+  animation: "slide_from_bottom" as const,
+  animationDuration: 250,
+  contentStyle: { backgroundColor: isAndroid ? "transparent" : "#1E1E1E" },
+};
+
+const songOptionsScreenOptions = {
+  presentation: isAndroid ? ("transparentModal" as const) : ("formSheet" as const),
+  animation: "slide_from_bottom" as const,
+  animationDuration: 220,
+  sheetAllowedDetents: [0.88, 1],
+  sheetCornerRadius: 24,
+  contentStyle: { backgroundColor: isAndroid ? "transparent" : "#1E1E1E" },
+};
+
+const sleepTimerScreenOptions = {
+  presentation: isAndroid ? ("transparentModal" as const) : ("formSheet" as const),
+  animation: "slide_from_bottom" as const,
+  animationDuration: 220,
+  sheetAllowedDetents: [0.62],
+  sheetCornerRadius: 24,
+  contentStyle: { backgroundColor: isAndroid ? "transparent" : Colors.background },
+};
+
+const artistMixScreenOptions = {
+  presentation: isAndroid ? ("formSheet" as const) : ("card" as const),
+  ...(isAndroid && {
+    sheetAllowedDetents: [1],
+    sheetCornerRadius: 24,
+  }),
+};
+
 function RootLayoutNav() {
   const { showNavOverlay } = useRootLayoutNavigation();
 
@@ -401,57 +443,12 @@ function RootLayoutNav() {
         }}
       >
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen
-          name="player"
-          options={{
-            presentation: "transparentModal",
-            animation: "slide_from_bottom",
-            animationDuration: 250,
-            contentStyle: { backgroundColor: "transparent" },
-          }}
-        />
-        <Stack.Screen
-          name="queue"
-          options={{
-            presentation: Platform.OS === "android" ? "transparentModal" : "modal",
-            animation: "slide_from_bottom",
-            animationDuration: 250,
-            contentStyle: { backgroundColor: Platform.OS === "android" ? "transparent" : "#1E1E1E" },
-          }}
-        />
-        <Stack.Screen
-          name="song-options"
-          options={{
-            presentation: Platform.OS === "android" ? "transparentModal" : "formSheet",
-            animation: "slide_from_bottom",
-            animationDuration: 220,
-            sheetAllowedDetents: [0.88, 1],
-            sheetCornerRadius: 24,
-            contentStyle: { backgroundColor: Platform.OS === "android" ? "transparent" : "#1E1E1E" },
-          }}
-        />
-        <Stack.Screen
-          name="sleep-timer"
-          options={{
-            presentation: Platform.OS === "android" ? "transparentModal" : "formSheet",
-            animation: "slide_from_bottom",
-            animationDuration: 220,
-            sheetAllowedDetents: [0.62],
-            sheetCornerRadius: 24,
-            contentStyle: { backgroundColor: Platform.OS === "android" ? "transparent" : Colors.background },
-          }}
-        />
+        <Stack.Screen name="player" options={playerScreenOptions} />
+        <Stack.Screen name="queue" options={queueScreenOptions} />
+        <Stack.Screen name="song-options" options={songOptionsScreenOptions} />
+        <Stack.Screen name="sleep-timer" options={sleepTimerScreenOptions} />
         <Stack.Screen name="notifications" />
-        <Stack.Screen
-          name="artist-mix"
-          options={{
-            presentation: Platform.OS === "android" ? "formSheet" : "card",
-            ...(Platform.OS === "android" && {
-              sheetAllowedDetents: [1],
-              sheetCornerRadius: 24,
-            }),
-          }}
-        />
+        <Stack.Screen name="artist-mix" options={artistMixScreenOptions} />
         <Stack.Screen name="downloaded-songs" />
         <Stack.Screen name="downloads" />
         <Stack.Screen name="playlist" />

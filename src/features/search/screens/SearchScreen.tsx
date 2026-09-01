@@ -41,16 +41,7 @@ import {
 } from "@/lib/storage";
 import AdMobNativeVideo from "@/components/AdMobNativeVideo";
 import { normalizeText } from "@/lib/searchUtils";
-import {
-  searchRepository,
-  fetchYouTubeSuggestions,
-  ResultFilter,
-  PlaylistResult,
-  AlbumResult,
-  ArtistResult,
-  SearchResults,
-  EMPTY_RESULTS,
-} from "@/lib/searchRepository";
+import { searchRepository, fetchYouTubeSuggestions, type ResultFilter, PlaylistResult, AlbumResult, ArtistResult, SearchResults, EMPTY_RESULTS } from "@/lib/searchRepository";
 
 interface RecentSearchItem {
   id: string;

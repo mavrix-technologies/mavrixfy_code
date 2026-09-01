@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DeviceEventEmitter } from "react-native";
-import { FirestorePlaylist } from "@/lib/firestore";
+import { type FirestorePlaylist } from "@/lib/firestore";
 import { mapFilter } from "@/lib/arrayUtils";
 import type { Song } from "@/lib/musicData";
 import type { HomeJioSaavnCategoryData } from "@/data/providers/JioSaavnProvider";

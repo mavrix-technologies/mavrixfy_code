@@ -13,11 +13,7 @@ import {
   createDownloadResumable,
   DownloadResumable,
 } from "expo-file-system/legacy";
-import {
-  DownloadItem,
-  DownloadStatus,
-  DownloadPreferences,
-} from "@/types/downloads";
+import { type DownloadItem, type DownloadStatus, type DownloadPreferences } from "@/types/downloads";
 import {
   saveDownload,
   loadDownload,

@@ -14,7 +14,6 @@
 
 import React, {
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -49,7 +48,7 @@ import {
   usePlaybackQueueState,
   usePlaybackPlayState,
 } from "@/services/audio/PlaybackEngine";
-import { Song } from "@/lib/musicData";
+import { type Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import { getSmartAutoplayModeLabel } from "@/lib/smartAutoplayConfig";
 
@@ -349,6 +348,8 @@ type Props = {
   ref?: React.Ref<QueueBottomSheetRef>;
 };
 
+const queueItemKeyExtractor = (item: QueueItem) => item.key;
+
 const SMART_AUTOPLAY_STATUS = {
   enabled: false,
   isRefreshing: false,
@@ -511,7 +512,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
       [handleSongPress, isPlaying, smartAutoplayStatus.enabled]
     );
 
-    const keyExtractor = useCallback((item: QueueItem) => item.key, []);
+    const keyExtractor = queueItemKeyExtractor;
 
     // ── Backdrop ─────────────────────────────────────────────────────────────
     const renderBackdrop = useCallback(

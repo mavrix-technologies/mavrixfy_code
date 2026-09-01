@@ -1,25 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import {
-  View,
-  Text,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Platform,
-  Alert,
-  ToastAndroid,
-  ActivityIndicator,
-  AppState,
-  InteractionManager,
-  GestureResponderEvent,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-  StyleProp,
-  useWindowDimensions,
-  ViewStyle,
-  BackHandler,
-} from "react-native";
+import { View, Text, FlatList, Pressable, StyleSheet, Platform, Alert, ToastAndroid, ActivityIndicator, AppState, InteractionManager, type GestureResponderEvent, type NativeScrollEvent, type NativeSyntheticEvent, type StyleProp, useWindowDimensions, type ViewStyle, BackHandler } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useNavigation } from "expo-router";
@@ -578,48 +559,10 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   const { isPlaying } = usePlayerRow();
   const { isBuffering, isLoading } = usePlaybackPlayState();
 
-  const [localProgress, setLocalProgress] = useState(0);
+  const [scrubProgress, setScrubProgress] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
-  const lastSyncRef = useRef({ progress: 0, timestamp: Date.now() });
 
-  useEffect(() => {
-    if (!isScrubbing) {
-      setLocalProgress(progress);
-      lastSyncRef.current = { progress, timestamp: Date.now() };
-    }
-  }, [progress, isScrubbing]);
-
-  useEffect(() => {
-    setLocalProgress(progress);
-    lastSyncRef.current = { progress, timestamp: Date.now() };
-  }, [songDurationSeconds]);
-
-  // A song progress bar moves by less than a pixel per sample at 4 Hz on a
-  // phone. Updating React state every animation frame needlessly rerendered
-  // the player around 60 times per second and kept multiple CPU cores busy.
-  useEffect(() => {
-    if (!isPlaying || isBuffering || isLoading || isScrubbing) return;
-
-    // Reset the reference point to prevent jumping after pause/resume or buffering
-    lastSyncRef.current = { progress, timestamp: Date.now() };
-
-    const updateInterpolatedProgress = () => {
-      const elapsedSec = (Date.now() - lastSyncRef.current.timestamp) / 1000;
-      const durationSec = duration / 1000;
-      if (durationSec > 0) {
-        const addedProgress = elapsedSec / durationSec;
-        const nextProgress = Math.min(1.0, lastSyncRef.current.progress + addedProgress);
-        setLocalProgress(nextProgress);
-      }
-    };
-
-    updateInterpolatedProgress();
-    const interval = setInterval(updateInterpolatedProgress, 250);
-    return () => clearInterval(interval);
-  }, [isPlaying, isBuffering, isLoading, duration, isScrubbing, progress]);
-
-  const liveProgress = isPlaying && !isScrubbing ? localProgress : progress;
-  const playerProgress = liveProgress;
+  const playerProgress = isScrubbing ? scrubProgress : progress;
   const safeSongDuration = Number.isFinite(songDurationSeconds) ? Math.max(0, songDurationSeconds) : 0;
   const playerDuration = duration;
   const playerPositionMillis = Math.round(playerDuration * playerProgress);
@@ -634,8 +577,6 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
     (next: boolean) => onSeekingChange(next),
     [onSeekingChange]
   );
-
-
 
   // Slider works on a fixed 0..1000 scale. Convert normalized progress to/from it.
   const SLIDER_MAX = 1000;
@@ -653,21 +594,21 @@ const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
 
   const handleValueChange = useCallback((value: number) => {
     const normalized = clampUnit(value / SLIDER_MAX);
-    setLocalProgress(normalized);
+    setScrubProgress(normalized);
   }, []);
 
   const handleSlidingComplete = useCallback((value: number) => {
     const normalized = clampUnit(value / SLIDER_MAX);
     setIsScrubbing(false);
     updateSeeking(false);
-    setLocalProgress(normalized);
+    setScrubProgress(normalized);
     seekTo(normalized);
   }, [seekTo, updateSeeking]);
 
   const handleSlidingCancel = useCallback(() => {
     setIsScrubbing(false);
     updateSeeking(false);
-    setLocalProgress(progress);
+    setScrubProgress(progress);
   }, [progress, updateSeeking]);
 
   return (

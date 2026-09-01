@@ -53,7 +53,14 @@ export const CreatePlaylistModal = memo(function CreatePlaylistModal({
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.modalOverlay}
       >
-        <Pressable style={styles.modalBackdrop} onPress={onClose} />
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss modal"
+        >
+          <View pointerEvents="none" />
+        </Pressable>
         <View style={styles.modalContent}>
           <ScrollView
             bounces={false}

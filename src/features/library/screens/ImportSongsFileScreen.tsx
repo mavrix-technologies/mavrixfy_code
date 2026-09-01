@@ -24,7 +24,7 @@ import { parseFile } from "@/lib/file-parser";
 import { searchSong, getMatchConfidence } from "@/lib/song-matcher";
 import { ParsedSong } from "@/types/import";
 import { useAuth } from "@/contexts/AuthContext";
-import { Song } from "@/lib/musicData";
+import { type Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
 import { createUserPlaylist, addSongToPlaylist, getUserPlaylists, UserPlaylist } from "@/lib/storage";
 import {

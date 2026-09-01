@@ -5,6 +5,7 @@
 
 import * as FileSystem from 'expo-file-system';
 import { validateImageFile, sanitizeFilename, isAllowedImageExtension } from './fileValidation';
+import { logger } from '@/lib/logger';
 
 // Cloudinary Configuration
 const CLOUDINARY_CLOUD_NAME = 'djqq8kba8';
@@ -117,7 +118,7 @@ export const uploadImageToCloudinary = async (
 
     return data.secure_url;
   } catch (error: any) {
-    console.error('Cloudinary upload error:', error);
+    logger.error('Cloudinary upload error:', error);
     throw new Error(error?.message || 'Failed to upload image. Please try again.');
   }
 };

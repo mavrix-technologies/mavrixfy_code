@@ -1,5 +1,5 @@
 import React from "react";
-import { Platform, Pressable, StyleSheet, TextInput, View, ViewStyle, StyleProp } from "react-native";
+import { Platform, Pressable, StyleSheet, TextInput, View, type ViewStyle, type StyleProp } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 type SearchHeaderFieldProps = {

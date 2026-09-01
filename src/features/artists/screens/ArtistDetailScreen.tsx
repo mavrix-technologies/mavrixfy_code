@@ -20,19 +20,8 @@ import { safeGoBack } from "@/utils/navigation";
 import { convertJioSaavnSong, getBestImageUrl, Song } from "@/lib/musicData";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
-import {
-  getArtistDetails,
-  getArtistSongs,
-  JioSaavnArtist,
-  JioSaavnArtistAlbum,
-  JioSaavnSimilarArtist,
-  prefetchArtist,
-} from "@/data/providers/ArtistProvider";
-import {
-  isFollowingArtist,
-  toggleFollowArtist,
-  FollowedArtist,
-} from "@/lib/followedArtists";
+import { getArtistDetails, getArtistSongs, JioSaavnArtist, type JioSaavnArtistAlbum, type JioSaavnSimilarArtist, prefetchArtist } from "@/data/providers/ArtistProvider";
+import { isFollowingArtist, toggleFollowArtist, type FollowedArtist } from "@/lib/followedArtists";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { mapFilter } from "@/lib/arrayUtils";

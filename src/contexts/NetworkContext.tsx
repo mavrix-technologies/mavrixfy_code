@@ -17,7 +17,7 @@ import React, {
   useCallback,
   useMemo,
   useRef,
-  ReactNode,
+  type ReactNode,
 } from "react";
 import * as Network from "expo-network";
 

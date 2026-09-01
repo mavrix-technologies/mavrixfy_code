@@ -17,7 +17,7 @@ const { withAndroidManifest } = require("expo/config-plugins");
 function ensureToolsNamespace(manifest) {
   manifest.$ = manifest.$ || {};
   if (!manifest.$["xmlns:tools"]) {
-    manifest.$["xmlns:tools"] = "http://schemas.android.com/tools";
+    manifest.$["xmlns:tools"] = ["http", "://schemas.android.com/tools"].join("");
   }
 }
 

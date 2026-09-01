@@ -2,12 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { Alert, Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
-import {
-  getUserPlaylists,
-  updateUserPlaylist,
-  deleteUserPlaylist,
-  UserPlaylist,
-} from "@/lib/storage";
+import { getUserPlaylists, updateUserPlaylist, deleteUserPlaylist, type UserPlaylist } from "@/lib/storage";
 import {
   getPlaylistById,
   updateFirestorePlaylist,
@@ -15,12 +10,7 @@ import {
   firestorePlaylistToLocalSongs,
 } from "@/lib/firestore";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
-import {
-  convertJioSaavnSong,
-  getBestImageUrl,
-  JioSaavnSong,
-  Song,
-} from "@/lib/musicData";
+import { convertJioSaavnSong, getBestImageUrl, type JioSaavnSong, Song } from "@/lib/musicData";
 import {
   getJioSaavnAlbumDetails,
   getJioSaavnPlaylistDetails,

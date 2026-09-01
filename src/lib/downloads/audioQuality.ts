@@ -2,7 +2,7 @@
  * Audio Quality — Utilities for quality-based audio URL selection
  */
 
-import { DownloadQuality } from "@/types/downloads";
+import { type DownloadQuality } from "@/types/downloads";
 
 /**
  * Map download quality preference to audio bitrate

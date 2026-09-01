@@ -64,7 +64,14 @@ export const PlaylistEditModal: React.FC<PlaylistEditModalProps> = ({
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
         <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.7)", opacity: modalOpacity }]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss edit playlist modal"
+          >
+            <View pointerEvents="none" />
+          </Pressable>
         </Animated.View>
 
         <Animated.View style={[styles.modalBottomSheet, { transform: [{ translateY: modalTranslateY }] }]}>

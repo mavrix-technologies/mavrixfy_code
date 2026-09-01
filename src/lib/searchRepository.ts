@@ -1,4 +1,4 @@
-import { Song, JioSaavnImage } from "@/lib/musicData";
+import { Song, type JioSaavnImage } from "@/lib/musicData";
 import { searchCatalog } from "@/lib/catalogService";
 import { rankSongs, parseStructuredQuery } from "@/lib/searchUtils";
 

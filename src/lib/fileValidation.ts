@@ -8,6 +8,7 @@
  */
 
 import * as FileSystem from 'expo-file-system';
+import { logger } from '@/lib/logger';
 
 // Maximum file size: 5MB
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
@@ -20,55 +21,63 @@ const ALLOWED_IMAGE_TYPES = [
   'image/webp',
 ];
 
-// Magic numbers (file signatures) for image formats
-// These are the first few bytes that identify file types
-const IMAGE_MAGIC_NUMBERS: Record<string, number[]> = {
+// Magic numbers for image format validation
+const IMAGE_MAGIC_NUMBERS: { [key: string]: number[] } = {
   'image/jpeg': [0xFF, 0xD8, 0xFF],
   'image/jpg': [0xFF, 0xD8, 0xFF],
-  'image/png': [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
-  'image/webp': [0x52, 0x49, 0x46, 0x46], // RIFF header
+  'image/png': [0x89, 0x50, 0x4E, 0x47],
+  'image/webp': [0x52, 0x49, 0x46, 0x46], // RIFF (first 4 bytes)
 };
 
-interface ValidationResult {
+export interface FileValidationResult {
   valid: boolean;
   error?: string;
 }
 
-interface FileInfo {
+export interface FileInfo {
   uri: string;
-  size: number;
+  size?: number;
   mimeType?: string;
 }
 
 /**
- * Validate an image file comprehensively
+ * Validate image file before upload
  * @param fileInfo File information including URI, size, and MIME type
  * @returns Validation result
  */
 export async function validateImageFile(
   fileInfo: FileInfo
-): Promise<ValidationResult> {
+): Promise<FileValidationResult> {
   try {
-    const { uri, size, mimeType } = fileInfo;
-
-    // 1. Check if file exists
-    const info = await FileSystem.getInfoAsync(uri);
-    if (!info.exists) {
-      return { valid: false, error: 'File does not exist' };
+    const { uri, size: fileSize, mimeType } = fileInfo;
+    // Check file existence and get info
+    const fileInfoResult = await FileSystem.getInfoAsync(uri);
+    
+    if (!fileInfoResult.exists) {
+      return {
+        valid: false,
+        error: 'File does not exist',
+      };
     }
 
-    // 2. Validate file size
-    if (size > MAX_FILE_SIZE) {
-      const sizeMB = (MAX_FILE_SIZE / (1024 * 1024)).toFixed(1);
-      return { valid: false, error: `File must be under ${sizeMB}MB` };
+    // Size validation
+    const actualSize = fileSize || (fileInfoResult as any).size;
+    if (actualSize && actualSize > MAX_FILE_SIZE) {
+      return {
+        valid: false,
+        error: `File size exceeds 5MB limit (${(actualSize / (1024 * 1024)).toFixed(2)}MB)`,
+      };
     }
 
-    // 3. Validate MIME type
-    if (mimeType && !ALLOWED_IMAGE_TYPES.includes(mimeType)) {
-      return { valid: false, error: 'Only JPEG, PNG, and WebP images are allowed' };
+    // MIME type validation
+    if (mimeType && !ALLOWED_IMAGE_TYPES.includes(mimeType.toLowerCase())) {
+      return {
+        valid: false,
+        error: 'Invalid file type. Only JPEG, PNG, and WebP images are allowed.',
+      };
     }
 
-    // 4. Validate magic numbers (file signature)
+    // Magic number validation (file signature check)
     const isValidSignature = await validateFileSignature(uri, mimeType);
     if (!isValidSignature) {
       return {
@@ -79,7 +88,7 @@ export async function validateImageFile(
 
     return { valid: true };
   } catch (error: any) {
-    console.error('File validation error:', error);
+    logger.error('File validation error:', error);
     return {
       valid: false,
       error: error?.message || 'Failed to validate file',
@@ -124,7 +133,7 @@ async function validateFileSignature(
 
     return isValidImage;
   } catch (error) {
-    console.error('Magic number validation error:', error);
+    logger.error('Magic number validation error:', error);
     return false;
   }
 }

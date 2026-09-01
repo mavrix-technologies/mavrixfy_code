@@ -48,6 +48,8 @@ import {
   type HomeSectionItem,
 } from "../hooks/useHomeSectionData";
 
+const homeSectionKeyExtractor = (item: HomeSectionItem) => item.id;
+
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { isOnline } = useNetwork();
@@ -143,7 +145,7 @@ export function HomeScreen() {
     ]
   );
 
-  const keyExtractor = useCallback((item: HomeSectionItem) => item.id, []);
+  const keyExtractor = homeSectionKeyExtractor;
 
   const [scrollY, setScrollY] = useState(0);
   const pullProgress = useSharedValue(0);

@@ -120,14 +120,14 @@ function writePng(pngObj, targetPath) {
   const dir = path.dirname(targetPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(targetPath, PNG.sync.write(pngObj));
-  console.log('Saved:', targetPath, `(${pngObj.width}x${pngObj.height})`);
+  process.stdout.write(`Saved: ${targetPath} (${pngObj.width}x${pngObj.height})\n`);
 }
 
 async function run() {
   const masterPath = path.resolve('assets/images/mavrixfy_icone.png');
   const masterBuf = fs.readFileSync(masterPath);
   const masterPng = PNG.sync.read(masterBuf);
-  console.log('Read master PNG:', masterPng.width, masterPng.height);
+  process.stdout.write(`Read master PNG: ${masterPng.width}x${masterPng.height}\n`);
 
   const transparentMaster = makeTransparentMaster(masterPng);
   writePng(transparentMaster, path.resolve('assets/images/mavrixfy_transparent_master.png'));
@@ -140,38 +140,49 @@ async function run() {
     'mipmap-hdpi': 162,
     'mipmap-xhdpi': 216,
     'mipmap-xxhdpi': 324,
-    'mipmap-xxxhdpi': 432
+    'mipmap-xxxhdpi': 432,
   };
 
   for (const [folder, size] of Object.entries(foregroundSizes)) {
-    const fg = resizePNG(transparentMaster, size, size, 0.70, false, false);
-    writePng(fg, path.join(resBase, folder, 'ic_launcher_foreground.png'));
+    const icon = resizePNG(transparentMaster, size, size, 0.70, false, false);
+    writePng(icon, path.join(resBase, folder, 'ic_launcher_foreground.png'));
   }
 
-  // Android Launcher Icons (48, 72, 96, 144, 192)
-  const launcherSizes = {
+  // Legacy Square Icons (48dp standard base)
+  const legacySquareSizes = {
     'mipmap-mdpi': 48,
     'mipmap-hdpi': 72,
     'mipmap-xhdpi': 96,
     'mipmap-xxhdpi': 144,
-    'mipmap-xxxhdpi': 192
+    'mipmap-xxxhdpi': 192,
   };
 
-  for (const [folder, size] of Object.entries(launcherSizes)) {
-    const sq = resizePNG(transparentMaster, size, size, 0.82, false, true);
-    writePng(sq, path.join(resBase, folder, 'ic_launcher.png'));
-
-    const rd = resizePNG(transparentMaster, size, size, 0.82, true, true);
-    writePng(rd, path.join(resBase, folder, 'ic_launcher_round.png'));
+  for (const [folder, size] of Object.entries(legacySquareSizes)) {
+    const icon = resizePNG(transparentMaster, size, size, 0.82, false, true);
+    writePng(icon, path.join(resBase, folder, 'ic_launcher.png'));
   }
 
-  // Android 12+ Splash Screen Logo (High-resolution transparent vector-like logo)
+  // Legacy Round Icons
+  const legacyRoundSizes = {
+    'mipmap-mdpi': 48,
+    'mipmap-hdpi': 72,
+    'mipmap-xhdpi': 96,
+    'mipmap-xxhdpi': 144,
+    'mipmap-xxxhdpi': 192,
+  };
+
+  for (const [folder, size] of Object.entries(legacyRoundSizes)) {
+    const icon = resizePNG(transparentMaster, size, size, 0.82, true, true);
+    writePng(icon, path.join(resBase, folder, 'ic_launcher_round.png'));
+  }
+
+  // Splash Screen Logos
   const splashSizes = {
-    'drawable-mdpi': 192,
-    'drawable-hdpi': 288,
-    'drawable-xhdpi': 384,
-    'drawable-xxhdpi': 576,
-    'drawable-xxxhdpi': 768
+    'drawable-mdpi': 150,
+    'drawable-hdpi': 225,
+    'drawable-xhdpi': 300,
+    'drawable-xxhdpi': 450,
+    'drawable-xxxhdpi': 600,
   };
 
   for (const [folder, size] of Object.entries(splashSizes)) {
@@ -184,7 +195,10 @@ async function run() {
   writePng(storeIcon, path.join(resBase, 'playstore-icon.png'));
   writePng(storeIcon, path.join(resBase, 'ic_launcher-web.png'));
 
-  console.log('All icons generated successfully!');
+  process.stdout.write('All icons generated successfully!\n');
 }
 
-run().catch(console.error);
+run().catch((err) => {
+  process.stderr.write(`Error: ${err}\n`);
+  process.exit(1);
+});

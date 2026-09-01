@@ -1,13 +1,5 @@
 import React, { useState, useCallback, useMemo } from "react";
-import {
-  View,
-  Text,
-  FlatList,
-  StyleSheet,
-  ActivityIndicator,
-  RefreshControl,
-  ListRenderItemInfo,
-} from "react-native";
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, RefreshControl, type ListRenderItemInfo } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,7 +8,7 @@ import Colors from "@/constants/colors";
 import * as Haptics from "expo-haptics";
 import { triggerImpact } from "@/lib/haptics";
 import { useLikedSongs } from "@/contexts/PlayerContext";
-import { FollowedArtist } from "@/lib/followedArtists";
+import { type FollowedArtist } from "@/lib/followedArtists";
 import OfflineBanner from "@/components/OfflineBanner";
 import AppTopHeader, {
   APP_TOP_HEADER_HEIGHT,

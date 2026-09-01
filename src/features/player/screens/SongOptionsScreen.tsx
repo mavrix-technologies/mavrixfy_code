@@ -22,12 +22,7 @@ import { usePlayerActions } from "@/contexts/PlayerContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { Song, getBestImageUrl } from "@/lib/musicData";
 import { addSongToPlaylist, getUserPlaylists, removeSongFromPlaylist, UserPlaylist } from "@/lib/storage";
-import {
-  getUserFirestorePlaylists,
-  addSongToFirestorePlaylist,
-  removeSongFromFirestorePlaylist,
-  FirestorePlaylist,
-} from "@/lib/firestore";
+import { getUserFirestorePlaylists, addSongToFirestorePlaylist, removeSongFromFirestorePlaylist, type FirestorePlaylist } from "@/lib/firestore";
 import { searchArtists } from "@/data/providers/ArtistProvider";
 import { safeGoBack } from "@/utils/navigation";
 import { compactMap } from "@/lib/arrayUtils";
@@ -462,8 +457,11 @@ function SheetWrap({ children }: { children: React.ReactNode }) {
         <Pressable
           style={styles.backdrop}
           onPress={safeGoBack}
-          accessible={false}
-        />
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss options"
+        >
+          <View pointerEvents="none" />
+        </Pressable>
       )}
       <View style={styles.sheet}>
         <View style={styles.grabberRow}>
@@ -709,8 +707,11 @@ export function SongOptionsScreen() {
         <Pressable
           style={styles.backdrop}
           onPress={safeGoBack}
-          accessible={false}
-        />
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss options"
+        >
+          <View pointerEvents="none" />
+        </Pressable>
       )}
       <View style={styles.sheet}>
         {/* Grabber + song header */}
