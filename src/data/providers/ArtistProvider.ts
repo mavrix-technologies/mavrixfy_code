@@ -494,9 +494,10 @@ async function fetchFeaturedArtists(): Promise<ArtistCard[]> {
 export async function getArtistDetails(id: string): Promise<JioSaavnArtist | null> {
   const cached = await getCachedArtist(id);
   if (cached) return cached;
-  const fresh = await fetchArtistRaw(id);
-  if (fresh) void setCachedArtist(id, fresh);
-  return fresh;
+  return fetchArtistRaw(id).then((fresh) => {
+    if (fresh) void setCachedArtist(id, fresh);
+    return fresh;
+  });
 }
 
 export async function getFeaturedArtists(options?: { forceRefresh?: boolean }): Promise<ArtistCard[]> {

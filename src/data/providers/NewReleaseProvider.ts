@@ -414,6 +414,16 @@ async function writeCachedDailySongs(songs: Song[]): Promise<void> {
   await AsyncStorage.setItem(DAILY_NEW_RELEASE_CACHE_KEY, JSON.stringify(payload)).catch(() => undefined);
 }
 
+async function fetchJson<T = any>(url: string, signal?: AbortSignal): Promise<T | null> {
+  try {
+    const res = await fetch(url, { headers: { Accept: "application/json" }, signal });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 async function searchSongs(
   query: string,
   limit: number,
@@ -429,13 +439,7 @@ async function searchSongs(
     params.push("refresh=1", `ts=${Date.now()}`);
   }
 
-  const response = await fetch(`${buildAppApiUrl("/search/songs")}?${params.join("&")}`, {
-    headers: { Accept: "application/json" },
-    signal,
-  }).catch(() => null);
-  if (!response?.ok) return [];
-
-  const payload = await response.json().catch(() => null);
+  const payload = await fetchJson(`${buildAppApiUrl("/search/songs")}?${params.join("&")}`, signal);
   return unwrapSongResults(payload).flatMap((raw, index) => {
     const song = normalizeNewReleaseCandidate(raw, index);
     return song ? [song] : [];
@@ -457,13 +461,7 @@ async function searchAlbums(
     params.push("refresh=1", `ts=${Date.now()}`);
   }
 
-  const response = await fetch(`${buildAppApiUrl("/search/albums")}?${params.join("&")}`, {
-    headers: { Accept: "application/json" },
-    signal,
-  }).catch(() => null);
-  if (!response?.ok) return [];
-
-  const payload = await response.json().catch(() => null);
+  const payload = await fetchJson(`${buildAppApiUrl("/search/albums")}?${params.join("&")}`, signal);
   return unwrapAlbumResults(payload).flatMap((raw, index) => {
     const album = normalizeAlbumCandidate(raw, index);
     return album ? [album] : [];
@@ -481,13 +479,7 @@ async function fetchAlbumSongs(
     params.push("refresh=1", `ts=${Date.now()}`);
   }
 
-  const response = await fetch(`${buildAppApiUrl("/albums")}?${params.join("&")}`, {
-    headers: { Accept: "application/json" },
-    signal,
-  }).catch(() => null);
-  if (!response?.ok) return [];
-
-  const payload = await response.json().catch(() => null);
+  const payload = await fetchJson(`${buildAppApiUrl("/albums")}?${params.join("&")}`, signal);
   const albumData = payload?.data || {};
   return unwrapSongResults(payload).flatMap((raw, index) => {
     const song = normalizeNewReleaseCandidate(

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import { View, Text, FlatList, Pressable, StyleSheet, Platform, Alert, ToastAndroid, ActivityIndicator, AppState, InteractionManager, type GestureResponderEvent, type NativeScrollEvent, type NativeSyntheticEvent, type StyleProp, useWindowDimensions, type ViewStyle, BackHandler } from "react-native";
+import { View, Text, FlatList, Pressable, StyleSheet, Alert, ToastAndroid, ActivityIndicator, AppState, InteractionManager, type GestureResponderEvent, type NativeScrollEvent, type NativeSyntheticEvent, type StyleProp, useWindowDimensions, type ViewStyle, BackHandler } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useNavigation } from "expo-router";
@@ -15,6 +15,7 @@ import Reanimated, {
 import { runOnJS } from "react-native-worklets";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { IS_ANDROID, IS_IOS, IS_WEB } from "@/constants/platform";
 
 import { safeGoBack } from "@/utils/navigation";
 import { playerUIStateStore, type PlayerUIState } from "@/lib/playerUIState";
@@ -390,7 +391,7 @@ const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
             // Pre-load hook: patches onYouTubeIframeAPIReady/onPlayerReady before the YT API
             // script loads, so playVideo() fires the instant the player is ready — no postMessage.
             // Safe to use Before because we're only defining functions, not reading layout.
-            injectedJavaScriptBeforeContentLoaded: Platform.OS === "android"
+            injectedJavaScriptBeforeContentLoaded: IS_ANDROID
               ? BACKGROUND_YOUTUBE_PRELOAD_HOOK
               : undefined,
             // Post-load: crop script runs after layout so window.innerHeight is valid.
@@ -1227,7 +1228,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
     };
   }, [applyPlayerArtworkColors, interactionReady, screenSong?.id, screenSong?.coverUrl]);
 
-  const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const topInset = IS_WEB ? 67 : insets.top;
   const isShortScreen = screenHeight <= 760;
   const isVeryShortScreen = screenHeight <= 700;
   const topBarHeight = isShortScreen ? 50 : 54;
@@ -1241,7 +1242,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
   const songDetailActionSize = isVeryShortScreen ? 38 : 42;
   const songDetailIconSize = isVeryShortScreen ? 21 : 23;
   const bottomContentPadding =
-    Platform.OS === "web"
+    IS_WEB
       ? 16
       : Math.max(insets.bottom, 0) + 24;
   const largeArtworkByWidth = Math.min(screenWidth - (isShortScreen ? 44 : 38), isShortScreen ? 348 : 388);
@@ -1455,7 +1456,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
 
 
   const showDevLoadMessage = useCallback((message: string) => {
-    if (Platform.OS === "android") {
+    if (IS_ANDROID) {
       ToastAndroid.show(message, ToastAndroid.SHORT);
       return;
     }
@@ -1864,8 +1865,8 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
             nestedScrollEnabled
             scrollEnabled={!isProgressSeeking}
             keyboardShouldPersistTaps="handled"
-            bounces={Platform.OS === "ios"}
-            alwaysBounceVertical={Platform.OS === "ios"}
+            bounces={IS_IOS}
+            alwaysBounceVertical={IS_IOS}
             overScrollMode="never"
             scrollEventThrottle={16}
             ListHeaderComponent={
@@ -1943,7 +1944,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
                         keyExtractor={(item: ArtworkQueueItem) => item.artworkKey}
                         renderItem={renderArtworkCard}
                         horizontal
-                        pagingEnabled={Platform.OS === "ios"}
+                        pagingEnabled={IS_IOS}
                         showsHorizontalScrollIndicator={false}
                         bounces={false}
                         scrollEnabled={playingQueue.length > 1 && !isProgressSeeking}
@@ -2222,7 +2223,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
 
   // ── Android Back Handler ────────────────────────────────────────────────────
   useEffect(() => {
-    if (Platform.OS !== "android") return;
+    if (!IS_ANDROID) return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       if (playerUIStateStore.current === "expanded") {
         playerUIStateStore.collapsePlayer();
@@ -2314,7 +2315,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     overflow: "hidden",
-    zIndex: Platform.OS === "android" ? 0 : -1,
+    zIndex: IS_ANDROID ? 0 : -1,
   },
   activeCardReanimatedContainer: {
     alignItems: "center",

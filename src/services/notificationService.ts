@@ -6,17 +6,17 @@
  *  - Device registration (token + metadata → Firestore)
  *  - Version checking (Firestore latestVersion)
  *  - Notification channel setup (Android)
- *  - Foreground / tap listeners
  */
 
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
-import { Platform, NativeModules } from "react-native";
+import { NativeModules, Platform } from "react-native";
 import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import appConfig from "../../app.json";
 import { db } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
+import { IS_ANDROID, IS_IOS } from "@/constants/platform";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,11 +48,11 @@ export function getInstalledAppVersion(): string {
 
 export function getInstalledBuildNumber(): string {
   const configuredBuildNumber =
-    Platform.OS === "android"
+    IS_ANDROID
       ? appConfig.expo.android.versionCode?.toString()
       : appConfig.expo.ios.buildNumber;
   const runtimeBuildNumber =
-    Platform.OS === "android"
+    IS_ANDROID
       ? Constants.expoConfig?.android?.versionCode?.toString()
       : Constants.expoConfig?.ios?.buildNumber;
 
@@ -106,19 +106,10 @@ export async function requestNotificationPermission(): Promise<boolean> {
   }
 }
 
-export async function getNotificationPermissionStatus(): Promise<Notifications.PermissionStatus> {
-  try {
-    const { status } = await Notifications.getPermissionsAsync();
-    return status;
-  } catch {
-    return "undetermined" as Notifications.PermissionStatus;
-  }
-}
-
 // ─── Android Channels ─────────────────────────────────────────────────────────
 
 async function setupAndroidChannels() {
-  if (Platform.OS !== "android") return;
+  if (!IS_ANDROID) return;
   const channels = [
     { id: "mavrixfy-music",          name: "Music",           importance: Notifications.AndroidImportance.HIGH },
     { id: "mavrixfy-releases",       name: "New Releases",    importance: Notifications.AndroidImportance.HIGH },
@@ -177,7 +168,7 @@ export async function registerForPushNotificationsAsync(
   userId: string
 ): Promise<DeviceRegistration | null> {
   // iOS simulators don't support push
-  if (!Device.isDevice && Platform.OS === "ios") {
+  if (!Device.isDevice && IS_IOS) {
     logger.info("[NotifService] Push not supported on iOS simulator");
     return null;
   }
@@ -291,29 +282,4 @@ export async function checkAppVersion(): Promise<AppVersionInfo | null> {
     logger.warn("[NotifService] Version check failed:", err);
     return null;
   }
-}
-
-// ─── Notification Listeners ───────────────────────────────────────────────────
-
-type NotifHandler = (n: Notifications.Notification) => void;
-type ResponseHandler = (r: Notifications.NotificationResponse) => void;
-
-export function registerNotificationListeners(
-  onReceived?: NotifHandler,
-  onResponse?: ResponseHandler
-): () => void {
-  ensureNotificationHandler();
-
-  const sub1 = Notifications.addNotificationReceivedListener((n) => {
-    onReceived?.(n);
-  });
-
-  const sub2 = Notifications.addNotificationResponseReceivedListener((r) => {
-    onResponse?.(r);
-  });
-
-  return () => {
-    sub1.remove();
-    sub2.remove();
-  };
 }

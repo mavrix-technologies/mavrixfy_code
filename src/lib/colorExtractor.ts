@@ -257,12 +257,12 @@ async function extractArtworkColorsUncached(cacheKey: string): Promise<ArtworkPa
 }
 
 async function extractArtworkColorsWithJsDecoder(cacheKey: string): Promise<ArtworkPalette> {
-  const sources = await buildArtworkSources(cacheKey);
-  const localUri = sources[0];
-  const base64 = await FileSystem.readAsStringAsync(localUri, {
-    encoding: "base64",
+  const bytes = await buildArtworkSources(cacheKey).then(async (sources) => {
+    const localUri = sources[0];
+    return FileSystem.readAsStringAsync(localUri, {
+      encoding: "base64",
+    }).then(base64ToBytes).catch(() => new Uint8Array());
   });
-  const bytes = base64ToBytes(base64);
 
   if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) {
     return extractPaletteFromJpeg(bytes);
@@ -396,13 +396,13 @@ async function cacheRemoteArtwork(remoteUrl: string): Promise<string> {
     throw new Error("Cache directory unavailable.");
   }
 
-  const existing = await FileSystem.getInfoAsync(localUri);
-  if (existing.exists) {
-    return localUri;
-  }
-
-  const downloaded = await FileSystem.downloadAsync(remoteUrl, localUri);
-  return downloaded.uri;
+  return FileSystem.getInfoAsync(localUri).then(async (existing) => {
+    if (existing.exists) {
+      return localUri;
+    }
+    const downloaded = await FileSystem.downloadAsync(remoteUrl, localUri);
+    return downloaded.uri;
+  });
 }
 
 function mapImageColorsToPalette(result: ImageColorsResult): ArtworkPalette {

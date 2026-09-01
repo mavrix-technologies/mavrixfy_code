@@ -17,20 +17,6 @@ export function getApiUrl(): string {
   return getMusicApiUrl();
 }
 
-async function consumeResponseBody(res: Response) {
-  try {
-    await res.text();
-  } catch {
-    // Best effort only
-  }
-}
-
-async function throwIfResNotOk(res: Response) {
-  if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new ApiError(res.status, text);
-  }
-}
 
 async function apiRequest(
   method: string,
@@ -47,7 +33,9 @@ async function apiRequest(
     credentials: "include",
   });
 
-  await throwIfResNotOk(res);
+  if (!res.ok) {
+    throw new ApiError(res.status, res.statusText);
+  }
   return res;
 }
 
@@ -65,12 +53,13 @@ const getQueryFn: <T>(options: {
       });
 
       if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-        await consumeResponseBody(res);
         return null;
       }
 
-      await throwIfResNotOk(res);
-      return await res.json();
+      if (!res.ok) {
+        throw new ApiError(res.status, res.statusText);
+      }
+      return res.json();
     };
 
 export const queryClient = new QueryClient({

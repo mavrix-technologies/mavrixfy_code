@@ -3,8 +3,8 @@
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
 import { logger } from "@/lib/logger";
+import { IS_ANDROID, IS_IOS } from "@/constants/platform";
 
 const KEY_DEVICE_ID = "@mavrixfy_device_id";
 
@@ -59,7 +59,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
     modelName = Device.modelName ?? Device.deviceName ?? "Unknown Device";
   } catch {
     // expo-device not available — use platform string.
-    modelName = Platform.OS === "android" ? "Android Device" : Platform.OS === "ios" ? "iOS Device" : "Web";
+    modelName = IS_ANDROID ? "Android Device" : IS_IOS ? "iOS Device" : "Web";
   }
 
   let appVersion = "1.0.0";
@@ -75,7 +75,7 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
   }
 
   const platform: "android" | "ios" | "web" =
-    Platform.OS === "android" ? "android" : Platform.OS === "ios" ? "ios" : "web";
+    IS_ANDROID ? "android" : IS_IOS ? "ios" : "web";
 
   return { platform, appVersion, modelName };
 }

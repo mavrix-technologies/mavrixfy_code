@@ -16,6 +16,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { IS_ANDROID } from "@/constants/platform";
 import DownloadButton from "@/components/DownloadButton";
 import { showGlobalToast } from "@/utils/globalToast";
 import { usePlayerActions } from "@/contexts/PlayerContext";
@@ -453,7 +454,7 @@ function formatDuration(seconds: number): string {
 function SheetWrap({ children }: { children: React.ReactNode }) {
   return (
     <View style={styles.root}>
-      {Platform.OS === "android" && (
+      {IS_ANDROID && (
         <Pressable
           style={styles.backdrop}
           onPress={safeGoBack}
@@ -768,15 +769,15 @@ export function SongOptionsScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Platform.OS === "android" ? "transparent" : SHEET_BACKGROUND,
-    justifyContent: Platform.OS === "android" ? "flex-end" : "flex-start",
+    backgroundColor: IS_ANDROID ? "transparent" : SHEET_BACKGROUND,
+    justifyContent: IS_ANDROID ? "flex-end" : "flex-start",
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0, 0, 0, 0.55)",
   },
   sheet: {
-    ...(Platform.OS === "android"
+    ...(IS_ANDROID
       ? {
           maxHeight: "85%",
           borderTopLeftRadius: 24,

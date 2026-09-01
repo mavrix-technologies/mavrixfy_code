@@ -19,7 +19,7 @@ import {
 import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { logLogin, logSignUp } from "@/lib/analytics";
-import { Platform } from "react-native";
+import { IS_WEB } from "@/constants/platform";
 import { deleteUserFirestoreData } from "@/lib/firestore";
 import { clearAppStorage } from "@/lib/storage";
 import { clearUserCache } from "@/lib/cache";
@@ -170,8 +170,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { email: validEmail, password: validPassword } = validation.data;
 
     // Firebase handles server-side brute-force protection
-    const cred = await signInWithEmailAndPassword(auth, validEmail, validPassword);
-    const appUser = await buildAppUser(cred.user);
+    const { cred, appUser } = await signInWithEmailAndPassword(auth, validEmail, validPassword).then(
+      async (userCred) => ({
+        cred: userCred,
+        appUser: await buildAppUser(userCred.user),
+      })
+    );
     setUser(appUser);
     setFirebaseUser(cred.user);
     setIsGuest(false);
@@ -212,25 +216,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const normalizedEmail = validEmail;
     const displayName = validFullName;
-    const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, validPassword);
-    await Promise.all([
-      updateProfile(cred.user, { displayName }),
-      // Create user doc WITHOUT onboardingCompleted — the onboarding flow sets it
-      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
-      setDoc(doc(db, "users", cred.user.uid), {
-        email: normalizedEmail,
-        emailLower: normalizedEmail.toLowerCase(),
-        displayName,
-        fullName: displayName,
-        imageUrl: null,
-        photoURL: null,
-        provider: "password",
-        onboardingCompleted: false,
-        schemaVersion: 2,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      }),
-    ]);
+    const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, validPassword).then(
+      async (userCred) => {
+        await Promise.all([
+          updateProfile(userCred.user, { displayName }),
+          // Create user doc WITHOUT onboardingCompleted — the onboarding flow sets it
+          // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
+          setDoc(doc(db, "users", userCred.user.uid), {
+            email: normalizedEmail,
+            emailLower: normalizedEmail.toLowerCase(),
+            displayName,
+            fullName: displayName,
+            imageUrl: null,
+            photoURL: null,
+            provider: "password",
+            onboardingCompleted: false,
+            schemaVersion: 2,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          }),
+        ]);
+        return userCred;
+      }
+    );
     const appUser: AppUser = {
       id: cred.user.uid,
       email: normalizedEmail,
@@ -248,7 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
-    if (Platform.OS === "web") {
+    if (IS_WEB) {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       const fbUser = result.user;
@@ -282,9 +290,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(appUser);
       setFirebaseUser(fbUser);
       setIsGuest(false);
-    } else {
-      throw new Error("Google Sign-In on native should use the mobile Google sign-in flow.");
+      return;
     }
+
+    throw new Error("Google Sign-In on native should use the native Google flow.");
   }, [buildAppUser]);
 
   const signInWithGoogleCredential = useCallback(async (idToken: string) => {
@@ -324,7 +333,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [buildAppUser]);
 
   const signInWithApple = useCallback(async () => {
-    if (Platform.OS !== "web") {
+    if (!IS_WEB) {
       throw new Error("Apple Sign-In on native should use the Apple device sign-in flow.");
     }
 
@@ -488,7 +497,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const credential = EmailAuthProvider.credential(email, password);
       await reauthenticateWithCredential(currentUser, credential);
     } else if (primaryProviderId === "google.com") {
-      if (Platform.OS === "web") {
+      if (IS_WEB) {
         const provider = new GoogleAuthProvider();
         await reauthenticateWithPopup(currentUser, provider);
       } else {
@@ -503,7 +512,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else if (primaryProviderId === "apple.com") {
       const provider = new OAuthProvider("apple.com");
 
-      if (Platform.OS === "web") {
+      if (IS_WEB) {
         await reauthenticateWithPopup(currentUser, provider);
       } else {
         const appleIdToken = options?.appleIdToken?.trim();
@@ -524,12 +533,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await Promise.all([
       deleteUserFirestoreData(currentUser.uid),
       clearAppStorage(),
+      deleteUser(currentUser),
+      clearRateLimit('auth:deleteAccount', userEmail.toLowerCase()),
     ]);
-    await deleteUser(currentUser);
     clearAuthState(currentUser.uid);
-    
-    // Clear rate limit after successful deletion
-    await clearRateLimit('auth:deleteAccount', userEmail.toLowerCase());
   }, [clearAuthState]);
 
   const logout = useCallback(async () => {

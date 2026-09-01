@@ -17,7 +17,6 @@ import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
 import { useAppTopHeaderScrollElevation } from "@/components/AppTopHeader";
 import AdMobBanner from "@/components/AdMobBanner";
-import AppPromotionModal from "@/components/AppPromotionModal";
 import * as Haptics from "expo-haptics";
 import { triggerImpact } from "@/lib/haptics";
 
@@ -259,8 +258,6 @@ export function HomeScreen() {
         windowSize={7}
         removeClippedSubviews={Platform.OS === "android"}
       />
-
-      <AppPromotionModal />
     </View>
   );
 }

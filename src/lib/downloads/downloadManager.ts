@@ -11,6 +11,7 @@ import { type DownloadItem, type DownloadPreferences, type StorageSummary } from
 import {
   loadAllDownloads,
   loadDownload,
+  getDownloadSync,
   saveDownload,
   removeDownload,
   patchDownload,
@@ -158,7 +159,7 @@ export async function downloadCollection(
 ): Promise<{ queued: number; skipped: number; failed: number }> {
   const results = await Promise.all(
     songs.map(async (song) => {
-      const existing = await loadDownload(song.id);
+      const existing = getDownloadSync(song.id);
       if (existing?.status === "completed") {
         return "skipped" as const;
       }

@@ -8,6 +8,7 @@ import TrackPlayer, {
   IOSCategoryOptions,
 } from "react-native-track-player";
 import { logger } from "@/lib/logger";
+export { trackPlayerService } from "@/lib/trackPlayerService";
 
 let playerReady = false;
 let setupPromise: Promise<void> | null = null;

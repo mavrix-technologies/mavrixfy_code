@@ -41,11 +41,6 @@ const UI = {
   error: "#ff5449",
 };
 
-const QUALITY_OPTIONS: { label: string; sub: string; value: DownloadQuality }[] = [
-  { label: "High Quality", sub: "~320 kbps · Full studio fidelity audio", value: "high" },
-  { label: "Normal Quality", sub: "~128 kbps · Standard balance of speed & quality", value: "medium" },
-  { label: "Low Quality", sub: "~48 kbps · Uses minimal device storage", value: "low" },
-];
 
 function downloadItemToSong(item: DownloadItem): Song {
   return {
@@ -546,32 +541,66 @@ export function DownloadedSongsScreen() {
             {/* Audio Quality Section */}
             <Text style={styles.sectionHeaderTitle}>Audio Download Quality</Text>
             <View style={styles.groupedCard}>
-              {QUALITY_OPTIONS.map((opt, idx) => {
-                const isSelected = preferences.quality === opt.value;
-                return (
-                  <React.Fragment key={opt.value}>
-                    {idx > 0 && <View style={styles.settingDivider} />}
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.qualityItemRow,
-                        isSelected && styles.qualityItemRowActive,
-                        pressed && styles.qualityItemRowPressed,
-                      ]}
-                      onPress={() => handleQualityChange(opt.value)}
-                    >
-                      <View style={styles.qualityTextCol}>
-                        <Text style={[styles.qualityItemTitle, isSelected && styles.qualityItemTitleActive]}>
-                          {opt.label}
-                        </Text>
-                        <Text style={styles.qualityItemSub}>{opt.sub}</Text>
-                      </View>
-                      <View style={[styles.radioCircle, isSelected && styles.radioCircleActive]}>
-                        {isSelected && <View style={styles.radioDot} />}
-                      </View>
-                    </Pressable>
-                  </React.Fragment>
-                );
-              })}
+              <Pressable
+                style={({ pressed }) => [
+                  styles.qualityItemRow,
+                  preferences.quality === "high" && styles.qualityItemRowActive,
+                  pressed && styles.qualityItemRowPressed,
+                ]}
+                onPress={() => handleQualityChange("high")}
+              >
+                <View style={styles.qualityTextCol}>
+                  <Text style={[styles.qualityItemTitle, preferences.quality === "high" && styles.qualityItemTitleActive]}>
+                    High Quality
+                  </Text>
+                  <Text style={styles.qualityItemSub}>~320 kbps · Full studio fidelity audio</Text>
+                </View>
+                <View style={[styles.radioCircle, preferences.quality === "high" && styles.radioCircleActive]}>
+                  {preferences.quality === "high" && <View style={styles.radioDot} />}
+                </View>
+              </Pressable>
+
+              <View style={styles.settingDivider} />
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.qualityItemRow,
+                  preferences.quality === "medium" && styles.qualityItemRowActive,
+                  pressed && styles.qualityItemRowPressed,
+                ]}
+                onPress={() => handleQualityChange("medium")}
+              >
+                <View style={styles.qualityTextCol}>
+                  <Text style={[styles.qualityItemTitle, preferences.quality === "medium" && styles.qualityItemTitleActive]}>
+                    Normal Quality
+                  </Text>
+                  <Text style={styles.qualityItemSub}>~128 kbps · Standard balance of speed & quality</Text>
+                </View>
+                <View style={[styles.radioCircle, preferences.quality === "medium" && styles.radioCircleActive]}>
+                  {preferences.quality === "medium" && <View style={styles.radioDot} />}
+                </View>
+              </Pressable>
+
+              <View style={styles.settingDivider} />
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.qualityItemRow,
+                  preferences.quality === "low" && styles.qualityItemRowActive,
+                  pressed && styles.qualityItemRowPressed,
+                ]}
+                onPress={() => handleQualityChange("low")}
+              >
+                <View style={styles.qualityTextCol}>
+                  <Text style={[styles.qualityItemTitle, preferences.quality === "low" && styles.qualityItemTitleActive]}>
+                    Low Quality
+                  </Text>
+                  <Text style={styles.qualityItemSub}>~48 kbps · Uses minimal device storage</Text>
+                </View>
+                <View style={[styles.radioCircle, preferences.quality === "low" && styles.radioCircleActive]}>
+                  {preferences.quality === "low" && <View style={styles.radioDot} />}
+                </View>
+              </Pressable>
             </View>
 
             {/* Network & Power Section */}

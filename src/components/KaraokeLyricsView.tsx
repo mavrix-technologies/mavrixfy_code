@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -11,6 +10,7 @@ import {
   useWindowDimensions,
   type ListRenderItemInfo,
 } from "react-native";
+import { IS_ANDROID, IS_IOS, IS_WEB } from "@/constants/platform";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   useSharedValue,
@@ -638,7 +638,7 @@ const SpotifyModalHeader = memo(function SpotifyModalHeader({
         {/* Right: Circular close button pill */}
         <Pressable
           onPress={() => {
-            if (Platform.OS !== "web") {
+            if (!IS_WEB) {
               void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
             }
             onClose();
@@ -718,7 +718,7 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
 
   const handleSeekToLine = useCallback(
     (time: number) => {
-      if (Platform.OS !== "web") {
+      if (!IS_WEB) {
         void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
       }
       onSeek(time);
@@ -808,7 +808,7 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
       maxToRenderPerBatch={8}
       windowSize={5}
       updateCellsBatchingPeriod={50}
-      removeClippedSubviews={Platform.OS === "android"}
+      removeClippedSubviews={IS_ANDROID}
     />
   );
 });
@@ -842,7 +842,7 @@ const SpotifyModalBottomBar = memo(function SpotifyModalBottomBar({
   const handleSlidingComplete = useCallback(
     (val: number) => {
       setSeekingSeconds(null);
-      if (Platform.OS !== "web") {
+      if (!IS_WEB) {
         void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
       }
       onSeek(val);
@@ -1149,7 +1149,7 @@ const styles = StyleSheet.create({
   spotifyModalHeader: {
     flexDirection: "row",
     alignItems: "center",
-    paddingTop: Platform.OS === "ios" ? 54 : 36,
+    paddingTop: IS_IOS ? 54 : 36,
     paddingHorizontal: 20,
     paddingBottom: 16,
     gap: 12,
@@ -1279,7 +1279,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingBottom: Platform.OS === "ios" ? 38 : 24,
+    paddingBottom: IS_IOS ? 38 : 24,
     paddingTop: 12,
     gap: 10,
   },

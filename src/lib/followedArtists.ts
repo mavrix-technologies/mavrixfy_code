@@ -22,11 +22,9 @@ async function read(): Promise<FollowedArtist[]> {
   return memCache!;
 }
 
-async function write(list: FollowedArtist[]): Promise<void> {
+function write(list: FollowedArtist[]): Promise<void> {
   memCache = list;
-  try {
-    await AsyncStorage.setItem(KEY, JSON.stringify(list));
-  } catch {}
+  return AsyncStorage.setItem(KEY, JSON.stringify(list)).catch(() => {});
 }
 
 export async function getFollowedArtists(): Promise<FollowedArtist[]> {
@@ -41,22 +39,22 @@ export async function isFollowingArtist(id: string): Promise<boolean> {
 async function followArtist(artist: FollowedArtist): Promise<void> {
   const list = await read();
   if (list.some((a) => a.id === artist.id)) return; // already following
-  await write([{ ...artist, followedAt: Date.now() }, ...list]);
+  return write([{ ...artist, followedAt: Date.now() }, ...list]);
 }
 
 async function unfollowArtist(id: string): Promise<void> {
   const list = await read();
-  await write(list.filter((a) => a.id !== id));
+  return write(list.filter((a) => a.id !== id));
 }
 
 export async function toggleFollowArtist(artist: FollowedArtist): Promise<boolean> {
   const list = await read();
   const already = list.some((a) => a.id === artist.id);
   if (already) {
-    await write(list.filter((a) => a.id !== artist.id));
+    void write(list.filter((a) => a.id !== artist.id));
     return false; // now unfollowed
   } else {
-    await write([{ ...artist, followedAt: Date.now() }, ...list]);
+    void write([{ ...artist, followedAt: Date.now() }, ...list]);
     return true; // now following
   }
 }

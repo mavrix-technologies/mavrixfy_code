@@ -321,20 +321,21 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   }, [refreshSummary]);
 
   const handleRemoveAll = useCallback(async () => {
-    await removeAllDownloads();
-    // Clear the store
+    // Clear the store in memory
     for (const item of downloadItemStore.getAll()) {
       downloadItemStore.delete(item.songId);
     }
-    await refreshDownloads();
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps
+    await Promise.all([
+      removeAllDownloads(),
+      refreshDownloads(),
+    ]);
   }, [refreshDownloads]);
 
   const handleUpdatePreferences = useCallback(
     async (patch: Partial<DownloadPreferences>) => {
       const updated = { ...prefsRef.current, ...patch };
       setPreferences(updated);
-      await saveDownloadPreferences(updated);
+      return saveDownloadPreferences(updated);
     },
     []
   );

@@ -46,6 +46,7 @@ import { logger } from "@/lib/logger";
 import { initializeMobileAds } from "@/lib/googleMobileAds";
 import { initRemoteConfig } from "@/lib/remoteConfig";
 import { showGlobalToast, subscribeGlobalToast } from "@/utils/globalToast";
+import { checkAppVersion, registerForPushNotificationsAsync } from "@/services/notificationService";
 import { AppNavBar } from "./(tabs)/_layout";
 import PlayerScreen from "@/features/player/screens/PlayerScreen";
 
@@ -135,7 +136,7 @@ LogBox.ignoreLogs([
   "The action 'GO_BACK' was not handled by any navigator",
 ]);
 
-const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "profile", "delete-account", "notifications"]);
+const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "profile", "delete-account"]);
 const NAV_OVERLAY_SEGMENTS = new Set(["playlist", "artist"]);
 
 const GLOBAL_TOAST_VISIBLE_MS = 1050;
@@ -253,101 +254,34 @@ function useRootLayoutNavigation() {
   const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
   const isAllowedGuest = GUEST_LOGIN_ENABLED && isGuest;
 
-  // ── Enterprise Notification Startup Sequence ────────────────────────────────
+  // ── App Startup & Version Check Sequence ────────────────────────────────────
   useEffect(() => {
     if (loading) return;
 
     let isActive = true;
-    let cleanupListeners: (() => void) | undefined;
 
     const run = async () => {
-      const [notificationService, notificationStore] = await Promise.all([
-        import("@/services/notificationService"),
-        import("@/stores/notificationStore"),
-      ]);
-      const { registerForPushNotificationsAsync, registerNotificationListeners, checkAppVersion } =
-        notificationService;
-      const { addNotification, syncFromFirestore, loadNotifications } = notificationStore;
-
       if (!isActive) return;
 
-      // Step 1 — Load local notification cache immediately
-      await loadNotifications();
-
-      // Step 2 — Register device (token + metadata) for authenticated users
       if (firebaseUser?.uid) {
         void registerForPushNotificationsAsync(firebaseUser.uid);
-        // Step 3 — Sync activity feed from Firestore
-        void syncFromFirestore(firebaseUser.uid);
       }
 
-      // Step 4 — Version check (non-blocking)
       const versionInfo = await checkAppVersion().catch(() => null);
       if (versionInfo?.hasUpdate && isActive) {
         try { routerReplace("/force-update" as any); } catch { /* ignore */ }
-        return;
       }
-
-      // Step 5 — Notification listeners
-      cleanupListeners = registerNotificationListeners(
-        // Foreground received → add to Activity store
-        (notification) => {
-          const content = notification.request.content;
-          const data = content.data as Record<string, string> | null;
-          const notificationId = data?.notificationId ?? notification.request.identifier;
-          void addNotification(
-            content.title ?? "Mavrixfy",
-            content.body ?? "",
-            (data?.type as any) ?? "system",
-            {
-              deeplink: data?.route ?? undefined,
-              notificationId,
-              imageUrl: data?.imageUrl ?? undefined,
-              minAppVersion: data?.minAppVersion ?? undefined,
-              maxAppVersion: data?.maxAppVersion ?? undefined,
-            },
-            firebaseUser?.uid
-          );
-        },
-        // Tap / click → add as read + deep link
-        (response) => {
-          const content = response.notification.request.content;
-          const data = content.data as Record<string, string> | null;
-          const notificationId = data?.notificationId ?? response.notification.request.identifier;
-
-          void addNotification(
-            content.title ?? "Mavrixfy",
-            content.body ?? "",
-            (data?.type as any) ?? "system",
-            {
-              deeplink: data?.route ?? undefined,
-              notificationId,
-              minAppVersion: data?.minAppVersion ?? undefined,
-              maxAppVersion: data?.maxAppVersion ?? undefined,
-            },
-            firebaseUser?.uid
-          );
-
-          const route = data?.route;
-          if (route) {
-            try { routerReplace(route as any); } catch (err) {
-              logger.error("[Layout] Deep link navigation failed:", err);
-            }
-          }
-        }
-      );
     };
 
     const timer = setTimeout(() => {
       InteractionManager.runAfterInteractions(() => {
-        run().catch((err) => logger.error("[Layout] Notification startup failed:", err));
+        run().catch((err) => logger.error("[Layout] Startup check failed:", err));
       });
     }, 3000);
 
     return () => {
       isActive = false;
       clearTimeout(timer);
-      cleanupListeners?.();
     };
   }, [loading, firebaseUser?.uid, routerReplace]);
 
@@ -447,7 +381,6 @@ function RootLayoutNav() {
         <Stack.Screen name="queue" options={queueScreenOptions} />
         <Stack.Screen name="song-options" options={songOptionsScreenOptions} />
         <Stack.Screen name="sleep-timer" options={sleepTimerScreenOptions} />
-        <Stack.Screen name="notifications" />
         <Stack.Screen name="artist-mix" options={artistMixScreenOptions} />
         <Stack.Screen name="downloaded-songs" />
         <Stack.Screen name="downloads" />

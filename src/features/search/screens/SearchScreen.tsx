@@ -432,8 +432,45 @@ const SearchRecentSection = React.memo(function SearchRecentSection({
   onRecentSearchPress,
   onRemoveRecentSearch,
 }: SearchRecentSectionProps) {
+  const renderItem = useCallback(
+    ({ item }: { item: RecentSearchItem }) => (
+      <Pressable
+        key={item.id}
+        style={({ pressed }) => [styles.recentRow, pressed && styles.recentRowPressed]}
+        onPress={() => onRecentSearchPress(item)}
+      >
+        {item.imageUrl ? (
+          <Image
+            source={{ uri: item.imageUrl }}
+            style={[styles.recentThumb, item.type === "artist" && styles.recentThumbRound]}
+            contentFit="cover"
+            transition={100}
+          />
+        ) : (
+          <View style={[styles.recentThumb, styles.recentThumbRound, styles.recentThumbFallback]}>
+            <Ionicons name={item.icon ?? "search"} size={24} color={Colors.subtext} />
+          </View>
+        )}
+        <View style={styles.recentInfo}>
+          <Text style={styles.recentLabel} numberOfLines={1}>{item.label}</Text>
+          {item.subtitle ? (
+            <Text style={styles.recentSubtitle} numberOfLines={1}>{item.subtitle}</Text>
+          ) : null}
+        </View>
+        <Pressable
+          hitSlop={10}
+          style={styles.recentActionBtn}
+          onPress={(e) => { e.stopPropagation(); onRemoveRecentSearch(item.id); }}
+        >
+          <Ionicons name="close" size={18} color={Colors.subtext} />
+        </Pressable>
+      </Pressable>
+    ),
+    [onRecentSearchPress, onRemoveRecentSearch]
+  );
+
   return (
-    <ScrollView
+    <FlatList
       style={styles.scrollView}
       contentContainerStyle={[
         styles.content,
@@ -443,51 +480,17 @@ const SearchRecentSection = React.memo(function SearchRecentSection({
       showsVerticalScrollIndicator={false}
       onScroll={onScroll}
       scrollEventThrottle={16}
-    >
-      <View style={styles.recentSection}>
-        <Text style={styles.recentTitle}>Recent searches</Text>
-        {recentSearches.length > 0 ? (
-          recentSearches.map((item) => (
-            <Pressable
-              key={item.id}
-              style={({ pressed }) => [styles.recentRow, pressed && styles.recentRowPressed]}
-              onPress={() => onRecentSearchPress(item)}
-            >
-              {item.imageUrl ? (
-                <Image
-                  source={{ uri: item.imageUrl }}
-                  style={[styles.recentThumb, item.type === "artist" && styles.recentThumbRound]}
-                  contentFit="cover"
-                  transition={100}
-                />
-              ) : (
-                <View style={[styles.recentThumb, styles.recentThumbRound, styles.recentThumbFallback]}>
-                  <Ionicons name={item.icon ?? "search"} size={24} color={Colors.subtext} />
-                </View>
-              )}
-              <View style={styles.recentInfo}>
-                <Text style={styles.recentLabel} numberOfLines={1}>{item.label}</Text>
-                {item.subtitle ? (
-                  <Text style={styles.recentSubtitle} numberOfLines={1}>{item.subtitle}</Text>
-                ) : null}
-              </View>
-              <Pressable
-                hitSlop={10}
-                style={styles.recentActionBtn}
-                onPress={(e) => { e.stopPropagation(); onRemoveRecentSearch(item.id); }}
-              >
-                <Ionicons name="close" size={18} color={Colors.subtext} />
-              </Pressable>
-            </Pressable>
-          ))
-        ) : (
-          <View style={styles.recentEmpty}>
-            <Ionicons name="search-outline" size={34} color={Colors.subtext} />
-            <Text style={styles.recentEmptyText}>No recent searches</Text>
-          </View>
-        )}
-      </View>
-    </ScrollView>
+      data={recentSearches}
+      keyExtractor={(item) => item.id}
+      ListHeaderComponent={<Text style={styles.recentTitle}>Recent searches</Text>}
+      ListEmptyComponent={
+        <View style={styles.recentEmpty}>
+          <Ionicons name="search-outline" size={34} color={Colors.subtext} />
+          <Text style={styles.recentEmptyText}>No recent searches</Text>
+        </View>
+      }
+      renderItem={renderItem}
+    />
   );
 });
 

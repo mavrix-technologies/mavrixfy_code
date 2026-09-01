@@ -232,15 +232,12 @@ async function executeDownload(songId: string): Promise<void> {
   const tempUri = getTempDownloadUri(songId);
   const finalUri = getTrackFileUri(songId);
 
-  // Fetch fresh audio URL while updating status and ensuring directories in parallel
-  const [, , freshUrl] = await Promise.all([
+  // Fetch fresh audio URL and resolve redirects while updating status and ensuring directories in parallel
+  const [, , audioUrl] = await Promise.all([
     ensureDownloadsDirs(),
     updateStatus(songId, "downloading"),
-    refreshAudioUrl(songId, item.audioUrl, item.quality),
+    refreshAudioUrl(songId, item.audioUrl, item.quality).then(resolveRedirects),
   ]);
-
-  // Resolve all redirects to get the final download URL
-  const audioUrl = await resolveRedirects(freshUrl);
 
   const handle = createDownloadResumable(
     audioUrl,
@@ -389,7 +386,7 @@ export async function enqueueDownload(
     return;
   }
 
-  await saveDownload({ ...item, status: "queued" });
+  void saveDownload({ ...item, status: "queued" });
   emit("status", songId, { ...item, status: "queued" });
 
   const hasSpace = await hasSufficientStorage();
@@ -449,11 +446,11 @@ export async function resumeDownload(
 
   const hasSpace = await hasSufficientStorage();
   if (!hasSpace) {
-    await updateStatus(songId, "paused", { failureReason: "Insufficient storage" });
+    void updateStatus(songId, "paused", { failureReason: "Insufficient storage" });
     return;
   }
 
-  await startDownload(songId);
+  return startDownload(songId);
 }
 
 export async function cancelDownload(songId: string): Promise<void> {
@@ -475,12 +472,12 @@ export async function retryDownload(
   prefs: DownloadPreferences
 ): Promise<void> {
   clearRetryTimer(songId);
-  await updateStatus(songId, "queued", {
+  void updateStatus(songId, "queued", {
     retryCount: 0,
     failureReason: null,
     failedAt: null,
   });
-  await resumeDownload(songId, prefs);
+  return resumeDownload(songId, prefs);
 }
 
 /** How many downloads are currently active (for debug/UI). */

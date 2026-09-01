@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Text, View, TextInput, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { FlatList, Pressable, StyleSheet, Text, View, TextInput, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { IS_ANDROID, IS_WEB } from "@/constants/platform";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -74,7 +75,7 @@ const likedSongKeyExtractor = (item: Song) => item.id;
 // react-doctor-disable-next-line react-doctor/no-giant-component
 export function LikedSongsScreen() {
   const insets = useSafeAreaInsets();
-  const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const topInset = IS_WEB ? 67 : insets.top;
   const { isAuthenticated } = useAuth();
   const { isOnline } = useNetwork();
   const { currentSong, isShuffled } = usePlaybackNowPlaying();
@@ -267,6 +268,29 @@ export function LikedSongsScreen() {
     [filteredSongs, handleSongPress]
   );
 
+  const renderMoodChip = useCallback(
+    ({ item: mood }: { item: string }) => (
+      <Pressable
+        onPress={() => setSelectedMood(mood)}
+        accessibilityRole="button"
+        accessibilityLabel={`Filter by ${mood}`}
+        accessibilityState={{ selected: false }}
+        style={({ pressed }) => [
+          styles.moodChip,
+          pressed && styles.moodChipPressed,
+        ]}
+      >
+        <Text style={styles.moodChipText}>{mood}</Text>
+      </Pressable>
+    ),
+    [setSelectedMood]
+  );
+
+  const availableMoods = useMemo(
+    () => (selectedMood ? MOOD_SUGGESTIONS.filter((m) => m !== selectedMood) : MOOD_SUGGESTIONS),
+    [selectedMood]
+  );
+
   const headerMeta = selectedMood
     ? `${filteredSongs.length} songs • ${selectedMood}`
     : songs.length > 0
@@ -335,7 +359,7 @@ export function LikedSongsScreen() {
         maxToRenderPerBatch={10}
         windowSize={5}
         updateCellsBatchingPeriod={50}
-        removeClippedSubviews={Platform.OS === "android"}
+        removeClippedSubviews={IS_ANDROID}
         ListHeaderComponent={
           <>
             <Pressable
@@ -417,44 +441,28 @@ export function LikedSongsScreen() {
 
             {songs.length > 0 && (
               <View style={styles.moodSection}>
-                <ScrollView
+                <FlatList
                   horizontal
+                  data={availableMoods}
+                  keyExtractor={(item) => item}
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.moodScrollContent}
-                >
-                  {selectedMood && (
-                    <Pressable
-                      onPress={() => setSelectedMood(null)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${selectedMood} mood filter, selected`}
-                      accessibilityState={{ selected: true }}
-                      style={[styles.moodChip, styles.moodChipActive]}
-                    >
-                      <Ionicons name="close" size={14} color="#042115" style={{ marginRight: 4 }} />
-                      <Text style={[styles.moodChipText, styles.moodChipTextActive]}>{selectedMood}</Text>
-                    </Pressable>
-                  )}
-                  {/* react-doctor-disable-next-line react-doctor/rn-no-scrollview-mapped-list -- static horizontal mood chips row */}
-                  {MOOD_SUGGESTIONS.map((mood) => {
-                    const isActive = selectedMood === mood;
-                    if (isActive) return null;
-                    return (
+                  ListHeaderComponent={
+                    selectedMood ? (
                       <Pressable
-                        key={mood}
-                        onPress={() => setSelectedMood(mood)}
+                        onPress={() => setSelectedMood(null)}
                         accessibilityRole="button"
-                        accessibilityLabel={`Filter by ${mood}`}
-                        accessibilityState={{ selected: false }}
-                        style={({ pressed }) => [
-                          styles.moodChip,
-                          pressed && styles.moodChipPressed,
-                        ]}
+                        accessibilityLabel={`${selectedMood} mood filter, selected`}
+                        accessibilityState={{ selected: true }}
+                        style={[styles.moodChip, styles.moodChipActive]}
                       >
-                        <Text style={styles.moodChipText}>{mood}</Text>
+                        <Ionicons name="close" size={14} color="#042115" style={{ marginRight: 4 }} />
+                        <Text style={[styles.moodChipText, styles.moodChipTextActive]}>{selectedMood}</Text>
                       </Pressable>
-                    );
-                  })}
-                </ScrollView>
+                    ) : null
+                  }
+                  renderItem={renderMoodChip}
+                />
               </View>
             )}
 
@@ -558,7 +566,7 @@ export function LikedSongsScreen() {
             maxToRenderPerBatch={10}
             windowSize={5}
             updateCellsBatchingPeriod={50}
-            removeClippedSubviews={Platform.OS === "android"}
+            removeClippedSubviews={IS_ANDROID}
             ListEmptyComponent={
               searchQuery ? (
                 <View style={styles.searchModeEmptyWrap}>

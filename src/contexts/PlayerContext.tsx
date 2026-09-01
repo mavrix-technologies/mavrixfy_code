@@ -961,10 +961,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             }
 
             if (typeof TrackPlayer.setQueue === "function") {
-              await TrackPlayer.setQueue(nativeTracks).catch(async () => {
-                await TrackPlayer.reset().catch(() => {});
-                await TrackPlayer.add(nativeTracks).catch(() => {});
-              });
+              await TrackPlayer.setQueue(nativeTracks).catch(() =>
+                TrackPlayer.reset()
+                  .then(() => TrackPlayer.add(nativeTracks))
+                  .catch(() => {})
+              );
             } else {
               await TrackPlayer.reset().catch(() => {});
               await TrackPlayer.add(nativeTracks).catch(() => {});
@@ -1527,10 +1528,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               songToTrack(s, idx === activeIdx ? newAudioUrl : null)
             );
             if (typeof TrackPlayer.setQueue === "function") {
-              await TrackPlayer.setQueue(updatedQueue).catch(async () => {
-                await TrackPlayer.reset().catch(() => {});
-                await TrackPlayer.add(updatedQueue).catch(() => {});
-              });
+              await TrackPlayer.setQueue(updatedQueue).catch(() =>
+                TrackPlayer.reset()
+                  .then(() => TrackPlayer.add(updatedQueue))
+                  .catch(() => {})
+              );
             } else {
               await TrackPlayer.reset().catch(() => {});
               await TrackPlayer.add(updatedQueue).catch(() => {});

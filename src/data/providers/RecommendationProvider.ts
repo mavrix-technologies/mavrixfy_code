@@ -539,24 +539,23 @@ export async function getRecommendationHomeFeed(options?: RecommendationHomeFeed
     return getLocalPlaylistRecommendationFeed();
   }
 
-  const [token, sessionId] = await Promise.all([
+  const payload = await Promise.all([
     currentUser.getIdToken(),
     getRecommendationSessionId(),
-  ]);
-  const url = createRecommendationHomeUrl(sessionId, options);
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    signal: options?.signal,
-  }).catch(() => null);
+  ]).then(async ([token, sessionId]) => {
+    try {
+      const url = createRecommendationHomeUrl(sessionId, options);
+      const res = await fetch(url, {
+        headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+        signal: options?.signal,
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  });
 
-  if (!response?.ok) {
-    return getLocalPlaylistRecommendationFeed();
-  }
-
-  const payload = await response.json();
   const feed = payload?.feed as RecommendationFeed | undefined;
   if (!feed || !Array.isArray(feed.sections)) {
     return getLocalPlaylistRecommendationFeed();

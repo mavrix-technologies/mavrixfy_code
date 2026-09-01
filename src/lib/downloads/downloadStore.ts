@@ -54,7 +54,7 @@ async function addToIndex(songId: string): Promise<void> {
     const ids = await readIndex();
     if (!ids.includes(songId)) {
       ids.unshift(songId);
-      await AsyncStorage.setItem(KEY_INDEX, JSON.stringify(ids));
+      return AsyncStorage.setItem(KEY_INDEX, JSON.stringify(ids));
     }
   });
 }
@@ -63,7 +63,7 @@ async function removeFromIndex(songId: string): Promise<void> {
   return withIndexMutex(async () => {
     const ids = await readIndex();
     const next = ids.filter((id) => id !== songId);
-    await AsyncStorage.setItem(KEY_INDEX, JSON.stringify(next));
+    return AsyncStorage.setItem(KEY_INDEX, JSON.stringify(next));
   });
 }
 
@@ -100,6 +100,10 @@ export async function loadAllDownloads(): Promise<DownloadItem[]> {
     cacheSeeded = true;
     return [];
   }
+}
+
+export function getDownloadSync(songId: string): DownloadItem | null {
+  return memCache.get(songId) ?? null;
 }
 
 /** Read from cache (instant, no I/O). Falls back to AsyncStorage if cache not seeded. */
@@ -167,7 +171,7 @@ export async function patchDownload(
 ): Promise<void> {
   const existing = await loadDownload(songId);
   if (!existing) return;
-  await saveDownload({ ...existing, ...patch });
+  return saveDownload({ ...existing, ...patch });
 }
 
 // ─── Preferences ─────────────────────────────────────────────────────────────

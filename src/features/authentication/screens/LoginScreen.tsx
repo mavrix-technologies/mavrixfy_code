@@ -5,7 +5,6 @@ import {
   TextInput,
   Pressable,
   StyleSheet,
-  Platform,
   ActivityIndicator,
   KeyboardAvoidingView,
   Alert,
@@ -20,6 +19,7 @@ import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Constants from "expo-constants";
 import Colors from "@/constants/colors";
+import { IS_IOS, IS_WEB } from "@/constants/platform";
 import { useAuth } from "@/contexts/AuthContext";
 import { triggerNotification, triggerImpact } from "@/lib/haptics";
 import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
@@ -316,7 +316,7 @@ function AuthSocialButtons({
             <View style={styles.socialBtn}>
               <ActivityIndicator size="small" color="#FFFFFF" />
             </View>
-          ) : appleAvailable && Platform.OS === "ios" ? (
+          ) : appleAvailable && IS_IOS ? (
             <AppleAuthentication.AppleAuthenticationButton
               buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
               buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
@@ -330,7 +330,7 @@ function AuthSocialButtons({
                 styles.socialBtn,
                 pressed && styles.btnPressed,
               ]}
-              onPress={Platform.OS === "web" ? onAppleSignIn : handleUnavailableAppleSignIn}
+              onPress={IS_WEB ? onAppleSignIn : handleUnavailableAppleSignIn}
             >
               <Ionicons name="logo-apple" size={20} color="#FFFFFF" style={styles.socialIcon} />
               <Text style={styles.socialBtnText}>Continue with Apple</Text>
@@ -383,11 +383,11 @@ function LoginScreenView() {
     continueAsGuest,
   } = useAuth();
 
-  const topInset = Platform.OS === "web" ? 24 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 24 : insets.bottom;
+  const topInset = IS_WEB ? 24 : insets.top;
+  const bottomInset = IS_WEB ? 24 : insets.bottom;
   const isExpoGo = Constants.appOwnership === "expo";
   const guestLoginEnabled = GUEST_LOGIN_ENABLED;
-  const showAppleLoginOption = Platform.OS === "ios" || Platform.OS === "web";
+  const showAppleLoginOption = IS_IOS || IS_WEB;
   const cardMaxWidth = Math.min(420, screenWidth - 36);
 
   const [mode, setMode] = useState<AuthMode>("login");
@@ -468,7 +468,7 @@ function LoginScreenView() {
   };
 
   const handleGoogleSignIn = async () => {
-    if (Platform.OS === "web") {
+    if (IS_WEB) {
       setGoogleLoading(true);
       try {
         await signInWithGoogle();
@@ -499,7 +499,7 @@ function LoginScreenView() {
 
     setAppleLoading(true);
     try {
-      if (Platform.OS === "web") {
+      if (IS_WEB) {
         await signInWithApple();
       } else {
         const credential = await getAppleMobileCredential("Apple Sign-In");
@@ -557,8 +557,8 @@ function LoginScreenView() {
     <View style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboardView}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 40 : 0}
+        behavior={IS_IOS ? "padding" : undefined}
+        keyboardVerticalOffset={IS_IOS ? 40 : 0}
       >
         <ScrollView
           contentContainerStyle={[

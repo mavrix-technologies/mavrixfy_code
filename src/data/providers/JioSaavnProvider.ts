@@ -1692,6 +1692,14 @@ export async function getJioSaavnPlaylistDetails(
     return cached;
   }
 
+  return fetchFreshPlaylistDetails(normalizedId, playlistLink, cacheKey);
+}
+
+async function fetchFreshPlaylistDetails(
+  normalizedId: string,
+  playlistLink: string,
+  cacheKey: string
+): Promise<JioSaavnPlaylistDetailsData> {
   // 2. Fetch — all URLs raced in parallel (fast)
   const firstPage = await fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT, playlistLink);
 
@@ -1752,6 +1760,14 @@ export async function getJioSaavnAlbumDetails(
     return cached;
   }
 
+  return fetchFreshAlbumDetails(normalizedId, albumLink, cacheKey);
+}
+
+async function fetchFreshAlbumDetails(
+  normalizedId: string,
+  albumLink: string,
+  cacheKey: string
+): Promise<JioSaavnPlaylistDetailsData> {
   const first = await fetchAlbumDetails(normalizedId, albumLink);
 
   if (first.data?.songs?.length) {
@@ -2292,17 +2308,14 @@ export async function getHomeJioSaavnCategories(options?: {
     return [];
   }
 
-  // Load anti-repetition history once (cross-session)
-  const history = await getLastShownIds();
-
-  // ── Step 1: Fetch all categories in parallel (fast) ───────────────────────
-  // Each category gets a larger pool (limit + 10) so the global dedupe below
-  // has enough candidates to fill every section after removing cross-section dupes.
-  const rawResults = await runWithConcurrencyLimit(
-    categoriesToFetch,
-    HOME_FETCH_CATEGORY_CONCURRENCY,
-    async (cat) => {
-      const fetchLimit = limit + 8;
+  // ── Step 1: Fetch anti-repetition history & categories in parallel (fast) ──
+  const [history, rawResults] = await Promise.all([
+    getLastShownIds(),
+    runWithConcurrencyLimit(
+      categoriesToFetch,
+      HOME_FETCH_CATEGORY_CONCURRENCY,
+      async (cat) => {
+        const fetchLimit = limit + 8;
 
       if (!forceRefresh) {
         const cached = await getCategoryCache(cat.id, dayFingerprint, { allowFingerprintMismatch: false });
@@ -2334,7 +2347,7 @@ export async function getHomeJioSaavnCategories(options?: {
 
       return { cat, pool: [] as JioSaavnPlaylistResult[] };
     }
-  );
+  )]);
 
   // ── Step 2: Global cross-section dedupe ───────────────────────────────────
   // Walk categories in priority order. Once a playlist ID is claimed by a

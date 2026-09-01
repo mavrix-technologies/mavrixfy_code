@@ -5,7 +5,6 @@ import {
   FlatList,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View
@@ -341,6 +340,13 @@ function useArtistScreenView() {
   // ── Render helpers ──────────────────────────────────────────────────────────
   const songsQueueKey = useMemo(() => songs.map((song) => song.id).join("|"), [songs]);
 
+  const renderSongRow = useCallback(
+    ({ item, index }: { item: Song; index: number }) => (
+      <SongRow key={item.id} song={item} index={index} queue={songs} queueKey={songsQueueKey} />
+    ),
+    [songs, songsQueueKey]
+  );
+
   // ── Loading / error states ──────────────────────────────────────────────────
 
   if (loading && !initName) {
@@ -372,130 +378,135 @@ function useArtistScreenView() {
 
   return (
     <View style={styles.container}>
-      <ScrollView
+      <FlatList
+        data={songs}
+        keyExtractor={(item) => item.id}
+        renderItem={renderSongRow}
         contentInset={{ bottom: bottomPad }}
         scrollIndicatorInsets={{ bottom: bottomPad }}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
-        nestedScrollEnabled={false}
-      >
-        {/* ── Hero ── */}
-        <View style={[styles.hero, { paddingTop: topInset + 8 }]}>
-          {coverUrl ? (
-            <Image source={{ uri: coverUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
-          ) : null}
-          <LinearGradient
-            colors={["transparent", "rgba(16,20,26,0.7)", Colors.background]}
-            locations={[0.3, 0.7, 1]}
-            style={StyleSheet.absoluteFill}
-          />
-          <Pressable onPress={safeGoBack} style={[styles.heroBack, { top: topInset + 8 }]}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
-          </Pressable>
-          <View style={styles.heroInfo}>
-            {artist?.isVerified ? (
-              <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={14} color={Colors.primary} />
-                <Text style={styles.verifiedText}>Verified Artist</Text>
-              </View>
-            ) : null}
-            <Text style={styles.artistName}>{displayName}</Text>
-            {artist?.followerCount ? (
-              <Text style={styles.followers}>{formatFollowers(artist.followerCount)}</Text>
-            ) : null}
-            <View style={styles.heroActions}>
-              <Animated.View style={{ transform: [{ scale: followScale }] }}>
-                <Pressable
-                  style={[styles.followBtn, following && styles.followBtnFollowed]}
-                  onPress={handleFollow}
-                >
-                  {following ? (
-                    <>
-                      <Ionicons name="checkmark" size={16} color="#000" />
-                      <Text style={styles.followBtnTextActive}>Following</Text>
-                    </>
-                  ) : (
-                    <Text style={styles.followBtnText}>Follow</Text>
-                  )}
-                </Pressable>
-              </Animated.View>
-              <Pressable style={styles.playAllBtn} onPress={handlePlayAll} disabled={!songs.length}>
-                <Ionicons name={isPlayingFromThisArtist && isPlaying ? "pause" : "play"} size={16} color="#000" />
-                <Text style={styles.playAllText}>{isPlayingFromThisArtist && isPlaying ? "Pause" : "Play"}</Text>
-              </Pressable>
-              {/* Shuffle icon */}
-              <Pressable style={styles.iconCircleBtn} onPress={handleShuffle} disabled={!songs.length}>
-                <Ionicons name="shuffle" size={18} color="rgba(255,255,255,0.85)" />
-              </Pressable>
-            </View>
-          </View>
-        </View>
-
-        {/* ── Top Songs ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Popular Songs</Text>
-          {loading ? (
-            <SongRowSkeleton count={6} />
-          ) : songs.length > 0 ? (
-            <>
-              {songs.map((song, i) => (
-                <SongRow key={song.id} song={song} index={i} queue={songs} queueKey={songsQueueKey} />
-              ))}
-              {/* Load More button */}
-              {hasMore ? (
-                <Pressable
-                  style={styles.loadMoreBtn}
-                  onPress={handleLoadMore}
-                  disabled={loadingMore}
-                >
-                  {loadingMore ? (
-                    <ActivityIndicator size="small" color={Colors.primary} />
-                  ) : (
-                    <Text style={styles.loadMoreText}>Load More Songs</Text>
-                  )}
-                </Pressable>
+        ListHeaderComponent={
+          <>
+            {/* ── Hero ── */}
+            <View style={[styles.hero, { paddingTop: topInset + 8 }]}>
+              {coverUrl ? (
+                <Image source={{ uri: coverUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
               ) : null}
-            </>
+              <LinearGradient
+                colors={["transparent", "rgba(16,20,26,0.7)", Colors.background]}
+                locations={[0.3, 0.7, 1]}
+                style={StyleSheet.absoluteFill}
+              />
+              <Pressable onPress={safeGoBack} style={[styles.heroBack, { top: topInset + 8 }]}>
+                <Ionicons name="arrow-back" size={22} color="#fff" />
+              </Pressable>
+              <View style={styles.heroInfo}>
+                {artist?.isVerified ? (
+                  <View style={styles.verifiedBadge}>
+                    <Ionicons name="checkmark-circle" size={14} color={Colors.primary} />
+                    <Text style={styles.verifiedText}>Verified Artist</Text>
+                  </View>
+                ) : null}
+                <Text style={styles.artistName}>{displayName}</Text>
+                {artist?.followerCount ? (
+                  <Text style={styles.followers}>{formatFollowers(artist.followerCount)}</Text>
+                ) : null}
+                <View style={styles.heroActions}>
+                  <Animated.View style={{ transform: [{ scale: followScale }] }}>
+                    <Pressable
+                      style={[styles.followBtn, following && styles.followBtnFollowed]}
+                      onPress={handleFollow}
+                    >
+                      {following ? (
+                        <>
+                          <Ionicons name="checkmark" size={16} color="#000" />
+                          <Text style={styles.followBtnTextActive}>Following</Text>
+                        </>
+                      ) : (
+                        <Text style={styles.followBtnText}>Follow</Text>
+                      )}
+                    </Pressable>
+                  </Animated.View>
+                  <Pressable style={styles.playAllBtn} onPress={handlePlayAll} disabled={!songs.length}>
+                    <Ionicons name={isPlayingFromThisArtist && isPlaying ? "pause" : "play"} size={16} color="#000" />
+                    <Text style={styles.playAllText}>{isPlayingFromThisArtist && isPlaying ? "Pause" : "Play"}</Text>
+                  </Pressable>
+                  {/* Shuffle icon */}
+                  <Pressable style={styles.iconCircleBtn} onPress={handleShuffle} disabled={!songs.length}>
+                    <Ionicons name="shuffle" size={18} color="rgba(255,255,255,0.85)" />
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+
+            {/* ── Top Songs ── */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Popular Songs</Text>
+            </View>
+          </>
+        }
+        ListEmptyComponent={
+          loading ? (
+            <SongRowSkeleton count={6} />
           ) : (
             <Text style={styles.emptyText}>No songs available</Text>
-          )}
-        </View>
+          )
+        }
+        ListFooterComponent={
+          <>
+            {/* Load More button */}
+            {hasMore ? (
+              <Pressable
+                style={styles.loadMoreBtn}
+                onPress={handleLoadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : (
+                  <Text style={styles.loadMoreText}>Load More Songs</Text>
+                )}
+              </Pressable>
+            ) : null}
 
-        <AdMobBanner loadDelayMs={800} />
+            <AdMobBanner loadDelayMs={800} />
 
-        {/* ── Albums ── */}
-        {topAlbums.length ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Albums</Text>
-            <FlatList
-              data={topAlbums}
-              keyExtractor={(item) => item.id}
-              renderItem={renderAlbumCard}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.rowPad}
-              nestedScrollEnabled={false}
-            />
-          </View>
-        ) : null}
+            {/* ── Albums ── */}
+            {topAlbums.length ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Albums</Text>
+                <FlatList
+                  data={topAlbums}
+                  keyExtractor={(item) => item.id}
+                  renderItem={renderAlbumCard}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.rowPad}
+                  nestedScrollEnabled={false}
+                />
+              </View>
+            ) : null}
 
-        {/* ── Similar Artists ── */}
-        {visibleSimilarArtists.length ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Fans Also Like</Text>
-            <FlatList
-              data={visibleSimilarArtists}
-              keyExtractor={(item) => item.id}
-              renderItem={renderSimilarArtist}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.rowPad}
-              nestedScrollEnabled={false}
-            />
-          </View>
-        ) : null}
-      </ScrollView>
+            {/* ── Similar Artists ── */}
+            {visibleSimilarArtists.length ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Fans Also Like</Text>
+                <FlatList
+                  data={visibleSimilarArtists}
+                  keyExtractor={(item) => item.id}
+                  renderItem={renderSimilarArtist}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.rowPad}
+                  nestedScrollEnabled={false}
+                />
+              </View>
+            ) : null}
+          </>
+        }
+      />
 
       {/* ── Sticky header — always mounted, fades in/out via opacity ── */}
       <Animated.View

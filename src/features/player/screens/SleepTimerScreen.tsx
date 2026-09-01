@@ -4,13 +4,13 @@ import {
   Text,
   Pressable,
   StyleSheet,
-  Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
+import { IS_ANDROID, IS_IOS, IS_WEB } from "@/constants/platform";
 import { usePlayerActions, type SleepTimerSelection } from "@/contexts/PlayerContext";
 
 const SHEET_BACKGROUND = "#1E1E1E";
@@ -31,7 +31,7 @@ export function SleepTimerScreen() {
   const { sleepTimer, setSleepTimer, clearSleepTimer } = usePlayerActions();
 
   const haptic = useCallback((style: Haptics.ImpactFeedbackStyle) => {
-    if (Platform.OS !== "web") {
+    if (!IS_WEB) {
       void Haptics.impactAsync(style);
     }
   }, []);
@@ -50,7 +50,7 @@ export function SleepTimerScreen() {
 
   return (
     <View style={styles.root}>
-      {Platform.OS === "android" && (
+      {IS_ANDROID && (
         <Pressable
           style={styles.backdrop}
           onPress={() => router.back()}
@@ -78,7 +78,7 @@ export function SleepTimerScreen() {
           </View>
         </View>
 
-        <View style={[styles.options, { paddingBottom: Math.max(insets.bottom + 8, Platform.OS === "ios" ? 34 : 20) }]}>
+        <View style={[styles.options, { paddingBottom: Math.max(insets.bottom + 8, IS_IOS ? 34 : 20) }]}>
           {TIMER_OPTIONS.map((option) => {
             const selected =
               sleepTimer?.mode === "end-of-stack"
@@ -113,14 +113,14 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     justifyContent: "flex-end",
-    backgroundColor: Platform.OS === "android" ? "transparent" : "#000000",
+    backgroundColor: IS_ANDROID ? "transparent" : "#000000",
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0, 0, 0, 0.55)",
   },
   sheet: {
-    ...(Platform.OS === "android"
+    ...(IS_ANDROID
       ? {
           maxHeight: "75%",
           borderTopLeftRadius: 24,

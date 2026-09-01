@@ -22,6 +22,7 @@ import { useDownloadsSafe } from "@/contexts/DownloadContext";
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
 import { formatBytes } from "@/lib/downloads/storagePolicy";
+import { saveCollectionMetadata } from "@/lib/downloads/collectionMetadata";
 
 // Average compressed audio file size per minute at high quality (~1.5 MB/min)
 const AVG_BYTES_PER_SECOND = 25_000; // ~200 kbps
@@ -193,7 +194,6 @@ export default function DownloadCollectionButton({
           onPress: async () => {
             // Save collection metadata before downloading
             if (collectionName || collectionImage) {
-              const { saveCollectionMetadata } = await import("@/lib/downloads/collectionMetadata");
               await saveCollectionMetadata(collectionId, {
                 name: collectionName || "Playlist",
                 imageUrl: collectionImage || "",

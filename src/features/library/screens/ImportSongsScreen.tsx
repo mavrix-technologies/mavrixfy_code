@@ -5,7 +5,6 @@ import {
   ScrollView,
   Pressable,
   StyleSheet,
-  Platform,
   Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
@@ -17,6 +16,7 @@ import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
 import { router } from "expo-router";
 import Colors from "@/constants/colors";
+import { IS_IOS, IS_WEB } from "@/constants/platform";
 import { triggerImpact } from "@/lib/haptics";
 import AppTopHeader, {
   APP_TOP_HEADER_HEIGHT,
@@ -26,34 +26,12 @@ import AppTopHeader, {
 
 const EXPORTIFY_URL = "https://exportify.net/";
 
-const exportSteps = [
-  {
-    icon: "open-outline",
-    title: "Open Exportify",
-    text: "Tap Get Started, sign in with Spotify, and approve playlist access.",
-  },
-  {
-    icon: "heart-outline",
-    title: "Export Liked Songs",
-    text: "Use the Liked Songs row and tap Export to download a CSV file.",
-  },
-  {
-    icon: "list-outline",
-    title: "Export a playlist",
-    text: "Find the Spotify playlist you want and tap Export on that row.",
-  },
-  {
-    icon: "download-outline",
-    title: "Import here",
-    text: "Return to Mavrixfy and choose the downloaded CSV or TXT file.",
-  },
-] as const;
 
 async function handleOpenExportify() {
   void triggerImpact(ImpactFeedbackStyle.Light);
 
   try {
-    if (Platform.OS === "web") {
+    if (IS_WEB) {
       await Linking.openURL(EXPORTIFY_URL);
       return;
     }
@@ -107,8 +85,8 @@ async function handleFileImport() {
 
 export function ImportSongsScreen() {
   const insets = useSafeAreaInsets();
-  const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 24 : insets.bottom;
+  const topInset = IS_WEB ? 67 : insets.top;
+  const bottomInset = IS_WEB ? 24 : insets.bottom;
   const bottomScrollPadding = Math.max(128, bottomInset + 112);
   const { isHeaderElevated, handleHeaderScroll } = useAppTopHeaderScrollElevation();
 
@@ -139,8 +117,8 @@ export function ImportSongsScreen() {
         showsVerticalScrollIndicator={false}
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
-        bounces={Platform.OS === "ios"}
-        alwaysBounceVertical={Platform.OS === "ios"}
+        bounces={IS_IOS}
+        alwaysBounceVertical={IS_IOS}
         onScroll={handleHeaderScroll}
         scrollEventThrottle={16}
       >
@@ -204,20 +182,38 @@ export function ImportSongsScreen() {
             </View>
 
             <View style={styles.stepList}>
-              {exportSteps.map((step, index) => (
-                <View key={step.title} style={styles.stepRow}>
-                  <View style={styles.stepIndex}>
-                    <Text style={styles.stepIndexText}>{index + 1}</Text>
-                  </View>
-                  <View style={styles.stepIcon}>
-                    <Ionicons name={step.icon} size={18} color={Colors.primary} />
-                  </View>
-                  <View style={styles.stepTextWrap}>
-                    <Text style={styles.stepTitle}>{step.title}</Text>
-                    <Text style={styles.stepText}>{step.text}</Text>
-                  </View>
+              <View style={styles.stepRow}>
+                <View style={styles.stepIndex}><Text style={styles.stepIndexText}>1</Text></View>
+                <View style={styles.stepIcon}><Ionicons name="open-outline" size={18} color={Colors.primary} /></View>
+                <View style={styles.stepTextWrap}>
+                  <Text style={styles.stepTitle}>Open Exportify</Text>
+                  <Text style={styles.stepText}>Tap Get Started, sign in with Spotify, and approve playlist access.</Text>
                 </View>
-              ))}
+              </View>
+              <View style={styles.stepRow}>
+                <View style={styles.stepIndex}><Text style={styles.stepIndexText}>2</Text></View>
+                <View style={styles.stepIcon}><Ionicons name="heart-outline" size={18} color={Colors.primary} /></View>
+                <View style={styles.stepTextWrap}>
+                  <Text style={styles.stepTitle}>Export Liked Songs</Text>
+                  <Text style={styles.stepText}>Use the Liked Songs row and tap Export to download a CSV file.</Text>
+                </View>
+              </View>
+              <View style={styles.stepRow}>
+                <View style={styles.stepIndex}><Text style={styles.stepIndexText}>3</Text></View>
+                <View style={styles.stepIcon}><Ionicons name="list-outline" size={18} color={Colors.primary} /></View>
+                <View style={styles.stepTextWrap}>
+                  <Text style={styles.stepTitle}>Export a playlist</Text>
+                  <Text style={styles.stepText}>Find the Spotify playlist you want and tap Export on that row.</Text>
+                </View>
+              </View>
+              <View style={styles.stepRow}>
+                <View style={styles.stepIndex}><Text style={styles.stepIndexText}>4</Text></View>
+                <View style={styles.stepIcon}><Ionicons name="download-outline" size={18} color={Colors.primary} /></View>
+                <View style={styles.stepTextWrap}>
+                  <Text style={styles.stepTitle}>Import here</Text>
+                  <Text style={styles.stepText}>Return to Mavrixfy and choose the downloaded CSV or TXT file.</Text>
+                </View>
+              </View>
             </View>
 
             <View style={styles.noteRow}>

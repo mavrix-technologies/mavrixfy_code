@@ -284,7 +284,7 @@ export async function createUserPlaylist(name: string, description?: string): Pr
 
 export async function deleteUserPlaylist(playlistId: string): Promise<void> {
   const playlists = await getUserPlaylists();
-  await saveUserPlaylists(playlists.filter(p => p.id !== playlistId));
+  return saveUserPlaylists(playlists.filter(p => p.id !== playlistId));
 }
 
 export async function addSongToPlaylist(playlistId: string, song: Song): Promise<boolean> {
@@ -389,7 +389,7 @@ export async function addSongSearchHistoryItem(song: Song): Promise<SearchHistor
 export async function removeSearchHistoryItem(id: string): Promise<SearchHistoryItem[]> {
   const items = await getSearchHistory();
   const nextItems = items.filter((item) => item.id !== id);
-  await setJSON(KEYS.SEARCH_HISTORY, nextItems);
+  void setJSON(KEYS.SEARCH_HISTORY, nextItems);
   return nextItems;
 }
 
@@ -424,7 +424,7 @@ export async function getSettings(): Promise<AppSettings> {
 export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
   const current = await getSettings();
   const next = { ...current, ...settings };
-  await setJSON(KEYS.SETTINGS, next);
+  return setJSON(KEYS.SETTINGS, next);
 }
 
 export function isHighQualityEntitled(settings: AppSettings): boolean {
