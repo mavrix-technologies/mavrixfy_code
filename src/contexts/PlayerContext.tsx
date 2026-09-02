@@ -8,8 +8,7 @@ import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
 import { logger } from "@/lib/logger";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
-import { mapFilter } from "@/lib/arrayUtils";
-import { createShuffledPlaybackQueue, toggleQueueShuffleState } from "@/services/audio/ShuffleManager";
+import { mapFilter, createShuffledPlaybackQueue, toggleQueueShuffleState } from "@/lib/arrayUtils";
 import { showGlobalToast } from "@/utils/globalToast";
 import { setupPlayer } from "@/services/audio/TrackPlayerAdapter";
 import { carPlayService } from "@/services/carPlayService";
@@ -548,6 +547,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const positionSecondsRef = useRef(0);
   const playerSetupPromiseRef = useRef<Promise<boolean> | null>(null);
   const lastPlaybackNoticeAtRef = useRef(0);
+  const lastSyncedDurationRef = useRef<{ songId: string; duration: number }>({ songId: "", duration: 0 });
   const sleepTimerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sleepTimerRef = useRef<SleepTimerState | null>(null);
   const likePendingSongsRef = useRef<Map<string, Promise<void>>>(new Map());
@@ -651,24 +651,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         mounted = false;
       };
     }
-
-    const subProgress = TrackPlayer?.addEventListener?.(
-      Event.PlaybackProgressUpdated,
-      (event: { position?: number; duration?: number }) => {
-        if (!mounted) return;
-        if (typeof event?.position === "number") {
-          setNativePosition(event.position);
-        }
-        if (typeof event?.duration === "number" && event.duration > 0) {
-          setNativeDuration(event.duration);
-        }
-      }
-    );
-
-    return () => {
-      mounted = false;
-      subProgress?.remove?.();
-    };
   }, []);
 
   const resolvedIsPlaying = isPlaying;
@@ -1618,7 +1600,30 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           setNativePosition(event.position);
         }
         if (typeof event?.duration === "number" && event.duration > 0) {
-          setNativeDuration(event.duration);
+          const dur = event.duration;
+          setNativeDuration((prev) => (Math.abs(prev - dur) > 0.5 ? dur : prev));
+
+          const curSong = currentSongRef.current;
+          if (
+            curSong?.id &&
+            (lastSyncedDurationRef.current.songId !== curSong.id ||
+              Math.abs(lastSyncedDurationRef.current.duration - dur) > 1.5)
+          ) {
+            lastSyncedDurationRef.current = { songId: curSong.id, duration: dur };
+            const activeIdx = queueIndexRef.current;
+            if (TrackPlayer && activeIdx >= 0) {
+              if (typeof TrackPlayer.updateMetadataForTrack === "function") {
+                TrackPlayer.updateMetadataForTrack(activeIdx, {
+                  duration: dur,
+                }).catch(() => {});
+              }
+              if (typeof TrackPlayer.updateNowPlayingMetadata === "function") {
+                TrackPlayer.updateNowPlayingMetadata({
+                  duration: dur,
+                }).catch(() => {});
+              }
+            }
+          }
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
@@ -1646,6 +1651,36 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             desiredPlayState: true,
             isPlaying: true,
           });
+
+          // Immediately sync metadata & duration to native lock screen / Control Center
+          if (TrackPlayer) {
+            const trackDuration = initialDuration > 0 ? initialDuration : undefined;
+            if (trackDuration) {
+              lastSyncedDurationRef.current = { songId: targetSong.id, duration: trackDuration };
+            }
+            if (typeof TrackPlayer.updateMetadataForTrack === "function") {
+              TrackPlayer.updateMetadataForTrack(nextIndex, {
+                title: cleanHtmlEntities(readNonEmptyString(targetSong.title) || "Unknown"),
+                artist: cleanHtmlEntities(readNonEmptyString(targetSong.artist) || "Mavrixfy"),
+                album: targetSong.album ? cleanHtmlEntities(readNonEmptyString(targetSong.album) || "") : undefined,
+                artwork: targetSong.coverUrl,
+                genre: readNonEmptyString(targetSong.genre),
+                ...(trackDuration ? { duration: trackDuration } : {}),
+              }).catch(() => {});
+            }
+            if (typeof TrackPlayer.updateNowPlayingMetadata === "function") {
+              TrackPlayer.updateNowPlayingMetadata({
+                title: cleanHtmlEntities(readNonEmptyString(targetSong.title) || "Unknown"),
+                artist: cleanHtmlEntities(readNonEmptyString(targetSong.artist) || "Mavrixfy"),
+                album: targetSong.album ? cleanHtmlEntities(readNonEmptyString(targetSong.album) || "") : undefined,
+                artwork: targetSong.coverUrl,
+                genre: readNonEmptyString(targetSong.genre),
+                ...(trackDuration ? { duration: trackDuration } : {}),
+                elapsedTime: 0,
+              }).catch(() => {});
+            }
+          }
+
           prefetchAdjacentTrackStreams(currentQ, nextIndex);
         }
       }),
@@ -1658,7 +1693,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       unsubs.forEach((unsub) => unsub?.());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- TrackPlayer event callbacks use mutable refs
-  }, [isPlayerReady, resolvedDuration]);
+  }, [isPlayerReady]);
 
   // Load liked songs from Firestore when user auth state changes
   useEffect(() => {

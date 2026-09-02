@@ -19,10 +19,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
 import { setHapticsPreference } from "@/lib/haptics";
-import { setMiniPlayerSecondaryControlPreference } from "@/lib/miniPlayerControls";
 import {
   getSettings,
   saveSettings,
+  setMiniPlayerSecondaryControlPreference,
   hasSeenNewFeatures,
   markNewFeaturesSeen,
   isHighQualityEntitled,

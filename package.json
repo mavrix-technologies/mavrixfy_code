@@ -1,7 +1,7 @@
 {
   "name": "expo-app",
   "main": "index.js",
-  "version": "3.3.0",
+  "version": "3.2.0",
   "scripts": {
     "expo:start:static:build": "npx expo start --no-dev --minify --localhost",
     "start": "npx expo start",
@@ -22,7 +22,8 @@
     "storage:deploy:rules": "npx firebase-tools deploy --only storage",
     "doctor": "npx react-doctor@latest --max-duration 15",
     "verify:ios": "pwsh -File scripts/verify-ios-config.ps1",
-    "festival": "npx tsx scripts/switch-festival.ts"
+    "festival": "npx tsx scripts/switch-festival.ts",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

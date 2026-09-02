@@ -19,7 +19,7 @@
   <uses-feature android:name="android.hardware.wifi" android:required="false"/>
   <queries>
     <intent>
-      <action android:name="android.speech.RecognitionService" />
+      <action android:name="android.speech.RecognitionService"/>
     </intent>
     <intent>
       <action android:name="android.intent.action.VIEW"/>

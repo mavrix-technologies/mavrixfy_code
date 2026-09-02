@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { AppState, InteractionManager } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { type Song } from "./musicData";
 import { logger } from "@/lib/logger";
@@ -508,4 +510,58 @@ export async function markNewFeaturesSeen(): Promise<void> {
   try {
     await AsyncStorage.setItem(KEYS.NEW_FEATURES_SEEN, "1");
   } catch {}
+}
+
+let cachedSecondaryControl: MiniPlayerSecondaryControl = "queue";
+const secondaryControlListeners = new Set<(value: MiniPlayerSecondaryControl) => void>();
+
+function notifySecondaryControlListeners(value: MiniPlayerSecondaryControl): void {
+  InteractionManager.runAfterInteractions(() => {
+    secondaryControlListeners.forEach((listener) => listener(value));
+  });
+}
+
+export function setMiniPlayerSecondaryControlPreference(value: MiniPlayerSecondaryControl): void {
+  cachedSecondaryControl = value;
+  notifySecondaryControlListeners(value);
+}
+
+async function refreshMiniPlayerSecondaryControlPreference(): Promise<MiniPlayerSecondaryControl> {
+  const settings = await getSettings();
+  cachedSecondaryControl = settings.miniPlayerSecondaryControl;
+  notifySecondaryControlListeners(cachedSecondaryControl);
+  return cachedSecondaryControl;
+}
+
+export function useMiniPlayerSecondaryControl(): MiniPlayerSecondaryControl {
+  const [control, setControl] = useState<MiniPlayerSecondaryControl>(cachedSecondaryControl);
+
+  useEffect(() => {
+    let mounted = true;
+
+    function updateControl(val: MiniPlayerSecondaryControl) {
+      if (mounted) {
+        // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+        setControl(val);
+      }
+    }
+
+    void refreshMiniPlayerSecondaryControlPreference().then(updateControl);
+
+    secondaryControlListeners.add(updateControl);
+
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        void refreshMiniPlayerSecondaryControlPreference();
+      }
+    });
+
+    return () => {
+      mounted = false;
+      secondaryControlListeners.delete(updateControl);
+      subscription.remove();
+    };
+  }, []);
+
+  return control;
 }

@@ -32,7 +32,7 @@ if (!isRunningInExpoGo() && Platform.OS !== "web") {
     const trackPlayerModule = require("react-native-track-player");
     const TrackPlayer = trackPlayerModule.default || trackPlayerModule;
     TrackPlayer.registerPlaybackService(
-      () => require("./src/lib/trackPlayerService").trackPlayerService
+      () => require("./src/services/audio/TrackPlayerAdapter").trackPlayerService
     );
   } catch {
     // native module unavailable in Expo Go and unsupported runtimes

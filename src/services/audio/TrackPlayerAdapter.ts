@@ -8,7 +8,41 @@ import TrackPlayer, {
   IOSCategoryOptions,
 } from "react-native-track-player";
 import { logger } from "@/lib/logger";
-export { trackPlayerService } from "@/lib/trackPlayerService";
+
+export async function trackPlayerService() {
+  try {
+    const trackPlayerModule = require("react-native-track-player");
+    const TP = trackPlayerModule.default || trackPlayerModule;
+    const Event = trackPlayerModule.Event;
+    if (!TP?.addEventListener || !Event) return;
+
+    TP.addEventListener(Event.RemotePlay, () => { TP.play().catch(() => {}); });
+    TP.addEventListener(Event.RemotePause, () => { TP.pause().catch(() => {}); });
+    TP.addEventListener(Event.RemoteStop, () => { TP.stop().catch(() => {}); });
+    TP.addEventListener(Event.RemoteNext, () => { TP.skipToNext().catch(() => {}); });
+    TP.addEventListener(Event.RemotePrevious, () => { TP.skipToPrevious().catch(() => {}); });
+    TP.addEventListener(Event.RemoteSeek, (event: { position: number }) => {
+      if (typeof event?.position === "number") {
+        TP.seekTo(event.position).catch(() => {});
+      }
+    });
+    TP.addEventListener(Event.RemoteDuck, async (event: { paused?: boolean; permanent?: boolean; ducking?: boolean }) => {
+      if (event?.permanent) {
+        TP.stop().catch(() => {});
+      } else if (event?.paused) {
+        TP.pause().catch(() => {});
+      }
+    });
+
+    TP.addEventListener(Event.PlaybackError, async (error: any) => {
+      logger.error("[TrackPlayer] Playback error:", error);
+      if (error?.code) logger.error("[TrackPlayer] Error code:", error.code);
+      if (error?.message) logger.error("[TrackPlayer] Error message:", error.message);
+    });
+  } catch {
+    // Non-fatal fallback
+  }
+}
 
 let playerReady = false;
 let setupPromise: Promise<void> | null = null;
