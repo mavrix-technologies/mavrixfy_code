@@ -41,8 +41,8 @@ const HOME_ESSENTIAL_CATEGORY_IDS = [
   "top-charts",
 ] as const;
 
-const HOME_SECTION_TIMEOUT_MS = 30000;
-const HOME_SECONDARY_TIMEOUT_MS = 10000;
+const HOME_SECTION_TIMEOUT_MS = 8000;
+const HOME_SECONDARY_TIMEOUT_MS = 6000;
 
 interface HomeSessionCache {
   hydrated: boolean;
@@ -121,7 +121,7 @@ export function useHomeFeedData() {
       };
 
       const applyCategories = (items: HomeJioSaavnCategoryData[]) => {
-        if (!items || items.length === 0) return;
+        if (!isActiveRun() || items.length === 0) return;
         setCategories(items);
         HOME_CACHE.categories = items;
       };
@@ -171,9 +171,7 @@ export function useHomeFeedData() {
             : Promise.resolve(),
           !forceRefresh
             ? getCachedHomeFeedSnapshot({ allowStale: true }).then((snapshot) => {
-                if (snapshot && (snapshot.categories?.length > 0 || snapshot.featuredArtists?.length > 0)) {
-                  applyHomeSnapshot(snapshot);
-                }
+                if (snapshot) applyHomeSnapshot(snapshot);
               })
             : Promise.resolve(),
         ]);

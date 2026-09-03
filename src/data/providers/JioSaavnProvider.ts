@@ -122,39 +122,12 @@ const CATEGORY_TTL_MS: Record<string, number> = {
   workout:       60 * 60 * 1000,
   retro:         90 * 60 * 1000,
 };
-function getJioSaavnPlaylistBaseUrls(): string[] {
-  const primary = `${getApiUrl().replace(/\/+$/, "")}/api`;
-  const candidates = [
-    primary,
-    "https://saavn.sumit.co/api",
-    "https://mavrixfy-song-api.vercel.app/api",
-  ];
-  return Array.from(new Set(candidates.filter(Boolean)));
-}
-
-function getJioSaavnSearchBaseUrls(): string[] {
-  const primary = `${getApiUrl().replace(/\/+$/, "")}/api`;
-  const candidates = [
-    primary,
-    "https://saavn.sumit.co/api",
-    "https://mavrixfy-song-api.vercel.app/api",
-  ];
-  return Array.from(new Set(candidates.filter(Boolean)));
-}
-
-const JIOSAAVN_PLAYLIST_BASE_URLS = {
-  map: <T>(fn: (url: string) => T): T[] => getJioSaavnPlaylistBaseUrls().map(fn),
-  [Symbol.iterator]: function* () {
-    yield* getJioSaavnPlaylistBaseUrls();
-  },
-};
-
-const JIOSAAVN_SEARCH_BASE_URLS = {
-  map: <T>(fn: (url: string) => T): T[] => getJioSaavnSearchBaseUrls().map(fn),
-  [Symbol.iterator]: function* () {
-    yield* getJioSaavnSearchBaseUrls();
-  },
-};
+const JIOSAAVN_PLAYLIST_BASE_URLS = [
+  `${getApiUrl().replace(/\/+$/, "")}/api`,
+];
+const JIOSAAVN_SEARCH_BASE_URLS = [
+  `${getApiUrl().replace(/\/+$/, "")}/api`,
+];
 
 export const HOME_JIOSAAVN_CATEGORIES: HomeJioSaavnCategory[] = [
   {
@@ -438,12 +411,11 @@ function normalizePlaylistList(raw: unknown): JioSaavnPlaylistResult[] {
         id,
         name,
         image,
-        songCount: songCount > 0 ? songCount : 10,
+        songCount,
         language: language || undefined,
-        url: toTrimmedString(playlist?.url) || toTrimmedString(playlist?.perma_url) || undefined,
       };
     }, (playlist) => {
-      if (!playlist.id || !playlist.name) return false;
+      if (!playlist.id || !playlist.name || playlist.songCount <= 0) return false;
       const lowerName = playlist.name.toLowerCase();
       const lowerLang = playlist.language?.toLowerCase() || "";
 
@@ -856,7 +828,7 @@ async function searchPlaylistsRaw(
   const page = forceRefresh ? randomInt(1, 3) : 1;
   const requestLimit = forceRefresh ? limit + 4 : limit;
 
-  const requestUrls = getJioSaavnSearchBaseUrls().map((endpointBase) => {
+  const requestUrls = JIOSAAVN_SEARCH_BASE_URLS.map((endpointBase) => {
     const trimmed = endpointBase.replace(/\/+$/, "");
     return (
       `${trimmed}/search/playlists?` +
@@ -1227,7 +1199,7 @@ async function fetchJioSaavnDetailsByLink(path: string, type: "song" | "album"):
   const isSong = type === "song";
   const endpoint = isSong ? "songs" : "albums";
   
-  for (const endpointBase of getJioSaavnSearchBaseUrls()) {
+  for (const endpointBase of JIOSAAVN_SEARCH_BASE_URLS) {
     const trimmed = endpointBase.replace(/\/+$/, "");
     const requestUrl = `${trimmed}/${endpoint}?link=${encodeURIComponent(path)}`;
     try {
@@ -1480,7 +1452,7 @@ async function fetchFromCandidates(
           const json = await response.json();
           const normalized = parsePlaylistDetailsResponse(json);
           results[idx] = { data: normalized, notFound: false };
-          if (normalized && normalized.songs && normalized.songs.length > 0 && !resolved) {
+          if (normalized && !resolved) {
             resolved = true;
             resolve({ data: normalized, reason: "network" });
             return;
@@ -1492,10 +1464,8 @@ async function fetchFromCandidates(
         completedCount++;
         if (completedCount === urls.length && !resolved) {
           resolved = true;
-          const bestWithSongs = results.find((r) => r?.data?.songs && r.data.songs.length > 0)?.data;
-          const fallbackData = bestWithSongs || results.find((r) => r?.data)?.data || null;
           const allNotFound = results.every((r) => r && r.notFound);
-          resolve({ data: fallbackData, reason: allNotFound ? "not_found" : "network" });
+          resolve({ data: null, reason: allNotFound ? "not_found" : "network" });
         }
       }
     }));
@@ -1508,27 +1478,16 @@ async function fetchPlaylistDetailsPage(
   limit: number,
   playlistLink?: string
 ): Promise<PlaylistDetailsPageResult> {
-  const cleanId = String(playlistId || "").replace(/^(jiosaavn|saavn)_/i, "").trim();
+  const sourceQuery = playlistLink
+    ? `link=${encodeURIComponent(playlistLink)}`
+    : `id=${encodeURIComponent(playlistId)}`;
   const apiPage = Math.max(0, page - 1);
-  const baseUrls = getJioSaavnPlaylistBaseUrls();
+  const query = `${sourceQuery}&limit=${limit}&page=${apiPage}`;
 
-  const candidateUrls: string[] = [];
-  if (cleanId) {
-    for (const base of baseUrls) {
-      candidateUrls.push(
-        `${base.replace(/\/+$/, "")}/playlists?id=${encodeURIComponent(cleanId)}&limit=${limit}&page=${apiPage}`
-      );
-    }
-  }
-  if (playlistLink) {
-    for (const base of baseUrls) {
-      candidateUrls.push(
-        `${base.replace(/\/+$/, "")}/playlists?link=${encodeURIComponent(playlistLink)}&limit=${limit}&page=${apiPage}`
-      );
-    }
-  }
+  const candidateUrls = JIOSAAVN_PLAYLIST_BASE_URLS.map(
+    (base) => `${base.replace(/\/+$/, "")}/playlists?${query}`
+  );
 
-  logger.info(`[PlaylistFetch] Querying playlist (id: "${cleanId}", link: "${playlistLink || ""}")`);
   return fetchFromCandidates(candidateUrls);
 }
 
@@ -1538,8 +1497,7 @@ function buildAlbumDetailsQuery(albumId: string, albumLink?: string): string {
   }
 
   const params: string[] = [];
-  const cleanId = String(albumId || "").replace(/^(jiosaavn|saavn)_/i, "").trim();
-  if (cleanId) params.push(`id=${encodeURIComponent(cleanId)}`);
+  if (albumId) params.push(`id=${encodeURIComponent(albumId)}`);
   return params.join("&");
 }
 
@@ -1547,22 +1505,13 @@ async function fetchAlbumDetails(
   albumId: string,
   albumLink?: string
 ): Promise<PlaylistDetailsPageResult> {
-  const cleanId = String(albumId || "").replace(/^(jiosaavn|saavn)_/i, "").trim();
-  const baseUrls = getJioSaavnPlaylistBaseUrls();
+  const query = buildAlbumDetailsQuery(albumId, albumLink);
+  if (!query) return { data: null, reason: "not_found" };
 
-  const candidateUrls: string[] = [];
-  if (cleanId) {
-    for (const base of baseUrls) {
-      candidateUrls.push(`${base.replace(/\/+$/, "")}/albums?id=${encodeURIComponent(cleanId)}`);
-    }
-  }
-  if (albumLink) {
-    for (const base of baseUrls) {
-      candidateUrls.push(`${base.replace(/\/+$/, "")}/albums?link=${encodeURIComponent(albumLink)}`);
-    }
-  }
+  const candidateUrls = JIOSAAVN_PLAYLIST_BASE_URLS.map(
+    (base) => `${base.replace(/\/+$/, "")}/albums?${query}`
+  );
 
-  logger.info(`[AlbumFetch] Querying album (id: "${cleanId}", link: "${albumLink || ""}")`);
   return fetchFromCandidates(candidateUrls);
 }
 
@@ -1719,7 +1668,7 @@ export async function getJioSaavnPlaylistDetails(
   playlistId: string,
   options?: GetJioSaavnPlaylistDetailsOptions
 ): Promise<JioSaavnPlaylistDetailsData> {
-  const normalizedId = String(playlistId || "").replace(/^(jiosaavn|saavn)_/i, "").trim();
+  const normalizedId = String(playlistId || "").trim();
   const playlistLink = String(options?.link || "").trim();
   const cacheKey = normalizedId || playlistLink;
   if (!cacheKey) {
@@ -1789,7 +1738,7 @@ export async function getJioSaavnAlbumDetails(
   albumId: string,
   options?: GetJioSaavnAlbumDetailsOptions
 ): Promise<JioSaavnPlaylistDetailsData> {
-  const normalizedId = String(albumId || "").replace(/^(jiosaavn|saavn)_/i, "").trim();
+  const normalizedId = String(albumId || "").trim();
   const albumLink = String(options?.link || "").trim();
   const cacheKey = normalizedId || albumLink;
   if (!cacheKey) {
@@ -1902,9 +1851,8 @@ function calculatePlaylistScore(
   playlist: JioSaavnPlaylistResult,
   context: AutoRefreshContext
 ): number {
-  if (!playlist) return 0;
   let score = 0;
-  const name = (playlist.name || "").toLowerCase();
+  const name = playlist.name.toLowerCase();
   const year  = String(CURRENT_YEAR);
   const prevY = String(CURRENT_YEAR - 1);
 
@@ -1914,7 +1862,7 @@ function calculatePlaylistScore(
   if (name.includes(prevY))  score -= 15;
 
   // Popularity proxy (capped)
-  score += Math.min((playlist.songCount || 0) * 0.75, 75);
+  score += Math.min(playlist.songCount * 0.75, 75);
 
   // Generic trend keywords
   if (name.includes("trending") || name.includes("viral"))  score += 24;
@@ -1935,17 +1883,15 @@ function calculatePlaylistScore(
   }
 
   // Time-of-day context
-  const slot = context?.slot;
-  if (slot === "morning"   && (name.includes("morning") || name.includes("workout"))) score += 15;
-  if (slot === "evening"   && (name.includes("party")   || name.includes("evening"))) score += 15;
-  if (slot === "night"     && (name.includes("night")   || name.includes("chill")))   score += 15;
-  if (slot === "afternoon" && (name.includes("afternoon")|| name.includes("relax")))  score += 10;
+  if (context.slot === "morning"   && (name.includes("morning") || name.includes("workout"))) score += 15;
+  if (context.slot === "evening"   && (name.includes("party")   || name.includes("evening"))) score += 15;
+  if (context.slot === "night"     && (name.includes("night")   || name.includes("chill")))   score += 15;
+  if (context.slot === "afternoon" && (name.includes("afternoon")|| name.includes("relax")))  score += 10;
 
   // Language context
-  const lang = context?.languageBias;
-  if (lang === "hindi"   && (name.includes("hindi")   || name.includes("bollywood"))) score += 30;
-  if (lang === "punjabi" && (name.includes("punjabi")  || name.includes("bhangra")))  score += 10;
-  if (context?.isWeekend && (name.includes("weekend") || name.includes("party"))) score += 8;
+  if (context.languageBias === "hindi"   && (name.includes("hindi")   || name.includes("bollywood"))) score += 30;
+  if (context.languageBias === "punjabi" && (name.includes("punjabi")  || name.includes("bhangra")))  score += 10;
+  if (context.isWeekend && (name.includes("weekend") || name.includes("party"))) score += 8;
 
   // Controlled randomness — prevents identical order every session
   score += Math.random() * 8;
@@ -1958,9 +1904,7 @@ function rankPlaylists(
   playlists: JioSaavnPlaylistResult[],
   context: AutoRefreshContext
 ): JioSaavnPlaylistResult[] {
-  if (!Array.isArray(playlists)) return [];
   return playlists
-    .filter((p) => Boolean(p && (p.id || p.name)))
     .map((p) => ({ p, score: calculatePlaylistScore(p, context) }))
     .sort((a, b) => b.score - a.score)
     .map(({ p }) => p);
@@ -1969,13 +1913,10 @@ function rankPlaylists(
 // ── 3. Daily freshness rotation ───────────────────────────────────────────────
 // Each day the order shifts deterministically — no backend needed.
 function applyFreshnessRotation(playlists: JioSaavnPlaylistResult[]): JioSaavnPlaylistResult[] {
-  if (!Array.isArray(playlists)) return [];
   const todaySeed = new Date().getDate(); // 1–31
   return sortedCopy(playlists, (a, b) => {
-    const charA = a?.id ? a.id.charCodeAt(0) : 0;
-    const charB = b?.id ? b.id.charCodeAt(0) : 0;
-    const hashA = (charA + todaySeed) % 13;
-    const hashB = (charB + todaySeed) % 13;
+    const hashA = (a.id.charCodeAt(0) + todaySeed) % 13;
+    const hashB = (b.id.charCodeAt(0) + todaySeed) % 13;
     return hashB - hashA;
   });
 }
@@ -2002,47 +1943,47 @@ async function updateLastShownIds(ids: string[]): Promise<void> {
 
 function removeRecentlyShown(
   playlists: JioSaavnPlaylistResult[],
-  history?: Set<string>
+  history: Set<string>
 ): JioSaavnPlaylistResult[] {
-  if (!Array.isArray(playlists)) return [];
-  if (!history || typeof history.has !== "function") return playlists;
-  const filtered = playlists.filter((p) => Boolean(p?.id && !history.has(p.id)));
+  const filtered = playlists.filter((p) => !history.has(p.id));
   // If filtering removes too many, fall back to full list to avoid empty sections
   return filtered.length >= Math.min(playlists.length, 4) ? filtered : playlists;
 }
 
+// ── 5. Fast single-term fetch ─────────────────────────────────────────────────
 async function fetchCategoryFast(
   categoryId: string,
   limit: number
 ): Promise<JioSaavnPlaylistResult[]> {
   const term = FAST_SEARCH_TERMS[categoryId] ?? `${categoryId} songs ${CURRENT_YEAR}`;
-  const apiLimit = Math.min(Math.max(limit, 15), 25);
-  const baseUrls = getJioSaavnSearchBaseUrls();
-
-  for (const base of baseUrls) {
+  // Request more than needed so the ranking + global dedupe has a real pool to work with
+  const apiLimit = Math.max(limit, 20);
+  const urls = JIOSAAVN_SEARCH_BASE_URLS.map((base) => {
     const trimmed = base.replace(/\/+$/, "");
-    const url = `${trimmed}/search/playlists?query=${encodeURIComponent(term)}&limit=${apiLimit}&page=1`;
-    try {
-      const res = await withTimeout(
-        fetch(url, { headers: { Accept: "application/json" } }),
-        4500
-      );
-      if (!res.ok) {
-        await consumeResponseBody(res);
-        continue;
-      }
+    return `${trimmed}/search/playlists?query=${encodeURIComponent(term)}&limit=${apiLimit}&page=1`;
+  });
 
-      const json = await res.json();
-      const results = parsePlaylistSearchResponse(json);
-      if (results && results.length > 0) {
-        return results;
-      }
-    } catch {
-      continue;
-    }
-  }
+  const providerResults = await Promise.all(
+    urls.map(async (url) => {
+      try {
+        const res = await withTimeout(
+          fetch(url, { headers: { Accept: "application/json" } }),
+          FAST_TIMEOUT_MS
+        );
+        if (!res.ok) {
+          await consumeResponseBody(res);
+          return [] as JioSaavnPlaylistResult[];
+        }
 
-  return [];
+        const json = await res.json();
+        return parsePlaylistSearchResponse(json);
+      } catch {
+        return [] as JioSaavnPlaylistResult[];
+      }
+    })
+  );
+
+  return providerResults.find((parsed) => parsed.length > 0) ?? [];
 }
 
 async function runWithConcurrencyLimit<T, R>(
@@ -2285,44 +2226,33 @@ async function fetchAndRankCategory(
   context: AutoRefreshContext,
   history: Set<string>
 ): Promise<JioSaavnPlaylistResult[]> {
-  try {
-    // 1. Fast direct search — resolves in ~600ms reliably
-    const raw = await fetchCategoryFast(cat.id, limit);
-    if (raw && raw.length > 0) {
-      try {
-        const deduped  = dedupeByPlaylistId(raw);
-        const noRepeat = removeRecentlyShown(deduped, history);
-        const ranked   = rankPlaylists(noRepeat, context);
-        const rotated  = applyFreshnessRotation(ranked);
-        return rotated && rotated.length > 0 ? rotated : raw;
-      } catch {
-        return raw;
-      }
-    }
-
-    // 2. Fallback to standard searchPlaylists using category terms
-    const term = cat.searchTerms?.[0] || cat.title;
-    const fallbackResults = await searchPlaylists(term, limit, cat.id, false);
-    if (fallbackResults && fallbackResults.length > 0) {
-      const deduped  = dedupeByPlaylistId(fallbackResults);
-      const noRepeat = removeRecentlyShown(deduped, history);
-      const ranked   = rankPlaylists(noRepeat, context);
-      const rotated  = applyFreshnessRotation(ranked);
-      return rotated;
-    }
-
-    if (cat.id === "new-arrivals") {
-      try {
-        return await fetchNewArrivalPlaylists(limit, false, context);
-      } catch {
-        return [];
-      }
-    }
-  } catch (err) {
-    logger.warn(`[JioSaavn] fetchAndRankCategory error for ${cat.id}:`, err);
+  const scraped = await fetchScrapedCategoryFromHomepage(cat.id, limit * 4, false);
+  if (scraped && scraped.length > 0) {
+    const deduped  = dedupeByPlaylistId(scraped);
+    const noRepeat = removeRecentlyShown(deduped, history);
+    const ranked   = rankPlaylists(noRepeat, context);
+    const rotated  = applyFreshnessRotation(ranked);
+    return rotated;
   }
 
-  return [];
+  if (cat.id === "new-arrivals") {
+    try {
+      return await fetchNewArrivalPlaylists(limit, false, context);
+    } catch {
+      return [];
+    }
+  }
+
+  // Fetch a larger pool — 4× limit gives the global dedupe enough unique candidates
+  const raw = await fetchCategoryFast(cat.id, limit * 4);
+  if (raw.length === 0) return [];
+
+  const deduped  = dedupeByPlaylistId(raw);
+  const noRepeat = removeRecentlyShown(deduped, history);
+  const ranked   = rankPlaylists(noRepeat, context);
+  const rotated  = applyFreshnessRotation(ranked);
+  // Return the full pool — caller slices after global dedupe
+  return rotated;
 }
 
 // ── 7. Mix strategy — interleave trending + new + viral for the feed ──────────
@@ -2381,47 +2311,43 @@ export async function getHomeJioSaavnCategories(options?: {
   // ── Step 1: Fetch anti-repetition history & categories in parallel (fast) ──
   const [history, rawResults] = await Promise.all([
     getLastShownIds(),
-    Promise.all(
-      categoriesToFetch.map(async (cat) => {
-        try {
-          const fetchLimit = limit + 8;
+    runWithConcurrencyLimit(
+      categoriesToFetch,
+      HOME_FETCH_CATEGORY_CONCURRENCY,
+      async (cat) => {
+        const fetchLimit = limit + 8;
 
-          if (!forceRefresh) {
-            const cached = await getCategoryCache(cat.id, dayFingerprint, { allowFingerprintMismatch: false });
-            if (cached && cached.length > 0) {
-              const ranked = rankPlaylists(cached, context);
-              const rotated = applyFreshnessRotation(ranked);
-              return { cat, pool: rotated };
-            }
-          }
-
-          let fresh: JioSaavnPlaylistResult[] = [];
-          try {
-            fresh = await fetchAndRankCategory(cat, fetchLimit, context, history);
-          } catch {
-            fresh = [];
-          }
-
-          if (fresh.length > 0) {
-            void setCategoryCache(cat.id, fresh, dayFingerprint);
-            return { cat, pool: fresh };
-          }
-
-          // Stale fallback
-          const stale = await getCategoryCache(cat.id, dayFingerprint, { allowFingerprintMismatch: true });
-          if (stale && stale.length > 0) {
-            const rotated = applyFreshnessRotation(rankPlaylists(stale, context));
-            return { cat, pool: rotated };
-          }
-
-          return { cat, pool: [] as JioSaavnPlaylistResult[] };
-        } catch (catErr) {
-          logger.warn(`[JioSaavn] Failed fetching category ${cat.id}:`, catErr);
-          return { cat, pool: [] as JioSaavnPlaylistResult[] };
+      if (!forceRefresh) {
+        const cached = await getCategoryCache(cat.id, dayFingerprint, { allowFingerprintMismatch: false });
+        if (cached && cached.length > 0) {
+          const ranked = rankPlaylists(cached, context);
+          const rotated = applyFreshnessRotation(ranked);
+          return { cat, pool: rotated };
         }
-      })
-    ),
-  ]);
+      }
+
+      let fresh: JioSaavnPlaylistResult[] = [];
+      try {
+        fresh = await fetchAndRankCategory(cat, fetchLimit, context, history);
+      } catch {
+        fresh = [];
+      }
+
+      if (fresh.length > 0) {
+        void setCategoryCache(cat.id, fresh, dayFingerprint);
+        return { cat, pool: fresh };
+      }
+
+      // Stale fallback
+      const stale = await getCategoryCache(cat.id, dayFingerprint, { allowFingerprintMismatch: true });
+      if (stale && stale.length > 0) {
+        const rotated = applyFreshnessRotation(rankPlaylists(stale, context));
+        return { cat, pool: rotated };
+      }
+
+      return { cat, pool: [] as JioSaavnPlaylistResult[] };
+    }
+  )]);
 
   // ── Step 2: Global cross-section dedupe ───────────────────────────────────
   // Walk categories in priority order. Once a playlist ID is claimed by a
