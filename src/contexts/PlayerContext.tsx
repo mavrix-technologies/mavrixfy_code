@@ -547,7 +547,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const positionSecondsRef = useRef(0);
   const playerSetupPromiseRef = useRef<Promise<boolean> | null>(null);
   const lastPlaybackNoticeAtRef = useRef(0);
-  const lastSyncedDurationRef = useRef<{ songId: string; duration: number }>({ songId: "", duration: 0 });
   const sleepTimerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sleepTimerRef = useRef<SleepTimerState | null>(null);
   const likePendingSongsRef = useRef<Map<string, Promise<void>>>(new Map());
@@ -849,8 +848,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }
 
       desiredPlayStateRef.current = true;
-      setIsPlaying(true);
-      isPlayingRef.current = true;
       setPlaybackLoading(true);
       setSeekOverride(null);
       setNativePosition(0);
@@ -862,7 +859,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         userQueuedSongIds: isNewQueue ? [] : userQueuedSongIdsRef.current,
         queueIndex: targetIndex,
         desiredPlayState: true,
-        isPlaying: true,
         isLoading: true,
         isBuffering: false,
       });
@@ -1049,15 +1045,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             return;
           }
 
-          setIsPlaying(true);
-          isPlayingRef.current = true;
-          updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
-
+          updatePlaybackEngineSnapshot({ desiredPlayState: true });
           await TrackPlayer.play();
         } else {
-          setIsPlaying(false);
-          isPlayingRef.current = false;
-          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
+          updatePlaybackEngineSnapshot({ desiredPlayState: false });
           await TrackPlayer.pause();
         }
       } else if (canUseLightweightAudioFallback) {
@@ -1602,28 +1593,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         if (typeof event?.duration === "number" && event.duration > 0) {
           const dur = event.duration;
           setNativeDuration((prev) => (Math.abs(prev - dur) > 0.5 ? dur : prev));
-
-          const curSong = currentSongRef.current;
-          if (
-            curSong?.id &&
-            (lastSyncedDurationRef.current.songId !== curSong.id ||
-              Math.abs(lastSyncedDurationRef.current.duration - dur) > 1.5)
-          ) {
-            lastSyncedDurationRef.current = { songId: curSong.id, duration: dur };
-            const activeIdx = queueIndexRef.current;
-            if (TrackPlayer && activeIdx >= 0) {
-              if (typeof TrackPlayer.updateMetadataForTrack === "function") {
-                TrackPlayer.updateMetadataForTrack(activeIdx, {
-                  duration: dur,
-                }).catch(() => {});
-              }
-              if (typeof TrackPlayer.updateNowPlayingMetadata === "function") {
-                TrackPlayer.updateNowPlayingMetadata({
-                  duration: dur,
-                }).catch(() => {});
-              }
-            }
-          }
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
@@ -1645,41 +1614,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           setNativePosition(0);
           const initialDuration = toDurationSeconds(event?.track?.duration || targetSong.duration);
           setNativeDuration(initialDuration > 0 ? initialDuration : 0);
+          // Only update track and index. Let Event.PlaybackState be the sole authority on isPlaying.
           updatePlaybackEngineSnapshot({
             currentSong: targetSong,
             queueIndex: nextIndex,
-            desiredPlayState: true,
-            isPlaying: true,
           });
-
-          // Immediately sync metadata & duration to native lock screen / Control Center
-          if (TrackPlayer) {
-            const trackDuration = initialDuration > 0 ? initialDuration : undefined;
-            if (trackDuration) {
-              lastSyncedDurationRef.current = { songId: targetSong.id, duration: trackDuration };
-            }
-            if (typeof TrackPlayer.updateMetadataForTrack === "function") {
-              TrackPlayer.updateMetadataForTrack(nextIndex, {
-                title: cleanHtmlEntities(readNonEmptyString(targetSong.title) || "Unknown"),
-                artist: cleanHtmlEntities(readNonEmptyString(targetSong.artist) || "Mavrixfy"),
-                album: targetSong.album ? cleanHtmlEntities(readNonEmptyString(targetSong.album) || "") : undefined,
-                artwork: targetSong.coverUrl,
-                genre: readNonEmptyString(targetSong.genre),
-                ...(trackDuration ? { duration: trackDuration } : {}),
-              }).catch(() => {});
-            }
-            if (typeof TrackPlayer.updateNowPlayingMetadata === "function") {
-              TrackPlayer.updateNowPlayingMetadata({
-                title: cleanHtmlEntities(readNonEmptyString(targetSong.title) || "Unknown"),
-                artist: cleanHtmlEntities(readNonEmptyString(targetSong.artist) || "Mavrixfy"),
-                album: targetSong.album ? cleanHtmlEntities(readNonEmptyString(targetSong.album) || "") : undefined,
-                artwork: targetSong.coverUrl,
-                genre: readNonEmptyString(targetSong.genre),
-                ...(trackDuration ? { duration: trackDuration } : {}),
-                elapsedTime: 0,
-              }).catch(() => {});
-            }
-          }
 
           prefetchAdjacentTrackStreams(currentQ, nextIndex);
         }

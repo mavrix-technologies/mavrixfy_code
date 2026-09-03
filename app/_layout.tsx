@@ -336,7 +336,7 @@ const queueScreenOptions = {
 
 const songOptionsScreenOptions = {
   presentation: isAndroid ? ("transparentModal" as const) : ("formSheet" as const),
-  animation: "slide_from_bottom" as const,
+  animation: isAndroid ? ("none" as const) : ("slide_from_bottom" as const),
   animationDuration: 220,
   sheetAllowedDetents: [0.88, 1],
   sheetCornerRadius: 24,
@@ -345,7 +345,7 @@ const songOptionsScreenOptions = {
 
 const sleepTimerScreenOptions = {
   presentation: isAndroid ? ("transparentModal" as const) : ("formSheet" as const),
-  animation: "slide_from_bottom" as const,
+  animation: isAndroid ? ("none" as const) : ("slide_from_bottom" as const),
   animationDuration: 220,
   sheetAllowedDetents: [0.62],
   sheetCornerRadius: 24,
@@ -408,13 +408,11 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  const [appIsReady, setAppIsReady] = useState(false);
   const [error, setError] = useState<Error | null>(null);
-  const [safetyTimeoutActive, setSafetyTimeoutActive] = useState(false);
-  const fontsLoadedRef = useRef(false);
 
   useEffect(() => {
     void initRemoteConfig();
+    void logAppOpen();
     if (Platform.OS === "android") {
       SystemUI.setBackgroundColorAsync(Colors.background).catch(() => { });
     }
@@ -434,44 +432,10 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    fontsLoadedRef.current = fontsLoaded;
-  }, [fontsLoaded]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSafetyTimeoutActive(true);
-      if (!fontsLoadedRef.current) {
-        logger.warn("[RootLayout] Safety timeout triggered. Proceeding without waiting for fonts/assets.");
-      }
-    }, 800);
-
-    return () => clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    async function prepare() {
-      try {
-        void initRemoteConfig();
-        void logAppOpen();
-      } catch {
-        // Silent fail
-      } finally {
-        setAppIsReady(true);
-      }
-    }
-
     if (fontsLoaded) {
-      prepare();
+      hideSplashScreenSafely("fontsLoaded");
     }
   }, [fontsLoaded]);
-
-  const isReady = safetyTimeoutActive || (appIsReady && fontsLoaded);
-
-  useEffect(() => {
-    if (isReady) {
-      hideSplashScreenSafely("isReady");
-    }
-  }, [isReady]);
 
   const handleError = useCallback((err: Error) => {
     // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
@@ -487,16 +451,8 @@ export default function RootLayout() {
     );
   }
 
-  if (!isReady) {
-    return (
-      <View style={{ flex: 1, backgroundColor: "#000000", justifyContent: "center", alignItems: "center" }}>
-        <Image
-          source={require("@/assets/images/mavrixfy_icone.png")}
-          style={{ width: 110, height: 110, borderRadius: 26 }}
-          contentFit="contain"
-        />
-      </View>
-    );
+  if (!fontsLoaded) {
+    return null;
   }
 
   return (

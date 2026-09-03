@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   DeviceEventEmitter,
   FlatList,
+  Modal,
   Platform,
   Pressable,
   Share,
@@ -10,7 +11,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { Image } from "expo-image";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,7 +26,6 @@ import { Song, getBestImageUrl } from "@/lib/musicData";
 import { addSongToPlaylist, getUserPlaylists, removeSongFromPlaylist, UserPlaylist } from "@/lib/storage";
 import { getUserFirestorePlaylists, addSongToFirestorePlaylist, removeSongFromFirestorePlaylist, type FirestorePlaylist } from "@/lib/firestore";
 import { searchArtists } from "@/data/providers/ArtistProvider";
-import { safeGoBack } from "@/utils/navigation";
 import { compactMap } from "@/lib/arrayUtils";
 
 type MenuIconName = React.ComponentProps<typeof Ionicons>["name"];
@@ -40,6 +40,25 @@ type SongOptionMenuItem = {
 const SHEET_BACKGROUND = "#1E1E1E";
 const HANDLE_COLOR = "#6D6D6D";
 
+function dismissOptions() {
+  if (router.canGoBack()) {
+    router.back();
+  } else {
+    router.replace("/(tabs)");
+  }
+}
+
+function unescapeHtml(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
 function parseSongParam(value: string | string[] | undefined): Song | null {
   const raw = Array.isArray(value) ? value[0] : value;
   if (!raw) return null;
@@ -48,9 +67,9 @@ function parseSongParam(value: string | string[] | undefined): Song | null {
     if (!parsed.id || !parsed.title) return null;
     return {
       id: parsed.id,
-      title: parsed.title,
-      artist: parsed.artist || "Unknown Artist",
-      album: parsed.album || "",
+      title: unescapeHtml(parsed.title),
+      artist: unescapeHtml(parsed.artist || "Unknown Artist"),
+      album: unescapeHtml(parsed.album || ""),
       duration: parsed.duration || 0,
       coverUrl: parsed.coverUrl || "",
       genre: parsed.genre || "",
@@ -350,7 +369,7 @@ function GoToArtistsView({ song, onBack, bottomPad }: { song: Song; onBack: () =
         return;
       }
       const image = artist.image?.length ? getBestImageUrl(artist.image) : "";
-      safeGoBack();
+      dismissOptions();
       setTimeout(() => {
         router.push({
           pathname: "/artist/[id]",
@@ -457,7 +476,7 @@ function SheetWrap({ children }: { children: React.ReactNode }) {
       {IS_ANDROID && (
         <Pressable
           style={styles.backdrop}
-          onPress={safeGoBack}
+          onPress={dismissOptions}
           accessibilityRole="button"
           accessibilityLabel="Dismiss options"
         >
@@ -514,20 +533,22 @@ export function SongOptionsScreen() {
       Gesture.Pan()
         .enabled(Platform.OS === "android")
         .runOnJS(true)
+        .activeOffsetY(8)
+        .failOffsetY(-8)
         .onEnd((event) => {
           const isDownwardSwipe =
-            event.translationY > 80 ||
-            (event.translationY > 40 && event.velocityY > 500);
-          const isMostlyVertical = Math.abs(event.translationY) > Math.abs(event.translationX) * 1.5;
+            event.translationY > 50 ||
+            (event.translationY > 20 && event.velocityY > 350);
+          const isMostlyVertical = Math.abs(event.translationY) > Math.abs(event.translationX) * 1.1;
           if (isDownwardSwipe && isMostlyVertical) {
-            safeGoBack();
+            dismissOptions();
           }
         }),
     []
   );
 
   const closeThen = useCallback((action: () => void | Promise<void>) => {
-    safeGoBack();
+    dismissOptions();
     setTimeout(() => void action(), 180);
   }, []);
 
@@ -547,7 +568,7 @@ export function SongOptionsScreen() {
       showGlobalToast("Album info not available");
       return;
     }
-    safeGoBack();
+    dismissOptions();
     setTimeout(() => {
       router.push({ pathname: "/(tabs)/search", params: { q: query } });
     }, 180);
@@ -555,7 +576,7 @@ export function SongOptionsScreen() {
 
   const handleRemoveFromPlaylist = useCallback(async () => {
     if (!song || !playlistIdParam) {
-      safeGoBack();
+      dismissOptions();
       return;
     }
 
@@ -579,7 +600,7 @@ export function SongOptionsScreen() {
       showGlobalToast(
         playlistNameParam ? `Removed from ${playlistNameParam}` : "Removed from playlist"
       );
-      safeGoBack();
+      dismissOptions();
     } catch {
       showGlobalToast("Could not remove from playlist");
     }
@@ -591,7 +612,7 @@ export function SongOptionsScreen() {
       <SheetWrap>
         <View style={styles.centered}>
           <Text style={styles.emptyMsg}>Song unavailable</Text>
-          <Pressable style={styles.closeButton} onPress={safeGoBack}>
+          <Pressable style={styles.closeButton} onPress={dismissOptions}>
             <Text style={styles.closeButtonText}>Close</Text>
           </Pressable>
         </View>
@@ -698,16 +719,16 @@ export function SongOptionsScreen() {
     menuItems.splice(2, 0, {
       label: isPlaylistContext ? "Remove from this playlist" : "Remove from playlist",
       icon: "remove-circle-outline",
-      onPress: isPlaylistContext ? () => void handleRemoveFromPlaylist() : safeGoBack,
+      onPress: isPlaylistContext ? () => void handleRemoveFromPlaylist() : dismissOptions,
     });
   }
 
-  return (
+  const mainContent = (
     <View style={styles.root}>
       {Platform.OS === "android" && (
         <Pressable
           style={styles.backdrop}
-          onPress={safeGoBack}
+          onPress={dismissOptions}
           accessibilityRole="button"
           accessibilityLabel="Dismiss options"
         >
@@ -763,6 +784,24 @@ export function SongOptionsScreen() {
       </View>
     </View>
   );
+
+  if (IS_ANDROID) {
+    return (
+      <Modal
+        visible={true}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={dismissOptions}
+        statusBarTranslucent={true}
+      >
+        <GestureHandlerRootView style={styles.modalRoot}>
+          {mainContent}
+        </GestureHandlerRootView>
+      </Modal>
+    );
+  }
+
+  return mainContent;
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -772,6 +811,9 @@ const styles = StyleSheet.create({
     backgroundColor: IS_ANDROID ? "transparent" : SHEET_BACKGROUND,
     justifyContent: IS_ANDROID ? "flex-end" : "flex-start",
   },
+  modalRoot: {
+    flex: 1,
+  },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0, 0, 0, 0.55)",
@@ -779,6 +821,7 @@ const styles = StyleSheet.create({
   sheet: {
     ...(IS_ANDROID
       ? {
+          height: "75%",
           maxHeight: "85%",
           borderTopLeftRadius: 24,
           borderTopRightRadius: 24,

@@ -74,7 +74,7 @@ const ALBUM_STAGGER_PATTERN = [0, 7, 3, 9, 2, 5] as const;
 const ALBUM_TILT_PATTERN = [0.8, -1.0, 1.1, -0.7, 0.6, -0.9] as const;
 const PLAYLIST_STAGGER_PATTERN = [0, 8, 4, 10, 2, 6] as const;
 const PLAYLIST_TILT_PATTERN = [-1.1, 0.9, -0.8, 1.2, -0.6, 0.8] as const;
-const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
+const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icon.png");
 const MAX_SEARCH_SUGGESTIONS = 8;
 
 function getRouteSearchQuery(params: { q?: string | string[]; name?: string | string[] }) {

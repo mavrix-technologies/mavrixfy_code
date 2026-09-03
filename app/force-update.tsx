@@ -109,7 +109,7 @@ export default function ForceUpdateScreen() {
             ListHeaderComponent={
               <>
                 <View style={styles.brandRow}>
-                  <Image source={require("@/assets/images/mavrixfy_icone.png")} style={styles.brandIcon} contentFit="cover" />
+                  <Image source={require("@/assets/images/mavrixfy_icon.png")} style={styles.brandIcon} contentFit="cover" />
                   <Text style={styles.brandName}>Mavrixfy</Text>
                 </View>
 

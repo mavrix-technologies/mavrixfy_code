@@ -1,10 +1,12 @@
 import React, { useCallback } from "react";
 import {
+  Modal,
   View,
   Text,
   Pressable,
   StyleSheet,
 } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -48,7 +50,7 @@ export function SleepTimerScreen() {
     router.back();
   }, [clearSleepTimer, haptic]);
 
-  return (
+  const content = (
     <View style={styles.root}>
       {IS_ANDROID && (
         <Pressable
@@ -105,6 +107,24 @@ export function SleepTimerScreen() {
       </View>
     </View>
   );
+
+  if (IS_ANDROID) {
+    return (
+      <Modal
+        visible={true}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => router.back()}
+        statusBarTranslucent={true}
+      >
+        <GestureHandlerRootView style={styles.modalRoot}>
+          {content}
+        </GestureHandlerRootView>
+      </Modal>
+    );
+  }
+
+  return content;
 }
 
 export default SleepTimerScreen;
@@ -114,6 +134,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "flex-end",
     backgroundColor: IS_ANDROID ? "transparent" : "#000000",
+  },
+  modalRoot: {
+    flex: 1,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,

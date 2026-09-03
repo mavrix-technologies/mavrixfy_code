@@ -4,17 +4,12 @@
     "slug": "mavrixfy",
     "version": "3.2.0",
     "orientation": "portrait",
-    "icon": "./assets/images/mavrixfy_icone.png",
+    "icon": "./assets/images/mavrixfy_icon.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/images/mavrixfy_icone.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#000000"
-    },
     "ios": {
       "scheme": "mavrixfy",
       "supportsTablet": true,
-      "icon": "./assets/images/mavrixfy_icon_ios.png",
+      "icon": "./assets/images/mavrixfy_icon.png",
       "bundleIdentifier": "com.mavrixfy.app",
       "buildNumber": "32001",
       "bitcode": false,
@@ -70,8 +65,9 @@
       "versionCode": 32001,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/mavrixfy_icone.png",
-        "backgroundColor": "#121212"
+        "foregroundImage": "./assets/images/mavrixfy_icon_foreground.png",
+        "backgroundColor": "#000000",
+        "monochromeImage": "./assets/images/mavrixfy_icon_monochrome.png"
       },
       "permissions": [
         "INTERNET",
@@ -109,6 +105,19 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/mavrixfy_splash.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#000000",
+          "dark": {
+            "image": "./assets/images/mavrixfy_splash.png",
+            "backgroundColor": "#000000"
+          }
+        }
+      ],
       "expo-tracking-transparency",
       "expo-font",
       "expo-web-browser",
@@ -203,7 +212,7 @@
     },
     "runtimeVersion": "3.2.0-32001",
     "extra": {
-      "musicApiDomain": "mavrixfy-song-api.vercel.app",
+      "musicApiDomain": "saavn.sumit.co",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",
       "firebaseAuthDomain": "spotify-8fefc.firebaseapp.com",
       "firebaseProjectId": "spotify-8fefc",

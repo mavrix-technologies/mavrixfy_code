@@ -80,3 +80,4 @@ android/app/mavrixfy-release.keystore
 android/keystore.properties
 
 .vercel
+.native-doctor-cache/

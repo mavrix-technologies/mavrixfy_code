@@ -9,7 +9,7 @@ import { logger } from "@/lib/logger";
 const NATIVE_AD_UNIT_ID = AD_UNITS.NATIVE;
 const DEFAULT_LOAD_DELAY_MS = 2500;
 
-const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icone.png");
+const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icon.png");
 
 export default function AdMobBanner({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }: { loadDelayMs?: number }) {
   const [nativeAd, setNativeAd] = useState<GoogleNativeAd | null>(null);

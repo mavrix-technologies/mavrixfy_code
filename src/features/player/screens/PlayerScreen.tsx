@@ -117,6 +117,17 @@ const CinematicPlayerBackground = memo(function CinematicPlayerBackground() {
   );
 });
 
+function unescapeHtml(str: string | undefined | null): string {
+  if (!str) return "";
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
 const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
 const BACKGROUND_YOUTUBE_CHROME_CROP_PX = 260;
 const BACKGROUND_YOUTUBE_CHROME_CROP_TOTAL_PX = BACKGROUND_YOUTUBE_CHROME_CROP_PX * 2;
@@ -1181,20 +1192,17 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
     if (!screenSong || optionsPressLockRef.current) return;
 
     optionsPressLockRef.current = true;
-    router.push(
-      {
-        pathname: "/song-options",
-        params: {
-          song: JSON.stringify(screenSong),
-          showDownload: "1",
-          canRemove: "0",
-          optionContext: "",
-          playlistSource: "",
-          playlistName: "",
-        },
+    router.push({
+      pathname: "/song-options",
+      params: {
+        song: JSON.stringify(screenSong),
+        showDownload: "1",
+        canRemove: "0",
+        optionContext: "",
+        playlistSource: "",
+        playlistName: "",
       },
-      { dangerouslySingular: () => "song-options" }
-    );
+    });
 
     setTimeout(() => {
       optionsPressLockRef.current = false;
@@ -1835,7 +1843,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
 
             <View style={styles.headerCenter}>
               <Text style={[styles.headerAlbum, { fontSize: isShortScreen ? 12 : 13 }]} numberOfLines={1}>
-                {screenSong.album || "Single"}
+                {unescapeHtml(screenSong.album || "Single")}
               </Text>
             </View>
 
@@ -1979,7 +1987,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
                       >
                         <View style={styles.songTextWrap}>
                           <PingPongScroll
-                            text={screenSong.title}
+                            text={unescapeHtml(screenSong.title)}
                             style={[
                               styles.songTitle,
                               {
@@ -1992,7 +2000,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
                             paused={!interactionReady}
                           />
                           <PingPongScroll
-                            text={screenSong.artist}
+                            text={unescapeHtml(screenSong.artist)}
                             style={[
                               styles.songArtist,
                               {
