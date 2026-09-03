@@ -11,36 +11,47 @@ import { logger } from "@/lib/logger";
 
 export async function trackPlayerService() {
   try {
-    const trackPlayerModule = require("react-native-track-player");
-    const TP = trackPlayerModule.default || trackPlayerModule;
-    const Event = trackPlayerModule.Event;
-    if (!TP?.addEventListener || !Event) return;
+    const Event = require("react-native-track-player").Event;
+    if (!TrackPlayer?.addEventListener || !Event) return;
 
-    TP.addEventListener(Event.RemotePlay, () => { TP.play().catch(() => {}); });
-    TP.addEventListener(Event.RemotePause, () => { TP.pause().catch(() => {}); });
-    TP.addEventListener(Event.RemoteStop, () => { TP.stop().catch(() => {}); });
-    TP.addEventListener(Event.RemoteNext, () => { TP.skipToNext().catch(() => {}); });
-    TP.addEventListener(Event.RemotePrevious, () => { TP.skipToPrevious().catch(() => {}); });
-    TP.addEventListener(Event.RemoteSeek, (event: { position: number }) => {
+    TrackPlayer.addEventListener(Event.RemotePlay, () => {
+      TrackPlayer.play().catch(() => {});
+    });
+    TrackPlayer.addEventListener(Event.RemotePause, () => {
+      TrackPlayer.pause().catch(() => {});
+    });
+    TrackPlayer.addEventListener(Event.RemoteStop, () => {
+      TrackPlayer.stop().catch(() => {});
+    });
+    TrackPlayer.addEventListener(Event.RemoteNext, () => {
+      TrackPlayer.skipToNext().catch(() => {});
+    });
+    TrackPlayer.addEventListener(Event.RemotePrevious, () => {
+      TrackPlayer.skipToPrevious().catch(() => {});
+    });
+    TrackPlayer.addEventListener(Event.RemoteSeek, (event: { position: number }) => {
       if (typeof event?.position === "number") {
-        TP.seekTo(event.position).catch(() => {});
+        TrackPlayer.seekTo(event.position).catch(() => {});
       }
     });
-    TP.addEventListener(Event.RemoteDuck, async (event: { paused?: boolean; permanent?: boolean; ducking?: boolean }) => {
-      if (event?.permanent) {
-        TP.stop().catch(() => {});
-      } else if (event?.paused) {
-        TP.pause().catch(() => {});
+    TrackPlayer.addEventListener(
+      Event.RemoteDuck,
+      async (event: { paused?: boolean; permanent?: boolean; ducking?: boolean }) => {
+        if (event?.permanent) {
+          TrackPlayer.stop().catch(() => {});
+        } else if (event?.paused) {
+          TrackPlayer.pause().catch(() => {});
+        }
       }
-    });
+    );
 
-    TP.addEventListener(Event.PlaybackError, async (error: any) => {
+    TrackPlayer.addEventListener(Event.PlaybackError, (error: any) => {
       logger.error("[TrackPlayer] Playback error:", error);
       if (error?.code) logger.error("[TrackPlayer] Error code:", error.code);
       if (error?.message) logger.error("[TrackPlayer] Error message:", error.message);
     });
-  } catch {
-    // Non-fatal fallback
+  } catch (error) {
+    logger.error("[TrackPlayer] Service registration failed:", error);
   }
 }
 

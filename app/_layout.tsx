@@ -26,7 +26,6 @@ import { Inter_700Bold } from "@expo-google-fonts/inter/700Bold";
 import { Inter_800ExtraBold } from "@expo-google-fonts/inter/800ExtraBold";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Constants from "expo-constants";
-import { Image } from "expo-image";
 import { queryClient } from "@/lib/query-client";
 import { PlayerProvider } from "@/contexts/PlayerContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";

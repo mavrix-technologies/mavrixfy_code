@@ -122,7 +122,8 @@ const withTrackPlayer = (config) =>
       $: {
         "android:name": "expo.modules.audio.service.AudioControlsService",
         "android:enabled": "false",
-        "tools:replace": "android:enabled",
+        "android:foregroundServiceType": "mediaPlayback",
+        "tools:replace": "android:enabled,android:foregroundServiceType",
       },
     });
 

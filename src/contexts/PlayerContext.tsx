@@ -274,8 +274,6 @@ function readAudioCandidate(value: unknown): string {
   return url;
 }
 
-
-
 function readDownloadAudioUrl(value: unknown): string {
   if (typeof value === "string") return readAudioCandidate(value);
 
@@ -320,17 +318,27 @@ function resolveAudioUrl(source: SongPlaybackSource | null | undefined): string 
   return readAudioCandidate(source.url);
 }
 
-
-
 function withResolvedPlaybackUrl(song: Song, audioUrl: string): Song {
   const resolvedUrl = readNonEmptyString(audioUrl);
   if (!resolvedUrl || song.audioUrl === resolvedUrl) return song;
   return { ...song, audioUrl: resolvedUrl };
 }
 
-function songToTrack(song: Song, localUrl?: string | null): any {
-  const audioUrl = localUrl || resolveAudioUrl(song as SongPlaybackSource);
-  const duration = toDurationSeconds(song.duration);
+function cleanHtmlEntities(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&apos;/g, "'");
+}
+
+function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?: Map<string, string>): any {
+  const audioUrl = localUrl || cachedUrlMap?.get(song.id) || resolveAudioUrl(song as SongPlaybackSource);
+  const rawDuration = song.duration ?? (song as any)?.duration_ms ?? (song as any)?.durationSeconds;
+  const duration = toDurationSeconds(rawDuration);
   const title = cleanHtmlEntities(readNonEmptyString(song.title) || "Unknown");
   const artist = cleanHtmlEntities(readNonEmptyString(song.artist) || "Mavrixfy");
   const album = song.album ? cleanHtmlEntities(readNonEmptyString(song.album) || "") : undefined;
@@ -346,47 +354,6 @@ function songToTrack(song: Song, localUrl?: string | null): any {
     ...(song.playbackHeaders && Object.keys(song.playbackHeaders).length > 0
       ? { headers: song.playbackHeaders }
       : {}),
-  };
-}
-
-type NowPlayingMetadataSource = {
-  title?: unknown;
-  artist?: unknown;
-  album?: unknown;
-  genre?: unknown;
-  duration?: unknown;
-  artwork?: unknown;
-  coverUrl?: unknown;
-};
-
-function cleanHtmlEntities(str: string): string {
-  if (!str) return "";
-  return str
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&apos;/g, "'");
-}
-
-function getNowPlayingMetadata(track: NowPlayingMetadataSource) {
-  const rawTitle = readNonEmptyString(track.title) || "Mavrixfy";
-  const rawArtist = readNonEmptyString(track.artist) || "Mavrixfy";
-  const rawAlbum = readNonEmptyString(track.album);
-  const title = cleanHtmlEntities(rawTitle);
-  const artist = cleanHtmlEntities(rawArtist);
-  const album = rawAlbum ? cleanHtmlEntities(rawAlbum) : undefined;
-  const duration = toDurationSeconds(track.duration);
-  const artwork = readNonEmptyString(track.artwork) || readNonEmptyString(track.coverUrl);
-
-  return {
-    title,
-    artist,
-    album,
-    genre: readNonEmptyString(track.genre) || "Mavrixfy",
-    duration: duration > 0 ? duration : undefined,
-    artwork: artwork || undefined,
   };
 }
 
@@ -493,8 +460,6 @@ async function resolvePlaybackUrl(song: Song): Promise<string | null> {
 
 const canUseLightweightAudioFallback = Boolean(isRunningInExpoGo() || !TrackPlayer);
 
-// react-doctor-disable-next-line react-doctor/prefer-useReducer -- acceptable component structure for this app
-// react-doctor-disable-next-line react-doctor/no-giant-component -- acceptable component structure for this app
 export function PlayerProvider({ children }: { children: ReactNode }) {
   // Android Auto service integration
   const [isPlayerReady, setIsPlayerReady] = useState(false);
@@ -573,43 +538,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => { likedSongsRef.current = likedSongs; }, [likedSongs]);
   useEffect(() => { userQueuedSongIdsRef.current = userQueuedSongIds; }, [userQueuedSongIds]);
   useEffect(() => { sleepTimerRef.current = sleepTimer; }, [sleepTimer]);
-
-  // Restore previous song and queue on app launch / refresh
-  useEffect(() => {
-    let mounted = true;
-    void Storage.loadPlayerState().then((persisted) => {
-      if (!mounted || !persisted?.currentSong?.id || currentSongRef.current) return;
-      const song = persisted.currentSong;
-      const q = Array.isArray(persisted.queue) && persisted.queue.length > 0 ? persisted.queue : [song];
-      const qIndex = Math.max(0, Math.min(persisted.queueIndex || 0, q.length - 1));
-
-      setCurrentSong(song);
-      currentSongRef.current = song;
-      setQueue(q);
-      setSourceQueue(q);
-      queueRef.current = q;
-      originalQueueRef.current = q;
-      setQueueIndex(qIndex);
-      queueIndexRef.current = qIndex;
-      setIsPlaying(false);
-      isPlayingRef.current = false;
-
-      updatePlaybackEngineSnapshot({
-        currentSong: song,
-        queue: q,
-        sourceQueue: q,
-        queueIndex: qIndex,
-        desiredPlayState: false,
-        isPlaying: false,
-        isLoading: false,
-        isBuffering: false,
-      });
-    }).catch(() => {});
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   // Event-driven progress tracking (Spotify/Apple Music style)
   useEffect(() => {
@@ -731,6 +659,111 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [ensurePlayerReady]);
 
+  // Restore previous song and queue on app launch / refresh with native reconciliation
+  useEffect(() => {
+    let mounted = true;
+    const reconcileStartup = async () => {
+      try {
+        if (TrackPlayer) {
+          const ready = isPlayerReady || (await ensurePlayerReady());
+          if (ready) {
+            const activeTrack = await TrackPlayer.getActiveTrack().catch(() => null);
+            const nativeQueue = await TrackPlayer.getQueue().catch(() => []);
+            const playbackState = await TrackPlayer.getPlaybackState().catch(() => null);
+            const rawState = (playbackState as any)?.state ?? playbackState;
+            const isPlayingNow = rawState === State.Playing;
+
+            if (activeTrack?.id && Array.isArray(nativeQueue) && nativeQueue.length > 0) {
+              const rawIndex = await TrackPlayer.getActiveTrackIndex().catch(() => 0);
+              const activeIndex = typeof rawIndex === "number" ? rawIndex : 0;
+              const persisted = await Storage.loadPlayerState().catch(() => null);
+              const persistedMap = new Map((persisted?.queue || []).map((s: Song) => [s.id, s]));
+
+              const mappedSongs: Song[] = nativeQueue.map((t: any) => {
+                const existing = persistedMap.get(t.id);
+                if (existing) {
+                  return {
+                    ...existing,
+                    duration: t.duration || existing.duration,
+                    audioUrl: t.url || existing.audioUrl,
+                  };
+                }
+                return {
+                  id: t.id,
+                  title: t.title || "Unknown",
+                  artist: t.artist || "Mavrixfy",
+                  album: t.album,
+                  duration: t.duration,
+                  coverUrl: t.artwork,
+                  audioUrl: t.url,
+                } as Song;
+              });
+              const currentActiveSong = mappedSongs[activeIndex] || mappedSongs[0];
+
+              if (mounted) {
+                setCurrentSong(currentActiveSong);
+                currentSongRef.current = currentActiveSong;
+                setQueue(mappedSongs);
+                queueRef.current = mappedSongs;
+                setSourceQueue(mappedSongs);
+                originalQueueRef.current = mappedSongs;
+                setQueueIndex(activeIndex);
+                queueIndexRef.current = activeIndex;
+                setIsPlaying(isPlayingNow);
+                isPlayingRef.current = isPlayingNow;
+
+                updatePlaybackEngineSnapshot({
+                  currentSong: currentActiveSong,
+                  queue: mappedSongs,
+                  sourceQueue: mappedSongs,
+                  queueIndex: activeIndex,
+                  isPlaying: isPlayingNow,
+                  desiredPlayState: isPlayingNow,
+                });
+                return;
+              }
+            }
+          }
+        }
+
+        const persisted = await Storage.loadPlayerState();
+        if (!mounted || !persisted?.currentSong?.id || currentSongRef.current) return;
+        const song = persisted.currentSong;
+        const q = Array.isArray(persisted.queue) && persisted.queue.length > 0 ? persisted.queue : [song];
+        const qIndex = Math.max(0, Math.min(persisted.queueIndex || 0, q.length - 1));
+
+        setCurrentSong(song);
+        currentSongRef.current = song;
+        setQueue(q);
+        setSourceQueue(q);
+        queueRef.current = q;
+        originalQueueRef.current = q;
+        setQueueIndex(qIndex);
+        queueIndexRef.current = qIndex;
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+
+        updatePlaybackEngineSnapshot({
+          currentSong: song,
+          queue: q,
+          sourceQueue: q,
+          queueIndex: qIndex,
+          desiredPlayState: false,
+          isPlaying: false,
+          isLoading: false,
+          isBuffering: false,
+        });
+      } catch (err) {
+        logger.warn("[Player] Startup reconciliation skipped:", err);
+      }
+    };
+
+    void reconcileStartup();
+    return () => {
+      mounted = false;
+    };
+  }, [ensurePlayerReady, isPlayerReady]);
+
   // Bounded LRU Stream Cache updater
   const setStreamCache = useCallback((songId: string, url: string) => {
     if (!songId || !url) return;
@@ -774,12 +807,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [setStreamCache]
   );
 
-  // Pre-fetch adjacent stream URLs in background for 0ms transitions
+  // Warm the URL cache only. updateMetadataForTrack is intentionally not used for
+  // changing a playable source URL; native source replacement is handled by queue
+  // transactions above.
   const prefetchAdjacentTrackStreams = useCallback(
     (songQueue: Song[], activeIndex: number) => {
       const nextItem = songQueue[activeIndex + 1];
       if (nextItem) {
-        void resolvePlaybackUrlCached(nextItem);
+        void resolvePlaybackUrlCached(nextItem).catch(() => null);
       }
     },
     [resolvePlaybackUrlCached]
@@ -798,6 +833,112 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setSleepTimerState(null);
   }, [clearSleepTimerTimeout]);
 
+  const isSameQueueContent = (a: Song[] | undefined | null, b: Song[] | undefined | null): boolean => {
+    if (a === b) return true;
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i]?.id !== b[i]?.id) return false;
+    }
+    return true;
+  };
+
+  // Serialize every native queue mutation. JS state is updated first for responsive UI,
+  // while this transaction lane guarantees native operations execute in the same order.
+  const nativeQueueMutationRef = useRef(Promise.resolve());
+
+  const enqueueNativeQueueMutation = useCallback(
+    <T,>(operation: () => Promise<T>): Promise<T> => {
+      const run = nativeQueueMutationRef.current.then(operation, operation);
+      nativeQueueMutationRef.current = run.then(
+        () => undefined,
+        () => undefined
+      );
+      return run;
+    },
+    []
+  );
+
+  const nativeQueueIdsMatch = useCallback((nativeQueue: any[], songs: Song[]) => {
+    return (
+      Array.isArray(nativeQueue) &&
+      nativeQueue.length === songs.length &&
+      nativeQueue.every((track, index) => {
+        const s = songs[index];
+        if (!track || !s || track.id !== s.id) return false;
+        if (s.audioUrl && track.url && track.url !== s.audioUrl) return false;
+        return true;
+      })
+    );
+  }, []);
+
+  const buildNativeQueueTracks = useCallback(
+    async (
+      songs: Song[],
+      forcedUrls: Map<string, string> = new Map()
+    ): Promise<any[]> => {
+      return Promise.all(
+        songs.map(async (song) => {
+          const forced = forcedUrls.get(song.id);
+          if (forced) return songToTrack(song, forced, streamUrlCache.current);
+
+          const cached = streamUrlCache.current.get(song.id);
+          if (cached) return songToTrack(song, cached, streamUrlCache.current);
+
+          const resolved = await resolvePlaybackUrlCached(song);
+          return songToTrack(song, resolved, streamUrlCache.current);
+        })
+      );
+    },
+    [resolvePlaybackUrlCached]
+  );
+
+  // Full native queue replacement is reserved for recovery/reordering operations that
+  // cannot be represented safely by a single native queue mutation. It restores the
+  // active item, position and play state after replacement.
+  const replaceNativeQueuePreservingState = useCallback(
+    async (
+      songs: Song[],
+      activeIndex: number,
+      options?: {
+        position?: number;
+        wasPlaying?: boolean;
+        forcedUrls?: Map<string, string>;
+      }
+    ) => {
+      if (!TrackPlayer || !isPlayerReady || songs.length === 0) return;
+
+      const position = Math.max(0, options?.position ?? 0);
+      const wasPlaying = options?.wasPlaying ?? false;
+      const forcedUrls = options?.forcedUrls ?? new Map<string, string>();
+
+      const nativeTracks = await buildNativeQueueTracks(songs, forcedUrls);
+      if (nativeTracks.some((track) => !readAudioCandidate(track?.url))) {
+        throw new Error("One or more queue tracks have no playable audio URL.");
+      }
+
+      await TrackPlayer.setQueue(nativeTracks);
+      await TrackPlayer.skip(Math.max(0, Math.min(activeIndex, songs.length - 1)));
+      if (position > 0) {
+        await TrackPlayer.seekTo(position);
+      }
+      if (wasPlaying) {
+        await TrackPlayer.play();
+      } else {
+        await TrackPlayer.pause().catch(() => {});
+      }
+
+      if (RepeatMode) {
+        const repeatMap: Record<string, any> = {
+          off: RepeatMode.Off,
+          all: RepeatMode.Queue,
+          one: RepeatMode.Track,
+        };
+        await TrackPlayer.setRepeatMode(repeatMap[repeatModeRef.current] ?? RepeatMode.Off).catch(() => {});
+      }
+    },
+    [buildNativeQueueTracks, isPlayerReady]
+  );
+
   // Main atomic playback execution
   const playSong = useCallback(
     async (song: Song, requestedQueue?: Song[]) => {
@@ -811,7 +952,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         : queueRef.current.findIndex((s) => s.id === song.id);
 
       const isNewQueue = hasRequestedQueue
-        ? requestedQueue !== queueRef.current
+        ? !isSameQueueContent(requestedQueue, queueRef.current)
         : songIndexInQueue < 0;
 
       const q = hasRequestedQueue
@@ -910,68 +1051,47 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             return;
           }
 
-          const currentNativeQueue = await TrackPlayer.getQueue().catch(() => []);
-          const isQueueSynced =
-            !isNewQueue &&
-            Array.isArray(currentNativeQueue) &&
-            currentNativeQueue.length === q.length &&
-            currentNativeQueue.every((t: any, idx: number) => t?.id === q[idx]?.id);
+          await enqueueNativeQueueMutation(async () => {
+            if (reqId !== playRequestIdRef.current) return;
 
-          if (!isQueueSynced) {
-            const nativeTracks = q.map((s, idx) =>
-              songToTrack(s, idx === targetIndex ? audioUrl : null)
-            );
+            const currentNativeQueue = await TrackPlayer!.getQueue().catch(() => []);
+            const isQueueSynced =
+              !isNewQueue &&
+              Array.isArray(currentNativeQueue) &&
+              currentNativeQueue.length === q.length &&
+              currentNativeQueue.every((t: any, idx: number) => {
+                const item = q[idx];
+                if (!item || t?.id !== item.id) return false;
+                if (idx === targetIndex && audioUrl && t?.url !== audioUrl) return false;
+                const expectedDur = toDurationSeconds(item.duration);
+                if (expectedDur > 0 && Math.abs((t?.duration || 0) - expectedDur) > 1) return false;
+                return true;
+              });
 
-            if (__DEV__) {
-              const missingDuration = nativeTracks.filter(
-                (track: any) => !Number.isFinite(track.duration) || track.duration <= 0
+            if (!isQueueSynced) {
+              const nativeTracks = q.map((s, idx) =>
+                songToTrack(s, idx === targetIndex ? audioUrl : null, streamUrlCache.current)
               );
-              if (missingDuration.length > 0) {
-                logger.warn(
-                  "[Playback] Queue tracks missing duration:",
-                  missingDuration.map((track: any) => ({
-                    id: track.id,
-                    title: track.title,
-                    duration: track.duration,
-                  }))
-                );
+
+              try {
+                if (typeof TrackPlayer!.setQueue === "function") {
+                  await TrackPlayer!.setQueue(nativeTracks);
+                } else {
+                  await TrackPlayer!.add(nativeTracks);
+                }
+              } catch (queueErr) {
+                logger.error("[Player] Native queue synchronization failed:", queueErr);
               }
             }
 
-            if (typeof TrackPlayer.setQueue === "function") {
-              await TrackPlayer.setQueue(nativeTracks).catch(() =>
-                TrackPlayer.reset()
-                  .then(() => TrackPlayer.add(nativeTracks))
-                  .catch(() => {})
-              );
-            } else {
-              await TrackPlayer.reset().catch(() => {});
-              await TrackPlayer.add(nativeTracks).catch(() => {});
-            }
-          }
+            if (reqId !== playRequestIdRef.current) return;
+            await TrackPlayer!.skip(targetIndex).catch(() => {});
+            if (reqId !== playRequestIdRef.current) return;
+
+            await TrackPlayer!.play();
+          });
 
           if (reqId !== playRequestIdRef.current) return;
-          await TrackPlayer.skip(targetIndex).catch(() => {});
-          if (reqId !== playRequestIdRef.current) return;
-
-          await TrackPlayer.play();
-          if (reqId !== playRequestIdRef.current) return;
-
-          if (__DEV__) {
-            void Promise.all([
-              TrackPlayer.getActiveTrack().catch(() => null),
-              TrackPlayer.getProgress().catch(() => null),
-            ]).then(([active, prog]) => {
-              logger.info("[Playback Duration Diagnostic]", {
-                id: targetSong.id,
-                title: targetSong.title,
-                catalogDuration: targetSong.duration,
-                activeTrackDuration: active?.duration,
-                progressDuration: prog?.duration,
-                position: prog?.position,
-              });
-            });
-          }
 
           // Prefetch next track in background
           prefetchAdjacentTrackStreams(q, targetIndex);
@@ -1032,15 +1152,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           const playbackState = ready ? await TrackPlayer.getPlaybackState().catch(() => null) : null;
           const rawState = (playbackState as any)?.state ?? playbackState;
 
-          // If no active track is loaded in native TrackPlayer, or player is idle/stopped/unloaded
-          if (
-            !activeTrack ||
-            rawState === "none" ||
-            rawState === "stopped" ||
-            rawState === "idle" ||
-            rawState === 0 ||
-            rawState === undefined
-          ) {
+          // Safe positive verification: Player is considered loaded if it has an active track and is in an active state
+          const isPlayerLoaded = Boolean(
+            activeTrack?.id &&
+            (rawState === State.Playing ||
+              rawState === State.Paused ||
+              rawState === State.Ready ||
+              rawState === State.Buffering ||
+              rawState === State.Loading)
+          );
+
+          if (!isPlayerLoaded) {
             void playSong(currentSongRef.current, queueRef.current);
             return;
           }
@@ -1078,12 +1200,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const nextSong = useCallback(async () => {
     if (TrackPlayer && isPlayerReady) {
-      try {
-        await TrackPlayer.skipToNext();
-        return;
-      } catch {
-        // Fall back to queue index navigation if at end of queue
-      }
+      let skipSucceeded = false;
+      await enqueueNativeQueueMutation(async () => {
+        try {
+          await TrackPlayer!.skipToNext();
+          skipSucceeded = true;
+        } catch {
+          const activeTrack = await TrackPlayer!.getActiveTrack().catch(() => null);
+          if (activeTrack?.id && activeTrack.id !== currentSongRef.current?.id) {
+            skipSucceeded = true;
+          }
+        }
+      });
+      if (skipSucceeded) return;
     }
 
     const cq = queueRef.current;
@@ -1111,7 +1240,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (nextTrack) {
       void playSong(nextTrack, cq);
     }
-  }, [clearSleepTimer, isPlayerReady, playSong]);
+  }, [clearSleepTimer, enqueueNativeQueueMutation, isPlayerReady, playSong]);
 
   useEffect(() => {
     nextSongRef.current = nextSong;
@@ -1151,12 +1280,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     if (TrackPlayer && isPlayerReady) {
-      try {
-        await TrackPlayer.skipToPrevious();
-        return;
-      } catch {
-        // Fall back
-      }
+      let skipSucceeded = false;
+      await enqueueNativeQueueMutation(async () => {
+        try {
+          await TrackPlayer!.skipToPrevious();
+          skipSucceeded = true;
+        } catch {
+          const activeTrack = await TrackPlayer!.getActiveTrack().catch(() => null);
+          if (activeTrack?.id && activeTrack.id !== currentSongRef.current?.id) {
+            skipSucceeded = true;
+          }
+        }
+      });
+      if (skipSucceeded) return;
     }
 
     const cq = queueRef.current;
@@ -1177,7 +1313,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (prevTrack) {
       void playSong(prevTrack, cq);
     }
-  }, [isPlayerReady, playSong, resolvedPositionSeconds, seekTo]);
+  }, [enqueueNativeQueueMutation, isPlayerReady, playSong, resolvedPositionSeconds, seekTo]);
 
   useEffect(() => {
     prevSongRef.current = prevSong;
@@ -1191,6 +1327,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       originalQueue: originalQueueRef.current,
     });
 
+    const previousPosition = positionSecondsRef.current;
+    const wasPlaying = isPlayingRef.current;
+
     isShuffledRef.current = nextIsShuffled;
     setIsShuffled(nextIsShuffled);
     setQueue(nextQueue);
@@ -1203,7 +1342,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       queue: nextQueue,
       queueIndex: nextIndex,
     });
-  }, []);
+
+    if (TrackPlayer && isPlayerReady && nextQueue.length > 0) {
+      void enqueueNativeQueueMutation(async () => {
+        try {
+          await replaceNativeQueuePreservingState(nextQueue, nextIndex, {
+            position: previousPosition,
+            wasPlaying,
+          });
+        } catch (err) {
+          logger.error("[Player] Native shuffle synchronization failed:", err);
+        }
+      });
+    }
+  }, [enqueueNativeQueueMutation, isPlayerReady, replaceNativeQueuePreservingState]);
 
   const shufflePlay = useCallback(
     async (songs: Song[], startSong?: Song) => {
@@ -1244,9 +1396,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         all: RepeatMode.Queue,
         one: RepeatMode.Track,
       };
-      TrackPlayer.setRepeatMode(repeatMap[next] || RepeatMode.Off).catch(() => {});
+      void enqueueNativeQueueMutation(async () => {
+        await TrackPlayer!.setRepeatMode(repeatMap[next] || RepeatMode.Off);
+      }).catch(() => {});
     }
-  }, []);
+  }, [enqueueNativeQueueMutation]);
 
   const isLiked = useCallback((songId: string) => {
     return likedSongIds.includes(songId);
@@ -1310,22 +1464,60 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         showPlaybackNotice("Already in queue");
         return;
       }
-
-      const nextQueue = [...queueRef.current, song];
-      queueRef.current = nextQueue;
-      setQueue(nextQueue);
-
-      const nextSourceQueue = [...originalQueueRef.current, song];
-      originalQueueRef.current = nextSourceQueue;
-      setSourceQueue(nextSourceQueue);
-
-      setUserQueuedSongIds((prev) => (prev.includes(song.id) ? prev : [...prev, song.id]));
-      if (TrackPlayer && isPlayerReady) {
-        TrackPlayer.add([songToTrack(song)]).catch(() => {});
-      }
       showPlaybackNotice("Added to queue");
+
+      void enqueueNativeQueueMutation(async () => {
+        if (queueRef.current.some((s) => s.id === song.id)) {
+          return;
+        }
+
+        const resolvedUrl = await resolvePlaybackUrlCached(song);
+        if (!resolvedUrl) {
+          showPlaybackNotice("Could not add song: audio unavailable.");
+          return;
+        }
+
+        const previousQueue = queueRef.current;
+        const songWithUrl = withResolvedPlaybackUrl(song, resolvedUrl);
+        const nextQueue = [...previousQueue, songWithUrl];
+        queueRef.current = nextQueue;
+        setQueue(nextQueue);
+
+        const nextSourceQueue = [...originalQueueRef.current, songWithUrl];
+        originalQueueRef.current = nextSourceQueue;
+        setSourceQueue(nextSourceQueue);
+
+        setUserQueuedSongIds((prev) => (prev.includes(song.id) ? prev : [...prev, song.id]));
+
+        if (TrackPlayer && isPlayerReady) {
+          try {
+            const nativeQueue = await TrackPlayer!.getQueue();
+            if (nativeQueueIdsMatch(nativeQueue, previousQueue)) {
+              await TrackPlayer!.add([songToTrack(songWithUrl, resolvedUrl, streamUrlCache.current)]);
+            } else {
+              await replaceNativeQueuePreservingState(
+                nextQueue,
+                queueIndexRef.current,
+                {
+                  position: positionSecondsRef.current,
+                  wasPlaying: isPlayingRef.current,
+                }
+              );
+            }
+          } catch (error) {
+            logger.error("[Player] addToQueue native synchronization failed:", error);
+          }
+        }
+      });
     },
-    [isPlayerReady, showPlaybackNotice]
+    [
+      enqueueNativeQueueMutation,
+      isPlayerReady,
+      nativeQueueIdsMatch,
+      replaceNativeQueuePreservingState,
+      resolvePlaybackUrlCached,
+      showPlaybackNotice,
+    ]
   );
 
   const playNext = useCallback(
@@ -1336,35 +1528,76 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         showPlaybackNotice("This song is already playing");
         return;
       }
-
-      const currentQ = queueRef.current;
-      const cleanQ = currentQ.filter((s) => s.id !== song.id);
-      const ci = Math.min(queueIndexRef.current, cleanQ.length - 1);
-      const insertAt = Math.max(0, ci + 1);
-      const nextQueue = [...cleanQ.slice(0, insertAt), song, ...cleanQ.slice(insertAt)];
-      queueRef.current = nextQueue;
-      setQueue(nextQueue);
-
-      const currentSourceQ = originalQueueRef.current;
-      const cleanSourceQ = currentSourceQ.filter((s) => s.id !== song.id);
-      const current = currentSongRef.current;
-      const sci = current ? cleanSourceQ.findIndex((s) => s.id === current.id) : 0;
-      const sourceInsertAt = Math.max(0, (sci >= 0 ? sci : 0) + 1);
-      const nextSourceQueue = [
-        ...cleanSourceQ.slice(0, sourceInsertAt),
-        song,
-        ...cleanSourceQ.slice(sourceInsertAt),
-      ];
-      originalQueueRef.current = nextSourceQueue;
-      setSourceQueue(nextSourceQueue);
-
-      setUserQueuedSongIds((prev) => [song.id, ...prev.filter((id) => id !== song.id)]);
-      if (TrackPlayer && isPlayerReady) {
-        TrackPlayer.add([songToTrack(song)], insertAt).catch(() => {});
-      }
       showPlaybackNotice("Playing next");
+
+      void enqueueNativeQueueMutation(async () => {
+        const resolvedUrl = await resolvePlaybackUrlCached(song);
+        if (!resolvedUrl) {
+          showPlaybackNotice("Could not queue song: audio unavailable.");
+          return;
+        }
+
+        const currentQ = queueRef.current;
+        const cleanQ = currentQ.filter((s) => s.id !== song.id);
+        const currentIndexInClean = cleanQ.findIndex((s) => s.id === currentSongRef.current?.id);
+        const insertAt = Math.max(0, (currentIndexInClean >= 0 ? currentIndexInClean : 0) + 1);
+        const nextSongWithUrl = withResolvedPlaybackUrl(song, resolvedUrl);
+        const nextQueue = [
+          ...cleanQ.slice(0, insertAt),
+          nextSongWithUrl,
+          ...cleanQ.slice(insertAt),
+        ];
+
+        queueRef.current = nextQueue;
+        setQueue(nextQueue);
+
+        const currentSourceQ = originalQueueRef.current;
+        const cleanSourceQ = currentSourceQ.filter((s) => s.id !== song.id);
+        const current = currentSongRef.current;
+        const sci = current ? cleanSourceQ.findIndex((s) => s.id === current.id) : 0;
+        const sourceInsertAt = Math.max(0, (sci >= 0 ? sci : 0) + 1);
+        const nextSourceQueue = [
+          ...cleanSourceQ.slice(0, sourceInsertAt),
+          song,
+          ...cleanSourceQ.slice(sourceInsertAt),
+        ];
+        originalQueueRef.current = nextSourceQueue;
+        setSourceQueue(nextSourceQueue);
+
+        setUserQueuedSongIds((prev) => [song.id, ...prev.filter((id) => id !== song.id)]);
+
+        if (TrackPlayer && isPlayerReady) {
+          try {
+            const nativeQueue = await TrackPlayer!.getQueue();
+            if (nativeQueueIdsMatch(nativeQueue, currentQ)) {
+              await TrackPlayer!.add(
+                [songToTrack(nextSongWithUrl, resolvedUrl, streamUrlCache.current)],
+                insertAt
+              );
+            } else {
+              await replaceNativeQueuePreservingState(
+                nextQueue,
+                queueIndexRef.current,
+                {
+                  position: positionSecondsRef.current,
+                  wasPlaying: isPlayingRef.current,
+                }
+              );
+            }
+          } catch (error) {
+            logger.error("[Player] playNext native synchronization failed:", error);
+          }
+        }
+      });
     },
-    [isPlayerReady, showPlaybackNotice]
+    [
+      enqueueNativeQueueMutation,
+      isPlayerReady,
+      nativeQueueIdsMatch,
+      replaceNativeQueuePreservingState,
+      resolvePlaybackUrlCached,
+      showPlaybackNotice,
+    ]
   );
 
   const removeFromQueue = useCallback((index: number) => {
@@ -1373,16 +1606,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     const removedSong = currentQ[index];
     const nextQueue = currentQ.filter((_, i) => i !== index);
+    const previousIndex = queueIndexRef.current;
+    const nextIndex = index < previousIndex ? previousIndex - 1 : previousIndex;
+
     queueRef.current = nextQueue;
     setQueue(nextQueue);
-
-    if (index < queueIndexRef.current) {
-      setQueueIndex((ci) => Math.max(0, ci - 1));
-    }
-
-    if (TrackPlayer && isPlayerReady) {
-      TrackPlayer.remove([index]).catch(() => {});
-    }
+    setQueueIndex(nextIndex);
+    queueIndexRef.current = nextIndex;
 
     if (removedSong) {
       const nextSourceQueue = originalQueueRef.current.filter((s) => s.id !== removedSong.id);
@@ -1399,35 +1629,120 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         return prevUserIds;
       });
     }
-  }, [isPlayerReady]);
 
-  const reorderQueue = useCallback((fromIndex: number, toIndex: number) => {
-    const currentQ = queueRef.current;
-    if (
-      fromIndex < 0 ||
-      fromIndex >= currentQ.length ||
-      toIndex < 0 ||
-      toIndex >= currentQ.length ||
-      fromIndex === toIndex
-    ) {
-      return;
+    updatePlaybackEngineSnapshot({
+      queue: nextQueue,
+      queueIndex: nextIndex,
+    });
+
+    if (TrackPlayer && isPlayerReady) {
+      void enqueueNativeQueueMutation(async () => {
+        try {
+          const nativeQueue = await TrackPlayer!.getQueue();
+          if (nativeQueueIdsMatch(nativeQueue, currentQ)) {
+            await TrackPlayer!.remove([index]);
+          } else {
+            await replaceNativeQueuePreservingState(
+              nextQueue,
+              nextIndex,
+              {
+                position: positionSecondsRef.current,
+                wasPlaying: isPlayingRef.current,
+              }
+            );
+          }
+        } catch (err) {
+          logger.error("[Player] TrackPlayer.remove failed:", err);
+        }
+      });
     }
+  }, [
+    enqueueNativeQueueMutation,
+    isPlayerReady,
+    nativeQueueIdsMatch,
+    replaceNativeQueuePreservingState,
+  ]);
 
-    const nextQueue = [...currentQ];
-    const [item] = nextQueue.splice(fromIndex, 1);
-    if (item) nextQueue.splice(toIndex, 0, item);
-    queueRef.current = nextQueue;
-    setQueue(nextQueue);
+  const reorderQueue = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      const currentQ = queueRef.current;
+      if (
+        fromIndex < 0 ||
+        fromIndex >= currentQ.length ||
+        toIndex < 0 ||
+        toIndex >= currentQ.length ||
+        fromIndex === toIndex
+      ) {
+        return;
+      }
 
-    if (!isShuffledRef.current) {
-      originalQueueRef.current = nextQueue;
-      setSourceQueue(nextQueue);
-    }
-  }, []);
+      const nextQueue = [...currentQ];
+      const [item] = nextQueue.splice(fromIndex, 1);
+      if (!item) return;
+      nextQueue.splice(toIndex, 0, item);
+
+      const currentActiveIdx = queueIndexRef.current;
+      let newActiveIdx = currentActiveIdx;
+      if (currentActiveIdx === fromIndex) {
+        newActiveIdx = toIndex;
+      } else if (fromIndex < currentActiveIdx && toIndex >= currentActiveIdx) {
+        newActiveIdx = currentActiveIdx - 1;
+      } else if (fromIndex > currentActiveIdx && toIndex <= currentActiveIdx) {
+        newActiveIdx = currentActiveIdx + 1;
+      }
+
+      queueRef.current = nextQueue;
+      setQueue(nextQueue);
+      setQueueIndex(newActiveIdx);
+      queueIndexRef.current = newActiveIdx;
+
+      if (!isShuffledRef.current) {
+        originalQueueRef.current = nextQueue;
+        setSourceQueue(nextQueue);
+      }
+
+      updatePlaybackEngineSnapshot({
+        queue: nextQueue,
+        queueIndex: newActiveIdx,
+      });
+
+      if (TrackPlayer && isPlayerReady) {
+        void enqueueNativeQueueMutation(async () => {
+          try {
+            const nativeQueue = await TrackPlayer!.getQueue();
+            if (nativeQueueIdsMatch(nativeQueue, currentQ)) {
+              await TrackPlayer!.move(fromIndex, toIndex);
+            } else {
+              await replaceNativeQueuePreservingState(
+                nextQueue,
+                newActiveIdx,
+                {
+                  position: positionSecondsRef.current,
+                  wasPlaying: isPlayingRef.current,
+                }
+              );
+            }
+          } catch (err) {
+            logger.error("[Player] TrackPlayer.move failed:", err);
+          }
+        });
+      }
+    },
+    [
+      enqueueNativeQueueMutation,
+      isPlayerReady,
+      nativeQueueIdsMatch,
+      replaceNativeQueuePreservingState,
+    ]
+  );
 
   const clearQueue = useCallback(() => {
     const current = currentSongRef.current;
-    const next = current ? [current] : [];
+    const previousQueue = queueRef.current;
+    if (!current) return;
+
+    const next = [current];
+
     setQueue(next);
     setSourceQueue(next);
     queueRef.current = next;
@@ -1435,7 +1750,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setQueueIndex(0);
     queueIndexRef.current = 0;
     setUserQueuedSongIds([]);
-  }, []);
+
+    updatePlaybackEngineSnapshot({
+      queue: next,
+      queueIndex: 0,
+      userQueuedSongIds: [],
+    });
+
+    if (TrackPlayer && isPlayerReady) {
+      void enqueueNativeQueueMutation(async () => {
+        try {
+          const nativeQueue = await TrackPlayer!.getQueue();
+          if (nativeQueueIdsMatch(nativeQueue, previousQueue)) {
+            await TrackPlayer!.removeUpcomingTracks();
+          } else {
+            await replaceNativeQueuePreservingState(
+              next,
+              0,
+              {
+                position: positionSecondsRef.current,
+                wasPlaying: isPlayingRef.current,
+              }
+            );
+          }
+        } catch (err) {
+          logger.error("[Player] clearQueue native synchronization failed:", err);
+        }
+      });
+    }
+
+  }, [
+    enqueueNativeQueueMutation,
+    isPlayerReady,
+    nativeQueueIdsMatch,
+    replaceNativeQueuePreservingState,
+  ]);
 
   const shuffleQueue = useCallback(() => {
     toggleShuffle();
@@ -1462,7 +1811,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       endsAt,
     };
     sleepTimerRef.current = nextTimer;
-    setSleepTimerState(nextTimer);    sleepTimerTimeoutRef.current = setTimeout(() => {
+    setSleepTimerState(nextTimer);
+
+    sleepTimerTimeoutRef.current = setTimeout(() => {
       if (isPlayingRef.current) {
         void togglePlay();
       }
@@ -1473,65 +1824,102 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const changeStreamingQuality = useCallback(
     async (quality: "low" | "medium" | "high") => {
       await Storage.saveSettings({ streamingQuality: quality });
-      // Invalidate stream cache so new tracks and retries fetch the new quality ladder
+
       streamUrlCache.current.clear();
       streamResolveCache.current.clear();
 
       const activeSong = currentSongRef.current;
       if (!activeSong) return;
 
-      const positionSec = positionSecondsRef.current > 0 ? positionSecondsRef.current : 0;
+      const positionSec = Math.max(0, positionSecondsRef.current);
       const wasPlaying = isPlayingRef.current;
 
       try {
         const { url: newAudioUrl, qualityState } = await resolvePlaybackUrlWithDetails(activeSong, quality);
-        if (!newAudioUrl) return;
+        if (!newAudioUrl) {
+          showPlaybackNotice("Could not change streaming quality.");
+          return;
+        }
 
         setPlaybackQuality(qualityState);
+
         const resolvedSong = withResolvedPlaybackUrl(activeSong, newAudioUrl);
         currentSongRef.current = resolvedSong;
         setCurrentSong(resolvedSong);
 
+        const currentIdx = queueIndexRef.current;
+        const updatedJsQueue = queueRef.current.map((s, idx) =>
+          idx === currentIdx ? resolvedSong : s
+        );
+        queueRef.current = updatedJsQueue;
+        setQueue(updatedJsQueue);
+
+        const updatedSourceQueue = originalQueueRef.current.map((s) =>
+          s.id === resolvedSong.id ? resolvedSong : s
+        );
+        originalQueueRef.current = updatedSourceQueue;
+        setSourceQueue(updatedSourceQueue);
+
         if (TrackPlayer && (isPlayerReady || (await ensurePlayerReady()))) {
-          const currentNativeQueue = await TrackPlayer.getQueue().catch(() => []);
-          const activeIdx = queueIndexRef.current;
-          const currentQ = queueRef.current;
-          if (Array.isArray(currentNativeQueue) && currentNativeQueue.length > 0) {
-            const updatedQueue = currentQ.map((s, idx) =>
-              songToTrack(s, idx === activeIdx ? newAudioUrl : null)
+          await enqueueNativeQueueMutation(async () => {
+            const nativeQueue = await TrackPlayer!.getQueue();
+            const activeIdx = queueIndexRef.current;
+            if (!nativeQueue.length || activeIdx < 0 || activeIdx >= nativeQueue.length) return;
+
+            // Keep every existing native source unchanged except the active track.
+            // This avoids resolving/reloading the entire queue just to change quality.
+            const updatedNativeQueue = nativeQueue.map((track: any, idx: number) =>
+              idx === activeIdx
+                ? songToTrack(
+                    resolvedSong,
+                    newAudioUrl,
+                    streamUrlCache.current
+                  )
+                : track
             );
-            if (typeof TrackPlayer.setQueue === "function") {
-              await TrackPlayer.setQueue(updatedQueue).catch(() =>
-                TrackPlayer.reset()
-                  .then(() => TrackPlayer.add(updatedQueue))
-                  .catch(() => {})
-              );
-            } else {
-              await TrackPlayer.reset().catch(() => {});
-              await TrackPlayer.add(updatedQueue).catch(() => {});
+
+            await TrackPlayer!.setQueue(updatedNativeQueue);
+            await TrackPlayer!.skip(activeIdx);
+            if (positionSec > 0) {
+              await TrackPlayer!.seekTo(positionSec);
             }
-            await TrackPlayer.skip(activeIdx).catch(() => {});
-            if (positionSec > 0.5) {
-              await TrackPlayer.seekTo(positionSec).catch(() => {});
+
+            if (RepeatMode) {
+              const repeatMap: Record<string, any> = {
+                off: RepeatMode.Off,
+                all: RepeatMode.Queue,
+                one: RepeatMode.Track,
+              };
+              await TrackPlayer!.setRepeatMode(
+                repeatMap[repeatModeRef.current] ?? RepeatMode.Off
+              ).catch(() => {});
             }
+
             if (wasPlaying) {
-              await TrackPlayer.play().catch(() => {});
+              await TrackPlayer!.play();
+            } else {
+              await TrackPlayer!.pause().catch(() => {});
             }
-          }
+          });
         } else if (canUseLightweightAudioFallback) {
           await ExpoAvPlayer.loadAndPlay(newAudioUrl);
-          if (positionSec > 0.5) {
+          if (positionSec > 0) {
             await ExpoAvPlayer.seekTo(positionSec);
           }
           if (!wasPlaying) {
-            ExpoAvPlayer.pause();
+            await ExpoAvPlayer.pause();
           }
         }
       } catch (err) {
         logger.error("[Player] Failed to reload playback stream on quality change:", err);
       }
     },
-    [ensurePlayerReady, isPlayerReady]
+    [
+      enqueueNativeQueueMutation,
+      ensurePlayerReady,
+      isPlayerReady,
+      showPlaybackNotice,
+    ]
   );
 
   // TrackPlayer native event handlers
@@ -1624,7 +2012,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, () => {
-        nextSongRef.current();
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+        setPlaybackLoading(false);
+        updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
+        if (sleepTimerRef.current?.mode === "end-of-stack") {
+          clearSleepTimer();
+        }
       }),
     ];
 
