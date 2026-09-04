@@ -57,9 +57,7 @@ function normalizePublicPlaylist(raw: any): FirestorePlaylist | null {
 function normalizePublicPlaylistList(raw: unknown): FirestorePlaylist[] {
   if (!Array.isArray(raw)) return [];
 
-  const normalized = mapFilter(raw, (item) => normalizePublicPlaylist(item), (item): item is FirestorePlaylist => Boolean(item));
-
-  return normalized;
+  return mapFilter(raw, (item) => normalizePublicPlaylist(item), (item): item is FirestorePlaylist => Boolean(item));
 }
 
 export async function getCachedHomePublicPlaylists(options?: {

@@ -36,6 +36,4 @@ rootProject.name = 'Mavrixfy'
 expoAutolinking.useExpoVersionCatalog()
 
 include ':app'
-include ':react-native-track-player'
-project(':react-native-track-player').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-track-player/android')
 includeBuild(expoAutolinking.reactNativeGradlePlugin)

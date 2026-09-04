@@ -137,8 +137,8 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
         {
           paddingTop: topInset,
           backgroundColor: headerBgColor,
-          borderBottomColor: borderAlpha > 0.005 ? `rgba(255, 255, 255, ${Math.max(0.08, borderAlpha).toFixed(3)})` : "rgba(255, 255, 255, 0.06)",
-          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: borderAlpha > 0.005 ? `rgba(255, 255, 255, ${borderAlpha.toFixed(3)})` : "transparent",
+          borderBottomWidth: borderAlpha > 0.005 ? StyleSheet.hairlineWidth : 0,
           transform: [{ translateY: headerTranslateY }],
         },
       ]}

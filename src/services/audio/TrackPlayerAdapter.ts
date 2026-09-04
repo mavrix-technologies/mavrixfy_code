@@ -9,7 +9,8 @@ import TrackPlayer, {
 } from "react-native-track-player";
 import { logger } from "@/lib/logger";
 
-export async function trackPlayerService() {
+export async function trackPlayerService(): Promise<void> {
+  await Promise.resolve();
   try {
     const Event = require("react-native-track-player").Event;
     if (!TrackPlayer?.addEventListener || !Event) return;

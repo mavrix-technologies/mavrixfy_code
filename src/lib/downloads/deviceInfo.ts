@@ -50,7 +50,7 @@ export interface DeviceInfo {
 }
 
 /** Returns basic device metadata for Firestore device registration. */
-export async function getDeviceInfo(): Promise<DeviceInfo> {
+export function getDeviceInfo(): Promise<DeviceInfo> {
   let modelName = "Unknown Device";
 
   // Try to get the device model name from expo-device if available.
@@ -77,5 +77,5 @@ export async function getDeviceInfo(): Promise<DeviceInfo> {
   const platform: "android" | "ios" | "web" =
     IS_ANDROID ? "android" : IS_IOS ? "ios" : "web";
 
-  return { platform, appVersion, modelName };
+  return Promise.resolve({ platform, appVersion, modelName });
 }

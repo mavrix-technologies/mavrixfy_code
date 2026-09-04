@@ -147,14 +147,16 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
             />
             <LinearGradient
               colors={[
+                "rgba(11, 15, 20, 0.05)",
                 "transparent",
-                "transparent",
-                "rgba(11, 15, 20, 0.35)",
-                "rgba(11, 15, 20, 0.82)",
+                "rgba(11, 15, 20, 0.12)",
+                "rgba(11, 15, 20, 0.45)",
+                "rgba(11, 15, 20, 0.85)",
+                "#0B0F14",
                 "#0B0F14",
               ]}
-              locations={[0, 0.52, 0.72, 0.88, 1]}
-              style={StyleSheet.absoluteFillObject}
+              locations={[0, 0.30, 0.50, 0.68, 0.84, 0.94, 1]}
+              style={styles.gradientFill}
             />
           </View>
         </View>
@@ -242,10 +244,18 @@ const styles = StyleSheet.create({
     zIndex: 0,
   },
   gradientFill: {
-    ...StyleSheet.absoluteFillObject,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   imageBackgroundLayer: {
-    ...StyleSheet.absoluteFillObject,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     overflow: "hidden",
   },
   festiveImage: {

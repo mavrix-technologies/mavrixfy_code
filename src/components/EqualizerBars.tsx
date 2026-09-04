@@ -16,7 +16,8 @@ import Animated, {
 import Colors from "@/constants/colors";
 
 interface Props {
-  isPlaying: boolean;
+  isPlaying?: boolean;
+  active?: boolean;
   color?: string;
   /** Width of each bar in dp. Default 3. */
   size?: number;
@@ -92,10 +93,12 @@ const Bar = React.memo(function Bar({
 
 const EqualizerBars = React.memo(function EqualizerBars({
   isPlaying,
+  active,
   color,
   size = 3,
   gap = 2,
 }: Props) {
+  const isAnimating = active ?? isPlaying ?? false;
   const barColor = color ?? Colors.primary;
 
   return (
@@ -111,7 +114,7 @@ const EqualizerBars = React.memo(function EqualizerBars({
       {BARS.map((cfg) => (
         <Bar
           key={cfg.id}
-          isPlaying={isPlaying}
+          isPlaying={isAnimating}
           minScale={cfg.minScale}
           maxScale={cfg.maxScale}
           duration={cfg.duration}

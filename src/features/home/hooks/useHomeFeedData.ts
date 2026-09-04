@@ -64,7 +64,7 @@ const HOME_CACHE: HomeSessionCache = {
   recommendations: [],
 };
 
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T, label: string): Promise<T> {
+function withFallbackTimeout<T>(promise: Promise<T>, ms: number, fallback: T, label: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
   const timeout = new Promise<T>((resolve) => {
@@ -176,7 +176,7 @@ export function useHomeFeedData() {
             : Promise.resolve(),
         ]);
 
-        const jioTask = withTimeout(
+        const jioTask = withFallbackTimeout(
           getHomeJioSaavnCategories({
             forceRefresh,
             limitPerCategory: 15,
@@ -189,7 +189,7 @@ export function useHomeFeedData() {
           applyCategories(homeCategories.filter((cat) => cat.results.length > 0));
         });
 
-        const playlistsTask = withTimeout(
+        const playlistsTask = withFallbackTimeout(
           getCachedHomePublicPlaylists().then(async (cached) => {
           if (cached && cached.length > 0 && !forceRefresh) {
             applyPublicPlaylists(cached);
@@ -208,19 +208,19 @@ export function useHomeFeedData() {
           "public playlists"
         );
 
-        const artistsTask = withTimeout(
+        const artistsTask = withFallbackTimeout(
           getFeaturedArtists(),
           HOME_SECONDARY_TIMEOUT_MS,
           [] as ArtistCard[],
           "featured artists"
         ).then(applyArtists);
-        const releasesTask = withTimeout(
+        const releasesTask = withFallbackTimeout(
           getDailyNewReleaseSongs({ limit: 24, forceRefresh }),
           HOME_SECTION_TIMEOUT_MS,
           [] as Song[],
           "new releases"
         ).then(applyNewReleaseSongs);
-        const recommendationsTask = withTimeout(
+        const recommendationsTask = withFallbackTimeout(
           getRecommendationHomeFeed({ forceRefresh }).then((feed) => feed.sections),
           HOME_SECONDARY_TIMEOUT_MS,
           [] as RecommendationSection[],

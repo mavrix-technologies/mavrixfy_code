@@ -25,7 +25,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 
 import Colors from "@/constants/colors";
-import { getBestImageUrl, Song } from "@/lib/musicData";
+import { Song } from "@/lib/musicData";
 import { searchCatalog, getCatalogSongs } from "@/lib/catalogService";
 import { getApiUrl } from "@/lib/query-client";
 import { useLikedSongs, usePlayerBrowse } from "@/contexts/PlayerContext";
@@ -33,46 +33,8 @@ import { triggerImpact } from "@/lib/haptics";
 import { showGlobalToast } from "@/utils/globalToast";
 
 import { type AddSongsBottomSheetRef } from "@/lib/addSongsSheetRef";
+import { parseApiSong } from "@/lib/searchRepository";
 export type { AddSongsBottomSheetRef };
-
-function parseApiSong(s: any): Song | null {
-  if (!s) return null;
-  const audioUrl =
-    (Array.isArray(s.downloadUrl)
-      ? s.downloadUrl.find?.((d: any) => d.quality === "320kbps" || d.quality === "160kbps")?.url ||
-        s.downloadUrl[s.downloadUrl.length - 1]?.url
-      : typeof s.downloadUrl === "string" ? s.downloadUrl : "") ||
-    s.audioUrl ||
-    s.media_url ||
-    s.url ||
-    "";
-
-  const title = s.name || s.title || "";
-  if (!title) return null;
-
-  const coverUrl = getBestImageUrl(s.image || s.coverUrl || s.imageUrl);
-  const artist =
-    typeof s.primaryArtists === "string" && s.primaryArtists.trim()
-      ? s.primaryArtists.trim()
-      : typeof s.artist === "string" && s.artist.trim()
-      ? s.artist.trim()
-      : Array.isArray(s.artists?.primary)
-      ? s.artists.primary.map((a: any) => a.name).join(", ")
-      : "Unknown Artist";
-
-  return {
-    id: String(s.id || Math.random().toString(36).substring(7)),
-    title,
-    artist,
-    album: typeof s.album === "string" ? s.album : s.album?.name || "",
-    duration: Number(s.duration) || 0,
-    coverUrl,
-    genre: s.language || "",
-    audioUrl,
-    year: s.year ? String(s.year) : "",
-    source: "jiosaavn",
-  };
-}
 
 const AddSongsBottomSheet = memo(
   forwardRef<AddSongsBottomSheetRef, object>((_, ref) => {

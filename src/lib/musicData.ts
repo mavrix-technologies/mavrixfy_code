@@ -155,7 +155,8 @@ export function normalizeAudioCandidates(downloadUrls: unknown): AudioCandidate[
   return [];
 }
 
-function getBestAudioUrl(downloadUrls: unknown): string {
+export function getBestAudioUrl(downloadUrls: unknown): string {
+  if (typeof downloadUrls === "string") return downloadUrls.trim();
   const candidates = normalizeAudioCandidates(downloadUrls);
   if (candidates.length === 0) return "";
 
@@ -299,9 +300,4 @@ const genres: Genre[] = [
   { id: "lofi", name: "Lo-Fi", color: "#477D95" },
 ];
 
-export function formatDuration(seconds: number | undefined): string {
-  if (!seconds || isNaN(seconds) || seconds < 0) return "0:00";
-  const min = Math.floor(seconds / 60);
-  const sec = Math.floor(seconds % 60);
-  return `${min}:${sec.toString().padStart(2, "0")}`;
-}
+export { formatDuration } from "@/utils/timeFormatters";

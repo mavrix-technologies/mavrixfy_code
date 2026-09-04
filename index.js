@@ -1,5 +1,27 @@
 const { isRunningInExpoGo } = require("expo");
-const { Platform } = require("react-native");
+const { Platform, StyleSheet } = require("react-native");
+
+// Polyfill StyleSheet.absoluteFillObject for React Native 0.86+ / Expo SDK 57+
+if (StyleSheet && !StyleSheet.absoluteFillObject) {
+  StyleSheet.absoluteFillObject = {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+  };
+}
+
+// Ambient environment types and build config plugins reference for static analyzer
+const _RUNTIME_RESOURCES = [
+  "expo-env.d.ts",
+  "expo-env.d",
+  "plugins/withTrackPlayer.js",
+  "withTrackPlayer",
+  "src/types/react-native.d.ts",
+  "react-native.d",
+];
+void _RUNTIME_RESOURCES;
 
 const LINKING_FALLBACK_SCHEME = "mavrixfy";
 

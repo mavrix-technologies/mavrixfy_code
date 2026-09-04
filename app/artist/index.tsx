@@ -1,6 +1,7 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback } from "react";
-import { InteractionManager, View } from "react-native";
+import { View } from "react-native";
+import { runAfterIdle } from "@/utils/idleTask";
 import { safeGoBack } from "@/utils/navigation";
 import Colors from "@/constants/colors";
 
@@ -9,10 +10,10 @@ export default function ArtistAnchorScreen() {
     useCallback(() => {
       // Wait for all navigation animations to finish before going back.
       // Calling router.back() during a transition causes black screen / freeze.
-      const task = InteractionManager.runAfterInteractions(() => {
+      const cancelIdle = runAfterIdle(() => {
         safeGoBack();
       });
-      return () => task.cancel();
+      return () => cancelIdle();
     }, [])
   );
 

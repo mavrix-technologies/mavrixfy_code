@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { AppState, InteractionManager } from "react-native";
+import { AppState } from "react-native";
+import { runAfterIdle } from "@/utils/idleTask";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { type Song } from "./musicData";
 import { logger } from "@/lib/logger";
@@ -260,7 +261,7 @@ async function setJSON(key: string, value: unknown): Promise<void> {
 
 export { setJSON };
 
-export async function getUserPlaylists(): Promise<UserPlaylist[]> {
+export function getUserPlaylists(): Promise<UserPlaylist[]> {
   return getJSON<UserPlaylist[]>(KEYS.USER_PLAYLISTS, []);
 }
 
@@ -329,7 +330,7 @@ export async function removeSongFromPlaylist(playlistId: string, songId: string)
   await saveUserPlaylists(playlists);
 }
 
-export async function getRecentlyPlayed(): Promise<RecentlyPlayedItem[]> {
+export function getRecentlyPlayed(): Promise<RecentlyPlayedItem[]> {
   return getJSON<RecentlyPlayedItem[]>(KEYS.RECENTLY_PLAYED, []);
 }
 
@@ -516,7 +517,7 @@ let cachedSecondaryControl: MiniPlayerSecondaryControl = "queue";
 const secondaryControlListeners = new Set<(value: MiniPlayerSecondaryControl) => void>();
 
 function notifySecondaryControlListeners(value: MiniPlayerSecondaryControl): void {
-  InteractionManager.runAfterInteractions(() => {
+  runAfterIdle(() => {
     secondaryControlListeners.forEach((listener) => listener(value));
   });
 }

@@ -1,17 +1,28 @@
-import React, { createContext, use, useState, useCallback, useMemo, useRef, type ReactNode, useEffect } from "react";
-import { AppState, Platform, View } from "react-native";
+import React, { type ReactNode } from "react";
+import { Platform } from "react-native";
 import { isRunningInExpoGo } from "expo";
-import type { Song } from "@/lib/musicData";
-import * as Storage from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAudioSleepTimer } from "@/services/audio/audioSleepTimer";
+import { useAudioLikedSync } from "@/services/audio/audioLikedSync";
+import { useAudioQueueOperations } from "@/services/audio/audioQueueOperations";
+import { useAudioSyncListeners } from "@/services/audio/audioSyncListeners";
+import { useAudioPlaybackValues } from "@/services/audio/audioPlaybackValues";
+import { useAudioQualityControl } from "@/services/audio/audioQualityControl";
+import { useAudioProgressTracking } from "@/services/audio/audioProgressTracking";
+import { useAudioPlaybackCommands } from "@/services/audio/audioPlaybackCommands";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
-import { getLikedSongsFromFirestore, addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
-import { logger } from "@/lib/logger";
-import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
-import { mapFilter, createShuffledPlaybackQueue, toggleQueueShuffleState } from "@/lib/arrayUtils";
-import { showGlobalToast } from "@/utils/globalToast";
-import { setupPlayer } from "@/services/audio/TrackPlayerAdapter";
-import { carPlayService } from "@/services/carPlayService";
+import { usePlayerCoreState } from "@/services/audio/usePlayerCoreState";
+import { PlayerContextTree } from "./PlayerContextProviders";
+import {
+  PlayerContext,
+  PlayerLiteContext,
+  PlayerProgressContext,
+  PlayerRowContext,
+  PlayerBrowseContext,
+  PlayerQueueContext,
+  PlayerLikedContext,
+  PlayerActionsContext,
+} from "./PlayerContextDefs";
 
 let TrackPlayer: typeof import("react-native-track-player").default | null = null;
 let Event: any = {};
@@ -44,2487 +55,279 @@ const subscribeTrackPlayerEvent = (eventName: unknown, listener: (...args: any[]
   return () => cleanupNativeSubscription(subscription);
 };
 
-export type SleepTimerSelection = 5 | 10 | 15 | 30 | 45 | 60 | "end-of-stack";
+export type {
+  SleepTimerSelection,
+  SleepTimerState,
+  PlaybackQualityState,
+  PlayerState,
+  PlayerContextValue,
+  PlayerLiteContextValue,
+  PlayerProgressContextValue,
+  PlayerRowContextValue,
+  PlayerBrowseContextValue,
+  PlayerQueueContextValue,
+  PlayerActionsContextValue,
+  PlayerLikedContextValue,
+  ResolvedPlaybackResult,
+} from "@/types/playbackTypes";
 
-export interface SleepTimerState {
-  mode: "duration" | "end-of-stack";
-  label: string;
-  endsAt: number | null;
-}
+import type { PlaybackQualityState } from "@/types/playbackTypes";
 
-export interface PlaybackQualityState {
-  requested: "low" | "medium" | "high";
-  actualBitrate: number;
-  qualityLabel: string;
-  unlocked: boolean;
-  isFallback: boolean;
-}
+export {
+  resolvePlaybackUrlWithDetails,
+  resolvePlaybackUrl,
+} from "@/services/audio/PlayerPlaybackResolver";
 
-interface PlayerState {
-  currentSong: Song | null;
-  queue: Song[];
-  userQueuedSongIds: string[];
-  sourceQueue: Song[];
-  queueIndex: number;
-  isPlaying: boolean;
-  progress: number;
-  duration: number;
-  positionMillis: number;
-  isShuffled: boolean;
-  repeatMode: "off" | "all" | "one";
-  likedSongIds: string[];
-  likedSongs: Song[];
-  isLoading: boolean;
-  albumColor: string;
-  textColor: string;
-  sleepTimer: SleepTimerState | null;
-  playbackQuality: PlaybackQualityState;
-}
-
-interface PlayerContextValue extends PlayerState {
-  playSong: (song: Song, queue?: Song[]) => void;
-  shufflePlay: (songs: Song[], startSong?: Song) => void;
-  togglePlay: () => void;
-  nextSong: () => void;
-  prevSong: () => void;
-  seekTo: (progress: number) => void;
-  toggleShuffle: () => void;
-  toggleRepeat: () => void;
-  toggleLike: (song: Song) => void;
-  isLiked: (songId: string) => boolean;
-  addToQueue: (song: Song) => void;
-  playNext: (song: Song) => void;
-  removeFromQueue: (index: number) => void;
-  reorderQueue: (fromIndex: number, toIndex: number) => void;
-  clearQueue: () => void;
-  shuffleQueue: () => void;
-  setSleepTimer: (selection: SleepTimerSelection) => void;
-  clearSleepTimer: () => void;
-  setAlbumColor: (color: string) => void;
-  setTextColor: (color: string) => void;
-  changeStreamingQuality: (quality: "low" | "medium" | "high") => Promise<void>;
-}
-
-const PlayerContext = createContext<PlayerContextValue | null>(null);
-
-type PlayerLiteContextValue = Omit<PlayerContextValue, "progress" | "duration" | "positionMillis">;
-const PlayerLiteContext = createContext<PlayerLiteContextValue | null>(null);
-
-interface PlayerProgressContextValue {
-  progress: number;
-  duration: number;
-  positionMillis: number;
-}
-
-const PlayerProgressContext = createContext<PlayerProgressContextValue | null>(null);
-
-interface PlayerRowContextValue {
-  currentSongId: string | null;
-  isPlaying: boolean;
-  playSong: (song: Song, queue?: Song[]) => void;
-  toggleLike: (song: Song) => void;
-  isLiked: (songId: string) => boolean;
-  addToQueue: (song: Song) => void;
-  playNext: (song: Song) => void;
-}
-
-const PlayerRowContext = createContext<PlayerRowContextValue | null>(null);
-
-interface PlayerBrowseContextValue {
-  currentSong: Song | null;
-  queue: Song[];
-  isPlaying: boolean;
-  likedSongs: Song[];
-  playSong: (song: Song, queue?: Song[]) => void;
-  shufflePlay: (songs: Song[], startSong?: Song) => void;
-  togglePlay: () => void;
-  toggleLike: (song: Song) => void;
-  toggleShuffle: () => void;
-}
-
-const PlayerBrowseContext = createContext<PlayerBrowseContextValue | null>(null);
-
-interface PlayerQueueContextValue {
-  currentSong: Song | null;
-  queue: Song[];
-  userQueuedSongIds: string[];
-  queueIndex: number;
-  isShuffled: boolean;
-  sleepTimer: SleepTimerState | null;
-  playSong: (song: Song, queue?: Song[]) => void;
-  shufflePlay: (songs: Song[], startSong?: Song) => void;
-  removeFromQueue: (index: number) => void;
-  reorderQueue: (fromIndex: number, toIndex: number) => void;
-  clearQueue: () => void;
-  shuffleQueue: () => void;
-}
-
-const PlayerQueueContext = createContext<PlayerQueueContextValue | null>(null);
-
-interface PlayerActionsContextValue {
-  isShuffled: boolean;
-  repeatMode: "off" | "all" | "one";
-  likedSongIds: string[];
-  likedSongs: Song[];
-  albumColor: string;
-  textColor: string;
-  sleepTimer: SleepTimerState | null;
-  playbackQuality: PlaybackQualityState;
-  playSong: (song: Song, queue?: Song[]) => void;
-  shufflePlay: (songs: Song[], startSong?: Song) => void;
-  togglePlay: () => void;
-  nextSong: () => void;
-  prevSong: () => void;
-  seekTo: (progress: number) => void;
-  toggleShuffle: () => void;
-  toggleRepeat: () => void;
-  toggleLike: (song: Song) => void;
-  isLiked: (songId: string) => boolean;
-  addToQueue: (song: Song) => void;
-  playNext: (song: Song) => void;
-  removeFromQueue: (index: number) => void;
-  reorderQueue: (fromIndex: number, toIndex: number) => void;
-  clearQueue: () => void;
-  shuffleQueue: () => void;
-  setSleepTimer: (selection: SleepTimerSelection) => void;
-  clearSleepTimer: () => void;
-  setAlbumColor: (color: string) => void;
-  setTextColor: (color: string) => void;
-  changeStreamingQuality: (quality: "low" | "medium" | "high") => Promise<void>;
-}
-
-interface PlayerLikedContextValue {
-  likedSongs: Song[];
-  likedSongIds: string[];
-  likedSongsCount: number;
-  isLiked: (songId: string) => boolean;
-  toggleLike: (song: Song) => void;
-}
-
-const PlayerLikedContext = createContext<PlayerLikedContextValue | null>(null);
-
-const PlayerActionsContext = createContext<PlayerActionsContextValue | null>(null);
-
-function toDurationSeconds(raw: unknown): number {
-  if (typeof raw === "number" && Number.isFinite(raw)) {
-    const normalized = Math.max(0, raw);
-    return normalized > 10000 ? normalized / 1000 : normalized;
-  }
-
-  if (typeof raw !== "string") return 0;
-  const value = raw.trim();
-  if (!value) return 0;
-
-  if (value.includes(":")) {
-    const parts = mapFilter(
-      value.split(":"),
-      (part) => Number(part.trim()),
-      (part) => Number.isFinite(part) && part >= 0
-    );
-
-    if (parts.length >= 2) {
-      let total = 0;
-      for (const part of parts) {
-        total = total * 60 + part;
-      }
-      return Math.max(0, total);
-    }
-  }
-
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 0;
-  const normalized = Math.max(0, parsed);
-  return normalized > 10000 ? normalized / 1000 : normalized;
-}
-
-type SongPlaybackSource = Partial<Song> & {
-  url?: string;
-  uri?: string;
-  streamUrl?: string;
-  downloadUrl?: unknown;
-};
-
-function readNonEmptyString(value: unknown): string {
-  if (typeof value !== "string") return "";
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : "";
-}
-
-function isKnownNonAudioPageUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    const host = parsed.hostname.toLowerCase();
-    const path = parsed.pathname.toLowerCase();
-
-    if (/\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac|m3u8)(?:$|[?#])/i.test(path)) return false;
-    if (host.includes("saavncdn.com") || host.includes("gaanacdn.com") || host.includes("akamaized.net")) return false;
-    if (host === "gaana.com" || host === "www.gaana.com" || host === "jiosaavn.com" || host === "www.jiosaavn.com") return true;
-    if (host.includes("youtube.com") || host.includes("youtu.be")) return true;
-    if (host.includes("spotify.com") || host.includes("music.apple.com")) return true;
-  } catch {
-    return false;
-  }
-
-  return false;
-}
-
-function readAudioCandidate(value: unknown): string {
-  const url = readNonEmptyString(value);
-  if (!url || isKnownNonAudioPageUrl(url)) return "";
-  return url;
-}
-
-function readDownloadAudioUrl(value: unknown): string {
-  if (typeof value === "string") return readAudioCandidate(value);
-
-  if (Array.isArray(value)) {
-    const preferredQualities = ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"];
-    for (const quality of preferredQualities) {
-      const match = value.find((item) => String(item?.quality || "").toLowerCase() === quality);
-      const url = readAudioCandidate(match?.url) || readAudioCandidate(match?.link);
-      if (url) return url;
-    }
-
-    for (let index = value.length - 1; index >= 0; index -= 1) {
-      const item = value[index];
-      const url =
-        typeof item === "string"
-          ? readAudioCandidate(item)
-          : readAudioCandidate(item?.url) || readAudioCandidate(item?.link);
-      if (url) return url;
-    }
-  }
-
-  if (value && typeof value === "object") {
-    const item = value as { url?: unknown; link?: unknown };
-    return readAudioCandidate(item.url) || readAudioCandidate(item.link);
-  }
-
-  return "";
-}
-
-function resolveAudioUrl(source: SongPlaybackSource | null | undefined): string {
-  if (!source) return "";
-
-  const directCandidates = [source.audioUrl, source.uri, source.streamUrl];
-  for (const candidate of directCandidates) {
-    const value = readAudioCandidate(candidate);
-    if (value) return value;
-  }
-
-  const downloadUrl = readDownloadAudioUrl(source.downloadUrl);
-  if (downloadUrl) return downloadUrl;
-
-  return readAudioCandidate(source.url);
-}
-
-function withResolvedPlaybackUrl(song: Song, audioUrl: string): Song {
-  const resolvedUrl = readNonEmptyString(audioUrl);
-  if (!resolvedUrl || song.audioUrl === resolvedUrl) return song;
-  return { ...song, audioUrl: resolvedUrl };
-}
-
-function cleanHtmlEntities(str: string): string {
-  if (!str) return "";
-  return str
-    .replace(/&quot;/g, '"')
-    .replace(/&#039;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&apos;/g, "'");
-}
-
-function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?: Map<string, string>): any {
-  const audioUrl = localUrl || cachedUrlMap?.get(song.id) || resolveAudioUrl(song as SongPlaybackSource);
-  const rawDuration = song.duration ?? (song as any)?.duration_ms ?? (song as any)?.durationSeconds;
-  const duration = toDurationSeconds(rawDuration);
-  const title = cleanHtmlEntities(readNonEmptyString(song.title) || "Unknown");
-  const artist = cleanHtmlEntities(readNonEmptyString(song.artist) || "Mavrixfy");
-  const album = song.album ? cleanHtmlEntities(readNonEmptyString(song.album) || "") : undefined;
-  return {
-    id: song.id,
-    url: audioUrl,
-    title,
-    artist,
-    album,
-    genre: readNonEmptyString(song.genre),
-    artwork: song.coverUrl,
-    ...(duration > 0 ? { duration } : {}),
-    ...(song.playbackHeaders && Object.keys(song.playbackHeaders).length > 0
-      ? { headers: song.playbackHeaders }
-      : {}),
-  };
-}
-
-export interface ResolvedPlaybackResult {
-  url: string | null;
-  qualityState: PlaybackQualityState;
-}
-
-async function getRequestedQualityPreference(): Promise<{
-  requested: "low" | "medium" | "high";
-  effective: "low" | "medium" | "high";
-  unlocked: boolean;
-}> {
-  try {
-    const settings = await Storage.getSettings();
-    const unlocked = Storage.isHighQualityEntitled(settings);
-    const requested = settings.streamingQuality || "medium";
-    const effective = Storage.getEffectiveStreamingQuality(settings);
-    return { requested, effective, unlocked };
-  } catch (e) {
-    logger.error("[Player] Failed to determine streaming quality preference", e);
-    return { requested: "medium", effective: "medium", unlocked: false };
-  }
-}
-
-/** Resolve the best playback URL and metadata for a song based on explicit quality entitlement. */
-async function resolvePlaybackUrlWithDetails(
-  song: Song,
-  forcedQuality?: "low" | "medium" | "high"
-): Promise<ResolvedPlaybackResult> {
-  const { requested, effective, unlocked } = await getRequestedQualityPreference();
-  const targetQuality = forcedQuality || effective;
-
-  const defaultQualityState: PlaybackQualityState = {
-    requested: forcedQuality || requested,
-    actualBitrate: targetQuality === "high" ? 320 : targetQuality === "medium" ? 160 : 96,
-    qualityLabel: targetQuality === "high" ? "320kbps" : targetQuality === "medium" ? "160kbps" : "96kbps",
-    unlocked,
-    isFallback: false,
-  };
-
-  try {
-    // 1. Local downloaded file
-    const { getLocalPlaybackUrl } = await import("@/lib/downloads/downloadManager");
-    const local = await getLocalPlaybackUrl(song.id);
-    if (local) {
-      const url = local.startsWith("file://") || local.startsWith("http") ? local : `file://${local}`;
-      return {
-        url,
-        qualityState: {
-          requested,
-          actualBitrate: 320,
-          qualityLabel: "Offline (320kbps)",
-          unlocked,
-          isFallback: false,
-        },
-      };
-    }
-  } catch {
-    // Fall through
-  }
-
-  // 2. JioSaavn / Catalogue Songs -> Quality ladder selection
-  if (song.downloadUrl) {
-    try {
-      const { resolveAudioStreamWithQuality } = await import("@/lib/musicData");
-      const stream = resolveAudioStreamWithQuality(song.downloadUrl, targetQuality);
-      if (stream?.url) {
-        const playableUrl = readAudioCandidate(stream.url);
-        if (playableUrl) {
-          return {
-            url: playableUrl,
-            qualityState: {
-              requested,
-              actualBitrate: stream.bitrate,
-              qualityLabel: stream.qualityLabel,
-              unlocked,
-              isFallback: stream.isFallback,
-            },
-          };
-        }
-      }
-    } catch (e) {
-      logger.error("[Player] Failed to resolve quality-specific audio URL:", e);
-    }
-  }
-
-  // 3. Direct audio URL fallback
-  const fallbackUrl = resolveAudioUrl(song as SongPlaybackSource) || null;
-  return {
-    url: fallbackUrl,
-    qualityState: {
-      ...defaultQualityState,
-      isFallback: true,
-    },
-  };
-}
-
-/** Resolve the best playback URL for a song — local file first, then quality-specific stream, then direct candidate. */
-async function resolvePlaybackUrl(song: Song): Promise<string | null> {
-  const result = await resolvePlaybackUrlWithDetails(song);
-  return result.url;
-}
+export {
+  PlayerContext,
+  PlayerLiteContext,
+  PlayerProgressContext,
+  PlayerRowContext,
+  PlayerBrowseContext,
+  PlayerQueueContext,
+  PlayerLikedContext,
+  PlayerActionsContext,
+  usePlayerProgress,
+  useOptionalPlayerProgress,
+  usePlayerActions,
+  useOptionalPlayerActions,
+  useLikedSongs,
+  usePlayerRow,
+  usePlayerRowActions,
+  usePlayerBrowse,
+} from "./PlayerContextDefs";
 
 const canUseLightweightAudioFallback = Boolean(isRunningInExpoGo() || !TrackPlayer);
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
-  // Android Auto service integration
-  const [isPlayerReady, setIsPlayerReady] = useState(false);
   const { user: authUser } = useAuth();
+  const core = usePlayerCoreState({ TrackPlayer, State, RepeatMode });
 
-  const [currentSong, setCurrentSong] = useState<Song | null>(null);
-  const [queue, setQueue] = useState<Song[]>([]);
-  const [userQueuedSongIds, setUserQueuedSongIds] = useState<string[]>([]);
-  const [sourceQueue, setSourceQueue] = useState<Song[]>([]);
-  const [queueIndex, setQueueIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isShuffled, setIsShuffled] = useState(false);
-  const [repeatMode, setRepeatMode] = useState<"off" | "all" | "one">("off");
-  const [likedSongIds, setLikedSongIds] = useState<string[]>([]);
-  const [likedSongs, setLikedSongs] = useState<Song[]>([]);
-  const [playbackLoading, setPlaybackLoading] = useState(false);
-  const [albumColor, setAlbumColor] = useState("#282828");
-  const [textColor, setTextColor] = useState("#FFFFFF");
-  const [sleepTimer, setSleepTimerState] = useState<SleepTimerState | null>(null);
-  const [playbackQuality, setPlaybackQuality] = useState<PlaybackQualityState>({
-    requested: "medium",
-    actualBitrate: 160,
-    qualityLabel: "160kbps",
-    unlocked: false,
-    isFallback: false,
+  const {
+    positionSecondsRef,
+    resolvedDuration,
+    resolvedDurationMillis,
+    resolvedPositionSeconds,
+    resolvedProgress,
+    resolvedPositionMillis,
+    setSeekOverride,
+    setNativePosition,
+    setNativeDuration,
+  } = useAudioProgressTracking({
+    currentSong: core.currentSong,
+    currentSongRef: core.currentSongRef,
+    queueRef: core.queueRef,
+    repeatModeRef: core.repeatModeRef,
+    isPlayingRef: core.isPlayingRef,
+    setIsPlaying: core.setIsPlaying,
+    playbackLoadingRef: core.playbackLoadingRef,
+    desiredPlayStateRef: core.desiredPlayStateRef,
+    canUseLightweightAudioFallback,
+    TrackPlayer,
+    nextSongRef: core.nextSongRef,
+    playSongRef: core.playSongRef,
   });
 
-  // Position and progress state
-  const [nativePosition, setNativePosition] = useState(0);
-  const [nativeDuration, setNativeDuration] = useState(0);
-  const [seekOverride, setSeekOverride] = useState<{
-    songId: string | null;
-    seconds: number;
-    startedAt: number;
-  } | null>(null);
-
-  // References for fast, glitch-free synchronous access
-  const currentSongRef = useRef<Song | null>(null);
-  const queueRef = useRef<Song[]>([]);
-  const originalQueueRef = useRef<Song[]>([]);
-  const queueIndexRef = useRef(0);
-  const isPlayingRef = useRef(false);
-  const repeatModeRef = useRef<"off" | "all" | "one">("off");
-  const isShuffledRef = useRef(false);
-  const likedSongsRef = useRef<Song[]>([]);
-  const userQueuedSongIdsRef = useRef<string[]>([]);
-  const playbackLoadingRef = useRef(false);
-  const desiredPlayStateRef = useRef<boolean | null>(null);
-  const playRequestIdRef = useRef(0);
-  const positionSecondsRef = useRef(0);
-  const playerSetupPromiseRef = useRef<Promise<boolean> | null>(null);
-  const lastPlaybackNoticeAtRef = useRef(0);
-  const sleepTimerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sleepTimerRef = useRef<SleepTimerState | null>(null);
-  const likePendingSongsRef = useRef<Map<string, Promise<void>>>(new Map());
-  const nextSongRef = useRef<() => void>(() => {});
-  const prevSongRef = useRef<() => void>(() => {});
-  const togglePlayRef = useRef<() => Promise<void> | void>(() => {});
-  const togglePlayInFlightRef = useRef(false);
-  const seekToRef = useRef<(progress: number) => Promise<void> | void>(() => {});
-  const playSongRef = useRef<(song: Song, queue?: Song[]) => Promise<void> | void>(() => {});
-
-  // In-memory stream URL cache for instant zero-latency queue navigation
-  const streamUrlCache = useRef<Map<string, string>>(new Map());
-  const streamResolveCache = useRef<Map<string, Promise<string | null>>>(new Map());
-  const MAX_STREAM_CACHE = 100;
-
-  // Keep refs up-to-date
-  useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
-  useEffect(() => { queueRef.current = queue; }, [queue]);
-  useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
-  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
-  useEffect(() => { playbackLoadingRef.current = playbackLoading; }, [playbackLoading]);
-  useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
-  useEffect(() => { isShuffledRef.current = isShuffled; }, [isShuffled]);
-  useEffect(() => { likedSongsRef.current = likedSongs; }, [likedSongs]);
-  useEffect(() => { userQueuedSongIdsRef.current = userQueuedSongIds; }, [userQueuedSongIds]);
-  useEffect(() => { sleepTimerRef.current = sleepTimer; }, [sleepTimer]);
-
-  // Event-driven progress tracking (Spotify/Apple Music style)
-  useEffect(() => {
-    let mounted = true;
-
-    if (canUseLightweightAudioFallback) {
-      ExpoAvPlayer.onStatusUpdate((status) => {
-        if (!mounted) return;
-        if (typeof status.position === "number") {
-          setNativePosition(status.position);
-        }
-        if (typeof status.duration === "number" && status.duration > 0) {
-          setNativeDuration(status.duration);
-        }
-        if (typeof status.isPlaying === "boolean") {
-          // If a new track is loading or user desired play, do not flash isPlaying to false during buffering
-          if (!status.isPlaying && (playbackLoadingRef.current || desiredPlayStateRef.current === true)) {
-            return;
-          }
-          if (status.isPlaying) {
-            desiredPlayStateRef.current = null;
-          }
-          if (status.isPlaying !== isPlayingRef.current) {
-            setIsPlaying(status.isPlaying);
-            isPlayingRef.current = status.isPlaying;
-            updatePlaybackEngineSnapshot({ isPlaying: status.isPlaying, isLoading: false, isBuffering: false });
-          }
-        }
-        if (status.didJustFinish) {
-          if (repeatModeRef.current === "one" && currentSongRef.current) {
-            void playSongRef.current(currentSongRef.current, queueRef.current);
-          } else {
-            nextSongRef.current();
-          }
-        }
-      });
-      return () => {
-        mounted = false;
-      };
-    }
-  }, []);
-
-  const resolvedIsPlaying = isPlaying;
-
-  const resolvedDuration = useMemo(() => {
-    if (nativeDuration > 0) return nativeDuration;
-    const songDuration = toDurationSeconds(currentSong?.duration);
-    if (songDuration > 0) return songDuration;
-    return 0;
-  }, [nativeDuration, currentSong?.duration]);
-
-  const resolvedDurationMillis = useMemo(() => {
-    return Math.round(resolvedDuration * 1000);
-  }, [resolvedDuration]);
-
-  const resolvedPositionSeconds = useMemo(() => {
-    if (seekOverride && currentSong?.id && seekOverride.songId === currentSong.id) {
-      const elapsed = (Date.now() - seekOverride.startedAt) / 1000;
-      if (elapsed < 1.2) {
-        return seekOverride.seconds;
-      }
-    }
-    if (TrackPlayer || canUseLightweightAudioFallback) {
-      return nativePosition;
-    }
-    return 0;
-  }, [seekOverride, currentSong?.id, nativePosition]);
-
-  const resolvedProgress = useMemo(() => {
-    if (resolvedDuration <= 0) return 0;
-    return Math.max(0, Math.min(1, resolvedPositionSeconds / resolvedDuration));
-  }, [resolvedPositionSeconds, resolvedDuration]);
-
-  const resolvedPositionMillis = useMemo(() => {
-    return Math.round(resolvedPositionSeconds * 1000);
-  }, [resolvedPositionSeconds]);
-
-  // Keep position ref updated for zero-overhead persistence
-  useEffect(() => {
-    positionSecondsRef.current = resolvedPositionSeconds;
-  }, [resolvedPositionSeconds]);
-
-  const showPlaybackNotice = useCallback((message: string) => {
-    const now = Date.now();
-    if (now - lastPlaybackNoticeAtRef.current < 1200) return;
-    lastPlaybackNoticeAtRef.current = now;
-
-    showGlobalToast(message);
-  }, []);
-
-  const ensurePlayerReady = useCallback(async (): Promise<boolean> => {
-    if (isPlayerReady) return true;
-    if (!TrackPlayer) return false;
-
-    if (playerSetupPromiseRef.current) {
-      return playerSetupPromiseRef.current;
-    }
-
-    const promise = (async () => {
-      try {
-        await setupPlayer();
-        setIsPlayerReady(true);
-        return true;
-      } catch (error) {
-        logger.error("[Player] TrackPlayer setup failed", error);
-        return false;
-      } finally {
-        playerSetupPromiseRef.current = null;
-      }
-    })();
-
-    playerSetupPromiseRef.current = promise;
-    return promise;
-  }, [isPlayerReady]);
-
-  useEffect(() => {
-    if (TrackPlayer) {
-      void ensurePlayerReady();
-    }
-  }, [ensurePlayerReady]);
-
-  // Restore previous song and queue on app launch / refresh with native reconciliation
-  useEffect(() => {
-    let mounted = true;
-    const reconcileStartup = async () => {
-      try {
-        if (TrackPlayer) {
-          const ready = isPlayerReady || (await ensurePlayerReady());
-          if (ready) {
-            const activeTrack = await TrackPlayer.getActiveTrack().catch(() => null);
-            const nativeQueue = await TrackPlayer.getQueue().catch(() => []);
-            const playbackState = await TrackPlayer.getPlaybackState().catch(() => null);
-            const rawState = (playbackState as any)?.state ?? playbackState;
-            const isPlayingNow = rawState === State.Playing;
-
-            if (activeTrack?.id && Array.isArray(nativeQueue) && nativeQueue.length > 0) {
-              const rawIndex = await TrackPlayer.getActiveTrackIndex().catch(() => 0);
-              const activeIndex = typeof rawIndex === "number" ? rawIndex : 0;
-              const persisted = await Storage.loadPlayerState().catch(() => null);
-              const persistedMap = new Map((persisted?.queue || []).map((s: Song) => [s.id, s]));
-
-              const mappedSongs: Song[] = nativeQueue.map((t: any) => {
-                const existing = persistedMap.get(t.id);
-                if (existing) {
-                  return {
-                    ...existing,
-                    duration: t.duration || existing.duration,
-                    audioUrl: t.url || existing.audioUrl,
-                  };
-                }
-                return {
-                  id: t.id,
-                  title: t.title || "Unknown",
-                  artist: t.artist || "Mavrixfy",
-                  album: t.album,
-                  duration: t.duration,
-                  coverUrl: t.artwork,
-                  audioUrl: t.url,
-                } as Song;
-              });
-              const currentActiveSong = mappedSongs[activeIndex] || mappedSongs[0];
-
-              if (mounted) {
-                setCurrentSong(currentActiveSong);
-                currentSongRef.current = currentActiveSong;
-                setQueue(mappedSongs);
-                queueRef.current = mappedSongs;
-                setSourceQueue(mappedSongs);
-                originalQueueRef.current = mappedSongs;
-                setQueueIndex(activeIndex);
-                queueIndexRef.current = activeIndex;
-                setIsPlaying(isPlayingNow);
-                isPlayingRef.current = isPlayingNow;
-
-                updatePlaybackEngineSnapshot({
-                  currentSong: currentActiveSong,
-                  queue: mappedSongs,
-                  sourceQueue: mappedSongs,
-                  queueIndex: activeIndex,
-                  isPlaying: isPlayingNow,
-                  desiredPlayState: isPlayingNow,
-                });
-                return;
-              }
-            }
-          }
-        }
-
-        const persisted = await Storage.loadPlayerState();
-        if (!mounted || !persisted?.currentSong?.id || currentSongRef.current) return;
-        const song = persisted.currentSong;
-        const q = Array.isArray(persisted.queue) && persisted.queue.length > 0 ? persisted.queue : [song];
-        const qIndex = Math.max(0, Math.min(persisted.queueIndex || 0, q.length - 1));
-
-        setCurrentSong(song);
-        currentSongRef.current = song;
-        setQueue(q);
-        setSourceQueue(q);
-        queueRef.current = q;
-        originalQueueRef.current = q;
-        setQueueIndex(qIndex);
-        queueIndexRef.current = qIndex;
-        setIsPlaying(false);
-        isPlayingRef.current = false;
-
-        updatePlaybackEngineSnapshot({
-          currentSong: song,
-          queue: q,
-          sourceQueue: q,
-          queueIndex: qIndex,
-          desiredPlayState: false,
-          isPlaying: false,
-          isLoading: false,
-          isBuffering: false,
-        });
-      } catch (err) {
-        logger.warn("[Player] Startup reconciliation skipped:", err);
-      }
-    };
-
-    void reconcileStartup();
-    return () => {
-      mounted = false;
-    };
-  }, [ensurePlayerReady, isPlayerReady]);
-
-  // Bounded LRU Stream Cache updater
-  const setStreamCache = useCallback((songId: string, url: string) => {
-    if (!songId || !url) return;
-    const cache = streamUrlCache.current;
-    if (cache.has(songId)) {
-      cache.delete(songId);
-    } else if (cache.size >= MAX_STREAM_CACHE) {
-      const oldestKey = cache.keys().next().value;
-      if (oldestKey) cache.delete(oldestKey);
-    }
-    cache.set(songId, url);
-  }, []);
-
-  // Deduplicated in-flight stream URL resolver
-  const resolvePlaybackUrlCached = useCallback(
-    async (song: Song, forcedQuality?: "low" | "medium" | "high"): Promise<string | null> => {
-      if (!song?.id) return null;
-      const cached = streamUrlCache.current.get(song.id);
-      if (cached && !forcedQuality) return cached;
-
-      const pending = streamResolveCache.current.get(song.id);
-      if (pending && !forcedQuality) return pending;
-
-      const request = resolvePlaybackUrlWithDetails(song, forcedQuality)
-        .then(({ url, qualityState }) => {
-          if (url) {
-            setStreamCache(song.id, url);
-          }
-          if (song.id === currentSongRef.current?.id) {
-            setPlaybackQuality(qualityState);
-          }
-          return url;
-        })
-        .finally(() => {
-          streamResolveCache.current.delete(song.id);
-        });
-
-      streamResolveCache.current.set(song.id, request);
-      return request;
-    },
-    [setStreamCache]
-  );
-
-  // Warm the URL cache only. updateMetadataForTrack is intentionally not used for
-  // changing a playable source URL; native source replacement is handled by queue
-  // transactions above.
-  const prefetchAdjacentTrackStreams = useCallback(
-    (songQueue: Song[], activeIndex: number) => {
-      const nextItem = songQueue[activeIndex + 1];
-      if (nextItem) {
-        void resolvePlaybackUrlCached(nextItem).catch(() => null);
-      }
-    },
-    [resolvePlaybackUrlCached]
-  );
-
-  const clearSleepTimerTimeout = useCallback(() => {
-    if (sleepTimerTimeoutRef.current) {
-      clearTimeout(sleepTimerTimeoutRef.current);
-      sleepTimerTimeoutRef.current = null;
-    }
-  }, []);
-
-  const clearSleepTimer = useCallback(() => {
-    clearSleepTimerTimeout();
-    sleepTimerRef.current = null;
-    setSleepTimerState(null);
-  }, [clearSleepTimerTimeout]);
-
-  const isSameQueueContent = (a: Song[] | undefined | null, b: Song[] | undefined | null): boolean => {
-    if (a === b) return true;
-    if (!a || !b || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if (a[i]?.id !== b[i]?.id) return false;
-    }
-    return true;
-  };
-
-  // Serialize every native queue mutation. JS state is updated first for responsive UI,
-  // while this transaction lane guarantees native operations execute in the same order.
-  const nativeQueueMutationRef = useRef(Promise.resolve());
-
-  const enqueueNativeQueueMutation = useCallback(
-    <T,>(operation: () => Promise<T>): Promise<T> => {
-      const run = nativeQueueMutationRef.current.then(operation, operation);
-      nativeQueueMutationRef.current = run.then(
-        () => undefined,
-        () => undefined
-      );
-      return run;
-    },
-    []
-  );
-
-  const nativeQueueIdsMatch = useCallback((nativeQueue: any[], songs: Song[]) => {
-    return (
-      Array.isArray(nativeQueue) &&
-      nativeQueue.length === songs.length &&
-      nativeQueue.every((track, index) => {
-        const s = songs[index];
-        if (!track || !s || track.id !== s.id) return false;
-        if (s.audioUrl && track.url && track.url !== s.audioUrl) return false;
-        return true;
-      })
-    );
-  }, []);
-
-  const buildNativeQueueTracks = useCallback(
-    async (
-      songs: Song[],
-      forcedUrls: Map<string, string> = new Map()
-    ): Promise<any[]> => {
-      return Promise.all(
-        songs.map(async (song) => {
-          const forced = forcedUrls.get(song.id);
-          if (forced) return songToTrack(song, forced, streamUrlCache.current);
-
-          const cached = streamUrlCache.current.get(song.id);
-          if (cached) return songToTrack(song, cached, streamUrlCache.current);
-
-          const resolved = await resolvePlaybackUrlCached(song);
-          return songToTrack(song, resolved, streamUrlCache.current);
-        })
-      );
-    },
-    [resolvePlaybackUrlCached]
-  );
-
-  // Full native queue replacement is reserved for recovery/reordering operations that
-  // cannot be represented safely by a single native queue mutation. It restores the
-  // active item, position and play state after replacement.
-  const replaceNativeQueuePreservingState = useCallback(
-    async (
-      songs: Song[],
-      activeIndex: number,
-      options?: {
-        position?: number;
-        wasPlaying?: boolean;
-        forcedUrls?: Map<string, string>;
-      }
-    ) => {
-      if (!TrackPlayer || !isPlayerReady || songs.length === 0) return;
-
-      const position = Math.max(0, options?.position ?? 0);
-      const wasPlaying = options?.wasPlaying ?? false;
-      const forcedUrls = options?.forcedUrls ?? new Map<string, string>();
-
-      const nativeTracks = await buildNativeQueueTracks(songs, forcedUrls);
-      if (nativeTracks.some((track) => !readAudioCandidate(track?.url))) {
-        throw new Error("One or more queue tracks have no playable audio URL.");
-      }
-
-      await TrackPlayer.setQueue(nativeTracks);
-      await TrackPlayer.skip(Math.max(0, Math.min(activeIndex, songs.length - 1)));
-      if (position > 0) {
-        await TrackPlayer.seekTo(position);
-      }
-      if (wasPlaying) {
-        await TrackPlayer.play();
-      } else {
-        await TrackPlayer.pause().catch(() => {});
-      }
-
-      if (RepeatMode) {
-        const repeatMap: Record<string, any> = {
-          off: RepeatMode.Off,
-          all: RepeatMode.Queue,
-          one: RepeatMode.Track,
-        };
-        await TrackPlayer.setRepeatMode(repeatMap[repeatModeRef.current] ?? RepeatMode.Off).catch(() => {});
-      }
-    },
-    [buildNativeQueueTracks, isPlayerReady]
-  );
-
-  // Main atomic playback execution
-  const playSong = useCallback(
-    async (song: Song, requestedQueue?: Song[]) => {
-      if (!song?.id) return;
-      const reqId = ++playRequestIdRef.current;
-
-      // 1. Build queue
-      const hasRequestedQueue = Array.isArray(requestedQueue) && requestedQueue.length > 0;
-      const songIndexInQueue = hasRequestedQueue
-        ? requestedQueue.findIndex((s) => s.id === song.id)
-        : queueRef.current.findIndex((s) => s.id === song.id);
-
-      const isNewQueue = hasRequestedQueue
-        ? !isSameQueueContent(requestedQueue, queueRef.current)
-        : songIndexInQueue < 0;
-
-      const q = hasRequestedQueue
-        ? requestedQueue
-        : songIndexInQueue >= 0
-          ? queueRef.current
-          : [song];
-
-      const targetIndex = Math.max(0, q.findIndex((s) => s.id === song.id));
-      const targetSong = q[targetIndex] || song;
-
-      // 2. Synchronously commit state (immediate UI update, zero lag, zero flicker)
-      setCurrentSong(targetSong);
-      currentSongRef.current = targetSong;
-      setQueue(q);
-      queueRef.current = q;
-      if (isNewQueue || !isShuffledRef.current) {
-        originalQueueRef.current = q;
-        setSourceQueue(q);
-      }
-      setQueueIndex(targetIndex);
-      queueIndexRef.current = targetIndex;
-
-      if (isNewQueue) {
-        setUserQueuedSongIds([]);
-        userQueuedSongIdsRef.current = [];
-      } else {
-        const prevIds = userQueuedSongIdsRef.current;
-        if (prevIds.includes(targetSong.id)) {
-          const next = prevIds.filter((id) => id !== targetSong.id);
-          userQueuedSongIdsRef.current = next;
-          setUserQueuedSongIds(next);
-        }
-      }
-
-      desiredPlayStateRef.current = true;
-      setPlaybackLoading(true);
-      setSeekOverride(null);
-      setNativePosition(0);
-
-      updatePlaybackEngineSnapshot({
-        currentSong: targetSong,
-        queue: q,
-        sourceQueue: originalQueueRef.current,
-        userQueuedSongIds: isNewQueue ? [] : userQueuedSongIdsRef.current,
-        queueIndex: targetIndex,
-        desiredPlayState: true,
-        isLoading: true,
-        isBuffering: false,
-      });
-
-      // 3. Save to recently played and persisted player state asynchronously (deferred off the critical tap path)
-      setTimeout(() => {
-        Storage.addRecentlyPlayed({
-          id: targetSong.id,
-          name: targetSong.title,
-          imageUrl: targetSong.coverUrl,
-          type: "song",
-          data: targetSong,
-        }).catch(() => {});
-
-        Storage.savePlayerState({
-          currentSong: targetSong,
-          queue: q,
-          queueIndex: targetIndex,
-          positionSeconds: 0,
-          updatedAt: Date.now(),
-        }).catch(() => {});
-      }, 150);
-
-      // 4. Resolve audio URL (cached or network)
-      try {
-        const audioUrl = await resolvePlaybackUrlCached(targetSong);
-        if (reqId !== playRequestIdRef.current) return;
-
-        if (!audioUrl) {
-          setIsPlaying(false);
-          isPlayingRef.current = false;
-          updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
-          showPlaybackNotice("Could not resolve playback URL.");
-          return;
-        }
-
-        const resolvedSong = withResolvedPlaybackUrl(targetSong, audioUrl);
-        currentSongRef.current = resolvedSong;
-        setCurrentSong(resolvedSong);
-
-        // 5. Playback execution
-        if (TrackPlayer) {
-          const ready = isPlayerReady || (await ensurePlayerReady());
-          if (reqId !== playRequestIdRef.current) return;
-          if (!ready) {
-            setIsPlaying(false);
-            isPlayingRef.current = false;
-            showPlaybackNotice("Audio player initialization failed.");
-            return;
-          }
-
-          await enqueueNativeQueueMutation(async () => {
-            if (reqId !== playRequestIdRef.current) return;
-
-            const currentNativeQueue = await TrackPlayer!.getQueue().catch(() => []);
-            const isQueueSynced =
-              !isNewQueue &&
-              Array.isArray(currentNativeQueue) &&
-              currentNativeQueue.length === q.length &&
-              currentNativeQueue.every((t: any, idx: number) => {
-                const item = q[idx];
-                if (!item || t?.id !== item.id) return false;
-                if (idx === targetIndex && audioUrl && t?.url !== audioUrl) return false;
-                const expectedDur = toDurationSeconds(item.duration);
-                if (expectedDur > 0 && Math.abs((t?.duration || 0) - expectedDur) > 1) return false;
-                return true;
-              });
-
-            if (!isQueueSynced) {
-              const nativeTracks = q.map((s, idx) =>
-                songToTrack(s, idx === targetIndex ? audioUrl : null, streamUrlCache.current)
-              );
-
-              try {
-                if (typeof TrackPlayer!.setQueue === "function") {
-                  await TrackPlayer!.setQueue(nativeTracks);
-                } else {
-                  await TrackPlayer!.add(nativeTracks);
-                }
-              } catch (queueErr) {
-                logger.error("[Player] Native queue synchronization failed:", queueErr);
-              }
-            }
-
-            if (reqId !== playRequestIdRef.current) return;
-            await TrackPlayer!.skip(targetIndex).catch(() => {});
-            if (reqId !== playRequestIdRef.current) return;
-
-            await TrackPlayer!.play();
-          });
-
-          if (reqId !== playRequestIdRef.current) return;
-
-          // Prefetch next track in background
-          prefetchAdjacentTrackStreams(q, targetIndex);
-        } else if (canUseLightweightAudioFallback) {
-          if (reqId !== playRequestIdRef.current) return;
-          await ExpoAvPlayer.loadAndPlay(audioUrl);
-        }
-      } catch (error) {
-        if (reqId !== playRequestIdRef.current) return;
-        logger.error("[Player] playSong failed", error);
-        desiredPlayStateRef.current = false;
-        setIsPlaying(false);
-        isPlayingRef.current = false;
-        updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
-        showPlaybackNotice("Could not start playback.");
-      } finally {
-        setPlaybackLoading(false);
-        if (reqId === playRequestIdRef.current) {
-          updatePlaybackEngineSnapshot({ isLoading: false, isBuffering: false });
-        }
-      }
-    },
-    [ensurePlayerReady, isPlayerReady, prefetchAdjacentTrackStreams, resolvePlaybackUrlCached, showPlaybackNotice]
-  );
-
-  useEffect(() => {
-    playSongRef.current = playSong;
-  }, [playSong]);
-
-  const togglePlay = useCallback(async () => {
-    if (togglePlayInFlightRef.current) return;
-    togglePlayInFlightRef.current = true;
-
-    const nextPlayState = !isPlayingRef.current;
-    desiredPlayStateRef.current = nextPlayState;
-
-    if (!nextPlayState) {
-      // Invalidate any in-flight playSong requests so they don't force playback to resume
-      playRequestIdRef.current += 1;
-    }
-
-    if (!currentSongRef.current) {
-      if (queueRef.current.length > 0) {
-        const target = queueRef.current[queueIndexRef.current] || queueRef.current[0];
-        if (target) {
-          void playSong(target, queueRef.current);
-        }
-      }
-      togglePlayInFlightRef.current = false;
-      return;
-    }
-
-    try {
+  const { playSong, togglePlay, nextSong, prevSong, seekTo } = useAudioPlaybackCommands({
+    currentSongRef: core.currentSongRef,
+    setCurrentSong: core.setCurrentSong,
+    queueRef: core.queueRef,
+    setQueue: core.setQueue,
+    originalQueueRef: core.originalQueueRef,
+    setSourceQueue: core.setSourceQueue,
+    queueIndexRef: core.queueIndexRef,
+    setQueueIndex: core.setQueueIndex,
+    userQueuedSongIdsRef: core.userQueuedSongIdsRef,
+    setUserQueuedSongIds: core.setUserQueuedSongIds,
+    isShuffledRef: core.isShuffledRef,
+    repeatModeRef: core.repeatModeRef,
+    isPlayingRef: core.isPlayingRef,
+    setIsPlaying: core.setIsPlaying,
+    playbackLoadingRef: core.playbackLoadingRef,
+    setPlaybackLoading: core.setPlaybackLoading,
+    desiredPlayStateRef: core.desiredPlayStateRef,
+    playRequestIdRef: core.playRequestIdRef,
+    positionSecondsRef,
+    setSeekOverride,
+    setNativePosition,
+    resolvedDuration,
+    streamUrlCache: core.streamUrlCache,
+    resolvePlaybackUrlCached: core.resolvePlaybackUrlCached,
+    prefetchAdjacentTrackStreams: core.prefetchAdjacentTrackStreams,
+    enqueueNativeQueueMutation: core.enqueueNativeQueueMutation,
+    TrackPlayer,
+    isPlayerReady: core.isPlayerReady,
+    ensurePlayerReady: core.ensurePlayerReady,
+    State,
+    canUseLightweightAudioFallback,
+    showPlaybackNotice: core.showPlaybackNotice,
+    playSongRef: core.playSongRef,
+    togglePlayRef: core.togglePlayRef,
+    togglePlayInFlightRef: core.togglePlayInFlightRef,
+    nextSongRef: core.nextSongRef,
+    prevSongRef: core.prevSongRef,
+    seekToRef: core.seekToRef,
+  });
+
+  const { sleepTimer, sleepTimerRef, setSleepTimer, clearSleepTimer } = useAudioSleepTimer({
+    onTimerExpire: () => {
       if (TrackPlayer) {
-        if (nextPlayState) {
-          const ready = isPlayerReady || (await ensurePlayerReady());
-          const activeTrack = ready ? await TrackPlayer.getActiveTrack().catch(() => null) : null;
-          const playbackState = ready ? await TrackPlayer.getPlaybackState().catch(() => null) : null;
-          const rawState = (playbackState as any)?.state ?? playbackState;
-
-          // Safe positive verification: Player is considered loaded if it has an active track and is in an active state
-          const isPlayerLoaded = Boolean(
-            activeTrack?.id &&
-            (rawState === State.Playing ||
-              rawState === State.Paused ||
-              rawState === State.Ready ||
-              rawState === State.Buffering ||
-              rawState === State.Loading)
-          );
-
-          if (!isPlayerLoaded) {
-            void playSong(currentSongRef.current, queueRef.current);
-            return;
-          }
-
-          updatePlaybackEngineSnapshot({ desiredPlayState: true });
-          await TrackPlayer.play();
-        } else {
-          updatePlaybackEngineSnapshot({ desiredPlayState: false });
-          await TrackPlayer.pause();
-        }
+        TrackPlayer.pause().catch(() => {});
       } else if (canUseLightweightAudioFallback) {
-        if (nextPlayState) {
-          // If ExpoAvPlayer has no loaded sound yet (e.g. cold start restored song)
-          void playSong(currentSongRef.current, queueRef.current);
-        } else {
-          setIsPlaying(false);
-          isPlayingRef.current = false;
-          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
-          await ExpoAvPlayer.pause();
-        }
+        try { ExpoAvPlayer.pause(); } catch {}
       }
-    } catch (error) {
-      logger.error("[Player] togglePlay failed", error);
-      if (nextPlayState && currentSongRef.current) {
-        void playSong(currentSongRef.current, queueRef.current);
-      }
-    } finally {
-      togglePlayInFlightRef.current = false;
-    }
-  }, [ensurePlayerReady, isPlayerReady, playSong]);
-
-  useEffect(() => {
-    togglePlayRef.current = togglePlay;
-  }, [togglePlay]);
-
-  const nextSong = useCallback(async () => {
-    if (TrackPlayer && isPlayerReady) {
-      let skipSucceeded = false;
-      await enqueueNativeQueueMutation(async () => {
-        try {
-          await TrackPlayer!.skipToNext();
-          skipSucceeded = true;
-        } catch {
-          const activeTrack = await TrackPlayer!.getActiveTrack().catch(() => null);
-          if (activeTrack?.id && activeTrack.id !== currentSongRef.current?.id) {
-            skipSucceeded = true;
-          }
-        }
-      });
-      if (skipSucceeded) return;
-    }
-
-    const cq = queueRef.current;
-    const ci = queueIndexRef.current;
-    if (cq.length === 0) return;
-
-    let ni = ci + 1;
-    const rm = repeatModeRef.current;
-    if (ni >= cq.length) {
-      if (rm === "all") {
-        ni = 0;
-      } else {
-        setIsPlaying(false);
-        isPlayingRef.current = false;
-        setPlaybackLoading(false);
-        updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
-        if (sleepTimerRef.current?.mode === "end-of-stack") {
-          clearSleepTimer();
-        }
-        return;
-      }
-    }
-
-    const nextTrack = cq[ni];
-    if (nextTrack) {
-      void playSong(nextTrack, cq);
-    }
-  }, [clearSleepTimer, enqueueNativeQueueMutation, isPlayerReady, playSong]);
-
-  useEffect(() => {
-    nextSongRef.current = nextSong;
-  }, [nextSong]);
-
-  const seekTo = useCallback(async (progress: number) => {
-    const targetProgress = Math.max(0, Math.min(1, progress));
-    const dur = resolvedDuration;
-    const targetSeconds = targetProgress * dur;
-
-    setSeekOverride({
-      songId: currentSongRef.current?.id || null,
-      seconds: targetSeconds,
-      startedAt: Date.now(),
-    });
-    setNativePosition(targetSeconds);
-
-    try {
-      if (TrackPlayer) {
-        await TrackPlayer.seekTo(targetSeconds);
-      } else if (canUseLightweightAudioFallback) {
-        await ExpoAvPlayer.seekTo(targetSeconds);
-      }
-    } catch (error) {
-      logger.error("[Player] seekTo failed", error);
-    }
-  }, [resolvedDuration]);
-
-  useEffect(() => {
-    seekToRef.current = seekTo;
-  }, [seekTo]);
-
-  const prevSong = useCallback(async () => {
-    if (resolvedPositionSeconds > 3) {
-      void seekTo(0);
-      return;
-    }
-
-    if (TrackPlayer && isPlayerReady) {
-      let skipSucceeded = false;
-      await enqueueNativeQueueMutation(async () => {
-        try {
-          await TrackPlayer!.skipToPrevious();
-          skipSucceeded = true;
-        } catch {
-          const activeTrack = await TrackPlayer!.getActiveTrack().catch(() => null);
-          if (activeTrack?.id && activeTrack.id !== currentSongRef.current?.id) {
-            skipSucceeded = true;
-          }
-        }
-      });
-      if (skipSucceeded) return;
-    }
-
-    const cq = queueRef.current;
-    const ci = queueIndexRef.current;
-    if (cq.length === 0) return;
-
-    let pi = ci - 1;
-    const rm = repeatModeRef.current;
-    if (pi < 0) {
-      if (rm === "all") pi = cq.length - 1;
-      else {
-        void seekTo(0);
-        return;
-      }
-    }
-
-    const prevTrack = cq[pi];
-    if (prevTrack) {
-      void playSong(prevTrack, cq);
-    }
-  }, [enqueueNativeQueueMutation, isPlayerReady, playSong, resolvedPositionSeconds, seekTo]);
-
-  useEffect(() => {
-    prevSongRef.current = prevSong;
-  }, [prevSong]);
-
-  const toggleShuffle = useCallback(() => {
-    const { nextIsShuffled, nextQueue, nextIndex } = toggleQueueShuffleState({
-      isShuffled: isShuffledRef.current,
-      currentSong: currentSongRef.current,
-      activeQueue: queueRef.current,
-      originalQueue: originalQueueRef.current,
-    });
-
-    const previousPosition = positionSecondsRef.current;
-    const wasPlaying = isPlayingRef.current;
-
-    isShuffledRef.current = nextIsShuffled;
-    setIsShuffled(nextIsShuffled);
-    setQueue(nextQueue);
-    queueRef.current = nextQueue;
-    setQueueIndex(nextIndex);
-    queueIndexRef.current = nextIndex;
-
-    updatePlaybackEngineSnapshot({
-      isShuffled: nextIsShuffled,
-      queue: nextQueue,
-      queueIndex: nextIndex,
-    });
-
-    if (TrackPlayer && isPlayerReady && nextQueue.length > 0) {
-      void enqueueNativeQueueMutation(async () => {
-        try {
-          await replaceNativeQueuePreservingState(nextQueue, nextIndex, {
-            position: previousPosition,
-            wasPlaying,
-          });
-        } catch (err) {
-          logger.error("[Player] Native shuffle synchronization failed:", err);
-        }
-      });
-    }
-  }, [enqueueNativeQueueMutation, isPlayerReady, replaceNativeQueuePreservingState]);
-
-  const shufflePlay = useCallback(
-    async (songs: Song[], startSong?: Song) => {
-      const result = createShuffledPlaybackQueue(songs, startSong);
-      if (!result) return;
-
-      const { shuffledQueue, targetSong } = result;
-      const canonicalSource = [...songs];
-
-      originalQueueRef.current = canonicalSource;
-      setSourceQueue(canonicalSource);
-      isShuffledRef.current = true;
-      setIsShuffled(true);
-
-      await playSong(targetSong, shuffledQueue);
-
-      updatePlaybackEngineSnapshot({
-        isShuffled: true,
-        sourceQueue: canonicalSource,
-      });
+      core.setIsPlaying(false);
+      core.isPlayingRef.current = false;
     },
-    [playSong]
-  );
-
-  const toggleRepeat = useCallback(() => {
-    const prev = repeatModeRef.current;
-    const next = prev === "off" ? "all" : prev === "all" ? "one" : "off";
-    repeatModeRef.current = next;
-    setRepeatMode(next);
-
-    updatePlaybackEngineSnapshot({
-      repeatMode: next,
-    });
-
-    if (TrackPlayer && RepeatMode) {
-      const repeatMap: Record<string, any> = {
-        off: RepeatMode.Off,
-        all: RepeatMode.Queue,
-        one: RepeatMode.Track,
-      };
-      void enqueueNativeQueueMutation(async () => {
-        await TrackPlayer!.setRepeatMode(repeatMap[next] || RepeatMode.Off);
-      }).catch(() => {});
-    }
-  }, [enqueueNativeQueueMutation]);
-
-  const isLiked = useCallback((songId: string) => {
-    return likedSongIds.includes(songId);
-  }, [likedSongIds]);
-
-  const toggleLike = useCallback(
-    async (song: Song) => {
-      if (!song?.id) return;
-      const songId = song.id;
-      const isCurrentlyLiked =
-        likedSongsRef.current.some((s) => s.id === songId) || likedSongIds.includes(songId);
-      const willBeLiked = !isCurrentlyLiked;
-
-      const prevSongs = likedSongsRef.current;
-      const nextSongs = willBeLiked
-        ? prevSongs.some((s) => s.id === songId)
-          ? prevSongs
-          : [...prevSongs, song]
-        : prevSongs.filter((s) => s.id !== songId);
-      likedSongsRef.current = nextSongs;
-      setLikedSongs(nextSongs);
-
-      setLikedSongIds((prevIds) =>
-        willBeLiked
-          ? prevIds.includes(songId)
-            ? prevIds
-            : [...prevIds, songId]
-          : prevIds.filter((id) => id !== songId)
-      );
-
-      if (authUser?.id) {
-        const previousPromise = likePendingSongsRef.current.get(songId) || Promise.resolve();
-        const currentOperation = previousPromise
-          .then(async () => {
-            if (willBeLiked) {
-              await addLikedSongToFirestore(authUser.id, song);
-            } else {
-              await removeLikedSongFromFirestore(authUser.id, songId);
-            }
-          })
-          .catch((error) => {
-            logger.error("[Player] Failed to sync like state with Firestore", error);
-          })
-          .finally(() => {
-            if (likePendingSongsRef.current.get(songId) === currentOperation) {
-              likePendingSongsRef.current.delete(songId);
-            }
-          });
-
-        likePendingSongsRef.current.set(songId, currentOperation);
-      }
-    },
-    [authUser?.id, likedSongIds]
-  );
-
-  const addToQueue = useCallback(
-    (song: Song) => {
-      if (!song?.id) return;
-
-      if (queueRef.current.some((s) => s.id === song.id)) {
-        showPlaybackNotice("Already in queue");
-        return;
-      }
-      showPlaybackNotice("Added to queue");
-
-      void enqueueNativeQueueMutation(async () => {
-        if (queueRef.current.some((s) => s.id === song.id)) {
-          return;
-        }
-
-        const resolvedUrl = await resolvePlaybackUrlCached(song);
-        if (!resolvedUrl) {
-          showPlaybackNotice("Could not add song: audio unavailable.");
-          return;
-        }
-
-        const previousQueue = queueRef.current;
-        const songWithUrl = withResolvedPlaybackUrl(song, resolvedUrl);
-        const nextQueue = [...previousQueue, songWithUrl];
-        queueRef.current = nextQueue;
-        setQueue(nextQueue);
-
-        const nextSourceQueue = [...originalQueueRef.current, songWithUrl];
-        originalQueueRef.current = nextSourceQueue;
-        setSourceQueue(nextSourceQueue);
-
-        setUserQueuedSongIds((prev) => (prev.includes(song.id) ? prev : [...prev, song.id]));
-
-        if (TrackPlayer && isPlayerReady) {
-          try {
-            const nativeQueue = await TrackPlayer!.getQueue();
-            if (nativeQueueIdsMatch(nativeQueue, previousQueue)) {
-              await TrackPlayer!.add([songToTrack(songWithUrl, resolvedUrl, streamUrlCache.current)]);
-            } else {
-              await replaceNativeQueuePreservingState(
-                nextQueue,
-                queueIndexRef.current,
-                {
-                  position: positionSecondsRef.current,
-                  wasPlaying: isPlayingRef.current,
-                }
-              );
-            }
-          } catch (error) {
-            logger.error("[Player] addToQueue native synchronization failed:", error);
-          }
-        }
-      });
-    },
-    [
-      enqueueNativeQueueMutation,
-      isPlayerReady,
-      nativeQueueIdsMatch,
-      replaceNativeQueuePreservingState,
-      resolvePlaybackUrlCached,
-      showPlaybackNotice,
-    ]
-  );
-
-  const playNext = useCallback(
-    (song: Song) => {
-      if (!song?.id) return;
-
-      if (currentSongRef.current?.id === song.id) {
-        showPlaybackNotice("This song is already playing");
-        return;
-      }
-      showPlaybackNotice("Playing next");
-
-      void enqueueNativeQueueMutation(async () => {
-        const resolvedUrl = await resolvePlaybackUrlCached(song);
-        if (!resolvedUrl) {
-          showPlaybackNotice("Could not queue song: audio unavailable.");
-          return;
-        }
-
-        const currentQ = queueRef.current;
-        const cleanQ = currentQ.filter((s) => s.id !== song.id);
-        const currentIndexInClean = cleanQ.findIndex((s) => s.id === currentSongRef.current?.id);
-        const insertAt = Math.max(0, (currentIndexInClean >= 0 ? currentIndexInClean : 0) + 1);
-        const nextSongWithUrl = withResolvedPlaybackUrl(song, resolvedUrl);
-        const nextQueue = [
-          ...cleanQ.slice(0, insertAt),
-          nextSongWithUrl,
-          ...cleanQ.slice(insertAt),
-        ];
-
-        queueRef.current = nextQueue;
-        setQueue(nextQueue);
-
-        const currentSourceQ = originalQueueRef.current;
-        const cleanSourceQ = currentSourceQ.filter((s) => s.id !== song.id);
-        const current = currentSongRef.current;
-        const sci = current ? cleanSourceQ.findIndex((s) => s.id === current.id) : 0;
-        const sourceInsertAt = Math.max(0, (sci >= 0 ? sci : 0) + 1);
-        const nextSourceQueue = [
-          ...cleanSourceQ.slice(0, sourceInsertAt),
-          song,
-          ...cleanSourceQ.slice(sourceInsertAt),
-        ];
-        originalQueueRef.current = nextSourceQueue;
-        setSourceQueue(nextSourceQueue);
-
-        setUserQueuedSongIds((prev) => [song.id, ...prev.filter((id) => id !== song.id)]);
-
-        if (TrackPlayer && isPlayerReady) {
-          try {
-            const nativeQueue = await TrackPlayer!.getQueue();
-            if (nativeQueueIdsMatch(nativeQueue, currentQ)) {
-              await TrackPlayer!.add(
-                [songToTrack(nextSongWithUrl, resolvedUrl, streamUrlCache.current)],
-                insertAt
-              );
-            } else {
-              await replaceNativeQueuePreservingState(
-                nextQueue,
-                queueIndexRef.current,
-                {
-                  position: positionSecondsRef.current,
-                  wasPlaying: isPlayingRef.current,
-                }
-              );
-            }
-          } catch (error) {
-            logger.error("[Player] playNext native synchronization failed:", error);
-          }
-        }
-      });
-    },
-    [
-      enqueueNativeQueueMutation,
-      isPlayerReady,
-      nativeQueueIdsMatch,
-      replaceNativeQueuePreservingState,
-      resolvePlaybackUrlCached,
-      showPlaybackNotice,
-    ]
-  );
-
-  const removeFromQueue = useCallback((index: number) => {
-    const currentQ = queueRef.current;
-    if (index === queueIndexRef.current || index < 0 || index >= currentQ.length) return;
-
-    const removedSong = currentQ[index];
-    const nextQueue = currentQ.filter((_, i) => i !== index);
-    const previousIndex = queueIndexRef.current;
-    const nextIndex = index < previousIndex ? previousIndex - 1 : previousIndex;
-
-    queueRef.current = nextQueue;
-    setQueue(nextQueue);
-    setQueueIndex(nextIndex);
-    queueIndexRef.current = nextIndex;
-
-    if (removedSong) {
-      const nextSourceQueue = originalQueueRef.current.filter((s) => s.id !== removedSong.id);
-      originalQueueRef.current = nextSourceQueue;
-      setSourceQueue(nextSourceQueue);
-
-      setUserQueuedSongIds((prevUserIds) => {
-        const itemIdx = prevUserIds.indexOf(removedSong.id);
-        if (itemIdx >= 0) {
-          const nextUserIds = [...prevUserIds];
-          nextUserIds.splice(itemIdx, 1);
-          return nextUserIds;
-        }
-        return prevUserIds;
-      });
-    }
-
-    updatePlaybackEngineSnapshot({
-      queue: nextQueue,
-      queueIndex: nextIndex,
-    });
-
-    if (TrackPlayer && isPlayerReady) {
-      void enqueueNativeQueueMutation(async () => {
-        try {
-          const nativeQueue = await TrackPlayer!.getQueue();
-          if (nativeQueueIdsMatch(nativeQueue, currentQ)) {
-            await TrackPlayer!.remove([index]);
-          } else {
-            await replaceNativeQueuePreservingState(
-              nextQueue,
-              nextIndex,
-              {
-                position: positionSecondsRef.current,
-                wasPlaying: isPlayingRef.current,
-              }
-            );
-          }
-        } catch (err) {
-          logger.error("[Player] TrackPlayer.remove failed:", err);
-        }
-      });
-    }
-  }, [
-    enqueueNativeQueueMutation,
-    isPlayerReady,
-    nativeQueueIdsMatch,
-    replaceNativeQueuePreservingState,
-  ]);
-
-  const reorderQueue = useCallback(
-    (fromIndex: number, toIndex: number) => {
-      const currentQ = queueRef.current;
-      if (
-        fromIndex < 0 ||
-        fromIndex >= currentQ.length ||
-        toIndex < 0 ||
-        toIndex >= currentQ.length ||
-        fromIndex === toIndex
-      ) {
-        return;
-      }
-
-      const nextQueue = [...currentQ];
-      const [item] = nextQueue.splice(fromIndex, 1);
-      if (!item) return;
-      nextQueue.splice(toIndex, 0, item);
-
-      const currentActiveIdx = queueIndexRef.current;
-      let newActiveIdx = currentActiveIdx;
-      if (currentActiveIdx === fromIndex) {
-        newActiveIdx = toIndex;
-      } else if (fromIndex < currentActiveIdx && toIndex >= currentActiveIdx) {
-        newActiveIdx = currentActiveIdx - 1;
-      } else if (fromIndex > currentActiveIdx && toIndex <= currentActiveIdx) {
-        newActiveIdx = currentActiveIdx + 1;
-      }
-
-      queueRef.current = nextQueue;
-      setQueue(nextQueue);
-      setQueueIndex(newActiveIdx);
-      queueIndexRef.current = newActiveIdx;
-
-      if (!isShuffledRef.current) {
-        originalQueueRef.current = nextQueue;
-        setSourceQueue(nextQueue);
-      }
-
-      updatePlaybackEngineSnapshot({
-        queue: nextQueue,
-        queueIndex: newActiveIdx,
-      });
-
-      if (TrackPlayer && isPlayerReady) {
-        void enqueueNativeQueueMutation(async () => {
-          try {
-            const nativeQueue = await TrackPlayer!.getQueue();
-            if (nativeQueueIdsMatch(nativeQueue, currentQ)) {
-              await TrackPlayer!.move(fromIndex, toIndex);
-            } else {
-              await replaceNativeQueuePreservingState(
-                nextQueue,
-                newActiveIdx,
-                {
-                  position: positionSecondsRef.current,
-                  wasPlaying: isPlayingRef.current,
-                }
-              );
-            }
-          } catch (err) {
-            logger.error("[Player] TrackPlayer.move failed:", err);
-          }
-        });
-      }
-    },
-    [
-      enqueueNativeQueueMutation,
-      isPlayerReady,
-      nativeQueueIdsMatch,
-      replaceNativeQueuePreservingState,
-    ]
-  );
-
-  const clearQueue = useCallback(() => {
-    const current = currentSongRef.current;
-    const previousQueue = queueRef.current;
-    if (!current) return;
-
-    const next = [current];
-
-    setQueue(next);
-    setSourceQueue(next);
-    queueRef.current = next;
-    originalQueueRef.current = next;
-    setQueueIndex(0);
-    queueIndexRef.current = 0;
-    setUserQueuedSongIds([]);
-
-    updatePlaybackEngineSnapshot({
-      queue: next,
-      queueIndex: 0,
-      userQueuedSongIds: [],
-    });
-
-    if (TrackPlayer && isPlayerReady) {
-      void enqueueNativeQueueMutation(async () => {
-        try {
-          const nativeQueue = await TrackPlayer!.getQueue();
-          if (nativeQueueIdsMatch(nativeQueue, previousQueue)) {
-            await TrackPlayer!.removeUpcomingTracks();
-          } else {
-            await replaceNativeQueuePreservingState(
-              next,
-              0,
-              {
-                position: positionSecondsRef.current,
-                wasPlaying: isPlayingRef.current,
-              }
-            );
-          }
-        } catch (err) {
-          logger.error("[Player] clearQueue native synchronization failed:", err);
-        }
-      });
-    }
-
-  }, [
-    enqueueNativeQueueMutation,
-    isPlayerReady,
-    nativeQueueIdsMatch,
-    replaceNativeQueuePreservingState,
-  ]);
-
-  const shuffleQueue = useCallback(() => {
-    toggleShuffle();
-  }, [toggleShuffle]);
-
-  const setSleepTimer = useCallback((selection: SleepTimerSelection) => {
-    clearSleepTimerTimeout();
-    if (selection === "end-of-stack") {
-      const nextTimer: SleepTimerState = {
-        mode: "end-of-stack",
-        label: "End of stack",
-        endsAt: null,
-      };
-      sleepTimerRef.current = nextTimer;
-      setSleepTimerState(nextTimer);
-      return;
-    }
-
-    const minutes = selection;
-    const endsAt = Date.now() + minutes * 60 * 1000;
-    const nextTimer: SleepTimerState = {
-      mode: "duration",
-      label: minutes === 60 ? "1 hour" : `${minutes} min`,
-      endsAt,
-    };
-    sleepTimerRef.current = nextTimer;
-    setSleepTimerState(nextTimer);
-
-    sleepTimerTimeoutRef.current = setTimeout(() => {
-      if (isPlayingRef.current) {
-        void togglePlay();
-      }
-      clearSleepTimer();
-    }, Math.max(0, endsAt - Date.now()));
-  }, [clearSleepTimer, clearSleepTimerTimeout, togglePlay]);
-
-  const changeStreamingQuality = useCallback(
-    async (quality: "low" | "medium" | "high") => {
-      await Storage.saveSettings({ streamingQuality: quality });
-
-      streamUrlCache.current.clear();
-      streamResolveCache.current.clear();
-
-      const activeSong = currentSongRef.current;
-      if (!activeSong) return;
-
-      const positionSec = Math.max(0, positionSecondsRef.current);
-      const wasPlaying = isPlayingRef.current;
-
-      try {
-        const { url: newAudioUrl, qualityState } = await resolvePlaybackUrlWithDetails(activeSong, quality);
-        if (!newAudioUrl) {
-          showPlaybackNotice("Could not change streaming quality.");
-          return;
-        }
-
-        setPlaybackQuality(qualityState);
-
-        const resolvedSong = withResolvedPlaybackUrl(activeSong, newAudioUrl);
-        currentSongRef.current = resolvedSong;
-        setCurrentSong(resolvedSong);
-
-        const currentIdx = queueIndexRef.current;
-        const updatedJsQueue = queueRef.current.map((s, idx) =>
-          idx === currentIdx ? resolvedSong : s
-        );
-        queueRef.current = updatedJsQueue;
-        setQueue(updatedJsQueue);
-
-        const updatedSourceQueue = originalQueueRef.current.map((s) =>
-          s.id === resolvedSong.id ? resolvedSong : s
-        );
-        originalQueueRef.current = updatedSourceQueue;
-        setSourceQueue(updatedSourceQueue);
-
-        if (TrackPlayer && (isPlayerReady || (await ensurePlayerReady()))) {
-          await enqueueNativeQueueMutation(async () => {
-            const nativeQueue = await TrackPlayer!.getQueue();
-            const activeIdx = queueIndexRef.current;
-            if (!nativeQueue.length || activeIdx < 0 || activeIdx >= nativeQueue.length) return;
-
-            // Keep every existing native source unchanged except the active track.
-            // This avoids resolving/reloading the entire queue just to change quality.
-            const updatedNativeQueue = nativeQueue.map((track: any, idx: number) =>
-              idx === activeIdx
-                ? songToTrack(
-                    resolvedSong,
-                    newAudioUrl,
-                    streamUrlCache.current
-                  )
-                : track
-            );
-
-            await TrackPlayer!.setQueue(updatedNativeQueue);
-            await TrackPlayer!.skip(activeIdx);
-            if (positionSec > 0) {
-              await TrackPlayer!.seekTo(positionSec);
-            }
-
-            if (RepeatMode) {
-              const repeatMap: Record<string, any> = {
-                off: RepeatMode.Off,
-                all: RepeatMode.Queue,
-                one: RepeatMode.Track,
-              };
-              await TrackPlayer!.setRepeatMode(
-                repeatMap[repeatModeRef.current] ?? RepeatMode.Off
-              ).catch(() => {});
-            }
-
-            if (wasPlaying) {
-              await TrackPlayer!.play();
-            } else {
-              await TrackPlayer!.pause().catch(() => {});
-            }
-          });
-        } else if (canUseLightweightAudioFallback) {
-          await ExpoAvPlayer.loadAndPlay(newAudioUrl);
-          if (positionSec > 0) {
-            await ExpoAvPlayer.seekTo(positionSec);
-          }
-          if (!wasPlaying) {
-            await ExpoAvPlayer.pause();
-          }
-        }
-      } catch (err) {
-        logger.error("[Player] Failed to reload playback stream on quality change:", err);
-      }
-    },
-    [
-      enqueueNativeQueueMutation,
-      ensurePlayerReady,
-      isPlayerReady,
-      showPlaybackNotice,
-    ]
-  );
-
-  // TrackPlayer native event handlers
-  useEffect(() => {
-    if (!isPlayerReady || !TrackPlayer) return;
-
-    const unsubs = [
-      subscribeTrackPlayerEvent(Event.PlaybackState, (event: any) => {
-        const nextState = event && typeof event === "object" && "state" in event ? event.state : event;
-
-        switch (nextState) {
-          case State.Playing:
-            desiredPlayStateRef.current = null;
-            setIsPlaying(true);
-            isPlayingRef.current = true;
-            setPlaybackLoading(false);
-            updatePlaybackEngineSnapshot({ isPlaying: true, isLoading: false, isBuffering: false });
-            break;
-
-          case State.Paused:
-          case State.Stopped:
-            if (!playbackLoadingRef.current && desiredPlayStateRef.current !== true) {
-              setIsPlaying(false);
-              isPlayingRef.current = false;
-              setPlaybackLoading(false);
-              updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
-            }
-            break;
-
-          case State.Buffering:
-          case State.Loading:
-            updatePlaybackEngineSnapshot({ isBuffering: true });
-            break;
-        }
-      }),
-      subscribeTrackPlayerEvent(Event.PlaybackError, (error: any) => {
-        // Handle playback errors (stream failures, network issues, codec problems)
-        logger.error("[Player] PlaybackError event", error);
-        
-        setIsPlaying(false);
-        isPlayingRef.current = false;
-        setPlaybackLoading(false);
-        updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
-        
-        // Show user-friendly error message
-        const errorMsg = error?.message || error?.code || "Playback failed";
-        showPlaybackNotice(`Playback error: ${errorMsg}`);
-        
-        // Log detailed error for debugging
-        if (error?.code) logger.error("[Player] Error code:", error.code);
-        if (currentSongRef.current) {
-          logger.error("[Player] Failed song:", currentSongRef.current.title);
-        }
-      }),
-      subscribeTrackPlayerEvent(Event.PlaybackProgressUpdated, (event: any) => {
-        if (typeof event?.position === "number") {
-          setNativePosition(event.position);
-        }
-        if (typeof event?.duration === "number" && event.duration > 0) {
-          const dur = event.duration;
-          setNativeDuration((prev) => (Math.abs(prev - dur) > 0.5 ? dur : prev));
-        }
-      }),
-      subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
-        const nextIndex =
-          typeof event?.index === "number"
-            ? event.index
-            : typeof event?.nextTrack === "number"
-            ? event.nextTrack
-            : -1;
-        if (nextIndex < 0) return;
-        const currentQ = queueRef.current;
-        const targetSong = currentQ[nextIndex];
-        if (targetSong && targetSong.id !== currentSongRef.current?.id) {
-          currentSongRef.current = targetSong;
-          setCurrentSong(targetSong);
-          setQueueIndex(nextIndex);
-          queueIndexRef.current = nextIndex;
-          setSeekOverride(null);
-          setNativePosition(0);
-          const initialDuration = toDurationSeconds(event?.track?.duration || targetSong.duration);
-          setNativeDuration(initialDuration > 0 ? initialDuration : 0);
-          // Only update track and index. Let Event.PlaybackState be the sole authority on isPlaying.
-          updatePlaybackEngineSnapshot({
-            currentSong: targetSong,
-            queueIndex: nextIndex,
-          });
-
-          prefetchAdjacentTrackStreams(currentQ, nextIndex);
-        }
-      }),
-      subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, () => {
-        setIsPlaying(false);
-        isPlayingRef.current = false;
-        setPlaybackLoading(false);
-        updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
-        if (sleepTimerRef.current?.mode === "end-of-stack") {
-          clearSleepTimer();
-        }
-      }),
-    ];
-
-    return () => {
-      unsubs.forEach((unsub) => unsub?.());
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- TrackPlayer event callbacks use mutable refs
-  }, [isPlayerReady]);
-
-  // Load liked songs from Firestore when user auth state changes
-  useEffect(() => {
-    if (authUser?.id) {
-      getLikedSongsFromFirestore(authUser.id)
-        .then((songs) => {
-          if (songs && songs.length > 0) {
-            setLikedSongs(songs);
-            setLikedSongIds(songs.map((s) => s.id));
-            likedSongsRef.current = songs;
-          }
-        })
-        .catch(() => {});
-    } else {
-      setLikedSongs([]);
-      setLikedSongIds([]);
-      likedSongsRef.current = [];
-    }
-  }, [authUser?.id]);
-
-  // Save current player state to AsyncStorage (event-driven)
-  useEffect(() => {
-    if (!currentSong) return;
-
-    const persist = () => {
-      if (!currentSongRef.current) return;
-      Storage.savePlayerState({
-        currentSong: currentSongRef.current,
-        queue: queueRef.current,
-        queueIndex: queueIndexRef.current,
-        positionSeconds: positionSecondsRef.current,
-        updatedAt: Date.now(),
-      }).catch(() => {});
-    };
-
-    persist();
-
-    const sub = AppState.addEventListener("change", (state) => {
-      if (state !== "active") persist();
-    });
-
-    return () => {
-      sub.remove();
-      persist();
-    };
-  }, [currentSong, queueIndex]);
-
-  // Synchronize playback progress and active track immediately when returning to foreground
-  useEffect(() => {
-    const handleAppStateChange = async (nextState: string) => {
-      if (nextState === "active" && TrackPlayer && isPlayerReady) {
-        try {
-          const [activeTrack, prog] = await Promise.all([
-            TrackPlayer.getActiveTrack().catch(() => null),
-            TrackPlayer.getProgress().catch(() => null),
-          ]);
-          if (activeTrack?.id && activeTrack.id !== currentSongRef.current?.id) {
-            const foundIdx = queueRef.current.findIndex((s) => s.id === activeTrack.id);
-            if (foundIdx >= 0) {
-              const target = queueRef.current[foundIdx];
-              currentSongRef.current = target;
-              setCurrentSong(target);
-              setQueueIndex(foundIdx);
-              queueIndexRef.current = foundIdx;
-            }
-          }
-          if (prog) {
-            if (typeof prog.position === "number") {
-              setNativePosition(prog.position);
-            }
-            if (typeof prog.duration === "number" && prog.duration > 0) {
-              setNativeDuration(prog.duration);
-            }
-          }
-        } catch {
-          // ignore non-fatal sync errors
-        }
-      }
-    };
-
-    const sub = AppState.addEventListener("change", handleAppStateChange);
-    return () => sub.remove();
-  }, [isPlayerReady]);
-
-  // Sync state and listen for playback requests from Apple CarPlay
-  useEffect(() => {
-    if (Platform.OS !== "ios" || !carPlayService.isAvailable()) return;
-
-    if (likedSongs.length > 0) {
-      void carPlayService.syncFavorites(likedSongs);
-    }
-
-    Storage.getUserPlaylists()
-      .then((playlists) => {
-        if (playlists && playlists.length > 0) {
-          void carPlayService.syncPlaylists(playlists);
-        }
-      })
-      .catch(() => {});
-
-    Storage.getRecentlyPlayed()
-      .then((recent) => {
-        const recentSongs: Song[] = (recent || []).flatMap((item) => {
-          const s = item.data as Song;
-          return s && s.id ? [s] : [];
-        });
-        if (recentSongs.length > 0) {
-          void carPlayService.syncRecent(recentSongs);
-        }
-      })
-      .catch(() => {});
-
-    const unsubPlay = carPlayService.onPlaySong((event) => {
-      if (event.song && (event.song as Song).id) {
-        void playSong(event.song as Song);
-      } else if (event.songId) {
-        const found =
-          queueRef.current.find((s) => s.id === event.songId) ||
-          likedSongsRef.current.find((s) => s.id === event.songId);
-        if (found) {
-          void playSong(found);
-        }
-      }
-    });
-
-    return () => {
-      unsubPlay();
-    };
-  }, [likedSongs, playSong]);
-
-  // Context Values
-  const value = useMemo<PlayerContextValue>(
-    () => ({
-      currentSong,
-      queue,
-      userQueuedSongIds,
-      sourceQueue,
-      queueIndex,
-      isPlaying: resolvedIsPlaying,
-      progress: resolvedProgress,
-      duration: resolvedDurationMillis,
-      positionMillis: resolvedPositionMillis,
-      isShuffled,
-      repeatMode,
-      likedSongIds,
-      likedSongs,
-      isLoading: playbackLoading,
-      albumColor,
-      textColor,
-      sleepTimer,
-      playbackQuality,
-      playSong,
-      shufflePlay,
-      togglePlay,
-      nextSong,
-      prevSong,
-      seekTo,
-      toggleShuffle,
-      toggleRepeat,
-      toggleLike,
-      isLiked,
-      addToQueue,
-      playNext,
-      removeFromQueue,
-      reorderQueue,
-      clearQueue,
-      shuffleQueue,
-      setSleepTimer,
-      clearSleepTimer,
-      setAlbumColor,
-      setTextColor,
-      changeStreamingQuality,
-    }),
-    [
-      currentSong,
-      queue,
-      userQueuedSongIds,
-      sourceQueue,
-      queueIndex,
-      resolvedIsPlaying,
-      resolvedProgress,
-      resolvedDurationMillis,
-      resolvedPositionMillis,
-      isShuffled,
-      repeatMode,
-      likedSongIds,
-      likedSongs,
-      playbackLoading,
-      albumColor,
-      textColor,
-      sleepTimer,
-      playbackQuality,
-      playSong,
-      shufflePlay,
-      togglePlay,
-      nextSong,
-      prevSong,
-      seekTo,
-      toggleShuffle,
-      toggleRepeat,
-      toggleLike,
-      isLiked,
-      addToQueue,
-      playNext,
-      removeFromQueue,
-      reorderQueue,
-      clearQueue,
-      shuffleQueue,
-      setSleepTimer,
-      clearSleepTimer,
-      setAlbumColor,
-      setTextColor,
-      changeStreamingQuality,
-    ]
-  );
-
-  const liteValue = useMemo<PlayerLiteContextValue>(
-    () => ({
-      currentSong,
-      queue,
-      userQueuedSongIds,
-      sourceQueue,
-      queueIndex,
-      isPlaying: resolvedIsPlaying,
-      isShuffled,
-      repeatMode,
-      likedSongIds,
-      likedSongs,
-      isLoading: playbackLoading,
-      albumColor,
-      textColor,
-      sleepTimer,
-      playbackQuality,
-      playSong,
-      shufflePlay,
-      togglePlay,
-      nextSong,
-      prevSong,
-      seekTo,
-      toggleShuffle,
-      toggleRepeat,
-      toggleLike,
-      isLiked,
-      addToQueue,
-      playNext,
-      removeFromQueue,
-      reorderQueue,
-      clearQueue,
-      shuffleQueue,
-      setSleepTimer,
-      clearSleepTimer,
-      setAlbumColor,
-      setTextColor,
-      changeStreamingQuality,
-    }),
-    [
-      currentSong,
-      queue,
-      userQueuedSongIds,
-      sourceQueue,
-      queueIndex,
-      resolvedIsPlaying,
-      isShuffled,
-      repeatMode,
-      likedSongIds,
-      likedSongs,
-      playbackLoading,
-      albumColor,
-      textColor,
-      sleepTimer,
-      playbackQuality,
-      playSong,
-      shufflePlay,
-      togglePlay,
-      nextSong,
-      prevSong,
-      seekTo,
-      toggleShuffle,
-      toggleRepeat,
-      toggleLike,
-      isLiked,
-      addToQueue,
-      playNext,
-      removeFromQueue,
-      reorderQueue,
-      clearQueue,
-      shuffleQueue,
-      setSleepTimer,
-      clearSleepTimer,
-      setAlbumColor,
-      setTextColor,
-      changeStreamingQuality,
-    ]
-  );
-
-  const progressValue = useMemo(
-    () => ({
-      progress: resolvedProgress,
-      duration: resolvedDurationMillis,
-      positionMillis: resolvedPositionMillis,
-    }),
-    [resolvedProgress, resolvedDurationMillis, resolvedPositionMillis]
-  );
-
-  const rowValue = useMemo(
-    () => ({
-      currentSongId: currentSong?.id || null,
-      isPlaying: resolvedIsPlaying,
-      playSong,
-      toggleLike,
-      isLiked,
-      addToQueue,
-      playNext,
-    }),
-    [currentSong?.id, resolvedIsPlaying, playSong, toggleLike, isLiked, addToQueue, playNext]
-  );
-
-  const browseValue = useMemo(
-    () => ({
-      currentSong,
-      queue,
-      isPlaying: resolvedIsPlaying,
-      likedSongs,
-      playSong,
-      shufflePlay,
-      togglePlay,
-      toggleLike,
-      toggleShuffle,
-    }),
-    [currentSong, queue, resolvedIsPlaying, likedSongs, playSong, shufflePlay, togglePlay, toggleLike, toggleShuffle]
-  );
-
-  const queueValue = useMemo(
-    () => ({
-      currentSong,
-      queue,
-      userQueuedSongIds,
-      queueIndex,
-      isShuffled,
-      sleepTimer,
-      playSong,
-      shufflePlay,
-      removeFromQueue,
-      reorderQueue,
-      clearQueue,
-      shuffleQueue,
-    }),
-    [
-      currentSong,
-      queue,
-      userQueuedSongIds,
-      queueIndex,
-      isShuffled,
-      sleepTimer,
-      playSong,
-      shufflePlay,
-      removeFromQueue,
-      reorderQueue,
-      clearQueue,
-      shuffleQueue,
-    ]
-  );
-
-  const actionsValue = useMemo(
-    () => ({
-      isShuffled,
-      repeatMode,
-      likedSongIds,
-      likedSongs,
-      albumColor,
-      textColor,
-      sleepTimer,
-      playbackQuality,
-      playSong,
-      shufflePlay,
-      togglePlay,
-      nextSong,
-      prevSong,
-      seekTo,
-      toggleShuffle,
-      toggleRepeat,
-      toggleLike,
-      isLiked,
-      addToQueue,
-      playNext,
-      removeFromQueue,
-      reorderQueue,
-      clearQueue,
-      shuffleQueue,
-      setSleepTimer,
-      clearSleepTimer,
-      setAlbumColor,
-      setTextColor,
-      changeStreamingQuality,
-    }),
-    [
-      isShuffled,
-      repeatMode,
-      likedSongIds,
-      likedSongs,
-      albumColor,
-      textColor,
-      sleepTimer,
-      playbackQuality,
-      playSong,
-      shufflePlay,
-      togglePlay,
-      nextSong,
-      prevSong,
-      seekTo,
-      toggleShuffle,
-      toggleRepeat,
-      toggleLike,
-      isLiked,
-      addToQueue,
-      playNext,
-      removeFromQueue,
-      reorderQueue,
-      clearQueue,
-      shuffleQueue,
-      setSleepTimer,
-      clearSleepTimer,
-      setAlbumColor,
-      setTextColor,
-      changeStreamingQuality,
-    ]
-  );
-
-  const likedValue = useMemo<PlayerLikedContextValue>(
-    () => ({
-      likedSongs,
-      likedSongIds,
-      likedSongsCount: likedSongs.length,
-      isLiked,
-      toggleLike,
-    }),
-    [likedSongs, likedSongIds, isLiked, toggleLike]
-  );
+  });
+
+  const { likedSongIds, likedSongs, likedSongsRef, isLiked, toggleLike } = useAudioLikedSync({
+    userId: authUser?.id,
+  });
+
+  const { changeStreamingQuality } = useAudioQualityControl({
+    streamUrlCache: core.streamUrlCache,
+    streamResolveCache: core.streamResolveCache,
+    currentSongRef: core.currentSongRef,
+    setCurrentSong: core.setCurrentSong,
+    positionSecondsRef,
+    isPlayingRef: core.isPlayingRef,
+    setPlaybackQuality: core.setPlaybackQuality,
+    queueIndexRef: core.queueIndexRef,
+    queueRef: core.queueRef,
+    setQueue: core.setQueue,
+    originalQueueRef: core.originalQueueRef,
+    setSourceQueue: core.setSourceQueue,
+    TrackPlayer,
+    isPlayerReady: core.isPlayerReady,
+    ensurePlayerReady: core.ensurePlayerReady,
+    RepeatMode,
+    repeatModeRef: core.repeatModeRef,
+    enqueueNativeQueueMutation: core.enqueueNativeQueueMutation,
+    canUseLightweightAudioFallback,
+    showPlaybackNotice: core.showPlaybackNotice,
+  });
+
+  const {
+    toggleShuffle,
+    shufflePlay,
+    toggleRepeat,
+    addToQueue,
+    playNext,
+    removeFromQueue,
+    reorderQueue,
+    clearQueue,
+    shuffleQueue,
+  } = useAudioQueueOperations({
+    queue: core.queue,
+    queueRef: core.queueRef,
+    setQueue: core.setQueue,
+    sourceQueue: core.sourceQueue,
+    originalQueueRef: core.originalQueueRef,
+    setSourceQueue: core.setSourceQueue,
+    queueIndex: core.queueIndex,
+    queueIndexRef: core.queueIndexRef,
+    setQueueIndex: core.setQueueIndex,
+    userQueuedSongIds: core.userQueuedSongIds,
+    userQueuedSongIdsRef: core.userQueuedSongIdsRef,
+    setUserQueuedSongIds: core.setUserQueuedSongIds,
+    isShuffled: core.isShuffled,
+    isShuffledRef: core.isShuffledRef,
+    setIsShuffled: core.setIsShuffled,
+    repeatMode: core.repeatMode,
+    repeatModeRef: core.repeatModeRef,
+    setRepeatMode: core.setRepeatMode,
+    currentSongRef: core.currentSongRef,
+    isPlayingRef: core.isPlayingRef,
+    positionSecondsRef,
+    streamUrlCache: core.streamUrlCache,
+    TrackPlayer,
+    isPlayerReady: core.isPlayerReady,
+    RepeatMode,
+    enqueueNativeQueueMutation: core.enqueueNativeQueueMutation,
+    nativeQueueIdsMatch: core.nativeQueueIdsMatch,
+    replaceNativeQueuePreservingState: core.replaceNativeQueuePreservingState,
+    resolvePlaybackUrlCached: core.resolvePlaybackUrlCached,
+    showPlaybackNotice: core.showPlaybackNotice,
+    playSong,
+  });
+
+  useAudioSyncListeners({
+    isPlayerReady: core.isPlayerReady,
+    TrackPlayer,
+    Event,
+    State,
+    subscribeTrackPlayerEvent,
+    currentSong: core.currentSong,
+    currentSongRef: core.currentSongRef,
+    setCurrentSong: core.setCurrentSong,
+    queueRef: core.queueRef,
+    queueIndex: core.queueIndex,
+    queueIndexRef: core.queueIndexRef,
+    setQueueIndex: core.setQueueIndex,
+    setIsPlaying: core.setIsPlaying,
+    isPlayingRef: core.isPlayingRef,
+    setPlaybackLoading: core.setPlaybackLoading,
+    playbackLoadingRef: core.playbackLoadingRef,
+    desiredPlayStateRef: core.desiredPlayStateRef,
+    positionSecondsRef,
+    setNativePosition,
+    setNativeDuration,
+    setSeekOverride,
+    prefetchAdjacentTrackStreams: core.prefetchAdjacentTrackStreams,
+    sleepTimerRef,
+    clearSleepTimer,
+    showPlaybackNotice: core.showPlaybackNotice,
+    likedSongs,
+    likedSongsRef,
+    playSong,
+  });
+
+  const playbackValues = useAudioPlaybackValues({
+    currentSong: core.currentSong,
+    queue: core.queue,
+    userQueuedSongIds: core.userQueuedSongIds,
+    sourceQueue: core.sourceQueue,
+    queueIndex: core.queueIndex,
+    resolvedIsPlaying: core.isPlaying,
+    resolvedProgress,
+    resolvedDurationMillis,
+    resolvedPositionMillis,
+    isShuffled: core.isShuffled,
+    repeatMode: core.repeatMode,
+    likedSongIds,
+    likedSongs,
+    playbackLoading: core.playbackLoading,
+    albumColor: core.albumColor,
+    textColor: core.textColor,
+    sleepTimer,
+    playbackQuality: core.playbackQuality,
+    playSong,
+    shufflePlay,
+    togglePlay,
+    nextSong,
+    prevSong,
+    seekTo,
+    toggleShuffle,
+    toggleRepeat,
+    toggleLike,
+    isLiked,
+    addToQueue,
+    playNext,
+    removeFromQueue,
+    reorderQueue,
+    clearQueue,
+    shuffleQueue,
+    setSleepTimer,
+    clearSleepTimer,
+    setAlbumColor: core.setAlbumColor,
+    setTextColor: core.setTextColor,
+    changeStreamingQuality,
+  });
 
   return (
-    <PlayerContext.Provider value={value}>
-      <PlayerLiteContext.Provider value={liteValue}>
-        <PlayerProgressContext.Provider value={progressValue}>
-          <PlayerActionsContext.Provider value={actionsValue}>
-            <PlayerLikedContext.Provider value={likedValue}>
-              <PlayerBrowseContext.Provider value={browseValue}>
-                <PlayerQueueContext.Provider value={queueValue}>
-                  <PlayerRowContext.Provider value={rowValue}>
-                    <View style={{ flex: 1 }}>{children}</View>
-                  </PlayerRowContext.Provider>
-                </PlayerQueueContext.Provider>
-              </PlayerBrowseContext.Provider>
-            </PlayerLikedContext.Provider>
-          </PlayerActionsContext.Provider>
-        </PlayerProgressContext.Provider>
-      </PlayerLiteContext.Provider>
-    </PlayerContext.Provider>
+    <PlayerContextTree playbackValues={playbackValues}>
+      {children}
+    </PlayerContextTree>
   );
-}
-
-export function usePlayerProgress() {
-  const ctx = use(PlayerProgressContext);
-  if (!ctx) throw new Error("usePlayerProgress must be used within PlayerProvider");
-  return ctx;
-}
-
-export function useOptionalPlayerProgress() {
-  return use(PlayerProgressContext);
-}
-
-export function usePlayerActions() {
-  const ctx = use(PlayerActionsContext);
-  if (!ctx) throw new Error("usePlayerActions must be used within PlayerProvider");
-  return ctx;
-}
-
-export function useOptionalPlayerActions() {
-  return use(PlayerActionsContext);
-}
-
-export function useLikedSongs() {
-  const ctx = use(PlayerLikedContext);
-  if (!ctx) throw new Error("useLikedSongs must be used within PlayerProvider");
-  return ctx;
-}
-
-export function usePlayerRow() {
-  const ctx = use(PlayerRowContext);
-  if (!ctx) throw new Error("usePlayerRow must be used within PlayerProvider");
-  return ctx;
-}
-
-export function usePlayerRowActions() {
-  return usePlayerRow();
-}
-
-export function usePlayerBrowse() {
-  const ctx = use(PlayerBrowseContext);
-  if (!ctx) throw new Error("usePlayerBrowse must be used within PlayerProvider");
-  return ctx;
 }

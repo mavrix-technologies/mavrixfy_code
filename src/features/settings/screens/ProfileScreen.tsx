@@ -109,9 +109,8 @@ export function ProfileScreen() {
           return;
         }
 
-        setIsLoadingAd(true);
         try {
-          const unlocked = await requestHighQualityUnlockWithRewardedAd();
+          const unlocked = await requestHighQualityUnlockWithRewardedAd(setIsLoadingAd);
           if (unlocked) {
             const updated = await getSettings();
             setSettings(updated);

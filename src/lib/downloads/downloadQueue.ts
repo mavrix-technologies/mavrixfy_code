@@ -49,7 +49,7 @@ export function onQueueEvent(event: QueueEventType, fn: QueueListener): () => vo
   return () => listeners.get(event)?.delete(fn);
 }
 
-function emit(event: QueueEventType, songId: string, item: DownloadItem) {
+function emitQueueEvent(event: QueueEventType, songId: string, item: DownloadItem) {
   listeners.get(event)?.forEach((fn) => {
     try { fn(songId, item); } catch { /* ignore */ }
   });
@@ -111,7 +111,7 @@ async function updateStatus(
   if (!item) return null;
   const updated: DownloadItem = { ...item, status, ...extra };
   await saveDownload(updated);
-  emit("status", songId, updated);
+  emitQueueEvent("status", songId, updated);
   return updated;
 }
 
@@ -261,7 +261,7 @@ async function executeDownload(songId: string): Promise<void> {
           totalBytes: totalBytesExpectedToWrite,
         };
         updateDownloadMemory(patched);
-        emit("progress", songId, patched);
+        emitQueueEvent("progress", songId, patched);
 
         const now = Date.now();
         const lastPersistedAt = lastProgressPersistAt.get(songId) ?? 0;
@@ -318,7 +318,7 @@ async function executeDownload(songId: string): Promise<void> {
       failedAt: null,
     });
 
-    if (completedItem) emit("completed", songId, completedItem);
+    if (completedItem) emitQueueEvent("completed", songId, completedItem);
     releaseSlot(songId);
 
   } catch (err: any) {
@@ -367,7 +367,7 @@ async function executeDownload(songId: string): Promise<void> {
         failureReason: err?.message ?? "Download failed after retries",
         failedAt: new Date().toISOString(),
       });
-      if (failedItem) emit("failed", songId, failedItem);
+      if (failedItem) emitQueueEvent("failed", songId, failedItem);
     }
   }
 }
@@ -387,7 +387,7 @@ export async function enqueueDownload(
   }
 
   void saveDownload({ ...item, status: "queued" });
-  emit("status", songId, { ...item, status: "queued" });
+  emitQueueEvent("status", songId, { ...item, status: "queued" });
 
   const hasSpace = await hasSufficientStorage();
   if (!hasSpace) {
@@ -467,7 +467,7 @@ export async function cancelDownload(songId: string): Promise<void> {
   await updateStatus(songId, "deleted");
 }
 
-export async function retryDownload(
+export function retryDownload(
   songId: string,
   prefs: DownloadPreferences
 ): Promise<void> {

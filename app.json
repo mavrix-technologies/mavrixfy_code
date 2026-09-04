@@ -2,6 +2,7 @@
   "expo": {
     "name": "Mavrixfy",
     "slug": "mavrixfy",
+    "scheme": "mavrixfy",
     "version": "3.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/mavrixfy_icon.png",
@@ -11,7 +12,7 @@
       "supportsTablet": true,
       "icon": "./assets/images/mavrixfy_icon.png",
       "bundleIdentifier": "com.mavrixfy.app",
-      "buildNumber": "32001",
+      "buildNumber": "32002",
       "bitcode": false,
       "usesAppleSignIn": true,
       "infoPlist": {
@@ -62,7 +63,7 @@
     "android": {
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
-      "versionCode": 32001,
+      "versionCode": 32002,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icon_foreground.png",
@@ -135,7 +136,7 @@
         "expo-build-properties",
         {
           "ios": {
-            "deploymentTarget": "15.1",
+            "deploymentTarget": "16.4",
             "useFrameworks": "static",
             "extraBuildProperties": {
               "GCC_WARN_INHIBIT_ALL_WARNINGS": "YES",

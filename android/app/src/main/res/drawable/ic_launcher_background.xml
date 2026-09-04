@@ -3,7 +3,4 @@
   <item>
     <bitmap android:gravity="center" android:src="@drawable/splashscreen_logo"/>
   </item>
-  <item android:gravity="bottom|center_horizontal" android:bottom="48dp">
-    <bitmap android:gravity="bottom|center_horizontal" android:src="@drawable/branding_footer"/>
-  </item>
 </layer-list>

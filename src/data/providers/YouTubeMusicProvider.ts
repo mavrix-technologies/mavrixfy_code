@@ -1,11 +1,11 @@
 import { type Song } from "@/lib/musicData";
 
-async function searchYouTubeMusicVideos(
+function searchYouTubeMusicVideos(
   _query: string,
   _limit?: number,
   _signal?: AbortSignal
 ): Promise<Song[]> {
-  return [];
+  return Promise.resolve([]);
 }
 
 export async function getYouTubeMusicVisualVideoId(song: Song): Promise<string | null> {

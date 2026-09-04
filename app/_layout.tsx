@@ -1,19 +1,18 @@
 import * as Animated from "@/lib/nativeAnimated";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { DarkTheme, ThemeProvider } from "@react-navigation/native";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { DarkTheme, ThemeProvider, Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  InteractionManager,
   LogBox,
   Platform,
   StyleSheet,
   View,
   Text,
 } from "react-native";
+import { runAfterIdle } from "@/utils/idleTask";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Ionicons, MaterialIcons, MaterialCommunityIcons, Feather, FontAwesome } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -273,7 +272,7 @@ function useRootLayoutNavigation() {
     };
 
     const timer = setTimeout(() => {
-      InteractionManager.runAfterInteractions(() => {
+      runAfterIdle(() => {
         run().catch((err) => logger.error("[Layout] Startup check failed:", err));
       });
     }, 3000);

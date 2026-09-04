@@ -1,5 +1,6 @@
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { toTrimmedString } from "@/utils/stringUtils";
 
 export type HomeHeroConfig = {
   enabled: boolean;
@@ -77,9 +78,7 @@ const DISABLED_HOME_HERO_CONFIG: HomeHeroConfig = {
 
 const HOME_HERO_CONFIG_REF = doc(db, "appConfig", "homeHero");
 
-function toTrimmedString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
+
 
 function toFiniteNumber(value: unknown): number {
   const next = typeof value === "number" ? value : Number(value);

@@ -125,13 +125,11 @@ async function validateFileSignature(
     }
 
     // Otherwise, check if it matches any allowed image signature
-    const isValidImage = Object.values(IMAGE_MAGIC_NUMBERS).some((magic) => {
+    return Object.values(IMAGE_MAGIC_NUMBERS).some((magic) => {
       // Check length first for performance
       return magic.length <= bytes.length && 
              magic.every((byte, index) => bytes[index] === byte);
     });
-
-    return isValidImage;
   } catch (error) {
     logger.error('Magic number validation error:', error);
     return false;

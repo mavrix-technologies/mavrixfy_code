@@ -36,14 +36,14 @@ const CREATE_ACTIONS: CreateAction[] = [
 ];
 
 function CreateActionRow({ action }: { action: CreateAction }) {
-  const handlePress = () => {
+  const handleActionPress = () => {
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
     router.push(action.href as any);
   };
 
   return (
     <Pressable
-      onPress={handlePress}
+      onPress={handleActionPress}
       style={({ pressed }) => [styles.actionRow, pressed && styles.actionRowPressed]}
     >
       <View style={styles.actionIcon}>

@@ -25,20 +25,9 @@ import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { mapFilter } from "@/lib/arrayUtils";
 import AdMobBanner from "@/components/AdMobBanner";
-
-function pickFirst(v: string | string[] | undefined): string {
-  if (Array.isArray(v)) return v[0] ?? "";
-  return v ?? "";
-}
+import { pickFirst, formatFollowers } from "@/utils/stringUtils";
 
 
-
-function formatFollowers(n: number | null | undefined): string {
-  if (!n) return "";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M followers`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K followers`;
-  return `${n} followers`;
-}
 
 export function ArtistDetailScreen() {
   return useArtistScreenView();

@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
 import { compactMap, mapFilter, sortedCopy } from "@/lib/arrayUtils";
+import { withTimeout } from "@/utils/asyncUtils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -112,14 +113,7 @@ const POPULAR_ARTIST_QUERIES = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function withTimeout<T>(p: Promise<T>, ms = TIMEOUT_MS): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error("timeout")), ms)
-    ),
-  ]);
-}
+
 
 function toStr(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";

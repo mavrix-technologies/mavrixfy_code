@@ -140,7 +140,7 @@ export default function DownloadButton({
     }
   }
 
-  async function handleDelete() {
+  async function handleDeleteDownload() {
     Alert.alert(
       'Delete Download',
       `Remove "${song.title}" from downloads?`,
@@ -163,7 +163,7 @@ export default function DownloadButton({
       onPress={() => {
         void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
         if (isDownloaded) {
-          void handleDelete();
+          void handleDeleteDownload();
         } else {
           void handleDownload();
         }

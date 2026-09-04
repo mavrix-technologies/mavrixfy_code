@@ -357,11 +357,11 @@ export async function getStorageSummary(): Promise<StorageSummary> {
 
 // ─── Query helpers ────────────────────────────────────────────────────────────
 
-export async function getAllDownloads(): Promise<DownloadItem[]> {
+export function getAllDownloads(): Promise<DownloadItem[]> {
   return loadAllDownloads();
 }
 
-export async function getSongDownload(songId: string): Promise<DownloadItem | null> {
+export function getSongDownload(songId: string): Promise<DownloadItem | null> {
   return loadDownload(songId);
 }
 

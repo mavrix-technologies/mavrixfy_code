@@ -81,3 +81,4 @@ android/keystore.properties
 
 .vercel
 .native-doctor-cache/
+.native-doctor/

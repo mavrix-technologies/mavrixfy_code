@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { buildAppApiUrl } from "@/lib/api-config";
-import { getBestImageUrl, type Song, type JioSaavnImage } from "@/lib/musicData";
+import { fetchJson } from "@/utils/asyncUtils";
+import { getBestImageUrl, getBestAudioUrl, type Song, type JioSaavnImage } from "@/lib/musicData";
 import { sortedCopy } from "@/lib/arrayUtils";
 
 const DAILY_NEW_RELEASE_CACHE_KEY = "@mavrixfy_daily_new_release_songs_v6"; // bumped: official labels & trending expansion
@@ -174,35 +175,6 @@ function getImageList(value: unknown): JioSaavnImage[] {
   });
 }
 
-function getBestAudioUrl(value: unknown): string {
-  if (typeof value === "string") return value.trim();
-  if (!Array.isArray(value)) return "";
-
-  const qualityRank: Record<string, number> = {
-    "320kbps": 5,
-    "160kbps": 4,
-    "96kbps": 3,
-    "48kbps": 2,
-    "12kbps": 1,
-  };
-
-  const candidates = value.flatMap((item) => {
-    if (typeof item === "string") {
-      const url = item.trim();
-      return url ? [{ quality: "", url }] : [];
-    }
-    if (!item || typeof item !== "object") return [];
-    const record = item as { quality?: unknown; url?: unknown; link?: unknown };
-    const url = cleanText(record.url || record.link);
-    if (!url) return [];
-    return [{ quality: cleanText(record.quality), url }];
-  });
-
-  return sortedCopy(
-    candidates,
-    (left, right) => (qualityRank[right.quality] || 0) - (qualityRank[left.quality] || 0)
-  )[0]?.url || "";
-}
 
 function getArtistName(raw: any): string {
   const primaryArtists = cleanText(raw?.primaryArtists || raw?.primary_artists);
@@ -414,15 +386,7 @@ async function writeCachedDailySongs(songs: Song[]): Promise<void> {
   await AsyncStorage.setItem(DAILY_NEW_RELEASE_CACHE_KEY, JSON.stringify(payload)).catch(() => undefined);
 }
 
-async function fetchJson<T = any>(url: string, signal?: AbortSignal): Promise<T | null> {
-  try {
-    const res = await fetch(url, { headers: { Accept: "application/json" }, signal });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
-  }
-}
+
 
 async function searchSongs(
   query: string,

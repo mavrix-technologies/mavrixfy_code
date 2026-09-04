@@ -27,7 +27,7 @@ function write(list: FollowedArtist[]): Promise<void> {
   return AsyncStorage.setItem(KEY, JSON.stringify(list)).catch(() => {});
 }
 
-export async function getFollowedArtists(): Promise<FollowedArtist[]> {
+export function getFollowedArtists(): Promise<FollowedArtist[]> {
   return read();
 }
 

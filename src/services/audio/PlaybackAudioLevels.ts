@@ -26,7 +26,7 @@ let frame: PlaybackAudioLevelFrame = {
 };
 let lastSamplePublishedAt = 0;
 
-function emit(): void {
+function emitAudioLevels(): void {
   listeners.forEach((listener) => listener());
 }
 
@@ -94,7 +94,7 @@ export function publishPlaybackAudioSample(sample: AudioSampleLike): void {
     hasSignal: true,
     updatedAt: now,
   };
-  emit();
+  emitAudioLevels();
 }
 
 export function resetPlaybackAudioLevels(): void {
@@ -106,20 +106,20 @@ export function resetPlaybackAudioLevels(): void {
     hasSignal: false,
     updatedAt: 0,
   };
-  emit();
+  emitAudioLevels();
 }
 
-function subscribe(listener: Listener): () => void {
+function subscribeAudioLevels(listener: Listener): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
   };
 }
 
-function getSnapshot(): PlaybackAudioLevelFrame {
+function getAudioLevelsSnapshot(): PlaybackAudioLevelFrame {
   return frame;
 }
 
 function usePlaybackAudioLevels(): PlaybackAudioLevelFrame {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return useSyncExternalStore(subscribeAudioLevels, getAudioLevelsSnapshot, getAudioLevelsSnapshot);
 }

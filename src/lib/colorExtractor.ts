@@ -124,15 +124,15 @@ const pendingRequests = new Map<string, Promise<ArtworkPalette>>();
 
 let nativeGetColors: NativeGetColors | null | undefined;
 
-export async function extractArtworkColors(imageUrl: string): Promise<ArtworkPalette> {
+export function extractArtworkColors(imageUrl: string): Promise<ArtworkPalette> {
   const cacheKey = (imageUrl || "").trim();
-  if (!cacheKey) return DEFAULT_ARTWORK_PALETTE;
+  if (!cacheKey) return Promise.resolve(DEFAULT_ARTWORK_PALETTE);
 
   const cached = paletteCache.get(cacheKey);
   if (cached) {
     paletteCache.delete(cacheKey);
     paletteCache.set(cacheKey, cached);
-    return cached;
+    return Promise.resolve(cached);
   }
 
   const pending = pendingRequests.get(cacheKey);

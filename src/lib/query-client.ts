@@ -1,6 +1,7 @@
 
 import { QueryClient, type QueryFunction } from "@tanstack/react-query";
-import { getMusicApiUrl } from "./api-config";
+import { getApiUrl } from "./api-config";
+export { getApiUrl };
 
 export class ApiError extends Error {
   status: number;
@@ -13,9 +14,6 @@ export class ApiError extends Error {
 }
 
 
-export function getApiUrl(): string {
-  return getMusicApiUrl();
-}
 
 
 async function apiRequest(

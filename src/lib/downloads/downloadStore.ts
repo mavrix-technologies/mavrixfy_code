@@ -129,7 +129,7 @@ export async function loadDownload(songId: string): Promise<DownloadItem | null>
 }
 
 /** Write to cache immediately, persist to AsyncStorage in background. */
-export async function saveDownload(item: DownloadItem): Promise<void> {
+export function saveDownload(item: DownloadItem): Promise<void> {
   const isNew = !memCache.has(item.songId);
 
   // Update cache synchronously — callers see the new value instantly
@@ -144,6 +144,8 @@ export async function saveDownload(item: DownloadItem): Promise<void> {
   if (isNew) {
     addToIndex(item.songId).catch(() => {});
   }
+
+  return Promise.resolve();
 }
 
 /** Update the in-memory cache only. Use for high-frequency progress ticks. */

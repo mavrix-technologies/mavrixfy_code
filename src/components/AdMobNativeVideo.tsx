@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { InteractionManager, View, Text, StyleSheet, Platform } from "react-native";
+import { View, Text, StyleSheet, Platform } from "react-native";
+import { runAfterIdle } from "@/utils/idleTask";
 import { Image } from "expo-image";
 
 import { AD_UNITS } from "@/constants/admob";
@@ -67,8 +68,8 @@ export default function AdMobNativeVideo({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }
       }
     };
 
-    const performLoad = () => {
-      InteractionManager.runAfterInteractions(() => {
+    const performVideoLoad = () => {
+      runAfterIdle(() => {
         if (active) {
           void loadNativeVideoAd();
         }
@@ -77,9 +78,9 @@ export default function AdMobNativeVideo({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }
 
     if (loadDelayMs <= 0) {
       // react-doctor-disable-next-line react-doctor/no-adjust-state-on-prop-change
-      performLoad();
+      performVideoLoad();
     } else {
-      timer = setTimeout(performLoad, loadDelayMs);
+      timer = setTimeout(performVideoLoad, loadDelayMs);
     }
 
     return () => {

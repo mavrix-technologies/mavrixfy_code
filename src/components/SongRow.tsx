@@ -9,6 +9,8 @@ import {
 import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from "react-native-gesture-handler/ReanimatedSwipeable";
+
+const Swipeable: any = ReanimatedSwipeable;
 import Animated, {
   useAnimatedStyle,
   interpolate,
@@ -291,7 +293,7 @@ const SongRow = memo(function SongRow({
 
   return (
     <View style={styles.swipeWrap}>
-      <ReanimatedSwipeable
+      <Swipeable
         ref={swipeableRef}
         enabled={!onRemove}
         friction={1.6}
@@ -405,7 +407,7 @@ const SongRow = memo(function SongRow({
             <Ionicons name="ellipsis-horizontal" size={20} color={Colors.subtext} />
           </Pressable>
         </Pressable>
-      </ReanimatedSwipeable>
+      </Swipeable>
     </View>
   );
 }, (prevProps, nextProps) => {

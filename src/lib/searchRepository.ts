@@ -59,22 +59,8 @@ function getRepositoryApiUrl(): string {
   }
 }
 
-export async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T | null> {
-  try {
-    const response = await fetch(url, {
-      signal,
-      headers: {
-        Accept: "application/json",
-      },
-    });
-    if (!response.ok) {
-      return null;
-    }
-    return (await response.json()) as T;
-  } catch {
-    return null;
-  }
-}
+import { fetchJson } from "@/utils/asyncUtils";
+export { fetchJson };
 
 export async function fetchYouTubeSuggestions(query: string, signal?: AbortSignal): Promise<string[]> {
   const url = `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&client=firefox&q=${encodeURIComponent(query)}`;
@@ -87,7 +73,7 @@ export async function fetchYouTubeSuggestions(query: string, signal?: AbortSigna
     : [];
 }
 
-function parseApiSong(s: any): Song | null {
+export function parseApiSong(s: any): Song | null {
   if (!s?.id && !s?.name && !s?.title) return null;
 
   const songId = String(s.id || `song_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
@@ -219,7 +205,7 @@ function normalizeAlbums(raw: unknown, limit = 20): AlbumResult[] {
   return results;
 }
 
-function normalizeArtists(raw: unknown, limit = 20): ArtistResult[] {
+function normalizeSearchArtists(raw: unknown, limit = 20): ArtistResult[] {
   if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();
   const results: ArtistResult[] = [];
@@ -366,7 +352,7 @@ export async function searchRepository(
       globalRes?.data?.albums?.results || globalRes?.data?.albums || [],
       12
     );
-    const artists = normalizeArtists(
+    const artists = normalizeSearchArtists(
       globalRes?.data?.artists?.results || globalRes?.data?.artists || [],
       12
     );
@@ -479,7 +465,7 @@ export async function searchRepository(
     const rawArtists = artistsData?.data?.results || artistsData?.results || [];
     return {
       ...EMPTY_RESULTS,
-      artists: normalizeArtists(rawArtists, 20),
+      artists: normalizeSearchArtists(rawArtists, 20),
     };
   }
 

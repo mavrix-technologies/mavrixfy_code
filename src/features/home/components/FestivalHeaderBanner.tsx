@@ -28,7 +28,7 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
 
   const hasAnyText = subTitle.length > 0 || mainTitle.length > 0 || badgeText.length > 0;
 
-  const handlePress = () => {
+  const handleBannerPress = () => {
     if (!targetQuery) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
     if (onPress) {
@@ -45,7 +45,7 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={mainTitle ? `${mainTitle} Special Music` : "Festival Special Music"}
-      onPress={handlePress}
+      onPress={handleBannerPress}
       style={[
         styles.bannerContainer,
         !hasAnyText && styles.bannerContainerImageOnly,

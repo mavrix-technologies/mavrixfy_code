@@ -4,7 +4,7 @@ import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobil
 import { logger } from "@/lib/logger";
 import { getSettings, saveSettings, isHighQualityEntitled, setHighQualityEntitlement } from "@/lib/storage";
 
-export const DEFAULT_HIGH_QUALITY_DURATION_HOURS = 2;
+export const DEFAULT_HIGH_QUALITY_DURATION_HOURS = 0;
 
 /**
  * Checks if the user currently holds an active High Quality entitlement.
@@ -18,16 +18,13 @@ export async function isHighQualityUnlocked(): Promise<boolean> {
   }
 }
 
-
-
 /**
- * Grants High Quality entitlement for a given number of hours (default 2 hours).
+ * Grants High Quality entitlement permanently (kept after one-time unlock).
  */
-export async function unlockHighQuality(durationHours: number = DEFAULT_HIGH_QUALITY_DURATION_HOURS): Promise<void> {
-  const expiresAt = Date.now() + Math.max(0.5, durationHours) * 60 * 60 * 1000;
+export async function unlockHighQuality(_durationHours?: number): Promise<void> {
   await Promise.all([
-    setHighQualityEntitlement(true, expiresAt),
-    saveSettings({ streamingQuality: "high" }),
+    setHighQualityEntitlement(true, null),
+    saveSettings({ streamingQuality: "high", highQualityUnlocked: true, highQualityExpiresAt: null }),
   ]);
 }
 
@@ -35,7 +32,9 @@ export async function unlockHighQuality(durationHours: number = DEFAULT_HIGH_QUA
  * Presents an opt-in Rewarded Ad to unlock High Quality (Up to 320 kbps).
  * Returns true if High Quality is now unlocked and ready for playback.
  */
-export async function requestHighQualityUnlockWithRewardedAd(): Promise<boolean> {
+export async function requestHighQualityUnlockWithRewardedAd(
+  onLoadingChange?: (loading: boolean) => void
+): Promise<boolean> {
   const alreadyUnlocked = await isHighQualityUnlocked();
   if (alreadyUnlocked) {
     await saveSettings({ streamingQuality: "high" });
@@ -45,23 +44,38 @@ export async function requestHighQualityUnlockWithRewardedAd(): Promise<boolean>
   const adsModule = getGoogleMobileAdsModule();
   if (!adsModule || !AD_UNITS.REWARDED) {
     // If ads are not available in current environment, unlock gracefully
-    await unlockHighQuality(DEFAULT_HIGH_QUALITY_DURATION_HOURS);
+    await unlockHighQuality();
     return true;
   }
 
   return new Promise<boolean>((resolve) => {
     Alert.alert(
       "Unlock High Quality Audio",
-      `Watch a short video ad to unlock High Quality streaming (up to 320 kbps) for ${DEFAULT_HIGH_QUALITY_DURATION_HOURS} hours.`,
+      "Watch a short video ad to permanently unlock High Quality streaming (up to 320 kbps).",
       [
         {
           text: "Cancel",
           style: "cancel",
-          onPress: () => resolve(false),
+          onPress: () => {
+            onLoadingChange?.(false);
+            resolve(false);
+          },
         },
         {
           text: "Watch Ad",
           onPress: async () => {
+            if (__DEV__) {
+              onLoadingChange?.(false);
+              await unlockHighQuality();
+              Alert.alert(
+                "High Quality Unlocked",
+                "High Quality (up to 320 kbps) streaming enabled permanently."
+              );
+              resolve(true);
+              return;
+            }
+
+            onLoadingChange?.(true);
             let isCleanedUp = false;
             let timeoutId: ReturnType<typeof setTimeout> | null = null;
             let rewardEarned = false;
@@ -80,6 +94,7 @@ export async function requestHighQualityUnlockWithRewardedAd(): Promise<boolean>
                   clearTimeout(timeoutId);
                   timeoutId = null;
                 }
+                onLoadingChange?.(false);
                 try { unsubLoaded(); } catch {}
                 try { unsubEarned(); } catch {}
                 try { unsubClosed(); } catch {}
@@ -88,11 +103,12 @@ export async function requestHighQualityUnlockWithRewardedAd(): Promise<boolean>
 
               const unsubLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
                 try {
+                  onLoadingChange?.(false);
                   rewarded.show();
                 } catch (err) {
                   logger.warn("[Ads] Failed to show rewarded high quality ad:", err);
                   cleanup();
-                  void unlockHighQuality(DEFAULT_HIGH_QUALITY_DURATION_HOURS).then(() => resolve(true));
+                  void unlockHighQuality().then(() => resolve(true));
                 }
               });
 
@@ -103,10 +119,10 @@ export async function requestHighQualityUnlockWithRewardedAd(): Promise<boolean>
               const unsubClosed = rewarded.addAdEventListener(AdEventType.CLOSED, async () => {
                 cleanup();
                 if (rewardEarned) {
-                  await unlockHighQuality(DEFAULT_HIGH_QUALITY_DURATION_HOURS);
+                  await unlockHighQuality();
                   Alert.alert(
                     "High Quality Unlocked!",
-                    `You now have High Quality (up to 320 kbps) streaming enabled for ${DEFAULT_HIGH_QUALITY_DURATION_HOURS} hours.`
+                    "You now have High Quality (up to 320 kbps) streaming enabled permanently."
                   );
                   resolve(true);
                 } else {
@@ -118,21 +134,23 @@ export async function requestHighQualityUnlockWithRewardedAd(): Promise<boolean>
                 logger.warn("[Ads] Error loading high quality rewarded ad:", err);
                 cleanup();
                 // Graceful fallback if ad network fails
-                void unlockHighQuality(DEFAULT_HIGH_QUALITY_DURATION_HOURS).then(() => resolve(true));
+                void unlockHighQuality().then(() => resolve(true));
               });
 
-              // 12-second load timeout guard
+              // 5-second load timeout guard for responsive fallback
               timeoutId = setTimeout(() => {
                 if (!isCleanedUp) {
+                  logger.info("[Ads] Rewarded ad load timed out after 5s; unlocking High Quality gracefully.");
                   cleanup();
-                  void unlockHighQuality(DEFAULT_HIGH_QUALITY_DURATION_HOURS).then(() => resolve(true));
+                  void unlockHighQuality().then(() => resolve(true));
                 }
-              }, 12000);
+              }, 5000);
 
               rewarded.load();
             } catch (err) {
               logger.warn("[Ads] Exception loading rewarded high quality ad:", err);
-              await unlockHighQuality(DEFAULT_HIGH_QUALITY_DURATION_HOURS);
+              onLoadingChange?.(false);
+              await unlockHighQuality();
               resolve(true);
             }
           },
