@@ -24,23 +24,7 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
   const screenWidth = windowWidth || 390;
   const screenHeight = windowHeight || 844;
 
-  if (!themeConfig || !themeConfig.enabled) {
-    return null;
-  }
-
-  const subTitle = themeConfig?.subTitle?.trim() || "";
-  const mainTitle = themeConfig?.mainTitle?.trim() || "";
-  const badgeText = themeConfig?.badgeText?.trim() || "";
   const backgroundImageUrl = themeConfig?.backgroundImageUrl?.trim() || null;
-  const accentColor = themeConfig?.themeAccentColor || "#014D52";
-
-  const hasImage = Boolean(backgroundImageUrl && backgroundImageUrl.length > 0);
-  const hasAnyText = subTitle.length > 0 || mainTitle.length > 0 || badgeText.length > 0;
-
-  // Don't render an empty banner if there's neither an image nor text
-  if (!hasImage && !hasAnyText) {
-    return null;
-  }
 
   // Dynamic aspect ratio state: measures real image width & height for any ratio format
   const [aspectRatio, setAspectRatio] = useState<number>(() => {
@@ -73,6 +57,23 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
       }
     );
   }, [backgroundImageUrl]);
+
+  if (!themeConfig || !themeConfig.enabled) {
+    return null;
+  }
+
+  const subTitle = themeConfig?.subTitle?.trim() || "";
+  const mainTitle = themeConfig?.mainTitle?.trim() || "";
+  const badgeText = themeConfig?.badgeText?.trim() || "";
+  const accentColor = themeConfig?.themeAccentColor || "#014D52";
+
+  const hasImage = Boolean(backgroundImageUrl && backgroundImageUrl.length > 0);
+  const hasAnyText = subTitle.length > 0 || mainTitle.length > 0 || badgeText.length > 0;
+
+  // Don't render an empty banner if there's neither an image nor text
+  if (!hasImage && !hasAnyText) {
+    return null;
+  }
 
   // Responsive banner height: exactly matches the image's aspect ratio (zero bottom gap, zero letterboxing)
   const effectiveRatio = aspectRatio > 0 ? aspectRatio : 1080 / 850;

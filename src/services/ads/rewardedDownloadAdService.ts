@@ -62,7 +62,7 @@ export async function requestDownloadWithRewardedAd(_songTitle: string): Promise
     let resolved = false;
     let rewardEarned = false;
 
-    const finish = (result: boolean) => {
+    const resolveDownloadResult = (result: boolean) => {
       if (resolved) return;
       resolved = true;
       resolve(result);
@@ -81,7 +81,7 @@ export async function requestDownloadWithRewardedAd(_songTitle: string): Promise
             rewarded.show();
           } catch (err) {
             logger.warn("[Ads] Failed to show rewarded download ad:", err);
-            finish(true); // Graceful fallback
+            resolveDownloadResult(true); // Graceful fallback
           }
         });
 
@@ -97,9 +97,9 @@ export async function requestDownloadWithRewardedAd(_songTitle: string): Promise
 
           if (rewardEarned) {
             await addDownloadPasses(2); // 3 unlocked - 1 consumed = 2 remaining
-            finish(true);
+            resolveDownloadResult(true);
           } else {
-            finish(false);
+            resolveDownloadResult(false);
           }
         });
 
@@ -109,13 +109,13 @@ export async function requestDownloadWithRewardedAd(_songTitle: string): Promise
           unsubEarned();
           unsubClosed();
           unsubError();
-          finish(true); // Allow download if ad network fails
+          resolveDownloadResult(true); // Allow download if ad network fails
         });
 
         rewarded.load();
       } catch (err) {
         logger.warn("[Ads] Exception running rewarded download ad:", err);
-        finish(true);
+        resolveDownloadResult(true);
       }
     })();
   });

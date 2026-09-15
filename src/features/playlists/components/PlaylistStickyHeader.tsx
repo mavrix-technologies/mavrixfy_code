@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import * as Animated from "@/lib/nativeAnimated";
 import { Ionicons } from "@expo/vector-icons";
@@ -39,7 +39,7 @@ export const PlaylistStickyHeader: React.FC<PlaylistStickyHeaderProps> = ({
     isPlaying,
   } = playState;
 
-  const fallbackScrollY = useRef(new Animated.Value(0)).current;
+  const [fallbackScrollY] = useState(() => new Animated.Value(0));
   const effectiveScrollY = scrollY ?? fallbackScrollY;
 
   // Header background opacity fades in as hero scrolls up
@@ -260,11 +260,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 4,
-    elevation: 4,
+    boxShadow: "0px 2px 4px rgba(38, 225, 154, 0.35)",
   },
   stickyPlayPressed: {
     opacity: 0.88,

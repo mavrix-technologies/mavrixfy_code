@@ -14,7 +14,7 @@ async function getAccessToken() {
     throw new Error("No refresh_token found in firebase-tools.json");
   }
 
-  const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
+  const refreshData = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -23,10 +23,9 @@ async function getAccessToken() {
       grant_type: "refresh_token",
       refresh_token: rt,
     }),
-  });
+  }).then((res) => res.json());
 
-  const refreshData = await refreshRes.json();
-  const token = refreshData.access_token;
+  const token = refreshData?.access_token;
   if (!token) {
     throw new Error(`Token refresh failed: ${JSON.stringify(refreshData)}`);
   }
@@ -75,40 +74,31 @@ async function deployFestivalConfig(options = {}) {
     }),
   };
 
-  const publicRes = await fetch(publicUrl, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(publicPayload),
-  });
+  const [publicRes, devRes] = await Promise.all([
+    fetch(publicUrl, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(publicPayload),
+    }),
+    fetch(devUrl, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(devPayload),
+    }),
+  ]);
+
   if (!publicRes.ok) {
     const err = await publicRes.json();
     throw new Error(`Failed to write configs/public: ${JSON.stringify(err)}`);
   }
   console.log("✓ Deployed clean configs/public with unified activeColor!");
 
-  // 2. Separate 'dev' document: appConfig/festivalTheme/configs/dev
-  const devUrl = `${baseUrl}/configs/dev`;
-  const devPayload = {
-    fields: buildCleanConfigFields({
-      enabled: options.devEnabled ?? true,
-      backgroundImageUrl: options.devBackgroundImageUrl,
-      themeAccentColor: options.devThemeAccentColor,
-      titleText: options.devTitleText,
-      activeColor: options.devActiveColor || "#FFFFFF",
-    }),
-  };
-
-  const devRes = await fetch(devUrl, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(devPayload),
-  });
   if (!devRes.ok) {
     const err = await devRes.json();
     throw new Error(`Failed to write configs/dev: ${JSON.stringify(err)}`);

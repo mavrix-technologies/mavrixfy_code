@@ -52,7 +52,7 @@ export async function requestHighQualityUnlockWithRewardedAd(
     let resolved = false;
     let rewardEarned = false;
 
-    const finish = (result: boolean) => {
+    const resolveEntitlementResult = (result: boolean) => {
       if (resolved) return;
       resolved = true;
       resolve(result);
@@ -71,7 +71,7 @@ export async function requestHighQualityUnlockWithRewardedAd(
             rewarded.show();
           } catch (err) {
             logger.warn("[Ads] Failed to show rewarded ad:", err);
-            finish(false);
+            resolveEntitlementResult(false);
           }
         });
 
@@ -87,9 +87,9 @@ export async function requestHighQualityUnlockWithRewardedAd(
 
           if (rewardEarned) {
             await unlockHighQuality();
-            finish(true);
+            resolveEntitlementResult(true);
           } else {
-            finish(false);
+            resolveEntitlementResult(false);
           }
         });
 
@@ -99,13 +99,13 @@ export async function requestHighQualityUnlockWithRewardedAd(
           unsubEarned();
           unsubClosed();
           unsubError();
-          finish(false);
+          resolveEntitlementResult(false);
         });
 
         rewarded.load();
       } catch (err) {
         logger.warn("[Ads] Error triggering rewarded ad:", err);
-        finish(false);
+        resolveEntitlementResult(false);
       }
     })();
   });

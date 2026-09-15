@@ -13,7 +13,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   useSharedValue,
   useAnimatedScrollHandler,
-  runOnJS,
+  SlideInRight,
+  SlideInLeft,
+  Easing,
 } from "react-native-reanimated";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -50,14 +52,15 @@ import {
   HOME_CATEGORY_TITLES,
   type HomeSectionItem,
 } from "../hooks/useHomeSectionData";
+import { MAVRIXFY_MUSIC_CATEGORIES } from "../constants/homeNavConstants";
 
 const homeSectionKeyExtractor = (item: HomeSectionItem) => item.id;
 
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { isOnline, isChecking } = useNetwork();
   const { playSong, currentSong } = usePlayerBrowse();
   const currentSongId = currentSong?.id || null;
+  const { isOnline, isChecking } = useNetwork();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const flatListRef = useRef<FlatList<HomeSectionItem> | null>(null);
 
@@ -76,10 +79,17 @@ export function HomeScreen() {
   } = useHomeFeedData();
 
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
+  const [slideDirection, setSlideDirection] = useState<"right" | "left">("right");
+  const prevCategoryRef = useRef<string>("All");
 
   const handleSelectCategory = useCallback((category: string) => {
+    if (category === prevCategoryRef.current) return;
+    const prevIdx = MAVRIXFY_MUSIC_CATEGORIES.findIndex((c) => c.id === prevCategoryRef.current);
+    const newIdx = MAVRIXFY_MUSIC_CATEGORIES.findIndex((c) => c.id === category);
+    setSlideDirection(newIdx >= prevIdx ? "right" : "left");
+    prevCategoryRef.current = category;
     setSelectedCategory(category);
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
   }, []);
 
   const displayedQuickPicks = useMemo(() => {
@@ -99,9 +109,11 @@ export function HomeScreen() {
 
   const renderSectionItem = useCallback(
     ({ item }: ListRenderItemInfo<HomeSectionItem>) => {
+      let content: React.ReactNode = null;
+
       switch (item.type) {
         case "quick-picks":
-          return (
+          content = (
             <HomeQuickPicks
               songs={displayedQuickPicks}
               currentSongId={currentSongId}
@@ -109,12 +121,15 @@ export function HomeScreen() {
               playSong={playSong}
             />
           );
+          break;
         case "loading-quick":
-          return <HomeQuickPicksSkeleton />;
+          content = <HomeQuickPicksSkeleton />;
+          break;
         case "recently-played":
-          return <HomeRecentlyPlayed items={recentlyPlayed} playSong={playSong} />;
+          content = <HomeRecentlyPlayed items={recentlyPlayed} playSong={playSong} />;
+          break;
         case "category":
-          return (
+          content = (
             <React.Fragment>
               <HomeHorizontalSection
                 title={HOME_CATEGORY_TITLES[item.category.id] || item.category.title}
@@ -125,31 +140,52 @@ export function HomeScreen() {
               ) : null}
             </React.Fragment>
           );
+          break;
         case "artists":
-          return <HomeArtistsSection artists={featuredArtists} />;
+          content = <HomeArtistsSection artists={featuredArtists} />;
+          break;
         case "public-playlists":
-          return (
+          content = (
             <HomeHorizontalSection
               title="Featured Playlists"
               items={publicPlaylists as unknown as HomeCardItem[]}
               isFirestore
             />
           );
+          break;
         case "loading-main":
-          return <HomeSectionSkeleton />;
+          content = <HomeSectionSkeleton />;
+          break;
         default:
-          return null;
+          content = null;
       }
+
+      if (!content) return null;
+
+      return (
+        <Animated.View
+          key={`${selectedCategory}-${item.id}`}
+          entering={
+            slideDirection === "right"
+              ? SlideInRight.duration(360).easing(Easing.bezier(0.25, 0.1, 0.25, 1))
+              : SlideInLeft.duration(360).easing(Easing.bezier(0.25, 0.1, 0.25, 1))
+          }
+        >
+          {content}
+        </Animated.View>
+      );
     },
     [
       currentSong,
       currentSongId,
+      displayedQuickPicks,
       featuredArtists,
       loadingMainContent,
       playSong,
       publicPlaylists,
-      quickPickSongs,
       recentlyPlayed,
+      selectedCategory,
+      slideDirection,
     ]
   );
 
@@ -158,11 +194,6 @@ export function HomeScreen() {
   // 100% UI-Thread Reanimated SharedValues for 60/120 FPS native scrolling
   const scrollY = useSharedValue(0);
   const pullProgress = useSharedValue(0);
-  const hasTriggeredPullHapticRef = useRef(false);
-
-  const triggerHaptic = useCallback(() => {
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-  }, []);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -171,19 +202,9 @@ export function HomeScreen() {
       scrollY.value = offsetY;
 
       if (offsetY < 0) {
-        const progress = Math.min(1, Math.max(0, -offsetY / 68));
-        pullProgress.value = progress;
-
-        // Tactile haptic tick when reaching full pull stretch threshold
-        if (progress >= 0.95 && !hasTriggeredPullHapticRef.current) {
-          hasTriggeredPullHapticRef.current = true;
-          runOnJS(triggerHaptic)();
-        } else if (progress < 0.5) {
-          hasTriggeredPullHapticRef.current = false;
-        }
+        pullProgress.value = Math.min(1, Math.max(0, -offsetY / 68));
       } else if (pullProgress.value > 0) {
         pullProgress.value = 0;
-        hasTriggeredPullHapticRef.current = false;
       }
     },
   });

@@ -374,11 +374,7 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 21,
     backgroundColor: Colors.primary,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 4,
+    boxShadow: "0px 3px 6px rgba(38, 225, 154, 0.35)",
   },
   playAllBtnPressed: {
     opacity: 0.88,

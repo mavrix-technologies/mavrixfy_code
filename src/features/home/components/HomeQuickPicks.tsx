@@ -228,9 +228,9 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
   const renderColumn = useCallback(
     ({ item }: { item: Song[] }) => (
       <View style={{ width: columnWidth, gap: 8 }}>
-        {item.map((song, i) => (
+        {item.map((song) => (
           <QuickPickItem
-            key={`${song.id}-${i}`}
+            key={song.id}
             song={song}
             isActive={currentSongId === song.id}
             accentColor={accentColor}
@@ -244,7 +244,7 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
     [accentColor, columnWidth, currentSongId, handleOptionsPress, handleSongPress]
   );
 
-  const keyExtractor = useCallback((_: Song[], idx: number) => `col-${idx}`, []);
+  const keyExtractor = useCallback((col: Song[], idx: number) => (col[0]?.id ? `col-${col[0].id}` : `col-${idx}`), []);
   const ItemSeparatorComponent = useCallback(() => <View style={{ width: 14 }} />, []);
   const getItemLayout = useCallback(
     (_: ArrayLike<Song[]> | null | undefined, index: number) => ({

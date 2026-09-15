@@ -70,7 +70,7 @@ export function PlaylistDetailScreen() {
   } = usePlaylistDetailData(params);
 
   // Sticky header state
-  const scrollY = useRef(new Animated.Value(0)).current;
+  const [scrollY] = useState(() => new Animated.Value(0));
   const [isStickyPlayVisible, setIsStickyPlayVisible] = useState(false);
 
   // Edit modal animation hook
