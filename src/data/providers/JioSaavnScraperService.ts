@@ -3,6 +3,7 @@ import { getApiUrl } from "@/lib/api-config";
 import { withTimeout } from "@/utils/asyncUtils";
 import { unescapeHtml } from "@/utils/stringUtils";
 import { mapHomepageItemToPlaylistResult, consumeResponseBody } from "./JioSaavnNormalizers";
+import { getJioSaavnSearchBaseUrls } from "./JioSaavnCategoryService";
 import type { JioSaavnPlaylistResult, AutoRefreshContext } from "./JioSaavnTypes";
 
 interface ScrapedHomepageData {
@@ -13,11 +14,6 @@ interface ScrapedHomepageData {
 let cachedScrapedHomeData: ScrapedHomepageData | null = null;
 let activeScrapedHomePromise: Promise<any[]> | null = null;
 const SCRAPED_HOME_CACHE_DURATION = 15 * 60 * 1000;
-
-const JIOSAAVN_SEARCH_BASE_URLS = [
-  `${getApiUrl().replace(/\/+$/, "")}/api`,
-];
-
 
 export function getScrapedJioSaavnHomeModules(forceRefresh: boolean): Promise<any[]> {
   const now = Date.now();
@@ -35,7 +31,7 @@ export function getScrapedJioSaavnHomeModules(forceRefresh: boolean): Promise<an
 
   activeScrapedHomePromise = (async () => {
     try {
-      const apiUrls = JIOSAAVN_SEARCH_BASE_URLS.map((base) =>
+      const apiUrls = getJioSaavnSearchBaseUrls().map((base) =>
         `${base.replace(/\/+$/, "")}/modules?language=hindi`
       );
 
@@ -137,7 +133,7 @@ export async function fetchJioSaavnDetailsByLink(path: string, type: "song" | "a
   const isSong = type === "song";
   const endpoint = isSong ? "songs" : "albums";
 
-  for (const endpointBase of JIOSAAVN_SEARCH_BASE_URLS) {
+  for (const endpointBase of getJioSaavnSearchBaseUrls()) {
     const trimmed = endpointBase.replace(/\/+$/, "");
     const requestUrl = `${trimmed}/${endpoint}?link=${encodeURIComponent(path)}`;
     try {

@@ -40,9 +40,17 @@ const CATEGORY_TTL_MS: Record<string, number> = {
   retro: 90 * 60 * 1000,
 };
 
-const JIOSAAVN_SEARCH_BASE_URLS = [
-  `${getApiUrl().replace(/\/+$/, "")}/api`,
-];
+export function getJioSaavnSearchBaseUrls(): string[] {
+  const configured = getApiUrl().replace(/\/+$/, "");
+  const urls: string[] = [];
+  if (configured) {
+    urls.push(`${configured}/api`);
+  }
+  if (!configured.includes("mavrixfy-song-api.vercel.app")) {
+    urls.push("https://mavrixfy-song-api.vercel.app/api");
+  }
+  return urls;
+}
 
 export function buildCategoryCacheKey(categoryId: string): string {
   return `${CACHE_PREFIX}:${categoryId}`;
@@ -129,7 +137,7 @@ export async function searchPlaylistsRaw(
   const page = forceRefresh ? randomInt(1, 3) : 1;
   const requestLimit = forceRefresh ? limit + 4 : limit;
 
-  const requestUrls = JIOSAAVN_SEARCH_BASE_URLS.map((endpointBase) => {
+  const requestUrls = getJioSaavnSearchBaseUrls().map((endpointBase) => {
     const trimmed = endpointBase.replace(/\/+$/, "");
     return (
       `${trimmed}/search/playlists?` +
@@ -170,7 +178,7 @@ export async function searchJioSaavnAlbums(
   const searchQuery = query.trim();
   if (!searchQuery) return [];
 
-  const requestUrls = JIOSAAVN_SEARCH_BASE_URLS.map((endpointBase) => {
+  const requestUrls = getJioSaavnSearchBaseUrls().map((endpointBase) => {
     const trimmed = endpointBase.replace(/\/+$/, "");
     return (
       `${trimmed}/search/albums?` +

@@ -34,13 +34,17 @@ const ALBUM_DETAILS_CACHE_PREFIX = "@mavrixfy_jiosaavn_album_details";
 const PLAYLIST_FETCH_LIMIT = 50;
 const PLAYLIST_DETAILS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
-const JIOSAAVN_PLAYLIST_BASE_URLS = [
-  `${getApiUrl().replace(/\/+$/, "")}/api`,
-];
-const JIOSAAVN_SEARCH_BASE_URLS = [
-  `${getApiUrl().replace(/\/+$/, "")}/api`,
-];
-
+export function getJioSaavnPlaylistBaseUrls(): string[] {
+  const configured = getApiUrl().replace(/\/+$/, "");
+  const urls: string[] = [];
+  if (configured) {
+    urls.push(`${configured}/api`);
+  }
+  if (!configured.includes("mavrixfy-song-api.vercel.app")) {
+    urls.push("https://mavrixfy-song-api.vercel.app/api");
+  }
+  return urls;
+}
 
 export async function fetchFromCandidates(
   urls: string[],
@@ -99,7 +103,7 @@ export function fetchPlaylistDetailsPage(
   const apiPage = Math.max(0, page - 1);
   const query = `${sourceQuery}&limit=${limit}&page=${apiPage}`;
 
-  const candidateUrls = JIOSAAVN_PLAYLIST_BASE_URLS.map(
+  const candidateUrls = getJioSaavnPlaylistBaseUrls().map(
     (base) => `${base.replace(/\/+$/, "")}/playlists?${query}`
   );
 
@@ -123,7 +127,7 @@ export function fetchAlbumDetails(
   const query = buildAlbumDetailsQuery(albumId, albumLink);
   if (!query) return Promise.resolve({ data: null, reason: "not_found" });
 
-  const candidateUrls = JIOSAAVN_PLAYLIST_BASE_URLS.map(
+  const candidateUrls = getJioSaavnPlaylistBaseUrls().map(
     (base) => `${base.replace(/\/+$/, "")}/albums?${query}`
   );
 
@@ -396,7 +400,7 @@ export async function getJioSaavnSongDetails(
   link?: string
 ): Promise<JioSaavnSong | null> {
   const queryParam = link ? `link=${encodeURIComponent(link)}` : `id=${encodeURIComponent(songId)}`;
-  for (const endpointBase of JIOSAAVN_SEARCH_BASE_URLS) {
+  for (const endpointBase of getJioSaavnPlaylistBaseUrls()) {
     const trimmed = endpointBase.replace(/\/+$/, "");
     const requestUrl = `${trimmed}/songs?${queryParam}`;
     try {

@@ -38,6 +38,8 @@ interface Props {
   showCover?: boolean;
   /** Show the download button. Defaults to true. */
   showDownload?: boolean;
+  /** Show subtle bottom separator divider line. Defaults to true. */
+  showDivider?: boolean;
   optionContext?: "playlist";
   playlistId?: string;
   playlistSource?: "local" | "firestore";
@@ -120,6 +122,7 @@ function QueueSwipeAction({
   );
 }
 
+// react-doctor-disable-next-line react-doctor/no-giant-component
 const SongRow = memo(function SongRow({
   song,
   index: _index,
@@ -127,6 +130,7 @@ const SongRow = memo(function SongRow({
   queueKey: _queueKey,
   showCover = true,
   showDownload = true,
+  showDivider = true,
   optionContext,
   playlistId,
   playlistSource,
@@ -406,6 +410,22 @@ const SongRow = memo(function SongRow({
           >
             <Ionicons name="ellipsis-horizontal" size={20} color={Colors.subtext} />
           </Pressable>
+
+          {/* Subtle separator divider line */}
+          {showDivider ? (
+            <View
+              style={[
+                styles.dividerLine,
+                {
+                  left:
+                    showCover && rowCoverUrl
+                      ? (horizontalPadding !== undefined ? horizontalPadding + 62 : 78)
+                      : (horizontalPadding !== undefined ? horizontalPadding : 18),
+                  right: horizontalPadding !== undefined ? horizontalPadding : 18,
+                },
+              ]}
+            />
+          ) : null}
         </Pressable>
       </Swipeable>
     </View>
@@ -421,6 +441,7 @@ const SongRow = memo(function SongRow({
     prevProps.index === nextProps.index &&
     prevProps.showCover === nextProps.showCover &&
     prevProps.showDownload === nextProps.showDownload &&
+    prevProps.showDivider === nextProps.showDivider &&
     prevProps.optionContext === nextProps.optionContext &&
     prevProps.playlistId === nextProps.playlistId &&
     prevProps.playlistSource === nextProps.playlistSource &&
@@ -541,6 +562,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 24,
+  },
+  dividerLine: {
+    position: "absolute",
+    bottom: 0,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(255, 255, 255, 0.10)",
   },
 });
 

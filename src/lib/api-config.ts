@@ -74,13 +74,13 @@ const SONG_API_BASE_URL = getConfiguredApiBaseUrl(
   process.env.EXPO_PUBLIC_MUSIC_API_URL ||
     process.env.EXPO_PUBLIC_APP_API_URL ||
     toUrlFromDomain(process.env.EXPO_PUBLIC_MUSIC_API_DOMAIN),
-  toUrlFromDomain(Constants.expoConfig?.extra?.musicApiDomain as string | undefined) || ""
+  toUrlFromDomain(Constants.expoConfig?.extra?.musicApiDomain as string | undefined) || "https://mavrixfy-song-api.vercel.app"
 );
 const APP_API_BASE_URL = getConfiguredApiBaseUrl(
   "App API",
   process.env.EXPO_PUBLIC_APP_API_URL ||
     process.env.EXPO_PUBLIC_MUSIC_API_URL,
-  toUrlFromDomain(Constants.expoConfig?.extra?.musicApiDomain as string | undefined) || ""
+  toUrlFromDomain(Constants.expoConfig?.extra?.musicApiDomain as string | undefined) || "https://mavrixfy-song-api.vercel.app"
 );
 
 if (__DEV__) {
@@ -109,7 +109,7 @@ function isPrivateDevelopmentApiUrl(value: string): boolean {
 }
 
 export function getMusicApiUrl(): string {
-  // Dynamic priority: Firebase Remote Config > EXPO_PUBLIC_MUSIC_API_URL > empty
+  // Dynamic priority: Firebase Remote Config > EXPO_PUBLIC_MUSIC_API_URL > SONG_API_BASE_URL > fallback
   try {
     // Lazy import to avoid circular dep at module load time
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -121,7 +121,7 @@ export function getMusicApiUrl(): string {
   } catch {
     // remoteConfig not yet initialized — fall through to env
   }
-  return SONG_API_BASE_URL;
+  return SONG_API_BASE_URL || "https://mavrixfy-song-api.vercel.app";
 }
 
 export function getApiUrl(): string {

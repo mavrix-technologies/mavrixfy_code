@@ -204,7 +204,7 @@
     },
     "runtimeVersion": "3.2.0-32001",
     "extra": {
-      "musicApiDomain": "saavn.sumit.co",
+      "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",
       "firebaseAuthDomain": "spotify-8fefc.firebaseapp.com",
       "firebaseProjectId": "spotify-8fefc",

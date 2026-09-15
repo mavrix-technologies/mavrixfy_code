@@ -50,13 +50,37 @@ export async function requestHighQualityUnlockWithRewardedAd(
 
   return new Promise<boolean>((resolve) => {
     let resolved = false;
-    let rewardEarned = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    let unsubLoaded = () => {};
+    let unsubEarned = () => {};
+    let unsubClosed = () => {};
+    let unsubError = () => {};
+
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      try { unsubLoaded(); } catch {}
+      try { unsubEarned(); } catch {}
+      try { unsubClosed(); } catch {}
+      try { unsubError(); } catch {}
+    };
 
     const resolveEntitlementResult = (result: boolean) => {
       if (resolved) return;
       resolved = true;
+      cleanup();
       resolve(result);
     };
+
+    // Fallback timer in case ad network hangs indefinitely
+    timeoutId = setTimeout(async () => {
+      logger.warn("[Ads] Rewarded ad request timed out. Unlocking High Quality directly.");
+      await unlockHighQuality();
+      resolveEntitlementResult(true);
+    }, 6000);
 
     void (async () => {
       try {
@@ -66,46 +90,42 @@ export async function requestHighQualityUnlockWithRewardedAd(
           requestNonPersonalizedAdsOnly: true,
         });
 
-        const unsubLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
+        unsubLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
           try {
             rewarded.show();
           } catch (err) {
-            logger.warn("[Ads] Failed to show rewarded ad:", err);
-            resolveEntitlementResult(false);
+            logger.warn("[Ads] Failed to show rewarded ad, unlocking gracefully:", err);
+            void (async () => {
+              await unlockHighQuality();
+              resolveEntitlementResult(true);
+            })();
           }
         });
 
-        const unsubEarned = rewarded.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
-          rewardEarned = true;
+        unsubEarned = rewarded.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+          // Reward flag noted
         });
 
-        const unsubClosed = rewarded.addAdEventListener(AdEventType.CLOSED, async () => {
-          unsubLoaded();
-          unsubEarned();
-          unsubClosed();
-          unsubError();
-
-          if (rewardEarned) {
-            await unlockHighQuality();
-            resolveEntitlementResult(true);
-          } else {
-            resolveEntitlementResult(false);
-          }
+        unsubClosed = rewarded.addAdEventListener(AdEventType.CLOSED, async () => {
+          await unlockHighQuality();
+          resolveEntitlementResult(true);
         });
 
-        const unsubError = rewarded.addAdEventListener(AdEventType.ERROR, (err: unknown) => {
-          logger.warn("[Ads] Rewarded ad failed to load:", err);
-          unsubLoaded();
-          unsubEarned();
-          unsubClosed();
-          unsubError();
-          resolveEntitlementResult(false);
+        unsubError = rewarded.addAdEventListener(AdEventType.ERROR, async (err: unknown) => {
+          logger.warn("[Ads] Rewarded ad failed to load, unlocking gracefully:", err);
+          await unlockHighQuality();
+          resolveEntitlementResult(true);
         });
 
         rewarded.load();
       } catch (err) {
-        logger.warn("[Ads] Error triggering rewarded ad:", err);
-        resolveEntitlementResult(false);
+        logger.warn("[Ads] Error triggering rewarded ad, unlocking gracefully:", err);
+        await unlockHighQuality();
+        resolveEntitlementResult(true);
       }
     })();
   });

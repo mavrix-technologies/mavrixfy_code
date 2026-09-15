@@ -3,11 +3,13 @@ import * as Animated from "@/lib/nativeAnimated";
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
-  View
+  View,
 } from "react-native";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -19,15 +21,21 @@ import { safeGoBack } from "@/utils/navigation";
 import { convertJioSaavnSong, getBestImageUrl, Song } from "@/lib/musicData";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
-import { getArtistDetails, getArtistSongs, JioSaavnArtist, type JioSaavnArtistAlbum, type JioSaavnSimilarArtist, prefetchArtist } from "@/data/providers/ArtistProvider";
+import {
+  getArtistDetails,
+  getArtistSongs,
+  JioSaavnArtist,
+  type JioSaavnArtistAlbum,
+  type JioSaavnSimilarArtist,
+  prefetchArtist,
+} from "@/data/providers/ArtistProvider";
 import { isFollowingArtist, toggleFollowArtist, type FollowedArtist } from "@/lib/followedArtists";
+import { useArtworkPalette, colorWithAlpha } from "@/lib/colorExtractor";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { mapFilter } from "@/lib/arrayUtils";
 import AdMobBanner from "@/components/AdMobBanner";
 import { pickFirst, formatFollowers } from "@/utils/stringUtils";
-
-
 
 export function ArtistDetailScreen() {
   return useArtistScreenView();
@@ -41,16 +49,16 @@ function useArtistScreenView() {
     name?: string | string[];
     image?: string | string[];
   }>();
-  const artistId   = pickFirst(params.id).trim();
-  const initName   = pickFirst(params.name).trim();
-  const initImage  = pickFirst(params.image).trim();
+  const artistId = pickFirst(params.id).trim();
+  const initName = pickFirst(params.name).trim();
+  const initImage = pickFirst(params.image).trim();
 
   const insets = useSafeAreaInsets();
   const { push: routerPush } = useRouter();
   const { currentSong, queue } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
   const { playSong, shufflePlay, togglePlay } = usePlayerActions();
-  const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const topInset = Platform.OS === "web" ? 20 : insets.top;
   const bottomPad = Math.max(140, insets.bottom + 120);
 
   const [artist, setArtist] = useState<JioSaavnArtist | null>(null);
@@ -59,38 +67,84 @@ function useArtistScreenView() {
   const [following, setFollowing] = useState(false);
   const [extraSongs, setExtraSongs] = useState<Song[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
-  const nextPageRef = useRef(2); // page 1 = initial 20, page 2+ = more
+  const nextPageRef = useRef(2);
   const [hasMore, setHasMore] = useState(true);
+  const [showBioModal, setShowBioModal] = useState(false);
+
   const followScaleRef = useRef<Animated.Value | null>(null);
   if (followScaleRef.current === null) followScaleRef.current = new Animated.Value(1);
   const followScale = followScaleRef.current;
+
+  const playScaleRef = useRef<Animated.Value | null>(null);
+  if (playScaleRef.current === null) playScaleRef.current = new Animated.Value(1);
+  const playScale = playScaleRef.current;
+
+  const shuffleScaleRef = useRef<Animated.Value | null>(null);
+  if (shuffleScaleRef.current === null) shuffleScaleRef.current = new Animated.Value(1);
+  const shuffleScale = shuffleScaleRef.current;
+
   const stickyOpacityRef = useRef<Animated.Value | null>(null);
   if (stickyOpacityRef.current === null) stickyOpacityRef.current = new Animated.Value(0);
   const stickyOpacity = stickyOpacityRef.current;
   const [isStickyVisible, setIsStickyVisible] = useState(false);
+
   const topAlbums = artist?.topAlbums ?? [];
   const visibleSimilarArtists = useMemo(
     () => artist?.similarArtists?.slice(0, 10) ?? [],
     [artist?.similarArtists]
   );
 
-  // All songs = initial topSongs + loaded extra pages
-  const allSongs: Song[] = useMemo(() => {
+  const coverUrl = useMemo(() => {
+    if (artist?.image?.length) return getBestImageUrl(artist.image);
+    return initImage;
+  }, [artist, initImage]);
+
+  const palette = useArtworkPalette(coverUrl);
+  const backgroundColor = useMemo(() => {
+    return palette.background || Colors.background;
+  }, [palette.background]);
+
+  const displayName = artist?.name || initName || "Artist";
+
+  const songs: Song[] = useMemo(() => {
     if (!artist) return [];
-    const isYt = false;
-    if (isYt) {
-      return [...(artist.topSongs as unknown as Song[]), ...extraSongs];
-    }
     const base = artist?.topSongs
       ? mapFilter(artist.topSongs, (s) => convertJioSaavnSong(s), (s) => s.audioUrl?.trim())
       : [];
     return [...base, ...extraSongs];
   }, [artist, extraSongs]);
 
-  // songs alias kept for play/shuffle handlers
-  const songs = allSongs;
+  // Latest Release item (top albums or single)
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps
+  const latestRelease = useMemo(() => {
+    if (topAlbums.length > 0) {
+      return {
+        id: topAlbums[0].id,
+        name: topAlbums[0].name,
+        year: topAlbums[0].year,
+        image: getBestImageUrl(topAlbums[0].image),
+        songCount: topAlbums[0].songCount ?? (topAlbums[0].name.toLowerCase().includes("single") ? 1 : 8),
+        url: topAlbums[0].url,
+        isAlbum: true,
+      };
+    }
+    if (songs.length > 0) {
+      return {
+        id: songs[0].id,
+        name: `${songs[0].title} - Single`,
+        year: songs[0].year || new Date().getFullYear().toString(),
+        image: songs[0].coverUrl || coverUrl,
+        songCount: 1,
+        url: "",
+        isAlbum: false,
+      };
+    }
+    return null;
+    // react-doctor-disable-next-line react-doctor/exhaustive-deps
+  }, [topAlbums, songs, coverUrl]);
 
-  // Is the current queue playing from this artist?
+  // Is current queue playing from this artist?
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- currentSong, queue, and songs are tracked
   const isPlayingFromThisArtist = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
     return (
@@ -100,18 +154,13 @@ function useArtistScreenView() {
     );
   }, [currentSong, queue, songs]);
 
-  const coverUrl = useMemo(() => {
-    if (artist?.image?.length) return getBestImageUrl(artist.image);
-    return initImage;
-  }, [artist, initImage]);
-
-  const displayName = artist?.name || initName || "Artist";
   const markArtistNotFound = useCallback(() => {
     queueMicrotask(() => {
       setError("Artist not found");
       setLoading(false);
     });
   }, []);
+
   const resetArtistLoadState = useCallback(() => {
     queueMicrotask(() => {
       setLoading(true);
@@ -121,12 +170,14 @@ function useArtistScreenView() {
       setHasMore(true);
     });
   }, []);
+
   const applyArtistFollowState = useCallback((nextFollowing: boolean) => {
     queueMicrotask(() => {
       // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
       setFollowing(nextFollowing);
     });
   }, []);
+
   const applyArtistDetails = useCallback((data: JioSaavnArtist | null) => {
     queueMicrotask(() => {
       if (data) {
@@ -137,20 +188,26 @@ function useArtistScreenView() {
       }
     });
   }, []);
+
   const applyArtistLoadFailure = useCallback(() => {
     queueMicrotask(() => {
       setError("Could not load artist. Check your connection.");
     });
   }, []);
+
   const finishArtistLoad = useCallback(() => {
     queueMicrotask(() => {
       setLoading(false);
     });
   }, []);
 
+  // Fetch artist details
   // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- loading an artist resets several independent UI fields at once before async fetches start.
   useEffect(() => {
-    if (!artistId) { markArtistNotFound(); return; }
+    if (!artistId) {
+      markArtistNotFound();
+      return;
+    }
 
     let cancelled = false;
     resetArtistLoadState();
@@ -159,6 +216,7 @@ function useArtistScreenView() {
       // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
       if (!cancelled) applyArtistFollowState(v);
     });
+
     getArtistDetails(artistId)
       .then((data) => {
         if (cancelled) return;
@@ -172,7 +230,9 @@ function useArtistScreenView() {
         if (!cancelled) finishArtistLoad();
       });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [
     applyArtistDetails,
     applyArtistFollowState,
@@ -191,32 +251,56 @@ function useArtistScreenView() {
 
   const handlePlayAll = useCallback(() => {
     if (!songs.length) return;
+    Animated.sequence([
+      Animated.spring(playScale, { toValue: 0.9, speed: 50, bounciness: 0, useNativeDriver: true }),
+      Animated.spring(playScale, { toValue: 1, speed: 20, bounciness: 12, useNativeDriver: true }),
+    ]).start();
+
     if (isPlayingFromThisArtist && isPlaying) {
       togglePlay();
       return;
     }
     playSong(songs[0], songs);
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (songs, playback state, actions) are listed
-  }, [songs, isPlayingFromThisArtist, isPlaying, togglePlay, playSong]);
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps listed
+  }, [songs, isPlayingFromThisArtist, isPlaying, togglePlay, playSong, playScale]);
 
   const handleFollow = useCallback(async () => {
     Animated.sequence([
-      Animated.spring(followScale, { toValue: 0.88, speed: 50, bounciness: 0, useNativeDriver: true }),
-      Animated.spring(followScale, { toValue: 1, speed: 18, bounciness: 14, useNativeDriver: true }),
+      Animated.spring(followScale, { toValue: 0.82, speed: 50, bounciness: 0, useNativeDriver: true }),
+      Animated.spring(followScale, { toValue: 1, speed: 20, bounciness: 14, useNativeDriver: true }),
     ]).start();
 
     const artistCard: FollowedArtist = {
-      id: artistId, name: displayName, image: coverUrl, followedAt: Date.now(),
+      id: artistId,
+      name: displayName,
+      image: coverUrl,
+      followedAt: Date.now(),
     };
     const nowFollowing = await toggleFollowArtist(artistCard);
     setFollowing(nowFollowing);
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps (artistId, displayName, coverUrl, followScale) are listed
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps listed
   }, [artistId, displayName, coverUrl, followScale]);
+
+  const handleShare = useCallback(async () => {
+    try {
+      await Share.share({
+        message: `Listen to ${displayName} on Mavrixfy Music!`,
+        title: displayName,
+      });
+    } catch {
+      // ignore
+    }
+  }, [displayName]);
 
   const handleShuffle = useCallback(() => {
     if (!songs.length) return;
+    Animated.sequence([
+      Animated.spring(shuffleScale, { toValue: 0.85, speed: 50, bounciness: 0, useNativeDriver: true }),
+      Animated.spring(shuffleScale, { toValue: 1, speed: 20, bounciness: 12, useNativeDriver: true }),
+    ]).start();
     shufflePlay(songs);
-  }, [songs, shufflePlay]);
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps listed
+  }, [songs, shufflePlay, shuffleScale]);
 
   const handleLoadMore = useCallback(async () => {
     if (loadingMore || !hasMore || !artistId) return;
@@ -229,7 +313,6 @@ function useArtistScreenView() {
       }
       const converted = mapFilter(newSongs, (s) => convertJioSaavnSong(s), (s) => s.audioUrl?.trim());
       setExtraSongs((prev) => {
-        // Dedupe by id
         const existingIds = new Set(prev.map((s) => s.id));
         const unique = converted.filter((s) => !existingIds.has(s.id));
         return [...prev, ...unique];
@@ -243,32 +326,57 @@ function useArtistScreenView() {
     }
   }, [loadingMore, hasMore, artistId]);
 
-  const handleSimilarArtistPress = useCallback((id: string, name: string, image: string) => {
-    // Already inside the artist Stack — push directly.
-    // dangerouslySingular ensures only one artist profile exists in the stack at a time.
-    routerPush(
-      { pathname: "/artist/[id]", params: { id, name, image } },
-      { dangerouslySingular: () => "artist-profile" }
-    );
-  }, [routerPush]);
+  const handleSimilarArtistPress = useCallback(
+    (id: string, name: string, image: string) => {
+      routerPush(
+        { pathname: "/artist/[id]", params: { id, name, image } },
+        { dangerouslySingular: () => "artist-profile" }
+      );
+    },
+    [routerPush]
+  );
 
-  const handleAlbumPress = useCallback((album: JioSaavnArtistAlbum) => {
-    const isYt = false;
-    routerPush({
-      pathname: "/playlist/[id]",
-      params: {
-        id: album.id,
-        jiosaavn: isYt ? "false" : "true",
-        youtube: isYt ? "true" : "false",
-        album: "true",
-        firestore: "false",
-        link: album.url,
-        title: album.name,
-        cover: getBestImageUrl(album.image),
-        songCount: String(album.songCount ?? 0),
-      },
-    });
-  }, [routerPush]);
+  const handleAlbumPress = useCallback(
+    (album: JioSaavnArtistAlbum) => {
+      routerPush({
+        pathname: "/playlist/[id]",
+        params: {
+          id: album.id,
+          jiosaavn: "true",
+          youtube: "false",
+          album: "true",
+          firestore: "false",
+          link: album.url,
+          title: album.name,
+          cover: getBestImageUrl(album.image),
+          songCount: String(album.songCount ?? 0),
+        },
+      });
+    },
+    [routerPush]
+  );
+
+  const handleLatestReleasePress = useCallback(() => {
+    if (!latestRelease) return;
+    if (latestRelease.isAlbum) {
+      routerPush({
+        pathname: "/playlist/[id]",
+        params: {
+          id: latestRelease.id,
+          jiosaavn: "true",
+          youtube: "false",
+          album: "true",
+          firestore: "false",
+          link: latestRelease.url,
+          title: latestRelease.name,
+          cover: latestRelease.image,
+          songCount: String(latestRelease.songCount),
+        },
+      });
+    } else if (songs.length > 0) {
+      playSong(songs[0], songs);
+    }
+  }, [latestRelease, routerPush, songs, playSong]);
 
   const renderAlbumCard = useCallback(
     ({ item }: { item: JioSaavnArtistAlbum }) => (
@@ -281,7 +389,9 @@ function useArtistScreenView() {
           transition={80}
           cachePolicy="memory-disk"
         />
-        <Text style={styles.albumName} numberOfLines={2}>{item.name}</Text>
+        <Text style={styles.albumName} numberOfLines={2}>
+          {item.name}
+        </Text>
         {item.year ? <Text style={styles.albumYear}>{item.year}</Text> : null}
       </Pressable>
     ),
@@ -304,48 +414,70 @@ function useArtistScreenView() {
             transition={80}
             cachePolicy="memory-disk"
           />
-          <Text style={styles.similarName} numberOfLines={2}>{item.name}</Text>
+          <Text style={styles.similarName} numberOfLines={2}>
+            {item.name}
+          </Text>
         </Pressable>
       );
     },
     [handleSimilarArtistPress]
   );
 
-  const handleScroll = useCallback((e: any) => {
-    const y = e.nativeEvent.contentOffset.y;
-    // Show sticky after scrolling past the hero (320px)
-    const shouldShow = y > 260;
-    setIsStickyVisible((prev) => {
-      if (prev === shouldShow) return prev;
-      Animated.timing(stickyOpacity, {
-        toValue: shouldShow ? 1 : 0,
-        duration: 160,
-        useNativeDriver: true,
-      }).start();
-      return shouldShow;
-    });
-  }, [stickyOpacity]);
+  const isStickyVisibleRef = useRef(false);
+  const handleScroll = useCallback(
+    (e: any) => {
+      const y = e.nativeEvent.contentOffset.y;
+      const shouldShow = y > 300;
+      if (isStickyVisibleRef.current !== shouldShow) {
+        isStickyVisibleRef.current = shouldShow;
+        setIsStickyVisible(shouldShow);
+        Animated.timing(stickyOpacity, {
+          toValue: shouldShow ? 1 : 0,
+          duration: 160,
+          useNativeDriver: true,
+        }).start();
+      }
+    },
+    [stickyOpacity]
+  );
 
-  // ── Render helpers ──────────────────────────────────────────────────────────
   const songsQueueKey = useMemo(() => songs.map((song) => song.id).join("|"), [songs]);
 
   const renderSongRow = useCallback(
     ({ item, index }: { item: Song; index: number }) => (
-      <SongRow key={item.id} song={item} index={index} queue={songs} queueKey={songsQueueKey} />
+      <SongRow
+        key={item.id}
+        song={item}
+        index={index}
+        queue={songs}
+        queueKey={songsQueueKey}
+        showDownload={false}
+      />
     ),
     [songs, songsQueueKey]
   );
 
-  // ── Loading / error states ──────────────────────────────────────────────────
+  const getItemLayout = useCallback(
+    (_data: ArrayLike<Song> | null | undefined, index: number) => ({
+      length: 68,
+      offset: 68 * index,
+      index,
+    }),
+    []
+  );
+
+  const keyExtractor = useCallback((item: Song) => item.id, []);
 
   if (loading && !initName) {
     return (
-      <View style={[styles.container, { paddingTop: topInset }]}>
-        <Pressable onPress={safeGoBack} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={Colors.text} />
-        </Pressable>
+      <View style={[styles.container, { backgroundColor, paddingTop: topInset }]}>
+        <View style={[styles.floatingNavContainer, { top: topInset + 6 }]}>
+          <Pressable onPress={safeGoBack} style={styles.iosCircularNavBtn}>
+            <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
+          </Pressable>
+        </View>
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={Colors.primary} />
+          <ActivityIndicator size="large" color="#FFFFFF" />
         </View>
       </View>
     );
@@ -353,86 +485,162 @@ function useArtistScreenView() {
 
   if (error && !artist) {
     return (
-      <View style={[styles.container, { paddingTop: topInset }]}>
-        <Pressable onPress={safeGoBack} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={22} color={Colors.text} />
-        </Pressable>
+      <View style={[styles.container, { backgroundColor, paddingTop: topInset }]}>
+        <View style={[styles.floatingNavContainer, { top: topInset + 6 }]}>
+          <Pressable onPress={safeGoBack} style={styles.iosCircularNavBtn}>
+            <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
+          </Pressable>
+        </View>
         <View style={styles.center}>
-          <Ionicons name="person-outline" size={40} color={Colors.subtext} />
+          <Ionicons name="person-outline" size={42} color="rgba(255,255,255,0.4)" />
           <Text style={styles.errorText}>{error}</Text>
         </View>
       </View>
     );
   }
 
+  const bioText = artist?.bio?.[0]?.text || "";
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor }]}>
       <FlatList
         data={songs}
-        keyExtractor={(item) => item.id}
+        keyExtractor={keyExtractor}
         renderItem={renderSongRow}
+        getItemLayout={getItemLayout}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS === "android"}
         contentInset={{ bottom: bottomPad }}
         scrollIndicatorInsets={{ bottom: bottomPad }}
         onScroll={handleScroll}
-        scrollEventThrottle={16}
+        scrollEventThrottle={32}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
           <>
-            {/* ── Hero ── */}
-            <View style={[styles.hero, { paddingTop: topInset + 8 }]}>
+            {/* ── Apple Music Full-Bleed Hero Portrait ── */}
+            <View style={styles.heroContainer}>
               {coverUrl ? (
-                <Image source={{ uri: coverUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+                <Image
+                  source={{ uri: coverUrl }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                  priority="high"
+                />
               ) : null}
+
+              {/* Gradient Vignette overlay for seamless Apple Music background transition */}
               <LinearGradient
-                colors={["transparent", "rgba(16,20,26,0.7)", Colors.background]}
-                locations={[0.3, 0.7, 1]}
+                colors={[
+                  "rgba(0,0,0,0.35)",
+                  "transparent",
+                  "transparent",
+                  colorWithAlpha(backgroundColor, 0.45),
+                  colorWithAlpha(backgroundColor, 0.9),
+                  backgroundColor,
+                ]}
+                locations={[0, 0.2, 0.48, 0.75, 0.92, 1]}
                 style={StyleSheet.absoluteFill}
               />
-              <Pressable onPress={safeGoBack} style={[styles.heroBack, { top: topInset + 8 }]}>
-                <Ionicons name="arrow-back" size={22} color="#fff" />
-              </Pressable>
-              <View style={styles.heroInfo}>
-                {artist?.isVerified ? (
-                  <View style={styles.verifiedBadge}>
-                    <Ionicons name="checkmark-circle" size={14} color={Colors.primary} />
-                    <Text style={styles.verifiedText}>Verified Artist</Text>
-                  </View>
-                ) : null}
-                <Text style={styles.artistName}>{displayName}</Text>
-                {artist?.followerCount ? (
-                  <Text style={styles.followers}>{formatFollowers(artist.followerCount)}</Text>
-                ) : null}
-                <View style={styles.heroActions}>
-                  <Animated.View style={{ transform: [{ scale: followScale }] }}>
+
+              {/* Artist Name & Capsule Badge */}
+              <View style={styles.heroInfoSection}>
+                {/*  Upcoming Concerts / Artist Capsule Badge */}
+                <View style={styles.artistCapsuleBadge}>
+                  <Ionicons name="musical-notes" size={11} color="rgba(255,255,255,0.75)" />
+                  <Text style={styles.artistCapsuleText}>
+                    {artist?.isVerified ? "VERIFIED ARTIST" : "UPCOMING CONCERTS"}
+                  </Text>
+                </View>
+
+                {/* Massive Bold Artist Typography */}
+                <Text style={styles.appleMusicArtistName} numberOfLines={2}>
+                  {displayName}
+                </Text>
+
+                {/* ── Signature 3-Button Action Row (Shuffle, Play, Like) ── */}
+                <View style={styles.appleMusicActionRow}>
+                  {/* Left: Shuffle Button */}
+                  <Animated.View style={{ transform: [{ scale: shuffleScale }] }}>
                     <Pressable
-                      style={[styles.followBtn, following && styles.followBtnFollowed]}
-                      onPress={handleFollow}
+                      style={styles.appleMusicCircleBtn}
+                      onPress={handleShuffle}
+                      disabled={!songs.length}
                     >
-                      {following ? (
-                        <>
-                          <Ionicons name="checkmark" size={16} color="#000" />
-                          <Text style={styles.followBtnTextActive}>Following</Text>
-                        </>
-                      ) : (
-                        <Text style={styles.followBtnText}>Follow</Text>
-                      )}
+                      <Ionicons name="shuffle" size={22} color="#FFFFFF" />
                     </Pressable>
                   </Animated.View>
-                  <Pressable style={styles.playAllBtn} onPress={handlePlayAll} disabled={!songs.length}>
-                    <Ionicons name={isPlayingFromThisArtist && isPlaying ? "pause" : "play"} size={16} color="#000" />
-                    <Text style={styles.playAllText}>{isPlayingFromThisArtist && isPlaying ? "Pause" : "Play"}</Text>
-                  </Pressable>
-                  {/* Shuffle icon */}
-                  <Pressable style={styles.iconCircleBtn} onPress={handleShuffle} disabled={!songs.length}>
-                    <Ionicons name="shuffle" size={18} color="rgba(255,255,255,0.85)" />
-                  </Pressable>
+
+                  {/* Center: Prominent White Play Button */}
+                  <Animated.View style={{ transform: [{ scale: playScale }] }}>
+                    <Pressable
+                      style={styles.appleMusicMainPlayBtn}
+                      onPress={handlePlayAll}
+                      disabled={!songs.length}
+                    >
+                      <Ionicons
+                        name={isPlayingFromThisArtist && isPlaying ? "pause" : "play"}
+                        size={28}
+                        color="#000000"
+                        style={!isPlayingFromThisArtist || !isPlaying ? { marginLeft: 3 } : undefined}
+                      />
+                    </Pressable>
+                  </Animated.View>
+
+                  {/* Right: Like / Favorite Heart Button */}
+                  <Animated.View style={{ transform: [{ scale: followScale }] }}>
+                    <Pressable
+                      style={[
+                        styles.appleMusicCircleBtn,
+                        following && styles.appleMusicCircleBtnActive,
+                      ]}
+                      onPress={handleFollow}
+                    >
+                      <Ionicons
+                        name={following ? "heart" : "heart-outline"}
+                        size={21}
+                        color={following ? "#FFFFFF" : "#FFFFFF"}
+                      />
+                    </Pressable>
+                  </Animated.View>
                 </View>
               </View>
             </View>
 
-            {/* ── Top Songs ── */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Popular Songs</Text>
+            {/* ── Featured "Latest Release" Glass Card ── */}
+            {latestRelease ? (
+              <Pressable style={styles.latestReleaseCard} onPress={handleLatestReleasePress}>
+                <Image
+                  source={{ uri: latestRelease.image }}
+                  style={styles.latestReleaseThumb}
+                  contentFit="cover"
+                  transition={80}
+                  cachePolicy="memory-disk"
+                />
+                <View style={styles.latestReleaseMeta}>
+                  <Text style={styles.latestReleaseDate}>
+                    {latestRelease.year ? `${latestRelease.year} • ` : ""}Latest Release
+                  </Text>
+                  <Text style={styles.latestReleaseTitle} numberOfLines={1}>
+                    {latestRelease.name}
+                  </Text>
+                  <Text style={styles.latestReleaseCount}>
+                    {latestRelease.songCount} {latestRelease.songCount === 1 ? "song" : "songs"}
+                  </Text>
+                </View>
+                <View style={styles.latestReleaseAction}>
+                  <Ionicons name="add" size={18} color="#FFFFFF" />
+                </View>
+              </Pressable>
+            ) : null}
+
+            {/* ── Section: "Top Songs >" ── */}
+            <View style={styles.sectionHeaderRow}>
+              <Pressable style={styles.sectionTitleLink} onPress={handleShuffle}>
+                <Text style={styles.sectionTitle}>Top Songs</Text>
+                <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.45)" />
+              </Pressable>
             </View>
           </>
         }
@@ -445,7 +653,7 @@ function useArtistScreenView() {
         }
         ListFooterComponent={
           <>
-            {/* Load More button */}
+            {/* Load More Songs Button */}
             {hasMore ? (
               <Pressable
                 style={styles.loadMoreBtn}
@@ -453,7 +661,7 @@ function useArtistScreenView() {
                 disabled={loadingMore}
               >
                 {loadingMore ? (
-                  <ActivityIndicator size="small" color={Colors.primary} />
+                  <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
                   <Text style={styles.loadMoreText}>Load More Songs</Text>
                 )}
@@ -462,33 +670,37 @@ function useArtistScreenView() {
 
             <AdMobBanner loadDelayMs={800} />
 
-            {/* ── Albums ── */}
+            {/* ── Section: Albums ── */}
             {topAlbums.length ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Albums</Text>
+                <Text style={styles.carouselSectionTitle}>Albums</Text>
                 <FlatList
                   data={topAlbums}
                   keyExtractor={(item) => item.id}
                   renderItem={renderAlbumCard}
                   horizontal
+                  initialNumToRender={4}
+                  maxToRenderPerBatch={4}
                   showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.rowPad}
+                  contentContainerStyle={styles.carouselContentPadding}
                   nestedScrollEnabled={false}
                 />
               </View>
             ) : null}
 
-            {/* ── Similar Artists ── */}
+            {/* ── Section: Similar Artists ── */}
             {visibleSimilarArtists.length ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Fans Also Like</Text>
+                <Text style={styles.carouselSectionTitle}>Fans Also Like</Text>
                 <FlatList
                   data={visibleSimilarArtists}
                   keyExtractor={(item) => item.id}
                   renderItem={renderSimilarArtist}
                   horizontal
+                  initialNumToRender={5}
+                  maxToRenderPerBatch={5}
                   showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.rowPad}
+                  contentContainerStyle={styles.carouselContentPadding}
                   nestedScrollEnabled={false}
                 />
               </View>
@@ -497,179 +709,488 @@ function useArtistScreenView() {
         }
       />
 
-      {/* ── Sticky header — always mounted, fades in/out via opacity ── */}
+      {/* ── Top Floating Navigation Buttons (Native iOS Style) ── */}
+      <View
+        pointerEvents="box-none"
+        style={[styles.floatingNavContainer, { top: topInset + 6 }]}
+      >
+        {/* Left: Native iOS Circular Back Button */}
+        <Pressable onPress={safeGoBack} style={styles.iosCircularNavBtn}>
+          <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
+        </Pressable>
+
+        {/* Right: Native iOS Capsule Button Group */}
+        <View style={styles.iosCapsuleNavGroup}>
+          <Pressable style={styles.iosCapsuleBtn} onPress={handleShare}>
+            <Ionicons name="share-outline" size={19} color="#FFFFFF" />
+          </Pressable>
+          <View style={styles.iosCapsuleDivider} />
+          <Pressable style={styles.iosCapsuleBtn} onPress={() => setShowBioModal(true)}>
+            <Ionicons name="ellipsis-horizontal" size={19} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </View>
+
+      {/* ── Apple Music Frosted Sticky Header ── */}
       <Animated.View
         pointerEvents={isStickyVisible ? "auto" : "none"}
-        style={[styles.sticky, { paddingTop: topInset, opacity: stickyOpacity }]}
+        style={[
+          styles.stickyHeader,
+          {
+            paddingTop: topInset,
+            opacity: stickyOpacity,
+            backgroundColor: colorWithAlpha(backgroundColor, 0.94),
+          },
+        ]}
       >
-        <Pressable onPress={safeGoBack} style={styles.stickyBack}>
-          <Ionicons name="arrow-back" size={20} color={Colors.text} />
+        <Pressable onPress={safeGoBack} style={styles.stickyBackBtn}>
+          <Ionicons name="chevron-back" size={22} color="#FFFFFF" />
         </Pressable>
-        <Text style={styles.stickyName} numberOfLines={1}>{displayName}</Text>
-        <Pressable style={styles.stickyPlay} onPress={handlePlayAll} disabled={!songs.length}>
-          <Ionicons name={isPlayingFromThisArtist && isPlaying ? "pause" : "play"} size={14} color="#000" />
+        <Text style={styles.stickyTitle} numberOfLines={1}>
+          {displayName}
+        </Text>
+        <Pressable
+          style={styles.stickyPlayBtn}
+          onPress={handlePlayAll}
+          disabled={!songs.length}
+        >
+          <Ionicons
+            name={isPlayingFromThisArtist && isPlaying ? "pause" : "play"}
+            size={16}
+            color="#000000"
+            style={!isPlayingFromThisArtist || !isPlaying ? { marginLeft: 2 } : undefined}
+          />
         </Pressable>
       </Animated.View>
+
+      {/* ── Artist Bio Bottom Sheet Modal ── */}
+      <Modal
+        visible={showBioModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowBioModal(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setShowBioModal(false)}
+        >
+          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHandle} />
+
+            <View style={styles.modalHeaderRow}>
+              {coverUrl ? (
+                <Image source={{ uri: coverUrl }} style={styles.modalAvatar} contentFit="cover" />
+              ) : null}
+              <View style={styles.modalHeaderTextGroup}>
+                <Text style={styles.modalArtistName}>{displayName}</Text>
+                {artist?.followerCount ? (
+                  <Text style={styles.modalFollowers}>
+                    {formatFollowers(artist.followerCount)}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+
+            {bioText ? (
+              <Text style={styles.modalBioText}>{bioText}</Text>
+            ) : (
+              <Text style={styles.modalBioText}>
+                {displayName} is featured on Mavrixfy Music with top charts, albums, and exclusive tracks.
+              </Text>
+            )}
+
+            <Pressable
+              style={styles.modalCloseBtn}
+              onPress={() => setShowBioModal(false)}
+            >
+              <Text style={styles.modalCloseBtnText}>Done</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  backBtn: { width: 36, height: 36, marginLeft: 12, alignItems: "center", justifyContent: "center" },
-  errorText: { color: Colors.subtext, fontSize: 14, textAlign: "center", fontFamily: "Inter_500Medium" },
+  container: {
+    flex: 1,
+    backgroundColor: "#080B0F",
+  },
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  errorText: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 14,
+    textAlign: "center",
+    fontFamily: "Inter_500Medium",
+  },
 
-  // Hero
-  hero: {
-    height: 320,
+  // ── Hero ──
+  heroContainer: {
+    height: 480,
     justifyContent: "flex-end",
-    overflow: "hidden",
+    position: "relative",
   },
-  heroBack: {
-    position: "absolute",
-    left: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(0,0,0,0.45)",
+  heroInfoSection: {
     alignItems: "center",
-    justifyContent: "center",
-  },
-  heroInfo: { paddingHorizontal: 16, paddingBottom: 20, gap: 6 },
-  verifiedBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
-  verifiedText: { color: Colors.primary, fontSize: 12, fontFamily: "Inter_600SemiBold" },
-  artistName: {
-    color: "#fff",
-    fontSize: 32,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: -0.5,
-  },
-  followers: { color: "rgba(255,255,255,0.7)", fontSize: 13, fontFamily: "Inter_400Regular" },
-  heroActions: {
-    flexDirection: "row",
-    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 24,
     gap: 10,
-    marginTop: 6,
   },
-  followBtn: {
-    height: 38,
-    paddingHorizontal: 20,
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.65)",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  followBtnFollowed: {
-    borderColor: Colors.primary,
-    backgroundColor: Colors.primary,
-  },
-  followBtnInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 5,
-  },
-  followBtnText: {
-    color: "#fff",
-    fontSize: 14,
-    fontFamily: "Inter_700Bold",
-  },
-  followBtnTextActive: {
-    color: "#000",
-    fontSize: 14,
-    fontFamily: "Inter_700Bold",
-  },
-  playAllBtn: {
+  artistCapsuleBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: Colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255, 255, 255, 0.2)",
   },
-  playAllText: { color: "#000", fontSize: 14, fontFamily: "Inter_700Bold" },
+  artistCapsuleText: {
+    color: "rgba(255, 255, 255, 0.85)",
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.9,
+  },
+  appleMusicArtistName: {
+    color: "#FFFFFF",
+    fontSize: 34,
+    fontFamily: "Inter_900Black",
+    letterSpacing: 1.1,
+    textAlign: "center",
+    textTransform: "uppercase",
+  },
 
-  // Icon-only circle buttons (shuffle)
-  iconCircleBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(255,255,255,0.1)",
+  // ── Apple Music 3-Button Action Row ──
+  appleMusicActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 24,
+    marginTop: 12,
+  },
+  appleMusicCircleBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
+    borderColor: "rgba(255, 255, 255, 0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  appleMusicCircleBtnActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  appleMusicMainPlayBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0px 6px 16px rgba(0, 0, 0, 0.35)",
+  },
+
+  // ── Featured "Latest Release" Glass Card ──
+  latestReleaseCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginTop: 18,
+    marginBottom: 20,
+    padding: 12,
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    gap: 14,
+  },
+  latestReleaseThumb: {
+    width: 58,
+    height: 58,
+    borderRadius: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+  },
+  latestReleaseMeta: {
+    flex: 1,
+    gap: 3,
+  },
+  latestReleaseDate: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 11.5,
+    fontFamily: "Inter_500Medium",
+  },
+  latestReleaseTitle: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+  },
+  latestReleaseCount: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  latestReleaseAction: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
     alignItems: "center",
     justifyContent: "center",
   },
 
-  // Sections
-  section: { paddingTop: 24 },
+  // ── Section Headers ──
+  sectionHeaderRow: {
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  sectionTitleLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
   sectionTitle: {
-    color: Colors.text,
+    color: "#FFFFFF",
+    fontSize: 21,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.2,
+  },
+  carouselSectionTitle: {
+    color: "#FFFFFF",
     fontSize: 20,
     fontFamily: "Inter_700Bold",
     letterSpacing: -0.2,
     paddingHorizontal: 16,
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  emptyText: { color: Colors.subtext, fontSize: 14, paddingHorizontal: 16, fontFamily: "Inter_400Regular" },
-  rowPad: { paddingHorizontal: 16, gap: 12 },
+  section: {
+    paddingTop: 24,
+  },
+  emptyText: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 14,
+    paddingHorizontal: 16,
+    fontFamily: "Inter_400Regular",
+  },
+  carouselContentPadding: {
+    paddingHorizontal: 16,
+    gap: 14,
+  },
+
+  // ── Albums Carousel ──
+  albumCard: {
+    width: 136,
+    gap: 6,
+  },
+  albumCover: {
+    width: 136,
+    height: 136,
+    borderRadius: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
+  albumName: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+  },
+  albumYear: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 11.5,
+    fontFamily: "Inter_400Regular",
+  },
+
+  // ── Similar Artists Carousel ──
+  similarCard: {
+    width: 96,
+    alignItems: "center",
+    gap: 8,
+  },
+  similarAvatar: {
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
+  similarName: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+    textAlign: "center",
+  },
 
   loadMoreBtn: {
     marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 4,
-    height: 42,
-    borderRadius: 999,
+    marginTop: 12,
+    marginBottom: 8,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: "rgba(255, 255, 255, 0.12)",
     alignItems: "center",
     justifyContent: "center",
   },
   loadMoreText: {
-    color: Colors.text,
-    fontSize: 13,
+    color: "#FFFFFF",
+    fontSize: 13.5,
     fontFamily: "Inter_600SemiBold",
   },
 
-  // Albums
-  albumCard: { width: 130, gap: 6 },
-  albumCover: { width: 130, height: 130, borderRadius: 8, backgroundColor: Colors.surface },
-  albumName: { color: Colors.text, fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  albumYear: { color: Colors.subtext, fontSize: 11, fontFamily: "Inter_400Regular" },
+  // ── Top Floating Navigation Bar (Native iOS Style) ──
+  floatingNavContainer: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    zIndex: 90,
+  },
+  iosCircularNavBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(0, 0, 0, 0.32)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255, 255, 255, 0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iosCapsuleNavGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(0, 0, 0, 0.32)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255, 255, 255, 0.18)",
+    paddingHorizontal: 2,
+  },
+  iosCapsuleBtn: {
+    width: 36,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iosCapsuleDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
+  },
 
-  // Similar artists
-  similarCard: { width: 90, alignItems: "center", gap: 6 },
-  similarAvatar: { width: 80, height: 80, borderRadius: 40, backgroundColor: Colors.surface },
-  similarName: { color: Colors.text, fontSize: 12, fontFamily: "Inter_500Medium", textAlign: "center" },
-
-  // Sticky — always rendered, opacity animated
-  sticky: {
+  // ── Sticky Header ──
+  stickyHeader: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: "rgba(16,20,26,0.97)",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255,255,255,0.1)",
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
     paddingBottom: 10,
     paddingHorizontal: 12,
     gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255, 255, 255, 0.12)",
+    zIndex: 95,
   },
-  stickyBack: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
-  stickyName: { flex: 1, color: Colors.text, fontSize: 16, fontFamily: "Inter_700Bold" },
-  stickyPlay: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.primary,
+  stickyBackBtn: {
+    width: 36,
+    height: 36,
     alignItems: "center",
     justifyContent: "center",
+  },
+  stickyTitle: {
+    flex: 1,
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+    textAlign: "center",
+  },
+  stickyPlayBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // ── Bio Bottom Sheet Modal ──
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    backgroundColor: "#161B22",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 36,
+    gap: 16,
+    maxHeight: "80%",
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.25)",
+    alignSelf: "center",
+    marginBottom: 8,
+  },
+  modalHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  modalAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+  },
+  modalHeaderTextGroup: {
+    flex: 1,
+    gap: 2,
+  },
+  modalArtistName: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontFamily: "Inter_700Bold",
+  },
+  modalFollowers: {
+    color: "rgba(255, 255, 255, 0.6)",
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+  },
+  modalBioText: {
+    color: "rgba(255, 255, 255, 0.8)",
+    fontSize: 14.5,
+    lineHeight: 22,
+    fontFamily: "Inter_400Regular",
+  },
+  modalCloseBtn: {
+    marginTop: 8,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCloseBtnText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
   },
 });

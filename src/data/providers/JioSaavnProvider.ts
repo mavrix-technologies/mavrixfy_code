@@ -13,6 +13,7 @@ import {
   fetchNewArrivalPlaylists,
   getCategoryCache,
   setCategoryCache,
+  getJioSaavnSearchBaseUrls,
 } from "./JioSaavnCategoryService";
 import type {
   JioSaavnPlaylistResult,
@@ -89,10 +90,6 @@ const FAST_TIMEOUT_MS = 6500;
 const LAST_SHOWN_KEY = "@mavrixfy_last_shown_playlists_v1";
 const LAST_SHOWN_MAX = 40;
 const HOME_FETCH_CATEGORY_CONCURRENCY = 3;
-
-const JIOSAAVN_SEARCH_BASE_URLS = [
-  `${getApiUrl().replace(/\/+$/, "")}/api`,
-];
 
 const FAST_SEARCH_TERMS: Record<string, string> = {
   trending: `trending now hindi`,
@@ -211,7 +208,7 @@ async function fetchCategoryFast(
 ): Promise<JioSaavnPlaylistResult[]> {
   const term = FAST_SEARCH_TERMS[categoryId] ?? `${categoryId} songs ${CURRENT_YEAR}`;
   const apiLimit = Math.max(limit, 20);
-  const urls = JIOSAAVN_SEARCH_BASE_URLS.map((base) => {
+  const urls = getJioSaavnSearchBaseUrls().map((base) => {
     const trimmed = base.replace(/\/+$/, "");
     return `${trimmed}/search/playlists?query=${encodeURIComponent(term)}&limit=${apiLimit}&page=1`;
   });
