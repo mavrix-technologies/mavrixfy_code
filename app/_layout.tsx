@@ -360,6 +360,7 @@ const artistMixScreenOptions = {
 
 function RootLayoutNav() {
   const { showNavOverlay } = useRootLayoutNavigation();
+  const { loading } = useAuth();
 
   return (
     <View style={{ flex: 1 }}>

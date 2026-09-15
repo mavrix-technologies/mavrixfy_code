@@ -354,11 +354,11 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const miniSecondaryButtonBorder = "transparent";
   const miniSecondaryIconColor = "rgba(255, 255, 255, 0.90)";
   const coverUrl = activeSong?.coverUrl?.trim();
-  const miniPlayerHeight = 50;
-  const miniCoverSlotSize = 40;
-  const miniCoverSize = 40;
-  const miniControlSize = 34;
-  const miniControlRadius = 17;
+  const miniPlayerHeight = 55;
+  const miniCoverSlotSize = 44;
+  const miniCoverSize = 44;
+  const miniControlSize = 36;
+  const miniControlRadius = 18;
   const trashShiftX = trashOpacity.interpolate({
     inputRange: [0, 1],
     outputRange: [16, 0],

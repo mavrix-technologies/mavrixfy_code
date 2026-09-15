@@ -1,27 +1,33 @@
 import React from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 export function SegmentPicker<T extends string>({
   options,
   value,
+  loadingValue,
   onChange,
 }: {
   options: { label: string; value: T; icon?: keyof typeof Ionicons.glyphMap }[];
   value: T;
+  loadingValue?: T | null;
   onChange: (value: T) => void;
 }) {
   return (
     <View style={styles.segmentTrack}>
       {options.map((opt) => {
         const selected = value === opt.value;
+        const isLoading = loadingValue === opt.value;
         return (
           <Pressable
             key={opt.value}
+            disabled={Boolean(loadingValue)}
             style={[styles.segmentTab, selected && styles.segmentTabSelected]}
             onPress={() => onChange(opt.value)}
           >
-            {opt.icon ? (
+            {isLoading ? (
+              <ActivityIndicator size="small" color="#FFFFFF" style={{ transform: [{ scale: 0.75 }] }} />
+            ) : opt.icon ? (
               <Ionicons
                 name={opt.icon}
                 size={18}

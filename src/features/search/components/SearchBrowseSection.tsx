@@ -11,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { APP_TOP_HEADER_HEIGHT } from "@/components/AppTopHeader";
 import AdMobNativeVideo from "@/components/AdMobNativeVideo";
+import AdMobBanner from "@/components/AdMobBanner";
 import { styles } from "../styles/searchStyles";
 import {
   type BrowseCategory,
@@ -80,6 +81,7 @@ export const SearchBrowseSection = React.memo(function SearchBrowseSection({
       scrollEventThrottle={16}
     >
       <AdMobNativeVideo />
+      <AdMobBanner loadDelayMs={400} />
 
       <View style={styles.browseSection}>
         <Text style={styles.browseTitle}>Browse all</Text>
@@ -93,6 +95,7 @@ export const SearchBrowseSection = React.memo(function SearchBrowseSection({
           columnWrapperStyle={styles.browseGridRow}
         />
       </View>
+      <AdMobBanner loadDelayMs={800} />
     </ScrollView>
   );
 });

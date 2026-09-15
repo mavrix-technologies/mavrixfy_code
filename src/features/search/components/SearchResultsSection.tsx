@@ -17,6 +17,7 @@ import { getBestImageUrl, type Song } from "@/lib/musicData";
 import SongRow from "@/components/SongRow";
 import SearchResultFilterChip from "@/components/SearchResultFilterChip";
 import { APP_TOP_HEADER_HEIGHT } from "@/components/AppTopHeader";
+import AdMobBanner from "@/components/AdMobBanner";
 import type {
   ResultFilter,
   PlaylistResult,
@@ -505,67 +506,70 @@ export const SearchResultsSection = React.memo(function SearchResultsSection({
             ) : null
           }
           ListFooterComponent={
-            showAlbumResults || showArtistResults || showPlaylistResults ? (
-              <>
-                {showAlbumResults ? (
-                  <View style={styles.sectionBlock}>
-                    <View style={styles.sectionHeaderRow}>
-                      <Text style={styles.sectionTitle}>Albums</Text>
-                      {resultFilter === "all" ? (
-                        <Pressable onPress={() => onFilterSelect("albums")}>
-                          <Text style={styles.sectionActionText}>See all</Text>
-                        </Pressable>
-                      ) : null}
+            <>
+              <AdMobBanner loadDelayMs={600} />
+              {showAlbumResults || showArtistResults || showPlaylistResults ? (
+                <>
+                  {showAlbumResults ? (
+                    <View style={styles.sectionBlock}>
+                      <View style={styles.sectionHeaderRow}>
+                        <Text style={styles.sectionTitle}>Albums</Text>
+                        {resultFilter === "all" ? (
+                          <Pressable onPress={() => onFilterSelect("albums")}>
+                            <Text style={styles.sectionActionText}>See all</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                      <View style={styles.playlistGridWrap}>
+                        {featuredAlbums.map((album, index) => (
+                          <View key={album.id} style={styles.playlistGridItemWrap}>
+                            <SearchResultAlbumCard album={album} index={index} onPress={onAlbumPress} />
+                          </View>
+                        ))}
+                      </View>
                     </View>
-                    <View style={styles.playlistGridWrap}>
-                      {featuredAlbums.map((album, index) => (
-                        <View key={album.id} style={styles.playlistGridItemWrap}>
-                          <SearchResultAlbumCard album={album} index={index} onPress={onAlbumPress} />
-                        </View>
-                      ))}
+                  ) : null}
+                  {showArtistResults ? (
+                    <View style={styles.sectionBlock}>
+                      <View style={styles.sectionHeaderRow}>
+                        <Text style={styles.sectionTitle}>Artists</Text>
+                        {resultFilter === "all" ? (
+                          <Pressable onPress={() => onFilterSelect("artists")}>
+                            <Text style={styles.sectionActionText}>See all</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                      <View style={styles.artistSectionList}>
+                        {featuredArtists.map((artist) => (
+                          <View key={artist.id}>
+                            <SearchResultArtistRow artist={artist} onPress={onArtistPress} />
+                          </View>
+                        ))}
+                      </View>
                     </View>
-                  </View>
-                ) : null}
-                {showArtistResults ? (
-                  <View style={styles.sectionBlock}>
-                    <View style={styles.sectionHeaderRow}>
-                      <Text style={styles.sectionTitle}>Artists</Text>
-                      {resultFilter === "all" ? (
-                        <Pressable onPress={() => onFilterSelect("artists")}>
-                          <Text style={styles.sectionActionText}>See all</Text>
-                        </Pressable>
-                      ) : null}
+                  ) : null}
+                  {showPlaylistResults ? (
+                    <View style={styles.sectionBlock}>
+                      <View style={styles.sectionHeaderRow}>
+                        <Text style={styles.sectionTitle}>Playlists</Text>
+                        {resultFilter === "all" ? (
+                          <Pressable onPress={() => onFilterSelect("playlists")}>
+                            <Text style={styles.sectionActionText}>See all</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                      <View style={styles.playlistGridWrap}>
+                        {featuredPlaylists.map((playlist, index) => (
+                          <View key={playlist.id} style={styles.playlistGridItemWrap}>
+                            <SearchResultPlaylistCard playlist={playlist} index={index} onPress={onPlaylistPress} />
+                          </View>
+                        ))}
+                      </View>
                     </View>
-                    <View style={styles.artistSectionList}>
-                      {featuredArtists.map((artist) => (
-                        <View key={artist.id}>
-                          <SearchResultArtistRow artist={artist} onPress={onArtistPress} />
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                ) : null}
-                {showPlaylistResults ? (
-                  <View style={styles.sectionBlock}>
-                    <View style={styles.sectionHeaderRow}>
-                      <Text style={styles.sectionTitle}>Playlists</Text>
-                      {resultFilter === "all" ? (
-                        <Pressable onPress={() => onFilterSelect("playlists")}>
-                          <Text style={styles.sectionActionText}>See all</Text>
-                        </Pressable>
-                      ) : null}
-                    </View>
-                    <View style={styles.playlistGridWrap}>
-                      {featuredPlaylists.map((playlist, index) => (
-                        <View key={playlist.id} style={styles.playlistGridItemWrap}>
-                          <SearchResultPlaylistCard playlist={playlist} index={index} onPress={onPlaylistPress} />
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                ) : null}
-              </>
-            ) : null
+                  ) : null}
+                </>
+              ) : null}
+            </>
           }
         />
       )}

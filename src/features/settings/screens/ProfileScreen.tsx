@@ -48,6 +48,7 @@ export function ProfileScreen() {
   const bottomInset = Platform.OS === "web" ? 20 : insets.bottom;
 
   const [checkingStoreUpdate, setCheckingStoreUpdate] = useState(false);
+  const [changingQuality, setChangingQuality] = useState<AppSettings["streamingQuality"] | null>(null);
 
   const scrollRef = useRef<ScrollView>(null);
 
@@ -98,31 +99,37 @@ export function ProfileScreen() {
 
   const handleQualityChange = useCallback(
     async (value: AppSettings["streamingQuality"]) => {
-      if (value === "high") {
-        const isEntitled = isHighQualityEntitled(settings);
-        if (isEntitled) {
-          await saveSettings({ streamingQuality: "high" });
-          setSettings((prev) => ({ ...prev, streamingQuality: "high" }));
-          await changeStreamingQuality("high");
+      if (changingQuality || value === settings.streamingQuality) return;
+      setChangingQuality(value);
+      try {
+        if (value === "high") {
+          const isEntitled = isHighQualityEntitled(settings);
+          if (isEntitled) {
+            await saveSettings({ streamingQuality: "high" });
+            setSettings((prev) => ({ ...prev, streamingQuality: "high" }));
+            await changeStreamingQuality("high");
+            return;
+          }
+
+          const unlocked = await requestHighQualityUnlockWithRewardedAd();
+          if (unlocked) {
+            const updated = await getSettings();
+            setSettings(updated);
+            await changeStreamingQuality("high");
+          }
           return;
         }
 
-        const unlocked = await requestHighQualityUnlockWithRewardedAd();
-        if (unlocked) {
-          const updated = await getSettings();
-          setSettings(updated);
-          await changeStreamingQuality("high");
-        }
-        return;
+        setSettings((prev) => ({ ...prev, streamingQuality: value }));
+        await Promise.all([
+          saveSettings({ streamingQuality: value }),
+          changeStreamingQuality(value),
+        ]);
+      } finally {
+        setChangingQuality(null);
       }
-
-      setSettings((prev) => ({ ...prev, streamingQuality: value }));
-      await Promise.all([
-        saveSettings({ streamingQuality: value }),
-        changeStreamingQuality(value),
-      ]);
     },
-    [settings, changeStreamingQuality]
+    [settings, changeStreamingQuality, changingQuality]
   );
 
   const handleLogout = useCallback(() => {
@@ -232,6 +239,7 @@ export function ProfileScreen() {
           settings={settings}
           updateSettings={updateSettings}
           onQualityChange={handleQualityChange}
+          loadingQuality={changingQuality}
         />
 
         {/* Library & Data */}
@@ -307,6 +315,12 @@ export function ProfileScreen() {
             isLast
           />
         </View>
+
+        {/* Developer Credit Footer */}
+        <View style={styles.footerCredits}>
+          <Text style={styles.footerCreditsLabel}>DEVELOPED BY</Text>
+          <Text style={styles.footerCreditsName}>Satvik Patel</Text>
+        </View>
       </ScrollView>
     </View>
   );
@@ -369,6 +383,26 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: "rgba(255, 255, 255, 0.04)",
     overflow: "hidden",
+  },
+  footerCredits: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 36,
+    marginBottom: 16,
+    gap: 3,
+  },
+  footerCreditsLabel: {
+    color: "rgba(255, 255, 255, 0.35)",
+    fontSize: 10.5,
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: 2,
+    textTransform: "uppercase",
+  },
+  footerCreditsName: {
+    color: "rgba(255, 255, 255, 0.8)",
+    fontSize: 13,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.6,
   },
 });
 

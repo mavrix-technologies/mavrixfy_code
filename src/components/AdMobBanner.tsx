@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, StyleSheet } from "react-native";
 import { AD_UNITS } from "@/constants/admob";
-import { getGoogleMobileAdsModule } from "@/lib/googleMobileAds";
+import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobileAds";
 import { logger } from "@/lib/logger";
 
 const BANNER_AD_UNIT_ID = AD_UNITS.BANNER || AD_UNITS.NATIVE;
@@ -13,6 +13,10 @@ interface AdMobBannerProps {
 export default function AdMobBanner(_props: AdMobBannerProps) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    void initializeMobileAds();
+  }, []);
 
   const adsModule = getGoogleMobileAdsModule();
 

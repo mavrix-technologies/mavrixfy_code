@@ -115,10 +115,26 @@ export function useAudioSyncListeners({
       subscribeTrackPlayerEvent(Event.PlaybackProgressUpdated, (event: any) => {
         if (typeof event?.position === "number") {
           setNativePosition(event.position);
+          positionSecondsRef.current = event.position;
         }
         if (typeof event?.duration === "number" && event.duration > 0) {
           const dur = event.duration;
-          setNativeDuration((prev) => (Math.abs(prev - dur) > 0.5 ? dur : prev));
+          setNativeDuration((prev) => {
+            if (Math.abs(prev - dur) > 0.5) {
+              if (TrackPlayer && typeof TrackPlayer.updateNowPlayingMetadata === "function" && currentSongRef.current) {
+                TrackPlayer.updateNowPlayingMetadata({
+                  title: currentSongRef.current.title || "Unknown",
+                  artist: currentSongRef.current.artist || "Mavrixfy",
+                  album: currentSongRef.current.album || undefined,
+                  artwork: currentSongRef.current.coverUrl || undefined,
+                  duration: dur,
+                  elapsedTime: typeof event.position === "number" ? event.position : 0,
+                }).catch(() => {});
+              }
+              return dur;
+            }
+            return prev;
+          });
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
@@ -138,12 +154,25 @@ export function useAudioSyncListeners({
           queueIndexRef.current = nextIndex;
           setSeekOverride(null);
           setNativePosition(0);
+          positionSecondsRef.current = 0;
           const initialDuration = toDurationSeconds(event?.track?.duration || targetSong.duration);
           setNativeDuration(initialDuration > 0 ? initialDuration : 0);
           updatePlaybackEngineSnapshot({
             currentSong: targetSong,
             queueIndex: nextIndex,
           });
+
+          // Explicitly sync iOS lock screen / Control Center progress bar & metadata on auto track transition
+          if (TrackPlayer && typeof TrackPlayer.updateNowPlayingMetadata === "function") {
+            TrackPlayer.updateNowPlayingMetadata({
+              title: targetSong.title || "Unknown",
+              artist: targetSong.artist || "Mavrixfy",
+              album: targetSong.album || undefined,
+              artwork: targetSong.coverUrl || undefined,
+              duration: initialDuration > 0 ? initialDuration : undefined,
+              elapsedTime: 0,
+            }).catch(() => {});
+          }
 
           prefetchAdjacentTrackStreams(currentQ, nextIndex);
         }

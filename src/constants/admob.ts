@@ -1,21 +1,22 @@
 import { Platform } from "react-native";
 
-// Set to false for real production AdMob ad unit IDs
-const IS_TEST_MODE = false;
+// Set to __DEV__ to load official Google test ad units during development/testing
+// and live production ad units in production release builds.
+const IS_TEST_MODE = __DEV__;
 
 export const AD_UNITS = {
-  // 1. Official Banner Ad
+  // 1. Official Banner Ad (genral banner)
   BANNER: Platform.select({
     ios: IS_TEST_MODE
       ? "ca-app-pub-3940256099942544/2934735716" // iOS official test Banner ID
-      : "ca-app-pub-6003470714469240/1788794195", // iOS production Banner ID
+      : "ca-app-pub-6003470714469240/5428822540", // iOS production Banner ID
     android: IS_TEST_MODE
       ? "ca-app-pub-3940256099942544/6300978111" // Android official test Banner ID
-      : "ca-app-pub-6003470714469240/1788794195", // Android production Banner ID
+      : "ca-app-pub-6003470714469240/5428822540", // Android production Banner ID
     default: "",
   }) || "",
 
-  // 2. Rewarded Video Ad (Used to unlock high quality sound & offline downloads)
+  // 2. Rewarded Video Ad (streamin quality ads)
   REWARDED: Platform.select({
     ios: IS_TEST_MODE
       ? "ca-app-pub-3940256099942544/1712485313" // iOS official test Rewarded ID
@@ -30,25 +31,25 @@ export const AD_UNITS = {
   NATIVE_VIDEO: Platform.select({
     ios: IS_TEST_MODE
       ? "ca-app-pub-3940256099942544/2521693316" // iOS official test Native Video ID
-      : "ca-app-pub-6003470714469240/2135402846", // iOS production Native Video ID
+      : "ca-app-pub-6003470714469240/1788794195", // iOS production Native Video ID
     android: IS_TEST_MODE
       ? "ca-app-pub-3940256099942544/1044960115" // Android official test Native Video ID
-      : "ca-app-pub-6003470714469240/2135402846", // Android production Native Video ID
+      : "ca-app-pub-6003470714469240/1788794195", // Android production Native Video ID
     default: "",
   }) || "",
 
-  // 4. Interstitial Ad
+  // 4. Interstitial Ad (locally)
   INTERSTITIAL: Platform.select({
     ios: IS_TEST_MODE
       ? "ca-app-pub-3940256099942544/4411468910" // iOS official test Interstitial ID
-      : "ca-app-pub-6003470714469240/2135402846", // iOS production Interstitial ID
+      : "ca-app-pub-6003470714469240/4602826035", // iOS production Interstitial ID
     android: IS_TEST_MODE
       ? "ca-app-pub-3940256099942544/1033173712" // Android official test Interstitial ID
-      : "ca-app-pub-6003470714469240/2135402846", // Android production Interstitial ID
+      : "ca-app-pub-6003470714469240/4602826035", // Android production Interstitial ID
     default: "",
   }) || "",
 
-  // Standard Native alias for backwards compatibility
+  // Standard Native alias (Mavrixfy_Native_Standard)
   NATIVE: Platform.select({
     ios: IS_TEST_MODE
       ? "ca-app-pub-3940256099942544/3986693108"

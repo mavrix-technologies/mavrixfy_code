@@ -14,12 +14,14 @@ interface ProfilePlaybackSectionProps {
   settings: AppSettings;
   updateSettings: (partial: Partial<AppSettings>) => Promise<void>;
   onQualityChange: (value: AppSettings["streamingQuality"]) => Promise<void>;
+  loadingQuality?: AppSettings["streamingQuality"] | null;
 }
 
 export function ProfilePlaybackSection({
   settings,
   updateSettings,
   onQualityChange,
+  loadingQuality,
 }: ProfilePlaybackSectionProps) {
   return (
     <>
@@ -36,6 +38,7 @@ export function ProfilePlaybackSection({
           <SegmentPicker
             options={QUALITY_OPTIONS}
             value={settings.streamingQuality}
+            loadingValue={loadingQuality}
             onChange={onQualityChange}
           />
         </View>

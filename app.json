@@ -67,7 +67,7 @@
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icon_foreground.png",
-        "backgroundColor": "#000000",
+        "backgroundColor": "#10141A",
         "monochromeImage": "./assets/images/mavrixfy_icon_monochrome.png"
       },
       "permissions": [
@@ -102,14 +102,15 @@
           "image": "./assets/images/mavrixfy_splash.png",
           "imageWidth": 180,
           "resizeMode": "contain",
-          "backgroundColor": "#000000",
+          "backgroundColor": "#10141A",
           "dark": {
             "image": "./assets/images/mavrixfy_splash.png",
-            "backgroundColor": "#000000"
+            "backgroundColor": "#10141A"
           }
         }
       ],
       "expo-tracking-transparency",
+      "expo-image",
       "expo-font",
       "expo-web-browser",
       "expo-apple-authentication",
@@ -174,7 +175,16 @@
       ],
       "expo-asset",
       "@react-native-google-signin/google-signin",
-      "expo-video"
+      "expo-video",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-6003470714469240~2133470244",
+          "iosAppId": "ca-app-pub-6003470714469240~2133470244",
+          "optimizeInitialization": true,
+          "optimizeAdLoading": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
@@ -208,9 +218,5 @@
       }
     },
     "owner": "satvik1234"
-  },
-  "react-native-google-mobile-ads": {
-    "android_app_id": "ca-app-pub-6003470714469240~2133470244",
-    "ios_app_id": "ca-app-pub-6003470714469240~2133470244"
   }
 }
