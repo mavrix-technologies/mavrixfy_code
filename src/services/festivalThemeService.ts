@@ -2,6 +2,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
+export interface CustomCategoryItem {
+  id: string;
+  label: string;
+  icon?: string;
+}
+
 export interface FestivalItemData {
   subTitle?: string;
   mainTitle?: string;
@@ -9,7 +15,11 @@ export interface FestivalItemData {
   backgroundImageUrl?: string | null;
   themeAccentColor?: string;
   targetQuery?: string;
-  enableSparkles?: boolean;
+  titleText?: string;
+  titleColor?: string;
+  menuTextColor?: string;
+  menuActiveTextColor?: string;
+  menuActiveIndicatorColor?: string;
 }
 
 export interface FestivalThemeConfig {
@@ -21,11 +31,34 @@ export interface FestivalThemeConfig {
   backgroundImageUrl: string | null;
   themeAccentColor?: string;
   targetQuery?: string;
-  enableSparkles?: boolean;
   isDevPreview?: boolean;
+
+  // Header Title Controls
+  titleText?: string;
+  titleColor?: string;
+  stickyTitleColor?: string;
+
+  // Header Menu / Category Rail Controls (Merged & Simplified)
+  menuColor?: string;
+  activeColor?: string;
+  menuTextColor?: string;
+  menuActiveTextColor?: string;
+  menuIconColor?: string;
+  menuActiveIconColor?: string;
+  menuActiveIndicatorColor?: string;
+  headerIconColor?: string;
+
+  stickyMenuTextColor?: string;
+  stickyMenuActiveTextColor?: string;
+  stickyMenuActiveIndicatorColor?: string;
+  stickyHeaderIconColor?: string;
+
+  // Menu labels / items customization
+  menuLabels?: Record<string, string>;
+  customCategories?: CustomCategoryItem[];
 }
 
-const STORAGE_KEY = "mavrixfy_remote_festival_theme_v7";
+const STORAGE_KEY = "mavrixfy_remote_festival_theme_v10";
 
 export const DEFAULT_FESTIVAL_THEME: FestivalThemeConfig = {
   enabled: false,
@@ -36,122 +69,129 @@ export const DEFAULT_FESTIVAL_THEME: FestivalThemeConfig = {
   backgroundImageUrl: null,
   themeAccentColor: "#014D52",
   targetQuery: "",
-  enableSparkles: true,
   isDevPreview: false,
+  titleText: "MAVRIXFY",
+  titleColor: "#FFFFFF",
+  menuColor: "#FFFFFF",
+  activeColor: "#FFFFFF",
+  menuTextColor: "#FFFFFF",
+  menuActiveTextColor: "#FFFFFF",
+  menuActiveIndicatorColor: "#FFFFFF",
 };
 
 let gCachedTheme: FestivalThemeConfig = DEFAULT_FESTIVAL_THEME;
 
 export function resolveFestivalThemeConfig(
-  mainData: Record<string, any> | undefined,
-  subData?: Record<string, any>,
+  publicSource?: Record<string, any>,
+  devSource?: Record<string, any>,
   isDevOrAdmin: boolean = false
 ): FestivalThemeConfig {
-  if (!mainData) {
+  if (!publicSource && !devSource) {
     return DEFAULT_FESTIVAL_THEME;
   }
 
-  const isPublicEnabled = mainData.enabled === true;
-  const isDevTesting = isDevOrAdmin && mainData.devTesting === true;
-  const isEnabled = isPublicEnabled || isDevTesting;
+  // Extract separate documents (public, dev) or handle legacy nested map
+  let pub: Record<string, any> = {};
+  let dev: Record<string, any> = {};
 
-  const publicActiveKey =
-    typeof mainData.activeFestival === "string" ? mainData.activeFestival.trim() : "";
-  const devActiveKey =
-    typeof mainData.devTestingFestival === "string"
-      ? mainData.devTestingFestival.trim()
-      : "";
-  const activeKey = isDevTesting && devActiveKey ? devActiveKey : publicActiveKey;
+  if (publicSource && typeof publicSource === "object") {
+    if (typeof publicSource.public === "object" && publicSource.public !== null) {
+      pub = publicSource.public;
+    } else {
+      pub = publicSource;
+    }
+  }
 
-  if (!isEnabled) {
+  if (devSource && typeof devSource === "object") {
+    if (typeof devSource.dev === "object" && devSource.dev !== null) {
+      dev = devSource.dev;
+    } else {
+      dev = devSource;
+    }
+  } else if (publicSource && typeof publicSource.dev === "object" && publicSource.dev !== null) {
+    dev = publicSource.dev;
+  }
+
+  // Purely check 'dev.enabled' and 'pub.enabled' - NO outside enabled check!
+  const isDevEnabled = dev.enabled === true;
+  const isPublicEnabled = pub.enabled === true;
+
+  // Active Dev applies if dev is enabled:
+  // - When isDevOrAdmin is true
+  // - Or when public is disabled (allows testing dev without turning on public)
+  const isDevActive = isDevEnabled && (isDevOrAdmin || !isPublicEnabled);
+  const isPublicActive = isPublicEnabled;
+
+  if (!isDevActive && !isPublicActive) {
     return {
       ...DEFAULT_FESTIVAL_THEME,
       enabled: false,
-      activeFestival: activeKey,
     };
   }
 
-  // When dev testing is active, dev-prefixed fields take priority
-  const devBg =
-    typeof mainData.devBackgroundImageUrl === "string"
-      ? mainData.devBackgroundImageUrl.trim()
-      : "";
-  const publicBg =
-    typeof mainData.backgroundImageUrl === "string"
-      ? mainData.backgroundImageUrl.trim()
-      : "";
-  const subBg =
-    typeof subData?.backgroundImageUrl === "string"
-      ? subData.backgroundImageUrl.trim()
-      : "";
-  const backgroundImageUrl = isDevTesting
-    ? (devBg || publicBg || subBg || null)
-    : (publicBg || subBg || null);
+  // If dev is active, use dev controls; otherwise use public controls
+  const activeSource = isDevActive ? dev : pub;
+  const fallbackSource = isDevActive ? pub : {};
 
-  const devTitle =
-    typeof mainData.devMainTitle === "string" ? mainData.devMainTitle.trim() : "";
-  const publicTitle =
-    typeof mainData.mainTitle === "string" ? mainData.mainTitle.trim() : "";
-  const subTitle =
-    typeof subData?.mainTitle === "string" ? subData.mainTitle.trim() : "";
-  const mainTitle = isDevTesting
-    ? (devTitle || publicTitle || subTitle || "")
-    : (publicTitle || subTitle || "");
+  const getString = (key: string, defaultVal = ""): string => {
+    if (typeof activeSource[key] === "string" && activeSource[key].trim()) {
+      return activeSource[key].trim();
+    }
+    if (typeof fallbackSource[key] === "string" && fallbackSource[key].trim()) {
+      return fallbackSource[key].trim();
+    }
+    return defaultVal;
+  };
 
-  const devSub =
-    typeof mainData.devSubTitle === "string" ? mainData.devSubTitle.trim() : "";
-  const publicSub =
-    typeof mainData.subTitle === "string" ? mainData.subTitle.trim() : "";
-  const subSub =
-    typeof subData?.subTitle === "string" ? subData.subTitle.trim() : "";
-  const subTitleText = isDevTesting
-    ? (devSub || publicSub || subSub || "")
-    : (publicSub || subSub || "");
+  const getOptString = (key: string): string | undefined => {
+    const val = getString(key, "");
+    return val ? val : undefined;
+  };
 
-  const devBadge =
-    typeof mainData.devBadgeText === "string" ? mainData.devBadgeText.trim() : "";
-  const publicBadge =
-    typeof mainData.badgeText === "string" ? mainData.badgeText.trim() : "";
-  const subBadge =
-    typeof subData?.badgeText === "string" ? subData.badgeText.trim() : "";
-  const badgeText = isDevTesting
-    ? (devBadge || publicBadge || subBadge || "")
-    : (publicBadge || subBadge || "");
+  const activeKey = getString("activeFestival");
+  const backgroundImageUrl = getOptString("backgroundImageUrl") || null;
+  const mainTitle = getString("mainTitle");
+  const subTitleText = getString("subTitle");
+  const badgeText = getString("badgeText");
+  const themeAccentColor = getString("themeAccentColor", "#ffb900");
+  const targetQuery = getString("targetQuery", mainTitle);
 
-  const devColor =
-    typeof mainData.devThemeAccentColor === "string"
-      ? mainData.devThemeAccentColor.trim()
-      : "";
-  const publicColor =
-    typeof mainData.themeAccentColor === "string"
-      ? mainData.themeAccentColor.trim()
-      : "";
-  const subColor =
-    typeof subData?.themeAccentColor === "string"
-      ? subData.themeAccentColor.trim()
-      : "";
-  const themeAccentColor = isDevTesting
-    ? (devColor || publicColor || subColor || DEFAULT_FESTIVAL_THEME.themeAccentColor)
-    : (publicColor || subColor || DEFAULT_FESTIVAL_THEME.themeAccentColor);
+  // Single Unified Color: activeColor applies to title, menu tabs, icons, and indicator!
+  // (menuColor and titleColor are merged into activeColor for a simple, unified theme)
+  const unifiedColor =
+    getOptString("activeColor") ||
+    getOptString("menuColor") ||
+    getOptString("titleColor") ||
+    "#FFFFFF";
 
-  const devTarget =
-    typeof mainData.devTargetQuery === "string" ? mainData.devTargetQuery.trim() : "";
-  const publicTarget =
-    typeof mainData.targetQuery === "string" ? mainData.targetQuery.trim() : "";
-  const subTarget =
-    typeof subData?.targetQuery === "string" ? subData.targetQuery.trim() : "";
-  const targetQuery = isDevTesting
-    ? (devTarget || publicTarget || subTarget || mainTitle || "")
-    : (publicTarget || subTarget || mainTitle || "");
+  // Title Controls
+  const titleText = getString("titleText", "MAVRIXFY");
+  const titleColor = unifiedColor;
+  const stickyTitleColor = getOptString("stickyTitleColor") || unifiedColor;
 
-  let enableSparkles = true;
-  if (isDevTesting && typeof mainData.devEnableSparkles === "boolean") {
-    enableSparkles = mainData.devEnableSparkles;
-  } else if (typeof mainData.enableSparkles === "boolean") {
-    enableSparkles = mainData.enableSparkles;
-  } else if (typeof subData?.enableSparkles === "boolean") {
-    enableSparkles = subData.enableSparkles;
-  }
+  const menuTextColor = unifiedColor;
+  const menuActiveTextColor = unifiedColor;
+  const menuIconColor = unifiedColor;
+  const menuActiveIconColor = unifiedColor;
+  const menuActiveIndicatorColor = unifiedColor;
+  const headerIconColor = unifiedColor;
+
+  const stickyMenuTextColor = "rgba(255, 255, 255, 0.72)";
+  const stickyMenuActiveTextColor = "#FFFFFF";
+  const stickyMenuActiveIndicatorColor = "#FFFFFF";
+  const stickyHeaderIconColor = unifiedColor;
+
+  // Menu labels override map
+  const menuLabels: Record<string, string> | undefined =
+    activeSource.menuLabels || fallbackSource.menuLabels;
+
+  // Custom categories array
+  const rawCategories =
+    activeSource.customCategories || fallbackSource.customCategories;
+
+  const customCategories: CustomCategoryItem[] | undefined = Array.isArray(rawCategories)
+    ? rawCategories.filter((c: any) => c && typeof c.id === "string")
+    : undefined;
 
   return {
     enabled: true,
@@ -162,8 +202,29 @@ export function resolveFestivalThemeConfig(
     backgroundImageUrl,
     themeAccentColor,
     targetQuery,
-    enableSparkles,
-    isDevPreview: isDevTesting && !isPublicEnabled,
+    isDevPreview: isDevActive && !isPublicActive,
+
+    titleText,
+    titleColor,
+    stickyTitleColor,
+
+    menuColor: unifiedColor,
+    activeColor: unifiedColor,
+
+    menuTextColor,
+    menuActiveTextColor,
+    menuIconColor,
+    menuActiveIconColor,
+    menuActiveIndicatorColor,
+    headerIconColor,
+
+    stickyMenuTextColor,
+    stickyMenuActiveTextColor,
+    stickyMenuActiveIndicatorColor,
+    stickyHeaderIconColor,
+
+    menuLabels,
+    customCategories,
   };
 }
 
@@ -193,8 +254,9 @@ export interface SubscribeFestivalOptions {
 }
 
 /**
- * Real-time Firestore subscription to `appConfig/festivalTheme`
- * Seamlessly resolves public live festivals and developer test preview mode.
+ * Real-time Firestore subscription to separate `public` and `dev` documents
+ * under `appConfig/festivalTheme/configs/`.
+ * NO outside 'enabled' dependency: only dev.enabled and public.enabled matter.
  */
 export function subscribeRemoteFestivalTheme(
   onUpdate: (theme: FestivalThemeConfig) => void,
@@ -206,158 +268,54 @@ export function subscribeRemoteFestivalTheme(
       options?.isDevOrAdmin ??
       (typeof __DEV__ !== "undefined" && Boolean(__DEV__));
 
-    const mainDocRef = doc(db, "appConfig", "festivalTheme");
-    let activeSubUnsubscribe: (() => void) | null = null;
-    let currentActiveKey: string | null = null;
-    let lastMainData: Record<string, any> | null = null;
-    let lastSubData: Record<string, any> = {};
+    let pubData: Record<string, any> | undefined;
+    let devData: Record<string, any> | undefined;
 
-    const mainUnsubscribe = onSnapshot(
-      mainDocRef,
-      (mainSnap) => {
-        if (!mainSnap.exists()) {
-          if (activeSubUnsubscribe) {
-            activeSubUnsubscribe();
-            activeSubUnsubscribe = null;
-          }
-          currentActiveKey = null;
-          lastMainData = null;
-          lastSubData = {};
-          gCachedTheme = DEFAULT_FESTIVAL_THEME;
-          onUpdate(DEFAULT_FESTIVAL_THEME);
-          return;
-        }
+    const reevaluate = () => {
+      const resolved = resolveFestivalThemeConfig(
+        pubData,
+        devData,
+        isDevOrAdmin
+      );
+      gCachedTheme = resolved;
+      void AsyncStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(resolved)
+      ).catch(() => {});
+      onUpdate(resolved);
+    };
 
-        const mainData = mainSnap.data() as Record<string, any>;
-        lastMainData = mainData;
-
-        const isPublicEnabled = mainData.enabled === true;
-        const isDevTesting = isDevOrAdmin && mainData.devTesting === true;
-        const isEnabled = isPublicEnabled || isDevTesting;
-
-        const publicActiveKey =
-          typeof mainData.activeFestival === "string"
-            ? mainData.activeFestival.trim()
-            : "";
-        const devActiveKey =
-          typeof mainData.devTestingFestival === "string"
-            ? mainData.devTestingFestival.trim()
-            : "";
-        const activeKey =
-          isDevTesting && devActiveKey ? devActiveKey : publicActiveKey;
-
-        if (!isEnabled) {
-          if (activeSubUnsubscribe) {
-            activeSubUnsubscribe();
-            activeSubUnsubscribe = null;
-          }
-          currentActiveKey = null;
-          lastSubData = {};
-          const disabledConfig = resolveFestivalThemeConfig(
-            mainData,
-            undefined,
-            isDevOrAdmin
-          );
-          gCachedTheme = disabledConfig;
-          void AsyncStorage.setItem(
-            STORAGE_KEY,
-            JSON.stringify(disabledConfig)
-          ).catch(() => {});
-          onUpdate(disabledConfig);
-          return;
-        }
-
-        // If no active festival key (e.g. general custom banner on main doc), resolve directly
-        if (!activeKey) {
-          if (activeSubUnsubscribe) {
-            activeSubUnsubscribe();
-            activeSubUnsubscribe = null;
-          }
-          currentActiveKey = null;
-          lastSubData = {};
-          const resolved = resolveFestivalThemeConfig(
-            mainData,
-            undefined,
-            isDevOrAdmin
-          );
-          gCachedTheme = resolved;
-          void AsyncStorage.setItem(
-            STORAGE_KEY,
-            JSON.stringify(resolved)
-          ).catch(() => {});
-          onUpdate(resolved);
-          return;
-        }
-
-        // If activeKey changed or no active sub doc subscription, subscribe to subcollection doc
-        if (activeKey !== currentActiveKey) {
-          if (activeSubUnsubscribe) {
-            activeSubUnsubscribe();
-            activeSubUnsubscribe = null;
-          }
-          currentActiveKey = activeKey;
-
-          const subDocRef = doc(
-            db,
-            "appConfig",
-            "festivalTheme",
-            "festivals",
-            activeKey
-          );
-          activeSubUnsubscribe = onSnapshot(
-            subDocRef,
-            (subSnap) => {
-              lastSubData = (subSnap.exists() ? subSnap.data() : {}) as Record<
-                string,
-                any
-              >;
-              const merged = resolveFestivalThemeConfig(
-                lastMainData || mainData,
-                lastSubData,
-                isDevOrAdmin
-              );
-              gCachedTheme = merged;
-              void AsyncStorage.setItem(
-                STORAGE_KEY,
-                JSON.stringify(merged)
-              ).catch(() => {});
-              onUpdate(merged);
-            },
-            () => {
-              const fallback = resolveFestivalThemeConfig(
-                lastMainData || mainData,
-                undefined,
-                isDevOrAdmin
-              );
-              gCachedTheme = fallback;
-              onUpdate(fallback);
-            }
-          );
-        } else {
-          // activeKey is unchanged, re-evaluate with updated mainData & cached subData
-          const resolved = resolveFestivalThemeConfig(
-            mainData,
-            lastSubData,
-            isDevOrAdmin
-          );
-          gCachedTheme = resolved;
-          void AsyncStorage.setItem(
-            STORAGE_KEY,
-            JSON.stringify(resolved)
-          ).catch(() => {});
-          onUpdate(resolved);
-        }
+    // 1. Separate 'public' document: appConfig/festivalTheme/configs/public
+    const pubDocRef = doc(db, "appConfig", "festivalTheme", "configs", "public");
+    const unsubPublic = onSnapshot(
+      pubDocRef,
+      (snap) => {
+        pubData = snap.exists() ? (snap.data() as Record<string, any>) : undefined;
+        reevaluate();
       },
       () => {
-        onUpdate(gCachedTheme);
+        pubData = undefined;
+        reevaluate();
+      }
+    );
+
+    // 2. Separate 'dev' document: appConfig/festivalTheme/configs/dev
+    const devDocRef = doc(db, "appConfig", "festivalTheme", "configs", "dev");
+    const unsubDev = onSnapshot(
+      devDocRef,
+      (snap) => {
+        devData = snap.exists() ? (snap.data() as Record<string, any>) : undefined;
+        reevaluate();
+      },
+      () => {
+        devData = undefined;
+        reevaluate();
       }
     );
 
     return () => {
-      mainUnsubscribe();
-      if (activeSubUnsubscribe) {
-        activeSubUnsubscribe();
-      }
+      unsubPublic();
+      unsubDev();
     };
   } catch {
     return () => {};

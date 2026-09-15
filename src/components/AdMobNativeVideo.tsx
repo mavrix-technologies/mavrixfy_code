@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, Platform } from "react-native";
-import { runAfterIdle } from "@/utils/idleTask";
+import { View, Text, StyleSheet } from "react-native";
 import { Image } from "expo-image";
 
 import { AD_UNITS } from "@/constants/admob";
@@ -8,14 +7,13 @@ import { getGoogleMobileAdsModule, initializeMobileAds, type GoogleNativeAd } fr
 import { logger } from "@/lib/logger";
 
 const NATIVE_VIDEO_AD_UNIT_ID = AD_UNITS.NATIVE_VIDEO;
-const DEFAULT_LOAD_DELAY_MS = 2500;
-
 const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icon.png");
 
-export default function AdMobNativeVideo({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }: { loadDelayMs?: number }) {
+export default function AdMobNativeVideo({ loadDelayMs = 0 }: { loadDelayMs?: number }) {
   const [nativeAd, setNativeAd] = useState<GoogleNativeAd | null>(null);
   const [adLoaded, setAdLoaded] = useState(false);
   const [adError, setAdError] = useState(false);
+
   useEffect(() => {
     let active = true;
     let loadedAd: GoogleNativeAd | null = null;
@@ -25,31 +23,17 @@ export default function AdMobNativeVideo({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }
       try {
         const adsModule = getGoogleMobileAdsModule();
         if (!adsModule || !NATIVE_VIDEO_AD_UNIT_ID) {
-          if (active) {
-            setAdError(true);
-          }
+          if (active) setAdError(true);
           return;
         }
 
-        const { NativeAd } = adsModule;
-
-        if (Platform.OS === "ios") {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const { requestTrackingPermissionsAsync } = require("expo-tracking-transparency");
-            await requestTrackingPermissionsAsync();
-          } catch {
-            // Ignore tracking permission errors if unsupported
-          }
-        }
-
         await initializeMobileAds();
-        
         if (!active) return;
 
+        const { NativeAd } = adsModule;
         const ad = await NativeAd.createForAdRequest(NATIVE_VIDEO_AD_UNIT_ID, {
           requestNonPersonalizedAdsOnly: true,
-          startVideoMuted: true, // Start video muted for better user experience
+          startVideoMuted: true,
         });
 
         if (!active) {
@@ -61,26 +45,15 @@ export default function AdMobNativeVideo({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }
         setNativeAd(ad);
         setAdLoaded(true);
       } catch (err) {
-        logger.warn("Failed to load native video ad:", err);
-        if (active) {
-          setAdError(true);
-        }
+        logger.warn("[Ads] Failed to load native video ad:", err);
+        if (active) setAdError(true);
       }
     };
 
-    const performVideoLoad = () => {
-      runAfterIdle(() => {
-        if (active) {
-          void loadNativeVideoAd();
-        }
-      });
-    };
-
     if (loadDelayMs <= 0) {
-      // react-doctor-disable-next-line react-doctor/no-adjust-state-on-prop-change
-      performVideoLoad();
+      void loadNativeVideoAd();
     } else {
-      timer = setTimeout(performVideoLoad, loadDelayMs);
+      timer = setTimeout(loadNativeVideoAd, loadDelayMs);
     }
 
     return () => {
@@ -94,64 +67,61 @@ export default function AdMobNativeVideo({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }
 
   const adsModule = nativeAd ? getGoogleMobileAdsModule() : null;
 
-  if (adError || !NATIVE_VIDEO_AD_UNIT_ID || !nativeAd || !adsModule) {
-    return null; // Return nothing if native ad fails to load
+  if (adError || !NATIVE_VIDEO_AD_UNIT_ID || !nativeAd || !adsModule || !adLoaded) {
+    return null;
   }
 
   const { NativeAdView, NativeAsset, NativeAssetType, NativeMediaView } = adsModule;
 
   return (
-    <View style={[styles.container, !adLoaded && styles.loading]}>
+    <View style={styles.container}>
       <NativeAdView nativeAd={nativeAd} style={styles.nativeAdView}>
-      {/* Immersive Video Media View */}
-      <NativeMediaView resizeMode="cover" style={styles.mediaView} />
-      
-      {/* Information Row */}
-      <View style={styles.infoRow}>
-        {nativeAd.icon ? (
-          <NativeAsset assetType={NativeAssetType.ICON}>
+        <NativeMediaView resizeMode="cover" style={styles.mediaView} />
+
+        <View style={styles.infoRow}>
+          {nativeAd.icon ? (
+            <NativeAsset assetType={NativeAssetType.ICON}>
+              <Image
+                source={{ uri: nativeAd.icon.url }}
+                style={styles.logoImage}
+                contentFit="cover"
+              />
+            </NativeAsset>
+          ) : (
             <Image
-              source={{ uri: nativeAd.icon.url }}
+              source={APP_BRAND_ICON}
               style={styles.logoImage}
               contentFit="cover"
-              transition={80}
             />
-          </NativeAsset>
-        ) : (
-          <Image
-            source={APP_BRAND_ICON}
-            style={styles.logoImage}
-            contentFit="cover"
-          />
-        )}
-        
-        <View style={styles.textColumn}>
-          <View style={styles.titleRow}>
-            <View style={styles.badgeContainer}>
-              <Text style={styles.badgeText}>AD</Text>
+          )}
+
+          <View style={styles.textColumn}>
+            <View style={styles.titleRow}>
+              <View style={styles.badgeContainer}>
+                <Text style={styles.badgeText}>AD</Text>
+              </View>
+              <NativeAsset assetType={NativeAssetType.HEADLINE}>
+                <Text style={styles.titleText} numberOfLines={1}>
+                  {nativeAd.headline}
+                </Text>
+              </NativeAsset>
             </View>
-            <NativeAsset assetType={NativeAssetType.HEADLINE}>
-              <Text style={styles.titleText} numberOfLines={1}>
-                {nativeAd.headline}
-              </Text>
-            </NativeAsset>
+
+            {nativeAd.body && (
+              <NativeAsset assetType={NativeAssetType.BODY}>
+                <Text style={styles.subtitleText} numberOfLines={2}>
+                  {nativeAd.body}
+                </Text>
+              </NativeAsset>
+            )}
           </View>
-          
-          {nativeAd.body && (
-            <NativeAsset assetType={NativeAssetType.BODY}>
-              <Text style={styles.subtitleText} numberOfLines={2}>
-                {nativeAd.body}
-              </Text>
+
+          {nativeAd.callToAction && (
+            <NativeAsset assetType={NativeAssetType.CALL_TO_ACTION}>
+              <Text style={styles.actionButtonText}>{nativeAd.callToAction}</Text>
             </NativeAsset>
           )}
         </View>
-
-        {nativeAd.callToAction && (
-          <NativeAsset assetType={NativeAssetType.CALL_TO_ACTION}>
-            <Text style={styles.actionButtonText}>{nativeAd.callToAction}</Text>
-          </NativeAsset>
-        )}
-      </View>
       </NativeAdView>
     </View>
   );
@@ -160,7 +130,7 @@ export default function AdMobNativeVideo({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }
 const styles = StyleSheet.create({
   container: {
     marginHorizontal: 16,
-    marginVertical: 14,
+    marginVertical: 12,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
@@ -170,12 +140,6 @@ const styles = StyleSheet.create({
   nativeAdView: {
     width: "100%",
     backgroundColor: "#11141a",
-  },
-  loading: {
-    height: 0,
-    marginVertical: 0,
-    borderWidth: 0,
-    overflow: "hidden",
   },
   mediaView: {
     width: "100%",

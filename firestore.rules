@@ -63,11 +63,16 @@ service cloud.firestore {
     }
 
     match /appConfig/{configId} {
-      allow get, list: if isPublicAppVersion(resource.data) || true;
+      allow get, list: if true;
       allow create, update, delete: if isAdmin();
 
+      match /configs/{configDoc} {
+        allow get, list: if true;
+        allow create, update, delete: if isAdmin();
+      }
+
       match /festivals/{festivalId} {
-        allow get, list: if isPublicAppVersion(resource.data) || true;
+        allow get, list: if true;
         allow create, update, delete: if isAdmin();
       }
     }
@@ -191,7 +196,7 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
-    match /appConfig/{configId} {
+    match /appConfig/{document=**} {
       allow get, list: if true;
       allow create, update, delete: if isAdmin();
     }

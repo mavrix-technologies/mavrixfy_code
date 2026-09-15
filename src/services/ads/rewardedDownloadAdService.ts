@@ -1,4 +1,3 @@
-import { Alert } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AD_UNITS } from "@/constants/admob";
 import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobileAds";
@@ -43,10 +42,10 @@ export async function consumeDownloadPass(): Promise<boolean> {
 }
 
 /**
- * Checks if user has a download pass or presents the Rewarded Video Ad offer.
+ * Checks if user has a download pass or directly runs the Rewarded Ad.
  * Returns true if the download should proceed.
  */
-export async function requestDownloadWithRewardedAd(songTitle: string): Promise<boolean> {
+export async function requestDownloadWithRewardedAd(_songTitle: string): Promise<boolean> {
   const remaining = await getRemainingDownloadPasses();
   if (remaining > 0) {
     await consumeDownloadPass();
@@ -59,69 +58,65 @@ export async function requestDownloadWithRewardedAd(songTitle: string): Promise<
     return true;
   }
 
-  return new Promise((resolve) => {
-    Alert.alert(
-      "Unlock Offline Downloads",
-      `You have reached your free download limit. Watch a short video to unlock 3 more offline downloads for "${songTitle}".`,
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
-          onPress: () => resolve(false),
-        },
-        {
-          text: "Watch Video",
-          onPress: async () => {
-            try {
-              await initializeMobileAds();
-              const { RewardedAd, RewardedAdEventType, AdEventType } = adsModule;
-              const rewarded = RewardedAd.createForAdRequest(AD_UNITS.REWARDED, {
-                requestNonPersonalizedAdsOnly: true,
-              });
+  return new Promise<boolean>((resolve) => {
+    let resolved = false;
+    let rewardEarned = false;
 
-              let rewardEarned = false;
+    const finish = (result: boolean) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(result);
+    };
 
-              const unsubLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
-                rewarded.show();
-              });
+    void (async () => {
+      try {
+        await initializeMobileAds();
+        const { RewardedAd, RewardedAdEventType, AdEventType } = adsModule;
+        const rewarded = RewardedAd.createForAdRequest(AD_UNITS.REWARDED, {
+          requestNonPersonalizedAdsOnly: true,
+        });
 
-              const unsubEarned = rewarded.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
-                rewardEarned = true;
-              });
+        const unsubLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
+          try {
+            rewarded.show();
+          } catch (err) {
+            logger.warn("[Ads] Failed to show rewarded download ad:", err);
+            finish(true); // Graceful fallback
+          }
+        });
 
-              const unsubClosed = rewarded.addAdEventListener(AdEventType.CLOSED, async () => {
-                unsubLoaded();
-                unsubEarned();
-                unsubClosed();
-                unsubError();
+        const unsubEarned = rewarded.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+          rewardEarned = true;
+        });
 
-                if (rewardEarned) {
-                  // Add 3 passes and consume 1 for current song
-                  await addDownloadPasses(2); // (3 unlocked - 1 consumed = 2 remaining)
-                  Alert.alert("Success!", "You've unlocked 3 offline song downloads!");
-                  resolve(true);
-                } else {
-                  resolve(false);
-                }
-              });
+        const unsubClosed = rewarded.addAdEventListener(AdEventType.CLOSED, async () => {
+          unsubLoaded();
+          unsubEarned();
+          unsubClosed();
+          unsubError();
 
-              const unsubError = rewarded.addAdEventListener(AdEventType.ERROR, () => {
-                unsubLoaded();
-                unsubEarned();
-                unsubClosed();
-                unsubError();
-                // Graceful fallback if ad fails to load
-                resolve(true);
-              });
+          if (rewardEarned) {
+            await addDownloadPasses(2); // 3 unlocked - 1 consumed = 2 remaining
+            finish(true);
+          } else {
+            finish(false);
+          }
+        });
 
-              rewarded.load();
-            } catch (err) {
-              logger.warn("[Ads] Failed to load rewarded download ad:", err);
-              resolve(true);
-            }
-          },
-        },
-      ]
-    );
+        const unsubError = rewarded.addAdEventListener(AdEventType.ERROR, (err: unknown) => {
+          logger.warn("[Ads] Rewarded download ad failed to load:", err);
+          unsubLoaded();
+          unsubEarned();
+          unsubClosed();
+          unsubError();
+          finish(true); // Allow download if ad network fails
+        });
+
+        rewarded.load();
+      } catch (err) {
+        logger.warn("[Ads] Exception running rewarded download ad:", err);
+        finish(true);
+      }
+    })();
   });
 }

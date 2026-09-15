@@ -308,7 +308,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     setTextColor(artworkPalette.text);
   }, [activeSong?.id, artworkPalette.accent, artworkPalette.text, setAlbumColor, setTextColor]);
 
-  const TAB_BAR_HEIGHT = 52;
+  const TAB_BAR_HEIGHT = 50;
   const resolvedBottomInset = isWeb ? 0 : Math.max(bottomInset, 0);
   const navIconSize = isNarrowMobile ? 20 : 22;
   const navLabelSize = isNarrowMobile ? 9 : 10;
@@ -354,11 +354,11 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const miniSecondaryButtonBorder = "transparent";
   const miniSecondaryIconColor = "rgba(255, 255, 255, 0.90)";
   const coverUrl = activeSong?.coverUrl?.trim();
-  const miniPlayerHeight = 60;
-  const miniCoverSlotSize = 48;
-  const miniCoverSize = 48;
-  const miniControlSize = 40;
-  const miniControlRadius = 20;
+  const miniPlayerHeight = 50;
+  const miniCoverSlotSize = 40;
+  const miniCoverSize = 40;
+  const miniControlSize = 34;
+  const miniControlRadius = 17;
   const trashShiftX = trashOpacity.interpolate({
     inputRange: [0, 1],
     outputRange: [16, 0],
@@ -411,19 +411,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
             >
               {bannerConfig.enabled && bannerConfig.items.length > 0 ? (
                 <MiniPlayerBannerView config={bannerConfig} />
-              ) : (
-                <>
-                  <View pointerEvents="none" style={[styles.playerTopEdge, { backgroundColor: playerTopEdgeTint }]} />
-                  <View
-                    pointerEvents="none"
-                    style={[styles.playerCornerAccentLeft, { borderColor: playerTopEdgeTint }]}
-                  />
-                  <View
-                    pointerEvents="none"
-                    style={[styles.playerCornerAccentRight, { borderColor: playerTopEdgeTint }]}
-                  />
-                </>
-              )}
+              ) : null}
 
               <View style={[styles.playerRow, { height: miniPlayerHeight }]}>
                 <GestureDetector gesture={miniSwipeGesture}>
@@ -556,7 +544,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                   >
                     <Ionicons
                       name={playbackState.isPlaying ? "pause" : "play"}
-                      size={25}
+                      size={21}
                       color={playIconColor}
                       style={!playbackState.isPlaying ? { marginLeft: 1 } : undefined}
                     />

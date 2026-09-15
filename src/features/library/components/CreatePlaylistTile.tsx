@@ -12,22 +12,20 @@ export const CreatePlaylistTile = memo(function CreatePlaylistTile({
 }: CreatePlaylistTileProps) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.gridCard, styles.createGridCard, pressed && styles.pressed]}
-      android_ripple={{ color: "rgba(255, 255, 255, 0.08)" }}
+      style={({ pressed }) => [styles.gridCard, pressed && styles.pressed]}
+      android_ripple={{ color: "rgba(255, 255, 255, 0.06)" }}
       onPress={onPress}
     >
-      <View style={[styles.gridImageWrap, styles.createGridArtwork]}>
-        <View style={styles.createGridIconWrap}>
-          <Ionicons name="add" size={24} color={Colors.text} />
+      <View style={styles.cardContainer}>
+        <View style={styles.createCoverWrapper}>
+          <View style={styles.plusIconCircle}>
+            <Ionicons name="add" size={32} color={Colors.primary} />
+          </View>
         </View>
-      </View>
-      <View style={styles.gridInfo}>
-        <Text style={styles.gridName} numberOfLines={1}>
-          Add New
-        </Text>
-        <Text style={styles.gridMeta} numberOfLines={1}>
-          Create playlist
-        </Text>
+        <View style={styles.cardInfo}>
+          <Text style={styles.playlistTitle}>Create Playlist</Text>
+          <Text style={styles.playlistSubtitle}>Add new playlist</Text>
+        </View>
       </View>
     </Pressable>
   );
@@ -35,60 +33,51 @@ export const CreatePlaylistTile = memo(function CreatePlaylistTile({
 
 const styles = StyleSheet.create({
   gridCard: {
-    width: "46.5%",
-    borderRadius: 10,
-    overflow: "hidden",
-    backgroundColor: "transparent",
-    marginBottom: 14,
-  },
-  createGridCard: {
-    backgroundColor: "transparent",
+    width: "48%",
+    marginBottom: 16,
   },
   pressed: {
-    opacity: 0.85,
+    opacity: 0.7,
   },
-  gridImageWrap: {
+  cardContainer: {
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    padding: 12,
+  },
+  createCoverWrapper: {
     width: "100%",
-    aspectRatio: 0.88,
-    borderRadius: 10,
-    overflow: "hidden",
-    backgroundColor: Colors.surfaceLight,
-    position: "relative",
-  },
-  createGridArtwork: {
-    backgroundColor: Colors.surfaceLight,
+    aspectRatio: 1,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
+    marginBottom: 10,
+    borderWidth: 2,
     borderStyle: "dashed",
-    borderColor: Colors.cardBorderStrong,
+    borderColor: "rgba(38, 225, 154, 0.3)",
   },
-  createGridIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  plusIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(38, 225, 154, 0.15)",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
   },
-  gridInfo: {
-    paddingHorizontal: 2,
-    paddingTop: 6,
-    paddingBottom: 2,
+  cardInfo: {
+    gap: 2,
   },
-  gridName: {
+  playlistTitle: {
     color: Colors.text,
-    fontSize: 12.5,
-    lineHeight: 16,
-    fontFamily: "Inter_700Bold",
+    fontSize: 14,
+    lineHeight: 18,
+    letterSpacing: -0.2,
+    fontFamily: "Inter_600SemiBold",
   },
-  gridMeta: {
+  playlistSubtitle: {
     color: Colors.subtext,
-    fontSize: 10,
-    lineHeight: 13,
+    fontSize: 12,
+    lineHeight: 15,
     fontFamily: "Inter_400Regular",
-    marginTop: 2,
   },
 });

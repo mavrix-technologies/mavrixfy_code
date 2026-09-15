@@ -228,9 +228,9 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
   const renderColumn = useCallback(
     ({ item }: { item: Song[] }) => (
       <View style={{ width: columnWidth, gap: 8 }}>
-        {item.map((song) => (
+        {item.map((song, i) => (
           <QuickPickItem
-            key={song.id}
+            key={`${song.id}-${i}`}
             song={song}
             isActive={currentSongId === song.id}
             accentColor={accentColor}

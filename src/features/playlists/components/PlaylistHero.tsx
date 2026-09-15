@@ -9,8 +9,8 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { safeGoBack } from "@/utils/navigation";
 import { type Song } from "@/lib/musicData";
+import { useArtworkPalette, colorWithAlpha } from "@/lib/colorExtractor";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
 
 export interface PlaylistHeroStateFlags {
@@ -48,6 +48,7 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
   playlistDescription,
   collectionKind,
   collectionKindLower,
+  playlistTitleSize,
   effectiveSongCount,
   totalMinutes,
   stateFlags,
@@ -66,10 +67,13 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
     isPlaying,
   } = stateFlags;
 
+  const palette = useArtworkPalette(playlistCover);
   const displayName = playlistName || `${collectionKind} Details`;
+  const heroHeight = Math.max(340, topInset + 280);
 
   return (
-    <View style={[styles.hero, { paddingTop: topInset + 8 }]}>
+    <View style={[styles.hero, { height: heroHeight, paddingTop: topInset + 48 }]}>
+      {/* Artwork Background Image or Fallback */}
       {playlistCover ? (
         <Image
           source={{ uri: playlistCover }}
@@ -81,32 +85,56 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
         />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.heroFallback]}>
-          <Ionicons name="musical-notes" size={72} color="rgba(255,255,255,0.2)" />
+          <Ionicons name="musical-notes" size={76} color="rgba(255,255,255,0.18)" />
         </View>
       )}
 
-      {/* Gradient matching ArtistDetailScreen */}
+      {/* Top vignette for clean status bar and top navigation contrast */}
       <LinearGradient
-        colors={["transparent", "rgba(16,20,26,0.7)", Colors.background]}
-        locations={[0.3, 0.7, 1]}
+        pointerEvents="none"
+        colors={["rgba(0,0,0,0.55)", "rgba(0,0,0,0.15)", "transparent"]}
+        locations={[0, 0.45, 1]}
+        style={styles.topVignette}
+      />
+
+      {/* Ambient Artwork Color Glow */}
+      {palette?.accent ? (
+        <LinearGradient
+          pointerEvents="none"
+          colors={[
+            colorWithAlpha(palette.accent, 0.28),
+            colorWithAlpha(palette.accent, 0.08),
+            "transparent",
+          ]}
+          locations={[0, 0.5, 1]}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 0.85 }}
+          style={StyleSheet.absoluteFill}
+        />
+      ) : null}
+
+      {/* Deep bottom fade seamlessly merging into screen background */}
+      <LinearGradient
+        pointerEvents="none"
+        colors={[
+          "transparent",
+          "rgba(16,20,26,0.45)",
+          "rgba(16,20,26,0.85)",
+          Colors.background,
+        ]}
+        locations={[0.15, 0.5, 0.8, 1]}
         style={StyleSheet.absoluteFill}
       />
 
-      {/* Floating Circular Back Button */}
-      <Pressable
-        style={[styles.heroBack, { top: topInset + 8 }]}
-        onPress={safeGoBack}
-        hitSlop={8}
-      >
-        <Ionicons name="arrow-back" size={22} color="#fff" />
-      </Pressable>
-
-      {/* Hero Info */}
+      {/* Hero Content Section */}
       <View style={styles.heroInfo}>
-        {/* Kind badge / visibility */}
-        <View style={styles.verifiedBadge}>
-          <Ionicons name="musical-notes" size={14} color={Colors.primary} />
-          <Text style={styles.verifiedText}>{collectionKind.toUpperCase()}</Text>
+        {/* Kind badge & Visibility */}
+        <View style={styles.badgeRow}>
+          <View style={styles.kindBadge}>
+            <Ionicons name="musical-notes" size={12} color={Colors.primary} />
+            <Text style={styles.kindBadgeText}>{collectionKind.toUpperCase()}</Text>
+          </View>
+
           {isFirestoreSource && (
             <View
               style={[
@@ -116,13 +144,13 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
             >
               <Ionicons
                 name={playlistIsPublic ? "globe-outline" : "lock-closed-outline"}
-                size={10}
-                color={playlistIsPublic ? "#6C5CE7" : "#FF6B6B"}
+                size={11}
+                color={playlistIsPublic ? "#8A7CF8" : "#FF6B6B"}
               />
               <Text
                 style={[
                   styles.visibilityBadgeText,
-                  { color: playlistIsPublic ? "#6C5CE7" : "#FF6B6B" },
+                  { color: playlistIsPublic ? "#8A7CF8" : "#FF6B6B" },
                 ]}
               >
                 {playlistIsPublic ? "Public" : "Private"}
@@ -131,51 +159,84 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
           )}
         </View>
 
-        {/* Playlist / Album Name */}
-        <Text style={styles.artistName} numberOfLines={2}>
+        {/* Dynamic Responsive Title */}
+        <Text
+          style={[
+            styles.playlistTitle,
+            {
+              fontSize: playlistTitleSize,
+              lineHeight: Math.round(playlistTitleSize * 1.15),
+            },
+          ]}
+          numberOfLines={2}
+        >
           {displayName}
         </Text>
 
-        {/* Description & Meta info */}
+        {/* Optional Description */}
         {playlistDescription ? (
-          <Text style={styles.followers} numberOfLines={2}>
+          <Text style={styles.description} numberOfLines={2}>
             {playlistDescription}
           </Text>
-        ) : (
-          <Text style={styles.followers}>
+        ) : null}
+
+        {/* Track Count & Duration Meta Line (Always visible) */}
+        <View style={styles.metaRow}>
+          <Ionicons name="disc-outline" size={13} color="rgba(255,255,255,0.7)" />
+          <Text style={styles.metaText}>
             {effectiveSongCount} {effectiveSongCount === 1 ? "track" : "tracks"}
             {totalMinutes > 0 ? ` • ${totalMinutes} min` : ""}
           </Text>
-        )}
+        </View>
 
-        {/* Actions Row */}
+        {/* Action Controls Row */}
         <View style={styles.heroActions}>
-          {/* Play All button */}
+          {/* Play / Pause Pill Button */}
           <Pressable
-            style={styles.playAllBtn}
+            style={({ pressed }) => [
+              styles.playAllBtn,
+              pressed && styles.playAllBtnPressed,
+            ]}
             onPress={onPlayAll}
             disabled={loading || songs.length === 0}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isPlayingFromThisPlaylist && isPlaying
+                ? "Pause playlist"
+                : "Play playlist"
+            }
           >
             <Ionicons
               name={isPlayingFromThisPlaylist && isPlaying ? "pause" : "play"}
-              size={16}
-              color="#000"
+              size={17}
+              color="#000000"
+              style={
+                !isPlayingFromThisPlaylist || !isPlaying
+                  ? { marginLeft: 1 }
+                  : undefined
+              }
             />
             <Text style={styles.playAllText}>
               {isPlayingFromThisPlaylist && isPlaying ? "Pause" : "Play"}
             </Text>
           </Pressable>
 
-          {/* Shuffle icon-only circle button */}
+          {/* Shuffle Icon Button */}
           <Pressable
-            style={styles.iconCircleBtn}
+            style={({ pressed }) => [
+              styles.iconCircleBtn,
+              pressed && styles.iconCircleBtnPressed,
+            ]}
             onPress={onShufflePlay}
             disabled={loading || songs.length === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Shuffle playlist"
+            hitSlop={6}
           >
-            <Ionicons name="shuffle" size={18} color="rgba(255,255,255,0.85)" />
+            <Ionicons name="shuffle" size={19} color="#FFFFFF" />
           </Pressable>
 
-          {/* Download button */}
+          {/* Download Collection Button */}
           {songs.length > 0 && (
             <DownloadCollectionButton
               collectionId={downloadCollectionId}
@@ -187,10 +248,19 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
             />
           )}
 
-          {/* Edit button */}
+          {/* Edit Playlist Button */}
           {canEdit && (
-            <Pressable style={styles.iconCircleBtn} onPress={onOpenEdit} hitSlop={8}>
-              <Ionicons name="pencil" size={16} color="rgba(255,255,255,0.85)" />
+            <Pressable
+              style={({ pressed }) => [
+                styles.iconCircleBtn,
+                pressed && styles.iconCircleBtnPressed,
+              ]}
+              onPress={onOpenEdit}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel="Edit playlist"
+            >
+              <Ionicons name="pencil" size={16} color="#FFFFFF" />
             </Pressable>
           )}
         </View>
@@ -201,104 +271,136 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
 
 const styles = StyleSheet.create({
   hero: {
-    height: 320,
     justifyContent: "flex-end",
     overflow: "hidden",
+    position: "relative",
   },
   heroFallback: {
-    backgroundColor: "#111820",
+    backgroundColor: "#121720",
     alignItems: "center",
     justifyContent: "center",
   },
-  heroBack: {
+  topVignette: {
     position: "absolute",
-    left: 16,
-    zIndex: 10,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    alignItems: "center",
-    justifyContent: "center",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 120,
   },
   heroInfo: {
     paddingHorizontal: 16,
-    paddingBottom: 20,
-    gap: 6,
+    paddingBottom: 18,
+    gap: 7,
   },
-  verifiedBadge: {
+  badgeRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
   },
-  verifiedText: {
-    color: Colors.primary,
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-    letterSpacing: 0.5,
-  },
-  artistName: {
-    color: "#fff",
-    fontSize: 32,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: -0.5,
-  },
-  followers: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-  },
-  heroActions: {
+  kindBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    marginTop: 6,
-  },
-  playAllBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: Colors.primary,
-  },
-  playAllText: {
-    color: "#000",
-    fontSize: 14,
-    fontFamily: "Inter_700Bold",
-  },
-  iconCircleBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    gap: 5,
+    backgroundColor: "rgba(38, 225, 154, 0.14)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
+    borderColor: "rgba(38, 225, 154, 0.28)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  kindBadgeText: {
+    color: Colors.primary,
+    fontSize: 11,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: 0.6,
   },
   visibilityBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-    marginLeft: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
   visibilityBadgePublic: {
-    backgroundColor: "rgba(108, 92, 231, 0.25)",
+    backgroundColor: "rgba(108, 92, 231, 0.22)",
     borderWidth: 1,
     borderColor: "rgba(108, 92, 231, 0.4)",
   },
   visibilityBadgePrivate: {
-    backgroundColor: "rgba(255, 107, 107, 0.25)",
+    backgroundColor: "rgba(255, 107, 107, 0.22)",
     borderWidth: 1,
     borderColor: "rgba(255, 107, 107, 0.4)",
   },
   visibilityBadgeText: {
-    fontSize: 10,
+    fontSize: 11,
     fontFamily: "Inter_600SemiBold",
+  },
+  playlistTitle: {
+    color: "#FFFFFF",
+    fontFamily: "Inter_800ExtraBold",
+    letterSpacing: -0.6,
+    marginTop: 2,
+  },
+  description: {
+    color: "rgba(255, 255, 255, 0.72)",
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: "Inter_400Regular",
+  },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 1,
+  },
+  metaText: {
+    color: "rgba(255, 255, 255, 0.7)",
+    fontSize: 12.5,
+    fontFamily: "Inter_500Medium",
+    letterSpacing: 0.1,
+  },
+  heroActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 8,
+  },
+  playAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 22,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: Colors.primary,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  playAllBtnPressed: {
+    opacity: 0.88,
+    transform: [{ scale: 0.97 }],
+  },
+  playAllText: {
+    color: "#000000",
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+  },
+  iconCircleBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconCircleBtnPressed: {
+    opacity: 0.8,
+    transform: [{ scale: 0.95 }],
   },
 });

@@ -104,11 +104,10 @@ export function NavTabItem({
             {
               fontSize: navLabelSize,
               lineHeight: navLabelLineHeight,
-              marginTop: isAndroid ? 3 : 2,
+              marginTop: 2,
               color: itemColor,
-              fontFamily: isFocused ? (isIOS ? "Inter_600SemiBold" : "Inter_700Bold") : "Inter_500Medium",
+              fontFamily: isFocused ? "Inter_600SemiBold" : "Inter_500Medium",
             },
-            isIOS && styles.navLabelIOS,
           ]}
         >
           {item.label}

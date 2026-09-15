@@ -28,7 +28,13 @@ import {
   getRecommendationHomeFeed,
   type RecommendationSection,
 } from "@/data/providers/RecommendationProvider";
-import { useOnReconnect } from "@/contexts/NetworkContext";
+import {
+  fetchQuickPicksFeed,
+  clearQuickPicksCache,
+  type QuickPicksPool,
+  EMPTY_QUICK_PICKS_POOL,
+} from "@/data/providers/QuickPicksProvider";
+import { useNetwork, useOnReconnect } from "@/contexts/NetworkContext";
 import { logger } from "@/lib/logger";
 
 const HOME_ESSENTIAL_CATEGORY_IDS = [
@@ -52,6 +58,7 @@ interface HomeSessionCache {
   featuredArtists: ArtistCard[];
   newReleaseSongs: Song[];
   recommendations: RecommendationSection[];
+  quickPicksPool: QuickPicksPool;
 }
 
 const HOME_CACHE: HomeSessionCache = {
@@ -62,6 +69,7 @@ const HOME_CACHE: HomeSessionCache = {
   featuredArtists: [],
   newReleaseSongs: [],
   recommendations: [],
+  quickPicksPool: EMPTY_QUICK_PICKS_POOL,
 };
 
 function withFallbackTimeout<T>(promise: Promise<T>, ms: number, fallback: T, label: string): Promise<T> {
@@ -80,6 +88,7 @@ function withFallbackTimeout<T>(promise: Promise<T>, ms: number, fallback: T, la
 }
 
 export function useHomeFeedData() {
+  const { isOnline, isChecking } = useNetwork();
   const loadRunRef = useRef(0);
   const [categories, setCategories] = useState<HomeJioSaavnCategoryData[]>(
     HOME_CACHE.hydrated ? HOME_CACHE.categories : []
@@ -98,6 +107,9 @@ export function useHomeFeedData() {
   );
   const [recommendations, setRecommendations] = useState<RecommendationSection[]>(
     HOME_CACHE.hydrated ? HOME_CACHE.recommendations : []
+  );
+  const [quickPicksPool, setQuickPicksPool] = useState<QuickPicksPool>(
+    HOME_CACHE.hydrated ? HOME_CACHE.quickPicksPool : EMPTY_QUICK_PICKS_POOL
   );
   const [loading, setLoading] = useState(!HOME_CACHE.hydrated);
   const [loadingMainContent, setLoadingMainContent] = useState(!HOME_CACHE.hydrated);
@@ -144,18 +156,28 @@ export function useHomeFeedData() {
         HOME_CACHE.recommendations = items;
       };
 
+      const applyQuickPicksPool = (pool: QuickPicksPool) => {
+        if (!isActiveRun() || pool.all.length === 0) return;
+        setQuickPicksPool(pool);
+        HOME_CACHE.quickPicksPool = pool;
+      };
+
       const applyHomeSnapshot = (snapshot: {
         categories: HomeJioSaavnCategoryData[];
         publicPlaylists: FirestorePlaylist[];
         featuredArtists: ArtistCard[];
         newReleaseSongs: Song[];
         recommendations: RecommendationSection[];
+        quickPicksPool?: QuickPicksPool;
       }) => {
         applyCategories(snapshot.categories);
         applyPublicPlaylists(snapshot.publicPlaylists);
         applyArtists(snapshot.featuredArtists);
         applyNewReleaseSongs(snapshot.newReleaseSongs);
         applyRecommendations(snapshot.recommendations);
+        if (snapshot.quickPicksPool && snapshot.quickPicksPool.all.length > 0) {
+          applyQuickPicksPool(snapshot.quickPicksPool);
+        }
       };
 
       try {
@@ -227,12 +249,24 @@ export function useHomeFeedData() {
           "recommendations"
         ).then(applyRecommendations);
 
+        const quickPicksTask = withFallbackTimeout(
+          fetchQuickPicksFeed({
+            forceRefresh,
+            categories: HOME_CACHE.categories,
+            newReleaseSongs: HOME_CACHE.newReleaseSongs,
+          }),
+          HOME_SECTION_TIMEOUT_MS,
+          EMPTY_QUICK_PICKS_POOL,
+          "quick picks"
+        ).then(applyQuickPicksPool);
+
         await Promise.allSettled([
           jioTask,
           playlistsTask,
           artistsTask,
           releasesTask,
           recommendationsTask,
+          quickPicksTask,
         ]);
 
         if (isActiveRun()) {
@@ -243,6 +277,7 @@ export function useHomeFeedData() {
             featuredArtists: HOME_CACHE.featuredArtists,
             newReleaseSongs: HOME_CACHE.newReleaseSongs,
             recommendations: HOME_CACHE.recommendations,
+            quickPicksPool: HOME_CACHE.quickPicksPool,
           });
         }
       } catch (error) {
@@ -254,9 +289,35 @@ export function useHomeFeedData() {
     },
     []
   );
+  // Wait for the network check to complete before the initial fetch.
+  // On cold start, isChecking=true for 300-800ms; firing before it settles
+  // causes API calls to fail silently, leaving the home screen empty.
+  const initialLoadFiredRef = useRef(false);
   useEffect(() => {
+    if (isChecking) return; // Not ready yet — wait for next effect run
+    if (initialLoadFiredRef.current) return; // Already fired
+    initialLoadFiredRef.current = true;
     void loadHomeFeed(false);
-  }, [loadHomeFeed]);
+  }, [isChecking, loadHomeFeed]);
+
+  // Safety net: if the first load failed (cache still empty) and we are now
+  // confirmed online, retry once so content always appears on first install.
+  const retryFiredRef = useRef(false);
+  useEffect(() => {
+    if (isChecking || !isOnline) return;
+    if (HOME_CACHE.hydrated) return;
+    if (!initialLoadFiredRef.current) return; // Haven't fired the initial load yet
+    if (retryFiredRef.current) return;
+    retryFiredRef.current = true;
+    // Small delay to let the first fetch's promises settle first
+    const t = setTimeout(() => {
+      if (!HOME_CACHE.hydrated) {
+        logger.warn("[Home] Cold-start retry: cache still empty after initial load, retrying...");
+        void loadHomeFeed(false);
+      }
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [isChecking, isOnline, loadHomeFeed]);
 
   useFocusEffect(
     useCallback(() => {
@@ -280,6 +341,7 @@ export function useHomeFeedData() {
     setRefreshing(true);
     try {
       await Promise.allSettled([
+        clearQuickPicksCache(),
         clearJioSaavnPlaylistCache(),
         clearDailyNewReleaseSongCache(),
         clearCachedHomePublicPlaylists(),
@@ -297,48 +359,19 @@ export function useHomeFeedData() {
     }
   }, [loadHomeFeed]);
 
-  // Quick Picks displays the hottest New Releases & Most Popular tracks
+  // Quick Picks displays 24 fresh, diverse, curated songs (Trending, Bollywood, Latest)
   const quickPickSongs = useMemo(() => {
-    const songs: Song[] = [];
-    const seen = new Set<string>();
-
-    // 1. Add fresh New Releases
-    for (const s of newReleaseSongs) {
-      if (s?.id && !seen.has(s.id)) {
-        seen.add(s.id);
-        songs.push(s);
-      }
+    if (quickPicksPool.all.length > 0) {
+      return quickPicksPool.all;
     }
-
-    // 2. Add top single songs from Most Popular, New Arrivals, Trending & Bollywood categories
-    const priorityCategories = categories.filter(
-      (c) => c.id === "popular" || c.id === "new-arrivals" || c.id === "trending" || c.id === "bollywood"
-    );
-
-    for (const cat of priorityCategories) {
-      for (const item of cat.results) {
-        if (item.songData) {
-          try {
-            const converted = convertJioSaavnSong(item.songData);
-            if (converted?.id && !seen.has(converted.id)) {
-              seen.add(converted.id);
-              songs.push(converted);
-            }
-          } catch {
-            // Ignore
-          }
-        }
-      }
-      if (songs.length >= 24) break;
-    }
-
-    return songs.slice(0, 24);
-  }, [categories, newReleaseSongs]);
+    return newReleaseSongs.slice(0, 24);
+  }, [quickPicksPool, newReleaseSongs]);
 
   const hasContent =
     categories.length > 0 ||
     publicPlaylists.length > 0 ||
     newReleaseSongs.length > 0 ||
+    quickPickSongs.length > 0 ||
     recentlyPlayed.length > 0;
 
   return {
@@ -347,6 +380,7 @@ export function useHomeFeedData() {
     recentlyPlayed,
     featuredArtists,
     quickPickSongs,
+    quickPicksPool,
     recommendations,
     loading,
     loadingMainContent,

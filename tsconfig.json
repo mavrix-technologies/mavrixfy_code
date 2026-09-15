@@ -1,6 +1,7 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "strict": true,
     "skipLibCheck": true,
@@ -19,6 +20,7 @@
   ],
   "exclude": [
     "node_modules",
-    "server"
+    "server",
+    "scripts"
   ]
 }

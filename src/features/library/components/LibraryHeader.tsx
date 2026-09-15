@@ -38,141 +38,66 @@ export const LibraryHeader = memo(function LibraryHeader({
 
   return (
     <View style={[styles.headerBlock, { paddingTop: topPadding }]}>
-      {/* Filter Chips & View Mode Toggle Row */}
-      <View style={styles.filterAndToggleRow}>
-        <View style={styles.filterRow}>
-          {/* Playlists chip */}
+      {/* Minimalist View Mode Toggle */}
+      <View style={styles.controlsRow}>
+        <View style={styles.viewToggle}>
           <Pressable
-            style={[styles.filterChip, filter === "playlists" && styles.filterChipActive]}
-            android_ripple={{ color: "rgba(255, 255, 255, 0.1)" }}
-            onPress={() => onSelectFilter(filter === "playlists" ? null : "playlists")}
-          >
-            {filter === "playlists" && (
-              <Ionicons name="close" size={13} color={Colors.black} style={styles.chipClose} />
-            )}
-            <Text style={[styles.filterText, filter === "playlists" && styles.filterTextActive]}>
-              Playlists
-            </Text>
-          </Pressable>
-
-          {/* Artists chip */}
-          <Pressable
-            style={[styles.filterChip, filter === "artists" && styles.filterChipActive]}
-            android_ripple={{ color: "rgba(255, 255, 255, 0.1)" }}
-            onPress={() => onSelectFilter(filter === "artists" ? null : "artists")}
-          >
-            {filter === "artists" && (
-              <Ionicons name="close" size={13} color={Colors.black} style={styles.chipClose} />
-            )}
-            <Text style={[styles.filterText, filter === "artists" && styles.filterTextActive]}>
-              Artists
-            </Text>
-          </Pressable>
-
-          {/* Liked chip */}
-          <Pressable
-            style={[styles.filterChip, filter === "favorite" && styles.filterChipActive]}
-            android_ripple={{ color: "rgba(255, 255, 255, 0.1)" }}
-            onPress={() => {
-              if (filter === "favorite") {
-                onSelectFilter(null);
-                return;
-              }
-              onSelectFilter("favorite");
-              onOpenLikedSongs();
-            }}
-          >
-            {filter === "favorite" && (
-              <Ionicons name="close" size={13} color={Colors.black} style={styles.chipClose} />
-            )}
-            <Text style={[styles.filterText, filter === "favorite" && styles.filterTextActive]}>
-              Liked
-            </Text>
-          </Pressable>
-        </View>
-
-        {/* List / Grid Toggle */}
-        <View style={styles.viewToggleWrap}>
-          <Pressable
-            style={[styles.viewToggleButton, viewMode === "grid" && styles.viewToggleActive]}
-            onPress={() => onChangeViewMode("grid")}
-          >
-            <Ionicons
-              name="grid-outline"
-              size={16}
-              color={viewMode === "grid" ? Colors.primary : Colors.subtext}
-            />
-          </Pressable>
-          <Pressable
-            style={[styles.viewToggleButton, viewMode === "list" && styles.viewToggleActive]}
+            style={[styles.toggleBtn, viewMode === "list" && styles.toggleBtnActive]}
             onPress={() => onChangeViewMode("list")}
           >
             <Ionicons
-              name="list-outline"
-              size={16}
+              name="list"
+              size={18}
               color={viewMode === "list" ? Colors.primary : Colors.subtext}
+            />
+          </Pressable>
+          <Pressable
+            style={[styles.toggleBtn, viewMode === "grid" && styles.toggleBtnActive]}
+            onPress={() => onChangeViewMode("grid")}
+          >
+            <Ionicons
+              name="grid"
+              size={18}
+              color={viewMode === "grid" ? Colors.primary : Colors.subtext}
             />
           </Pressable>
         </View>
       </View>
 
-      {/* Liked Songs Hero Card */}
+      {/* Elegant Liked Songs Card */}
       <Pressable
         style={styles.likedCard}
-        android_ripple={{ color: "rgba(255, 255, 255, 0.15)" }}
+        android_ripple={{ color: "rgba(255, 255, 255, 0.1)" }}
         onPress={onOpenLikedSongs}
       >
         <LinearGradient
-          colors={[Colors.primary, "#00b87b"]}
+          colors={["#26E19A", "#1AB57F"]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={styles.likedCardGradient}
+          style={styles.likedGradient}
         >
-          <Ionicons
-            name="heart"
-            size={82}
-            color="rgba(223, 226, 235, 0.18)"
-            style={styles.likedHeartBackdrop}
-          />
-          <Text style={styles.likedTitle}>Liked Songs</Text>
-          <View style={styles.likedCountPill}>
-            <Text style={styles.likedCount}>{likedSongCount.toLocaleString()} total songs</Text>
+          <View style={styles.likedContent}>
+            <View style={styles.likedIconCircle}>
+              <Ionicons name="heart" size={24} color="#FFFFFF" />
+            </View>
+            <View style={styles.likedTextSection}>
+              <Text style={styles.likedTitle}>Liked Songs</Text>
+              <Text style={styles.likedSubtitle}>{likedSongCount.toLocaleString()} songs</Text>
+            </View>
           </View>
-          <View style={styles.likedPlayButton}>
-            <Ionicons name="play" size={16} color="#FFFFFF" />
+          <View style={styles.likedPlayBtn}>
+            <Ionicons name="play" size={20} color="#000000" />
           </View>
         </LinearGradient>
       </Pressable>
 
-      {/* Followed Artists Section */}
-      {showArtistsSection ? (
+      {/* Followed Artists Section - Minimalist */}
+      {showArtistsSection && followedArtists.length > 0 ? (
         <View style={styles.artistsSection}>
-          {followedArtists.length === 0 ? (
-            <View style={styles.artistsEmpty}>
-              <Ionicons name="person-add-outline" size={36} color={Colors.subtext} />
-              <Text style={styles.artistsEmptyTitle}>No followed artists yet</Text>
-              <Text style={styles.artistsEmptySub}>
-                Follow artists from their profile page to see them here.
-              </Text>
-              <Pressable
-                style={styles.artistsEmptyBtn}
-                android_ripple={{ color: "rgba(0, 0, 0, 0.12)" }}
-                onPress={onBrowseArtists}
-              >
-                <Text style={styles.artistsEmptyBtnText}>Browse Artists</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <>
-              <View style={styles.artistsHeader}>
-                <Text style={styles.artistsTitle}>Following</Text>
-                <Text style={styles.artistsCount}>{followedArtists.length}</Text>
-              </View>
-              {followedArtists.map((artist) => (
-                <ArtistRow key={artist.id} artist={artist} onPress={onOpenArtist} />
-              ))}
-            </>
-          )}
+          <Text style={styles.sectionTitle}>Following</Text>
+          {followedArtists.map((artist) => (
+            <ArtistRow key={artist.id} artist={artist} onPress={onOpenArtist} />
+          ))}
         </View>
       ) : null}
     </View>
@@ -181,161 +106,98 @@ export const LibraryHeader = memo(function LibraryHeader({
 
 const styles = StyleSheet.create({
   headerBlock: {
-    paddingHorizontal: 18,
-    paddingBottom: 14,
+    paddingHorizontal: 20,
+    paddingBottom: 18,
   },
-  filterAndToggleRow: {
-    marginTop: 12,
+  controlsRow: {
+    marginTop: 8,
+    marginBottom: 16,
     flexDirection: "row",
+    justifyContent: "flex-end",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
   },
-  filterRow: {
+  viewToggle: {
     flexDirection: "row",
-    gap: 8,
-    flexShrink: 1,
-  },
-  filterChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: Colors.surfaceLight,
-    borderWidth: 1,
-    borderColor: Colors.cardBorder,
-    flexDirection: "row",
-    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderRadius: 12,
+    padding: 4,
     gap: 4,
   },
-  filterChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: "rgba(38,225,154,0.7)",
-  },
-  filterText: {
-    color: Colors.subtext,
-    fontSize: 13,
-    lineHeight: 16,
-    fontFamily: "Inter_700Bold",
-  },
-  filterTextActive: {
-    color: Colors.black,
-  },
-  chipClose: {
-    marginRight: 1,
-  },
-  viewToggleWrap: {
-    flexDirection: "row",
-    gap: 2,
-    flexShrink: 0,
-  },
-  viewToggleButton: {
-    width: 32,
-    height: 32,
+  toggleBtn: {
+    width: 40,
+    height: 40,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
   },
-  viewToggleActive: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+  toggleBtnActive: {
+    backgroundColor: "rgba(38, 225, 154, 0.15)",
   },
   likedCard: {
-    marginTop: 12,
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: "hidden",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
-  likedCardGradient: {
-    minHeight: 112,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+  likedGradient: {
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
   },
-  likedHeartBackdrop: {
-    position: "absolute",
-    right: -8,
-    bottom: -16,
-    opacity: 0.7,
+  likedContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    flex: 1,
+  },
+  likedIconCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  likedTextSection: {
+    flex: 1,
   },
   likedTitle: {
     color: "#FFFFFF",
-    fontSize: 24,
-    lineHeight: 28,
-    letterSpacing: -0.35,
+    fontSize: 20,
+    lineHeight: 24,
+    letterSpacing: -0.3,
     fontFamily: "Inter_700Bold",
   },
-  likedCount: {
-    color: "rgba(255,255,255,0.96)",
-    fontSize: 11,
-    lineHeight: 14,
+  likedSubtitle: {
+    color: "rgba(255, 255, 255, 0.85)",
+    fontSize: 13,
+    lineHeight: 16,
+    marginTop: 2,
     fontFamily: "Inter_500Medium",
   },
-  likedCountPill: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    backgroundColor: "rgba(6, 36, 26, 0.42)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-  },
-  likedPlayButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(6, 36, 26, 0.85)",
+  likedPlayBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.35)",
+    marginLeft: 12,
   },
   artistsSection: {
-    marginTop: 10,
-    paddingBottom: 8,
+    marginTop: 28,
   },
-  artistsHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 10,
-  },
-  artistsTitle: {
+  sectionTitle: {
     color: Colors.text,
-    fontSize: 18,
+    fontSize: 22,
+    lineHeight: 28,
+    letterSpacing: -0.4,
     fontFamily: "Inter_700Bold",
-    letterSpacing: -0.2,
-  },
-  artistsCount: {
-    color: Colors.subtext,
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-  },
-  artistsEmpty: {
-    alignItems: "center",
-    paddingTop: 28,
-    paddingBottom: 16,
-    gap: 10,
-  },
-  artistsEmptyTitle: {
-    color: Colors.text,
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-  },
-  artistsEmptySub: {
-    color: Colors.subtext,
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-    maxWidth: 260,
-  },
-  artistsEmptyBtn: {
-    marginTop: 4,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: Colors.primary,
-  },
-  artistsEmptyBtnText: {
-    color: Colors.black,
-    fontSize: 13,
-    fontFamily: "Inter_700Bold",
+    marginBottom: 14,
   },
 });

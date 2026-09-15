@@ -19,12 +19,15 @@ const HOME_FEED_MAX_STALE_MS = 24 * 60 * 60 * 1000;
 /** Emitted after Settings clears Home data so mounted Home screens can fetch a fresh feed. */
 export const HOME_CACHE_INVALIDATED_EVENT = "mavrixfy:home-cache-invalidated";
 
+import type { QuickPicksPool } from "@/data/providers/QuickPicksProvider";
+
 export interface CachedHomeFeedSnapshot {
   categories: HomeJioSaavnCategoryData[];
   publicPlaylists: FirestorePlaylist[];
   featuredArtists: ArtistCard[];
   newReleaseSongs: Song[];
   recommendations: RecommendationSection[];
+  quickPicksPool?: QuickPicksPool;
 }
 
 function normalizePublicPlaylist(raw: any): FirestorePlaylist | null {
@@ -117,6 +120,7 @@ function normalizeHomeFeedSnapshot(raw: unknown): CachedHomeFeedSnapshot | null 
     featuredArtists: normalizeArray<ArtistCard>(value.featuredArtists),
     newReleaseSongs: normalizeArray<Song>(value.newReleaseSongs),
     recommendations: normalizeArray<RecommendationSection>(value.recommendations),
+    quickPicksPool: value.quickPicksPool && Array.isArray(value.quickPicksPool.all) ? value.quickPicksPool : undefined,
   };
 
   const hasAnyContent =
@@ -124,7 +128,8 @@ function normalizeHomeFeedSnapshot(raw: unknown): CachedHomeFeedSnapshot | null 
     snapshot.publicPlaylists.length > 0 ||
     snapshot.featuredArtists.length > 0 ||
     snapshot.newReleaseSongs.length > 0 ||
-    snapshot.recommendations.length > 0;
+    snapshot.recommendations.length > 0 ||
+    Boolean(snapshot.quickPicksPool && snapshot.quickPicksPool.all.length > 0);
 
   return hasAnyContent ? snapshot : null;
 }

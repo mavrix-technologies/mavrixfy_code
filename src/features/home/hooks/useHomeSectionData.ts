@@ -71,6 +71,8 @@ export function useHomeSectionData({
       }
       if (quickPickSongs.length > 0) {
         items.push({ id: "quick-picks", type: "quick-picks" });
+      } else if (loadingMainContent) {
+        items.push({ id: "loading-quick", type: "loading-quick" });
       }
       if (popularCat && popularCat.id !== trendingCat?.id) {
         items.push({ id: `cat-${popularCat.id}`, type: "category", category: popularCat, showAd: false });
@@ -89,6 +91,8 @@ export function useHomeSectionData({
       }
       if (quickPickSongs.length > 0) {
         items.push({ id: "quick-picks", type: "quick-picks" });
+      } else if (loadingMainContent) {
+        items.push({ id: "loading-quick", type: "loading-quick" });
       }
       if (publicPlaylists.length > 0) {
         items.push({ id: "public-playlists", type: "public-playlists" });
@@ -104,6 +108,8 @@ export function useHomeSectionData({
       }
       if (quickPickSongs.length > 0) {
         items.push({ id: "quick-picks", type: "quick-picks" });
+      } else if (loadingMainContent) {
+        items.push({ id: "loading-quick", type: "loading-quick" });
       }
       const trendingCat = categories.find((c) => c.id === "trending");
       if (trendingCat) {
@@ -120,6 +126,8 @@ export function useHomeSectionData({
       }
       if (quickPickSongs.length > 0) {
         items.push({ id: "quick-picks", type: "quick-picks" });
+      } else if (loadingMainContent) {
+        items.push({ id: "loading-quick", type: "loading-quick" });
       }
       if (featuredArtists.length > 0) {
         items.push({ id: "artists", type: "artists" });
@@ -139,6 +147,8 @@ export function useHomeSectionData({
       }
       if (quickPickSongs.length > 0) {
         items.push({ id: "quick-picks", type: "quick-picks" });
+      } else if (loadingMainContent) {
+        items.push({ id: "loading-quick", type: "loading-quick" });
       }
       if (publicPlaylists.length > 0) {
         items.push({ id: "public-playlists", type: "public-playlists" });

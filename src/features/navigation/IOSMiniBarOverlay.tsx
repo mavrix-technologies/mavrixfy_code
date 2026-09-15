@@ -23,7 +23,13 @@ import { styles } from "./layoutStyles";
 import {
   MiniPlayerSecondaryControlButton,
   IOSMiniPlayerProgressBar,
+  MiniPlayerBannerView,
 } from "./miniPlayerComponents";
+import {
+  subscribeToMiniPlayerBannerConfig,
+  DEFAULT_MINI_PLAYER_BANNER_CONFIG,
+  type MiniPlayerBannerConfig,
+} from "@/lib/miniPlayerBannerConfig";
 import { noopPlayerAction } from "./layoutUtils";
 
 type NativeTabsModule = typeof import("expo-router/unstable-native-tabs");
@@ -96,6 +102,10 @@ function useIOSMiniPlayerOverlayView() {
   const setAlbumColor = playerActions?.setAlbumColor ?? noopPlayerAction;
   const setTextColor = playerActions?.setTextColor ?? noopPlayerAction;
   const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
+  const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(DEFAULT_MINI_PLAYER_BANNER_CONFIG);
+  useEffect(() => {
+    return subscribeToMiniPlayerBannerConfig(setBannerConfig);
+  }, []);
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const [coverFailed, setCoverFailed] = useState(false);
   const openPlayerLockRef = useRef(0);
@@ -247,6 +257,9 @@ function useIOSMiniPlayerOverlayView() {
   return (
     <View pointerEvents="box-none" style={[styles.iosMiniPlayerRoot, { bottom: bottomOffset }]}>
       <View style={[styles.iosMiniPlayerShell, { backgroundColor: shellBgColor, borderColor: shellBorderColor }]}>
+        {bannerConfig.enabled && bannerConfig.items.length > 0 ? (
+          <MiniPlayerBannerView config={bannerConfig} />
+        ) : null}
         <View style={styles.iosMiniPlayerRow}>
           <Pressable style={styles.iosMiniPlayerMain} onPress={openPlayer} android_disableSound>
             <View style={styles.iosMiniPlayerArtworkShell}>

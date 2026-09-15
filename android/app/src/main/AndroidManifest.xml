@@ -44,12 +44,16 @@
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://u.expo.dev/93293119-93b7-4dbb-acdd-7241771254c4"/>
+    <service android:name="expo.modules.audio.service.AudioControlsService" android:exported="false" android:foregroundServiceType="mediaPlayback" android:enabled="false" tools:replace="android:enabled,android:foregroundServiceType">
+      <intent-filter>
+        <action android:name="androidx.media3.session.MediaSessionService"/>
+      </intent-filter>
+    </service>
     <service android:name="com.doublesymmetry.trackplayer.service.MusicService" android:enabled="true" android:exported="true" android:foregroundServiceType="mediaPlayback" tools:replace="android:exported,android:foregroundServiceType">
       <intent-filter>
         <action android:name="android.intent.action.MEDIA_BUTTON"/>
       </intent-filter>
     </service>
-    <service android:name="expo.modules.audio.service.AudioControlsService" android:enabled="false" android:foregroundServiceType="mediaPlayback" tools:replace="android:enabled,android:foregroundServiceType"/>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize|assetsPaths" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>

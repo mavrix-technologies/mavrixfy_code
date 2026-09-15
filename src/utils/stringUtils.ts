@@ -11,7 +11,10 @@ export function unescapeHtml(str: string | undefined | null): string {
     .replace(/&apos;/g, "'")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function formatFollowers(n: number | null | undefined): string {

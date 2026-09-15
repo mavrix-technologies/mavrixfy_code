@@ -294,7 +294,8 @@ function extractPaletteFromJpeg(bytes: Uint8Array): ArtworkPalette {
 }
 
 function extractPaletteFromPng(bytes: Uint8Array): ArtworkPalette {
-  if (typeof globalThis.Buffer === "undefined") {
+  const globalBuffer = (globalThis as any).Buffer;
+  if (typeof globalBuffer === "undefined") {
     throw new Error("PNG decoder unavailable.");
   }
 
@@ -307,7 +308,7 @@ function extractPaletteFromPng(bytes: Uint8Array): ArtworkPalette {
     };
   };
 
-  const { data, width, height } = PNG.sync.read(globalThis.Buffer.from(bytes));
+  const { data, width, height } = PNG.sync.read(globalBuffer.from(bytes));
   const rgb = averageSampledRgb(data, width, height, 4);
   return buildSpotifyStylePaletteFromRgb(rgb.r, rgb.g, rgb.b);
 }

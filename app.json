@@ -92,17 +92,7 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.WRITE_SETTINGS",
         "android.permission.SYSTEM_ALERT_WINDOW"
-      ],
-      "navigationBar": {
-        "visible": "always",
-        "barStyle": "light-content",
-        "backgroundColor": "#0E1016"
-      }
-    },
-    "androidNavigationBar": {
-      "visible": "always",
-      "barStyle": "light-content",
-      "backgroundColor": "#0E1016"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -184,15 +174,6 @@
       ],
       "expo-asset",
       "@react-native-google-signin/google-signin",
-      [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-6003470714469240~2133470244",
-          "iosAppId": "ca-app-pub-6003470714469240~2133470244",
-          "optimizeInitialization": true,
-          "optimizeAdLoading": true
-        }
-      ],
       "expo-video"
     ],
     "experiments": {
@@ -227,5 +208,9 @@
       }
     },
     "owner": "satvik1234"
+  },
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-6003470714469240~2133470244",
+    "ios_app_id": "ca-app-pub-6003470714469240~2133470244"
   }
-}
+}

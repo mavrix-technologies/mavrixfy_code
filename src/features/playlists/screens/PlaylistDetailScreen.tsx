@@ -1,6 +1,5 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
-  FlatList,
   Platform,
   Pressable,
   StyleSheet,
@@ -71,8 +70,8 @@ export function PlaylistDetailScreen() {
   } = usePlaylistDetailData(params);
 
   // Sticky header state
-  const [stickyOpacity] = useState(() => new Animated.Value(0));
-  const [isStickyVisible, setIsStickyVisible] = useState(false);
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const [isStickyPlayVisible, setIsStickyPlayVisible] = useState(false);
 
   // Edit modal animation hook
   const {
@@ -121,16 +120,23 @@ export function PlaylistDetailScreen() {
   const canEdit = !params.isJioSaavnSource && (!params.isFirestoreSource || Boolean(user?.id));
 
   // Handlers
-  const handleScroll = useCallback((e: any) => {
-    const y = e.nativeEvent.contentOffset.y;
-    const shouldShow = y > 260;
-    setIsStickyVisible(shouldShow);
-    Animated.timing(stickyOpacity, {
-      toValue: shouldShow ? 1 : 0,
-      duration: 140,
-      useNativeDriver: true,
-    }).start();
-  }, [stickyOpacity]);
+  const handleScrollListener = useCallback((e: any) => {
+    const y = e?.nativeEvent?.contentOffset?.y ?? 0;
+    const shouldShow = y > 240;
+    setIsStickyPlayVisible((prev) => (prev === shouldShow ? prev : shouldShow));
+  }, []);
+
+  const handleScroll = useMemo(
+    () =>
+      Animated.event(
+        [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+        {
+          useNativeDriver: true,
+          listener: handleScrollListener,
+        }
+      ),
+    [scrollY, handleScrollListener]
+  );
 
   const handlePlayAll = useCallback(() => {
     if (!songs.length) return;
@@ -179,13 +185,13 @@ export function PlaylistDetailScreen() {
 
   const stickyPlayState = useMemo(
     () => ({
-      isStickyVisible,
+      isStickyVisible: isStickyPlayVisible,
       loading,
       hasSongs: songs.length > 0,
       isPlayingFromThisPlaylist,
       isPlaying,
     }),
-    [isStickyVisible, loading, songs.length, isPlayingFromThisPlaylist, isPlaying]
+    [isStickyPlayVisible, loading, songs.length, isPlayingFromThisPlaylist, isPlaying]
   );
 
   const heroStateFlags = useMemo(
@@ -203,7 +209,13 @@ export function PlaylistDetailScreen() {
   if (notFound) {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
-        <Pressable onPress={safeGoBack} style={styles.backBtnSolo}>
+        <Pressable
+          onPress={safeGoBack}
+          style={styles.backBtnSolo}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="arrow-back" size={22} color={Colors.text} />
         </Pressable>
         <View style={styles.center}>
@@ -253,13 +265,14 @@ export function PlaylistDetailScreen() {
     <View style={styles.container}>
       <PlaylistStickyHeader
         topInset={topInset}
-        stickyOpacity={stickyOpacity}
+        scrollY={scrollY}
         playlistName={playlistName}
+        isPlayVisible={isStickyPlayVisible}
         playState={stickyPlayState}
         onPlayAll={handlePlayAll}
       />
 
-      <FlatList
+      <Animated.FlatList
         data={songs}
         renderItem={renderPlaylistSong}
         keyExtractor={playlistSongKeyExtractor}

@@ -13,12 +13,14 @@ interface MavrixfyRefreshIndicatorProps {
   progress: SharedValue<number>;
   refreshing: boolean;
   topOffset?: number;
+  color?: string;
 }
 
 export const MavrixfyRefreshIndicator = memo(function MavrixfyRefreshIndicator({
   progress,
   refreshing,
   topOffset = 100,
+  color,
 }: MavrixfyRefreshIndicatorProps) {
   const continuousRotation = useSharedValue(0);
 
@@ -72,7 +74,12 @@ export const MavrixfyRefreshIndicator = memo(function MavrixfyRefreshIndicator({
       ]}
     >
       <Animated.View style={[styles.spinner, rotationStyle]}>
-        <View style={styles.arc} />
+        <View
+          style={[
+            styles.arc,
+            color ? { borderTopColor: color, borderBottomColor: color } : null,
+          ]}
+        />
       </Animated.View>
     </Animated.View>
   );

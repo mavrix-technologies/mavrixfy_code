@@ -5,6 +5,7 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   Easing,
+  type SharedValue,
 } from "react-native-reanimated";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -43,7 +44,7 @@ interface HomeAmbientBackdropProps {
   currentSong?: Song | null;
   topInset?: number;
   themeConfig?: FestivalThemeConfig;
-  scrollY?: number;
+  scrollY?: number | SharedValue<number>;
 }
 
 export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
@@ -72,113 +73,82 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
     opacity: opacityB.value,
   }));
 
+  // 100% UI-Thread Translate Style: Eliminates all JS bridge re-renders on scroll
+  const scrollTranslateStyle = useAnimatedStyle(() => {
+    "worklet";
+    const y = typeof scrollY === "number" ? scrollY : scrollY ? scrollY.value : 0;
+    return {
+      transform: [{ translateY: -Math.max(0, y) }],
+    };
+  });
+
   useEffect(() => {
     if (isFestivalMode) return;
 
-    let isCancelled = false;
     const coverUrl = currentSong?.coverUrl || null;
+    if (coverUrl === activeCoverUrlRef.current && gCachedCoverUrl) {
+      return;
+    }
+    activeCoverUrlRef.current = coverUrl;
 
     if (!coverUrl) {
-      if (activeCoverUrlRef.current !== null) {
-        activeCoverUrlRef.current = null;
-        gCachedCoverUrl = null;
-        gCachedColorStops = DEFAULT_GRADIENT_COLORS;
+      if (activeLayerRef.current === 0) {
+        setColorsB(DEFAULT_GRADIENT_COLORS);
+        opacityB.value = withTiming(1, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
         opacityA.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        activeLayerRef.current = 1;
+      } else {
+        setColorsA(DEFAULT_GRADIENT_COLORS);
+        opacityA.value = withTiming(1, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
         opacityB.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        activeLayerRef.current = 0;
       }
+      gCachedCoverUrl = null;
+      gCachedColorStops = DEFAULT_GRADIENT_COLORS;
       return;
     }
 
-    if (coverUrl === activeCoverUrlRef.current) return;
+    let isMounted = true;
+    extractArtworkColors(coverUrl).then((palette) => {
+      if (!isMounted) return;
 
-    void extractArtworkColors(coverUrl)
-      .then((palette) => {
-        if (isCancelled) return;
-        const newStops = buildColorStopsFromPalette(palette.accent, palette.background);
-        activeCoverUrlRef.current = coverUrl;
-        gCachedCoverUrl = coverUrl;
-        gCachedColorStops = newStops;
+      const newStops = buildColorStopsFromPalette(palette.accent, palette.background);
+      gCachedCoverUrl = coverUrl;
+      gCachedColorStops = newStops;
 
-        if (activeLayerRef.current === 0) {
-          setColorsB(newStops);
-          activeLayerRef.current = 1;
-          opacityB.value = withTiming(1, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
-          opacityA.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
-        } else {
-          setColorsA(newStops);
-          activeLayerRef.current = 0;
-          opacityA.value = withTiming(1, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
-          opacityB.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
-        }
-      })
-      .catch(() => {});
+      if (activeLayerRef.current === 0) {
+        setColorsB(newStops);
+        opacityB.value = withTiming(1, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        opacityA.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        activeLayerRef.current = 1;
+      } else {
+        setColorsA(newStops);
+        opacityA.value = withTiming(1, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        opacityB.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        activeLayerRef.current = 0;
+      }
+    });
 
     return () => {
-      isCancelled = true;
+      isMounted = false;
     };
   }, [currentSong?.coverUrl, isFestivalMode, opacityA, opacityB]);
 
-  // 1. FESTIVAL THEME MODE: Remote Image or Themed Ambient Glow
+  // 1. FESTIVAL THEME MODE: Seamless Smaller Ambient Color Blur
   if (isFestivalMode) {
-    const remoteImageUrl = themeConfig?.backgroundImageUrl;
-    const scrollTranslateY = -Math.max(0, scrollY);
-
-    if (remoteImageUrl) {
-      const heroImageHeight = Math.round(screenWidth * 1.30);
-      return (
-        <View
-          style={[
-            styles.topGlowContainer,
-            {
-              top: 0,
-              height: heroImageHeight,
-              transform: [{ translateY: scrollTranslateY }],
-            },
-          ]}
-          pointerEvents="none"
-        >
-          <View style={styles.imageBackgroundLayer}>
-            <Image
-              source={{ uri: remoteImageUrl }}
-              style={styles.festiveImage}
-              contentFit="cover"
-              contentPosition="top center"
-              cachePolicy="memory-disk"
-            />
-            <LinearGradient
-              colors={[
-                "rgba(11, 15, 20, 0.05)",
-                "transparent",
-                "rgba(11, 15, 20, 0.12)",
-                "rgba(11, 15, 20, 0.45)",
-                "rgba(11, 15, 20, 0.85)",
-                "#0B0F14",
-                "#0B0F14",
-              ]}
-              locations={[0, 0.30, 0.50, 0.68, 0.84, 0.94, 1]}
-              style={styles.gradientFill}
-            />
-          </View>
-        </View>
-      );
-    }
-
-    // Festive Color Glow if no background image URL is specified
     const festiveAccent = themeConfig?.themeAccentColor || "#014D52";
     const festiveStops: GradientStops = [
-      colorWithAlpha(festiveAccent, 0.45, "rgba(1, 77, 82, 0.45)"),
-      colorWithAlpha(festiveAccent, 0.25, "rgba(1, 77, 82, 0.25)"),
-      "rgba(11, 15, 20, 0.90)",
+      colorWithAlpha(festiveAccent, 0.38, "rgba(1, 77, 82, 0.38)"),
+      colorWithAlpha(festiveAccent, 0.14, "rgba(1, 77, 82, 0.14)"),
+      "rgba(11, 15, 20, 0.85)",
       "#0B0F14",
     ];
 
     return (
-      <View
+      <Animated.View
         style={[
-          styles.originalGlowContainer,
-          {
-            transform: [{ translateY: scrollTranslateY }],
-          },
+          styles.smallerFestiveGlowContainer,
+          scrollTranslateStyle,
         ]}
         pointerEvents="none"
       >
@@ -189,20 +159,16 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
           end={GRADIENT_END}
           style={styles.gradientFill}
         />
-      </View>
+      </Animated.View>
     );
   }
 
   // 2. DEFAULT NORMAL MODE: Original Git Ambient Song Color Glow
-  const normalScrollTranslateY = -Math.max(0, scrollY);
-
   return (
-    <View
+    <Animated.View
       style={[
         styles.originalGlowContainer,
-        {
-          transform: [{ translateY: normalScrollTranslateY }],
-        },
+        scrollTranslateStyle,
       ]}
       pointerEvents="none"
     >
@@ -224,11 +190,19 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
           style={styles.gradientFill}
         />
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 });
 
 const styles = StyleSheet.create({
+  smallerFestiveGlowContainer: {
+    position: "absolute",
+    top: -240,
+    left: 0,
+    right: 0,
+    height: 520,
+    zIndex: 0,
+  },
   originalGlowContainer: {
     position: "absolute",
     top: -300,

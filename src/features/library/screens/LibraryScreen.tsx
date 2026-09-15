@@ -145,14 +145,14 @@ export function LibraryScreen() {
   const listData = useMemo<LibraryListItem[]>(() => {
     if (filter === "artists") return [];
 
-    if (viewMode !== "grid") {
-      return playlists as LibraryListItem[];
+    if (viewMode === "grid") {
+      return [
+        ...playlists,
+        { id: CREATE_TILE_ID, isCreateTile: true },
+      ];
     }
 
-    return [
-      ...playlists,
-      { id: CREATE_TILE_ID, isCreateTile: true },
-    ];
+    return playlists as LibraryListItem[];
   }, [playlists, viewMode, filter]);
 
   const renderItem = useCallback(
@@ -367,32 +367,31 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   gridColumn: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 20,
     justifyContent: "space-between",
   },
   emptyState: {
-    marginTop: 28,
+    marginTop: 40,
     alignItems: "center",
     justifyContent: "center",
-    gap: 10,
+    gap: 12,
   },
   emptyTitle: {
     color: Colors.text,
-    fontSize: 18,
+    fontSize: 20,
+    letterSpacing: -0.3,
     fontFamily: "Inter_700Bold",
   },
   emptyButton: {
-    marginTop: 8,
-    borderRadius: 999,
+    marginTop: 12,
+    borderRadius: 24,
     backgroundColor: Colors.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderWidth: 1,
-    borderColor: "rgba(38,225,154,0.6)",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
   },
   emptyButtonText: {
     color: Colors.black,
-    fontSize: 12,
+    fontSize: 14,
     fontFamily: "Inter_700Bold",
   },
 });

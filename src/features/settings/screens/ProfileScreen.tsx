@@ -8,7 +8,6 @@ import {
   Text,
   View,
   ActivityIndicator,
-  Modal,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -48,7 +47,6 @@ export function ProfileScreen() {
   const topInset = Platform.OS === "web" ? 20 : insets.top;
   const bottomInset = Platform.OS === "web" ? 20 : insets.bottom;
 
-  const [isLoadingAd, setIsLoadingAd] = useState(false);
   const [checkingStoreUpdate, setCheckingStoreUpdate] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
@@ -109,15 +107,11 @@ export function ProfileScreen() {
           return;
         }
 
-        try {
-          const unlocked = await requestHighQualityUnlockWithRewardedAd(setIsLoadingAd);
-          if (unlocked) {
-            const updated = await getSettings();
-            setSettings(updated);
-            await changeStreamingQuality("high");
-          }
-        } finally {
-          setIsLoadingAd(false);
+        const unlocked = await requestHighQualityUnlockWithRewardedAd();
+        if (unlocked) {
+          const updated = await getSettings();
+          setSettings(updated);
+          await changeStreamingQuality("high");
         }
         return;
       }
@@ -314,16 +308,6 @@ export function ProfileScreen() {
           />
         </View>
       </ScrollView>
-
-      {/* Ad Loading Modal */}
-      <Modal transparent visible={isLoadingAd} animationType="fade">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <ActivityIndicator size="small" color={Colors.primary} />
-            <Text style={styles.modalText}>Unlocking High Quality...</Text>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -385,26 +369,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: "rgba(255, 255, 255, 0.04)",
     overflow: "hidden",
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.75)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modalCard: {
-    backgroundColor: "#161B22",
-    paddingHorizontal: 26,
-    paddingVertical: 20,
-    borderRadius: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-  },
-  modalText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
   },
 });
 

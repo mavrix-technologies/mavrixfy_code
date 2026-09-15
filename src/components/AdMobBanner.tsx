@@ -1,234 +1,55 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, Platform } from "react-native";
-import { runAfterIdle } from "@/utils/idleTask";
-import { Image } from "expo-image";
-
+import React, { useState } from "react";
+import { View, StyleSheet } from "react-native";
 import { AD_UNITS } from "@/constants/admob";
-import { getGoogleMobileAdsModule, initializeMobileAds, type GoogleNativeAd } from "@/lib/googleMobileAds";
+import { getGoogleMobileAdsModule } from "@/lib/googleMobileAds";
 import { logger } from "@/lib/logger";
 
-const NATIVE_AD_UNIT_ID = AD_UNITS.NATIVE;
-const DEFAULT_LOAD_DELAY_MS = 2500;
+const BANNER_AD_UNIT_ID = AD_UNITS.BANNER || AD_UNITS.NATIVE;
 
-const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icon.png");
+interface AdMobBannerProps {
+  loadDelayMs?: number; // Backwards-compatible prop
+}
 
-export default function AdMobBanner({ loadDelayMs = DEFAULT_LOAD_DELAY_MS }: { loadDelayMs?: number }) {
-  const [nativeAd, setNativeAd] = useState<GoogleNativeAd | null>(null);
-  const [adLoaded, setAdLoaded] = useState(false);
-  const [adError, setAdError] = useState(false);
-  useEffect(() => {
-    let active = true;
-    let loadedAd: GoogleNativeAd | null = null;
-    let timer: any = null;
+export default function AdMobBanner(_props: AdMobBannerProps) {
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasError, setHasError] = useState(false);
 
-    const loadNativeAd = async () => {
-      try {
-        const adsModule = getGoogleMobileAdsModule();
-        if (!adsModule || !NATIVE_AD_UNIT_ID) {
-          if (active) {
-            setAdError(true);
-          }
-          return;
-        }
+  const adsModule = getGoogleMobileAdsModule();
 
-        const { NativeAd } = adsModule;
-
-        if (Platform.OS === "ios") {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const { requestTrackingPermissionsAsync } = require("expo-tracking-transparency");
-            await requestTrackingPermissionsAsync();
-          } catch {
-            // Ignore tracking permission errors if unsupported
-          }
-        }
-
-        await initializeMobileAds();
-        
-        if (!active) return;
-
-        const ad = await NativeAd.createForAdRequest(NATIVE_AD_UNIT_ID, {
-          requestNonPersonalizedAdsOnly: true,
-        });
-
-        if (!active) {
-          ad.destroy();
-          return;
-        }
-
-        loadedAd = ad;
-        setNativeAd(ad);
-        setAdLoaded(true);
-      } catch (err) {
-        logger.warn("Failed to load native ad:", err);
-        if (active) {
-          setAdError(true);
-        }
-      }
-    };
-
-    const performBannerLoad = () => {
-      runAfterIdle(() => {
-        if (active) {
-          void loadNativeAd();
-        }
-      });
-    };
-
-    if (loadDelayMs <= 0) {
-      // react-doctor-disable-next-line react-doctor/no-adjust-state-on-prop-change
-      performBannerLoad();
-    } else {
-      timer = setTimeout(performBannerLoad, loadDelayMs);
-    }
-
-    return () => {
-      active = false;
-      if (timer) clearTimeout(timer);
-      if (loadedAd) {
-        loadedAd.destroy();
-      }
-    };
-  }, [loadDelayMs]);
-
-  const adsModule = nativeAd ? getGoogleMobileAdsModule() : null;
-
-  if (adError || !NATIVE_AD_UNIT_ID || !nativeAd || !adsModule) {
-    return null; // Return nothing if native ad fails to load
+  if (!adsModule || !BANNER_AD_UNIT_ID || hasError) {
+    return null;
   }
 
-  const { NativeAdView, NativeAsset, NativeAssetType } = adsModule;
+  const { BannerAd, BannerAdSize } = adsModule;
 
   return (
-    <View style={[styles.container, !adLoaded && styles.loading]}>
-      <NativeAdView nativeAd={nativeAd} style={styles.nativeAdView}>
-      <View style={styles.contentRow}>
-        {nativeAd.icon ? (
-          <NativeAsset assetType={NativeAssetType.ICON}>
-            <Image
-              source={{ uri: nativeAd.icon.url }}
-              style={styles.logoImage}
-              contentFit="cover"
-              transition={80}
-            />
-          </NativeAsset>
-        ) : (
-          <Image
-            source={APP_BRAND_ICON}
-            style={styles.logoImage}
-            contentFit="cover"
-          />
-        )}
-        
-        <View style={styles.textColumn}>
-          <View style={styles.titleRow}>
-            <View style={styles.badgeContainer}>
-              <Text style={styles.badgeText}>AD</Text>
-            </View>
-            <NativeAsset assetType={NativeAssetType.HEADLINE}>
-              <Text style={styles.titleText} numberOfLines={1}>
-                {nativeAd.headline}
-              </Text>
-            </NativeAsset>
-          </View>
-          
-          {nativeAd.body && (
-            <NativeAsset assetType={NativeAssetType.BODY}>
-              <Text style={styles.subtitleText} numberOfLines={2}>
-                {nativeAd.body}
-              </Text>
-            </NativeAsset>
-          )}
-        </View>
-
-        {nativeAd.callToAction && (
-          <NativeAsset assetType={NativeAssetType.CALL_TO_ACTION}>
-            <Text style={styles.actionButtonText}>{nativeAd.callToAction}</Text>
-          </NativeAsset>
-        )}
-      </View>
-      </NativeAdView>
+    <View style={[styles.container, !isLoaded && styles.hidden]}>
+      <BannerAd
+        unitId={BANNER_AD_UNIT_ID}
+        size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+        requestOptions={{
+          requestNonPersonalizedAdsOnly: true,
+        }}
+        onAdLoaded={() => {
+          setIsLoaded(true);
+        }}
+        onAdFailedToLoad={(error) => {
+          logger.warn("[Ads] Banner ad failed to load:", error);
+          setHasError(true);
+        }}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    marginHorizontal: 16,
-    marginVertical: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-    padding: 12,
-    backgroundColor: "#11141a",
-  },
-  nativeAdView: {
     width: "100%",
-    backgroundColor: "#11141a",
-  },
-  loading: {
-    height: 0,
-    marginVertical: 0,
-    padding: 0,
-    borderWidth: 0,
-    overflow: "hidden",
-  },
-  contentRow: {
-    flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-  },
-  logoImage: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
-    backgroundColor: "rgba(255, 255, 255, 0.03)",
-  },
-  textColumn: {
-    flex: 1,
     justifyContent: "center",
-    gap: 2,
+    marginVertical: 8,
   },
-  titleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  badgeContainer: {
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    borderRadius: 3,
-    paddingHorizontal: 4,
-    paddingVertical: 1.5,
-    borderWidth: 0.5,
-    borderColor: "rgba(255, 255, 255, 0.15)",
-  },
-  badgeText: {
-    color: "rgba(255, 255, 255, 0.7)",
-    fontSize: 8,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.5,
-  },
-  titleText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontFamily: "Inter_600SemiBold",
-    flexShrink: 1,
-  },
-  subtitleText: {
-    color: "rgba(255, 255, 255, 0.5)",
-    fontSize: 11,
-    lineHeight: 15,
-    fontFamily: "Inter_400Regular",
-  },
-  actionButtonText: {
-    color: "#10141a",
-    fontSize: 11,
-    fontFamily: "Inter_700Bold",
-    backgroundColor: "#26e19a",
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6.5,
-    overflow: "hidden",
-    textAlign: "center",
+  hidden: {
+    display: "none",
   },
 });

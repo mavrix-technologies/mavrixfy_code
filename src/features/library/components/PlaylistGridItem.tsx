@@ -16,41 +16,43 @@ export const PlaylistGridItem = memo(function PlaylistGridItem({
   onPress,
   onLongPress,
 }: PlaylistGridItemProps) {
-  const subtitle = item.description?.trim() || "Playlist • Mavrixfy";
+  const trackCount = item.songs?.length || 0;
 
   return (
     <Pressable
       style={({ pressed }) => [styles.gridCard, pressed && styles.pressed]}
-      android_ripple={{ color: "rgba(255, 255, 255, 0.08)" }}
+      android_ripple={{ color: "rgba(255, 255, 255, 0.06)" }}
       onPress={() => onPress(item)}
       onLongPress={() => onLongPress(item)}
     >
-      {item.coverUrl ? (
-        <View style={styles.gridImageWrap}>
-          <Image
-            recyclingKey={item.id}
-            source={{ uri: item.coverUrl }}
-            style={styles.gridImage}
-            contentFit="cover"
-            transition={100}
-            cachePolicy="memory-disk"
-          />
-          <View style={styles.gridFloatingPlay}>
-            <Ionicons name="play" size={13} color={Colors.black} />
+      <View style={styles.cardContainer}>
+        {item.coverUrl ? (
+          <View style={styles.coverWrapper}>
+            <Image
+              recyclingKey={item.id}
+              source={{ uri: item.coverUrl }}
+              style={styles.coverImage}
+              contentFit="cover"
+              transition={150}
+              cachePolicy="memory-disk"
+            />
+            <View style={styles.playIconCircle}>
+              <Ionicons name="play" size={18} color="#000000" />
+            </View>
           </View>
+        ) : (
+          <View style={[styles.coverWrapper, styles.coverPlaceholder]}>
+            <Ionicons name="musical-notes" size={32} color={Colors.subtext} />
+          </View>
+        )}
+        <View style={styles.cardInfo}>
+          <Text style={styles.playlistTitle} numberOfLines={2}>
+            {item.name}
+          </Text>
+          <Text style={styles.playlistSubtitle} numberOfLines={1}>
+            {trackCount} {trackCount === 1 ? "song" : "songs"}
+          </Text>
         </View>
-      ) : (
-        <View style={[styles.gridImageWrap, styles.gridPlaceholder]}>
-          <Ionicons name="musical-notes" size={24} color={Colors.subtext} />
-        </View>
-      )}
-      <View style={styles.gridInfo}>
-        <Text style={styles.gridName} numberOfLines={1}>
-          {item.name}
-        </Text>
-        <Text style={styles.gridMeta} numberOfLines={1}>
-          {subtitle}
-        </Text>
       </View>
     </Pressable>
   );
@@ -58,60 +60,65 @@ export const PlaylistGridItem = memo(function PlaylistGridItem({
 
 const styles = StyleSheet.create({
   gridCard: {
-    width: "46.5%",
-    borderRadius: 10,
-    overflow: "hidden",
-    backgroundColor: "transparent",
-    marginBottom: 14,
+    width: "48%",
+    marginBottom: 16,
   },
   pressed: {
-    opacity: 0.85,
+    opacity: 0.7,
   },
-  gridImageWrap: {
+  cardContainer: {
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    padding: 12,
+  },
+  coverWrapper: {
     width: "100%",
-    aspectRatio: 0.88,
-    borderRadius: 10,
+    aspectRatio: 1,
+    borderRadius: 12,
     overflow: "hidden",
     backgroundColor: Colors.surface,
     position: "relative",
+    marginBottom: 10,
   },
-  gridImage: {
+  coverImage: {
     width: "100%",
     height: "100%",
   },
-  gridPlaceholder: {
+  coverPlaceholder: {
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.surfaceLight,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
   },
-  gridFloatingPlay: {
+  playIconCircle: {
     position: "absolute",
     right: 8,
     bottom: 8,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
-  gridInfo: {
-    paddingHorizontal: 2,
-    paddingTop: 6,
-    paddingBottom: 2,
+  cardInfo: {
+    gap: 2,
   },
-  gridName: {
+  playlistTitle: {
     color: Colors.text,
-    fontSize: 12.5,
-    lineHeight: 16,
-    fontFamily: "Inter_700Bold",
+    fontSize: 14,
+    lineHeight: 18,
+    letterSpacing: -0.2,
+    fontFamily: "Inter_600SemiBold",
   },
-  gridMeta: {
+  playlistSubtitle: {
     color: Colors.subtext,
-    fontSize: 10,
-    lineHeight: 13,
+    fontSize: 12,
+    lineHeight: 15,
     fontFamily: "Inter_400Regular",
-    marginTop: 2,
   },
 });

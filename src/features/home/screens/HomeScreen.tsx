@@ -10,12 +10,15 @@ import {
   type ListRenderItemInfo,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useSharedValue } from "react-native-reanimated";
+import Animated, {
+  useSharedValue,
+  useAnimatedScrollHandler,
+  runOnJS,
+} from "react-native-reanimated";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { useNetwork } from "@/contexts/NetworkContext";
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
-import { useAppTopHeaderScrollElevation } from "@/components/AppTopHeader";
 import AdMobBanner from "@/components/AdMobBanner";
 import * as Haptics from "expo-haptics";
 import { triggerImpact } from "@/lib/haptics";
@@ -41,6 +44,7 @@ import {
 } from "../components/HomeSkeletons";
 import { useHomeFeedData } from "../hooks/useHomeFeedData";
 import { useFestivalTheme } from "../hooks/useFestivalTheme";
+import { getQuickPicksForCategory } from "@/data/providers/QuickPicksProvider";
 import {
   useHomeSectionData,
   HOME_CATEGORY_TITLES,
@@ -51,7 +55,7 @@ const homeSectionKeyExtractor = (item: HomeSectionItem) => item.id;
 
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { isOnline } = useNetwork();
+  const { isOnline, isChecking } = useNetwork();
   const { playSong, currentSong } = usePlayerBrowse();
   const currentSongId = currentSong?.id || null;
   const topInset = Platform.OS === "web" ? 67 : insets.top;
@@ -63,6 +67,7 @@ export function HomeScreen() {
     recentlyPlayed,
     featuredArtists,
     quickPickSongs,
+    quickPicksPool,
     loading,
     loadingMainContent,
     refreshing,
@@ -70,18 +75,22 @@ export function HomeScreen() {
     handleRefresh,
   } = useHomeFeedData();
 
-  const { elevationProgress, handleHeaderScroll } = useAppTopHeaderScrollElevation();
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
 
   const handleSelectCategory = useCallback((category: string) => {
     setSelectedCategory(category);
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
   }, []);
+
+  const displayedQuickPicks = useMemo(() => {
+    const list = getQuickPicksForCategory(quickPicksPool, selectedCategory);
+    return list.length > 0 ? list : quickPickSongs;
+  }, [quickPicksPool, selectedCategory, quickPickSongs]);
 
   const sectionData = useHomeSectionData({
     selectedCategory,
     categories,
-    quickPickSongs,
+    quickPickSongs: displayedQuickPicks,
     recentlyPlayed,
     featuredArtists,
     publicPlaylists,
@@ -94,7 +103,7 @@ export function HomeScreen() {
         case "quick-picks":
           return (
             <HomeQuickPicks
-              songs={quickPickSongs}
+              songs={displayedQuickPicks}
               currentSongId={currentSongId}
               currentSong={currentSong}
               playSong={playSong}
@@ -146,15 +155,20 @@ export function HomeScreen() {
 
   const keyExtractor = homeSectionKeyExtractor;
 
-  const [scrollY, setScrollY] = useState(0);
+  // 100% UI-Thread Reanimated SharedValues for 60/120 FPS native scrolling
+  const scrollY = useSharedValue(0);
   const pullProgress = useSharedValue(0);
   const hasTriggeredPullHapticRef = useRef(false);
 
-  const handleScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const offsetY = event.nativeEvent.contentOffset.y;
-      handleHeaderScroll(event);
-      setScrollY(offsetY);
+  const triggerHaptic = useCallback(() => {
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+  }, []);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      "worklet";
+      const offsetY = event.contentOffset.y;
+      scrollY.value = offsetY;
 
       if (offsetY < 0) {
         const progress = Math.min(1, Math.max(0, -offsetY / 68));
@@ -163,7 +177,7 @@ export function HomeScreen() {
         // Tactile haptic tick when reaching full pull stretch threshold
         if (progress >= 0.95 && !hasTriggeredPullHapticRef.current) {
           hasTriggeredPullHapticRef.current = true;
-          void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+          runOnJS(triggerHaptic)();
         } else if (progress < 0.5) {
           hasTriggeredPullHapticRef.current = false;
         }
@@ -172,8 +186,7 @@ export function HomeScreen() {
         hasTriggeredPullHapticRef.current = false;
       }
     },
-    [handleHeaderScroll, pullProgress]
-  );
+  });
 
   const handleScrollEndDrag = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -184,7 +197,6 @@ export function HomeScreen() {
     },
     [handleRefresh, refreshing]
   );
-
 
   const festivalTheme = useFestivalTheme();
 
@@ -199,8 +211,7 @@ export function HomeScreen() {
     [insets.bottom, topInset]
   );
 
-
-  if (!isOnline && !hasContent) {
+  if (!isOnline && !isChecking && !hasContent) {
     return <OfflineScreen />;
   }
 
@@ -208,7 +219,7 @@ export function HomeScreen() {
     <View style={styles.container}>
       {!isOnline && <OfflineBanner />}
 
-      {/* ── Ambient Backdrop: Moves naturally with feed on scroll (NOT FIXED) ── */}
+      {/* ── Ambient Backdrop: Moves naturally with feed on scroll (100% Native Reanimated) ── */}
       <HomeAmbientBackdrop
         currentSong={currentSong}
         topInset={topInset}
@@ -222,6 +233,7 @@ export function HomeScreen() {
         selectedCategory={selectedCategory}
         onSelectCategory={handleSelectCategory}
         scrollY={scrollY}
+        themeConfig={festivalTheme}
       />
 
       {/* ── Dedicated Mavrixfy Reanimated Refresh Indicator (Top Visual Overlay) ── */}
@@ -229,27 +241,38 @@ export function HomeScreen() {
         progress={pullProgress}
         refreshing={refreshing}
         topOffset={topInset + UNIFIED_HEADER_TOTAL_HEIGHT + 6}
+        color={festivalTheme?.enabled ? (festivalTheme.activeColor || "#FFFFFF") : undefined}
       />
 
-      {/* ── Home Content Scroll Layer ── */}
-      <FlatList
-        ref={flatListRef}
+      {/* ── Home Content Scroll Layer (Animated FlatList running on UI Thread) ── */}
+      <Animated.FlatList
+        ref={flatListRef as any}
         data={sectionData}
         keyExtractor={keyExtractor}
         renderItem={renderSectionItem}
         ListHeaderComponent={
           festivalTheme?.enabled ? (
             <View style={styles.listHeaderWrap}>
+              {/* Seamless Overscroll Background for Pull-Down Refresh:
+                  Fills the space above the banner with themeAccentColor so there is never a black gap */}
+              <View
+                style={[
+                  styles.overscrollFill,
+                  {
+                    backgroundColor: festivalTheme.themeAccentColor || "#ffb900",
+                  },
+                ]}
+                pointerEvents="none"
+              />
               <FestivalHeaderBanner themeConfig={festivalTheme} />
             </View>
-
           ) : null
         }
         ListEmptyComponent={loading ? <HomeLoadingSkeleton /> : null}
         style={styles.scroll}
         contentContainerStyle={contentContainerStyle}
         showsVerticalScrollIndicator={false}
-        onScroll={handleScroll}
+        onScroll={scrollHandler}
         onScrollEndDrag={handleScrollEndDrag}
         scrollEventThrottle={16}
         initialNumToRender={4}
@@ -271,6 +294,14 @@ const styles = StyleSheet.create({
   },
   listHeaderWrap: {
     position: "relative",
+  },
+  overscrollFill: {
+    position: "absolute",
+    top: -1000,
+    left: 0,
+    right: 0,
+    height: 1000,
+    zIndex: -1,
   },
   scroll: {
     flex: 1,

@@ -79,7 +79,7 @@ export function MiniPlayerSecondaryControlButton({
       >
         <Ionicons
           name={action.icon}
-          size={control === "more" ? 22 : 24}
+          size={control === "more" ? 18 : 20}
           color={iconColor}
         />
       </Pressable>
@@ -195,7 +195,6 @@ export const MiniPlayerBannerView = React.memo(function MiniPlayerBannerView({
       }}
       style={({ pressed }) => [
         styles.miniBannerRow,
-        activeItem.backgroundColor ? { backgroundColor: activeItem.backgroundColor } : null,
         pressed && styles.miniBannerRowPressed,
       ]}
       hitSlop={{ top: 4, bottom: 4 }}

@@ -18,97 +18,95 @@ export const PlaylistListItem = memo(function PlaylistListItem({
   onPress,
   onLongPress,
 }: PlaylistListItemProps) {
-  const subtitle =
-    item.description?.trim() ||
-    `${item.songs?.length || 0} track${(item.songs?.length || 0) === 1 ? "" : "s"}`;
+  const trackCount = item.songs?.length || 0;
 
   return (
     <Pressable
       style={({ pressed }) => [styles.playlistCard, pressed && styles.pressed]}
-      android_ripple={{ color: "rgba(255, 255, 255, 0.08)" }}
+      android_ripple={{ color: "rgba(255, 255, 255, 0.06)" }}
       onPress={() => onPress(item)}
       onLongPress={() => onLongPress(item)}
     >
-      {item.coverUrl ? (
-        <Image
-          recyclingKey={item.id}
-          source={{ uri: item.coverUrl }}
-          style={styles.playlistCover}
-          contentFit="cover"
-          transition={100}
-          cachePolicy="memory-disk"
-        />
-      ) : (
-        <View style={[styles.playlistCover, styles.playlistCoverPlaceholder]}>
-          <Ionicons name="musical-notes" size={22} color={Colors.subtext} />
+      <View style={styles.playlistContent}>
+        {item.coverUrl ? (
+          <Image
+            recyclingKey={item.id}
+            source={{ uri: item.coverUrl }}
+            style={styles.playlistCover}
+            contentFit="cover"
+            transition={150}
+            cachePolicy="memory-disk"
+          />
+        ) : (
+          <View style={[styles.playlistCover, styles.playlistCoverPlaceholder]}>
+            <Ionicons name="musical-notes" size={28} color={Colors.subtext} />
+          </View>
+        )}
+
+        <View style={styles.playlistInfo}>
+          <Text style={styles.playlistName} numberOfLines={1}>
+            {item.name}
+          </Text>
+          <View style={styles.playlistMetaRow}>
+            <Text style={styles.playlistMeta}>
+              {trackCount} {trackCount === 1 ? "song" : "songs"}
+            </Text>
+          </View>
         </View>
-      )}
-
-      <View style={styles.playlistInfo}>
-        <Text style={styles.playlistName} numberOfLines={1}>
-          {item.name}
-        </Text>
-        <Text style={styles.playlistMeta} numberOfLines={1}>
-          {subtitle}
-        </Text>
       </View>
-
-      <Ionicons
-        name="chevron-forward"
-        size={19}
-        color={Colors.subtext}
-        style={styles.playlistActionIcon}
-      />
     </Pressable>
   );
 });
 
 const styles = StyleSheet.create({
   playlistCard: {
-    marginHorizontal: 14,
-    marginBottom: 8,
-    borderRadius: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "transparent",
+    marginHorizontal: 20,
+    marginBottom: 10,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    overflow: "hidden",
   },
   pressed: {
-    opacity: 0.85,
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    opacity: 0.7,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
+  playlistContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
   },
   playlistCover: {
-    width: 60,
-    height: 60,
-    borderRadius: 9,
+    width: 64,
+    height: 64,
+    borderRadius: 12,
     backgroundColor: Colors.surfaceLight,
   },
   playlistCoverPlaceholder: {
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.surfaceLight,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
   },
   playlistInfo: {
     flex: 1,
-    marginLeft: 10,
+    marginLeft: 14,
+    justifyContent: "center",
   },
   playlistName: {
     color: Colors.text,
-    fontSize: 15,
-    lineHeight: 18,
-    fontFamily: "Inter_700Bold",
+    fontSize: 16,
+    lineHeight: 20,
+    letterSpacing: -0.2,
+    fontFamily: "Inter_600SemiBold",
+    marginBottom: 4,
+  },
+  playlistMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   playlistMeta: {
-    marginTop: 3,
     color: Colors.subtext,
-    fontSize: 11.5,
-    lineHeight: 14,
+    fontSize: 13,
+    lineHeight: 16,
     fontFamily: "Inter_400Regular",
-  },
-  playlistActionIcon: {
-    marginLeft: 8,
-    marginRight: 2,
-    opacity: 0.8,
   },
 });
