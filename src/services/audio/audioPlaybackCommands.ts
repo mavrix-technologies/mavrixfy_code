@@ -6,7 +6,6 @@ import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { songToTrack, withResolvedPlaybackUrl } from "@/services/audio/PlayerPlaybackResolver";
-import { toDurationSeconds } from "@/utils/timeFormatters";
 import { isSameQueueContent } from "@/services/audio/audioNativeQueueLane";
 
 interface UseAudioPlaybackCommandsOptions {
@@ -237,18 +236,6 @@ export function useAudioPlaybackCommands({
             if (reqId !== playRequestIdRef.current) return;
             await TrackPlayer!.play();
 
-            if (Platform.OS === "ios" && typeof TrackPlayer!.updateNowPlayingMetadata === "function") {
-              const durSec = toDurationSeconds(targetSong.duration);
-              TrackPlayer!.updateNowPlayingMetadata({
-                title: targetTrack.title,
-                artist: targetTrack.artist,
-                album: targetTrack.album,
-                artwork: targetTrack.artwork,
-                duration: durSec > 0 ? durSec : undefined,
-                elapsedTime: 0,
-                isLiveStream: false,
-              }).catch(() => {});
-            }
           });
 
           if (reqId !== playRequestIdRef.current) return;

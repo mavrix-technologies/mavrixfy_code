@@ -24,23 +24,29 @@ export async function trackPlayerService(): Promise<void> {
     TrackPlayer.addEventListener(Event.RemoteStop, () => {
       TrackPlayer.stop().catch(() => {});
     });
-    TrackPlayer.addEventListener(Event.RemoteNext, () => {
-      TrackPlayer.skipToNext().catch(() => {});
-    });
-    TrackPlayer.addEventListener(Event.RemotePrevious, () => {
-      TrackPlayer.skipToPrevious().catch(() => {});
-    });
     TrackPlayer.addEventListener(Event.RemoteSeek, (event: { position: number }) => {
       if (typeof event?.position === "number") {
         TrackPlayer.seekTo(event.position).catch(() => {});
       }
     });
-    TrackPlayer.addEventListener(Event.RemoteJumpForward, async (event: { interval?: number }) => {
-      try {
-        const pos = await TrackPlayer.getPosition();
-        await TrackPlayer.seekTo(pos + (event?.interval || 15));
-      } catch {}
-    });
+
+    // iOS queue navigation is coordinated by the UI state so that its custom
+    // queue remains the source of truth. Android owns these commands in the
+    // playback service, which is the only handler that survives headless mode.
+    if (Platform.OS !== "ios") {
+      TrackPlayer.addEventListener(Event.RemoteNext, () => {
+        TrackPlayer.skipToNext().catch(() => {});
+      });
+      TrackPlayer.addEventListener(Event.RemotePrevious, () => {
+        TrackPlayer.skipToPrevious().catch(() => {});
+      });
+      TrackPlayer.addEventListener(Event.RemoteJumpForward, async (event: { interval?: number }) => {
+        try {
+          const pos = await TrackPlayer.getPosition();
+          await TrackPlayer.seekTo(pos + (event?.interval || 15));
+        } catch {}
+      });
+    }
     TrackPlayer.addEventListener(
       Event.RemoteDuck,
       async (event: { paused?: boolean; permanent?: boolean; ducking?: boolean }) => {
@@ -104,6 +110,8 @@ async function setupPlayerInternal(): Promise<void> {
     logger.info("[TrackPlayerAdapter] Calling TrackPlayer.setupPlayer...");
     await TrackPlayer.setupPlayer({
       autoHandleInterruptions: true,
+      // SwiftAudioEx owns iOS elapsed time, duration, and playback rate for
+      // Now Playing. Do not manually overwrite these values from JavaScript.
       autoUpdateMetadata: true,
       androidAudioContentType: AndroidAudioContentType?.Music ?? 2,
       minBuffer: 30,
