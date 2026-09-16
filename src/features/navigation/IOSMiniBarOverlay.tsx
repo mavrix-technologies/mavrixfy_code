@@ -10,7 +10,6 @@ import { useOptionalPlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import {
-  getSpotifyMiniPlayerBg,
   useArtworkPalette,
   preloadDominantColors,
 } from "@/lib/colorExtractor";
@@ -240,8 +239,8 @@ function useIOSMiniPlayerOverlayView() {
   }, [isPlayingFromLastMix, lastMix, mixBarOne, mixBarThree, mixBarTwo]);
 
   const shellBgColor = useMemo(
-    () => getSpotifyMiniPlayerBg(iosArtworkPalette.accent, iosArtworkPalette.background),
-    [iosArtworkPalette.accent, iosArtworkPalette.background]
+    () => iosArtworkPalette.background || "#16181D",
+    [iosArtworkPalette.background]
   );
 
   if (!activeSong) {

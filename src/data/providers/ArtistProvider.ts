@@ -330,7 +330,16 @@ function buildFeaturedArtistShowcase(artists: ArtistCard[]): ArtistCard[] {
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
 
+const artistMemoryCache = new Map<string, JioSaavnArtist>();
+
+export function getImmediateCachedArtist(id: string): JioSaavnArtist | null {
+  return artistMemoryCache.get(id) ?? null;
+}
+
 async function getCachedArtist(id: string): Promise<JioSaavnArtist | null> {
+  const mem = artistMemoryCache.get(id);
+  if (mem) return mem;
+
   try {
     const [[, data], [, time]] = await AsyncStorage.multiGet([
       `${ARTIST_CACHE_PREFIX}:${id}`,
@@ -338,13 +347,16 @@ async function getCachedArtist(id: string): Promise<JioSaavnArtist | null> {
     ]);
     if (!data || !time) return null;
     if (Date.now() - Number(time) > ARTIST_CACHE_TTL_MS) return null;
-    return JSON.parse(data);
+    const parsed = JSON.parse(data) as JioSaavnArtist;
+    artistMemoryCache.set(id, parsed);
+    return parsed;
   } catch {
     return null;
   }
 }
 
 async function setCachedArtist(id: string, artist: JioSaavnArtist): Promise<void> {
+  artistMemoryCache.set(id, artist);
   try {
     await AsyncStorage.multiSet([
       [`${ARTIST_CACHE_PREFIX}:${id}`, JSON.stringify(artist)],

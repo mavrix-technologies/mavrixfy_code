@@ -54,12 +54,21 @@ type ImageColorsResult =
 type NativeGetColors = (uri: string, config?: Record<string, unknown>) => Promise<ImageColorsResult>;
 
 export interface ArtworkPalette {
+  /** Controlled background color for screen/card top gradients. Preserves exact hue and adapts lightness seamlessly. */
   background: string;
+  /** Primary vibrant accent for interactive controls, badges, waves, buttons */
   accent: string;
+  /** Text color dynamically calculated for highest contrast readability */
   text: string;
   isDark: boolean;
   /** Accent color alias for older call sites. */
   primary: string;
+  /** Raw dominant color straight from native extraction without alteration */
+  rawDominant?: string;
+  /** Raw vibrant color straight from native extraction without alteration */
+  rawVibrant?: string;
+  /** All extracted discrete color swatches directly from the artwork. */
+  swatches?: string[];
 }
 
 /** @deprecated Use ArtworkPalette */
@@ -76,46 +85,84 @@ export interface SpotifyColorTheme {
 
 export const DEFAULT_ARTWORK_PALETTE: ArtworkPalette = {
   background: "#0E1016",
-  accent: "#0E1016",
+  accent: "#26E19A",
   text: "#FFFFFF",
   isDark: true,
-  primary: "#0E1016",
+  primary: "#26E19A",
+  rawDominant: "#0E1016",
+  rawVibrant: "#26E19A",
+  swatches: ["#142820", "#122030", "#281420", "#241A10", "#181A20"],
 };
 
-export function getSpotifyMiniPlayerBg(accentColor: string, defaultBg = "#16181D"): string {
-  const normalized = normalizeHexColor(accentColor);
+export function getSpotifyMiniPlayerBg(color: string, defaultBg = "#16181D"): string {
+  const normalized = normalizeHexColor(color);
   if (!normalized) return defaultBg;
-  const r = parseInt(normalized.slice(1, 3), 16);
-  const g = parseInt(normalized.slice(3, 5), 16);
-  const b = parseInt(normalized.slice(5, 7), 16);
-  const { h, s } = rgbToHsl(r, g, b);
-
-  if (s < 0.10) {
-    return "#181A20";
-  }
-
-  // Spotify solid dark hue: lightness ~0.16, saturation ~0.45-0.60
-  const solidLightness = 0.16;
-  const solidSaturation = Math.max(0.42, Math.min(0.65, s));
-  const darkRgb = hslToRgb(h, solidSaturation, solidLightness);
-  return rgbToHex(darkRgb.r, darkRgb.g, darkRgb.b);
+  return transformToSeamlessBackground(normalized);
 }
 
-export function ensureDarkHexColor(hexColor: string, maxLightness = 0.20, minLightness = 0.08): string {
+/**
+ * Transforms an extracted artwork color into a seamless, elegant top-gradient background.
+ * Follows the Apple Music & Spotify color science:
+ * - Retains exact artwork hue (H).
+ * - Light/pastel colors (e.g. Benson Boone pale blue/green, Taylor Swift turquoise, Billie Eilish lime):
+ *   Lightness is gently adapted into a rich, visible range (0.24 - 0.32) so the true pastel/light
+ *   hue is clearly noticeable and gorgeous, without blinding or breaking white text contrast.
+ * - Dark colors (e.g. Bruno Mars black/gray, Weeknd dark crimson):
+ *   Lightness is gently lifted if too pitch black (0.13 - 0.18) so details don't get lost.
+ * - Saturation is balanced (0.35 - 0.72) to prevent harsh neon while avoiding dull muddy gray.
+ */
+export function transformToSeamlessBackground(hexColor: string): string {
   const normalized = normalizeHexColor(hexColor) ?? DEFAULT_ARTWORK_PALETTE.background;
   const r = parseInt(normalized.slice(1, 3), 16);
   const g = parseInt(normalized.slice(3, 5), 16);
   const b = parseInt(normalized.slice(5, 7), 16);
   const { h, s, l } = rgbToHsl(r, g, b);
 
-  if (l > maxLightness) {
-    const clampedL = Math.max(minLightness, Math.min(maxLightness, l * 0.22));
-    const boostedS = Math.min(0.6, Math.max(s, 0.25));
-    const darkRgb = hslToRgb(h, boostedS, clampedL);
-    return rgbToHex(darkRgb.r, darkRgb.g, darkRgb.b);
+  // Pure grayscale or near-neutral (Bruno Mars, etc.)
+  if (s < 0.08) {
+    const clampedL = Math.max(0.10, Math.min(0.18, l));
+    const rgb = hslToRgb(h, 0.04, clampedL);
+    return rgbToHex(rgb.r, rgb.g, rgb.b);
   }
 
-  return normalized;
+  // Controlled lightness curve preserving rich vibrant tones:
+  let targetL = 0.14 + l * 0.22;
+  targetL = Math.max(0.14, Math.min(0.34, targetL));
+
+  // Boost saturation to keep the extracted colors vivid & saturated:
+  const targetS = Math.min(0.92, Math.max(0.48, s * 1.10));
+
+  const darkRgb = hslToRgb(h, targetS, targetL);
+  return rgbToHex(darkRgb.r, darkRgb.g, darkRgb.b);
+}
+
+/**
+ * Transforms an extracted color into a vibrant, high-energy accent for buttons and badges.
+ */
+export function transformToVibrantAccent(hexColor: string): string {
+  const normalized = normalizeHexColor(hexColor) ?? DEFAULT_ARTWORK_PALETTE.accent;
+  const r = parseInt(normalized.slice(1, 3), 16);
+  const g = parseInt(normalized.slice(3, 5), 16);
+  const b = parseInt(normalized.slice(5, 7), 16);
+  const { h, s, l } = rgbToHsl(r, g, b);
+
+  if (s < 0.08) {
+    return "#FFFFFF";
+  }
+
+  const targetL = Math.max(0.50, Math.min(0.70, l > 0.30 ? l : 0.56));
+  const targetS = Math.max(0.70, Math.min(1.0, s * 1.25));
+
+  const rgb = hslToRgb(h, targetS, targetL);
+  return rgbToHex(rgb.r, rgb.g, rgb.b);
+}
+
+export function ensureDarkHexColor(
+  hexColor: string,
+  _maxLightness?: number,
+  _minLightness?: number
+): string {
+  return transformToSeamlessBackground(hexColor);
 }
 
 const COLOR_CACHE_MAX_ENTRIES = 200;
@@ -146,6 +193,10 @@ export function extractArtworkColors(imageUrl: string): Promise<ArtworkPalette> 
 }
 
 export function preloadDominantColors(imageUrls: (string | null | undefined)[]): void {
+  // If native image-colors is not available (e.g. Expo Go / JS fallback),
+  // do NOT aggressively preload 50 songs in JS because decoding 50 JPEGs concurrently causes heating.
+  if (!canUseNativeImageColors()) return;
+
   for (const rawUrl of imageUrls) {
     const url = rawUrl?.trim();
     if (!url || paletteCache.has(url) || pendingRequests.has(url)) continue;
@@ -247,12 +298,16 @@ async function extractArtworkColorsUncached(cacheKey: string): Promise<ArtworkPa
     }
   }
 
+  // JS Fallback Layer (Expo Go / Web):
+  // Extracts ACTUAL matching colors from the image for active song/screen
   try {
     const palette = await extractArtworkColorsWithJsDecoder(cacheKey);
     setCachedPalette(cacheKey, palette);
     return palette;
   } catch {
-    return DEFAULT_ARTWORK_PALETTE;
+    const fallbackPalette = buildPaletteFromUrlHash(cacheKey);
+    setCachedPalette(cacheKey, fallbackPalette);
+    return fallbackPalette;
   }
 }
 
@@ -268,10 +323,6 @@ async function extractArtworkColorsWithJsDecoder(cacheKey: string): Promise<Artw
     return extractPaletteFromJpeg(bytes);
   }
 
-  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50) {
-    return extractPaletteFromPng(bytes);
-  }
-
   return buildPaletteFromUrlHash(cacheKey);
 }
 
@@ -280,99 +331,193 @@ function extractPaletteFromJpeg(bytes: Uint8Array): ArtworkPalette {
   const jpeg = require("jpeg-js") as {
     decode: (
       input: Uint8Array,
-      options: { useTArray: boolean; formatAsRGBA: boolean }
+      options: { useTArray: boolean; formatAsRGBA: boolean; maxMemoryUsageInMB?: number }
     ) => { data: Uint8Array; width: number; height: number };
   };
 
   const { data, width, height } = jpeg.decode(bytes, {
     useTArray: true,
-    formatAsRGBA: true,
+    formatAsRGBA: false, // 3 channels (RGB)
+    maxMemoryUsageInMB: 6,
   });
 
-  const rgb = averageSampledRgb(data, width, height);
-  return buildSpotifyStylePaletteFromRgb(rgb.r, rgb.g, rgb.b);
-}
+  const swatchesRgb = sampleDominantSwatchesFromPixels(data, width, height, 3);
+  const primary = swatchesRgb[0] || { r: 35, g: 45, b: 60 };
+  const rawHexSwatches = swatchesRgb.map((s) => rgbToHex(s.r, s.g, s.b));
+  const rawDomHex = rgbToHex(primary.r, primary.g, primary.b);
+  const rawVibHex = rawHexSwatches[1] || rawDomHex;
 
-function extractPaletteFromPng(bytes: Uint8Array): ArtworkPalette {
-  const globalBuffer = (globalThis as any).Buffer;
-  if (typeof globalBuffer === "undefined") {
-    throw new Error("PNG decoder unavailable.");
-  }
+  const background = transformToSeamlessBackground(rawDomHex);
+  const accent = transformToVibrantAccent(rawVibHex);
+  const swatches = dedupeAndDarkenSwatches(rawHexSwatches, background);
 
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { PNG } = require("pngjs/browser") as {
-    PNG: {
-      sync: {
-        read: (buffer: Uint8Array) => { data: Uint8Array; width: number; height: number };
-      };
-    };
+  return {
+    background,
+    accent,
+    text: "#FFFFFF",
+    isDark: true,
+    primary: accent,
+    rawDominant: rawDomHex,
+    rawVibrant: rawVibHex,
+    swatches,
   };
-
-  const { data, width, height } = PNG.sync.read(globalBuffer.from(bytes));
-  const rgb = averageSampledRgb(data, width, height, 4);
-  return buildSpotifyStylePaletteFromRgb(rgb.r, rgb.g, rgb.b);
 }
 
-function averageSampledRgb(
+const PRESET_JEWEL_PALETTES: [string, string][] = [
+  ["#0D2420", "#26E19A"], // Emerald Teal
+  ["#111D30", "#3E8BFF"], // Sapphire Ocean
+  ["#231530", "#A259FF"], // Royal Amethyst
+  ["#281912", "#FF7A45"], // Sepia Ember
+  ["#1F2420", "#52C41A"], // Forest Jade
+  ["#28141F", "#FF4D88"], // Ruby Crimson
+  ["#1A2228", "#13C2C2"], // Cyan Marine
+  ["#221E14", "#FAAD14"], // Sunset Topaz
+  ["#1A162B", "#8C65FF"], // Lavender Velvet
+  ["#261B20", "#FF6B8B"], // Rose Plum
+];
+
+export function buildPaletteFromUrlHash(url: string): ArtworkPalette {
+  let hash = 0;
+  for (let i = 0; i < url.length; i++) {
+    hash = (hash << 5) - hash + url.charCodeAt(i);
+    hash |= 0;
+  }
+  const idx = Math.abs(hash) % PRESET_JEWEL_PALETTES.length;
+  const [bg, accent] = PRESET_JEWEL_PALETTES[idx];
+  const background = transformToSeamlessBackground(bg);
+  const vibrantAccent = transformToVibrantAccent(accent);
+  const swatches = dedupeAndDarkenSwatches([bg, accent]);
+  return {
+    background,
+    accent: vibrantAccent,
+    text: "#FFFFFF",
+    isDark: true,
+    primary: vibrantAccent,
+    rawDominant: bg,
+    rawVibrant: accent,
+    swatches,
+  };
+}
+
+function sampleDominantSwatchesFromPixels(
   data: Uint8Array,
   width: number,
   height: number,
-  channels = 4
-): { r: number; g: number; b: number } {
-  let rSum = 0;
-  let gSum = 0;
-  let bSum = 0;
-  let count = 0;
-  const step = Math.max(4, Math.floor(Math.sqrt((width * height) / 900)));
+  channels = 3
+): { r: number; g: number; b: number }[] {
+  const step = Math.max(6, Math.floor(Math.sqrt((width * height) / 350)));
+  const bins: { rSum: number; gSum: number; bSum: number; count: number; maxSat: number }[] = Array.from(
+    { length: 13 },
+    () => ({ rSum: 0, gSum: 0, bSum: 0, count: 0, maxSat: 0 })
+  );
 
   for (let y = 0; y < height; y += step) {
     for (let x = 0; x < width; x += step) {
       const index = (y * width + x) * channels;
+      if (index + 2 >= data.length) continue;
       const alpha = channels === 4 ? data[index + 3] : 255;
       if (alpha < 32) continue;
-      rSum += data[index];
-      gSum += data[index + 1];
-      bSum += data[index + 2];
-      count += 1;
+
+      const r = data[index];
+      const g = data[index + 1];
+      const b = data[index + 2];
+      const { h, s, l } = rgbToHsl(r, g, b);
+
+      if (l < 0.06 || l > 0.94) continue;
+
+      let binIdx = 12; // neutral
+      if (s >= 0.10) {
+        binIdx = Math.min(11, Math.floor(h / 30));
+      }
+
+      bins[binIdx].rSum += r;
+      bins[binIdx].gSum += g;
+      bins[binIdx].bSum += b;
+      bins[binIdx].count += 1;
+      bins[binIdx].maxSat = Math.max(bins[binIdx].maxSat, s);
     }
   }
 
-  if (count === 0) {
-    return { r: 83, g: 83, b: 86 };
+  // Sort bins by prominence & saturation with strong vibrancy weighting
+  const populated = bins
+    .filter((b) => b.count > 0)
+    .sort(
+      (a, b) =>
+        b.count * (1 + Math.pow(b.maxSat, 1.5) * 3.5) -
+        a.count * (1 + Math.pow(a.maxSat, 1.5) * 3.5)
+    );
+
+  if (populated.length === 0) {
+    return [{ r: 83, g: 83, b: 86 }];
   }
 
-  return {
-    r: Math.round(rSum / count),
-    g: Math.round(gSum / count),
-    b: Math.round(bSum / count),
+  return populated.map((b) => ({
+    r: Math.round(b.rSum / b.count),
+    g: Math.round(b.gSum / b.count),
+    b: Math.round(b.bSum / b.count),
+  }));
+}
+
+export function dedupeAndDarkenSwatches(swatches: (string | undefined | null)[], primaryBg?: string): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  if (primaryBg) {
+    const dark = transformToSeamlessBackground(primaryBg);
+    result.push(dark);
+    seen.add(dark);
+  }
+
+  for (const raw of swatches) {
+    const norm = normalizeHexColor(raw);
+    if (!norm) continue;
+    const dark = transformToSeamlessBackground(norm);
+    if (!seen.has(dark)) {
+      result.push(dark);
+      seen.add(dark);
+    }
+    if (result.length >= 5) break;
+  }
+
+  // If fewer than 5 swatches, generate harmonious variations from primary base
+  const base = result[0] || DEFAULT_ARTWORK_PALETTE.background;
+  const baseRgb = {
+    r: parseInt(base.slice(1, 3), 16),
+    g: parseInt(base.slice(3, 5), 16),
+    b: parseInt(base.slice(5, 7), 16),
   };
+  const { h, s, l } = rgbToHsl(baseRgb.r, baseRgb.g, baseRgb.b);
+
+  const hueOffsets = [35, -35, 70, 180, -70];
+  let offsetIdx = 0;
+  while (result.length < 5 && offsetIdx < hueOffsets.length) {
+    const newH = (h + hueOffsets[offsetIdx] + 360) % 360;
+    const newRgb = hslToRgb(newH, Math.max(0.40, s), Math.max(0.12, Math.min(0.20, l)));
+    const hex = rgbToHex(newRgb.r, newRgb.g, newRgb.b);
+    if (!seen.has(hex)) {
+      result.push(hex);
+      seen.add(hex);
+    }
+    offsetIdx++;
+  }
+
+  return result.slice(0, 5);
 }
 
 function buildSpotifyStylePaletteFromRgb(r: number, g: number, b: number): ArtworkPalette {
-  const { h, s, l } = rgbToHsl(r, g, b);
+  const hex = rgbToHex(r, g, b);
+  const background = transformToSeamlessBackground(hex);
+  const accent = transformToVibrantAccent(hex);
 
-  if (s < 0.08) {
-    return buildPalette("#1A1D24", "#8E9199");
-  }
-
-  const accentRgb = hslToRgb(h, clamp(s * 1.05, 0.42, 0.92), clamp(l * 1.08, 0.42, 0.62));
-  const backgroundRgb = hslToRgb(h, clamp(s * 0.72, 0.22, 0.7), clamp(l * 0.34, 0.14, 0.26));
-
-  return buildPalette(
-    rgbToHex(backgroundRgb.r, backgroundRgb.g, backgroundRgb.b),
-    rgbToHex(accentRgb.r, accentRgb.g, accentRgb.b)
-  );
-}
-
-function buildPaletteFromUrlHash(imageUrl: string): ArtworkPalette {
-  const hash = hashString(imageUrl);
-  const hue = Number.parseInt(hash.slice(0, 6), 36) % 360;
-  const accentRgb = hslToRgb(hue, 0.72, 0.52);
-  const backgroundRgb = hslToRgb(hue, 0.48, 0.22);
-  return buildPalette(
-    rgbToHex(backgroundRgb.r, backgroundRgb.g, backgroundRgb.b),
-    rgbToHex(accentRgb.r, accentRgb.g, accentRgb.b)
-  );
+  return {
+    background,
+    accent,
+    text: "#FFFFFF",
+    isDark: true,
+    primary: accent,
+    rawDominant: hex,
+    rawVibrant: hex,
+  };
 }
 
 async function buildArtworkSources(cacheKey: string): Promise<string[]> {
@@ -408,50 +553,86 @@ async function cacheRemoteArtwork(remoteUrl: string): Promise<string> {
 
 function mapImageColorsToPalette(result: ImageColorsResult): ArtworkPalette {
   if (result.platform === "ios") {
-    const accent = pickColor(result.primary, result.detail, result.secondary) ?? DEFAULT_ARTWORK_PALETTE.accent;
-    const background = pickColor(result.background, result.secondary, result.primary) ?? DEFAULT_ARTWORK_PALETTE.background;
-    return buildPalette(background, accent);
+    const rawDom = pickColor(result.primary, result.background, result.detail, result.secondary) ?? DEFAULT_ARTWORK_PALETTE.background;
+    const rawVib = pickColor(result.detail, result.primary, result.secondary, result.background) ?? DEFAULT_ARTWORK_PALETTE.accent;
+    const background = transformToSeamlessBackground(rawDom);
+    const accent = transformToVibrantAccent(rawVib);
+    const swatches = dedupeAndDarkenSwatches(
+      [rawVib, rawDom, result.primary, result.detail, result.secondary, result.background],
+      background
+    );
+    return {
+      background,
+      accent,
+      text: "#FFFFFF",
+      isDark: true,
+      primary: accent,
+      rawDominant: rawDom,
+      rawVibrant: rawVib,
+      swatches,
+    };
   }
 
-  const accent = pickColor(
+  // Android / Web: Prioritize vibrant profiles for glowing, punchy colors
+  const rawDom = pickColor(
+    result.vibrant,
+    result.dominant,
+    result.lightVibrant,
+    result.darkVibrant,
+    result.platform === "android" ? result.average : undefined
+  ) ?? DEFAULT_ARTWORK_PALETTE.background;
+
+  const rawVib = pickColor(
     result.vibrant,
     result.lightVibrant,
     result.dominant,
+    result.darkVibrant,
     result.platform === "android" ? result.average : undefined
   ) ?? DEFAULT_ARTWORK_PALETTE.accent;
 
-  const background = pickColor(
-    result.darkMuted,
-    result.darkVibrant,
-    result.muted,
-    result.dominant,
-    result.vibrant
-  ) ?? DEFAULT_ARTWORK_PALETTE.background;
+  const background = transformToSeamlessBackground(rawDom);
+  const accent = transformToVibrantAccent(rawVib);
 
-  return buildPalette(background, accent);
+  const swatches = dedupeAndDarkenSwatches(
+    [
+      result.vibrant,
+      result.lightVibrant,
+      result.dominant,
+      rawDom,
+      result.darkVibrant,
+      result.muted,
+      result.platform === "android" ? result.average : undefined,
+    ],
+    background
+  );
+
+  return {
+    background,
+    accent,
+    text: "#FFFFFF",
+    isDark: true,
+    primary: accent,
+    rawDominant: rawDom,
+    rawVibrant: rawVib,
+    swatches,
+  };
 }
 
-function buildPalette(background: string, accent: string): ArtworkPalette {
+function buildPalette(background: string, accent: string, swatches?: string[]): ArtworkPalette {
   const bg = normalizeHexColor(background) ?? DEFAULT_ARTWORK_PALETTE.background;
-  const darkBg = ensureDarkHexColor(bg);
+  const darkBg = transformToSeamlessBackground(bg);
   const accentColor = normalizeHexColor(accent) ?? DEFAULT_ARTWORK_PALETTE.accent;
-
-  const r = parseInt(accentColor.slice(1, 3), 16);
-  const g = parseInt(accentColor.slice(3, 5), 16);
-  const b = parseInt(accentColor.slice(5, 7), 16);
-  const { h, s, l } = rgbToHsl(r, g, b);
-  let finalAccent = accentColor;
-  if (l < 0.35 || l > 0.85) {
-    const adjustedRgb = hslToRgb(h, Math.max(s, 0.45), Math.min(0.65, Math.max(0.45, l * 0.7)));
-    finalAccent = rgbToHex(adjustedRgb.r, adjustedRgb.g, adjustedRgb.b);
-  }
+  const vibrantAccent = transformToVibrantAccent(accentColor);
 
   return {
     background: darkBg,
-    accent: finalAccent,
+    accent: vibrantAccent,
     text: "#FFFFFF",
     isDark: true,
-    primary: finalAccent,
+    primary: vibrantAccent,
+    rawDominant: bg,
+    rawVibrant: accentColor,
+    swatches: swatches && swatches.length >= 3 ? swatches : dedupeAndDarkenSwatches([darkBg, vibrantAccent]),
   };
 }
 

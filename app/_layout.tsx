@@ -23,6 +23,9 @@ import { Inter_500Medium } from "@expo-google-fonts/inter/500Medium";
 import { Inter_600SemiBold } from "@expo-google-fonts/inter/600SemiBold";
 import { Inter_700Bold } from "@expo-google-fonts/inter/700Bold";
 import { Inter_800ExtraBold } from "@expo-google-fonts/inter/800ExtraBold";
+import { Syne_700Bold, Syne_800ExtraBold } from "@expo-google-fonts/syne";
+import { BebasNeue_400Regular } from "@expo-google-fonts/bebas-neue";
+import { Anton_400Regular } from "@expo-google-fonts/anton";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Constants from "expo-constants";
 import { queryClient } from "@/lib/query-client";
@@ -44,6 +47,7 @@ import { logger } from "@/lib/logger";
 import { initializeMobileAds } from "@/lib/googleMobileAds";
 import { initRemoteConfig } from "@/lib/remoteConfig";
 import { showGlobalToast, subscribeGlobalToast } from "@/utils/globalToast";
+import ShareModal from "@/components/ShareModal";
 import { checkAppVersion, registerForPushNotificationsAsync } from "@/services/notificationService";
 import { AppNavBar } from "./(tabs)/_layout";
 import PlayerScreen from "@/features/player/screens/PlayerScreen";
@@ -423,6 +427,10 @@ export default function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
     Inter_800ExtraBold,
+    Syne_700Bold,
+    Syne_800ExtraBold,
+    BebasNeue_400Regular,
+    Anton_400Regular,
     ...Ionicons.font,
     ...MaterialIcons.font,
     ...MaterialCommunityIcons.font,
@@ -467,6 +475,7 @@ export default function RootLayout() {
                       <StatusBar style="light" />
                       <RootLayoutNav />
                       <GlobalToast />
+                      <ShareModal />
                     </PlayerProvider>
                   </DownloadProvider>
                 </AuthProvider>

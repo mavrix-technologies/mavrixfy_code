@@ -119,17 +119,10 @@ export function useAudioSyncListeners({
         }
         if (typeof event?.duration === "number" && event.duration > 0) {
           const dur = event.duration;
-          setNativeDuration((prev) => {
-            if (Math.abs(prev - dur) > 0.5) {
-              if (TrackPlayer && typeof TrackPlayer.updateMetadataForTrack === "function" && queueIndexRef.current >= 0) {
-                TrackPlayer.updateMetadataForTrack(queueIndexRef.current, {
-                  duration: dur,
-                }).catch(() => {});
-              }
-              return dur;
-            }
-            return prev;
-          });
+          setNativeDuration((prev) => (Math.abs(prev - dur) > 0.5 ? dur : prev));
+          if (currentSongRef.current && (!currentSongRef.current.duration || currentSongRef.current.duration <= 0)) {
+            currentSongRef.current.duration = dur;
+          }
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
@@ -156,17 +149,6 @@ export function useAudioSyncListeners({
             currentSong: targetSong,
             queueIndex: nextIndex,
           });
-
-          // Sync metadata for the new active track in native queue without freezing the OS lockscreen progress clock
-          if (TrackPlayer && typeof TrackPlayer.updateMetadataForTrack === "function") {
-            TrackPlayer.updateMetadataForTrack(nextIndex, {
-              title: targetSong.title || "Unknown",
-              artist: targetSong.artist || "Mavrixfy",
-              album: targetSong.album || undefined,
-              artwork: targetSong.coverUrl || undefined,
-              ...(initialDuration > 0 ? { duration: initialDuration } : {}),
-            }).catch(() => {});
-          }
 
           prefetchAdjacentTrackStreams(currentQ, nextIndex);
         }

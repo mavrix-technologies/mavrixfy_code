@@ -19,6 +19,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import type { Song } from "@/lib/musicData";
 import { removeSongFromPlaylist } from "@/lib/storage";
 import { removeSongFromFirestorePlaylist } from "@/lib/firestore";
+import { shareSong } from "@/utils/shareUtils";
 import { styles } from "../styles/songOptionsStyles";
 import type { SongOptionMenuItem } from "../components/SongOptionsSubComponents";
 import { dismissOptions } from "../utils/songOptionsUtils";
@@ -114,11 +115,7 @@ export function SongOptionsScreen() {
 
   const handleShare = useCallback(async () => {
     if (!song) return;
-    await Share.share({
-      title: song.title,
-      message: `${song.title} - ${song.artist || "Unknown Artist"}`,
-      url: song.audioUrl || undefined,
-    });
+    await shareSong(song);
   }, [song]);
 
   const handleGoToAlbum = useCallback(() => {

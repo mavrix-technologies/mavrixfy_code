@@ -1,6 +1,7 @@
 import { Song, type JioSaavnImage } from "@/lib/musicData";
 import { searchCatalog } from "@/lib/catalogService";
 import { rankSongs, parseStructuredQuery, deduplicateSongs } from "@/lib/searchUtils";
+import { toDurationSeconds } from "@/utils/timeFormatters";
 
 export type ResultFilter = "all" | "songs" | "albums" | "artists" | "playlists";
 
@@ -139,7 +140,7 @@ export function parseApiSong(s: any): Song | null {
     title,
     artist,
     album,
-    duration: Number(s.duration) || 0,
+    duration: toDurationSeconds(s.duration),
     coverUrl,
     genre: String(s.language || s.genre || ""),
     audioUrl,

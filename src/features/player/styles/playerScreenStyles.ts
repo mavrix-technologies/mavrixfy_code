@@ -358,7 +358,7 @@ export const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
-    gap: 2,
+    gap: 8,
   },
   songDetailActionButton: {
     alignItems: "center",

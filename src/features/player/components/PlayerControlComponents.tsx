@@ -22,6 +22,8 @@ export type SmoothControlButtonProps = {
   style?: StyleProp<ViewStyle>;
   hitSlop?: React.ComponentProps<typeof Pressable>["hitSlop"];
   disabled?: boolean;
+  accessibilityLabel?: string;
+  accessibilityRole?: React.ComponentProps<typeof Pressable>["accessibilityRole"];
 };
 
 export function SmoothControlButton({
@@ -32,6 +34,8 @@ export function SmoothControlButton({
   style,
   hitSlop,
   disabled,
+  accessibilityLabel,
+  accessibilityRole,
 }: SmoothControlButtonProps) {
   const handlePressIn = useCallback(
     (event: GestureResponderEvent) => {
@@ -55,6 +59,8 @@ export function SmoothControlButton({
       onPress={onPress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole={accessibilityRole}
       style={({ pressed }) => [style, pressed && styles.quickButtonPressed]}
     >
       {children}

@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import type { Song } from "@/lib/musicData";
 import { unescapeHtml } from "@/utils/stringUtils";
 import { PingPongScroll } from "@/components/PingPongScroll";
+import { shareSong } from "@/utils/shareUtils";
 import {
   SmoothControlButton,
   PlayerPlayButton,
@@ -120,6 +121,7 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
         </View>
         <View style={styles.songDetailActions}>
           <SmoothControlButton
+            accessibilityLabel={liked ? "Unlike song" : "Like song"}
             style={[styles.songDetailActionButton, songDetailActionBtnStyle]}
             onPress={onToggleLike}
           >
@@ -127,6 +129,18 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
               name={liked ? "heart" : "heart-outline"}
               size={songDetailIconSize + 2}
               color={liked ? selectedControlIconColor : "#FFFFFF"}
+            />
+          </SmoothControlButton>
+
+          <SmoothControlButton
+            accessibilityLabel="Share song"
+            style={[styles.songDetailActionButton, songDetailActionBtnStyle]}
+            onPress={() => void shareSong(screenSong)}
+          >
+            <Ionicons
+              name="share-outline"
+              size={songDetailIconSize}
+              color="#FFFFFF"
             />
           </SmoothControlButton>
         </View>

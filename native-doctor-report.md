@@ -7,8 +7,8 @@
 - **Target Path**: `E:\Mavrixfy\Mavrixfy_App`
 - **Architecture Workflow**: `expo-bare-or-prebuilt`
 - **Scanner Version**: `v0.8.0`
-- **Scan Scope**: 312 relevant files (287 code files, 20 native files)
-- **Execution Timing**: file scan 964ms | static analysis 2020ms | rules run: 16
+- **Scan Scope**: 325 relevant files (300 code files, 20 native files)
+- **Execution Timing**: file scan 1099ms | static analysis 2450ms | rules run: 16
 
 ## Summary of Findings
 
@@ -47,7 +47,7 @@
 | **Network & Waterfalls** | **100/100** | Healthy | Sequential independent awaits |
 | **Native Toolchain** | **100/100** | Healthy | Android 14+ FGS, permissions, CocoaPods |
 | **Correctness & Safety** | **100/100** | Healthy | Race conditions, edge-case safety |
-| **Code Quality (DRY)** | **95/100** | Healthy | Dead code, duplicate utilities |
+| **Code Quality (DRY)** | **90/100** | Healthy | Dead code, duplicate utilities |
 | **Architecture & Layers** | **100/100** | Healthy | Single responsibility, layer boundaries |
 | **Build & Store Health** | **100/100** | Healthy | 16 KB pages, targetSdk 34, privacy manifests |
 | **OVERALL MOBILE SCORE** | **100/100** | **EXCELLENT** | Holistic weighted mobile index |
@@ -62,7 +62,7 @@
 | :--- | :---: | :--- |
 | **Registered Routes** | **32** | Monitored ✓ |
 | **Navigation Screens** | **23** | Monitored ✓ |
-| **React Components** | **105** | Monitored ✓ |
+| **React Components** | **104** | Monitored ✓ |
 | **Native Modules & Bridge** | **47** | Monitored ✓ |
 | **API Endpoints** | **5** | Monitored ✓ |
 | **Persistent Storage Keys** | **2** | Monitored ✓ |
@@ -93,9 +93,9 @@
 | **Dead / Unused Code** | **0** | Low | Verify reachability, safely prune unreachable exports |
 | **Unused Dependencies** | **0** | Low | Remove from package.json to trim bundle |
 | **Duplicate Logic / Utilities** | **0** | Medium | Consolidate duplicate helper functions |
-| **Over-Complex Functions** | **1** | Medium | Decompose into smaller focused pure functions |
+| **Over-Complex Functions** | **2** | Medium | Decompose into smaller focused pure functions |
 | **Unnecessary Abstractions** | **0** | Medium | Simplify pass-through wrappers |
-| **Organization / SRP Smells** | **1** | Medium | Separate mixed concerns |
+| **Organization / SRP Smells** | **2** | Medium | Separate mixed concerns |
 
 ---
 
@@ -128,7 +128,24 @@
 
 ## Detailed Findings
 
-### [MEDIUM] RNDOCTOR-ORG-GIANT-FILE — Overly Large Source Module: ArtistDetailScreen.tsx (1197 LOC)
+### [MEDIUM] RNDOCTOR-ORG-GIANT-FILE — Overly Large Source Module: colorExtractor.ts (794 LOC)
+
+- **Category**: `complexity`
+- **Confidence**: `HIGH`
+- **Location**: `src/lib/colorExtractor.ts`
+- **File Classification**: `SAFE_SOURCE`
+
+**What was found:**
+> src/lib/colorExtractor.ts has 794 lines of code.
+
+**Why it matters:**
+> Monolithic source files degrade IDE responsiveness, make code reviews cumbersome, and conceal subtle side-effect dependencies.
+
+**Recommended fix:**
+> Split hooks, helper utilities, and sub-components into dedicated submodules.
+
+
+### [MEDIUM] RNDOCTOR-ORG-GIANT-FILE — Overly Large Source Module: ArtistDetailScreen.tsx (1219 LOC)
 
 - **Category**: `complexity`
 - **Confidence**: `HIGH`
@@ -136,7 +153,7 @@
 - **File Classification**: `SAFE_SOURCE`
 
 **What was found:**
-> src/features/artists/screens/ArtistDetailScreen.tsx has 1197 lines of code.
+> src/features/artists/screens/ArtistDetailScreen.tsx has 1219 lines of code.
 
 **Why it matters:**
 > Monolithic source files degrade IDE responsiveness, make code reviews cumbersome, and conceal subtle side-effect dependencies.

@@ -131,7 +131,7 @@ export function useAudioQualityControl({
             }
           });
         } else if (canUseLightweightAudioFallback) {
-          await ExpoAvPlayer.loadAndPlay(newAudioUrl);
+          await ExpoAvPlayer.loadAndPlay(newAudioUrl, currentSongRef.current);
           if (positionSec > 0) {
             await ExpoAvPlayer.seekTo(positionSec);
           }

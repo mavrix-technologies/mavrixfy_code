@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -19,6 +20,8 @@ import SongRow from "@/components/SongRow";
 import { useAuth } from "@/contexts/AuthContext";
 import OfflineBanner from "@/components/OfflineBanner";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { sharePlaylist } from "@/utils/shareUtils";
+import { useArtworkPalette, colorWithAlpha } from "@/lib/colorExtractor";
 import { usePlaylistDetailData } from "../hooks/usePlaylistDetailData";
 import { usePlaylistDetailParams } from "../hooks/usePlaylistDetailParams";
 import { usePlaylistEditModalState } from "../hooks/usePlaylistEditModalState";
@@ -29,6 +32,12 @@ import { PlaylistTrackListEmpty } from "../components/PlaylistTrackListEmpty";
 import AdMobBanner from "@/components/AdMobBanner";
 
 export function PlaylistDetailScreen() {
+  return usePlaylistDetailView();
+}
+
+export default PlaylistDetailScreen;
+
+function usePlaylistDetailView() {
   const params = usePlaylistDetailParams();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -69,9 +78,23 @@ export function PlaylistDetailScreen() {
     handleDeletePlaylist,
   } = usePlaylistDetailData(params);
 
-  // Sticky header state
-  const [scrollY] = useState(() => new Animated.Value(0));
-  const [isStickyPlayVisible, setIsStickyPlayVisible] = useState(false);
+  const palette = useArtworkPalette(playlistCover);
+  const backgroundColor = palette?.background || Colors.background;
+
+  // Sticky header cross-fade animation
+  const stickyOpacityRef = useRef<Animated.Value | null>(null);
+  if (stickyOpacityRef.current === null) stickyOpacityRef.current = new Animated.Value(0);
+  const stickyOpacity = stickyOpacityRef.current;
+  const [isStickyVisible, setIsStickyVisible] = useState(false);
+
+  const floatingNavOpacity = useMemo(
+    () =>
+      stickyOpacity.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 0],
+      }),
+    [stickyOpacity]
+  );
 
   // Edit modal animation hook
   const {
@@ -102,51 +125,50 @@ export function PlaylistDetailScreen() {
 
   const isPlayingFromThisPlaylist = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
-    return songs.some((s: Song) => s.id === currentSong.id) &&
-      queue.length === songs.length &&
-      queue.every((q, i) => q.id === songs[i]?.id);
-  }, [currentSong, queue, songs]);
-
-  const playlistTitleSize = useMemo(() => {
-    const len = playlistName.trim().length;
-    if (len <= 16) return 34;
-    if (len <= 32) return 28;
-    if (len <= 48) return 23;
-    return 20;
-  }, [playlistName]);
+    return songs.some((s: Song) => s.id === currentSong.id);
+  }, [currentSong, songs]);
 
   const canRemoveSongsFromPlaylist = !params.isJioSaavnSource && (!params.isFirestoreSource || Boolean(user?.id));
   const playlistRowSource = params.isFirestoreSource ? "firestore" : "local";
   const canEdit = !params.isJioSaavnSource && (!params.isFirestoreSource || Boolean(user?.id));
 
-  // Handlers
-  const handleScrollListener = useCallback((e: any) => {
-    const y = e?.nativeEvent?.contentOffset?.y ?? 0;
-    const shouldShow = y > 240;
-    setIsStickyPlayVisible((prev) => (prev === shouldShow ? prev : shouldShow));
-  }, []);
-
-  const handleScroll = useMemo(
-    () =>
-      Animated.event(
-        [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-        {
+  // Scroll listener for sticky cross-fade
+  const isStickyVisibleRef = useRef(false);
+  const handleScroll = useCallback(
+    (e: any) => {
+      const y = e?.nativeEvent?.contentOffset?.y ?? 0;
+      const shouldShow = y > 240;
+      if (isStickyVisibleRef.current !== shouldShow) {
+        isStickyVisibleRef.current = shouldShow;
+        setIsStickyVisible(shouldShow);
+        Animated.timing(stickyOpacity, {
+          toValue: shouldShow ? 1 : 0,
+          duration: 160,
           useNativeDriver: true,
-          listener: handleScrollListener,
-        }
-      ),
-    [scrollY, handleScrollListener]
+        }).start();
+      }
+    },
+    [stickyOpacity]
   );
+
+  const handleShare = useCallback(async () => {
+    await sharePlaylist({
+      id: params.playlistId || "",
+      name: playlistName || "Playlist",
+      coverUrl: playlistCover,
+      songCount: songs.length,
+    });
+  }, [params.playlistId, playlistName, playlistCover, songs.length]);
 
   const handlePlayAll = useCallback(() => {
     if (!songs.length) return;
     if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (isPlayingFromThisPlaylist && isPlaying) {
+    if (isPlayingFromThisPlaylist) {
       togglePlay();
       return;
     }
     playSong(songs[0], songs);
-  }, [songs, isPlayingFromThisPlaylist, isPlaying, togglePlay, playSong]);
+  }, [songs, isPlayingFromThisPlaylist, togglePlay, playSong]);
 
   const handleShufflePlay = useCallback(() => {
     if (!songs.length) return;
@@ -185,13 +207,12 @@ export function PlaylistDetailScreen() {
 
   const stickyPlayState = useMemo(
     () => ({
-      isStickyVisible: isStickyPlayVisible,
       loading,
       hasSongs: songs.length > 0,
       isPlayingFromThisPlaylist,
       isPlaying,
     }),
-    [isStickyPlayVisible, loading, songs.length, isPlayingFromThisPlaylist, isPlaying]
+    [loading, songs.length, isPlayingFromThisPlaylist, isPlaying]
   );
 
   const heroStateFlags = useMemo(
@@ -208,7 +229,7 @@ export function PlaylistDetailScreen() {
 
   if (notFound) {
     return (
-      <View style={[styles.container, { paddingTop: topInset }]}>
+      <View style={[styles.container, { backgroundColor, paddingTop: topInset }]}>
         <Pressable
           onPress={safeGoBack}
           style={styles.backBtnSolo}
@@ -216,7 +237,7 @@ export function PlaylistDetailScreen() {
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
-          <Ionicons name="arrow-back" size={22} color={Colors.text} />
+          <Ionicons name="chevron-back" size={22} color={Colors.text} />
         </Pressable>
         <View style={styles.center}>
           <Ionicons name="musical-notes-outline" size={40} color={Colors.subtext} />
@@ -235,13 +256,12 @@ export function PlaylistDetailScreen() {
         playlistDescription={playlistDescription}
         collectionKind={collectionKind}
         collectionKindLower={collectionKindLower}
-        playlistTitleSize={playlistTitleSize}
         effectiveSongCount={effectiveSongCount}
         totalMinutes={totalMinutes}
-        totalDurationLabel={totalDurationLabel}
         stateFlags={heroStateFlags}
         songs={songs}
         downloadCollectionId={downloadCollectionId}
+        backgroundColor={backgroundColor}
         onOpenEdit={handleOpenEdit}
         onPlayAll={handlePlayAll}
         onShufflePlay={handleShufflePlay}
@@ -255,20 +275,54 @@ export function PlaylistDetailScreen() {
 
       <AdMobBanner loadDelayMs={800} />
 
-      <View style={styles.section}>
+      <View style={styles.sectionHeaderRow}>
         <Text style={styles.sectionTitle}>Tracks</Text>
+        <Text style={styles.sectionSubtitle}>
+          {effectiveSongCount} {effectiveSongCount === 1 ? "track" : "tracks"}
+          {totalDurationLabel ? ` • ${totalDurationLabel}` : totalMinutes > 0 ? ` • ${totalMinutes} min` : ""}
+        </Text>
       </View>
     </>
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor }]}>
+      {/* Top Floating Navigation Bar */}
+      <Animated.View
+        style={[
+          styles.floatingNavContainer,
+          { top: topInset + 6, opacity: floatingNavOpacity },
+        ]}
+        pointerEvents={isStickyVisible ? "none" : "box-none"}
+      >
+        <Pressable onPress={safeGoBack} style={styles.iosCircularNavBtn}>
+          <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
+        </Pressable>
+
+        {canEdit ? (
+          <View style={styles.iosCapsuleNavGroup}>
+            <Pressable onPress={handleOpenEdit} style={styles.iosCapsuleBtn}>
+              <Ionicons name="pencil" size={16} color="#FFFFFF" />
+            </Pressable>
+            <View style={styles.iosCapsuleDivider} />
+            <Pressable onPress={handleShare} style={styles.iosCapsuleBtn}>
+              <Ionicons name="share-outline" size={17} color="#FFFFFF" />
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable onPress={handleShare} style={styles.iosCircularNavBtn}>
+            <Ionicons name="share-outline" size={17} color="#FFFFFF" />
+          </Pressable>
+        )}
+      </Animated.View>
+
       <PlaylistStickyHeader
         topInset={topInset}
-        scrollY={scrollY}
+        stickyOpacity={stickyOpacity}
         playlistName={playlistName}
-        isPlayVisible={isStickyPlayVisible}
+        isStickyVisible={isStickyVisible}
         playState={stickyPlayState}
+        backgroundColor={backgroundColor}
         onPlayAll={handlePlayAll}
       />
 
@@ -286,7 +340,7 @@ export function PlaylistDetailScreen() {
         }
         contentContainerStyle={contentContainerStyle}
         onScroll={handleScroll}
-        scrollEventThrottle={16}
+        scrollEventThrottle={32}
         removeClippedSubviews={Platform.OS === "android"}
         initialNumToRender={12}
         maxToRenderPerBatch={10}
@@ -319,28 +373,75 @@ export function PlaylistDetailScreen() {
   );
 }
 
-export default PlaylistDetailScreen;
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
+  container: { flex: 1, backgroundColor: "#080B0F" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   backBtnSolo: { width: 36, height: 36, marginLeft: 12, alignItems: "center", justifyContent: "center" },
   emptyText: { color: Colors.subtext, fontSize: 14, fontFamily: "Inter_500Medium", textAlign: "center" },
+
+  floatingNavContainer: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    zIndex: 90,
+  },
+  iosCircularNavBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(0, 0, 0, 0.32)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255, 255, 255, 0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iosCapsuleNavGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(0, 0, 0, 0.32)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255, 255, 255, 0.18)",
+    paddingHorizontal: 2,
+  },
+  iosCapsuleBtn: {
+    width: 36,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iosCapsuleDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
+  },
 
   offlineBannerWrap: {
     paddingHorizontal: 16,
     paddingTop: 8,
   },
 
-  section: {
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
     paddingTop: 16,
+    marginBottom: 8,
   },
   sectionTitle: {
-    color: Colors.text,
+    color: "#FFFFFF",
     fontSize: 20,
     fontFamily: "Inter_700Bold",
     letterSpacing: -0.2,
-    paddingHorizontal: 16,
-    marginBottom: 8,
+  },
+  sectionSubtitle: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
   },
 });

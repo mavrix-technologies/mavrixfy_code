@@ -4,6 +4,7 @@
  */
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import type { AudioPlayer, AudioSample } from "expo-audio";
+import type { Song } from "@/lib/musicData";
 import { publishPlaybackAudioSample, resetPlaybackAudioLevels } from "./PlaybackAudioLevels";
 
 // ─── singletons ───────────────────────────────────────────────────────────────
@@ -60,6 +61,8 @@ function clearListeners(): void {
  */
 function killPlayer(p: AudioPlayer | null): void {
   if (!p) return;
+  try { (p as any).clearLockScreenControls?.(); } catch {}
+  try { (p as any).setActiveForLockScreen?.(false); } catch {}
   const subscriptions = playerSubscriptions.get(p);
   try { subscriptions?.status?.remove?.(); } catch {}
   try { subscriptions?.sample?.remove?.(); } catch {}
@@ -122,7 +125,7 @@ function attachListener(p: AudioPlayer, gen: number): void {
 
 // ─── public API ───────────────────────────────────────────────────────────────
 
-export async function loadAndPlay(url: string): Promise<void> {
+export async function loadAndPlay(url: string, song?: Partial<Song> | null): Promise<void> {
   if (!url) {
     errorCb?.("No audio URL provided");
     return;
@@ -161,6 +164,27 @@ export async function loadAndPlay(url: string): Promise<void> {
       // 7. Register as the active player, wire events, start playback.
       activePlayer = p;
       attachListener(p, myGen);
+
+      if (typeof (p as any).setActiveForLockScreen === "function") {
+        try {
+          (p as any).setActiveForLockScreen(
+            true,
+            {
+              title: song?.title || "Unknown",
+              artist: song?.artist || "Mavrixfy",
+              albumTitle: song?.album || undefined,
+              artworkUrl: song?.coverUrl || undefined,
+            },
+            {
+              showSeekBackward: true,
+              showSeekForward: true,
+            }
+          );
+        } catch {
+          // non-fatal
+        }
+      }
+
       p.play();
     }
   } catch (err: any) {

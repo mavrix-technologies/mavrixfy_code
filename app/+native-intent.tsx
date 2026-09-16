@@ -26,6 +26,39 @@ function normalizeAssistantPath(path: string): string | null {
   if (route === "downloaded-songs") return "/downloaded-songs";
   if (route === "player") return "/player";
   if (route === "queue") return "/queue";
+  if (route === "artists") return "/artists";
+
+  // Playlist route: playlist/:id or playlist?id=...
+  if (route.startsWith("playlist/")) {
+    const id = parsed.route.slice("playlist/".length);
+    if (id) return `/playlist/${id}`;
+  }
+  if (route === "playlist") {
+    const id = parsed.searchParams.get("id");
+    if (id) return `/playlist/${id}`;
+  }
+
+  // Artist route: artist/:id or artist?id=...
+  if (route.startsWith("artist/")) {
+    const id = parsed.route.slice("artist/".length);
+    if (id) return `/artist/${id}`;
+  }
+  if (route === "artist") {
+    const id = parsed.searchParams.get("id");
+    if (id) return `/artist/${id}`;
+  }
+
+  // Artist Mix route: artist-mix?ids=...&names=...
+  if (route === "artist-mix" || route === "artistmix") {
+    const searchString = parsed.searchParams.toString();
+    return `/artist-mix${searchString ? `?${searchString}` : ""}`;
+  }
+
+  // Song / Track route: track/:id or song/:id
+  if (route.startsWith("track/") || route.startsWith("song/")) {
+    const id = parsed.route.split("/")[1];
+    if (id) return `/(tabs)/search?q=${encodeURIComponent(id)}`;
+  }
 
   if (route.startsWith("feature/")) {
     return normalizeFeatureRoute(route.slice("feature/".length));

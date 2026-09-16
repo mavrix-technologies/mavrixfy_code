@@ -35,6 +35,18 @@ export async function trackPlayerService(): Promise<void> {
         TrackPlayer.seekTo(event.position).catch(() => {});
       }
     });
+    TrackPlayer.addEventListener(Event.RemoteJumpForward, async (event: { interval?: number }) => {
+      try {
+        const pos = await TrackPlayer.getPosition();
+        await TrackPlayer.seekTo(pos + (event?.interval || 15));
+      } catch {}
+    });
+    TrackPlayer.addEventListener(Event.RemoteJumpBackward, async (event: { interval?: number }) => {
+      try {
+        const pos = await TrackPlayer.getPosition();
+        await TrackPlayer.seekTo(Math.max(0, pos - (event?.interval || 15)));
+      } catch {}
+    });
     TrackPlayer.addEventListener(
       Event.RemoteDuck,
       async (event: { paused?: boolean; permanent?: boolean; ducking?: boolean }) => {
@@ -136,6 +148,8 @@ async function setupPlayerInternal(): Promise<void> {
         Capability.SkipToNext,
         Capability.SkipToPrevious,
         Capability.SeekTo,
+        Capability.JumpForward,
+        Capability.JumpBackward,
         Capability.Stop,
       ],
       notificationCapabilities: [
@@ -144,12 +158,16 @@ async function setupPlayerInternal(): Promise<void> {
         Capability.SkipToNext,
         Capability.SkipToPrevious,
         Capability.SeekTo,
+        Capability.JumpForward,
+        Capability.JumpBackward,
       ],
       compactCapabilities: [
         Capability.Play,
         Capability.Pause,
         Capability.SkipToNext,
       ],
+      forwardJumpInterval: 15,
+      backwardJumpInterval: 15,
       progressUpdateEventInterval: 1,
     });
     logger.info("[TrackPlayerAdapter] TrackPlayer.updateOptions configured successfully!");

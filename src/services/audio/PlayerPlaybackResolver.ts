@@ -104,7 +104,11 @@ export function cleanHtmlEntities(str: string): string {
 
 export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?: Map<string, string>): any {
   const audioUrl = localUrl || cachedUrlMap?.get(song.id) || resolveAudioUrl(song as SongPlaybackSource);
-  const rawDuration = song.duration ?? (song as any)?.duration_ms ?? (song as any)?.durationSeconds;
+  const rawDuration =
+    song.duration ??
+    (song as any)?.duration_ms ??
+    (song as any)?.durationSeconds ??
+    (song as any)?.duration_sec;
   const duration = toDurationSeconds(rawDuration);
   const title = cleanHtmlEntities(readNonEmptyString(song.title) || "Unknown");
   const artist = cleanHtmlEntities(readNonEmptyString(song.artist) || "Mavrixfy");

@@ -1,18 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
-  Platform,
 } from "react-native";
-import { Image } from "expo-image";
 import { useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
 import { convertJioSaavnSong, Song } from "@/lib/musicData";
 import { getArtistDetails } from "@/data/providers/ArtistProvider";
@@ -20,12 +18,12 @@ import { usePlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { triggerImpact } from "@/lib/haptics";
 import SongRow from "@/components/SongRow";
-import SongRowSkeleton from "@/components/SongRowSkeleton";
 import { setLastMix } from "@/lib/lastMix";
 import { mapFilter } from "@/lib/arrayUtils";
 import { pickFirst } from "@/utils/stringUtils";
-
-
+import { shareArtistMix } from "@/utils/shareUtils";
+import { ArtistMixGettingReady } from "../components/ArtistMixGettingReady";
+import { ArtistMixHero } from "../components/ArtistMixHero";
 
 // Interleave songs from multiple artists in round-robin order
 function interleave(allSongs: Song[], artistCount: number): Song[] {
@@ -40,7 +38,10 @@ function interleave(allSongs: Song[], artistCount: number): Song[] {
   while (hasMore) {
     hasMore = false;
     for (const bucket of buckets) {
-      if (i < bucket.length) { result.push(bucket[i]); hasMore = true; }
+      if (i < bucket.length) {
+        result.push(bucket[i]);
+        hasMore = true;
+      }
     }
     i++;
   }
@@ -63,28 +64,32 @@ export function ArtistMixScreen() {
   const names = useMemo(() => pickFirst(params.names).split(",").filter(Boolean), [params.names]);
   const images = useMemo(() => pickFirst(params.images).split(",").filter(Boolean), [params.images]);
 
-  const { currentSong, queue } = usePlaybackNowPlaying();
+  const { currentSong } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
   const { playSong, shufflePlay, togglePlay } = usePlayerActions();
 
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadedCount, setLoadedCount] = useState(0);
+
   const mixIds = useMemo(() => ids.join(","), [ids]);
   const mixNames = useMemo(() => names.join(","), [names]);
   const mixImages = useMemo(() => images.join(","), [images]);
+
   const startMixLoad = useCallback(() => {
     setLoading(true);
     setLoadedCount(0);
   }, []);
+
   const incrementLoadedCount = useCallback(() => {
     setLoadedCount((count) => count + 1);
   }, []);
+
   const finishMixLoad = useCallback((nextSongs: Song[]) => {
     setLoading(false);
-    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
     setSongs(nextSongs);
   }, []);
+
   const finishEmptyMixLoad = useCallback(() => {
     setLoading(false);
   }, []);
@@ -100,9 +105,12 @@ export function ArtistMixScreen() {
     });
   }, [mixIds, mixNames, mixImages, songs]);
 
-  // Fetch and filter songs - only include songs where the artist ID matches the selected artist
+  // Fetch and filter songs
   useEffect(() => {
-    if (ids.length === 0) { finishEmptyMixLoad(); return; }
+    if (ids.length === 0) {
+      finishEmptyMixLoad();
+      return;
+    }
     let cancelled = false;
 
     const fetchAll = async () => {
@@ -120,45 +128,43 @@ export function ArtistMixScreen() {
         if (r.status !== "fulfilled" || !r.value) return;
         const artist = r.value;
         const selectedId = ids[idx];
-        
-        // Only include songs where the primary artist ID matches the selected artist ID
-        const artistSongs = mapFilter((artist.topSongs ?? []), convertJioSaavnSong, (s) => {
-            // Only include if:
-            // 1. Song has audio URL
-            // 2. Song hasn't been added yet
-            // 3. Song's primary artist ID matches this selected artist (or is undefined, show all)
-            const songArtistId = (s as Song & { artistId?: string }).artistId;
-            return s.audioUrl?.trim() && !seen.has(s.id) && (!songArtistId || songArtistId === selectedId);
-          });
-        
-        artistSongs.forEach((s) => { seen.add(s.id); merged.push(s); });
+
+        const artistSongs = mapFilter(artist.topSongs ?? [], convertJioSaavnSong, (s) => {
+          const songArtistId = (s as Song & { artistId?: string }).artistId;
+          return !!s.audioUrl?.trim() && !seen.has(s.id) && (!songArtistId || songArtistId === selectedId);
+        });
+
+        artistSongs.forEach((s) => {
+          seen.add(s.id);
+          merged.push(s);
+        });
         if (!cancelled) incrementLoadedCount();
       });
 
       if (!cancelled) {
-        // Don't interleave for single artist - just show their songs directly
         const finalSongs = ids.length === 1 ? merged : interleave(merged, ids.length);
         finishMixLoad(finalSongs);
       }
     };
 
     void fetchAll();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [finishEmptyMixLoad, finishMixLoad, ids, incrementLoadedCount, startMixLoad]);
 
   const isPlayingFromMix = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
-    return (
-      songs.some((s) => s.id === currentSong.id) &&
-      queue.length === songs.length &&
-      queue.every((queuedSong, index) => queuedSong.id === songs[index]?.id)
-    );
-  }, [currentSong, queue, songs]);
+    return songs.some((s) => s.id === currentSong.id);
+  }, [currentSong, songs]);
 
   const handlePlayAll = useCallback(() => {
     if (!songs.length) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-    if (isPlayingFromMix) { togglePlay(); return; }
+    if (isPlayingFromMix) {
+      togglePlay();
+      return;
+    }
     playSong(songs[0], songs);
   }, [songs, isPlayingFromMix, togglePlay, playSong]);
 
@@ -169,8 +175,19 @@ export function ArtistMixScreen() {
   }, [songs, shufflePlay]);
 
   const title = names.length > 0
-    ? names.length === 1 ? names[0] : `${names.slice(0, 2).join(" & ")}${names.length > 2 ? ` +${names.length - 2}` : ""}`
+    ? names.length === 1
+      ? `${names[0]} Mix`
+      : `${names.slice(0, 2).join(" & ")}${names.length > 2 ? ` +${names.length - 2}` : ""} Mix`
     : "Artist Mix";
+
+  const totalDurationMin = useMemo(() => {
+    const totalSec = songs.reduce((acc, s) => acc + (s.duration || 0), 0);
+    const hrs = Math.floor(totalSec / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+    if (hrs > 0) return `${hrs} hr ${mins} min`;
+    return `${mins} min`;
+  }, [songs]);
+
   const songsQueueKey = useMemo(() => songs.map((song) => song.id).join("|"), [songs]);
 
   const renderSong = useCallback(
@@ -181,101 +198,92 @@ export function ArtistMixScreen() {
   );
 
   const listContentStyle = useMemo(
-    () => ({ paddingBottom: bottomPad }),
+    () => ({ paddingBottom: bottomPad, paddingHorizontal: 16 }),
     [bottomPad]
   );
 
+  const loadingArtists = useMemo(() => {
+    return ids.slice(0, 3).map((id, index) => ({
+      id,
+      image: images[index] || "",
+      isStacked: index > 0,
+    }));
+  }, [ids, images]);
+
+  const handleShare = useCallback(async () => {
+    await shareArtistMix(names, ids, images);
+  }, [names, ids, images]);
+
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
-      {/* Header */}
+      {/* Top Navigation Bar */}
       <View style={styles.header}>
-        <Pressable onPress={safeGoBack} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-down" size={26} color="#fff" />
+        <Pressable
+          onPress={safeGoBack}
+          hitSlop={12}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
         </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-        <View style={{ width: 40 }} />
+        <Pressable
+          onPress={handleShare}
+          hitSlop={12}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Share artist mix"
+        >
+          <Ionicons name="share-outline" size={20} color="#FFFFFF" />
+        </Pressable>
       </View>
 
-      <FlatList
-        data={loading ? [] : songs}
-        keyExtractor={(song) => song.id}
-        renderItem={renderSong}
-        contentContainerStyle={listContentStyle}
-        showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <>
-            {/* Artist avatars row */}
-            <View style={styles.avatarRow}>
-              {ids.map((id, i) => (
-                <View key={id} style={[styles.avatarWrap, i > 0 && { marginLeft: -24 }]}>
-                  <Image
-                    recyclingKey={id}
-                    source={{ uri: images[i] || undefined }}
-                    style={styles.avatar}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                  />
-                </View>
-              ))}
-            </View>
-
-            {/* Artist names row - show all selected artists */}
-            {ids.length > 1 && (
-              <View style={styles.artistNamesContainer}>
-                {names.map((name) => (
-                  <View key={name} style={styles.artistNameBadge}>
-                    <Text style={styles.artistNameText} numberOfLines={1}>{name}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {/* Mix title + meta */}
-            <Text style={styles.mixTitle}>{title}</Text>
-            <Text style={styles.mixMeta}>
-              {loading
-                ? `Loading songs… (${loadedCount}/${ids.length} artists)`
-                : `${songs.length} songs · ${ids.length} artist${ids.length > 1 ? "s" : ""}`}
-            </Text>
-
-            {/* Action buttons */}
-            {!loading && songs.length > 0 ? (
-              <View style={styles.actions}>
-                <Pressable style={styles.shuffleBtn} onPress={handleShuffle}>
-                  <Ionicons name="shuffle" size={17} color={Colors.text} />
-                  <Text style={styles.shuffleBtnText}>Shuffle</Text>
-                </Pressable>
-                <Pressable style={styles.playBtn} onPress={handlePlayAll}>
-                  <Ionicons
-                    name={isPlayingFromMix && isPlaying ? "pause" : "play"}
-                    size={18}
-                    color="#000"
-                  />
-                  <Text style={styles.playBtnText}>
-                    {isPlayingFromMix && isPlaying ? "Pause" : "Play All"}
-                  </Text>
-                </Pressable>
-              </View>
-            ) : null}
-          </>
-        }
-        ListEmptyComponent={
-          loading ? (
-            <SongRowSkeleton count={10} />
-          ) : (
+      {loading ? (
+        <ArtistMixGettingReady
+          loadingArtists={loadingArtists}
+          loadedCount={loadedCount}
+          totalCount={ids.length}
+          names={names}
+        />
+      ) : (
+        <FlatList
+          data={songs}
+          keyExtractor={(song) => `mix-song-${song.id}`}
+          renderItem={renderSong}
+          contentContainerStyle={listContentStyle}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <ArtistMixHero
+              ids={ids}
+              names={names}
+              images={images}
+              title={title}
+              songsCount={songs.length}
+              totalDurationMin={totalDurationMin}
+              isPlayingFromMix={isPlayingFromMix}
+              isPlaying={isPlaying}
+              onShuffle={handleShuffle}
+              onPlayAll={handlePlayAll}
+            />
+          }
+          ListEmptyComponent={
             <View style={styles.empty}>
-              <Ionicons name="musical-notes-outline" size={40} color={Colors.subtext} />
-              <Text style={styles.emptyText}>No songs found for these artists.</Text>
+              <Ionicons name="musical-notes-outline" size={44} color="rgba(255,255,255,0.2)" />
+              <Text style={styles.emptyText}>No songs available for these artists</Text>
             </View>
-          )
-        }
-      />
+          }
+        />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#000" },
+  container: {
+    flex: 1,
+    backgroundColor: "#0D0E11",
+  },
 
   header: {
     height: 52,
@@ -285,131 +293,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   backBtn: {
-    width: 40,
-    height: 40,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  backBtnPressed: {
+    opacity: 0.7,
   },
   headerTitle: {
     flex: 1,
-    color: "#fff",
+    color: "#FFFFFF",
     fontSize: 16,
     fontFamily: "Inter_700Bold",
     textAlign: "center",
+    paddingHorizontal: 8,
   },
 
-  // Artist avatars
-  avatarRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  avatarWrap: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    borderWidth: 3,
-    borderColor: "#000",
-    overflow: "hidden",
-    backgroundColor: "#1a1a1a",
-    boxShadow: "none",
-  },
-  avatar: { width: "100%", height: "100%" },
-
-  // Artist names container
-  artistNamesContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: 6,
-    paddingHorizontal: 16,
-    marginBottom: 14,
-  },
-  artistNameBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-  },
-  artistNameText: {
-    color: "#fff",
-    fontSize: 12,
-    fontFamily: "Inter_600SemiBold",
-  },
-
-  // Mix info
-  mixTitle: {
-    color: "#fff",
-    fontSize: 28,
-    fontFamily: "Inter_800ExtraBold",
-    textAlign: "center",
-    paddingHorizontal: 16,
-    letterSpacing: -0.5,
-    marginBottom: 2,
-  },
-  mixMeta: {
-    color: "rgba(255,255,255,0.45)",
-    fontSize: 14,
-    fontFamily: "Inter_500Medium",
-    textAlign: "center",
-    marginTop: 4,
-    marginBottom: 24,
-    letterSpacing: 0.2,
-  },
-
-  // Actions
-  actions: {
-    flexDirection: "row",
-    gap: 10,
-    paddingHorizontal: 20,
-    marginBottom: 16,
-  },
-  shuffleBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 20,
-    paddingVertical: 11,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-    backgroundColor: "rgba(255,255,255,0.05)",
-  },
-  shuffleBtnText: {
-    color: Colors.text,
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
-  },
-  playBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 11,
-    borderRadius: 999,
-    backgroundColor: Colors.primary,
-  },
-  playBtnText: {
-    color: "#000",
-    fontSize: 14,
-    fontFamily: "Inter_700Bold",
-  },
-
-  // Empty
   empty: {
     alignItems: "center",
-    paddingTop: 48,
+    paddingTop: 60,
     gap: 12,
   },
   emptyText: {
-    color: Colors.subtext,
+    color: "rgba(255, 255, 255, 0.4)",
     fontSize: 14,
-    fontFamily: "Inter_500Medium",
+    fontFamily: "Inter_400Regular",
     textAlign: "center",
   },
 });

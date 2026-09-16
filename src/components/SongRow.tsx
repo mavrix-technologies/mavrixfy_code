@@ -323,6 +323,7 @@ const SongRow = memo(function SongRow({
           }}
           style={({ pressed }) => [
             styles.container,
+            isActive && styles.activeContainer,
             horizontalPadding !== undefined && { paddingHorizontal: horizontalPadding },
             pressed && styles.pressed,
           ]}
@@ -332,27 +333,34 @@ const SongRow = memo(function SongRow({
           accessibilityLabel={`${song.title} by ${song.artist}`}
         >
           {showCover && rowCoverUrl && (
-            <Image
-              recyclingKey={`${song.id}:${rowCoverUrl}`}
-              source={{ uri: rowCoverUrl }}
-              style={styles.cover}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              priority="normal"
-              placeholder={{ blurhash: "L5H2EC=PM+yV+^$gM_e-4Wo0WB%M" }}
-              transition={0}
-            />
+            <View style={styles.coverWrapper}>
+              <Image
+                recyclingKey={`${song.id}:${rowCoverUrl}`}
+                source={{ uri: rowCoverUrl }}
+                style={styles.cover}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                priority="normal"
+                placeholder={{ blurhash: "L5H2EC=PM+yV+^$gM_e-4Wo0WB%M" }}
+                transition={0}
+              />
+              {isActive && (
+                <View style={styles.coverActiveOverlay}>
+                  <EqualizerBars color="#FFFFFF" size={2.5} gap={2} isPlaying={isPlaying} />
+                </View>
+              )}
+            </View>
           )}
 
           <View style={styles.info}>
             <View style={styles.titleRow}>
-              {isActive && (
+              {isActive && (!showCover || !rowCoverUrl) && (
                 <View style={styles.equalizerInline}>
-                  <EqualizerBars isPlaying={isPlaying} size={3} gap={2} />
+                  <EqualizerBars color="#FFFFFF" size={2.5} gap={2} isPlaying={isPlaying} />
                 </View>
               )}
               <Text
-                style={[styles.title, isActive && styles.activeText]}
+                style={[styles.title, isActive && styles.activeTitle]}
                 numberOfLines={1}
               >
                 {song.title || "Unknown Title"}
@@ -502,11 +510,27 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 1,
   },
+  activeContainer: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+  },
+  coverWrapper: {
+    position: "relative",
+    width: 48,
+    height: 48,
+    borderRadius: 6,
+    overflow: "hidden",
+    marginRight: 14,
+  },
   cover: {
     width: 48,
     height: 48,
-    borderRadius: 4,
-    marginRight: 14,
+    borderRadius: 6,
+  },
+  coverActiveOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.48)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   info: {
     flex: 1,
@@ -514,12 +538,13 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   title: {
-    color: Colors.text,
+    color: "#FFFFFF",
     fontSize: 15,
     fontFamily: "Inter_500Medium",
   },
-  activeText: {
-    color: Colors.primary,
+  activeTitle: {
+    color: "#FFFFFF",
+    fontFamily: "Inter_700Bold",
   },
   artist: {
     color: Colors.subtext,

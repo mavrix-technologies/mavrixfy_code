@@ -13,9 +13,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, {
   useSharedValue,
   useAnimatedScrollHandler,
-  SlideInRight,
-  SlideInLeft,
-  Easing,
 } from "react-native-reanimated";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -79,17 +76,13 @@ export function HomeScreen() {
   } = useHomeFeedData();
 
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
-  const [slideDirection, setSlideDirection] = useState<"right" | "left">("right");
   const prevCategoryRef = useRef<string>("All");
 
   const handleSelectCategory = useCallback((category: string) => {
     if (category === prevCategoryRef.current) return;
-    const prevIdx = MAVRIXFY_MUSIC_CATEGORIES.findIndex((c) => c.id === prevCategoryRef.current);
-    const newIdx = MAVRIXFY_MUSIC_CATEGORIES.findIndex((c) => c.id === category);
-    setSlideDirection(newIdx >= prevIdx ? "right" : "left");
     prevCategoryRef.current = category;
     setSelectedCategory(category);
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
   }, []);
 
   const displayedQuickPicks = useMemo(() => {
@@ -162,18 +155,7 @@ export function HomeScreen() {
 
       if (!content) return null;
 
-      return (
-        <Animated.View
-          key={`${selectedCategory}-${item.id}`}
-          entering={
-            slideDirection === "right"
-              ? SlideInRight.duration(360).easing(Easing.bezier(0.25, 0.1, 0.25, 1))
-              : SlideInLeft.duration(360).easing(Easing.bezier(0.25, 0.1, 0.25, 1))
-          }
-        >
-          {content}
-        </Animated.View>
-      );
+      return <View key={item.id}>{content}</View>;
     },
     [
       currentSong,
@@ -184,8 +166,6 @@ export function HomeScreen() {
       playSong,
       publicPlaylists,
       recentlyPlayed,
-      selectedCategory,
-      slideDirection,
     ]
   );
 

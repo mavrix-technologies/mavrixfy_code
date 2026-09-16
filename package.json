@@ -26,7 +26,13 @@
     "postinstall": "patch-package"
   },
   "dependencies": {
+    "@expo-google-fonts/anton": "^0.4.2",
+    "@expo-google-fonts/bebas-neue": "^0.4.1",
+    "@expo-google-fonts/cinzel": "^0.4.2",
+    "@expo-google-fonts/cinzel-decorative": "^0.4.1",
     "@expo-google-fonts/inter": "^0.4.2",
+    "@expo-google-fonts/playfair-display": "^0.4.2",
+    "@expo-google-fonts/syne": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
     "@gorhom/bottom-sheet": "^5.2.14",
     "@react-native-async-storage/async-storage": "2.2.0",

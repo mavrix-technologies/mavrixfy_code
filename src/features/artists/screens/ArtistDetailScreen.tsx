@@ -24,12 +24,15 @@ import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/Pl
 import {
   getArtistDetails,
   getArtistSongs,
+  getImmediateCachedArtist,
   JioSaavnArtist,
   type JioSaavnArtistAlbum,
   type JioSaavnSimilarArtist,
   prefetchArtist,
 } from "@/data/providers/ArtistProvider";
 import { isFollowingArtist, toggleFollowArtist, type FollowedArtist } from "@/lib/followedArtists";
+import { showGlobalToast } from "@/utils/globalToast";
+import { shareArtist } from "@/utils/shareUtils";
 import { useArtworkPalette, colorWithAlpha } from "@/lib/colorExtractor";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
@@ -61,8 +64,8 @@ function useArtistScreenView() {
   const topInset = Platform.OS === "web" ? 20 : insets.top;
   const bottomPad = Math.max(140, insets.bottom + 120);
 
-  const [artist, setArtist] = useState<JioSaavnArtist | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [artist, setArtist] = useState<JioSaavnArtist | null>(() => getImmediateCachedArtist(artistId));
+  const [loading, setLoading] = useState<boolean>(() => !getImmediateCachedArtist(artistId));
   const [error, setError] = useState("");
   const [following, setFollowing] = useState(false);
   const [extraSongs, setExtraSongs] = useState<Song[]>([]);
@@ -87,6 +90,15 @@ function useArtistScreenView() {
   if (stickyOpacityRef.current === null) stickyOpacityRef.current = new Animated.Value(0);
   const stickyOpacity = stickyOpacityRef.current;
   const [isStickyVisible, setIsStickyVisible] = useState(false);
+
+  const floatingNavOpacity = useMemo(
+    () =>
+      stickyOpacity.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 0],
+      }),
+    [stickyOpacity]
+  );
 
   const topAlbums = artist?.topAlbums ?? [];
   const visibleSimilarArtists = useMemo(
@@ -144,15 +156,11 @@ function useArtistScreenView() {
   }, [topAlbums, songs, coverUrl]);
 
   // Is current queue playing from this artist?
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- currentSong, queue, and songs are tracked
+  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- currentSong and songs are tracked
   const isPlayingFromThisArtist = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
-    return (
-      songs.some((s) => s.id === currentSong.id) &&
-      queue.length === songs.length &&
-      queue.every((queuedSong, index) => queuedSong.id === songs[index]?.id)
-    );
-  }, [currentSong, queue, songs]);
+    return songs.some((s) => s.id === currentSong.id);
+  }, [currentSong, songs]);
 
   const markArtistNotFound = useCallback(() => {
     queueMicrotask(() => {
@@ -161,9 +169,11 @@ function useArtistScreenView() {
     });
   }, []);
 
-  const resetArtistLoadState = useCallback(() => {
+  const resetArtistLoadState = useCallback((isCached: boolean) => {
     queueMicrotask(() => {
-      setLoading(true);
+      if (!isCached) {
+        setLoading(true);
+      }
       setError("");
       setExtraSongs([]);
       nextPageRef.current = 2;
@@ -210,7 +220,12 @@ function useArtistScreenView() {
     }
 
     let cancelled = false;
-    resetArtistLoadState();
+    const initialCached = getImmediateCachedArtist(artistId);
+    if (initialCached) {
+      setArtist(initialCached);
+      setLoading(false);
+    }
+    resetArtistLoadState(Boolean(initialCached));
 
     void isFollowingArtist(artistId).then((v) => {
       // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
@@ -256,13 +271,13 @@ function useArtistScreenView() {
       Animated.spring(playScale, { toValue: 1, speed: 20, bounciness: 12, useNativeDriver: true }),
     ]).start();
 
-    if (isPlayingFromThisArtist && isPlaying) {
+    if (isPlayingFromThisArtist) {
       togglePlay();
       return;
     }
     playSong(songs[0], songs);
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps listed
-  }, [songs, isPlayingFromThisArtist, isPlaying, togglePlay, playSong, playScale]);
+  }, [songs, isPlayingFromThisArtist, togglePlay, playSong, playScale]);
 
   const handleFollow = useCallback(async () => {
     Animated.sequence([
@@ -282,15 +297,12 @@ function useArtistScreenView() {
   }, [artistId, displayName, coverUrl, followScale]);
 
   const handleShare = useCallback(async () => {
-    try {
-      await Share.share({
-        message: `Listen to ${displayName} on Mavrixfy Music!`,
-        title: displayName,
-      });
-    } catch {
-      // ignore
-    }
-  }, [displayName]);
+    await shareArtist({
+      id: artistId || "",
+      name: displayName || "Artist",
+      coverUrl,
+    });
+  }, [artistId, displayName, coverUrl]);
 
   const handleShuffle = useCallback(() => {
     if (!songs.length) return;
@@ -533,28 +545,20 @@ function useArtistScreenView() {
               {/* Gradient Vignette overlay for seamless Apple Music background transition */}
               <LinearGradient
                 colors={[
-                  "rgba(0,0,0,0.35)",
+                  "rgba(0,0,0,0.28)",
                   "transparent",
                   "transparent",
-                  colorWithAlpha(backgroundColor, 0.45),
-                  colorWithAlpha(backgroundColor, 0.9),
+                  colorWithAlpha(backgroundColor, 0.38),
+                  colorWithAlpha(backgroundColor, 0.88),
                   backgroundColor,
                 ]}
-                locations={[0, 0.2, 0.48, 0.75, 0.92, 1]}
+                locations={[0, 0.25, 0.56, 0.8, 0.93, 1]}
                 style={StyleSheet.absoluteFill}
               />
 
-              {/* Artist Name & Capsule Badge */}
+              {/* Artist Name */}
               <View style={styles.heroInfoSection}>
-                {/*  Upcoming Concerts / Artist Capsule Badge */}
-                <View style={styles.artistCapsuleBadge}>
-                  <Ionicons name="musical-notes" size={11} color="rgba(255,255,255,0.75)" />
-                  <Text style={styles.artistCapsuleText}>
-                    {artist?.isVerified ? "VERIFIED ARTIST" : "UPCOMING CONCERTS"}
-                  </Text>
-                </View>
-
-                {/* Massive Bold Artist Typography */}
+                {/* Massive Bold Bulky Artist Typography */}
                 <Text style={styles.appleMusicArtistName} numberOfLines={2}>
                   {displayName}
                 </Text>
@@ -568,7 +572,7 @@ function useArtistScreenView() {
                       onPress={handleShuffle}
                       disabled={!songs.length}
                     >
-                      <Ionicons name="shuffle" size={22} color="#FFFFFF" />
+                      <Ionicons name="shuffle" size={19} color="#FFFFFF" />
                     </Pressable>
                   </Animated.View>
 
@@ -581,9 +585,9 @@ function useArtistScreenView() {
                     >
                       <Ionicons
                         name={isPlayingFromThisArtist && isPlaying ? "pause" : "play"}
-                        size={28}
+                        size={24}
                         color="#000000"
-                        style={!isPlayingFromThisArtist || !isPlaying ? { marginLeft: 3 } : undefined}
+                        style={!isPlayingFromThisArtist || !isPlaying ? { marginLeft: 2 } : undefined}
                       />
                     </Pressable>
                   </Animated.View>
@@ -599,7 +603,7 @@ function useArtistScreenView() {
                     >
                       <Ionicons
                         name={following ? "heart" : "heart-outline"}
-                        size={21}
+                        size={19}
                         color={following ? "#FFFFFF" : "#FFFFFF"}
                       />
                     </Pressable>
@@ -710,9 +714,15 @@ function useArtistScreenView() {
       />
 
       {/* ── Top Floating Navigation Buttons (Native iOS Style) ── */}
-      <View
-        pointerEvents="box-none"
-        style={[styles.floatingNavContainer, { top: topInset + 6 }]}
+      <Animated.View
+        pointerEvents={isStickyVisible ? "none" : "box-none"}
+        style={[
+          styles.floatingNavContainer,
+          {
+            top: topInset + 6,
+            opacity: floatingNavOpacity,
+          },
+        ]}
       >
         {/* Left: Native iOS Circular Back Button */}
         <Pressable onPress={safeGoBack} style={styles.iosCircularNavBtn}>
@@ -729,7 +739,7 @@ function useArtistScreenView() {
             <Ionicons name="ellipsis-horizontal" size={19} color="#FFFFFF" />
           </Pressable>
         </View>
-      </View>
+      </Animated.View>
 
       {/* ── Apple Music Frosted Sticky Header ── */}
       <Animated.View
@@ -739,7 +749,7 @@ function useArtistScreenView() {
           {
             paddingTop: topInset,
             opacity: stickyOpacity,
-            backgroundColor: colorWithAlpha(backgroundColor, 0.94),
+            backgroundColor: backgroundColor,
           },
         ]}
       >
@@ -749,18 +759,26 @@ function useArtistScreenView() {
         <Text style={styles.stickyTitle} numberOfLines={1}>
           {displayName}
         </Text>
-        <Pressable
-          style={styles.stickyPlayBtn}
-          onPress={handlePlayAll}
-          disabled={!songs.length}
-        >
-          <Ionicons
-            name={isPlayingFromThisArtist && isPlaying ? "pause" : "play"}
-            size={16}
-            color="#000000"
-            style={!isPlayingFromThisArtist || !isPlaying ? { marginLeft: 2 } : undefined}
-          />
-        </Pressable>
+        <View style={styles.stickyRightActions}>
+          <Pressable
+            style={styles.stickyPlayBtn}
+            onPress={handlePlayAll}
+            disabled={!songs.length}
+          >
+            <Ionicons
+              name={isPlayingFromThisArtist && isPlaying ? "pause" : "play"}
+              size={16}
+              color="#000000"
+              style={!isPlayingFromThisArtist || !isPlaying ? { marginLeft: 2 } : undefined}
+            />
+          </Pressable>
+          <Pressable
+            style={styles.stickyMoreBtn}
+            onPress={() => setShowBioModal(true)}
+          >
+            <Ionicons name="ellipsis-horizontal" size={18} color="#FFFFFF" />
+          </Pressable>
+        </View>
       </Animated.View>
 
       {/* ── Artist Bio Bottom Sheet Modal ── */}
@@ -832,40 +850,31 @@ const styles = StyleSheet.create({
 
   // ── Hero ──
   heroContainer: {
-    height: 480,
+    height: 460,
     justifyContent: "flex-end",
     position: "relative",
   },
   heroInfoSection: {
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    gap: 10,
-  },
-  artistCapsuleBadge: {
-    flexDirection: "row",
-    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingBottom: 14,
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 14,
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-  },
-  artistCapsuleText: {
-    color: "rgba(255, 255, 255, 0.85)",
-    fontSize: 11,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.9,
   },
   appleMusicArtistName: {
     color: "#FFFFFF",
-    fontSize: 34,
-    fontFamily: "Inter_900Black",
-    letterSpacing: 1.1,
+    fontSize: 42,
+    fontFamily: "Anton_400Regular",
+    letterSpacing: 0.8,
+    lineHeight: 48,
+    paddingTop: 6,
+    paddingBottom: 2,
+    paddingHorizontal: 8,
     textAlign: "center",
     textTransform: "uppercase",
+    includeFontPadding: false,
+    textShadowColor: "rgba(0, 0, 0, 0.85)",
+    textShadowOffset: { width: 0, height: 3 },
+    textShadowRadius: 10,
   },
 
   // ── Apple Music 3-Button Action Row ──
@@ -873,13 +882,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 24,
-    marginTop: 12,
+    gap: 18,
+    marginTop: 6,
   },
   appleMusicCircleBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: "rgba(255, 255, 255, 0.16)",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.18)",
@@ -891,9 +900,9 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   appleMusicMainPlayBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
@@ -1121,6 +1130,19 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 17,
     backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stickyRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  stickyMoreBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
     alignItems: "center",
     justifyContent: "center",
   },

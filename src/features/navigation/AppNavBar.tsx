@@ -19,7 +19,6 @@ import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/Pl
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { triggerImpact } from "@/lib/haptics";
 import {
-  getSpotifyMiniPlayerBg,
   useArtworkPalette,
   preloadDominantColors,
 } from "@/lib/colorExtractor";
@@ -338,8 +337,8 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   );
   const playIconColor = "#060A0F";
   const playerSectionBg = useMemo(
-    () => getSpotifyMiniPlayerBg(artworkPalette.accent, artworkPalette.background),
-    [artworkPalette.accent, artworkPalette.background]
+    () => artworkPalette.background || "#16181D",
+    [artworkPalette.background]
   );
   const activeNavColor = "#FFFFFF";
   const navInactiveColor = conceptSubtext;

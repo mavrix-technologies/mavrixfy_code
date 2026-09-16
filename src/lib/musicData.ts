@@ -1,4 +1,5 @@
 import { mapFilter, sortedCopy } from "@/lib/arrayUtils";
+import { toDurationSeconds } from "@/utils/timeFormatters";
 export interface Song {
   id: string;
   title: string;
@@ -259,7 +260,7 @@ export function convertJioSaavnSong(song: JioSaavnSong): Song {
     title: song.name || "Unknown",
     artist: artistNames,
     album: song.album?.name || "",
-    duration: song.duration || 0,
+    duration: toDurationSeconds(song.duration),
     coverUrl: getBestImageUrl(song.image),
     genre: song.language || "",
     audioUrl: getBestAudioUrl(song.downloadUrl || song.audioUrl || song.url),

@@ -10,8 +10,13 @@ import Animated, {
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { type Song } from "@/lib/musicData";
-import { extractArtworkColors, colorWithAlpha } from "@/lib/colorExtractor";
 import { type FestivalThemeConfig } from "@/services/festivalThemeService";
+import {
+  extractArtworkColors,
+  colorWithAlpha,
+  type ArtworkPalette,
+  DEFAULT_ARTWORK_PALETTE,
+} from "@/lib/colorExtractor";
 
 type GradientStops = readonly [string, string, string, string];
 

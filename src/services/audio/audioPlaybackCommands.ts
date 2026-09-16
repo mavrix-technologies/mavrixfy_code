@@ -235,7 +235,7 @@ export function useAudioPlaybackCommands({
           prefetchAdjacentTrackStreams(q, targetIndex);
         } else if (canUseLightweightAudioFallback) {
           if (reqId !== playRequestIdRef.current) return;
-          await ExpoAvPlayer.loadAndPlay(audioUrl);
+          await ExpoAvPlayer.loadAndPlay(audioUrl, targetSong);
         }
       } catch (error) {
         if (reqId !== playRequestIdRef.current) return;
