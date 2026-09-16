@@ -81,8 +81,13 @@ export interface Genre {
 }
 
 function normalizeJioSaavnImageUrl(rawUrl: string): string {
-  const trimmed = String(rawUrl || "").trim();
+  let trimmed = String(rawUrl || "").trim();
   if (!trimmed) return "";
+
+  // Upgrade insecure http:// to https:// to satisfy iOS ATS in release/IPA builds
+  if (trimmed.startsWith("http://")) {
+    trimmed = "https://" + trimmed.slice(7);
+  }
 
   // Prefer higher-res covers (500x500) over lower resolutions (50x50, 150x150).
   return trimmed.replace(/[-_]?(50x50|150x150)(?=\b|\.jpg)/gi, (match) => {

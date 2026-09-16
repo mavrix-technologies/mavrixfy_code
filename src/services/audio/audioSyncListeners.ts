@@ -1,10 +1,11 @@
-import { useEffect, type MutableRefObject } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { AppState, Platform } from "react-native";
 import type { Song } from "@/lib/musicData";
 import { logger } from "@/lib/logger";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { carPlayService } from "@/services/carPlayService";
+import { songToTrack } from "@/services/audio/PlayerPlaybackResolver";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 import type { SleepTimerState } from "@/types/playbackTypes";
 
@@ -69,6 +70,11 @@ export function useAudioSyncListeners({
   likedSongsRef,
   playSong,
 }: UseAudioSyncListenersOptions) {
+  const publishedLockScreenDurationRef = useRef<{
+    songId: string;
+    duration: number;
+  } | null>(null);
+
   // TrackPlayer native event handlers
   useEffect(() => {
     if (!isPlayerReady || !TrackPlayer) return;
@@ -117,12 +123,51 @@ export function useAudioSyncListeners({
           setNativePosition(event.position);
           positionSecondsRef.current = event.position;
         }
-        if (typeof event?.duration === "number" && event.duration > 0) {
-          const dur = event.duration;
+        const song = currentSongRef.current;
+        const nativeDuration = typeof event?.duration === "number" && event.duration > 0
+          ? event.duration
+          : 0;
+        const catalogDuration = toDurationSeconds(song?.duration);
+        const duration = nativeDuration || catalogDuration;
+
+        if (nativeDuration > 0) {
+          const dur = nativeDuration;
           setNativeDuration((prev) => (Math.abs(prev - dur) > 0.5 ? dur : prev));
-          if (currentSongRef.current && (!currentSongRef.current.duration || currentSongRef.current.duration <= 0)) {
-            currentSongRef.current.duration = dur;
+          if (song && (!song.duration || song.duration <= 0)) {
+            song.duration = dur;
           }
+        }
+
+        // SwiftAudioEx uses its AVPlayer duration for Now Playing. Several
+        // music streams report that as zero, despite the catalogue already
+        // knowing the track length. Set the best available duration once per
+        // track (and again only if native later reports a different value).
+        const previouslyPublished = publishedLockScreenDurationRef.current;
+        const shouldPublishDuration = Boolean(
+          song &&
+          duration > 0 &&
+          (previouslyPublished?.songId !== song.id ||
+            Math.abs((previouslyPublished?.duration ?? 0) - duration) > 0.5)
+        );
+
+        if (
+          shouldPublishDuration &&
+          song &&
+          Platform.OS === "ios" &&
+          typeof TrackPlayer?.updateMetadataForTrack === "function"
+        ) {
+          publishedLockScreenDurationRef.current = { songId: song.id, duration };
+          const track = songToTrack(song);
+          const trackIndex = typeof event?.track === "number" ? event.track : queueIndexRef.current;
+          TrackPlayer.updateMetadataForTrack(trackIndex, {
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            artwork: track.artwork,
+            genre: track.genre,
+            duration,
+            isLiveStream: false,
+          }).catch(() => {});
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {

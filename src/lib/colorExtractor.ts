@@ -171,24 +171,62 @@ const pendingRequests = new Map<string, Promise<ArtworkPalette>>();
 
 let nativeGetColors: NativeGetColors | null | undefined;
 
-export function extractArtworkColors(imageUrl: string): Promise<ArtworkPalette> {
-  const cacheKey = (imageUrl || "").trim();
-  if (!cacheKey) return Promise.resolve(DEFAULT_ARTWORK_PALETTE);
+export function normalizeArtworkUrl(url: string | null | undefined): string {
+  if (!url || typeof url !== "string") return "";
+  let clean = url.trim();
+  if (!clean) return "";
 
-  const cached = paletteCache.get(cacheKey);
+  // Upgrade insecure http:// to https:// to satisfy iOS ATS in release/IPA builds
+  if (clean.startsWith("http://")) {
+    clean = "https://" + clean.slice(7);
+  }
+
+  // Handle potential unencoded characters in URL (spaces, unicode)
+  try {
+    clean = encodeURI(decodeURI(clean));
+  } catch {
+    // Keep as is if encoding fails
+  }
+
+  return clean;
+}
+
+export function getColorStats(hex: string | undefined | null) {
+  const norm = normalizeHexColor(hex);
+  if (!norm) return null;
+  const r = parseInt(norm.slice(1, 3), 16);
+  const g = parseInt(norm.slice(3, 5), 16);
+  const b = parseInt(norm.slice(5, 7), 16);
+  const { h, s, l } = rgbToHsl(r, g, b);
+  // Vibrancy score favors saturated colors with moderate lightness (avoids pitch black and blinding white)
+  const vibrancy = s * (1 - Math.abs(l - 0.55) * 1.3);
+  return { hex: norm, h, s, l, vibrancy };
+}
+
+export function extractArtworkColors(imageUrl: string): Promise<ArtworkPalette> {
+  const rawKey = (imageUrl || "").trim();
+  if (!rawKey) return Promise.resolve(DEFAULT_ARTWORK_PALETTE);
+
+  const cacheKey = normalizeArtworkUrl(rawKey);
+
+  const cached = paletteCache.get(cacheKey) || paletteCache.get(rawKey);
   if (cached) {
     paletteCache.delete(cacheKey);
     paletteCache.set(cacheKey, cached);
     return Promise.resolve(cached);
   }
 
-  const pending = pendingRequests.get(cacheKey);
+  const pending = pendingRequests.get(cacheKey) || pendingRequests.get(rawKey);
   if (pending) return pending;
 
   const request = extractArtworkColorsUncached(cacheKey).finally(() => {
     pendingRequests.delete(cacheKey);
+    pendingRequests.delete(rawKey);
   });
   pendingRequests.set(cacheKey, request);
+  if (rawKey !== cacheKey) {
+    pendingRequests.set(rawKey, request);
+  }
   return request;
 }
 
@@ -205,10 +243,12 @@ export function preloadDominantColors(imageUrls: (string | null | undefined)[]):
 }
 
 export function getImmediateArtworkPalette(imageUrl: string | null | undefined): ArtworkPalette {
-  const cacheKey = (imageUrl || "").trim();
-  if (!cacheKey) return DEFAULT_ARTWORK_PALETTE;
+  const rawKey = (imageUrl || "").trim();
+  if (!rawKey) return DEFAULT_ARTWORK_PALETTE;
 
-  const cached = paletteCache.get(cacheKey);
+  const cacheKey = normalizeArtworkUrl(rawKey);
+
+  const cached = paletteCache.get(cacheKey) || paletteCache.get(rawKey);
   if (!cached) return DEFAULT_ARTWORK_PALETTE;
 
   paletteCache.delete(cacheKey);
@@ -271,7 +311,10 @@ function resolveNativeGetColors(): NativeGetColors | null {
   return nativeGetColors;
 }
 
-async function extractArtworkColorsUncached(cacheKey: string): Promise<ArtworkPalette> {
+async function extractArtworkColorsUncached(rawKey: string): Promise<ArtworkPalette> {
+  const cacheKey = normalizeArtworkUrl(rawKey);
+  if (!cacheKey) return DEFAULT_ARTWORK_PALETTE;
+
   const getColors = resolveNativeGetColors();
 
   if (getColors) {
@@ -280,7 +323,7 @@ async function extractArtworkColorsUncached(cacheKey: string): Promise<ArtworkPa
     for (let i = 0; i < sources.length; i++) {
       try {
         const result = await getColors(sources[i], {
-          fallback: DEFAULT_ARTWORK_PALETTE.background,
+          fallback: "#000000",
           cache: false,
           quality: "high",
           key: cacheKey,
@@ -290,6 +333,9 @@ async function extractArtworkColorsUncached(cacheKey: string): Promise<ArtworkPa
         const palette = mapImageColorsToPalette(result);
         if (!isDefaultPalette(palette)) {
           setCachedPalette(cacheKey, palette);
+          if (rawKey !== cacheKey) {
+            setCachedPalette(rawKey, palette);
+          }
           return palette;
         }
       } catch {
@@ -298,29 +344,36 @@ async function extractArtworkColorsUncached(cacheKey: string): Promise<ArtworkPa
     }
   }
 
-  // JS Fallback Layer (Expo Go / Web):
-  // Extracts ACTUAL matching colors from the image for active song/screen
+  // JS Fallback Layer (Expo Go / Web / Native Fallback):
   try {
     const palette = await extractArtworkColorsWithJsDecoder(cacheKey);
     setCachedPalette(cacheKey, palette);
+    if (rawKey !== cacheKey) {
+      setCachedPalette(rawKey, palette);
+    }
     return palette;
   } catch {
     const fallbackPalette = buildPaletteFromUrlHash(cacheKey);
     setCachedPalette(cacheKey, fallbackPalette);
+    if (rawKey !== cacheKey) {
+      setCachedPalette(rawKey, fallbackPalette);
+    }
     return fallbackPalette;
   }
 }
 
 async function extractArtworkColorsWithJsDecoder(cacheKey: string): Promise<ArtworkPalette> {
-  const bytes = await buildArtworkSources(cacheKey).then(async (sources) => {
-    const localUri = sources[0];
-    return FileSystem.readAsStringAsync(localUri, {
+  try {
+    const localUri = await cacheRemoteArtwork(cacheKey);
+    const bytes = await FileSystem.readAsStringAsync(localUri, {
       encoding: "base64",
     }).then(base64ToBytes).catch(() => new Uint8Array());
-  });
 
-  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) {
-    return extractPaletteFromJpeg(bytes);
+    if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+      return extractPaletteFromJpeg(bytes);
+    }
+  } catch {
+    // Graceful fallback
   }
 
   return buildPaletteFromUrlHash(cacheKey);
@@ -521,46 +574,100 @@ function buildSpotifyStylePaletteFromRgb(r: number, g: number, b: number): Artwo
 }
 
 async function buildArtworkSources(cacheKey: string): Promise<string[]> {
-  if (cacheKey.startsWith("file://") || cacheKey.startsWith("data:") || cacheKey.startsWith("content://")) {
-    return [cacheKey];
+  const normalized = normalizeArtworkUrl(cacheKey);
+  if (!normalized) return [];
+
+  if (normalized.startsWith("file://") || normalized.startsWith("data:") || normalized.startsWith("content://")) {
+    return [normalized];
   }
 
-  if (!cacheKey.startsWith("http")) {
-    return [cacheKey];
+  if (!normalized.startsWith("http")) {
+    return [normalized];
   }
 
-  const localUri = await cacheRemoteArtwork(cacheKey);
-  return [localUri, cacheKey];
+  // On iOS: react-native-image-colors uses URLSession.shared.dataTask which directly downloads
+  // HTTP/HTTPS in memory. Passing local file:// URLs to URLSession on iOS fails with error -1002 (unsupported URL).
+  // Thus, the remote HTTPS URL must be the primary source on iOS.
+  if (Platform.OS === "ios") {
+    return [normalized];
+  }
+
+  // On Android, attempt caching for fast local decode, fallback to remote URL
+  try {
+    const localUri = await cacheRemoteArtwork(normalized);
+    return [localUri, normalized];
+  } catch {
+    return [normalized];
+  }
 }
 
 async function cacheRemoteArtwork(remoteUrl: string): Promise<string> {
   const extensionMatch = remoteUrl.match(/\.(jpe?g|png|webp|gif)(\?|#|$)/i);
   const extension = extensionMatch?.[1]?.toLowerCase() ?? "jpg";
   const fileName = `art-${hashString(remoteUrl)}.${extension}`;
-  const localUri = `${FileSystem.cacheDirectory ?? ""}${fileName}`;
-  if (!localUri || localUri === fileName) {
+  const cacheDir = FileSystem.cacheDirectory;
+  if (!cacheDir) {
     throw new Error("Cache directory unavailable.");
   }
+  const localUri = `${cacheDir}${fileName}`;
 
-  return FileSystem.getInfoAsync(localUri).then(async (existing) => {
+  try {
+    const existing = await FileSystem.getInfoAsync(localUri).catch(() => ({ exists: false }));
     if (existing.exists) {
       return localUri;
     }
     const downloaded = await FileSystem.downloadAsync(remoteUrl, localUri);
     return downloaded.uri;
-  });
+  } catch (e) {
+    throw e;
+  }
 }
 
 function mapImageColorsToPalette(result: ImageColorsResult): ArtworkPalette {
   if (result.platform === "ios") {
-    const rawDom = pickColor(result.primary, result.background, result.detail, result.secondary) ?? DEFAULT_ARTWORK_PALETTE.background;
-    const rawVib = pickColor(result.detail, result.primary, result.secondary, result.background) ?? DEFAULT_ARTWORK_PALETTE.accent;
+    const bgStats = getColorStats(result.background);
+    const primaryStats = getColorStats(result.primary);
+    const secondaryStats = getColorStats(result.secondary);
+    const detailStats = getColorStats(result.detail);
+
+    const candidates = [primaryStats, secondaryStats, detailStats, bgStats].filter(
+      (c): c is NonNullable<typeof c> => c !== null && c.hex !== "#000000" && c.hex !== "#0E1016"
+    );
+
+    // Pick the most vibrant color as accent:
+    // Vibrancy rewards saturation while avoiding pitch black or blinding white
+    let bestAccent = candidates.length > 0
+      ? candidates.slice().sort((a, b) => b.vibrancy - a.vibrancy)[0].hex
+      : result.primary || result.detail || result.background || DEFAULT_ARTWORK_PALETTE.accent;
+
+    // Pick the dominant background:
+    // 1. If result.background has color (s >= 0.10) and is not washed-out white (l < 0.88), it's the natural dominant tone.
+    // 2. If result.background is near-white or black/fallback, check for a rich colored candidate swatch.
+    let bestDominant = result.background;
+    if (!bgStats || bgStats.hex === "#000000" || bgStats.hex === "#0E1016" || bgStats.l > 0.88 || bgStats.s < 0.10) {
+      const coloredCandidate = candidates.find((c) => c.s >= 0.15 && c.l >= 0.10 && c.l <= 0.85);
+      if (coloredCandidate) {
+        bestDominant = coloredCandidate.hex;
+      } else if (bgStats && bgStats.hex !== "#000000" && bgStats.l < 0.88) {
+        bestDominant = bgStats.hex;
+      } else if (primaryStats && primaryStats.hex !== "#000000" && primaryStats.hex !== "#0E1016") {
+        bestDominant = primaryStats.hex;
+      } else {
+        bestDominant = DEFAULT_ARTWORK_PALETTE.background;
+      }
+    }
+
+    const rawDom = normalizeHexColor(bestDominant) ?? DEFAULT_ARTWORK_PALETTE.background;
+    const rawVib = normalizeHexColor(bestAccent) ?? DEFAULT_ARTWORK_PALETTE.accent;
+
     const background = transformToSeamlessBackground(rawDom);
     const accent = transformToVibrantAccent(rawVib);
+
     const swatches = dedupeAndDarkenSwatches(
-      [rawVib, rawDom, result.primary, result.detail, result.secondary, result.background],
+      [rawVib, rawDom, result.background, result.primary, result.secondary, result.detail],
       background
     );
+
     return {
       background,
       accent,
@@ -639,7 +746,9 @@ function buildPalette(background: string, accent: string, swatches?: string[]): 
 function isDefaultPalette(palette: ArtworkPalette): boolean {
   return (
     palette.background === DEFAULT_ARTWORK_PALETTE.background &&
-    palette.accent === DEFAULT_ARTWORK_PALETTE.accent
+    palette.accent === DEFAULT_ARTWORK_PALETTE.accent &&
+    palette.rawDominant === DEFAULT_ARTWORK_PALETTE.rawDominant &&
+    palette.rawVibrant === DEFAULT_ARTWORK_PALETTE.rawVibrant
   );
 }
 
