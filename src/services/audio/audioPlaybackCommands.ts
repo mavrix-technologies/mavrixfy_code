@@ -1,4 +1,5 @@
 import { useCallback, useEffect, type MutableRefObject } from "react";
+import { Platform } from "react-native";
 import type { Song } from "@/lib/musicData";
 import { logger } from "@/lib/logger";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
@@ -191,44 +192,63 @@ export function useAudioPlaybackCommands({
           await enqueueNativeQueueMutation(async () => {
             if (reqId !== playRequestIdRef.current) return;
 
-            const currentNativeQueue = await TrackPlayer!.getQueue().catch(() => []);
-            const isQueueSynced =
-              !isNewQueue &&
-              Array.isArray(currentNativeQueue) &&
-              currentNativeQueue.length === q.length &&
-              currentNativeQueue.every((t: any, idx: number) => {
-                const item = q[idx];
-                if (!item || t?.id !== item.id) return false;
-                if (idx === targetIndex && audioUrl && t?.url !== audioUrl) return false;
-                const expectedDur = toDurationSeconds(item.duration);
-                if (expectedDur > 0 && Math.abs((t?.duration || 0) - expectedDur) > 1) return false;
-                return true;
-              });
+            const targetTrack = songToTrack(targetSong, audioUrl, streamUrlCache.current);
 
-            if (!isQueueSynced) {
-              const nativeTracks = q.map((s, idx) =>
-                songToTrack(s, idx === targetIndex ? audioUrl : null, streamUrlCache.current)
-              );
-
-              try {
-                if (typeof TrackPlayer!.setQueue === "function") {
-                  await TrackPlayer!.setQueue(nativeTracks);
+            try {
+              if (Platform.OS === "ios") {
+                if (typeof TrackPlayer!.load === "function") {
+                  await TrackPlayer!.load(targetTrack);
                 } else {
-                  await TrackPlayer!.add(nativeTracks);
+                  await TrackPlayer!.reset();
+                  await TrackPlayer!.add([targetTrack]);
                 }
-              } catch (queueErr) {
-                logger.error("[Player] Native queue synchronization failed:", queueErr);
+              } else {
+                const nativeTracks = q
+                  .map((s, idx) =>
+                    songToTrack(s, idx === targetIndex ? audioUrl : null, streamUrlCache.current)
+                  )
+                  .filter((t) => Boolean(t && t.url));
+
+                if (typeof TrackPlayer!.setQueue === "function" && nativeTracks.length > 0) {
+                  await TrackPlayer!.setQueue(nativeTracks);
+                  const newIndex = nativeTracks.findIndex((t) => t.id === targetSong.id);
+                  if (newIndex >= 0) {
+                    await TrackPlayer!.skip(newIndex).catch(() => {});
+                  }
+                } else if (typeof TrackPlayer!.load === "function") {
+                  await TrackPlayer!.load(targetTrack);
+                } else {
+                  await TrackPlayer!.reset();
+                  await TrackPlayer!.add([targetTrack]);
+                }
               }
+            } catch (queueErr) {
+              logger.error("[Player] Native track load failed:", queueErr);
+              try {
+                if (typeof TrackPlayer!.load === "function") {
+                  await TrackPlayer!.load(targetTrack);
+                } else {
+                  await TrackPlayer!.reset();
+                  await TrackPlayer!.add([targetTrack]);
+                }
+              } catch {}
             }
 
             if (reqId !== playRequestIdRef.current) return;
-            await TrackPlayer!.skip(targetIndex)
-              .catch(() => {})
-              .then(() => {
-                if (reqId === playRequestIdRef.current) {
-                  return TrackPlayer!.play();
-                }
-              });
+            await TrackPlayer!.play();
+
+            if (Platform.OS === "ios" && typeof TrackPlayer!.updateNowPlayingMetadata === "function") {
+              const durSec = toDurationSeconds(targetSong.duration);
+              TrackPlayer!.updateNowPlayingMetadata({
+                title: targetTrack.title,
+                artist: targetTrack.artist,
+                album: targetTrack.album,
+                artwork: targetTrack.artwork,
+                duration: durSec > 0 ? durSec : undefined,
+                elapsedTime: 0,
+                isLiveStream: false,
+              }).catch(() => {});
+            }
           });
 
           if (reqId !== playRequestIdRef.current) return;

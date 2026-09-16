@@ -176,8 +176,9 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null): Pro
               artworkUrl: song?.coverUrl || undefined,
             },
             {
-              showSeekBackward: true,
+              showSeekBackward: false,
               showSeekForward: true,
+              isLiveStream: false,
             }
           );
         } catch {

@@ -121,6 +121,7 @@ export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?:
     album,
     genre: readNonEmptyString(song.genre),
     artwork: song.coverUrl,
+    isLiveStream: false,
     ...(duration > 0 ? { duration } : {}),
     ...(song.playbackHeaders && Object.keys(song.playbackHeaders).length > 0
       ? { headers: song.playbackHeaders }

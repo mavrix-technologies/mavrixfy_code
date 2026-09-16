@@ -281,6 +281,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     likedSongs,
     likedSongsRef,
     playSong,
+    nextSong,
+    prevSong,
   });
 
   const playbackValues = useAudioPlaybackValues({
