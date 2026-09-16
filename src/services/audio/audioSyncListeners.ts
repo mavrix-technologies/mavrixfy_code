@@ -37,8 +37,6 @@ interface UseAudioSyncListenersOptions {
   likedSongs: Song[];
   likedSongsRef: MutableRefObject<Song[]>;
   playSong: (song: Song) => Promise<void> | void;
-  nextSong?: () => Promise<void> | void;
-  prevSong?: () => Promise<void> | void;
 }
 
 export function useAudioSyncListeners({
@@ -70,8 +68,6 @@ export function useAudioSyncListeners({
   likedSongs,
   likedSongsRef,
   playSong,
-  nextSong,
-  prevSong,
 }: UseAudioSyncListenersOptions) {
   // TrackPlayer native event handlers
   useEffect(() => {
@@ -129,27 +125,6 @@ export function useAudioSyncListeners({
           }
         }
       }),
-      ...(Platform.OS === "ios"
-        ? [
-            subscribeTrackPlayerEvent(Event.RemoteNext, () => {
-              if (nextSong) {
-                void nextSong();
-              }
-            }),
-            subscribeTrackPlayerEvent(Event.RemotePrevious, () => {
-              if (prevSong) {
-                void prevSong();
-              }
-            }),
-            subscribeTrackPlayerEvent(Event.RemoteJumpForward, (event: any) => {
-              const interval = typeof event?.interval === "number" && event.interval > 0 ? event.interval : 15;
-              const cur = positionSecondsRef.current;
-              const dur = currentSongRef.current?.duration ? toDurationSeconds(currentSongRef.current.duration) : 0;
-              const target = dur > 0 ? Math.min(dur, cur + interval) : cur + interval;
-              TrackPlayer.seekTo(target).catch(() => {});
-            }),
-          ]
-        : []),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
         const nextIndex =
           typeof event?.index === "number"

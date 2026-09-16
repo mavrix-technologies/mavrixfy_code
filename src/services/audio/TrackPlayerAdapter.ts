@@ -30,23 +30,12 @@ export async function trackPlayerService(): Promise<void> {
       }
     });
 
-    // iOS queue navigation is coordinated by the UI state so that its custom
-    // queue remains the source of truth. Android owns these commands in the
-    // playback service, which is the only handler that survives headless mode.
-    if (Platform.OS !== "ios") {
-      TrackPlayer.addEventListener(Event.RemoteNext, () => {
-        TrackPlayer.skipToNext().catch(() => {});
-      });
-      TrackPlayer.addEventListener(Event.RemotePrevious, () => {
-        TrackPlayer.skipToPrevious().catch(() => {});
-      });
-      TrackPlayer.addEventListener(Event.RemoteJumpForward, async (event: { interval?: number }) => {
-        try {
-          const pos = await TrackPlayer.getPosition();
-          await TrackPlayer.seekTo(pos + (event?.interval || 15));
-        } catch {}
-      });
-    }
+    TrackPlayer.addEventListener(Event.RemoteNext, () => {
+      TrackPlayer.skipToNext().catch(() => {});
+    });
+    TrackPlayer.addEventListener(Event.RemotePrevious, () => {
+      TrackPlayer.skipToPrevious().catch(() => {});
+    });
     TrackPlayer.addEventListener(
       Event.RemoteDuck,
       async (event: { paused?: boolean; permanent?: boolean; ducking?: boolean }) => {
@@ -150,7 +139,6 @@ async function setupPlayerInternal(): Promise<void> {
         Capability.SkipToNext,
         Capability.SkipToPrevious,
         Capability.SeekTo,
-        Capability.JumpForward,
         Capability.Stop,
       ],
       notificationCapabilities: [
@@ -159,14 +147,12 @@ async function setupPlayerInternal(): Promise<void> {
         Capability.SkipToNext,
         Capability.SkipToPrevious,
         Capability.SeekTo,
-        Capability.JumpForward,
       ],
       compactCapabilities: [
         Capability.Play,
         Capability.Pause,
         Capability.SkipToNext,
       ],
-      forwardJumpInterval: 15,
       progressUpdateEventInterval: 1,
     });
     logger.info("[TrackPlayerAdapter] TrackPlayer.updateOptions configured successfully!");

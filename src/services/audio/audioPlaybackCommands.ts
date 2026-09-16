@@ -1,5 +1,4 @@
 import { useCallback, useEffect, type MutableRefObject } from "react";
-import { Platform } from "react-native";
 import type { Song } from "@/lib/musicData";
 import { logger } from "@/lib/logger";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
@@ -194,32 +193,29 @@ export function useAudioPlaybackCommands({
             const targetTrack = songToTrack(targetSong, audioUrl, streamUrlCache.current);
 
             try {
-              if (Platform.OS === "ios") {
-                if (typeof TrackPlayer!.load === "function") {
-                  await TrackPlayer!.load(targetTrack);
-                } else {
-                  await TrackPlayer!.reset();
-                  await TrackPlayer!.add([targetTrack]);
-                }
-              } else {
-                const nativeTracks = q
-                  .map((s, idx) =>
-                    songToTrack(s, idx === targetIndex ? audioUrl : null, streamUrlCache.current)
-                  )
-                  .filter((t) => Boolean(t && t.url));
+              const resolvedUrls = await Promise.all(
+                q.map((queueSong, index) =>
+                  index === targetIndex ? Promise.resolve(audioUrl) : resolvePlaybackUrlCached(queueSong)
+                )
+              );
+              const nativeTracks = resolvedUrls.map((url, index) =>
+                url ? songToTrack(q[index], url, streamUrlCache.current) : null
+              );
 
-                if (typeof TrackPlayer!.setQueue === "function" && nativeTracks.length > 0) {
-                  await TrackPlayer!.setQueue(nativeTracks);
-                  const newIndex = nativeTracks.findIndex((t) => t.id === targetSong.id);
-                  if (newIndex >= 0) {
-                    await TrackPlayer!.skip(newIndex).catch(() => {});
-                  }
-                } else if (typeof TrackPlayer!.load === "function") {
-                  await TrackPlayer!.load(targetTrack);
-                } else {
-                  await TrackPlayer!.reset();
-                  await TrackPlayer!.add([targetTrack]);
-                }
+              // The native queue must mirror the app queue on iOS. Otherwise
+              // the Lock Screen has no next item for its Next command.
+              if (
+                typeof TrackPlayer!.setQueue === "function" &&
+                nativeTracks.length === q.length &&
+                nativeTracks.every(Boolean)
+              ) {
+                await TrackPlayer!.setQueue(nativeTracks);
+                await TrackPlayer!.skip(targetIndex);
+              } else if (typeof TrackPlayer!.load === "function") {
+                await TrackPlayer!.load(targetTrack);
+              } else {
+                await TrackPlayer!.reset();
+                await TrackPlayer!.add([targetTrack]);
               }
             } catch (queueErr) {
               logger.error("[Player] Native track load failed:", queueErr);
