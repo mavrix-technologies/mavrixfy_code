@@ -7,9 +7,8 @@ import {
   AppNavBar,
   AuthRouteFallback,
   IOSNativeTabLayout,
+  IOSMiniPlayerOverlay,
 } from "@/features/navigation/layoutView";
-
-import { IS_IOS } from "@/constants/platform";
 
 export { AppNavBar } from "@/features/navigation/layoutView";
 
@@ -27,21 +26,27 @@ export default function TabLayout() {
     return <Redirect href="/login" />;
   }
 
-  // iOS-only: Apple UITabBarController with Liquid Glass pill
-  if (IS_IOS) {
+  // NativeTabs only work correctly when distributed via App Store or TestFlight.
+  // Sideloaded / unsigned IPAs run with __DEV__ = false but lack the required
+  // entitlements, causing an immediate crash. Disable NativeTabs entirely until
+  // the app is properly signed and distributed through Apple channels.
+  const isProductionBuild = false; // TODO: re-enable when distributing via App Store
+
+  if (isProductionBuild) {
     return (
       <View style={{ flex: 1, backgroundColor: Colors.background }}>
-        <IOSNativeTabLayout hidden={shouldHideTabBar} />
+        <IOSNativeTabLayout />
+        {!shouldHideTabBar ? <IOSMiniPlayerOverlay /> : null}
       </View>
     );
   }
 
-  // Android + Web: custom JS tab bar with AppNavBar
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <Tabs
         screenOptions={{
           headerShown: false,
+          lazy: true,
           animation: "none",
           sceneStyle: { backgroundColor: Colors.background },
         }}
@@ -58,4 +63,3 @@ export default function TabLayout() {
     </View>
   );
 }
-

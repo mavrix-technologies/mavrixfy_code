@@ -54,7 +54,6 @@ import {
   type VisibleRoute,
 } from "./navTabConstants";
 import { MemoizedNavTabItem } from "./NavTabItem";
-import { LiquidGlassBackdrop } from "./LiquidGlassBackdrop";
 
 export type AppNavBarProps = {
   hidden?: boolean;
@@ -303,7 +302,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const navLabelLineHeight = 13;
   const navHorizontalPadding = isNarrowMobile ? 6 : 8;
   const conceptText = "#dfe2eb";
-  const conceptSubtext = isIOS ? "#A7A7A7" : "#bccbb9";
+  const conceptSubtext = "#bccbb9";
 
   const safeTextColor = useMemo(() => {
     const raw = textColor || conceptText;
@@ -326,17 +325,14 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   );
   const playIconColor = "#060A0F";
   const playerSectionBg = useMemo(
-    () => isIOS
-      ? colorToRgba(artworkPalette.background || "#16181D", 0.45, "rgba(18, 20, 26, 0.45)")
-      : (artworkPalette.background || "#16181D"),
-    [artworkPalette.background, isIOS]
+    () => artworkPalette.background || "#16181D",
+    [artworkPalette.background]
   );
-
   const activeNavColor = "#FFFFFF";
   const navInactiveColor = conceptSubtext;
-  const navBaseBg = isIOS ? "transparent" : "#0E1016";
-  const containerGlassBase = isIOS ? "rgba(14, 18, 24, 0.50)" : "#0E1016";
-  const playerSectionDivider = "rgba(255,255,255,0.08)";
+  const navBaseBg = "#0E1016";
+  const containerGlassBase = "#0E1016";
+  const playerSectionDivider = "rgba(255,255,255,0.06)";
   const playerProgressFillColor = "rgba(255,255,255,0.90)";
   const playerTopEdgeTint = "transparent";
   const miniButtonPrimaryBg = "#FFFFFF";
@@ -387,9 +383,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
             !hasActiveMiniPlayer && isIOS && styles.containerNavOnlyIOS,
           ]}
         >
-          {isIOS
-            ? <LiquidGlassBackdrop style={styles.glassLayer} tintColor={containerGlassBase} />
-            : <View pointerEvents="none" style={[styles.glassLayer, { backgroundColor: containerGlassBase }]} />}
+          <View pointerEvents="none" style={[styles.glassLayer, { backgroundColor: containerGlassBase }]} />
 
           {hasActiveMiniPlayer && activeSong ? (
             <View

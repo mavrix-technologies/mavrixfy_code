@@ -21,3 +21,14 @@
 -keep class kotlin.** { *; }
 -keep class kotlin.reflect.** { *; }
 # @generated end expo-build-properties
+
+# Play Store & Firebase keep rules
+-keep class com.google.android.gms.** { *; }
+-dontwarn com.google.android.gms.**
+-keep class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.**
+
+# React Native & Networking
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+-dontwarn okhttp3.**
+-dontwarn okio.**
