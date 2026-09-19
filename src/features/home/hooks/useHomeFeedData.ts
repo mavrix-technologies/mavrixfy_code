@@ -37,18 +37,21 @@ import {
 import { useNetwork, useOnReconnect } from "@/contexts/NetworkContext";
 import { logger } from "@/lib/logger";
 
-const HOME_ESSENTIAL_CATEGORY_IDS = [
-  "new-arrivals",
-  "popular",
+const HOME_PRIMARY_CATEGORY_IDS = [
   "trending",
+  "new-arrivals",
   "bollywood",
+] as const;
+
+const HOME_SECONDARY_CATEGORY_IDS = [
+  "popular",
   "party-mix",
   "romance",
   "top-charts",
 ] as const;
 
-const HOME_SECTION_TIMEOUT_MS = 8000;
-const HOME_SECONDARY_TIMEOUT_MS = 6000;
+const HOME_SECTION_TIMEOUT_MS = 6500;
+const HOME_SECONDARY_TIMEOUT_MS = 5000;
 
 interface HomeSessionCache {
   hydrated: boolean;
@@ -138,6 +141,20 @@ export function useHomeFeedData() {
         HOME_CACHE.categories = items;
       };
 
+      const mergeCategories = (newCategories: HomeJioSaavnCategoryData[]) => {
+        if (!isActiveRun() || newCategories.length === 0) return;
+        setCategories((prev) => {
+          const existingIds = new Set(prev.map((c) => c.id));
+          const additions = newCategories.filter(
+            (cat) => cat.results.length > 0 && !existingIds.has(cat.id)
+          );
+          if (additions.length === 0) return prev;
+          const merged = [...prev, ...additions];
+          HOME_CACHE.categories = merged;
+          return merged;
+        });
+      };
+
       const applyArtists = (items: ArtistCard[]) => {
         if (!isActiveRun() || items.length === 0) return;
         setFeaturedArtists(items);
@@ -198,56 +215,29 @@ export function useHomeFeedData() {
             : Promise.resolve(),
         ]);
 
-        const jioTask = withFallbackTimeout(
+        // Phase 1: High-priority above-the-fold content
+        const primaryJioTask = withFallbackTimeout(
           getHomeJioSaavnCategories({
             forceRefresh,
             limitPerCategory: 15,
-            categoryIds: [...HOME_ESSENTIAL_CATEGORY_IDS],
+            categoryIds: [...HOME_PRIMARY_CATEGORY_IDS],
           }),
           HOME_SECTION_TIMEOUT_MS,
           [] as HomeJioSaavnCategoryData[],
-          "JioSaavn home categories"
-        ).then((homeCategories) => {
-          applyCategories(homeCategories.filter((cat) => cat.results.length > 0));
+          "primary categories"
+        ).then((primaryCats) => {
+          const valid = primaryCats.filter((cat) => cat.results.length > 0);
+          if (valid.length > 0) {
+            applyCategories(valid);
+          }
         });
 
-        const playlistsTask = withFallbackTimeout(
-          getCachedHomePublicPlaylists().then(async (cached) => {
-          if (cached && cached.length > 0 && !forceRefresh) {
-            applyPublicPlaylists(cached);
-            return cached;
-          }
-
-          const remote = await getPublicPlaylists(8);
-          if (remote && remote.length > 0) {
-            applyPublicPlaylists(remote);
-            await setCachedHomePublicPlaylists(remote);
-          }
-          return remote;
-          }),
-          HOME_SECONDARY_TIMEOUT_MS,
-          [] as FirestorePlaylist[],
-          "public playlists"
-        );
-
-        const artistsTask = withFallbackTimeout(
-          getFeaturedArtists(),
-          HOME_SECONDARY_TIMEOUT_MS,
-          [] as ArtistCard[],
-          "featured artists"
-        ).then(applyArtists);
         const releasesTask = withFallbackTimeout(
           getDailyNewReleaseSongs({ limit: 24, forceRefresh }),
           HOME_SECTION_TIMEOUT_MS,
           [] as Song[],
           "new releases"
         ).then(applyNewReleaseSongs);
-        const recommendationsTask = withFallbackTimeout(
-          getRecommendationHomeFeed({ forceRefresh }).then((feed) => feed.sections),
-          HOME_SECONDARY_TIMEOUT_MS,
-          [] as RecommendationSection[],
-          "recommendations"
-        ).then(applyRecommendations);
 
         const quickPicksTask = withFallbackTimeout(
           fetchQuickPicksFeed({
@@ -260,25 +250,88 @@ export function useHomeFeedData() {
           "quick picks"
         ).then(applyQuickPicksPool);
 
+        // Await Phase 1 so user immediately gets top sections
         await Promise.allSettled([
-          jioTask,
-          playlistsTask,
-          artistsTask,
+          primaryJioTask,
           releasesTask,
-          recommendationsTask,
           quickPicksTask,
         ]);
 
         if (isActiveRun()) {
-          HOME_CACHE.hydrated = true;
-          void setCachedHomeFeedSnapshot({
-            categories: HOME_CACHE.categories,
-            publicPlaylists: HOME_CACHE.publicPlaylists,
-            featuredArtists: HOME_CACHE.featuredArtists,
-            newReleaseSongs: HOME_CACHE.newReleaseSongs,
-            recommendations: HOME_CACHE.recommendations,
-            quickPicksPool: HOME_CACHE.quickPicksPool,
-          });
+          setLoading(false);
+          setLoadingMainContent(false);
+        }
+
+        // Phase 2: Secondary sections below the fold
+        const secondaryJioTask = withFallbackTimeout(
+          getHomeJioSaavnCategories({
+            forceRefresh,
+            limitPerCategory: 15,
+            categoryIds: [...HOME_SECONDARY_CATEGORY_IDS],
+          }),
+          HOME_SECONDARY_TIMEOUT_MS,
+          [] as HomeJioSaavnCategoryData[],
+          "secondary categories"
+        ).then(mergeCategories);
+
+        const playlistsTask = withFallbackTimeout(
+          getCachedHomePublicPlaylists().then(async (cached) => {
+            if (cached && cached.length > 0 && !forceRefresh) {
+              applyPublicPlaylists(cached);
+              return cached;
+            }
+
+            const remote = await getPublicPlaylists(8);
+            if (remote && remote.length > 0) {
+              applyPublicPlaylists(remote);
+              await setCachedHomePublicPlaylists(remote);
+            }
+            return remote;
+          }),
+          HOME_SECONDARY_TIMEOUT_MS,
+          [] as FirestorePlaylist[],
+          "public playlists"
+        );
+
+        const artistsTask = withFallbackTimeout(
+          getFeaturedArtists(),
+          HOME_SECONDARY_TIMEOUT_MS,
+          [] as ArtistCard[],
+          "featured artists"
+        ).then(applyArtists);
+
+        const recommendationsTask = withFallbackTimeout(
+          getRecommendationHomeFeed({ forceRefresh }).then((feed) => feed.sections),
+          HOME_SECONDARY_TIMEOUT_MS,
+          [] as RecommendationSection[],
+          "recommendations"
+        ).then(applyRecommendations);
+
+        await Promise.allSettled([
+          secondaryJioTask,
+          playlistsTask,
+          artistsTask,
+          recommendationsTask,
+        ]);
+
+        if (isActiveRun()) {
+          const hasLoadedAnyContent =
+            HOME_CACHE.categories.length > 0 ||
+            HOME_CACHE.newReleaseSongs.length > 0 ||
+            HOME_CACHE.quickPicksPool.all.length > 0 ||
+            HOME_CACHE.publicPlaylists.length > 0;
+
+          if (hasLoadedAnyContent) {
+            HOME_CACHE.hydrated = true;
+            void setCachedHomeFeedSnapshot({
+              categories: HOME_CACHE.categories,
+              publicPlaylists: HOME_CACHE.publicPlaylists,
+              featuredArtists: HOME_CACHE.featuredArtists,
+              newReleaseSongs: HOME_CACHE.newReleaseSongs,
+              recommendations: HOME_CACHE.recommendations,
+              quickPicksPool: HOME_CACHE.quickPicksPool,
+            });
+          }
         }
       } catch (error) {
         logger.error("[Home] Feed load failed:", error);
@@ -289,6 +342,7 @@ export function useHomeFeedData() {
     },
     []
   );
+
   // Wait for the network check to complete before the initial fetch.
   // On cold start, isChecking=true for 300-800ms; firing before it settles
   // causes API calls to fail silently, leaving the home screen empty.
@@ -315,7 +369,7 @@ export function useHomeFeedData() {
         logger.warn("[Home] Cold-start retry: cache still empty after initial load, retrying...");
         void loadHomeFeed(false);
       }
-    }, 1500);
+    }, 2000);
     return () => clearTimeout(t);
   }, [isChecking, isOnline, loadHomeFeed]);
 
@@ -333,6 +387,7 @@ export function useHomeFeedData() {
 
   useOnReconnect(
     useCallback(() => {
+      retryFiredRef.current = false;
       void loadHomeFeed(true);
     }, [loadHomeFeed])
   );

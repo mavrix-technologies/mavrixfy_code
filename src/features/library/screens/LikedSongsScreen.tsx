@@ -19,6 +19,7 @@ import { triggerImpact } from "@/lib/haptics";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
 import OfflineBanner from "@/components/OfflineBanner";
 import SongRow from "@/components/SongRow";
+import SongRowSkeleton from "@/components/SongRowSkeleton";
 import SearchHeaderField from "@/components/SearchHeaderField";
 import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import AppTopHeader, {
@@ -71,7 +72,7 @@ export function LikedSongsScreen() {
   const { isOnline } = useNetwork();
   const { currentSong, isShuffled } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
-  const { likedSongs } = useLikedSongs();
+  const { likedSongs, status, initialized } = useLikedSongs();
   const { playSong, shufflePlay, togglePlay } = usePlayerBrowse();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
@@ -197,6 +198,10 @@ export function LikedSongsScreen() {
     });
   }, [songs, selectedMood, searchQuery]);
 
+  // Stable ref so handleSongPress/renderSong never recreate when list changes
+  const filteredSongsRef = useRef(filteredSongs);
+  filteredSongsRef.current = filteredSongs;
+
   const isPlayingFromLikedSongs = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
     const songIds = new Set(songs.map((s) => s.id));
@@ -227,9 +232,11 @@ export function LikedSongsScreen() {
 
   const handleSongPress = useCallback(
     (song: Song) => {
-      playSong(song, filteredSongs);
+      playSong(song, filteredSongsRef.current);
     },
-    [filteredSongs, playSong]
+    // filteredSongsRef is stable — read current value at call time
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [playSong]
   );
 
   const keyExtractor = likedSongKeyExtractor;
@@ -248,7 +255,7 @@ export function LikedSongsScreen() {
       return (
         <SongRow
           song={item}
-          queue={filteredSongs}
+          queue={filteredSongsRef.current}
           queueKey="liked-songs"
           horizontalPadding={8}
           showDownload={false}
@@ -256,7 +263,9 @@ export function LikedSongsScreen() {
         />
       );
     },
-    [filteredSongs, handleSongPress]
+    // handleSongPress is stable; filteredSongsRef read at call time — no re-render on list change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handleSongPress]
   );
 
   const renderMoodChip = useCallback(
@@ -481,27 +490,33 @@ export function LikedSongsScreen() {
           </>
         }
         ListEmptyComponent={
-          <View style={styles.emptyWrap}>
-            <Ionicons name={selectedMood ? "funnel-outline" : searchQuery ? "search-outline" : "heart-outline"} size={56} color={UI.subtext} />
-            <Text style={styles.emptyTitle}>
-              {selectedMood
-                ? `No ${selectedMood} songs found`
-                : searchQuery
-                  ? "No songs found"
-                  : isAuthenticated
-                    ? "No liked songs yet"
-                    : "Sign in to view liked songs"}
-            </Text>
-            <Text style={styles.emptySubtitle}>
-              {selectedMood
-                ? `None of your liked songs matched the ${selectedMood} mood.`
-                : searchQuery
-                  ? `No results for "${searchQuery}"`
-                  : isAuthenticated
-                    ? "Tap the heart on any song to save it here."
-                    : "Sign in to sync your liked songs across all your devices."}
-            </Text>
-          </View>
+          !initialized || (status === "loading" && songs.length === 0) ? (
+            <View style={{ paddingTop: 8 }}>
+              <SongRowSkeleton count={8} />
+            </View>
+          ) : (
+            <View style={styles.emptyWrap}>
+              <Ionicons name={selectedMood ? "funnel-outline" : searchQuery ? "search-outline" : "heart-outline"} size={56} color={UI.subtext} />
+              <Text style={styles.emptyTitle}>
+                {selectedMood
+                  ? `No ${selectedMood} songs found`
+                  : searchQuery
+                    ? "No songs found"
+                    : isAuthenticated
+                      ? "No liked songs yet"
+                      : "Sign in to view liked songs"}
+              </Text>
+              <Text style={styles.emptySubtitle}>
+                {selectedMood
+                  ? `None of your liked songs matched the ${selectedMood} mood.`
+                  : searchQuery
+                    ? `No results for "${searchQuery}"`
+                    : isAuthenticated
+                      ? "Tap the heart on any song to save it here."
+                      : "Sign in to sync your liked songs across all your devices."}
+              </Text>
+            </View>
+          )
         }
         style={styles.list}
         contentContainerStyle={[

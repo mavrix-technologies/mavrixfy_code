@@ -10,6 +10,7 @@ import { triggerImpact } from "@/lib/haptics";
 import { useLikedSongs } from "@/contexts/PlayerContext";
 import { type FollowedArtist } from "@/lib/followedArtists";
 import OfflineBanner from "@/components/OfflineBanner";
+import SongRowSkeleton from "@/components/SongRowSkeleton";
 import AppTopHeader, {
   APP_TOP_HEADER_HEIGHT,
   AppTopHeaderIconButton,
@@ -248,28 +249,23 @@ export function LibraryScreen() {
 
   if (isLoading && playlists.length === 0) {
     return (
-      <View
-        style={[
-          styles.container,
-          styles.loadingScreen,
-          { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 20 },
-        ]}
-      >
+      <View style={styles.container}>
         <LinearGradient
           colors={[Colors.backgroundGradientStart, Colors.background, Colors.background]}
           style={StyleSheet.absoluteFillObject}
         />
         <AppTopHeader
           topInset={topInset}
-          elevated={isHeaderElevated}
+          elevated={false}
           title="Your Library"
           left={<AppTopHeaderProfileButton />}
           leftWidth={88}
           rightWidth={88}
           right={headerActions}
         />
-        <ActivityIndicator size="large" color={Colors.primary} />
-        <Text style={styles.loadingText}>Loading your library…</Text>
+        <View style={[styles.listContent, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 16, paddingHorizontal: 16 }]}>
+          <SongRowSkeleton count={6} />
+        </View>
       </View>
     );
   }

@@ -1,4 +1,5 @@
 import { createContext, use } from "react";
+import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
 import type {
   PlayerContextValue,
   PlayerLiteContextValue,
@@ -18,15 +19,20 @@ export const PlayerBrowseContext = createContext<PlayerBrowseContextValue | null
 export const PlayerQueueContext = createContext<PlayerQueueContextValue | null>(null);
 export const PlayerLikedContext = createContext<PlayerLikedContextValue | null>(null);
 export const PlayerActionsContext = createContext<PlayerActionsContextValue | null>(null);
+export const PlayerRowActionsContext = createContext<{
+  playSong: (song: any, queue?: any[]) => Promise<void> | void;
+  toggleLike: (song: any) => Promise<void>;
+  isLiked: (songId: string) => boolean;
+  addToQueue: (song: any) => void;
+  playNext: (song: any) => void;
+} | null>(null);
 
 export function usePlayerProgress() {
-  const ctx = use(PlayerProgressContext);
-  if (!ctx) throw new Error("usePlayerProgress must be used within PlayerProvider");
-  return ctx;
+  return usePlaybackProgressStore();
 }
 
 export function useOptionalPlayerProgress() {
-  return use(PlayerProgressContext);
+  return usePlaybackProgressStore();
 }
 
 export function usePlayerActions() {
@@ -39,11 +45,7 @@ export function useOptionalPlayerActions() {
   return use(PlayerActionsContext);
 }
 
-export function useLikedSongs() {
-  const ctx = use(PlayerLikedContext);
-  if (!ctx) throw new Error("useLikedSongs must be used within PlayerProvider");
-  return ctx;
-}
+export { useLikedSongs } from "@/features/liked-songs";
 
 export function usePlayerRow() {
   const ctx = use(PlayerRowContext);
@@ -51,8 +53,19 @@ export function usePlayerRow() {
   return ctx;
 }
 
+/** Stable row action callbacks that do NOT re-render on active song or play-state changes */
 export function usePlayerRowActions() {
-  return usePlayerRow();
+  const rowActions = use(PlayerRowActionsContext);
+  if (rowActions) return rowActions;
+  const actions = use(PlayerActionsContext);
+  const row = use(PlayerRowContext);
+  return actions || row || {
+    playSong: () => {},
+    toggleLike: async () => {},
+    isLiked: () => false,
+    addToQueue: () => {},
+    playNext: () => {},
+  };
 }
 
 export function usePlayerBrowse() {
@@ -60,3 +73,4 @@ export function usePlayerBrowse() {
   if (!ctx) throw new Error("usePlayerBrowse must be used within PlayerProvider");
   return ctx;
 }
+

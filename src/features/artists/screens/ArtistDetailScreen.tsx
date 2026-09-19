@@ -455,18 +455,22 @@ function useArtistScreenView() {
 
   const songsQueueKey = useMemo(() => songs.map((song) => song.id).join("|"), [songs]);
 
+  const songsRef = useRef(songs);
+  songsRef.current = songs;
+
   const renderSongRow = useCallback(
     ({ item, index }: { item: Song; index: number }) => (
       <SongRow
         key={item.id}
         song={item}
         index={index}
-        queue={songs}
+        queue={songsRef.current}
         queueKey={songsQueueKey}
         showDownload={false}
       />
     ),
-    [songs, songsQueueKey]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [songsQueueKey]
   );
 
   const getItemLayout = useCallback(

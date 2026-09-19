@@ -19,6 +19,7 @@ import React, {
   useRef,
   type ReactNode,
 } from "react";
+import { Platform } from "react-native";
 import * as Network from "expo-network";
 
 interface NetworkContextValue {
@@ -40,7 +41,12 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const check = useCallback(async () => {
     try {
       const state = await Network.getNetworkStateAsync();
-      const online = state.isConnected === true && state.isInternetReachable !== false;
+      // On Android cold boot, isConnected is true while isInternetReachable may take
+      // 500-1500ms to resolve (captive portal probe). If connected, treat as online
+      // on initial check to prevent false offline screens during fresh install/launch.
+      const online =
+        state.isConnected === true &&
+        (state.isInternetReachable !== false || Platform.OS === "android");
       setIsOnline(online);
     } catch {
       setIsOnline(true);

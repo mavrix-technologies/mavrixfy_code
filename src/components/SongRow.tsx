@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useRef } from "react";
+import React, { memo, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -6,16 +6,12 @@ import {
   StyleSheet,
   Platform,
 } from "react-native";
-import ReanimatedSwipeable, {
-  type SwipeableMethods,
-} from "react-native-gesture-handler/ReanimatedSwipeable";
-
-const Swipeable: any = ReanimatedSwipeable;
 import Animated, {
   useAnimatedStyle,
-  interpolate,
-  Extrapolation,
-  type SharedValue,
+  interpolateColor,
+  useSharedValue,
+  withTiming,
+  Easing,
 } from "react-native-reanimated";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -30,15 +26,15 @@ import EqualizerBars from "@/components/EqualizerBars";
 import DownloadButton from "@/components/DownloadButton";
 import { logger } from "@/lib/logger";
 
+const AnimatedText = Animated.createAnimatedComponent(Text);
+
 interface Props {
   song: Song;
   index?: number;
   queue?: Song[];
   queueKey?: string;
   showCover?: boolean;
-  /** Show the download button. Defaults to true. */
   showDownload?: boolean;
-  /** Show subtle bottom separator divider line. Defaults to true. */
   showDivider?: boolean;
   optionContext?: "playlist";
   playlistId?: string;
@@ -50,11 +46,7 @@ interface Props {
   showSearchSourceMeta?: boolean;
 }
 
-const SWIPE_ACTION_WIDTH = 92;
-const SWIPE_COMMIT_DISTANCE = 68;
 const ROW_ARTWORK_SIZE = 96;
-const OPTION_OPEN_LOCK_MS = 650;
-const SWIPE_RESET_DELAY_MS = 80;
 
 function getSongRowCoverUrl(url: string | undefined): string {
   if (!url) return "";
@@ -77,52 +69,6 @@ function getSongRowCoverUrl(url: string | undefined): string {
   return url;
 }
 
-function QueueSwipeAction({
-  dragX,
-}: {
-  dragX: SharedValue<number>;
-}) {
-  const animatedContainerStyle = useAnimatedStyle(() => {
-    const distance = Math.abs(dragX.value);
-    const opacity = interpolate(
-      distance,
-      [0, 20, SWIPE_COMMIT_DISTANCE],
-      [0.2, 0.7, 1],
-      Extrapolation.CLAMP
-    );
-    return { opacity };
-  });
-
-  const animatedIconStyle = useAnimatedStyle(() => {
-    const distance = Math.abs(dragX.value);
-    const scale = interpolate(
-      distance,
-      [0, SWIPE_COMMIT_DISTANCE * 0.5, SWIPE_COMMIT_DISTANCE],
-      [0.65, 0.9, 1.06],
-      Extrapolation.CLAMP
-    );
-    const opacity = interpolate(
-      distance,
-      [0, 15, SWIPE_COMMIT_DISTANCE * 0.7],
-      [0, 0.6, 1],
-      Extrapolation.CLAMP
-    );
-    return {
-      opacity,
-      transform: [{ scale }],
-    };
-  });
-
-  return (
-    <Animated.View style={[styles.queueActionWrapper, animatedContainerStyle]}>
-      <Animated.View style={animatedIconStyle}>
-        <Ionicons name="list" size={24} color="#FFFFFF" />
-      </Animated.View>
-    </Animated.View>
-  );
-}
-
-// react-doctor-disable-next-line react-doctor/no-giant-component
 const SongRow = memo(function SongRow({
   song,
   index: _index,
@@ -140,91 +86,24 @@ const SongRow = memo(function SongRow({
   horizontalPadding,
   showSearchSourceMeta = false,
 }: Props) {
-  const { playSong, addToQueue } = usePlayerRowActions();
+  const { playSong } = usePlayerRowActions();
   const { isActive, isPlaying } = usePlaybackRowState(song?.id);
-  const queueCommittedRef = useRef(false);
-  const didSwipeRef = useRef(false);
-  const swipeableRef = useRef<SwipeableMethods | null>(null);
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const optionOpenLockRef = useRef(false);
-  const optionOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const clearPendingTimers = useCallback(() => {
-    if (resetTimerRef.current) {
-      clearTimeout(resetTimerRef.current);
-      resetTimerRef.current = null;
-    }
-    if (optionOpenTimerRef.current) {
-      clearTimeout(optionOpenTimerRef.current);
-      optionOpenTimerRef.current = null;
-    }
-  }, []);
-
-  // Close swipeable on unmount — prevents stuck-open state when navigating back
+  // Smooth cross-fade when active song changes — runs 100% on UI thread
+  const activeAnim = useSharedValue(isActive ? 1 : 0);
   useEffect(() => {
-    const swipeable = swipeableRef.current;
-    return () => {
-      clearPendingTimers();
-      swipeable?.close();
-    };
-  }, [clearPendingTimers]);
+    activeAnim.value = withTiming(isActive ? 1 : 0, {
+      duration: 150,
+      easing: Easing.inOut(Easing.quad),
+    });
+  }, [isActive, activeAnim]);
 
-  const resetSwipeStateSoon = useCallback(() => {
-    if (resetTimerRef.current) {
-      clearTimeout(resetTimerRef.current);
-    }
-    resetTimerRef.current = setTimeout(() => {
-      didSwipeRef.current = false;
-      queueCommittedRef.current = false;
-      resetTimerRef.current = null;
-    }, SWIPE_RESET_DELAY_MS);
-  }, []);
-
-  const handleSwipeAddToQueue = useCallback(() => {
-    if (queueCommittedRef.current || onRemove) return;
-    queueCommittedRef.current = true;
-    didSwipeRef.current = true;
-    void triggerImpact(ImpactFeedbackStyle.Medium);
-    addToQueue(song);
-    swipeableRef.current?.close();
-    resetSwipeStateSoon();
-  }, [addToQueue, onRemove, resetSwipeStateSoon, song]);
-
-  const handleSwipeOpen = useCallback(() => {
-    handleSwipeAddToQueue();
-  }, [handleSwipeAddToQueue]);
-
-  const handleSwipeClose = useCallback(() => {
-    queueCommittedRef.current = false;
-    resetSwipeStateSoon();
-  }, [resetSwipeStateSoon]);
-
-  const renderRightActions = useCallback(
-    (
-      _progress: SharedValue<number>,
-      dragX: SharedValue<number>
-    ) => <QueueSwipeAction dragX={dragX} />,
-    []
-  );
+  const titleAnimStyle = useAnimatedStyle(() => ({
+    color: interpolateColor(activeAnim.value, [0, 1], ["#FFFFFF", Colors.primary]),
+  }));
 
   const openSongOptions = useCallback(() => {
-    if (optionOpenLockRef.current) return;
-
-    optionOpenLockRef.current = true;
-    didSwipeRef.current = false;
-    queueCommittedRef.current = false;
-    swipeableRef.current?.close();
-
-    if (resetTimerRef.current) {
-      clearTimeout(resetTimerRef.current);
-      resetTimerRef.current = null;
-    }
-    if (optionOpenTimerRef.current) {
-      clearTimeout(optionOpenTimerRef.current);
-    }
-
     const canRemoveFromPlaylist = optionContext === "playlist" && Boolean(playlistId);
-
     try {
       router.push({
         pathname: "/song-options",
@@ -252,11 +131,6 @@ const SongRow = memo(function SongRow({
     } catch (error) {
       logger.error("[SongRow] Failed to open song options:", error);
     }
-
-    optionOpenTimerRef.current = setTimeout(() => {
-      optionOpenLockRef.current = false;
-      optionOpenTimerRef.current = null;
-    }, OPTION_OPEN_LOCK_MS);
   }, [
     onRemove,
     optionContext,
@@ -268,27 +142,23 @@ const SongRow = memo(function SongRow({
   ]);
 
   const handlePress = useCallback(() => {
-    if (didSwipeRef.current) return;
+    // Immediate native-feeling haptic feedback.
+    void triggerImpact(ImpactFeedbackStyle.Light);
+
+    // One simple playback action.
+    // PlaybackEngine remains the single source of truth.
     if (onSongPress) {
       onSongPress(song);
-    } else {
-      playSong(song, queue || [song]);
+      return;
     }
-  }, [onSongPress, playSong, queue, song]);
 
-  const handleLongPress = useCallback(() => {
-    void triggerImpact(ImpactFeedbackStyle.Medium);
-    openSongOptions();
-  }, [openSongOptions]);
+    void playSong(song, queue ?? [song]);
+  }, [onSongPress, playSong, queue, song]);
 
   const handleRemove = useCallback(() => {
     void triggerImpact(ImpactFeedbackStyle.Light);
     onRemove?.();
   }, [onRemove]);
-
-  const handleMorePress = useCallback(() => {
-    openSongOptions();
-  }, [openSongOptions]);
 
   if (!song || !song.id || !song.title) return null;
 
@@ -296,151 +166,138 @@ const SongRow = memo(function SongRow({
   const rowCoverUrl = getSongRowCoverUrl(song.coverUrl);
 
   return (
-    <View style={styles.swipeWrap}>
-      <Swipeable
-        ref={swipeableRef}
-        enabled={!onRemove}
-        friction={1.6}
-        rightThreshold={SWIPE_COMMIT_DISTANCE}
-        dragOffsetFromLeftEdge={Platform.OS === "ios" ? 44 : 36}
-        activeOffsetX={[-22, 500]}
-        failOffsetY={[-14, 14]}
-        overshootRight={false}
-        overshootFriction={8}
-        renderRightActions={renderRightActions}
-        onSwipeableWillOpen={handleSwipeOpen}
-        onSwipeableOpen={handleSwipeOpen}
-        onSwipeableClose={handleSwipeClose}
-        containerStyle={styles.swipeableContainer}
-        childrenContainerStyle={styles.rowLayer}
-      >
-        <Pressable
-          android_disableSound
-          android_ripple={{
-            color: "rgba(255, 255, 255, 0.08)",
-            borderless: false,
-            foreground: true,
-          }}
-          style={({ pressed }) => [
-            styles.container,
-            isActive && styles.activeContainer,
-            horizontalPadding !== undefined && { paddingHorizontal: horizontalPadding },
-            pressed && styles.pressed,
-          ]}
-          onPress={handlePress}
-          onLongPress={handleLongPress}
-          accessibilityRole="button"
-          accessibilityLabel={`${song.title} by ${song.artist}`}
-        >
-          {showCover && rowCoverUrl && (
-            <View style={styles.coverWrapper}>
-              <Image
-                recyclingKey={`${song.id}:${rowCoverUrl}`}
-                source={{ uri: rowCoverUrl }}
-                style={styles.cover}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-                priority="normal"
-                placeholder={{ blurhash: "L5H2EC=PM+yV+^$gM_e-4Wo0WB%M" }}
-                transition={0}
-              />
-              {isActive && (
-                <View style={styles.coverActiveOverlay}>
-                  <EqualizerBars color="#FFFFFF" size={2.5} gap={2} isPlaying={isPlaying} />
-                </View>
-              )}
-            </View>
-          )}
+    <Pressable
+      android_disableSound
+      style={({ pressed }) => [
+        styles.container,
+        horizontalPadding !== undefined && { paddingHorizontal: horizontalPadding },
+        pressed && styles.pressed,
+      ]}
+      onPress={handlePress}
+      onLongPress={openSongOptions}
+      delayLongPress={500}
+      accessibilityRole="button"
+      accessibilityLabel={`${song.title} by ${song.artist}`}
+    >
+      {showCover && rowCoverUrl && (
+        <View style={styles.coverWrapper}>
+          <Image
+            recyclingKey={`${song.id}:${rowCoverUrl}`}
+            source={{ uri: rowCoverUrl }}
+            style={styles.cover}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            priority="normal"
+            placeholder={{ blurhash: "L5H2EC=PM+yV+^$gM_e-4Wo0WB%M" }}
+            transition={0}
+          />
+        </View>
+      )}
 
-          <View style={styles.info}>
-            <View style={styles.titleRow}>
-              {isActive && (!showCover || !rowCoverUrl) && (
-                <View style={styles.equalizerInline}>
-                  <EqualizerBars color="#FFFFFF" size={2.5} gap={2} isPlaying={isPlaying} />
-                </View>
-              )}
-              <Text
-                style={[styles.title, isActive && styles.activeTitle]}
-                numberOfLines={1}
-              >
-                {song.title || "Unknown Title"}
-              </Text>
-            </View>
-            <Text style={styles.artist} numberOfLines={1}>
-              {song.artist || "Unknown Artist"}
-            </Text>
-            {showYouTubeSearchMeta ? (
-              <View style={styles.sourceMetaRow}>
-                <View style={styles.sourcePill}>
-                  <Ionicons name="videocam-outline" size={13} color="#D7D7D7" />
-                </View>
-              </View>
-            ) : null}
-          </View>
-
-          {/* Remove / duration */}
-          {onRemove ? (
-            <Pressable
-              onPress={(event) => {
-                event.stopPropagation();
-                handleRemove();
-              }}
-              accessibilityRole="button"
-              accessibilityLabel={`Remove ${song.title} from playlist`}
-              style={styles.removeBtn}
-            >
-              <Ionicons name="trash" size={18} color={Colors.subtext} />
-            </Pressable>
-          ) : null}
-
-          {/* Download button */}
-          {showDownload && !onRemove ? (
-            <View
-              onTouchStart={(e) => e.stopPropagation()}
-              style={styles.downloadBtnWrapper}
-            >
-              <DownloadButton
-                song={song}
-                size={20}
-                color={Colors.subtext}
-              />
-            </View>
-          ) : null}
-
-          <Pressable
-            onPress={(event) => {
-              event.stopPropagation();
-              handleMorePress();
-            }}
-            accessibilityRole="button"
-            accessibilityLabel={`More options for ${song.title}`}
-            style={styles.moreBtn}
-          >
-            <Ionicons name="ellipsis-horizontal" size={20} color={Colors.subtext} />
-          </Pressable>
-
-          {/* Subtle separator divider line */}
-          {showDivider ? (
-            <View
-              style={[
-                styles.dividerLine,
-                {
-                  left:
-                    showCover && rowCoverUrl
-                      ? (horizontalPadding !== undefined ? horizontalPadding + 62 : 78)
-                      : (horizontalPadding !== undefined ? horizontalPadding : 18),
-                  right: horizontalPadding !== undefined ? horizontalPadding : 18,
-                },
-              ]}
+      <View style={styles.info}>
+        <View style={styles.titleRow}>
+          {isActive && (
+            <EqualizerBars
+              color={Colors.primary}
+              size={2.5}
+              gap={2}
+              isPlaying={isPlaying}
             />
-          ) : null}
+          )}
+          <AnimatedText
+            style={[styles.title, titleAnimStyle]}
+            numberOfLines={1}
+          >
+            {song.title || "Unknown Title"}
+          </AnimatedText>
+        </View>
+        <Text style={styles.artist} numberOfLines={1}>
+          {song.artist || "Unknown Artist"}
+        </Text>
+        {showYouTubeSearchMeta ? (
+          <View style={styles.sourceMetaRow}>
+            <View style={styles.sourcePill}>
+              <Ionicons name="videocam-outline" size={13} color="#D7D7D7" />
+            </View>
+          </View>
+        ) : null}
+      </View>
+
+      {/* Remove button */}
+      {onRemove ? (
+        <Pressable
+          hitSlop={8}
+          android_ripple={{
+            color: "rgba(255, 255, 255, 0.12)",
+            borderless: true,
+            radius: 22,
+          }}
+          onPress={(event) => {
+            event.stopPropagation();
+            handleRemove();
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={`Remove ${song.title} from playlist`}
+          style={({ pressed }) => [
+            styles.removeBtn,
+            Platform.OS !== "android" && pressed && styles.pressedIconBtn,
+          ]}
+        >
+          <Ionicons name="trash" size={18} color={Colors.subtext} />
         </Pressable>
-      </Swipeable>
-    </View>
+      ) : null}
+
+      {/* Download button */}
+      {showDownload && !onRemove ? (
+        <View
+          onTouchStart={(e) => e.stopPropagation()}
+          style={styles.downloadBtnWrapper}
+        >
+          <DownloadButton
+            song={song}
+            size={20}
+            color={Colors.subtext}
+          />
+        </View>
+      ) : null}
+
+      {/* More options button */}
+      <Pressable
+        hitSlop={8}
+        android_ripple={{
+          color: "rgba(255, 255, 255, 0.12)",
+          borderless: true,
+          radius: 22,
+        }}
+        onPress={(event) => {
+          event.stopPropagation();
+          openSongOptions();
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`More options for ${song.title}`}
+        style={({ pressed }) => [
+          styles.moreBtn,
+          Platform.OS !== "android" && pressed && styles.pressedIconBtn,
+        ]}
+      >
+        <Ionicons name="ellipsis-horizontal" size={20} color={Colors.subtext} />
+      </Pressable>
+
+      {/* Subtle separator divider line */}
+      {showDivider && !isActive ? (
+        <View
+          style={[
+            styles.dividerLine,
+            {
+              left: showCover && rowCoverUrl ? 68 : 12,
+              right: 12,
+            },
+          ]}
+        />
+      ) : null}
+    </Pressable>
   );
 }, (prevProps, nextProps) => {
-  // Optimized comparison - skip queue array comparison for better performance
-  // Queue changes are detected via queueKey instead
   return (
     prevProps.song.id === nextProps.song.id &&
     prevProps.song.title === nextProps.song.title &&
@@ -465,37 +322,20 @@ const SongRow = memo(function SongRow({
 export default SongRow;
 
 const styles = StyleSheet.create({
-  swipeWrap: {
-    position: "relative",
-    width: "100%",
-    backgroundColor: "transparent",
-  },
-  rowLayer: {
-    width: "100%",
-  },
-  swipeableContainer: {
-    width: "100%",
-    overflow: "hidden",
-    backgroundColor: "transparent",
-  },
-  queueActionWrapper: {
-    width: SWIPE_ACTION_WIDTH,
-    height: "100%",
-    backgroundColor: Colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   container: {
     flexDirection: "row",
     alignItems: "center",
-    height: 68,
-    paddingVertical: 10,
-    paddingHorizontal: 18,
+    height: 64,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     width: "100%",
     backgroundColor: "transparent",
   },
   pressed: {
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    opacity: 0.72,
+  },
+  pressedIconBtn: {
+    opacity: 0.6,
   },
   titleRow: {
     flexDirection: "row",
@@ -503,15 +343,6 @@ const styles = StyleSheet.create({
     gap: 6,
     flexShrink: 1,
     minWidth: 0,
-  },
-  equalizerInline: {
-    flexShrink: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 1,
-  },
-  activeContainer: {
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
   },
   coverWrapper: {
     position: "relative",
@@ -526,12 +357,6 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 6,
   },
-  coverActiveOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.48)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   info: {
     flex: 1,
     minWidth: 0,
@@ -541,10 +366,6 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 15,
     fontFamily: "Inter_500Medium",
-  },
-  activeTitle: {
-    color: "#FFFFFF",
-    fontFamily: "Inter_700Bold",
   },
   artist: {
     color: Colors.subtext,
@@ -595,4 +416,3 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.10)",
   },
 });
-

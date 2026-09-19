@@ -285,6 +285,17 @@ export function useAudioPlaybackValues(props: UseAudioPlaybackValuesProps) {
     [currentSong?.id, resolvedIsPlaying, playSong, toggleLike, isLiked, addToQueue, playNext]
   );
 
+  const rowActionsValue = useMemo(
+    () => ({
+      playSong,
+      toggleLike,
+      isLiked,
+      addToQueue,
+      playNext,
+    }),
+    [playSong, toggleLike, isLiked, addToQueue, playNext]
+  );
+
   const browseValue = useMemo<PlayerBrowseContextValue>(
     () => ({
       currentSong,
@@ -412,6 +423,7 @@ export function useAudioPlaybackValues(props: UseAudioPlaybackValuesProps) {
     liteValue,
     progressValue,
     rowValue,
+    rowActionsValue,
     browseValue,
     queueValue,
     actionsValue,

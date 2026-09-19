@@ -1,4 +1,6 @@
 import type { Song } from "@/lib/musicData";
+import { resolveAudioStreamWithQuality } from "@/lib/musicData";
+import { getLocalPlaybackUrl } from "@/lib/downloads/downloadManager";
 import * as Storage from "@/lib/storage";
 import { logger } from "@/lib/logger";
 import { toDurationSeconds } from "@/utils/timeFormatters";
@@ -129,17 +131,34 @@ export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?:
   };
 }
 
+let cachedQualityPreference: {
+  requested: "low" | "medium" | "high";
+  effective: "low" | "medium" | "high";
+  unlocked: boolean;
+  cachedAt: number;
+} | null = null;
+
+export function invalidateQualityPreferenceCache(): void {
+  cachedQualityPreference = null;
+}
+
 export async function getRequestedQualityPreference(): Promise<{
   requested: "low" | "medium" | "high";
   effective: "low" | "medium" | "high";
   unlocked: boolean;
 }> {
+  const now = Date.now();
+  if (cachedQualityPreference && now - cachedQualityPreference.cachedAt < 30000) {
+    return cachedQualityPreference;
+  }
+
   try {
     const settings = await Storage.getSettings();
     const unlocked = Storage.isHighQualityEntitled(settings);
     const requested = settings.streamingQuality || "medium";
     const effective = Storage.getEffectiveStreamingQuality(settings);
-    return { requested, effective, unlocked };
+    cachedQualityPreference = { requested, effective, unlocked, cachedAt: now };
+    return cachedQualityPreference;
   } catch (e) {
     logger.error("[Player] Failed to determine streaming quality preference", e);
     return { requested: "medium", effective: "medium", unlocked: false };
@@ -164,7 +183,6 @@ export async function resolvePlaybackUrlWithDetails(
 
   try {
     // 1. Local downloaded file
-    const { getLocalPlaybackUrl } = await import("@/lib/downloads/downloadManager");
     const local = await getLocalPlaybackUrl(song.id);
     if (local) {
       const url = local.startsWith("file://") || local.startsWith("http") ? local : `file://${local}`;
@@ -186,7 +204,6 @@ export async function resolvePlaybackUrlWithDetails(
   // 2. JioSaavn / Catalogue Songs -> Quality ladder selection
   if (song.downloadUrl) {
     try {
-      const { resolveAudioStreamWithQuality } = await import("@/lib/musicData");
       const stream = resolveAudioStreamWithQuality(song.downloadUrl, targetQuality);
       if (stream?.url) {
         const playableUrl = readAudioCandidate(stream.url);

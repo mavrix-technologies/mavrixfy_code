@@ -6,6 +6,7 @@ import { logger } from "@/lib/logger";
 import { setupPlayer } from "./TrackPlayerAdapter";
 import { useStartupPlaybackReconcile } from "./audioStartupReconcile";
 import { useAudioNativeQueueLane } from "./audioNativeQueueLane";
+import { resolvePlaybackUrlWithDetails } from "./PlayerPlaybackResolver";
 
 export interface UsePlayerCoreStateOptions {
   TrackPlayer: any;
@@ -19,6 +20,7 @@ export function usePlayerCoreState({
   RepeatMode,
 }: UsePlayerCoreStateOptions) {
   const [isPlayerReady, setIsPlayerReady] = useState(false);
+  const isNativeQueueSyncedRef = useRef(false);
 
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [queue, setQueue] = useState<Song[]>([]);
@@ -131,8 +133,7 @@ export function usePlayerCoreState({
       const pending = streamResolveCache.current.get(song.id);
       if (pending && !forcedQuality) return pending;
 
-      const { resolvePlaybackUrlWithDetails: resolveWithDetails } = await import("@/services/audio/PlayerPlaybackResolver");
-      const request = resolveWithDetails(song, forcedQuality)
+      const request = resolvePlaybackUrlWithDetails(song, forcedQuality)
         .then(({ url, qualityState }) => {
           if (url) {
             setStreamCache(song.id, url);
@@ -192,6 +193,7 @@ export function usePlayerCoreState({
     repeatModeRef,
     streamUrlCache,
     resolvePlaybackUrlCached,
+    isNativeQueueSyncedRef,
   });
 
   return {
@@ -247,5 +249,6 @@ export function usePlayerCoreState({
     enqueueNativeQueueMutation,
     nativeQueueIdsMatch,
     replaceNativeQueuePreservingState,
+    isNativeQueueSyncedRef,
   };
 }

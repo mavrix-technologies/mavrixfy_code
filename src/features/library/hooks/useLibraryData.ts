@@ -4,68 +4,25 @@ import * as Haptics from "expo-haptics";
 import * as DocumentPicker from "expo-document-picker";
 import { useAuth } from "@/contexts/AuthContext";
 import { triggerImpact } from "@/lib/haptics";
-import {
-  getUserPlaylists,
-  createUserPlaylist,
-  deleteUserPlaylist,
-} from "@/lib/storage";
-import { getUserFirestorePlaylists, createFirestorePlaylist, deleteFirestorePlaylist, updateFirestorePlaylist, type FirestorePlaylist } from "@/lib/firestore";
-import { uploadImageToCloudinary } from "@/lib/cloudinary";
-import { getFollowedArtists, FollowedArtist } from "@/lib/followedArtists";
 import { useOnReconnect } from "@/contexts/NetworkContext";
-import { sortedCopy } from "@/lib/arrayUtils";
-import { setCachedPlaylists } from "@/lib/playlistMemoryCache";
-import { DisplayPlaylist } from "../components/PlaylistListItem";
-
-type LibrarySessionCache = {
-  hydrated: boolean;
-  userId: string | null;
-  playlists: DisplayPlaylist[];
-};
-
-const LIBRARY_SESSION_CACHE: LibrarySessionCache = {
-  hydrated: false,
-  userId: null,
-  playlists: [],
-};
-
-function toMillis(value: any): number {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : Date.now();
-  }
-
-  if (value && typeof value.toMillis === "function") {
-    const millis = value.toMillis();
-    return Number.isFinite(millis) ? millis : Date.now();
-  }
-
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : Date.now();
-}
-
-async function loadLocalPlaylists(): Promise<DisplayPlaylist[]> {
-  const localPlaylists = await getUserPlaylists();
-  const formatted: DisplayPlaylist[] = localPlaylists.map(
-    (p): DisplayPlaylist => ({
-      ...p,
-      isFirestore: false,
-      coverUrl: p.coverUrl || p.songs?.[0]?.coverUrl || "",
-    })
-  );
-  return sortedCopy(formatted, (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-}
+import { useLibraryStore } from "../store/libraryStore";
+import {
+  subscribeLibrary,
+  createPlaylistOptimistic,
+  deletePlaylistOptimistic,
+  loadCachedLibrary,
+} from "../services/libraryRepository";
+import type { DisplayPlaylist } from "../components/PlaylistListItem";
 
 export function useLibraryData() {
   const { user } = useAuth();
   const activeUserId = user?.id ?? null;
-  const hasCachedPlaylists =
-    LIBRARY_SESSION_CACHE.hydrated && LIBRARY_SESSION_CACHE.userId === activeUserId;
 
-  const [playlists, setPlaylists] = useState<DisplayPlaylist[]>(
-    hasCachedPlaylists ? LIBRARY_SESSION_CACHE.playlists : []
-  );
-  const [followedArtists, setFollowedArtists] = useState<FollowedArtist[]>([]);
-  const [isLoading, setIsLoading] = useState(!hasCachedPlaylists);
+  const playlists = useLibraryStore((s) => s.playlists);
+  const followedArtists = useLibraryStore((s) => s.followedArtists);
+  const status = useLibraryStore((s) => s.status);
+  const initialized = useLibraryStore((s) => s.initialized);
+
   const [refreshing, setRefreshing] = useState(false);
 
   // Create playlist modal state
@@ -75,6 +32,14 @@ export function useLibraryData() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
+  // Subscribe to realtime sync and 0ms local cache on mount/user change
+  useEffect(() => {
+    const unsubscribe = subscribeLibrary(activeUserId);
+    return () => {
+      unsubscribe?.();
+    };
+  }, [activeUserId]);
+
   const resetCreateModal = useCallback(() => {
     setNewPlaylistName("");
     setNewPlaylistDescription("");
@@ -82,104 +47,19 @@ export function useLibraryData() {
     setShowCreateModal(false);
   }, []);
 
-  const commitPlaylists = useCallback(
-    (nextPlaylists: DisplayPlaylist[]) => {
-      LIBRARY_SESSION_CACHE.hydrated = true;
-      LIBRARY_SESSION_CACHE.userId = activeUserId;
-      LIBRARY_SESSION_CACHE.playlists = nextPlaylists;
-      setCachedPlaylists(nextPlaylists);
-      setPlaylists(nextPlaylists);
-    },
-    [activeUserId]
-  );
-
-  const loadPlaylists = useCallback(
-    async (options?: { silent?: boolean }) => {
-      const silent = options?.silent ?? false;
-      if (!silent) {
-        setIsLoading(true);
-      }
-
-      try {
-        const formattedLocalPlaylists = await loadLocalPlaylists();
-
-        if (!activeUserId) {
-          commitPlaylists(formattedLocalPlaylists);
-          return;
-        }
-
-        const firestorePlaylists = await getUserFirestorePlaylists(activeUserId);
-        const formattedFirestorePlaylists: DisplayPlaylist[] = firestorePlaylists.map(
-          (p: FirestorePlaylist): DisplayPlaylist => ({
-            id: p.id,
-            name: p.name,
-            description: p.description || "",
-            coverUrl: p.imageUrl || p.songs?.[0]?.imageUrl || "",
-            songs: (p.songs || []).map((fs: any) => ({
-              id: fs.id,
-              title: fs.title,
-              artist: fs.artist,
-              coverUrl: fs.imageUrl,
-              audioUrl: fs.audioUrl,
-              duration: fs.duration,
-              album: "",
-              genre: "",
-            })),
-            createdAt: toMillis(p.createdAt),
-            updatedAt: toMillis(p.updatedAt),
-            isFirestore: true,
-          })
-        );
-
-        const firestoreIds = new Set(firestorePlaylists.map((fp: FirestorePlaylist) => fp.id));
-        const localOnlyPlaylists = formattedLocalPlaylists.filter((p) => !firestoreIds.has(p.id));
-
-        const merged = sortedCopy(
-          formattedFirestorePlaylists.concat(localOnlyPlaylists),
-          (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
-        );
-        commitPlaylists(merged);
-      } catch {
-        const formattedLocalPlaylists = await loadLocalPlaylists();
-        commitPlaylists(formattedLocalPlaylists);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [activeUserId, commitPlaylists]
-  );
-
-  useEffect(() => {
-    const cacheMatches =
-      LIBRARY_SESSION_CACHE.hydrated && LIBRARY_SESSION_CACHE.userId === activeUserId;
-    if (cacheMatches) {
-      setPlaylists(LIBRARY_SESSION_CACHE.playlists);
-      setIsLoading(false);
-      return;
-    }
-    void loadPlaylists();
-  }, [activeUserId, loadPlaylists]);
-
-  useEffect(() => {
-    void getFollowedArtists().then(setFollowedArtists);
-  }, []);
-
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([
-        loadPlaylists({ silent: true }),
-        getFollowedArtists().then(setFollowedArtists),
-      ]);
+      subscribeLibrary(activeUserId);
     } finally {
-      setRefreshing(false);
+      setTimeout(() => setRefreshing(false), 400);
     }
-  }, [loadPlaylists]);
+  }, [activeUserId]);
 
   useOnReconnect(
     useCallback(() => {
-      void loadPlaylists({ silent: true });
-    }, [loadPlaylists])
+      subscribeLibrary(activeUserId);
+    }, [activeUserId])
   );
 
   const handleSelectImage = useCallback(async () => {
@@ -215,38 +95,18 @@ export function useLibraryData() {
 
     try {
       setIsUploadingImage(true);
-      const imageUrl = await uploadImageToCloudinary(selectedImage);
+      void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
 
-      if (!imageUrl) {
-        Alert.alert("Error", "Failed to upload image. Please try again.");
-        return;
-      }
-
-      if (user && user.id) {
-        const newPlaylist = await createFirestorePlaylist(
-          user.id,
-          user.name || "Unknown User",
-          name,
-          newPlaylistDescription || ""
-        );
-
-        if (newPlaylist) {
-          await updateFirestorePlaylist(newPlaylist.id, { imageUrl });
-          await createUserPlaylist(name, newPlaylistDescription);
-        }
-      } else {
-        await createUserPlaylist(name, newPlaylistDescription);
-      }
+      // Optimistic creation: added to store and persistent cache at 0ms
+      void createPlaylistOptimistic(name, newPlaylistDescription, selectedImage, user);
 
       resetCreateModal();
-      await loadPlaylists({ silent: true });
-      Alert.alert("Success", "Playlist created successfully!");
     } catch {
       Alert.alert("Error", "Failed to create playlist. Please try again.");
     } finally {
       setIsUploadingImage(false);
     }
-  }, [newPlaylistName, selectedImage, user, newPlaylistDescription, resetCreateModal, loadPlaylists]);
+  }, [newPlaylistName, selectedImage, user, newPlaylistDescription, resetCreateModal]);
 
   const handleDeletePlaylist = useCallback(
     (playlist: DisplayPlaylist) => {
@@ -256,23 +116,17 @@ export function useLibraryData() {
         {
           text: "Delete",
           style: "destructive",
-          onPress: async () => {
-            try {
-              if (playlist.isFirestore) {
-                await deleteFirestorePlaylist(playlist.id);
-              } else {
-                await deleteUserPlaylist(playlist.id);
-              }
-              await loadPlaylists({ silent: true });
-            } catch {
-              Alert.alert("Error", "Failed to delete playlist");
-            }
+          onPress: () => {
+            // Optimistic deletion: removed from store and cache at 0ms
+            void deletePlaylistOptimistic(playlist, activeUserId);
           },
         },
       ]);
     },
-    [loadPlaylists]
+    [activeUserId]
   );
+
+  const isLoading = !initialized && playlists.length === 0;
 
   return {
     playlists,

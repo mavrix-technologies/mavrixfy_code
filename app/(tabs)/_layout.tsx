@@ -7,8 +7,9 @@ import {
   AppNavBar,
   AuthRouteFallback,
   IOSNativeTabLayout,
-  IOSMiniPlayerOverlay,
 } from "@/features/navigation/layoutView";
+
+import { IS_IOS } from "@/constants/platform";
 
 export { AppNavBar } from "@/features/navigation/layoutView";
 
@@ -26,27 +27,21 @@ export default function TabLayout() {
     return <Redirect href="/login" />;
   }
 
-  // NativeTabs only work correctly when distributed via App Store or TestFlight.
-  // Sideloaded / unsigned IPAs run with __DEV__ = false but lack the required
-  // entitlements, causing an immediate crash. Disable NativeTabs entirely until
-  // the app is properly signed and distributed through Apple channels.
-  const isProductionBuild = false; // TODO: re-enable when distributing via App Store
-
-  if (isProductionBuild) {
+  // iOS-only: Apple UITabBarController with Liquid Glass pill
+  if (IS_IOS) {
     return (
       <View style={{ flex: 1, backgroundColor: Colors.background }}>
-        <IOSNativeTabLayout />
-        {!shouldHideTabBar ? <IOSMiniPlayerOverlay /> : null}
+        <IOSNativeTabLayout hidden={shouldHideTabBar} />
       </View>
     );
   }
 
+  // Android + Web: custom JS tab bar with AppNavBar
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <Tabs
         screenOptions={{
           headerShown: false,
-          lazy: true,
           animation: "none",
           sceneStyle: { backgroundColor: Colors.background },
         }}
@@ -57,8 +52,10 @@ export default function TabLayout() {
         <Tabs.Screen name="library" options={{ title: "Library" }} />
         <Tabs.Screen name="liked-songs" options={{ title: "Liked" }} />
         <Tabs.Screen name="import-songs" options={{ title: "Import" }} />
+        <Tabs.Screen name="create" options={{ href: null }} />
       </Tabs>
       <AppNavBar hidden={shouldHideTabBar} />
     </View>
   );
 }
+

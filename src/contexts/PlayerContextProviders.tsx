@@ -5,6 +5,7 @@ import {
   PlayerLiteContext,
   PlayerProgressContext,
   PlayerRowContext,
+  PlayerRowActionsContext,
   PlayerBrowseContext,
   PlayerQueueContext,
   PlayerLikedContext,
@@ -22,6 +23,7 @@ export function PlayerContextTree({ playbackValues, children }: PlayerContextTre
     liteValue,
     progressValue,
     rowValue,
+    rowActionsValue,
     browseValue,
     queueValue,
     actionsValue,
@@ -36,9 +38,11 @@ export function PlayerContextTree({ playbackValues, children }: PlayerContextTre
             <PlayerLikedContext.Provider value={likedValue}>
               <PlayerBrowseContext.Provider value={browseValue}>
                 <PlayerQueueContext.Provider value={queueValue}>
-                  <PlayerRowContext.Provider value={rowValue}>
-                    {children}
-                  </PlayerRowContext.Provider>
+                  <PlayerRowActionsContext.Provider value={rowActionsValue}>
+                    <PlayerRowContext.Provider value={rowValue}>
+                      {children}
+                    </PlayerRowContext.Provider>
+                  </PlayerRowActionsContext.Provider>
                 </PlayerQueueContext.Provider>
               </PlayerBrowseContext.Provider>
             </PlayerLikedContext.Provider>

@@ -105,11 +105,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const {
     positionSecondsRef,
-    resolvedDuration,
-    resolvedDurationMillis,
-    resolvedPositionSeconds,
-    resolvedProgress,
-    resolvedPositionMillis,
+    durationSecondsRef,
     setSeekOverride,
     setNativePosition,
     setNativeDuration,
@@ -148,9 +144,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     desiredPlayStateRef: core.desiredPlayStateRef,
     playRequestIdRef: core.playRequestIdRef,
     positionSecondsRef,
+    durationSecondsRef,
+    isNativeQueueSyncedRef: core.isNativeQueueSyncedRef,
     setSeekOverride,
     setNativePosition,
-    resolvedDuration,
     streamUrlCache: core.streamUrlCache,
     resolvePlaybackUrlCached: core.resolvePlaybackUrlCached,
     prefetchAdjacentTrackStreams: core.prefetchAdjacentTrackStreams,
@@ -281,6 +278,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     likedSongs,
     likedSongsRef,
     playSong,
+    isNativeQueueSyncedRef: core.isNativeQueueSyncedRef,
   });
 
   const playbackValues = useAudioPlaybackValues({
@@ -290,9 +288,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     sourceQueue: core.sourceQueue,
     queueIndex: core.queueIndex,
     resolvedIsPlaying: core.isPlaying,
-    resolvedProgress,
-    resolvedDurationMillis,
-    resolvedPositionMillis,
+    resolvedProgress: 0,
+    resolvedDurationMillis: 0,
+    resolvedPositionMillis: 0,
     isShuffled: core.isShuffled,
     repeatMode: core.repeatMode,
     likedSongIds,

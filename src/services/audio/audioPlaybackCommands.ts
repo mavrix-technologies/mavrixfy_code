@@ -4,8 +4,9 @@ import { logger } from "@/lib/logger";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
-import { songToTrack, withResolvedPlaybackUrl } from "@/services/audio/PlayerPlaybackResolver";
+import { songToTrack, withResolvedPlaybackUrl, resolveAudioUrl } from "@/services/audio/PlayerPlaybackResolver";
 import { isSameQueueContent } from "@/services/audio/audioNativeQueueLane";
+import { toDurationSeconds } from "@/utils/timeFormatters";
 
 interface UseAudioPlaybackCommandsOptions {
   currentSongRef: MutableRefObject<Song | null>;
@@ -27,9 +28,10 @@ interface UseAudioPlaybackCommandsOptions {
   desiredPlayStateRef: MutableRefObject<boolean | null>;
   playRequestIdRef: MutableRefObject<number>;
   positionSecondsRef: MutableRefObject<number>;
+  durationSecondsRef?: MutableRefObject<number>;
+  isNativeQueueSyncedRef?: MutableRefObject<boolean>;
   setSeekOverride: (override: any) => void;
   setNativePosition: (pos: number) => void;
-  resolvedDuration: number;
   streamUrlCache: MutableRefObject<Map<string, string>>;
   resolvePlaybackUrlCached: (song: Song) => Promise<string | null>;
   prefetchAdjacentTrackStreams: (queue: Song[], index: number) => void;
@@ -68,9 +70,10 @@ export function useAudioPlaybackCommands({
   desiredPlayStateRef,
   playRequestIdRef,
   positionSecondsRef,
+  durationSecondsRef,
+  isNativeQueueSyncedRef,
   setSeekOverride,
   setNativePosition,
-  resolvedDuration,
   streamUrlCache,
   resolvePlaybackUrlCached,
   prefetchAdjacentTrackStreams,
@@ -108,9 +111,10 @@ export function useAudioPlaybackCommands({
           ? queueRef.current
           : [song];
 
-      const targetIndex = Math.max(0, q.findIndex((s) => s.id === song.id));
+      const targetIndex = songIndexInQueue >= 0 ? songIndexInQueue : Math.max(0, q.findIndex((s) => s.id === song.id));
       const targetSong = q[targetIndex] || song;
 
+      // 1. Instant local UI feedback
       setCurrentSong(targetSong);
       currentSongRef.current = targetSong;
       setQueue(q);
@@ -125,6 +129,7 @@ export function useAudioPlaybackCommands({
       if (isNewQueue) {
         setUserQueuedSongIds([]);
         userQueuedSongIdsRef.current = [];
+        if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
       } else {
         const prevIds = userQueuedSongIdsRef.current;
         if (prevIds.includes(targetSong.id)) {
@@ -135,6 +140,8 @@ export function useAudioPlaybackCommands({
       }
 
       desiredPlayStateRef.current = true;
+      setIsPlaying(true);
+      isPlayingRef.current = true;
       setPlaybackLoading(true);
       setSeekOverride(null);
       setNativePosition(0);
@@ -146,10 +153,12 @@ export function useAudioPlaybackCommands({
         userQueuedSongIds: isNewQueue ? [] : userQueuedSongIdsRef.current,
         queueIndex: targetIndex,
         desiredPlayState: true,
+        isPlaying: true,
         isLoading: true,
         isBuffering: false,
       });
 
+      // 2. Offload persistence completely off the critical tap path
       setTimeout(() => {
         playerPersistenceService.addRecentlyPlayed(targetSong).catch(() => {});
         playerPersistenceService.savePlayerState({
@@ -159,7 +168,7 @@ export function useAudioPlaybackCommands({
           positionSeconds: 0,
           updatedAt: Date.now(),
         }).catch(() => {});
-      }, 150);
+      }, 800);
 
       try {
         const audioUrl = await resolvePlaybackUrlCached(targetSong);
@@ -192,18 +201,26 @@ export function useAudioPlaybackCommands({
 
             const targetTrack = songToTrack(targetSong, audioUrl, streamUrlCache.current);
 
-            try {
-              const resolvedUrls = await Promise.all(
-                q.map((queueSong, index) =>
-                  index === targetIndex ? Promise.resolve(audioUrl) : resolvePlaybackUrlCached(queueSong)
-                )
-              );
-              const nativeTracks = resolvedUrls.map((url, index) =>
-                url ? songToTrack(q[index], url, streamUrlCache.current) : null
-              );
+            // Fast path: native queue already synchronized -> skip + play directly
+            if (!isNewQueue && isNativeQueueSyncedRef?.current) {
+              try {
+                await TrackPlayer!.skip(targetIndex);
+                if (reqId !== playRequestIdRef.current) return;
+                await TrackPlayer!.play();
+                return;
+              } catch {
+                if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
+              }
+            }
 
-              // The native queue must mirror the app queue on iOS. Otherwise
-              // the Lock Screen has no next item for its Next command.
+            // Sync native queue without blocking on bulk URL scrape
+            try {
+              const nativeTracks = q.map((queueSong, index) => {
+                if (index === targetIndex) return targetTrack;
+                const cachedUrl = streamUrlCache.current.get(queueSong.id) || resolveAudioUrl(queueSong);
+                return songToTrack(queueSong, cachedUrl || null, streamUrlCache.current);
+              });
+
               if (
                 typeof TrackPlayer!.setQueue === "function" &&
                 nativeTracks.length === q.length &&
@@ -211,6 +228,7 @@ export function useAudioPlaybackCommands({
               ) {
                 await TrackPlayer!.setQueue(nativeTracks);
                 await TrackPlayer!.skip(targetIndex);
+                if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = true;
               } else if (typeof TrackPlayer!.load === "function") {
                 await TrackPlayer!.load(targetTrack);
               } else {
@@ -231,7 +249,6 @@ export function useAudioPlaybackCommands({
 
             if (reqId !== playRequestIdRef.current) return;
             await TrackPlayer!.play();
-
           });
 
           if (reqId !== playRequestIdRef.current) return;
@@ -259,6 +276,7 @@ export function useAudioPlaybackCommands({
       currentSongRef,
       enqueueNativeQueueMutation,
       ensurePlayerReady,
+      isNativeQueueSyncedRef,
       isPlayerReady,
       isPlayingRef,
       isShuffledRef,
@@ -297,10 +315,6 @@ export function useAudioPlaybackCommands({
     const nextPlayState = !isPlayingRef.current;
     desiredPlayStateRef.current = nextPlayState;
 
-    if (!nextPlayState) {
-      playRequestIdRef.current += 1;
-    }
-
     if (!currentSongRef.current) {
       if (queueRef.current.length > 0) {
         const target = queueRef.current[queueIndexRef.current] || queueRef.current[0];
@@ -315,29 +329,17 @@ export function useAudioPlaybackCommands({
     try {
       if (TrackPlayer) {
         if (nextPlayState) {
+          setIsPlaying(true);
+          isPlayingRef.current = true;
+          updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
           const ready = isPlayerReady || (await ensurePlayerReady());
-          const activeTrack = ready ? await TrackPlayer.getActiveTrack().catch(() => null) : null;
-          const playbackState = ready ? await TrackPlayer.getPlaybackState().catch(() => null) : null;
-          const rawState = (playbackState as any)?.state ?? playbackState;
-
-          const isPlayerLoaded = Boolean(
-            activeTrack?.id &&
-            (rawState === State.Playing ||
-              rawState === State.Paused ||
-              rawState === State.Ready ||
-              rawState === State.Buffering ||
-              rawState === State.Loading)
-          );
-
-          if (!isPlayerLoaded) {
-            void playSong(currentSongRef.current, queueRef.current);
-            return;
+          if (ready) {
+            await TrackPlayer.play();
           }
-
-          updatePlaybackEngineSnapshot({ desiredPlayState: true });
-          await TrackPlayer.play();
         } else {
-          updatePlaybackEngineSnapshot({ desiredPlayState: false });
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
           await TrackPlayer.pause();
         }
       } else if (canUseLightweightAudioFallback) {
@@ -365,12 +367,10 @@ export function useAudioPlaybackCommands({
     ensurePlayerReady,
     isPlayerReady,
     isPlayingRef,
-    playRequestIdRef,
     playSong,
     queueIndexRef,
     queueRef,
     setIsPlaying,
-    State,
     togglePlayInFlightRef,
     TrackPlayer,
   ]);
@@ -419,7 +419,9 @@ export function useAudioPlaybackCommands({
 
   const seekTo = useCallback(
     async (progress: number) => {
-      const durationSeconds = resolvedDuration;
+      const durationSeconds = (durationSecondsRef?.current && durationSecondsRef.current > 0)
+        ? durationSecondsRef.current
+        : toDurationSeconds(currentSongRef.current?.duration);
       if (durationSeconds <= 0) return;
 
       const seconds = Math.max(0, Math.min(durationSeconds, progress * durationSeconds));
@@ -436,7 +438,7 @@ export function useAudioPlaybackCommands({
         await ExpoAvPlayer.seekTo(seconds);
       }
     },
-    [canUseLightweightAudioFallback, currentSongRef, isPlayerReady, resolvedDuration, setNativePosition, setSeekOverride, TrackPlayer]
+    [canUseLightweightAudioFallback, currentSongRef, durationSecondsRef, isPlayerReady, setNativePosition, setSeekOverride, TrackPlayer]
   );
 
   useEffect(() => {

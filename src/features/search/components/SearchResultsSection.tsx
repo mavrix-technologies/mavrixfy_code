@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -337,17 +337,21 @@ export const SearchResultsSection = React.memo(function SearchResultsSection({
     [onFilterSelect, resultFilter]
   );
 
+  const songResultsRef = useRef(songResults);
+  songResultsRef.current = songResults;
+
   const renderSong = useCallback(
     ({ item }: { item: Song }) => (
       <SongRow
         song={item}
-        queue={songResults}
+        queue={songResultsRef.current}
         onSongPress={onSongPress}
         showSearchSourceMeta
         showDownload={false}
       />
     ),
-    [onSongPress, songResults]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onSongPress]
   );
 
   const renderArtistResult = useCallback(

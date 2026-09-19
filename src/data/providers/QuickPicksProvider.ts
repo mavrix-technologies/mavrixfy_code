@@ -204,20 +204,16 @@ export async function fetchQuickPicksFeed(options?: {
 
   const [
     trendingSearch,
-    trendingViralSearch,
     bollywoodSearch,
-    superhitSearch,
     latestSearch,
     trendingPlaylistSongs,
     bollywoodPlaylistSongs,
   ] = await Promise.all([
-    fetchSongsByQuery("trending hindi songs", 15, signal),
-    fetchSongsByQuery("viral hindi hits 2026", 15, signal),
-    fetchSongsByQuery(`latest bollywood hits ${CURRENT_YEAR}`, 15, signal),
-    fetchSongsByQuery("hindi superhits chartbusters", 15, signal),
-    fetchSongsByQuery(`new hindi songs ${CURRENT_YEAR}`, 15, signal),
-    extractPlaylistSongs(trendingCat, 2),
-    extractPlaylistSongs(bollywoodCat, 2),
+    fetchSongsByQuery("trending hindi songs", 20, signal),
+    fetchSongsByQuery(`latest bollywood hits ${CURRENT_YEAR}`, 20, signal),
+    fetchSongsByQuery(`new hindi songs ${CURRENT_YEAR}`, 20, signal),
+    trendingCat ? extractPlaylistSongs(trendingCat, 1) : Promise.resolve([]),
+    bollywoodCat ? extractPlaylistSongs(bollywoodCat, 1) : Promise.resolve([]),
   ]);
 
   // 4. Deduplicate and bucketize songs
@@ -244,7 +240,6 @@ export async function fetchQuickPicksFeed(options?: {
   const rawTrending = shuffleArray([
     ...trendingPlaylistSongs,
     ...trendingSearch,
-    ...trendingViralSearch,
   ]);
   const trendingPool = filterUnique(rawTrending, 18);
 
@@ -252,7 +247,6 @@ export async function fetchQuickPicksFeed(options?: {
   const rawBollywood = shuffleArray([
     ...bollywoodPlaylistSongs,
     ...bollywoodSearch,
-    ...superhitSearch,
   ]);
   const bollywoodPool = filterUnique(rawBollywood, 18);
 

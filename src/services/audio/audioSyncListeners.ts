@@ -38,6 +38,7 @@ interface UseAudioSyncListenersOptions {
   likedSongs: Song[];
   likedSongsRef: MutableRefObject<Song[]>;
   playSong: (song: Song) => Promise<void> | void;
+  isNativeQueueSyncedRef?: MutableRefObject<boolean>;
 }
 
 export function useAudioSyncListeners({
@@ -69,6 +70,7 @@ export function useAudioSyncListeners({
   likedSongs,
   likedSongsRef,
   playSong,
+  isNativeQueueSyncedRef,
 }: UseAudioSyncListenersOptions) {
   const publishedLockScreenDurationRef = useRef<{
     songId: string;
@@ -171,20 +173,57 @@ export function useAudioSyncListeners({
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
+        const currentQ = queueRef.current;
+        const currentSong = currentSongRef.current;
+
+        // 1. Identify track by ID if available from native event
+        const activeTrackId =
+          typeof event?.track?.id === "string"
+            ? event?.track?.id
+            : typeof event?.track === "string"
+            ? event?.track
+            : null;
+
+        // If native event confirms the song we already selected, do NOT overwrite or jump
+        if (activeTrackId && currentSong && activeTrackId === currentSong.id) {
+          return;
+        }
+
         const nextIndex =
           typeof event?.index === "number"
             ? event.index
             : typeof event?.nextTrack === "number"
             ? event.nextTrack
             : -1;
-        if (nextIndex < 0) return;
-        const currentQ = queueRef.current;
-        const targetSong = currentQ[nextIndex];
-        if (targetSong && targetSong.id !== currentSongRef.current?.id) {
+
+        let targetSong: Song | undefined;
+        let resolvedIndex = -1;
+
+        // Match by ID first across our queue
+        if (activeTrackId) {
+          const foundIndex = currentQ.findIndex((s) => s.id === activeTrackId);
+          if (foundIndex >= 0) {
+            targetSong = currentQ[foundIndex];
+            resolvedIndex = foundIndex;
+          }
+        }
+
+        // Only fall back to index if the native queue is confirmed 1:1 synchronized
+        if (!targetSong && isNativeQueueSyncedRef?.current && nextIndex >= 0 && nextIndex < currentQ.length) {
+          targetSong = currentQ[nextIndex];
+          resolvedIndex = nextIndex;
+        }
+
+        // If native queue is unsynced and no track ID matched, DO NOT blind-revert to queue[0]!
+        if (!targetSong) return;
+
+        if (targetSong.id !== currentSongRef.current?.id) {
           currentSongRef.current = targetSong;
           setCurrentSong(targetSong);
-          setQueueIndex(nextIndex);
-          queueIndexRef.current = nextIndex;
+          if (resolvedIndex >= 0) {
+            setQueueIndex(resolvedIndex);
+            queueIndexRef.current = resolvedIndex;
+          }
           setSeekOverride(null);
           setNativePosition(0);
           positionSecondsRef.current = 0;
@@ -192,10 +231,12 @@ export function useAudioSyncListeners({
           setNativeDuration(initialDuration > 0 ? initialDuration : 0);
           updatePlaybackEngineSnapshot({
             currentSong: targetSong,
-            queueIndex: nextIndex,
+            ...(resolvedIndex >= 0 ? { queueIndex: resolvedIndex } : {}),
           });
 
-          prefetchAdjacentTrackStreams(currentQ, nextIndex);
+          if (resolvedIndex >= 0) {
+            prefetchAdjacentTrackStreams(currentQ, resolvedIndex);
+          }
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, () => {

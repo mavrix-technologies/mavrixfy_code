@@ -54,6 +54,7 @@ import {
   type VisibleRoute,
 } from "./navTabConstants";
 import { MemoizedNavTabItem } from "./NavTabItem";
+import { LiquidGlassBackdrop } from "./LiquidGlassBackdrop";
 
 export type AppNavBarProps = {
   hidden?: boolean;
@@ -64,30 +65,19 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const { push: routerPush, navigate: routerNavigate } = useRouter();
   const pathname = usePathname();
 
-  const [activeTab, setActiveTab] = useState<VisibleRoute>(() => {
+  const activeTab = useMemo<VisibleRoute>(() => {
     if (!pathname || pathname === "/" || pathname === "/index") return "index";
     if (pathname === "/search" || pathname.startsWith("/search/")) return "search";
     if (pathname === "/library" || pathname.startsWith("/library/")) return "library";
     if (pathname === "/liked-songs" || pathname.startsWith("/liked-songs/")) return "liked-songs";
-    if (pathname === "/import-songs" || pathname.startsWith("/import-songs/") || pathname === "/import-songs-file" || pathname.startsWith("/import-songs-file")) return "import-songs";
+    if (
+      pathname === "/import-songs" ||
+      pathname.startsWith("/import-songs/") ||
+      pathname === "/import-songs-file" ||
+      pathname.startsWith("/import-songs-file")
+    )
+      return "import-songs";
     return "index";
-  });
-
-  useEffect(() => {
-    if (!pathname) return;
-    let nextTab: VisibleRoute = "index";
-    if (pathname === "/" || pathname === "/index") {
-      nextTab = "index";
-    } else if (pathname === "/search" || pathname.startsWith("/search/")) {
-      nextTab = "search";
-    } else if (pathname === "/library" || pathname.startsWith("/library/")) {
-      nextTab = "library";
-    } else if (pathname === "/liked-songs" || pathname.startsWith("/liked-songs/")) {
-      nextTab = "liked-songs";
-    } else if (pathname === "/import-songs" || pathname.startsWith("/import-songs/") || pathname === "/import-songs-file" || pathname.startsWith("/import-songs-file")) {
-      nextTab = "import-songs";
-    }
-    setActiveTab(nextTab);
   }, [pathname]);
 
   const isWeb = IS_WEB;
@@ -134,7 +124,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
       }
       
       const href = getTabHref(route);
-      setActiveTab(route);
       routerNavigate(href as any);
     },
     [routerNavigate]
@@ -309,12 +298,12 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
 
   const TAB_BAR_HEIGHT = 50;
   const resolvedBottomInset = isWeb ? 0 : Math.max(bottomInset, 0);
-  const navIconSize = isNarrowMobile ? 20 : 22;
-  const navLabelSize = isNarrowMobile ? 9 : 10;
-  const navLabelLineHeight = 12;
+  const navIconSize = isNarrowMobile ? 22 : 24;
+  const navLabelSize = isNarrowMobile ? 9.5 : 10.5;
+  const navLabelLineHeight = 13;
   const navHorizontalPadding = isNarrowMobile ? 6 : 8;
   const conceptText = "#dfe2eb";
-  const conceptSubtext = "#bccbb9";
+  const conceptSubtext = isIOS ? "#A7A7A7" : "#bccbb9";
 
   const safeTextColor = useMemo(() => {
     const raw = textColor || conceptText;
@@ -337,14 +326,17 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   );
   const playIconColor = "#060A0F";
   const playerSectionBg = useMemo(
-    () => artworkPalette.background || "#16181D",
-    [artworkPalette.background]
+    () => isIOS
+      ? colorToRgba(artworkPalette.background || "#16181D", 0.45, "rgba(18, 20, 26, 0.45)")
+      : (artworkPalette.background || "#16181D"),
+    [artworkPalette.background, isIOS]
   );
+
   const activeNavColor = "#FFFFFF";
   const navInactiveColor = conceptSubtext;
-  const navBaseBg = "#0E1016";
-  const containerGlassBase = "#0E1016";
-  const playerSectionDivider = "rgba(255,255,255,0.06)";
+  const navBaseBg = isIOS ? "transparent" : "#0E1016";
+  const containerGlassBase = isIOS ? "rgba(14, 18, 24, 0.50)" : "#0E1016";
+  const playerSectionDivider = "rgba(255,255,255,0.08)";
   const playerProgressFillColor = "rgba(255,255,255,0.90)";
   const playerTopEdgeTint = "transparent";
   const miniButtonPrimaryBg = "#FFFFFF";
@@ -395,7 +387,9 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
             !hasActiveMiniPlayer && isIOS && styles.containerNavOnlyIOS,
           ]}
         >
-          <View pointerEvents="none" style={[styles.glassLayer, { backgroundColor: containerGlassBase }]} />
+          {isIOS
+            ? <LiquidGlassBackdrop style={styles.glassLayer} tintColor={containerGlassBase} />
+            : <View pointerEvents="none" style={[styles.glassLayer, { backgroundColor: containerGlassBase }]} />}
 
           {hasActiveMiniPlayer && activeSong ? (
             <View
@@ -429,6 +423,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                     <View style={[styles.coverWrap, { width: miniCoverSlotSize }]}>
                       {coverUrl && !coverFailed ? (
                         <Image
+                          key={activeSong.id}
                           source={{ uri: coverUrl }}
                           style={[
                             styles.cover,
@@ -438,7 +433,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                           cachePolicy="memory-disk"
                           priority="high"
                           decodeFormat="argb"
-                          transition={100}
+                          transition={60}
                           onError={() => setCoverFailed(true)}
                         />
                       ) : (

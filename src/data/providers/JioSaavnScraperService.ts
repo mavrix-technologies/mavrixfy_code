@@ -15,70 +15,10 @@ let cachedScrapedHomeData: ScrapedHomepageData | null = null;
 let activeScrapedHomePromise: Promise<any[]> | null = null;
 const SCRAPED_HOME_CACHE_DURATION = 15 * 60 * 1000;
 
-export function getScrapedJioSaavnHomeModules(forceRefresh: boolean): Promise<any[]> {
-  const now = Date.now();
-  if (
-    !forceRefresh &&
-    cachedScrapedHomeData &&
-    now - cachedScrapedHomeData.timestamp < SCRAPED_HOME_CACHE_DURATION
-  ) {
-    return Promise.resolve(cachedScrapedHomeData.modules);
-  }
-
-  if (activeScrapedHomePromise) {
-    return activeScrapedHomePromise;
-  }
-
-  activeScrapedHomePromise = (async () => {
-    try {
-      const apiUrls = getJioSaavnSearchBaseUrls().map((base) =>
-        `${base.replace(/\/+$/, "")}/modules?language=hindi`
-      );
-
-      let modules: any[] = [];
-
-      for (const url of apiUrls) {
-        try {
-          const res = await withTimeout(
-            fetch(url, { headers: { Accept: "application/json" } }),
-            6500
-          );
-          if (!res.ok) {
-            await consumeResponseBody(res);
-            continue;
-          }
-          const json = await res.json();
-          const data = json?.data ?? json;
-          if (data && typeof data === "object" && Object.keys(data).length > 0) {
-            modules = Object.entries(data).reduce((acc: any[], [key, value]: [string, any]) => {
-              const dataArray = Array.isArray(value?.data)
-                ? value.data
-                : Array.isArray(value)
-                ? value
-                : [];
-              if (dataArray.length > 0) {
-                acc.push({ key, data: dataArray });
-              }
-              return acc;
-            }, []);
-            break;
-          }
-        } catch {
-          continue;
-        }
-      }
-
-      cachedScrapedHomeData = { modules, timestamp: Date.now() };
-      return modules;
-    } catch (err) {
-      logger.warn("[JioSaavn] Failed to fetch home modules:", err);
-      return [];
-    } finally {
-      activeScrapedHomePromise = null;
-    }
-  })();
-
-  return activeScrapedHomePromise;
+export async function getScrapedJioSaavnHomeModules(_forceRefresh: boolean): Promise<any[]> {
+  // mavrixfy-song-api uses dedicated /search and details endpoints; /modules is not supported
+  // Returning immediately prevents wasting 6.5s timeout on every category during cold start
+  return [];
 }
 
 const HOMEPAGE_MODULE_MAP: Record<string, string[]> = {

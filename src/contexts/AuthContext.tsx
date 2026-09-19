@@ -136,25 +136,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // Safety fallback timeout to prevent stuck loading / splash screen on boot
-    const safetyTimeout = setTimeout(() => {
-      logger.warn("[AuthContext] Firebase auth initialization timed out. Forcing loading = false.");
-      setLoading(false);
-    }, 4500); // 4.5 seconds safety window
+    let isSubscribed = true;
 
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      clearTimeout(safetyTimeout);
-      if (fbUser) {
-        // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
-        applyAuthenticatedSnapshot(fbUser);
-        // Enrich with Firestore data in the background (non-blocking)
-        buildAppUser(fbUser).then(setUser).catch(() => {});
+    // Failsafe timeout: 15 seconds to ensure the app never hangs indefinitely
+    // in rare native storage lockups, while giving cellular networks plenty of time.
+    const safetyTimeout = setTimeout(() => {
+      if (!isSubscribed) return;
+      logger.warn("[AuthContext] Firebase auth initialization took over 15s. Checking currentUser...");
+      if (auth.currentUser) {
+        applyAuthenticatedSnapshot(auth.currentUser);
       } else {
-        applySignedOutSnapshot();
+        setLoading(false);
       }
-    });
+    }, 15000);
+
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      async (fbUser) => {
+        clearTimeout(safetyTimeout);
+        if (!isSubscribed) return;
+
+        if (fbUser) {
+          // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+          applyAuthenticatedSnapshot(fbUser);
+          // Enrich with Firestore data in the background (non-blocking)
+          buildAppUser(fbUser)
+            .then((appUser) => {
+              if (isSubscribed) {
+                setUser(appUser);
+              }
+            })
+            .catch(() => {});
+        } else {
+          applySignedOutSnapshot();
+        }
+      },
+      (error) => {
+        clearTimeout(safetyTimeout);
+        logger.error("[AuthContext] onAuthStateChanged error:", error);
+        if (isSubscribed) {
+          // In case of a network or transient error during token refresh on cellular,
+          // never sign out if auth.currentUser is already active.
+          if (auth.currentUser) {
+            applyAuthenticatedSnapshot(auth.currentUser);
+          } else {
+            setLoading(false);
+          }
+        }
+      }
+    );
 
     return () => {
+      isSubscribed = false;
       clearTimeout(safetyTimeout);
       unsubscribe();
     };

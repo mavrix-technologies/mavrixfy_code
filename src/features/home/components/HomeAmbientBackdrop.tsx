@@ -52,11 +52,15 @@ interface HomeAmbientBackdropProps {
   scrollY?: number | SharedValue<number>;
 }
 
+import { usePlaybackNowPlaying } from "@/services/audio/PlaybackEngine";
+
 export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
-  currentSong,
+  currentSong: propSong,
   themeConfig,
   scrollY = 0,
 }: HomeAmbientBackdropProps) {
+  const { currentSong: contextSong } = usePlaybackNowPlaying();
+  const currentSong = propSong !== undefined ? propSong : contextSong;
   const isFestivalMode = themeConfig?.enabled === true;
   const { width: windowWidth } = useWindowDimensions();
   const screenWidth = windowWidth || 390;

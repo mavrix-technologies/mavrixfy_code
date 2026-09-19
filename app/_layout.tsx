@@ -366,6 +366,12 @@ function RootLayoutNav() {
   const { showNavOverlay } = useRootLayoutNavigation();
   const { loading } = useAuth();
 
+  useEffect(() => {
+    if (!loading) {
+      hideSplashScreenSafely("authReady");
+    }
+  }, [loading]);
+
   return (
     <View style={{ flex: 1 }}>
       <Stack
@@ -439,10 +445,10 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (fontsLoaded) {
-      hideSplashScreenSafely("fontsLoaded");
+    if (error) {
+      hideSplashScreenSafely("rootError");
     }
-  }, [fontsLoaded]);
+  }, [error]);
 
   const handleError = useCallback((err: Error) => {
     // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback

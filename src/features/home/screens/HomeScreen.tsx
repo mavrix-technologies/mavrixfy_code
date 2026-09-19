@@ -14,8 +14,8 @@ import Animated, {
   useSharedValue,
   useAnimatedScrollHandler,
 } from "react-native-reanimated";
-import { usePlayerBrowse } from "@/contexts/PlayerContext";
-import { useNetwork } from "@/contexts/NetworkContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
+import { useNetwork, useOnReconnect } from "@/contexts/NetworkContext";
 import OfflineScreen from "@/components/OfflineScreen";
 import OfflineBanner from "@/components/OfflineBanner";
 import AdMobBanner from "@/components/AdMobBanner";
@@ -55,8 +55,7 @@ const homeSectionKeyExtractor = (item: HomeSectionItem) => item.id;
 
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { playSong, currentSong } = usePlayerBrowse();
-  const currentSongId = currentSong?.id || null;
+  const { playSong } = usePlayerActions();
   const { isOnline, isChecking } = useNetwork();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const flatListRef = useRef<FlatList<HomeSectionItem> | null>(null);
@@ -109,8 +108,6 @@ export function HomeScreen() {
           content = (
             <HomeQuickPicks
               songs={displayedQuickPicks}
-              currentSongId={currentSongId}
-              currentSong={currentSong}
               playSong={playSong}
             />
           );
@@ -158,8 +155,6 @@ export function HomeScreen() {
       return <View key={item.id}>{content}</View>;
     },
     [
-      currentSong,
-      currentSongId,
       displayedQuickPicks,
       featuredArtists,
       loadingMainContent,
@@ -212,7 +207,15 @@ export function HomeScreen() {
     [insets.bottom, topInset]
   );
 
-  if (!isOnline && !isChecking && !hasContent) {
+  useOnReconnect(
+    useCallback(() => {
+      if (!hasContent) {
+        void handleRefresh();
+      }
+    }, [hasContent, handleRefresh])
+  );
+
+  if (!isOnline && !isChecking && !hasContent && !loading) {
     return <OfflineScreen />;
   }
 
@@ -222,7 +225,6 @@ export function HomeScreen() {
 
       {/* ── Ambient Backdrop: Moves naturally with feed on scroll (100% Native Reanimated) ── */}
       <HomeAmbientBackdrop
-        currentSong={currentSong}
         topInset={topInset}
         themeConfig={festivalTheme}
         scrollY={scrollY}

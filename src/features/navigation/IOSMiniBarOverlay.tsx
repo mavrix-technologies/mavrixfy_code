@@ -1,95 +1,150 @@
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as Animated from "@/lib/nativeAnimated";
-import { Pressable, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { PanResponder, Pressable, View } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import Colors from "@/constants/colors";
+import * as Haptics from "expo-haptics";
 import { useOptionalPlayerActions } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import {
-  useArtworkPalette,
   preloadDominantColors,
 } from "@/lib/colorExtractor";
-import { useLastMix } from "@/lib/lastMix";
-import { compactMap, mapFilter } from "@/lib/arrayUtils";
-import { globalQueueSheetRef } from "@/lib/queueRef";
-import { useMiniPlayerSecondaryControl } from "@/lib/storage";
+import { mapFilter } from "@/lib/arrayUtils";
+import { triggerImpact } from "@/lib/haptics";
 import { expandPlayer } from "@/lib/playerUIState";
 import { styles } from "./layoutStyles";
-import {
-  MiniPlayerSecondaryControlButton,
-  IOSMiniPlayerProgressBar,
-  MiniPlayerBannerView,
-} from "./miniPlayerComponents";
-import {
-  subscribeToMiniPlayerBannerConfig,
-  DEFAULT_MINI_PLAYER_BANNER_CONFIG,
-  type MiniPlayerBannerConfig,
-} from "@/lib/miniPlayerBannerConfig";
+import { IOSMiniPlayerProgressBar } from "./miniPlayerComponents";
 import { noopPlayerAction } from "./layoutUtils";
+import { NativeTabs } from "expo-router/unstable-native-tabs";
 
-type NativeTabsModule = typeof import("expo-router/unstable-native-tabs");
-let nativeTabsModule: NativeTabsModule | null = null;
-
-function getNativeTabsModule(): NativeTabsModule {
-  if (!nativeTabsModule) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    nativeTabsModule = require("expo-router/unstable-native-tabs") as NativeTabsModule;
+/**
+ * Safely queries the BottomAccessory placement ('regular' | 'inline')
+ * when rendered inside a <NativeTabs.BottomAccessory> slot.
+ */
+function useAccessoryPlacement(): "regular" | "inline" {
+  try {
+    if (typeof (NativeTabs?.BottomAccessory as any)?.usePlacement === "function") {
+      return (NativeTabs.BottomAccessory as any).usePlacement();
+    }
+  } catch {
+    // Fallback if context is not mounted
   }
-  return nativeTabsModule;
+  return "regular";
 }
 
-export function IOSNativeTabLayout() {
-  const { Icon, Label, NativeTabs } = getNativeTabsModule() as any;
+/**
+ * Official Apple iOS native tab bar (UITabBarController + Liquid Glass pill)
+ * Keeps all tabs (Home, Search, Library, Liked, Import) in ONE unified floating pill
+ * (no isolated search tab), and mounts the Apple-style miniplayer in BottomAccessory.
+ */
+const TAB_BG = "#10141A";
+const SELECTED_CAPSULE = "rgba(255,255,255,0.18)";
+
+/**
+ * Official Apple iOS native tab bar (UITabBarController + Liquid Glass pill).
+ *
+ * On iOS 26, the bar itself is rendered by the system as Liquid Glass —
+ * backgroundColor / blurEffect / shadowColor on <NativeTabs> do NOT control
+ * the iOS 26 tab-bar background (Expo SDK 54 docs confirm this).
+ * The correct approach is:
+ *   - contentStyle={{ backgroundColor: TAB_BG }} on each Trigger → makes the
+ *     content behind the floating glass bar dark, so the overall bar reads dark.
+ *   - tintColor + iconColor/labelStyle → white icons & labels.
+ *   - The system draws the selected-tab gray floating capsule automatically.
+ *
+ * BottomAccessory MiniPlayer stays exactly where it is.
+ */
+export function IOSNativeTabLayout({ hidden = false }: { hidden?: boolean } = {}) {
+  const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
+  const hasActiveSong = Boolean(currentSong ?? queue[queueIndex] ?? queue[0]);
 
   return (
     <NativeTabs
-      disableTransparentOnScrollEdge
-      minimizeBehavior="never"
-      tintColor={Colors.primary}
-      iconColor={{ default: "rgba(235,235,245,0.6)", selected: Colors.primary }}
+      minimizeBehavior="onScrollDown"
+      hidden={hidden}
+      tintColor="#FFFFFF"
+      iconColor={{ default: "rgba(255,255,255,0.65)", selected: "#FFFFFF" }}
       labelStyle={{
-        default: {
-          color: "rgba(235,235,245,0.6)",
-          fontSize: 10,
-          fontWeight: "500",
-        },
-        selected: {
-          color: Colors.primary,
-          fontSize: 10,
-          fontWeight: "600",
-        },
+        default: { color: "rgba(255,255,255,0.65)", fontSize: 10 },
+        selected: { color: "#FFFFFF", fontSize: 10 },
       }}
     >
-      <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: "house", selected: "house.fill" }} />
-        <Label>Home</Label>
+      {!hidden && hasActiveSong ? (
+        <NativeTabs.BottomAccessory>
+          <IOSNativeAccessoryMiniPlayer />
+        </NativeTabs.BottomAccessory>
+      ) : null}
+
+      {/* HOME — selected capsule provided by system on iOS 26 */}
+      <NativeTabs.Trigger
+        name="index"
+        contentStyle={{ backgroundColor: TAB_BG }}
+      >
+        <NativeTabs.Trigger.Icon sf={{ default: "house", selected: "house.fill" }} />
+        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="search" role="search" />
-
-      <NativeTabs.Trigger name="library">
-        <Icon sf={{ default: "square.stack", selected: "square.stack.fill" }} />
-        <Label>Library</Label>
+      {/* SEARCH */}
+      <NativeTabs.Trigger
+        name="search"
+        contentStyle={{ backgroundColor: TAB_BG }}
+      >
+        <NativeTabs.Trigger.Icon sf="magnifyingglass" />
+        <NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="liked-songs">
-        <Icon sf={{ default: "heart", selected: "heart.fill" }} />
-        <Label>Liked</Label>
+      {/* LIBRARY */}
+      <NativeTabs.Trigger
+        name="library"
+        contentStyle={{ backgroundColor: TAB_BG }}
+      >
+        <NativeTabs.Trigger.Icon sf="music.note.list" />
+        <NativeTabs.Trigger.Label>Library</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
+
+      {/* LIKED */}
+      <NativeTabs.Trigger
+        name="liked-songs"
+        contentStyle={{ backgroundColor: TAB_BG }}
+      >
+        <NativeTabs.Trigger.Icon sf={{ default: "heart", selected: "heart.fill" }} />
+        <NativeTabs.Trigger.Label>Liked</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      {/* IMPORT */}
+      <NativeTabs.Trigger
+        name="import-songs"
+        contentStyle={{ backgroundColor: TAB_BG }}
+      >
+        <NativeTabs.Trigger.Icon
+          sf={{ default: "arrow.down.circle", selected: "arrow.down.circle.fill" }}
+        />
+        <NativeTabs.Trigger.Label>Import</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      {/* Hidden create route */}
+      <NativeTabs.Trigger name="create" hidden />
     </NativeTabs>
   );
 }
 
-export function IOSMiniPlayerOverlay() {
-  return useIOSMiniPlayerOverlayView();
-}
 
-function useIOSMiniPlayerOverlayView() {
-  const insets = useSafeAreaInsets();
+export type IOSMiniPlayerOverlayProps = {
+  isAccessory?: boolean;
+};
+
+/**
+ * Authentic iOS Native Mini Player
+ * Features Apple Music HIG layout:
+ * - Left: Album artwork (rounded square with subtle border)
+ * - Center: Song title & artist with marquee support
+ * - Right: Clean iOS Play/Pause and Skip-Forward controls
+ * - Bottom: Integrated subtle progress bar
+ * - Gestures: Tap to expand, long-press for song options, swipe left/right to skip tracks
+ * - Adapts to 'regular' and 'inline' placements in iOS 26+ UITabBarController
+ */
+export function IOSNativeAccessoryMiniPlayer() {
   const { push: overlayRouterPush } = useRouter();
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
@@ -97,14 +152,10 @@ function useIOSMiniPlayerOverlayView() {
   const togglePlay = playerActions?.togglePlay ?? noopPlayerAction;
   const nextSong = playerActions?.nextSong ?? noopPlayerAction;
   const prevSong = playerActions?.prevSong ?? noopPlayerAction;
-  const textColor = playerActions?.textColor ?? "#FFFFFF";
-  const setAlbumColor = playerActions?.setAlbumColor ?? noopPlayerAction;
-  const setTextColor = playerActions?.setTextColor ?? noopPlayerAction;
-  const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
-  const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(DEFAULT_MINI_PLAYER_BANNER_CONFIG);
-  useEffect(() => {
-    return subscribeToMiniPlayerBannerConfig(setBannerConfig);
-  }, []);
+
+  const placement = useAccessoryPlacement();
+  const isInline = placement === "inline";
+
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const [coverFailed, setCoverFailed] = useState(false);
   const openPlayerLockRef = useRef(0);
@@ -116,12 +167,9 @@ function useIOSMiniPlayerOverlayView() {
     expandPlayer();
   }, []);
 
-  const openMiniPlayerQueue = useCallback(() => {
-    globalQueueSheetRef.current?.expand();
-  }, []);
-
   const openMiniPlayerSongOptions = useCallback(() => {
     if (!activeSong) return;
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
     overlayRouterPush(
       {
         pathname: "/song-options",
@@ -139,279 +187,168 @@ function useIOSMiniPlayerOverlayView() {
     );
   }, [activeSong, overlayRouterPush]);
 
+  // Horizontal swipe gesture for track skipping (Apple Music native gesture)
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          return Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dy) < 16;
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx < -36) {
+            void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+            nextSong();
+          } else if (gestureState.dx > 36) {
+            void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+            prevSong();
+          }
+        },
+      }),
+    [nextSong, prevSong]
+  );
+
+  // Artwork prefetching and color palette extraction
   useEffect(() => {
-    const urls = mapFilter([
-      queue[queueIndex - 1]?.coverUrl,
-      activeSong?.coverUrl,
-      queue[queueIndex + 1]?.coverUrl,
-    ], (url) => url?.trim(), (url): url is string => Boolean(url));
+    const urls = mapFilter(
+      [
+        queue[queueIndex - 1]?.coverUrl,
+        activeSong?.coverUrl,
+        queue[queueIndex + 1]?.coverUrl,
+      ],
+      (url) => url?.trim(),
+      (url): url is string => Boolean(url)
+    );
 
     if (urls.length === 0) return;
     void Image.prefetch(urls, "memory-disk").catch(() => { });
     preloadDominantColors(urls);
   }, [activeSong?.coverUrl, queue, queueIndex]);
 
-  const lastMix = useLastMix();
-  const mixBarOneRef = useRef<Animated.Value | null>(null);
-  if (mixBarOneRef.current === null) mixBarOneRef.current = new Animated.Value(0.32);
-  const mixBarOne = mixBarOneRef.current;
-  const mixBarTwoRef = useRef<Animated.Value | null>(null);
-  if (mixBarTwoRef.current === null) mixBarTwoRef.current = new Animated.Value(0.58);
-  const mixBarTwo = mixBarTwoRef.current;
-  const mixBarThreeRef = useRef<Animated.Value | null>(null);
-  if (mixBarThreeRef.current === null) mixBarThreeRef.current = new Animated.Value(0.44);
-  const mixBarThree = mixBarThreeRef.current;
-  const mixImage = useMemo(() => {
-    const first = compactMap((lastMix?.images ?? "")
-      .split(","), (value) => value.trim())[0];
-    return first ?? "";
-  }, [lastMix?.images]);
-  const mixImages = useMemo(() => {
-    return compactMap(
-      (lastMix?.images ?? "").split(","),
-      (value) => value.trim()
-    );
-  }, [lastMix?.images]);
-  const mixSongIds = useMemo(() => {
-    const raw = lastMix?.songIds ?? "";
-    if (!raw) return [] as string[];
-    return compactMap(raw.split(","), (id) => id.trim());
-  }, [lastMix?.songIds]);
-  const activeSongId = activeSong?.id ?? "";
-  const isPlayingFromLastMix = useMemo(() => {
-    if (!isPlaying || !activeSongId || mixSongIds.length === 0) return false;
-    if (!mixSongIds.includes(activeSongId)) return false;
-    if (queue.length !== mixSongIds.length) return false;
-    const mixSet = new Set(mixSongIds);
-    return queue.every((song) => mixSet.has(song.id));
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive values are listed
-  }, [activeSongId, isPlaying, mixSongIds, queue]);
-  const iosArtworkPalette = useArtworkPalette(activeSong?.coverUrl);
-
-  useEffect(() => {
-    setCoverFailed(false);
-    setAlbumColor(iosArtworkPalette.accent);
-    setTextColor(iosArtworkPalette.text);
-  }, [activeSong?.id, iosArtworkPalette.accent, iosArtworkPalette.text, setAlbumColor, setTextColor]);
-
-  useEffect(() => {
-    const resetBars = () => {
-      Animated.parallel([
-        Animated.timing(mixBarOne, { toValue: 0.32, duration: 180, useNativeDriver: true, isInteraction: false }),
-        Animated.timing(mixBarTwo, { toValue: 0.58, duration: 180, useNativeDriver: true, isInteraction: false }),
-        Animated.timing(mixBarThree, { toValue: 0.44, duration: 180, useNativeDriver: true, isInteraction: false }),
-      ]).start();
-    };
-
-    if (!lastMix || !isPlayingFromLastMix) {
-      resetBars();
-      return;
-    }
-
-    const loopOne = Animated.loop(
-      Animated.sequence([
-        Animated.timing(mixBarOne, { toValue: 0.96, duration: 230, useNativeDriver: true, isInteraction: false }),
-        Animated.timing(mixBarOne, { toValue: 0.24, duration: 280, useNativeDriver: true, isInteraction: false }),
-      ])
-    );
-    const loopTwo = Animated.loop(
-      Animated.sequence([
-        Animated.timing(mixBarTwo, { toValue: 0.84, duration: 180, useNativeDriver: true, isInteraction: false }),
-        Animated.timing(mixBarTwo, { toValue: 0.3, duration: 240, useNativeDriver: true, isInteraction: false }),
-      ])
-    );
-    const loopThree = Animated.loop(
-      Animated.sequence([
-        Animated.timing(mixBarThree, { toValue: 0.9, duration: 260, useNativeDriver: true, isInteraction: false }),
-        Animated.timing(mixBarThree, { toValue: 0.22, duration: 210, useNativeDriver: true, isInteraction: false }),
-      ])
-    );
-
-    loopOne.start();
-    loopTwo.start();
-    loopThree.start();
-
-    return () => {
-      loopOne.stop();
-      loopTwo.stop();
-      loopThree.stop();
-    };
-  }, [isPlayingFromLastMix, lastMix, mixBarOne, mixBarThree, mixBarTwo]);
-
-  const shellBgColor = useMemo(
-    () => iosArtworkPalette.background || "#16181D",
-    [iosArtworkPalette.background]
-  );
-
   if (!activeSong) {
     return null;
   }
 
-  const progressFillColor = "rgba(255,255,255,0.90)";
-  const tabBarVisualHeight = 49;
-  const tabBarGap = 6;
-  const bottomOffset = Math.max(insets.bottom + tabBarVisualHeight + tabBarGap, 80);
-  const shellBorderColor = "rgba(255,255,255,0.08)";
+  const progressFillColor = "rgba(255,255,255,0.92)";
 
+  const accessoryHeight = isInline ? 44 : 56;
+
+  // Single direct native accessory view that fits 100% transparently in UITabAccessory
   return (
-    <View pointerEvents="box-none" style={[styles.iosMiniPlayerRoot, { bottom: bottomOffset }]}>
-      <View style={[styles.iosMiniPlayerShell, { backgroundColor: shellBgColor, borderColor: shellBorderColor }]}>
-        {bannerConfig.enabled && bannerConfig.items.length > 0 ? (
-          <MiniPlayerBannerView config={bannerConfig} />
-        ) : null}
-        <View style={styles.iosMiniPlayerRow}>
-          <Pressable style={styles.iosMiniPlayerMain} onPress={openPlayer} android_disableSound>
-            <View style={styles.iosMiniPlayerArtworkShell}>
-              {activeSong.coverUrl && !coverFailed ? (
-                <Image
-                  source={{ uri: activeSong.coverUrl }}
-                  style={styles.iosMiniPlayerCover}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  priority="high"
-                  transition={100}
-                  onError={() => setCoverFailed(true)}
-                />
-              ) : (
-                <View
-                  style={[
-                    styles.iosMiniPlayerCover,
-                    styles.iosMiniPlayerCoverFallback,
-                  ]}
-                >
-                  <Ionicons name="musical-notes" size={20} color="rgba(255,255,255,0.72)" />
-                </View>
-              )}
-            </View>
-
-            <View style={styles.iosMiniPlayerText}>
-              <PingPongScroll
-                text={activeSong.title}
-                style={[styles.iosMiniPlayerTitle, { color: "#FFFFFF" }]}
-                velocity={14}
+    <View
+      {...panResponder.panHandlers}
+      style={[
+        styles.iosNativeAccessoryContainer,
+        {
+          height: accessoryHeight,
+        },
+      ]}
+    >
+      <View style={[styles.iosMiniPlayerRow, { height: accessoryHeight }]}>
+        {/* Main tappable metadata area (artwork + title + artist) */}
+        <Pressable
+          style={styles.iosMiniPlayerMain}
+          onPress={openPlayer}
+          onLongPress={openMiniPlayerSongOptions}
+          android_disableSound
+        >
+          <View style={isInline ? styles.iosMiniPlayerArtworkShellInline : styles.iosMiniPlayerArtworkShell}>
+            {activeSong.coverUrl && !coverFailed ? (
+              <Image
+                key={activeSong.id}
+                source={{ uri: activeSong.coverUrl }}
+                style={isInline ? styles.iosMiniPlayerCoverInline : styles.iosMiniPlayerCover}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                priority="high"
+                transition={80}
+                onError={() => setCoverFailed(true)}
               />
+            ) : (
+              <View
+                style={[
+                  isInline ? styles.iosMiniPlayerCoverInline : styles.iosMiniPlayerCover,
+                  styles.iosMiniPlayerCoverFallback,
+                ]}
+              >
+                <Ionicons name="musical-notes" size={isInline ? 14 : 20} color="rgba(255,255,255,0.72)" />
+              </View>
+            )}
+          </View>
+
+          <View style={styles.iosMiniPlayerText}>
+            <PingPongScroll
+              text={activeSong.title}
+              style={[styles.iosMiniPlayerTitle, { color: "#FFFFFF", fontSize: isInline ? 12.5 : 13.5 }]}
+              velocity={14}
+            />
+            {!isInline && (
               <PingPongScroll
                 text={activeSong.artist}
-                style={[styles.iosMiniPlayerArtist, { color: "rgba(255, 255, 255, 0.70)" }]}
+                style={[styles.iosMiniPlayerArtist, { color: "rgba(235, 235, 245, 0.68)" }]}
                 velocity={11}
               />
-            </View>
+            )}
+          </View>
+        </Pressable>
+
+        {/* Clean Apple Music style native media controls */}
+        <View style={styles.iosMiniPlayerNativeControls}>
+          <Pressable
+            android_disableSound
+            onPress={() => {
+              void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+              togglePlay();
+            }}
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.iosMiniPlayerNativeControlBtn,
+              pressed && styles.iosMiniPlayerNativeControlBtnPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={isPlaying ? "Pause" : "Play"}
+          >
+            <Ionicons
+              name={isPlaying ? "pause" : "play"}
+              size={isInline ? 20 : 22}
+              color="#FFFFFF"
+              style={!isPlaying ? { marginLeft: 2 } : undefined}
+            />
           </Pressable>
 
-          {lastMix ? (
+          {!isInline && (
             <Pressable
               android_disableSound
               onPress={() => {
-                overlayRouterPush({ pathname: "/artist-mix", params: lastMix });
+                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                nextSong();
               }}
               hitSlop={8}
-              style={styles.iosMiniPlayerInlineMixBtn}
-            >
-              <View style={styles.iosMiniPlayerMixCard}>
-                {mixImages.length > 1 ? (
-                  <View style={styles.iosMiniPlayerMixGrid}>
-                    {mixImages.slice(0, 4).map((img) => (
-                      <View key={img} style={styles.iosMiniPlayerMixGridCell}>
-                        {img ? (
-                          <Image
-                            source={{ uri: img }}
-                            style={styles.iosMiniPlayerMixGridImage}
-                            contentFit="cover"
-                            cachePolicy="memory-disk"
-                          />
-                        ) : (
-                          <View style={[styles.iosMiniPlayerMixGridImage, styles.iosMiniPlayerMixGridFallback]}>
-                            <Ionicons name="person" size={8} color="rgba(255,255,255,0.88)" />
-                          </View>
-                        )}
-                      </View>
-                    ))}
-                    {mixImages.length > 4 && (
-                      <View style={[styles.iosMiniPlayerMixGridCell, styles.iosMiniPlayerMixGridMore]}>
-                        <Text style={styles.iosMiniPlayerMixGridMoreText}>+{mixImages.length - 4}</Text>
-                      </View>
-                    )}
-                  </View>
-                ) : mixImage ? (
-                  <Image
-                    source={{ uri: mixImage }}
-                    style={[styles.iosMiniPlayerMixFullImage, styles.iosMiniPlayerMixFullImageMuted]}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                  />
-                ) : (
-                  <View
-                    style={[
-                      styles.iosMiniPlayerMixFullImage,
-                      styles.iosMiniPlayerMixHeroFallback,
-                      styles.iosMiniPlayerMixFullImageMuted,
-                    ]}
-                  >
-                    <Ionicons name="person" size={14} color="rgba(255,255,255,0.88)" />
-                  </View>
-                )}
-                <View style={styles.iosMiniPlayerMixEqOverlay}>
-                  <Animated.View
-                    style={[
-                      styles.iosMiniPlayerMixEqBar,
-                      { opacity: isPlayingFromLastMix ? 0.95 : 0.42, transform: [{ scaleY: mixBarOne }] },
-                    ]}
-                  />
-                  <Animated.View
-                    style={[
-                      styles.iosMiniPlayerMixEqBar,
-                      { opacity: isPlayingFromLastMix ? 0.95 : 0.42, transform: [{ scaleY: mixBarTwo }] },
-                    ]}
-                  />
-                  <Animated.View
-                    style={[
-                      styles.iosMiniPlayerMixEqBar,
-                      { opacity: isPlayingFromLastMix ? 0.95 : 0.42, transform: [{ scaleY: mixBarThree }] },
-                    ]}
-                  />
-                </View>
-              </View>
-            </Pressable>
-          ) : null}
-
-          <View style={styles.iosMiniPlayerControls}>
-            <Pressable
-              android_disableSound
-              onPress={() => {
-                togglePlay();
-              }}
-              hitSlop={14}
               style={({ pressed }) => [
-                styles.iosMiniPlayerButton,
-                styles.iosMiniPlayerPrimaryButton,
-                pressed && styles.miniButtonPressed,
+                styles.iosMiniPlayerNativeControlBtn,
+                pressed && styles.iosMiniPlayerNativeControlBtnPressed,
               ]}
+              accessibilityRole="button"
+              accessibilityLabel="Next track"
             >
               <Ionicons
-                name={isPlaying ? "pause" : "play"}
-                size={22}
-                color="#060A0F"
-                style={!isPlaying ? { marginLeft: 2 } : undefined}
+                name="play-skip-forward"
+                size={20}
+                color="rgba(255, 255, 255, 0.88)"
               />
             </Pressable>
-            <MiniPlayerSecondaryControlButton
-              control={miniPlayerSecondaryControl}
-              size={40}
-              radius={20}
-              backgroundColor="transparent"
-              borderColor="transparent"
-              iconColor="rgba(255,255,255,0.90)"
-              shellStyle={styles.iosMiniPlayerButton}
-              onQueue={openMiniPlayerQueue}
-              onNext={nextSong}
-              onPrev={prevSong}
-              onMore={openMiniPlayerSongOptions}
-            />
-          </View>
+          )}
         </View>
-
-        <IOSMiniPlayerProgressBar fillColor={progressFillColor} />
       </View>
+
+      <IOSMiniPlayerProgressBar fillColor={progressFillColor} />
     </View>
   );
+}
+
+/**
+ * Backward compatibility export
+ */
+export function IOSMiniPlayerOverlay(_props: IOSMiniPlayerOverlayProps = {}) {
+  return <IOSNativeAccessoryMiniPlayer />;
 }

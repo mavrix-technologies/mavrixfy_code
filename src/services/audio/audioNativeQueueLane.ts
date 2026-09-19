@@ -21,6 +21,7 @@ interface UseAudioNativeQueueLaneOptions {
   repeatModeRef: MutableRefObject<"off" | "all" | "one">;
   streamUrlCache: MutableRefObject<Map<string, string>>;
   resolvePlaybackUrlCached: (song: Song) => Promise<string | null>;
+  isNativeQueueSyncedRef?: MutableRefObject<boolean>;
 }
 const RESOLVED_EMPTY_PROMISE: Promise<any> = Promise.resolve();
 
@@ -31,6 +32,7 @@ export function useAudioNativeQueueLane({
   repeatModeRef,
   streamUrlCache,
   resolvePlaybackUrlCached,
+  isNativeQueueSyncedRef,
 }: UseAudioNativeQueueLaneOptions) {
   const nativeQueueMutationRef = useRef<Promise<any>>(RESOLVED_EMPTY_PROMISE);
 
@@ -106,6 +108,7 @@ export function useAudioNativeQueueLane({
         .then(() => (position > 0 ? TrackPlayer.seekTo(position) : undefined))
         .then(() => (wasPlaying ? TrackPlayer.play() : TrackPlayer.pause().catch(() => {})))
         .then(() => {
+          if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = true;
           if (RepeatMode) {
             const repeatMap: Record<string, any> = {
               off: RepeatMode.Off,
@@ -116,7 +119,7 @@ export function useAudioNativeQueueLane({
           }
         });
     },
-    [buildNativeQueueTracks, isPlayerReady, repeatModeRef, RepeatMode, TrackPlayer]
+    [buildNativeQueueTracks, isNativeQueueSyncedRef, isPlayerReady, repeatModeRef, RepeatMode, TrackPlayer]
   );
 
   return {

@@ -467,8 +467,10 @@ async function fetchAlbumNewReleaseSongs(
   forceRefresh: boolean,
   signal?: AbortSignal
 ): Promise<NewReleaseSongCandidate[]> {
+  // Focus on top 2 album queries on cold boot to avoid socket pool saturation
+  const primaryAlbumQueries = NEW_RELEASE_ALBUM_QUERIES.slice(0, forceRefresh ? 3 : 2);
   const albumResults = await Promise.all(
-    NEW_RELEASE_ALBUM_QUERIES.map((query) => searchAlbums(query, 8, forceRefresh, signal))
+    primaryAlbumQueries.map((query) => searchAlbums(query, 6, forceRefresh, signal))
   );
   const seen = new Set<string>();
   const albums: NewReleaseAlbumCandidate[] = [];
@@ -482,7 +484,7 @@ async function fetchAlbumNewReleaseSongs(
   const rankedAlbums = sortedCopy(albums, (left, right) => {
     if (left.year !== right.year) return right.year - left.year;
     return left.resultRank - right.resultRank;
-  }).slice(0, Math.max(limit, 10));
+  }).slice(0, Math.min(limit, 3));
 
   const songResults = await Promise.all(
     rankedAlbums.map((album, index) => fetchAlbumSongs(album, index, forceRefresh, signal))
@@ -500,9 +502,12 @@ export async function getDailyNewReleaseSongs(options?: DailyNewReleaseSongOptio
     if (cached && cached.length > 0) return cached;
   }
 
+  // Use top 3 high-yielding queries on cold start to get 75+ songs without flooding the network
+  const activeQueries = NEW_RELEASE_QUERIES.slice(0, forceRefresh ? 5 : 3);
+
   const [albumSongs, searchSongResults] = await Promise.all([
     fetchAlbumNewReleaseSongs(limit, forceRefresh, signal),
-    Promise.all(NEW_RELEASE_QUERIES.map((query) => searchSongs(query, limit, forceRefresh, signal))),
+    Promise.all(activeQueries.map((query) => searchSongs(query, limit, forceRefresh, signal))),
   ]);
   const songs = dedupeAndRankSongs([...albumSongs, ...searchSongResults.flat()], limit);
   if (songs.length > 0) {

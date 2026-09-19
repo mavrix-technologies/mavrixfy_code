@@ -65,7 +65,6 @@ function isAlreadyInitialized(error: unknown): boolean {
 }
 
 export async function setupPlayer(): Promise<void> {
-  logger.info("[TrackPlayerAdapter] setupPlayer called, playerReady =", playerReady);
   if (playerReady) return;
   if (setupPromise) return setupPromise;
 
@@ -73,7 +72,6 @@ export async function setupPlayer(): Promise<void> {
   try {
     await setupPromise;
     playerReady = true;
-    logger.info("[TrackPlayerAdapter] setupPlayer completed successfully!");
   } catch (error) {
     logger.error("[TrackPlayerAdapter] setupPlayer failed:", error);
     setupPromise = null;
@@ -96,7 +94,6 @@ async function setupPlayerInternal(): Promise<void> {
   }
 
   try {
-    logger.info("[TrackPlayerAdapter] Calling TrackPlayer.setupPlayer...");
     await TrackPlayer.setupPlayer({
       autoHandleInterruptions: true,
       // SwiftAudioEx owns iOS elapsed time, duration, and playback rate for
@@ -124,7 +121,6 @@ async function setupPlayerInternal(): Promise<void> {
   }
 
   if (TrackPlayer.updateOptions) {
-    logger.info("[TrackPlayerAdapter] Calling TrackPlayer.updateOptions...");
     await TrackPlayer.updateOptions({
       android: {
         appKilledPlaybackBehavior:
@@ -155,6 +151,5 @@ async function setupPlayerInternal(): Promise<void> {
       ],
       progressUpdateEventInterval: 1,
     });
-    logger.info("[TrackPlayerAdapter] TrackPlayer.updateOptions configured successfully!");
   }
 }

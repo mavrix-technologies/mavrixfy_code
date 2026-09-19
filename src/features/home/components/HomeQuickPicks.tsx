@@ -31,6 +31,8 @@ import {
 
 
 
+import { usePlaybackRowState } from "@/services/audio/PlaybackEngine";
+
 function chunkArray<T>(arr: readonly T[], size: number): T[][] {
   const result: T[][] = [];
   for (let i = 0; i < arr.length; i += size) {
@@ -41,19 +43,19 @@ function chunkArray<T>(arr: readonly T[], size: number): T[][] {
 
 const QuickPickItem = memo(function QuickPickItem({
   song,
-  isActive,
   accentColor,
   onPress,
   onOptionsPress,
   width,
 }: {
   song: Song;
-  isActive: boolean;
   accentColor: string;
   onPress: (song: Song) => void;
   onOptionsPress: (song: Song) => void;
   width: number;
 }) {
+  const { isActive } = usePlaybackRowState(song?.id);
+
   const handlePress = useCallback(() => {
     onPress(song);
   }, [onPress, song]);
@@ -66,7 +68,7 @@ const QuickPickItem = memo(function QuickPickItem({
 
   useEffect(() => {
     activeProgress.value = withTiming(isActive ? 1 : 0, {
-      duration: 400,
+      duration: 300,
       easing: Easing.bezier(0.25, 0.1, 0.25, 1),
     });
   }, [isActive, activeProgress]);
@@ -83,9 +85,6 @@ const QuickPickItem = memo(function QuickPickItem({
       ["transparent", activeBg]
     ),
   }));
-
-
-
 
   return (
     <Animated.View
@@ -139,72 +138,24 @@ const QuickPickItem = memo(function QuickPickItem({
 
 export const HomeQuickPicks = memo(function HomeQuickPicks({
   songs,
-  currentSongId,
-  currentSong,
   playSong,
 }: {
   songs: Song[];
-  currentSongId: string | null;
+  currentSongId?: string | null;
   currentSong?: Song | null;
   playSong: (song: Song, queue?: Song[]) => void;
 }) {
   const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
   const columnWidth = useMemo(() => Math.round(Math.min(windowWidth * 0.85, 340)), [windowWidth]);
-
-  const artworkPalette = useArtworkPalette(currentSong?.coverUrl);
-  const accentColor = artworkPalette.accent;
-
-  const playableQueue = useMemo(
-    () => songs.filter((s) => typeof s.audioUrl === "string" && s.audioUrl.trim().length > 0),
-    [songs]
-  );
+  const accentColor = Colors.primary;
 
   const handleSongPress = useCallback(
-    async (song: Song) => {
-      try {
-        void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-
-        // Play directly if URL exists
-        if (song.audioUrl?.trim()) {
-          const queue = playableQueue.some((q) => q.id === song.id)
-            ? playableQueue
-            : [song, ...playableQueue];
-
-          playSong(song, queue);
-          return;
-        }
-
-        // On-demand resolve if metadata only
-        if (song.source === "jiosaavn") {
-          showGlobalToast("Loading song...");
-          const resolved = await getJioSaavnSongDetails(song.id, undefined);
-          if (!resolved) {
-            showGlobalToast("Failed to load song");
-            return;
-          }
-          const playable = convertJioSaavnSong(resolved);
-          if (!playable?.audioUrl?.trim()) {
-            showGlobalToast("Song is unavailable");
-            return;
-          }
-
-          const updatedQueue = [
-            playable,
-            ...playableQueue.filter((q) => q.id !== playable.id),
-          ];
-
-          playSong(playable, updatedQueue);
-          return;
-        }
-
-        showGlobalToast("Song is unavailable");
-      } catch (error) {
-        logger.error("[QuickPicks] Playback failed:", error);
-        showGlobalToast("Could not play this song");
-      }
+    (song: Song) => {
+      void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+      playSong(song, songs);
     },
-    [playSong, playableQueue]
+    [playSong, songs]
   );
 
   const handleOptionsPress = useCallback(
@@ -232,7 +183,6 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
           <QuickPickItem
             key={song.id}
             song={song}
-            isActive={currentSongId === song.id}
             accentColor={accentColor}
             onPress={handleSongPress}
             onOptionsPress={handleOptionsPress}
@@ -241,7 +191,7 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
         ))}
       </View>
     ),
-    [accentColor, columnWidth, currentSongId, handleOptionsPress, handleSongPress]
+    [accentColor, columnWidth, handleOptionsPress, handleSongPress]
   );
 
   const keyExtractor = useCallback((col: Song[], idx: number) => (col[0]?.id ? `col-${col[0].id}` : `col-${idx}`), []);
