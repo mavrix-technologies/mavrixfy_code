@@ -30,6 +30,8 @@ import AppTopHeader, {
 } from "@/components/AppTopHeader";
 import { useNetwork } from "@/contexts/NetworkContext";
 import AdMobBanner from "@/components/AdMobBanner";
+import CollectionHero from "@/components/CollectionHero";
+import { NavLikedIcon } from "@/components/OfficialNavIcons";
 
 import { LIKED_SONGS_UI as UI, styles } from "../styles/likedSongsStyles";
 
@@ -86,9 +88,10 @@ export function LikedSongsScreen() {
 
   // Reanimated shared values for the smooth sticky play button and download readjustment
   const stickyPlayOpacity = useSharedValue(0);
-  const stickyPlayScale = useSharedValue(0.82);
+  const stickyPlayScale = useSharedValue(0.7);
   const stickyPlayIsVisible = useSharedValue(false);
-  const downloadTranslateX = useSharedValue(52);
+  const downloadTranslateX = useSharedValue(0);
+  const [isStickyPlayActive, setIsStickyPlayActive] = useState(false);
 
   const stickyPlayStyle = useAnimatedStyle(() => ({
     opacity: stickyPlayOpacity.value,
@@ -127,14 +130,15 @@ export function LikedSongsScreen() {
       const shouldShow = offsetY > 240;
       if (shouldShow !== stickyPlayIsVisible.value) {
         stickyPlayIsVisible.value = shouldShow;
+        setIsStickyPlayActive(shouldShow);
         if (shouldShow) {
-          downloadTranslateX.value = withTiming(0, { duration: 220, easing: Easing.out(Easing.cubic) });
+          downloadTranslateX.value = withTiming(-42, { duration: 220, easing: Easing.out(Easing.cubic) });
           stickyPlayOpacity.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.quad) });
           stickyPlayScale.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.back(1.4)) });
         } else {
-          downloadTranslateX.value = withTiming(52, { duration: 180, easing: Easing.inOut(Easing.cubic) });
+          downloadTranslateX.value = withTiming(0, { duration: 180, easing: Easing.inOut(Easing.cubic) });
           stickyPlayOpacity.value = withTiming(0, { duration: 140, easing: Easing.in(Easing.quad) });
-          stickyPlayScale.value = withTiming(0.82, { duration: 140, easing: Easing.in(Easing.quad) });
+          stickyPlayScale.value = withTiming(0.7, { duration: 140, easing: Easing.in(Easing.quad) });
         }
       }
     },
@@ -257,7 +261,7 @@ export function LikedSongsScreen() {
           song={item}
           queue={filteredSongsRef.current}
           queueKey="liked-songs"
-          horizontalPadding={8}
+          horizontalPadding={4}
           showDownload={false}
           onSongPress={handleSongPress}
         />
@@ -322,13 +326,17 @@ export function LikedSongsScreen() {
         elevated={isHeaderElevated}
         title="Liked Songs"
         left={<AppTopHeaderProfileButton />}
-        rightWidth={96}
+        leftWidth={84}
+        rightWidth={84}
         right={
           <View style={styles.headerRightContainer}>
-            <Animated.View style={downloadAnimStyle}>
+            <Animated.View style={[styles.downloadButtonWrapper, downloadAnimStyle]}>
               <AppTopHeaderDownloadButton />
             </Animated.View>
-            <Animated.View style={[styles.stickyPlayButton, stickyPlayStyle]}>
+            <Animated.View
+              pointerEvents={isStickyPlayActive ? "auto" : "none"}
+              style={[styles.stickyPlayButton, stickyPlayStyle]}
+            >
               <Pressable
                 onPress={handlePlayAll}
                 accessibilityRole="button"
@@ -340,8 +348,8 @@ export function LikedSongsScreen() {
               >
                 <Ionicons
                   name={isPlayingFromLikedSongs && isPlaying ? "pause" : "play"}
-                  size={18}
-                  color="#06241a"
+                  size={16}
+                  color="#06241A"
                   style={!isPlayingFromLikedSongs || !isPlaying ? { marginLeft: 1 } : undefined}
                 />
               </Pressable>
@@ -377,67 +385,27 @@ export function LikedSongsScreen() {
                 />
               </View>
             </Pressable>
-            <View style={styles.heroSection}>
-              <LinearGradient
-                colors={[UI.primaryA, UI.primaryB]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.heroIconCard}
-              >
-                <Ionicons name="heart" size={38} color="#042115" />
-              </LinearGradient>
-              <Text style={styles.heroTitle}>Liked Songs</Text>
-              <Text style={styles.heroMeta}>{headerMeta.toUpperCase()}</Text>
-            </View>
 
-            <View style={styles.actionSection}>
-              <View style={styles.leftActions}>
+            <CollectionHero
+              customIcon={<NavLikedIcon size={46} color="#042115" isFocused />}
+              iconGradientColors={[UI.primaryA, UI.primaryB]}
+              showIconCard={true}
+              title="Liked Songs"
+              meta={headerMeta}
+              isPlaying={isPlayingFromLikedSongs && isPlaying}
+              isShuffled={isShuffled}
+              onPlayAll={handlePlayAll}
+              onShufflePlay={handleShufflePlay}
+              leftAction={
                 <DownloadCollectionButton
                   songs={filteredSongs}
                   collectionId="liked-songs"
                   collectionName="Liked Songs"
                   collectionImage=""
                   compact
-                  style={styles.utilityIcon}
                 />
-              </View>
-
-              <View style={styles.rightActions}>
-                <Pressable
-                  onPress={handleShufflePlay}
-                  accessibilityRole="button"
-                  accessibilityLabel={isShuffled ? "Shuffle on" : "Shuffle off"}
-                  accessibilityState={{ checked: isShuffled }}
-                  style={({ pressed }) => [
-                    styles.shuffleButton,
-                    pressed && styles.shuffleButtonPressed,
-                  ]}
-                  android_ripple={{ color: "rgba(255,255,255,0.1)", borderless: true, radius: 28 }}
-                >
-                  <Ionicons
-                    name="shuffle"
-                    size={22}
-                    color={isShuffled ? UI.primaryA : UI.subtext}
-                  />
-                  {isShuffled && <View style={styles.shuffleDot} />}
-                </Pressable>
-
-                <Pressable
-                  onPress={handlePlayAll}
-                  accessibilityRole="button"
-                  accessibilityLabel={isPlayingFromLikedSongs && isPlaying ? "Pause liked songs" : "Play liked songs"}
-                  style={({ pressed }) => [styles.playAllButton, pressed && styles.playAllButtonPressed]}
-                  android_ripple={{ color: "rgba(0,0,0,0.15)", borderless: false }}
-                >
-                  <Ionicons
-                    name={isPlayingFromLikedSongs && isPlaying ? "pause" : "play"}
-                    size={28}
-                    color="#06241a"
-                    style={!isPlayingFromLikedSongs || !isPlaying ? { marginLeft: 3 } : undefined}
-                  />
-                </Pressable>
-              </View>
-            </View>
+              }
+            />
 
             {songs.length > 0 && (
               <View style={styles.moodSection}>

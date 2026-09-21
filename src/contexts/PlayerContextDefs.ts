@@ -45,7 +45,7 @@ export function useOptionalPlayerActions() {
   return use(PlayerActionsContext);
 }
 
-export { useLikedSongs } from "@/features/liked-songs";
+export { useLikedSongs } from "@/services/liked-songs";
 
 export function usePlayerRow() {
   const ctx = use(PlayerRowContext);

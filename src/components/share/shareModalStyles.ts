@@ -14,22 +14,22 @@ export const DEFAULT_CARD_PALETTES = [
 ];
 
 export function buildShareMessage(data: ShareSheetData): string {
-  const url = data.url?.trim() || "https://mavrixfy-git-main-team-mavrix.vercel.app";
+  const url = data.url?.trim() || "https://mavrixfy.site";
 
   if (data.type === "artist") {
-    return `Listen to ${data.title} on Mavrixfy:\n${url}`;
+    return `🎵 Listen to ${data.title} on Mavrixfy:\n${url}`;
   }
   if (data.type === "playlist") {
-    return `Check out the playlist "${data.title}" on Mavrixfy:\n${url}`;
+    return `🎶 Check out the playlist "${data.title}" on Mavrixfy:\n${url}`;
   }
   if (data.type === "mix") {
-    return `Listen to the ${data.title} on Mavrixfy:\n${url}`;
+    return `🔀 Listen to ${data.title} on Mavrixfy:\n${url}`;
   }
   const artistText =
     data.subtitle && data.subtitle !== "Song" && data.subtitle !== "Artist"
-      ? ` by ${data.subtitle}`
+      ? ` • ${data.subtitle}`
       : "";
-  return `Listen to "${data.title}"${artistText} on Mavrixfy:\n${url}`;
+  return `🎵 "${data.title}"${artistText}\nListen on Mavrixfy:\n${url}`;
 }
 
 export const styles = StyleSheet.create({

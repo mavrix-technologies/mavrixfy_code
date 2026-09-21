@@ -1,9 +1,10 @@
 import { logger } from "@/lib/logger";
-import { getApiUrl } from "@/lib/api-config";
 import { withTimeout } from "@/utils/asyncUtils";
 import { unescapeHtml } from "@/utils/stringUtils";
-import { mapHomepageItemToPlaylistResult, consumeResponseBody } from "./JioSaavnNormalizers";
-import { getJioSaavnSearchBaseUrls } from "./JioSaavnCategoryService";
+import {
+  mapHomepageItemToPlaylistResult,
+  getJioSaavnSearchBaseUrls,
+} from "./JioSaavnNormalizers";
 import type { JioSaavnPlaylistResult, AutoRefreshContext } from "./JioSaavnTypes";
 
 interface ScrapedHomepageData {
@@ -15,10 +16,10 @@ let cachedScrapedHomeData: ScrapedHomepageData | null = null;
 let activeScrapedHomePromise: Promise<any[]> | null = null;
 const SCRAPED_HOME_CACHE_DURATION = 15 * 60 * 1000;
 
-export async function getScrapedJioSaavnHomeModules(_forceRefresh: boolean): Promise<any[]> {
+export function getScrapedJioSaavnHomeModules(_forceRefresh: boolean): Promise<any[]> {
   // mavrixfy-song-api uses dedicated /search and details endpoints; /modules is not supported
   // Returning immediately prevents wasting 6.5s timeout on every category during cold start
-  return [];
+  return Promise.resolve([]);
 }
 
 const HOMEPAGE_MODULE_MAP: Record<string, string[]> = {

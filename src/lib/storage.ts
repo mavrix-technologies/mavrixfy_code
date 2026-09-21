@@ -61,13 +61,15 @@ function normalizeYouTubeVideoQuality(value: unknown): YouTubeVideoQualityPrefer
 export type MiniPlayerSecondaryControl = "queue" | "next" | "prev" | "more";
 
 export interface AppSettings {
-  streamingQuality: "low" | "medium" | "high";
+  streamingQuality: "auto" | "low" | "medium" | "high";
   highQualityUnlocked: boolean;
   highQualityExpiresAt?: number | null;
   videoBackgroundQuality: YouTubeVideoQualityPreference;
   smartAutoplayEnabled: boolean;
   smartAutoplayMode: SmartAutoplayMode;
   downloadQuality: "low" | "medium" | "high";
+  downloadWifiOnly: boolean;
+  dataSaverEnabled: boolean;
   equalizer: Record<string, number>;
   equalizerEnabled: boolean;
   hapticsEnabled: boolean;
@@ -86,6 +88,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   smartAutoplayEnabled: true,
   smartAutoplayMode: "similar-trending",
   downloadQuality: "high",
+  downloadWifiOnly: false,
+  dataSaverEnabled: false,
   equalizer: {
     "60Hz": 0,
     "150Hz": 0,
@@ -417,9 +421,12 @@ export async function getSettings(): Promise<AppSettings> {
     smartAutoplayEnabled: saved.smartAutoplayEnabled !== undefined ? Boolean(saved.smartAutoplayEnabled) : DEFAULT_SETTINGS.smartAutoplayEnabled,
     smartAutoplayMode: normalizeSmartAutoplayMode(saved.smartAutoplayMode),
     miniPlayerSecondaryControl: normalizeMiniPlayerSecondaryControl(saved.miniPlayerSecondaryControl),
-    crossfade: DEFAULT_SETTINGS.crossfade,
-    gapless: DEFAULT_SETTINGS.gapless,
-    normalizeVolume: DEFAULT_SETTINGS.normalizeVolume,
+    downloadQuality: (saved.downloadQuality === "low" || saved.downloadQuality === "medium" || saved.downloadQuality === "high") ? saved.downloadQuality : DEFAULT_SETTINGS.downloadQuality,
+    downloadWifiOnly: saved.downloadWifiOnly !== undefined ? Boolean(saved.downloadWifiOnly) : DEFAULT_SETTINGS.downloadWifiOnly,
+    dataSaverEnabled: Boolean(saved.dataSaverEnabled),
+    crossfade: typeof saved.crossfade === "number" ? Math.max(0, Math.min(12, saved.crossfade)) : DEFAULT_SETTINGS.crossfade,
+    gapless: saved.gapless !== undefined ? Boolean(saved.gapless) : DEFAULT_SETTINGS.gapless,
+    normalizeVolume: saved.normalizeVolume !== undefined ? Boolean(saved.normalizeVolume) : DEFAULT_SETTINGS.normalizeVolume,
     ambientBackdropEnabled: saved.ambientBackdropEnabled !== undefined ? Boolean(saved.ambientBackdropEnabled) : DEFAULT_SETTINGS.ambientBackdropEnabled,
   };
 }
@@ -438,11 +445,11 @@ export function isHighQualityEntitled(settings: AppSettings): boolean {
   return true;
 }
 
-export function getEffectiveStreamingQuality(settings: AppSettings): "low" | "medium" | "high" {
+export function getEffectiveStreamingQuality(settings: AppSettings): "auto" | "low" | "medium" | "high" {
   if (settings.streamingQuality === "high") {
     return isHighQualityEntitled(settings) ? "high" : "medium";
   }
-  return settings.streamingQuality || "medium";
+  return settings.streamingQuality || "auto";
 }
 
 export async function setHighQualityEntitlement(unlocked: boolean, expiresAt?: number | null): Promise<void> {

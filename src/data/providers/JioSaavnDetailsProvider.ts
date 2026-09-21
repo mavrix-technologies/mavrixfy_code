@@ -48,47 +48,40 @@ export function getJioSaavnPlaylistBaseUrls(): string[] {
 
 export async function fetchFromCandidates(
   urls: string[],
-  timeoutMs = 6000
+  timeoutMs = 4500
 ): Promise<PlaylistDetailsPageResult> {
-  return new Promise<PlaylistDetailsPageResult>((resolve) => {
-    let completedCount = 0;
-    let resolved = false;
-    const results: { data: JioSaavnPlaylistDetailsData | null; notFound: boolean }[] = [];
+  if (!urls.length) {
+    return { data: null, reason: "not_found" };
+  }
 
-    void Promise.all(
-      urls.map(async (url, idx) => {
-        try {
-          const response = await withTimeout(
-            fetch(url, { headers: { Accept: "application/json" } }),
-            timeoutMs
-          );
-          if (!response.ok) {
-            const notFound = response.status === 404;
-            await consumeResponseBody(response);
-            results[idx] = { data: null, notFound };
-          } else {
-            const json = await response.json();
-            const normalized = parsePlaylistDetailsResponse(json);
-            results[idx] = { data: normalized, notFound: false };
-            if (normalized && !resolved) {
-              resolved = true;
-              resolve({ data: normalized, reason: "network" });
-              return;
-            }
-          }
-        } catch {
-          results[idx] = { data: null, notFound: false };
-        } finally {
-          completedCount++;
-          if (completedCount === urls.length && !resolved) {
-            resolved = true;
-            const allNotFound = results.every((r) => r && r.notFound);
-            resolve({ data: null, reason: allNotFound ? "not_found" : "network" });
-          }
+  let lastReason: "not_found" | "network" = "network";
+
+  for (const url of urls) {
+    try {
+      const response = await withTimeout(
+        fetch(url, { headers: { Accept: "application/json" } }),
+        timeoutMs
+      );
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          lastReason = "not_found";
         }
-      })
-    );
-  });
+        await consumeResponseBody(response);
+        continue;
+      }
+
+      const json = await response.json();
+      const normalized = parsePlaylistDetailsResponse(json);
+      if (normalized) {
+        return { data: normalized, reason: "network" };
+      }
+    } catch {
+      lastReason = "network";
+    }
+  }
+
+  return { data: null, reason: lastReason };
 }
 
 export function fetchPlaylistDetailsPage(
@@ -134,6 +127,22 @@ export function fetchAlbumDetails(
   return fetchFromCandidates(candidateUrls);
 }
 
+interface MemoryCacheRecord<T> {
+  data: T;
+  timestamp: number;
+}
+
+const MEMORY_PLAYLIST_CACHE = new Map<string, MemoryCacheRecord<JioSaavnPlaylistDetailsData>>();
+const MEMORY_ALBUM_CACHE = new Map<string, MemoryCacheRecord<JioSaavnPlaylistDetailsData>>();
+const MAX_MEMORY_DETAILS_CACHE = 60;
+
+function pruneMemoryMap<T>(map: Map<string, MemoryCacheRecord<T>>) {
+  if (map.size > MAX_MEMORY_DETAILS_CACHE) {
+    const oldest = map.keys().next().value;
+    if (oldest) map.delete(oldest);
+  }
+}
+
 function buildPlaylistDetailsCacheKey(playlistId: string): string {
   return `${PLAYLIST_DETAILS_CACHE_PREFIX}:${playlistId}`;
 }
@@ -153,6 +162,16 @@ function buildAlbumDetailsCacheTimeKey(albumKey: string): string {
 export async function getCachedPlaylistDetails(
   playlistId: string
 ): Promise<JioSaavnPlaylistDetailsData | null> {
+  // 1. Instant synchronous memory check (0ms)
+  const mem = MEMORY_PLAYLIST_CACHE.get(playlistId);
+  if (mem) {
+    if (Date.now() - mem.timestamp <= PLAYLIST_DETAILS_CACHE_TTL_MS) {
+      return mem.data;
+    }
+    MEMORY_PLAYLIST_CACHE.delete(playlistId);
+  }
+
+  // 2. Disk AsyncStorage check
   try {
     const [[, rawData], [, rawTime]] = await AsyncStorage.multiGet([
       buildPlaylistDetailsCacheKey(playlistId),
@@ -167,6 +186,10 @@ export async function getCachedPlaylistDetails(
     const parsed = JSON.parse(rawData);
     const normalized = normalizePlaylistDetailsData(parsed);
     if (!normalized || !Array.isArray(normalized.songs)) return null;
+
+    MEMORY_PLAYLIST_CACHE.set(playlistId, { data: normalized, timestamp: cachedAt });
+    pruneMemoryMap(MEMORY_PLAYLIST_CACHE);
+
     return normalized;
   } catch {
     return null;
@@ -177,6 +200,11 @@ export async function setCachedPlaylistDetails(
   playlistId: string,
   playlist: JioSaavnPlaylistDetailsData
 ): Promise<void> {
+  // 1. Save to memory cache immediately
+  MEMORY_PLAYLIST_CACHE.set(playlistId, { data: playlist, timestamp: Date.now() });
+  pruneMemoryMap(MEMORY_PLAYLIST_CACHE);
+
+  // 2. Persist to disk asynchronously
   try {
     await AsyncStorage.multiSet([
       [buildPlaylistDetailsCacheKey(playlistId), JSON.stringify(playlist)],
@@ -190,6 +218,16 @@ export async function setCachedPlaylistDetails(
 export async function getCachedAlbumDetails(
   albumKey: string
 ): Promise<JioSaavnPlaylistDetailsData | null> {
+  // 1. Instant synchronous memory check (0ms)
+  const mem = MEMORY_ALBUM_CACHE.get(albumKey);
+  if (mem) {
+    if (Date.now() - mem.timestamp <= PLAYLIST_DETAILS_CACHE_TTL_MS) {
+      return mem.data;
+    }
+    MEMORY_ALBUM_CACHE.delete(albumKey);
+  }
+
+  // 2. Disk AsyncStorage check
   try {
     const [[, rawData], [, rawTime]] = await AsyncStorage.multiGet([
       buildAlbumDetailsCacheKey(albumKey),
@@ -204,6 +242,10 @@ export async function getCachedAlbumDetails(
     const parsed = JSON.parse(rawData);
     const normalized = normalizePlaylistDetailsData(parsed);
     if (!normalized || !Array.isArray(normalized.songs)) return null;
+
+    MEMORY_ALBUM_CACHE.set(albumKey, { data: normalized, timestamp: cachedAt });
+    pruneMemoryMap(MEMORY_ALBUM_CACHE);
+
     return normalized;
   } catch {
     return null;
@@ -214,6 +256,11 @@ export async function setCachedAlbumDetails(
   albumKey: string,
   album: JioSaavnPlaylistDetailsData
 ): Promise<void> {
+  // 1. Save to memory cache immediately
+  MEMORY_ALBUM_CACHE.set(albumKey, { data: album, timestamp: Date.now() });
+  pruneMemoryMap(MEMORY_ALBUM_CACHE);
+
+  // 2. Persist to disk asynchronously
   try {
     await AsyncStorage.multiSet([
       [buildAlbumDetailsCacheKey(albumKey), JSON.stringify(album)],
@@ -305,25 +352,14 @@ async function fetchFreshPlaylistDetails(
 ): Promise<JioSaavnPlaylistDetailsData> {
   const firstPage = await fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT, playlistLink);
 
-  if (firstPage.data?.songs?.length) {
-    void setCachedPlaylistDetails(cacheKey, firstPage.data);
-    if (firstPage.data.id && firstPage.data.id !== cacheKey) {
-      void setCachedPlaylistDetails(firstPage.data.id, firstPage.data);
+  if (firstPage.data) {
+    if (firstPage.data.songs?.length) {
+      void setCachedPlaylistDetails(cacheKey, firstPage.data);
+      if (firstPage.data.id && firstPage.data.id !== cacheKey) {
+        void setCachedPlaylistDetails(firstPage.data.id, firstPage.data);
+      }
     }
     return firstPage.data;
-  }
-
-  if (firstPage.data && !firstPage.data.songs?.length) {
-    const retry = await fetchPlaylistDetailsPage(normalizedId, 1, PLAYLIST_FETCH_LIMIT, playlistLink);
-    if (retry.data?.songs?.length) {
-      void setCachedPlaylistDetails(cacheKey, retry.data);
-      if (retry.data.id && retry.data.id !== cacheKey) {
-        void setCachedPlaylistDetails(retry.data.id, retry.data);
-      }
-      return retry.data;
-    }
-    if (retry.data) return retry.data;
-    if (firstPage.data) return firstPage.data;
   }
 
   if (firstPage.reason === "not_found") {
@@ -368,24 +404,13 @@ async function fetchFreshAlbumDetails(
 ): Promise<JioSaavnPlaylistDetailsData> {
   const first = await fetchAlbumDetails(normalizedId, albumLink);
 
-  if (first.data?.songs?.length) {
-    void setCachedAlbumDetails(cacheKey, first.data);
-    if (first.data.id && first.data.id !== cacheKey) {
-      void setCachedAlbumDetails(first.data.id, first.data);
-    }
-    return first.data;
-  }
-
-  if (first.data && !first.data.songs?.length) {
-    const retry = await fetchAlbumDetails(normalizedId, albumLink);
-    if (retry.data?.songs?.length) {
-      void setCachedAlbumDetails(cacheKey, retry.data);
-      if (retry.data.id && retry.data.id !== cacheKey) {
-        void setCachedAlbumDetails(retry.data.id, retry.data);
+  if (first.data) {
+    if (first.data.songs?.length) {
+      void setCachedAlbumDetails(cacheKey, first.data);
+      if (first.data.id && first.data.id !== cacheKey) {
+        void setCachedAlbumDetails(first.data.id, first.data);
       }
-      return retry.data;
     }
-    if (retry.data) return retry.data;
     return first.data;
   }
 

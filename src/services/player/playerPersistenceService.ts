@@ -12,7 +12,7 @@ export const playerPersistenceService = {
       type: "song",
       data: song,
     }),
-  saveStreamingQuality: (quality: "low" | "medium" | "high") =>
+  saveStreamingQuality: (quality: "auto" | "low" | "medium" | "high") =>
     Storage.saveSettings({ streamingQuality: quality }),
   getUserPlaylists: () => Storage.getUserPlaylists(),
   getRecentlyPlayed: () => Storage.getRecentlyPlayed(),

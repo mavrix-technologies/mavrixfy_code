@@ -40,7 +40,7 @@ export const CreatePlaylistModal = memo(function CreatePlaylistModal({
   onSubmit,
   onClose,
 }: CreatePlaylistModalProps) {
-  const isSubmitDisabled = !name.trim() || !selectedImage || isUploadingImage;
+  const isSubmitDisabled = !name.trim() || isUploadingImage;
 
   return (
     <Modal
@@ -84,7 +84,7 @@ export const CreatePlaylistModal = memo(function CreatePlaylistModal({
               ) : (
                 <View style={styles.imagePlaceholder}>
                   <Ionicons name="image-outline" size={32} color={Colors.subtext} />
-                  <Text style={styles.imagePlaceholderText}>Select cover image</Text>
+                  <Text style={styles.imagePlaceholderText}>Add cover image (optional)</Text>
                 </View>
               )}
 
@@ -245,15 +245,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 999,
-    backgroundColor: Colors.primary,
-    borderWidth: 1,
-    borderColor: "rgba(38,225,154,0.6)",
+    backgroundColor: "#FFFFFF",
   },
   modalCreateDisabled: {
-    opacity: 0.5,
+    opacity: 0.4,
   },
   modalCreateText: {
-    color: Colors.black,
+    color: "#000000",
     fontSize: 13,
     fontFamily: "Inter_700Bold",
   },

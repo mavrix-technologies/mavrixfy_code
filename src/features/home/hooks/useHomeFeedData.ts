@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useFocusEffect } from "expo-router";
-import { type Song, convertJioSaavnSong } from "@/lib/musicData";
+import { type Song } from "@/lib/musicData";
 import { getRecentlyPlayed, type RecentlyPlayedItem } from "@/lib/storage";
 import { getPublicPlaylists, type FirestorePlaylist } from "@/lib/firestore";
 import {

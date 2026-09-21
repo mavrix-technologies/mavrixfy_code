@@ -3,16 +3,12 @@ import {
   View,
   Text,
   FlatList,
-  ScrollView,
   Pressable,
   StyleSheet,
   Platform,
   ActivityIndicator,
-  Modal,
-  TextInput,
 } from "react-native";
 import { styles } from "../styles/importSongsStyles";
-import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -27,12 +23,11 @@ import { ParsedSong } from "@/types/import";
 import { useAuth } from "@/contexts/AuthContext";
 import { type Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
-import { createUserPlaylist, addSongToPlaylist, getUserPlaylists, UserPlaylist } from "@/lib/storage";
+import { createUserPlaylist, addSongToPlaylist, getUserPlaylists } from "@/lib/storage";
 import {
   createFirestorePlaylist,
   addLikedSongToFirestore,
   getUserFirestorePlaylists,
-  FirestorePlaylist,
   addSongToFirestorePlaylist,
 } from "@/lib/firestore";
 import { logger } from "@/lib/logger";

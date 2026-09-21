@@ -14,7 +14,7 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { ParsedSong } from "@/types/import";
+import type { ParsedSong } from "@/types/import";
 import { UserPlaylist } from "@/lib/storage";
 import { FirestorePlaylist } from "@/lib/firestore";
 import { styles } from "../styles/importSongsStyles";

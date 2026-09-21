@@ -80,7 +80,7 @@ export const ShareModal = memo(function ShareModal() {
   const handleCopyLink = useCallback(async () => {
     if (!data) return;
     void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-    const linkToCopy = data.url || "https://mavrixfy-git-main-team-mavrix.vercel.app";
+    const linkToCopy = data.url || "https://mavrixfy.site";
     await Clipboard.setStringAsync(linkToCopy);
     showGlobalToast("Link copied to clipboard!");
     closeShareSheet();
@@ -109,17 +109,21 @@ export const ShareModal = memo(function ShareModal() {
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
     closeShareSheet();
 
-    const linkToCopy = data.url || "https://mavrixfy-git-main-team-mavrix.vercel.app";
+    const linkToCopy = data.url || "https://mavrixfy.site";
     await Clipboard.setStringAsync(linkToCopy);
-    showGlobalToast("Link copied! Opening Instagram...");
+    showGlobalToast("Link copied! Add Link sticker in Story");
 
     try {
-      await Linking.openURL("instagram://");
+      await Linking.openURL("instagram://story-camera");
     } catch {
       try {
-        await Linking.openURL("https://instagram.com");
+        await Linking.openURL("instagram://");
       } catch {
-        // Fallback
+        try {
+          await Linking.openURL("https://instagram.com");
+        } catch {
+          // Fallback
+        }
       }
     }
   }, [data]);

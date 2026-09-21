@@ -12,14 +12,12 @@ import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
 import { runAfterIdle } from "@/utils/idleTask";
 import { preloadDominantColors } from "@/lib/colorExtractor";
 import { mapFilter } from "@/lib/arrayUtils";
-import {
-  usePlayerProgress,
-  usePlayerActions,
-} from "@/contexts/PlayerContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
 import {
   usePlaybackNowPlaying,
   usePlaybackPlayState,
 } from "@/services/audio/PlaybackEngine";
+import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
 import { playerUIStateStore } from "@/lib/playerUIState";
 import { useArtworkPaletteSync } from "./useArtworkPaletteSync";
 import { useBackgroundVisualVideo } from "./useBackgroundVisualVideo";
@@ -68,7 +66,7 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
   const [interactionReady, setInteractionReady] = useState(false);
   const prevSongIdRef = useRef(currentSong?.id);
   const optionsPressLockRef = useRef(false);
-  const { positionMillis, duration, progress } = usePlayerProgress();
+  const { positionMillis, duration, progress } = usePlaybackProgressStore();
   const [fullscreenLyricsVisible, setFullscreenLyricsVisible] = useState(false);
 
   const {

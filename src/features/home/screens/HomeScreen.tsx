@@ -49,7 +49,6 @@ import {
   HOME_CATEGORY_TITLES,
   type HomeSectionItem,
 } from "../hooks/useHomeSectionData";
-import { MAVRIXFY_MUSIC_CATEGORIES } from "../constants/homeNavConstants";
 
 const homeSectionKeyExtractor = (item: HomeSectionItem) => item.id;
 

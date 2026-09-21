@@ -28,6 +28,7 @@ export function useArtworkCarouselSync({
   const hasAlignedArtCarouselRef = useRef(false);
   const prevCarouselSongIdRef = useRef(currentSongId);
   const pendingArtworkTargetIndexRef = useRef<number | null>(null);
+  const userScrolledToIndexRef = useRef<number | null>(null);
   const skipCooldownRef = useRef(false);
   const skipCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -54,17 +55,7 @@ export function useArtworkCarouselSync({
       skipCooldownTimerRef.current = setTimeout(() => {
         skipCooldownRef.current = false;
         skipCooldownTimerRef.current = null;
-      }, 400);
-
-      if (targetIndex === activeQueueIndex + 1) {
-        void nextSong();
-        return;
-      }
-
-      if (targetIndex === activeQueueIndex - 1) {
-        void prevSong();
-        return;
-      }
+      }, 350);
 
       const targetSong = playingQueue[targetIndex];
       if (!targetSong) {
@@ -73,7 +64,7 @@ export function useArtworkCarouselSync({
 
       playSong(targetSong, playingQueue);
     },
-    [activeQueueIndex, clearSkipCooldownTimer, nextSong, playSong, playingQueue, prevSong]
+    [activeQueueIndex, clearSkipCooldownTimer, playSong, playingQueue]
   );
 
   useEffect(() => {
@@ -96,6 +87,8 @@ export function useArtworkCarouselSync({
         return;
       }
 
+      // Mark that user manually scrolled the list here so useEffect doesn't fight the gesture
+      userScrolledToIndexRef.current = targetIndex;
       pendingArtworkTargetIndexRef.current = targetIndex;
       handleArtworkSongChange(targetIndex);
     },
@@ -120,6 +113,13 @@ export function useArtworkCarouselSync({
 
     if (songChanged) {
       hasAlignedArtCarouselRef.current = false;
+    }
+
+    // If the carousel was already positioned here by manual user flick, do NOT bounce back
+    if (userScrolledToIndexRef.current === activeQueueIndex) {
+      userScrolledToIndexRef.current = null;
+      hasAlignedArtCarouselRef.current = true;
+      return;
     }
 
     const targetOffset = activeQueueIndex * artCarouselSnapInterval;

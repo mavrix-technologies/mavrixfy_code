@@ -62,10 +62,8 @@ export const styles = StyleSheet.create({
     color: Colors.text,
   },
   progressIconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "rgba(38, 225, 154, 0.12)",
+    width: 64,
+    height: 64,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,

@@ -14,6 +14,7 @@
 
 import React, {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -21,7 +22,6 @@ import React, {
 import {
   Platform,
   Pressable,
-  StyleSheet,
   Text,
   View,
 } from "react-native";
@@ -50,17 +50,15 @@ import {
 } from "@/services/audio/PlaybackEngine";
 import { type Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
-import { getSmartAutoplayModeLabel } from "@/lib/smartAutoplayConfig";
 
-
-import { SHEET_BG, HANDLE_COLOR, s } from "./styles/queueBottomSheetStyles";
+import { s } from "./styles/queueBottomSheetStyles";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type QueueItem = {
   song: Song;
   index: number;
   key: string;
-  section: "user" | "playlist";
+  section: "user" | "playlist" | "autoplay";
   isFirstInSection: boolean;
 };
 
@@ -252,43 +250,6 @@ const QueueNowPlaying = React.memo(
 );
 QueueNowPlaying.displayName = "QueueNowPlaying";
 
-type QueueSmartAutoplayProps = {
-  enabled: boolean;
-  isRefreshing: boolean;
-  modeLabel: string;
-  basisLabels: string[];
-  generatedCount: number;
-};
-
-const QueueSmartAutoplay = React.memo(
-  ({ enabled, isRefreshing, modeLabel, basisLabels, generatedCount }: QueueSmartAutoplayProps) => {
-    if (!enabled) return null;
-    const hasBasis = basisLabels.length > 0;
-
-    return (
-      <View style={s.smartWrap}>
-        <View style={s.smartHeaderRow}>
-          <View style={s.smartBadge}>
-            <Ionicons name="sparkles-outline" size={12} color={Colors.primary} />
-            <Text style={s.smartBadgeText}>Generated for You</Text>
-          </View>
-          <Text style={s.smartModeText} numberOfLines={1}>
-            {isRefreshing ? "Refreshing" : modeLabel}
-          </Text>
-        </View>
-        <Text style={s.smartBasisText} numberOfLines={1}>
-          {hasBasis
-            ? `Based on: ${basisLabels.join(" • ")}`
-            : generatedCount > 0
-              ? `${generatedCount} recommended songs ready`
-              : "Smart Autoplay will fill your next songs"}
-        </Text>
-      </View>
-    );
-  }
-);
-QueueSmartAutoplay.displayName = "QueueSmartAutoplay";
-
 type QueueFooterProps = {
   sleepTimer: { label: string } | null;
   bottomPad: number;
@@ -348,14 +309,6 @@ type Props = {
 
 const queueItemKeyExtractor = (item: QueueItem) => item.key;
 
-const SMART_AUTOPLAY_STATUS = {
-  enabled: false,
-  isRefreshing: false,
-  mode: "similar-trending" as const,
-  basisLabels: [],
-  generatedCount: 0,
-};
-
 // react-doctor-disable-next-line react-doctor/no-giant-component -- queue gestures, sheet index state, and playback actions are tightly coordinated in this bottom sheet.
 const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     const insets = useSafeAreaInsets();
@@ -365,6 +318,8 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
     const {
       queue,
       userQueuedSongIds,
+      autoplaySongIds,
+      isAutoplayLoading,
       queueIndex,
       currentSong,
       isShuffled,
@@ -377,8 +332,6 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
       sleepTimer,
       togglePlay,
     } = usePlayerActions();
-
-    const smartAutoplayStatus = SMART_AUTOPLAY_STATUS;
 
     const lastPlaceholderRef = useRef<number | null>(null);
     const currentSheetIndexRef = useRef(-1);
@@ -430,19 +383,25 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
 
     const data: QueueItem[] = useMemo(() => {
       const start = currentSong ? Math.max(0, queueIndex + 1) : 0;
-      return upcomingQueue.map((song, idx) => ({
-        song,
-        index: start + idx,
-        key: `${song.id}-${start + idx}`,
-        section: idx < userQueuedCount ? "user" : "playlist",
-        isFirstInSection: idx === 0 || idx === userQueuedCount,
-      }));
-    }, [currentSong, queueIndex, upcomingQueue, userQueuedCount]);
+      const autoplaySet = new Set(autoplaySongIds || []);
 
-    const smartModeLabel = useMemo(
-      () => getSmartAutoplayModeLabel(smartAutoplayStatus.mode),
-      [smartAutoplayStatus.mode]
-    );
+      return upcomingQueue.map((song, idx) => {
+        const isAutoplay = autoplaySet.has(song.id);
+        const section: QueueItem["section"] =
+          idx < userQueuedCount ? "user" : isAutoplay ? "autoplay" : "playlist";
+
+        return {
+          song,
+          index: start + idx,
+          key: `${song.id}-${start + idx}`,
+          section,
+          isFirstInSection:
+            idx === 0 ||
+            idx === userQueuedCount ||
+            (isAutoplay && idx > 0 && !autoplaySet.has(upcomingQueue[idx - 1]?.id)),
+        };
+      });
+    }, [autoplaySongIds, currentSong, queueIndex, upcomingQueue, userQueuedCount]);
 
     // ── Handlers ─────────────────────────────────────────────────────────────
     const handleSongPress = useCallback(
@@ -488,9 +447,9 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
               <View style={s.sectionHeader}>
                 <Text style={s.sectionTitle}>
                   {item.section === "user"
-                    ? "Added to queue"
-                    : smartAutoplayStatus.enabled
-                      ? "Generated for You"
+                    ? "Next in queue"
+                    : item.section === "autoplay"
+                      ? "Recommended for you"
                       : "Playing next"}
                 </Text>
               </View>
@@ -507,7 +466,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
           </View>
         </ScaleDecorator>
       ),
-      [handleSongPress, isPlaying, smartAutoplayStatus.enabled]
+      [handleSongPress, isPlaying]
     );
 
     const keyExtractor = queueItemKeyExtractor;
@@ -606,14 +565,6 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
           upcomingQueueLength={upcomingQueue.length}
           onPress={handleNowPlayingPress}
           togglePlay={togglePlay}
-        />
-
-        <QueueSmartAutoplay
-          enabled={smartAutoplayStatus.enabled}
-          isRefreshing={smartAutoplayStatus.isRefreshing}
-          modeLabel={smartModeLabel}
-          basisLabels={smartAutoplayStatus.basisLabels}
-          generatedCount={smartAutoplayStatus.generatedCount}
         />
 
         <AdMobBanner loadDelayMs={600} />

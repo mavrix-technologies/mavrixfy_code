@@ -53,7 +53,7 @@ interface UseAudioPlaybackValuesProps {
   clearSleepTimer: () => void;
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
-  changeStreamingQuality: (quality: "low" | "medium" | "high") => Promise<void>;
+  changeStreamingQuality: (quality: "auto" | "low" | "medium" | "high") => Promise<void>;
 }
 
 export function useAudioPlaybackValues(props: UseAudioPlaybackValuesProps) {

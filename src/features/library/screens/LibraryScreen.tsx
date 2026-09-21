@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from "react";
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, RefreshControl, type ListRenderItemInfo } from "react-native";
+import { View, Text, FlatList, StyleSheet, RefreshControl, type ListRenderItemInfo } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,6 +11,7 @@ import { useLikedSongs } from "@/contexts/PlayerContext";
 import { type FollowedArtist } from "@/lib/followedArtists";
 import OfflineBanner from "@/components/OfflineBanner";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
+import { NavSearchIcon } from "@/components/OfficialNavIcons";
 import AppTopHeader, {
   APP_TOP_HEADER_HEIGHT,
   AppTopHeaderIconButton,
@@ -24,7 +25,7 @@ import {
   DisplayPlaylist,
 } from "../components/PlaylistListItem";
 import { PlaylistGridItem } from "../components/PlaylistGridItem";
-import { CreatePlaylistTile } from "../components/CreatePlaylistTile";
+import { CreatePlaylistTile, CreatePlaylistListItem } from "../components/CreatePlaylistTile";
 import {
   LibraryHeader,
   Filter,
@@ -146,20 +147,19 @@ export function LibraryScreen() {
   const listData = useMemo<LibraryListItem[]>(() => {
     if (filter === "artists") return [];
 
-    if (viewMode === "grid") {
-      return [
-        ...playlists,
-        { id: CREATE_TILE_ID, isCreateTile: true },
-      ];
-    }
-
-    return playlists as LibraryListItem[];
-  }, [playlists, viewMode, filter]);
+    return [
+      ...playlists,
+      { id: CREATE_TILE_ID, isCreateTile: true },
+    ];
+  }, [playlists, filter]);
 
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<LibraryListItem>) => {
       if (isCreateTileItem(item)) {
-        return <CreatePlaylistTile onPress={handleAddPress} />;
+        if (viewMode === "grid") {
+          return <CreatePlaylistTile onPress={handleAddPress} />;
+        }
+        return <CreatePlaylistListItem onPress={handleAddPress} />;
       }
       if (viewMode === "grid") {
         return (
@@ -191,7 +191,7 @@ export function LibraryScreen() {
     () => (
       <View style={styles.topHeaderActions}>
         <AppTopHeaderIconButton
-          iconName="search-outline"
+          customIcon={<NavSearchIcon size={20} color="#F8FBF9" />}
           accessibilityLabel="Search library"
           onPress={openLibrarySearch}
           haptic={false}
@@ -200,9 +200,10 @@ export function LibraryScreen() {
           iconName="add"
           accessibilityLabel="Create playlist"
           onPress={handleAddPress}
-          iconSize={22}
-          variant="primary"
-          haptic={false}
+          iconSize={26}
+          iconColor="#F8FBF9"
+          variant="default"
+          haptic={true}
         />
       </View>
     ),

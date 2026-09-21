@@ -10,7 +10,7 @@ import {
   type ListRenderItemInfo,
 } from "react-native";
 import { styles } from "./styles/karaokeLyricsStyles";
-import { IS_ANDROID, IS_IOS, IS_WEB } from "@/constants/platform";
+import { IS_ANDROID, IS_WEB } from "@/constants/platform";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   useSharedValue,

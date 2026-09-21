@@ -11,7 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { IS_ANDROID } from "@/constants/platform";
 import { showGlobalToast } from "@/utils/globalToast";
-import { Song, getBestImageUrl, formatDuration } from "@/lib/musicData";
+import { getBestImageUrl, formatDuration, type Song } from "@/lib/musicData";
 import { addSongToPlaylist, getUserPlaylists } from "@/lib/storage";
 import {
   getUserFirestorePlaylists,

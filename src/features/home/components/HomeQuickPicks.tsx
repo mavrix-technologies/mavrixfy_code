@@ -20,12 +20,8 @@ import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
-import { showGlobalToast } from "@/utils/globalToast";
-import { logger } from "@/lib/logger";
-import { type Song, convertJioSaavnSong } from "@/lib/musicData";
-import { getJioSaavnSongDetails } from "@/data/providers/JioSaavnProvider";
+import { type Song } from "@/lib/musicData";
 import {
-  useArtworkPalette,
   colorWithAlpha,
 } from "@/lib/colorExtractor";
 
@@ -74,7 +70,7 @@ const QuickPickItem = memo(function QuickPickItem({
   }, [isActive, activeProgress]);
 
   const activeBg = useMemo(
-    () => colorWithAlpha(accentColor, 0.16, "rgba(38, 225, 154, 0.12)"),
+    () => colorWithAlpha(accentColor, 0.14, "rgba(255, 255, 255, 0.08)"),
     [accentColor]
   );
 
@@ -263,7 +259,7 @@ const styles = StyleSheet.create({
   },
 
   quickPickRowActive: {
-    backgroundColor: "rgba(38, 225, 154, 0.10)",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   quickPickMain: {
     flex: 1,

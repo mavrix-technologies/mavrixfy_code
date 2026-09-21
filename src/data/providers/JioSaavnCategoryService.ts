@@ -1,16 +1,15 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { logger } from "@/lib/logger";
-import { getApiUrl } from "@/lib/api-config";
 import { sortedCopy, shuffleArray } from "@/lib/arrayUtils";
 import { withTimeout } from "@/utils/asyncUtils";
-import { unescapeHtml } from "@/utils/stringUtils";
 import {
   dedupeByPlaylistId,
   parsePlaylistSearchResponse,
   parseAlbumSearchResponse,
-  mapHomepageItemToPlaylistResult,
   consumeResponseBody,
+  getJioSaavnSearchBaseUrls,
 } from "./JioSaavnNormalizers";
+
+export { getJioSaavnSearchBaseUrls };
 import type {
   JioSaavnPlaylistResult,
   JioSaavnAlbumResult,
@@ -39,18 +38,6 @@ const CATEGORY_TTL_MS: Record<string, number> = {
   workout: 60 * 60 * 1000,
   retro: 90 * 60 * 1000,
 };
-
-export function getJioSaavnSearchBaseUrls(): string[] {
-  const configured = getApiUrl().replace(/\/+$/, "");
-  const urls: string[] = [];
-  if (configured) {
-    urls.push(`${configured}/api`);
-  }
-  if (!configured.includes("mavrixfy-song-api.vercel.app")) {
-    urls.push("https://mavrixfy-song-api.vercel.app/api");
-  }
-  return urls;
-}
 
 export function buildCategoryCacheKey(categoryId: string): string {
   return `${CACHE_PREFIX}:${categoryId}`;

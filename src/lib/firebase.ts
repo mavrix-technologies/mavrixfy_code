@@ -52,4 +52,5 @@ export const db = (() => {
 
 export const storage = getStorage(app);
 
+export { firebaseConfig };
 export default app;

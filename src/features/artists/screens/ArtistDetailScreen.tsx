@@ -6,7 +6,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   View,
@@ -31,7 +30,6 @@ import {
   prefetchArtist,
 } from "@/data/providers/ArtistProvider";
 import { isFollowingArtist, toggleFollowArtist, type FollowedArtist } from "@/lib/followedArtists";
-import { showGlobalToast } from "@/utils/globalToast";
 import { shareArtist } from "@/utils/shareUtils";
 import { useArtworkPalette, colorWithAlpha } from "@/lib/colorExtractor";
 import SongRow from "@/components/SongRow";

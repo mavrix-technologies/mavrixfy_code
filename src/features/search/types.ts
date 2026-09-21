@@ -1,8 +1,8 @@
-import { Ionicons } from "@expo/vector-icons";
 import type { Song } from "@/lib/musicData";
 import type { SearchHistoryItem } from "@/lib/storage";
 import type { ResultFilter } from "@/lib/searchRepository";
 import { normalizeText } from "@/lib/searchUtils";
+import type { Ionicons } from "@expo/vector-icons";
 
 export interface RecentSearchItem {
   id: string;

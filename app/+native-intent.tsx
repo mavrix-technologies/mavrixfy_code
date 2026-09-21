@@ -16,10 +16,13 @@ function normalizeAssistantPath(path: string): string | null {
   if (!parsed) return null;
 
   const route = parsed.route.toLowerCase();
-  const query = parsed.searchParams.get("q") || parsed.searchParams.get("name") || "";
-  const encodedQuery = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+  const search = parsed.searchParams;
 
-  if (route === "search") return `/(tabs)/search${encodedQuery}`;
+  // 1. Direct tab / feature matches
+  if (route === "search") {
+    const query = search.get("q") || search.get("name") || "";
+    return query.trim() ? `/(tabs)/search?q=${encodeURIComponent(query.trim())}` : "/(tabs)/search";
+  }
   if (route === "library") return "/(tabs)/library";
   if (route === "liked-songs" || route === "liked") return "/(tabs)/liked-songs";
   if (route === "downloads") return "/downloads";
@@ -28,36 +31,65 @@ function normalizeAssistantPath(path: string): string | null {
   if (route === "queue") return "/queue";
   if (route === "artists") return "/artists";
 
-  // Playlist route: playlist/:id or playlist?id=...
-  if (route.startsWith("playlist/")) {
-    const id = parsed.route.slice("playlist/".length);
-    if (id) return `/playlist/${id}`;
-  }
-  if (route === "playlist") {
-    const id = parsed.searchParams.get("id");
-    if (id) return `/playlist/${id}`;
+  // 2. Track / Song route (checked before artist/playlist to avoid param collision with artist name)
+  const isTrackRoute =
+    route.startsWith("track/") ||
+    route.startsWith("song/") ||
+    search.has("track") ||
+    search.has("song");
+  if (isTrackRoute) {
+    const title = search.get("title")?.trim() || "";
+    const artist = search.get("artist")?.trim() || "";
+    const explicitQ = search.get("q")?.trim() || "";
+
+    let searchQuery = explicitQ;
+    if (!searchQuery) {
+      if (title && artist) {
+        searchQuery = `${title} ${artist}`;
+      } else if (title) {
+        searchQuery = title;
+      } else {
+        const idFromRoute = route.startsWith("track/")
+          ? route.slice("track/".length)
+          : route.startsWith("song/")
+          ? route.slice("song/".length)
+          : search.get("track") || search.get("song") || "";
+        searchQuery = idFromRoute;
+      }
+    }
+
+    if (searchQuery) {
+      return `/(tabs)/search?q=${encodeURIComponent(searchQuery)}`;
+    }
+    return "/(tabs)/search";
   }
 
-  // Artist route: artist/:id or artist?id=...
-  if (route.startsWith("artist/")) {
-    const id = parsed.route.slice("artist/".length);
-    if (id) return `/artist/${id}`;
-  }
-  if (route === "artist") {
-    const id = parsed.searchParams.get("id");
-    if (id) return `/artist/${id}`;
+  // 3. Playlist route: playlist/:id, ?playlist=:id, or ?id=:id
+  const playlistId =
+    search.get("playlist") ||
+    (route.startsWith("playlist/") ? route.slice("playlist/".length) : route === "playlist" ? search.get("id") : null);
+  if (playlistId) {
+    return `/playlist/${encodeURIComponent(playlistId)}`;
   }
 
-  // Artist Mix route: artist-mix?ids=...&names=...
-  if (route === "artist-mix" || route === "artistmix") {
-    const searchString = parsed.searchParams.toString();
+  // 4. Artist route: artist/:id, ?artist=:id, or ?id=:id
+  const artistId =
+    search.get("artist") ||
+    (route.startsWith("artist/") ? route.slice("artist/".length) : route === "artist" ? search.get("id") : null);
+  if (artistId) {
+    return `/artist/${encodeURIComponent(artistId)}`;
+  }
+
+  // 5. Artist Mix route: artist-mix?ids=...&names=..., ?mix=1, or ?artist-mix=1
+  if (route === "artist-mix" || route === "artistmix" || search.has("mix") || search.has("artist-mix")) {
+    const searchString = search.toString();
     return `/artist-mix${searchString ? `?${searchString}` : ""}`;
   }
 
-  // Song / Track route: track/:id or song/:id
-  if (route.startsWith("track/") || route.startsWith("song/")) {
-    const id = parsed.route.split("/")[1];
-    if (id) return `/(tabs)/search?q=${encodeURIComponent(id)}`;
+  // 6. Generic query parameter: ?q=...
+  const genericQ = search.get("q") || search.get("name");
+  if (genericQ && genericQ.trim()) {
+    return `/(tabs)/search?q=${encodeURIComponent(genericQ.trim())}`;
   }
 
   if (route.startsWith("feature/")) {
@@ -70,11 +102,24 @@ function normalizeAssistantPath(path: string): string | null {
 function parseIncomingPath(raw: string): { route: string; searchParams: URLSearchParams } | null {
   try {
     const url = new URL(raw);
-    const route = [url.hostname, url.pathname.replace(/^\/+/, "")].filter(Boolean).join("/");
+    let route = "";
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      // For web URLs, the route path is in pathname, not hostname
+      route = url.pathname.replace(/^\/+/, "");
+    } else {
+      // Custom scheme (e.g. mavrixfy://track/123 or mavrixfy:///track/123)
+      const host =
+        url.hostname && url.hostname !== "mavrixfy.site" && !url.hostname.includes("vercel.app")
+          ? url.hostname
+          : "";
+      route = [host, url.pathname.replace(/^\/+/, "")].filter(Boolean).join("/");
+    }
     return { route, searchParams: url.searchParams };
   } catch {
-    const [pathname, query = ""] = raw.replace(/^\/+/, "").split("?");
-    return { route: pathname, searchParams: new URLSearchParams(query) };
+    const cleaned = raw.replace(/^[a-zA-Z0-9_-]+:\/\//, "").replace(/^\/+/, "");
+    const [pathname, query = ""] = cleaned.split("?");
+    const pathWithoutDomain = pathname.replace(/^[^/]+\//, "");
+    return { route: pathWithoutDomain || pathname, searchParams: new URLSearchParams(query) };
   }
 }
 

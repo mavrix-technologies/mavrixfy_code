@@ -101,7 +101,7 @@ export function subscribeLikedSongs(userId?: string | null): () => void {
 
   const likedSongsRef = collection(db, "users", userId, "likedSongs");
 
-  const handleSnapshot = (snapshot: any) => {
+  const handleLikedSongsSnapshot = (snapshot: any) => {
     const songs: Song[] = [];
     snapshot.forEach((docSnap: any) => {
       const data = docSnap.data();
@@ -127,7 +127,7 @@ export function subscribeLikedSongs(userId?: string | null): () => void {
     void persistCachedLikedSongs(userId, songs);
   };
 
-  const handleError = (error: any) => {
+  const handleLikedSongsError = (error: any) => {
     logger.warn("[LikedSongsRepository] Realtime listener error, falling back to cached state:", error);
     // Don't blow away cached songs on network errors
     useLikedSongsStore.getState().setStatus("ready");
@@ -135,16 +135,16 @@ export function subscribeLikedSongs(userId?: string | null): () => void {
 
   try {
     const q = query(likedSongsRef, orderBy("likedAt", "desc"));
-    activeUnsubscribe = onSnapshot(q, handleSnapshot, (err) => {
+    activeUnsubscribe = onSnapshot(q, handleLikedSongsSnapshot, (err) => {
       // If composite index is missing or orderBy fails, fallback to unordered snapshot
       logger.warn("[LikedSongsRepository] Ordered query failed, falling back to unordered listener:", err);
       if (activeSubscriptionUserId === userId) {
-        activeUnsubscribe = onSnapshot(likedSongsRef, handleSnapshot, handleError);
+        activeUnsubscribe = onSnapshot(likedSongsRef, handleLikedSongsSnapshot, handleLikedSongsError);
       }
     });
   } catch (err) {
     logger.warn("[LikedSongsRepository] Failed to initialize query, attaching unordered listener:", err);
-    activeUnsubscribe = onSnapshot(likedSongsRef, handleSnapshot, handleError);
+    activeUnsubscribe = onSnapshot(likedSongsRef, handleLikedSongsSnapshot, handleLikedSongsError);
   }
 
   return cleanupLikedSongsSubscription;

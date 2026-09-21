@@ -173,7 +173,7 @@ export function getBestAudioUrl(downloadUrls: unknown): string {
   return sorted[0]?.url || "";
 }
 
-export type StreamingQuality = "low" | "medium" | "high";
+export type StreamingQuality = "auto" | "low" | "medium" | "high";
 
 export interface ResolvedAudioStream {
   url: string;
@@ -197,12 +197,14 @@ export function parseBitrateFromQuality(quality: string | undefined): number {
 }
 
 export const QUALITY_LADDER: Record<StreamingQuality, number[]> = {
+  auto: [160, 96, 48, 320, 12],
   low: [96, 48, 12, 160, 320],
   medium: [160, 96, 48, 320, 12],
   high: [320, 160, 96, 48, 12],
 } as const;
 
 export const QUALITY_LABELS: Record<StreamingQuality, string[]> = {
+  auto: ["160kbps", "96kbps", "48kbps", "320kbps", "12kbps"],
   low: ["96kbps", "48kbps", "12kbps", "160kbps", "320kbps"],
   medium: ["160kbps", "96kbps", "48kbps", "320kbps", "12kbps"],
   high: ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"],

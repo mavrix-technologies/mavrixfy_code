@@ -1,11 +1,22 @@
 /**
- * Downloaded Songs — Spotify-style offline library with tabs.
+ * Downloaded Songs — Spotify-style offline library.
  *
- * Clean, premium, and unified with LikedSongsScreen and Settings.
+ * Clean, premium, and unified with LikedSongsScreen.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, Alert, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import {
+  Alert,
+  FlatList,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -14,7 +25,7 @@ import * as Haptics from "expo-haptics";
 import { triggerImpact } from "@/lib/haptics";
 import { useDownloads } from "@/contexts/DownloadContext";
 import { onQueueEvent } from "@/lib/downloads/downloadManager";
-import { DownloadItem, type DownloadQuality } from "@/types/downloads";
+import { DownloadItem } from "@/types/downloads";
 import { Song } from "@/lib/musicData";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
@@ -26,6 +37,8 @@ import AppTopHeader, {
 } from "@/components/AppTopHeader";
 import { formatBytes, getTrackFileUri } from "@/lib/downloads/storagePolicy";
 import AdMobBanner from "@/components/AdMobBanner";
+import CollectionHero from "@/components/CollectionHero";
+import ActionCircleButton from "@/components/ActionCircleButton";
 
 import { DOWNLOADS_UI as UI, styles } from "../styles/downloadedSongsStyles";
 
@@ -46,7 +59,7 @@ function downloadItemToSong(item: DownloadItem): Song {
 
 const songKeyExtractor = (item: Song) => item.id;
 
-// react-doctor-disable-next-line react-doctor/no-giant-component -- screen layout component containing downloads and storage settings tabs
+// react-doctor-disable-next-line react-doctor/no-giant-component -- screen layout component for downloaded songs offline library
 export function DownloadedSongsScreen() {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
@@ -54,17 +67,13 @@ export function DownloadedSongsScreen() {
   const {
     getAllDownloadItems,
     storageSummary,
-    preferences,
-    updatePreferences,
     removeAllDownloads,
-    refreshSummary,
   } = useDownloads();
 
   const { currentSong, isShuffled } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
   const { playSong, shufflePlay, togglePlay, toggleShuffle } = usePlayerBrowse();
 
-  const [activeTab, setActiveTab] = useState<"songs" | "settings">("songs");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [showStickyPlay, setShowStickyPlay] = useState(false);
@@ -145,33 +154,6 @@ export function DownloadedSongsScreen() {
     shufflePlay(listToPlay);
   }, [filteredSongs, completedSongs, shufflePlay]);
 
-  const handleQualityChange = useCallback(
-    (quality: DownloadQuality) => {
-      void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-      updatePreferences({ quality });
-    },
-    [updatePreferences]
-  );
-
-  const handleRemoveAll = useCallback(() => {
-    Alert.alert(
-      "Remove All Downloads",
-      "This will delete all downloaded songs from this device to free up storage space. Continue?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete All",
-          style: "destructive",
-          onPress: async () => {
-            void triggerImpact(Haptics.ImpactFeedbackStyle.Heavy);
-            await removeAllDownloads();
-            refreshSummary();
-          },
-        },
-      ]
-    );
-  }, [removeAllDownloads, refreshSummary]);
-
   const keyExtractor = songKeyExtractor;
 
   const renderSong = useCallback(
@@ -204,7 +186,35 @@ export function DownloadedSongsScreen() {
       : "0 B";
   }, [storageSummary.totalDownloadedBytes]);
 
-  const headerMeta = `${completedSongs.length} SONGS • ${totalBytesFormatted} OFFLINE`;
+  const headerMeta = useMemo(() => {
+    if (completedSongs.length === 0) return "No downloaded songs";
+    const count = `${completedSongs.length} ${completedSongs.length === 1 ? "song" : "songs"}`;
+    return totalBytesFormatted && totalBytesFormatted !== "0 B"
+      ? `${count} • ${totalBytesFormatted}`
+      : count;
+  }, [completedSongs.length, totalBytesFormatted]);
+
+  const handleConfirmDeleteAll = useCallback(() => {
+    if (completedSongs.length === 0) return;
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
+
+    Alert.alert(
+      "Delete All Downloads",
+      `Are you sure you want to remove all ${completedSongs.length} downloaded song${completedSongs.length === 1 ? "" : "s"} (${totalBytesFormatted}) from your device?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete All",
+          style: "destructive",
+          onPress: async () => {
+            void triggerImpact(Haptics.ImpactFeedbackStyle.Heavy);
+            await removeAllDownloads();
+            setDownloadItems([]);
+          },
+        },
+      ]
+    );
+  }, [completedSongs.length, totalBytesFormatted, removeAllDownloads]);
 
   if (isSearchMode) {
     return (
@@ -284,35 +294,21 @@ export function DownloadedSongsScreen() {
       <AppTopHeader
         topInset={topInset}
         elevated={isHeaderElevated}
-        title={activeTab === "songs" ? "Downloads" : "Download Settings"}
+        title="Downloaded Songs"
         left={
           <AppTopHeaderIconButton
             iconName="chevron-back"
             iconSize={24}
             accessibilityLabel="Back"
             onPress={() => {
-              if (activeTab === "settings") {
-                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                setActiveTab("songs");
-              } else {
-                router.back();
-              }
+              router.back();
             }}
           />
         }
-        rightWidth={activeTab === "songs" && showStickyPlay ? 80 : 40}
+        rightWidth={showStickyPlay ? 44 : completedSongs.length > 0 ? 40 : 0}
         right={
-          <View style={styles.headerRightContainer}>
-            <AppTopHeaderIconButton
-              iconName={activeTab === "songs" ? "options-outline" : "musical-notes-outline"}
-              iconSize={20}
-              accessibilityLabel={activeTab === "songs" ? "Settings" : "Songs"}
-              onPress={() => {
-                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                setActiveTab((prev) => (prev === "songs" ? "settings" : "songs"));
-              }}
-            />
-            {activeTab === "songs" && showStickyPlay && (
+          showStickyPlay ? (
+            <View style={styles.headerRightContainer}>
               <Pressable
                 onPress={handlePlayAll}
                 style={({ pressed }) => [
@@ -323,140 +319,71 @@ export function DownloadedSongsScreen() {
                 <Ionicons
                   name={isPlayingFromDownloaded && isPlaying ? "pause" : "play"}
                   size={15}
-                  color="#06241a"
+                  color="#06241A"
                   style={!isPlayingFromDownloaded || !isPlaying ? { marginLeft: 1 } : undefined}
                 />
               </Pressable>
-            )}
-          </View>
+            </View>
+          ) : completedSongs.length > 0 ? (
+            <AppTopHeaderIconButton
+              iconName="trash-outline"
+              iconSize={20}
+              iconColor="#F8FBF9"
+              accessibilityLabel="Delete all downloaded songs"
+              onPress={handleConfirmDeleteAll}
+              haptic={true}
+            />
+          ) : null
         }
       />
 
       <View style={[styles.mainWrap, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT }]}>
-        {/* Segmented Tab Bar */}
-        <View style={styles.tabBarWrap}>
-          <View style={styles.tabBar}>
-            <Pressable
-              style={[styles.tabBtn, activeTab === "songs" && styles.tabBtnActive]}
-              onPress={() => {
-                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                setActiveTab("songs");
-              }}
-            >
-              <Ionicons
-                name="musical-notes"
-                size={15}
-                color={activeTab === "songs" ? "#042115" : UI.subtext}
-                style={{ marginRight: 6 }}
-              />
-              <Text style={[styles.tabBtnText, activeTab === "songs" && styles.tabBtnTextActive]}>
-                Songs ({completedSongs.length})
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.tabBtn, activeTab === "settings" && styles.tabBtnActive]}
-              onPress={() => {
-                void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                setActiveTab("settings");
-              }}
-            >
-              <Ionicons
-                name="settings-outline"
-                size={15}
-                color={activeTab === "settings" ? "#042115" : UI.subtext}
-                style={{ marginRight: 6 }}
-              />
-              <Text style={[styles.tabBtnText, activeTab === "settings" && styles.tabBtnTextActive]}>
-                Storage & Settings
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Tab 1: Downloaded Songs View */}
-        {activeTab === "songs" ? (
-          <FlatList
-            data={filteredSongs}
-            keyExtractor={keyExtractor}
-            renderItem={renderSong}
-            getItemLayout={getItemLayout}
-            initialNumToRender={12}
-            maxToRenderPerBatch={10}
-            windowSize={5}
-            removeClippedSubviews={Platform.OS !== "web"}
-            ListHeaderComponent={
-              <>
-                <Pressable
-                  onPress={() => {
-                    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                    setIsSearchMode(true);
-                  }}
-                  style={styles.searchContainer}
-                >
-                  <View style={styles.searchInputWrapper}>
-                    <Ionicons name="search" size={16} color={UI.subtext} />
-                    <Text style={styles.searchPlaceholderText}>Search downloaded songs...</Text>
-                  </View>
-                </Pressable>
-
-                <View style={styles.heroSection}>
-                  <LinearGradient
-                    colors={[UI.primaryA, UI.primaryB]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.heroIconCard}
-                  >
-                    <Ionicons name="arrow-down-circle" size={38} color="#042115" />
-                  </LinearGradient>
-                  <Text style={styles.heroTitle}>Downloaded Songs</Text>
-                  <Text style={styles.heroMeta}>{headerMeta}</Text>
+        <FlatList
+          data={filteredSongs}
+          keyExtractor={keyExtractor}
+          renderItem={renderSong}
+          getItemLayout={getItemLayout}
+          initialNumToRender={12}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          removeClippedSubviews={Platform.OS !== "web"}
+          ListHeaderComponent={
+            <>
+              <Pressable
+                onPress={() => {
+                  void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+                  setIsSearchMode(true);
+                }}
+                style={styles.searchContainer}
+              >
+                <View style={styles.searchInputWrapper}>
+                  <Ionicons name="search" size={16} color={UI.subtext} />
+                  <Text style={styles.searchPlaceholderText}>Search downloaded songs...</Text>
                 </View>
+              </Pressable>
 
-                <View style={styles.actionSection}>
-                  <Pressable
-                    onPress={() => {
-                      void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-                      setActiveTab("settings");
-                    }}
-                    style={styles.storageBadge}
-                  >
-                    <Ionicons name="phone-portrait-outline" size={14} color={UI.primaryA} />
-                    <Text style={styles.storageBadgeText}>{totalBytesFormatted}</Text>
-                    <Ionicons name="chevron-forward" size={12} color={UI.primaryA} style={{ marginLeft: 2 }} />
-                  </Pressable>
-
-                  <View style={styles.rightActions}>
-                    <Pressable
-                      onPress={handleShufflePlay}
-                      style={({ pressed }) => [
-                        styles.shuffleButton,
-                        isShuffled && isPlayingFromDownloaded && styles.shuffleButtonActive,
-                        pressed && styles.shuffleButtonPressed,
-                      ]}
-                      android_ripple={{ color: "rgba(255,255,255,0.12)", borderless: false }}
-                    >
-                      <Ionicons
-                        name="shuffle"
-                        size={24}
-                        color={isShuffled && isPlayingFromDownloaded ? UI.primaryA : UI.text}
-                      />
-                    </Pressable>
-
-                    <Pressable
-                      onPress={handlePlayAll}
-                      style={({ pressed }) => [styles.playAllButton, pressed && styles.playAllButtonPressed]}
-                      android_ripple={{ color: "rgba(0,0,0,0.15)", borderless: false }}
-                    >
-                      <Ionicons
-                        name={isPlayingFromDownloaded && isPlaying ? "pause" : "play"}
-                        size={28}
-                        color="#06241a"
-                        style={!isPlayingFromDownloaded || !isPlaying ? { marginLeft: 3 } : undefined}
-                      />
-                    </Pressable>
-                  </View>
-                </View>
+              <CollectionHero
+                iconName="arrow-down-circle"
+                iconColor="#26E19A"
+                title="Downloaded Songs"
+                meta={headerMeta}
+                isPlaying={isPlayingFromDownloaded && isPlaying}
+                isShuffled={isShuffled && isPlayingFromDownloaded}
+                onPlayAll={handlePlayAll}
+                onShufflePlay={handleShufflePlay}
+                leftAction={
+                  completedSongs.length > 0 ? (
+                    <ActionCircleButton
+                      iconName="trash-outline"
+                      size={44}
+                      iconSize={20}
+                      iconColor="#F8FBF9"
+                      accessibilityLabel="Delete all downloaded songs"
+                      onPress={handleConfirmDeleteAll}
+                    />
+                  ) : null
+                }
+              />
 
                 <AdMobBanner loadDelayMs={800} />
 
@@ -498,168 +425,6 @@ export function DownloadedSongsScreen() {
             onScroll={handleScroll}
             scrollEventThrottle={16}
           />
-        ) : (
-          /* Tab 2: Settings & Storage View */
-          <ScrollView
-            style={styles.settingsScrollView}
-            contentContainerStyle={[styles.settingsScrollContent, { paddingBottom: Math.max(insets.bottom + 20, 100) }]}
-            showsVerticalScrollIndicator={false}
-          >
-            {/* Storage Hero Card */}
-            <View style={styles.storageCard}>
-              <View style={styles.storageTopRow}>
-                <View style={styles.storageTextGroup}>
-                  <Text style={styles.storageTitle}>Offline Storage</Text>
-                  <Text style={styles.storageValue}>{totalBytesFormatted}</Text>
-                </View>
-                <View style={styles.storageIconWrap}>
-                  <Ionicons name="phone-portrait-outline" size={24} color={UI.primaryA} />
-                </View>
-              </View>
-
-              <View style={styles.storageMetricsRow}>
-                <View style={styles.metricItem}>
-                  <Text style={styles.metricNum}>{storageSummary.completedTracks}</Text>
-                  <Text style={styles.metricLabel}>Saved</Text>
-                </View>
-                <View style={styles.metricDivider} />
-                <View style={styles.metricItem}>
-                  <Text style={styles.metricNum}>{storageSummary.pendingTracks}</Text>
-                  <Text style={styles.metricLabel}>Pending</Text>
-                </View>
-                <View style={styles.metricDivider} />
-                <View style={styles.metricItem}>
-                  <Text style={[styles.metricNum, storageSummary.failedTracks > 0 && { color: UI.error }]}>
-                    {storageSummary.failedTracks}
-                  </Text>
-                  <Text style={styles.metricLabel}>Failed</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Audio Quality Section */}
-            <Text style={styles.sectionHeaderTitle}>Audio Download Quality</Text>
-            <View style={styles.groupedCard}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.qualityItemRow,
-                  preferences.quality === "high" && styles.qualityItemRowActive,
-                  pressed && styles.qualityItemRowPressed,
-                ]}
-                onPress={() => handleQualityChange("high")}
-              >
-                <View style={styles.qualityTextCol}>
-                  <Text style={[styles.qualityItemTitle, preferences.quality === "high" && styles.qualityItemTitleActive]}>
-                    High Quality
-                  </Text>
-                  <Text style={styles.qualityItemSub}>~320 kbps · Full studio fidelity audio</Text>
-                </View>
-                <View style={[styles.radioCircle, preferences.quality === "high" && styles.radioCircleActive]}>
-                  {preferences.quality === "high" && <View style={styles.radioDot} />}
-                </View>
-              </Pressable>
-
-              <View style={styles.settingDivider} />
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.qualityItemRow,
-                  preferences.quality === "medium" && styles.qualityItemRowActive,
-                  pressed && styles.qualityItemRowPressed,
-                ]}
-                onPress={() => handleQualityChange("medium")}
-              >
-                <View style={styles.qualityTextCol}>
-                  <Text style={[styles.qualityItemTitle, preferences.quality === "medium" && styles.qualityItemTitleActive]}>
-                    Normal Quality
-                  </Text>
-                  <Text style={styles.qualityItemSub}>~128 kbps · Standard balance of speed & quality</Text>
-                </View>
-                <View style={[styles.radioCircle, preferences.quality === "medium" && styles.radioCircleActive]}>
-                  {preferences.quality === "medium" && <View style={styles.radioDot} />}
-                </View>
-              </Pressable>
-
-              <View style={styles.settingDivider} />
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.qualityItemRow,
-                  preferences.quality === "low" && styles.qualityItemRowActive,
-                  pressed && styles.qualityItemRowPressed,
-                ]}
-                onPress={() => handleQualityChange("low")}
-              >
-                <View style={styles.qualityTextCol}>
-                  <Text style={[styles.qualityItemTitle, preferences.quality === "low" && styles.qualityItemTitleActive]}>
-                    Low Quality
-                  </Text>
-                  <Text style={styles.qualityItemSub}>~48 kbps · Uses minimal device storage</Text>
-                </View>
-                <View style={[styles.radioCircle, preferences.quality === "low" && styles.radioCircleActive]}>
-                  {preferences.quality === "low" && <View style={styles.radioDot} />}
-                </View>
-              </Pressable>
-            </View>
-
-            {/* Network & Power Section */}
-            <Text style={[styles.sectionHeaderTitle, { marginTop: 22 }]}>Network & Power</Text>
-            <View style={styles.groupedCard}>
-              <View style={styles.settingRow}>
-                <View style={styles.settingInfo}>
-                  <Text style={styles.settingLabel}>Download over Wi-Fi only</Text>
-                  <Text style={styles.settingDesc}>Prevents using mobile cellular data</Text>
-                </View>
-                <Switch
-                  value={preferences.wifiOnly}
-                  onValueChange={(v) => updatePreferences({ wifiOnly: v })}
-                  trackColor={{ false: "#2a2f38", true: UI.primaryA }}
-                  thumbColor="#fff"
-                />
-              </View>
-
-              <View style={styles.settingDivider} />
-
-              <View style={styles.settingRow}>
-                <View style={styles.settingInfo}>
-                  <Text style={styles.settingLabel}>Download only when charging</Text>
-                  <Text style={styles.settingDesc}>Preserves battery when running unplugged</Text>
-                </View>
-                <Switch
-                  value={preferences.chargingOnly}
-                  onValueChange={(v) => updatePreferences({ chargingOnly: v })}
-                  trackColor={{ false: "#2a2f38", true: UI.primaryA }}
-                  thumbColor="#fff"
-                />
-              </View>
-
-              <View style={styles.settingDivider} />
-
-              <View style={styles.settingRow}>
-                <View style={styles.settingInfo}>
-                  <Text style={styles.settingLabel}>Auto-delete expired</Text>
-                  <Text style={styles.settingDesc}>Cleans up expired offline tracks</Text>
-                </View>
-                <Switch
-                  value={preferences.autoDeleteExpired}
-                  onValueChange={(v) => updatePreferences({ autoDeleteExpired: v })}
-                  trackColor={{ false: "#2a2f38", true: UI.primaryA }}
-                  thumbColor="#fff"
-                />
-              </View>
-            </View>
-
-            {/* Delete All Section */}
-            <Text style={[styles.sectionHeaderTitle, { marginTop: 22 }]}>Storage Cleanup</Text>
-            <Pressable
-              style={({ pressed }) => [styles.dangerCard, pressed && styles.dangerCardPressed]}
-              onPress={handleRemoveAll}
-            >
-              <Ionicons name="trash-outline" size={18} color={UI.error} style={{ marginRight: 8 }} />
-              <Text style={styles.dangerText}>Delete All Offline Downloads</Text>
-            </Pressable>
-          </ScrollView>
-        )}
       </View>
     </View>
   );

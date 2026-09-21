@@ -1,6 +1,8 @@
 import { create } from "zustand";
-import type { DisplayPlaylist } from "../components/PlaylistListItem";
+import type { UserPlaylist } from "@/lib/storage";
 import type { FollowedArtist } from "@/lib/followedArtists";
+
+export type DisplayPlaylist = UserPlaylist & { isFirestore?: boolean };
 
 export interface LibraryState {
   playlists: DisplayPlaylist[];

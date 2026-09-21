@@ -23,7 +23,6 @@ import {
   type AlbumResult,
   type ArtistResult,
   type SearchResults,
-  EMPTY_RESULTS,
 } from "@/lib/searchRepository";
 import {
   type RecentSearchItem,
@@ -146,7 +145,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
         dispatch({ type: "SEARCH_SUCCESS", results: nextResults, displayQuery: normalizedQuery });
 
         searchCache.set(cacheKey, nextResults);
-        if (searchCache.size > 25) {
+        if (searchCache.size > 60) {
           const firstKey = searchCache.keys().next().value;
           if (firstKey) searchCache.delete(firstKey);
         }
@@ -419,7 +418,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     const searchTimer = setTimeout(() => {
       lastQueryRef.current = trimmed;
       void performSearch(trimmed);
-    }, 300);
+    }, 180);
     debounceTimer.current = searchTimer;
 
     return () => {

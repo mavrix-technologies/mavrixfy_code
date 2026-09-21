@@ -3,9 +3,8 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { UserPlaylist } from "@/lib/storage";
-
-export type DisplayPlaylist = UserPlaylist & { isFirestore?: boolean };
+import { type DisplayPlaylist } from "../store/libraryStore";
+export type { DisplayPlaylist };
 
 interface PlaylistListItemProps {
   item: DisplayPlaylist;

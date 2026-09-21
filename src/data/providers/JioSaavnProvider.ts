@@ -1,5 +1,4 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getApiUrl } from "@/lib/api-config";
 import { shuffleArray } from "@/lib/arrayUtils";
 import { withTimeout } from "@/utils/asyncUtils";
 import {

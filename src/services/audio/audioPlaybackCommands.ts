@@ -48,6 +48,10 @@ interface UseAudioPlaybackCommandsOptions {
   nextSongRef: MutableRefObject<() => void>;
   prevSongRef: MutableRefObject<() => void>;
   seekToRef: MutableRefObject<(progress: number) => Promise<void> | void>;
+  triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[]) => Promise<Song[]>;
+  autoplaySongIdsRef?: MutableRefObject<string[]>;
+  lastAutoplaySeedIdRef?: MutableRefObject<string | null>;
+  sleepTimerRef?: MutableRefObject<any>;
 }
 
 export function useAudioPlaybackCommands({
@@ -90,6 +94,10 @@ export function useAudioPlaybackCommands({
   nextSongRef,
   prevSongRef,
   seekToRef,
+  triggerAutoplayAppend,
+  autoplaySongIdsRef,
+  lastAutoplaySeedIdRef,
+  sleepTimerRef,
 }: UseAudioPlaybackCommandsOptions) {
   const playSong = useCallback(
     async (song: Song, requestedQueue?: Song[]) => {
@@ -129,6 +137,8 @@ export function useAudioPlaybackCommands({
       if (isNewQueue) {
         setUserQueuedSongIds([]);
         userQueuedSongIdsRef.current = [];
+        if (autoplaySongIdsRef) autoplaySongIdsRef.current = [];
+        if (lastAutoplaySeedIdRef) lastAutoplaySeedIdRef.current = null;
         if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
       } else {
         const prevIds = userQueuedSongIdsRef.current;
@@ -151,12 +161,18 @@ export function useAudioPlaybackCommands({
         queue: q,
         sourceQueue: originalQueueRef.current,
         userQueuedSongIds: isNewQueue ? [] : userQueuedSongIdsRef.current,
+        autoplaySongIds: isNewQueue ? [] : (autoplaySongIdsRef?.current || []),
         queueIndex: targetIndex,
         desiredPlayState: true,
         isPlaying: true,
         isLoading: true,
         isBuffering: false,
       });
+
+      // Proactively fetch and append similar songs if queue is near end
+      if (triggerAutoplayAppend && (q.length - targetIndex <= 2)) {
+        void triggerAutoplayAppend(targetSong, q);
+      }
 
       // 2. Offload persistence completely off the critical tap path
       setTimeout(() => {
@@ -171,14 +187,17 @@ export function useAudioPlaybackCommands({
       }, 800);
 
       try {
-        const audioUrl = await resolvePlaybackUrlCached(targetSong);
+        const audioUrl = await Promise.race([
+          resolvePlaybackUrlCached(targetSong),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 8500)),
+        ]);
         if (reqId !== playRequestIdRef.current) return;
 
         if (!audioUrl) {
           setIsPlaying(false);
           isPlayingRef.current = false;
           updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
-          showPlaybackNotice("Could not resolve playback URL.");
+          showPlaybackNotice("Playback stream timed out or unavailable.");
           return;
         }
 
@@ -380,22 +399,6 @@ export function useAudioPlaybackCommands({
   }, [togglePlay, togglePlayRef]);
 
   const nextSong = useCallback(async () => {
-    if (TrackPlayer && isPlayerReady) {
-      let skipSucceeded = false;
-      await enqueueNativeQueueMutation(async () => {
-        try {
-          await TrackPlayer!.skipToNext();
-          skipSucceeded = true;
-        } catch {
-          const activeTrack = await TrackPlayer!.getActiveTrack().catch(() => null);
-          if (activeTrack?.id && activeTrack.id !== currentSongRef.current?.id) {
-            skipSucceeded = true;
-          }
-        }
-      });
-      if (skipSucceeded) return;
-    }
-
     const cq = queueRef.current;
     const ci = queueIndexRef.current;
     if (cq.length === 0) return;
@@ -407,11 +410,44 @@ export function useAudioPlaybackCommands({
         void playSong(targetSong, cq);
       }
     } else {
+      // Reached end of queue: check smart autoplay before stopping
+      try {
+        const { getSettings } = require("@/lib/storage");
+        const settings = await getSettings();
+        if (
+          settings?.smartAutoplayEnabled &&
+          sleepTimerRef?.current?.mode !== "end-of-stack" &&
+          triggerAutoplayAppend
+        ) {
+          const seed = cq[ci] || currentSongRef.current;
+          if (seed) {
+            showPlaybackNotice("Finding similar songs...");
+            const recs = await triggerAutoplayAppend(seed, cq);
+            if (recs.length > 0) {
+              void playSong(recs[0], queueRef.current);
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn("[Player] Autoplay nextSong error:", err);
+      }
+
       setIsPlaying(false);
       isPlayingRef.current = false;
       updatePlaybackEngineSnapshot({ isPlaying: false, desiredPlayState: false });
     }
-  }, [enqueueNativeQueueMutation, isPlayerReady, playSong, currentSongRef, isPlayingRef, queueIndexRef, queueRef, repeatModeRef, setIsPlaying, TrackPlayer]);
+  }, [
+    currentSongRef,
+    playSong,
+    queueIndexRef,
+    queueRef,
+    repeatModeRef,
+    setIsPlaying,
+    showPlaybackNotice,
+    sleepTimerRef,
+    triggerAutoplayAppend,
+  ]);
 
   useEffect(() => {
     nextSongRef.current = nextSong;
@@ -451,32 +487,20 @@ export function useAudioPlaybackCommands({
       return;
     }
 
-    if (TrackPlayer && isPlayerReady) {
-      let skipSucceeded = false;
-      await enqueueNativeQueueMutation(async () => {
-        try {
-          await TrackPlayer!.skipToPrevious();
-          skipSucceeded = true;
-        } catch {
-          const activeTrack = await TrackPlayer!.getActiveTrack().catch(() => null);
-          if (activeTrack?.id && activeTrack.id !== currentSongRef.current?.id) {
-            skipSucceeded = true;
-          }
-        }
-      });
-      if (skipSucceeded) return;
-    }
-
     const cq = queueRef.current;
     const ci = queueIndexRef.current;
     if (cq.length === 0) return;
 
-    const prevIndex = (ci - 1 + cq.length) % cq.length;
-    const targetSong = cq[prevIndex];
-    if (targetSong) {
-      void playSong(targetSong, cq);
+    if (repeatModeRef.current === "all" || ci > 0) {
+      const prevIndex = (ci - 1 + cq.length) % cq.length;
+      const targetSong = cq[prevIndex];
+      if (targetSong) {
+        void playSong(targetSong, cq);
+      }
+    } else {
+      void seekTo(0);
     }
-  }, [currentSongRef, enqueueNativeQueueMutation, isPlayerReady, playSong, positionSecondsRef, queueIndexRef, queueRef, seekTo, TrackPlayer]);
+  }, [playSong, positionSecondsRef, queueIndexRef, queueRef, repeatModeRef, seekTo]);
 
   useEffect(() => {
     prevSongRef.current = prevSong;

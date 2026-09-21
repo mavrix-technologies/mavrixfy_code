@@ -36,7 +36,8 @@ type AppTopHeaderProps = {
 };
 
 type AppTopHeaderIconButtonProps = {
-  iconName: keyof typeof Ionicons.glyphMap;
+  iconName?: keyof typeof Ionicons.glyphMap;
+  customIcon?: ReactNode;
   onPress: () => void;
   accessibilityLabel: string;
   iconColor?: string;
@@ -109,7 +110,7 @@ export default function AppTopHeader({
   const gradientColors = useMemo<readonly [string, string]>(() => {
     if (ambientColor) {
       return [
-        colorWithAlpha(ambientColor, 0.45, "rgba(38, 225, 154, 0.35)"),
+        colorWithAlpha(ambientColor, 0.45, "rgba(20, 23, 31, 0.90)"),
         "#0B0F14",
       ] as const;
     }
@@ -147,7 +148,17 @@ export default function AppTopHeader({
         <View style={[styles.sideSlot, { width: leftWidth }]}>{left}</View>
         <View
           pointerEvents={titleNode ? "auto" : "none"}
-          style={[styles.titleWrap, titleAlign === "left" && styles.titleWrapLeft]}
+          style={[
+            styles.titleWrap,
+            titleAlign === "left" && styles.titleWrapLeft,
+            titleAlign === "center" && {
+              position: "absolute",
+              left: Math.max(leftWidth, rightWidth) + 12,
+              right: Math.max(leftWidth, rightWidth) + 12,
+              top: 0,
+              bottom: 0,
+            },
+          ]}
         >
           {resolvedTitle}
         </View>
@@ -158,7 +169,8 @@ export default function AppTopHeader({
 }
 
 export function AppTopHeaderIconButton({
-  iconName,
+  iconName = "chevron-back",
+  customIcon,
   onPress,
   accessibilityLabel,
   iconColor,
@@ -185,11 +197,15 @@ export function AppTopHeaderIconButton({
       onPress={handlePress}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
     >
-      <Ionicons
-        name={iconName}
-        size={iconSize}
-        color={iconColor ?? (variant === "primary" ? "#06241a" : "#F8FBF9")}
-      />
+      {customIcon ? (
+        customIcon
+      ) : (
+        <Ionicons
+          name={iconName}
+          size={iconSize}
+          color={iconColor ?? (variant === "primary" ? "#06241a" : "#F8FBF9")}
+        />
+      )}
     </Pressable>
   );
 }
@@ -325,9 +341,9 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   buttonPrimary: {
-    backgroundColor: "#26E19A",
+    backgroundColor: "rgba(255, 255, 255, 0.10)",
     borderWidth: 1,
-    borderColor: "rgba(38,225,154,0.55)",
+    borderColor: "rgba(255, 255, 255, 0.12)",
   },
   buttonPressed: {
     opacity: 0.78,

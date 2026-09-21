@@ -7,6 +7,7 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNetwork } from "@/contexts/NetworkContext";
+import Colors from "@/constants/colors";
 
 export default function OfflineBanner() {
   const { isOnline, recheck, isChecking } = useNetwork();
@@ -16,7 +17,7 @@ export default function OfflineBanner() {
 
   return (
     <View style={[styles.banner, { paddingTop: Math.max(insets.top, 8) + 4 }]}>
-      <Ionicons name="cloud-offline-outline" size={15} color="#26E19A" />
+      <Ionicons name="cloud-offline-outline" size={15} color={Colors.primary} />
       <Text style={styles.text}>Offline mode · Cached content</Text>
       <Pressable
         onPress={recheck}
@@ -51,16 +52,16 @@ const styles = StyleSheet.create({
   retry: {
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 6,
-    backgroundColor: "rgba(38, 225, 154, 0.15)",
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.10)",
     borderWidth: 1,
-    borderColor: "rgba(38, 225, 154, 0.3)",
+    borderColor: "rgba(255, 255, 255, 0.16)",
   },
   retryPressed: {
     opacity: 0.8,
   },
   retryText: {
-    color: "#26E19A",
+    color: Colors.primary,
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
   },

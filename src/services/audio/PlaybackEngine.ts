@@ -30,6 +30,8 @@ export interface PlaybackEngineSnapshot {
   transitionType: PlaybackCommandType | null;
   transitionTargetId: string | null;
   transitionTargetIndex: number | null;
+  autoplaySongIds: string[];
+  isAutoplayLoading: boolean;
   error: string | null;
   isShuffled: boolean;
   repeatMode: "off" | "all" | "one";
@@ -55,6 +57,8 @@ const INITIAL_SNAPSHOT: PlaybackEngineSnapshot = {
   queueIds: [],
   sourceQueue: [],
   userQueuedSongIds: [],
+  autoplaySongIds: [],
+  isAutoplayLoading: false,
   queueIndex: 0,
   activeIndex: 0,
   isPlaying: false,
@@ -102,7 +106,7 @@ function normalizeSnapshot(next: PlaybackEngineSnapshot): PlaybackEngineSnapshot
   };
 }
 
-function emit(): void {
+function emitPlaybackEngine(): void {
   listeners.forEach((listener) => listener());
 }
 
@@ -129,7 +133,7 @@ export function updatePlaybackEngineSnapshot(update: SnapshotUpdater): void {
 
   if (shallowEqualObject(snapshot, next)) return;
   snapshot = next;
-  emit();
+  emitPlaybackEngine();
 }
 
 function beginPlaybackTransaction({
@@ -263,6 +267,8 @@ export function usePlaybackQueueState() {
       currentSong: state.currentSong,
       queue: state.queue,
       userQueuedSongIds: state.userQueuedSongIds,
+      autoplaySongIds: state.autoplaySongIds || [],
+      isAutoplayLoading: Boolean(state.isAutoplayLoading),
       queueIndex: state.queueIndex,
       isShuffled: state.isShuffled,
     }),

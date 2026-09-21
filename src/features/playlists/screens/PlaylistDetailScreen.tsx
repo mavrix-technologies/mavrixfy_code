@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Platform,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   View,
@@ -21,7 +20,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import OfflineBanner from "@/components/OfflineBanner";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { sharePlaylist } from "@/utils/shareUtils";
-import { useArtworkPalette, colorWithAlpha } from "@/lib/colorExtractor";
+import { useArtworkPalette } from "@/lib/colorExtractor";
 import { usePlaylistDetailData } from "../hooks/usePlaylistDetailData";
 import { usePlaylistDetailParams } from "../hooks/usePlaylistDetailParams";
 import { usePlaylistEditModalState } from "../hooks/usePlaylistEditModalState";

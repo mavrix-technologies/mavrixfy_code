@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, StyleSheet, useWindowDimensions } from "react-native";
+import { StyleSheet, useWindowDimensions } from "react-native";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -7,7 +7,6 @@ import Animated, {
   Easing,
   type SharedValue,
 } from "react-native-reanimated";
-import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { type Song } from "@/lib/musicData";
 import { type FestivalThemeConfig } from "@/services/festivalThemeService";
@@ -15,7 +14,6 @@ import {
   extractArtworkColors,
   colorWithAlpha,
   type ArtworkPalette,
-  DEFAULT_ARTWORK_PALETTE,
 } from "@/lib/colorExtractor";
 
 type GradientStops = readonly [string, string, string, string];
@@ -38,8 +36,8 @@ let gCachedColorStops: GradientStops = DEFAULT_GRADIENT_COLORS;
 
 function buildColorStopsFromPalette(accent: string, background: string): GradientStops {
   return [
-    colorWithAlpha(accent, 0.42, "rgba(38, 225, 154, 0.30)"),
-    colorWithAlpha(background, 0.65, "rgba(18, 30, 26, 0.50)"),
+    colorWithAlpha(accent, 0.42, "rgba(20, 24, 32, 0.50)"),
+    colorWithAlpha(background, 0.65, "rgba(18, 22, 28, 0.50)"),
     "rgba(11, 15, 20, 0.90)",
     "#0B0F14",
   ];

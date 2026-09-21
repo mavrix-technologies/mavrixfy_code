@@ -60,6 +60,8 @@ export function ProfileScreen() {
     smartAutoplayEnabled: true,
     smartAutoplayMode: "similar-trending",
     downloadQuality: "high",
+    downloadWifiOnly: false,
+    dataSaverEnabled: false,
     equalizer: { "60Hz": 0, "150Hz": 0, "400Hz": 0, "1KHz": 0, "2.4KHz": 0, "15KHz": 0 },
     equalizerEnabled: false,
     hapticsEnabled: false,
@@ -94,6 +96,17 @@ export function ProfileScreen() {
     }
     if (partial.miniPlayerSecondaryControl) {
       setMiniPlayerSecondaryControlPreference(partial.miniPlayerSecondaryControl);
+    }
+    if (partial.downloadQuality || typeof partial.downloadWifiOnly === "boolean") {
+      try {
+        const { saveDownloadPreferences, loadDownloadPreferences } = await import("@/lib/downloads/downloadStore");
+        const currentPrefs = await loadDownloadPreferences();
+        await saveDownloadPreferences({
+          ...currentPrefs,
+          ...(partial.downloadQuality ? { quality: partial.downloadQuality } : {}),
+          ...(typeof partial.downloadWifiOnly === "boolean" ? { wifiOnly: partial.downloadWifiOnly } : {}),
+        });
+      } catch {}
     }
   }, []);
 
@@ -245,6 +258,11 @@ export function ProfileScreen() {
         {/* Library & Data */}
         <Text style={styles.sectionLabel}>LIBRARY & DATA</Text>
         <View style={styles.sectionGroup}>
+          <SimpleRow
+            icon="arrow-down-circle-outline"
+            title="Downloaded Songs"
+            onPress={() => routerPush("/downloaded-songs" as any)}
+          />
           <SimpleRow
             icon="cloud-upload-outline"
             title="Import Local Audio"

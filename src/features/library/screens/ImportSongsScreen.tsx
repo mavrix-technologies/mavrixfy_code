@@ -10,6 +10,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { NavImportIcon } from "@/components/OfficialNavIcons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import * as DocumentPicker from "expo-document-picker";
 import * as Linking from "expo-linking";
@@ -25,7 +26,6 @@ import AppTopHeader, {
 } from "@/components/AppTopHeader";
 
 const EXPORTIFY_URL = "https://exportify.net/";
-
 
 async function handleOpenExportify() {
   void triggerImpact(ImpactFeedbackStyle.Light);
@@ -92,10 +92,25 @@ export function ImportSongsScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Background base */}
       <LinearGradient
-        colors={[Colors.background, "#10141A", "#111820"]}
-        locations={[0, 0.58, 1]}
+        colors={[Colors.background, "#0E1217", "#0B0E14"]}
+        locations={[0, 0.5, 1]}
         style={StyleSheet.absoluteFill}
+      />
+
+      {/* Subtle top ambient glow */}
+      <LinearGradient
+        colors={[
+          "rgba(38, 225, 154, 0.18)",
+          "rgba(20, 180, 120, 0.08)",
+          "rgba(10, 100, 70, 0.02)",
+          "transparent",
+        ]}
+        locations={[0, 0.45, 0.75, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={styles.ambientGlow}
       />
 
       <AppTopHeader
@@ -103,6 +118,8 @@ export function ImportSongsScreen() {
         elevated={isHeaderElevated}
         title="Import"
         left={<AppTopHeaderProfileButton />}
+        leftWidth={40}
+        rightWidth={40}
       />
 
       <ScrollView
@@ -110,7 +127,7 @@ export function ImportSongsScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 12,
+            paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 24,
             paddingBottom: bottomScrollPadding,
           },
         ]}
@@ -122,107 +139,62 @@ export function ImportSongsScreen() {
         onScroll={handleHeaderScroll}
         scrollEventThrottle={16}
       >
-        <View style={styles.mainContent}>
-          <View style={styles.heroIcon}>
-            <Ionicons name="cloud-upload-outline" size={28} color={Colors.primary} />
+        <View style={styles.content}>
+          {/* Minimal Icon Card */}
+          <View style={styles.heroCard}>
+            <NavImportIcon size={46} color={Colors.primary} isFocused />
           </View>
 
-          <Text style={styles.title}>Import from Spotify</Text>
+          {/* Clean Title & Subtitle */}
+          <Text style={styles.title}>Import Songs</Text>
           <Text style={styles.subtitle}>
-            Export your Spotify playlists or Liked Songs as a CSV, then import it here.
+            Select a CSV or TXT file to import songs into your library.
           </Text>
 
-          <View style={styles.actionStack}>
-            <Pressable
-              accessibilityRole="link"
-              accessibilityLabel="Open Exportify"
-              style={({ pressed }) => [
-                styles.secondaryAction,
-                pressed && styles.actionPressed,
-              ]}
-              onPress={handleOpenExportify}
+          {/* Primary Action Button */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Choose CSV or TXT file"
+            style={({ pressed }) => [
+              styles.chooseButton,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={handleFileImport}
+          >
+            <LinearGradient
+              colors={[Colors.primary, "#18B983"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.chooseButtonGradient}
             >
-              <Ionicons name="open-outline" size={20} color={Colors.text} />
-              <View style={styles.actionTextWrap}>
-                <Text style={styles.secondaryActionText}>Open Exportify</Text>
-                <Text style={styles.secondaryActionSubtext} numberOfLines={1}>
-                  exportify.net
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={Colors.inactive} />
-            </Pressable>
+              <Ionicons name="document-text-outline" size={20} color="#06241A" />
+              <Text style={styles.chooseButtonText}>Choose File</Text>
+            </LinearGradient>
+          </Pressable>
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Choose CSV or TXT file"
-              style={({ pressed }) => [
-                styles.uploadButton,
-                pressed && styles.actionPressed,
-              ]}
-              onPress={handleFileImport}
-            >
-              <LinearGradient
-                colors={[Colors.primary, "#18B983"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.uploadButtonGradient}
-              >
-                <Ionicons name="document-text-outline" size={20} color="#06241A" />
-                <Text style={styles.uploadButtonText}>Choose CSV / TXT</Text>
-              </LinearGradient>
-            </Pressable>
-          </View>
+          <Text style={styles.formatHint}>Supports .csv and .txt</Text>
 
-          <View style={styles.stepsPanel}>
-            <View style={styles.panelHeader}>
-              <Text style={styles.panelTitle}>Export steps</Text>
-              <View style={styles.filePill}>
-                <Text style={styles.filePillText}>CSV recommended</Text>
-              </View>
+          {/* Minimal Helper Link for Spotify Exports */}
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel="Open Exportify to export Spotify playlists"
+            style={({ pressed }) => [
+              styles.exportifyCard,
+              pressed && styles.buttonPressed,
+            ]}
+            onPress={handleOpenExportify}
+          >
+            <View style={styles.exportifyIcon}>
+              <Ionicons name="open-outline" size={18} color={Colors.primary} />
             </View>
-
-            <View style={styles.stepList}>
-              <View style={styles.stepRow}>
-                <View style={styles.stepIndex}><Text style={styles.stepIndexText}>1</Text></View>
-                <View style={styles.stepIcon}><Ionicons name="open-outline" size={18} color={Colors.primary} /></View>
-                <View style={styles.stepTextWrap}>
-                  <Text style={styles.stepTitle}>Open Exportify</Text>
-                  <Text style={styles.stepText}>Tap Get Started, sign in with Spotify, and approve playlist access.</Text>
-                </View>
-              </View>
-              <View style={styles.stepRow}>
-                <View style={styles.stepIndex}><Text style={styles.stepIndexText}>2</Text></View>
-                <View style={styles.stepIcon}><Ionicons name="heart-outline" size={18} color={Colors.primary} /></View>
-                <View style={styles.stepTextWrap}>
-                  <Text style={styles.stepTitle}>Export Liked Songs</Text>
-                  <Text style={styles.stepText}>Use the Liked Songs row and tap Export to download a CSV file.</Text>
-                </View>
-              </View>
-              <View style={styles.stepRow}>
-                <View style={styles.stepIndex}><Text style={styles.stepIndexText}>3</Text></View>
-                <View style={styles.stepIcon}><Ionicons name="list-outline" size={18} color={Colors.primary} /></View>
-                <View style={styles.stepTextWrap}>
-                  <Text style={styles.stepTitle}>Export a playlist</Text>
-                  <Text style={styles.stepText}>Find the Spotify playlist you want and tap Export on that row.</Text>
-                </View>
-              </View>
-              <View style={styles.stepRow}>
-                <View style={styles.stepIndex}><Text style={styles.stepIndexText}>4</Text></View>
-                <View style={styles.stepIcon}><Ionicons name="download-outline" size={18} color={Colors.primary} /></View>
-                <View style={styles.stepTextWrap}>
-                  <Text style={styles.stepTitle}>Import here</Text>
-                  <Text style={styles.stepText}>Return to Mavrixfy and choose the downloaded CSV or TXT file.</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.noteRow}>
-              <Ionicons name="information-circle-outline" size={16} color={Colors.inactive} />
-              <Text style={styles.noteText}>
-                Export All downloads a ZIP. Unzip it first, then import one CSV file.
+            <View style={styles.exportifyContent}>
+              <Text style={styles.exportifyTitle}>Need to export from Spotify?</Text>
+              <Text style={styles.exportifySubtext}>
+                Download your playlist CSV at exportify.net
               </Text>
             </View>
-          </View>
+            <Ionicons name="chevron-forward" size={16} color={Colors.inactive} />
+          </Pressable>
         </View>
       </ScrollView>
     </View>
@@ -234,193 +206,115 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  ambientGlow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 280,
+    zIndex: 0,
+  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
   },
-  mainContent: {
+  content: {
     flex: 1,
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: 18,
+    paddingHorizontal: 24,
   },
-  heroIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+  heroCard: {
+    width: 88,
+    height: 88,
+    borderRadius: 22,
+    backgroundColor: "#181C22",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(38,225,154,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(38,225,154,0.22)",
-    marginBottom: 18,
+    marginBottom: 20,
   },
   title: {
     color: Colors.text,
-    fontSize: 25,
+    fontSize: 24,
     fontFamily: "Inter_700Bold",
     textAlign: "center",
     marginBottom: 8,
+    letterSpacing: -0.3,
   },
   subtitle: {
-    maxWidth: 330,
-    color: "rgba(223,226,235,0.7)",
+    maxWidth: 310,
+    color: "rgba(223, 226, 235, 0.65)",
     fontSize: 14,
-    fontFamily: "Inter_500Medium",
     lineHeight: 20,
+    fontFamily: "Inter_400Regular",
     textAlign: "center",
-    marginBottom: 24,
+    marginBottom: 28,
   },
-  actionStack: {
-    width: "100%",
-    gap: 10,
-    marginBottom: 18,
-  },
-  secondaryAction: {
-    minHeight: 58,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: "rgba(223,226,235,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(223,226,235,0.1)",
-  },
-  actionTextWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  secondaryActionText: {
-    color: Colors.text,
-    fontSize: 15,
-    fontFamily: "Inter_700Bold",
-  },
-  secondaryActionSubtext: {
-    marginTop: 2,
-    color: Colors.inactive,
-    fontSize: 12,
-    fontFamily: "Inter_500Medium",
-  },
-  uploadButton: {
+  chooseButton: {
     width: "100%",
     borderRadius: 14,
     overflow: "hidden",
-    boxShadow: "none",
   },
-  actionPressed: {
-    opacity: 0.82,
-    transform: [{ scale: 0.98 }],
-  },
-  uploadButtonGradient: {
-    minHeight: 58,
-    paddingHorizontal: 18,
+  chooseButtonGradient: {
+    minHeight: 54,
+    paddingHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
   },
-  uploadButtonText: {
+  chooseButtonText: {
     color: "#06241A",
     fontSize: 16,
     fontFamily: "Inter_700Bold",
   },
-  stepsPanel: {
+  buttonPressed: {
+    opacity: 0.84,
+    transform: [{ scale: 0.98 }],
+  },
+  formatHint: {
+    marginTop: 10,
+    marginBottom: 28,
+    color: Colors.inactive,
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+  },
+  exportifyCard: {
     width: "100%",
-    borderRadius: 16,
-    padding: 16,
-    backgroundColor: "rgba(223,226,235,0.055)",
-    borderWidth: 1,
-    borderColor: "rgba(223,226,235,0.09)",
-  },
-  panelHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.07)",
     gap: 12,
-    marginBottom: 16,
   },
-  panelTitle: {
-    color: Colors.text,
-    fontSize: 16,
-    fontFamily: "Inter_700Bold",
-  },
-  filePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: "rgba(38,225,154,0.1)",
-    borderWidth: 1,
-    borderColor: "rgba(38,225,154,0.2)",
-  },
-  filePillText: {
-    color: Colors.primary,
-    fontSize: 11,
-    fontFamily: "Inter_700Bold",
-  },
-  stepList: {
-    gap: 14,
-  },
-  stepRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-  },
-  stepIndex: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+  exportifyIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(38, 225, 154, 0.1)",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(223,226,235,0.08)",
-    marginTop: 1,
   },
-  stepIndexText: {
-    color: Colors.text,
-    fontSize: 11,
-    fontFamily: "Inter_700Bold",
-  },
-  stepIcon: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(38,225,154,0.1)",
-  },
-  stepTextWrap: {
+  exportifyContent: {
     flex: 1,
     minWidth: 0,
   },
-  stepTitle: {
+  exportifyTitle: {
     color: Colors.text,
-    fontSize: 15,
-    fontFamily: "Inter_700Bold",
+    fontSize: 14,
+    fontFamily: "Inter_600SemiBold",
   },
-  stepText: {
-    marginTop: 3,
-    color: "rgba(223,226,235,0.66)",
-    fontSize: 12,
-    lineHeight: 17,
-    fontFamily: "Inter_500Medium",
-  },
-  noteRow: {
-    marginTop: 16,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(223,226,235,0.08)",
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-  },
-  noteText: {
-    flex: 1,
+  exportifySubtext: {
     color: Colors.inactive,
     fontSize: 12,
-    lineHeight: 17,
-    fontFamily: "Inter_500Medium",
+    fontFamily: "Inter_400Regular",
+    marginTop: 2,
   },
 });
 

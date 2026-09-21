@@ -100,9 +100,9 @@ async function setupPlayerInternal(): Promise<void> {
       // Now Playing. Do not manually overwrite these values from JavaScript.
       autoUpdateMetadata: true,
       androidAudioContentType: AndroidAudioContentType?.Music ?? 2,
-      minBuffer: 30,
-      maxBuffer: 50,
-      playBuffer: 5,
+      minBuffer: 15,
+      maxBuffer: 45,
+      playBuffer: 2,
       backBuffer: 10,
       ...(Platform.OS === "ios"
         ? {

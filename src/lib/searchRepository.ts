@@ -60,6 +60,37 @@ function getRepositoryApiUrl(): string {
   }
 }
 
+interface SearchCacheEntry {
+  results: SearchResults;
+  timestamp: number;
+}
+
+const MEMORY_SEARCH_CACHE = new Map<string, SearchCacheEntry>();
+const SEARCH_CACHE_TTL_MS = 3 * 60 * 1000; // 3 minutes
+const SEARCH_CACHE_MAX_ENTRIES = 80;
+
+export function getCachedSearch(cacheKey: string): SearchResults | null {
+  const entry = MEMORY_SEARCH_CACHE.get(cacheKey);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > SEARCH_CACHE_TTL_MS) {
+    MEMORY_SEARCH_CACHE.delete(cacheKey);
+    return null;
+  }
+  return entry.results;
+}
+
+export function setCachedSearch(cacheKey: string, results: SearchResults): void {
+  MEMORY_SEARCH_CACHE.set(cacheKey, { results, timestamp: Date.now() });
+  if (MEMORY_SEARCH_CACHE.size > SEARCH_CACHE_MAX_ENTRIES) {
+    const firstKey = MEMORY_SEARCH_CACHE.keys().next().value;
+    if (firstKey) MEMORY_SEARCH_CACHE.delete(firstKey);
+  }
+}
+
+export function clearMemorySearchCache(): void {
+  MEMORY_SEARCH_CACHE.clear();
+}
+
 import { fetchJson } from "@/utils/asyncUtils";
 export { fetchJson };
 
@@ -257,6 +288,12 @@ export async function searchRepository(
   const rawApiUrl = customApiUrl || getRepositoryApiUrl();
   const apiUrl = String(rawApiUrl || "").replace(/\/$/, "");
 
+  const cacheKey = `${filter}:${searchTerm.toLowerCase()}:${apiUrl}`;
+  const cached = getCachedSearch(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   // Check if search query matches any known major tracks that JioSaavn omits from text search
   const cleanSearchLower = searchTerm.toLowerCase().trim();
   let knownSongIds: string[] = [];
@@ -275,7 +312,7 @@ export async function searchRepository(
   if (filter === "all") {
     const fetchPromises: Promise<any>[] = [
       fetchJson<any>(`${apiUrl}/api/search?query=${encodeURIComponent(searchTerm)}`, signal),
-      fetchJson<any>(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=50`, signal),
+      fetchJson<any>(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=35`, signal),
       catalogPromise,
     ];
 
@@ -308,43 +345,19 @@ export async function searchRepository(
       ? parsedApiSongs.some((s) => s.id === topQueryId)
       : false;
 
-    // Fetch topQuery song by ID if it's not already in search results,
-    // and fetch its suggestions to expand the candidate pool with songs
-    // that are on JioSaavn but not returned by the search API.
-    const extraFetches: Promise<Song[]>[] = [];
-
+    // Fetch topQuery song by ID ONLY if missing from search results
+    let extraSongs: Song[] = [];
     if (topQueryId && !topQueryInResults) {
-      extraFetches.push(
-        fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}`, signal)
-          .then((res) => {
-            const items: Song[] = [];
-            for (const item of res?.data || []) {
-              const parsed = parseApiSong(item);
-              if (parsed) items.push(parsed);
-            }
-            return items;
-          })
-          .catch(() => [])
-      );
+      try {
+        const singleRes = await fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}`, signal);
+        for (const item of singleRes?.data || []) {
+          const parsed = parseApiSong(item);
+          if (parsed) extraSongs.push(parsed);
+        }
+      } catch {
+        // Continue with whatever songs were retrieved
+      }
     }
-
-    if (topQueryId) {
-      extraFetches.push(
-        fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}/suggestions?limit=20`, signal)
-          .then((res) => {
-            const items: Song[] = [];
-            for (const item of res?.data || []) {
-              const parsed = parseApiSong(item);
-              if (parsed) items.push(parsed);
-            }
-            return items;
-          })
-          .catch(() => [])
-      );
-    }
-
-    const extraResults = await Promise.all(extraFetches);
-    const extraSongs: Song[] = extraResults.flat();
 
     const mergedSongs = deduplicateSongs([...catalogSongs, ...parsedApiSongs, ...extraSongs]);
     const rankedSongs = rankSongs(mergedSongs, normalizedQuery, {}, topQueryId);
@@ -362,18 +375,20 @@ export async function searchRepository(
       12
     );
 
-    return {
+    const results: SearchResults = {
       songs: rankedSongs,
       albums,
       artists,
       playlists,
     };
+    setCachedSearch(cacheKey, results);
+    return results;
   }
 
   if (filter === "songs") {
     const fetchPromises: Promise<any>[] = [
       fetchJson<any>(`${apiUrl}/api/search?query=${encodeURIComponent(searchTerm)}`, signal),
-      fetchJson<any>(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=50`, signal),
+      fetchJson<any>(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=35`, signal),
       catalogPromise,
     ];
 
@@ -397,7 +412,6 @@ export async function searchRepository(
       if (parsed) parsedApiSongs.push(parsed);
     }
 
-    // Same topQuery + suggestions expansion for dedicated songs filter
     const topQueryResult =
       globalRes?.data?.topQuery?.results?.[0] || globalRes?.data?.topquery?.results?.[0];
     const topQueryId: string | null =
@@ -406,44 +420,28 @@ export async function searchRepository(
       ? parsedApiSongs.some((s) => s.id === topQueryId)
       : false;
 
-    const extraFetches: Promise<Song[]>[] = [];
+    let extraSongs: Song[] = [];
     if (topQueryId && !topQueryInResults) {
-      extraFetches.push(
-        fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}`, signal)
-          .then((res) => {
-            const items: Song[] = [];
-            for (const item of res?.data || []) {
-              const parsed = parseApiSong(item);
-              if (parsed) items.push(parsed);
-            }
-            return items;
-          })
-          .catch(() => [])
-      );
+      try {
+        const singleRes = await fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}`, signal);
+        for (const item of singleRes?.data || []) {
+          const parsed = parseApiSong(item);
+          if (parsed) extraSongs.push(parsed);
+        }
+      } catch {
+        // Continue with available songs
+      }
     }
-    if (topQueryId) {
-      extraFetches.push(
-        fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}/suggestions?limit=20`, signal)
-          .then((res) => {
-            const items: Song[] = [];
-            for (const item of res?.data || []) {
-              const parsed = parseApiSong(item);
-              if (parsed) items.push(parsed);
-            }
-            return items;
-          })
-          .catch(() => [])
-      );
-    }
-    const extraSongs: Song[] = (await Promise.all(extraFetches)).flat();
 
     const mergedSongs = deduplicateSongs([...catalogSongs, ...parsedApiSongs, ...extraSongs]);
     const rankedSongs = rankSongs(mergedSongs, normalizedQuery, {}, topQueryId);
 
-    return {
+    const results: SearchResults = {
       ...EMPTY_RESULTS,
       songs: rankedSongs,
     };
+    setCachedSearch(cacheKey, results);
+    return results;
   }
 
   if (filter === "albums") {
@@ -452,10 +450,12 @@ export async function searchRepository(
       signal
     );
     const rawAlbums = albumsData?.data?.results || albumsData?.results || [];
-    return {
+    const results: SearchResults = {
       ...EMPTY_RESULTS,
       albums: normalizeAlbums(rawAlbums, 20),
     };
+    setCachedSearch(cacheKey, results);
+    return results;
   }
 
   if (filter === "artists") {
@@ -464,10 +464,12 @@ export async function searchRepository(
       signal
     );
     const rawArtists = artistsData?.data?.results || artistsData?.results || [];
-    return {
+    const results: SearchResults = {
       ...EMPTY_RESULTS,
       artists: normalizeSearchArtists(rawArtists, 20),
     };
+    setCachedSearch(cacheKey, results);
+    return results;
   }
 
   if (filter === "playlists") {
@@ -476,10 +478,12 @@ export async function searchRepository(
       signal
     );
     const rawPlaylists = playlistsData?.data?.results || playlistsData?.results || [];
-    return {
+    const results: SearchResults = {
       ...EMPTY_RESULTS,
       playlists: normalizePlaylists(rawPlaylists, 20),
     };
+    setCachedSearch(cacheKey, results);
+    return results;
   }
 
   return EMPTY_RESULTS;

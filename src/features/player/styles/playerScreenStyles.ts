@@ -1,5 +1,5 @@
 import { StyleSheet } from "react-native";
-import { IS_ANDROID, IS_IOS } from "@/constants/platform";
+import { IS_ANDROID } from "@/constants/platform";
 import Colors from "@/constants/colors";
 import {
   PLAYER_SLIDER_TOUCH_HEIGHT,
@@ -281,15 +281,15 @@ export const styles = StyleSheet.create({
     gap: 4,
   },
   adCardBadge: {
-    backgroundColor: "rgba(38, 225, 154, 0.15)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderWidth: 0.5,
-    borderColor: "#26e19a",
+    borderColor: "rgba(255, 255, 255, 0.20)",
     borderRadius: 3,
-    paddingHorizontal: 3,
+    paddingHorizontal: 4,
     paddingVertical: 1,
   },
   adCardBadgeText: {
-    color: "#26e19a",
+    color: "rgba(255, 255, 255, 0.90)",
     fontSize: 7.5,
     fontFamily: "Inter_700Bold",
   },

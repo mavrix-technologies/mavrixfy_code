@@ -92,6 +92,8 @@ export type BackgroundYoutubeVideoProps = {
   onVideoActive?: (active: boolean) => void;
 };
 
+import { getSettings } from "@/lib/storage";
+
 export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   videoId,
   active,
@@ -105,6 +107,28 @@ export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   const initialPositionSeconds = Math.max(0, Math.floor(initialOffsetMs / 1000));
   const lastPositionRef = useRef(initialPositionSeconds);
   const [playerReady, setPlayerReady] = useState(false);
+  const [videoQuality, setVideoQuality] = useState<"auto" | "low" | "medium" | "high">("auto");
+
+  useEffect(() => {
+    let mounted = true;
+    getSettings().then((s) => {
+      if (mounted && s.videoBackgroundQuality) {
+        setVideoQuality(s.videoBackgroundQuality);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const ytQualityMap: Record<string, string> = {
+    low: "small",
+    medium: "large",
+    high: "hd720",
+    auto: "default",
+  };
+  const targetYtQuality = ytQualityMap[videoQuality] || "default";
+
   const videoOpacity = useRef<Animated.Value | null>(null);
   if (videoOpacity.current === null) {
     videoOpacity.current = new Animated.Value(0);
@@ -140,9 +164,12 @@ export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
 
   const onReady = useCallback(() => {
     setPlayerReady(true);
+    try {
+      playerRef.current?.setPlaybackQuality?.(targetYtQuality);
+    } catch {}
     if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
     revealTimerRef.current = setTimeout(revealVideo, 600);
-  }, [revealVideo]);
+  }, [revealVideo, targetYtQuality]);
 
   useEffect(() => {
     return () => {

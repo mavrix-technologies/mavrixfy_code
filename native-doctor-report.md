@@ -1,23 +1,23 @@
 # Native Doctor — Project Health Report
 
-> **Health Score**: **100/100 [ EXCELLENT ]** | Technical Debt: **LOW**
+> **Health Score**: **97/100 [ EXCELLENT ]** | Technical Debt: **MEDIUM**
 
 ## Project Overview
 
 - **Target Path**: `E:\Mavrixfy\Mavrixfy_App`
 - **Architecture Workflow**: `expo-bare-or-prebuilt`
 - **Scanner Version**: `v0.8.0`
-- **Scan Scope**: 325 relevant files (300 code files, 20 native files)
-- **Execution Timing**: file scan 1099ms | static analysis 2450ms | rules run: 16
+- **Scan Scope**: 333 relevant files (308 code files, 20 native files)
+- **Execution Timing**: file scan 1016ms | static analysis 2272ms | rules run: 16
 
 ## Summary of Findings
 
 | Severity | Count | Description |
 | :--- | :---: | :--- |
 | **Errors** | **0** | Action required; potential build failure, crash, or breaking misconfiguration |
-| **Warnings** | **0** | Review and fix before release; architecture, performance, or native defect |
+| **Warnings** | **4** | Review and fix before release; architecture, performance, or native defect |
 | **Suggestions** | **0** | Best-practice recommendations and modernization improvements |
-| **Reviews** | **0** | Heuristic observation requiring developer investigation |
+| **Reviews** | **1** | Heuristic observation requiring developer investigation |
 
 ## Category Health Scores
 
@@ -25,7 +25,7 @@
 | :--- | :---: | :--- |
 | **ui** | **100/100** | Optimal |
 | **accessibility** | **100/100** | Optimal |
-| **architecture** | **100/100** | Optimal |
+| **architecture** | **83/100** | Good |
 | **code** | **100/100** | Optimal |
 | **correctness** | **100/100** | Optimal |
 | **performance** | **100/100** | Optimal |
@@ -48,9 +48,9 @@
 | **Native Toolchain** | **100/100** | Healthy | Android 14+ FGS, permissions, CocoaPods |
 | **Correctness & Safety** | **100/100** | Healthy | Race conditions, edge-case safety |
 | **Code Quality (DRY)** | **90/100** | Healthy | Dead code, duplicate utilities |
-| **Architecture & Layers** | **100/100** | Healthy | Single responsibility, layer boundaries |
+| **Architecture & Layers** | **58/100** | Action Needed | Single responsibility, layer boundaries |
 | **Build & Store Health** | **100/100** | Healthy | 16 KB pages, targetSdk 34, privacy manifests |
-| **OVERALL MOBILE SCORE** | **100/100** | **EXCELLENT** | Holistic weighted mobile index |
+| **OVERALL MOBILE SCORE** | **97/100** | **EXCELLENT** | Holistic weighted mobile index |
 
 ---
 
@@ -62,11 +62,11 @@
 | :--- | :---: | :--- |
 | **Registered Routes** | **32** | Monitored ✓ |
 | **Navigation Screens** | **23** | Monitored ✓ |
-| **React Components** | **104** | Monitored ✓ |
+| **React Components** | **103** | Monitored ✓ |
 | **Native Modules & Bridge** | **47** | Monitored ✓ |
 | **API Endpoints** | **5** | Monitored ✓ |
 | **Persistent Storage Keys** | **2** | Monitored ✓ |
-| **Declared Permissions** | **28** | Monitored ✓ |
+| **Declared Permissions** | **24** | Monitored ✓ |
 | **Expo Config Plugins** | **17** | Monitored ✓ |
 | **Android Services** | **0** | Monitored ✓ |
 | **iOS Capabilities** | **0** | Monitored ✓ |
@@ -77,12 +77,12 @@
 
 | Feature Domain | Status | JS Layer | Android Native | iOS Native | Build Config | Docs |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Audio Playback Subsystem** | `HEALTHY` | ✓ | ✓ | — | ✓ | ✓ |
+| **Audio Playback Subsystem** | `WARNING` | ▲ | ✓ | — | ✓ | ✓ |
 | **Push Notifications** | `HEALTHY` | ✓ | ✓ | — | ✓ | ✓ |
 | **Deep Linking & Universal Links** | `HEALTHY` | ✓ | ✓ | — | ✓ | ✓ |
 | **Background Processing & Execution** | `HEALTHY` | ✓ | ✓ | — | ✓ | ✓ |
 | **Camera & Media Capture** | `HEALTHY` | ✓ | ✓ | — | ✓ | ✓ |
-| **App Routing & Screen Navigation** | `HEALTHY` | ✓ | ✓ | — | ✓ | ✓ |
+| **App Routing & Screen Navigation** | `WARNING` | ▲ | ✓ | ▲ | ✓ | ✓ |
 
 ---
 
@@ -101,7 +101,7 @@
 
 ## Build & Release Preflight (Store Readiness)
 
-> **Preflight Status**: **PASSED WITH WARNINGS** | Blockers: **0** | Warnings: **1** | Passed: **8**
+> **Preflight Status**: **PASSED WITH WARNINGS** | Blockers: **0** | Warnings: **1** | Passed: **7**
 
 | Check | Status | Detail |
 | :--- | :---: | :--- |
@@ -109,10 +109,9 @@
 | **Version String Synchronized** | `PASS` | Consistent version '3.2.0' across app.json and package.json. |
 | **App Icon Configured** | `PASS` | Found valid app icon at './assets/images/mavrixfy_icon.png'. |
 | **Android Adaptive Icon Configured** | `PASS` | Adaptive icon foreground image found at './assets/images/mavrixfy_icon_foreground.png'. |
-| **Target SDK Level Compliant (API 36)** | `PASS` | App targets Android 15 (API 35), meeting Google Play Store requirements. |
+| **Target SDK Level Compliant (API 34)** | `PASS` | App targets Android 14 (API 34), meeting Google Play Store requirements. |
 | **Android versionCode Configured (32002)** | `PASS` | versionCode is set to 32002. |
-| **Restricted Permission(s) Declared: android.permission.SYSTEM_ALERT_WINDOW** | `WARNING` | Google Play requires explicit declaration and core-use justification forms for these sensitive permissions in Play Console. *(Fix: Verify that these permissions are strictly necessary. Remove them if not central to app functionality to avoid policy strikes.)* |
-| **Privacy Manifest (PrivacyInfo.xcprivacy) Present** | `PASS` | Found PrivacyInfo.xcprivacy in iOS bundle resources. |
+| **Missing Apple Privacy Manifest (PrivacyInfo.xcprivacy)** | `WARNING` | App Store Connect enforces PrivacyInfo.xcprivacy for apps consuming Required Reason APIs (User Defaults, Disk Space, System Boot). *(Fix: Add PrivacyInfo.xcprivacy to your Xcode project root declaring NSPrivacyAccessedAPITypes.)* |
 | **iOS Build Number Configured (32002)** | `PASS` | buildNumber is set to '32002'. |
 
 ---
@@ -128,7 +127,122 @@
 
 ## Detailed Findings
 
-### [MEDIUM] RNDOCTOR-ORG-GIANT-FILE — Overly Large Source Module: colorExtractor.ts (794 LOC)
+### [REVIEW] AUDIO-ARCH-001 — Overlapping audio playback-state ownership
+
+- **Category**: `architecture`
+- **Confidence**: `HIGH`
+- **Location**: `src/contexts/PlayerContext.tsx`
+- **File Classification**: `SAFE_SOURCE`
+
+**What was found:**
+> Modules declaring overlapping playback state terms: src/contexts/PlayerContext.tsx, src/features/player/hooks/useLegacyPlayerViewState.ts, src/features/player/screens/PlayerScreen.tsx.
+
+**Why it matters:**
+> Having multiple components or contexts managing playback progress, track state, and play/pause state leads to out-of-sync UI and conflicting audio events.
+
+**Official platform guidance:**
+> React Native Audio Guidance: Maintain a single playback controller as the sole source of truth.
+
+**Recommended fix:**
+> Map ownership and consolidate state into a single authoritative playback service/store.
+
+**Do not add:**
+> Do not add another state store, manager, polling loop, or event emitter before consolidating responsibilities.
+
+
+### [WARNING] RNDOCTOR-LAYER-VIOLATION — Architectural Layer Boundary Violation (DOMAIN → UI)
+
+- **Category**: `architecture`
+- **Confidence**: `HIGH`
+- **Location**: `src/features/navigation/AppNavBar.tsx`
+- **File Classification**: `SAFE_SOURCE`
+
+**What was found:**
+> src/features/navigation/AppNavBar.tsx (DOMAIN) imports src/components/PingPongScroll.tsx (UI).
+
+**Why it matters:**
+> Lower architectural layers (Services, Data, Domain) must remain decoupled from presentation components to ensure testability and prevent cyclic re-renders.
+
+**Official platform guidance:**
+> Software Architecture Guidance: Dependencies must point inwards towards pure domain logic, never backwards to UI components.
+
+**Recommended fix:**
+> Pass UI callbacks or handlers via function arguments or use event listeners / reactive hooks.
+
+**Do not add:**
+> Do not add a circular barrel export or import Screens directly into services.
+
+
+### [WARNING] RNDOCTOR-LAYER-VIOLATION — Architectural Layer Boundary Violation (DOMAIN → UI)
+
+- **Category**: `architecture`
+- **Confidence**: `HIGH`
+- **Location**: `src/features/navigation/AppNavBar.tsx`
+- **File Classification**: `SAFE_SOURCE`
+
+**What was found:**
+> src/features/navigation/AppNavBar.tsx (DOMAIN) imports src/features/navigation/miniPlayerComponents.tsx (UI).
+
+**Why it matters:**
+> Lower architectural layers (Services, Data, Domain) must remain decoupled from presentation components to ensure testability and prevent cyclic re-renders.
+
+**Official platform guidance:**
+> Software Architecture Guidance: Dependencies must point inwards towards pure domain logic, never backwards to UI components.
+
+**Recommended fix:**
+> Pass UI callbacks or handlers via function arguments or use event listeners / reactive hooks.
+
+**Do not add:**
+> Do not add a circular barrel export or import Screens directly into services.
+
+
+### [WARNING] RNDOCTOR-LAYER-VIOLATION — Architectural Layer Boundary Violation (DOMAIN → UI)
+
+- **Category**: `architecture`
+- **Confidence**: `HIGH`
+- **Location**: `src/features/navigation/IOSMiniBarOverlay.tsx`
+- **File Classification**: `SAFE_SOURCE`
+
+**What was found:**
+> src/features/navigation/IOSMiniBarOverlay.tsx (DOMAIN) imports src/components/PingPongScroll.tsx (UI).
+
+**Why it matters:**
+> Lower architectural layers (Services, Data, Domain) must remain decoupled from presentation components to ensure testability and prevent cyclic re-renders.
+
+**Official platform guidance:**
+> Software Architecture Guidance: Dependencies must point inwards towards pure domain logic, never backwards to UI components.
+
+**Recommended fix:**
+> Pass UI callbacks or handlers via function arguments or use event listeners / reactive hooks.
+
+**Do not add:**
+> Do not add a circular barrel export or import Screens directly into services.
+
+
+### [WARNING] RNDOCTOR-LAYER-VIOLATION — Architectural Layer Boundary Violation (DOMAIN → UI)
+
+- **Category**: `architecture`
+- **Confidence**: `HIGH`
+- **Location**: `src/features/navigation/IOSMiniBarOverlay.tsx`
+- **File Classification**: `SAFE_SOURCE`
+
+**What was found:**
+> src/features/navigation/IOSMiniBarOverlay.tsx (DOMAIN) imports src/features/navigation/miniPlayerComponents.tsx (UI).
+
+**Why it matters:**
+> Lower architectural layers (Services, Data, Domain) must remain decoupled from presentation components to ensure testability and prevent cyclic re-renders.
+
+**Official platform guidance:**
+> Software Architecture Guidance: Dependencies must point inwards towards pure domain logic, never backwards to UI components.
+
+**Recommended fix:**
+> Pass UI callbacks or handlers via function arguments or use event listeners / reactive hooks.
+
+**Do not add:**
+> Do not add a circular barrel export or import Screens directly into services.
+
+
+### [MEDIUM] RNDOCTOR-ORG-GIANT-FILE — Overly Large Source Module: colorExtractor.ts (903 LOC)
 
 - **Category**: `complexity`
 - **Confidence**: `HIGH`
@@ -136,7 +250,7 @@
 - **File Classification**: `SAFE_SOURCE`
 
 **What was found:**
-> src/lib/colorExtractor.ts has 794 lines of code.
+> src/lib/colorExtractor.ts has 903 lines of code.
 
 **Why it matters:**
 > Monolithic source files degrade IDE responsiveness, make code reviews cumbersome, and conceal subtle side-effect dependencies.
@@ -145,7 +259,7 @@
 > Split hooks, helper utilities, and sub-components into dedicated submodules.
 
 
-### [MEDIUM] RNDOCTOR-ORG-GIANT-FILE — Overly Large Source Module: ArtistDetailScreen.tsx (1219 LOC)
+### [MEDIUM] RNDOCTOR-ORG-GIANT-FILE — Overly Large Source Module: ArtistDetailScreen.tsx (1223 LOC)
 
 - **Category**: `complexity`
 - **Confidence**: `HIGH`
@@ -153,7 +267,7 @@
 - **File Classification**: `SAFE_SOURCE`
 
 **What was found:**
-> src/features/artists/screens/ArtistDetailScreen.tsx has 1219 lines of code.
+> src/features/artists/screens/ArtistDetailScreen.tsx has 1223 lines of code.
 
 **Why it matters:**
 > Monolithic source files degrade IDE responsiveness, make code reviews cumbersome, and conceal subtle side-effect dependencies.

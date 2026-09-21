@@ -2,6 +2,7 @@ import React, { memo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import { NavLikedIcon } from "@/components/OfficialNavIcons";
 import Colors from "@/constants/colors";
 import { type FollowedArtist } from "@/lib/followedArtists";
 import { ArtistRow } from "./ArtistRow";
@@ -66,29 +67,20 @@ export const LibraryHeader = memo(function LibraryHeader({
 
       {/* Elegant Liked Songs Card */}
       <Pressable
-        style={styles.likedCard}
-        android_ripple={{ color: "rgba(255, 255, 255, 0.1)" }}
+        style={({ pressed }) => [styles.likedCard, pressed && styles.likedCardPressed]}
+        android_ripple={{ color: "rgba(255, 255, 255, 0.08)" }}
         onPress={onOpenLikedSongs}
       >
-        <LinearGradient
-          colors={["#26E19A", "#1AB57F"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.likedGradient}
-        >
-          <View style={styles.likedContent}>
-            <View style={styles.likedIconCircle}>
-              <Ionicons name="heart" size={24} color="#FFFFFF" />
-            </View>
-            <View style={styles.likedTextSection}>
-              <Text style={styles.likedTitle}>Liked Songs</Text>
-              <Text style={styles.likedSubtitle}>{likedSongCount.toLocaleString()} songs</Text>
-            </View>
+        <View style={styles.likedContent}>
+          <NavLikedIcon size={28} color={Colors.primary} isFocused />
+          <View style={styles.likedTextSection}>
+            <Text style={styles.likedTitle}>Liked Songs</Text>
+            <Text style={styles.likedSubtitle}>{likedSongCount.toLocaleString()} songs</Text>
           </View>
-          <View style={styles.likedPlayBtn}>
-            <Ionicons name="play" size={20} color="#000000" />
-          </View>
-        </LinearGradient>
+        </View>
+        <View style={styles.likedPlayBtn}>
+          <Ionicons name="play" size={18} color="#06241A" style={{ marginLeft: 2 }} />
+        </View>
       </Pressable>
 
       {/* Followed Artists Section - Minimalist */}
@@ -119,31 +111,34 @@ const styles = StyleSheet.create({
   viewToggle: {
     flexDirection: "row",
     backgroundColor: "rgba(255, 255, 255, 0.05)",
-    borderRadius: 12,
-    padding: 4,
-    gap: 4,
+    borderRadius: 10,
+    padding: 3,
+    gap: 2,
   },
   toggleBtn: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
   },
   toggleBtnActive: {
-    backgroundColor: "rgba(38, 225, 154, 0.15)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
   },
   likedCard: {
-    borderRadius: 20,
-    overflow: "hidden",
-    boxShadow: "0px 4px 8px rgba(0, 0, 0, 0.3)",
-  },
-  likedGradient: {
-    paddingHorizontal: 20,
-    paddingVertical: 18,
+    borderRadius: 16,
+    backgroundColor: "#191D24",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    paddingHorizontal: 18,
+    paddingVertical: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  likedCardPressed: {
+    backgroundColor: "#20252E",
+    transform: [{ scale: 0.99 }],
   },
   likedContent: {
     flexDirection: "row",
@@ -151,36 +146,28 @@ const styles = StyleSheet.create({
     gap: 14,
     flex: 1,
   },
-  likedIconCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   likedTextSection: {
     flex: 1,
   },
   likedTitle: {
     color: "#FFFFFF",
-    fontSize: 20,
-    lineHeight: 24,
+    fontSize: 17,
+    lineHeight: 22,
     letterSpacing: -0.3,
     fontFamily: "Inter_700Bold",
   },
   likedSubtitle: {
-    color: "rgba(255, 255, 255, 0.85)",
-    fontSize: 13,
+    color: "#8E99A8",
+    fontSize: 12.5,
     lineHeight: 16,
     marginTop: 2,
-    fontFamily: "Inter_500Medium",
+    fontFamily: "Inter_400Regular",
   },
   likedPlayBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#FFFFFF",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",
     marginLeft: 12,

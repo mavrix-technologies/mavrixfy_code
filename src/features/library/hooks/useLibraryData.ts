@@ -10,7 +10,6 @@ import {
   subscribeLibrary,
   createPlaylistOptimistic,
   deletePlaylistOptimistic,
-  loadCachedLibrary,
 } from "../services/libraryRepository";
 import type { DisplayPlaylist } from "../components/PlaylistListItem";
 
@@ -88,17 +87,12 @@ export function useLibraryData() {
     const name = newPlaylistName.trim();
     if (!name) return;
 
-    if (!selectedImage) {
-      Alert.alert("Error", "Please select a cover image for your playlist");
-      return;
-    }
-
     try {
       setIsUploadingImage(true);
       void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
 
       // Optimistic creation: added to store and persistent cache at 0ms
-      void createPlaylistOptimistic(name, newPlaylistDescription, selectedImage, user);
+      void createPlaylistOptimistic(name, newPlaylistDescription, selectedImage || "", user);
 
       resetCreateModal();
     } catch {

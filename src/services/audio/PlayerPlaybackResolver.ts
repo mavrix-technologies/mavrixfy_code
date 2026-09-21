@@ -131,8 +131,10 @@ export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?:
   };
 }
 
+import * as Network from "expo-network";
+
 let cachedQualityPreference: {
-  requested: "low" | "medium" | "high";
+  requested: "auto" | "low" | "medium" | "high";
   effective: "low" | "medium" | "high";
   unlocked: boolean;
   cachedAt: number;
@@ -142,8 +144,28 @@ export function invalidateQualityPreferenceCache(): void {
   cachedQualityPreference = null;
 }
 
+export async function detectAutoStreamingQuality(unlocked: boolean): Promise<"low" | "medium" | "high"> {
+  try {
+    const netState = await Network.getNetworkStateAsync();
+    // On cellular/slow mobile network, use 96kbps to ensure smooth playback without stalls
+    if (netState.type === Network.NetworkStateType.CELLULAR) {
+      return "low";
+    }
+    // On Wi-Fi or fast connection, stream 320kbps (if unlocked) or 160kbps
+    if (
+      netState.type === Network.NetworkStateType.WIFI ||
+      netState.type === Network.NetworkStateType.ETHERNET
+    ) {
+      return unlocked ? "high" : "medium";
+    }
+  } catch (err) {
+    logger.debug("[Player] Network state query failed, defaulting to medium", err);
+  }
+  return "medium";
+}
+
 export async function getRequestedQualityPreference(): Promise<{
-  requested: "low" | "medium" | "high";
+  requested: "auto" | "low" | "medium" | "high";
   effective: "low" | "medium" | "high";
   unlocked: boolean;
 }> {
@@ -155,28 +177,49 @@ export async function getRequestedQualityPreference(): Promise<{
   try {
     const settings = await Storage.getSettings();
     const unlocked = Storage.isHighQualityEntitled(settings);
-    const requested = settings.streamingQuality || "medium";
-    const effective = Storage.getEffectiveStreamingQuality(settings);
+    const requested = (settings.streamingQuality || "auto") as "auto" | "low" | "medium" | "high";
+    let effective: "low" | "medium" | "high";
+
+    if (requested === "auto") {
+      effective = await detectAutoStreamingQuality(unlocked);
+    } else if (requested === "high") {
+      effective = unlocked ? "high" : "medium";
+    } else {
+      effective = requested;
+    }
+
     cachedQualityPreference = { requested, effective, unlocked, cachedAt: now };
     return cachedQualityPreference;
   } catch (e) {
     logger.error("[Player] Failed to determine streaming quality preference", e);
-    return { requested: "medium", effective: "medium", unlocked: false };
+    return { requested: "auto", effective: "medium", unlocked: false };
   }
 }
 
 /** Resolve the best playback URL and metadata for a song based on explicit quality entitlement. */
 export async function resolvePlaybackUrlWithDetails(
   song: Song,
-  forcedQuality?: "low" | "medium" | "high"
+  forcedQuality?: "auto" | "low" | "medium" | "high"
 ): Promise<ResolvedPlaybackResult> {
   const { requested, effective, unlocked } = await getRequestedQualityPreference();
-  const targetQuality = forcedQuality || effective;
+  let targetQuality: "low" | "medium" | "high";
+
+  if (forcedQuality === "auto") {
+    targetQuality = await detectAutoStreamingQuality(unlocked);
+  } else if (forcedQuality) {
+    targetQuality = forcedQuality === "high" && !unlocked ? "medium" : forcedQuality;
+  } else {
+    targetQuality = effective;
+  }
+
+  const effectiveRequested = forcedQuality || requested;
+  const defaultBitrate = targetQuality === "high" ? 320 : targetQuality === "medium" ? 160 : 96;
+  const defaultLabel = effectiveRequested === "auto" ? `Auto (${defaultBitrate}kbps)` : `${defaultBitrate}kbps`;
 
   const defaultQualityState: PlaybackQualityState = {
-    requested: forcedQuality || requested,
-    actualBitrate: targetQuality === "high" ? 320 : targetQuality === "medium" ? 160 : 96,
-    qualityLabel: targetQuality === "high" ? "320kbps" : targetQuality === "medium" ? "160kbps" : "96kbps",
+    requested: effectiveRequested,
+    actualBitrate: defaultBitrate,
+    qualityLabel: defaultLabel,
     unlocked,
     isFallback: false,
   };
@@ -189,7 +232,7 @@ export async function resolvePlaybackUrlWithDetails(
       return {
         url,
         qualityState: {
-          requested,
+          requested: effectiveRequested,
           actualBitrate: 320,
           qualityLabel: "Offline (320kbps)",
           unlocked,
@@ -211,9 +254,9 @@ export async function resolvePlaybackUrlWithDetails(
           return {
             url: playableUrl,
             qualityState: {
-              requested,
+              requested: effectiveRequested,
               actualBitrate: stream.bitrate,
-              qualityLabel: stream.qualityLabel,
+              qualityLabel: effectiveRequested === "auto" ? `Auto (${stream.qualityLabel})` : stream.qualityLabel,
               unlocked,
               isFallback: stream.isFallback,
             },

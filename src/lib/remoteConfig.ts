@@ -1,29 +1,31 @@
 /**
- * Firebase Remote Config — API URL Manager
+ * Firebase Remote Config — Official Client API Manager
  *
- * URL priority at runtime:
- *   1. Firebase Remote Config (musicApiUrl / appApiUrl) — update in console, no rebuild
- *   2. EXPO_PUBLIC_MUSIC_API_URL env var (optional local dev override)
- *   3. Built-in default (app's own Vercel API — always works)
+ * Connects directly to the official Firebase Remote Config client endpoint:
+ *   POST https://firebaseremoteconfig.googleapis.com/v1/projects/${projectId}/namespaces/firebase:fetch?key=${apiKey}
  *
- * To change the API URL without rebuilding:
- *   Firebase Console → Remote Config → musicApiUrl → Publish changes
+ * This allows updating musicApiUrl / appApiUrl dynamically from Firebase Console:
+ *   Firebase Console → Remote Config → musicApiUrl / appApiUrl → Publish changes
+ *
+ * Features:
+ *   - Instant synchronous access (no blocking or waiting for network)
+ *   - Persistent AsyncStorage caching across app launches
+ *   - Automatic background fetch & activation at startup
+ *   - Fallback to .env / built-in default if offline
  */
 
-import {
-  getRemoteConfig,
-  fetchAndActivate,
-  getValue,
-  isSupported,
-} from "firebase/remote-config";
-import app from "./firebase";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { firebaseConfig } from "./firebase";
 import { logger } from "./logger";
 
-// Cache TTL: 30 min in production, 0 in __DEV__ (instant refresh during dev)
-const FETCH_INTERVAL_SECONDS = __DEV__ ? 0 : 1800;
+const STORAGE_KEY_MUSIC_API = "@remote_config_music_api_url";
+const STORAGE_KEY_APP_API = "@remote_config_app_api_url";
+const STORAGE_KEY_LAST_FETCH = "@remote_config_last_fetch_ts";
+
+// Cache TTL: 0 in __DEV__ (instant fetch during development), 15 min in production
+const FETCH_TTL_MS = __DEV__ ? 0 : 15 * 60 * 1000;
 
 // Built-in default — always resolves immediately so home content loads with zero delay.
-// Overridden by Firebase Remote Config at runtime (change URL without rebuilding).
 const BUILT_IN_DEFAULT_API_URL = "https://mavrixfy-song-api.vercel.app";
 
 // In-memory resolved URLs — initialized synchronously so first API call is instant
@@ -31,68 +33,224 @@ let resolvedMusicApiUrl: string =
   process.env.EXPO_PUBLIC_MUSIC_API_URL?.trim() || BUILT_IN_DEFAULT_API_URL;
 let resolvedAppApiUrl: string =
   process.env.EXPO_PUBLIC_APP_API_URL?.trim() || resolvedMusicApiUrl;
+
+let isHydrated = false;
+let isFetching = false;
 let initialized = false;
 
+// Listeners for runtime configuration changes
+type RemoteConfigListener = (config: { musicApiUrl: string; appApiUrl: string }) => void;
+const listeners = new Set<RemoteConfigListener>();
+
+// Hydrate cached values from AsyncStorage as early as possible
+void hydrateFromStorage();
+
+async function hydrateFromStorage(): Promise<void> {
+  if (isHydrated) return;
+  try {
+    const [cachedMusic, cachedApp] = await Promise.all([
+      AsyncStorage.getItem(STORAGE_KEY_MUSIC_API),
+      AsyncStorage.getItem(STORAGE_KEY_APP_API),
+    ]);
+
+    if (cachedMusic?.trim()) {
+      resolvedMusicApiUrl = normalizeUrl(cachedMusic.trim());
+    }
+    if (cachedApp?.trim()) {
+      resolvedAppApiUrl = normalizeUrl(cachedApp.trim());
+    }
+    isHydrated = true;
+  } catch {
+    isHydrated = true;
+  }
+}
+
+function normalizeUrl(url: string): string {
+  let cleaned = url.trim().replace(/\/+$/, "");
+  if (cleaned && !/^https?:\/\//i.test(cleaned)) {
+    cleaned = `https://${cleaned}`;
+  }
+  return cleaned;
+}
+
+function notifyListeners(): void {
+  const payload = { musicApiUrl: resolvedMusicApiUrl, appApiUrl: resolvedAppApiUrl };
+  listeners.forEach((listener) => {
+    try {
+      listener(payload);
+    } catch (e) {
+      logger.warn("[RemoteConfig] Listener error:", e);
+    }
+  });
+}
+
 /**
- * Call once at app startup. Fetches Remote Config and updates the resolved URLs.
- * Non-blocking — the default URL above is used immediately while this runs in background.
+ * Perform the official Firebase Remote Config client fetch.
  */
-export async function initRemoteConfig(): Promise<void> {
-  if (initialized) return;
+async function performFetch(): Promise<boolean> {
+  const projectId = process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || firebaseConfig?.projectId || "spotify-8fefc";
+  const apiKey = process.env.EXPO_PUBLIC_FIREBASE_API_KEY || firebaseConfig?.apiKey;
+  const appId = process.env.EXPO_PUBLIC_FIREBASE_APP_ID || firebaseConfig?.appId || "1:816396705670:web:005e724df7139772521607";
+
+  if (!projectId || !apiKey) {
+    logger.warn("[RemoteConfig] Missing Firebase projectId or apiKey, cannot fetch Remote Config.");
+    return false;
+  }
+
+  const endpoint = `https://firebaseremoteconfig.googleapis.com/v1/projects/${encodeURIComponent(
+    projectId
+  )}/namespaces/firebase:fetch?key=${encodeURIComponent(apiKey)}`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
 
   try {
-    // isSupported() times out quickly on native (web SDK returns false)
-    const supported = await Promise.race([
-      isSupported(),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1500)),
-    ]);
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        appId: appId || "1:816396705670:web:005e724df7139772521607",
+        appInstanceId: "PROD",
+      }),
+      signal: controller.signal,
+    });
 
-    if (!supported) {
-      logger.info("[RemoteConfig] Not supported on this platform — using default URL.");
-      initialized = true;
-      return;
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      logger.warn(`[RemoteConfig] Fetch returned status ${response.status}`);
+      return false;
     }
 
-    const remoteConfig = getRemoteConfig(app);
-    remoteConfig.settings.minimumFetchIntervalMillis = FETCH_INTERVAL_SECONDS * 1000;
+    const data = (await response.json()) as {
+      entries?: Record<string, string>;
+      state?: string;
+      templateVersion?: string;
+    };
 
-    // Fetch + activate (5s timeout)
-    await Promise.race([
-      fetchAndActivate(remoteConfig),
-      new Promise<void>((_, reject) =>
-        setTimeout(() => reject(new Error("Remote Config fetch timeout")), 5000)
-      ),
-    ]);
+    if (data.entries) {
+      const musicUrl =
+        data.entries.musicApiUrl ||
+        data.entries.music_api_url ||
+        data.entries.serverUrl ||
+        data.entries.server_url ||
+        data.entries.apiUrl;
 
-    const musicUrl = getValue(remoteConfig, "musicApiUrl").asString().trim();
-    const appUrl = getValue(remoteConfig, "appApiUrl").asString().trim();
+      const appUrl =
+        data.entries.appApiUrl ||
+        data.entries.app_api_url ||
+        musicUrl;
 
-    if (musicUrl) {
-      resolvedMusicApiUrl = musicUrl;
-      logger.info(`[RemoteConfig] musicApiUrl → ${musicUrl}`);
+      let changed = false;
+
+      if (musicUrl?.trim()) {
+        const normalizedMusic = normalizeUrl(musicUrl);
+        if (normalizedMusic !== resolvedMusicApiUrl) {
+          resolvedMusicApiUrl = normalizedMusic;
+          changed = true;
+        }
+        void AsyncStorage.setItem(STORAGE_KEY_MUSIC_API, normalizedMusic);
+      }
+
+      if (appUrl?.trim()) {
+        const normalizedApp = normalizeUrl(appUrl);
+        if (normalizedApp !== resolvedAppApiUrl) {
+          resolvedAppApiUrl = normalizedApp;
+          changed = true;
+        }
+        void AsyncStorage.setItem(STORAGE_KEY_APP_API, normalizedApp);
+      }
+
+      void AsyncStorage.setItem(STORAGE_KEY_LAST_FETCH, Date.now().toString());
+
+      logger.info(
+        `[RemoteConfig] Official Firebase Remote Config activated: musicApiUrl → ${resolvedMusicApiUrl} (version ${data.templateVersion ?? "latest"})`
+      );
+
+      if (changed) {
+        notifyListeners();
+      }
+
+      return true;
     }
-    if (appUrl) {
-      resolvedAppApiUrl = appUrl;
-      logger.info(`[RemoteConfig] appApiUrl → ${appUrl}`);
+
+    return false;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err?.name === "AbortError") {
+      logger.warn("[RemoteConfig] Fetch timed out (6s)");
+    } else {
+      logger.warn("[RemoteConfig] Fetch error:", err);
     }
-  } catch (error) {
-    logger.warn("[RemoteConfig] Fetch failed, using default:", error);
-  } finally {
-    initialized = true;
+    return false;
   }
 }
 
 /**
- * Returns the resolved music API base URL.
- * Available immediately (no await needed) — Remote Config overrides on next launch.
+ * Call once at app startup. Non-blocking — default/cached URL is used immediately
+ * while Remote Config fetches in background and updates storage & memory.
+ */
+export async function initRemoteConfig(force = false): Promise<void> {
+  if (initialized && !force) return;
+  initialized = true;
+
+  await hydrateFromStorage();
+
+  // Check TTL unless forced or in DEV
+  if (!force && FETCH_TTL_MS > 0) {
+    try {
+      const lastFetchStr = await AsyncStorage.getItem(STORAGE_KEY_LAST_FETCH);
+      if (lastFetchStr) {
+        const elapsed = Date.now() - parseInt(lastFetchStr, 10);
+        if (elapsed < FETCH_TTL_MS) {
+          logger.info(`[RemoteConfig] Using cached config (fetched ${Math.round(elapsed / 1000)}s ago)`);
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (isFetching) return;
+  isFetching = true;
+
+  try {
+    await performFetch();
+  } finally {
+    isFetching = false;
+  }
+}
+
+/**
+ * Force fetch immediately (bypasses TTL). Useful for settings or admin refresh.
+ */
+export async function fetchRemoteConfigNow(): Promise<boolean> {
+  return await performFetch();
+}
+
+/**
+ * Returns the resolved music API base URL synchronously.
  */
 export function getRemoteConfigMusicApiUrl(): string {
   return resolvedMusicApiUrl;
 }
 
 /**
- * Returns the resolved app API base URL.
+ * Returns the resolved app API base URL synchronously.
  */
 export function getRemoteConfigAppApiUrl(): string {
   return resolvedAppApiUrl;
+}
+
+/**
+ * Subscribe to Remote Config updates.
+ */
+export function addRemoteConfigListener(listener: RemoteConfigListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }

@@ -1,11 +1,24 @@
 import type { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
 import { compactMap, mapFilter } from "@/lib/arrayUtils";
 import { toTrimmedString } from "@/utils/stringUtils";
+import { getApiUrl } from "@/lib/api-config";
 import type {
   JioSaavnPlaylistResult,
   JioSaavnAlbumResult,
   JioSaavnPlaylistDetailsData,
 } from "./JioSaavnTypes";
+
+export function getJioSaavnSearchBaseUrls(): string[] {
+  const configured = getApiUrl().replace(/\/+$/, "");
+  const urls: string[] = [];
+  if (configured) {
+    urls.push(`${configured}/api`);
+  }
+  if (!configured.includes("mavrixfy-song-api.vercel.app")) {
+    urls.push("https://mavrixfy-song-api.vercel.app/api");
+  }
+  return urls;
+}
 
 export async function consumeResponseBody(response: Response): Promise<void> {
   try {

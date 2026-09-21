@@ -4,7 +4,6 @@ import * as Animated from "@/lib/nativeAnimated";
 import {
   Pressable,
   StyleSheet,
-  Text,
   View,
   useWindowDimensions,
 } from "react-native";

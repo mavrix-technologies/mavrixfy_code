@@ -73,7 +73,7 @@ export async function shareContent(options: ShareContentOptions): Promise<boolea
   }
 }
 
-export const MAVRIXFY_WEB_BASE = "https://mavrixfy-git-main-team-mavrix.vercel.app";
+export const MAVRIXFY_WEB_BASE = "https://mavrixfy.site";
 
 /**
  * Universal builder for clean, Spotify-style canonical share links
@@ -87,19 +87,39 @@ export function buildShareUrl(options: {
   ids?: string[];
   names?: string[];
 }): string {
+  const base = MAVRIXFY_WEB_BASE;
+
   if (options.type === "playlist" && options.id) {
-    return `${MAVRIXFY_WEB_BASE}/playlist/${encodeURIComponent(options.id)}`;
+    const params = new URLSearchParams({ playlist: options.id });
+    if (options.title) params.set("name", options.title);
+    return `${base}/?${params.toString()}`;
   }
+
   if (options.type === "artist" && options.id) {
-    return `${MAVRIXFY_WEB_BASE}/artist/${encodeURIComponent(options.id)}`;
+    const params = new URLSearchParams({ artist: options.id });
+    if (options.title) params.set("name", options.title);
+    return `${base}/?${params.toString()}`;
   }
+
   if (options.type === "mix" && options.ids?.length && options.names?.length) {
-    return `${MAVRIXFY_WEB_BASE}/artist-mix?ids=${encodeURIComponent(options.ids.join(","))}&names=${encodeURIComponent(options.names.join(","))}`;
+    const params = new URLSearchParams({
+      mix: "1",
+      ids: options.ids.join(","),
+      names: options.names.join(","),
+    });
+    return `${base}/?${params.toString()}`;
   }
+
   if (options.id) {
-    return `${MAVRIXFY_WEB_BASE}/track/${encodeURIComponent(options.id)}`;
+    const params = new URLSearchParams({ track: options.id });
+    if (options.title) params.set("title", options.title);
+    if (options.subtitle && options.subtitle !== "Song" && options.subtitle !== "Artist") {
+      params.set("artist", options.subtitle);
+    }
+    return `${base}/?${params.toString()}`;
   }
-  return MAVRIXFY_WEB_BASE;
+
+  return base;
 }
 
 /**

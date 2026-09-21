@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet, Pressable, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-export function SegmentPicker<T extends string>({
+export function SegmentPicker<T extends string | number>({
   options,
   value,
   loadingValue,
@@ -20,7 +20,7 @@ export function SegmentPicker<T extends string>({
         const isLoading = loadingValue === opt.value;
         return (
           <Pressable
-            key={opt.value}
+            key={String(opt.value)}
             disabled={Boolean(loadingValue)}
             style={[styles.segmentTab, selected && styles.segmentTabSelected]}
             onPress={() => onChange(opt.value)}

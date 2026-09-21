@@ -38,7 +38,7 @@ interface UseAudioQueueOperationsOptions {
     activeIndex: number,
     options?: { position?: number; wasPlaying?: boolean; forcedUrls?: Map<string, string> }
   ) => Promise<any>;
-  resolvePlaybackUrlCached: (song: Song, forcedQuality?: "low" | "medium" | "high") => Promise<string | null>;
+  resolvePlaybackUrlCached: (song: Song, forcedQuality?: "auto" | "low" | "medium" | "high") => Promise<string | null>;
   showPlaybackNotice: (message: string) => void;
   playSong: (song: Song, requestedQueue?: Song[]) => Promise<void> | void;
 }

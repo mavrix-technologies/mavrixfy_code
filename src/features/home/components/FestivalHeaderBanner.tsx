@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   useWindowDimensions,
-  Image as RNImage,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -39,23 +38,7 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
 
     if (gBannerAspectRatioCache[backgroundImageUrl]) {
       setAspectRatio(gBannerAspectRatioCache[backgroundImageUrl]);
-      return;
     }
-
-    // Measure native image dimensions dynamically
-    RNImage.getSize(
-      backgroundImageUrl,
-      (width, height) => {
-        if (width > 0 && height > 0) {
-          const ratio = width / height;
-          gBannerAspectRatioCache[backgroundImageUrl] = ratio;
-          setAspectRatio(ratio);
-        }
-      },
-      () => {
-        // Fallback: onLoad on Image component will supply it
-      }
-    );
   }, [backgroundImageUrl]);
 
   if (!themeConfig || !themeConfig.enabled) {

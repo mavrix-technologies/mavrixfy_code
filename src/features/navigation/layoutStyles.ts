@@ -331,7 +331,7 @@ export const styles = StyleSheet.create({
     left: 8,
     right: 8,
     height: 1,
-    backgroundColor: "rgba(38,225,154,0.28)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     opacity: 0.32,
   },
   playerCornerAccentLeft: {
@@ -343,6 +343,7 @@ export const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderTopLeftRadius: 10,
+    borderColor: "rgba(255, 255, 255, 0.14)",
     opacity: 0.36,
   },
   playerCornerAccentRight: {
@@ -354,6 +355,7 @@ export const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderRightWidth: 1,
     borderTopRightRadius: 10,
+    borderColor: "rgba(255, 255, 255, 0.14)",
     opacity: 0.36,
   },
   playerProgressTrack: {

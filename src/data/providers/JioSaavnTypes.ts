@@ -3,8 +3,7 @@
  * Extracted from JioSaavnProvider.ts to reduce module size.
  */
 
-import { type JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
-import { getApiUrl } from "@/lib/api-config";
+import { type JioSaavnImage, type JioSaavnSong } from "@/lib/musicData";
 
 export interface JioSaavnPlaylistResult {
   id: string;

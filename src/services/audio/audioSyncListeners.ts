@@ -37,8 +37,9 @@ interface UseAudioSyncListenersOptions {
   showPlaybackNotice: (msg: string) => void;
   likedSongs: Song[];
   likedSongsRef: MutableRefObject<Song[]>;
-  playSong: (song: Song) => Promise<void> | void;
+  playSong: (song: Song, queue?: Song[]) => Promise<void> | void;
   isNativeQueueSyncedRef?: MutableRefObject<boolean>;
+  triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[]) => Promise<Song[]>;
 }
 
 export function useAudioSyncListeners({
@@ -71,6 +72,7 @@ export function useAudioSyncListeners({
   likedSongsRef,
   playSong,
   isNativeQueueSyncedRef,
+  triggerAutoplayAppend,
 }: UseAudioSyncListenersOptions) {
   const publishedLockScreenDurationRef = useRef<{
     songId: string;
@@ -236,17 +238,43 @@ export function useAudioSyncListeners({
 
           if (resolvedIndex >= 0) {
             prefetchAdjacentTrackStreams(currentQ, resolvedIndex);
+            if (triggerAutoplayAppend && resolvedIndex >= currentQ.length - 2) {
+              void triggerAutoplayAppend(targetSong, currentQ);
+            }
           }
         }
       }),
-      subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, () => {
+      subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, async () => {
+        if (sleepTimerRef.current?.mode === "end-of-stack") {
+          clearSleepTimer();
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          setPlaybackLoading(false);
+          updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
+          return;
+        }
+
+        try {
+          const { getSettings } = require("@/lib/storage");
+          const settings = await getSettings();
+          if (settings?.smartAutoplayEnabled && triggerAutoplayAppend) {
+            const seed = currentSongRef.current || queueRef.current[queueRef.current.length - 1];
+            if (seed) {
+              const recs = await triggerAutoplayAppend(seed, queueRef.current);
+              if (recs.length > 0) {
+                void playSong(recs[0], queueRef.current);
+                return;
+              }
+            }
+          }
+        } catch (err) {
+          logger.warn("[Player] Autoplay queue-ended continuation error:", err);
+        }
+
         setIsPlaying(false);
         isPlayingRef.current = false;
         setPlaybackLoading(false);
         updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
-        if (sleepTimerRef.current?.mode === "end-of-stack") {
-          clearSleepTimer();
-        }
       }),
     ];
 
@@ -254,7 +282,7 @@ export function useAudioSyncListeners({
       unsubs.forEach((unsub) => unsub?.());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlayerReady]);
+  }, [isPlayerReady, triggerAutoplayAppend]);
 
   // Save current playback state (event-driven)
   useEffect(() => {

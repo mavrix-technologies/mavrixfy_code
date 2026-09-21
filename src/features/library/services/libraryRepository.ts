@@ -23,8 +23,7 @@ import { getFollowedArtists, type FollowedArtist } from "@/lib/followedArtists";
 import { sortedCopy } from "@/lib/arrayUtils";
 import { setCachedPlaylists } from "@/lib/playlistMemoryCache";
 import { logger } from "@/lib/logger";
-import type { DisplayPlaylist } from "../components/PlaylistListItem";
-import { useLibraryStore } from "../store/libraryStore";
+import { useLibraryStore, type DisplayPlaylist } from "../store/libraryStore";
 
 const PLAYLISTS_CACHE_KEY_PREFIX = "@mavrixfy_library_playlists_";
 const ARTISTS_CACHE_KEY = "@mavrixfy_followed_artists";

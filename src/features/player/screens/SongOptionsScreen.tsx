@@ -4,7 +4,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  Share,
   Text,
   View,
 } from "react-native";

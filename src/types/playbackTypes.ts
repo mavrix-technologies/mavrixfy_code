@@ -9,7 +9,7 @@ export interface SleepTimerState {
 }
 
 export interface PlaybackQualityState {
-  requested: "low" | "medium" | "high";
+  requested: "auto" | "low" | "medium" | "high";
   actualBitrate: number;
   qualityLabel: string;
   unlocked: boolean;
@@ -58,7 +58,7 @@ export interface PlayerContextValue extends PlayerState {
   clearSleepTimer: () => void;
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
-  changeStreamingQuality: (quality: "low" | "medium" | "high") => Promise<void>;
+  changeStreamingQuality: (quality: "auto" | "low" | "medium" | "high") => Promise<void>;
 }
 
 export type PlayerLiteContextValue = Omit<PlayerContextValue, "progress" | "duration" | "positionMillis">;
@@ -135,7 +135,7 @@ export interface PlayerActionsContextValue {
   clearSleepTimer: () => void;
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
-  changeStreamingQuality: (quality: "low" | "medium" | "high") => Promise<void>;
+  changeStreamingQuality: (quality: "auto" | "low" | "medium" | "high") => Promise<void>;
 }
 
 export interface PlayerLikedContextValue {

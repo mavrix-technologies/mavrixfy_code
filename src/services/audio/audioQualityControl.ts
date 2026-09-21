@@ -56,7 +56,7 @@ export function useAudioQualityControl({
   showPlaybackNotice,
 }: UseAudioQualityControlOptions) {
   const changeStreamingQuality = useCallback(
-    async (quality: "low" | "medium" | "high") => {
+    async (quality: "auto" | "low" | "medium" | "high") => {
       await playerPersistenceService.saveStreamingQuality(quality);
 
       streamUrlCache.current.clear();

@@ -33,17 +33,8 @@ export default function OfflineScreen({
         paddingBottom: Math.max(insets.bottom, 24) + 16,
       }
     ]}>
-      <LinearGradient
-        colors={["rgba(38, 225, 154, 0.12)", "rgba(16, 20, 26, 0)"]}
-        style={styles.ambientGlow}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 0.7 }}
-      />
-
       <View style={styles.contentCard}>
-        <View style={styles.iconCircle}>
-          <Ionicons name="cloud-offline-outline" size={38} color="#26E19A" />
-        </View>
+        <Ionicons name="cloud-offline-outline" size={48} color={Colors.primary} style={styles.heroIcon} />
 
         <Text style={styles.title}>{"You're Offline"}</Text>
         <Text style={styles.message}>{message}</Text>
@@ -72,7 +63,7 @@ export default function OfflineScreen({
             disabled={isChecking}
           >
             {isChecking ? (
-              <ActivityIndicator size="small" color="#26E19A" />
+              <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
               <Ionicons name="refresh-outline" size={18} color="#FFFFFF" />
             )}
@@ -94,33 +85,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 24,
   },
-  ambientGlow: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: "55%",
-  },
   contentCard: {
     width: "100%",
     maxWidth: 380,
     alignItems: "center",
     backgroundColor: "rgba(255, 255, 255, 0.04)",
-    borderRadius: 24,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.08)",
     paddingHorizontal: 24,
     paddingVertical: 36,
   },
-  iconCircle: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: "rgba(38, 225, 154, 0.10)",
-    borderWidth: 1.5,
-    borderColor: "rgba(38, 225, 154, 0.30)",
-    alignItems: "center",
-    justifyContent: "center",
+  heroIcon: {
     marginBottom: 20,
   },
   title: {

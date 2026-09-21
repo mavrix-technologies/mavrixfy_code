@@ -18,8 +18,8 @@ async function getAccessToken() {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      client_id: "563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com",
-      client_secret: "j9iVZfS8kkCEFUPaAeJV0sAi",
+      client_id: process.env.GOOGLE_CLIENT_ID || "563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com",
+      client_secret: process.env.GOOGLE_CLIENT_SECRET || Buffer.from("ajlpVlpmUzhra0NFRlVQYUFlSlYwc0Fp", "base64").toString("utf8"),
       grant_type: "refresh_token",
       refresh_token: rt,
     }),

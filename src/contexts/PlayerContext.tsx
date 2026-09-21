@@ -13,16 +13,6 @@ import { useAudioPlaybackCommands } from "@/services/audio/audioPlaybackCommands
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { usePlayerCoreState } from "@/services/audio/usePlayerCoreState";
 import { PlayerContextTree } from "./PlayerContextProviders";
-import {
-  PlayerContext,
-  PlayerLiteContext,
-  PlayerProgressContext,
-  PlayerRowContext,
-  PlayerBrowseContext,
-  PlayerQueueContext,
-  PlayerLikedContext,
-  PlayerActionsContext,
-} from "./PlayerContextDefs";
 
 let TrackPlayer: typeof import("react-native-track-player").default | null = null;
 let Event: any = {};
@@ -124,6 +114,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     playSongRef: core.playSongRef,
   });
 
+  const { sleepTimer, sleepTimerRef, setSleepTimer, clearSleepTimer } = useAudioSleepTimer({
+    onTimerExpire: () => {
+      if (TrackPlayer) {
+        TrackPlayer.pause().catch(() => {});
+      } else if (canUseLightweightAudioFallback) {
+        try { ExpoAvPlayer.pause(); } catch {}
+      }
+      core.setIsPlaying(false);
+      core.isPlayingRef.current = false;
+    },
+  });
+
   const { playSong, togglePlay, nextSong, prevSong, seekTo } = useAudioPlaybackCommands({
     currentSongRef: core.currentSongRef,
     setCurrentSong: core.setCurrentSong,
@@ -164,18 +166,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     nextSongRef: core.nextSongRef,
     prevSongRef: core.prevSongRef,
     seekToRef: core.seekToRef,
-  });
-
-  const { sleepTimer, sleepTimerRef, setSleepTimer, clearSleepTimer } = useAudioSleepTimer({
-    onTimerExpire: () => {
-      if (TrackPlayer) {
-        TrackPlayer.pause().catch(() => {});
-      } else if (canUseLightweightAudioFallback) {
-        try { ExpoAvPlayer.pause(); } catch {}
-      }
-      core.setIsPlaying(false);
-      core.isPlayingRef.current = false;
-    },
+    triggerAutoplayAppend: core.triggerAutoplayAppend,
+    autoplaySongIdsRef: core.autoplaySongIdsRef,
+    lastAutoplaySeedIdRef: core.lastAutoplaySeedIdRef,
+    sleepTimerRef,
   });
 
   const { likedSongIds, likedSongs, likedSongsRef, isLiked, toggleLike } = useAudioLikedSync({
@@ -279,6 +273,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     likedSongsRef,
     playSong,
     isNativeQueueSyncedRef: core.isNativeQueueSyncedRef,
+    triggerAutoplayAppend: core.triggerAutoplayAppend,
   });
 
   const playbackValues = useAudioPlaybackValues({

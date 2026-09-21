@@ -4,7 +4,7 @@ import {
   useLikedSongsStore,
   subscribeLikedSongs,
   toggleLikeSong,
-} from "@/features/liked-songs";
+} from "@/services/liked-songs";
 
 interface UseAudioLikedSyncOptions {
   userId?: string | null;
