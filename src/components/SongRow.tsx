@@ -63,7 +63,7 @@ function getSongRowCoverUrl(url: string | undefined): string {
 
   const youtubeMatch = url.match(/https?:\/\/i\.ytimg\.com\/vi\/([a-zA-Z0-9_-]{11})\/[^?#]+/i);
   if (youtubeMatch?.[1]) {
-    return `https://i.ytimg.com/vi/${youtubeMatch[1]}/hqdefault.jpg`;
+    return `https://i.ytimg.com/vi/${youtubeMatch[1]}/mqdefault.jpg`;
   }
 
   return url;
@@ -162,7 +162,6 @@ const SongRow = memo(function SongRow({
 
   if (!song || !song.id || !song.title) return null;
 
-  const showYouTubeSearchMeta = showSearchSourceMeta && song.source === "youtube";
   const rowCoverUrl = getSongRowCoverUrl(song.coverUrl);
 
   return (
@@ -211,16 +210,11 @@ const SongRow = memo(function SongRow({
             {song.title || "Unknown Title"}
           </AnimatedText>
         </View>
-        <Text style={styles.artist} numberOfLines={1}>
-          {song.artist || "Unknown Artist"}
-        </Text>
-        {showYouTubeSearchMeta ? (
-          <View style={styles.sourceMetaRow}>
-            <View style={styles.sourcePill}>
-              <Ionicons name="videocam-outline" size={13} color="#D7D7D7" />
-            </View>
-          </View>
-        ) : null}
+        <View style={styles.artistRow}>
+          <Text style={styles.artist} numberOfLines={1}>
+            {song.artist || "Unknown Artist"}
+          </Text>
+        </View>
       </View>
 
       {/* Remove button */}
@@ -325,6 +319,7 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
+    minHeight: 64,
     height: 64,
     paddingVertical: 8,
     paddingHorizontal: 10,
@@ -341,7 +336,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    flexShrink: 1,
+    flex: 1,
     minWidth: 0,
   },
   coverWrapper: {
@@ -363,31 +358,25 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   title: {
+    flex: 1,
+    minWidth: 0,
     color: "#FFFFFF",
     fontSize: 15,
     fontFamily: "Inter_500Medium",
   },
+  artistRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 2,
+    minWidth: 0,
+  },
   artist: {
+    flex: 1,
+    minWidth: 0,
     color: Colors.subtext,
     fontSize: 13,
     fontFamily: "Inter_400Regular",
-    marginTop: 2,
-  },
-  sourceMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: 6,
-    marginTop: 6,
-  },
-  sourcePill: {
-    width: 22,
-    height: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 10,
-    backgroundColor: "rgba(255,255,255,0.08)",
   },
   removeBtn: {
     width: 48,

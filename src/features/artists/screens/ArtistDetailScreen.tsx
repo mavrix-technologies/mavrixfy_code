@@ -98,7 +98,10 @@ function useArtistScreenView() {
     [stickyOpacity]
   );
 
-  const topAlbums = artist?.topAlbums ?? [];
+  const topAlbums = useMemo(
+    () => artist?.topAlbums ?? [],
+    [artist?.topAlbums]
+  );
   const visibleSimilarArtists = useMemo(
     () => artist?.similarArtists?.slice(0, 10) ?? [],
     [artist?.similarArtists]
@@ -125,7 +128,6 @@ function useArtistScreenView() {
   }, [artist, extraSongs]);
 
   // Latest Release item (top albums or single)
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps
   const latestRelease = useMemo(() => {
     if (topAlbums.length > 0) {
       return {
@@ -150,11 +152,9 @@ function useArtistScreenView() {
       };
     }
     return null;
-    // react-doctor-disable-next-line react-doctor/exhaustive-deps
   }, [topAlbums, songs, coverUrl]);
 
   // Is current queue playing from this artist?
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- currentSong and songs are tracked
   const isPlayingFromThisArtist = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
     return songs.some((s) => s.id === currentSong.id);
@@ -454,7 +454,9 @@ function useArtistScreenView() {
   const songsQueueKey = useMemo(() => songs.map((song) => song.id).join("|"), [songs]);
 
   const songsRef = useRef(songs);
-  songsRef.current = songs;
+  useEffect(() => {
+    songsRef.current = songs;
+  }, [songs]);
 
   const renderSongRow = useCallback(
     ({ item, index }: { item: Song; index: number }) => (
@@ -743,7 +745,7 @@ function useArtistScreenView() {
         </View>
       </Animated.View>
 
-      {/* ── Apple Music Frosted Sticky Header ── */}
+      {/* ── Apple Music Sticky Header ── */}
       <Animated.View
         pointerEvents={isStickyVisible ? "auto" : "none"}
         style={[

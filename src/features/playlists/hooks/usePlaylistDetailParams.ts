@@ -18,12 +18,16 @@ export function usePlaylistDetailParams() {
     description?: string | string[];
     cover?: string | string[];
     songCount?: string | string[];
+    source?: string | string[];
   }>();
 
   const playlistId = pickFirstParam(params.id).trim();
   const sourceLink = pickFirstParam(params.link).trim();
   const firestoreParam = pickFirstParam(params.firestore);
   const jiosaavnParam = pickFirstParam(params.jiosaavn);
+  const sourceParam = pickFirstParam(params.source).toLowerCase();
+
+  const isYouTubeSource = false;
 
   const isSongSource =
     pickFirstParam(params.song) === "true" ||
@@ -55,6 +59,7 @@ export function usePlaylistDetailParams() {
     isFirestoreSource,
     isLocalCustomPlaylist,
     isJioSaavnSource,
+    isYouTubeSource,
     initialTitle,
     initialCover,
     initialDescription,

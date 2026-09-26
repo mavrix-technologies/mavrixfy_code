@@ -11,6 +11,7 @@ import {
   PlayerPlayButton,
   PlayerSpotifyProgress,
 } from "./PlayerControlComponents";
+import { SpotifyMotionSaveButton } from "./SpotifyMotionSaveButton";
 import { styles } from "../styles/playerScreenStyles";
 
 export interface PlayerControlsSectionProps {
@@ -120,17 +121,17 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
           />
         </View>
         <View style={styles.songDetailActions}>
-          <SmoothControlButton
-            accessibilityLabel={liked ? "Unlike song" : "Like song"}
+          <SpotifyMotionSaveButton
+            liked={liked}
+            onToggleLike={onToggleLike}
+            iconSize={songDetailIconSize + 4}
             style={[styles.songDetailActionButton, songDetailActionBtnStyle]}
-            onPress={onToggleLike}
-          >
-            <Ionicons
-              name={liked ? "heart" : "heart-outline"}
-              size={songDetailIconSize + 2}
-              color={liked ? selectedControlIconColor : "#FFFFFF"}
-            />
-          </SmoothControlButton>
+            activeColor={selectedControlIconColor}
+            inactiveColor="#FFFFFF"
+            accessibilityLabel={
+              liked ? "Remove from your library" : "Save to your library"
+            }
+          />
 
           <SmoothControlButton
             accessibilityLabel="Share song"

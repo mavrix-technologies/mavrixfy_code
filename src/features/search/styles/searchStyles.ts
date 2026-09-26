@@ -8,65 +8,86 @@ export const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
 
-  // ── Search entry ────────────────────────────────────────────────────────────
+  // ── Default Stack Native Liquid Glass Search ────────────────────────────────
   searchBarRow: {
-    flexDirection: "row",
-    alignItems: "center",
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  searchBar: {
-    flex: 1,
+  searchGlassButton: {
+    width: "100%",
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    boxShadow: "0 4px 10px rgba(0, 0, 0, 0.15)",
-  } as any,
-
-
-  searchBarPressed: {
-    opacity: 0.92,
+  },
+  searchGlassButtonPressed: {
+    opacity: 0.85,
     transform: [{ scale: 0.99 }],
   },
+  liquidGlassBar: {
+    width: "100%",
+    height: 48,
+    borderRadius: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    gap: 12,
+  },
   searchIcon: {
-    marginRight: 9,
+    marginRight: 2,
   },
   inactiveSearchText: {
     flex: 1,
     minWidth: 0,
-    color: "#64748B",
-    fontSize: 14.5,
-    fontFamily: "Inter_500Medium",
+    color: "rgba(255, 255, 255, 0.60)",
+    fontSize: 15,
+    fontFamily: "Inter_400Regular",
     letterSpacing: -0.1,
   },
-  rightSearchGroup: {
+
+  // ── Active Search Header ───────────────────────────────────────────────────
+  activeSearchHeader: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 25,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    backgroundColor: Colors.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "transparent",
+  },
+  activeSearchHeaderElevated: {
+    borderBottomColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: "rgba(11, 15, 20, 0.96)",
+  },
+  activeSearchBarRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingLeft: 6,
+    width: "100%",
+    gap: 12,
   },
-  searchDivider: {
-    width: 1,
-    height: 18,
-    backgroundColor: "rgba(0, 0, 0, 0.12)",
-    marginRight: 10,
+  activeSearchFieldWrap: {
+    flex: 1,
+    minWidth: 0,
   },
-
   searchCancelButton: {
-    minHeight: 40,
-    minWidth: 58,
-    alignItems: "flex-end",
+    height: 40,
+    paddingLeft: 4,
+    paddingRight: 2,
+    alignItems: "center",
     justifyContent: "center",
   },
   searchCancelButtonPressed: {
-    opacity: 0.72,
+    opacity: 0.65,
   },
   searchCancelText: {
-    color: "#F8FBF9",
-    fontSize: 15,
+    color: Colors.primary,
+    fontSize: 16,
     fontFamily: "Inter_500Medium",
+  },
+  headerScopeBarWrap: {
+    marginTop: 8,
+    width: "100%",
   },
 
   // ── Scroll / shared ─────────────────────────────────────────────────────────

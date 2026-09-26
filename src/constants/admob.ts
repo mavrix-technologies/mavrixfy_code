@@ -59,6 +59,17 @@ export const AD_UNITS = {
       : "ca-app-pub-6003470714469240/1788794195",
     default: "",
   }) || "",
+
+  // 5. App Open / Launch Ad
+  APP_OPEN: Platform.select({
+    ios: IS_TEST_MODE
+      ? "ca-app-pub-3940256099942544/5575463023" // iOS official test App Open ID
+      : "ca-app-pub-6003470714469240/4602826035", // Production Launch / Interstitial ID
+    android: IS_TEST_MODE
+      ? "ca-app-pub-3940256099942544/9257395921" // Android official test App Open ID
+      : "ca-app-pub-6003470714469240/4602826035", // Production Launch / Interstitial ID
+    default: "",
+  }) || "",
 };
 
 

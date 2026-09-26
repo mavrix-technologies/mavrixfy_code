@@ -57,6 +57,7 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     backgroundVideoId,
     videoActive,
     handleVideoActive,
+    handleVideoError,
     isScreenFocused,
     shouldRenderBackgroundVideo,
     ambientVideoLayoutActive,
@@ -417,6 +418,7 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     setFullscreenLyricsVisible,
     positionMillis,
     handleVideoActive,
+    handleVideoError,
     ambientVideoLayoutActive,
   };
 }

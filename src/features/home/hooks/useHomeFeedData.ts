@@ -143,16 +143,15 @@ export function useHomeFeedData() {
 
       const mergeCategories = (newCategories: HomeJioSaavnCategoryData[]) => {
         if (!isActiveRun() || newCategories.length === 0) return;
-        setCategories((prev) => {
-          const existingIds = new Set(prev.map((c) => c.id));
-          const additions = newCategories.filter(
-            (cat) => cat.results.length > 0 && !existingIds.has(cat.id)
-          );
-          if (additions.length === 0) return prev;
-          const merged = [...prev, ...additions];
-          HOME_CACHE.categories = merged;
-          return merged;
-        });
+        const current = HOME_CACHE.categories || [];
+        const existingIds = new Set(current.map((c) => c.id));
+        const additions = newCategories.filter(
+          (cat) => cat.results.length > 0 && !existingIds.has(cat.id)
+        );
+        if (additions.length === 0) return;
+        const merged = [...current, ...additions];
+        HOME_CACHE.categories = merged;
+        setCategories(merged);
       };
 
       const applyArtists = (items: ArtistCard[]) => {

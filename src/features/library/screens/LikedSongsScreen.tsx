@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View, TextInput, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { IS_ANDROID, IS_WEB } from "@/constants/platform";
 import Animated, {
@@ -204,7 +204,9 @@ export function LikedSongsScreen() {
 
   // Stable ref so handleSongPress/renderSong never recreate when list changes
   const filteredSongsRef = useRef(filteredSongs);
-  filteredSongsRef.current = filteredSongs;
+  useEffect(() => {
+    filteredSongsRef.current = filteredSongs;
+  }, [filteredSongs]);
 
   const isPlayingFromLikedSongs = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;

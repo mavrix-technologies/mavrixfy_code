@@ -189,14 +189,13 @@ export function useAudioPlaybackCommands({
       try {
         const audioUrl = await Promise.race([
           resolvePlaybackUrlCached(targetSong),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 8500)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000)),
         ]);
         if (reqId !== playRequestIdRef.current) return;
 
         if (!audioUrl) {
           setIsPlaying(false);
           isPlayingRef.current = false;
-          updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
           showPlaybackNotice("Playback stream timed out or unavailable.");
           return;
         }
@@ -240,19 +239,23 @@ export function useAudioPlaybackCommands({
                 return songToTrack(queueSong, cachedUrl || null, streamUrlCache.current);
               });
 
+              const hasValidUrl = (t: any) => typeof t?.url === "string" && t.url.length > 5;
+              const allTracksValid = nativeTracks.length === q.length && nativeTracks.every(hasValidUrl);
+
               if (
                 typeof TrackPlayer!.setQueue === "function" &&
-                nativeTracks.length === q.length &&
-                nativeTracks.every(Boolean)
+                allTracksValid
               ) {
                 await TrackPlayer!.setQueue(nativeTracks);
                 await TrackPlayer!.skip(targetIndex);
                 if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = true;
               } else if (typeof TrackPlayer!.load === "function") {
                 await TrackPlayer!.load(targetTrack);
+                if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
               } else {
                 await TrackPlayer!.reset();
                 await TrackPlayer!.add([targetTrack]);
+                if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
               }
             } catch (queueErr) {
               logger.error("[Player] Native track load failed:", queueErr);
@@ -320,6 +323,9 @@ export function useAudioPlaybackCommands({
       userQueuedSongIdsRef,
       desiredPlayStateRef,
       canUseLightweightAudioFallback,
+      autoplaySongIdsRef,
+      lastAutoplaySeedIdRef,
+      triggerAutoplayAppend,
     ]
   );
 
@@ -353,7 +359,32 @@ export function useAudioPlaybackCommands({
           updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
           const ready = isPlayerReady || (await ensurePlayerReady());
           if (ready) {
-            await TrackPlayer.play();
+            const [activeTrack, playbackState] = await Promise.all([
+              TrackPlayer.getActiveTrack().catch(() => null),
+              TrackPlayer.getPlaybackState().catch(() => null),
+            ]);
+            const rawState = typeof playbackState === "object" ? (playbackState as any)?.state : playbackState;
+
+            // If native player has no active track, wrong track, or state is none/stopped/ended/error:
+            if (
+              !activeTrack ||
+              !activeTrack.url ||
+              rawState === State.None ||
+              rawState === State.Stopped ||
+              rawState === State.Ended ||
+              rawState === State.Error ||
+              activeTrack.id !== currentSongRef.current.id
+            ) {
+              await playSong(currentSongRef.current, queueRef.current);
+              return;
+            }
+
+            try {
+              await TrackPlayer.play();
+            } catch (playErr) {
+              logger.warn("[Player] TrackPlayer.play() failed, reloading track via playSong:", playErr);
+              await playSong(currentSongRef.current, queueRef.current);
+            }
           }
         } else {
           setIsPlaying(false);
@@ -380,6 +411,7 @@ export function useAudioPlaybackCommands({
       togglePlayInFlightRef.current = false;
     }
   }, [
+    State,
     canUseLightweightAudioFallback,
     currentSongRef,
     desiredPlayStateRef,
@@ -439,6 +471,7 @@ export function useAudioPlaybackCommands({
     }
   }, [
     currentSongRef,
+    isPlayingRef,
     playSong,
     queueIndexRef,
     queueRef,

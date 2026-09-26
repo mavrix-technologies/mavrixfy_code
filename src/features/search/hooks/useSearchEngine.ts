@@ -96,16 +96,12 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   const searchCache = searchCacheRef.current;
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const shuffledBrowseCategories = useMemo(() => {
-    const hero = STITCH_BROWSE_CATEGORIES.find((item) => item.isHero);
+  const browseCategories = useMemo(() => {
+    const heroes = STITCH_BROWSE_CATEGORIES.filter((item) => item.isHero);
     const rest = STITCH_BROWSE_CATEGORIES.filter((item) => !item.isHero);
     const randomized = sortedCopy(rest, () => Math.random() - 0.5);
-    return hero ? [hero, ...randomized] : randomized;
+    return [...heroes, ...randomized];
   }, []);
-  const browseCategories = useMemo(
-    () => filterMap(shuffledBrowseCategories, (category) => !category.isHero, (category) => category),
-    [shuffledBrowseCategories]
-  );
 
   const performSearch = useCallback(
     async (searchQuery: string) => {
@@ -430,7 +426,12 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     return cancelActiveSearchWork;
   }, [cancelActiveSearchWork]);
 
-  const { songs: songResults, albums: albumResults, artists: artistResults, playlists: playlistResults } = results;
+  const {
+    songs: songResults,
+    albums: albumResults,
+    artists: artistResults,
+    playlists: playlistResults,
+  } = results;
 
   const hasResults =
     songResults.length > 0 ||
@@ -450,14 +451,21 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   const topSong = songResults[0];
   const topArtist = artistResults[0];
 
-  const displayedSongs = useMemo(() => (showSongResults ? songResults : []), [showSongResults, songResults]);
+  const displayedSongs = useMemo(() => {
+    if (showSongResults) {
+      return songResults;
+    }
+    return [];
+  }, [showSongResults, songResults]);
+
   const featuredAlbums = useMemo(() => albumResults.slice(0, 6), [albumResults]);
   const featuredArtists = useMemo(() => artistResults.slice(0, 5), [artistResults]);
   const featuredPlaylists = useMemo(() => playlistResults.slice(0, 6), [playlistResults]);
 
   const handleSongResultPress = useCallback(
     (song: Song) => {
-      playSong(song, songResults);
+      const activeQueue = songResults.length > 0 ? songResults : [song];
+      playSong(song, activeQueue);
       void addSongSearchHistoryItem(song)
         .then((items) => setRecentSearches(toRecentSearchItems(items)))
         .catch(() => undefined);

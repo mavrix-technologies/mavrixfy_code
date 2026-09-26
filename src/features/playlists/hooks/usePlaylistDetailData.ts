@@ -37,6 +37,7 @@ interface UsePlaylistDetailDataProps {
   isFirestoreSource: boolean;
   isLocalCustomPlaylist: boolean;
   isJioSaavnSource: boolean;
+  isYouTubeSource?: boolean;
   initialTitle: string;
   initialCover: string;
   initialDescription: string;
@@ -52,6 +53,7 @@ export function usePlaylistDetailData({
   isFirestoreSource,
   isLocalCustomPlaylist,
   isJioSaavnSource,
+  isYouTubeSource = false,
   initialTitle,
   initialCover,
   initialDescription,

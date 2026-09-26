@@ -51,6 +51,7 @@ import ShareModal from "@/components/ShareModal";
 import { checkAppVersion, registerForPushNotificationsAsync } from "@/services/notificationService";
 import { AppNavBar } from "./(tabs)/_layout";
 import PlayerScreen from "@/features/player/screens/PlayerScreen";
+import { showAppLaunchAd } from "@/services/ads/appLaunchAdService";
 
 function isExpoGoRuntime(): boolean {
   return Constants.executionEnvironment === "storeClient" || Constants.appOwnership === "expo";
@@ -369,6 +370,10 @@ function RootLayoutNav() {
   useEffect(() => {
     if (!loading) {
       hideSplashScreenSafely("authReady");
+      const timer = setTimeout(() => {
+        void showAppLaunchAd();
+      }, 1200);
+      return () => clearTimeout(timer);
     }
   }, [loading]);
 
@@ -444,14 +449,8 @@ export default function RootLayout() {
     ...FontAwesome.font,
   });
 
-  useEffect(() => {
-    if (error) {
-      hideSplashScreenSafely("rootError");
-    }
-  }, [error]);
-
   const handleError = useCallback((err: Error) => {
-    // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
+    hideSplashScreenSafely("rootError");
     setError(err);
   }, []);
 

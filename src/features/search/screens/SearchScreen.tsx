@@ -1,9 +1,14 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useRef } from "react";
 import {
   View,
   Text,
   FlatList,
   Pressable,
+  Keyboard,
+  LayoutAnimation,
+  Platform,
+  UIManager,
+  TextInput,
 } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,13 +22,20 @@ import AppTopHeader, {
   AppTopHeaderProfileButton,
 } from "@/components/AppTopHeader";
 import SearchHeaderField from "@/components/SearchHeaderField";
+import LiquidGlassView from "@/components/LiquidGlassView";
+import LiquidGlassScopeBar from "@/components/LiquidGlassScopeBar";
 import { styles } from "../styles/searchStyles";
+import { RESULT_FILTERS } from "../types";
 import { useSearchEngine } from "../hooks/useSearchEngine";
 import {
   SearchBrowseSection,
   SearchRecentSection,
 } from "../components/SearchBrowseSection";
 import { SearchResultsSection } from "../components/SearchResultsSection";
+
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 export function SearchScreen() {
   return <SearchScreenView />;
@@ -34,6 +46,7 @@ export default SearchScreen;
 function SearchScreenView() {
   const params = useLocalSearchParams<{ q?: string | string[]; name?: string | string[] }>();
   const searchEngine = useSearchEngine(params);
+  const inputRef = useRef<TextInput>(null);
 
   const {
     isOnline,
@@ -83,6 +96,18 @@ function SearchScreenView() {
     handlePlaylistPress,
   } = searchEngine;
 
+  const onFocusSearch = useCallback(() => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    handleActivateSearchMode();
+  }, [handleActivateSearchMode]);
+
+  const onCancelSearch = useCallback(() => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    Keyboard.dismiss();
+    inputRef.current?.blur();
+    handleCancelSearchMode();
+  }, [handleCancelSearchMode]);
+
   const renderSuggestion = useCallback(
     ({ item: suggestion }: { item: string }) => (
       <Pressable
@@ -120,60 +145,86 @@ function SearchScreenView() {
   return (
     <View style={styles.container}>
       {!isOnline && <OfflineBanner />}
+
+      {/* ── Header ── */}
       {isSearchMode ? (
-        <AppTopHeader
-          topInset={topInset}
-          elevated={isHeaderElevated}
-          titleNode={
-            <SearchHeaderField
-              value={query}
-              onChangeText={handleChangeText}
-              onSubmit={handleSubmitSearch}
-              onClear={handleClear}
-              autoFocus={isSearchMode}
-            />
-          }
-          leftWidth={0}
-          rightWidth={68}
-          right={
+        <View
+          style={[
+            styles.activeSearchHeader,
+            { paddingTop: topInset + 6 },
+            isHeaderElevated && styles.activeSearchHeaderElevated,
+          ]}
+        >
+          <View style={styles.activeSearchBarRow}>
+            <View style={styles.activeSearchFieldWrap}>
+              <SearchHeaderField
+                ref={inputRef}
+                value={query}
+                onChangeText={handleChangeText}
+                onSubmit={handleSubmitSearch}
+                onClear={handleClear}
+                autoFocus={true}
+                placeholder="Search songs, artists, albums..."
+                theme="dark"
+              />
+            </View>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Cancel search"
-              onPress={handleCancelSearchMode}
-              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+              onPress={onCancelSearch}
+              hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}
               style={({ pressed }) => [styles.searchCancelButton, pressed && styles.searchCancelButtonPressed]}
             >
               <Text style={styles.searchCancelText}>Cancel</Text>
             </Pressable>
-          }
-        />
+          </View>
+
+          {/* Liquid Glass Scope Bar integrated directly in header */}
+          <View style={styles.headerScopeBarWrap}>
+            <LiquidGlassScopeBar
+              options={RESULT_FILTERS}
+              activeKey={resultFilter}
+              onSelect={handleResultFilterSelect}
+            />
+          </View>
+        </View>
       ) : (
         <AppTopHeader
           topInset={topInset}
           elevated={isHeaderElevated}
           title="Search"
           left={<AppTopHeaderProfileButton />}
+          right={<AppTopHeaderDownloadButton />}
         />
       )}
-      {!isSearchMode ? (
+
+      {/* ── Native Liquid Glass Search Button ── */}
+      {!isSearchMode && (
         <View style={[styles.searchBarRow, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 8 }]}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Search songs, albums, artists, playlists"
-            style={({ pressed }) => [styles.searchBar, pressed && styles.searchBarPressed]}
-            onPress={handleActivateSearchMode}
+            style={({ pressed }) => [styles.searchGlassButton, pressed && styles.searchGlassButtonPressed]}
+            onPress={onFocusSearch}
           >
-            <Ionicons name="search" size={20} color="#1E293B" style={styles.searchIcon} />
-            <Text style={styles.inactiveSearchText} numberOfLines={1}>
-              Search "songs, artists, albums..."
-            </Text>
+            <LiquidGlassView
+              style={styles.liquidGlassBar}
+              intensity={55}
+              tint="systemMaterialDark"
+              borderRadius={24}
+            >
+              <Ionicons name="search" size={19} color="rgba(255, 255, 255, 0.70)" style={styles.searchIcon} />
+              <Text style={styles.inactiveSearchText} numberOfLines={1}>
+                Search songs, artists, albums...
+              </Text>
+            </LiquidGlassView>
           </Pressable>
         </View>
-      ) : null}
+      )}
 
-      {/* Inline suggestions below search bar */}
+      {/* Inline suggestions below search header */}
       {isSearchMode && suggestionsOpen && suggestions.length > 0 && query.trim().length >= 2 && (
-        <View style={[styles.suggestionsDropdown, { top: topInset + APP_TOP_HEADER_HEIGHT }]}>
+        <View style={[styles.suggestionsDropdown, { top: topInset + 104 }]}>
           <FlatList
             data={suggestions}
             keyboardDismissMode="none"

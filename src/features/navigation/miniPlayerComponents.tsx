@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "expo-router";
 import * as Animated from "@/lib/nativeAnimated";
 import {
   Pressable,
@@ -7,8 +8,12 @@ import {
   type DimensionValue,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { useOptionalPlayerProgress } from "@/contexts/PlayerContext";
 import type { MiniPlayerSecondaryControl } from "@/lib/storage";
+import { compactMap } from "@/lib/arrayUtils";
+import { useLastMix } from "@/lib/lastMix";
+import type { Song } from "@/lib/musicData";
 import {
   openMiniPlayerBannerLink,
   type MiniPlayerBannerConfig,
@@ -267,3 +272,181 @@ export const IOSMiniPlayerProgressBar = React.memo(function IOSMiniPlayerProgres
   );
 });
 IOSMiniPlayerProgressBar.displayName = "IOSMiniPlayerProgressBar";
+
+export interface IOSMiniPlayerMixBadgeProps {
+  activeSongId: string;
+  queue: Song[];
+  isPlaying: boolean;
+  onPress?: () => void;
+}
+
+export const IOSMiniPlayerMixBadge = React.memo(function IOSMiniPlayerMixBadge({
+  activeSongId,
+  queue,
+  isPlaying,
+  onPress,
+}: IOSMiniPlayerMixBadgeProps) {
+  const { push: overlayRouterPush } = useRouter();
+  const lastMix = useLastMix();
+  const mixBarOneRef = useRef<Animated.Value | null>(null);
+  if (mixBarOneRef.current === null) mixBarOneRef.current = new Animated.Value(0.32);
+  const mixBarOne = mixBarOneRef.current;
+  const mixBarTwoRef = useRef<Animated.Value | null>(null);
+  if (mixBarTwoRef.current === null) mixBarTwoRef.current = new Animated.Value(0.58);
+  const mixBarTwo = mixBarTwoRef.current;
+  const mixBarThreeRef = useRef<Animated.Value | null>(null);
+  if (mixBarThreeRef.current === null) mixBarThreeRef.current = new Animated.Value(0.44);
+  const mixBarThree = mixBarThreeRef.current;
+
+  const mixImage = useMemo(() => {
+    const first = compactMap((lastMix?.images ?? "").split(","), (value) => value.trim())[0];
+    return first ?? "";
+  }, [lastMix?.images]);
+
+  const mixImages = useMemo(() => {
+    return compactMap((lastMix?.images ?? "").split(","), (value) => value.trim());
+  }, [lastMix?.images]);
+
+  const mixSongIds = useMemo(() => {
+    const raw = lastMix?.songIds ?? "";
+    if (!raw) return [] as string[];
+    return compactMap(raw.split(","), (id) => id.trim());
+  }, [lastMix?.songIds]);
+
+  const isPlayingFromLastMix = useMemo(() => {
+    if (!isPlaying || !activeSongId || mixSongIds.length === 0) return false;
+    if (!mixSongIds.includes(activeSongId)) return false;
+    if (queue.length !== mixSongIds.length) return false;
+    const mixSet = new Set(mixSongIds);
+    return queue.every((song) => mixSet.has(song.id));
+  }, [activeSongId, isPlaying, mixSongIds, queue]);
+
+  useEffect(() => {
+    const resetBars = () => {
+      Animated.parallel([
+        Animated.timing(mixBarOne, { toValue: 0.32, duration: 180, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(mixBarTwo, { toValue: 0.58, duration: 180, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(mixBarThree, { toValue: 0.44, duration: 180, useNativeDriver: true, isInteraction: false }),
+      ]).start();
+    };
+
+    if (!lastMix || !isPlayingFromLastMix) {
+      resetBars();
+      return;
+    }
+
+    const loopOne = Animated.loop(
+      Animated.sequence([
+        Animated.timing(mixBarOne, { toValue: 0.96, duration: 230, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(mixBarOne, { toValue: 0.24, duration: 280, useNativeDriver: true, isInteraction: false }),
+      ])
+    );
+    const loopTwo = Animated.loop(
+      Animated.sequence([
+        Animated.timing(mixBarTwo, { toValue: 0.84, duration: 180, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(mixBarTwo, { toValue: 0.3, duration: 240, useNativeDriver: true, isInteraction: false }),
+      ])
+    );
+    const loopThree = Animated.loop(
+      Animated.sequence([
+        Animated.timing(mixBarThree, { toValue: 0.9, duration: 260, useNativeDriver: true, isInteraction: false }),
+        Animated.timing(mixBarThree, { toValue: 0.22, duration: 210, useNativeDriver: true, isInteraction: false }),
+      ])
+    );
+
+    loopOne.start();
+    loopTwo.start();
+    loopThree.start();
+
+    return () => {
+      loopOne.stop();
+      loopTwo.stop();
+      loopThree.stop();
+    };
+  }, [isPlayingFromLastMix, lastMix, mixBarOne, mixBarThree, mixBarTwo]);
+
+  const handlePress = useCallback(() => {
+    if (onPress) {
+      onPress();
+    } else if (lastMix) {
+      overlayRouterPush({ pathname: "/artist-mix", params: lastMix });
+    }
+  }, [lastMix, onPress, overlayRouterPush]);
+
+  if (!lastMix) return null;
+
+  return (
+    <Pressable
+      android_disableSound
+      onPress={handlePress}
+      hitSlop={8}
+      style={styles.iosMiniPlayerInlineMixBtn}
+    >
+      <View style={styles.iosMiniPlayerMixCard}>
+        {mixImages.length > 1 ? (
+          <View style={styles.iosMiniPlayerMixGrid}>
+            {mixImages.slice(0, 4).map((img) => (
+              <View key={img} style={styles.iosMiniPlayerMixGridCell}>
+                {img ? (
+                  <Image
+                    source={{ uri: img }}
+                    style={styles.iosMiniPlayerMixGridImage}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                  />
+                ) : (
+                  <View style={[styles.iosMiniPlayerMixGridImage, styles.iosMiniPlayerMixGridFallback]}>
+                    <Ionicons name="person" size={8} color="rgba(255,255,255,0.88)" />
+                  </View>
+                )}
+              </View>
+            ))}
+            {mixImages.length > 4 && (
+              <View style={[styles.iosMiniPlayerMixGridCell, styles.iosMiniPlayerMixGridMore]}>
+                <Text style={styles.iosMiniPlayerMixGridMoreText}>+{mixImages.length - 4}</Text>
+              </View>
+            )}
+          </View>
+        ) : mixImage ? (
+          <Image
+            source={{ uri: mixImage }}
+            style={[styles.iosMiniPlayerMixFullImage, styles.iosMiniPlayerMixFullImageMuted]}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+          />
+        ) : (
+          <View
+            style={[
+              styles.iosMiniPlayerMixFullImage,
+              styles.iosMiniPlayerMixHeroFallback,
+              styles.iosMiniPlayerMixFullImageMuted,
+            ]}
+          >
+            <Ionicons name="person" size={14} color="rgba(255,255,255,0.88)" />
+          </View>
+        )}
+        <View style={styles.iosMiniPlayerMixEqOverlay}>
+          <Animated.View
+            style={[
+              styles.iosMiniPlayerMixEqBar,
+              { opacity: isPlayingFromLastMix ? 0.95 : 0.42, transform: [{ scaleY: mixBarOne }] },
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.iosMiniPlayerMixEqBar,
+              { opacity: isPlayingFromLastMix ? 0.95 : 0.42, transform: [{ scaleY: mixBarTwo }] },
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.iosMiniPlayerMixEqBar,
+              { opacity: isPlayingFromLastMix ? 0.95 : 0.42, transform: [{ scaleY: mixBarThree }] },
+            ]}
+          />
+        </View>
+      </View>
+    </Pressable>
+  );
+});
+IOSMiniPlayerMixBadge.displayName = "IOSMiniPlayerMixBadge";

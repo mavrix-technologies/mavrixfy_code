@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -15,7 +15,6 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { getBestImageUrl, type Song } from "@/lib/musicData";
 import SongRow from "@/components/SongRow";
-import SearchResultFilterChip from "@/components/SearchResultFilterChip";
 import { APP_TOP_HEADER_HEIGHT } from "@/components/AppTopHeader";
 import AdMobBanner from "@/components/AdMobBanner";
 import type {
@@ -326,31 +325,21 @@ export const SearchResultsSection = React.memo(function SearchResultsSection({
   const showPlaylistResults = (resultFilter === "all" || resultFilter === "playlists") && playlistResults.length > 0;
   const showSongResults = (resultFilter === "all" || resultFilter === "songs") && songResults.length > 0;
 
-  const renderResultFilter = useCallback(
-    ({ item }: { item: { key: ResultFilter; label: string } }) => (
-      <SearchResultFilterChip
-        filter={item}
-        activeFilter={resultFilter}
-        onSelect={onFilterSelect}
-      />
-    ),
-    [onFilterSelect, resultFilter]
-  );
-
-  const songResultsRef = useRef(songResults);
-  songResultsRef.current = songResults;
+  const currentQueueRef = useRef(displayedSongs);
+  useEffect(() => {
+    currentQueueRef.current = displayedSongs;
+  }, [displayedSongs]);
 
   const renderSong = useCallback(
     ({ item }: { item: Song }) => (
       <SongRow
         song={item}
-        queue={songResultsRef.current}
+        queue={currentQueueRef.current}
         onSongPress={onSongPress}
         showSearchSourceMeta
         showDownload={false}
       />
     ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [onSongPress]
   );
 
@@ -380,18 +369,7 @@ export const SearchResultsSection = React.memo(function SearchResultsSection({
   );
 
   return (
-    <View style={[styles.resultsWrap, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 8 }]}>
-      {/* Filter chips */}
-      <View style={styles.filterRow}>
-        <FlatList
-          data={RESULT_FILTERS}
-          keyExtractor={(filter) => filter.key}
-          renderItem={renderResultFilter}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRowContent}
-        />
-      </View>
+    <View style={[styles.resultsWrap, { paddingTop: topInset + 108 }]}>
 
       {searchLoading ? (
         <View style={styles.loadingContainer}>

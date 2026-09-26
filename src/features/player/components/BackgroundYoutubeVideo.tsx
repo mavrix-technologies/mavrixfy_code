@@ -8,6 +8,8 @@ import { IS_ANDROID } from "@/constants/platform";
 export const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
 export const BACKGROUND_YOUTUBE_CHROME_CROP_PX = 260;
 export const BACKGROUND_YOUTUBE_CHROME_CROP_TOTAL_PX = BACKGROUND_YOUTUBE_CHROME_CROP_PX * 2;
+export const AMBIENT_VIDEO_INTRO_SKIP_SEC = 4.0; // Skip first 4.0s (intro slate / logo animation)
+export const AMBIENT_VIDEO_OUTRO_SKIP_SEC = 4.5; // Skip final 4.5s (subscribe / end cards / credits)
 
 // Injected after DOM is ready (injectedJavaScript only — not Before — so window.innerHeight is valid on Android)
 export const BACKGROUND_YOUTUBE_CROP_SCRIPT = `
@@ -62,8 +64,43 @@ export const BACKGROUND_YOUTUBE_PRELOAD_HOOK = `
         if (_origPlayerReady) _origPlayerReady(event);
         try { player.mute(); } catch(e) {}
         try { player.setVolume(0); } catch(e) {}
-        try { player.playVideo(); } catch(e) {}
+        try {
+          var curr = (typeof player.getCurrentTime === "function") ? player.getCurrentTime() : 0;
+          if (curr < 3.5) {
+            player.seekTo(3.5, true);
+          }
+          player.playVideo();
+        } catch(e) {}
       };
+      var _origStateChange = window.onPlayerStateChange;
+      window.onPlayerStateChange = function(event) {
+        if (_origStateChange) _origStateChange(event);
+        if (event && event.data === 0) {
+          try {
+            if (typeof player !== "undefined" && player && typeof player.seekTo === "function") {
+              var dur = (typeof player.getDuration === "function") ? (player.getDuration() || 0) : 0;
+              var introSkip = Math.min(3.5, dur * 0.08);
+              player.seekTo(introSkip, true);
+              player.playVideo();
+            }
+          } catch(e) {}
+        }
+      };
+      // Outro skip monitor: seamlessly loop before reaching end title cards
+      setInterval(function() {
+        try {
+          if (typeof player !== "undefined" && player && typeof player.getDuration === "function" && typeof player.getCurrentTime === "function") {
+            var dur = player.getDuration() || 0;
+            var curr = player.getCurrentTime() || 0;
+            var outroSkip = Math.min(4.5, dur * 0.08);
+            var introSkip = Math.min(3.5, dur * 0.08);
+            if (dur > 15 && curr >= (dur - outroSkip)) {
+              player.seekTo(introSkip, true);
+              player.playVideo();
+            }
+          }
+        } catch(e) {}
+      }, 350);
     };
   }
   wrapHooks();
@@ -90,6 +127,7 @@ export type BackgroundYoutubeVideoProps = {
   containerHeight: number;
   isLowEnd?: boolean;
   onVideoActive?: (active: boolean) => void;
+  onVideoError?: (error: string) => void;
 };
 
 import { getSettings } from "@/lib/storage";
@@ -101,11 +139,15 @@ export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   containerHeight,
   isLowEnd = false,
   onVideoActive,
+  onVideoError,
 }: BackgroundYoutubeVideoProps) {
   const { width: winW } = useWindowDimensions();
   const playerRef = useRef<any>(null);
   const initialPositionSeconds = Math.max(0, Math.floor(initialOffsetMs / 1000));
-  const lastPositionRef = useRef(initialPositionSeconds);
+  const startAtSeconds = initialPositionSeconds < AMBIENT_VIDEO_INTRO_SKIP_SEC
+    ? AMBIENT_VIDEO_INTRO_SKIP_SEC
+    : initialPositionSeconds;
+  const lastPositionRef = useRef(startAtSeconds);
   const [playerReady, setPlayerReady] = useState(false);
   const [videoQuality, setVideoQuality] = useState<"auto" | "low" | "medium" | "high">("auto");
 
@@ -166,10 +208,13 @@ export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
     setPlayerReady(true);
     try {
       playerRef.current?.setPlaybackQuality?.(targetYtQuality);
-    } catch {}
+      if (initialPositionSeconds < AMBIENT_VIDEO_INTRO_SKIP_SEC) {
+        playerRef.current?.seekTo?.(AMBIENT_VIDEO_INTRO_SKIP_SEC, true);
+      }
+    } catch { }
     if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
     revealTimerRef.current = setTimeout(revealVideo, 600);
-  }, [revealVideo, targetYtQuality]);
+  }, [initialPositionSeconds, revealVideo, targetYtQuality]);
 
   useEffect(() => {
     return () => {
@@ -181,7 +226,15 @@ export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
     (state: string) => {
       if (state === "playing" || state === "buffering") {
         revealVideo();
-      } else if (state === "paused" || state === "ended") {
+      } else if (state === "ended") {
+        // Song is still playing on PlayerScreen, but background video finished -> auto loop from 3.5s (skipping intro cards)
+        if (active && playerRef.current) {
+          try {
+            playerRef.current.seekTo?.(AMBIENT_VIDEO_INTRO_SKIP_SEC, true);
+            playerRef.current.playVideo?.();
+          } catch { }
+        }
+      } else if (state === "paused") {
         if (active && playerRef.current) {
           playerRef.current.playVideo?.();
         }
@@ -207,10 +260,13 @@ export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   useEffect(() => {
     if (isLowEnd) return;
     const targetSeconds = Math.max(0, Math.floor(initialOffsetMs / 1000));
-    if (playerReady && Math.abs(targetSeconds - lastPositionRef.current) > 10) {
-      playerRef.current?.seekTo?.(targetSeconds, true);
+    const effectiveTarget = targetSeconds < AMBIENT_VIDEO_INTRO_SKIP_SEC
+      ? AMBIENT_VIDEO_INTRO_SKIP_SEC
+      : targetSeconds;
+    if (playerReady && Math.abs(effectiveTarget - lastPositionRef.current) > 10) {
+      playerRef.current?.seekTo?.(effectiveTarget, true);
     }
-    lastPositionRef.current = targetSeconds;
+    lastPositionRef.current = effectiveTarget;
   }, [initialOffsetMs, playerReady, isLowEnd]);
 
   const dimensions = useMemo(() => {
@@ -274,7 +330,10 @@ export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
           videoId={videoId}
           onReady={onReady}
           onChangeState={handleBackgroundStateChange}
-          onError={() => undefined}
+          onError={(err: any) => {
+            onVideoActive?.(false);
+            onVideoError?.(typeof err === "string" ? err : String(err || "unknown"));
+          }}
           forceAndroidAutoplay
           useLocalHTML
           baseUrlOverride={YOUTUBE_PLAYER_REFERRER_URL}
@@ -286,13 +345,14 @@ export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
             preventFullScreen: true,
             showClosedCaptions: false,
             iv_load_policy: 3,
-            start: initialPositionSeconds,
+            start: Math.round(startAtSeconds),
             disablekb: true,
             fs: false,
             playsinline: true,
             cc_load_policy: 0,
             enablejsapi: 1,
             mute: 1,
+            loop: true,
           }}
           webViewProps={{
             javaScriptEnabled: true,

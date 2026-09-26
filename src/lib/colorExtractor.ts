@@ -120,17 +120,19 @@ export function transformToSeamlessBackground(hexColor: string): string {
 
   // Pure grayscale or near-neutral (Bruno Mars, etc.)
   if (s < 0.08) {
-    const clampedL = Math.max(0.10, Math.min(0.18, l));
-    const rgb = hslToRgb(h, 0.04, clampedL);
+    const clampedL = Math.max(0.08, Math.min(0.14, l));
+    const rgb = hslToRgb(h, 0.03, clampedL);
     return rgbToHex(rgb.r, rgb.g, rgb.b);
   }
 
-  // Controlled lightness curve preserving rich vibrant tones:
-  let targetL = 0.14 + l * 0.22;
-  targetL = Math.max(0.14, Math.min(0.34, targetL));
+  // Accurate dark background: Keep exact hue, keep saturation true to artwork,
+  // target rich dark lightness (0.09 - 0.16) so text contrast is 100% and background
+  // is solid, deep, and perfectly matches the artwork tone
+  let targetL = 0.09 + l * 0.12;
+  targetL = Math.max(0.08, Math.min(0.16, targetL));
 
-  // Boost saturation to keep the extracted colors vivid & saturated:
-  const targetS = Math.min(0.92, Math.max(0.48, s * 1.10));
+  // Maintain natural saturation of the extracted color (accurate, no artificial neon or wash):
+  const targetS = Math.min(0.85, Math.max(0.32, s));
 
   const darkRgb = hslToRgb(h, targetS, targetL);
   return rgbToHex(darkRgb.r, darkRgb.g, darkRgb.b);
@@ -491,24 +493,50 @@ function sampleDominantSwatchesFromPixels(
     }
   }
 
-  // Sort bins by prominence & saturation with strong vibrancy weighting
-  const populated = bins
-    .filter((b) => b.count > 0)
-    .sort(
-      (a, b) =>
-        b.count * (1 + Math.pow(b.maxSat, 1.5) * 3.5) -
-        a.count * (1 + Math.pow(a.maxSat, 1.5) * 3.5)
-    );
+  // Populate bins that have pixels
+  const populated = bins.filter((b) => b.count > 0);
 
   if (populated.length === 0) {
     return [{ r: 83, g: 83, b: 86 }];
   }
 
-  return populated.map((b) => ({
-    r: Math.round(b.rSum / b.count),
-    g: Math.round(b.gSum / b.count),
-    b: Math.round(b.bSum / b.count),
-  }));
+  // 1. Dominant: Highest pixel count (true dominant color of the image)
+  const sortedByCount = [...populated].sort((a, b) => b.count - a.count);
+  const dominantBin = sortedByCount[0];
+
+  // 2. Vibrant: Highest vibrancy / saturation (avoiding neutral bin 12 if possible)
+  const coloredBins = populated.filter((b) => b !== bins[12] && b.maxSat >= 0.18);
+  const vibrantBin =
+    coloredBins.length > 0
+      ? coloredBins.sort((a, b) => b.count * b.maxSat - a.count * a.maxSat)[0]
+      : sortedByCount[1] || dominantBin;
+
+  const result: { r: number; g: number; b: number }[] = [];
+  result.push({
+    r: Math.round(dominantBin.rSum / dominantBin.count),
+    g: Math.round(dominantBin.gSum / dominantBin.count),
+    b: Math.round(dominantBin.bSum / dominantBin.count),
+  });
+
+  if (vibrantBin !== dominantBin) {
+    result.push({
+      r: Math.round(vibrantBin.rSum / vibrantBin.count),
+      g: Math.round(vibrantBin.gSum / vibrantBin.count),
+      b: Math.round(vibrantBin.bSum / vibrantBin.count),
+    });
+  }
+
+  for (const b of sortedByCount) {
+    if (b !== dominantBin && b !== vibrantBin) {
+      result.push({
+        r: Math.round(b.rSum / b.count),
+        g: Math.round(b.gSum / b.count),
+        b: Math.round(b.bSum / b.count),
+      });
+    }
+  }
+
+  return result;
 }
 
 export function dedupeAndDarkenSwatches(swatches: (string | undefined | null)[], primaryBg?: string): string[] {
@@ -680,20 +708,20 @@ function mapImageColorsToPalette(result: ImageColorsResult): ArtworkPalette {
     };
   }
 
-  // Android / Web: Prioritize vibrant profiles for glowing, punchy colors
+  // Android / Web: Prioritize true dominant color for background, and vibrant for accent
   const rawDom = pickColor(
-    result.vibrant,
     result.dominant,
-    result.lightVibrant,
     result.darkVibrant,
+    result.vibrant,
+    result.darkMuted,
     result.platform === "android" ? result.average : undefined
   ) ?? DEFAULT_ARTWORK_PALETTE.background;
 
   const rawVib = pickColor(
     result.vibrant,
     result.lightVibrant,
-    result.dominant,
     result.darkVibrant,
+    result.dominant,
     result.platform === "android" ? result.average : undefined
   ) ?? DEFAULT_ARTWORK_PALETTE.accent;
 

@@ -50,6 +50,12 @@ function extractArtistNames(artistStr?: string | null): { primary: string; secon
   };
 }
 
+function isFuzzySameSongTitle(candTitle: string, seedTitle: string): boolean {
+  if (!candTitle || !seedTitle || seedTitle.length < 3) return false;
+  if (candTitle === seedTitle) return true;
+  return candTitle.indexOf(seedTitle) !== -1 || seedTitle.indexOf(candTitle) !== -1;
+}
+
 export interface FetchAutoplayRecommendationsOptions {
   seedSong: Song;
   currentQueue?: Song[];
@@ -190,14 +196,8 @@ export async function fetchAutoplayRecommendations({
     if (!candCoreTitle) continue;
 
     // Strict same-song check: Never play another version/remix of the searched song
-    if (seedCoreTitle && seedCoreTitle.length >= 3) {
-      if (
-        candCoreTitle === seedCoreTitle ||
-        candCoreTitle.includes(seedCoreTitle) ||
-        seedCoreTitle.includes(candCoreTitle)
-      ) {
-        continue;
-      }
+    if (isFuzzySameSongTitle(candCoreTitle, seedCoreTitle)) {
+      continue;
     }
 
     // Reject if this title is already present in queue

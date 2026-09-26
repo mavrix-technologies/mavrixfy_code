@@ -7,7 +7,6 @@ import {
   StyleSheet,
   Text,
   View,
-  ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,7 +15,6 @@ import { Image } from "expo-image";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
 import { setHapticsPreference } from "@/lib/haptics";
 import {
   getSettings,
@@ -37,6 +35,8 @@ import { checkAppVersion, getInstalledAppVersion, getInstalledBuildNumber } from
 import { SimpleRow } from "../components/SettingsUIComponents";
 import { ProfileAccountHeader } from "../components/ProfileAccountHeader";
 import { ProfilePlaybackSection } from "../components/ProfilePlaybackSection";
+import { ProfileAboutSection } from "../components/ProfileAboutSection";
+import { ProfileLibrarySection } from "../components/ProfileLibrarySection";
 
 export function ProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -256,25 +256,11 @@ export function ProfileScreen() {
         />
 
         {/* Library & Data */}
-        <Text style={styles.sectionLabel}>LIBRARY & DATA</Text>
-        <View style={styles.sectionGroup}>
-          <SimpleRow
-            icon="arrow-down-circle-outline"
-            title="Downloaded Songs"
-            onPress={() => routerPush("/downloaded-songs" as any)}
-          />
-          <SimpleRow
-            icon="cloud-upload-outline"
-            title="Import Local Audio"
-            onPress={() => routerPush("/import-songs" as any)}
-          />
-          <SimpleRow
-            icon="trash-bin-outline"
-            title="Clear Cache & History"
-            onPress={handleClearCache}
-            isLast
-          />
-        </View>
+        <ProfileLibrarySection
+          onDownloadedSongs={() => routerPush("/downloaded-songs" as any)}
+          onImportSongs={() => routerPush("/import-songs" as any)}
+          onClearCache={handleClearCache}
+        />
 
         {/* Account & Security */}
         {isAuthenticated && (
@@ -304,41 +290,12 @@ export function ProfileScreen() {
         )}
 
         {/* About Section */}
-        <Text style={styles.sectionLabel}>ABOUT</Text>
-        <View style={styles.sectionGroup}>
-          <SimpleRow
-            icon="information-circle-outline"
-            title="Version"
-            value={`v${appVersion} (${buildNumber})`}
-          />
-          <SimpleRow
-            icon="arrow-up-circle-outline"
-            title="Check for Updates"
-            onPress={() => void handleCheckStoreUpdate()}
-            trailing={
-              checkingStoreUpdate ? (
-                <ActivityIndicator size="small" color={Colors.primary} />
-              ) : undefined
-            }
-          />
-          <SimpleRow
-            icon="shield-checkmark-outline"
-            title="Privacy Policy"
-            onPress={() => void openPrivacyPolicy()}
-          />
-          <SimpleRow
-            icon="document-text-outline"
-            title="Terms of Service"
-            onPress={() => void openTermsOfService()}
-            isLast
-          />
-        </View>
-
-        {/* Developer Credit Footer */}
-        <View style={styles.footerCredits}>
-          <Text style={styles.footerCreditsLabel}>DEVELOPED BY</Text>
-          <Text style={styles.footerCreditsName}>Satvik Patel</Text>
-        </View>
+        <ProfileAboutSection
+          appVersion={appVersion}
+          buildNumber={buildNumber}
+          checkingStoreUpdate={checkingStoreUpdate}
+          onCheckStoreUpdate={() => void handleCheckStoreUpdate()}
+        />
       </ScrollView>
     </View>
   );
@@ -401,26 +358,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: "rgba(255, 255, 255, 0.04)",
     overflow: "hidden",
-  },
-  footerCredits: {
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 36,
-    marginBottom: 16,
-    gap: 3,
-  },
-  footerCreditsLabel: {
-    color: "rgba(255, 255, 255, 0.35)",
-    fontSize: 10.5,
-    fontFamily: "Inter_600SemiBold",
-    letterSpacing: 2,
-    textTransform: "uppercase",
-  },
-  footerCreditsName: {
-    color: "rgba(255, 255, 255, 0.8)",
-    fontSize: 13,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.6,
   },
 });
 

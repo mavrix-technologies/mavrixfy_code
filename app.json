@@ -3,7 +3,7 @@
     "name": "Mavrixfy",
     "slug": "mavrixfy",
     "scheme": "mavrixfy",
-    "version": "3.2.0",
+    "version": "3.3.0",
     "orientation": "portrait",
     "icon": "./assets/images/mavrixfy_icon.png",
     "userInterfaceStyle": "automatic",
@@ -12,7 +12,7 @@
       "supportsTablet": true,
       "icon": "./assets/images/mavrixfy_icon.png",
       "bundleIdentifier": "com.mavrixfy.app",
-      "buildNumber": "32002",
+      "buildNumber": "33001",
       "bitcode": false,
       "usesAppleSignIn": true,
       "infoPlist": {
@@ -63,7 +63,7 @@
     "android": {
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
-      "versionCode": 32002,
+      "versionCode": 33001,
       "supportsTablet": true,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
@@ -203,7 +203,7 @@
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": "3.2.0-32001",
+    "runtimeVersion": "3.3.0-33001",
     "extra": {
       "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",

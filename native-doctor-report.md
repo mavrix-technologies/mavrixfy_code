@@ -106,13 +106,13 @@
 | Check | Status | Detail |
 | :--- | :---: | :--- |
 | **EAS Build Profiles Configured** | `PASS` | Detected 16 build profile(s): development, preview, ios-simulator, ios-optimized, ios-unsigned, ios-ipa, production, production-arm, production-optimized, playstore-aab, production-aab, production-arm64, production-ultra-small, production-universal, production-split, production-armeabi-v7a. |
-| **Version String Synchronized** | `PASS` | Consistent version '3.2.0' across app.json and package.json. |
+| **Version String Synchronized** | `PASS` | Consistent version '3.3.0' across app.json and package.json. |
 | **App Icon Configured** | `PASS` | Found valid app icon at './assets/images/mavrixfy_icon.png'. |
 | **Android Adaptive Icon Configured** | `PASS` | Adaptive icon foreground image found at './assets/images/mavrixfy_icon_foreground.png'. |
 | **Target SDK Level Compliant (API 34)** | `PASS` | App targets Android 14 (API 34), meeting Google Play Store requirements. |
-| **Android versionCode Configured (32002)** | `PASS` | versionCode is set to 32002. |
+| **Android versionCode Configured (33001)** | `PASS` | versionCode is set to 33001. |
 | **Missing Apple Privacy Manifest (PrivacyInfo.xcprivacy)** | `WARNING` | App Store Connect enforces PrivacyInfo.xcprivacy for apps consuming Required Reason APIs (User Defaults, Disk Space, System Boot). *(Fix: Add PrivacyInfo.xcprivacy to your Xcode project root declaring NSPrivacyAccessedAPITypes.)* |
-| **iOS Build Number Configured (32002)** | `PASS` | buildNumber is set to '32002'. |
+| **iOS Build Number Configured (33001)** | `PASS` | buildNumber is set to '33001'. |
 
 ---
 

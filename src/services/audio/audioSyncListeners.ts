@@ -40,6 +40,9 @@ interface UseAudioSyncListenersOptions {
   playSong: (song: Song, queue?: Song[]) => Promise<void> | void;
   isNativeQueueSyncedRef?: MutableRefObject<boolean>;
   triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[]) => Promise<Song[]>;
+  // Tracks whether we are in the middle of an automatic track-to-track transition
+  // so the spurious Paused/Stopped event is ignored during the gap.
+  trackTransitionInProgressRef?: MutableRefObject<boolean>;
 }
 
 export function useAudioSyncListeners({
@@ -74,6 +77,10 @@ export function useAudioSyncListeners({
   isNativeQueueSyncedRef,
   triggerAutoplayAppend,
 }: UseAudioSyncListenersOptions) {
+  // True while TrackPlayer is transitioning between tracks automatically.
+  // During this window we suppress the spurious Paused/Stopped event so
+  // the play-button never flickers to "paused" between songs.
+  const trackTransitionInProgressRef = useRef(false);
   const publishedLockScreenDurationRef = useRef<{
     songId: string;
     duration: number;
@@ -89,6 +96,8 @@ export function useAudioSyncListeners({
 
         switch (nextState) {
           case State.Playing:
+            // Track finished transitioning — clear the transition guard
+            trackTransitionInProgressRef.current = false;
             desiredPlayStateRef.current = null;
             setIsPlaying(true);
             isPlayingRef.current = true;
@@ -98,6 +107,8 @@ export function useAudioSyncListeners({
 
           case State.Paused:
           case State.Stopped:
+            // Ignore spurious Paused/Stopped fired during automatic track-to-track transition
+            if (trackTransitionInProgressRef.current) break;
             if (!playbackLoadingRef.current && desiredPlayStateRef.current !== true) {
               setIsPlaying(false);
               isPlayingRef.current = false;
@@ -190,6 +201,13 @@ export function useAudioSyncListeners({
         if (activeTrackId && currentSong && activeTrackId === currentSong.id) {
           return;
         }
+
+        // Mark that we are mid-transition so PlaybackState handler ignores
+        // the brief Paused/Stopped that TrackPlayer emits between songs.
+        trackTransitionInProgressRef.current = true;
+        // Safety: auto-clear the flag after 3s in case State.Playing never fires
+        // (e.g. stream error), so we don't permanently block pause signals.
+        setTimeout(() => { trackTransitionInProgressRef.current = false; }, 3000);
 
         const nextIndex =
           typeof event?.index === "number"

@@ -15,6 +15,7 @@ export interface PlayerAmbientBackdropProps {
   fullscreenLyricsVisible: boolean;
   positionMillis: number;
   onVideoActive: (active: boolean) => void;
+  onVideoError?: (error: string) => void;
   artScrollX: Animated.Value;
   activeQueueIndex: number;
   artCarouselSnapInterval: number;
@@ -31,6 +32,7 @@ export const PlayerAmbientBackdrop = React.memo(function PlayerAmbientBackdrop({
   fullscreenLyricsVisible,
   positionMillis,
   onVideoActive,
+  onVideoError,
   artScrollX,
   activeQueueIndex,
   artCarouselSnapInterval,
@@ -69,6 +71,7 @@ export const PlayerAmbientBackdrop = React.memo(function PlayerAmbientBackdrop({
         containerHeight={containerH}
         isLowEnd={isLowEnd}
         onVideoActive={onVideoActive}
+        onVideoError={onVideoError}
       />
       <LinearGradient
         pointerEvents="none"

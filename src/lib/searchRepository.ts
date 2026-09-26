@@ -2,7 +2,6 @@ import { Song, type JioSaavnImage } from "@/lib/musicData";
 import { searchCatalog } from "@/lib/catalogService";
 import { rankSongs, parseStructuredQuery, deduplicateSongs } from "@/lib/searchUtils";
 import { toDurationSeconds } from "@/utils/timeFormatters";
-
 export type ResultFilter = "all" | "songs" | "albums" | "artists" | "playlists";
 
 export interface PlaylistResult {
@@ -95,7 +94,7 @@ import { fetchJson } from "@/utils/asyncUtils";
 export { fetchJson };
 
 export async function fetchYouTubeSuggestions(query: string, signal?: AbortSignal): Promise<string[]> {
-  const url = `https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&client=firefox&q=${encodeURIComponent(query)}`;
+  const url = `https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(query)}`;
   const data = await fetchJson<[string, string[]]>(url, signal);
   return Array.isArray(data) && Array.isArray(data[1])
     ? data[1].flatMap((s) => {

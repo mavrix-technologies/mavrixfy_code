@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import { Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,8 +13,7 @@ import {
   useArtworkPalette,
   preloadDominantColors,
 } from "@/lib/colorExtractor";
-import { useLastMix } from "@/lib/lastMix";
-import { compactMap, mapFilter } from "@/lib/arrayUtils";
+import { mapFilter } from "@/lib/arrayUtils";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { useMiniPlayerSecondaryControl } from "@/lib/storage";
 import { expandPlayer } from "@/lib/playerUIState";
@@ -23,6 +22,7 @@ import {
   MiniPlayerSecondaryControlButton,
   IOSMiniPlayerProgressBar,
   MiniPlayerBannerView,
+  IOSMiniPlayerMixBadge,
 } from "./miniPlayerComponents";
 import {
   subscribeToMiniPlayerBannerConfig,
@@ -42,8 +42,12 @@ function getNativeTabsModule(): NativeTabsModule {
   return nativeTabsModule;
 }
 
-export function IOSNativeTabLayout() {
-  const { Icon, Label, NativeTabs } = getNativeTabsModule() as any;
+export function NativeTabLayout() {
+  const { NativeTabs } = getNativeTabsModule() as any;
+  const Trigger = NativeTabs.Trigger;
+  const Icon = Trigger.Icon;
+  const Label = Trigger.Label;
+  const VectorIcon = Trigger.VectorIcon;
 
   return (
     <NativeTabs
@@ -64,31 +68,65 @@ export function IOSNativeTabLayout() {
         },
       }}
     >
-      <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: "house", selected: "house.fill" }} />
+      <Trigger name="index">
+        <Icon
+          sf={{ default: "house", selected: "house.fill" }}
+          md={{ default: "home", selected: "home_filled" }}
+          src={<VectorIcon family={Ionicons} name="home" />}
+        />
         <Label>Home</Label>
-      </NativeTabs.Trigger>
+      </Trigger>
 
-      <NativeTabs.Trigger name="search" role="search" />
+      <Trigger name="search">
+        <Icon
+          sf={{ default: "magnifyingglass", selected: "magnifyingglass" }}
+          md={{ default: "search", selected: "search" }}
+          src={<VectorIcon family={Ionicons} name="search" />}
+        />
+        <Label>Search</Label>
+      </Trigger>
 
-      <NativeTabs.Trigger name="library">
-        <Icon sf={{ default: "square.stack", selected: "square.stack.fill" }} />
+      <Trigger name="library">
+        <Icon
+          sf={{ default: "music.note.list", selected: "music.note.list" }}
+          md={{ default: "library_music", selected: "library_music" }}
+          src={<VectorIcon family={Ionicons} name="library" />}
+        />
         <Label>Library</Label>
-      </NativeTabs.Trigger>
+      </Trigger>
 
-      <NativeTabs.Trigger name="liked-songs">
-        <Icon sf={{ default: "heart", selected: "heart.fill" }} />
+      <Trigger name="liked-songs">
+        <Icon
+          sf={{ default: "heart", selected: "heart.fill" }}
+          md={{ default: "favorite_border", selected: "favorite" }}
+          src={<VectorIcon family={Ionicons} name="heart" />}
+        />
         <Label>Liked</Label>
-      </NativeTabs.Trigger>
+      </Trigger>
+
+      <Trigger name="import-songs">
+        <Icon
+          sf={{ default: "square.and.arrow.down", selected: "square.and.arrow.down.fill" }}
+          md={{ default: "file_upload", selected: "file_upload" }}
+          src={<VectorIcon family={Ionicons} name="download-outline" />}
+        />
+        <Label>Import</Label>
+      </Trigger>
+
+      <Trigger name="create" hidden />
     </NativeTabs>
   );
 }
 
-export function IOSMiniPlayerOverlay() {
-  return useIOSMiniPlayerOverlayView();
+export function IOSNativeTabLayout() {
+  return <NativeTabLayout />;
 }
 
-function useIOSMiniPlayerOverlayView() {
+export interface MiniPlayerOverlayProps {
+  inTabScreen?: boolean;
+}
+
+export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverlayProps = {}) {
   const insets = useSafeAreaInsets();
   const { push: overlayRouterPush } = useRouter();
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
@@ -151,41 +189,6 @@ function useIOSMiniPlayerOverlayView() {
     preloadDominantColors(urls);
   }, [activeSong?.coverUrl, queue, queueIndex]);
 
-  const lastMix = useLastMix();
-  const mixBarOneRef = useRef<Animated.Value | null>(null);
-  if (mixBarOneRef.current === null) mixBarOneRef.current = new Animated.Value(0.32);
-  const mixBarOne = mixBarOneRef.current;
-  const mixBarTwoRef = useRef<Animated.Value | null>(null);
-  if (mixBarTwoRef.current === null) mixBarTwoRef.current = new Animated.Value(0.58);
-  const mixBarTwo = mixBarTwoRef.current;
-  const mixBarThreeRef = useRef<Animated.Value | null>(null);
-  if (mixBarThreeRef.current === null) mixBarThreeRef.current = new Animated.Value(0.44);
-  const mixBarThree = mixBarThreeRef.current;
-  const mixImage = useMemo(() => {
-    const first = compactMap((lastMix?.images ?? "")
-      .split(","), (value) => value.trim())[0];
-    return first ?? "";
-  }, [lastMix?.images]);
-  const mixImages = useMemo(() => {
-    return compactMap(
-      (lastMix?.images ?? "").split(","),
-      (value) => value.trim()
-    );
-  }, [lastMix?.images]);
-  const mixSongIds = useMemo(() => {
-    const raw = lastMix?.songIds ?? "";
-    if (!raw) return [] as string[];
-    return compactMap(raw.split(","), (id) => id.trim());
-  }, [lastMix?.songIds]);
-  const activeSongId = activeSong?.id ?? "";
-  const isPlayingFromLastMix = useMemo(() => {
-    if (!isPlaying || !activeSongId || mixSongIds.length === 0) return false;
-    if (!mixSongIds.includes(activeSongId)) return false;
-    if (queue.length !== mixSongIds.length) return false;
-    const mixSet = new Set(mixSongIds);
-    return queue.every((song) => mixSet.has(song.id));
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive values are listed
-  }, [activeSongId, isPlaying, mixSongIds, queue]);
   const iosArtworkPalette = useArtworkPalette(activeSong?.coverUrl);
 
   useEffect(() => {
@@ -193,50 +196,6 @@ function useIOSMiniPlayerOverlayView() {
     setAlbumColor(iosArtworkPalette.accent);
     setTextColor(iosArtworkPalette.text);
   }, [activeSong?.id, iosArtworkPalette.accent, iosArtworkPalette.text, setAlbumColor, setTextColor]);
-
-  useEffect(() => {
-    const resetBars = () => {
-      Animated.parallel([
-        Animated.timing(mixBarOne, { toValue: 0.32, duration: 180, useNativeDriver: true, isInteraction: false }),
-        Animated.timing(mixBarTwo, { toValue: 0.58, duration: 180, useNativeDriver: true, isInteraction: false }),
-        Animated.timing(mixBarThree, { toValue: 0.44, duration: 180, useNativeDriver: true, isInteraction: false }),
-      ]).start();
-    };
-
-    if (!lastMix || !isPlayingFromLastMix) {
-      resetBars();
-      return;
-    }
-
-    const loopOne = Animated.loop(
-      Animated.sequence([
-        Animated.timing(mixBarOne, { toValue: 0.96, duration: 230, useNativeDriver: true, isInteraction: false }),
-        Animated.timing(mixBarOne, { toValue: 0.24, duration: 280, useNativeDriver: true, isInteraction: false }),
-      ])
-    );
-    const loopTwo = Animated.loop(
-      Animated.sequence([
-        Animated.timing(mixBarTwo, { toValue: 0.84, duration: 180, useNativeDriver: true, isInteraction: false }),
-        Animated.timing(mixBarTwo, { toValue: 0.3, duration: 240, useNativeDriver: true, isInteraction: false }),
-      ])
-    );
-    const loopThree = Animated.loop(
-      Animated.sequence([
-        Animated.timing(mixBarThree, { toValue: 0.9, duration: 260, useNativeDriver: true, isInteraction: false }),
-        Animated.timing(mixBarThree, { toValue: 0.22, duration: 210, useNativeDriver: true, isInteraction: false }),
-      ])
-    );
-
-    loopOne.start();
-    loopTwo.start();
-    loopThree.start();
-
-    return () => {
-      loopOne.stop();
-      loopTwo.stop();
-      loopThree.stop();
-    };
-  }, [isPlayingFromLastMix, lastMix, mixBarOne, mixBarThree, mixBarTwo]);
 
   const shellBgColor = useMemo(
     () => iosArtworkPalette.background || "#16181D",
@@ -248,9 +207,12 @@ function useIOSMiniPlayerOverlayView() {
   }
 
   const progressFillColor = "rgba(255,255,255,0.90)";
-  const tabBarVisualHeight = 49;
-  const tabBarGap = 6;
-  const bottomOffset = Math.max(insets.bottom + tabBarVisualHeight + tabBarGap, 80);
+  const isIOS = Platform.OS === "ios";
+  const tabBarVisualHeight = inTabScreen ? (isIOS ? 49 : 56) : 0;
+  const tabBarGap = inTabScreen ? 6 : 0;
+  const bottomOffset = inTabScreen
+    ? Math.max(insets.bottom + tabBarVisualHeight + tabBarGap, isIOS ? 80 : 70)
+    : Math.max(insets.bottom + 12, 16);
   const shellBorderColor = "rgba(255,255,255,0.08)";
 
   return (
@@ -298,81 +260,11 @@ function useIOSMiniPlayerOverlayView() {
             </View>
           </Pressable>
 
-          {lastMix ? (
-            <Pressable
-              android_disableSound
-              onPress={() => {
-                overlayRouterPush({ pathname: "/artist-mix", params: lastMix });
-              }}
-              hitSlop={8}
-              style={styles.iosMiniPlayerInlineMixBtn}
-            >
-              <View style={styles.iosMiniPlayerMixCard}>
-                {mixImages.length > 1 ? (
-                  <View style={styles.iosMiniPlayerMixGrid}>
-                    {mixImages.slice(0, 4).map((img) => (
-                      <View key={img} style={styles.iosMiniPlayerMixGridCell}>
-                        {img ? (
-                          <Image
-                            source={{ uri: img }}
-                            style={styles.iosMiniPlayerMixGridImage}
-                            contentFit="cover"
-                            cachePolicy="memory-disk"
-                          />
-                        ) : (
-                          <View style={[styles.iosMiniPlayerMixGridImage, styles.iosMiniPlayerMixGridFallback]}>
-                            <Ionicons name="person" size={8} color="rgba(255,255,255,0.88)" />
-                          </View>
-                        )}
-                      </View>
-                    ))}
-                    {mixImages.length > 4 && (
-                      <View style={[styles.iosMiniPlayerMixGridCell, styles.iosMiniPlayerMixGridMore]}>
-                        <Text style={styles.iosMiniPlayerMixGridMoreText}>+{mixImages.length - 4}</Text>
-                      </View>
-                    )}
-                  </View>
-                ) : mixImage ? (
-                  <Image
-                    source={{ uri: mixImage }}
-                    style={[styles.iosMiniPlayerMixFullImage, styles.iosMiniPlayerMixFullImageMuted]}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                  />
-                ) : (
-                  <View
-                    style={[
-                      styles.iosMiniPlayerMixFullImage,
-                      styles.iosMiniPlayerMixHeroFallback,
-                      styles.iosMiniPlayerMixFullImageMuted,
-                    ]}
-                  >
-                    <Ionicons name="person" size={14} color="rgba(255,255,255,0.88)" />
-                  </View>
-                )}
-                <View style={styles.iosMiniPlayerMixEqOverlay}>
-                  <Animated.View
-                    style={[
-                      styles.iosMiniPlayerMixEqBar,
-                      { opacity: isPlayingFromLastMix ? 0.95 : 0.42, transform: [{ scaleY: mixBarOne }] },
-                    ]}
-                  />
-                  <Animated.View
-                    style={[
-                      styles.iosMiniPlayerMixEqBar,
-                      { opacity: isPlayingFromLastMix ? 0.95 : 0.42, transform: [{ scaleY: mixBarTwo }] },
-                    ]}
-                  />
-                  <Animated.View
-                    style={[
-                      styles.iosMiniPlayerMixEqBar,
-                      { opacity: isPlayingFromLastMix ? 0.95 : 0.42, transform: [{ scaleY: mixBarThree }] },
-                    ]}
-                  />
-                </View>
-              </View>
-            </Pressable>
-          ) : null}
+          <IOSMiniPlayerMixBadge
+            activeSongId={activeSong.id}
+            queue={queue}
+            isPlaying={isPlaying}
+          />
 
           <View style={styles.iosMiniPlayerControls}>
             <Pressable
@@ -414,4 +306,8 @@ function useIOSMiniPlayerOverlayView() {
       </View>
     </View>
   );
+}
+
+export function IOSMiniPlayerOverlay(props: MiniPlayerOverlayProps = {}) {
+  return <NativeMiniPlayerOverlay {...props} />;
 }

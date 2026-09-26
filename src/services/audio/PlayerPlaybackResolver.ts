@@ -26,7 +26,13 @@ export function isKnownNonAudioPageUrl(value: string): boolean {
     const path = parsed.pathname.toLowerCase();
 
     if (/\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac|m3u8)(?:$|[?#])/i.test(path)) return false;
-    if (host.includes("saavncdn.com") || host.includes("gaanacdn.com") || host.includes("akamaized.net")) return false;
+    if (
+      host.includes("saavncdn.com") ||
+      host.includes("gaanacdn.com") ||
+      host.includes("akamaized.net") ||
+      host.includes("googlevideo.com")
+    )
+      return false;
     if (host === "gaana.com" || host === "www.gaana.com" || host === "jiosaavn.com" || host === "www.jiosaavn.com") return true;
     if (host.includes("youtube.com") || host.includes("youtu.be")) return true;
     if (host.includes("spotify.com") || host.includes("music.apple.com")) return true;
@@ -268,7 +274,7 @@ export async function resolvePlaybackUrlWithDetails(
     }
   }
 
-  // 3. Direct audio URL fallback
+  // 4. Direct audio URL fallback (Non-YouTube tracks only)
   const fallbackUrl = resolveAudioUrl(song as SongPlaybackSource) || null;
   return {
     url: fallbackUrl,

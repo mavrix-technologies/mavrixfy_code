@@ -144,6 +144,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
                   fullscreenLyricsVisible={s.fullscreenLyricsVisible}
                   positionMillis={s.positionMillis}
                   onVideoActive={s.handleVideoActive}
+                  onVideoError={s.handleVideoError}
                   artScrollX={s.artScrollX}
                   activeQueueIndex={s.activeQueueIndex}
                   artCarouselSnapInterval={s.artCarouselSnapInterval}

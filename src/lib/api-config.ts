@@ -73,6 +73,7 @@ const SONG_API_BASE_URL = getConfiguredApiBaseUrl(
   "Music API",
   process.env.EXPO_PUBLIC_MUSIC_API_URL ||
     process.env.EXPO_PUBLIC_APP_API_URL ||
+    toUrlFromDomain(process.env.EXPO_PUBLIC_DOMAIN) ||
     toUrlFromDomain(process.env.EXPO_PUBLIC_MUSIC_API_DOMAIN),
   toUrlFromDomain(Constants.expoConfig?.extra?.musicApiDomain as string | undefined) || "https://mavrixfy-song-api.vercel.app"
 );

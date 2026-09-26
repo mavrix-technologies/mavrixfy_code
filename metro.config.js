@@ -6,6 +6,7 @@ const config = getDefaultConfig(__dirname);
 // disabled in the native project settings where it actually matters.
 config.resolver = {
   ...config.resolver,
+  unstable_enablePackageExports: true,
   blockList: [
     /node_modules\/react-native-track-player\/lib\/web\/.*/,
     /node_modules\/react-native-track-player\/.*\.web\.js$/,
