@@ -1,28 +1,28 @@
-import React, { useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import { useRouter } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import { getAppleMobileCredential } from "@/lib/appleAuth";
 import { getGoogleMobileIdToken } from "@/lib/googleAuth";
 import {
-  openPrivacyPolicy,
-  openPrivacySupportEmail,
-  openTermsOfService,
+openPrivacyPolicy,
+openPrivacySupportEmail,
+openTermsOfService,
 } from "@/lib/legal";
 import { safeGoBack } from "@/utils/navigation";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useMemo,useState } from "react";
+import {
+ActivityIndicator,
+Alert,
+Platform,
+Pressable,
+ScrollView,
+StyleSheet,
+Text,
+TextInput,
+View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 function getFriendlyDeleteError(message: string): string {
   if (message.includes("wrong-password") || message.includes("invalid-credential")) {

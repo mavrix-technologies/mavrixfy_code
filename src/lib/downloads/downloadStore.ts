@@ -1,3 +1,4 @@
+import { accountStorageKey,getAccountScope } from "@/lib/accountScope";
 /**
  * Download Store — Durable local persistence for the download queue.
  *
@@ -10,22 +11,22 @@
  * - The cache is seeded on first load and stays in sync via saveDownload/removeDownload.
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  DownloadItem,
-  DownloadPreferences,
-  DEFAULT_DOWNLOAD_PREFERENCES,
-} from "@/types/downloads";
 import { logger } from "@/lib/logger";
+import {
+DEFAULT_DOWNLOAD_PREFERENCES,
+DownloadItem,
+DownloadPreferences,
+} from "@/types/downloads";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const KEY_INDEX = "@mavrixfy_downloads_index";
 const KEY_PREFS = "@mavrixfy_download_prefs";
-const itemKey = (songId: string) => `@mavrixfy_download_${songId}`;
+const itemKey = (songId: string, uid = getAccountScope().accountId) => accountStorageKey(`@mavrixfy_download_${songId}`, uid);
 
 // ─── In-memory cache ──────────────────────────────────────────────────────────
 
 const memCache = new Map<string, DownloadItem>();
-let cacheSeeded = false;
+const seededAccounts = new Set<string | null>();
 
 // ─── Index mutex ──────────────────────────────────────────────────────────────
 // Prevents concurrent index reads/writes from corrupting the list.
@@ -33,15 +34,16 @@ let cacheSeeded = false;
 let indexMutexPromise: Promise<void> = Promise.resolve();
 
 function withIndexMutex(fn: () => Promise<void>): Promise<void> {
-  indexMutexPromise = indexMutexPromise.then(fn).catch(() => {});
-  return indexMutexPromise;
+  const operation = indexMutexPromise.then(fn);
+  indexMutexPromise = operation.catch(() => {});
+  return operation;
 }
 
 // ─── Index helpers ────────────────────────────────────────────────────────────
 
-async function readIndex(): Promise<string[]> {
+async function readIndex(uid = getAccountScope().accountId): Promise<string[]> {
   try {
-    const raw = await AsyncStorage.getItem(KEY_INDEX);
+    const raw = await AsyncStorage.getItem(accountStorageKey(KEY_INDEX, uid));
     if (!raw) return [];
     return JSON.parse(raw) as string[];
   } catch {
@@ -49,21 +51,21 @@ async function readIndex(): Promise<string[]> {
   }
 }
 
-async function addToIndex(songId: string): Promise<void> {
+async function addToIndex(songId: string, uid = getAccountScope().accountId): Promise<void> {
   return withIndexMutex(async () => {
-    const ids = await readIndex();
+    const ids = await readIndex(uid);
     if (!ids.includes(songId)) {
       ids.unshift(songId);
-      return AsyncStorage.setItem(KEY_INDEX, JSON.stringify(ids));
+      return AsyncStorage.setItem(accountStorageKey(KEY_INDEX, uid), JSON.stringify(ids));
     }
   });
 }
 
-async function removeFromIndex(songId: string): Promise<void> {
+async function removeFromIndex(songId: string, uid = getAccountScope().accountId): Promise<void> {
   return withIndexMutex(async () => {
-    const ids = await readIndex();
+    const ids = await readIndex(uid);
     const next = ids.filter((id) => id !== songId);
-    return AsyncStorage.setItem(KEY_INDEX, JSON.stringify(next));
+    return AsyncStorage.setItem(accountStorageKey(KEY_INDEX, uid), JSON.stringify(next));
   });
 }
 
@@ -71,14 +73,15 @@ async function removeFromIndex(songId: string): Promise<void> {
 
 /** Seed the in-memory cache from AsyncStorage. Called once on init. */
 export async function loadAllDownloads(): Promise<DownloadItem[]> {
+  const uid = getAccountScope().accountId;
   try {
-    const ids = await readIndex();
+    const ids = await readIndex(uid);
     if (ids.length === 0) {
-      cacheSeeded = true;
+      seededAccounts.add(uid);
       return [];
     }
 
-    const keys = ids.map(itemKey);
+    const keys = ids.map(id => itemKey(id, uid));
     const pairs = await AsyncStorage.multiGet(keys);
     const items: DownloadItem[] = [];
 
@@ -86,42 +89,43 @@ export async function loadAllDownloads(): Promise<DownloadItem[]> {
       if (!value) continue;
       try {
         const item = JSON.parse(value) as DownloadItem;
-        memCache.set(item.songId, item);
+        memCache.set(itemKey(item.songId, item.accountId ?? uid), item);
         items.push(item);
       } catch {
         // skip corrupt entries
       }
     }
 
-    cacheSeeded = true;
+    seededAccounts.add(uid);
     return items;
   } catch (err) {
     logger.error("[DownloadStore] loadAllDownloads failed", err);
-    cacheSeeded = true;
+    seededAccounts.add(uid);
     return [];
   }
 }
 
 export function getDownloadSync(songId: string): DownloadItem | null {
-  return memCache.get(songId) ?? null;
+  return memCache.get(itemKey(songId)) ?? null;
 }
 
 /** Read from cache (instant, no I/O). Falls back to AsyncStorage if cache not seeded. */
 export async function loadDownload(songId: string): Promise<DownloadItem | null> {
-  if (cacheSeeded) {
-    return memCache.get(songId) ?? null;
+  const uid = getAccountScope().accountId;
+  if (seededAccounts.has(uid)) {
+    return memCache.get(itemKey(songId, uid)) ?? null;
   }
   // Cache not ready yet — read from storage directly
   try {
-    const raw = await AsyncStorage.getItem(itemKey(songId));
+    const raw = await AsyncStorage.getItem(itemKey(songId, uid));
     if (!raw) return null;
     const item = JSON.parse(raw) as DownloadItem;
-    memCache.set(songId, item);
+    memCache.set(itemKey(songId, uid), item);
     // Register in the durable index so a subsequent loadAllDownloads()
     // (which iterates the index) does not miss this entry. Without this,
     // an item read here before seeding completes would be invisible to
     // getAllDownloads()/getStorageSummary(), creating a cache/index desync.
-    addToIndex(songId).catch(() => {});
+    addToIndex(songId, uid).catch(() => {});
     return item;
   } catch {
     return null;
@@ -129,37 +133,26 @@ export async function loadDownload(songId: string): Promise<DownloadItem | null>
 }
 
 /** Write to cache immediately, persist to AsyncStorage in background. */
-export function saveDownload(item: DownloadItem): Promise<void> {
-  const isNew = !memCache.has(item.songId);
-
-  // Update cache synchronously — callers see the new value instantly
-  memCache.set(item.songId, item);
-
-  // Persist to AsyncStorage in background (non-blocking for progress updates)
-  AsyncStorage.setItem(itemKey(item.songId), JSON.stringify(item)).catch((err) => {
-    logger.error("[DownloadStore] saveDownload persist failed", err);
-  });
-
-  // Only update the index if this is a new entry
-  if (isNew) {
-    addToIndex(item.songId).catch(() => {});
-  }
-
-  return Promise.resolve();
+export async function saveDownload(item: DownloadItem): Promise<void> {
+  const uid = item.accountId ?? getAccountScope().accountId;
+  const key = itemKey(item.songId, uid);
+  memCache.set(key, item);
+  await AsyncStorage.setItem(key, JSON.stringify(item));
+  await addToIndex(item.songId, uid);
 }
 
-/** Update the in-memory cache only. Use for high-frequency progress ticks. */
 export function updateDownloadMemory(item: DownloadItem): void {
-  memCache.set(item.songId, item);
+  memCache.set(itemKey(item.songId, item.accountId ?? getAccountScope().accountId), item);
 }
 
 /** Remove from cache and storage. */
 export async function removeDownload(songId: string): Promise<void> {
-  memCache.delete(songId);
+  const uid = getAccountScope().accountId;
+  memCache.delete(itemKey(songId, uid));
   try {
     await Promise.all([
-      AsyncStorage.removeItem(itemKey(songId)),
-      removeFromIndex(songId),
+      AsyncStorage.removeItem(itemKey(songId, uid)),
+      removeFromIndex(songId, uid),
     ]);
   } catch (err) {
     logger.error("[DownloadStore] removeDownload failed", err);
@@ -193,18 +186,7 @@ export async function saveDownloadPreferences(prefs: DownloadPreferences): Promi
     await AsyncStorage.setItem(KEY_PREFS, JSON.stringify(prefs));
   } catch (err) {
     logger.error("[DownloadStore] saveDownloadPreferences failed", err);
+    throw err;
   }
 }
 
-// ─── Cleanup ──────────────────────────────────────────────────────────────────
-
-async function clearAllDownloads(): Promise<void> {
-  try {
-    const ids = await readIndex();
-    const keys = ids.map(itemKey);
-    memCache.clear();
-    await AsyncStorage.multiRemove([...keys, KEY_INDEX]);
-  } catch (err) {
-    logger.error("[DownloadStore] clearAllDownloads failed", err);
-  }
-}

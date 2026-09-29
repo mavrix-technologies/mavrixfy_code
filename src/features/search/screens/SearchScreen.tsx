@@ -1,37 +1,37 @@
-import React, { useCallback, useRef } from "react";
-import {
-  View,
-  Text,
-  FlatList,
-  Pressable,
-  Keyboard,
-  LayoutAnimation,
-  Platform,
-  UIManager,
-  TextInput,
-} from "react-native";
-import { useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-
-import Colors from "@/constants/colors";
-import OfflineScreen from "@/components/OfflineScreen";
-import OfflineBanner from "@/components/OfflineBanner";
-import AppTopHeader, {
-  APP_TOP_HEADER_HEIGHT,
-  AppTopHeaderDownloadButton,
-  AppTopHeaderProfileButton,
-} from "@/components/AppTopHeader";
-import SearchHeaderField from "@/components/SearchHeaderField";
-import LiquidGlassView from "@/components/LiquidGlassView";
-import LiquidGlassScopeBar from "@/components/LiquidGlassScopeBar";
-import { styles } from "../styles/searchStyles";
-import { RESULT_FILTERS } from "../types";
-import { useSearchEngine } from "../hooks/useSearchEngine";
+import { useLocalSearchParams } from "expo-router";
+import { useCallback,useRef } from "react";
 import {
-  SearchBrowseSection,
-  SearchRecentSection,
+FlatList,
+Keyboard,
+LayoutAnimation,
+Platform,
+Pressable,
+Text,
+TextInput,
+UIManager,
+View,
+} from "react-native";
+
+import AppTopHeader,{
+APP_TOP_HEADER_HEIGHT,
+AppTopHeaderDownloadButton,
+AppTopHeaderProfileButton,
+} from "@/components/AppTopHeader";
+import { LiquidGlassScopeBar } from "@/components/LiquidGlassScopeBar";
+import { LiquidGlassView } from "@/components/LiquidGlassView";
+import OfflineBanner from "@/components/OfflineBanner";
+import OfflineScreen from "@/components/OfflineScreen";
+import { SearchHeaderField } from "@/components/SearchHeaderField";
+import Colors from "@/constants/colors";
+import {
+SearchBrowseSection,
+SearchRecentSection,
 } from "../components/SearchBrowseSection";
 import { SearchResultsSection } from "../components/SearchResultsSection";
+import { useSearchEngine } from "../hooks/useSearchEngine";
+import { styles } from "../styles/searchStyles";
+import { RESULT_FILTERS } from "../types";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);

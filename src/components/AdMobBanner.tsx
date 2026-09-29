@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react";
-import { View, StyleSheet } from "react-native";
 import { AD_UNITS } from "@/constants/admob";
-import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobileAds";
+import { getGoogleMobileAdsModule,initializeMobileAds } from "@/lib/googleMobileAds";
 import { logger } from "@/lib/logger";
+import { useEffect,useState } from "react";
+import { StyleSheet,View } from "react-native";
 
 const BANNER_AD_UNIT_ID = AD_UNITS.BANNER || AD_UNITS.NATIVE;
 

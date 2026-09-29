@@ -1,5 +1,5 @@
-import { useMemo } from "react";
 import type { Song } from "@/lib/musicData";
+import { useMemo } from "react";
 
 export function usePlayerLiveQueue(
   queue: Song[],
@@ -33,7 +33,7 @@ export function usePlayerLiveQueue(
     }
     const rawIndex = queue.length > 0 ? queueIndex : 0;
     return Math.max(0, Math.min(rawIndex, livePlayingQueue.length - 1));
-  }, [currentSong?.id, livePlayingQueue, queue.length, queueIndex]);
+  }, [currentSong, livePlayingQueue, queue.length, queueIndex]);
 
   return {
     livePlayingQueue,

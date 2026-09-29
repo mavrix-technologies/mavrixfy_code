@@ -10,34 +10,34 @@
  * - The full `downloads` state is only used by the Downloads screen.
  */
 
-import React, {
-  createContext,
-  use,
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useMemo,
-  type ReactNode,
-  useSyncExternalStore,
-} from "react";
-import { AppState, type AppStateStatus } from "react-native";
-import { type Song } from "@/lib/musicData";
+import { useAuth } from "@/contexts/AuthContext";
+import { downloadCollection,downloadSong,getAllDownloads,getLocalPlaybackUrl,getStorageSummary,onQueueEvent,pauseSongDownload,removeAllDownloads,removeSongDownload,resumeSongDownload,retrySongDownload,syncLicenses,type DownloadResult } from "@/lib/downloads/downloadManager";
 import {
-  DownloadItem,
-  DownloadPreferences,
-  DownloadEntitlement,
-  StorageSummary,
-  DEFAULT_DOWNLOAD_PREFERENCES,
-} from "@/types/downloads";
-import { getAllDownloads, downloadSong, downloadCollection, pauseSongDownload, resumeSongDownload, retrySongDownload, removeSongDownload, removeAllDownloads, syncLicenses, getStorageSummary, getLocalPlaybackUrl, onQueueEvent, type DownloadResult } from "@/lib/downloads/downloadManager";
-import {
-  loadDownloadPreferences,
-  saveDownloadPreferences,
+loadDownloadPreferences,
+saveDownloadPreferences,
 } from "@/lib/downloads/downloadStore";
 import { getDownloadEntitlement } from "@/lib/downloads/entitlement";
-import { useAuth } from "@/contexts/AuthContext";
 import { logger } from "@/lib/logger";
+import { type Song } from "@/lib/musicData";
+import {
+DEFAULT_DOWNLOAD_PREFERENCES,
+DownloadEntitlement,
+DownloadItem,
+DownloadPreferences,
+StorageSummary,
+} from "@/types/downloads";
+import {
+createContext,
+use,
+useCallback,
+useEffect,
+useMemo,
+useRef,
+useState,
+useSyncExternalStore,
+type ReactNode,
+} from "react";
+import { AppState,type AppStateStatus } from "react-native";
 
 const subscribeToAppStateChanges = (listener: (state: AppStateStatus) => void) => {
   const subscription = AppState.addEventListener("change", listener);
@@ -83,6 +83,7 @@ const downloadItemStore = {
   },
 
   seed(items: DownloadItem[]) {
+    this._items.clear();
     for (const item of items) {
       this._items.set(item.songId, item);
     }
@@ -138,7 +139,8 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   const [preferences, setPreferences] = useState<DownloadPreferences>(
     DEFAULT_DOWNLOAD_PREFERENCES
   );
-  const [entitlement, setEntitlement] = useState<DownloadEntitlement | null>(null);
+  const [entitlementState, setEntitlementState] = useState<{ uid: string; value: DownloadEntitlement | null } | null>(null);
+  const entitlement = entitlementState?.uid === uid ? entitlementState.value : null;
   const [storageSummary, setStorageSummary] = useState<StorageSummary>({
     totalDownloadedBytes: 0,
     totalDownloadedTracks: 0,
@@ -167,6 +169,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let isMounted = true;
+    downloadItemStore.seed([]);
 
     const initialize = async () => {
       try {
@@ -198,10 +201,12 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   // ─── Entitlement refresh ────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!uid) { setEntitlement(null); return; }
+    if (!uid) return;
+    let active = true;
     getDownloadEntitlement(uid)
-      .then(setEntitlement)
-      .catch(() => setEntitlement(null));
+      .then((value) => { if (active) setEntitlementState({ uid, value }); })
+      .catch(() => { if (active) setEntitlementState({ uid, value: null }); });
+    return () => { active = false; };
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- uid is the only reactive dep; getDownloadEntitlement is a stable import
   }, [uid]);
 
@@ -223,23 +228,13 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
 
       onQueueEvent("completed", (songId, item) => {
         downloadItemStore.set(songId, item);
-        if (uid) {
-          import("@/lib/downloads/downloadManager")
-            .then(({ onDownloadCompleted }) => onDownloadCompleted(uid, songId, 1))
-            .catch(() => {});
-        }
+
         refreshDownloads();
       }),
 
       onQueueEvent("failed", (songId, item) => {
         downloadItemStore.set(songId, item);
-        if (uid) {
-          import("@/lib/downloads/downloadManager")
-            .then(({ onDownloadFailed }) =>
-              onDownloadFailed(uid, songId, item.failureReason ?? "unknown")
-            )
-            .catch(() => {});
-        }
+
       }),
     ];
 
@@ -325,15 +320,14 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     for (const item of downloadItemStore.getAll()) {
       downloadItemStore.delete(item.songId);
     }
-    await Promise.all([
-      removeAllDownloads(),
-      refreshDownloads(),
-    ]);
+    await removeAllDownloads();
+    await refreshDownloads();
   }, [refreshDownloads]);
 
   const handleUpdatePreferences = useCallback(
     async (patch: Partial<DownloadPreferences>) => {
       const updated = { ...prefsRef.current, ...patch };
+      prefsRef.current = updated;
       setPreferences(updated);
       return saveDownloadPreferences(updated);
     },

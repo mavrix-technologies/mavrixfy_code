@@ -1,13 +1,14 @@
-import { useEffect, useRef, type MutableRefObject } from "react";
-import { AppState, Platform } from "react-native";
-import type { Song } from "@/lib/musicData";
 import { logger } from "@/lib/logger";
+import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
-import { playerPersistenceService } from "@/services/player/playerPersistenceService";
-import { carPlayService } from "@/services/carPlayService";
 import { songToTrack } from "@/services/audio/PlayerPlaybackResolver";
-import { toDurationSeconds } from "@/utils/timeFormatters";
+import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
+import { carPlayService } from "@/services/carPlayService";
+import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import type { SleepTimerState } from "@/types/playbackTypes";
+import { toDurationSeconds } from "@/utils/timeFormatters";
+import { useEffect,useRef,type MutableRefObject } from "react";
+import { AppState,Platform } from "react-native";
 
 interface UseAudioSyncListenersOptions {
   isPlayerReady: boolean;
@@ -27,6 +28,7 @@ interface UseAudioSyncListenersOptions {
   setPlaybackLoading: (loading: boolean) => void;
   playbackLoadingRef: MutableRefObject<boolean>;
   desiredPlayStateRef: MutableRefObject<boolean | null>;
+  pendingPlayRequestRef: MutableRefObject<PendingPlayRequest | null>;
   positionSecondsRef: MutableRefObject<number>;
   setNativePosition: (pos: number) => void;
   setNativeDuration: React.Dispatch<React.SetStateAction<number>>;
@@ -40,9 +42,6 @@ interface UseAudioSyncListenersOptions {
   playSong: (song: Song, queue?: Song[]) => Promise<void> | void;
   isNativeQueueSyncedRef?: MutableRefObject<boolean>;
   triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[]) => Promise<Song[]>;
-  // Tracks whether we are in the middle of an automatic track-to-track transition
-  // so the spurious Paused/Stopped event is ignored during the gap.
-  trackTransitionInProgressRef?: MutableRefObject<boolean>;
 }
 
 export function useAudioSyncListeners({
@@ -63,6 +62,7 @@ export function useAudioSyncListeners({
   setPlaybackLoading,
   playbackLoadingRef,
   desiredPlayStateRef,
+  pendingPlayRequestRef,
   positionSecondsRef,
   setNativePosition,
   setNativeDuration,
@@ -77,10 +77,6 @@ export function useAudioSyncListeners({
   isNativeQueueSyncedRef,
   triggerAutoplayAppend,
 }: UseAudioSyncListenersOptions) {
-  // True while TrackPlayer is transitioning between tracks automatically.
-  // During this window we suppress the spurious Paused/Stopped event so
-  // the play-button never flickers to "paused" between songs.
-  const trackTransitionInProgressRef = useRef(false);
   const publishedLockScreenDurationRef = useRef<{
     songId: string;
     duration: number;
@@ -90,15 +86,33 @@ export function useAudioSyncListeners({
   useEffect(() => {
     if (!isPlayerReady || !TrackPlayer) return;
 
+    const pauseIntent = () => {
+      desiredPlayStateRef.current = false;
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+      updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
+    };
+    const playIntent = () => {
+      desiredPlayStateRef.current = true;
+      setIsPlaying(true);
+      isPlayingRef.current = true;
+      updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
+    };
     const unsubs = [
+      subscribeTrackPlayerEvent(Event.RemotePlay, playIntent),
+      subscribeTrackPlayerEvent(Event.RemotePause, pauseIntent),
+      subscribeTrackPlayerEvent(Event.RemoteStop, pauseIntent),
+      subscribeTrackPlayerEvent(Event.RemoteDuck, (event: any) => {
+        if (event?.paused || event?.permanent) pauseIntent();
+      }),
       subscribeTrackPlayerEvent(Event.PlaybackState, (event: any) => {
         const nextState = event && typeof event === "object" && "state" in event ? event.state : event;
 
         switch (nextState) {
           case State.Playing:
-            // Track finished transitioning — clear the transition guard
-            trackTransitionInProgressRef.current = false;
-            desiredPlayStateRef.current = null;
+            if (playbackLoadingRef.current || desiredPlayStateRef.current === false) break;
+            pendingPlayRequestRef.current = null;
+            desiredPlayStateRef.current = true;
             setIsPlaying(true);
             isPlayingRef.current = true;
             setPlaybackLoading(false);
@@ -107,9 +121,8 @@ export function useAudioSyncListeners({
 
           case State.Paused:
           case State.Stopped:
-            // Ignore spurious Paused/Stopped fired during automatic track-to-track transition
-            if (trackTransitionInProgressRef.current) break;
-            if (!playbackLoadingRef.current && desiredPlayStateRef.current !== true) {
+            // Keep the intended play state through a native source change.
+            if (!playbackLoadingRef.current && desiredPlayStateRef.current !== true && !pendingPlayRequestRef.current) {
               setIsPlaying(false);
               isPlayingRef.current = false;
               setPlaybackLoading(false);
@@ -123,8 +136,37 @@ export function useAudioSyncListeners({
             break;
         }
       }),
+      subscribeTrackPlayerEvent(Event.PlaybackPlayWhenReadyChanged, (event: any) => {
+        if (typeof event?.playWhenReady !== "boolean") return;
+        // A native queue replacement may emit a stale resume after the user
+        // has paused. The explicit user intent must always win that race.
+        if (desiredPlayStateRef.current === false) {
+          if (event.playWhenReady) {
+            void TrackPlayer?.pause?.().catch(() => {});
+          }
+          return;
+        }
+        // Queue replacement can reset native intent before our play command.
+        if (playbackLoadingRef.current) return;
+        desiredPlayStateRef.current = event.playWhenReady;
+
+        if (event.playWhenReady) {
+          setIsPlaying(true);
+          isPlayingRef.current = true;
+          updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
+          return;
+        }
+
+        pendingPlayRequestRef.current = null;
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+        setPlaybackLoading(false);
+        updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false });
+      }),
       subscribeTrackPlayerEvent(Event.PlaybackError, (error: any) => {
         logger.error("[Player] PlaybackError event", error);
+        pendingPlayRequestRef.current = null;
+        desiredPlayStateRef.current = false;
         setIsPlaying(false);
         isPlayingRef.current = false;
         setPlaybackLoading(false);
@@ -134,6 +176,8 @@ export function useAudioSyncListeners({
         showPlaybackNotice(`Playback error: ${errorMsg}`);
       }),
       subscribeTrackPlayerEvent(Event.PlaybackProgressUpdated, (event: any) => {
+        if (playbackLoadingRef.current || pendingPlayRequestRef.current) return;
+        if (isNativeQueueSyncedRef?.current && event?.track !== queueIndexRef.current) return;
         if (typeof event?.position === "number") {
           setNativePosition(event.position);
           positionSecondsRef.current = event.position;
@@ -197,17 +241,13 @@ export function useAudioSyncListeners({
             ? event?.track
             : null;
 
+        const pending = pendingPlayRequestRef.current;
+        if (pending && activeTrackId !== pending.songId) return;
+
         // If native event confirms the song we already selected, do NOT overwrite or jump
         if (activeTrackId && currentSong && activeTrackId === currentSong.id) {
           return;
         }
-
-        // Mark that we are mid-transition so PlaybackState handler ignores
-        // the brief Paused/Stopped that TrackPlayer emits between songs.
-        trackTransitionInProgressRef.current = true;
-        // Safety: auto-clear the flag after 3s in case State.Playing never fires
-        // (e.g. stream error), so we don't permanently block pause signals.
-        setTimeout(() => { trackTransitionInProgressRef.current = false; }, 3000);
 
         const nextIndex =
           typeof event?.index === "number"
@@ -263,6 +303,10 @@ export function useAudioSyncListeners({
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, async () => {
+        if (playbackLoadingRef.current || pendingPlayRequestRef.current) return;
+        const endedSong = currentSongRef.current;
+        const isStillEnded = () => currentSongRef.current === endedSong &&
+          !playbackLoadingRef.current && !pendingPlayRequestRef.current;
         if (sleepTimerRef.current?.mode === "end-of-stack") {
           clearSleepTimer();
           setIsPlaying(false);
@@ -272,13 +316,23 @@ export function useAudioSyncListeners({
           return;
         }
 
+        if (isNativeQueueSyncedRef?.current === false) {
+          const next = queueRef.current[queueIndexRef.current + 1];
+          if (next) {
+            void playSong(next, queueRef.current);
+            return;
+          }
+        }
+
         try {
           const { getSettings } = require("@/lib/storage");
           const settings = await getSettings();
+          if (!isStillEnded()) return;
           if (settings?.smartAutoplayEnabled && triggerAutoplayAppend) {
             const seed = currentSongRef.current || queueRef.current[queueRef.current.length - 1];
             if (seed) {
               const recs = await triggerAutoplayAppend(seed, queueRef.current);
+              if (!isStillEnded() || desiredPlayStateRef.current === false) return;
               if (recs.length > 0) {
                 void playSong(recs[0], queueRef.current);
                 return;
@@ -289,6 +343,8 @@ export function useAudioSyncListeners({
           logger.warn("[Player] Autoplay queue-ended continuation error:", err);
         }
 
+        if (!isStillEnded()) return;
+        desiredPlayStateRef.current = false;
         setIsPlaying(false);
         isPlayingRef.current = false;
         setPlaybackLoading(false);

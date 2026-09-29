@@ -1,24 +1,25 @@
-import {
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  setDoc,
-  updateDoc,
-  addDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
-  limit,
-  serverTimestamp,
-} from "firebase/firestore";
-import { db } from "./firebase";
 import { sortedCopy } from "@/lib/arrayUtils";
 import {
-  setCachedPlaylist,
-  removeCachedPlaylist,
+removeCachedPlaylist,
+setCachedPlaylist,
 } from "@/lib/playlistMemoryCache";
+import {
+addDoc,
+collection,
+deleteDoc,
+doc,
+getDoc,
+getDocs,
+limit,
+orderBy,
+query,
+runTransaction,
+serverTimestamp,
+setDoc,
+updateDoc,
+where,
+} from "firebase/firestore";
+import { db } from "./firebase";
 
 export interface FirestorePlaylist {
   id: string;
@@ -417,32 +418,21 @@ export async function addSongToFirestorePlaylist(playlistId: string, song: any):
     if (!db) return false;
 
     const playlistRef = doc(db, "playlists", playlistId);
-    const playlistSnap = await getDoc(playlistRef);
-
-    if (!playlistSnap.exists()) return false;
-
-    const playlist = playlistSnap.data() as FirestorePlaylist;
-    const songs = playlist.songs || [];
-
-    // Check for duplicates - return false if already exists
-    if (songs.some((s: any) => s.id === song.id)) return false;
-
-    songs.push({
-      id: song.id,
-      title: song.title,
-      artist: song.artist,
-      album: song.album || "",
-      imageUrl: song.coverUrl,
-      audioUrl: song.audioUrl || song.streamUrl || "",
-      duration: song.duration || 0,
-      addedAt: new Date().toISOString(),
+    const songs = await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(playlistRef);
+      if (!snapshot.exists()) return null;
+      const existing = (snapshot.data() as FirestorePlaylist).songs || [];
+      if (existing.some((track) => track.id === song.id)) return null;
+      const next = [...existing, {
+        id: song.id, title: song.title, artist: song.artist,
+        album: song.album || "", imageUrl: song.coverUrl || "",
+        audioUrl: song.audioUrl || song.streamUrl || "",
+        duration: song.duration || 0, addedAt: new Date().toISOString(),
+      }];
+      transaction.update(playlistRef, { songs: next, songCount: next.length, updatedAt: serverTimestamp() });
+      return next;
     });
-
-    await updateDoc(playlistRef, {
-      songs,
-      songCount: songs.length,
-      updatedAt: serverTimestamp(),
-    });
+    if (!songs) return false;
 
     setCachedPlaylist(playlistId, {
       id: playlistId,
@@ -502,23 +492,15 @@ export async function removeSongFromFirestorePlaylist(playlistId: string, songId
     }
 
     const playlistRef = doc(db, "playlists", playlistId);
-    const playlistSnap = await getDoc(playlistRef);
-
-    if (!playlistSnap.exists()) {
-      return false;
-    }
-
-    const playlist = playlistSnap.data() as FirestorePlaylist;
-    const songs = playlist.songs || [];
-
-    // Remove song from array
-    const updatedSongs = songs.filter((s: any) => s.id !== songId);
-
-    await updateDoc(playlistRef, {
-      songs: updatedSongs,
-      songCount: updatedSongs.length,
-      updatedAt: serverTimestamp(),
+    const updatedSongs = await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(playlistRef);
+      if (!snapshot.exists()) return null;
+      const songs = (snapshot.data() as FirestorePlaylist).songs || [];
+      const next = songs.filter((song) => song.id !== songId);
+      transaction.update(playlistRef, { songs: next, songCount: next.length, updatedAt: serverTimestamp() });
+      return next;
     });
+    if (!updatedSongs) return false;
 
     setCachedPlaylist(playlistId, {
       id: playlistId,
@@ -536,53 +518,41 @@ export async function deleteUserFirestoreData(userId: string): Promise<void> {
     return;
   }
 
-  const likedSongsRef = collection(db, "users", userId, "likedSongs");
-  const pushTokensRef = collection(db, "users", userId, "pushTokens");
-  const spotifyTokensRef = collection(db, "users", userId, "spotifyTokens");
-  const spotifySyncRef = collection(db, "users", userId, "spotifySync");
-  const spotifyLikedSongsRef = collection(db, "users", userId, "spotifyLikedSongs");
+  const userSubcollections = [
+    "likedSongs",
+    "pushTokens",
+    "spotifyTokens",
+    "spotifySync",
+    "spotifyLikedSongs",
+    "offlineLicenses",
+    "downloadDevices",
+    "activityFeed",
+  ];
   const playlistsRef = collection(db, "playlists");
+  const playlistSharesRef = collection(db, "playlist_shares");
   const userRef = doc(db, "users", userId);
   const legacyLikedSongsRef = doc(db, "likedSongs", userId);
 
   const [
-    likedSongsSnapshot,
-    pushTokensSnapshot,
-    spotifyTokensSnapshot,
-    spotifySyncSnapshot,
-    spotifyLikedSongsSnapshot,
+    subcollectionSnapshots,
     playlistsByIdSnapshot,
     playlistsByUidSnapshot,
+    playlistsByLegacyIdSnapshot,
+    playlistSharesSnapshot,
   ] = await Promise.all([
-    getDocs(likedSongsRef),
-    getDocs(pushTokensRef),
-    getDocs(spotifyTokensRef),
-    getDocs(spotifySyncRef),
-    getDocs(spotifyLikedSongsRef),
+    Promise.all(userSubcollections.map((name) => getDocs(collection(db, "users", userId, name)))),
     getDocs(query(playlistsRef, where("createdBy.id", "==", userId))),
     getDocs(query(playlistsRef, where("createdBy.uid", "==", userId))),
+    getDocs(query(playlistsRef, where("createdBy._id", "==", userId))),
+    getDocs(query(playlistSharesRef, where("createdBy", "==", userId))),
   ]);
 
   const deletions: Promise<void>[] = [];
 
-  likedSongsSnapshot.forEach((songDoc) => {
-    deletions.push(deleteDoc(songDoc.ref));
-  });
-
-  pushTokensSnapshot.forEach((tokenDoc) => {
-    deletions.push(deleteDoc(tokenDoc.ref));
-  });
-
-  spotifyTokensSnapshot.forEach((tokenDoc) => {
-    deletions.push(deleteDoc(tokenDoc.ref));
-  });
-
-  spotifySyncSnapshot.forEach((syncDoc) => {
-    deletions.push(deleteDoc(syncDoc.ref));
-  });
-
-  spotifyLikedSongsSnapshot.forEach((songDoc) => {
-    deletions.push(deleteDoc(songDoc.ref));
+  subcollectionSnapshots.forEach((snapshot) => {
+    snapshot.forEach((childDoc) => {
+      deletions.push(deleteDoc(childDoc.ref));
+    });
   });
 
   const playlistRefs = new Map<string, (typeof playlistsByIdSnapshot.docs)[number]["ref"]>();
@@ -592,8 +562,14 @@ export async function deleteUserFirestoreData(userId: string): Promise<void> {
   playlistsByUidSnapshot.forEach((playlistDoc) => {
     playlistRefs.set(playlistDoc.id, playlistDoc.ref);
   });
+  playlistsByLegacyIdSnapshot.forEach((playlistDoc) => {
+    playlistRefs.set(playlistDoc.id, playlistDoc.ref);
+  });
   playlistRefs.forEach((playlistRef) => {
     deletions.push(deleteDoc(playlistRef));
+  });
+  playlistSharesSnapshot.forEach((shareDoc) => {
+    deletions.push(deleteDoc(shareDoc.ref));
   });
 
   deletions.push(deleteDoc(legacyLikedSongsRef));

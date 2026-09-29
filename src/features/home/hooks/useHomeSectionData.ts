@@ -1,9 +1,9 @@
-import { useMemo } from "react";
+import { type ArtistCard } from "@/data/providers/ArtistProvider";
 import { type HomeJioSaavnCategoryData } from "@/data/providers/JioSaavnProvider";
+import { type FirestorePlaylist } from "@/lib/firestore";
 import { type Song } from "@/lib/musicData";
 import { type RecentlyPlayedItem } from "@/lib/storage";
-import { type ArtistCard } from "@/data/providers/ArtistProvider";
-import { type FirestorePlaylist } from "@/lib/firestore";
+import { useMemo } from "react";
 
 export const HOME_CATEGORY_TITLES: Record<string, string> = {
   "new-arrivals": "New Releases",

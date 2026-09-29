@@ -1,5 +1,5 @@
-import { create } from "zustand";
 import type { Song } from "@/lib/musicData";
+import { create } from "zustand";
 
 export interface LikedSongsState {
   songs: Song[];

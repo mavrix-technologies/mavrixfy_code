@@ -1,8 +1,8 @@
-import React from "react";
 import * as Animated from "@/lib/nativeAnimated";
 import { LinearGradient } from "expo-linear-gradient";
-import { BackgroundYoutubeVideo } from "./BackgroundYoutubeVideo";
+import React from "react";
 import { styles } from "../styles/playerScreenStyles";
+import { BackgroundYoutubeVideo } from "./BackgroundYoutubeVideo";
 
 export interface PlayerAmbientBackdropProps {
   shouldRender: boolean;
@@ -13,7 +13,7 @@ export interface PlayerAmbientBackdropProps {
   isScreenFocused: boolean;
   playerIsPlaying: boolean;
   fullscreenLyricsVisible: boolean;
-  positionMillis: number;
+  initialOffsetMs: number;
   onVideoActive: (active: boolean) => void;
   onVideoError?: (error: string) => void;
   artScrollX: Animated.Value;
@@ -30,7 +30,7 @@ export const PlayerAmbientBackdrop = React.memo(function PlayerAmbientBackdrop({
   isScreenFocused,
   playerIsPlaying,
   fullscreenLyricsVisible,
-  positionMillis,
+  initialOffsetMs,
   onVideoActive,
   onVideoError,
   artScrollX,
@@ -67,7 +67,7 @@ export const PlayerAmbientBackdrop = React.memo(function PlayerAmbientBackdrop({
         key={`bg-video-${backgroundVideoId}`}
         videoId={backgroundVideoId}
         active={isScreenFocused && playerIsPlaying && !fullscreenLyricsVisible}
-        initialOffsetMs={positionMillis}
+        initialOffsetMs={initialOffsetMs}
         containerHeight={containerH}
         isLowEnd={isLowEnd}
         onVideoActive={onVideoActive}

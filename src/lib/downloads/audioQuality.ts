@@ -71,18 +71,3 @@ export function getAudioUrlByQuality(baseUrl: string, quality: DownloadQuality):
   // (it's likely already the best quality)
   return baseUrl;
 }
-
-/**
- * Get the bitrate for a download quality for UI display
- */
-function getQualityLabel(quality: DownloadQuality): string {
-  switch (quality) {
-    case "low":
-      return "~48 kbps";
-    case "medium":
-      return "~128 kbps";
-    case "high":
-    default:
-      return "~320 kbps";
-  }
-}

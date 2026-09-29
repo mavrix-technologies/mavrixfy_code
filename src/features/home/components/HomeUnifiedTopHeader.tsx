@@ -1,36 +1,36 @@
-import React, { useCallback, useRef, useMemo, useEffect } from "react";
-import {
-  StyleSheet,
-  FlatList,
-  Platform,
-  type ListRenderItemInfo,
-} from "react-native";
-import Animated, {
-  useAnimatedStyle,
-  type SharedValue,
-} from "react-native-reanimated";
-import { useRouter } from "expo-router";
+import Colors from "@/constants/colors";
+import { useAuth } from "@/contexts/AuthContext";
+import { colorWithAlpha } from "@/lib/colorExtractor";
 import { triggerImpact } from "@/lib/haptics";
+import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import { colorWithAlpha } from "@/lib/colorExtractor";
-import { useAuth } from "@/contexts/AuthContext";
-import { type FestivalThemeConfig } from "@/services/festivalThemeService";
+import { useRouter } from "expo-router";
+import React,{ useCallback,useEffect,useMemo,useRef } from "react";
 import {
-  MAVRIXFY_MUSIC_CATEGORIES,
-  type MusicCategoryItem,
+FlatList,
+Platform,
+StyleSheet,
+type ListRenderItemInfo,
+} from "react-native";
+import Animated,{
+useAnimatedStyle,
+type SharedValue,
+} from "react-native-reanimated";
+import {
+MAVRIXFY_MUSIC_CATEGORIES,
+type MusicCategoryItem,
 } from "../constants/homeNavConstants";
 
 import {
-  CategoryTabItem,
-  UNIFIED_HEADER_TOP_BAR_HEIGHT,
-  UNIFIED_HEADER_MENU_HEIGHT,
+CategoryTabItem,
+UNIFIED_HEADER_MENU_HEIGHT,
+UNIFIED_HEADER_TOP_BAR_HEIGHT,
 } from "./CategoryTabItem";
 import { HomeTopBarRow } from "./HomeTopBarRow";
 
 export {
-  UNIFIED_HEADER_TOP_BAR_HEIGHT,
-  UNIFIED_HEADER_MENU_HEIGHT,
+UNIFIED_HEADER_MENU_HEIGHT,UNIFIED_HEADER_TOP_BAR_HEIGHT
 };
 
 export const UNIFIED_HEADER_TOTAL_HEIGHT =
@@ -252,7 +252,7 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
       <Animated.View
         style={[
           StyleSheet.absoluteFillObject,
-          { backgroundColor: "#0B0F14" },
+          { backgroundColor: Colors.background },
           stickyDockBgAnimatedStyle,
         ]}
         pointerEvents="none"

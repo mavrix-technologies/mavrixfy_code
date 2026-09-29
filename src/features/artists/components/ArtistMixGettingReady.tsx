@@ -1,7 +1,7 @@
-import React, { memo } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import { Image } from "expo-image";
 import Colors from "@/constants/colors";
+import { Image } from "expo-image";
+import { memo } from "react";
+import { ActivityIndicator,StyleSheet,Text,View } from "react-native";
 
 export interface ArtistMixGettingReadyProps {
   loadingArtists: { id: string; image: string; isStacked: boolean }[];
@@ -71,7 +71,7 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     borderWidth: 3,
-    borderColor: "#0D0E11",
+    borderColor: Colors.background,
     overflow: "hidden",
     backgroundColor: "#1C1E26",
   },

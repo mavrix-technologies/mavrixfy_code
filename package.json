@@ -23,15 +23,16 @@
     "doctor": "npx react-doctor@latest --max-duration 15",
     "verify:ios": "pwsh -File scripts/verify-ios-config.ps1",
     "festival": "npx tsx scripts/switch-festival.ts",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "typecheck": "tsc --noEmit --pretty false",
+    "test": "node --test scripts/*.regression.test.cjs",
+    "functions:deploy": "npx firebase-tools deploy --only functions:offline-licenses",
+    "test:rules": "firebase emulators:exec --project demo-mavrixfy --only firestore \"node --test scripts/firestore.rules.test.cjs\""
   },
   "dependencies": {
     "@expo-google-fonts/anton": "^0.4.2",
     "@expo-google-fonts/bebas-neue": "^0.4.1",
-    "@expo-google-fonts/cinzel": "^0.4.2",
-    "@expo-google-fonts/cinzel-decorative": "^0.4.1",
     "@expo-google-fonts/inter": "^0.4.2",
-    "@expo-google-fonts/playfair-display": "^0.4.2",
     "@expo-google-fonts/syne": "^0.4.2",
     "@expo/ui": "~57.0.19",
     "@expo/vector-icons": "^15.0.3",
@@ -82,7 +83,6 @@
     "react-native-google-mobile-ads": "16.3.3",
     "react-native-image-colors": "^2.6.0",
     "react-native-paper": "^5.15.3",
-    "react-native-qrcode-svg": "^6.3.21",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",

@@ -1,13 +1,9 @@
-import React from "react";
 import { View } from "react-native";
 import { styles } from "./layoutStyles";
 
 export { AppNavBar } from "./AppNavBar";
 export {
-  IOSNativeTabLayout,
-  IOSMiniPlayerOverlay,
-  NativeTabLayout,
-  NativeMiniPlayerOverlay,
+IOSMiniPlayerOverlay,IOSNativeTabLayout,NativeMiniPlayerOverlay,NativeTabLayout
 } from "./IOSMiniBarOverlay";
 
 export function AuthRouteFallback() {

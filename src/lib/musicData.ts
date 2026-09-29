@@ -1,4 +1,4 @@
-import { mapFilter, sortedCopy } from "@/lib/arrayUtils";
+import { mapFilter,sortedCopy } from "@/lib/arrayUtils";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 export interface Song {
   id: string;
@@ -275,21 +275,6 @@ export function convertJioSaavnSong(song: JioSaavnSong): Song {
     year: song.year,
     language: song.language,
     source: isGaanaSong ? undefined : "jiosaavn",  // Don't set source for Gaana songs
-  };
-}
-
-function convertJioSaavnPlaylist(playlist: JioSaavnPlaylist): Playlist {
-  const convertedSongs = playlist.songs?.map(convertJioSaavnSong) || [];
-  return {
-    id: `jiosaavn_${playlist.id}`,
-    name: playlist.name,
-    description: playlist.description || `${playlist.songCount || 0} songs`,
-    coverUrl: getBestImageUrl(playlist.image),
-    songs: convertedSongs.map(s => s.id),
-    songData: convertedSongs,
-    isJioSaavn: true,
-    jiosaavnId: playlist.id,
-    songCount: playlist.songCount,
   };
 }
 

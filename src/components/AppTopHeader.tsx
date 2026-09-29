@@ -1,30 +1,31 @@
-import React, { type ReactNode, useCallback, useState, useRef, useEffect, useMemo } from "react";
+import { useCallback,useEffect,useMemo,useRef,useState,type ReactNode } from "react";
 import {
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
+Pressable,
+StyleSheet,
+Text,
+View,
+type NativeScrollEvent,
+type NativeSyntheticEvent,
 } from "react-native";
 
-import { Image } from "expo-image";
-import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import * as Haptics from "expo-haptics";
+import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
-import { triggerImpact } from "@/lib/haptics";
-import { getSettings } from "@/lib/storage";
 import { colorWithAlpha } from "@/lib/colorExtractor";
+import { triggerImpact } from "@/lib/haptics";
+import * as Animated from "@/lib/nativeAnimated";
+import { getSettings } from "@/lib/storage";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 
-export const APP_TOP_HEADER_HEIGHT = 44;
+export const APP_TOP_HEADER_HEIGHT = 48;
 const DEFAULT_ELEVATION_SCROLL_THRESHOLD = 10;
 
 type AppTopHeaderProps = {
   topInset: number;
   elevated?: boolean;
-  elevationProgress?: number;
   ambientColor?: string;
   title?: string;
   titleNode?: ReactNode;
@@ -48,30 +49,26 @@ type AppTopHeaderIconButtonProps = {
 
 export function useAppTopHeaderScrollElevation(threshold = DEFAULT_ELEVATION_SCROLL_THRESHOLD) {
   const [isHeaderElevated, setIsHeaderElevated] = useState(false);
-  const [elevationProgress, setElevationProgress] = useState(0);
+  const elevatedRef = useRef(false);
 
   const handleHeaderScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const offsetY = event.nativeEvent.contentOffset.y;
-      const shouldElevateHeader = offsetY > threshold;
-      setIsHeaderElevated((current) => (
-        current === shouldElevateHeader ? current : shouldElevateHeader
-      ));
-      // Slower, smooth transition matching natural mobile scroll speed (~120px)
-      const progress = Math.min(1, Math.max(0, offsetY / 120));
-      setElevationProgress(progress);
+      const shouldElevateHeader = event.nativeEvent.contentOffset.y > threshold;
+      if (elevatedRef.current === shouldElevateHeader) return;
+
+      elevatedRef.current = shouldElevateHeader;
+      setIsHeaderElevated(shouldElevateHeader);
     },
     [threshold]
   );
 
   const resetHeaderElevation = useCallback(() => {
+    elevatedRef.current = false;
     setIsHeaderElevated(false);
-    setElevationProgress(0);
   }, []);
 
   return {
     isHeaderElevated,
-    elevationProgress,
     handleHeaderScroll,
     resetHeaderElevation,
   };
@@ -80,7 +77,6 @@ export function useAppTopHeaderScrollElevation(threshold = DEFAULT_ELEVATION_SCR
 export default function AppTopHeader({
   topInset,
   elevated = false,
-  elevationProgress,
   ambientColor,
   title,
   titleNode,
@@ -90,6 +86,16 @@ export default function AppTopHeader({
   rightWidth = 40,
   titleAlign = "center",
 }: AppTopHeaderProps) {
+  const [elevationOpacity] = useState(() => new Animated.Value(elevated ? 1 : 0));
+
+  useEffect(() => {
+    Animated.timing(elevationOpacity, {
+      toValue: elevated ? 1 : 0,
+      duration: elevated ? 140 : 110,
+      useNativeDriver: true,
+    }).start();
+  }, [elevated, elevationOpacity]);
+
   const resolvedTitle = titleNode ?? (
     title ? (
       <Text style={[styles.titleText, titleAlign === "left" && styles.titleTextLeft]} numberOfLines={1}>
@@ -98,23 +104,14 @@ export default function AppTopHeader({
     ) : null
   );
 
-  const effectiveProgress = elevationProgress !== undefined
-    ? elevationProgress
-    : elevated
-    ? 1
-    : 0;
-
-  const bgOpacity = effectiveProgress;
-  const borderAlpha = 0.15 * effectiveProgress;
-
   const gradientColors = useMemo<readonly [string, string]>(() => {
     if (ambientColor) {
       return [
         colorWithAlpha(ambientColor, 0.45, "rgba(20, 23, 31, 0.90)"),
-        "#0B0F14",
+        Colors.background,
       ] as const;
     }
-    return ["#14171F", "#0B0F14"] as const;
+    return [Colors.surface, Colors.background] as const;
   }, [ambientColor]);
 
   return (
@@ -124,17 +121,17 @@ export default function AppTopHeader({
         styles.header,
         {
           paddingTop: topInset,
-          borderBottomColor: `rgba(223, 226, 235, ${borderAlpha})`,
-          borderBottomWidth: borderAlpha > 0.01 ? StyleSheet.hairlineWidth : 0,
+          borderBottomColor: "rgba(223, 226, 235, 0.15)",
+          borderBottomWidth: elevated ? StyleSheet.hairlineWidth : 0,
         },
       ]}
     >
-      <View
+      <Animated.View
         pointerEvents="none"
         style={[
           StyleSheet.absoluteFill,
           styles.headerElevatedBg,
-          { opacity: bgOpacity },
+          { opacity: elevationOpacity },
         ]}
       >
         <LinearGradient
@@ -143,7 +140,7 @@ export default function AppTopHeader({
           end={{ x: 0.5, y: 1 }}
           style={StyleSheet.absoluteFillObject}
         />
-      </View>
+      </Animated.View>
       <View style={styles.content}>
         <View style={[styles.sideSlot, { width: leftWidth }]}>{left}</View>
         <View
@@ -213,7 +210,6 @@ export function AppTopHeaderIconButton({
 export function AppTopHeaderProfileButton() {
   const { push: routerPush } = useRouter();
   const { user, isAuthenticated } = useAuth();
-  const buttonRef = useRef<View>(null);
   const [showNewDot, setShowNewDot] = useState(false);
 
   useEffect(() => {
@@ -225,29 +221,23 @@ export function AppTopHeaderProfileButton() {
     routerPush("/profile");
   }, [routerPush]);
 
-  const handleLayout = useCallback(() => {
-    // no-op — tour removed
-  }, []);
-
   return (
-    <View ref={buttonRef} onLayout={handleLayout} collapsable={false}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Open profile"
-        style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-        onPress={handlePress}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        {isAuthenticated && user?.picture ? (
-          <Image source={{ uri: user.picture }} style={styles.avatarImage} contentFit="cover" />
-        ) : (
-          <View style={styles.avatarFallback}>
-            <Ionicons name="person-circle-outline" size={28} color="#F8FBF9" />
-          </View>
-        )}
-        {showNewDot && <View style={styles.newDot} />}
-      </Pressable>
-    </View>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Open profile"
+      style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+      onPress={handlePress}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+    >
+      {isAuthenticated && user?.picture ? (
+        <Image source={{ uri: user.picture }} style={styles.avatarImage} contentFit="cover" />
+      ) : (
+        <View style={styles.avatarFallback}>
+          <Ionicons name="person-circle-outline" size={28} color="#F8FBF9" />
+        </View>
+      )}
+      {showNewDot && <View style={styles.newDot} />}
+    </Pressable>
   );
 }
 
@@ -284,7 +274,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(223,226,235,0.15)",
   },
   headerElevatedBg: {
-    backgroundColor: "#0E1016",
+    backgroundColor: Colors.background,
   },
   headerSeamless: {
     borderBottomWidth: 0,
@@ -293,14 +283,14 @@ const styles = StyleSheet.create({
   },
   content: {
     minHeight: APP_TOP_HEADER_HEIGHT,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
   },
   sideSlot: {
-    minHeight: 36,
+    minHeight: 40,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -330,9 +320,9 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   button: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: "transparent",
     borderWidth: 0,
     borderColor: "transparent",
@@ -350,17 +340,17 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.96 }],
   },
   avatarFallback: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: "transparent",
     justifyContent: "center",
     alignItems: "center",
   },
   avatarImage: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
   },
   newDot: {
     position: "absolute",

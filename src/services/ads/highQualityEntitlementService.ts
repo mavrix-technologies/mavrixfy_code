@@ -1,7 +1,5 @@
-import { AD_UNITS } from "@/constants/admob";
-import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobileAds";
-import { logger } from "@/lib/logger";
-import { getSettings, saveSettings, isHighQualityEntitled, setHighQualityEntitlement } from "@/lib/storage";
+import { getSettings,isHighQualityEntitled,saveSettings } from "@/lib/storage";
+import { runRewardedAd } from "./rewardedAdService";
 
 export const DEFAULT_HIGH_QUALITY_DURATION_HOURS = 0;
 
@@ -21,10 +19,7 @@ export async function isHighQualityUnlocked(): Promise<boolean> {
  * Grants High Quality entitlement permanently (kept after one-time unlock).
  */
 export async function unlockHighQuality(_durationHours?: number): Promise<void> {
-  await Promise.all([
-    setHighQualityEntitlement(true, null),
-    saveSettings({ streamingQuality: "high", highQualityUnlocked: true, highQualityExpiresAt: null }),
-  ]);
+  await saveSettings({ streamingQuality: "high", highQualityUnlocked: true, highQualityExpiresAt: null });
 }
 
 /**
@@ -41,92 +36,9 @@ export async function requestHighQualityUnlockWithRewardedAd(
     return true;
   }
 
-  const adsModule = getGoogleMobileAdsModule();
-  if (!adsModule || !AD_UNITS.REWARDED) {
-    logger.warn("[Ads] Rewarded ads unavailable. Unlocking directly.");
-    await unlockHighQuality();
-    return true;
-  }
-
-  return new Promise<boolean>((resolve) => {
-    let resolved = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    let unsubLoaded = () => {};
-    let unsubEarned = () => {};
-    let unsubClosed = () => {};
-    let unsubError = () => {};
-
-    const cleanup = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-      try { unsubLoaded(); } catch {}
-      try { unsubEarned(); } catch {}
-      try { unsubClosed(); } catch {}
-      try { unsubError(); } catch {}
-    };
-
-    const resolveEntitlementResult = (result: boolean) => {
-      if (resolved) return;
-      resolved = true;
-      cleanup();
-      resolve(result);
-    };
-
-    // Fallback timer in case ad network hangs indefinitely
-    timeoutId = setTimeout(async () => {
-      logger.warn("[Ads] Rewarded ad request timed out. Unlocking High Quality directly.");
-      await unlockHighQuality();
-      resolveEntitlementResult(true);
-    }, 6000);
-
-    void (async () => {
-      try {
-        await initializeMobileAds();
-        const { RewardedAd, RewardedAdEventType, AdEventType } = adsModule;
-        const rewarded = RewardedAd.createForAdRequest(AD_UNITS.REWARDED, {
-          requestNonPersonalizedAdsOnly: true,
-        });
-
-        unsubLoaded = rewarded.addAdEventListener(RewardedAdEventType.LOADED, () => {
-          if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
-          }
-          try {
-            rewarded.show();
-          } catch (err) {
-            logger.warn("[Ads] Failed to show rewarded ad, unlocking gracefully:", err);
-            void (async () => {
-              await unlockHighQuality();
-              resolveEntitlementResult(true);
-            })();
-          }
-        });
-
-        unsubEarned = rewarded.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
-          // Reward flag noted
-        });
-
-        unsubClosed = rewarded.addAdEventListener(AdEventType.CLOSED, async () => {
-          await unlockHighQuality();
-          resolveEntitlementResult(true);
-        });
-
-        unsubError = rewarded.addAdEventListener(AdEventType.ERROR, async (err: unknown) => {
-          logger.warn("[Ads] Rewarded ad failed to load, unlocking gracefully:", err);
-          await unlockHighQuality();
-          resolveEntitlementResult(true);
-        });
-
-        rewarded.load();
-      } catch (err) {
-        logger.warn("[Ads] Error triggering rewarded ad, unlocking gracefully:", err);
-        await unlockHighQuality();
-        resolveEntitlementResult(true);
-      }
-    })();
-  });
+  const result = await runRewardedAd();
+  // Unsupported runtimes retain free access; a dismissed or failed ad grants no reward.
+  if (result !== "earned" && result !== "unavailable") return false;
+  await unlockHighQuality();
+  return true;
 }

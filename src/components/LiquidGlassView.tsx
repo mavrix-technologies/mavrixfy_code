@@ -1,14 +1,14 @@
-import React, { memo } from "react";
+import { BlurView,type BlurTint } from "expo-blur";
+import { GlassView,isLiquidGlassAvailable,type GlassStyle } from "expo-glass-effect";
+import React,{ memo } from "react";
 import {
-  Platform,
-  StyleSheet,
-  View,
-  type StyleProp,
-  type ViewProps,
-  type ViewStyle,
+Platform,
+StyleSheet,
+View,
+type StyleProp,
+type ViewProps,
+type ViewStyle,
 } from "react-native";
-import { GlassView, isLiquidGlassAvailable, type GlassStyle } from "expo-glass-effect";
-import { BlurView, type BlurTint } from "expo-blur";
 
 export interface LiquidGlassViewProps extends ViewProps {
   intensity?: number;

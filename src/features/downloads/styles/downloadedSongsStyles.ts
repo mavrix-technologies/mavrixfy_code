@@ -1,7 +1,8 @@
+import Colors from "@/constants/colors";
 import { StyleSheet } from "react-native";
 
 export const DOWNLOADS_UI = {
-  bg: "#10141a",
+  bg: Colors.background,
   card: "#181c22",
   cardHover: "#20242b",
   border: "rgba(255, 255, 255, 0.08)",

@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState, memo } from "react";
-import * as Animated from "@/lib/nativeAnimated";
-import { View, StyleSheet } from "react-native";
-import { Image } from "expo-image";
 import type { Song } from "@/lib/musicData";
+import * as Animated from "@/lib/nativeAnimated";
+import { Image } from "expo-image";
+import { memo,useCallback,useEffect,useRef,useState } from "react";
+import { StyleSheet,View } from "react-native";
 import { styles } from "../styles/playerScreenStyles";
 
 export type ArtworkQueueItem = {

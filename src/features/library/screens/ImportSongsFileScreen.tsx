@@ -1,42 +1,41 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import {
-  View,
-  Text,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Platform,
-  ActivityIndicator,
-} from "react-native";
-import { styles } from "../styles/importSongsStyles";
-import { LinearGradient } from "expo-linear-gradient";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
-import { ImpactFeedbackStyle } from "expo-haptics";
-import { File } from "expo-file-system";
 import Colors from "@/constants/colors";
-import { safeGoBack } from "@/utils/navigation";
-import { parseFile } from "@/lib/file-parser";
-import { searchSong, getMatchConfidence } from "@/lib/song-matcher";
-import { ParsedSong } from "@/types/import";
 import { useAuth } from "@/contexts/AuthContext";
-import { type Song } from "@/lib/musicData";
-import { triggerImpact } from "@/lib/haptics";
-import { createUserPlaylist, addSongToPlaylist, getUserPlaylists } from "@/lib/storage";
+import { parseFile } from "@/lib/file-parser";
 import {
-  createFirestorePlaylist,
-  addLikedSongToFirestore,
-  getUserFirestorePlaylists,
-  addSongToFirestorePlaylist,
+addLikedSongToFirestore,
+addSongToFirestorePlaylist,
+createFirestorePlaylist,
+getUserFirestorePlaylists,
 } from "@/lib/firestore";
+import { triggerImpact } from "@/lib/haptics";
 import { logger } from "@/lib/logger";
+import { type Song } from "@/lib/musicData";
+import { getMatchConfidence,searchSong } from "@/lib/song-matcher";
+import { addSongToPlaylist,createUserPlaylist,getUserPlaylists } from "@/lib/storage";
+import { ParsedSong } from "@/types/import";
+import { safeGoBack } from "@/utils/navigation";
+import { Ionicons } from "@expo/vector-icons";
+import { File } from "expo-file-system";
+import { ImpactFeedbackStyle } from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
+import { router,useLocalSearchParams } from "expo-router";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import {
+ActivityIndicator,
+FlatList,
+Platform,
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { styles } from "../styles/importSongsStyles";
 
 import {
-  type ImportDestination,
-  type ImportDestinationPlaylist,
-  ImportedSongRow,
-  ImportDestinationModal,
+ImportDestinationModal,
+type ImportDestinationPlaylist,
+ImportedSongRow
 } from "../components/ImportSongsSubComponents";
 
 function getParsedSongKey(song: ParsedSong): string {
@@ -117,7 +116,7 @@ export function ImportSongsFileScreen() {
     } catch {
       // Non-fatal, user can still create a new playlist
     }
-  }, [user?.id]);
+  }, [user]);
 
   // Search all parsed songs with controlled batch concurrency (10 parallel per batch)
   const searchAllSongs = useCallback(async (songs: ParsedSong[]) => {
@@ -276,7 +275,7 @@ export function ImportSongsFileScreen() {
   }, [fileName, fileUri, searchAllSongs]);
 
   useEffect(() => {
-    void loadFile();
+    void Promise.resolve().then(loadFile);
   }, [loadFile]);
 
   const openDestinationModal = useCallback(() => {
@@ -428,7 +427,7 @@ export function ImportSongsFileScreen() {
   if (step === "error") {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
-        <LinearGradient colors={[Colors.background, "#1a1a1a"]} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFill} />
         <View style={styles.centerContainer}>
           <Ionicons name="alert-circle-outline" size={64} color="#FF6B6B" />
           <Text style={styles.errorTitle}>Import Failed</Text>
@@ -445,7 +444,7 @@ export function ImportSongsFileScreen() {
   if (step === "loading") {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
-        <LinearGradient colors={[Colors.background, "#1a1a1a"]} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFill} />
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={Colors.primary} />
           <Text style={styles.loadingText}>Reading and parsing playlist…</Text>
@@ -458,7 +457,7 @@ export function ImportSongsFileScreen() {
   if (step === "searching") {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
-        <LinearGradient colors={[Colors.background, "#1a1a1a"]} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFill} />
         <View style={styles.centerContainer}>
           <View style={styles.progressIconCircle}>
             <Ionicons name="search" size={42} color={Colors.primary} />
@@ -483,7 +482,7 @@ export function ImportSongsFileScreen() {
   if (step === "importing") {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
-        <LinearGradient colors={[Colors.background, "#1a1a1a"]} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFill} />
         <View style={styles.centerContainer}>
           <View style={styles.progressIconCircle}>
             <Ionicons name="download" size={42} color={Colors.primary} />
@@ -512,7 +511,7 @@ export function ImportSongsFileScreen() {
   if (step === "complete") {
     return (
       <View style={[styles.container, { paddingTop: topInset }]}>
-        <LinearGradient colors={[Colors.background, "#1a1a1a"]} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFill} />
         <View style={styles.centerContainer}>
           <Ionicons name="checkmark-circle" size={80} color={Colors.primary} />
           <Text style={styles.completeTitle}>Import Complete!</Text>
@@ -580,7 +579,7 @@ export function ImportSongsFileScreen() {
   // 6. Review state (main interactive list)
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
-      <LinearGradient colors={[Colors.background, "#1a1a1a"]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFill} />
 
       {/* Header */}
       <View style={styles.header}>

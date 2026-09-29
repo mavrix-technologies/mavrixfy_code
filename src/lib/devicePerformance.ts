@@ -1,5 +1,5 @@
-import { Platform } from "react-native";
 import * as Device from "expo-device";
+import { Platform } from "react-native";
 
 const ANDROID_LOW_RAM_FEATURE = "android.hardware.ram.low";
 // Devices with ≤3 GB RAM get low-end treatment for the video backdrop.

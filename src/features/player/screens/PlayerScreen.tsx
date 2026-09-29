@@ -1,47 +1,51 @@
-import React, { memo, useCallback, useEffect, useState } from "react";
+import { FullscreenKaraokeModal } from "@/components/FullscreenKaraokeModal";
+import { IS_ANDROID,IS_IOS } from "@/constants/platform";
+import type { Song } from "@/lib/musicData";
+import * as Animated from "@/lib/nativeAnimated";
+import { playerUIStateStore,type PlayerUIState } from "@/lib/playerUIState";
+import { usePlaybackNowPlaying } from "@/services/audio/PlaybackEngine";
+import { getPlaybackProgressSnapshot,usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
+import { safeGoBack } from "@/utils/navigation";
+import { LinearGradient } from "expo-linear-gradient";
+import React,{ memo,useCallback,useEffect,useMemo,useState } from "react";
 import {
-  BackHandler,
-  FlatList,
-  StyleSheet,
-  View,
-  useWindowDimensions,
+BackHandler,
+ScrollView,
+StyleSheet,
+View,
+useWindowDimensions,
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Reanimated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-  type SharedValue,
+import { Gesture,GestureDetector } from "react-native-gesture-handler";
+import Reanimated,{
+useAnimatedStyle,
+useSharedValue,
+withSpring,
+type SharedValue,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
-import * as Animated from "@/lib/nativeAnimated";
-import { LinearGradient } from "expo-linear-gradient";
-import { IS_ANDROID, IS_IOS } from "@/constants/platform";
-import type { Song } from "@/lib/musicData";
-import { safeGoBack } from "@/utils/navigation";
-import { usePlaybackNowPlaying } from "@/services/audio/PlaybackEngine";
-import { playerUIStateStore, type PlayerUIState } from "@/lib/playerUIState";
-import { styles } from "../styles/playerScreenStyles";
-import { PlayerStickyHeader } from "../components/PlayerStickyHeader";
-import { PlayerArtworkCarousel } from "../components/PlayerArtworkCarousel";
-import { PlayerControlsSection } from "../components/PlayerControlsSection";
-import { PlayerBottomDetailsSection } from "../components/PlayerBottomDetailsSection";
 import { PlayerAmbientBackdrop } from "../components/PlayerAmbientBackdrop";
+import { PlayerArtworkCarousel } from "../components/PlayerArtworkCarousel";
 import { CinematicPlayerBackground } from "../components/PlayerArtworkViews";
+import { PlayerBottomDetailsSection } from "../components/PlayerBottomDetailsSection";
+import { PlayerControlsSection } from "../components/PlayerControlsSection";
 import { QueueSongRow } from "../components/PlayerDiscoverySections";
-import { FullscreenKaraokeModal } from "@/components/FullscreenKaraokeModal";
 import { PlayerEmptyState } from "../components/PlayerEmptyState";
+import { PlayerStickyHeader } from "../components/PlayerStickyHeader";
 import {
-  useLegacyPlayerViewState,
-  SPRING_CONFIG,
-  collapseOnJS,
+SPRING_CONFIG,
+collapseOnJS,
+useLegacyPlayerViewState,
 } from "../hooks/useLegacyPlayerViewState";
+import { styles } from "../styles/playerScreenStyles";
 
-const AnimatedPlayerFlatList = Animated.createAnimatedComponent(FlatList);
-const EMPTY_PLAYER_SCROLL_SONGS: Song[] = [];
+const AnimatedPlayerScrollView = Animated.createAnimatedComponent(ScrollView);
 
 function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<number> }) {
   const s = useLegacyPlayerViewState(translateY);
+  const ambientStartPositionMs = useMemo(
+    () => getPlaybackProgressSnapshot().positionMillis,
+    [s.backgroundVideoId, s.screenSong?.id]
+  );
 
   const renderQueueItem = useCallback(
     ({ item, index }: { item: Song; index: number }) => (
@@ -56,8 +60,6 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
     ),
     [s.activeQueueIndex, s.handleQueueSongPress, s.isShortScreen, s.playerIsPlaying]
   );
-
-  const renderPlayerScrollItem = useCallback(() => null, []);
 
   if (!s.screenSong) {
     return (
@@ -113,11 +115,8 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
             onOptionsPress={s.handleSongOptionsPress}
           />
 
-          <AnimatedPlayerFlatList
+          <AnimatedPlayerScrollView
             style={styles.playerScroll}
-            data={EMPTY_PLAYER_SCROLL_SONGS}
-            keyExtractor={(item: any) => item.id}
-            renderItem={renderPlayerScrollItem}
             contentContainerStyle={[styles.playerScrollContent, { paddingBottom: s.bottomContentPadding }]}
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled
@@ -131,123 +130,114 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
               [{ nativeEvent: { contentOffset: { y: s.headerScrollY } } }],
               { useNativeDriver: true }
             )}
-            ListHeaderComponent={
-              <>
-                <PlayerAmbientBackdrop
-                  shouldRender={s.shouldRenderBackgroundVideo}
-                  screenHeight={s.screenHeight}
-                  screenWidth={s.screenWidth}
-                  isLowEnd={s.isLowEnd}
-                  backgroundVideoId={s.backgroundVideoId}
-                  isScreenFocused={s.isScreenFocused}
-                  playerIsPlaying={s.playerIsPlaying}
-                  fullscreenLyricsVisible={s.fullscreenLyricsVisible}
-                  positionMillis={s.positionMillis}
-                  onVideoActive={s.handleVideoActive}
-                  onVideoError={s.handleVideoError}
-                  artScrollX={s.artScrollX}
-                  activeQueueIndex={s.activeQueueIndex}
-                  artCarouselSnapInterval={s.artCarouselSnapInterval}
-                />
-                <View
-                  style={[
-                    styles.playerContent,
-                    {
-                      height: s.screenHeight - (s.isShortScreen ? 48 : 58),
-                      paddingTop: s.topInset + s.topBarHeight,
-                      paddingBottom: 6,
-                    },
-                  ]}
-                >
-                  <GestureDetector gesture={s.playerPrimaryDismissGesture}>
-                    <View style={styles.playerPrimaryStack}>
-                      <PlayerArtworkCarousel
-                        artCarouselRef={s.artCarouselRef}
-                        artworkQueue={s.artworkQueue}
-                        artCarouselSnapInterval={s.artCarouselSnapInterval}
-                        artCarouselPageWidth={s.artCarouselPageWidth}
-                        artSize={s.artSize}
-                        activeQueueIndex={s.activeQueueIndex}
-                        artScrollX={s.artScrollX}
-                        playingQueueLength={s.playingQueue.length}
-                        isProgressSeeking={s.isProgressSeeking}
-                        ambientVideoLayoutActive={s.ambientVideoLayoutActive}
-                        onArtworkSongChange={s.handleArtworkSongChange}
-                        onScroll={s.handleArtworkScroll}
-                        onMomentumScrollEnd={s.handleArtworkScrollFinished}
-                        artCarouselGetItemLayout={s.artCarouselGetItemLayout}
-                      />
+          >
+            <PlayerAmbientBackdrop
+              shouldRender={s.shouldRenderBackgroundVideo}
+              screenHeight={s.screenHeight}
+              screenWidth={s.screenWidth}
+              isLowEnd={s.isLowEnd}
+              backgroundVideoId={s.backgroundVideoId}
+              isScreenFocused={s.isScreenFocused}
+              playerIsPlaying={s.playerIsPlaying}
+              fullscreenLyricsVisible={s.fullscreenLyricsVisible}
+              initialOffsetMs={ambientStartPositionMs}
+              onVideoActive={s.handleVideoActive}
+              onVideoError={s.handleVideoError}
+              artScrollX={s.artScrollX}
+              activeQueueIndex={s.activeQueueIndex}
+              artCarouselSnapInterval={s.artCarouselSnapInterval}
+            />
+            <View
+              style={[
+                styles.playerContent,
+                {
+                  height: s.screenHeight - (s.isShortScreen ? 48 : 58),
+                  paddingTop: s.topInset + s.topBarHeight,
+                  paddingBottom: 6,
+                },
+              ]}
+            >
+              <GestureDetector gesture={s.playerPrimaryDismissGesture}>
+                <View style={styles.playerPrimaryStack}>
+                  <PlayerArtworkCarousel
+                    artCarouselRef={s.artCarouselRef}
+                    artworkQueue={s.artworkQueue}
+                    artCarouselSnapInterval={s.artCarouselSnapInterval}
+                    artCarouselPageWidth={s.artCarouselPageWidth}
+                    artSize={s.artSize}
+                    activeQueueIndex={s.activeQueueIndex}
+                    artScrollX={s.artScrollX}
+                    playingQueueLength={s.playingQueue.length}
+                    isProgressSeeking={s.isProgressSeeking}
+                    ambientVideoLayoutActive={s.ambientVideoLayoutActive}
+                    onArtworkSongChange={s.handleArtworkSongChange}
+                    onScroll={s.handleArtworkScroll}
+                    onMomentumScrollEnd={s.handleArtworkScrollFinished}
+                    artCarouselGetItemLayout={s.artCarouselGetItemLayout}
+                  />
 
-                      <PlayerControlsSection
-                        screenSong={s.screenSong}
-                        sheetTextColor={s.sheetTextColor}
-                        sheetMutedTextColor={s.sheetMutedTextColor}
-                        selectedControlIconColor={s.selectedControlIconColor}
-                        sideControlIconColor={s.sideControlIconColor}
-                        activeControlIconColor={s.activeControlIconColor}
-                        songDetailActionBtnStyle={s.songDetailActionBtnStyle}
-                        playerIconBtnStyle={s.playerIconBtnStyle}
-                        prevNextBtnSizeStyle={s.prevNextBtnSizeStyle}
-                        isShortScreen={s.isShortScreen}
-                        isVeryShortScreen={s.isVeryShortScreen}
-                        interactionReady={s.interactionReady}
-                        liked={s.liked}
-                        onToggleLike={() => s.toggleLike(s.screenSong!)}
-                        progress={s.progress}
-                        totalLengthMs={s.duration}
-                        onSeekTo={s.seekTo}
-                        onSeekingChange={s.setIsProgressSeeking}
-                        controlsRowGap={s.controlsRowGap}
-                        shuffleRepeatIconSize={s.shuffleRepeatIconSize}
-                        prevNextIconSize={s.prevNextIconSize}
-                        playButtonSize={s.playButtonSize}
-                        playIconSize={s.playIconSize}
-                        songDetailIconSize={s.songDetailIconSize}
-                        playerIsShuffled={s.playerIsShuffled}
-                        playbackActive={s.playerIsPlaying}
-                        playerRepeatMode={s.playerRepeatMode}
-                        onToggleShuffle={s.toggleShuffle}
-                        onSkip={s.handleSkip}
-                        onTogglePlay={s.togglePlay}
-                        onToggleRepeat={s.toggleRepeat}
-                      />
-                    </View>
-                  </GestureDetector>
+                  <PlayerControlsSection
+                    screenSong={s.screenSong}
+                    sheetTextColor={s.sheetTextColor}
+                    sheetMutedTextColor={s.sheetMutedTextColor}
+                    selectedControlIconColor={s.selectedControlIconColor}
+                    sideControlIconColor={s.sideControlIconColor}
+                    activeControlIconColor={s.activeControlIconColor}
+                    songDetailActionBtnStyle={s.songDetailActionBtnStyle}
+                    playerIconBtnStyle={s.playerIconBtnStyle}
+                    prevNextBtnSizeStyle={s.prevNextBtnSizeStyle}
+                    isShortScreen={s.isShortScreen}
+                    isVeryShortScreen={s.isVeryShortScreen}
+                    interactionReady={s.interactionReady}
+                    liked={s.liked}
+                    onToggleLike={() => s.toggleLike(s.screenSong!)}
+                    onSeekTo={s.seekTo}
+                    onSeekingChange={s.setIsProgressSeeking}
+                    controlsRowGap={s.controlsRowGap}
+                    shuffleRepeatIconSize={s.shuffleRepeatIconSize}
+                    prevNextIconSize={s.prevNextIconSize}
+                    playButtonSize={s.playButtonSize}
+                    playIconSize={s.playIconSize}
+                    songDetailIconSize={s.songDetailIconSize}
+                    playerIsShuffled={s.playerIsShuffled}
+                    playbackActive={s.playerIsPlaying}
+                    playerRepeatMode={s.playerRepeatMode}
+                    onToggleShuffle={s.toggleShuffle}
+                    onSkip={s.handleSkip}
+                    onTogglePlay={s.togglePlay}
+                    onToggleRepeat={s.toggleRepeat}
+                  />
                 </View>
+              </GestureDetector>
+            </View>
 
-                <PlayerBottomDetailsSection
-                  screenSong={s.screenSong}
-                  currentPositionSeconds={s.currentPositionSeconds}
-                  totalLengthSec={s.duration > 0 ? s.duration / 1000 : s.screenSong?.duration || 0}
-                  playbackActive={s.playbackState.isPlaying}
-                  accentColor={s.artworkPalette.accent}
-                  onTogglePlay={s.togglePlay}
-                  onLyricSeek={s.handleLyricSeek}
-                  onToggleFullScreenLyrics={() => s.setFullscreenLyricsVisible(true)}
-                  ambientVideoLayoutActive={s.ambientVideoLayoutActive}
-                  isShortScreen={s.isShortScreen}
-                  queueViewportStyle={s.queueViewportStyle}
-                  playingQueue={s.playingQueue}
-                  queueKeyExtractor={s.queueKeyExtractor}
-                  renderQueueItem={renderQueueItem}
-                  getQueueItemLayout={s.getQueueItemLayout}
-                  artistDetails={s.artistDetails}
-                  artistLoading={s.artistLoading}
-                  onViewArtistProfile={s.handleViewArtistProfile}
-                  relatedSongs={s.relatedSongs}
-                  onPlayRelatedSong={s.handlePlayRelatedSong}
-                />
-              </>
-            }
-          />
+            <PlayerBottomDetailsSection
+              screenSong={s.screenSong}
+              playbackActive={s.playbackState.isPlaying}
+              accentColor={s.artworkPalette.accent}
+              onTogglePlay={s.togglePlay}
+              onLyricSeek={s.handleLyricSeek}
+              onToggleFullScreenLyrics={() => s.setFullscreenLyricsVisible(true)}
+              ambientVideoLayoutActive={s.ambientVideoLayoutActive}
+              isShortScreen={s.isShortScreen}
+              queueViewportStyle={s.queueViewportStyle}
+              playingQueue={s.playingQueue}
+              queueKeyExtractor={s.queueKeyExtractor}
+              renderQueueItem={renderQueueItem}
+              getQueueItemLayout={s.getQueueItemLayout}
+              artistDetails={s.artistDetails}
+              artistLoading={s.artistLoading}
+              onViewArtistProfile={s.handleViewArtistProfile}
+              relatedSongs={s.relatedSongs}
+              onPlayRelatedSong={s.handlePlayRelatedSong}
+            />
+          </AnimatedPlayerScrollView>
         </View>
       </View>
 
-      <FullscreenKaraokeModal
+      <LiveFullscreenKaraokeModal
         visible={s.fullscreenLyricsVisible}
         song={s.screenSong}
-        currentPositionSeconds={s.currentPositionSeconds}
-        durationSeconds={s.duration > 0 ? s.duration / 1000 : s.screenSong?.duration || 0}
         isPlaying={s.playbackState.isPlaying}
         accentColor={s.artworkPalette.accent}
         onTogglePlay={s.togglePlay}
@@ -257,6 +247,19 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
     </View>
   );
 }
+
+const LiveFullscreenKaraokeModal = memo(function LiveFullscreenKaraokeModal(
+  props: Omit<React.ComponentProps<typeof FullscreenKaraokeModal>, "currentPositionSeconds" | "durationSeconds">
+) {
+  const { positionMillis, duration } = usePlaybackProgressStore();
+  return (
+    <FullscreenKaraokeModal
+      {...props}
+      currentPositionSeconds={positionMillis / 1000}
+      durationSeconds={duration > 0 ? duration / 1000 : props.song?.duration || 0}
+    />
+  );
+});
 
 export const PlayerScreen = memo(function PlayerScreen() {
   const { height: screenHeight } = useWindowDimensions();
@@ -298,6 +301,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
     return () => sub.remove();
   }, []);
 
+  /* eslint-disable react-hooks/immutability -- Gesture callbacks update Reanimated shared values after render. */
   const panGesture = Gesture.Pan()
     .activeOffsetY(8)
     .failOffsetY(-8)
@@ -315,6 +319,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
         translateY.value = withSpring(0, SPRING_CONFIG);
       }
     });
+  /* eslint-enable react-hooks/immutability */
 
   const containerStyle = useAnimatedStyle(() => {
     const isHidden = translateY.value >= screenHeight - 100;

@@ -1,28 +1,30 @@
-import React, { useState, useEffect, useRef } from "react";
-import { StyleSheet, useWindowDimensions } from "react-native";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  Easing,
-  type SharedValue,
-} from "react-native-reanimated";
-import { LinearGradient } from "expo-linear-gradient";
+import Colors from "@/constants/colors";
+import {
+colorWithAlpha,
+extractArtworkColors
+} from "@/lib/colorExtractor";
 import { type Song } from "@/lib/musicData";
 import { type FestivalThemeConfig } from "@/services/festivalThemeService";
-import {
-  extractArtworkColors,
-  colorWithAlpha,
-  type ArtworkPalette,
-} from "@/lib/colorExtractor";
+import { LinearGradient } from "expo-linear-gradient";
+import React,{ useEffect,useRef,useState } from "react";
+import { StyleSheet } from "react-native";
+import Animated,{
+Easing,
+useAnimatedStyle,
+useSharedValue,
+withTiming,
+type SharedValue,
+} from "react-native-reanimated";
+
+import { usePlaybackNowPlaying } from "@/services/audio/PlaybackEngine";
 
 type GradientStops = readonly [string, string, string, string];
 
 const DEFAULT_GRADIENT_COLORS: GradientStops = [
-  "#0B0F14",
-  "#0B0F14",
-  "#0B0F14",
-  "#0B0F14",
+  Colors.background,
+  Colors.background,
+  Colors.background,
+  Colors.background,
 ] as const;
 
 const GRADIENT_LOCATIONS = [0, 0.40, 0.75, 1] as const;
@@ -38,8 +40,8 @@ function buildColorStopsFromPalette(accent: string, background: string): Gradien
   return [
     colorWithAlpha(accent, 0.42, "rgba(20, 24, 32, 0.50)"),
     colorWithAlpha(background, 0.65, "rgba(18, 22, 28, 0.50)"),
-    "rgba(11, 15, 20, 0.90)",
-    "#0B0F14",
+    colorWithAlpha(Colors.background, 0.90, Colors.background),
+    Colors.background,
   ];
 }
 
@@ -50,8 +52,6 @@ interface HomeAmbientBackdropProps {
   scrollY?: number | SharedValue<number>;
 }
 
-import { usePlaybackNowPlaying } from "@/services/audio/PlaybackEngine";
-
 export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
   currentSong: propSong,
   themeConfig,
@@ -60,8 +60,8 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
   const { currentSong: contextSong } = usePlaybackNowPlaying();
   const currentSong = propSong !== undefined ? propSong : contextSong;
   const isFestivalMode = themeConfig?.enabled === true;
-  const { width: windowWidth } = useWindowDimensions();
-  const screenWidth = windowWidth || 390;
+
+
 
   // Dynamic Song Ambient Color Extraction State (Original Git Logic)
   const [colorsA, setColorsA] = useState<GradientStops>(gCachedColorStops);
@@ -148,7 +148,7 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
       colorWithAlpha(festiveAccent, 0.38, "rgba(1, 77, 82, 0.38)"),
       colorWithAlpha(festiveAccent, 0.14, "rgba(1, 77, 82, 0.14)"),
       "rgba(11, 15, 20, 0.85)",
-      "#0B0F14",
+      Colors.background,
     ];
 
     return (

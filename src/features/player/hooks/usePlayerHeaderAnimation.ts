@@ -1,5 +1,5 @@
-import { useState } from "react";
 import * as Animated from "@/lib/nativeAnimated";
+import { useState } from "react";
 
 export function usePlayerHeaderAnimation() {
   const [headerScrollY] = useState(() => new Animated.Value(0));

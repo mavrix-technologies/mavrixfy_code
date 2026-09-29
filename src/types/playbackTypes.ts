@@ -16,67 +16,10 @@ export interface PlaybackQualityState {
   isFallback: boolean;
 }
 
-export interface PlayerState {
-  currentSong: Song | null;
-  queue: Song[];
-  userQueuedSongIds: string[];
-  sourceQueue: Song[];
-  queueIndex: number;
-  isPlaying: boolean;
-  progress: number;
-  duration: number;
-  positionMillis: number;
-  isShuffled: boolean;
-  repeatMode: "off" | "all" | "one";
-  likedSongIds: string[];
-  likedSongs: Song[];
-  isLoading: boolean;
-  albumColor: string;
-  textColor: string;
-  sleepTimer: SleepTimerState | null;
-  playbackQuality: PlaybackQualityState;
-}
-
-export interface PlayerContextValue extends PlayerState {
-  playSong: (song: Song, queue?: Song[]) => void;
-  shufflePlay: (songs: Song[], startSong?: Song) => void;
-  togglePlay: () => void;
-  nextSong: () => void;
-  prevSong: () => void;
-  seekTo: (progress: number) => void;
-  toggleShuffle: () => void;
-  toggleRepeat: () => void;
-  toggleLike: (song: Song) => void;
-  isLiked: (songId: string) => boolean;
-  addToQueue: (song: Song) => void;
-  playNext: (song: Song) => void;
-  removeFromQueue: (index: number) => void;
-  reorderQueue: (fromIndex: number, toIndex: number) => void;
-  clearQueue: () => void;
-  shuffleQueue: () => void;
-  setSleepTimer: (selection: SleepTimerSelection) => void;
-  clearSleepTimer: () => void;
-  setAlbumColor: (color: string) => void;
-  setTextColor: (color: string) => void;
-  changeStreamingQuality: (quality: "auto" | "low" | "medium" | "high") => Promise<void>;
-}
-
-export type PlayerLiteContextValue = Omit<PlayerContextValue, "progress" | "duration" | "positionMillis">;
-
 export interface PlayerProgressContextValue {
   progress: number;
   duration: number;
   positionMillis: number;
-}
-
-export interface PlayerRowContextValue {
-  currentSongId: string | null;
-  isPlaying: boolean;
-  playSong: (song: Song, queue?: Song[]) => void;
-  toggleLike: (song: Song) => void;
-  isLiked: (songId: string) => boolean;
-  addToQueue: (song: Song) => void;
-  playNext: (song: Song) => void;
 }
 
 export interface PlayerBrowseContextValue {
@@ -89,21 +32,6 @@ export interface PlayerBrowseContextValue {
   togglePlay: () => void;
   toggleLike: (song: Song) => void;
   toggleShuffle: () => void;
-}
-
-export interface PlayerQueueContextValue {
-  currentSong: Song | null;
-  queue: Song[];
-  userQueuedSongIds: string[];
-  queueIndex: number;
-  isShuffled: boolean;
-  sleepTimer: SleepTimerState | null;
-  playSong: (song: Song, queue?: Song[]) => void;
-  shufflePlay: (songs: Song[], startSong?: Song) => void;
-  removeFromQueue: (index: number) => void;
-  reorderQueue: (fromIndex: number, toIndex: number) => void;
-  clearQueue: () => void;
-  shuffleQueue: () => void;
 }
 
 export interface PlayerActionsContextValue {
@@ -136,14 +64,6 @@ export interface PlayerActionsContextValue {
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
   changeStreamingQuality: (quality: "auto" | "low" | "medium" | "high") => Promise<void>;
-}
-
-export interface PlayerLikedContextValue {
-  likedSongs: Song[];
-  likedSongIds: string[];
-  likedSongsCount: number;
-  isLiked: (songId: string) => boolean;
-  toggleLike: (song: Song) => void;
 }
 
 export interface ResolvedPlaybackResult {

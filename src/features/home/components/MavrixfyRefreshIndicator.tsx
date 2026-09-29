@@ -1,12 +1,12 @@
-import React, { memo, useEffect } from "react";
-import { StyleSheet, View } from "react-native";
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  useSharedValue,
-  type SharedValue,
+import { memo,useEffect } from "react";
+import { StyleSheet,View } from "react-native";
+import Animated,{
+Easing,
+useAnimatedStyle,
+useSharedValue,
+withRepeat,
+withTiming,
+type SharedValue,
 } from "react-native-reanimated";
 
 interface MavrixfyRefreshIndicatorProps {

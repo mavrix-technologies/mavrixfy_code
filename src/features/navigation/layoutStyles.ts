@@ -1,5 +1,5 @@
-import { StyleSheet } from "react-native";
 import Colors from "@/constants/colors";
+import { StyleSheet } from "react-native";
 
 export const styles = StyleSheet.create({
   authRouteFallback: {
@@ -26,7 +26,7 @@ export const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.1)",
-    backgroundColor: "#111317",
+    backgroundColor: Colors.surface,
     boxShadow: "none",
   },
   iosMiniPlayerBlur: {
@@ -142,13 +142,13 @@ export const styles = StyleSheet.create({
     height: "100%",
     flexDirection: "row",
     flexWrap: "wrap",
-    backgroundColor: "#1a1a1a",
+    backgroundColor: Colors.surface,
   },
   iosMiniPlayerMixGridCell: {
     width: "50%",
     height: "50%",
     overflow: "hidden",
-    backgroundColor: "#0a0a0a",
+    backgroundColor: Colors.background,
     borderWidth: 0.5,
     borderColor: "rgba(255,255,255,0.08)",
   },
@@ -267,7 +267,7 @@ export const styles = StyleSheet.create({
   },
 
   playerSection: {
-    backgroundColor: "#0A0A0C",
+    backgroundColor: Colors.background,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,

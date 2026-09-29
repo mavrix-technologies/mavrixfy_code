@@ -1,3 +1,4 @@
+import { accountStorageKey } from "@/lib/accountScope";
 /**
  * Collection Metadata Storage
  * 
@@ -5,8 +6,8 @@
  * so we can display proper playlist cards in the downloads screen.
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { logger } from "@/lib/logger";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const COLLECTION_METADATA_KEY = "@mavrixfy/collection_metadata";
 
@@ -23,7 +24,7 @@ type CollectionMetadataMap = Record<string, CollectionMetadata>;
 
 async function loadAllCollectionMetadata(): Promise<CollectionMetadataMap> {
   try {
-    const raw = await AsyncStorage.getItem(COLLECTION_METADATA_KEY);
+    const raw = await AsyncStorage.getItem(accountStorageKey(COLLECTION_METADATA_KEY));
     if (!raw) return {};
     return JSON.parse(raw) as CollectionMetadataMap;
   } catch (err) {
@@ -39,6 +40,7 @@ export async function saveCollectionMetadata(
   collectionId: string,
   metadata: Omit<CollectionMetadata, "id" | "createdAt">
 ): Promise<void> {
+  const key = accountStorageKey(COLLECTION_METADATA_KEY);
   try {
     const existing = await loadAllCollectionMetadata();
     existing[collectionId] = {
@@ -46,7 +48,7 @@ export async function saveCollectionMetadata(
       ...metadata,
       createdAt: new Date().toISOString(),
     };
-    await AsyncStorage.setItem(COLLECTION_METADATA_KEY, JSON.stringify(existing));
+    await AsyncStorage.setItem(key, JSON.stringify(existing));
   } catch (err) {
     logger.error("[CollectionMetadata] saveCollectionMetadata failed", err);
   }

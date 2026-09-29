@@ -1,5 +1,5 @@
-import { Stack } from "expo-router";
 import Colors from "@/constants/colors";
+import { Stack } from "expo-router";
 
 export default function PlaylistLayout() {
   return (

@@ -1,12 +1,13 @@
-import { useCallback, useEffect, type MutableRefObject } from "react";
-import type { Song } from "@/lib/musicData";
 import { logger } from "@/lib/logger";
-import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
-import { playerPersistenceService } from "@/services/player/playerPersistenceService";
+import type { Song } from "@/lib/musicData";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
-import { songToTrack, withResolvedPlaybackUrl, resolveAudioUrl } from "@/services/audio/PlayerPlaybackResolver";
+import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
+import { resolveAudioUrl,songToTrack,withResolvedPlaybackUrl } from "@/services/audio/PlayerPlaybackResolver";
 import { isSameQueueContent } from "@/services/audio/audioNativeQueueLane";
+import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
+import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { toDurationSeconds } from "@/utils/timeFormatters";
+import { useCallback,useEffect,type MutableRefObject } from "react";
 
 interface UseAudioPlaybackCommandsOptions {
   currentSongRef: MutableRefObject<Song | null>;
@@ -27,6 +28,7 @@ interface UseAudioPlaybackCommandsOptions {
   setPlaybackLoading: (loading: boolean) => void;
   desiredPlayStateRef: MutableRefObject<boolean | null>;
   playRequestIdRef: MutableRefObject<number>;
+  pendingPlayRequestRef: MutableRefObject<PendingPlayRequest | null>;
   positionSecondsRef: MutableRefObject<number>;
   durationSecondsRef?: MutableRefObject<number>;
   isNativeQueueSyncedRef?: MutableRefObject<boolean>;
@@ -73,6 +75,7 @@ export function useAudioPlaybackCommands({
   setPlaybackLoading,
   desiredPlayStateRef,
   playRequestIdRef,
+  pendingPlayRequestRef,
   positionSecondsRef,
   durationSecondsRef,
   isNativeQueueSyncedRef,
@@ -103,6 +106,10 @@ export function useAudioPlaybackCommands({
     async (song: Song, requestedQueue?: Song[]) => {
       if (!song?.id) return;
       const reqId = ++playRequestIdRef.current;
+      pendingPlayRequestRef.current = {
+        id: reqId,
+        songId: song.id,
+      };
 
       const hasRequestedQueue = Array.isArray(requestedQueue) && requestedQueue.length > 0;
       const songIndexInQueue = hasRequestedQueue
@@ -152,8 +159,11 @@ export function useAudioPlaybackCommands({
       desiredPlayStateRef.current = true;
       setIsPlaying(true);
       isPlayingRef.current = true;
+      playbackLoadingRef.current = true;
       setPlaybackLoading(true);
       setSeekOverride(null);
+      if (durationSecondsRef) durationSecondsRef.current = toDurationSeconds(targetSong.duration);
+      positionSecondsRef.current = 0;
       setNativePosition(0);
 
       updatePlaybackEngineSnapshot({
@@ -194,8 +204,13 @@ export function useAudioPlaybackCommands({
         if (reqId !== playRequestIdRef.current) return;
 
         if (!audioUrl) {
+          if (pendingPlayRequestRef.current?.id === reqId) {
+            pendingPlayRequestRef.current = null;
+          }
+          desiredPlayStateRef.current = false;
           setIsPlaying(false);
           isPlayingRef.current = false;
+          updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
           showPlaybackNotice("Playback stream timed out or unavailable.");
           return;
         }
@@ -208,8 +223,13 @@ export function useAudioPlaybackCommands({
           const ready = isPlayerReady || (await ensurePlayerReady());
           if (reqId !== playRequestIdRef.current) return;
           if (!ready) {
+            if (pendingPlayRequestRef.current?.id === reqId) {
+              pendingPlayRequestRef.current = null;
+            }
+            desiredPlayStateRef.current = false;
             setIsPlaying(false);
             isPlayingRef.current = false;
+            updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
             showPlaybackNotice("Audio player initialization failed.");
             return;
           }
@@ -224,7 +244,8 @@ export function useAudioPlaybackCommands({
               try {
                 await TrackPlayer!.skip(targetIndex);
                 if (reqId !== playRequestIdRef.current) return;
-                await TrackPlayer!.play();
+                if (desiredPlayStateRef.current === false) await TrackPlayer!.pause();
+                else await TrackPlayer!.play();
                 return;
               } catch {
                 if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
@@ -266,36 +287,49 @@ export function useAudioPlaybackCommands({
                   await TrackPlayer!.reset();
                   await TrackPlayer!.add([targetTrack]);
                 }
-              } catch {}
+              } catch (loadError) {
+                throw loadError;
+              }
+              if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
             }
 
             if (reqId !== playRequestIdRef.current) return;
-            await TrackPlayer!.play();
+            if (desiredPlayStateRef.current === false) await TrackPlayer!.pause();
+            else await TrackPlayer!.play();
           });
 
           if (reqId !== playRequestIdRef.current) return;
           prefetchAdjacentTrackStreams(q, targetIndex);
         } else if (canUseLightweightAudioFallback) {
           if (reqId !== playRequestIdRef.current) return;
-          await ExpoAvPlayer.loadAndPlay(audioUrl, targetSong);
+          await ExpoAvPlayer.loadAndPlay(audioUrl, targetSong, () =>
+            reqId === playRequestIdRef.current && desiredPlayStateRef.current !== false
+          );
         }
       } catch (error) {
         if (reqId !== playRequestIdRef.current) return;
         logger.error("[Player] playSong failed", error);
+        if (pendingPlayRequestRef.current?.id === reqId) {
+          pendingPlayRequestRef.current = null;
+        }
         desiredPlayStateRef.current = false;
         setIsPlaying(false);
         isPlayingRef.current = false;
         updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
         showPlaybackNotice("Could not start playback.");
       } finally {
-        setPlaybackLoading(false);
         if (reqId === playRequestIdRef.current) {
-          updatePlaybackEngineSnapshot({ isLoading: false, isBuffering: false });
+          pendingPlayRequestRef.current = null;
+          playbackLoadingRef.current = false;
+          setPlaybackLoading(false);
+          updatePlaybackEngineSnapshot({ isLoading: false });
         }
       }
     },
     [
       currentSongRef,
+      durationSecondsRef,
+      positionSecondsRef,
       enqueueNativeQueueMutation,
       ensurePlayerReady,
       isNativeQueueSyncedRef,
@@ -304,6 +338,8 @@ export function useAudioPlaybackCommands({
       isShuffledRef,
       originalQueueRef,
       playRequestIdRef,
+      playbackLoadingRef,
+      pendingPlayRequestRef,
       prefetchAdjacentTrackStreams,
       queueIndexRef,
       queueRef,
@@ -352,6 +388,12 @@ export function useAudioPlaybackCommands({
     }
 
     try {
+      if (nextPlayState && playbackLoadingRef.current) {
+        setIsPlaying(true);
+        isPlayingRef.current = true;
+        updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
+        return;
+      }
       if (TrackPlayer) {
         if (nextPlayState) {
           setIsPlaying(true);
@@ -394,7 +436,14 @@ export function useAudioPlaybackCommands({
         }
       } else if (canUseLightweightAudioFallback) {
         if (nextPlayState) {
-          void playSong(currentSongRef.current, queueRef.current);
+          if (ExpoAvPlayer.isLoaded()) {
+            ExpoAvPlayer.play();
+            setIsPlaying(true);
+            isPlayingRef.current = true;
+            updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
+          } else {
+            void playSong(currentSongRef.current, queueRef.current);
+          }
         } else {
           setIsPlaying(false);
           isPlayingRef.current = false;
@@ -419,6 +468,7 @@ export function useAudioPlaybackCommands({
     isPlayerReady,
     isPlayingRef,
     playSong,
+    playbackLoadingRef,
     queueIndexRef,
     queueRef,
     setIsPlaying,

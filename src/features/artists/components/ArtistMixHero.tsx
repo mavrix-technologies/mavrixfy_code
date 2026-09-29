@@ -1,8 +1,8 @@
-import React, { memo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { memo } from "react";
+import { Pressable,StyleSheet,Text,View } from "react-native";
 
 export interface ArtistMixHeroProps {
   ids: string[];
@@ -126,7 +126,7 @@ const styles = StyleSheet.create({
     height: 96,
     borderRadius: 48,
     borderWidth: 3.5,
-    borderColor: "#0D0E11",
+    borderColor: Colors.background,
     overflow: "hidden",
     backgroundColor: "#1C1E26",
   },

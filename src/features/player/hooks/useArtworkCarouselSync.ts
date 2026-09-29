@@ -1,8 +1,8 @@
-import { useRef, useCallback, useMemo, useEffect, useState } from "react";
-import * as Animated from "@/lib/nativeAnimated";
-import type { NativeScrollEvent, NativeSyntheticEvent, FlatList } from "react-native";
-import type { ArtworkQueueItem } from "../components/PlayerArtworkViews";
 import type { Song } from "@/lib/musicData";
+import * as Animated from "@/lib/nativeAnimated";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import type { FlatList,NativeScrollEvent,NativeSyntheticEvent } from "react-native";
+import type { ArtworkQueueItem } from "../components/PlayerArtworkViews";
 
 export interface UseArtworkCarouselSyncParams {
   playingQueue: Song[];

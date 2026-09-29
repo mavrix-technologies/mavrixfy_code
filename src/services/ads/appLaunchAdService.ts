@@ -1,5 +1,5 @@
 import { AD_UNITS } from "@/constants/admob";
-import { getGoogleMobileAdsModule, initializeMobileAds } from "@/lib/googleMobileAds";
+import { getGoogleMobileAdsModule,initializeMobileAds } from "@/lib/googleMobileAds";
 import { logger } from "@/lib/logger";
 
 let hasShownLaunchAdThisSession = false;

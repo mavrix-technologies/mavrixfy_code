@@ -1,5 +1,5 @@
 
-import { QueryClient, type QueryFunction } from "@tanstack/react-query";
+import { QueryClient,type QueryFunction } from "@tanstack/react-query";
 import { getApiUrl } from "./api-config";
 export { getApiUrl };
 
@@ -11,30 +11,6 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
   }
-}
-
-
-
-
-async function apiRequest(
-  method: string,
-  route: string,
-  data?: unknown | undefined,
-): Promise<Response> {
-  const baseUrl = getApiUrl();
-  const url = new URL(route, baseUrl);
-
-  const res = await fetch(url.toString(), {
-    method,
-    headers: data ? { "Content-Type": "application/json" } : {},
-    body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
-  });
-
-  if (!res.ok) {
-    throw new ApiError(res.status, res.statusText);
-  }
-  return res;
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";

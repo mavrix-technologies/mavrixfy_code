@@ -1,5 +1,5 @@
-import * as Storage from "@/lib/storage";
 import type { Song } from "@/lib/musicData";
+import * as Storage from "@/lib/storage";
 
 export const playerPersistenceService = {
   loadPlayerState: () => Storage.loadPlayerState(),

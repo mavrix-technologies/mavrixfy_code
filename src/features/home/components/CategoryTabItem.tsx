@@ -1,10 +1,10 @@
-import React, { useCallback } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
-import Animated, {
-  useAnimatedStyle,
-  type SharedValue,
-} from "react-native-reanimated";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import React,{ useCallback } from "react";
+import { Pressable,StyleSheet,Text,View } from "react-native";
+import Animated,{
+useAnimatedStyle,
+type SharedValue,
+} from "react-native-reanimated";
 import { type MusicCategoryItem } from "../constants/homeNavConstants";
 
 export const UNIFIED_HEADER_TOP_BAR_HEIGHT = 48;

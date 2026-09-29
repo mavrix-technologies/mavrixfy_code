@@ -1,13 +1,13 @@
-import React, { memo, useCallback } from "react";
-import {
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import * as Haptics from "expo-haptics";
 import { triggerImpact } from "@/lib/haptics";
+import * as Haptics from "expo-haptics";
+import { memo,useCallback } from "react";
+import {
+FlatList,
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
 
 export interface ArtistLanguageFiltersProps {
   languages: string[];

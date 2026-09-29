@@ -1,6 +1,6 @@
-import React from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import React from "react";
+import { ActivityIndicator,Pressable,StyleSheet,Text,View } from "react-native";
 
 export function SegmentPicker<T extends string | number>({
   options,

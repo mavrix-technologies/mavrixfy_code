@@ -4,43 +4,44 @@
  * Clean, premium, and unified with LikedSongsScreen.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Alert,
-  FlatList,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ActionCircleButton } from "@/components/ActionCircleButton";
+import AdMobBanner from "@/components/AdMobBanner";
+import AppTopHeader,{
+APP_TOP_HEADER_HEIGHT,
+AppTopHeaderIconButton,
+useAppTopHeaderScrollElevation,
+} from "@/components/AppTopHeader";
+import { CollectionHero } from "@/components/CollectionHero";
+import SongRow from "@/components/SongRow";
+import { useDownloads } from "@/contexts/DownloadContext";
+import { usePlayerBrowse } from "@/contexts/PlayerContext";
+import { onQueueEvent } from "@/lib/downloads/downloadManager";
+import { formatBytes,getTrackFileUri } from "@/lib/downloads/storagePolicy";
+import { triggerImpact } from "@/lib/haptics";
+import { Song } from "@/lib/musicData";
+import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
+import { DownloadItem } from "@/types/downloads";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import Colors from "@/constants/colors";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import * as Haptics from "expo-haptics";
-import { triggerImpact } from "@/lib/haptics";
-import { useDownloads } from "@/contexts/DownloadContext";
-import { onQueueEvent } from "@/lib/downloads/downloadManager";
-import { DownloadItem } from "@/types/downloads";
-import { Song } from "@/lib/musicData";
-import { usePlayerBrowse } from "@/contexts/PlayerContext";
-import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
-import SongRow from "@/components/SongRow";
-import AppTopHeader, {
-  APP_TOP_HEADER_HEIGHT,
-  AppTopHeaderIconButton,
-  useAppTopHeaderScrollElevation,
-} from "@/components/AppTopHeader";
-import { formatBytes, getTrackFileUri } from "@/lib/downloads/storagePolicy";
-import AdMobBanner from "@/components/AdMobBanner";
-import CollectionHero from "@/components/CollectionHero";
-import ActionCircleButton from "@/components/ActionCircleButton";
+import { useCallback,useEffect,useMemo,useState } from "react";
+import {
+Alert,
+FlatList,
+Platform,
+Pressable,
+StyleSheet,
+Text,
+TextInput,
+View,
+type NativeScrollEvent,
+type NativeSyntheticEvent,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { DOWNLOADS_UI as UI, styles } from "../styles/downloadedSongsStyles";
+import { DOWNLOADS_UI as UI,styles } from "../styles/downloadedSongsStyles";
 
 
 function downloadItemToSong(item: DownloadItem): Song {
@@ -87,7 +88,6 @@ export function DownloadedSongsScreen() {
   const [downloadItems, setDownloadItems] = useState<DownloadItem[]>(() => getAllDownloadItems());
 
   useEffect(() => {
-    setDownloadItems(getAllDownloadItems());
     const unsubs = [
       onQueueEvent("completed", () => setDownloadItems(getAllDownloadItems())),
       onQueueEvent("status", () => setDownloadItems(getAllDownloadItems())),
@@ -219,7 +219,7 @@ export function DownloadedSongsScreen() {
   if (isSearchMode) {
     return (
       <View style={styles.searchModeContainer}>
-        <LinearGradient colors={["#09111B", "#10141a", "#10141a"]} style={StyleSheet.absoluteFillObject} />
+        <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFillObject} />
 
         {/* Search Header */}
         <View style={[styles.searchModeHeader, { paddingTop: topInset + 10 }]}>
@@ -289,7 +289,7 @@ export function DownloadedSongsScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#09111B", "#10141a", "#10141a"]} style={StyleSheet.absoluteFillObject} />
+      <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFillObject} />
 
       <AppTopHeader
         topInset={topInset}

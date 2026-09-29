@@ -1,4 +1,3 @@
-import { useSyncExternalStore } from "react";
 
 export type PlaybackAudioLevels = readonly [number, number, number];
 
@@ -118,8 +117,4 @@ function subscribeAudioLevels(listener: Listener): () => void {
 
 function getAudioLevelsSnapshot(): PlaybackAudioLevelFrame {
   return frame;
-}
-
-function usePlaybackAudioLevels(): PlaybackAudioLevelFrame {
-  return useSyncExternalStore(subscribeAudioLevels, getAudioLevelsSnapshot, getAudioLevelsSnapshot);
 }

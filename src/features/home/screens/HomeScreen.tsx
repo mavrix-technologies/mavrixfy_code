@@ -1,53 +1,54 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React,{ useCallback,useMemo,useRef,useState } from "react";
 
-import {
-  View,
-  StyleSheet,
-  Platform,
-  FlatList,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-  type ListRenderItemInfo,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, {
-  useSharedValue,
-  useAnimatedScrollHandler,
-} from "react-native-reanimated";
-import { usePlayerActions } from "@/contexts/PlayerContext";
-import { useNetwork, useOnReconnect } from "@/contexts/NetworkContext";
-import OfflineScreen from "@/components/OfflineScreen";
-import OfflineBanner from "@/components/OfflineBanner";
+import Colors from "@/constants/colors";
 import AdMobBanner from "@/components/AdMobBanner";
-import * as Haptics from "expo-haptics";
+import OfflineBanner from "@/components/OfflineBanner";
+import OfflineScreen from "@/components/OfflineScreen";
+import { useNetwork,useOnReconnect } from "@/contexts/NetworkContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
 import { triggerImpact } from "@/lib/haptics";
+import * as Haptics from "expo-haptics";
+import {
+FlatList,
+Platform,
+StyleSheet,
+View,
+type ListRenderItemInfo,
+type NativeScrollEvent,
+type NativeSyntheticEvent,
+} from "react-native";
+import Animated,{
+useAnimatedScrollHandler,
+useSharedValue,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { getQuickPicksForCategory } from "@/data/providers/QuickPicksProvider";
+import { FestivalHeaderBanner } from "../components/FestivalHeaderBanner";
+import { HomeAmbientBackdrop } from "../components/HomeAmbientBackdrop";
+import { HomeArtistsSection } from "../components/HomeArtistsSection";
+import {
+HomeHorizontalSection,
+type HomeCardItem,
+} from "../components/HomeHorizontalSection";
 import { HomeQuickPicks } from "../components/HomeQuickPicks";
 import { HomeRecentlyPlayed } from "../components/HomeRecentlyPlayed";
-import { HomeArtistsSection } from "../components/HomeArtistsSection";
-import { HomeAmbientBackdrop } from "../components/HomeAmbientBackdrop";
-import { FestivalHeaderBanner } from "../components/FestivalHeaderBanner";
 import {
-  HomeUnifiedTopHeader,
-  UNIFIED_HEADER_TOTAL_HEIGHT,
+HomeLoadingSkeleton,
+HomeQuickPicksSkeleton,
+HomeSectionSkeleton,
+} from "../components/HomeSkeletons";
+import {
+HomeUnifiedTopHeader,
+UNIFIED_HEADER_TOTAL_HEIGHT,
 } from "../components/HomeUnifiedTopHeader";
 import { MavrixfyRefreshIndicator } from "../components/MavrixfyRefreshIndicator";
-import {
-  HomeHorizontalSection,
-  type HomeCardItem,
-} from "../components/HomeHorizontalSection";
-import {
-  HomeQuickPicksSkeleton,
-  HomeSectionSkeleton,
-  HomeLoadingSkeleton,
-} from "../components/HomeSkeletons";
-import { useHomeFeedData } from "../hooks/useHomeFeedData";
 import { useFestivalTheme } from "../hooks/useFestivalTheme";
-import { getQuickPicksForCategory } from "@/data/providers/QuickPicksProvider";
+import { useHomeFeedData } from "../hooks/useHomeFeedData";
 import {
-  useHomeSectionData,
-  HOME_CATEGORY_TITLES,
-  type HomeSectionItem,
+HOME_CATEGORY_TITLES,
+useHomeSectionData,
+type HomeSectionItem,
 } from "../hooks/useHomeSectionData";
 
 const homeSectionKeyExtractor = (item: HomeSectionItem) => item.id;
@@ -292,7 +293,7 @@ export default HomeScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0B0F14",
+    backgroundColor: Colors.background,
   },
   listHeaderWrap: {
     position: "relative",

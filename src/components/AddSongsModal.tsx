@@ -1,35 +1,35 @@
-import React, {
-  forwardRef,
-  memo,
-  useCallback,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
+import { Ionicons } from "@expo/vector-icons";
+import BottomSheet,{
+BottomSheetBackdrop,
+BottomSheetFlatList,
+type BottomSheetBackdropProps,
+} from "@gorhom/bottom-sheet";
+import { ImpactFeedbackStyle } from "expo-haptics";
+import { Image } from "expo-image";
+import {
+forwardRef,
+memo,
+useCallback,
+useImperativeHandle,
+useMemo,
+useRef,
+useState,
 } from "react";
 import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+ActivityIndicator,
+Pressable,
+StyleSheet,
+Text,
+TextInput,
+View,
 } from "react-native";
-import BottomSheet, {
-  BottomSheetBackdrop,
-  BottomSheetFlatList,
-  type BottomSheetBackdropProps,
-} from "@gorhom/bottom-sheet";
-import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
-import { ImpactFeedbackStyle } from "expo-haptics";
 
 import Colors from "@/constants/colors";
-import { Song } from "@/lib/musicData";
-import { searchCatalog, getCatalogSongs } from "@/lib/catalogService";
-import { getApiUrl } from "@/lib/query-client";
-import { useLikedSongs, usePlayerBrowse } from "@/contexts/PlayerContext";
+import { useLikedSongs,usePlayerBrowse } from "@/contexts/PlayerContext";
+import { getCatalogSongs,searchCatalog } from "@/lib/catalogService";
 import { triggerImpact } from "@/lib/haptics";
+import { Song } from "@/lib/musicData";
+import { getApiUrl } from "@/lib/query-client";
 import { showGlobalToast } from "@/utils/globalToast";
 
 import { type AddSongsBottomSheetRef } from "@/lib/addSongsSheetRef";
@@ -361,7 +361,7 @@ const s = StyleSheet.create({
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#10141A",
+    backgroundColor: Colors.background,
     borderRadius: 8,
     paddingHorizontal: 12,
     height: 44,

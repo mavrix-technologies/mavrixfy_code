@@ -1,3 +1,4 @@
+import { getAccountScope } from "@/lib/accountScope";
 /**
  * Filesystem — Canonical paths, directory setup, and file operations for offline downloads.
  *
@@ -11,24 +12,24 @@
  *         └── <songId>.download
  */
 
-import { Platform } from "react-native";
-import {
-  documentDirectory,
-  getInfoAsync,
-  makeDirectoryAsync,
-  deleteAsync,
-  moveAsync,
-  getFreeDiskStorageAsync,
-} from "expo-file-system/legacy";
-import { MIN_FREE_STORAGE_BYTES } from "@/types/downloads";
 import { logger } from "@/lib/logger";
+import { MIN_FREE_STORAGE_BYTES } from "@/types/downloads";
+import {
+deleteAsync,
+documentDirectory,
+getFreeDiskStorageAsync,
+getInfoAsync,
+makeDirectoryAsync,
+moveAsync,
+} from "expo-file-system/legacy";
+import { Platform } from "react-native";
 
 // ─── Canonical Paths ──────────────────────────────────────────────────────────
 
 /** Root directory URI for all offline downloads (in persistent app storage). */
-export function getDownloadsRootUri(): string {
+export function getDownloadsRootUri(uid = getAccountScope().accountId): string {
   const base = documentDirectory ?? "";
-  return `${base}mavrixfy_downloads/`;
+  return `${base}mavrixfy_downloads/accounts/${encodeURIComponent(uid ?? "guest")}/`;
 }
 
 export function getTracksRootUri(): string {
@@ -40,7 +41,7 @@ export function getTempRootUri(): string {
 }
 
 export function getTrackDirUri(songId: string): string {
-  return `${getTracksRootUri()}${songId}/`;
+  return `${getTracksRootUri()}${encodeURIComponent(songId)}/`;
 }
 
 /** Full file URI for a permanent downloaded track. */
@@ -50,7 +51,7 @@ export function getTrackFileUri(songId: string): string {
 
 /** In-flight temporary download file URI. */
 export function getTempDownloadUri(songId: string): string {
-  return `${getTempRootUri()}${songId}.download`;
+  return `${getTempRootUri()}${encodeURIComponent(songId)}.download`;
 }
 
 /** Full file URI for offline artwork. */

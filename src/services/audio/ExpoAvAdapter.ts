@@ -2,10 +2,10 @@
  * expo-audio based player — Expo Go fallback.
  * Uses expo-audio (SDK 54+), the modern replacement for expo-av.
  */
-import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
-import type { AudioPlayer, AudioSample } from "expo-audio";
 import type { Song } from "@/lib/musicData";
-import { publishPlaybackAudioSample, resetPlaybackAudioLevels } from "./PlaybackAudioLevels";
+import type { AudioPlayer,AudioSample } from "expo-audio";
+import { createAudioPlayer,setAudioModeAsync } from "expo-audio";
+import { publishPlaybackAudioSample,resetPlaybackAudioLevels } from "./PlaybackAudioLevels";
 
 // ─── singletons ───────────────────────────────────────────────────────────────
 
@@ -47,7 +47,6 @@ let statusCb: StatusCallback | null = null;
 let errorCb: ErrorCallback | null = null;
 
 export function onStatusUpdate(cb: StatusCallback) { statusCb = cb; }
-function onError(cb: ErrorCallback) { errorCb = cb; }
 function clearListeners(): void {
   statusCb = null;
   errorCb = null;
@@ -125,7 +124,7 @@ function attachListener(p: AudioPlayer, gen: number): void {
 
 // ─── public API ───────────────────────────────────────────────────────────────
 
-export async function loadAndPlay(url: string, song?: Partial<Song> | null): Promise<void> {
+export async function loadAndPlay(url: string, song?: Partial<Song> | null, shouldPlay: () => boolean = () => true): Promise<void> {
   if (!url) {
     errorCb?.("No audio URL provided");
     return;
@@ -186,11 +185,12 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null): Pro
         }
       }
 
-      p.play();
+      if (shouldPlay()) p.play();
     }
   } catch (err: any) {
     if (myGen === generation) {
       errorCb?.(err?.message || String(err) || "Playback failed");
+      throw err;
     }
   }
 }
@@ -213,7 +213,7 @@ function stop(): void {
   resetPlaybackAudioLevels();
 }
 
-function destroy(): void {
+export function destroy(): void {
   clearListeners();
   stop();
 }
@@ -233,5 +233,4 @@ export async function seekTo(seconds: number): Promise<void> {
   } catch {}
 }
 
-function isLoaded(): boolean { return activePlayer !== null; }
-function getCurrentUrl(): string | null { return currentUrl; }
+export function isLoaded(): boolean { return activePlayer !== null; }

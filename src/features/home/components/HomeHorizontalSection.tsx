@@ -1,16 +1,16 @@
-import React, { memo, useCallback } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  FlatList,
-  StyleSheet,
-} from "react-native";
-import { Image } from "expo-image";
-import { useRouter } from "expo-router";
-import * as Haptics from "expo-haptics";
 import { triggerImpact } from "@/lib/haptics";
 import type { JioSaavnImage } from "@/lib/musicData";
+import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import { useRouter } from "expo-router";
+import { memo,useCallback } from "react";
+import {
+FlatList,
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
 
 const CARD_WIDTH = 148;
 const CARD_GAP = 14;

@@ -9,18 +9,18 @@
  * `OfflineBanner` component for a standard "no internet" UI.
  */
 
-import React, {
-  createContext,
-  use,
-  useEffect,
-  useState,
-  useCallback,
-  useMemo,
-  useRef,
-  type ReactNode,
+import * as Network from "expo-network";
+import {
+createContext,
+use,
+useCallback,
+useEffect,
+useMemo,
+useRef,
+useState,
+type ReactNode,
 } from "react";
 import { Platform } from "react-native";
-import * as Network from "expo-network";
 
 interface NetworkContextValue {
   isOnline: boolean;
@@ -57,6 +57,8 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Initial check
+    // check waits for the native network result before changing state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void check();
 
     // Push-based subscription for network state transitions

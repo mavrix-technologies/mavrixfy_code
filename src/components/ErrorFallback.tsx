@@ -1,17 +1,17 @@
-import React, { useState } from "react";
+import { Feather } from "@expo/vector-icons";
 import { reloadAppAsync } from "expo";
+import { useState } from "react";
 import {
-  StyleSheet,
-  View,
-  Pressable,
-  ScrollView,
-  Text,
-  Modal,
-  useColorScheme,
-  Platform,
+Modal,
+Platform,
+Pressable,
+ScrollView,
+StyleSheet,
+Text,
+useColorScheme,
+View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Feather } from "@expo/vector-icons";
 
 export type ErrorFallbackProps = {
   error: Error;

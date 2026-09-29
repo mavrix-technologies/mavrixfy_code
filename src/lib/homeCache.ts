@@ -1,11 +1,13 @@
+import type { ArtistCard } from "@/data/providers/ArtistProvider";
+import type { HomeJioSaavnCategoryData } from "@/data/providers/JioSaavnProvider";
+import type { RecommendationSection } from "@/data/providers/RecommendationProvider";
+import { mapFilter } from "@/lib/arrayUtils";
+import { type FirestorePlaylist } from "@/lib/firestore";
+import type { Song } from "@/lib/musicData";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DeviceEventEmitter } from "react-native";
-import { type FirestorePlaylist } from "@/lib/firestore";
-import { mapFilter } from "@/lib/arrayUtils";
-import type { Song } from "@/lib/musicData";
-import type { HomeJioSaavnCategoryData } from "@/data/providers/JioSaavnProvider";
-import type { ArtistCard } from "@/data/providers/ArtistProvider";
-import type { RecommendationSection } from "@/data/providers/RecommendationProvider";
+
+import type { QuickPicksPool } from "@/data/providers/QuickPicksProvider";
 
 const HOME_PUBLIC_PLAYLISTS_CACHE_KEY = "@mavrixfy_home_public_playlists_v1";
 const HOME_PUBLIC_PLAYLISTS_CACHE_TIME_KEY = "@mavrixfy_home_public_playlists_time_v1";
@@ -18,8 +20,6 @@ const HOME_FEED_MAX_STALE_MS = 24 * 60 * 60 * 1000;
 
 /** Emitted after Settings clears Home data so mounted Home screens can fetch a fresh feed. */
 export const HOME_CACHE_INVALIDATED_EVENT = "mavrixfy:home-cache-invalidated";
-
-import type { QuickPicksPool } from "@/data/providers/QuickPicksProvider";
 
 export interface CachedHomeFeedSnapshot {
   categories: HomeJioSaavnCategoryData[];

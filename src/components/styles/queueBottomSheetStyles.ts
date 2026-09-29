@@ -1,5 +1,5 @@
-import { StyleSheet } from "react-native";
 import Colors from "@/constants/colors";
+import { StyleSheet } from "react-native";
 
 export const SHEET_BG = "#1A1A1A";
 export const HANDLE_COLOR = "#4A4A4A";

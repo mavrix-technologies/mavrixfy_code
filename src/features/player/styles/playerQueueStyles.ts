@@ -1,5 +1,5 @@
-import { StyleSheet } from "react-native";
 import Colors from "@/constants/colors";
+import { StyleSheet } from "react-native";
 
 export const playerQueueStyles = StyleSheet.create({
   queueListContent: {

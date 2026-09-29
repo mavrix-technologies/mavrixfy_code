@@ -1,8 +1,8 @@
-import React from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
-import Animated from "react-native-reanimated";
-import { Image } from "expo-image";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { Image } from "expo-image";
+import React from "react";
+import { Pressable,StyleSheet,Text,View } from "react-native";
+import Animated from "react-native-reanimated";
 
 export const UNIFIED_HEADER_TOP_BAR_HEIGHT = 48;
 

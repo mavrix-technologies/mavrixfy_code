@@ -1,6 +1,6 @@
-import { StyleSheet } from "react-native";
-import { IS_ANDROID } from "@/constants/platform";
 import Colors from "@/constants/colors";
+import { IS_ANDROID } from "@/constants/platform";
+import { StyleSheet } from "react-native";
 
 export const SHEET_BACKGROUND = "#1E1E1E";
 export const HANDLE_COLOR = "#6D6D6D";

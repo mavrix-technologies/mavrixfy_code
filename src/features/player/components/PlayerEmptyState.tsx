@@ -1,8 +1,8 @@
-import React from "react";
-import { View, Text, Pressable, ActivityIndicator } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { safeGoBack } from "@/utils/navigation";
+import { Ionicons } from "@expo/vector-icons";
+import React from "react";
+import { ActivityIndicator,Pressable,Text,View } from "react-native";
 import { styles } from "../styles/playerScreenStyles";
 
 export interface PlayerEmptyStateProps {

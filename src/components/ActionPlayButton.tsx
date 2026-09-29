@@ -1,8 +1,8 @@
-import React from "react";
-import { Pressable, StyleSheet, ViewStyle, StyleProp } from "react-native";
+import { triggerImpact } from "@/lib/haptics";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { triggerImpact } from "@/lib/haptics";
+import React from "react";
+import { Pressable,StyleProp,StyleSheet,ViewStyle } from "react-native";
 
 export interface ActionPlayButtonProps {
   isPlaying: boolean;

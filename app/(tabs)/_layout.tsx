@@ -1,14 +1,13 @@
-import { Redirect, Tabs, usePathname } from "expo-router";
-import React from "react";
-import { View } from "react-native";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  AppNavBar,
-  AuthRouteFallback,
-  IOSNativeTabLayout,
-  IOSMiniPlayerOverlay,
+AppNavBar,
+AuthRouteFallback,
+IOSMiniPlayerOverlay,
+IOSNativeTabLayout,
 } from "@/features/navigation/layoutView";
+import { Redirect,Tabs,usePathname } from "expo-router";
+import { View } from "react-native";
 
 export { AppNavBar } from "@/features/navigation/layoutView";
 

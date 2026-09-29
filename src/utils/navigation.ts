@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
 import { playerUIStateStore } from '@/lib/playerUIState';
+import { router } from 'expo-router';
 
 /**
  * Safely navigate back, or collapse the persistent player sheet if open

@@ -1,11 +1,11 @@
-import React, { memo } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
 import {
-  Ionicons,
-  FontAwesome,
-  FontAwesome5,
-  MaterialCommunityIcons,
+FontAwesome,
+FontAwesome5,
+Ionicons,
+MaterialCommunityIcons,
 } from "@expo/vector-icons";
+import { memo } from "react";
+import { Pressable,ScrollView,Text,View } from "react-native";
 import { styles } from "./shareModalStyles";
 
 export interface ActionRowProps {

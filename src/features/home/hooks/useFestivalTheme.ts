@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  getCachedFestivalTheme,
-  subscribeRemoteFestivalTheme,
-  DEFAULT_FESTIVAL_THEME,
-  type FestivalThemeConfig,
+DEFAULT_FESTIVAL_THEME,
+getCachedFestivalTheme,
+subscribeRemoteFestivalTheme,
+type FestivalThemeConfig,
 } from "@/services/festivalThemeService";
+import { useEffect,useState } from "react";
 
 export function useFestivalTheme() {
   const [theme, setTheme] = useState<FestivalThemeConfig>(DEFAULT_FESTIVAL_THEME);

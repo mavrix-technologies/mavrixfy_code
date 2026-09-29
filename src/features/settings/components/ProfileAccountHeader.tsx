@@ -1,8 +1,7 @@
-import React from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import Colors from "@/constants/colors";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import Colors from "@/constants/colors";
+import { Pressable,StyleSheet,Text,View } from "react-native";
 
 interface ProfileAccountHeaderProps {
   user: { name?: string | null; email?: string | null; picture?: string | null } | null;

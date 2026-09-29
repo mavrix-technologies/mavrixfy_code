@@ -1,7 +1,6 @@
-import React from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import Colors from "@/constants/colors";
-import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
+import { openPrivacyPolicy,openTermsOfService } from "@/lib/legal";
+import { ActivityIndicator,StyleSheet,Text,View } from "react-native";
 import { SimpleRow } from "./SettingsUIComponents";
 
 export interface ProfileAboutSectionProps {

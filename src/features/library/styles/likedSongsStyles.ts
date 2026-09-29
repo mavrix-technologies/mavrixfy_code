@@ -1,7 +1,8 @@
+import Colors from "@/constants/colors";
 import { StyleSheet } from "react-native";
 
 export const LIKED_SONGS_UI = {
-  bg: "#10141a",
+  bg: Colors.background,
   text: "#FFFFFF",
   subtext: "#8E99A8",
   lowSurface: "#181c22",

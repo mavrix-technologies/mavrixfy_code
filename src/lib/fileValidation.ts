@@ -7,8 +7,8 @@
  * - Image dimension validation
  */
 
-import * as FileSystem from 'expo-file-system';
 import { logger } from '@/lib/logger';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // Maximum file size: 5MB
 const MAX_FILE_SIZE = 5 * 1024 * 1024;

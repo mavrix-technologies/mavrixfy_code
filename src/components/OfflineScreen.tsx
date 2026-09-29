@@ -2,14 +2,12 @@
  * OfflineScreen — Modern, sleek offline screen with clean typography and Downloads action.
  */
 
-import React from "react";
-import { View, Text, Pressable, StyleSheet, ActivityIndicator } from "react-native";
+import Colors from "@/constants/colors";
+import { useNetwork } from "@/contexts/NetworkContext";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
+import { ActivityIndicator,Pressable,StyleSheet,Text,View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useNetwork } from "@/contexts/NetworkContext";
-import Colors from "@/constants/colors";
 
 interface Props {
   /** Override the default message */

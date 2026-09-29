@@ -1,8 +1,8 @@
-import React, { memo } from "react";
-import { View, Text, Pressable, StyleSheet } from "react-native";
-import { Image } from "expo-image";
 import Colors from "@/constants/colors";
 import { type FollowedArtist } from "@/lib/followedArtists";
+import { Image } from "expo-image";
+import { memo } from "react";
+import { Pressable,StyleSheet,Text,View } from "react-native";
 
 interface ArtistRowProps {
   artist: FollowedArtist;

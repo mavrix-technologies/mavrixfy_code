@@ -1,48 +1,50 @@
-import React, { useCallback, useEffect, useState, useRef } from "react";
-import {
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { useRouter } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
+import { useDownloads } from "@/contexts/DownloadContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import { setHapticsPreference } from "@/lib/haptics";
-import {
-  getSettings,
-  saveSettings,
-  setMiniPlayerSecondaryControlPreference,
-  hasSeenNewFeatures,
-  markNewFeaturesSeen,
-  isHighQualityEntitled,
-  type AppSettings,
-} from "@/lib/storage";
-import { safeGoBack } from "@/utils/navigation";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { clearJioSaavnPlaylistCache } from "@/data/providers/JioSaavnProvider";
-import { clearCachedHomePublicPlaylists, notifyHomeCacheInvalidated } from "@/lib/homeCache";
 import { clearDailyNewReleaseSongCache } from "@/data/providers/NewReleaseProvider";
+import { setHapticsPreference } from "@/lib/haptics";
+import { clearCachedHomePublicPlaylists,notifyHomeCacheInvalidated } from "@/lib/homeCache";
+import {
+getSettings,
+hasSeenNewFeatures,
+isHighQualityEntitled,
+markNewFeaturesSeen,
+saveSettings,
+setMiniPlayerSecondaryControlPreference,
+type AppSettings,
+} from "@/lib/storage";
 import { requestHighQualityUnlockWithRewardedAd } from "@/services/ads/highQualityEntitlementService";
-import { checkAppVersion, getInstalledAppVersion, getInstalledBuildNumber } from "@/services/notificationService";
-import { SimpleRow } from "../components/SettingsUIComponents";
-import { ProfileAccountHeader } from "../components/ProfileAccountHeader";
-import { ProfilePlaybackSection } from "../components/ProfilePlaybackSection";
+import { checkAppVersion,getInstalledAppVersion,getInstalledBuildNumber } from "@/services/notificationService";
+import { safeGoBack } from "@/utils/navigation";
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Image } from "expo-image";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback,useEffect,useRef,useState } from "react";
+import {
+Alert,
+Platform,
+Pressable,
+ScrollView,
+StyleSheet,
+Text,
+View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ProfileAboutSection } from "../components/ProfileAboutSection";
+import { ProfileAccountHeader } from "../components/ProfileAccountHeader";
 import { ProfileLibrarySection } from "../components/ProfileLibrarySection";
+import { ProfilePlaybackSection } from "../components/ProfilePlaybackSection";
+import { SimpleRow } from "../components/SettingsUIComponents";
 
 export function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { push: routerPush, replace: routerReplace } = useRouter();
   const { user, isAuthenticated, logout } = useAuth();
   const { changeStreamingQuality } = usePlayerActions();
+  const { updatePreferences } = useDownloads();
 
   const topInset = Platform.OS === "web" ? 20 : insets.top;
   const bottomInset = Platform.OS === "web" ? 20 : insets.bottom;
@@ -87,6 +89,18 @@ export function ProfileScreen() {
     };
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void getSettings().then((s) => {
+        if (active) setSettings(s);
+      });
+      return () => {
+        active = false;
+      };
+    }, [])
+  );
+
   const updateSettings = useCallback(async (partial: Partial<AppSettings>) => {
     await saveSettings(partial);
     setSettings((current) => ({ ...current, ...partial }));
@@ -99,16 +113,15 @@ export function ProfileScreen() {
     }
     if (partial.downloadQuality || typeof partial.downloadWifiOnly === "boolean") {
       try {
-        const { saveDownloadPreferences, loadDownloadPreferences } = await import("@/lib/downloads/downloadStore");
-        const currentPrefs = await loadDownloadPreferences();
-        await saveDownloadPreferences({
-          ...currentPrefs,
+        await updatePreferences({
           ...(partial.downloadQuality ? { quality: partial.downloadQuality } : {}),
           ...(typeof partial.downloadWifiOnly === "boolean" ? { wifiOnly: partial.downloadWifiOnly } : {}),
         });
-      } catch {}
+      } catch {
+        Alert.alert("Settings not saved", "Could not update download preferences. Please try again.");
+      }
     }
-  }, []);
+  }, [updatePreferences]);
 
   const handleQualityChange = useCallback(
     async (value: AppSettings["streamingQuality"]) => {
@@ -253,6 +266,7 @@ export function ProfileScreen() {
           updateSettings={updateSettings}
           onQualityChange={handleQualityChange}
           loadingQuality={changingQuality}
+          onOpenEqualizer={() => routerPush("/equalizer" as any)}
         />
 
         {/* Library & Data */}
@@ -304,7 +318,7 @@ export function ProfileScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#0D1117",
+    backgroundColor: Colors.background,
   },
   header: {
     flexDirection: "row",

@@ -1,22 +1,21 @@
-import React, { useCallback } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  FlatList,
-  Pressable,
-} from "react-native";
-import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
-import Colors from "@/constants/colors";
-import { APP_TOP_HEADER_HEIGHT } from "@/components/AppTopHeader";
-import AdMobNativeVideo from "@/components/AdMobNativeVideo";
 import AdMobBanner from "@/components/AdMobBanner";
+import AdMobNativeVideo from "@/components/AdMobNativeVideo";
+import Colors from "@/constants/colors";
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import React,{ useCallback } from "react";
+import {
+FlatList,
+Pressable,
+ScrollView,
+Text,
+View,
+} from "react-native";
 import { styles } from "../styles/searchStyles";
 import {
-  type BrowseCategory,
-  type RecentSearchItem,
-  CARD_ROTATION_PATTERN,
+type BrowseCategory,
+type RecentSearchItem,
+CARD_ROTATION_PATTERN,
 } from "../types";
 
 export function BrowseCategoryCard({
@@ -64,13 +63,6 @@ export const SearchBrowseSection = React.memo(function SearchBrowseSection({
   onScroll,
   onGenrePress,
 }: SearchBrowseSectionProps) {
-  const renderBrowseCategory = useCallback(
-    ({ item, index }: { item: BrowseCategory; index: number }) => (
-      <BrowseCategoryCard category={item} index={index} onPress={onGenrePress} />
-    ),
-    [onGenrePress]
-  );
-
   return (
     <ScrollView
       style={styles.scrollView}
@@ -85,15 +77,20 @@ export const SearchBrowseSection = React.memo(function SearchBrowseSection({
 
       <View style={styles.browseSection}>
         <Text style={styles.browseTitle}>Browse all</Text>
-        <FlatList
-          data={browseCategories}
-          keyExtractor={(category) => category.id}
-          renderItem={renderBrowseCategory}
-          numColumns={2}
-          scrollEnabled={false}
-          contentContainerStyle={styles.browseGridList}
-          columnWrapperStyle={styles.browseGridRow}
-        />
+        <View style={styles.browseGridList}>
+          {browseCategories.filter((_, index) => index % 2 === 0).map((category, row) => (
+            <View key={category.id} style={styles.browseGridRow}>
+              <BrowseCategoryCard category={category} index={row * 2} onPress={onGenrePress} />
+              {browseCategories[row * 2 + 1] ? (
+                <BrowseCategoryCard
+                  category={browseCategories[row * 2 + 1]}
+                  index={row * 2 + 1}
+                  onPress={onGenrePress}
+                />
+              ) : null}
+            </View>
+          ))}
+        </View>
       </View>
       <AdMobBanner loadDelayMs={800} />
     </ScrollView>

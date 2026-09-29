@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import { Platform } from "react-native";
 
 import { logger } from "@/lib/logger";
+import { normalizeApiUrl } from "./apiUrlPolicy";
 
 // All API URLs are configured via .env (EXPO_PUBLIC_MUSIC_API_URL / EXPO_PUBLIC_APP_API_URL).
 // Do NOT hardcode URLs here — change them in .env only.
@@ -66,7 +67,7 @@ function getConfiguredApiBaseUrl(label: string, configuredUrl: string | undefine
     return normalizedFallback;
   }
 
-  return normalizedUrl;
+  return normalizeApiUrl(normalizedUrl) || normalizedFallback;
 }
 
 const SONG_API_BASE_URL = getConfiguredApiBaseUrl(
@@ -118,7 +119,8 @@ export function getMusicApiUrl(): string {
       getRemoteConfigMusicApiUrl: () => string;
     };
     const remoteUrl = getRemoteConfigMusicApiUrl().trim();
-    if (remoteUrl) return remoteUrl;
+    const safeRemoteUrl = normalizeApiUrl(normalizeBaseUrl(remoteUrl));
+    if (safeRemoteUrl) return safeRemoteUrl;
   } catch {
     // remoteConfig not yet initialized — fall through to env
   }
@@ -137,7 +139,8 @@ export function buildAppApiUrl(path: string): string {
       getRemoteConfigAppApiUrl: () => string;
     };
     const remoteUrl = getRemoteConfigAppApiUrl().trim();
-    if (remoteUrl) baseUrl = remoteUrl;
+    const safeRemoteUrl = normalizeApiUrl(normalizeBaseUrl(remoteUrl));
+    if (safeRemoteUrl) baseUrl = safeRemoteUrl;
   } catch {
     // Fall back to env
   }

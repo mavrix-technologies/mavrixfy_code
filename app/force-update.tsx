@@ -1,13 +1,13 @@
+import Colors from "@/constants/colors";
+import { AppVersionInfo,checkAppVersion } from "@/services/notificationService";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Linking, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useCallback,useEffect,useMemo,useState } from "react";
+import { ActivityIndicator,FlatList,Linking,Platform,Pressable,StyleSheet,Text,useWindowDimensions,View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Colors from "@/constants/colors";
-import { AppVersionInfo, checkAppVersion } from "@/services/notificationService";
 
 const DEFAULT_STORE_URL = Platform.select({
   ios: "https://apps.apple.com/app/mavrixfy/id123456789",
@@ -109,7 +109,7 @@ export default function ForceUpdateScreen() {
             ListHeaderComponent={
               <>
                 <View style={styles.brandRow}>
-                  <Image source={require("@/assets/images/mavrixfy_icon.png")} style={styles.brandIcon} contentFit="cover" />
+                  <Image source={require("../assets/images/mavrixfy_icon.png")} style={styles.brandIcon} contentFit="cover" />
                   <Text style={styles.brandName}>Mavrixfy</Text>
                 </View>
 

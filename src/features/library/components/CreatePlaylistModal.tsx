@@ -1,19 +1,19 @@
-import React, { memo } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  TextInput,
-  Modal,
-  ActivityIndicator,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-} from "react-native";
-import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { memo } from "react";
+import {
+ActivityIndicator,
+KeyboardAvoidingView,
+Modal,
+Platform,
+Pressable,
+ScrollView,
+StyleSheet,
+Text,
+TextInput,
+View,
+} from "react-native";
 
 interface CreatePlaylistModalProps {
   visible: boolean;

@@ -1,6 +1,6 @@
-import React, { memo } from "react";
-import { StyleSheet, View } from "react-native";
 import { SearchHeaderField } from "@/components/SearchHeaderField";
+import { memo } from "react";
+import { StyleSheet,View } from "react-native";
 
 export interface AllArtistsSearchProps {
   query: string;

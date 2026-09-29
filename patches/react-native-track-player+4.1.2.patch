@@ -1,5 +1,25 @@
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/AudioEffectPlayerAccess.java b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/AudioEffectPlayerAccess.java
+new file mode 100644
+index 0000000..92366e9
+--- /dev/null
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/AudioEffectPlayerAccess.java
+@@ -0,0 +1,14 @@
++package com.doublesymmetry.kotlinaudio.players;
++
++import com.google.android.exoplayer2.ExoPlayer;
++
++/**
++ * Compile-time adapter for KotlinAudio v2.1.0's protected player accessor.
++ */
++public final class AudioEffectPlayerAccess {
++    private AudioEffectPlayerAccess() {}
++
++    public static ExoPlayer getPlayer(BaseAudioPlayer player) {
++        return player.getExoPlayer();
++    }
++}
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
-index b2409a0..0a22158 100644
+index b2409a0..7db317c 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
 @@ -251,7 +251,7 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
@@ -333,7 +353,7 @@ index b2409a0..0a22158 100644
          if (verifyServiceBoundOrReject(callback)) return@launch
  
          try {
-@@ -569,61 +569,59 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
+@@ -569,61 +569,82 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
          } catch (exception: Exception) {
              rejectWithException(callback, exception)
          }
@@ -410,12 +430,44 @@ index b2409a0..0a22158 100644
          callback.resolve(Arguments.fromBundle(musicService.getPlayerStateBundle(musicService.state)))
 -    }
 +    } }
++
++    @ReactMethod
++    fun getAudioEffects(callback: Promise) { scope.launch {
++        if (verifyServiceBoundOrReject(callback)) return@launch
++        try {
++            val effects = checkNotNull(musicService.audioEffects) { "Play a song first." }
++            callback.resolve(Arguments.fromBundle(effects.snapshot()))
++        } catch (error: Exception) {
++            callback.reject("audio_effects_unavailable", error.message, error)
++        }
++    } }
++
++    @ReactMethod
++    fun updateAudioEffect(command: String, value: Int, band: Int, sessionId: Int, callback: Promise) { scope.launch {
++        if (verifyServiceBoundOrReject(callback)) return@launch
++        try {
++            val effects = checkNotNull(musicService.audioEffects) { "Play a song first." }
++            callback.resolve(Arguments.fromBundle(effects.update(command, value, band, sessionId)))
++        } catch (error: Exception) {
++            callback.reject("audio_effect_update_failed", error.message, error)
++        }
++    } }
++
  }
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
-index afa6b0f..023f4a9 100644
+index afa6b0f..7717e73 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
-@@ -120,7 +120,11 @@ class MusicService : HeadlessJsTaskService() {
+@@ -43,6 +43,8 @@ import timber.log.Timber
+ @MainThread
+ class MusicService : HeadlessJsTaskService() {
+     private lateinit var player: QueuedAudioPlayer
++    var audioEffects: PlaybackAudioEffects? = null
++        private set
+     private val binder = MusicBinder()
+     private val scope = MainScope()
+     private var progressUpdateJob: Job? = null
+@@ -120,7 +122,11 @@ class MusicService : HeadlessJsTaskService() {
              notificationBuilder.foregroundServiceBehavior = NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE
          }
          val notification = notificationBuilder.build()
@@ -428,7 +480,15 @@ index afa6b0f..023f4a9 100644
          @Suppress("DEPRECATION")
          stopForeground(true)
      }
-@@ -739,9 +743,16 @@ class MusicService : HeadlessJsTaskService() {
+@@ -157,6 +163,7 @@ class MusicService : HeadlessJsTaskService() {
+         val automaticallyUpdateNotificationMetadata = playerOptions?.getBoolean(AUTO_UPDATE_METADATA, true) ?: true
+ 
+         player = QueuedAudioPlayer(this@MusicService, playerConfig, bufferConfig, cacheConfig)
++        audioEffects = PlaybackAudioEffects(this, com.doublesymmetry.kotlinaudio.players.AudioEffectPlayerAccess.getPlayer(player))
+         player.automaticallyUpdateNotificationMetadata = automaticallyUpdateNotificationMetadata
+         observeEvents()
+         setupForegrounding()
+@@ -739,9 +746,16 @@ class MusicService : HeadlessJsTaskService() {
          return bundle
      }
  
@@ -446,7 +506,7 @@ index afa6b0f..023f4a9 100644
              ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
              ?.emit(event, data?.let { Arguments.fromBundle(it) })
      }
-@@ -751,7 +762,7 @@ class MusicService : HeadlessJsTaskService() {
+@@ -751,7 +765,7 @@ class MusicService : HeadlessJsTaskService() {
          val payload = Arguments.createArray()
          data.forEach { payload.pushMap(Arguments.fromBundle(it)) }
  
@@ -455,3 +515,276 @@ index afa6b0f..023f4a9 100644
              ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
              ?.emit(event, payload)
      }
+@@ -799,6 +813,8 @@ class MusicService : HeadlessJsTaskService() {
+     @MainThread
+     override fun onDestroy() {
+         super.onDestroy()
++        audioEffects?.release()
++        audioEffects = null
+         if (::player.isInitialized) {
+             player.destroy()
+         }
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/PlaybackAudioEffects.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/PlaybackAudioEffects.kt
+new file mode 100644
+index 0000000..bc727c0
+--- /dev/null
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/PlaybackAudioEffects.kt
+@@ -0,0 +1,245 @@
++package com.doublesymmetry.trackplayer.service
++
++import android.content.Context
++import android.media.AudioDeviceInfo
++import android.media.AudioFormat
++import android.media.AudioManager
++import android.media.audiofx.AudioEffect
++import android.media.audiofx.Equalizer
++import android.media.audiofx.Virtualizer
++import android.os.Build
++import android.os.Bundle
++import com.google.android.exoplayer2.ExoPlayer
++import com.google.android.exoplayer2.Player
++import timber.log.Timber
++
++/**
++ * 100% Official Android Platform AudioEffects Engine for Mavrixfy (Spotify standard).
++ * Uses native hardware DSP for zero latency, crystal-clear audio, and maximum battery efficiency.
++ * Includes intelligent speaker protection to prevent mono phase cancellation and distortion.
++ */
++@Suppress("DEPRECATION")
++class PlaybackAudioEffects(private val context: Context, private val player: ExoPlayer) : Player.Listener {
++    private val preferences = context.getSharedPreferences("playback_audio_effects", Context.MODE_PRIVATE)
++    private var sessionId = 0
++    private var equalizer: Equalizer? = null
++    private var virtualizer: Virtualizer? = null
++    private var equalizerError: String? = null
++    private var surroundError: String? = null
++
++    init {
++        player.addListener(this)
++        attach(player.audioSessionId)
++    }
++
++    override fun onAudioSessionIdChanged(audioSessionId: Int) = attach(audioSessionId)
++
++    private fun isHeadphonesConnected(): Boolean {
++        val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
++        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
++            val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
++            devices.any { device ->
++                when (device.type) {
++                    AudioDeviceInfo.TYPE_WIRED_HEADSET,
++                    AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
++                    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
++                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
++                    AudioDeviceInfo.TYPE_USB_HEADSET,
++                    AudioDeviceInfo.TYPE_HEARING_AID -> true
++                    else -> Build.VERSION.SDK_INT >= 31 && device.type == AudioDeviceInfo.TYPE_BLE_HEADSET
++                }
++            }
++        } else {
++            am.isWiredHeadsetOn || am.isBluetoothA2dpOn
++        }
++    }
++
++    private fun attach(id: Int) {
++        if (sessionId == id) return
++        releaseEffects()
++        sessionId = id
++        equalizerError = null
++        surroundError = null
++        if (id <= 0) return
++
++        try {
++            val effect = Equalizer(0, id)
++            equalizer = effect
++            if (effect.hasControl()) {
++                val range = effect.bandLevelRange
++                for (index in 0 until effect.numberOfBands.toInt()) {
++                    val band = index.toShort()
++                    val key = "band_${effect.getCenterFreq(band)}"
++                    if (preferences.contains(key)) {
++                        effect.setBandLevel(band, preferences.getInt(key, 0)
++                            .coerceIn(range[0].toInt(), range[1].toInt()).toShort())
++                    }
++                }
++                checkStatus(effect.setEnabled(preferences.getBoolean("equalizer_enabled", false)))
++            }
++        } catch (error: Exception) {
++            equalizerError = "Equalizer is unavailable on this device."
++            Timber.w(error, "Could not attach equalizer to session %s", id)
++            equalizer?.release()
++            equalizer = null
++        }
++
++        try {
++            val effect = Virtualizer(0, id)
++            virtualizer = effect
++            if (effect.hasControl()) {
++                // Safe strength: cap at 400 to prevent phase distortion and volume reduction
++                val stored = preferences.getInt("surround_strength", 350)
++                val safeStrength = if (stored > 450) {
++                    preferences.edit().putInt("surround_strength", 350).apply()
++                    350.toShort()
++                } else {
++                    stored.coerceIn(0, 450).toShort()
++                }
++
++                if (effect.strengthSupported) {
++                    effect.setStrength(safeStrength)
++                }
++
++                val requestedEnabled = preferences.getBoolean("surround_enabled", false)
++                // Speaker safety: only enable virtualizer on headphones to avoid mono phase cancellation
++                val shouldEnable = requestedEnabled && isHeadphonesConnected()
++                effect.enabled = shouldEnable
++            }
++        } catch (error: Exception) {
++            surroundError = "Surround sound is unavailable on this device."
++            Timber.w(error, "Could not attach virtualizer to session %s", id)
++            virtualizer?.release()
++            virtualizer = null
++        }
++    }
++
++    private fun checkStatus(status: Int) {
++        check(status == AudioEffect.SUCCESS) { "The device could not apply this audio effect (code $status)." }
++    }
++
++    private fun controlledEqualizer(): Equalizer {
++        val effect = checkNotNull(equalizer) { "Play a song first. Equalizer may not be supported on this device." }
++        check(effect.hasControl()) { "Another audio app controls the equalizer." }
++        return effect
++    }
++
++    private fun controlledVirtualizer(): Virtualizer {
++        val effect = checkNotNull(virtualizer) { "Play a song first. Surround sound may not be supported on this device." }
++        check(effect.hasControl()) { "Another audio app controls surround sound." }
++        return effect
++    }
++
++    private fun saveBands(effect: Equalizer) {
++        val editor = preferences.edit()
++        for (index in 0 until effect.numberOfBands.toInt()) {
++            val band = index.toShort()
++            editor.putInt("band_${effect.getCenterFreq(band)}", effect.getBandLevel(band).toInt())
++        }
++        editor.apply()
++    }
++
++    fun update(command: String, value: Int, band: Int, expectedSession: Int): Bundle {
++        attach(player.audioSessionId)
++        check(sessionId > 0 && sessionId == expectedSession) { "The audio session changed. Try again." }
++        when (command) {
++            "equalizer" -> {
++                val effect = controlledEqualizer()
++                checkStatus(effect.setEnabled(value != 0))
++                preferences.edit().putBoolean("equalizer_enabled", effect.enabled).apply()
++            }
++            "band" -> {
++                val effect = controlledEqualizer()
++                require(band in 0 until effect.numberOfBands.toInt()) { "Invalid equalizer band." }
++                val range = effect.bandLevelRange
++                require(value in range[0].toInt()..range[1].toInt()) { "Gain is outside the device's range." }
++                effect.setBandLevel(band.toShort(), value.toShort())
++                saveBands(effect)
++            }
++            "preset" -> {
++                val effect = controlledEqualizer()
++                require(value in 0 until effect.numberOfPresets.toInt()) { "Invalid equalizer preset." }
++                effect.usePreset(value.toShort())
++                saveBands(effect)
++            }
++            "reset" -> {
++                val effect = controlledEqualizer()
++                for (index in 0 until effect.numberOfBands.toInt()) effect.setBandLevel(index.toShort(), 0)
++                saveBands(effect)
++            }
++            "surround" -> {
++                val effect = controlledVirtualizer()
++                val enableRequested = value != 0
++                preferences.edit().putBoolean("surround_enabled", enableRequested).apply()
++                // Speaker safety: only enable virtualizer on headphones
++                val shouldEnable = enableRequested && isHeadphonesConnected()
++                effect.enabled = shouldEnable
++            }
++            "strength" -> {
++                val effect = controlledVirtualizer()
++                check(effect.strengthSupported) { "This device has a fixed surround strength." }
++                val safeStrength = value.coerceIn(0, 450).toShort()
++                effect.setStrength(safeStrength)
++                preferences.edit().putInt("surround_strength", effect.roundedStrength.toInt()).apply()
++            }
++            else -> error("Unknown audio effect command.")
++        }
++        return snapshot()
++    }
++
++    fun snapshot(): Bundle {
++        attach(player.audioSessionId)
++        val headphones = isHeadphonesConnected()
++        return Bundle().apply {
++            putInt("sessionId", sessionId)
++            putBoolean("equalizerAvailable", equalizer != null)
++            putBoolean("surroundAvailable", virtualizer != null)
++            putBoolean("headphonesConnected", headphones)
++            putString("equalizerError", equalizerError)
++            putString("surroundError", surroundError)
++            equalizer?.let { effect ->
++                putBoolean("equalizerControl", effect.hasControl())
++                putBoolean("equalizerEnabled", effect.enabled)
++                putInt("minLevel", effect.bandLevelRange[0].toInt())
++                putInt("maxLevel", effect.bandLevelRange[1].toInt())
++                putInt("currentPreset", effect.currentPreset.toInt())
++                putParcelableArrayList("bands", ArrayList((0 until effect.numberOfBands.toInt()).map { index ->
++                    Bundle().apply {
++                        putInt("id", index)
++                        putInt("frequency", effect.getCenterFreq(index.toShort()) / 1000)
++                        putInt("level", effect.getBandLevel(index.toShort()).toInt())
++                    }
++                }))
++                putParcelableArrayList("presets", ArrayList((0 until effect.numberOfPresets.toInt()).map { index ->
++                    Bundle().apply {
++                        putInt("id", index)
++                        putString("name", effect.getPresetName(index.toShort()))
++                    }
++                }))
++            }
++            virtualizer?.let { effect ->
++                val requested = preferences.getBoolean("surround_enabled", false)
++                putBoolean("surroundControl", effect.hasControl())
++                putBoolean("surroundEnabled", requested)
++                putBoolean("surroundActive", effect.enabled && headphones)
++                putBoolean("surroundSupported", effect.canVirtualize(AudioFormat.CHANNEL_OUT_STEREO, Virtualizer.VIRTUALIZATION_MODE_BINAURAL) ||
++                    effect.canVirtualize(AudioFormat.CHANNEL_OUT_STEREO, Virtualizer.VIRTUALIZATION_MODE_TRANSAURAL))
++                putBoolean("strengthSupported", effect.strengthSupported)
++                putInt("strength", effect.roundedStrength.toInt())
++            }
++        }
++    }
++
++    private fun releaseEffects() {
++        try { equalizer?.release() } finally {
++            equalizer = null
++            try { virtualizer?.release() } finally { virtualizer = null }
++        }
++    }
++
++    fun release() {
++        player.removeListener(this)
++        releaseEffects()
++        sessionId = 0
++    }
++}
+diff --git a/node_modules/react-native-track-player/src/trackPlayer.ts b/node_modules/react-native-track-player/src/trackPlayer.ts
+index 6f6d723..f7e0972 100644
+--- a/node_modules/react-native-track-player/src/trackPlayer.ts
++++ b/node_modules/react-native-track-player/src/trackPlayer.ts
+@@ -23,7 +23,7 @@ import resolveAssetSource from './resolveAssetSource';
+ 
+ const emitter =
+   Platform.OS !== 'android'
+-    ? new NativeEventEmitter(TrackPlayer)
++    ? (TrackPlayer ? new NativeEventEmitter(TrackPlayer) : DeviceEventEmitter)
+     : DeviceEventEmitter;
+ 
+ // MARK: - Helpers

@@ -1,34 +1,37 @@
-import React, { createContext, use, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut as firebaseSignOut,
-  updateProfile,
-  GoogleAuthProvider,
-  OAuthProvider,
-  signInWithPopup,
-  signInWithCredential,
-  sendPasswordResetEmail,
-  deleteUser,
-  reauthenticateWithCredential,
-  reauthenticateWithPopup,
-  EmailAuthProvider,
-  User as FirebaseUser,
-} from "firebase/auth";
-import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
-import { logLogin, logSignUp } from "@/lib/analytics";
 import { IS_WEB } from "@/constants/platform";
-import { deleteUserFirestoreData } from "@/lib/firestore";
-import { clearAppStorage } from "@/lib/storage";
-import { clearUserCache } from "@/lib/cache";
+import { getAccountScope,setAccountScope } from "@/lib/accountScope";
+import { logLogin,logSignUp } from "@/lib/analytics";
+import type { AppleMobileCredential } from "@/lib/appleAuth";
 import { compactMap } from "@/lib/arrayUtils";
 import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
+import { clearUserCache } from "@/lib/cache";
+import { resumeDownloadQueue,suspendDownloadQueue } from "@/lib/downloads/downloadQueue";
+import { getDownloadsRootUri } from "@/lib/downloads/filesystem";
+import { auth,db } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
-import type { AppleMobileCredential } from "@/lib/appleAuth";
-import { safeValidate, loginSchema, registerSchema, emailSchema } from "@/lib/validation";
-import { checkRateLimit, clearRateLimit, formatRetryAfter } from "@/lib/rateLimiter";
+import { checkRateLimit,clearRateLimit,formatRetryAfter } from "@/lib/rateLimiter";
+import { clearAppStorage } from "@/lib/storage";
+import { emailSchema,loginSchema,registerSchema,safeValidate } from "@/lib/validation";
+import { deleteAsync } from "expo-file-system/legacy";
+import {
+createUserWithEmailAndPassword,
+deleteUser,
+EmailAuthProvider,
+signOut as firebaseSignOut,
+User as FirebaseUser,
+GoogleAuthProvider,
+OAuthProvider,
+onAuthStateChanged,
+reauthenticateWithCredential,
+reauthenticateWithPopup,
+sendPasswordResetEmail,
+signInWithCredential,
+signInWithEmailAndPassword,
+signInWithPopup,
+updateProfile,
+} from "firebase/auth";
+import { doc,getDoc,serverTimestamp,setDoc } from "firebase/firestore";
+import React,{ createContext,use,useCallback,useEffect,useMemo,useRef,useState,type ReactNode } from "react";
 
 interface AppUser {
   id: string;
@@ -70,6 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [isGuest, setIsGuest] = useState(false);
+  const authGeneration = useRef(0);
 
   const buildAppUser = useCallback(async (fbUser: FirebaseUser): Promise<AppUser> => {
     let name = fbUser.displayName || "";
@@ -102,15 +106,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       picture,
       isAdmin: false,
     };
-  }, []);
-
-  const clearAuthState = useCallback((userId?: string | null) => {
-    if (userId) {
-      clearUserCache(userId);
-    }
-    setFirebaseUser(null);
-    setUser(null);
-    setIsGuest(false);
   }, []);
 
   const applyAuthenticatedSnapshot = useCallback((fbUser: FirebaseUser) => {
@@ -155,6 +150,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async (fbUser) => {
         clearTimeout(safetyTimeout);
         if (!isSubscribed) return;
+        const generation = ++authGeneration.current;
+        const uid = fbUser?.uid ?? null;
+        if (getAccountScope().accountId !== uid) {
+          setLoading(true);
+          await suspendDownloadQueue();
+          if (!isSubscribed || generation !== authGeneration.current) return;
+          setAccountScope(uid);
+          resumeDownloadQueue();
+        }
 
         if (fbUser) {
           // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
@@ -162,7 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Enrich with Firestore data in the background (non-blocking)
           buildAppUser(fbUser)
             .then((appUser) => {
-              if (isSubscribed) {
+              if (isSubscribed && generation === authGeneration.current && auth.currentUser?.uid === fbUser.uid) {
                 setUser(appUser);
               }
             })
@@ -188,6 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       isSubscribed = false;
+      authGeneration.current += 1;
       clearTimeout(safetyTimeout);
       unsubscribe();
     };
@@ -209,6 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         appUser: await buildAppUser(userCred.user),
       })
     );
+    if (auth.currentUser?.uid !== cred.user.uid) return;
     setUser(appUser);
     setFirebaseUser(cred.user);
     setIsGuest(false);
@@ -279,6 +285,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       picture: "",
       isAdmin: false,
     };
+    if (auth.currentUser?.uid !== cred.user.uid) return;
     setUser(appUser);
     setFirebaseUser(cred.user);
     setIsGuest(false);
@@ -316,10 +323,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logSignUp("google");
       } else {
         // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
-        await setDoc(userDocRef, googleUserData, { merge: true });
+        await setDoc(userDocRef, { lastLoginAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
         logLogin("google");
       }
       const appUser = await buildAppUser(fbUser);
+      if (auth.currentUser?.uid !== fbUser.uid) return;
       setUser(appUser);
       setFirebaseUser(fbUser);
       setIsGuest(false);
@@ -356,10 +364,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logSignUp("google");
     } else {
       // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
-      await setDoc(userDocRef, googleUserData, { merge: true });
+      await setDoc(userDocRef, { lastLoginAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
       logLogin("google");
     }
     const appUser = await buildAppUser(fbUser);
+    if (auth.currentUser?.uid !== fbUser.uid) return;
     setUser(appUser);
     setFirebaseUser(fbUser);
     setIsGuest(false);
@@ -403,11 +412,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logSignUp("apple");
     } else {
       // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
-      await setDoc(userDocRef, appleUserData, { merge: true });
+      await setDoc(userDocRef, { lastLoginAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
       logLogin("apple");
     }
 
     const appUser = await buildAppUser(fbUser);
+    if (auth.currentUser?.uid !== fbUser.uid) return;
     setUser(appUser);
     setFirebaseUser(fbUser);
     setIsGuest(false);
@@ -458,13 +468,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
       await setDoc(userDocRef, {
-        ...appleUserData,
-        ...appleNameData,
+        lastLoginAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        ...(!userDocSnap.data()?.fullName ? appleNameData : {}),
       }, { merge: true });
       logLogin("apple");
     }
 
     const appUser = await buildAppUser(fbUser);
+    if (auth.currentUser?.uid !== fbUser.uid) return;
     setUser(appUser);
     setFirebaseUser(fbUser);
     setIsGuest(false);
@@ -517,7 +529,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (primaryProviderId === "password") {
       const email = currentUser.email?.trim();
-      const password = options?.password?.trim();
+      const password = options?.password;
 
       if (!email) {
         throw new Error("This account is missing an email address.");
@@ -563,27 +575,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    await deleteUser(currentUser);
     await Promise.all([
-      deleteUserFirestoreData(currentUser.uid),
-      clearAppStorage(),
-      deleteUser(currentUser),
+      clearAppStorage({ userId: currentUser.uid }),
+      deleteAsync(getDownloadsRootUri(currentUser.uid), { idempotent: true }),
       clearRateLimit('auth:deleteAccount', userEmail.toLowerCase()),
     ]);
-    clearAuthState(currentUser.uid);
-  }, [clearAuthState]);
+    clearUserCache(currentUser.uid);
+  }, []);
 
   const logout = useCallback(async () => {
     const currentUserId = auth.currentUser?.uid || firebaseUser?.uid || user?.id;
-    try {
-      await firebaseSignOut(auth);
-    } catch {}
-    clearAuthState(currentUserId);
-  }, [clearAuthState, firebaseUser?.uid, user?.id]);
+    authGeneration.current += 1;
+    await firebaseSignOut(auth);
+    if (currentUserId) clearUserCache(currentUserId);
+  }, [firebaseUser?.uid, user?.id]);
 
   const refreshUser = useCallback(async () => {
     if (auth.currentUser) {
+      const generation = authGeneration.current;
       const appUser = await buildAppUser(auth.currentUser);
-      setUser(appUser);
+      if (generation === authGeneration.current && auth.currentUser?.uid === appUser.id) setUser(appUser);
     }
   }, [buildAppUser]);
 
@@ -606,7 +618,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshUser,
   }), [user, firebaseUser, loading, isGuest, continueAsGuest, login, register, signInWithGoogle, signInWithGoogleCredential, signInWithApple, signInWithAppleCredential, resetPassword, deleteAccount, logout, refreshUser]);
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={value}><React.Fragment key={user?.id ?? "guest"}>{loading ? null : children}</React.Fragment></AuthContext.Provider>;
 }
 
 export function useAuth() {

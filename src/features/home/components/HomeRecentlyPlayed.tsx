@@ -1,17 +1,17 @@
-import React, { memo, useCallback } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  FlatList,
-  StyleSheet,
-} from "react-native";
-import { Image } from "expo-image";
-import { useRouter } from "expo-router";
-import { ImpactFeedbackStyle } from "expo-haptics";
 import { triggerImpact } from "@/lib/haptics";
 import type { Song } from "@/lib/musicData";
 import type { RecentlyPlayedItem } from "@/lib/storage";
+import { ImpactFeedbackStyle } from "expo-haptics";
+import { Image } from "expo-image";
+import { useRouter } from "expo-router";
+import { memo,useCallback } from "react";
+import {
+FlatList,
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
 
 const RECENT_CARD_WIDTH = 100;
 const RECENT_CARD_GAP = 12;

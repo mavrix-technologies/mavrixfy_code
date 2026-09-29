@@ -1,27 +1,27 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Platform,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from "react-native";
-import { useRouter } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Colors from "@/constants/colors";
+import { ArtistCard,getAllPopularArtists,searchArtists } from "@/data/providers/ArtistProvider";
+import { triggerImpact } from "@/lib/haptics";
+import { getBestImageUrl } from "@/lib/musicData";
+import { safeGoBack } from "@/utils/navigation";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
-import { safeGoBack } from "@/utils/navigation";
-import { getBestImageUrl } from "@/lib/musicData";
-import { ArtistCard, getAllPopularArtists, searchArtists } from "@/data/providers/ArtistProvider";
-import { triggerImpact } from "@/lib/haptics";
-import { ArtistProfileCard } from "../components/ArtistProfileCard";
-import { ArtistLanguageFilters } from "../components/ArtistLanguageFilters";
+import { useRouter } from "expo-router";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import {
+ActivityIndicator,
+FlatList,
+Platform,
+StyleSheet,
+Text,
+useWindowDimensions,
+View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AllArtistsFloatingMixBar } from "../components/AllArtistsFloatingMixBar";
 import { AllArtistsHeader } from "../components/AllArtistsHeader";
 import { AllArtistsSearch } from "../components/AllArtistsSearch";
-import { AllArtistsFloatingMixBar } from "../components/AllArtistsFloatingMixBar";
+import { ArtistLanguageFilters } from "../components/ArtistLanguageFilters";
+import { ArtistProfileCard } from "../components/ArtistProfileCard";
 
 const SEARCH_DEBOUNCE_MS = 300;
 const NUM_COLUMNS = 3;
@@ -89,6 +89,8 @@ function AllArtistsScreenView() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const trimmed = query.trim();
     if (!trimmed) {
+      // Clear the previous query as soon as the search field is emptied.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       clearArtistSearch();
       return;
     }
@@ -323,7 +325,7 @@ function AllArtistsScreenView() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0D0E11",
+    backgroundColor: Colors.background,
   },
 
   hintWrap: {

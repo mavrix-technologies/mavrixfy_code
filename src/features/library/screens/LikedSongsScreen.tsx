@@ -1,39 +1,41 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View, TextInput, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
-import { IS_ANDROID, IS_WEB } from "@/constants/platform";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  Easing,
-} from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import { ImpactFeedbackStyle } from "expo-haptics";
-import { useAuth } from "@/contexts/AuthContext";
-import { useLikedSongs, usePlayerBrowse } from "@/contexts/PlayerContext";
-import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
-import { type Song } from "@/lib/musicData";
-import { triggerImpact } from "@/lib/haptics";
+/* eslint-disable react-hooks/immutability -- Reanimated shared values are updated inside user-event handlers. */
+import AdMobBanner from "@/components/AdMobBanner";
+import AppTopHeader,{
+APP_TOP_HEADER_HEIGHT,
+AppTopHeaderDownloadButton,
+AppTopHeaderProfileButton,
+useAppTopHeaderScrollElevation,
+} from "@/components/AppTopHeader";
+import { CollectionHero } from "@/components/CollectionHero";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
+import { NavLikedIcon } from "@/components/OfficialNavIcons";
 import OfflineBanner from "@/components/OfflineBanner";
+import { SearchHeaderField } from "@/components/SearchHeaderField";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
-import SearchHeaderField from "@/components/SearchHeaderField";
-import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
-import AppTopHeader, {
-  APP_TOP_HEADER_HEIGHT,
-  AppTopHeaderDownloadButton,
-  AppTopHeaderProfileButton,
-  useAppTopHeaderScrollElevation,
-} from "@/components/AppTopHeader";
+import { IS_ANDROID,IS_WEB } from "@/constants/platform";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNetwork } from "@/contexts/NetworkContext";
-import AdMobBanner from "@/components/AdMobBanner";
-import CollectionHero from "@/components/CollectionHero";
-import { NavLikedIcon } from "@/components/OfficialNavIcons";
+import { useLikedSongs,usePlayerBrowse } from "@/contexts/PlayerContext";
+import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
+import { triggerImpact } from "@/lib/haptics";
+import { type Song } from "@/lib/musicData";
+import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
+import { Ionicons } from "@expo/vector-icons";
+import { ImpactFeedbackStyle } from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { FlatList,Pressable,StyleSheet,Text,TextInput,View,type NativeScrollEvent,type NativeSyntheticEvent } from "react-native";
+import Animated,{
+Easing,
+useAnimatedStyle,
+useSharedValue,
+withTiming,
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Colors from "@/constants/colors";
 
-import { LIKED_SONGS_UI as UI, styles } from "../styles/likedSongsStyles";
+import { LIKED_SONGS_UI as UI,styles } from "../styles/likedSongsStyles";
 
 const MOOD_SUGGESTIONS = [
   "Smooth",
@@ -241,7 +243,7 @@ export function LikedSongsScreen() {
       playSong(song, filteredSongsRef.current);
     },
     // filteredSongsRef is stable — read current value at call time
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [playSong]
   );
 
@@ -270,7 +272,7 @@ export function LikedSongsScreen() {
       );
     },
     // handleSongPress is stable; filteredSongsRef read at call time — no re-render on list change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [handleSongPress]
   );
 
@@ -306,7 +308,7 @@ export function LikedSongsScreen() {
   return (
     <View style={styles.container}>
       {/* Base background */}
-      <LinearGradient colors={["#09111B", "#10141a", "#10141a"]} style={StyleSheet.absoluteFillObject} />
+      <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFillObject} />
 
       {/* Ambient glow — bleeds the primary green from top header area downward */}
       <LinearGradient
@@ -502,7 +504,7 @@ export function LikedSongsScreen() {
       {/* Animated search overlay — slides in smoothly over the main screen */}
       {isSearchMode && (
         <Animated.View style={[styles.searchOverlay, searchOverlayStyle]}>
-          <LinearGradient colors={["#09111B", "#10141a"]} style={StyleSheet.absoluteFillObject} />
+          <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFillObject} />
           <LinearGradient
             colors={["rgba(38,225,154,0.14)", "transparent"]}
             style={[styles.ambientGlow, { height: 160 }]}

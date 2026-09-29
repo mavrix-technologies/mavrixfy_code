@@ -1,8 +1,8 @@
-import { initializeApp, getApps } from "firebase/app";
-import { getAuth, initializeAuth } from "firebase/auth";
-import { getFirestore, initializeFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getApps,initializeApp } from "firebase/app";
+import { getAuth,initializeAuth } from "firebase/auth";
+import { getFirestore,initializeFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 import { Platform } from "react-native";
 import { getExpoExtra } from "./expoExtra";
 

@@ -1,16 +1,16 @@
-import React, { useCallback, useState, memo } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  type GestureResponderEvent,
-  type StyleProp,
-  type ViewStyle,
-} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import React,{ memo,useCallback,useState } from "react";
+import {
+Pressable,
+Text,
+View,
+type GestureResponderEvent,
+type StyleProp,
+type ViewStyle,
+} from "react-native";
 
-import { formatDuration } from "@/lib/musicData";
 import { PlayerSlider } from "@/components/PlayerSlider";
+import { formatDuration } from "@/lib/musicData";
 import { clampUnit } from "@/lib/sliderUtils";
 import { styles } from "../styles/playerScreenStyles";
 

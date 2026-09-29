@@ -1,6 +1,6 @@
-import { create } from "zustand";
-import type { UserPlaylist } from "@/lib/storage";
 import type { FollowedArtist } from "@/lib/followedArtists";
+import type { UserPlaylist } from "@/lib/storage";
+import { create } from "zustand";
 
 export type DisplayPlaylist = UserPlaylist & { isFirestore?: boolean };
 

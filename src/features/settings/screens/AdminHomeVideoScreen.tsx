@@ -1,27 +1,27 @@
-import React, { useCallback, useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  DEFAULT_HOME_HERO_CONFIG,
-  getHomeHeroConfig,
-  HomeHeroConfig,
-  saveHomeHeroConfig,
+DEFAULT_HOME_HERO_CONFIG,
+getHomeHeroConfig,
+HomeHeroConfig,
+saveHomeHeroConfig,
 } from "@/lib/homeHeroConfig";
 import { safeGoBack } from "@/utils/navigation";
+import { Ionicons } from "@expo/vector-icons";
+import { useCallback,useEffect,useState } from "react";
+import {
+ActivityIndicator,
+Alert,
+Platform,
+Pressable,
+ScrollView,
+StyleSheet,
+Switch,
+Text,
+TextInput,
+View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type HomeVideoEditorMode = "video" | "ad";
 
@@ -342,7 +342,7 @@ export function AdminHomeVideoScreen() {
     } finally {
       setSaving(false);
     }
-  }, [config, editorMode, user?.id]);
+  }, [config, editorMode, user]);
 
   const handleReset = useCallback(() => {
     setConfig(DEFAULT_HOME_HERO_CONFIG);

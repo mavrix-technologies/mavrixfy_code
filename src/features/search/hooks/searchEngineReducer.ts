@@ -1,7 +1,7 @@
 import {
-  type ResultFilter,
-  type SearchResults,
-  EMPTY_RESULTS,
+type ResultFilter,
+type SearchResults,
+EMPTY_RESULTS,
 } from "@/lib/searchRepository";
 
 export interface SearchScreenState {

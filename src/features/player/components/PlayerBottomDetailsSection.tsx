@@ -1,18 +1,16 @@
 import React from "react";
-import { View, Text } from "react-native";
-import { FlatList as GHFlatList } from "react-native-gesture-handler";
+import { Text,View } from "react-native";
+import { ScrollView as GHScrollView } from "react-native-gesture-handler";
 
-import type { Song } from "@/lib/musicData";
-import { KaraokeLyricsView } from "@/components/KaraokeLyricsView";
 import AdMobBanner from "@/components/AdMobBanner";
-import { IS_ANDROID } from "@/constants/platform";
-import { AboutArtistCard, RelatedSongsSection } from "./PlayerDiscoverySections";
+import { KaraokeLyricsView } from "@/components/KaraokeLyricsView";
+import type { Song } from "@/lib/musicData";
+import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
 import { styles } from "../styles/playerScreenStyles";
+import { AboutArtistCard,RelatedSongsSection } from "./PlayerDiscoverySections";
 
 export interface PlayerBottomDetailsSectionProps {
   screenSong: Song;
-  currentPositionSeconds: number;
-  totalLengthSec: number;
   playbackActive: boolean;
   accentColor: string;
   onTogglePlay: () => void;
@@ -24,7 +22,7 @@ export interface PlayerBottomDetailsSectionProps {
   playingQueue: Song[];
   queueKeyExtractor: (item: Song, index: number) => string;
   renderQueueItem: ({ item, index }: { item: Song; index: number }) => React.ReactElement;
-  getQueueItemLayout: any;
+  getQueueItemLayout?: any;
   artistDetails: any;
   artistLoading: boolean;
   onViewArtistProfile: () => void;
@@ -34,8 +32,6 @@ export interface PlayerBottomDetailsSectionProps {
 
 export const PlayerBottomDetailsSection = React.memo(function PlayerBottomDetailsSection({
   screenSong,
-  currentPositionSeconds,
-  totalLengthSec,
   playbackActive,
   accentColor,
   onTogglePlay,
@@ -47,7 +43,6 @@ export const PlayerBottomDetailsSection = React.memo(function PlayerBottomDetail
   playingQueue,
   queueKeyExtractor,
   renderQueueItem,
-  getQueueItemLayout,
   artistDetails,
   artistLoading,
   onViewArtistProfile,
@@ -56,9 +51,8 @@ export const PlayerBottomDetailsSection = React.memo(function PlayerBottomDetail
 }: PlayerBottomDetailsSectionProps) {
   return (
     <View>
-      <KaraokeLyricsView
+      <LiveKaraokeLyrics
         song={screenSong}
-        currentPositionSeconds={currentPositionSeconds}
         isPlaying={playbackActive}
         accentColor={accentColor}
         onTogglePlay={onTogglePlay}
@@ -78,22 +72,19 @@ export const PlayerBottomDetailsSection = React.memo(function PlayerBottomDetail
           <Text style={styles.playingListTitle}>Queue</Text>
         </View>
         <View style={[styles.queueListViewport, queueViewportStyle]}>
-          <GHFlatList
-            data={playingQueue}
-            keyExtractor={queueKeyExtractor}
-            renderItem={renderQueueItem}
-            getItemLayout={getQueueItemLayout}
+          <GHScrollView
             contentContainerStyle={styles.queueListContent}
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled
             bounces={false}
             overScrollMode="never"
-            removeClippedSubviews={IS_ANDROID}
-            initialNumToRender={5}
-            maxToRenderPerBatch={5}
-            windowSize={5}
-            updateCellsBatchingPeriod={50}
-          />
+          >
+            {playingQueue.map((item, index) => (
+              <React.Fragment key={queueKeyExtractor(item, index)}>
+                {renderQueueItem({ item, index })}
+              </React.Fragment>
+            ))}
+          </GHScrollView>
         </View>
       </View>
 
@@ -112,3 +103,10 @@ export const PlayerBottomDetailsSection = React.memo(function PlayerBottomDetail
 });
 
 PlayerBottomDetailsSection.displayName = "PlayerBottomDetailsSection";
+
+const LiveKaraokeLyrics = React.memo(function LiveKaraokeLyrics(
+  props: Omit<React.ComponentProps<typeof KaraokeLyricsView>, "currentPositionSeconds">
+) {
+  const { positionMillis } = usePlaybackProgressStore();
+  return <KaraokeLyricsView {...props} currentPositionSeconds={positionMillis / 1000} />;
+});

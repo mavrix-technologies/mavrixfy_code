@@ -1,52 +1,53 @@
-import { useState, useReducer, useRef, useCallback, useEffect, useMemo } from "react";
-import { Platform, Keyboard, type FlatList } from "react-native";
+import { useFocusEffect,useRouter } from "expo-router";
+import { useCallback,useEffect,useMemo,useReducer,useRef,useState } from "react";
+import { type FlatList,Keyboard,Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter, useFocusEffect } from "expo-router";
 
-import { getBestImageUrl, type Song } from "@/lib/musicData";
 import { useAppTopHeaderScrollElevation } from "@/components/AppTopHeader";
-import { useNetwork, useOnReconnect } from "@/contexts/NetworkContext";
+import { useNetwork,useOnReconnect } from "@/contexts/NetworkContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import { filterMap, sortedCopy } from "@/lib/arrayUtils";
+import { sortedCopy } from "@/lib/arrayUtils";
+import { getBestImageUrl,type Song } from "@/lib/musicData";
 import {
-  addSongSearchHistoryItem,
-  addSearchHistoryItem,
-  getSearchHistory,
-  removeSearchHistoryItem,
-} from "@/lib/storage";
+type AlbumResult,
+type ArtistResult,
+fetchYouTubeSuggestions,
+type PlaylistResult,
+type ResultFilter,
+searchRepository,
+type SearchResults,
+} from "@/lib/searchRepository";
 import { normalizeText } from "@/lib/searchUtils";
 import {
-  searchRepository,
-  fetchYouTubeSuggestions,
-  type ResultFilter,
-  type PlaylistResult,
-  type AlbumResult,
-  type ArtistResult,
-  type SearchResults,
-} from "@/lib/searchRepository";
+addSearchHistoryItem,
+addSongSearchHistoryItem,
+getSearchHistory,
+removeSearchHistoryItem,
+} from "@/lib/storage";
 import {
-  type RecentSearchItem,
-  type BrowseCategory,
-  getRouteSearchQuery,
-  normalizeRecentSearchLabel,
-  normalizeSearchSuggestionList,
-  toRecentSearchItems,
-  STITCH_BROWSE_CATEGORIES,
+getRouteSearchQuery,
+normalizeRecentSearchLabel,
+normalizeSearchSuggestionList,
+type RecentSearchItem,
+STITCH_BROWSE_CATEGORIES,
+toRecentSearchItems
 } from "../types";
 
 import {
-  type SearchScreenState,
-  type SearchScreenAction,
-  searchScreenReducer,
-  createInitialSearchState,
+createInitialSearchState,
+type SearchScreenAction,
+searchScreenReducer,
+type SearchScreenState,
 } from "./searchEngineReducer";
 
 export {
-  type SearchScreenState,
-  type SearchScreenAction,
-  searchScreenReducer,
-  createInitialSearchState,
+createInitialSearchState,searchScreenReducer,type SearchScreenAction,type SearchScreenState
 };
+
+const BROWSE_CATEGORIES = [
+  ...STITCH_BROWSE_CATEGORIES.filter((item) => item.isHero),
+  ...sortedCopy(STITCH_BROWSE_CATEGORIES.filter((item) => !item.isHero), () => Math.random() - 0.5),
+];
 
 export function useSearchEngine(params: { q?: string | string[]; name?: string | string[] }) {
   const insets = useSafeAreaInsets();
@@ -96,12 +97,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   const searchCache = searchCacheRef.current;
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const browseCategories = useMemo(() => {
-    const heroes = STITCH_BROWSE_CATEGORIES.filter((item) => item.isHero);
-    const rest = STITCH_BROWSE_CATEGORIES.filter((item) => !item.isHero);
-    const randomized = sortedCopy(rest, () => Math.random() - 0.5);
-    return [...heroes, ...randomized];
-  }, []);
+  const browseCategories = BROWSE_CATEGORIES;
 
   const performSearch = useCallback(
     async (searchQuery: string) => {

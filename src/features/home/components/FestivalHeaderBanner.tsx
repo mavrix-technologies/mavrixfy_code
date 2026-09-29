@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  useWindowDimensions,
-} from "react-native";
+import Colors from "@/constants/colors";
+import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { type FestivalThemeConfig } from "@/services/festivalThemeService";
+import React,{ useEffect,useState } from "react";
+import {
+StyleSheet,
+Text,
+useWindowDimensions,
+View,
+} from "react-native";
 
 // Module-level aspect ratio cache to avoid recalculating on re-renders
 const gBannerAspectRatioCache: Record<string, number> = {};
@@ -105,7 +106,7 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
       {/* 2. Fallback Ambient Gradient if No Image is configured */}
       {!hasImage && (
         <LinearGradient
-          colors={[accentColor, "#0B0F14"]}
+          colors={[accentColor, Colors.background]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFillObject}

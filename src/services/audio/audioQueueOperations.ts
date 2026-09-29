@@ -1,9 +1,9 @@
-import { useCallback, type MutableRefObject } from "react";
-import type { Song } from "@/lib/musicData";
+import { createShuffledPlaybackQueue,toggleQueueShuffleState } from "@/lib/arrayUtils";
 import { logger } from "@/lib/logger";
+import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
-import { createShuffledPlaybackQueue, toggleQueueShuffleState } from "@/lib/arrayUtils";
-import { songToTrack, withResolvedPlaybackUrl } from "@/services/audio/PlayerPlaybackResolver";
+import { songToTrack,withResolvedPlaybackUrl } from "@/services/audio/PlayerPlaybackResolver";
+import { useCallback,type MutableRefObject } from "react";
 
 interface UseAudioQueueOperationsOptions {
   queue: Song[];
@@ -253,6 +253,8 @@ export function useAudioQueueOperations({
         }
 
         const currentQ = queueRef.current;
+        if (currentSongRef.current?.id === song.id) return;
+        const alreadyQueued = currentQ.some((track) => track.id === song.id);
         const cleanQ = currentQ.filter((s) => s.id !== song.id);
         const currentIndexInClean = cleanQ.findIndex((s) => s.id === currentSongRef.current?.id);
         const insertAt = Math.max(0, (currentIndexInClean >= 0 ? currentIndexInClean : 0) + 1);
@@ -265,6 +267,9 @@ export function useAudioQueueOperations({
 
         queueRef.current = nextQueue;
         setQueue(nextQueue);
+        const nextActiveIndex = Math.max(0, currentIndexInClean);
+        queueIndexRef.current = nextActiveIndex;
+        setQueueIndex(nextActiveIndex);
 
         const currentSourceQ = originalQueueRef.current;
         const cleanSourceQ = currentSourceQ.filter((s) => s.id !== song.id);
@@ -284,7 +289,7 @@ export function useAudioQueueOperations({
         if (TrackPlayer && isPlayerReady) {
           try {
             const nativeQueue = await TrackPlayer!.getQueue();
-            if (nativeQueueIdsMatch(nativeQueue, currentQ)) {
+            if (!alreadyQueued && nativeQueueIdsMatch(nativeQueue, currentQ)) {
               await TrackPlayer!.add(
                 [songToTrack(nextSongWithUrl, resolvedUrl, streamUrlCache.current)],
                 insertAt
@@ -320,6 +325,7 @@ export function useAudioQueueOperations({
       setQueue,
       setSourceQueue,
       setUserQueuedSongIds,
+      setQueueIndex,
       showPlaybackNotice,
       streamUrlCache,
       TrackPlayer,

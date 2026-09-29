@@ -1,12 +1,12 @@
-import React, { memo } from "react";
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { Ionicons } from "@expo/vector-icons";
+import { memo } from "react";
+import {
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
 
 export interface AllArtistsFloatingMixBarProps {
   bottom: number;

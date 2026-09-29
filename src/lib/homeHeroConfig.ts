@@ -1,6 +1,6 @@
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { toTrimmedString } from "@/utils/stringUtils";
+import { doc,getDoc,serverTimestamp,setDoc } from "firebase/firestore";
 
 export type HomeHeroConfig = {
   enabled: boolean;

@@ -1,10 +1,9 @@
-import React, { memo } from "react";
-import { View, Text, Pressable, StyleSheet } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
 import { NavLikedIcon } from "@/components/OfficialNavIcons";
 import Colors from "@/constants/colors";
 import { type FollowedArtist } from "@/lib/followedArtists";
+import { Ionicons } from "@expo/vector-icons";
+import { memo } from "react";
+import { Pressable,StyleSheet,Text,View } from "react-native";
 import { ArtistRow } from "./ArtistRow";
 
 export type Filter = "playlists" | "artists" | "favorite" | null;

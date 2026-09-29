@@ -1,24 +1,24 @@
-import React from "react";
-import { Pressable, Text, View } from "react-native";
-import * as Haptics from "expo-haptics";
-import { triggerImpact } from "@/lib/haptics";
 import { IS_WEB } from "@/constants/platform";
+import { triggerImpact } from "@/lib/haptics";
+import * as Haptics from "expo-haptics";
+import React from "react";
+import { Pressable,Text,View } from "react-native";
 import { styles } from "./layoutStyles";
 
 import {
-  type VisibleRoute,
-  type NavItem,
-  NAV_ITEMS,
+type NavItem,
+type VisibleRoute,
+NAV_ITEMS,
 } from "./navTabConstants";
-export type { VisibleRoute, NavItem };
 
 import {
-  NavHomeIcon,
-  NavSearchIcon,
-  NavLibraryIcon,
-  NavLikedIcon,
-  NavImportIcon,
+NavHomeIcon,
+NavImportIcon,
+NavLibraryIcon,
+NavLikedIcon,
+NavSearchIcon,
 } from "@/components/OfficialNavIcons";
+export type { NavItem,VisibleRoute };
 
 export function TabIcon({
   route,

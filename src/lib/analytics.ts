@@ -79,14 +79,3 @@ export function logLogin(method: string) {
 export function logSignUp(method: string) {
   logEvent("sign_up", { method });
 }
-
-function logSearch(searchTerm: string) {
-  logEvent("search", { search_term: searchTerm });
-}
-
-function logSelectContent(contentType: string, itemId: string) {
-  logEvent("select_content", {
-    content_type: contentType,
-    item_id: itemId,
-  });
-}

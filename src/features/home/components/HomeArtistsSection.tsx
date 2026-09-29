@@ -1,19 +1,19 @@
-import React, { memo, useCallback } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  FlatList,
-  StyleSheet,
-} from "react-native";
-import { Image } from "expo-image";
-import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
+import type { ArtistCard } from "@/data/providers/ArtistProvider";
 import { triggerImpact } from "@/lib/haptics";
 import { getBestImageUrl } from "@/lib/musicData";
-import type { ArtistCard } from "@/data/providers/ArtistProvider";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import { useRouter } from "expo-router";
+import { memo,useCallback } from "react";
+import {
+FlatList,
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
 
 const ARTIST_CARD_WIDTH = 104;
 const ARTIST_CARD_GAP = 14;

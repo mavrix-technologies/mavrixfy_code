@@ -3,21 +3,7 @@
  */
 
 export {
-  getDownloadsRootUri,
-  getTracksRootUri,
-  getTempRootUri,
-  getTrackDirUri,
-  getTrackFileUri,
-  getTempDownloadUri,
-  getArtworkFileUri,
-  ensureDownloadsDirs,
-  ensureTrackDir,
-  hasSufficientStorage,
-  getValidatedTrackFileUri,
-  trackFileExists,
-  getTrackFileSize,
-  promoteTempToTrack,
-  deleteTrackFiles,
-  deleteAllTrackFiles,
-  formatBytes,
+deleteAllTrackFiles,deleteTrackFiles,ensureDownloadsDirs,
+ensureTrackDir,formatBytes,getArtworkFileUri,getDownloadsRootUri,getTempDownloadUri,getTempRootUri,
+getTrackDirUri,getTrackFileSize,getTrackFileUri,getTracksRootUri,getValidatedTrackFileUri,hasSufficientStorage,promoteTempToTrack,trackFileExists
 } from "./filesystem";

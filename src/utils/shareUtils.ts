@@ -1,10 +1,10 @@
-import { Platform, Share } from "react-native";
+import { triggerImpact } from "@/lib/haptics";
+import type { Song } from "@/lib/musicData";
+import { showGlobalToast } from "@/utils/globalToast";
+import { openShareSheet } from "@/utils/shareSheet";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
-import type { Song } from "@/lib/musicData";
-import { triggerImpact } from "@/lib/haptics";
-import { showGlobalToast } from "@/utils/globalToast";
-import { openShareSheet, type ShareSheetData } from "@/utils/shareSheet";
+import { Platform,Share } from "react-native";
 import { unescapeHtml } from "./stringUtils";
 
 export interface ShareContentOptions {

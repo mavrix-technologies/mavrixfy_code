@@ -147,39 +147,3 @@ export function formatRetryAfter(seconds: number): string {
   const hours = Math.ceil(minutes / 60);
   return `${hours} hour${hours !== 1 ? 's' : ''}`;
 }
-
-/**
- * Get remaining attempts for an action
- * @param action Action identifier
- * @param identifier Optional identifier
- * @returns Number of attempts remaining, or null if no limit
- */
-async function getRemainingAttempts(
-  action: string,
-  identifier?: string
-): Promise<number | null> {
-  const config = RATE_LIMIT_CONFIGS[action];
-  if (!config) return null;
-
-  const key = `ratelimit:${action}${identifier ? ':' + identifier : ''}`;
-  const dataStr = await AsyncStorage.getItem(key);
-  const now = Date.now();
-
-  if (!dataStr) {
-    return config.maxAttempts;
-  }
-
-  const data: RateLimitData = JSON.parse(dataStr);
-
-  // If blocked, return 0
-  if (data.blockedUntil && now < data.blockedUntil) {
-    return 0;
-  }
-
-  // Filter valid attempts
-  const validAttempts = data.attempts.filter(
-    (timestamp: number) => now - timestamp < config.windowMs
-  );
-
-  return Math.max(0, config.maxAttempts - validAttempts.length);
-}

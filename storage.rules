@@ -10,20 +10,32 @@ service firebase.storage {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function ownsPlaylist(playlistId) {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/playlists/$(playlistId))
+        && (
+          firestore.get(/databases/(default)/documents/playlists/$(playlistId)).data.createdBy.get('id', '') == request.auth.uid
+          || firestore.get(/databases/(default)/documents/playlists/$(playlistId)).data.createdBy.get('uid', '') == request.auth.uid
+          || firestore.get(/databases/(default)/documents/playlists/$(playlistId)).data.createdBy.get('_id', '') == request.auth.uid
+        );
+    }
+
     // User profile images: readable by signed-in users, writable only by owner (max 5MB, images only)
     match /users/{userId}/profile/{allImages=**} {
       allow read: if signedIn();
-      allow write: if isOwner(userId)
+      allow create, update: if isOwner(userId)
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
+      allow delete: if isOwner(userId);
     }
 
-    // Playlist cover images: readable by signed-in users, writable by authenticated users (max 5MB, images only)
+    // Playlist cover images: only the playlist creator can change them.
     match /playlists/{playlistId}/{allImages=**} {
       allow read: if signedIn();
-      allow write: if signedIn()
+      allow create, update: if ownsPlaylist(playlistId)
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
+      allow delete: if ownsPlaylist(playlistId);
     }
 
     // Deny all other unmatched paths by default

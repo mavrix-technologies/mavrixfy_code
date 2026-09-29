@@ -24,10 +24,6 @@ export function setLastMix(params: LastMixParams): void {
   _notify();
 }
 
-function getLastMix(): LastMixParams | null {
-  return _lastMix;
-}
-
 export function clearLastMix(): void {
   _lastMix = null;
   _notify();

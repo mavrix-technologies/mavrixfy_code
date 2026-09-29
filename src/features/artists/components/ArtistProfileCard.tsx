@@ -1,15 +1,15 @@
-import React, { memo, useCallback } from "react";
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
-import { getBestImageUrl } from "@/lib/musicData";
 import type { ArtistCard } from "@/data/providers/ArtistProvider";
+import { getBestImageUrl } from "@/lib/musicData";
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { memo,useCallback } from "react";
+import {
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
 
 export interface ArtistProfileCardProps {
   artist: ArtistCard;
@@ -181,7 +181,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: 3,
     right: 3,
-    backgroundColor: "#0D0E11",
+    backgroundColor: Colors.background,
     borderRadius: 999,
     padding: 1,
   },

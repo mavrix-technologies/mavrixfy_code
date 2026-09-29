@@ -1,22 +1,22 @@
+import { db } from "@/lib/firebase";
+import { addLikedSongToFirestore,removeLikedSongFromFirestore } from "@/lib/firestore";
+import { logger } from "@/lib/logger";
+import type { Song } from "@/lib/musicData";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  collection,
-  query,
-  orderBy,
-  onSnapshot,
-  type Unsubscribe,
+collection,
+onSnapshot,
+orderBy,
+query,
+type Unsubscribe,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { addLikedSongToFirestore, removeLikedSongFromFirestore } from "@/lib/firestore";
-import type { Song } from "@/lib/musicData";
-import { logger } from "@/lib/logger";
 import { useLikedSongsStore } from "./likedSongsStore";
 
 const CACHE_KEY_PREFIX = "@mavrixfy_liked_songs_";
 
 let activeUnsubscribe: Unsubscribe | null = null;
 let activeSubscriptionUserId: string | null = null;
-let isCacheHydrated = false;
+let subscriptionGeneration = 0;
 
 function getCacheKey(userId?: string | null): string {
   return `${CACHE_KEY_PREFIX}${userId || "guest"}`;
@@ -41,16 +41,19 @@ function sanitizeSongForCache(song: Song): Partial<Song> {
  * Reads cached liked songs from local storage and hydrates Zustand store immediately (0ms).
  */
 export async function loadCachedLikedSongs(userId?: string | null): Promise<Song[]> {
+  const generation = subscriptionGeneration;
   try {
     const key = getCacheKey(userId);
     const raw = await AsyncStorage.getItem(key);
+    if (generation !== subscriptionGeneration || (userId ?? null) !== activeSubscriptionUserId) return [];
     if (!raw) return [];
 
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
       const validSongs = parsed.filter((s: any) => Boolean(s && s.id && s.title)) as Song[];
-      useLikedSongsStore.getState().setSongs(validSongs, "loading");
-      isCacheHydrated = true;
+      if (useLikedSongsStore.getState().status === "loading") {
+        useLikedSongsStore.getState().setSongs(validSongs, "loading");
+      }
       return validSongs;
     }
   } catch (error) {
@@ -80,16 +83,18 @@ export function subscribeLikedSongs(userId?: string | null): () => void {
   // If no user or same active listener, avoid duplicate subscriptions
   if (!userId) {
     cleanupLikedSongsSubscription();
+    useLikedSongsStore.getState().setStatus("loading");
     void loadCachedLikedSongs(null);
-    return () => {};
+    return cleanupLikedSongsSubscription;
   }
 
   if (activeSubscriptionUserId === userId && activeUnsubscribe) {
-    return activeUnsubscribe;
+    return cleanupLikedSongsSubscription;
   }
 
   cleanupLikedSongsSubscription();
   activeSubscriptionUserId = userId;
+  useLikedSongsStore.getState().setStatus("loading");
 
   // 1. Instant local-first hydration from cache
   void loadCachedLikedSongs(userId);
@@ -102,6 +107,7 @@ export function subscribeLikedSongs(userId?: string | null): () => void {
   const likedSongsRef = collection(db, "users", userId, "likedSongs");
 
   const handleLikedSongsSnapshot = (snapshot: any) => {
+    if (activeSubscriptionUserId !== userId) return;
     const songs: Song[] = [];
     snapshot.forEach((docSnap: any) => {
       const data = docSnap.data();
@@ -128,6 +134,7 @@ export function subscribeLikedSongs(userId?: string | null): () => void {
   };
 
   const handleLikedSongsError = (error: any) => {
+    if (activeSubscriptionUserId !== userId) return;
     logger.warn("[LikedSongsRepository] Realtime listener error, falling back to cached state:", error);
     // Don't blow away cached songs on network errors
     useLikedSongsStore.getState().setStatus("ready");
@@ -154,6 +161,7 @@ export function subscribeLikedSongs(userId?: string | null): () => void {
  * Cleans up any active Firestore listener and resets state tracking.
  */
 export function cleanupLikedSongsSubscription(): void {
+  subscriptionGeneration += 1;
   if (activeUnsubscribe) {
     try {
       activeUnsubscribe();
@@ -163,6 +171,7 @@ export function cleanupLikedSongsSubscription(): void {
     activeUnsubscribe = null;
   }
   activeSubscriptionUserId = null;
+  useLikedSongsStore.getState().reset();
 }
 
 /**

@@ -5,10 +5,10 @@
  * Only account-disabled / banned users are blocked.
  */
 
-import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { type DownloadEntitlement, type TrackRights, DOWNLOAD_DEVICE_LIMIT, MAX_OFFLINE_SONGS, LICENSE_GRACE_PERIOD_DAYS } from "@/types/downloads";
 import { logger } from "@/lib/logger";
+import { type DownloadEntitlement,type TrackRights,DOWNLOAD_DEVICE_LIMIT,LICENSE_GRACE_PERIOD_DAYS,MAX_OFFLINE_SONGS } from "@/types/downloads";
+import { doc,getDoc } from "firebase/firestore";
 
 // ─── Entitlement ──────────────────────────────────────────────────────────────
 

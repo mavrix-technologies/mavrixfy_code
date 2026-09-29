@@ -59,21 +59,7 @@
       }
     },
     "ios-ipa": {
-      "distribution": "internal",
-      "ios": {
-        "buildConfiguration": "Release",
-        "simulator": false,
-        "resourceClass": "m-medium"
-      },
-      "channel": "production",
-      "autoIncrement": false,
-      "env": {
-        "NODE_ENV": "production",
-        "EXPO_USE_UPDATES": "1",
-        "EXPO_NO_FLIPPER": "1",
-        "EXPO_NO_CLIENT_ENV_VARS": "1",
-        "EXPO_NO_DOTENV": "1"
-      }
+      "extends": "ios-unsigned"
     },
     "production": {
       "android": {
@@ -181,17 +167,7 @@
       }
     },
     "production-split": {
-      "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
-      },
-      "channel": "production",
-      "autoIncrement": true,
-      "env": {
-        "NODE_ENV": "production",
-        "EXPO_USE_UPDATES": "1",
-        "EXPO_NO_FLIPPER": "1"
-      }
+      "extends": "production-universal"
     },
     "production-armeabi-v7a": {
       "android": {

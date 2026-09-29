@@ -1,5 +1,5 @@
-import { type Ionicons } from "@expo/vector-icons";
 import { type AppSettings } from "@/lib/storage";
+import { type Ionicons } from "@expo/vector-icons";
 
 export const QUALITY_OPTIONS: { label: string; value: "auto" | "low" | "medium" | "high" }[] = [
   { label: "Auto", value: "auto" },
@@ -55,4 +55,47 @@ export const CROSSFADE_OPTIONS: {
   { label: "8s", value: 8 },
 ];
 
+export const EQUALIZER_BANDS = ["60Hz", "150Hz", "400Hz", "1KHz", "2.4KHz", "15KHz"] as const;
 
+export interface EqualizerPreset {
+  id: string;
+  name: string;
+  bands: Record<string, number>;
+}
+
+const preset = (id: string, name: string, gains: number[]): EqualizerPreset => ({
+  id,
+  name,
+  bands: Object.fromEntries(EQUALIZER_BANDS.map((band, index) => [band, gains[index]])),
+});
+
+export const EQUALIZER_PRESETS: EqualizerPreset[] = [
+  preset("acoustic", "Acoustic", [5, 4, 2, 2, 4, 3]),
+  preset("bass-booster", "Bass Booster", [2, 7, 9, 0, 3, 2]),
+  preset("bass-reducer", "Bass Reducer", [-6, -4, -2, 0, 1, 2]),
+  preset("classical", "Classical", [5, 3, -2, 2, 4, 4]),
+  preset("dance", "Dance", [4, 6, 2, 0, 3, 4]),
+  preset("deep", "Deep", [5, 3, 1, 0, -2, -4]),
+  preset("electronic", "Electronic", [5, 4, 0, 2, 4, 5]),
+  preset("flat", "Flat", [0, 0, 0, 0, 0, 0]),
+  preset("hip-hop", "Hip-Hop", [6, 4, 0, 2, -1, 3]),
+  preset("jazz", "Jazz", [4, 3, 1, 2, -2, 3]),
+  preset("latin", "Latin", [4, 2, 0, 0, 3, 5]),
+  preset("loudness", "Loudness", [6, 3, -2, 0, -1, 5]),
+  preset("lounge", "Lounge", [-3, 1, 3, 4, 2, -2]),
+  preset("piano", "Piano", [3, 2, 0, 3, 4, 3]),
+  preset("pop", "Pop", [-1, 2, 4, 4, 2, -1]),
+  preset("r-and-b", "R&B", [3, 6, 3, -2, 3, 4]),
+  preset("rock", "Rock", [5, 3, -1, 1, 3, 5]),
+  preset("small-speakers", "Small Speakers", [6, 4, 2, 0, -2, -5]),
+  preset("spoken-word", "Spoken Word", [-3, 0, 2, 4, 3, 0]),
+  preset("treble-booster", "Treble Booster", [0, 0, 0, 2, 4, 6]),
+  preset("treble-reducer", "Treble Reducer", [0, 0, 0, -2, -4, -6]),
+  preset("vocal-booster", "Vocal Booster", [-2, 0, 3, 5, 3, 1]),
+];
+
+export function detectMatchingPreset(bands: Record<string, number>): string | null {
+  return EQUALIZER_PRESETS.find((item) =>
+    EQUALIZER_BANDS.every((band) => (bands[band] ?? 0) === item.bands[band])
+  )?.id ?? null;
+}

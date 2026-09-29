@@ -1,7 +1,7 @@
 import type { Song } from "@/lib/musicData";
-import type { SearchHistoryItem } from "@/lib/storage";
 import type { ResultFilter } from "@/lib/searchRepository";
 import { normalizeText } from "@/lib/searchUtils";
+import type { SearchHistoryItem } from "@/lib/storage";
 import type { Ionicons } from "@expo/vector-icons";
 
 export interface RecentSearchItem {
@@ -35,7 +35,7 @@ export const ALBUM_STAGGER_PATTERN = [0, 7, 3, 9, 2, 5] as const;
 export const ALBUM_TILT_PATTERN = [0.8, -1.0, 1.1, -0.7, 0.6, -0.9] as const;
 export const PLAYLIST_STAGGER_PATTERN = [0, 8, 4, 10, 2, 6] as const;
 export const PLAYLIST_TILT_PATTERN = [-1.1, 0.9, -0.8, 1.2, -0.6, 0.8] as const;
-export const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icon.png");
+export const APP_BRAND_ICON = require("../../../assets/images/mavrixfy_icon.png");
 export const MAX_SEARCH_SUGGESTIONS = 8;
 
 export function getRouteSearchQuery(params: { q?: string | string[]; name?: string | string[] }): string {

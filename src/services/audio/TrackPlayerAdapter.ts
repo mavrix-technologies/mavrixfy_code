@@ -1,13 +1,14 @@
-import { PermissionsAndroid, Platform } from "react-native";
-import TrackPlayer, {
-  Capability,
-  AppKilledPlaybackBehavior,
-  AndroidAudioContentType,
-  IOSCategory,
-  IOSCategoryMode,
-  IOSCategoryOptions,
-} from "react-native-track-player";
 import { logger } from "@/lib/logger";
+import { syncEqualizerWithNative } from "./audioEqualizer";
+import { PermissionsAndroid,Platform } from "react-native";
+import TrackPlayer,{
+AndroidAudioContentType,
+AppKilledPlaybackBehavior,
+Capability,
+IOSCategory,
+IOSCategoryMode,
+IOSCategoryOptions,
+} from "react-native-track-player";
 
 export async function trackPlayerService(): Promise<void> {
   await Promise.resolve();
@@ -152,4 +153,5 @@ async function setupPlayerInternal(): Promise<void> {
       progressUpdateEventInterval: 1,
     });
   }
+  void syncEqualizerWithNative();
 }

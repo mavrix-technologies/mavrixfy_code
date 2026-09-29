@@ -1,5 +1,5 @@
-import { useSyncExternalStore } from "react";
 import type { PlayerProgressContextValue } from "@/types/playbackTypes";
+import { useSyncExternalStore } from "react";
 
 export type ProgressSnapshot = PlayerProgressContextValue;
 

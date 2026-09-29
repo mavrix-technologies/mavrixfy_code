@@ -1,17 +1,16 @@
-import React, { forwardRef, memo } from "react";
-import {
-  Platform,
-  Pressable,
-  StyleSheet,
-  TextInput,
-  View,
-  type ViewStyle,
-  type StyleProp,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { Ionicons } from "@expo/vector-icons";
+import { forwardRef,memo } from "react";
+import {
+Platform,
+Pressable,
+StyleSheet,
+TextInput,
+type StyleProp,
+type ViewStyle
+} from "react-native";
 
-import LiquidGlassView from "./LiquidGlassView";
+import { LiquidGlassView } from "./LiquidGlassView";
 
 export type SearchHeaderFieldProps = {
   value: string;

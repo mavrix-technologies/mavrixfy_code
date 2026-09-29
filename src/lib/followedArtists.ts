@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { accountStorageKey } from "./accountScope";
 const KEY = "@mavrixfy_followed_artists_v1";
 
 export interface FollowedArtist {
@@ -9,22 +10,19 @@ export interface FollowedArtist {
 }
 
 // In-memory cache so reads are instant after first load
-let memCache: FollowedArtist[] | null = null;
+const cache = new Map<string, FollowedArtist[]>();
 
 async function read(): Promise<FollowedArtist[]> {
-  if (memCache !== null) return memCache;
-  try {
-    const raw = await AsyncStorage.getItem(KEY);
-    memCache = raw ? JSON.parse(raw) : [];
-  } catch {
-    memCache = [];
-  }
-  return memCache!;
+  const key = accountStorageKey(KEY);
+  if (cache.has(key)) return cache.get(key)!;
+  const raw = await AsyncStorage.getItem(key);
+  const value: FollowedArtist[] = raw ? JSON.parse(raw) : [];
+  cache.set(key, value);
+  return value;
 }
-
-function write(list: FollowedArtist[]): Promise<void> {
-  memCache = list;
-  return AsyncStorage.setItem(KEY, JSON.stringify(list)).catch(() => {});
+function write(list: FollowedArtist[], key = accountStorageKey(KEY)): Promise<void> {
+  cache.set(key, list);
+  return AsyncStorage.setItem(key, JSON.stringify(list));
 }
 
 export function getFollowedArtists(): Promise<FollowedArtist[]> {
@@ -36,30 +34,16 @@ export async function isFollowingArtist(id: string): Promise<boolean> {
   return list.some((a) => a.id === id);
 }
 
-async function followArtist(artist: FollowedArtist): Promise<void> {
-  const list = await read();
-  if (list.some((a) => a.id === artist.id)) return; // already following
-  return write([{ ...artist, followedAt: Date.now() }, ...list]);
-}
-
-async function unfollowArtist(id: string): Promise<void> {
-  const list = await read();
-  return write(list.filter((a) => a.id !== id));
-}
-
 export async function toggleFollowArtist(artist: FollowedArtist): Promise<boolean> {
+  const key = accountStorageKey(KEY);
   const list = await read();
   const already = list.some((a) => a.id === artist.id);
   if (already) {
-    void write(list.filter((a) => a.id !== artist.id));
+    await write(list.filter((a) => a.id !== artist.id), key);
     return false; // now unfollowed
   } else {
-    void write([{ ...artist, followedAt: Date.now() }, ...list]);
+    await write([{ ...artist, followedAt: Date.now() }, ...list], key);
     return true; // now following
   }
 }
 
-/** Invalidate in-memory cache — call after logout */
-function clearFollowedArtistsCache(): void {
-  memCache = null;
-}

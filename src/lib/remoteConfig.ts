@@ -15,6 +15,7 @@
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { normalizeApiUrl } from "./apiUrlPolicy";
 import { firebaseConfig } from "./firebase";
 import { logger } from "./logger";
 
@@ -30,9 +31,9 @@ const BUILT_IN_DEFAULT_API_URL = "https://mavrixfy-song-api.vercel.app";
 
 // In-memory resolved URLs — initialized synchronously so first API call is instant
 let resolvedMusicApiUrl: string =
-  process.env.EXPO_PUBLIC_MUSIC_API_URL?.trim() || BUILT_IN_DEFAULT_API_URL;
+  normalizeApiUrl(process.env.EXPO_PUBLIC_MUSIC_API_URL) || BUILT_IN_DEFAULT_API_URL;
 let resolvedAppApiUrl: string =
-  process.env.EXPO_PUBLIC_APP_API_URL?.trim() || resolvedMusicApiUrl;
+  normalizeApiUrl(process.env.EXPO_PUBLIC_APP_API_URL) || resolvedMusicApiUrl;
 
 let isHydrated = false;
 let isFetching = false;
@@ -66,11 +67,7 @@ async function hydrateFromStorage(): Promise<void> {
 }
 
 function normalizeUrl(url: string): string {
-  let cleaned = url.trim().replace(/\/+$/, "");
-  if (cleaned && !/^https?:\/\//i.test(cleaned)) {
-    cleaned = `https://${cleaned}`;
-  }
-  return cleaned;
+  return normalizeApiUrl(url) || BUILT_IN_DEFAULT_API_URL;
 }
 
 function notifyListeners(): void {

@@ -1,34 +1,34 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
-import {
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import AdMobBanner from "@/components/AdMobBanner";
+import OfflineBanner from "@/components/OfflineBanner";
+import SongRow from "@/components/SongRow";
+import Colors from "@/constants/colors";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
+import { useArtworkPalette } from "@/lib/colorExtractor";
+import { type Song,formatDuration } from "@/lib/musicData";
 import * as Animated from "@/lib/nativeAnimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
+import { safeGoBack } from "@/utils/navigation";
+import { sharePlaylist } from "@/utils/shareUtils";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
-import { safeGoBack } from "@/utils/navigation";
-import { type Song, formatDuration } from "@/lib/musicData";
-import { usePlayerActions } from "@/contexts/PlayerContext";
-import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
-import SongRow from "@/components/SongRow";
-import { useAuth } from "@/contexts/AuthContext";
-import OfflineBanner from "@/components/OfflineBanner";
-import { useNetwork } from "@/contexts/NetworkContext";
-import { useArtworkPalette, colorWithAlpha } from "@/lib/colorExtractor";
-import { sharePlaylist } from "@/utils/shareUtils";
-import { usePlaylistDetailData } from "../hooks/usePlaylistDetailData";
-import { usePlaylistDetailParams } from "../hooks/usePlaylistDetailParams";
-import { usePlaylistEditModalState } from "../hooks/usePlaylistEditModalState";
+import { useCallback,useMemo,useRef,useState } from "react";
+import {
+Platform,
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PlaylistEditModal } from "../components/PlaylistEditModal";
 import { PlaylistHero } from "../components/PlaylistHero";
 import { PlaylistStickyHeader } from "../components/PlaylistStickyHeader";
 import { PlaylistTrackListEmpty } from "../components/PlaylistTrackListEmpty";
-import AdMobBanner from "@/components/AdMobBanner";
+import { usePlaylistDetailData } from "../hooks/usePlaylistDetailData";
+import { usePlaylistDetailParams } from "../hooks/usePlaylistDetailParams";
+import { usePlaylistEditModalState } from "../hooks/usePlaylistEditModalState";
 
 export function PlaylistDetailScreen() {
   return usePlaylistDetailView();
@@ -81,9 +81,7 @@ function usePlaylistDetailView() {
   const backgroundColor = palette?.background || Colors.background;
 
   // Sticky header cross-fade animation
-  const stickyOpacityRef = useRef<Animated.Value | null>(null);
-  if (stickyOpacityRef.current === null) stickyOpacityRef.current = new Animated.Value(0);
-  const stickyOpacity = stickyOpacityRef.current;
+  const [stickyOpacity] = useState(() => new Animated.Value(0));
   const [isStickyVisible, setIsStickyVisible] = useState(false);
 
   const floatingNavOpacity = useMemo(
@@ -373,7 +371,7 @@ function usePlaylistDetailView() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#080B0F" },
+  container: { flex: 1, backgroundColor: Colors.background },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   backBtnSolo: { width: 36, height: 36, marginLeft: 12, alignItems: "center", justifyContent: "center" },
   emptyText: { color: Colors.subtext, fontSize: 14, fontFamily: "Inter_500Medium", textAlign: "center" },

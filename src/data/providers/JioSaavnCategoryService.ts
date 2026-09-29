@@ -1,26 +1,33 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { sortedCopy, shuffleArray } from "@/lib/arrayUtils";
+import { shuffleArray,sortedCopy } from "@/lib/arrayUtils";
 import { withTimeout } from "@/utils/asyncUtils";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  dedupeByPlaylistId,
-  parsePlaylistSearchResponse,
-  parseAlbumSearchResponse,
-  consumeResponseBody,
-  getJioSaavnSearchBaseUrls,
+consumeResponseBody,
+dedupeByPlaylistId,
+getJioSaavnSearchBaseUrls,
+parseAlbumSearchResponse,
+parsePlaylistSearchResponse,
 } from "./JioSaavnNormalizers";
+import type {
+AutoRefreshContext,
+AutoRefreshTimeSlot,
+HomeJioSaavnCategory,
+JioSaavnAlbumResult,
+JioSaavnPlaylistResult,
+} from "./JioSaavnTypes";
+import {
+HOME_JIOSAAVN_CATEGORIES,
+JIOSAAVN_CATEGORY_CACHE_TTL_MS,
+} from "./JioSaavnTypes";
+
+import {
+fetchJioSaavnDetailsByLink,
+fetchNewArrivalPlaylists,
+fetchScrapedCategoryFromHomepage,
+getScrapedJioSaavnHomeModules
+} from "./JioSaavnScraperService";
 
 export { getJioSaavnSearchBaseUrls };
-import type {
-  JioSaavnPlaylistResult,
-  JioSaavnAlbumResult,
-  HomeJioSaavnCategory,
-  AutoRefreshTimeSlot,
-  AutoRefreshContext,
-} from "./JioSaavnTypes";
-import {
-  JIOSAAVN_CATEGORY_CACHE_TTL_MS,
-  HOME_JIOSAAVN_CATEGORIES,
-} from "./JioSaavnTypes";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const CACHE_PREFIX = "@mavrixfy_jiosaavn_home_v2";
@@ -475,14 +482,9 @@ export async function fetchTrendingPlaylists(
   return forceRefresh ? shuffleArray(sorted).slice(0, limit) : sorted.slice(0, limit);
 }
 
-import {
-  fetchJioSaavnDetailsByLink,
-  fetchNewArrivalPlaylists,
-} from "./JioSaavnScraperService";
-
 export {
-  fetchJioSaavnDetailsByLink,
-  fetchNewArrivalPlaylists,
+fetchJioSaavnDetailsByLink,
+fetchNewArrivalPlaylists
 };
 
 export async function getCategoryCache(
@@ -563,14 +565,9 @@ export async function clearJioSaavnPlaylistCache(categoryId?: string): Promise<v
     // Silent cache clear failure
   }
 }
-import {
-  getScrapedJioSaavnHomeModules,
-  fetchScrapedCategoryFromHomepage,
-} from "./JioSaavnScraperService";
 
 export {
-  getScrapedJioSaavnHomeModules,
-  fetchScrapedCategoryFromHomepage,
+fetchScrapedCategoryFromHomepage,getScrapedJioSaavnHomeModules
 };
 
 export async function getPlaylistsByCategory(

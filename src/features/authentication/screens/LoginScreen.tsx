@@ -1,41 +1,80 @@
-import React, { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Alert,
-  useWindowDimensions,
-  ScrollView,
-} from "react-native";
-import { Image } from "expo-image";
-import * as AppleAuthentication from "expo-apple-authentication";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import * as Haptics from "expo-haptics";
-import Constants from "expo-constants";
 import Colors from "@/constants/colors";
-import { IS_IOS, IS_WEB } from "@/constants/platform";
+import { IS_IOS, IS_WEB, IS_ANDROID } from "@/constants/platform";
 import { useAuth } from "@/contexts/AuthContext";
-import { triggerNotification, triggerImpact } from "@/lib/haptics";
-import { openPrivacyPolicy, openTermsOfService } from "@/lib/legal";
-import { getAppleMobileCredential, isAppleSignInAvailable } from "@/lib/appleAuth";
-import { getGoogleMobileIdToken } from "@/lib/googleAuth";
+import { getAppleMobileCredential,isAppleSignInAvailable } from "@/lib/appleAuth";
 import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
+import { getGoogleMobileIdToken } from "@/lib/googleAuth";
+import { triggerImpact,triggerNotification } from "@/lib/haptics";
+import { openPrivacyPolicy,openTermsOfService } from "@/lib/legal";
+import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
+import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import React,{ useEffect,useState } from "react";
+import {
+ActivityIndicator,
+Alert,
+KeyboardAvoidingView,
+Pressable,
+ScrollView,
+StyleSheet,
+Text,
+TextInput,
+View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg,{ Path } from "react-native-svg";
 import { styles } from "../styles/loginStyles";
 
 type AuthMode = "login" | "signup";
 
+function GoogleIcon({ size = 18 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+        fill="#4285F4"
+      />
+      <Path
+        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+        fill="#34A853"
+      />
+      <Path
+        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+        fill="#FBBC05"
+      />
+      <Path
+        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+        fill="#EA4335"
+      />
+    </Svg>
+  );
+}
+
+function BrandHeader() {
+  return (
+    <View style={styles.brandHeader}>
+      <Image
+        source={require("../../../../assets/images/mavrixfy_transparent_master.png")}
+        style={styles.logoImage}
+        contentFit="contain"
+      />
+      <Text style={styles.brandTitle}>Mavrixfy</Text>
+    </View>
+  );
+}
+
 interface AuthFieldProps {
-  icon: keyof typeof Ionicons.glyphMap;
   placeholder: string;
   value: string;
   onChangeText: (value: string) => void;
   keyboardType?: "default" | "email-address";
   autoCapitalize?: "none" | "words";
+  autoComplete?: React.ComponentProps<typeof TextInput>["autoComplete"];
+  textContentType?: React.ComponentProps<typeof TextInput>["textContentType"];
   secureTextEntry?: boolean;
   trailing?: React.ReactNode;
   isFocused: boolean;
@@ -44,12 +83,13 @@ interface AuthFieldProps {
 }
 
 function AuthField({
-  icon,
   placeholder,
   value,
   onChangeText,
   keyboardType,
   autoCapitalize,
+  autoComplete,
+  textContentType,
   secureTextEntry,
   trailing,
   isFocused,
@@ -57,28 +97,21 @@ function AuthField({
   onBlur,
 }: AuthFieldProps) {
   return (
-    <View
-      style={[
-        styles.fieldShell,
-        isFocused ? styles.fieldShellFocused : null,
-      ]}
-    >
-      <Ionicons
-        name={icon}
-        size={18}
-        color={isFocused ? Colors.primary : "rgba(255,255,255,0.4)"}
-        style={styles.fieldIcon}
-      />
+    <View style={[styles.fieldShell, isFocused && styles.fieldShellFocused]}>
       <TextInput
         style={styles.fieldInput}
         placeholder={placeholder}
-        placeholderTextColor="rgba(255,255,255,0.35)"
+        placeholderTextColor="rgba(255, 255, 255, 0.38)"
         value={value}
         onChangeText={onChangeText}
         keyboardType={keyboardType}
         autoCapitalize={autoCapitalize}
+        autoCorrect={false}
+        autoComplete={autoComplete}
+        textContentType={textContentType}
         secureTextEntry={secureTextEntry}
         selectionColor={Colors.primary}
+        cursorColor={Colors.primary}
         onFocus={onFocus}
         onBlur={onBlur}
       />
@@ -87,18 +120,58 @@ function AuthField({
   );
 }
 
-function BrandHeader() {
+interface SocialButtonsProps {
+  googleLoading: boolean;
+  onGoogleSignIn: () => void;
+  showAppleOption: boolean;
+  appleLoading: boolean;
+  onAppleSignIn: () => void;
+}
+
+function AuthSocialButtons({
+  googleLoading,
+  onGoogleSignIn,
+  showAppleOption,
+  appleLoading,
+  onAppleSignIn,
+}: SocialButtonsProps) {
   return (
-    <View style={styles.brandHeader}>
-      <View style={styles.logoContainer}>
-        <Image
-          source={require("@/assets/images/mavrixfy_transparent_master.png")}
-          style={styles.logoImage}
-          contentFit="contain"
-        />
-      </View>
-      <Text style={styles.heroTitle}>Millions of songs.</Text>
-      <Text style={styles.heroSubtitle}>Free on Mavrixfy.</Text>
+    <View style={styles.socialRow}>
+      {/* Google Pill */}
+      <Pressable
+        style={({ pressed }) => [styles.socialPill, pressed && styles.socialPillPressed]}
+        onPress={onGoogleSignIn}
+        disabled={googleLoading || appleLoading}
+      >
+        {googleLoading ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <>
+            <GoogleIcon size={20} />
+            <Text style={styles.socialPillText}>
+              {showAppleOption ? "Google" : "Continue with Google"}
+            </Text>
+          </>
+        )}
+      </Pressable>
+
+      {/* Apple Pill (Only displayed on iOS and Web, hidden on Android) */}
+      {showAppleOption && (
+        <Pressable
+          style={({ pressed }) => [styles.socialPill, pressed && styles.socialPillPressed]}
+          onPress={onAppleSignIn}
+          disabled={appleLoading || googleLoading}
+        >
+          {appleLoading ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <>
+              <Ionicons name="logo-apple" size={22} color="#FFFFFF" />
+              <Text style={styles.socialPillText}>Apple</Text>
+            </>
+          )}
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -106,261 +179,16 @@ function BrandHeader() {
 function AuthLegalFooter() {
   return (
     <View style={styles.legalFooterContainer}>
-      <Text style={styles.legalText}>
-        {"By continuing, you agree to Mavrixfy's "}
-        <Text style={styles.legalLink} onPress={() => { void openTermsOfService(); }}>
-          Terms of Service
-        </Text>
-        {" "}and{" "}
-        <Text style={styles.legalLink} onPress={() => { void openPrivacyPolicy(); }}>
-          Privacy Policy
-        </Text>
-        .
-      </Text>
-    </View>
-  );
-}
-
-interface ModeSwitcherProps {
-  isSignup: boolean;
-  onSelectMode: (mode: AuthMode) => void;
-}
-
-function AuthModeSwitcher({
-  isSignup,
-  onSelectMode,
-}: ModeSwitcherProps) {
-  return (
-    <View style={styles.modeSwitcherWrap}>
-      <Pressable
-        style={[
-          styles.modeSwitcherTab,
-          !isSignup && styles.modeSwitcherTabActive,
-        ]}
-        onPress={() => onSelectMode("login")}
-      >
-        <Text
-          style={[
-            styles.modeSwitcherText,
-            !isSignup && styles.modeSwitcherTextActive,
-          ]}
-        >
-          Log In
-        </Text>
+      <Pressable onPress={() => { void openTermsOfService(); }} hitSlop={8}>
+        <Text style={styles.legalLink}>Terms of Service</Text>
       </Pressable>
-      <Pressable
-        style={[
-          styles.modeSwitcherTab,
-          isSignup && styles.modeSwitcherTabActive,
-        ]}
-        onPress={() => onSelectMode("signup")}
-      >
-        <Text
-          style={[
-            styles.modeSwitcherText,
-            isSignup && styles.modeSwitcherTextActive,
-          ]}
-        >
-          Sign Up
-        </Text>
+      <Text style={styles.legalDivider}>|</Text>
+      <Pressable onPress={() => { void openPrivacyPolicy(); }} hitSlop={8}>
+        <Text style={styles.legalLink}>Privacy Policy</Text>
       </Pressable>
     </View>
   );
 }
-
-interface FormFieldsProps {
-  isSignup: boolean;
-  fullName: string;
-  onFullNameChange: (v: string) => void;
-  email: string;
-  onEmailChange: (v: string) => void;
-  password: string;
-  onPasswordChange: (v: string) => void;
-  showPassword: boolean;
-  onToggleShowPassword: () => void;
-  focusedField: "name" | "email" | "password" | null;
-  onFocusField: (field: "name" | "email" | "password" | null) => void;
-  onForgotPassword: () => void;
-  resetPasswordLoading: boolean;
-}
-
-function AuthFormFields({
-  isSignup,
-  fullName,
-  onFullNameChange,
-  email,
-  onEmailChange,
-  password,
-  onPasswordChange,
-  showPassword,
-  onToggleShowPassword,
-  focusedField,
-  onFocusField,
-  onForgotPassword,
-  resetPasswordLoading,
-}: FormFieldsProps) {
-  return (
-    <View style={styles.formContainer}>
-      {isSignup && (
-        <AuthField
-          icon="person-outline"
-          placeholder="Full Name"
-          value={fullName}
-          onChangeText={onFullNameChange}
-          autoCapitalize="words"
-          isFocused={focusedField === "name"}
-          onFocus={() => onFocusField("name")}
-          onBlur={() => onFocusField(null)}
-        />
-      )}
-
-      <AuthField
-        icon="mail-outline"
-        placeholder="Email Address"
-        value={email}
-        onChangeText={onEmailChange}
-        keyboardType="email-address"
-        autoCapitalize="none"
-        isFocused={focusedField === "email"}
-        onFocus={() => onFocusField("email")}
-        onBlur={() => onFocusField(null)}
-      />
-
-      <AuthField
-        icon="lock-closed-outline"
-        placeholder="Password"
-        value={password}
-        onChangeText={onPasswordChange}
-        secureTextEntry={!showPassword}
-        isFocused={focusedField === "password"}
-        onFocus={() => onFocusField("password")}
-        onBlur={() => onFocusField(null)}
-        trailing={
-          <Pressable
-            onPress={onToggleShowPassword}
-            hitSlop={12}
-            style={styles.eyeBtn}
-          >
-            <Ionicons
-              name={showPassword ? "eye-off-outline" : "eye-outline"}
-              size={20}
-              color="rgba(255,255,255,0.4)"
-            />
-          </Pressable>
-        }
-      />
-
-      {!isSignup && (
-        <Pressable
-          style={styles.forgotBtn}
-          onPress={onForgotPassword}
-          disabled={resetPasswordLoading}
-        >
-          <Text style={styles.forgotText}>
-            {resetPasswordLoading ? "Sending reset link..." : "Forgot password?"}
-          </Text>
-        </Pressable>
-      )}
-    </View>
-  );
-}
-
-interface SocialButtonsProps {
-  isExpoGo: boolean;
-  googleLoading: boolean;
-  onGoogleSignIn: () => void;
-  showAppleLoginOption: boolean;
-  appleLoading: boolean;
-  appleAvailable: boolean;
-  onAppleSignIn: () => void;
-  guestLoginEnabled: boolean;
-  onContinueAsGuest: () => void;
-}
-
-function AuthSocialButtons({
-  isExpoGo,
-  googleLoading,
-  onGoogleSignIn,
-  showAppleLoginOption,
-  appleLoading,
-  appleAvailable,
-  onAppleSignIn,
-  guestLoginEnabled,
-  onContinueAsGuest,
-}: SocialButtonsProps) {
-  return (
-    <View style={styles.socialStack}>
-      {!isExpoGo && (
-        <Pressable
-          style={({ pressed }) => [
-            styles.socialBtn,
-            pressed && styles.btnPressed,
-          ]}
-          onPress={onGoogleSignIn}
-          disabled={googleLoading}
-        >
-          {googleLoading ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <>
-              <MaterialCommunityIcons name="google" size={20} color="#FFFFFF" style={styles.socialIcon} />
-              <Text style={styles.socialBtnText}>Continue with Google</Text>
-            </>
-          )}
-        </Pressable>
-      )}
-
-      {showAppleLoginOption && (
-        <View style={styles.appleWrap}>
-          {appleLoading ? (
-            <View style={styles.socialBtn}>
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            </View>
-          ) : appleAvailable && IS_IOS ? (
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-              cornerRadius={24}
-              style={styles.appleNativeBtn}
-              onPress={onAppleSignIn}
-            />
-          ) : (
-            <Pressable
-              style={({ pressed }) => [
-                styles.socialBtn,
-                pressed && styles.btnPressed,
-              ]}
-              onPress={IS_WEB ? onAppleSignIn : handleUnavailableAppleSignIn}
-            >
-              <Ionicons name="logo-apple" size={20} color="#FFFFFF" style={styles.socialIcon} />
-              <Text style={styles.socialBtnText}>Continue with Apple</Text>
-            </Pressable>
-          )}
-        </View>
-      )}
-
-      {guestLoginEnabled && (
-        <Pressable
-          style={({ pressed }) => [
-            styles.guestBtn,
-            pressed && styles.btnPressed,
-          ]}
-          onPress={onContinueAsGuest}
-        >
-          <Ionicons name="musical-notes-outline" size={18} color="rgba(255,255,255,0.7)" style={styles.socialIcon} />
-          <Text style={styles.guestBtnText}>Continue as Guest</Text>
-        </Pressable>
-      )}
-    </View>
-  );
-}
-
-const handleUnavailableAppleSignIn = () => {
-  Alert.alert(
-    "Apple Sign-In Unavailable",
-    "Make sure you are on a compatible iOS device signed into iCloud with two-factor authentication enabled."
-  );
-};
 
 export function LoginScreen() {
   return <LoginScreenView />;
@@ -369,7 +197,6 @@ export function LoginScreen() {
 export default LoginScreen;
 
 function LoginScreenView() {
-  const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { replace: routerReplace } = useRouter();
   const {
@@ -385,10 +212,8 @@ function LoginScreenView() {
 
   const topInset = IS_WEB ? 24 : insets.top;
   const bottomInset = IS_WEB ? 24 : insets.bottom;
-  const isExpoGo = Constants.appOwnership === "expo";
-  const guestLoginEnabled = GUEST_LOGIN_ENABLED;
-  const showAppleLoginOption = IS_IOS || IS_WEB;
-  const cardMaxWidth = Math.min(420, screenWidth - 36);
+  const requiresCustomDevelopmentBuild = !IS_WEB && Constants.appOwnership === "expo";
+  const showAppleOption = !IS_ANDROID;
 
   const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
@@ -398,9 +223,10 @@ function LoginScreenView() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
-  const [appleAvailable, setAppleAvailable] = useState(false);
+  const [, setAppleAvailable] = useState(false);
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
   const [focusedField, setFocusedField] = useState<"name" | "email" | "password" | null>(null);
+
   const isSignup = mode === "signup";
 
   useEffect(() => {
@@ -468,6 +294,14 @@ function LoginScreenView() {
   };
 
   const handleGoogleSignIn = async () => {
+    if (requiresCustomDevelopmentBuild) {
+      Alert.alert(
+        "Development Build Required",
+        "Google Sign-In uses a native module that is not included in Expo Go. Install a custom development build to test it."
+      );
+      return;
+    }
+
     if (IS_WEB) {
       setGoogleLoading(true);
       try {
@@ -496,6 +330,22 @@ function LoginScreenView() {
 
   const handleAppleSignIn = async () => {
     if (appleLoading) return;
+
+    if (!IS_IOS && !IS_WEB) {
+      Alert.alert(
+        "Apple Sign-In Unavailable",
+        "Apple Sign-In is only supported on iOS devices and supported web browsers."
+      );
+      return;
+    }
+
+    if (requiresCustomDevelopmentBuild) {
+      Alert.alert(
+        "Development Build Required",
+        "Expo Go signs in as the Expo app, so its Apple credential cannot authenticate as Mavrixfy with Firebase. Install a custom development build to test Apple Sign-In."
+      );
+      return;
+    }
 
     setAppleLoading(true);
     try {
@@ -538,115 +388,212 @@ function LoginScreenView() {
     }
   };
 
-  const handleContinueAsGuest = () => {
-    if (!guestLoginEnabled) return;
-    void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-    continueAsGuest();
-    routerReplace("/(tabs)");
-  };
-
-  const setAuthMode = (newMode: AuthMode) => {
-    if (mode === newMode) return;
+  const handleToggleMode = () => {
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-    setMode(newMode);
+    setMode((prev) => (prev === "login" ? "signup" : "login"));
     setPassword("");
     setFullName("");
   };
 
+  const handleGuestContinue = () => {
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    continueAsGuest();
+    routerReplace("/(tabs)");
+  };
+
   return (
     <View style={styles.container}>
+      <StatusBar style="light" />
+
+      {/* Radiant Glowing Background: Mavrixfy emerald green aura at top, fading completely into pure black at bottom */}
+      <LinearGradient
+        colors={["#0c4a34", "#083625", "#052217", "#02120d", "#000000", "#000000"]}
+        locations={[0, 0.16, 0.32, 0.48, 0.65, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={styles.backgroundGradient}
+        pointerEvents="none"
+      />
+
+      {/* Top Ambient Light Aura */}
+      <View style={styles.ambientGlow} pointerEvents="none">
+        <LinearGradient
+          colors={["rgba(38, 225, 154, 0.38)", "rgba(16, 185, 129, 0.14)", "transparent"]}
+          start={{ x: 0.5, y: 0.2 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+      </View>
+
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={IS_IOS ? "padding" : undefined}
-        keyboardVerticalOffset={IS_IOS ? 40 : 0}
       >
         <ScrollView
           contentContainerStyle={[
-            styles.scrollContainer,
+            styles.scrollContent,
             {
-              paddingTop: topInset + 20,
-              paddingBottom: Math.max(bottomInset, 16) + 40,
+              paddingTop: topInset + 8,
+              paddingBottom: Math.max(bottomInset, 16) + 24,
             },
           ]}
-          showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
         >
-          <View style={[styles.authCard, { maxWidth: cardMaxWidth }]}>
+          <View style={styles.mainCard}>
+            {/* Top Brand Logo & Title */}
             <BrandHeader />
 
-            <AuthModeSwitcher
-              isSignup={isSignup}
-              onSelectMode={setAuthMode}
+            {/* Dynamic Title & Subtitle */}
+            <View style={styles.headerArea}>
+              <Text style={styles.titleText}>
+                {isSignup ? "Create an Account" : "Hi There!"}
+              </Text>
+              <Text style={styles.subtitleText}>
+                {isSignup
+                  ? "To create an account provide details verify email and set a password."
+                  : "Please enter required details."}
+              </Text>
+            </View>
+
+            {/* Social Buttons */}
+            <AuthSocialButtons
+              googleLoading={googleLoading}
+              onGoogleSignIn={handleGoogleSignIn}
+              showAppleOption={showAppleOption}
+              appleLoading={appleLoading}
+              onAppleSignIn={handleAppleSignIn}
             />
 
-            <AuthFormFields
-              isSignup={isSignup}
-              fullName={fullName}
-              onFullNameChange={setFullName}
-              email={email}
-              onEmailChange={setEmail}
-              password={password}
-              onPasswordChange={setPassword}
-              showPassword={showPassword}
-              onToggleShowPassword={() => setShowPassword((prev) => !prev)}
-              focusedField={focusedField}
-              onFocusField={setFocusedField}
-              onForgotPassword={handleForgotPassword}
-              resetPasswordLoading={resetPasswordLoading}
-            />
+            {/* Divider */}
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>Or</Text>
+              <View style={styles.dividerLine} />
+            </View>
 
-            {/* Primary Action Button */}
+            {/* Form Fields */}
+            <View style={styles.inputsContainer}>
+              {isSignup && (
+                <AuthField
+                  placeholder="Full name"
+                  value={fullName}
+                  onChangeText={setFullName}
+                  autoCapitalize="words"
+                  autoComplete="name"
+                  textContentType="name"
+                  isFocused={focusedField === "name"}
+                  onFocus={() => setFocusedField("name")}
+                  onBlur={() => setFocusedField(null)}
+                />
+              )}
+
+              <AuthField
+                placeholder="Email address"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoComplete="email"
+                textContentType="emailAddress"
+                isFocused={focusedField === "email"}
+                onFocus={() => setFocusedField("email")}
+                onBlur={() => setFocusedField(null)}
+              />
+
+              <AuthField
+                placeholder="Password"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                autoComplete={isSignup ? "new-password" : "current-password"}
+                textContentType={isSignup ? "newPassword" : "password"}
+                isFocused={focusedField === "password"}
+                onFocus={() => setFocusedField("password")}
+                onBlur={() => setFocusedField(null)}
+                trailing={
+                  <Pressable
+                    onPress={() => setShowPassword((prev) => !prev)}
+                    hitSlop={12}
+                    style={styles.eyeBtn}
+                  >
+                    <Ionicons
+                      name={showPassword ? "eye-off-outline" : "eye-outline"}
+                      size={20}
+                      color="rgba(255, 255, 255, 0.45)"
+                    />
+                  </Pressable>
+                }
+              />
+            </View>
+
+            {/* Forgot Password (on Login mode) */}
+            {!isSignup && (
+              <Pressable
+                style={styles.forgotBtn}
+                onPress={handleForgotPassword}
+                disabled={resetPasswordLoading}
+                hitSlop={8}
+              >
+                <Text style={styles.forgotText}>
+                  {resetPasswordLoading ? "Sending reset link..." : "Forgot Password?"}
+                </Text>
+              </Pressable>
+            )}
+
+            {/* Primary Action Button (Theme Emerald-to-Mint Gradient Pill) */}
             <Pressable
               style={({ pressed }) => [
-                styles.submitBtn,
+                styles.submitBtnWrap,
                 pressed && styles.btnPressed,
                 loading && styles.submitBtnDisabled,
               ]}
               onPress={handleSubmit}
               disabled={loading}
             >
-              {loading ? (
-                <ActivityIndicator color="#000000" size="small" />
-              ) : (
-                <Text style={styles.submitBtnText}>
-                  {isSignup ? "Create Account" : "Log In"}
-                </Text>
-              )}
+              <LinearGradient
+                colors={["#00E58F", "#26E19A", "#48F2A8"]}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={styles.submitBtnGradient}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#03140C" size="small" />
+                ) : (
+                  <Text style={styles.submitBtnText}>
+                    {isSignup ? "Continue" : "Log In"}
+                  </Text>
+                )}
+              </LinearGradient>
             </Pressable>
 
             {/* Switch Mode Prompt */}
             <Pressable
               style={styles.switchPromptRow}
-              onPress={() => setAuthMode(isSignup ? "login" : "signup")}
+              onPress={handleToggleMode}
+              hitSlop={8}
             >
               <Text style={styles.switchPromptText}>
-                {isSignup ? "Already have an account?" : "Don't have an account?"}
+                {isSignup ? "Have an account?" : "Create an account?"}
               </Text>
               <Text style={styles.switchPromptAction}>
                 {isSignup ? "Log In" : "Sign Up"}
               </Text>
             </Pressable>
 
-            {/* Social Divider */}
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
+            {/* Optional Dev / Guest Bypass */}
+            {GUEST_LOGIN_ENABLED && (
+              <Pressable
+                style={styles.guestBtn}
+                onPress={handleGuestContinue}
+                hitSlop={8}
+              >
+                <Text style={styles.guestBtnText}>Continue as Guest</Text>
+              </Pressable>
+            )}
 
-            {/* Social Actions */}
-            <AuthSocialButtons
-              isExpoGo={isExpoGo}
-              googleLoading={googleLoading}
-              onGoogleSignIn={handleGoogleSignIn}
-              showAppleLoginOption={showAppleLoginOption}
-              appleLoading={appleLoading}
-              appleAvailable={appleAvailable}
-              onAppleSignIn={handleAppleSignIn}
-              guestLoginEnabled={guestLoginEnabled}
-              onContinueAsGuest={handleContinueAsGuest}
-            />
-
+            {/* Legal Footer safely inside view, not at the edge of the screen */}
             <AuthLegalFooter />
           </View>
         </ScrollView>
@@ -654,4 +601,3 @@ function LoginScreenView() {
     </View>
   );
 }
-

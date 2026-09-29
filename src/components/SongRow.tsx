@@ -1,30 +1,30 @@
-import React, { memo, useCallback, useEffect } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  Platform,
-} from "react-native";
-import Animated, {
-  useAnimatedStyle,
-  interpolateColor,
-  useSharedValue,
-  withTiming,
-  Easing,
-} from "react-native-reanimated";
-import { Image } from "expo-image";
+import DownloadButton from "@/components/DownloadButton";
+import EqualizerBars from "@/components/EqualizerBars";
+import Colors from "@/constants/colors";
+import { usePlayerRowActions } from "@/contexts/PlayerContext";
+import { triggerImpact } from "@/lib/haptics";
+import { logger } from "@/lib/logger";
+import { type Song } from "@/lib/musicData";
+import { usePlaybackRowState } from "@/services/audio/PlaybackEngine";
 import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
+import { Image } from "expo-image";
 import { router } from "expo-router";
-import Colors from "@/constants/colors";
-import { type Song } from "@/lib/musicData";
-import { triggerImpact } from "@/lib/haptics";
-import { usePlayerRowActions } from "@/contexts/PlayerContext";
-import { usePlaybackRowState } from "@/services/audio/PlaybackEngine";
-import EqualizerBars from "@/components/EqualizerBars";
-import DownloadButton from "@/components/DownloadButton";
-import { logger } from "@/lib/logger";
+import { memo,useCallback,useEffect } from "react";
+import {
+Platform,
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
+import Animated,{
+Easing,
+interpolateColor,
+useAnimatedStyle,
+useSharedValue,
+withTiming,
+} from "react-native-reanimated";
 
 const AnimatedText = Animated.createAnimatedComponent(Text);
 

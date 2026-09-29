@@ -1,6 +1,6 @@
-import { NativeModules, NativeEventEmitter, Platform } from "react-native";
-import { type Song } from "@/lib/musicData";
 import { logger } from "@/lib/logger";
+import { type Song } from "@/lib/musicData";
+import { NativeEventEmitter,NativeModules,Platform } from "react-native";
 
 const { MavrixfyCarPlayModule } = NativeModules;
 

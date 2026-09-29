@@ -1,37 +1,35 @@
-import React, { useCallback, useEffect, useRef } from "react";
-import {
-  View,
-  Text,
-  FlatList,
-  ScrollView,
-  Pressable,
-  StyleSheet,
-  ActivityIndicator,
-} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
+import React,{ useCallback,useEffect,useRef } from "react";
+import {
+ActivityIndicator,
+FlatList,
+Pressable,
+ScrollView,
+StyleSheet,
+Text,
+View,
+} from "react-native";
 
-import Colors from "@/constants/colors";
-import { getBestImageUrl, type Song } from "@/lib/musicData";
-import SongRow from "@/components/SongRow";
-import { APP_TOP_HEADER_HEIGHT } from "@/components/AppTopHeader";
 import AdMobBanner from "@/components/AdMobBanner";
+import SongRow from "@/components/SongRow";
+import Colors from "@/constants/colors";
+import { getBestImageUrl,type Song } from "@/lib/musicData";
 import type {
-  ResultFilter,
-  PlaylistResult,
-  AlbumResult,
-  ArtistResult,
+AlbumResult,
+ArtistResult,
+PlaylistResult,
+ResultFilter,
 } from "@/lib/searchRepository";
 import { styles } from "../styles/searchStyles";
 import {
-  RESULT_FILTERS,
-  ALBUM_STAGGER_PATTERN,
-  ALBUM_TILT_PATTERN,
-  PLAYLIST_STAGGER_PATTERN,
-  PLAYLIST_TILT_PATTERN,
-  APP_BRAND_ICON,
-  stableHash,
+ALBUM_STAGGER_PATTERN,
+ALBUM_TILT_PATTERN,
+APP_BRAND_ICON,
+PLAYLIST_STAGGER_PATTERN,
+PLAYLIST_TILT_PATTERN,
+stableHash
 } from "../types";
 
 export interface SearchResultAlbumCardProps {

@@ -1,20 +1,20 @@
-import React, { useCallback, useMemo, memo } from "react";
-import {
-  View,
-  Text,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  ActivityIndicator,
-} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
+import { memo,useCallback,useMemo } from "react";
+import {
+ActivityIndicator,
+FlatList,
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
 import { Pressable as GHPressable } from "react-native-gesture-handler";
 
-import { formatDuration, type Song, getBestImageUrl } from "@/lib/musicData";
-import { formatFollowers } from "@/utils/stringUtils";
 import EqualizerBars from "@/components/EqualizerBars";
+import { formatDuration,getBestImageUrl,type Song } from "@/lib/musicData";
+import { formatFollowers } from "@/utils/stringUtils";
 import { styles } from "../styles/playerScreenStyles";
 
 export const QueueSongRow = memo(

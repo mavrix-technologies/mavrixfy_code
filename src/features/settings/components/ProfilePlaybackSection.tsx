@@ -1,27 +1,31 @@
-import React, { useCallback } from "react";
-import { View, Text, StyleSheet, Switch, Pressable, Alert } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { ImpactFeedbackStyle } from "expo-haptics";
 import Colors from "@/constants/colors";
-import { type AppSettings } from "@/lib/storage";
 import { useDownloads } from "@/contexts/DownloadContext";
 import { formatBytes } from "@/lib/downloads/storagePolicy";
 import { triggerImpact } from "@/lib/haptics";
-import { SegmentPicker } from "./SettingsUIComponents";
+import { type AppSettings } from "@/lib/storage";
+import { applyEqualizerEnabled } from "@/services/audio/audioEqualizer";
+import { Ionicons } from "@expo/vector-icons";
+import { ImpactFeedbackStyle } from "expo-haptics";
+import { useRouter } from "expo-router";
+import { useCallback, useMemo } from "react";
+import { Alert,Pressable,StyleSheet,Switch,Text,View } from "react-native";
 import {
-  QUALITY_OPTIONS,
-  DOWNLOAD_QUALITY_OPTIONS,
-  CROSSFADE_OPTIONS,
-  SMART_AUTOPLAY_OPTIONS,
-  MINI_PLAYER_OPTIONS,
-  VIDEO_QUALITY_OPTIONS,
+DOWNLOAD_QUALITY_OPTIONS,
+detectMatchingPreset,
+EQUALIZER_PRESETS,
+MINI_PLAYER_OPTIONS,
+QUALITY_OPTIONS,
+SMART_AUTOPLAY_OPTIONS,
+VIDEO_QUALITY_OPTIONS,
 } from "../constants/settingsConstants";
+import { SegmentPicker } from "./SettingsUIComponents";
 
 interface ProfilePlaybackSectionProps {
   settings: AppSettings;
   updateSettings: (partial: Partial<AppSettings>) => Promise<void>;
   onQualityChange: (value: AppSettings["streamingQuality"]) => Promise<void>;
   loadingQuality?: AppSettings["streamingQuality"] | null;
+  onOpenEqualizer?: () => void;
 }
 
 export function ProfilePlaybackSection({
@@ -29,7 +33,30 @@ export function ProfilePlaybackSection({
   updateSettings,
   onQualityChange,
   loadingQuality,
+  onOpenEqualizer,
 }: ProfilePlaybackSectionProps) {
+  const router = useRouter();
+  const equalizerStatusText = useMemo(() => {
+    const presetId = detectMatchingPreset(settings.equalizer);
+    const presetName = EQUALIZER_PRESETS.find((preset) => preset.id === presetId)?.name;
+    const active = [settings.equalizerEnabled && (presetName || "Custom"), settings.surroundSoundEnabled && "3D Surround"].filter(Boolean);
+    return active.length ? active.join(" • ") : "Off";
+  }, [settings.equalizer, settings.equalizerEnabled, settings.surroundSoundEnabled]);
+
+  const handleToggleEqualizer = useCallback(async (enabled: boolean) => {
+    void triggerImpact(ImpactFeedbackStyle.Light);
+    await updateSettings({ equalizerEnabled: enabled });
+    void applyEqualizerEnabled(enabled);
+  }, [updateSettings]);
+
+  const handleOpenEqualizer = useCallback(() => {
+    if (onOpenEqualizer) {
+      onOpenEqualizer();
+    } else {
+      router.push("/equalizer" as any);
+    }
+  }, [onOpenEqualizer, router]);
+
   const handleDataSaverToggle = useCallback(
     async (enabled: boolean) => {
       if (enabled) {
@@ -162,7 +189,43 @@ export function ProfilePlaybackSection({
         </View>
       </View>
 
-      {/* ─── 2. Playback & Transitions ─── */}
+      {/* ─── 2. Audio & Equalizer ─── */}
+      <Text style={styles.sectionLabel}>AUDIO & EQUALIZER</Text>
+      <View style={styles.sectionGroup}>
+        <Pressable
+          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+          onPress={handleOpenEqualizer}
+          accessibilityRole="button"
+          accessibilityLabel="Open Equalizer Settings"
+        >
+          <Ionicons
+            name="options-outline"
+            size={22}
+            color={settings.equalizerEnabled ? Colors.primary : "rgba(255, 255, 255, 0.7)"}
+            style={styles.rowIcon}
+          />
+          <View style={styles.rowTextCol}>
+            <Text style={styles.rowTitle}>Equalizer</Text>
+            <Text style={styles.rowSubtitle}>{settings.equalizerEnabled || settings.surroundSoundEnabled ? `On • ${equalizerStatusText}` : "Off"}</Text>
+          </View>
+          <View style={styles.rowTrailingActions}>
+            <Switch
+              value={settings.equalizerEnabled}
+              onValueChange={handleToggleEqualizer}
+              trackColor={{ false: "rgba(255, 255, 255, 0.1)", true: Colors.primary }}
+              thumbColor="#FFFFFF"
+            />
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color="rgba(255, 255, 255, 0.25)"
+              style={{ marginLeft: 6 }}
+            />
+          </View>
+        </Pressable>
+      </View>
+
+      {/* ─── 3. Playback & Transitions ─── */}
       <Text style={styles.sectionLabel}>PLAYBACK & TRANSITIONS</Text>
       <View style={styles.sectionGroup}>
         {/* Video Background */}
@@ -215,53 +278,9 @@ export function ProfilePlaybackSection({
           )}
         </View>
 
-        {/* Crossfade */}
-        <View style={[styles.groupBlock, styles.blockDivider]}>
-          <View style={styles.blockHeader}>
-            <View style={styles.blockTitleRow}>
-              <Ionicons name="swap-horizontal-outline" size={21} color="rgba(255, 255, 255, 0.7)" />
-              <Text style={styles.blockTitle}>Crossfade</Text>
-            </View>
-          </View>
-          <SegmentPicker
-            options={CROSSFADE_OPTIONS}
-            value={settings.crossfade}
-            onChange={(val) => updateSettings({ crossfade: val })}
-          />
-        </View>
-
-        {/* Gapless Playback */}
-        <View style={[styles.row, styles.rowDivider]}>
-          <Ionicons name="repeat-outline" size={22} color="rgba(255, 255, 255, 0.7)" style={styles.rowIcon} />
-          <View style={styles.rowTextCol}>
-            <Text style={styles.rowTitle}>Gapless Playback</Text>
-            <Text style={styles.rowSubtitle}>Continuous audio without silence between tracks</Text>
-          </View>
-          <Switch
-            value={settings.gapless}
-            onValueChange={(v) => updateSettings({ gapless: v })}
-            trackColor={{ false: "rgba(255, 255, 255, 0.1)", true: Colors.primary }}
-            thumbColor="#FFFFFF"
-          />
-        </View>
-
-        {/* Normalize Volume */}
-        <View style={styles.row}>
-          <Ionicons name="volume-medium-outline" size={22} color="rgba(255, 255, 255, 0.7)" style={styles.rowIcon} />
-          <View style={styles.rowTextCol}>
-            <Text style={styles.rowTitle}>Normalize Volume</Text>
-            <Text style={styles.rowSubtitle}>Keep volume consistent across all songs</Text>
-          </View>
-          <Switch
-            value={settings.normalizeVolume}
-            onValueChange={(v) => updateSettings({ normalizeVolume: v })}
-            trackColor={{ false: "rgba(255, 255, 255, 0.1)", true: Colors.primary }}
-            thumbColor="#FFFFFF"
-          />
-        </View>
       </View>
 
-      {/* ─── 3. Controls & Hardware ─── */}
+      {/* ─── 4. Controls & Hardware ─── */}
       <Text style={styles.sectionLabel}>CONTROLS & HARDWARE</Text>
       <View style={styles.sectionGroup}>
         {/* Mini Player Control */}
@@ -371,5 +390,9 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontFamily: "Inter_400Regular",
     marginTop: 2,
+  },
+  rowTrailingActions: {
+    flexDirection: "row",
+    alignItems: "center",
   },
 });

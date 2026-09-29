@@ -1,18 +1,18 @@
-import React, { useCallback } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import {
-  View,
-  FlatList,
-  Pressable,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import React,{ useCallback } from "react";
+import {
+FlatList,
+Pressable,
+View,
+type NativeScrollEvent,
+type NativeSyntheticEvent,
+} from "react-native";
 
 import Colors from "@/constants/colors";
 import { IS_IOS } from "@/constants/platform";
-import { StableArtworkImage, type ArtworkQueueItem } from "./PlayerArtworkViews";
 import { styles } from "../styles/playerScreenStyles";
+import { StableArtworkImage,type ArtworkQueueItem } from "./PlayerArtworkViews";
 
 const AnimatedSongFlatList = Animated.createAnimatedComponent(
   FlatList as React.ComponentType<any>

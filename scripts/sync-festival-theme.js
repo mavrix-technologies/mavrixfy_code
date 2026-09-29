@@ -3,6 +3,9 @@ const os = require("os");
 const path = require("path");
 
 async function getAccessToken() {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    throw new Error("Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET before syncing the festival theme.");
+  }
   const configPath = path.join(os.homedir(), ".config", "configstore", "firebase-tools.json");
   if (!fs.existsSync(configPath)) {
     throw new Error(`Firebase credentials not found at ${configPath}`);
@@ -18,8 +21,8 @@ async function getAccessToken() {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID || "563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com",
-      client_secret: process.env.GOOGLE_CLIENT_SECRET || Buffer.from("ajlpVlpmUzhra0NFRlVQYUFlSlYwc0Fp", "base64").toString("utf8"),
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET,
       grant_type: "refresh_token",
       refresh_token: rt,
     }),
@@ -71,6 +74,17 @@ async function deployFestivalConfig(options = {}) {
       themeAccentColor: options.publicThemeAccentColor,
       titleText: options.publicTitleText,
       activeColor: options.publicActiveColor,
+    }),
+  };
+
+  const devUrl = `${baseUrl}/configs/dev`;
+  const devPayload = {
+    fields: buildCleanConfigFields({
+      enabled: options.devEnabled ?? true,
+      backgroundImageUrl: options.devBackgroundImageUrl,
+      themeAccentColor: options.devThemeAccentColor,
+      titleText: options.devTitleText,
+      activeColor: options.devActiveColor,
     }),
   };
 

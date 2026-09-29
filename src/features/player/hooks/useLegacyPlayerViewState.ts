@@ -1,33 +1,33 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useWindowDimensions } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router, useNavigation } from "expo-router";
-import { Gesture } from "react-native-gesture-handler";
-import { withSpring, type SharedValue } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
-import { Image } from "expo-image";
 import Colors from "@/constants/colors";
+import { usePlayerActions } from "@/contexts/PlayerContext";
+import { mapFilter } from "@/lib/arrayUtils";
+import { preloadDominantColors } from "@/lib/colorExtractor";
 import type { Song } from "@/lib/musicData";
 import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
-import { runAfterIdle } from "@/utils/idleTask";
-import { preloadDominantColors } from "@/lib/colorExtractor";
-import { mapFilter } from "@/lib/arrayUtils";
-import { usePlayerActions } from "@/contexts/PlayerContext";
-import {
-  usePlaybackNowPlaying,
-  usePlaybackPlayState,
-} from "@/services/audio/PlaybackEngine";
-import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
 import { playerUIStateStore } from "@/lib/playerUIState";
+import {
+usePlaybackNowPlaying,
+usePlaybackPlayState,
+} from "@/services/audio/PlaybackEngine";
+import { getPlaybackProgressSnapshot } from "@/services/audio/playbackProgressStore";
+import { runAfterIdle } from "@/utils/idleTask";
+import { Image } from "expo-image";
+import { router,useNavigation } from "expo-router";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { useWindowDimensions } from "react-native";
+import { Gesture } from "react-native-gesture-handler";
+import { withSpring,type SharedValue } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { scheduleOnRN } from "react-native-worklets";
+import type { ArtworkQueueItem } from "../components/PlayerArtworkViews";
+import { useArtistDiscovery } from "./useArtistDiscovery";
+import { useArtworkCarouselSync } from "./useArtworkCarouselSync";
 import { useArtworkPaletteSync } from "./useArtworkPaletteSync";
 import { useBackgroundVisualVideo } from "./useBackgroundVisualVideo";
 import { useDevTrackHelper } from "./useDevTrackHelper";
-import { usePlayerLayoutMetrics } from "./usePlayerLayoutMetrics";
 import { usePlayerHeaderAnimation } from "./usePlayerHeaderAnimation";
+import { usePlayerLayoutMetrics } from "./usePlayerLayoutMetrics";
 import { usePlayerLiveQueue } from "./usePlayerLiveQueue";
-import { useArtistDiscovery } from "./useArtistDiscovery";
-import { useArtworkCarouselSync } from "./useArtworkCarouselSync";
-import type { ArtworkQueueItem } from "../components/PlayerArtworkViews";
 
 export const SPRING_CONFIG = { damping: 28, mass: 0.8, stiffness: 220 };
 
@@ -67,7 +67,6 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
   const [interactionReady, setInteractionReady] = useState(false);
   const prevSongIdRef = useRef(currentSong?.id);
   const optionsPressLockRef = useRef(false);
-  const { positionMillis, duration, progress } = usePlaybackProgressStore();
   const [fullscreenLyricsVisible, setFullscreenLyricsVisible] = useState(false);
 
   const {
@@ -96,18 +95,18 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     }
   }, [currentSong?.id]);
 
-  const currentPositionSeconds = positionMillis > 0 ? positionMillis / 1000 : ((progress || 0) * (duration || 0)) / 1000;
-
   const handleLyricSeek = useCallback(
     (seconds: number) => {
-      const totalSec = (duration > 0 ? duration / 1000 : currentSong?.duration) || 0;
+      const nativeDuration = getPlaybackProgressSnapshot().duration / 1000;
+      const totalSec = nativeDuration > 0 ? nativeDuration : currentSong?.duration || 0;
       if (totalSec > 0) {
         seekTo(Math.max(0, Math.min(1, seconds / totalSec)));
       }
     },
-    [duration, currentSong?.duration, seekTo]
+    [currentSong?.duration, seekTo]
   );
 
+  /* eslint-disable react-hooks/immutability -- Gesture callbacks update Reanimated shared values after render. */
   const playerPrimaryDismissGesture = useMemo(
     () =>
       Gesture.Pan()
@@ -135,6 +134,7 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
         }),
     [isProgressSeeking, screenHeight, translateY]
   );
+  /* eslint-enable react-hooks/immutability */
 
   useEffect(() => {
     globalPlayerDetailsVisibleRef.setVisible(true);
@@ -177,7 +177,6 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     isShortScreen,
     isVeryShortScreen,
     topBarHeight,
-    prevNextButtonSize,
     prevNextIconSize,
     shuffleRepeatIconSize,
     playButtonSize,
@@ -347,9 +346,6 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     isProgressSeeking,
     setIsProgressSeeking,
     interactionReady,
-    currentPositionSeconds,
-    duration,
-    progress,
     seekTo,
     handleLyricSeek,
     playerPrimaryDismissGesture,
@@ -416,7 +412,6 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     isScreenFocused,
     fullscreenLyricsVisible,
     setFullscreenLyricsVisible,
-    positionMillis,
     handleVideoActive,
     handleVideoError,
     ambientVideoLayoutActive,

@@ -1,15 +1,9 @@
-import React, { type ReactNode } from "react";
 import type { useAudioPlaybackValues } from "@/services/audio/audioPlaybackValues";
+import { type ReactNode } from "react";
 import {
-  PlayerContext,
-  PlayerLiteContext,
-  PlayerProgressContext,
-  PlayerRowContext,
-  PlayerRowActionsContext,
-  PlayerBrowseContext,
-  PlayerQueueContext,
-  PlayerLikedContext,
-  PlayerActionsContext,
+PlayerActionsContext,
+PlayerBrowseContext,
+PlayerRowActionsContext,
 } from "./PlayerContextDefs";
 
 export interface PlayerContextTreeProps {
@@ -19,36 +13,18 @@ export interface PlayerContextTreeProps {
 
 export function PlayerContextTree({ playbackValues, children }: PlayerContextTreeProps) {
   const {
-    value,
-    liteValue,
-    progressValue,
-    rowValue,
     rowActionsValue,
     browseValue,
-    queueValue,
     actionsValue,
-    likedValue,
   } = playbackValues;
 
   return (
-    <PlayerContext.Provider value={value}>
-      <PlayerLiteContext.Provider value={liteValue}>
-        <PlayerProgressContext.Provider value={progressValue}>
-          <PlayerActionsContext.Provider value={actionsValue}>
-            <PlayerLikedContext.Provider value={likedValue}>
-              <PlayerBrowseContext.Provider value={browseValue}>
-                <PlayerQueueContext.Provider value={queueValue}>
-                  <PlayerRowActionsContext.Provider value={rowActionsValue}>
-                    <PlayerRowContext.Provider value={rowValue}>
-                      {children}
-                    </PlayerRowContext.Provider>
-                  </PlayerRowActionsContext.Provider>
-                </PlayerQueueContext.Provider>
-              </PlayerBrowseContext.Provider>
-            </PlayerLikedContext.Provider>
-          </PlayerActionsContext.Provider>
-        </PlayerProgressContext.Provider>
-      </PlayerLiteContext.Provider>
-    </PlayerContext.Provider>
+    <PlayerActionsContext.Provider value={actionsValue}>
+      <PlayerBrowseContext.Provider value={browseValue}>
+        <PlayerRowActionsContext.Provider value={rowActionsValue}>
+          {children}
+        </PlayerRowActionsContext.Provider>
+      </PlayerBrowseContext.Provider>
+    </PlayerActionsContext.Provider>
   );
 }

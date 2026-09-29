@@ -1,29 +1,29 @@
-import React, { memo, useMemo, useCallback, useEffect } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  FlatList,
-  StyleSheet,
-  useWindowDimensions,
-} from "react-native";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  interpolateColor,
-  Easing,
-} from "react-native-reanimated";
-import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
+import {
+colorWithAlpha,
+} from "@/lib/colorExtractor";
 import { triggerImpact } from "@/lib/haptics";
 import { type Song } from "@/lib/musicData";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import { useRouter } from "expo-router";
+import { memo,useCallback,useEffect,useMemo } from "react";
 import {
-  colorWithAlpha,
-} from "@/lib/colorExtractor";
+FlatList,
+Pressable,
+StyleSheet,
+Text,
+useWindowDimensions,
+View,
+} from "react-native";
+import Animated,{
+Easing,
+interpolateColor,
+useAnimatedStyle,
+useSharedValue,
+withTiming,
+} from "react-native-reanimated";
 
 
 

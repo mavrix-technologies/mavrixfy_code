@@ -1,38 +1,38 @@
-import React, { useState, useCallback, useMemo } from "react";
-import { View, Text, FlatList, StyleSheet, RefreshControl, type ListRenderItemInfo } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import Colors from "@/constants/colors";
-import * as Haptics from "expo-haptics";
-import { triggerImpact } from "@/lib/haptics";
-import { useLikedSongs } from "@/contexts/PlayerContext";
-import { type FollowedArtist } from "@/lib/followedArtists";
+import AppTopHeader,{
+APP_TOP_HEADER_HEIGHT,
+AppTopHeaderIconButton,
+AppTopHeaderProfileButton,
+useAppTopHeaderScrollElevation,
+} from "@/components/AppTopHeader";
+import { NavSearchIcon } from "@/components/OfficialNavIcons";
 import OfflineBanner from "@/components/OfflineBanner";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
-import { NavSearchIcon } from "@/components/OfficialNavIcons";
-import AppTopHeader, {
-  APP_TOP_HEADER_HEIGHT,
-  AppTopHeaderIconButton,
-  AppTopHeaderProfileButton,
-  useAppTopHeaderScrollElevation,
-} from "@/components/AppTopHeader";
+import Colors from "@/constants/colors";
 import { useNetwork } from "@/contexts/NetworkContext";
+import { useLikedSongs } from "@/contexts/PlayerContext";
+import { type FollowedArtist } from "@/lib/followedArtists";
+import { triggerImpact } from "@/lib/haptics";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
+import { router } from "expo-router";
+import React,{ useCallback,useMemo,useState } from "react";
+import { FlatList,RefreshControl,StyleSheet,Text,View,type ListRenderItemInfo } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import {
-  PlaylistListItem,
-  DisplayPlaylist,
-} from "../components/PlaylistListItem";
-import { PlaylistGridItem } from "../components/PlaylistGridItem";
-import { CreatePlaylistTile, CreatePlaylistListItem } from "../components/CreatePlaylistTile";
-import {
-  LibraryHeader,
-  Filter,
-  ViewMode,
-} from "../components/LibraryHeader";
-import { LibraryFooter } from "../components/LibraryFooter";
 import { CreatePlaylistModal } from "../components/CreatePlaylistModal";
+import { CreatePlaylistListItem,CreatePlaylistTile } from "../components/CreatePlaylistTile";
+import { LibraryFooter } from "../components/LibraryFooter";
+import {
+Filter,
+LibraryHeader,
+ViewMode,
+} from "../components/LibraryHeader";
+import { PlaylistGridItem } from "../components/PlaylistGridItem";
+import {
+DisplayPlaylist,
+PlaylistListItem,
+} from "../components/PlaylistListItem";
 import { useLibraryData } from "../hooks/useLibraryData";
 
 type CreateTileItem = { id: "__library_create_tile__"; isCreateTile: true };

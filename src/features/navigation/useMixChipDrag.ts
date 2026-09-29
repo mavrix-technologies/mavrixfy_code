@@ -1,25 +1,17 @@
-import { useRef, useState, useCallback, useMemo } from "react";
-import * as Animated from "@/lib/nativeAnimated";
-import { Gesture } from "react-native-gesture-handler";
 import { clearLastMix } from "@/lib/lastMix";
+import * as Animated from "@/lib/nativeAnimated";
+import { useCallback,useMemo,useState } from "react";
+import { Gesture } from "react-native-gesture-handler";
 
 const MIX_DELETE_THRESHOLD = -72;
 
 export function useMixChipDrag() {
   const [isDragging, setIsDragging] = useState(false);
   const [overTrash, setOverTrash] = useState(false);
-  const dragXRef = useRef<Animated.Value | null>(null);
-  if (dragXRef.current === null) dragXRef.current = new Animated.Value(0);
-  const dragX = dragXRef.current;
-  const trashOpacityRef = useRef<Animated.Value | null>(null);
-  if (trashOpacityRef.current === null) trashOpacityRef.current = new Animated.Value(0);
-  const trashOpacity = trashOpacityRef.current;
-  const chipScaleRef = useRef<Animated.Value | null>(null);
-  if (chipScaleRef.current === null) chipScaleRef.current = new Animated.Value(1);
-  const chipScale = chipScaleRef.current;
-  const chipOpacityRef = useRef<Animated.Value | null>(null);
-  if (chipOpacityRef.current === null) chipOpacityRef.current = new Animated.Value(1);
-  const chipOpacity = chipOpacityRef.current;
+  const [dragX] = useState(() => new Animated.Value(0));
+  const [trashOpacity] = useState(() => new Animated.Value(0));
+  const [chipScale] = useState(() => new Animated.Value(1));
+  const [chipOpacity] = useState(() => new Animated.Value(1));
 
   const resetMixChip = useCallback(() => {
     Animated.parallel([

@@ -1,5 +1,4 @@
-import React from "react";
-import Svg, { Path, Circle, Rect } from "react-native-svg";
+import Svg,{ Circle,Path,Rect } from "react-native-svg";
 
 export interface NavIconProps {
   size?: number;

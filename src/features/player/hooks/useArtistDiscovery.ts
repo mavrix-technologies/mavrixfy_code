@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
-import { router } from "expo-router";
+import { getArtistDetails,searchArtists } from "@/data/providers/ArtistProvider";
+import { convertJioSaavnSong,getBestImageUrl,type Song } from "@/lib/musicData";
 import { safeGoBack } from "@/utils/navigation";
-import { searchArtists, getArtistDetails } from "@/data/providers/ArtistProvider";
-import { convertJioSaavnSong, getBestImageUrl, type Song } from "@/lib/musicData";
+import { router } from "expo-router";
+import { useCallback,useEffect,useMemo,useState } from "react";
 
 export interface UseArtistDiscoveryParams {
   screenSong: Song | null;
@@ -23,6 +23,8 @@ export function useArtistDiscovery({
   useEffect(() => {
     let active = true;
     if (!screenSong?.artist) {
+      // A song without an artist must clear the previous artist's details.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setArtistDetails(null);
       return;
     }

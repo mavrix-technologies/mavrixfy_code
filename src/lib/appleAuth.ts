@@ -1,5 +1,5 @@
-import { Platform } from "react-native";
 import * as Crypto from "expo-crypto";
+import { Platform } from "react-native";
 
 type AppleAuthenticationModule = typeof import("expo-apple-authentication");
 type AppleFullName = import("expo-apple-authentication").AppleAuthenticationFullName;

@@ -5,5 +5,15 @@
   },
   "storage": {
     "rules": "storage.rules"
-  }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "offline-licenses",
+      "ignore": [
+        "node_modules",
+        ".git"
+      ]
+    }
+  ]
 }

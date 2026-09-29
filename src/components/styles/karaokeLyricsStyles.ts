@@ -1,5 +1,5 @@
-import { StyleSheet } from "react-native";
 import { IS_IOS } from "@/constants/platform";
+import { StyleSheet } from "react-native";
 
 export const styles = StyleSheet.create({
   // ── 1. Inline Preview Card (Screenshot 1) ──────────────────────────────────

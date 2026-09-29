@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
-import { AppState } from "react-native";
+import { logger } from "@/lib/logger";
+import { normalizeSmartAutoplayMode,type SmartAutoplayMode } from "@/lib/smartAutoplayConfig";
 import { runAfterIdle } from "@/utils/idleTask";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useEffect,useState } from "react";
+import { AppState } from "react-native";
+import { accountStorageKey,getAccountScope } from "./accountScope";
 import { type Song } from "./musicData";
-import { logger } from "@/lib/logger";
-import { normalizeSmartAutoplayMode, type SmartAutoplayMode } from "@/lib/smartAutoplayConfig";
 
 const KEYS = {
   LIKED_SONGS: "@mavrixfy_liked_songs",
@@ -78,6 +79,11 @@ export interface AppSettings {
   gapless: boolean;
   normalizeVolume: boolean;
   ambientBackdropEnabled: boolean;
+  surroundSoundEnabled?: boolean;
+  surroundStrength?: number;
+  surroundSpeed?: number;
+  reverbPreset?: string;
+  rotating8DEnabled?: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -105,6 +111,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   gapless: true,
   normalizeVolume: false,
   ambientBackdropEnabled: false,
+  surroundSoundEnabled: false,
+  surroundStrength: 600,
+  reverbPreset: "none",
+  rotating8DEnabled: false,
 };
 
 
@@ -193,6 +203,7 @@ export async function pruneNonEssentialStorageCaches(): Promise<void> {
       // Always prune rate limit keys — they are ephemeral and non-critical
       if (key.startsWith("ratelimit:")) return true;
 
+      if (key.startsWith("@mavrixfy_account:")) return false;
       if (!key.startsWith("@mavrixfy_")) return false;
 
       const isCritical =
@@ -258,7 +269,15 @@ async function setJSON(key: string, value: unknown): Promise<void> {
       await pruneNonEssentialStorageCaches();
       try {
         await AsyncStorage.setItem(key, JSON.stringify(value));
-      } catch {}
+      } catch (retryError) {
+        memoryCache.delete(key);
+        logger.error("[Storage] Could not persist data", retryError);
+        throw retryError;
+      }
+    } else {
+      memoryCache.delete(key);
+      logger.error("[Storage] Could not persist data", err);
+      throw err;
     }
   }
 }
@@ -266,35 +285,34 @@ async function setJSON(key: string, value: unknown): Promise<void> {
 export { setJSON };
 
 export function getUserPlaylists(): Promise<UserPlaylist[]> {
-  return getJSON<UserPlaylist[]>(KEYS.USER_PLAYLISTS, []);
+  return getJSON<UserPlaylist[]>(accountStorageKey(KEYS.USER_PLAYLISTS), []);
 }
 
-async function saveUserPlaylists(playlists: UserPlaylist[]): Promise<void> {
-  await setJSON(KEYS.USER_PLAYLISTS, playlists);
-}
-
-export async function createUserPlaylist(name: string, description?: string): Promise<UserPlaylist> {
+export async function createUserPlaylist(name: string, description?: string, coverUrl = ""): Promise<UserPlaylist> {
+  const storageKey = accountStorageKey(KEYS.USER_PLAYLISTS);
   const playlists = await getUserPlaylists();
   const newPlaylist: UserPlaylist = {
     id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     name,
     description: description || "",
-    coverUrl: "",
+    coverUrl,
     songs: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
   playlists.unshift(newPlaylist);
-  await saveUserPlaylists(playlists);
+  await setJSON(storageKey, playlists);
   return newPlaylist;
 }
 
 export async function deleteUserPlaylist(playlistId: string): Promise<void> {
+  const storageKey = accountStorageKey(KEYS.USER_PLAYLISTS);
   const playlists = await getUserPlaylists();
-  return saveUserPlaylists(playlists.filter(p => p.id !== playlistId));
+  return setJSON(storageKey, playlists.filter(p => p.id !== playlistId));
 }
 
 export async function addSongToPlaylist(playlistId: string, song: Song): Promise<boolean> {
+  const storageKey = accountStorageKey(KEYS.USER_PLAYLISTS);
   const playlists = await getUserPlaylists();
   const idx = playlists.findIndex(p => p.id === playlistId);
   if (idx === -1) return false;
@@ -304,7 +322,7 @@ export async function addSongToPlaylist(playlistId: string, song: Song): Promise
   if (!playlists[idx].coverUrl && song.coverUrl) {
     playlists[idx].coverUrl = song.coverUrl;
   }
-  await saveUserPlaylists(playlists);
+  await setJSON(storageKey, playlists);
   return true;
 }
 
@@ -312,6 +330,7 @@ export async function updateUserPlaylist(
   playlistId: string,
   updates: Partial<{ name: string; description: string; coverUrl: string }>
 ): Promise<void> {
+  const storageKey = accountStorageKey(KEYS.USER_PLAYLISTS);
   const playlists = await getUserPlaylists();
   const idx = playlists.findIndex(p => p.id === playlistId);
   if (idx === -1) return;
@@ -322,35 +341,38 @@ export async function updateUserPlaylist(
     updatedAt: Date.now(),
   };
   
-  await saveUserPlaylists(playlists);
+  await setJSON(storageKey, playlists);
 }
 
 export async function removeSongFromPlaylist(playlistId: string, songId: string): Promise<void> {
+  const storageKey = accountStorageKey(KEYS.USER_PLAYLISTS);
   const playlists = await getUserPlaylists();
   const idx = playlists.findIndex(p => p.id === playlistId);
   if (idx === -1) return;
   playlists[idx].songs = playlists[idx].songs.filter(s => s.id !== songId);
   playlists[idx].updatedAt = Date.now();
-  await saveUserPlaylists(playlists);
+  await setJSON(storageKey, playlists);
 }
 
 export function getRecentlyPlayed(): Promise<RecentlyPlayedItem[]> {
-  return getJSON<RecentlyPlayedItem[]>(KEYS.RECENTLY_PLAYED, []);
+  return getJSON<RecentlyPlayedItem[]>(accountStorageKey(KEYS.RECENTLY_PLAYED), []);
 }
 
 export async function addRecentlyPlayed(item: Omit<RecentlyPlayedItem, "lastPlayed">): Promise<void> {
+  const storageKey = accountStorageKey(KEYS.RECENTLY_PLAYED);
   const items = await getRecentlyPlayed();
   const filtered = items.filter(i => i.id !== item.id);
   filtered.unshift({ ...item, lastPlayed: Date.now() });
-  await setJSON(KEYS.RECENTLY_PLAYED, filtered.slice(0, 30));
+  await setJSON(storageKey, filtered.slice(0, 30));
 }
 
 export async function getSearchHistory(): Promise<SearchHistoryItem[]> {
-  const items = await getJSON<Partial<SearchHistoryItem>[]>(KEYS.SEARCH_HISTORY, []);
+  const items = await getJSON<Partial<SearchHistoryItem>[]>(accountStorageKey(KEYS.SEARCH_HISTORY), []);
   return normalizeSearchHistoryItems(items);
 }
 
 export async function addSearchHistoryItem(labelValue: string): Promise<SearchHistoryItem[]> {
+  const storageKey = accountStorageKey(KEYS.SEARCH_HISTORY);
   const label = normalizeSearchLabel(labelValue);
   if (label.length < 2) {
     return getSearchHistory();
@@ -366,11 +388,12 @@ export async function addSearchHistoryItem(labelValue: string): Promise<SearchHi
   const nextKey = getSearchHistoryKey(nextItem);
   const filtered = items.filter((item) => getSearchHistoryKey(item) !== nextKey);
   const nextItems = [nextItem, ...filtered].slice(0, SEARCH_HISTORY_LIMIT);
-  await setJSON(KEYS.SEARCH_HISTORY, nextItems);
+  await setJSON(storageKey, nextItems);
   return nextItems;
 }
 
 export async function addSongSearchHistoryItem(song: Song): Promise<SearchHistoryItem[]> {
+  const storageKey = accountStorageKey(KEYS.SEARCH_HISTORY);
   const label = normalizeSearchLabel(song.title);
   if (!song.id || label.length < 2) {
     return getSearchHistory();
@@ -389,14 +412,15 @@ export async function addSongSearchHistoryItem(song: Song): Promise<SearchHistor
   const nextKey = getSearchHistoryKey(nextItem);
   const filtered = items.filter((item) => getSearchHistoryKey(item) !== nextKey);
   const nextItems = [nextItem, ...filtered].slice(0, SEARCH_HISTORY_LIMIT);
-  await setJSON(KEYS.SEARCH_HISTORY, nextItems);
+  await setJSON(storageKey, nextItems);
   return nextItems;
 }
 
 export async function removeSearchHistoryItem(id: string): Promise<SearchHistoryItem[]> {
+  const storageKey = accountStorageKey(KEYS.SEARCH_HISTORY);
   const items = await getSearchHistory();
   const nextItems = items.filter((item) => item.id !== id);
-  void setJSON(KEYS.SEARCH_HISTORY, nextItems);
+  void setJSON(storageKey, nextItems);
   return nextItems;
 }
 
@@ -459,14 +483,15 @@ export async function setHighQualityEntitlement(unlocked: boolean, expiresAt?: n
   });
 }
 
-export async function clearAppStorage(options?: { preserveSettings?: boolean }): Promise<void> {
+export async function clearAppStorage(options?: { preserveSettings?: boolean; userId?: string }): Promise<void> {
   const preserveSettings = options?.preserveSettings ?? false;
 
   try {
     memoryCache.clear();
 
     const keys = await AsyncStorage.getAllKeys();
-    const appKeys = keys.filter((key) => key.startsWith("@mavrixfy_"));
+    const accountPrefix = accountStorageKey("", options?.userId ?? getAccountScope().accountId);
+    const appKeys = keys.filter((key) => key.startsWith(accountPrefix));
     const keysToRemove = preserveSettings
       ? appKeys.filter((key) => key !== KEYS.SETTINGS)
       : appKeys;
@@ -489,13 +514,13 @@ export interface PersistedPlayerState {
 
 export async function savePlayerState(state: PersistedPlayerState): Promise<void> {
   try {
-    await AsyncStorage.setItem(KEYS.PLAYER_STATE, JSON.stringify(state));
+    await AsyncStorage.setItem(accountStorageKey(KEYS.PLAYER_STATE), JSON.stringify(state));
   } catch {}
 }
 
 export async function loadPlayerState(): Promise<PersistedPlayerState | null> {
   try {
-    const raw = await AsyncStorage.getItem(KEYS.PLAYER_STATE);
+    const raw = await AsyncStorage.getItem(accountStorageKey(KEYS.PLAYER_STATE));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedPlayerState;
     if (!parsed?.currentSong?.id) return null;

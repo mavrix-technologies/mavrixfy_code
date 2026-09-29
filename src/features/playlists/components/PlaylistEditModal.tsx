@@ -1,21 +1,21 @@
+import Colors from "@/constants/colors";
+import * as Animated from "@/lib/nativeAnimated";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import {
-  ActivityIndicator,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+ActivityIndicator,
+Modal,
+Platform,
+Pressable,
+ScrollView,
+StyleSheet,
+Text,
+TextInput,
+View,
 } from "react-native";
-import * as Animated from "@/lib/nativeAnimated";
-import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
 
 interface PlaylistEditModalProps {
   visible: boolean;

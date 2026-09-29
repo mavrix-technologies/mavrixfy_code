@@ -1,20 +1,20 @@
-import React, { useEffect, useRef } from "react";
-import {
-  Pressable,
-  Platform,
-  StyleSheet,
-  type StyleProp,
-  type ViewStyle,
-} from "react-native";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withTiming,
-  interpolate,
-} from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import React,{ useEffect,useRef } from "react";
+import {
+Platform,
+Pressable,
+StyleSheet,
+type StyleProp,
+type ViewStyle,
+} from "react-native";
+import Animated,{
+interpolate,
+useAnimatedStyle,
+useSharedValue,
+withSpring,
+withTiming,
+} from "react-native-reanimated";
 
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";

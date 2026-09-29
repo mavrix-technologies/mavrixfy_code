@@ -1,12 +1,13 @@
-import { useRef, useEffect, useCallback, type MutableRefObject } from "react";
 import type { Song } from "@/lib/musicData";
-import { toDurationSeconds } from "@/utils/timeFormatters";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import {
-  updatePlaybackProgress,
-  resetPlaybackProgress,
+resetPlaybackProgress,
+updatePlaybackProgress,
 } from "@/services/audio/playbackProgressStore";
+import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
+import { toDurationSeconds } from "@/utils/timeFormatters";
+import { useCallback,useEffect,useRef,type MutableRefObject } from "react";
 
 interface UseAudioProgressTrackingOptions {
   currentSong: Song | null;
@@ -17,6 +18,7 @@ interface UseAudioProgressTrackingOptions {
   setIsPlaying: (playing: boolean) => void;
   playbackLoadingRef: MutableRefObject<boolean>;
   desiredPlayStateRef: MutableRefObject<boolean | null>;
+  pendingPlayRequestRef: MutableRefObject<PendingPlayRequest | null>;
   canUseLightweightAudioFallback: boolean;
   TrackPlayer: any;
   nextSongRef: MutableRefObject<() => void>;
@@ -32,6 +34,7 @@ export function useAudioProgressTracking({
   setIsPlaying,
   playbackLoadingRef,
   desiredPlayStateRef,
+  pendingPlayRequestRef,
   canUseLightweightAudioFallback,
   TrackPlayer,
   nextSongRef,
@@ -89,8 +92,16 @@ export function useAudioProgressTracking({
     updateProgressStore(positionSecondsRef.current, effectiveDur);
   }, [currentSongRef, updateProgressStore]);
 
-  // Reset progress when song changes
+  const progressSongIdRef = useRef<string | null>(null);
+
+  // Duration corrections must not reset the user's position.
   useEffect(() => {
+    const songId = currentSong?.id ?? null;
+    if (progressSongIdRef.current === songId) {
+      if (currentSong?.duration) setNativeDuration(toDurationSeconds(currentSong.duration));
+      return;
+    }
+    progressSongIdRef.current = songId;
     if (currentSong?.id) {
       const initialDur = toDurationSeconds(currentSong.duration);
       durationSecondsRef.current = initialDur;
@@ -103,7 +114,7 @@ export function useAudioProgressTracking({
       seekOverrideRef.current = null;
       resetPlaybackProgress();
     }
-  }, [currentSong?.id, currentSong?.duration, updateProgressStore]);
+  }, [currentSong?.id, currentSong?.duration, setNativeDuration, updateProgressStore]);
 
   useEffect(() => {
     let mounted = true;
@@ -120,8 +131,14 @@ export function useAudioProgressTracking({
           if (!status.isPlaying && (playbackLoadingRef.current || desiredPlayStateRef.current === true)) {
             return;
           }
+          // expo-av can report one last playing status from the outgoing
+          // source after the user has already paused during a track change.
+          if (status.isPlaying && desiredPlayStateRef.current === false) {
+            return;
+          }
           if (status.isPlaying) {
             desiredPlayStateRef.current = null;
+            pendingPlayRequestRef.current = null;
           }
           if (status.isPlaying !== isPlayingRef.current) {
             setIsPlaying(status.isPlaying);
@@ -141,7 +158,7 @@ export function useAudioProgressTracking({
         mounted = false;
       };
     }
-  }, [canUseLightweightAudioFallback, currentSongRef, desiredPlayStateRef, isPlayingRef, nextSongRef, playSongRef, playbackLoadingRef, queueRef, repeatModeRef, setIsPlaying, setNativeDuration, setNativePosition]);
+  }, [canUseLightweightAudioFallback, currentSongRef, desiredPlayStateRef, isPlayingRef, nextSongRef, pendingPlayRequestRef, playSongRef, playbackLoadingRef, queueRef, repeatModeRef, setIsPlaying, setNativeDuration, setNativePosition]);
 
   return {
     positionSecondsRef,
@@ -151,4 +168,3 @@ export function useAudioProgressTracking({
     setNativeDuration,
   };
 }
-

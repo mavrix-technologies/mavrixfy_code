@@ -1,27 +1,28 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  FlatList,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { useLocalSearchParams } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import SongRow from "@/components/SongRow";
+import Colors from "@/constants/colors";
+import { usePlayerActions } from "@/contexts/PlayerContext";
+import { getArtistDetails } from "@/data/providers/ArtistProvider";
+import { mapFilter } from "@/lib/arrayUtils";
+import { triggerImpact } from "@/lib/haptics";
+import { setLastMix } from "@/lib/lastMix";
+import { convertJioSaavnSong,Song } from "@/lib/musicData";
+import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
+import { safeGoBack } from "@/utils/navigation";
+import { shareArtistMix } from "@/utils/shareUtils";
+import { pickFirst } from "@/utils/stringUtils";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { safeGoBack } from "@/utils/navigation";
-import { convertJioSaavnSong, Song } from "@/lib/musicData";
-import { getArtistDetails } from "@/data/providers/ArtistProvider";
-import { usePlayerActions } from "@/contexts/PlayerContext";
-import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
-import { triggerImpact } from "@/lib/haptics";
-import SongRow from "@/components/SongRow";
-import { setLastMix } from "@/lib/lastMix";
-import { mapFilter } from "@/lib/arrayUtils";
-import { pickFirst } from "@/utils/stringUtils";
-import { shareArtistMix } from "@/utils/shareUtils";
+import { useLocalSearchParams } from "expo-router";
+import { useCallback,useEffect,useMemo,useState } from "react";
+import {
+FlatList,
+Platform,
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArtistMixGettingReady } from "../components/ArtistMixGettingReady";
 import { ArtistMixHero } from "../components/ArtistMixHero";
 
@@ -108,6 +109,8 @@ export function ArtistMixScreen() {
   // Fetch and filter songs
   useEffect(() => {
     if (ids.length === 0) {
+      // An empty mix has no remote request to deliver the initial state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       finishEmptyMixLoad();
       return;
     }
@@ -282,7 +285,7 @@ export function ArtistMixScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0D0E11",
+    backgroundColor: Colors.background,
   },
 
   header: {

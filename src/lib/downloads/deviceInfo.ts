@@ -2,9 +2,9 @@
  * Device Info — stable deviceId and platform metadata for download device registration.
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { IS_ANDROID,IS_IOS } from "@/constants/platform";
 import { logger } from "@/lib/logger";
-import { IS_ANDROID, IS_IOS } from "@/constants/platform";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const KEY_DEVICE_ID = "@mavrixfy_device_id";
 

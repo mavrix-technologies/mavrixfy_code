@@ -1,17 +1,17 @@
-import React, { memo, useCallback } from "react";
-import {
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  type StyleProp,
-  type ViewStyle,
-} from "react-native";
+import { LiquidGlassView } from "@/components/LiquidGlassView";
+import { triggerImpact } from "@/lib/haptics";
 import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
-import { triggerImpact } from "@/lib/haptics";
-import LiquidGlassView from "@/components/LiquidGlassView";
+import { memo,useCallback } from "react";
+import {
+FlatList,
+Pressable,
+StyleSheet,
+Text,
+View,
+type StyleProp,
+type ViewStyle,
+} from "react-native";
 
 export interface LiquidGlassScopeBarOption<T extends string = string> {
   key: T;

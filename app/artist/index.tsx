@@ -1,9 +1,9 @@
+import Colors from "@/constants/colors";
+import { runAfterIdle } from "@/utils/idleTask";
+import { safeGoBack } from "@/utils/navigation";
 import { useFocusEffect } from "expo-router";
 import { useCallback } from "react";
 import { View } from "react-native";
-import { runAfterIdle } from "@/utils/idleTask";
-import { safeGoBack } from "@/utils/navigation";
-import Colors from "@/constants/colors";
 
 export default function ArtistAnchorScreen() {
   useFocusEffect(

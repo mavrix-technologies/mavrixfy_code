@@ -1,6 +1,6 @@
+import { IS_WEB } from "@/constants/platform";
 import { useMemo } from "react";
 import { type EdgeInsets } from "react-native-safe-area-context";
-import { IS_WEB } from "@/constants/platform";
 
 export function usePlayerLayoutMetrics(
   screenWidth: number,

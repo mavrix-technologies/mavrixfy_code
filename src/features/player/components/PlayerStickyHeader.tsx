@@ -1,8 +1,8 @@
-import React from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import { View, Text, Pressable, StyleSheet } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { unescapeHtml } from "@/utils/stringUtils";
+import { Ionicons } from "@expo/vector-icons";
+import React from "react";
+import { Pressable,StyleSheet,Text,View } from "react-native";
 import { styles } from "../styles/playerScreenStyles";
 
 export interface PlayerStickyHeaderProps {

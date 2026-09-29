@@ -1,8 +1,9 @@
-import { useEffect, useRef, type MutableRefObject } from "react";
-import type { Song } from "@/lib/musicData";
+import { getAccountScope } from "@/lib/accountScope";
 import { logger } from "@/lib/logger";
-import { playerPersistenceService } from "@/services/player/playerPersistenceService";
+import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
+import { playerPersistenceService } from "@/services/player/playerPersistenceService";
+import { useEffect,useRef,type MutableRefObject } from "react";
 
 interface UseStartupPlaybackReconcileOptions {
   TrackPlayer: any;
@@ -58,7 +59,9 @@ export function useStartupPlaybackReconcile(options: UseStartupPlaybackReconcile
             const rawState = (playbackState as any)?.state ?? playbackState;
             const isPlayingNow = rawState === State.Playing;
 
-            if (activeTrack?.id && Array.isArray(nativeQueue) && nativeQueue.length > 0) {
+            const owner = getAccountScope().accountId ?? "guest";
+            if (activeTrack?.id && activeTrack.accountId !== owner) await TrackPlayer.reset();
+            if (activeTrack?.id && activeTrack.accountId === owner && Array.isArray(nativeQueue) && nativeQueue.length > 0) {
               const [rawIndex, persisted] = await Promise.all([
                 TrackPlayer.getActiveTrackIndex().catch(() => 0),
                 playerPersistenceService.loadPlayerState().catch(() => null),

@@ -3,7 +3,7 @@
  * Extracted from JioSaavnProvider.ts to reduce module size.
  */
 
-import { type JioSaavnImage, type JioSaavnSong } from "@/lib/musicData";
+import { type JioSaavnImage,type JioSaavnSong } from "@/lib/musicData";
 
 export interface JioSaavnPlaylistResult {
   id: string;

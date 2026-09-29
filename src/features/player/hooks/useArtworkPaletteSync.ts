@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
 import {
-  DEFAULT_ARTWORK_PALETTE,
-  extractArtworkColors,
-  getImmediateArtworkPalette,
-  type ArtworkPalette,
+DEFAULT_ARTWORK_PALETTE,
+extractArtworkColors,
+getImmediateArtworkPalette,
+type ArtworkPalette,
 } from "@/lib/colorExtractor";
 import type { Song } from "@/lib/musicData";
+import { useCallback,useEffect,useState } from "react";
 
 export interface UseArtworkPaletteSyncParams {
   screenSong: Song | null;
@@ -27,6 +27,8 @@ export function useArtworkPaletteSync({
     let active = true;
     const cover = screenSong?.coverUrl?.trim();
     if (!cover) {
+      // Clear the previous cover palette immediately when the song has no cover.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setArtworkPalette(DEFAULT_ARTWORK_PALETTE);
       return () => {};
     }

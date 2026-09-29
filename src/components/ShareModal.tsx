@@ -1,28 +1,28 @@
-import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Linking,
-  Modal,
-  Platform,
-  Pressable,
-  Share,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import Colors from "@/constants/colors";
+import { extractArtworkColors,type ArtworkPalette } from "@/lib/colorExtractor";
+import { triggerImpact } from "@/lib/haptics";
+import { showGlobalToast } from "@/utils/globalToast";
+import { closeShareSheet,subscribeShareSheet,type ShareSheetData } from "@/utils/shareSheet";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
-import { triggerImpact } from "@/lib/haptics";
-import { showGlobalToast } from "@/utils/globalToast";
-import { closeShareSheet, subscribeShareSheet, type ShareSheetData } from "@/utils/shareSheet";
-import { extractArtworkColors, type ArtworkPalette } from "@/lib/colorExtractor";
+import { memo,useCallback,useEffect,useMemo,useState } from "react";
+import {
+Linking,
+Modal,
+Platform,
+Pressable,
+Share,
+StyleSheet,
+Text,
+View,
+} from "react-native";
 import { SpotifyPosterCard } from "./share/SpotifyPosterCard";
 import { SpotifyShareActions } from "./share/SpotifyShareActions";
 import {
-  styles,
-  buildShareMessage,
-  DEFAULT_CARD_PALETTES,
+buildShareMessage,
+DEFAULT_CARD_PALETTES,
+styles,
 } from "./share/shareModalStyles";
 
 export const ShareModal = memo(function ShareModal() {

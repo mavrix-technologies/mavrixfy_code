@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
-import * as Animated from "@/lib/nativeAnimated";
-import { View, StyleSheet, useWindowDimensions } from "react-native";
-import YoutubePlayer from "react-native-youtube-iframe";
 import Colors from "@/constants/colors";
 import { IS_ANDROID } from "@/constants/platform";
+import * as Animated from "@/lib/nativeAnimated";
+import { memo,useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { StyleSheet,useWindowDimensions,View } from "react-native";
+import YoutubePlayer from "react-native-youtube-iframe";
+
+import { getSettings } from "@/lib/storage";
 
 export const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
 export const BACKGROUND_YOUTUBE_CHROME_CROP_PX = 260;
@@ -100,7 +102,7 @@ export const BACKGROUND_YOUTUBE_PRELOAD_HOOK = `
             }
           }
         } catch(e) {}
-      }, 350);
+      }, 1000);
     };
   }
   wrapHooks();
@@ -129,8 +131,6 @@ export type BackgroundYoutubeVideoProps = {
   onVideoActive?: (active: boolean) => void;
   onVideoError?: (error: string) => void;
 };
-
-import { getSettings } from "@/lib/storage";
 
 export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
   videoId,

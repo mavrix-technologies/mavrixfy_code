@@ -1,29 +1,29 @@
-import { useState, useCallback, useEffect } from "react";
-import { Alert, Platform } from "react-native";
-import * as ImagePicker from "expo-image-picker";
-import * as Haptics from "expo-haptics";
-import { getUserPlaylists, updateUserPlaylist, deleteUserPlaylist, type UserPlaylist } from "@/lib/storage";
-import {
-  getPlaylistById,
-  updateFirestorePlaylist,
-  deleteFirestorePlaylist,
-  firestorePlaylistToLocalSongs,
-} from "@/lib/firestore";
-import { uploadImageToCloudinary } from "@/lib/cloudinary";
-import { convertJioSaavnSong, getBestImageUrl, type JioSaavnSong, Song } from "@/lib/musicData";
-import {
-  getJioSaavnAlbumDetails,
-  getJioSaavnPlaylistDetails,
-  getJioSaavnSongDetails,
-} from "@/data/providers/JioSaavnProvider";
 import { useAuth } from "@/contexts/AuthContext";
-import { safeGoBack } from "@/utils/navigation";
-import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import {
-  getCachedPlaylist,
-  setCachedPlaylist,
-  removeCachedPlaylist,
+getJioSaavnAlbumDetails,
+getJioSaavnPlaylistDetails,
+getJioSaavnSongDetails,
+} from "@/data/providers/JioSaavnProvider";
+import { uploadImageToCloudinary } from "@/lib/cloudinary";
+import {
+deleteFirestorePlaylist,
+firestorePlaylistToLocalSongs,
+getPlaylistById,
+updateFirestorePlaylist,
+} from "@/lib/firestore";
+import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
+import { convertJioSaavnSong,getBestImageUrl,type JioSaavnSong,Song } from "@/lib/musicData";
+import {
+getCachedPlaylist,
+removeCachedPlaylist,
+setCachedPlaylist,
 } from "@/lib/playlistMemoryCache";
+import { deleteUserPlaylist,getUserPlaylists,updateUserPlaylist,type UserPlaylist } from "@/lib/storage";
+import { safeGoBack } from "@/utils/navigation";
+import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
+import { useCallback,useEffect,useState } from "react";
+import { Alert,Platform } from "react-native";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -403,6 +403,8 @@ export function usePlaylistDetailData({
   useEffect(() => {
     let cancelled = false;
     if (!playlistId) {
+      // An invalid playlist route has no load callback to report this state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setNotFound(true);
       return;
     }
@@ -505,7 +507,7 @@ export function usePlaylistDetailData({
       setIsSaving(false);
       setUploadProgress(0);
     }
-  }, [editName, editDescription, editCover, editIsPublic, playlistId, isFirestoreSource, user?.id]);
+  }, [editName, editDescription, editCover, editIsPublic, playlistId, isFirestoreSource, user]);
 
   const handleDeletePlaylist = useCallback(() => {
     Alert.alert(
@@ -533,7 +535,7 @@ export function usePlaylistDetailData({
         },
       ]
     );
-  }, [playlistName, playlistId, isFirestoreSource, user?.id]);
+  }, [playlistName, playlistId, isFirestoreSource, user]);
 
   return {
     loading,

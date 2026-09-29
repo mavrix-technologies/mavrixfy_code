@@ -1,6 +1,6 @@
-import { Platform } from "react-native";
-import Constants, { ExecutionEnvironment } from "expo-constants";
 import { logger } from "@/lib/logger";
+import Constants,{ ExecutionEnvironment } from "expo-constants";
+import { Platform } from "react-native";
 
 export type GoogleMobileAdsModule = typeof import("react-native-google-mobile-ads");
 export type GoogleNativeAd = import("react-native-google-mobile-ads").NativeAd;

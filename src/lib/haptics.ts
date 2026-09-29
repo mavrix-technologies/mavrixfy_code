@@ -1,6 +1,6 @@
-import { Platform } from "react-native";
-import * as ExpoHaptics from "expo-haptics";
 import { getSettings } from "@/lib/storage";
+import * as ExpoHaptics from "expo-haptics";
+import { Platform } from "react-native";
 
 let cachedEnabled: boolean | null = null;
 let cacheTime = 0;

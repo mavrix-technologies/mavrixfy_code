@@ -1,34 +1,34 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
-import { router } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { IS_ANDROID } from "@/constants/platform";
-import { showGlobalToast } from "@/utils/globalToast";
-import { getBestImageUrl, formatDuration, type Song } from "@/lib/musicData";
-import { addSongToPlaylist, getUserPlaylists } from "@/lib/storage";
-import {
-  getUserFirestorePlaylists,
-  addSongToFirestorePlaylist,
-  type FirestorePlaylist,
-} from "@/lib/firestore";
 import { searchArtists } from "@/data/providers/ArtistProvider";
 import { compactMap } from "@/lib/arrayUtils";
-import { styles } from "../styles/songOptionsStyles";
 import {
-  MergedPlaylist,
-  SubHeader,
-  AddToPlaylistRow,
-  ArtistNameOptionRow,
-  SongCreditRow,
-} from "./SongOptionsSubComponents";
+addSongToFirestorePlaylist,
+getUserFirestorePlaylists,
+type FirestorePlaylist,
+} from "@/lib/firestore";
+import { formatDuration,getBestImageUrl,type Song } from "@/lib/musicData";
+import { addSongToPlaylist,getUserPlaylists } from "@/lib/storage";
+import { showGlobalToast } from "@/utils/globalToast";
+import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
+import React,{ useCallback,useEffect,useMemo,useState } from "react";
+import {
+ActivityIndicator,
+FlatList,
+Pressable,
+Text,
+View,
+} from "react-native";
+import { styles } from "../styles/songOptionsStyles";
 import { dismissOptions } from "../utils/songOptionsUtils";
+import {
+AddToPlaylistRow,
+ArtistNameOptionRow,
+MergedPlaylist,
+SongCreditRow,
+SubHeader,
+} from "./SongOptionsSubComponents";
 
 // ─── Shared sheet wrapper ─────────────────────────────────────────────────────
 export function SheetWrap({ children }: { children: React.ReactNode }) {
@@ -136,7 +136,7 @@ export function AddToPlaylistView({
   }, [finishPlaylistLoad, startPlaylistLoad, userId]);
 
   useEffect(() => {
-    void loadPlaylists();
+    void Promise.resolve().then(loadPlaylists);
   }, [loadPlaylists]);
 
   const handleAdd = useCallback(

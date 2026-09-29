@@ -1,3 +1,4 @@
+import { getAccountScope,isCurrentAccount } from "@/lib/accountScope";
 /**
  * Download Queue — concurrency-limited, race-condition-free download engine.
  *
@@ -9,32 +10,35 @@
  * - When a slot frees up, the next pending song is automatically started.
  */
 
+import { getMusicApiUrl } from "@/lib/api-config";
+import { getAudioUrlByQuality } from "@/lib/downloads/audioQuality";
 import {
-  createDownloadResumable,
-  DownloadResumable,
-} from "expo-file-system/legacy";
-import { type DownloadItem, type DownloadStatus, type DownloadPreferences } from "@/types/downloads";
-import {
-  saveDownload,
-  loadDownload,
-  updateDownloadMemory,
+loadDownload,
+saveDownload,
+updateDownloadMemory,
 } from "@/lib/downloads/downloadStore";
 import {
-  ensureDownloadsDirs,
-  getTempDownloadUri,
-  getTrackFileUri,
-  getArtworkFileUri,
-  promoteTempToTrack,
-  hasSufficientStorage,
+ensureDownloadsDirs,
+getArtworkFileUri,
+getTempDownloadUri,
+getTrackFileUri,
+hasSufficientStorage,
+promoteTempToTrack,
 } from "@/lib/downloads/filesystem";
-import { getAudioUrlByQuality } from "@/lib/downloads/audioQuality";
-import { getMusicApiUrl } from "@/lib/api-config";
-import { getBestAudioUrlWithQuality } from "@/lib/musicData";
 import { logger } from "@/lib/logger";
+import { getBestAudioUrlWithQuality } from "@/lib/musicData";
+import { type DownloadItem,type DownloadPreferences,type DownloadStatus } from "@/types/downloads";
+import {
+createDownloadResumable,
+DownloadResumable,
+} from "expo-file-system/legacy";
+import * as Network from "expo-network";
 
 // ─── Concurrency config ───────────────────────────────────────────────────────
 
 const MAX_CONCURRENT = 2;
+let suspended = false;
+const runningTasks = new Set<Promise<void>>();
 
 // ─── Event emitter ────────────────────────────────────────────────────────────
 
@@ -67,12 +71,26 @@ const pendingQueue: string[] = [];
 const startingSet = new Set<string>();
 const lastProgressPersistAt = new Map<string, number>();
 const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const wifiOnlySongs = new Set<string>();
+let networkListener: { remove: () => void } | null = null;
 const PROGRESS_PERSIST_INTERVAL_MS = 1500;
 
 // ─── Slot management ──────────────────────────────────────────────────────────
 
 function activeCount(): number {
-  return activeHandles.size;
+  return new Set([...activeHandles.keys(), ...startingSet]).size;
+}
+
+function launchDownload(songId: string): void {
+  startingSet.add(songId);
+  const task = executeDownload(songId).catch((error) => {
+    logger.error("[DownloadQueue] Could not start download", { songId, error });
+  }).finally(() => {
+    startingSet.delete(songId);
+    runningTasks.delete(task);
+    drainQueue();
+  });
+  runningTasks.add(task);
 }
 
 /** Called when a download finishes (success, fail, or cancel) to free its slot. */
@@ -91,12 +109,37 @@ function clearRetryTimer(songId: string): void {
   }
 }
 
+function hasWifi(type?: Network.NetworkStateType): boolean {
+  return type === Network.NetworkStateType.WIFI || type === Network.NetworkStateType.ETHERNET;
+}
+
+function watchWifi(): void {
+  if (networkListener) return;
+  networkListener = Network.addNetworkStateListener(({ type }) => {
+    for (const songId of wifiOnlySongs) {
+      void loadDownload(songId).then(async (item) => {
+        if (!item || item.status === "completed" || item.status === "deleted") {
+          wifiOnlySongs.delete(songId);
+          return;
+        }
+        if (hasWifi(type)) {
+          if (item.status === "waiting_for_wifi") void startDownload(songId);
+        } else if (item.status === "downloading" || item.status === "queued") {
+          await pauseDownload(songId);
+          await updateStatus(songId, "waiting_for_wifi");
+        }
+      });
+    }
+  });
+}
+
 /** Start the next pending song if a slot is free. */
 function drainQueue() {
+  if (suspended) return;
   while (activeCount() < MAX_CONCURRENT && pendingQueue.length > 0) {
     const next = pendingQueue.shift()!;
     // Fire and forget — errors are handled inside executeDownload
-    executeDownload(next).catch(() => {});
+    launchDownload(next);
   }
 }
 
@@ -221,10 +264,15 @@ async function refreshAudioUrl(songId: string, originalUrl: string, quality: Dow
 
 async function executeDownload(songId: string): Promise<void> {
   // Double-check guard — prevents re-entry if somehow called twice
-  if (activeHandles.has(songId)) return;
+  if (suspended || activeHandles.has(songId)) return;
 
   const item = await loadDownload(songId);
   if (!item) return;
+
+  if (wifiOnlySongs.has(songId) && !hasWifi((await Network.getNetworkStateAsync()).type)) {
+    await updateStatus(songId, "waiting_for_wifi");
+    return;
+  }
 
   // If it was cancelled while waiting in the pending queue, skip it
   if (item.status === "deleted" || item.status === "completed") return;
@@ -238,6 +286,7 @@ async function executeDownload(songId: string): Promise<void> {
     updateStatus(songId, "downloading"),
     refreshAudioUrl(songId, item.audioUrl, item.quality).then(resolveRedirects),
   ]);
+  if (suspended || (await loadDownload(songId))?.status !== "downloading") return;
 
   const handle = createDownloadResumable(
     audioUrl,
@@ -280,9 +329,23 @@ async function executeDownload(songId: string): Promise<void> {
 
     if (!result) {
       // Paused / cancelled by user
-      await updateStatus(songId, "paused");
+      if ((await loadDownload(songId))?.status === "downloading") {
+        await updateStatus(songId, "paused");
+      }
       releaseSlot(songId);
       return;
+    }
+
+    if ((await loadDownload(songId))?.status !== "downloading") {
+      const { deleteAsync } = await import("expo-file-system/legacy");
+      await deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+      releaseSlot(songId);
+      return;
+    }
+
+    const contentType = result.headers?.["Content-Type"] || result.headers?.["content-type"] || "";
+    if (result.status < 200 || result.status >= 300 || /^(text\/|application\/(json|xml))/i.test(contentType)) {
+      throw new Error(`Audio download returned HTTP ${result.status}${contentType ? ` (${contentType})` : ""}`);
     }
 
     // Atomically promote verified temp file to final permanent track location
@@ -322,13 +385,17 @@ async function executeDownload(songId: string): Promise<void> {
     releaseSlot(songId);
 
   } catch (err: any) {
+    const { deleteAsync } = await import("expo-file-system/legacy");
+    await deleteAsync(tempUri, { idempotent: true }).catch(() => {});
     const wasCancelled =
       err?.code === "ERR_TASK_CANCELLED" ||
       err?.message?.includes("cancel") ||
       err?.message?.includes("cancelled");
 
     if (wasCancelled) {
-      await updateStatus(songId, "paused");
+      if ((await loadDownload(songId))?.status === "downloading") {
+        await updateStatus(songId, "paused");
+      }
       releaseSlot(songId);
       return;
     }
@@ -341,7 +408,7 @@ async function executeDownload(songId: string): Promise<void> {
 
     releaseSlot(songId); // free the slot before retry delay
 
-    if (retryCount <= MAX_RETRIES) {
+    if (!suspended && retryCount <= MAX_RETRIES) {
       await updateStatus(songId, "queued", {
         retryCount,
         failureReason: err?.message ?? "Unknown error",
@@ -376,8 +443,10 @@ async function executeDownload(songId: string): Promise<void> {
 
 export async function enqueueDownload(
   item: DownloadItem,
-  _prefs: DownloadPreferences
+  prefs: DownloadPreferences
 ): Promise<void> {
+  const scope = getAccountScope();
+  if (suspended || (item.accountId && item.accountId !== scope.accountId)) return;
   const songId = item.songId;
   clearRetryTimer(songId);
 
@@ -386,20 +455,35 @@ export async function enqueueDownload(
     return;
   }
 
-  void saveDownload({ ...item, status: "queued" });
+  startingSet.add(songId);
+  if (prefs.wifiOnly) {
+    wifiOnlySongs.add(songId);
+    watchWifi();
+  } else {
+    wifiOnlySongs.delete(songId);
+  }
+  await saveDownload({ ...item, status: "queued" });
   emitQueueEvent("status", songId, { ...item, status: "queued" });
 
   const hasSpace = await hasSufficientStorage();
   if (!hasSpace) {
     await updateStatus(songId, "paused", { failureReason: "Insufficient storage" });
+    startingSet.delete(songId);
     return;
   }
 
-  if (activeCount() < MAX_CONCURRENT) {
-    startingSet.add(songId);
-    executeDownload(songId).catch(() => {}).finally(() => startingSet.delete(songId));
+  if (prefs.wifiOnly && !hasWifi((await Network.getNetworkStateAsync()).type)) {
+    await updateStatus(songId, "waiting_for_wifi");
+    startingSet.delete(songId);
+    return;
+  }
+
+  if (suspended || !isCurrentAccount(scope)) { startingSet.delete(songId); return; }
+  if (activeCount() <= MAX_CONCURRENT) {
+    launchDownload(songId);
   } else {
     // Queue it — will start when a slot opens
+    startingSet.delete(songId);
     pendingQueue.push(songId);
     await updateStatus(songId, "queued");
   }
@@ -407,11 +491,10 @@ export async function enqueueDownload(
 
 async function startDownload(songId: string): Promise<void> {
   clearRetryTimer(songId);
-  if (activeHandles.has(songId) || startingSet.has(songId)) return;
+  if (suspended || activeHandles.has(songId) || startingSet.has(songId)) return;
 
   if (activeCount() < MAX_CONCURRENT) {
-    startingSet.add(songId);
-    executeDownload(songId).catch(() => {}).finally(() => startingSet.delete(songId));
+    launchDownload(songId);
   } else {
     if (!pendingQueue.includes(songId)) {
       pendingQueue.push(songId);
@@ -436,12 +519,12 @@ export async function pauseDownload(songId: string): Promise<void> {
 
 export async function resumeDownload(
   songId: string,
-  _prefs: DownloadPreferences
+  prefs: DownloadPreferences
 ): Promise<void> {
   const item = await loadDownload(songId);
   if (!item) return;
   clearRetryTimer(songId);
-  if (item.status !== "paused" && item.status !== "queued" && item.status !== "failed") return;
+  if (item.status !== "paused" && item.status !== "queued" && item.status !== "failed" && item.status !== "waiting_for_wifi") return;
   if (activeHandles.has(songId) || startingSet.has(songId)) return;
 
   const hasSpace = await hasSufficientStorage();
@@ -450,10 +533,22 @@ export async function resumeDownload(
     return;
   }
 
+  if (prefs.wifiOnly) {
+    wifiOnlySongs.add(songId);
+    watchWifi();
+    if (!hasWifi((await Network.getNetworkStateAsync()).type)) {
+      await updateStatus(songId, "waiting_for_wifi");
+      return;
+    }
+  } else {
+    wifiOnlySongs.delete(songId);
+  }
+
   return startDownload(songId);
 }
 
 export async function cancelDownload(songId: string): Promise<void> {
+  wifiOnlySongs.delete(songId);
   clearRetryTimer(songId);
   // Remove from pending queue
   const pendingIdx = pendingQueue.indexOf(songId);
@@ -480,12 +575,16 @@ export function retryDownload(
   return resumeDownload(songId, prefs);
 }
 
-/** How many downloads are currently active (for debug/UI). */
-function getActiveDownloadCount(): number {
-  return activeHandles.size;
+export async function suspendDownloadQueue(): Promise<void> {
+  suspended = true;
+  pendingQueue.length = 0;
+  wifiOnlySongs.clear();
+  networkListener?.remove();
+  networkListener = null;
+  for (const songId of retryTimers.keys()) clearRetryTimer(songId);
+  await Promise.allSettled([...activeHandles.values()].map(handle => handle.cancelAsync()));
+  await Promise.allSettled([...runningTasks]);
+  activeHandles.clear();
+  startingSet.clear();
 }
-
-/** How many downloads are waiting for a slot (for debug/UI). */
-function getPendingQueueLength(): number {
-  return pendingQueue.length;
-}
+export function resumeDownloadQueue(): void { suspended = false; }

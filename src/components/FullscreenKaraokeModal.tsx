@@ -1,32 +1,32 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Modal,
-  Pressable,
-  Text,
-  View,
-  useWindowDimensions,
-  type ListRenderItemInfo,
-} from "react-native";
-import { styles } from "./styles/karaokeLyricsStyles";
-import { IS_ANDROID, IS_WEB } from "@/constants/platform";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Reanimated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-} from "react-native-reanimated";
+import { PlayerSlider } from "@/components/PlayerSlider";
+import { IS_ANDROID,IS_WEB } from "@/constants/platform";
+import { useArtworkPalette } from "@/lib/colorExtractor";
+import { triggerImpact } from "@/lib/haptics";
+import { formatDuration,type Song } from "@/lib/musicData";
+import { getSongLyrics,type LyricLine,type LyricsResult } from "@/services/lyricsService";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { triggerImpact } from "@/lib/haptics";
-import { getSongLyrics, type LyricLine, type LyricsResult } from "@/services/lyricsService";
-import { formatDuration, type Song } from "@/lib/musicData";
-import { useArtworkPalette } from "@/lib/colorExtractor";
-import { PlayerSlider } from "@/components/PlayerSlider";
 import { Image } from "expo-image";
+import { memo,useCallback,useEffect,useMemo,useRef,useState } from "react";
+import {
+ActivityIndicator,
+FlatList,
+Modal,
+Pressable,
+Text,
+View,
+useWindowDimensions,
+type ListRenderItemInfo,
+} from "react-native";
+import { Gesture,GestureDetector } from "react-native-gesture-handler";
+import Reanimated,{
+useAnimatedStyle,
+useSharedValue,
+withSpring,
+} from "react-native-reanimated";
+import { SpotifyInstrumentalBreak,SpotifyLyricLine } from "./KaraokeLyricsSubComponents";
 import { getSpotifyLyricsBg } from "./karaokeLyricsUtils";
-import { SpotifyInstrumentalBreak, SpotifyLyricLine } from "./KaraokeLyricsSubComponents";
+import { styles } from "./styles/karaokeLyricsStyles";
 
 // ─── Fullscreen Modal Subcomponents ──────────────────────────────────────────
 

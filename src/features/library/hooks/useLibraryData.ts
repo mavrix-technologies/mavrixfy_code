@@ -1,17 +1,17 @@
-import { useState, useCallback, useEffect } from "react";
-import { Alert } from "react-native";
-import * as Haptics from "expo-haptics";
-import * as DocumentPicker from "expo-document-picker";
 import { useAuth } from "@/contexts/AuthContext";
-import { triggerImpact } from "@/lib/haptics";
 import { useOnReconnect } from "@/contexts/NetworkContext";
-import { useLibraryStore } from "../store/libraryStore";
-import {
-  subscribeLibrary,
-  createPlaylistOptimistic,
-  deletePlaylistOptimistic,
-} from "../services/libraryRepository";
+import { triggerImpact } from "@/lib/haptics";
+import * as DocumentPicker from "expo-document-picker";
+import * as Haptics from "expo-haptics";
+import { useCallback,useEffect,useState } from "react";
+import { Alert } from "react-native";
 import type { DisplayPlaylist } from "../components/PlaylistListItem";
+import {
+createPlaylistOptimistic,
+deletePlaylistOptimistic,
+subscribeLibrary,
+} from "../services/libraryRepository";
+import { useLibraryStore } from "../store/libraryStore";
 
 export function useLibraryData() {
   const { user } = useAuth();
@@ -92,7 +92,8 @@ export function useLibraryData() {
       void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
 
       // Optimistic creation: added to store and persistent cache at 0ms
-      void createPlaylistOptimistic(name, newPlaylistDescription, selectedImage || "", user);
+      const created = await createPlaylistOptimistic(name, newPlaylistDescription, selectedImage || "", user);
+      if (!created) throw new Error("Playlist creation failed");
 
       resetCreateModal();
     } catch {
@@ -112,7 +113,9 @@ export function useLibraryData() {
           style: "destructive",
           onPress: () => {
             // Optimistic deletion: removed from store and cache at 0ms
-            void deletePlaylistOptimistic(playlist, activeUserId);
+            void deletePlaylistOptimistic(playlist, activeUserId).then((deleted) => {
+              if (!deleted) Alert.alert("Error", "Failed to delete playlist. Please try again.");
+            });
           },
         },
       ]);

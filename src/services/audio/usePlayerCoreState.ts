@@ -1,20 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
+import { getSettings } from "@/lib/storage";
 import type { PlaybackQualityState } from "@/types/playbackTypes";
 import { showGlobalToast } from "@/utils/globalToast";
-import { logger } from "@/lib/logger";
-import { getSettings } from "@/lib/storage";
-import { updatePlaybackEngineSnapshot } from "./PlaybackEngine";
-import { setupPlayer } from "./TrackPlayerAdapter";
-import { useStartupPlaybackReconcile } from "./audioStartupReconcile";
+import { useCallback,useEffect,useRef,useState } from "react";
 import { useAudioNativeQueueLane } from "./audioNativeQueueLane";
-import { resolvePlaybackUrlWithDetails, songToTrack } from "./PlayerPlaybackResolver";
+import { useStartupPlaybackReconcile } from "./audioStartupReconcile";
+import { updatePlaybackEngineSnapshot } from "./PlaybackEngine";
+import { resolvePlaybackUrlWithDetails,songToTrack } from "./PlayerPlaybackResolver";
 import { fetchAutoplayRecommendations } from "./smartAutoplayService";
+import { setupPlayer } from "./TrackPlayerAdapter";
 
 export interface UsePlayerCoreStateOptions {
   TrackPlayer: any;
   State: any;
   RepeatMode: any;
+}
+
+export interface PendingPlayRequest {
+  id: number;
+  songId: string;
 }
 
 export function usePlayerCoreState({
@@ -55,6 +60,7 @@ export function usePlayerCoreState({
   const playbackLoadingRef = useRef(false);
   const desiredPlayStateRef = useRef<boolean | null>(null);
   const playRequestIdRef = useRef(0);
+  const pendingPlayRequestRef = useRef<PendingPlayRequest | null>(null);
   const playerSetupPromiseRef = useRef<Promise<boolean> | null>(null);
   const lastPlaybackNoticeAtRef = useRef(0);
   const nextSongRef = useRef<() => void>(() => {});
@@ -331,6 +337,7 @@ export function usePlayerCoreState({
     playbackLoadingRef,
     desiredPlayStateRef,
     playRequestIdRef,
+    pendingPlayRequestRef,
     nextSongRef,
     prevSongRef,
     togglePlayRef,

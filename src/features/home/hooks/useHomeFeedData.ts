@@ -1,41 +1,41 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useFocusEffect } from "expo-router";
-import { type Song } from "@/lib/musicData";
-import { getRecentlyPlayed, type RecentlyPlayedItem } from "@/lib/storage";
-import { getPublicPlaylists, type FirestorePlaylist } from "@/lib/firestore";
+import { useNetwork,useOnReconnect } from "@/contexts/NetworkContext";
 import {
-  getCachedHomePublicPlaylists,
-  setCachedHomePublicPlaylists,
-  clearCachedHomePublicPlaylists,
-  getCachedHomeFeedSnapshot,
-  setCachedHomeFeedSnapshot,
-} from "@/lib/homeCache";
-import {
-  clearJioSaavnPlaylistCache,
-  getHomeJioSaavnCategories,
-  type HomeJioSaavnCategoryData,
-} from "@/data/providers/JioSaavnProvider";
-import {
-  getDailyNewReleaseSongs,
-  clearDailyNewReleaseSongCache,
-} from "@/data/providers/NewReleaseProvider";
-import {
-  getFeaturedArtists,
-  type ArtistCard,
-  clearFeaturedArtistsCache,
+clearFeaturedArtistsCache,
+getFeaturedArtists,
+type ArtistCard,
 } from "@/data/providers/ArtistProvider";
 import {
-  getRecommendationHomeFeed,
-  type RecommendationSection,
-} from "@/data/providers/RecommendationProvider";
+clearJioSaavnPlaylistCache,
+getHomeJioSaavnCategories,
+type HomeJioSaavnCategoryData,
+} from "@/data/providers/JioSaavnProvider";
 import {
-  fetchQuickPicksFeed,
-  clearQuickPicksCache,
-  type QuickPicksPool,
-  EMPTY_QUICK_PICKS_POOL,
+clearDailyNewReleaseSongCache,
+getDailyNewReleaseSongs,
+} from "@/data/providers/NewReleaseProvider";
+import {
+clearQuickPicksCache,
+EMPTY_QUICK_PICKS_POOL,
+fetchQuickPicksFeed,
+type QuickPicksPool,
 } from "@/data/providers/QuickPicksProvider";
-import { useNetwork, useOnReconnect } from "@/contexts/NetworkContext";
+import {
+getRecommendationHomeFeed,
+type RecommendationSection,
+} from "@/data/providers/RecommendationProvider";
+import { getPublicPlaylists,type FirestorePlaylist } from "@/lib/firestore";
+import {
+clearCachedHomePublicPlaylists,
+getCachedHomeFeedSnapshot,
+getCachedHomePublicPlaylists,
+setCachedHomeFeedSnapshot,
+setCachedHomePublicPlaylists,
+} from "@/lib/homeCache";
 import { logger } from "@/lib/logger";
+import { type Song } from "@/lib/musicData";
+import { getRecentlyPlayed,type RecentlyPlayedItem } from "@/lib/storage";
+import { useFocusEffect } from "expo-router";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 
 const HOME_PRIMARY_CATEGORY_IDS = [
   "trending",
@@ -100,7 +100,7 @@ export function useHomeFeedData() {
     HOME_CACHE.hydrated ? HOME_CACHE.publicPlaylists : []
   );
   const [recentlyPlayed, setRecentlyPlayed] = useState<RecentlyPlayedItem[]>(
-    HOME_CACHE.hydrated ? HOME_CACHE.recentlyPlayed : []
+    []
   );
   const [featuredArtists, setFeaturedArtists] = useState<ArtistCard[]>(
     HOME_CACHE.hydrated ? HOME_CACHE.featuredArtists : []
@@ -335,12 +335,13 @@ export function useHomeFeedData() {
       } catch (error) {
         logger.error("[Home] Feed load failed:", error);
       } finally {
-        setLoading(false);
-        setLoadingMainContent(false);
+        if (isActiveRun()) { setLoading(false); setLoadingMainContent(false); }
       }
     },
     []
   );
+
+  useEffect(() => () => { loadRunRef.current += 1; }, []);
 
   // Wait for the network check to complete before the initial fetch.
   // On cold start, isChecking=true for 300-800ms; firing before it settles

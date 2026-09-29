@@ -1,57 +1,58 @@
+import AddSongsBottomSheet from "@/components/AddSongsModal";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import QueueBottomSheet from "@/components/QueueBottomSheet";
+import { ShareModal } from "@/components/ShareModal";
+import Colors from "@/constants/colors";
+import { AuthProvider,useAuth } from "@/contexts/AuthContext";
+import { DownloadProvider } from "@/contexts/DownloadContext";
+import { NetworkProvider } from "@/contexts/NetworkContext";
+import { PlayerProvider } from "@/contexts/PlayerContext";
+import { PlayerScreen } from "@/features/player/screens/PlayerScreen";
+import { useScreenTracking } from "@/hooks/useScreenTracking";
+import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
+import { logAppOpen } from "@/lib/analytics";
+import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
+import { initializeMobileAds } from "@/lib/googleMobileAds";
+import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
+import { logger } from "@/lib/logger";
 import * as Animated from "@/lib/nativeAnimated";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { DarkTheme, ThemeProvider, Stack, useRouter, useSegments } from "expo-router";
-import { StatusBar } from "expo-status-bar";
-import * as SystemUI from "expo-system-ui";
-import * as SplashScreen from "expo-splash-screen";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  LogBox,
-  Platform,
-  StyleSheet,
-  View,
-  Text,
-} from "react-native";
+import { queryClient } from "@/lib/query-client";
+import { globalQueueSheetRef } from "@/lib/queueRef";
+import { initRemoteConfig } from "@/lib/remoteConfig";
+import { getRecentlyPlayed,runOneTimeMigrations } from "@/lib/storage";
+import { showAppLaunchAd } from "@/services/ads/appLaunchAdService";
+import { syncEqualizerWithNative } from "@/services/audio/audioEqualizer";
+import { checkAppVersion,registerForPushNotificationsAsync } from "@/services/notificationService";
+import { showGlobalToast,subscribeGlobalToast } from "@/utils/globalToast";
 import { runAfterIdle } from "@/utils/idleTask";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { Ionicons, MaterialIcons, MaterialCommunityIcons, Feather, FontAwesome } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MD3DarkTheme, PaperProvider } from "react-native-paper";
-import { useFonts } from "expo-font";
+import { Anton_400Regular } from "@expo-google-fonts/anton";
+import { BebasNeue_400Regular } from "@expo-google-fonts/bebas-neue";
 import { Inter_400Regular } from "@expo-google-fonts/inter/400Regular";
 import { Inter_500Medium } from "@expo-google-fonts/inter/500Medium";
 import { Inter_600SemiBold } from "@expo-google-fonts/inter/600SemiBold";
 import { Inter_700Bold } from "@expo-google-fonts/inter/700Bold";
 import { Inter_800ExtraBold } from "@expo-google-fonts/inter/800ExtraBold";
-import { Syne_700Bold, Syne_800ExtraBold } from "@expo-google-fonts/syne";
-import { BebasNeue_400Regular } from "@expo-google-fonts/bebas-neue";
-import { Anton_400Regular } from "@expo-google-fonts/anton";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Syne_700Bold,Syne_800ExtraBold } from "@expo-google-fonts/syne";
+import { Feather,FontAwesome,Ionicons,MaterialCommunityIcons,MaterialIcons } from "@expo/vector-icons";
+import { QueryClientProvider } from "@tanstack/react-query";
 import Constants from "expo-constants";
-import { queryClient } from "@/lib/query-client";
-import { PlayerProvider } from "@/contexts/PlayerContext";
-import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import { DownloadProvider } from "@/contexts/DownloadContext";
-import { NetworkProvider } from "@/contexts/NetworkContext";
-import Colors from "@/constants/colors";
-import { logAppOpen } from "@/lib/analytics";
-import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
-import { getRecentlyPlayed, runOneTimeMigrations } from "@/lib/storage";
-import { useScreenTracking } from "@/hooks/useScreenTracking";
-import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
-import QueueBottomSheet from "@/components/QueueBottomSheet";
-import { globalQueueSheetRef } from "@/lib/queueRef";
-import AddSongsBottomSheet from "@/components/AddSongsModal";
-import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
-import { logger } from "@/lib/logger";
-import { initializeMobileAds } from "@/lib/googleMobileAds";
-import { initRemoteConfig } from "@/lib/remoteConfig";
-import { showGlobalToast, subscribeGlobalToast } from "@/utils/globalToast";
-import ShareModal from "@/components/ShareModal";
-import { checkAppVersion, registerForPushNotificationsAsync } from "@/services/notificationService";
+import { useFonts } from "expo-font";
+import { DarkTheme,Stack,ThemeProvider,useRouter,useSegments } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
+import * as SystemUI from "expo-system-ui";
+import { useCallback,useEffect,useState } from "react";
+import {
+LogBox,
+Platform,
+StyleSheet,
+Text,
+View,
+} from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { MD3DarkTheme,PaperProvider } from "react-native-paper";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppNavBar } from "./(tabs)/_layout";
-import PlayerScreen from "@/features/player/screens/PlayerScreen";
-import { showAppLaunchAd } from "@/services/ads/appLaunchAdService";
 
 function isExpoGoRuntime(): boolean {
   return Constants.executionEnvironment === "storeClient" || Constants.appOwnership === "expo";
@@ -116,19 +117,7 @@ if (__DEV__) {
     originalWarn(...args);
   };
 
-  const originalError = console.error;
-  console.error = (...args) => {
-    if (
-      args[0] &&
-      typeof args[0] === "string" &&
-      (args[0].includes("expo-notifications") ||
-        args[0].includes("GO_BACK") ||
-        args[0].includes("was not handled by any navigator"))
-    ) {
-      return;
-    }
-    originalError(...args);
-  };
+
 }
 
 LogBox.ignoreLogs([
@@ -136,7 +125,6 @@ LogBox.ignoreLogs([
   "expo-notifications: Android Push notifications",
   "Unable to activate keep awake",
   "setBackgroundColorAsync",
-  "The action 'GO_BACK' was not handled by any navigator",
 ]);
 
 const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "profile", "delete-account"]);
@@ -161,9 +149,7 @@ export { showGlobalToast };
 
 function GlobalToast() {
   const insets = useSafeAreaInsets();
-  const opacityRef = useRef<Animated.Value | null>(null);
-  if (opacityRef.current === null) opacityRef.current = new Animated.Value(0);
-  const opacity = opacityRef.current;
+  const [opacity] = useState(() => new Animated.Value(0));
   const [message, setMessage] = useState("Added to queue");
   const [visible, setVisible] = useState(false);
 
@@ -402,6 +388,7 @@ function RootLayoutNav() {
         <Stack.Screen name="artist" />
         <Stack.Screen name="profile" />
         <Stack.Screen name="login" />
+        <Stack.Screen name="equalizer" />
       </Stack>
 
       {showNavOverlay ? (
@@ -427,6 +414,7 @@ export default function RootLayout() {
   useEffect(() => {
     void initRemoteConfig();
     void logAppOpen();
+    void syncEqualizerWithNative();
     if (Platform.OS === "android") {
       SystemUI.setBackgroundColorAsync(Colors.background).catch(() => { });
     }
@@ -456,7 +444,7 @@ export default function RootLayout() {
 
   if (error) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#05070A", padding: 20 }}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: Colors.background, padding: 20 }}>
         <Text style={{ color: "#ff0000", fontSize: 20, marginBottom: 10 }}>Error Loading App</Text>
         <Text style={{ color: "#fff", fontSize: 14 }}>{error.message}</Text>
       </View>

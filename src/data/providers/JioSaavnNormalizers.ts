@@ -1,11 +1,11 @@
-import type { JioSaavnImage, JioSaavnSong } from "@/lib/musicData";
-import { compactMap, mapFilter } from "@/lib/arrayUtils";
-import { toTrimmedString } from "@/utils/stringUtils";
 import { getApiUrl } from "@/lib/api-config";
+import { compactMap,mapFilter } from "@/lib/arrayUtils";
+import type { JioSaavnImage,JioSaavnSong } from "@/lib/musicData";
+import { toTrimmedString } from "@/utils/stringUtils";
 import type {
-  JioSaavnPlaylistResult,
-  JioSaavnAlbumResult,
-  JioSaavnPlaylistDetailsData,
+JioSaavnAlbumResult,
+JioSaavnPlaylistDetailsData,
+JioSaavnPlaylistResult,
 } from "./JioSaavnTypes";
 
 export function getJioSaavnSearchBaseUrls(): string[] {

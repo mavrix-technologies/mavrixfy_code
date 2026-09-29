@@ -156,31 +156,8 @@ const CacheTTL = {
 };
 
 /**
- * Cached fetch wrapper
- */
-async function cachedFetch<T>(
-  key: string,
-  fetcher: () => Promise<T>,
-  ttlMinutes: number = 5
-): Promise<T> {
-  const cached = cache.get<T>(key);
-  if (cached !== null) {
-    return cached;
-  }
-
-  const data = await fetcher();
-  cache.set(key, data, ttlMinutes);
-  
-  return data;
-}
-
-/**
  * Clear user-specific cache on logout
  */
 export function clearUserCache(userId: string): void {
   cache.clearPattern(`user:${userId}:*`);
-}
-
-function clearAllCache(): void {
-  cache.clearAll();
 }

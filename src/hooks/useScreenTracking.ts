@@ -1,6 +1,6 @@
-import { useEffect } from "react";
-import { usePathname } from "expo-router";
 import { logScreenView } from "@/lib/analytics";
+import { usePathname } from "expo-router";
+import { useEffect } from "react";
 
 /**
  * Hook to automatically track screen views

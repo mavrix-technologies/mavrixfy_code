@@ -1,3 +1,4 @@
+import { getAccountScope,isCurrentAccount } from "@/lib/accountScope";
 /**
  * Download Manager — public API used by UI and playback.
  *
@@ -6,37 +7,32 @@
  * delegating to the queue.
  */
 
-import { type Song } from "@/lib/musicData";
-import { type DownloadItem, type DownloadPreferences, type StorageSummary } from "@/types/downloads";
 import {
-  loadAllDownloads,
-  loadDownload,
-  getDownloadSync,
-  saveDownload,
-  removeDownload,
-  patchDownload,
-} from "@/lib/downloads/downloadStore";
-import {
-  enqueueDownload,
-  pauseDownload,
-  resumeDownload,
-  cancelDownload,
-  retryDownload,
-  onQueueEvent,
+cancelDownload,
+enqueueDownload,
+onQueueEvent,
+pauseDownload,
+resumeDownload,
+retryDownload,
 } from "@/lib/downloads/downloadQueue";
 import {
-  getDownloadEntitlement,
-  getTrackRights,
-  isTerritoryAllowed,
-} from "@/lib/downloads/entitlement";
+getDownloadSync,
+loadAllDownloads,
+loadDownload,
+patchDownload,
+removeDownload,
+saveDownload,
+} from "@/lib/downloads/downloadStore";
 import {
-  registerDevice,
-  writeLicenseCompleted,
-  writeLicenseFailed,
-  refreshLicenses,
-} from "@/lib/downloads/licenseSync";
-import { deleteTrackFiles, deleteAllTrackFiles, trackFileExists, getTrackFileSize, type getTrackFileUri, getValidatedTrackFileUri, hasSufficientStorage } from "@/lib/downloads/filesystem";
+getDownloadEntitlement,
+getTrackRights,
+isTerritoryAllowed,
+} from "@/lib/downloads/entitlement";
+import { deleteAllTrackFiles,deleteTrackFiles,getTrackFileSize,getValidatedTrackFileUri,hasSufficientStorage,trackFileExists } from "@/lib/downloads/filesystem";
+import { issueOfflineLicense,refreshLicenses } from "@/lib/downloads/licenseSync";
 import { logger } from "@/lib/logger";
+import { type Song } from "@/lib/musicData";
+import { type DownloadItem,type DownloadPreferences,type StorageSummary } from "@/types/downloads";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,6 +66,8 @@ export async function downloadSong(
   }
 ): Promise<DownloadResult> {
   try {
+    const scope = getAccountScope();
+    if (scope.accountId !== uid) return { ok: false, reason: "Account changed. Try again." };
     // 1. Check entitlement.
     const entitlement = await getDownloadEntitlement(uid);
     if (!entitlement.canDownload) {
@@ -77,7 +75,7 @@ export async function downloadSong(
     }
 
     // 2. Register device.
-    await registerDevice(uid);
+    // License issuance registers the device on the server.
 
     // 3. Storage safety check.
     const storageOk = await hasSufficientStorage();
@@ -113,8 +111,10 @@ export async function downloadSong(
       }
     }
 
+    const license = await issueOfflineLicense(uid, song.id, prefs.quality);
     // 6. Build the download item.
     const item: DownloadItem = {
+      accountId: uid,
       songId: song.id,
       title: song.title,
       artist: song.artist,
@@ -122,7 +122,7 @@ export async function downloadSong(
       coverUrl: song.coverUrl ?? "",
       audioUrl: song.audioUrl,
       duration: song.duration,
-      quality: prefs.quality,
+      quality: license.quality,
       status: "queued",
       progress: 0,
       bytesDownloaded: 0,
@@ -134,10 +134,11 @@ export async function downloadSong(
       completedAt: null,
       failedAt: null,
       failureReason: null,
-      licenseExpiresAt: null,
+      licenseExpiresAt: license.expiresAt,
     };
 
     // 7. Persist and enqueue.
+    if (!isCurrentAccount(scope)) return { ok: false, reason: "Account changed. Try again." };
     await saveDownload(item);
     await enqueueDownload(item, prefs);
 
@@ -201,6 +202,8 @@ export async function getLocalPlaybackUrl(songId: string): Promise<string | null
     const item = await loadDownload(songId);
     if (!item || item.status !== "completed") return null;
 
+    const expiry = item.licenseExpiresAt ? Date.parse(item.licenseExpiresAt) : NaN;
+    if (!Number.isFinite(expiry) || Date.now() > expiry + 7 * 24 * 60 * 60 * 1000) return null;
     return getValidatedTrackFileUri(songId);
   } catch {
     return null;
@@ -275,24 +278,6 @@ export async function syncLicenses(uid: string): Promise<void> {
   } catch (err) {
     logger.error("[DownloadManager] syncLicenses failed", err);
   }
-}
-
-/** Write a completed license event after a successful download. */
-export async function onDownloadCompleted(
-  uid: string,
-  songId: string,
-  rightsVersion: number
-): Promise<void> {
-  await writeLicenseCompleted(uid, songId, rightsVersion);
-}
-
-/** Write a failed license event after a download failure. */
-export async function onDownloadFailed(
-  uid: string,
-  songId: string,
-  failureCode: string
-): Promise<void> {
-  await writeLicenseFailed(uid, songId, failureCode);
 }
 
 // ─── Storage summary ──────────────────────────────────────────────────────────

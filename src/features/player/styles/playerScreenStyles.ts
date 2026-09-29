@@ -1,13 +1,13 @@
-import { StyleSheet } from "react-native";
-import { IS_ANDROID } from "@/constants/platform";
 import Colors from "@/constants/colors";
+import { IS_ANDROID } from "@/constants/platform";
 import {
-  PLAYER_SLIDER_TOUCH_HEIGHT,
-  PLAYER_SLIDER_THUMB_SIZE,
-  PLAYER_SLIDER_MINIMUM_TRACK_COLOR,
-  PLAYER_SLIDER_MAXIMUM_TRACK_COLOR,
-  PLAYER_SLIDER_THUMB_COLOR,
+PLAYER_SLIDER_MAXIMUM_TRACK_COLOR,
+PLAYER_SLIDER_MINIMUM_TRACK_COLOR,
+PLAYER_SLIDER_THUMB_COLOR,
+PLAYER_SLIDER_THUMB_SIZE,
+PLAYER_SLIDER_TOUCH_HEIGHT,
 } from "@/lib/sliderUtils";
+import { StyleSheet } from "react-native";
 import { playerArtistStyles } from "./playerArtistStyles";
 import { playerQueueStyles } from "./playerQueueStyles";
 

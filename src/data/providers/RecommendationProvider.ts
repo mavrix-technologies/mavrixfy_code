@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { auth } from "@/lib/firebase";
 import { buildAppApiUrl } from "@/lib/api-config";
+import { auth } from "@/lib/firebase";
 
 export type RecommendationSource =
   | "catalog"
@@ -126,10 +126,6 @@ const LOCAL_BACKUP_QUERIES = [
   "devotional hindi playlist",
   "bollywood workout playlist",
 ];
-
-function recommendationFeedEnabled(): boolean {
-  return String(process.env.EXPO_PUBLIC_RECOMMENDATION_FEED_V1 || "").trim().toLowerCase() !== "false";
-}
 
 function createSessionId(): string {
   return `app-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;

@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet } from "react-native";
 import { Image } from "expo-image";
+import { useEffect,useState } from "react";
+import { StyleSheet,Text,View } from "react-native";
 
 import { AD_UNITS } from "@/constants/admob";
-import { getGoogleMobileAdsModule, initializeMobileAds, type GoogleNativeAd } from "@/lib/googleMobileAds";
+import { getGoogleMobileAdsModule,initializeMobileAds,type GoogleNativeAd } from "@/lib/googleMobileAds";
 import { logger } from "@/lib/logger";
 
 const NATIVE_VIDEO_AD_UNIT_ID = AD_UNITS.NATIVE_VIDEO;
-const APP_BRAND_ICON = require("@/assets/images/mavrixfy_icon.png");
+const APP_BRAND_ICON = require("../../assets/images/mavrixfy_icon.png");
 
 export default function AdMobNativeVideo({ loadDelayMs = 0 }: { loadDelayMs?: number }) {
   const [nativeAd, setNativeAd] = useState<GoogleNativeAd | null>(null);

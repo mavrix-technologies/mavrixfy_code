@@ -1,11 +1,10 @@
+import { getApiUrl } from "@/lib/api-config";
 import type { Song } from "@/lib/musicData";
 import { parseApiSong } from "@/lib/searchRepository";
 import { deduplicateSongs } from "@/lib/searchUtils";
-import { getApiUrl } from "@/lib/api-config";
-import { fetchJson } from "@/utils/asyncUtils";
-import { logger } from "@/lib/logger";
-import { getSettings } from "@/lib/storage";
 import type { SmartAutoplayMode } from "@/lib/smartAutoplayConfig";
+import { getSettings } from "@/lib/storage";
+import { fetchJson } from "@/utils/asyncUtils";
 
 const RECENT_AUTOPLAY_IDS = new Set<string>();
 const MAX_RECENT_AUTOPLAY_CACHE = 60;

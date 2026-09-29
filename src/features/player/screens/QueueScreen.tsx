@@ -1,8 +1,8 @@
-import React, { useEffect } from "react";
-import { View, ActivityIndicator, StyleSheet } from "react-native";
-import { useRouter } from "expo-router";
 import Colors from "@/constants/colors";
 import { globalQueueSheetRef } from "@/lib/queueRef";
+import { useRouter } from "expo-router";
+import { useEffect } from "react";
+import { ActivityIndicator,StyleSheet,View } from "react-native";
 
 export function QueueScreen() {
   const router = useRouter();
@@ -24,7 +24,7 @@ export function QueueScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000000",
+    backgroundColor: Colors.background,
     justifyContent: "center",
     alignItems: "center",
   },

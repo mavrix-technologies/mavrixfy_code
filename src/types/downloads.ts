@@ -33,6 +33,7 @@ export type DownloadQuality = "low" | "medium" | "high";
 // ─── Download Item ────────────────────────────────────────────────────────────
 
 export interface DownloadItem {
+  accountId?: string;
   /** Unique song ID. */
   songId: string;
   /** Human-readable title. */

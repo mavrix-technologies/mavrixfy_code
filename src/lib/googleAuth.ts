@@ -1,6 +1,6 @@
-import { Platform } from "react-native";
-import Constants from "expo-constants";
 import { getExpoExtra } from "@/lib/expoExtra";
+import Constants from "expo-constants";
+import { Platform } from "react-native";
 
 type GoogleSigninModule = typeof import("@react-native-google-signin/google-signin");
 
@@ -19,6 +19,9 @@ export async function getGoogleMobileIdToken(actionLabel: string = "Google Sign-
   const webClientId =
     (expoExtra.googleWebClientId as string | undefined)?.trim() ||
     process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim();
+  const iosClientId =
+    (expoExtra.googleIosClientId as string | undefined)?.trim() ||
+    process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
 
   if (!webClientId) {
     throw new Error(
@@ -44,6 +47,7 @@ export async function getGoogleMobileIdToken(actionLabel: string = "Google Sign-
 
     GoogleSignin.configure({
       webClientId,
+      ...(Platform.OS === "ios" && iosClientId ? { iosClientId } : {}),
     });
 
     if (Platform.OS === "android") {

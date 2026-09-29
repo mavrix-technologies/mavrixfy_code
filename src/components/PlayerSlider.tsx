@@ -1,20 +1,20 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef } from "react";
-import { StyleSheet, View } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Reanimated, {
-  useSharedValue,
-  useAnimatedStyle,
+import React,{ memo,useCallback,useEffect,useMemo,useRef } from "react";
+import { StyleSheet,View } from "react-native";
+import { Gesture,GestureDetector } from "react-native-gesture-handler";
+import Reanimated,{
+useAnimatedStyle,
+useSharedValue,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 
 import {
-  PLAYER_SLIDER_MINIMUM_TRACK_COLOR,
-  PLAYER_SLIDER_MAXIMUM_TRACK_COLOR,
-  PLAYER_SLIDER_THUMB_COLOR,
-  PLAYER_SLIDER_TOUCH_HEIGHT,
-  PLAYER_SLIDER_THUMB_SIZE,
-  clampUnit,
-  progressFromGestureX,
+PLAYER_SLIDER_MAXIMUM_TRACK_COLOR,
+PLAYER_SLIDER_MINIMUM_TRACK_COLOR,
+PLAYER_SLIDER_THUMB_COLOR,
+PLAYER_SLIDER_THUMB_SIZE,
+PLAYER_SLIDER_TOUCH_HEIGHT,
+clampUnit,
+progressFromGestureX,
 } from "@/lib/sliderUtils";
 
 export type PlayerSliderProps = {
@@ -51,6 +51,7 @@ export const PlayerSlider = memo(function PlayerSlider({
   const isSlidingShared = useSharedValue(0);
   const didCompleteGesture = useSharedValue(0);
   const isSlidingRef = useRef(false);
+  const lastProgressUpdateRef = useRef(0);
   const range = maximumValue - minimumValue;
   const normalizedValue = range > 0 ? clampUnit((value - minimumValue) / range) : 0;
 
@@ -68,6 +69,9 @@ export const PlayerSlider = memo(function PlayerSlider({
 
   const emitValue = useCallback(
     (nextProgress: number, shouldComplete: boolean) => {
+      const now = Date.now();
+      if (!shouldComplete && now - lastProgressUpdateRef.current < 50) return;
+      lastProgressUpdateRef.current = now;
       const nextValue = minimumValue + clampUnit(nextProgress) * range;
       onValueChange?.(nextValue);
       if (!shouldComplete) return;

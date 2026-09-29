@@ -2,18 +2,18 @@
  * Equalizer Bars — Spotify-style animated bars shown inline with the song title.
  * Runs 100% on the Reanimated UI thread (no JS frame budget used during animation).
  */
-import React, { useEffect } from "react";
-import { StyleSheet, View } from "react-native";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withSequence,
-  withTiming,
-  cancelAnimation,
-  Easing,
-} from "react-native-reanimated";
 import Colors from "@/constants/colors";
+import React,{ useEffect } from "react";
+import { StyleSheet,View } from "react-native";
+import Animated,{
+cancelAnimation,
+Easing,
+useAnimatedStyle,
+useSharedValue,
+withRepeat,
+withSequence,
+withTiming,
+} from "react-native-reanimated";
 
 interface Props {
   isPlaying?: boolean;

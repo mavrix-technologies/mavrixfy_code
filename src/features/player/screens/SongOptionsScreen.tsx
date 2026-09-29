@@ -1,35 +1,35 @@
-import React, { useCallback, useMemo, useState } from "react";
-import {
-  DeviceEventEmitter,
-  Modal,
-  Platform,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
-import { Gesture, GestureHandlerRootView } from "react-native-gesture-handler";
-import { router, useLocalSearchParams } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { IS_ANDROID } from "@/constants/platform";
-import { showGlobalToast } from "@/utils/globalToast";
-import { unescapeHtml } from "@/utils/stringUtils";
-import { usePlayerActions } from "@/contexts/PlayerContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePlayerActions } from "@/contexts/PlayerContext";
+import { removeSongFromFirestorePlaylist } from "@/lib/firestore";
 import type { Song } from "@/lib/musicData";
 import { removeSongFromPlaylist } from "@/lib/storage";
-import { removeSongFromFirestorePlaylist } from "@/lib/firestore";
+import { showGlobalToast } from "@/utils/globalToast";
 import { shareSong } from "@/utils/shareUtils";
-import { styles } from "../styles/songOptionsStyles";
-import type { SongOptionMenuItem } from "../components/SongOptionsSubComponents";
-import { dismissOptions } from "../utils/songOptionsUtils";
+import { unescapeHtml } from "@/utils/stringUtils";
+import { router,useLocalSearchParams } from "expo-router";
+import { useCallback,useMemo,useState } from "react";
 import {
-  SheetWrap,
-  AddToPlaylistView,
-  GoToArtistsView,
-  SongCreditsView,
-  MavrixfyCodeView,
-} from "../components/SongOptionsSubViews";
+DeviceEventEmitter,
+Modal,
+Platform,
+Pressable,
+Text,
+View,
+} from "react-native";
+import { Gesture,GestureHandlerRootView } from "react-native-gesture-handler";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SongOptionsMainSheet } from "../components/SongOptionsMainSheet";
+import type { SongOptionMenuItem } from "../components/SongOptionsSubComponents";
+import {
+AddToPlaylistView,
+GoToArtistsView,
+MavrixfyCodeView,
+SheetWrap,
+SongCreditsView,
+} from "../components/SongOptionsSubViews";
+import { styles } from "../styles/songOptionsStyles";
+import { dismissOptions } from "../utils/songOptionsUtils";
 
 type SubView = "main" | "add-to-playlist" | "go-to-artists" | "song-credits" | "mavrixfy-code";
 

@@ -1,23 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "expo-router";
-import * as Animated from "@/lib/nativeAnimated";
-import {
-  Pressable,
-  Text,
-  View,
-  type DimensionValue,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import { useOptionalPlayerProgress } from "@/contexts/PlayerContext";
-import type { MiniPlayerSecondaryControl } from "@/lib/storage";
 import { compactMap } from "@/lib/arrayUtils";
 import { useLastMix } from "@/lib/lastMix";
-import type { Song } from "@/lib/musicData";
 import {
-  openMiniPlayerBannerLink,
-  type MiniPlayerBannerConfig,
+openMiniPlayerBannerLink,
+type MiniPlayerBannerConfig,
 } from "@/lib/miniPlayerBannerConfig";
+import type { Song } from "@/lib/musicData";
+import * as Animated from "@/lib/nativeAnimated";
+import type { MiniPlayerSecondaryControl } from "@/lib/storage";
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { useRouter } from "expo-router";
+import React,{ useCallback,useEffect,useMemo,useRef,useState } from "react";
+import {
+Pressable,
+Text,
+View
+} from "react-native";
 import { styles } from "./layoutStyles";
 import { toProgressWidth } from "./layoutUtils";
 
@@ -127,17 +126,12 @@ export const MiniPlayerBannerView = React.memo(function MiniPlayerBannerView({
   const items = config.items;
   const count = items.length;
 
-  const fadeAnimRef = useRef<Animated.Value | null>(null);
-  if (fadeAnimRef.current === null) fadeAnimRef.current = new Animated.Value(1);
-  const fadeAnim = fadeAnimRef.current;
+  const [fadeAnim] = useState(() => new Animated.Value(1));
 
-  const slideAnimRef = useRef<Animated.Value | null>(null);
-  if (slideAnimRef.current === null) slideAnimRef.current = new Animated.Value(0);
-  const slideAnim = slideAnimRef.current;
+  const [slideAnim] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     if (count <= 1) {
-      setCurrentIndex(0);
       fadeAnim.setValue(1);
       slideAnim.setValue(0);
       return;
@@ -288,15 +282,9 @@ export const IOSMiniPlayerMixBadge = React.memo(function IOSMiniPlayerMixBadge({
 }: IOSMiniPlayerMixBadgeProps) {
   const { push: overlayRouterPush } = useRouter();
   const lastMix = useLastMix();
-  const mixBarOneRef = useRef<Animated.Value | null>(null);
-  if (mixBarOneRef.current === null) mixBarOneRef.current = new Animated.Value(0.32);
-  const mixBarOne = mixBarOneRef.current;
-  const mixBarTwoRef = useRef<Animated.Value | null>(null);
-  if (mixBarTwoRef.current === null) mixBarTwoRef.current = new Animated.Value(0.58);
-  const mixBarTwo = mixBarTwoRef.current;
-  const mixBarThreeRef = useRef<Animated.Value | null>(null);
-  if (mixBarThreeRef.current === null) mixBarThreeRef.current = new Animated.Value(0.44);
-  const mixBarThree = mixBarThreeRef.current;
+  const [mixBarOne] = useState(() => new Animated.Value(0.32));
+  const [mixBarTwo] = useState(() => new Animated.Value(0.58));
+  const [mixBarThree] = useState(() => new Animated.Value(0.44));
 
   const mixImage = useMemo(() => {
     const first = compactMap((lastMix?.images ?? "").split(","), (value) => value.trim())[0];

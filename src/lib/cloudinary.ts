@@ -3,9 +3,9 @@
  * Handles direct image uploads to Cloudinary
  */
 
-import * as FileSystem from 'expo-file-system';
-import { validateImageFile, sanitizeFilename, isAllowedImageExtension } from './fileValidation';
 import { logger } from '@/lib/logger';
+import * as FileSystem from 'expo-file-system/legacy';
+import { isAllowedImageExtension,sanitizeFilename,validateImageFile } from './fileValidation';
 
 // Cloudinary Configuration
 const CLOUDINARY_CLOUD_NAME = 'djqq8kba8';
@@ -98,9 +98,6 @@ export const uploadImageToCloudinary = async (
       {
         method: 'POST',
         body: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
       }
     );
 
@@ -123,96 +120,3 @@ export const uploadImageToCloudinary = async (
   }
 };
 
-/**
- * Generates an optimized Cloudinary URL
- * @param publicIdOrUrl The public_id or full URL of the image
- * @param width Optional width
- * @param height Optional height
- * @returns Optimized image URL
- */
-const getOptimizedImageUrl = (
-  publicIdOrUrl: string,
-  width?: number,
-  height?: number
-): string => {
-  if (!publicIdOrUrl) return '';
-
-  // If this is already a full URL, return it
-  if (publicIdOrUrl.startsWith('http')) {
-    return publicIdOrUrl;
-  }
-
-  // Build transformation string
-  const transformations = [];
-  if (width) transformations.push(`w_${width}`);
-  if (height) transformations.push(`h_${height}`);
-  transformations.push('c_fill', 'q_auto');
-
-  const transformationString = transformations.join(',');
-
-  return `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/image/upload/${transformationString}/${publicIdOrUrl}`;
-};
-
-/**
- * Generates a random color for placeholder
- */
-const getRandomColor = (): string => {
-  const colors = [
-    '1DB954', // Spotify green
-    '3D91F4', // blue
-    'E13300', // red
-    'FFA42B', // orange
-    '8B2AC2', // purple
-    '17A398', // teal
-    'F73D93', // pink
-    '43AA8B', // sage green
-  ];
-  return colors[Math.floor(Math.random() * colors.length)];
-};
-
-/**
- * Generates a placeholder image URL with text
- * @param text The text to show in the placeholder
- * @returns URL to the generated placeholder image
- */
-const getPlaceholderImageUrl = (text: string = 'Playlist'): string => {
-  const color = getRandomColor();
-  const letter = text.charAt(0).toUpperCase();
-  
-  const transformations = [
-    'w_500',
-    'h_500',
-    'c_fill',
-    `b_rgb:${color}`,
-    `l_text:Arial_80_bold:${encodeURIComponent(letter)}`,
-    'co_white',
-    'g_center'
-  ].join(',');
-
-  return `https://res.cloudinary.com/${CLOUDINARY_CLOUD_NAME}/image/upload/${transformations}/placeholder_text.png`;
-};
-
-/**
- * Validates image file
- * @param uri Image URI
- * @param maxSizeMB Maximum file size in MB
- * @returns Validation result
- */
-const validateImage = async (
-  uri: string,
-  maxSizeMB: number = 5
-): Promise<{ valid: boolean; error?: string }> => {
-  try {
-    // Check if URI exists
-    if (!uri) {
-      return { valid: false, error: 'No image selected' };
-    }
-
-    // For now, we'll rely on the file picker's validation
-    // In a production app, you might want to check file size here
-    
-    return { valid: true };
-  } catch (error) {
-    return { valid: false, error: 'Invalid image file' };
-  }
-};

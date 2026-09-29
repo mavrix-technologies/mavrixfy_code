@@ -1,11 +1,11 @@
-import React, { useCallback } from "react";
-import { FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
+import { useCallback } from "react";
+import { FlatList,Platform,Pressable,StyleSheet,Text,View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type CreateAction = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -97,7 +97,7 @@ export function CreatePlaylistScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#121212",
+    backgroundColor: Colors.background,
   },
   scroll: {
     flex: 1,

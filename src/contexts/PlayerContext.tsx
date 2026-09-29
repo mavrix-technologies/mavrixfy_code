@@ -1,18 +1,20 @@
-import React, { type ReactNode } from "react";
-import { Platform } from "react-native";
-import { isRunningInExpoGo } from "expo";
 import { useAuth } from "@/contexts/AuthContext";
-import { useAudioSleepTimer } from "@/services/audio/audioSleepTimer";
 import { useAudioLikedSync } from "@/services/audio/audioLikedSync";
-import { useAudioQueueOperations } from "@/services/audio/audioQueueOperations";
-import { useAudioSyncListeners } from "@/services/audio/audioSyncListeners";
-import { useAudioPlaybackValues } from "@/services/audio/audioPlaybackValues";
-import { useAudioQualityControl } from "@/services/audio/audioQualityControl";
-import { useAudioProgressTracking } from "@/services/audio/audioProgressTracking";
 import { useAudioPlaybackCommands } from "@/services/audio/audioPlaybackCommands";
+import { useAudioPlaybackValues } from "@/services/audio/audioPlaybackValues";
+import { useAudioProgressTracking } from "@/services/audio/audioProgressTracking";
+import { useAudioQualityControl } from "@/services/audio/audioQualityControl";
+import { useAudioQueueOperations } from "@/services/audio/audioQueueOperations";
+import { useAudioSleepTimer } from "@/services/audio/audioSleepTimer";
+import { useAudioSyncListeners } from "@/services/audio/audioSyncListeners";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
+import { resetPlaybackEngine,updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { usePlayerCoreState } from "@/services/audio/usePlayerCoreState";
+import { isRunningInExpoGo } from "expo";
+import { useEffect,type ReactNode } from "react";
+import { Platform } from "react-native";
 import { PlayerContextTree } from "./PlayerContextProviders";
+
 
 let TrackPlayer: typeof import("react-native-track-player").default | null = null;
 let Event: any = {};
@@ -46,45 +48,17 @@ const subscribeTrackPlayerEvent = (eventName: unknown, listener: (...args: any[]
 };
 
 export type {
-  SleepTimerSelection,
-  SleepTimerState,
-  PlaybackQualityState,
-  PlayerState,
-  PlayerContextValue,
-  PlayerLiteContextValue,
-  PlayerProgressContextValue,
-  PlayerRowContextValue,
-  PlayerBrowseContextValue,
-  PlayerQueueContextValue,
-  PlayerActionsContextValue,
-  PlayerLikedContextValue,
-  ResolvedPlaybackResult,
+PlaybackQualityState,PlayerActionsContextValue,PlayerBrowseContextValue,ResolvedPlaybackResult,SleepTimerSelection,
+SleepTimerState
 } from "@/types/playbackTypes";
 
-import type { PlaybackQualityState } from "@/types/playbackTypes";
-
 export {
-  resolvePlaybackUrlWithDetails,
-  resolvePlaybackUrl,
+resolvePlaybackUrl,resolvePlaybackUrlWithDetails
 } from "@/services/audio/PlayerPlaybackResolver";
 
 export {
-  PlayerContext,
-  PlayerLiteContext,
-  PlayerProgressContext,
-  PlayerRowContext,
-  PlayerBrowseContext,
-  PlayerQueueContext,
-  PlayerLikedContext,
-  PlayerActionsContext,
-  usePlayerProgress,
-  useOptionalPlayerProgress,
-  usePlayerActions,
-  useOptionalPlayerActions,
-  useLikedSongs,
-  usePlayerRow,
-  usePlayerRowActions,
-  usePlayerBrowse,
+PlayerActionsContext,PlayerBrowseContext,useLikedSongs,useOptionalPlayerActions,useOptionalPlayerProgress,
+usePlayerActions,usePlayerBrowse,usePlayerProgress,usePlayerRowActions
 } from "./PlayerContextDefs";
 
 const canUseLightweightAudioFallback = Boolean(isRunningInExpoGo() || !TrackPlayer);
@@ -92,6 +66,13 @@ const canUseLightweightAudioFallback = Boolean(isRunningInExpoGo() || !TrackPlay
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const { user: authUser } = useAuth();
   const core = usePlayerCoreState({ TrackPlayer, State, RepeatMode });
+  useEffect(() => () => {
+    core.playRequestIdRef.current += 1;
+    core.desiredPlayStateRef.current = false;
+    void TrackPlayer?.reset().catch(() => {});
+    ExpoAvPlayer.destroy();
+    resetPlaybackEngine();
+  }, [core.playRequestIdRef, core.desiredPlayStateRef]);
 
   const {
     positionSecondsRef,
@@ -108,6 +89,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setIsPlaying: core.setIsPlaying,
     playbackLoadingRef: core.playbackLoadingRef,
     desiredPlayStateRef: core.desiredPlayStateRef,
+    pendingPlayRequestRef: core.pendingPlayRequestRef,
     canUseLightweightAudioFallback,
     TrackPlayer,
     nextSongRef: core.nextSongRef,
@@ -116,13 +98,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const { sleepTimer, sleepTimerRef, setSleepTimer, clearSleepTimer } = useAudioSleepTimer({
     onTimerExpire: () => {
+      const desiredRef = core.desiredPlayStateRef;
+      desiredRef.current = false;
       if (TrackPlayer) {
         TrackPlayer.pause().catch(() => {});
       } else if (canUseLightweightAudioFallback) {
         try { ExpoAvPlayer.pause(); } catch {}
       }
       core.setIsPlaying(false);
-      core.isPlayingRef.current = false;
+      const playingRef = core.isPlayingRef;
+      playingRef.current = false;
+      updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
     },
   });
 
@@ -145,6 +131,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setPlaybackLoading: core.setPlaybackLoading,
     desiredPlayStateRef: core.desiredPlayStateRef,
     playRequestIdRef: core.playRequestIdRef,
+    pendingPlayRequestRef: core.pendingPlayRequestRef,
     positionSecondsRef,
     durationSecondsRef,
     isNativeQueueSyncedRef: core.isNativeQueueSyncedRef,
@@ -261,6 +248,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setPlaybackLoading: core.setPlaybackLoading,
     playbackLoadingRef: core.playbackLoadingRef,
     desiredPlayStateRef: core.desiredPlayStateRef,
+    pendingPlayRequestRef: core.pendingPlayRequestRef,
     positionSecondsRef,
     setNativePosition,
     setNativeDuration,
@@ -279,18 +267,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const playbackValues = useAudioPlaybackValues({
     currentSong: core.currentSong,
     queue: core.queue,
-    userQueuedSongIds: core.userQueuedSongIds,
-    sourceQueue: core.sourceQueue,
-    queueIndex: core.queueIndex,
     resolvedIsPlaying: core.isPlaying,
-    resolvedProgress: 0,
-    resolvedDurationMillis: 0,
-    resolvedPositionMillis: 0,
     isShuffled: core.isShuffled,
     repeatMode: core.repeatMode,
     likedSongIds,
     likedSongs,
-    playbackLoading: core.playbackLoading,
     albumColor: core.albumColor,
     textColor: core.textColor,
     sleepTimer,

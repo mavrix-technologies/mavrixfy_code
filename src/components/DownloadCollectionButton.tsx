@@ -6,23 +6,23 @@
  * All done: green filled icon, tap → confirm remove all.
  */
 
-import React, { useCallback, useMemo } from "react";
-import {
-  Pressable,
-  View,
-  Text,
-  StyleSheet,
-  Alert,
-} from "react-native";
-import Svg, { Circle, G } from "react-native-svg";
+import Colors from "@/constants/colors";
+import { useDownloadsSafe } from "@/contexts/DownloadContext";
+import { saveCollectionMetadata } from "@/lib/downloads/collectionMetadata";
+import { formatBytes } from "@/lib/downloads/storagePolicy";
+import { triggerImpact } from "@/lib/haptics";
+import type { Song } from "@/lib/musicData";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import type { Song } from "@/lib/musicData";
-import { useDownloadsSafe } from "@/contexts/DownloadContext";
-import Colors from "@/constants/colors";
-import { triggerImpact } from "@/lib/haptics";
-import { formatBytes } from "@/lib/downloads/storagePolicy";
-import { saveCollectionMetadata } from "@/lib/downloads/collectionMetadata";
+import { useCallback,useMemo } from "react";
+import {
+Alert,
+Pressable,
+StyleSheet,
+Text,
+View,
+} from "react-native";
+import Svg,{ Circle,G } from "react-native-svg";
 
 // Average compressed audio file size per minute at high quality (~1.5 MB/min)
 const AVG_BYTES_PER_SECOND = 25_000; // ~200 kbps

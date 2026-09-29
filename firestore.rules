@@ -29,14 +29,16 @@ service cloud.firestore {
     }
 
     function userCreateFieldsAreValid(userId) {
-      return (!request.resource.data.keys().hasAny(['uid']) || request.resource.data.uid == userId) &&
+      return !request.resource.data.keys().hasAny(['subscriptionStatus']) &&
+        (!request.resource.data.keys().hasAny(['uid']) || request.resource.data.uid == userId) &&
         (!request.resource.data.keys().hasAny(['role']) || request.resource.data.role in ['user']) &&
         (!request.resource.data.keys().hasAny(['isAdmin']) || request.resource.data.isAdmin == false) &&
         (!request.resource.data.keys().hasAny(['admin']) || request.resource.data.admin == false);
     }
 
     function userAuthFieldsAreImmutable() {
-      return (!resource.data.keys().hasAny(['uid']) || request.resource.data.uid == resource.data.uid) &&
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['subscriptionStatus', 'role', 'isAdmin', 'admin', 'uid']) &&
+        (!resource.data.keys().hasAny(['uid']) || request.resource.data.uid == resource.data.uid) &&
         (!resource.data.keys().hasAny(['email']) || request.resource.data.email == resource.data.email) &&
         (!resource.data.keys().hasAny(['emailLower']) || request.resource.data.emailLower == resource.data.emailLower) &&
         (!resource.data.keys().hasAny(['provider']) || request.resource.data.provider == resource.data.provider) &&
@@ -87,7 +89,7 @@ service cloud.firestore {
       allow read: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId) && userCreateFieldsAreValid(userId);
       allow update: if isAdmin() || (isOwner(userId) && userAuthFieldsAreImmutable());
-      allow delete: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
 
       match /likedSongs/{songId} {
         allow read, create, update, delete: if isOwner(userId) || isAdmin();
@@ -110,11 +112,13 @@ service cloud.firestore {
       }
 
       match /offlineLicenses/{songId} {
-        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+        allow read: if isOwner(userId) || isAdmin();
+        allow create, update, delete: if isAdmin();
       }
 
       match /downloadDevices/{deviceId} {
-        allow read, create, update, delete: if isOwner(userId) || isAdmin();
+        allow read: if isOwner(userId) || isAdmin();
+        allow create, update, delete: if isAdmin();
       }
 
       match /activityFeed/{notifId} {
@@ -148,7 +152,8 @@ service cloud.firestore {
           resource.data.keys().hasAny(['playlistId']) &&
           get(/databases/$(database)/documents/playlists/$(resource.data.playlistId)).data.isPublic == true
         );
-      allow list: if isAdmin();
+      allow list: if isAdmin() ||
+        (signedIn() && resource.data.createdBy == request.auth.uid);
       allow create: if signedIn() &&
         request.resource.data.createdBy == request.auth.uid &&
         request.resource.data.isPublic == true;

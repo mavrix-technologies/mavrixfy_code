@@ -1,35 +1,34 @@
-import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as Animated from "@/lib/nativeAnimated";
-import { Platform, Pressable, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
+import { PingPongScroll } from "@/components/PingPongScroll";
 import Colors from "@/constants/colors";
 import { useOptionalPlayerActions } from "@/contexts/PlayerContext";
-import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
-import { PingPongScroll } from "@/components/PingPongScroll";
-import {
-  useArtworkPalette,
-  preloadDominantColors,
-} from "@/lib/colorExtractor";
 import { mapFilter } from "@/lib/arrayUtils";
+import {
+preloadDominantColors,
+useArtworkPalette,
+} from "@/lib/colorExtractor";
+import {
+DEFAULT_MINI_PLAYER_BANNER_CONFIG,
+subscribeToMiniPlayerBannerConfig,
+type MiniPlayerBannerConfig,
+} from "@/lib/miniPlayerBannerConfig";
+import { expandPlayer } from "@/lib/playerUIState";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { useMiniPlayerSecondaryControl } from "@/lib/storage";
-import { expandPlayer } from "@/lib/playerUIState";
+import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { useRouter } from "expo-router";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { Platform,Pressable,View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { styles } from "./layoutStyles";
-import {
-  MiniPlayerSecondaryControlButton,
-  IOSMiniPlayerProgressBar,
-  MiniPlayerBannerView,
-  IOSMiniPlayerMixBadge,
-} from "./miniPlayerComponents";
-import {
-  subscribeToMiniPlayerBannerConfig,
-  DEFAULT_MINI_PLAYER_BANNER_CONFIG,
-  type MiniPlayerBannerConfig,
-} from "@/lib/miniPlayerBannerConfig";
 import { noopPlayerAction } from "./layoutUtils";
+import {
+IOSMiniPlayerMixBadge,
+IOSMiniPlayerProgressBar,
+MiniPlayerBannerView,
+MiniPlayerSecondaryControlButton,
+} from "./miniPlayerComponents";
 
 type NativeTabsModule = typeof import("expo-router/unstable-native-tabs");
 let nativeTabsModule: NativeTabsModule | null = null;
@@ -192,6 +191,8 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
   const iosArtworkPalette = useArtworkPalette(activeSong?.coverUrl);
 
   useEffect(() => {
+    // Reset cover error for the next song and publish its artwork colors.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCoverFailed(false);
     setAlbumColor(iosArtworkPalette.accent);
     setTextColor(iosArtworkPalette.text);

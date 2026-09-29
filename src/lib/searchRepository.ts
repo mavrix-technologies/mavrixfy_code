@@ -1,7 +1,9 @@
-import { Song, type JioSaavnImage } from "@/lib/musicData";
 import { searchCatalog } from "@/lib/catalogService";
-import { rankSongs, parseStructuredQuery, deduplicateSongs } from "@/lib/searchUtils";
+import { Song,type JioSaavnImage } from "@/lib/musicData";
+import { deduplicateSongs,parseStructuredQuery,rankSongs } from "@/lib/searchUtils";
 import { toDurationSeconds } from "@/utils/timeFormatters";
+
+import { fetchJson } from "@/utils/asyncUtils";
 export type ResultFilter = "all" | "songs" | "albums" | "artists" | "playlists";
 
 export interface PlaylistResult {
@@ -89,8 +91,6 @@ export function setCachedSearch(cacheKey: string, results: SearchResults): void 
 export function clearMemorySearchCache(): void {
   MEMORY_SEARCH_CACHE.clear();
 }
-
-import { fetchJson } from "@/utils/asyncUtils";
 export { fetchJson };
 
 export async function fetchYouTubeSuggestions(query: string, signal?: AbortSignal): Promise<string[]> {

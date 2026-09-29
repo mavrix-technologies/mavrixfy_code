@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import { View, Text, Easing, StyleSheet, type LayoutChangeEvent, type NativeSyntheticEvent, Platform, type StyleProp, TextStyle, type TextLayoutEventData } from "react-native";
+import React,{ useEffect,useMemo,useRef,useState } from "react";
+import { Easing,Platform,StyleSheet,Text,TextStyle,View,type LayoutChangeEvent,type NativeSyntheticEvent,type StyleProp,type TextLayoutEventData } from "react-native";
 
 interface PingPongScrollProps {
   text: string;
@@ -18,26 +18,16 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
   paused = false,
 }) => {
   const displayText = text;
-  const containerWidthRef = useRef(0);
-  const [layoutVersion, bumpLayoutVersion] = useReducer((value: number) => value + 1, 0);
+  const [containerWidth, setContainerWidth] = useState(0);
   const [textWidth, setTextWidth] = useState(0);
-  const animatedValueRef = useRef<Animated.Value | null>(null);
-  if (animatedValueRef.current === null) {
-    animatedValueRef.current = new Animated.Value(0);
-  }
-  const animatedValue = animatedValueRef.current;
+  const [animatedValue] = useState(() => new Animated.Value(0));
 
-  const contentOpacityRef = useRef<Animated.Value | null>(null);
-  if (contentOpacityRef.current === null) {
-    contentOpacityRef.current = new Animated.Value(1);
-  }
-  const contentOpacity = contentOpacityRef.current;
+  const [contentOpacity] = useState(() => new Animated.Value(1));
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
   const GAP = 28;
   const MEASURE_WIDTH = 10000;
 
   // Derive needsScroll during render — no state needed
-  const containerWidth = containerWidthRef.current;
   const overflow = textWidth - containerWidth;
   // Multiple native marquee loops keep older Android GPUs composing at 60fps
   // even when the rest of the player is static. Android gets a stable,
@@ -105,14 +95,11 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
         animationRef.current = null;
       }
     };
-  }, [animatedValue, displayText, layoutVersion, needsScroll, overflow, velocity]);
+  }, [animatedValue, displayText, needsScroll, overflow, velocity]);
 
   const handleContainerLayout = (event: LayoutChangeEvent) => {
     const { width } = event.nativeEvent.layout;
-    if (width > 0 && width !== containerWidthRef.current) {
-      containerWidthRef.current = width;
-      bumpLayoutVersion();
-    }
+    if (width > 0) setContainerWidth((current) => current === width ? current : width);
   };
 
   const handleTextLinesLayout = (event: NativeSyntheticEvent<TextLayoutEventData>) => {

@@ -12,44 +12,43 @@
  *  - Smooth backdrop dim that tracks sheet position via Reanimated
  */
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+import { Ionicons } from "@expo/vector-icons";
+import BottomSheet,{
+BottomSheetBackdrop,
+BottomSheetFooter,
+type BottomSheetBackdropProps,
+type BottomSheetFooterProps,
+} from "@gorhom/bottom-sheet";
+import { ImpactFeedbackStyle } from "expo-haptics";
+import { Image } from "expo-image";
+import { router } from "expo-router";
+import React,{
+useCallback,
+useMemo,
+useRef,
+useState
 } from "react";
 import {
-  Platform,
-  Pressable,
-  Text,
-  View,
+Platform,
+Pressable,
+Text,
+View,
 } from "react-native";
-import { Image } from "expo-image";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import BottomSheet, {
-  BottomSheetBackdrop,
-  BottomSheetFooter,
-  type BottomSheetBackdropProps,
-  type BottomSheetFooterProps,
-} from "@gorhom/bottom-sheet";
-import DraggableFlatList, {
-  ScaleDecorator,
-  type RenderItemParams,
+import DraggableFlatList,{
+ScaleDecorator,
+type RenderItemParams,
 } from "react-native-draggable-flatlist";
-import { ImpactFeedbackStyle } from "expo-haptics";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import Colors from "@/constants/colors";
 import AdMobBanner from "@/components/AdMobBanner";
+import Colors from "@/constants/colors";
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import {
-  usePlaybackQueueState,
-  usePlaybackPlayState,
-} from "@/services/audio/PlaybackEngine";
-import { type Song } from "@/lib/musicData";
 import { triggerImpact } from "@/lib/haptics";
+import { type Song } from "@/lib/musicData";
+import {
+usePlaybackPlayState,
+usePlaybackQueueState,
+} from "@/services/audio/PlaybackEngine";
 
 import { s } from "./styles/queueBottomSheetStyles";
 

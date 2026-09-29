@@ -1,18 +1,19 @@
-import React from "react";
-import { View, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import React from "react";
+import { Text,View } from "react-native";
 
-import type { Song } from "@/lib/musicData";
-import { unescapeHtml } from "@/utils/stringUtils";
 import { PingPongScroll } from "@/components/PingPongScroll";
+import type { Song } from "@/lib/musicData";
+import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
 import { shareSong } from "@/utils/shareUtils";
+import { unescapeHtml } from "@/utils/stringUtils";
+import { styles } from "../styles/playerScreenStyles";
 import {
-  SmoothControlButton,
-  PlayerPlayButton,
-  PlayerSpotifyProgress,
+PlayerPlayButton,
+PlayerSpotifyProgress,
+SmoothControlButton,
 } from "./PlayerControlComponents";
 import { SpotifyMotionSaveButton } from "./SpotifyMotionSaveButton";
-import { styles } from "../styles/playerScreenStyles";
 
 export interface PlayerControlsSectionProps {
   screenSong: Song;
@@ -29,8 +30,6 @@ export interface PlayerControlsSectionProps {
   interactionReady: boolean;
   liked: boolean;
   onToggleLike: () => void;
-  progress: number;
-  totalLengthMs: number;
   onSeekTo: (progress: number) => void;
   onSeekingChange: (isSeeking: boolean) => void;
   controlsRowGap: number;
@@ -63,8 +62,6 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
   interactionReady,
   liked,
   onToggleLike,
-  progress,
-  totalLengthMs,
   onSeekTo,
   onSeekingChange,
   controlsRowGap,
@@ -148,10 +145,8 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
       </View>
 
       <View style={styles.playerActionStack}>
-        <PlayerSpotifyProgress
+        <LivePlayerProgress
           key={screenSong.id}
-          progressRatio={progress}
-          totalLengthMs={totalLengthMs}
           totalSongSec={screenSong.duration}
           isShortScreen={isShortScreen}
           seekTo={onSeekTo}
@@ -232,3 +227,10 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
 });
 
 PlayerControlsSection.displayName = "PlayerControlsSection";
+
+const LivePlayerProgress = React.memo(function LivePlayerProgress(
+  props: Omit<React.ComponentProps<typeof PlayerSpotifyProgress>, "progressRatio" | "totalLengthMs">
+) {
+  const { progress, duration } = usePlaybackProgressStore();
+  return <PlayerSpotifyProgress {...props} progressRatio={progress} totalLengthMs={duration} />;
+});

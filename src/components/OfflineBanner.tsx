@@ -2,12 +2,11 @@
  * OfflineBanner — a slim top bar shown when the device is offline with safe area support.
  */
 
-import React from "react";
-import { View, Text, Pressable, StyleSheet } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useNetwork } from "@/contexts/NetworkContext";
 import Colors from "@/constants/colors";
+import { useNetwork } from "@/contexts/NetworkContext";
+import { Ionicons } from "@expo/vector-icons";
+import { Pressable,StyleSheet,Text,View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function OfflineBanner() {
   const { isOnline, recheck, isChecking } = useNetwork();

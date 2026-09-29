@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useState, memo } from "react";
-import { Pressable, Text, View } from "react-native";
 import * as Animated from "@/lib/nativeAnimated";
-import { styles } from "./styles/karaokeLyricsStyles";
 import type { LyricLine } from "@/services/lyricsService";
+import { memo,useCallback,useEffect,useState } from "react";
+import { Pressable,Text,View } from "react-native";
+import { styles } from "./styles/karaokeLyricsStyles";
 
 export const PREVIEW_LINE_HEIGHT = 44;
 

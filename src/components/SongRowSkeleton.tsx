@@ -1,6 +1,6 @@
-import React, { useEffect, useRef } from "react";
 import * as Animated from "@/lib/nativeAnimated";
-import { StyleSheet, View } from "react-native";
+import { useEffect,useState } from "react";
+import { StyleSheet,View } from "react-native";
 
 const SKELETON_KEYS = [
   "skel_1", "skel_2", "skel_3", "skel_4", "skel_5",
@@ -32,9 +32,7 @@ function SkeletonRow({ shimmer }: { shimmer: Animated.Value }) {
 }
 
 export default function SongRowSkeleton({ count = 8 }: { count?: number }) {
-  const shimmerRef = useRef<Animated.Value | null>(null);
-  if (shimmerRef.current === null) shimmerRef.current = new Animated.Value(0);
-  const shimmer = shimmerRef.current;
+  const [shimmer] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     const anim = Animated.loop(

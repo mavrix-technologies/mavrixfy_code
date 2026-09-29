@@ -1,5 +1,5 @@
-import { Dimensions, Platform, StyleSheet } from "react-native";
 import { type ShareSheetData } from "@/utils/shareSheet";
+import { Dimensions,Platform,StyleSheet } from "react-native";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 export const CARD_WIDTH = Math.min(290, SCREEN_WIDTH * 0.74);

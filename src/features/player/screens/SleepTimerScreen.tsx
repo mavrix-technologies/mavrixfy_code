@@ -1,19 +1,19 @@
-import React, { useCallback } from "react";
+import Colors from "@/constants/colors";
+import { IS_ANDROID,IS_IOS,IS_WEB } from "@/constants/platform";
+import { usePlayerActions,type SleepTimerSelection } from "@/contexts/PlayerContext";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
+import { useCallback } from "react";
 import {
-  Modal,
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
+Modal,
+Pressable,
+StyleSheet,
+Text,
+View,
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
-import { IS_ANDROID, IS_IOS, IS_WEB } from "@/constants/platform";
-import { usePlayerActions, type SleepTimerSelection } from "@/contexts/PlayerContext";
 
 const SHEET_BACKGROUND = "#1E1E1E";
 const HANDLE_COLOR = "#6D6D6D";

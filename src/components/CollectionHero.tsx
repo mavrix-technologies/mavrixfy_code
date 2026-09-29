@@ -1,9 +1,9 @@
-import React, { ReactNode } from "react";
-import { StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import ActionPlayButton from "./ActionPlayButton";
-import ActionCircleButton from "./ActionCircleButton";
+import React,{ ReactNode } from "react";
+import { StyleSheet,Text,View } from "react-native";
+import { ActionCircleButton } from "./ActionCircleButton";
+import { ActionPlayButton } from "./ActionPlayButton";
 
 export interface CollectionHeroProps {
   iconName?: keyof typeof Ionicons.glyphMap;

@@ -8,15 +8,41 @@
  *  - Notification channel setup (Android)
  */
 
-import * as Device from "expo-device";
-import * as Notifications from "expo-notifications";
-import Constants from "expo-constants";
-import { NativeModules, Platform } from "react-native";
-import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
-import appConfig from "../../app.json";
+import { IS_ANDROID,IS_IOS } from "@/constants/platform";
 import { db } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
-import { IS_ANDROID, IS_IOS } from "@/constants/platform";
+import { isRunningInExpoGo } from "expo";
+import Constants from "expo-constants";
+import * as Device from "expo-device";
+import { doc,getDoc,serverTimestamp,setDoc } from "firebase/firestore";
+import { NativeModules,Platform } from "react-native";
+import appConfig from "../../app.json";
+
+type NotificationsType = typeof import("expo-notifications");
+let notificationsModule: NotificationsType | null = null;
+
+function getNotifications(): NotificationsType | null {
+  if (IS_ANDROID && isRunningInExpoGo()) {
+    return null;
+  }
+  if (!notificationsModule) {
+    try {
+      notificationsModule = require("expo-notifications");
+    } catch {
+      return null;
+    }
+  }
+  return notificationsModule;
+}
+
+const AndroidImportance = {
+  DEFAULT: 3,
+  HIGH: 4,
+  LOW: 2,
+  MAX: 5,
+  MIN: 1,
+  NONE: 0,
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +101,8 @@ let handlerConfigured = false;
 
 export function ensureNotificationHandler() {
   if (handlerConfigured) return;
+  const Notifications = getNotifications();
+  if (!Notifications) return;
   try {
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
@@ -94,6 +122,8 @@ export function ensureNotificationHandler() {
 // ─── Permission ───────────────────────────────────────────────────────────────
 
 export async function requestNotificationPermission(): Promise<boolean> {
+  const Notifications = getNotifications();
+  if (!Notifications) return false;
   ensureNotificationHandler();
   try {
     const { status: existing } = await Notifications.getPermissionsAsync();
@@ -110,14 +140,16 @@ export async function requestNotificationPermission(): Promise<boolean> {
 
 async function setupAndroidChannels() {
   if (!IS_ANDROID) return;
+  const Notifications = getNotifications();
+  if (!Notifications) return;
   const channels = [
-    { id: "mavrixfy-music",          name: "Music",           importance: Notifications.AndroidImportance.HIGH },
-    { id: "mavrixfy-releases",       name: "New Releases",    importance: Notifications.AndroidImportance.HIGH },
-    { id: "mavrixfy-recommendations",name: "Recommendations", importance: Notifications.AndroidImportance.DEFAULT },
-    { id: "mavrixfy-downloads",      name: "Downloads",       importance: Notifications.AndroidImportance.LOW },
-    { id: "mavrixfy-updates",        name: "App Updates",     importance: Notifications.AndroidImportance.MAX },
-    { id: "mavrixfy-promotions",     name: "Promotions",      importance: Notifications.AndroidImportance.LOW },
-    { id: "mavrixfy-default",        name: "General",         importance: Notifications.AndroidImportance.HIGH },
+    { id: "mavrixfy-music",          name: "Music",           importance: Notifications.AndroidImportance?.HIGH ?? AndroidImportance.HIGH },
+    { id: "mavrixfy-releases",       name: "New Releases",    importance: Notifications.AndroidImportance?.HIGH ?? AndroidImportance.HIGH },
+    { id: "mavrixfy-recommendations",name: "Recommendations", importance: Notifications.AndroidImportance?.DEFAULT ?? AndroidImportance.DEFAULT },
+    { id: "mavrixfy-downloads",      name: "Downloads",       importance: Notifications.AndroidImportance?.LOW ?? AndroidImportance.LOW },
+    { id: "mavrixfy-updates",        name: "App Updates",     importance: Notifications.AndroidImportance?.MAX ?? AndroidImportance.MAX },
+    { id: "mavrixfy-promotions",     name: "Promotions",      importance: Notifications.AndroidImportance?.LOW ?? AndroidImportance.LOW },
+    { id: "mavrixfy-default",        name: "General",         importance: Notifications.AndroidImportance?.HIGH ?? AndroidImportance.HIGH },
   ];
 
   await Promise.all(
@@ -167,11 +199,19 @@ function getTimezone(): string {
 export async function registerForPushNotificationsAsync(
   userId: string
 ): Promise<DeviceRegistration | null> {
+  if (IS_ANDROID && isRunningInExpoGo()) {
+    logger.info("[NotifService] Push notifications skipped in Android Expo Go");
+    return null;
+  }
+
   // iOS simulators don't support push
   if (!Device.isDevice && IS_IOS) {
     logger.info("[NotifService] Push not supported on iOS simulator");
     return null;
   }
+
+  const Notifications = getNotifications();
+  if (!Notifications) return null;
 
   ensureNotificationHandler();
   await setupAndroidChannels();

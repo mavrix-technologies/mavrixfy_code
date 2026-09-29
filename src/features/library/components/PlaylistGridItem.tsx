@@ -1,8 +1,8 @@
-import React, { memo } from "react";
-import { View, Text, Pressable, StyleSheet } from "react-native";
-import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { memo } from "react";
+import { Pressable,StyleSheet,Text,View } from "react-native";
 import { type DisplayPlaylist } from "./PlaylistListItem";
 
 interface PlaylistGridItemProps {

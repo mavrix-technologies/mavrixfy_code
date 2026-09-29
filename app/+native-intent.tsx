@@ -15,7 +15,8 @@ function normalizeAssistantPath(path: string): string | null {
   const parsed = parseIncomingPath(raw);
   if (!parsed) return null;
 
-  const route = parsed.route.toLowerCase();
+  const originalRoute = parsed.route;
+  const route = originalRoute.toLowerCase();
   const search = parsed.searchParams;
 
   // 1. Direct tab / feature matches
@@ -50,9 +51,9 @@ function normalizeAssistantPath(path: string): string | null {
         searchQuery = title;
       } else {
         const idFromRoute = route.startsWith("track/")
-          ? route.slice("track/".length)
+          ? originalRoute.slice("track/".length)
           : route.startsWith("song/")
-          ? route.slice("song/".length)
+          ? originalRoute.slice("song/".length)
           : search.get("track") || search.get("song") || "";
         searchQuery = idFromRoute;
       }
@@ -67,17 +68,18 @@ function normalizeAssistantPath(path: string): string | null {
   // 3. Playlist route: playlist/:id, ?playlist=:id, or ?id=:id
   const playlistId =
     search.get("playlist") ||
-    (route.startsWith("playlist/") ? route.slice("playlist/".length) : route === "playlist" ? search.get("id") : null);
+    (route.startsWith("playlist/") ? originalRoute.slice("playlist/".length) : route === "playlist" ? search.get("id") : null);
   if (playlistId) {
-    return `/playlist/${encodeURIComponent(playlistId)}`;
+    const firestore = search.get("firestore");
+    return `/playlist/${encodeURIComponent(safeDecode(playlistId))}${firestore === "true" ? "?firestore=true" : ""}`;
   }
 
   // 4. Artist route: artist/:id, ?artist=:id, or ?id=:id
   const artistId =
     search.get("artist") ||
-    (route.startsWith("artist/") ? route.slice("artist/".length) : route === "artist" ? search.get("id") : null);
+    (route.startsWith("artist/") ? originalRoute.slice("artist/".length) : route === "artist" ? search.get("id") : null);
   if (artistId) {
-    return `/artist/${encodeURIComponent(artistId)}`;
+    return `/artist/${encodeURIComponent(safeDecode(artistId))}`;
   }
 
   // 5. Artist Mix route: artist-mix?ids=...&names=..., ?mix=1, or ?artist-mix=1
@@ -93,10 +95,18 @@ function normalizeAssistantPath(path: string): string | null {
   }
 
   if (route.startsWith("feature/")) {
-    return normalizeFeatureRoute(route.slice("feature/".length));
+    return normalizeFeatureRoute(originalRoute.slice("feature/".length));
   }
 
   return null;
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function parseIncomingPath(raw: string): { route: string; searchParams: URLSearchParams } | null {
@@ -116,15 +126,14 @@ function parseIncomingPath(raw: string): { route: string; searchParams: URLSearc
     }
     return { route, searchParams: url.searchParams };
   } catch {
-    const cleaned = raw.replace(/^[a-zA-Z0-9_-]+:\/\//, "").replace(/^\/+/, "");
+    const cleaned = raw.replace(/^\/+/, "");
     const [pathname, query = ""] = cleaned.split("?");
-    const pathWithoutDomain = pathname.replace(/^[^/]+\//, "");
-    return { route: pathWithoutDomain || pathname, searchParams: new URLSearchParams(query) };
+    return { route: pathname, searchParams: new URLSearchParams(query) };
   }
 }
 
 function normalizeFeatureRoute(feature: string): string {
-  const normalized = decodeURIComponent(feature).trim().toLowerCase().replace(/\s+/g, "-");
+  const normalized = safeDecode(feature).trim().toLowerCase().replace(/\s+/g, "-");
 
   if (normalized === "search") return "/(tabs)/search";
   if (normalized === "library") return "/(tabs)/library";

@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AppState } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getSettings } from "@/lib/storage";
 import { getDevicePerformanceProfile } from "@/lib/devicePerformance";
-import { playerUIStateStore } from "@/lib/playerUIState";
 import type { Song } from "@/lib/musicData";
+import { playerUIStateStore } from "@/lib/playerUIState";
+import { getSettings } from "@/lib/storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback,useEffect,useState } from "react";
+import { AppState } from "react-native";
 
 export interface UseBackgroundVisualVideoParams {
   screenSong: Song | null;
@@ -291,7 +291,10 @@ export function useBackgroundVisualVideo({
   const [ambientBackdropEnabled, setAmbientBackdropEnabled] = useState(false);
   const [isNavigationFocused, setIsNavigationFocused] = useState(() => navigation.isFocused());
   const [isAppActive, setIsAppActive] = useState(() => AppState.currentState === "active");
-  const isScreenFocused = isNavigationFocused && isAppActive;
+  const [isPlayerExpanded, setIsPlayerExpanded] = useState(
+    () => playerUIStateStore.current === "expanded"
+  );
+  const isScreenFocused = isNavigationFocused && isAppActive && isPlayerExpanded;
   const [isLowEnd, setIsLowEnd] = useState(false);
 
   useEffect(() => {
@@ -343,7 +346,7 @@ export function useBackgroundVisualVideo({
 
     const unsubscribe = playerUIStateStore.subscribe((state) => {
       const isExpanded = state === "expanded";
-      setIsNavigationFocused(isExpanded);
+      setIsPlayerExpanded(isExpanded);
       if (isExpanded) {
         fetchSettings();
       }

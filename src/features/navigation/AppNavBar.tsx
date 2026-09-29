@@ -1,58 +1,59 @@
-import { usePathname, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as Animated from "@/lib/nativeAnimated";
-import {
-  Pressable,
-  StyleSheet,
-  View,
-  useWindowDimensions,
-} from "react-native";
-import { styles } from "./layoutStyles";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import * as Haptics from "expo-haptics";
-import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Image } from "expo-image";
-import { useOptionalPlayerActions } from "@/contexts/PlayerContext";
-import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { PingPongScroll } from "@/components/PingPongScroll";
-import { triggerImpact } from "@/lib/haptics";
+import { IS_ANDROID,IS_IOS,IS_WEB } from "@/constants/platform";
+import { useOptionalPlayerActions } from "@/contexts/PlayerContext";
+import { compactMap,mapFilter } from "@/lib/arrayUtils";
 import {
-  useArtworkPalette,
-  preloadDominantColors,
+preloadDominantColors,
+useArtworkPalette,
 } from "@/lib/colorExtractor";
-import { useLastMix } from "@/lib/lastMix";
-import { compactMap, mapFilter } from "@/lib/arrayUtils";
+import { triggerImpact } from "@/lib/haptics";
 import { globalHomeScrollRef } from "@/lib/homeScrollRef";
+import { useLastMix } from "@/lib/lastMix";
+import {
+DEFAULT_MINI_PLAYER_BANNER_CONFIG,
+subscribeToMiniPlayerBannerConfig,
+type MiniPlayerBannerConfig,
+} from "@/lib/miniPlayerBannerConfig";
+import * as Animated from "@/lib/nativeAnimated";
+import { expandPlayer } from "@/lib/playerUIState";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { useMiniPlayerSecondaryControl } from "@/lib/storage";
-import { expandPlayer } from "@/lib/playerUIState";
-import { IS_ANDROID, IS_IOS, IS_WEB } from "@/constants/platform";
+import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import { usePathname,useRouter } from "expo-router";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import {
-  subscribeToMiniPlayerBannerConfig,
-  DEFAULT_MINI_PLAYER_BANNER_CONFIG,
-  type MiniPlayerBannerConfig,
-} from "@/lib/miniPlayerBannerConfig";
+Pressable,
+StyleSheet,
+View,
+useWindowDimensions,
+} from "react-native";
+import { Gesture,GestureDetector } from "react-native-gesture-handler";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Colors from "@/constants/colors";
+import { styles } from "./layoutStyles";
 import {
-  MiniPlayerSecondaryControlButton,
-  MiniPlayerProgressBar,
-  MiniPlayerBannerView,
+MiniPlayerBannerView,
+MiniPlayerProgressBar,
+MiniPlayerSecondaryControlButton,
 } from "./miniPlayerComponents";
 import { useMixChipDrag } from "./useMixChipDrag";
 
-const MINI_SWIPE_THRESHOLD = 26;
-
 import {
-  colorToRgba,
-  noopLongPress,
-  noopPlayerAction,
+colorToRgba,
+noopLongPress,
+noopPlayerAction,
 } from "./layoutUtils";
 import {
-  NAV_ITEMS,
-  getTabHref,
-  type VisibleRoute,
+NAV_ITEMS,
+getTabHref,
+type VisibleRoute,
 } from "./navTabConstants";
 import { MemoizedNavTabItem } from "./NavTabItem";
+
+const MINI_SWIPE_THRESHOLD = 26;
 
 export type AppNavBarProps = {
   hidden?: boolean;
@@ -193,9 +194,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   } = useMixChipDrag();
 
   // ── Mini Player Swipe Gestures (Skip next / previous) ──────────────────────
-  const miniSwipeXRef = useRef<Animated.Value | null>(null);
-  if (miniSwipeXRef.current === null) miniSwipeXRef.current = new Animated.Value(0);
-  const miniSwipeX = miniSwipeXRef.current;
+  const [miniSwipeX] = useState(() => new Animated.Value(0));
 
   const miniSwipeOpacity = useMemo(
     () =>
@@ -270,6 +269,8 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     [miniSwipeX, nextSong, prevSong]
   );
 
+  // The gesture callback runs on taps, after render; openPlayer reads its lock ref there.
+  /* eslint-disable react-hooks/refs */
   const miniTapGesture = useMemo(
     () =>
       Gesture.Tap()
@@ -282,6 +283,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
         }),
     [openPlayer]
   );
+  /* eslint-enable react-hooks/refs */
 
   const miniSwipeGesture = useMemo(
     () => Gesture.Exclusive(miniPanGesture, miniTapGesture),
@@ -289,6 +291,8 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   );
 
   useEffect(() => {
+    // Reset cover error for the next song and publish its artwork colors.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCoverFailed(false);
     setAlbumColor(artworkPalette.accent);
     setTextColor(artworkPalette.text);
@@ -324,13 +328,13 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   );
   const playIconColor = "#060A0F";
   const playerSectionBg = useMemo(
-    () => artworkPalette.background || "#16181D",
+    () => artworkPalette.background || Colors.surface,
     [artworkPalette.background]
   );
   const activeNavColor = "#FFFFFF";
   const navInactiveColor = conceptSubtext;
-  const navBaseBg = "#0E1016";
-  const containerGlassBase = "#0E1016";
+  const navBaseBg = Colors.background;
+  const containerGlassBase = Colors.background;
   const playerSectionDivider = "rgba(255,255,255,0.06)";
   const playerProgressFillColor = "rgba(255,255,255,0.90)";
   const playerTopEdgeTint = "transparent";

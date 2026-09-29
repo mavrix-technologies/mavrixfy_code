@@ -5,17 +5,17 @@
  * Supports offline playback
  */
 
-import React, { useState } from 'react';
-import { Pressable, ActivityIndicator, StyleSheet, View, Alert, Text } from 'react-native';
+import Colors from '@/constants/colors';
+import { useDownloads,useSongDownload } from '@/contexts/DownloadContext';
+import { formatBytes } from '@/lib/downloads/storagePolicy';
+import { triggerImpact } from '@/lib/haptics';
+import { logger } from '@/lib/logger';
+import type { Song } from '@/lib/musicData';
+import { requestDownloadWithRewardedAd } from '@/services/ads/rewardedDownloadAdService';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import Colors from '@/constants/colors';
-import { triggerImpact } from '@/lib/haptics';
-import { useDownloads, useSongDownload } from '@/contexts/DownloadContext';
-import type { Song } from '@/lib/musicData';
-import { logger } from '@/lib/logger';
-import { formatBytes } from '@/lib/downloads/storagePolicy';
-import { requestDownloadWithRewardedAd } from '@/services/ads/rewardedDownloadAdService';
+import { useState } from 'react';
+import { ActivityIndicator,Alert,Pressable,StyleSheet,Text,View } from 'react-native';
 
 function resolveSongAudioUrl(song: Song): string {
   if (song.audioUrl) return song.audioUrl;

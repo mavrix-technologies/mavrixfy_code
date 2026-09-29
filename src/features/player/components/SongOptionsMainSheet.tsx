@@ -1,20 +1,20 @@
-import React, { useCallback } from "react";
-import {
-  FlatList,
-  Platform,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
-import { GestureDetector } from "react-native-gesture-handler";
-import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
 import DownloadButton from "@/components/DownloadButton";
 import type { Song } from "@/lib/musicData";
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { useCallback } from "react";
+import {
+FlatList,
+Platform,
+Pressable,
+Text,
+View,
+} from "react-native";
+import { GestureDetector } from "react-native-gesture-handler";
 import { styles } from "../styles/songOptionsStyles";
 import {
-  type SongOptionMenuItem,
-  MainMenuOptionRow,
+type SongOptionMenuItem,
+MainMenuOptionRow,
 } from "./SongOptionsSubComponents";
 
 export interface SongOptionsMainSheetProps {

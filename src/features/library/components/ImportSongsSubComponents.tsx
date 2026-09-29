@@ -1,22 +1,22 @@
-import React, { useCallback } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  Modal,
-  ScrollView,
-  TextInput,
-  FlatList,
-  StyleSheet,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Colors from "@/constants/colors";
+import { FirestorePlaylist } from "@/lib/firestore";
+import { UserPlaylist } from "@/lib/storage";
+import type { ParsedSong } from "@/types/import";
+import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
-import Colors from "@/constants/colors";
-import type { ParsedSong } from "@/types/import";
-import { UserPlaylist } from "@/lib/storage";
-import { FirestorePlaylist } from "@/lib/firestore";
+import { useCallback } from "react";
+import {
+FlatList,
+Modal,
+Pressable,
+ScrollView,
+StyleSheet,
+Text,
+TextInput,
+View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { styles } from "../styles/importSongsStyles";
 
 export type ImportDestination = "liked" | "new-playlist" | "existing-playlist";

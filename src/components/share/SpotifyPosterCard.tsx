@@ -1,9 +1,9 @@
-import React, { memo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { type ShareSheetData } from "@/utils/shareSheet";
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
+import { memo } from "react";
+import { Pressable,StyleSheet,Text,View } from "react-native";
 import { styles } from "./shareModalStyles";
 
 export interface PosterCardProps {
@@ -41,7 +41,7 @@ export const SpotifyPosterCard = memo(function SpotifyPosterCard({
           <View style={styles.posterTopHeader}>
             <View style={styles.posterHeaderBrand}>
               <Image
-                source={require("@/assets/images/mavrixfy_transparent_master.png")}
+                source={require("../../../assets/images/mavrixfy_transparent_master.png")}
                 style={styles.posterHeaderLogo}
                 contentFit="contain"
               />
@@ -90,7 +90,7 @@ export const SpotifyPosterCard = memo(function SpotifyPosterCard({
 
               <View style={styles.footerBrandRight}>
                 <Image
-                  source={require("@/assets/images/mavrixfy_transparent_master.png")}
+                  source={require("../../../assets/images/mavrixfy_transparent_master.png")}
                   style={styles.footerBrandLogo}
                   contentFit="contain"
                 />

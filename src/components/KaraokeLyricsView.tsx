@@ -1,21 +1,21 @@
-import React, { useEffect, useMemo, useState, memo } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
-import { styles } from "./styles/karaokeLyricsStyles";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
-import * as Animated from "@/lib/nativeAnimated";
-import { getSongLyrics, type LyricsResult } from "@/services/lyricsService";
-import { type Song } from "@/lib/musicData";
 import { useArtworkPalette } from "@/lib/colorExtractor";
-import { getSpotifyLyricsBg } from "./karaokeLyricsUtils";
+import { type Song } from "@/lib/musicData";
+import * as Animated from "@/lib/nativeAnimated";
+import { getSongLyrics,type LyricsResult } from "@/services/lyricsService";
+import { Ionicons,MaterialIcons } from "@expo/vector-icons";
+import { memo,useEffect,useMemo,useState } from "react";
 import {
-  PREVIEW_LINE_HEIGHT,
-  SpotifyCardPreviewLine,
+ActivityIndicator,
+Pressable,
+Text,
+View,
+} from "react-native";
+import {
+PREVIEW_LINE_HEIGHT,
+SpotifyCardPreviewLine,
 } from "./KaraokeLyricsSubComponents";
+import { getSpotifyLyricsBg } from "./karaokeLyricsUtils";
+import { styles } from "./styles/karaokeLyricsStyles";
 
 export { FullscreenKaraokeModal } from "./FullscreenKaraokeModal";
 export { getSpotifyLyricsBg } from "./karaokeLyricsUtils";

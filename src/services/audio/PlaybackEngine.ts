@@ -1,16 +1,5 @@
-import { useRef, useSyncExternalStore } from "react";
 import type { Song } from "@/lib/musicData";
-
-export type PlaybackCommandType =
-  | "playSong"
-  | "skipNext"
-  | "skipPrevious"
-  | "togglePlay"
-  | "seekTo"
-  | "setQueue"
-  | "shuffle"
-  | "repeat"
-  | "nativeSync";
+import { useRef,useSyncExternalStore } from "react";
 
 export interface PlaybackEngineSnapshot {
   currentSong: Song | null;
@@ -25,25 +14,12 @@ export interface PlaybackEngineSnapshot {
   desiredPlayState: boolean | null;
   isBuffering: boolean;
   isLoading: boolean;
-  isTransitioning: boolean;
-  transitionId: number;
-  transitionType: PlaybackCommandType | null;
-  transitionTargetId: string | null;
-  transitionTargetIndex: number | null;
   autoplaySongIds: string[];
   isAutoplayLoading: boolean;
   error: string | null;
   isShuffled: boolean;
   repeatMode: "off" | "all" | "one";
   updatedAt: number;
-}
-
-export interface PlaybackTransaction {
-  id: number;
-  type: PlaybackCommandType;
-  targetSongId: string | null;
-  targetIndex: number | null;
-  isCurrent: () => boolean;
 }
 
 type SnapshotPatch = Partial<Omit<PlaybackEngineSnapshot, "currentSongId" | "queueIds" | "activeIndex" | "updatedAt">>;
@@ -65,11 +41,6 @@ const INITIAL_SNAPSHOT: PlaybackEngineSnapshot = {
   desiredPlayState: null,
   isBuffering: false,
   isLoading: false,
-  isTransitioning: false,
-  transitionId: 0,
-  transitionType: null,
-  transitionTargetId: null,
-  transitionTargetIndex: null,
   error: null,
   isShuffled: false,
   repeatMode: "off",
@@ -77,7 +48,6 @@ const INITIAL_SNAPSHOT: PlaybackEngineSnapshot = {
 };
 
 let snapshot = INITIAL_SNAPSHOT;
-let transactionSequence = 0;
 const listeners = new Set<Listener>();
 
 function shallowEqualObject<T>(left: T, right: T): boolean {
@@ -136,73 +106,6 @@ export function updatePlaybackEngineSnapshot(update: SnapshotUpdater): void {
   emitPlaybackEngine();
 }
 
-function beginPlaybackTransaction({
-  type,
-  targetSongId = null,
-  targetIndex = null,
-  desiredPlayState = true,
-}: {
-  type: PlaybackCommandType;
-  targetSongId?: string | null;
-  targetIndex?: number | null;
-  desiredPlayState?: boolean | null;
-}): PlaybackTransaction {
-  const id = ++transactionSequence;
-
-  updatePlaybackEngineSnapshot({
-    transitionId: id,
-    transitionType: type,
-    transitionTargetId: targetSongId,
-    transitionTargetIndex: targetIndex,
-    desiredPlayState,
-    isTransitioning: true,
-    error: null,
-  });
-
-  return {
-    id,
-    type,
-    targetSongId,
-    targetIndex,
-    isCurrent: () => isPlaybackTransactionCurrent(id, targetSongId),
-  };
-}
-
-function isPlaybackTransactionCurrent(id: number, targetSongId?: string | null): boolean {
-  const current = getPlaybackEngineSnapshot();
-  return (
-    current.transitionId === id &&
-    (targetSongId == null || current.transitionTargetId == null || current.transitionTargetId === targetSongId)
-  );
-}
-
-function completePlaybackTransaction(id: number): void {
-  updatePlaybackEngineSnapshot((current) => {
-    if (current.transitionId !== id) return {};
-    return {
-      isTransitioning: false,
-      transitionType: null,
-      transitionTargetId: null,
-      transitionTargetIndex: null,
-      error: null,
-    };
-  });
-}
-
-function failPlaybackTransaction(id: number, error: string): void {
-  updatePlaybackEngineSnapshot((current) => {
-    if (current.transitionId !== id) return {};
-    return {
-      isTransitioning: false,
-      transitionType: null,
-      transitionTargetId: null,
-      transitionTargetIndex: null,
-      desiredPlayState: null,
-      error,
-    };
-  });
-}
-
 function usePlaybackEngineSelector<T>(
   selector: (snapshot: PlaybackEngineSnapshot) => T,
   isEqual: (left: T, right: T) => boolean = Object.is
@@ -242,7 +145,6 @@ export function usePlaybackPlayState() {
       desiredPlayState: state.desiredPlayState,
       isBuffering: state.isBuffering,
       isLoading: state.isLoading,
-      isTransitioning: state.isTransitioning,
     }),
     shallowEqualObject
   );
@@ -275,3 +177,5 @@ export function usePlaybackQueueState() {
     shallowEqualObject
   );
 }
+
+export function resetPlaybackEngine(): void { snapshot = INITIAL_SNAPSHOT; emitPlaybackEngine(); }

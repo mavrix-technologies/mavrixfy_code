@@ -1,8 +1,8 @@
-import { doc, onSnapshot } from "firebase/firestore";
-import { Linking } from "react-native";
 import { db } from "@/lib/firebase";
 import { triggerImpact } from "@/lib/haptics";
 import { ImpactFeedbackStyle } from "expo-haptics";
+import { doc,onSnapshot } from "firebase/firestore";
+import { Linking } from "react-native";
 
 export type MiniPlayerBannerItem = {
   enabled?: boolean;

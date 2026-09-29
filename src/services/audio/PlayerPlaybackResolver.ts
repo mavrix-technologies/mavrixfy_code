@@ -1,10 +1,13 @@
+import { getAccountScope } from "@/lib/accountScope";
+import { getLocalPlaybackUrl } from "@/lib/downloads/downloadManager";
+import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { resolveAudioStreamWithQuality } from "@/lib/musicData";
-import { getLocalPlaybackUrl } from "@/lib/downloads/downloadManager";
 import * as Storage from "@/lib/storage";
-import { logger } from "@/lib/logger";
+import type { PlaybackQualityState,ResolvedPlaybackResult } from "@/types/playbackTypes";
 import { toDurationSeconds } from "@/utils/timeFormatters";
-import type { PlaybackQualityState, ResolvedPlaybackResult } from "@/types/playbackTypes";
+
+import * as Network from "expo-network";
 
 export type SongPlaybackSource = Partial<Song> & {
   url?: string;
@@ -123,6 +126,7 @@ export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?:
   const album = song.album ? cleanHtmlEntities(readNonEmptyString(song.album) || "") : undefined;
   return {
     id: song.id,
+    accountId: getAccountScope().accountId ?? "guest",
     url: audioUrl,
     title,
     artist,
@@ -136,8 +140,6 @@ export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?:
       : {}),
   };
 }
-
-import * as Network from "expo-network";
 
 let cachedQualityPreference: {
   requested: "auto" | "low" | "medium" | "high";

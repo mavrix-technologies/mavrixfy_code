@@ -1,29 +1,30 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  collection,
-  query,
-  where,
-  onSnapshot,
-  type Unsubscribe,
-} from "firebase/firestore";
+import { accountStorageKey } from "@/lib/accountScope";
+import { sortedCopy } from "@/lib/arrayUtils";
+import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import { db } from "@/lib/firebase";
 import {
-  getUserPlaylists,
-  createUserPlaylist,
-  deleteUserPlaylist,
-} from "@/lib/storage";
-import {
-  createFirestorePlaylist,
-  deleteFirestorePlaylist,
-  updateFirestorePlaylist,
-  type FirestorePlaylist,
+createFirestorePlaylist,
+deleteFirestorePlaylist,
+updateFirestorePlaylist,
+type FirestorePlaylist,
 } from "@/lib/firestore";
-import { uploadImageToCloudinary } from "@/lib/cloudinary";
-import { getFollowedArtists, type FollowedArtist } from "@/lib/followedArtists";
-import { sortedCopy } from "@/lib/arrayUtils";
-import { setCachedPlaylists } from "@/lib/playlistMemoryCache";
+import { getFollowedArtists,type FollowedArtist } from "@/lib/followedArtists";
 import { logger } from "@/lib/logger";
-import { useLibraryStore, type DisplayPlaylist } from "../store/libraryStore";
+import { removeCachedPlaylist,setCachedPlaylists } from "@/lib/playlistMemoryCache";
+import {
+createUserPlaylist,
+deleteUserPlaylist,
+getUserPlaylists,
+} from "@/lib/storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+collection,
+onSnapshot,
+query,
+where,
+type Unsubscribe,
+} from "firebase/firestore";
+import { useLibraryStore,type DisplayPlaylist } from "../store/libraryStore";
 
 const PLAYLISTS_CACHE_KEY_PREFIX = "@mavrixfy_library_playlists_";
 const ARTISTS_CACHE_KEY = "@mavrixfy_followed_artists";
@@ -31,6 +32,7 @@ const ARTISTS_CACHE_KEY = "@mavrixfy_followed_artists";
 let activeUnsubscribeById: Unsubscribe | null = null;
 let activeUnsubscribeByUid: Unsubscribe | null = null;
 let activeSubscriptionUserId: string | null = null;
+let subscriptionGeneration = 0;
 
 function getPlaylistsCacheKey(userId?: string | null): string {
   return `${PLAYLISTS_CACHE_KEY_PREFIX}${userId || "guest"}`;
@@ -66,16 +68,18 @@ async function loadLocalPlaylistsFormatted(): Promise<DisplayPlaylist[]> {
  * Reads cached playlists and artists from AsyncStorage and hydrates Zustand store at 0ms.
  */
 export async function loadCachedLibrary(userId?: string | null): Promise<void> {
+  const generation = subscriptionGeneration;
   try {
     const cacheKey = getPlaylistsCacheKey(userId);
     const [rawPlaylists, rawArtists] = await Promise.all([
       AsyncStorage.getItem(cacheKey),
-      AsyncStorage.getItem(ARTISTS_CACHE_KEY),
+      AsyncStorage.getItem(accountStorageKey(ARTISTS_CACHE_KEY)),
     ]);
+    if (generation !== subscriptionGeneration || (userId ?? null) !== activeSubscriptionUserId) return;
 
     if (rawPlaylists) {
       const parsed = JSON.parse(rawPlaylists);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed) && useLibraryStore.getState().status === "loading") {
         useLibraryStore.getState().setPlaylists(parsed, "loading");
         setCachedPlaylists(parsed);
       }
@@ -112,7 +116,7 @@ export async function persistCachedPlaylists(
  */
 export async function persistCachedArtists(artists: FollowedArtist[]): Promise<void> {
   try {
-    await AsyncStorage.setItem(ARTISTS_CACHE_KEY, JSON.stringify(artists));
+    await AsyncStorage.setItem(accountStorageKey(ARTISTS_CACHE_KEY), JSON.stringify(artists));
   } catch (error) {
     logger.warn("[LibraryRepository] Failed to persist followed artists:", error);
   }
@@ -130,12 +134,15 @@ export function subscribeLibrary(userId?: string | null): () => void {
 
   cleanupLibrarySubscription();
   activeSubscriptionUserId = userId ?? null;
+  const generation = subscriptionGeneration;
+  useLibraryStore.getState().setStatus("loading");
 
   // 1. Instant 0ms cache hydration
   void loadCachedLibrary(userId);
 
   // 2. Refresh followed artists in background
   void getFollowedArtists().then((artists) => {
+    if (generation !== subscriptionGeneration) return;
     useLibraryStore.getState().setFollowedArtists(artists);
     void persistCachedArtists(artists);
   });
@@ -143,6 +150,7 @@ export function subscribeLibrary(userId?: string | null): () => void {
   // 3. If guest / no user, load local storage only
   if (!userId) {
     void loadLocalPlaylistsFormatted().then((local) => {
+      if (generation !== subscriptionGeneration) return;
       useLibraryStore.getState().setPlaylists(local, "ready");
       void persistCachedPlaylists(null, local);
     });
@@ -151,17 +159,22 @@ export function subscribeLibrary(userId?: string | null): () => void {
 
   if (!db) {
     void loadLocalPlaylistsFormatted().then((local) => {
+      if (generation !== subscriptionGeneration) return;
       useLibraryStore.getState().setPlaylists(local, "ready");
     });
     return cleanupLibrarySubscription;
   }
 
   const playlistsRef = collection(db, "playlists");
-  let firestoreMap = new Map<string, DisplayPlaylist>();
+  let playlistsById = new Map<string, DisplayPlaylist>();
+  let playlistsByUid = new Map<string, DisplayPlaylist>();
+  let reconcileGeneration = 0;
 
   const reconcileAndEmit = async () => {
+    const currentReconcile = ++reconcileGeneration;
     const local = await loadLocalPlaylistsFormatted();
-    const firestoreList = Array.from(firestoreMap.values());
+    if (generation !== subscriptionGeneration || currentReconcile !== reconcileGeneration) return;
+    const firestoreList = Array.from(new Map([...playlistsById, ...playlistsByUid]).values());
     const firestoreIds = new Set(firestoreList.map((p) => p.id));
     const localOnly = local.filter((p) => !firestoreIds.has(p.id));
 
@@ -172,10 +185,12 @@ export function subscribeLibrary(userId?: string | null): () => void {
     void persistCachedPlaylists(userId, merged);
   };
 
-  const handleSnapshot = (snapshot: any) => {
+  const handleSnapshot = (snapshot: any, source: "id" | "uid") => {
+    if (generation !== subscriptionGeneration) return;
+    const next = new Map<string, DisplayPlaylist>();
     snapshot.forEach((docSnap: any) => {
       const p = docSnap.data() as FirestorePlaylist;
-      firestoreMap.set(docSnap.id, {
+      next.set(docSnap.id, {
         id: docSnap.id,
         name: p.name || "Untitled Playlist",
         description: p.description || "",
@@ -196,25 +211,31 @@ export function subscribeLibrary(userId?: string | null): () => void {
       });
     });
 
+    if (source === "id") playlistsById = next;
+    else playlistsByUid = next;
+
     void reconcileAndEmit();
   };
 
   const handleError = (error: any) => {
+    if (generation !== subscriptionGeneration) return;
     logger.warn("[LibraryRepository] Realtime listener error:", error);
     void loadLocalPlaylistsFormatted().then((local) => {
+      if (generation !== subscriptionGeneration) return;
       useLibraryStore.getState().setPlaylists(local, "ready");
     });
   };
 
   try {
     const qById = query(playlistsRef, where("createdBy.id", "==", userId));
-    activeUnsubscribeById = onSnapshot(qById, handleSnapshot, handleError);
+    activeUnsubscribeById = onSnapshot(qById, (snapshot) => handleSnapshot(snapshot, "id"), handleError);
 
     const qByUid = query(playlistsRef, where("createdBy.uid", "==", userId));
-    activeUnsubscribeByUid = onSnapshot(qByUid, handleSnapshot, handleError);
+    activeUnsubscribeByUid = onSnapshot(qByUid, (snapshot) => handleSnapshot(snapshot, "uid"), handleError);
   } catch (err) {
     logger.warn("[LibraryRepository] Failed to attach playlist listeners:", err);
     void loadLocalPlaylistsFormatted().then((local) => {
+      if (generation !== subscriptionGeneration) return;
       useLibraryStore.getState().setPlaylists(local, "ready");
     });
   }
@@ -223,6 +244,7 @@ export function subscribeLibrary(userId?: string | null): () => void {
 }
 
 export function cleanupLibrarySubscription(): void {
+  subscriptionGeneration += 1;
   if (activeUnsubscribeById) {
     try {
       activeUnsubscribeById();
@@ -236,6 +258,8 @@ export function cleanupLibrarySubscription(): void {
     activeUnsubscribeByUid = null;
   }
   activeSubscriptionUserId = null;
+  useLibraryStore.getState().reset();
+  setCachedPlaylists([]);
 }
 
 /**
@@ -245,22 +269,27 @@ export function cleanupLibrarySubscription(): void {
 export async function deletePlaylistOptimistic(
   playlist: DisplayPlaylist,
   userId?: string | null
-): Promise<void> {
+): Promise<boolean> {
   // 1. Instant local removal
   useLibraryStore.getState().removePlaylistOptimistic(playlist.id);
+  removeCachedPlaylist(playlist.id);
   const remaining = useLibraryStore.getState().playlists;
   void persistCachedPlaylists(userId, remaining);
 
   // 2. Background deletion
   try {
     if (playlist.isFirestore) {
-      await deleteFirestorePlaylist(playlist.id);
+      if (!await deleteFirestorePlaylist(playlist.id)) throw new Error("Firestore playlist deletion failed");
     } else {
       await deleteUserPlaylist(playlist.id);
     }
+    return true;
   } catch (error) {
     logger.error("[LibraryRepository] Failed to delete playlist in background:", error);
-    // On error, onSnapshot or local reload will naturally reconcile
+    useLibraryStore.getState().addPlaylistOptimistic(playlist);
+    setCachedPlaylists(useLibraryStore.getState().playlists);
+    void persistCachedPlaylists(userId, useLibraryStore.getState().playlists);
+    return false;
   }
 }
 
@@ -314,8 +343,6 @@ export async function createPlaylistOptimistic(
         if (uploadedImageUrl) {
           await updateFirestorePlaylist(remote.id, { imageUrl: uploadedImageUrl });
         }
-        await createUserPlaylist(name, description);
-
         // Replace temp playlist with confirmed remote playlist
         const confirmed: DisplayPlaylist = {
           id: remote.id,
@@ -334,12 +361,21 @@ export async function createPlaylistOptimistic(
         return confirmed;
       }
     } else {
-      await createUserPlaylist(name, description);
+      const local = await createUserPlaylist(name, description, uploadedImageUrl);
+      useLibraryStore.getState().removePlaylistOptimistic(tempId);
+      const confirmed = { ...optimisticPlaylist, id: local.id, isFirestore: false };
+      useLibraryStore.getState().addPlaylistOptimistic(confirmed);
+      void persistCachedPlaylists(null, useLibraryStore.getState().playlists);
+      return confirmed;
     }
 
-    return optimisticPlaylist;
+    useLibraryStore.getState().removePlaylistOptimistic(tempId);
+    void persistCachedPlaylists(user?.id, useLibraryStore.getState().playlists);
+    return null;
   } catch (error) {
     logger.error("[LibraryRepository] Background playlist creation failed:", error);
-    return optimisticPlaylist;
+    useLibraryStore.getState().removePlaylistOptimistic(tempId);
+    void persistCachedPlaylists(user?.id, useLibraryStore.getState().playlists);
+    return null;
   }
 }

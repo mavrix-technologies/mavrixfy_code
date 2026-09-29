@@ -1,29 +1,28 @@
-import React from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-  StyleSheet,
-  Alert,
-} from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { NavImportIcon } from "@/components/OfficialNavIcons";
-import { ImpactFeedbackStyle } from "expo-haptics";
-import * as DocumentPicker from "expo-document-picker";
-import * as Linking from "expo-linking";
-import * as WebBrowser from "expo-web-browser";
-import { router } from "expo-router";
-import Colors from "@/constants/colors";
-import { IS_IOS, IS_WEB } from "@/constants/platform";
-import { triggerImpact } from "@/lib/haptics";
-import AppTopHeader, {
-  APP_TOP_HEADER_HEIGHT,
-  AppTopHeaderProfileButton,
-  useAppTopHeaderScrollElevation,
+import AppTopHeader,{
+APP_TOP_HEADER_HEIGHT,
+AppTopHeaderProfileButton,
+useAppTopHeaderScrollElevation,
 } from "@/components/AppTopHeader";
+import { NavImportIcon } from "@/components/OfficialNavIcons";
+import Colors from "@/constants/colors";
+import { IS_IOS,IS_WEB } from "@/constants/platform";
+import { triggerImpact } from "@/lib/haptics";
+import { Ionicons } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
+import { ImpactFeedbackStyle } from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
+import * as Linking from "expo-linking";
+import { router } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
+import {
+Alert,
+Pressable,
+ScrollView,
+StyleSheet,
+Text,
+View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const EXPORTIFY_URL = "https://exportify.net/";
 
@@ -94,7 +93,7 @@ export function ImportSongsScreen() {
     <View style={styles.container}>
       {/* Background base */}
       <LinearGradient
-        colors={[Colors.background, "#0E1217", "#0B0E14"]}
+        colors={[Colors.background, Colors.background, Colors.background]}
         locations={[0, 0.5, 1]}
         style={StyleSheet.absoluteFill}
       />

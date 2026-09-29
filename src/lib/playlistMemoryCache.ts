@@ -32,6 +32,7 @@ export function setCachedPlaylist(
 export function setCachedPlaylists(
   playlists: (Partial<CachedPlaylistData> & { id: string })[]
 ): void {
+  MEMORY_PLAYLIST_MAP.clear();
   for (const p of playlists) {
     if (p && p.id) {
       setCachedPlaylist(p.id, p);

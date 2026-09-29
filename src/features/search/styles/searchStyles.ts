@@ -1,5 +1,5 @@
-import { StyleSheet } from "react-native";
 import Colors from "@/constants/colors";
+import { StyleSheet } from "react-native";
 
 export const styles = StyleSheet.create({
   // ── Layout ──────────────────────────────────────────────────────────────────
@@ -166,6 +166,7 @@ export const styles = StyleSheet.create({
     gap: 8,
   },
   browseGridRow: {
+    flexDirection: "row",
     gap: 8,
   },
   browseCard: {
