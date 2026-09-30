@@ -1166,7 +1166,7 @@ index 0000000..a238823
 +    }
 +}
 diff --git a/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayer.swift b/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayer.swift
-index 3be1342..b3f767d 100644
+index 3be1342..627e431 100644
 --- a/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayer.swift
 +++ b/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayer.swift
 @@ -17,6 +17,7 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
@@ -1177,13 +1177,14 @@ index 3be1342..b3f767d 100644
      private let audioSessionController = AudioSessionController.shared
      private var shouldEmitProgressEvent: Bool = false
      private var shouldResumePlaybackAfterInterruptionEnds: Bool = false
-@@ -27,6 +28,30 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
+@@ -27,6 +28,31 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
      private var sessionCategoryPolicy: AVAudioSession.RouteSharingPolicy = .default
      private var sessionCategoryOptions: AVAudioSession.CategoryOptions = []
  
 +    @objc(getAudioEffects:rejecter:)
 +    public func getAudioEffects(resolve: @escaping RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
 +        DispatchQueue.main.async {
++            self.playbackAudioEffects.attach(self.player.currentAVPlayerItem)
 +            resolve(self.playbackAudioEffects.snapshot())
 +        }
 +    }
@@ -1208,11 +1209,23 @@ index 3be1342..b3f767d 100644
      // MARK: - Lifecycle Methods
  
      public override init() {
-@@ -845,6 +870,7 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
+@@ -804,6 +830,9 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
+     // MARK: - QueuedAudioPlayer Event Handlers
+ 
+     func handleAudioPlayerStateChange(state: AVPlayerWrapperState) {
++        DispatchQueue.main.async {
++            self.playbackAudioEffects.attach(self.player.currentAVPlayerItem)
++        }
+         emit(event: EventType.PlaybackState, body: getPlaybackStateBodyKeyValues(state: state))
+         if (state == .ended) {
+             emit(event: EventType.PlaybackQueueEnded, body: [
+@@ -845,6 +874,9 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
          lastIndex: Int?,
          lastPosition: Double?
      ) {
-+        playbackAudioEffects.attach(player.currentAVPlayerItem)
++        DispatchQueue.main.async {
++            self.playbackAudioEffects.attach(self.player.currentAVPlayerItem)
++        }
  
          if let item = item {
              DispatchQueue.main.async {
