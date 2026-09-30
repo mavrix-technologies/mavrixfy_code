@@ -2,7 +2,7 @@ import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDownloads } from "@/contexts/DownloadContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import { clearJioSaavnPlaylistCache } from "@/data/providers/JioSaavnProvider";
+import { clearCatalogPlaylistCache } from "@/data/providers/MusicCatalogProvider";
 import { clearDailyNewReleaseSongCache } from "@/data/providers/NewReleaseProvider";
 import { setHapticsPreference } from "@/lib/haptics";
 import { clearCachedHomePublicPlaylists,notifyHomeCacheInvalidated } from "@/lib/homeCache";
@@ -200,7 +200,7 @@ export function ProfileScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              await clearJioSaavnPlaylistCache().catch(() => {});
+              await clearCatalogPlaylistCache().catch(() => {});
               await Promise.all([
                 clearCachedHomePublicPlaylists(),
                 clearDailyNewReleaseSongCache(),

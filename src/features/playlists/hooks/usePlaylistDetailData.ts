@@ -1,9 +1,9 @@
 import { useAuth } from "@/contexts/AuthContext";
 import {
-getJioSaavnAlbumDetails,
-getJioSaavnPlaylistDetails,
-getJioSaavnSongDetails,
-} from "@/data/providers/JioSaavnProvider";
+  getCatalogAlbumDetails,
+  getCatalogPlaylistDetails,
+  getCatalogSongDetails,
+} from "@/data/providers/MusicCatalogProvider";
 import { uploadImageToCloudinary } from "@/lib/cloudinary";
 import {
 deleteFirestorePlaylist,
@@ -75,7 +75,7 @@ export function usePlaylistDetailData({
   const [playlistDescription, setPlaylistDescription] = useState(
     initialCached?.description ||
       initialDescription ||
-      (initialSongCount > 0 ? `${initialSongCount} songs` : "")
+      (initialSongCount > 0 ? `${initialSongCount} ${initialSongCount === 1 ? "song" : "songs"}` : "")
   );
   const [songs, setSongs] = useState<Song[]>(initialCachedSongs);
   const [notFound, setNotFound] = useState(false);
@@ -122,8 +122,9 @@ export function usePlaylistDetailData({
         : "";
       if (data.name) setPlaylistName(data.name);
       if (coverUrl) setPlaylistCover(coverUrl);
-      const desc =
-        (data.description || "").trim() || `${data.songCount || data.songs?.length || 0} songs`;
+      const count = Number(data.songCount) || data.songs?.length || 0;
+      const countDesc = count > 0 ? `${count} ${count === 1 ? "song" : "songs"}` : "Playlist";
+      const desc = (data.description || "").trim() || countDesc;
       setPlaylistDescription(desc);
       const finalSongs = normalizeLoadedSongs(data.songs || []);
       if (finalSongs.length > 0) {
@@ -160,8 +161,9 @@ export function usePlaylistDetailData({
         isPublic: playlist.isPublic ?? false,
       });
       const name = playlist.name || initialTitle || "Playlist";
-      const desc =
-        (playlist.description || "").trim() || `${nextSongs.length || initialSongCount} songs`;
+      const count = nextSongs.length || initialSongCount || 0;
+      const countDesc = count > 0 ? `${count} ${count === 1 ? "song" : "songs"}` : "Playlist";
+      const desc = (playlist.description || "").trim() || countDesc;
       const cover = playlist.imageUrl || initialCover || "";
       const isPub = playlist.isPublic ?? false;
 
@@ -190,7 +192,7 @@ export function usePlaylistDetailData({
     setPlaylistDescription(
       cached?.description ||
         initialDescription ||
-        (initialSongCount > 0 ? `${initialSongCount} songs` : "")
+        (initialSongCount > 0 ? `${initialSongCount} ${initialSongCount === 1 ? "song" : "songs"}` : "")
     );
     setPlaylistCover(cached?.coverUrl || cached?.imageUrl || initialCover);
     if (cached?.songs && cached.songs.length > 0) {
@@ -277,7 +279,7 @@ export function usePlaylistDetailData({
           const loadJioCollectionAttempt = async (attempt: number): Promise<number> => {
             try {
               if (isSongSource) {
-                const songData = await getJioSaavnSongDetails(playlistId, sourceLink);
+                const songData = await getCatalogSongDetails(playlistId, sourceLink);
                 if (songData && !isCancelled()) {
                   const songImg =
                     songData.image || (initialCover ? [{ quality: "500x500", url: initialCover }] : []);
@@ -296,7 +298,7 @@ export function usePlaylistDetailData({
                     const albumId = songData.album?.id || (songData as any).album_id;
                     const albumUrl = songData.album?.url || (songData as any).album_url;
                     if (albumId || albumUrl) {
-                      void getJioSaavnAlbumDetails(albumId || "", { link: albumUrl })
+                      void getCatalogAlbumDetails(albumId || "", { link: albumUrl })
                         .then((albumData: any) => {
                           if (!isCancelled() && albumData?.songs?.length && albumData.songs.length > 1) {
                             applyJioPlaylistData(albumData);
@@ -312,20 +314,20 @@ export function usePlaylistDetailData({
               let data: any = null;
               if (isAlbumSource) {
                 try {
-                  data = await getJioSaavnAlbumDetails(playlistId, { link: sourceLink });
+                  data = await getCatalogAlbumDetails(playlistId, { link: sourceLink });
                 } catch {
-                  data = await getJioSaavnPlaylistDetails(playlistId, { link: sourceLink }).catch(() => null);
+                  data = await getCatalogPlaylistDetails(playlistId, { link: sourceLink }).catch(() => null);
                 }
               } else {
                 try {
-                  data = await getJioSaavnPlaylistDetails(playlistId, { link: sourceLink });
+                  data = await getCatalogPlaylistDetails(playlistId, { link: sourceLink });
                 } catch {
-                  data = await getJioSaavnAlbumDetails(playlistId, { link: sourceLink }).catch(() => null);
+                  data = await getCatalogAlbumDetails(playlistId, { link: sourceLink }).catch(() => null);
                 }
               }
 
               if (!data?.songs?.length) {
-                const singleSong = await getJioSaavnSongDetails(playlistId, sourceLink);
+                const singleSong = await getCatalogSongDetails(playlistId, sourceLink);
                 if (singleSong) {
                   data = {
                     name: singleSong.name || (singleSong as any).title || initialTitle,

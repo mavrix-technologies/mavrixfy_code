@@ -15,7 +15,7 @@ fetchYouTubeSuggestions,
 type PlaylistResult,
 type ResultFilter,
 searchRepository,
-type SearchResults,
+clearMemorySearchCache,
 } from "@/lib/searchRepository";
 import { normalizeText } from "@/lib/searchUtils";
 import {
@@ -67,6 +67,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     searchDisplayQuery,
     resultFilter,
     searchLoading,
+    searchError,
     isSearchMode,
     suggestions,
     suggestionsOpen,
@@ -93,9 +94,6 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   const resultsArtistsListRef = useRef<FlatList<ArtistResult> | null>(null);
   const resultsSongsListRef = useRef<FlatList<Song> | null>(null);
 
-  const searchCacheRef = useRef<Map<string, SearchResults>>(new Map());
-  const searchCache = searchCacheRef.current;
-
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const browseCategories = BROWSE_CATEGORIES;
 
@@ -115,16 +113,6 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
       const controller = new AbortController();
       activeSearchAbortRef.current = controller;
 
-      const cacheKey = `${resultFilter}:${normalizedQuery.toLowerCase()}`;
-      const cached = searchCache.get(cacheKey);
-      if (cached) {
-        dispatch({ type: "SEARCH_SUCCESS", results: cached, displayQuery: normalizedQuery });
-        if (activeSearchAbortRef.current === controller) {
-          activeSearchAbortRef.current = null;
-        }
-        return;
-      }
-
       dispatch({ type: "SET_SEARCH_LOADING", loading: true });
 
       try {
@@ -136,12 +124,6 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
 
         dispatch({ type: "SEARCH_SUCCESS", results: nextResults, displayQuery: normalizedQuery });
 
-        searchCache.set(cacheKey, nextResults);
-        if (searchCache.size > 60) {
-          const firstKey = searchCache.keys().next().value;
-          if (firstKey) searchCache.delete(firstKey);
-        }
-
         if (activeSearchAbortRef.current === controller) {
           activeSearchAbortRef.current = null;
         }
@@ -149,13 +131,13 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
         if (requestId !== requestSeqRef.current || controller.signal.aborted) {
           return;
         }
-        dispatch({ type: "SEARCH_RESET", displayQuery: normalizedQuery });
+        dispatch({ type: "SEARCH_FAILED", displayQuery: normalizedQuery });
         if (activeSearchAbortRef.current === controller) {
           activeSearchAbortRef.current = null;
         }
       }
     },
-    [resultFilter, searchCache]
+    [resultFilter]
   );
 
   const handleChangeText = useCallback((text: string) => {
@@ -185,10 +167,10 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     useCallback(() => {
       const trimmed = query.trim();
       if (trimmed.length >= 2) {
-        searchCache.clear();
+        clearMemorySearchCache();
         void performSearch(trimmed);
       }
-    }, [query, searchCache, performSearch])
+    }, [query, performSearch])
   );
 
   // Debounced query suggestions
@@ -556,6 +538,8 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     browseCategories,
     resultFilter,
     searchLoading,
+    searchError,
+    retrySearch: () => void performSearch(query.trim()),
     hasResults,
     searchDisplayQuery,
     resultDataKey,

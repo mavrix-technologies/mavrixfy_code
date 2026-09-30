@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { compactMap,mapFilter,sortedCopy } from "@/lib/arrayUtils";
 import type { JioSaavnImage,JioSaavnSong } from "@/lib/musicData";
 import { getApiUrl } from "@/lib/query-client";
-import { withTimeout } from "@/utils/asyncUtils";
+import { fetchWithTimeout } from "@/utils/asyncUtils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -395,7 +395,7 @@ async function fetchArtistRaw(id: string, songCount = 50): Promise<JioSaavnArtis
   const url = `${appBase}/api/artists/${encodeURIComponent(id)}?songCount=${songCount}&albumCount=10&sortBy=popularity&sortOrder=desc`;
 
   try {
-    const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
+    const res = await fetchWithTimeout(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return null;
     const json = await res.json();
     const data = json?.data ?? json;
@@ -415,7 +415,7 @@ export async function searchArtists(query: string): Promise<ArtistCard[]> {
   const url = `${appBase}/api/search/artists?query=${encoded}&limit=20&page=1`;
 
   try {
-    const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
+    const res = await fetchWithTimeout(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return [];
     const json = await res.json();
     const arr = firstArray(
@@ -439,7 +439,7 @@ export async function searchArtists(query: string): Promise<ArtistCard[]> {
 async function searchArtistsFromSongs(appBase: string, encodedQuery: string): Promise<ArtistCard[]> {
   try {
     const url = `${appBase}/api/search/songs?query=${encodedQuery}&limit=20&page=1`;
-    const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
+    const res = await fetchWithTimeout(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return [];
     const json = await res.json();
     const songs = firstArray(
@@ -566,7 +566,7 @@ export async function getArtistSongs(
   const url = `${appBase}/api/artists/${encodeURIComponent(id)}/songs?page=${page}&sortBy=${sortBy}&sortOrder=desc`;
 
   try {
-    const res = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }));
+    const res = await fetchWithTimeout(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return [];
     const json = await res.json();
     const arr = firstArray(json?.data?.songs, json?.songs, json?.data?.results, json?.data);

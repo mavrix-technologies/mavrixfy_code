@@ -35,7 +35,7 @@ test('account generations invalidate old work even when the same user returns', 
 test('download metadata stays isolated after switching accounts and reloading', async () => {
   const scope=load('src/lib/accountScope.ts'); const disk=new Map();
   const storage={getItem:async k=>disk.get(k)??null,setItem:async(k,v)=>disk.set(k,v),removeItem:async k=>disk.delete(k),multiGet:async keys=>keys.map(k=>[k,disk.get(k)])};
-  const store=load('src/lib/downloads/downloadStore.ts', {'@/lib/accountScope':scope,'@react-native-async-storage/async-storage':{default:storage},'@/types/downloads':{DEFAULT_DOWNLOAD_PREFERENCES:{}},'@/lib/logger':{logger:{error:noop}}});
+  const store=load('src/lib/downloads/downloadStore.ts', {'@/lib/accountScope':scope,'@react-native-async-storage/async-storage':{default:storage},'@/types/downloads':{DEFAULT_DOWNLOAD_PREFERENCES:{}},'@/lib/logger':{logger:{error:noop}},'@/lib/storage':{getSettings:async()=>({downloadQuality:'high',downloadWifiOnly:false})}});
   scope.setAccountScope('A'); await store.saveDownload({songId:'one',accountId:'A',status:'completed'}); await store.loadAllDownloads();
   assert.equal((await store.loadDownload('one')).accountId,'A');
   scope.setAccountScope('B'); assert.equal((await store.loadAllDownloads()).length,0); assert.equal(await store.loadDownload('one'),null);

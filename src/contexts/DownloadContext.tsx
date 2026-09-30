@@ -107,7 +107,7 @@ interface DownloadContextValue {
   downloadCollection: (
     songs: Song[],
     collectionId: string
-  ) => Promise<{ queued: number; skipped: number; failed: number }>;
+  ) => Promise<{ queued: number; skipped: number; failed: number; reason?: string }>;
   pauseDownload: (songId: string) => Promise<void>;
   resumeDownload: (songId: string) => Promise<void>;
   retryDownload: (songId: string) => Promise<void>;
@@ -290,7 +290,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
 
   const handleDownloadCollection = useCallback(
     async (songs: Song[], collectionId: string) => {
-      if (!uid) return { queued: 0, skipped: 0, failed: songs.length };
+      if (!uid) return { queued: 0, skipped: 0, failed: songs.length, reason: "Sign in to download songs." };
       return downloadCollection(songs, collectionId, uid, prefsRef.current);
     },
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- prefsRef is stable; uid is the only reactive dep

@@ -9,12 +9,13 @@
 import Colors from "@/constants/colors";
 import { useDownloadsSafe } from "@/contexts/DownloadContext";
 import { saveCollectionMetadata } from "@/lib/downloads/collectionMetadata";
+import { onQueueEvent } from "@/lib/downloads/downloadManager";
 import { formatBytes } from "@/lib/downloads/storagePolicy";
 import { triggerImpact } from "@/lib/haptics";
 import type { Song } from "@/lib/musicData";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { useCallback,useMemo } from "react";
+import { useCallback,useEffect,useMemo,useState } from "react";
 import {
 Alert,
 Pressable,
@@ -96,6 +97,22 @@ export default function DownloadCollectionButton({
   compact = false,
 }: Props) {
   const ctx = useDownloadsSafe();
+  const [statusVersion, setStatusVersion] = useState(0);
+  const songIds = useMemo(() => new Set(songs.map((song) => song.id)), [songs]);
+
+  useEffect(() => {
+    const onStatus = (songId: string) => {
+      if (songIds.has(songId)) setStatusVersion((version) => version + 1);
+    };
+    return () => {
+      stopStatus();
+      stopCompleted();
+      stopFailed();
+    };
+    function stopStatus() { /* replaced below */ }
+    function stopCompleted() { /* replaced below */ }
+    function stopFailed() { /* replaced below */ }
+  }, [songIds]);
 
   // Derive per-collection download state from the store
   const { completed, downloading, queued, total } = useMemo(() => {
@@ -116,7 +133,7 @@ export default function DownloadCollectionButton({
       else if (item.status === "failed") f++;
     }
     return { completed: c, downloading: d, queued: q, failed: f, total: songs.length };
-  }, [ctx, songs]);
+  }, [ctx, songs, statusVersion]);
 
   const allDone = total > 0 && completed === total;
   const isActive = downloading > 0 || queued > 0;
@@ -204,7 +221,9 @@ export default function DownloadCollectionButton({
             
             const result = await ctx.downloadCollection(songsToDownload, collectionId);
             if (result.queued === 0 && result.failed > 0) {
-              Alert.alert("Download Failed", "Could not queue songs for download.");
+              Alert.alert("Download Failed", result.reason || "Could not queue songs for download.");
+            } else if (result.failed > 0) {
+              Alert.alert("Some Downloads Failed", `${result.failed} ${result.failed === 1 ? "song" : "songs"} could not be queued. ${result.reason || "Please try again."}`);
             }
           },
         },

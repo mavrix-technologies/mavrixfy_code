@@ -1,5 +1,5 @@
 import { type ArtistCard } from "@/data/providers/ArtistProvider";
-import { type HomeJioSaavnCategoryData } from "@/data/providers/JioSaavnProvider";
+import { type CatalogCategoryData } from "@/data/providers/MusicCatalogProvider";
 import { type FirestorePlaylist } from "@/lib/firestore";
 import { type Song } from "@/lib/musicData";
 import { type RecentlyPlayedItem } from "@/lib/storage";
@@ -7,12 +7,18 @@ import { useMemo } from "react";
 
 export const HOME_CATEGORY_TITLES: Record<string, string> = {
   "new-arrivals": "New Releases",
+  "new-releases": "New Releases",
   popular: "Most Popular",
   trending: "Trending Now",
+  charts: "Top Charts",
+  "top-charts": "Official Biggest Hits",
+  "fresh-hits": "Fresh Hits",
+  editorial: "Editorial Picks",
+  moods: "Top Genres & Moods",
   bollywood: "Bollywood Hits",
   "party-mix": "Party Mix",
   romance: "Love & Romance",
-  "top-charts": "Official Biggest Hits",
+  "chill-vibes": "Lo-Fi & Chill",
   festive: "Festive Special",
   "lo-fi": "Lo-Fi & Chill",
 };
@@ -20,7 +26,7 @@ export const HOME_CATEGORY_TITLES: Record<string, string> = {
 export type HomeSectionItem =
   | { id: "quick-picks"; type: "quick-picks" }
   | { id: "recently-played"; type: "recently-played" }
-  | { id: string; type: "category"; category: HomeJioSaavnCategoryData; showAd: boolean }
+  | { id: string; type: "category"; category: CatalogCategoryData; showAd: boolean }
   | { id: "artists"; type: "artists" }
   | { id: "public-playlists"; type: "public-playlists" }
   | { id: "loading-quick"; type: "loading-quick" }
@@ -28,7 +34,7 @@ export type HomeSectionItem =
 
 interface UseHomeSectionDataParams {
   selectedCategory: string;
-  categories: HomeJioSaavnCategoryData[];
+  categories: CatalogCategoryData[];
   quickPickSongs: Song[];
   recentlyPlayed: RecentlyPlayedItem[];
   featuredArtists: ArtistCard[];
@@ -85,7 +91,7 @@ export function useHomeSectionData({
 
     // 3. NEW RELEASES TAB
     if (selectedCategory === "New Releases") {
-      const newArrivals = categories.find((c) => c.id === "new-arrivals");
+      const newArrivals = categories.find((c) => c.id === "new-releases" || c.id === "new-arrivals");
       if (newArrivals) {
         items.push({ id: `cat-${newArrivals.id}`, type: "category", category: newArrivals, showAd: false });
       }
@@ -102,7 +108,7 @@ export function useHomeSectionData({
 
     // 4. CHARTS TAB
     if (selectedCategory === "Charts") {
-      const chartsCat = categories.find((c) => c.id === "top-charts" || c.id === "popular");
+      const chartsCat = categories.find((c) => c.id === "charts" || c.id === "top-charts" || c.id === "popular");
       if (chartsCat) {
         items.push({ id: `cat-${chartsCat.id}`, type: "category", category: chartsCat, showAd: false });
       }
@@ -120,7 +126,7 @@ export function useHomeSectionData({
 
     // 5. BOLLYWOOD TAB
     if (selectedCategory === "Bollywood") {
-      const bCat = categories.find((c) => c.id === "bollywood");
+      const bCat = categories.find((c) => c.id === "bollywood" || c.id === "fresh-hits" || c.id === "editorial");
       if (bCat) {
         items.push({ id: `cat-${bCat.id}`, type: "category", category: bCat, showAd: false });
       }
@@ -132,7 +138,7 @@ export function useHomeSectionData({
       if (featuredArtists.length > 0) {
         items.push({ id: "artists", type: "artists" });
       }
-      const romanceCat = categories.find((c) => c.id === "romance");
+      const romanceCat = categories.find((c) => c.id === "romance" || c.id === "moods");
       if (romanceCat) {
         items.push({ id: `cat-${romanceCat.id}`, type: "category", category: romanceCat, showAd: false });
       }
@@ -141,7 +147,7 @@ export function useHomeSectionData({
 
     // 6. ROMANTIC TAB
     if (selectedCategory === "Romantic") {
-      const rCat = categories.find((c) => c.id === "romance");
+      const rCat = categories.find((c) => c.id === "romance" || c.id === "moods");
       if (rCat) {
         items.push({ id: `cat-${rCat.id}`, type: "category", category: rCat, showAd: false });
       }
@@ -158,14 +164,14 @@ export function useHomeSectionData({
 
     // 7. PARTY MIX TAB
     if (selectedCategory === "Party Mix") {
-      const pCat = categories.find((c) => c.id === "party-mix");
+      const pCat = categories.find((c) => c.id === "party-mix" || c.id === "moods" || c.id === "trending");
       if (pCat) {
         items.push({ id: `cat-${pCat.id}`, type: "category", category: pCat, showAd: false });
       }
       if (quickPickSongs.length > 0) {
         items.push({ id: "quick-picks", type: "quick-picks" });
       }
-      const bCat = categories.find((c) => c.id === "bollywood");
+      const bCat = categories.find((c) => c.id === "bollywood" || c.id === "fresh-hits");
       if (bCat) {
         items.push({ id: `cat-${bCat.id}`, type: "category", category: bCat, showAd: false });
       }
@@ -174,7 +180,7 @@ export function useHomeSectionData({
 
     // 8. FESTIVE TAB
     if (selectedCategory === "Festive") {
-      const pCat = categories.find((c) => c.id === "party-mix" || c.id === "bollywood");
+      const pCat = categories.find((c) => c.id === "festive" || c.id === "party-mix" || c.id === "bollywood");
       if (pCat) {
         items.push({ id: `cat-${pCat.id}`, type: "category", category: pCat, showAd: false });
       }
@@ -189,7 +195,9 @@ export function useHomeSectionData({
 
     // 9. LO-FI TAB
     if (selectedCategory === "Lo-Fi") {
-      const lCat = categories.find((c) => c.id === "romance" || c.id === "new-arrivals");
+      const lCat = categories.find(
+        (c) => c.id === "chill-vibes" || c.id === "lo-fi" || c.id === "moods" || c.id === "romance"
+      );
       if (lCat) {
         items.push({ id: `cat-${lCat.id}`, type: "category", category: lCat, showAd: false });
       }

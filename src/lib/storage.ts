@@ -455,10 +455,15 @@ export async function getSettings(): Promise<AppSettings> {
   };
 }
 
+let settingsWriteQueue: Promise<void> = Promise.resolve();
+
 export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
-  const current = await getSettings();
-  const next = { ...current, ...settings };
-  return setJSON(KEYS.SETTINGS, next);
+  const write = settingsWriteQueue.then(async () => {
+    const current = await getSettings();
+    await setJSON(KEYS.SETTINGS, { ...current, ...settings });
+  });
+  settingsWriteQueue = write.catch(() => {});
+  return write;
 }
 
 export function isHighQualityEntitled(settings: AppSettings): boolean {

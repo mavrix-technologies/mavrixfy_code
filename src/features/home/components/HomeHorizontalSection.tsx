@@ -62,11 +62,15 @@ const HorizontalCard = memo(function HorizontalCard({
         <Text style={styles.cardSubtitle} numberOfLines={1}>
           {item.subtitle}
         </Text>
-      ) : item.songCount ? (
+      ) : item.songCount && item.songCount > 0 ? (
         <Text style={styles.cardSubtitle} numberOfLines={1}>
-          {item.songCount} songs
+          {item.songCount} {item.songCount === 1 ? "song" : "songs"}
         </Text>
-      ) : null}
+      ) : (
+        <Text style={styles.cardSubtitle} numberOfLines={1}>
+          {item.type === "album" ? "Album" : item.type === "song" ? "Song" : "Playlist"}
+        </Text>
+      )}
     </Pressable>
   );
 });

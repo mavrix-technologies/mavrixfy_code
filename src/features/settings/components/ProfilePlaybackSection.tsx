@@ -3,7 +3,7 @@ import { useDownloads } from "@/contexts/DownloadContext";
 import { formatBytes } from "@/lib/downloads/storagePolicy";
 import { triggerImpact } from "@/lib/haptics";
 import { type AppSettings } from "@/lib/storage";
-import { applyEqualizerEnabled } from "@/services/audio/audioEqualizer";
+import { applyEqualizerEnabled, applySurroundSoundEnabled, applySurroundStrength } from "@/services/audio/audioEqualizer";
 import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -39,9 +39,8 @@ export function ProfilePlaybackSection({
   const equalizerStatusText = useMemo(() => {
     const presetId = detectMatchingPreset(settings.equalizer);
     const presetName = EQUALIZER_PRESETS.find((preset) => preset.id === presetId)?.name;
-    const active = [settings.equalizerEnabled && (presetName || "Custom"), settings.surroundSoundEnabled && "Spatial Panning"].filter(Boolean);
-    return active.length ? active.join(" • ") : "Off";
-  }, [settings.equalizer, settings.equalizerEnabled, settings.surroundSoundEnabled]);
+    return settings.equalizerEnabled ? `On • ${presetName || "Custom"}` : "Off";
+  }, [settings.equalizer, settings.equalizerEnabled]);
 
   const handleToggleEqualizer = useCallback(async (enabled: boolean) => {
     void triggerImpact(ImpactFeedbackStyle.Light);
@@ -55,6 +54,23 @@ export function ProfilePlaybackSection({
       await updateSettings({ equalizerEnabled: enabled });
     } catch (error) {
       Alert.alert("Equalizer unavailable", error instanceof Error ? error.message : "Could not change the equalizer.");
+    }
+  }, [updateSettings]);
+
+  const handleToggleSpatialPanning = useCallback(async (enabled: boolean) => {
+    void triggerImpact(ImpactFeedbackStyle.Light);
+    try {
+      if (!enabled) {
+        await updateSettings({ surroundSoundEnabled: false });
+        void applySurroundSoundEnabled(false).catch(() => {});
+        return;
+      }
+      const strength = 350;
+      await applySurroundStrength(strength);
+      await applySurroundSoundEnabled(true);
+      await updateSettings({ surroundSoundEnabled: true, surroundStrength: strength });
+    } catch (error) {
+      Alert.alert("Spatial panning unavailable", error instanceof Error ? error.message : "Could not change spatial panning.");
     }
   }, [updateSettings]);
 
@@ -199,10 +215,10 @@ export function ProfilePlaybackSection({
       </View>
 
       {/* ─── 2. Audio & Equalizer ─── */}
-      <Text style={styles.sectionLabel}>AUDIO & EQUALIZER</Text>
+      <Text style={styles.sectionLabel}>AUDIO EFFECTS</Text>
       <View style={styles.sectionGroup}>
         <Pressable
-          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+          style={({ pressed }) => [styles.row, styles.rowDivider, pressed && styles.rowPressed]}
           onPress={handleOpenEqualizer}
           accessibilityRole="button"
           accessibilityLabel="Open Equalizer Settings"
@@ -215,7 +231,7 @@ export function ProfilePlaybackSection({
           />
           <View style={styles.rowTextCol}>
             <Text style={styles.rowTitle}>Equalizer</Text>
-            <Text style={styles.rowSubtitle}>{settings.equalizerEnabled || settings.surroundSoundEnabled ? `On • ${equalizerStatusText}` : "Off"}</Text>
+            <Text style={styles.rowSubtitle}>{equalizerStatusText}</Text>
           </View>
           <View style={styles.rowTrailingActions}>
             <Switch
@@ -232,6 +248,25 @@ export function ProfilePlaybackSection({
             />
           </View>
         </Pressable>
+        <View style={styles.row}>
+          <Ionicons
+            name="headset-outline"
+            size={22}
+            color={settings.surroundSoundEnabled ? Colors.primary : "rgba(255, 255, 255, 0.7)"}
+            style={styles.rowIcon}
+          />
+          <View style={styles.rowTextCol}>
+            <Text style={styles.rowTitle}>Spatial Panning</Text>
+            <Text style={styles.rowSubtitle}>Subtle stereo movement; not 3D surround</Text>
+          </View>
+          <Switch
+            value={Boolean(settings.surroundSoundEnabled)}
+            onValueChange={handleToggleSpatialPanning}
+            accessibilityLabel="Spatial Panning"
+            trackColor={{ false: "rgba(255, 255, 255, 0.1)", true: Colors.primary }}
+            thumbColor="#FFFFFF"
+          />
+        </View>
       </View>
 
       {/* ─── 3. Playback & Transitions ─── */}

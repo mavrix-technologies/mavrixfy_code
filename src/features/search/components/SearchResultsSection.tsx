@@ -265,6 +265,8 @@ export interface SearchResultsSectionProps {
   topInset: number;
   resultFilter: ResultFilter;
   searchLoading: boolean;
+  searchError: boolean;
+  onRetry: () => void;
   hasResults: boolean;
   searchDisplayQuery: string;
   resultDataKey: string;
@@ -294,6 +296,8 @@ export const SearchResultsSection = React.memo(function SearchResultsSection({
   topInset,
   resultFilter,
   searchLoading,
+  searchError,
+  onRetry,
   hasResults,
   searchDisplayQuery,
   resultDataKey,
@@ -372,6 +376,13 @@ export const SearchResultsSection = React.memo(function SearchResultsSection({
       {searchLoading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#FFFFFF" />
+        </View>
+      ) : searchError ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>Could not load search results.</Text>
+          <Pressable accessibilityRole="button" onPress={onRetry}>
+            <Text style={styles.emptySubtext}>Try again</Text>
+          </Pressable>
         </View>
       ) : !hasResults ? (
         <View style={styles.empty}>

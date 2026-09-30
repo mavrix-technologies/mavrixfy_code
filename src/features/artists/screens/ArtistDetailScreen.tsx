@@ -1,6 +1,12 @@
 import AdMobBanner from "@/components/AdMobBanner";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
+import {
+  CapsuleDivider,
+  CapsuleNavButton,
+  CapsuleNavGroup,
+  CircularBackButton,
+} from "@/components/navigation/CircularNavButton";
 import Colors from "@/constants/colors";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import {
@@ -486,9 +492,7 @@ function useArtistScreenView() {
     return (
       <View style={[styles.container, { backgroundColor, paddingTop: topInset }]}>
         <View style={[styles.floatingNavContainer, { top: topInset + 6 }]}>
-          <Pressable onPress={safeGoBack} style={styles.iosCircularNavBtn}>
-            <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
-          </Pressable>
+          <CircularBackButton onPress={safeGoBack} />
         </View>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#FFFFFF" />
@@ -501,9 +505,7 @@ function useArtistScreenView() {
     return (
       <View style={[styles.container, { backgroundColor, paddingTop: topInset }]}>
         <View style={[styles.floatingNavContainer, { top: topInset + 6 }]}>
-          <Pressable onPress={safeGoBack} style={styles.iosCircularNavBtn}>
-            <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
-          </Pressable>
+          <CircularBackButton onPress={safeGoBack} />
         </View>
         <View style={styles.center}>
           <Ionicons name="person-outline" size={42} color="rgba(255,255,255,0.4)" />
@@ -715,7 +717,7 @@ function useArtistScreenView() {
         }
       />
 
-      {/* ── Top Floating Navigation Buttons (Native iOS Style) ── */}
+      {/* ── Top Floating Navigation Buttons (Reusable Nav System) ── */}
       <Animated.View
         pointerEvents={isStickyVisible ? "none" : "box-none"}
         style={[
@@ -726,21 +728,25 @@ function useArtistScreenView() {
           },
         ]}
       >
-        {/* Left: Native iOS Circular Back Button */}
-        <Pressable onPress={safeGoBack} style={styles.iosCircularNavBtn}>
-          <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
-        </Pressable>
+        {/* Left: Circular Back Button */}
+        <CircularBackButton onPress={safeGoBack} />
 
-        {/* Right: Native iOS Capsule Button Group */}
-        <View style={styles.iosCapsuleNavGroup}>
-          <Pressable style={styles.iosCapsuleBtn} onPress={handleShare}>
-            <Ionicons name="share-outline" size={19} color="#FFFFFF" />
-          </Pressable>
-          <View style={styles.iosCapsuleDivider} />
-          <Pressable style={styles.iosCapsuleBtn} onPress={() => setShowBioModal(true)}>
-            <Ionicons name="ellipsis-horizontal" size={19} color="#FFFFFF" />
-          </Pressable>
-        </View>
+        {/* Right: Capsule Group — Share + More */}
+        <CapsuleNavGroup>
+          <CapsuleNavButton
+            icon="share-outline"
+            iconSize={19}
+            onPress={handleShare}
+            accessibilityLabel="Share artist"
+          />
+          <CapsuleDivider />
+          <CapsuleNavButton
+            icon="ellipsis-horizontal"
+            iconSize={19}
+            onPress={() => setShowBioModal(true)}
+            accessibilityLabel="More info"
+          />
+        </CapsuleNavGroup>
       </Animated.View>
 
       {/* ── Apple Music Sticky Header ── */}

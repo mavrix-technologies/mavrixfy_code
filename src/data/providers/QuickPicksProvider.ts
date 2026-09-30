@@ -1,17 +1,16 @@
-import { getJioSaavnPlaylistDetails } from "@/data/providers/JioSaavnDetailsProvider";
-import { type HomeJioSaavnCategoryData } from "@/data/providers/JioSaavnTypes";
+import { getCatalogPlaylistDetails } from "@/data/providers/MusicCatalogDetailsProvider";
+import { type CatalogCategoryData } from "@/data/providers/MusicCatalogTypes";
+import { isLikelyNewReleaseSong } from "@/data/providers/homeFreshness";
 import { buildAppApiUrl } from "@/lib/api-config";
-import { shuffleArray } from "@/lib/arrayUtils";
 import { logger } from "@/lib/logger";
 import { type Song,convertJioSaavnSong } from "@/lib/musicData";
 import { parseApiSong } from "@/lib/searchRepository";
-import { fetchJson,withTimeout } from "@/utils/asyncUtils";
+import { fetchJsonStrict } from "@/utils/asyncUtils";
 import { unescapeHtml } from "@/utils/stringUtils";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const QUICK_PICKS_CACHE_KEY = "@mavrixfy_quick_picks_cache_v2";
+const QUICK_PICKS_CACHE_KEY = "@mavrixfy_quick_picks_cache_v3";
 const QUICK_PICKS_CACHE_TTL_MS = 25 * 60 * 1000; // 25 minutes fresh rotation
-const CURRENT_YEAR = new Date().getFullYear();
 
 export interface QuickPicksPool {
   trending: Song[];
@@ -76,10 +75,9 @@ async function fetchSongsByQuery(
       `query=${encodeURIComponent(query)}`,
       `limit=${limit}`,
       "page=1",
-      `_t=${Date.now()}`,
     ];
     const url = `${buildAppApiUrl("/search/songs")}?${params.join("&")}`;
-    const payload = await withTimeout(fetchJson<any>(url, signal), 5500);
+    const payload = await fetchJsonStrict<any>(url, signal, 5500);
 
     const candidates = [
       payload?.data?.results,
@@ -114,7 +112,7 @@ async function fetchSongsByQuery(
  * Extracts songs from top editorially curated playlists from Home categories.
  */
 async function extractPlaylistSongs(
-  category: HomeJioSaavnCategoryData | undefined,
+  category: CatalogCategoryData | undefined,
   maxPlaylists = 2
 ): Promise<Song[]> {
   if (!category || !Array.isArray(category.results) || category.results.length === 0) {
@@ -125,10 +123,10 @@ async function extractPlaylistSongs(
   const songs: Song[] = [];
 
   await Promise.allSettled(
-    targetPlaylists.map(async (pl) => {
+    targetPlaylists.map(async (pl: { id?: string }) => {
       if (!pl?.id) return;
       try {
-        const details = await getJioSaavnPlaylistDetails(pl.id, { preferCache: true });
+        const details = await getCatalogPlaylistDetails(pl.id, { preferCache: true });
         if (details?.songs && Array.isArray(details.songs)) {
           for (const rawSong of details.songs) {
             const converted = convertJioSaavnSong(rawSong);
@@ -157,7 +155,7 @@ export async function clearQuickPicksCache(): Promise<void> {
  */
 export async function fetchQuickPicksFeed(options?: {
   forceRefresh?: boolean;
-  categories?: HomeJioSaavnCategoryData[];
+  categories?: CatalogCategoryData[];
   newReleaseSongs?: Song[];
   signal?: AbortSignal;
 }): Promise<QuickPicksPool> {
@@ -210,18 +208,17 @@ export async function fetchQuickPicksFeed(options?: {
     bollywoodPlaylistSongs,
   ] = await Promise.all([
     fetchSongsByQuery("trending hindi songs", 20, signal),
-    fetchSongsByQuery(`latest bollywood hits ${CURRENT_YEAR}`, 20, signal),
-    fetchSongsByQuery(`new hindi songs ${CURRENT_YEAR}`, 20, signal),
+    fetchSongsByQuery(`latest bollywood hits ${new Date().getFullYear()}`, 20, signal),
+    fetchSongsByQuery(`new hindi songs ${new Date().getFullYear()}`, 20, signal),
     trendingCat ? extractPlaylistSongs(trendingCat, 1) : Promise.resolve([]),
     bollywoodCat ? extractPlaylistSongs(bollywoodCat, 1) : Promise.resolve([]),
   ]);
 
   // 4. Deduplicate and bucketize songs
-  const seenCanonical = new Set<string>();
-  const seenIds = new Set<string>();
-
   const filterUnique = (songList: Song[], maxCount: number): Song[] => {
     const list: Song[] = [];
+    const seenCanonical = new Set<string>();
+    const seenIds = new Set<string>();
     for (const song of songList) {
       if (list.length >= maxCount) break;
       if (!song?.id || seenIds.has(song.id)) continue;
@@ -237,36 +234,46 @@ export async function fetchQuickPicksFeed(options?: {
   };
 
   // Trending pool: combine top trending playlist tracks + direct trending queries
-  const rawTrending = shuffleArray([
+  const rawTrending = [
     ...trendingPlaylistSongs,
     ...trendingSearch,
-  ]);
+  ];
   const trendingPool = filterUnique(rawTrending, 18);
 
   // Bollywood pool: combine bollywood playlist tracks + bollywood hits searches
-  const rawBollywood = shuffleArray([
+  const rawBollywood = [
     ...bollywoodPlaylistSongs,
     ...bollywoodSearch,
-  ]);
+  ];
   const bollywoodPool = filterUnique(rawBollywood, 18);
 
   // Latest pool: combine newReleaseSongs + latest searches
-  const rawLatest = shuffleArray([
+  const rawLatest = [
     ...newReleaseSongs.flatMap((s) => {
       const sanitized = sanitizeSong(s);
       return sanitized ? [sanitized] : [];
     }),
-    ...latestSearch,
-  ]);
+    ...latestSearch.filter(isLikelyNewReleaseSong),
+  ];
   const latestPool = filterUnique(rawLatest, 18);
 
   // 5. Build balanced "All" pool (up to 24 tracks with variety)
   const allCurated: Song[] = [];
+  const allSeen = new Set<string>();
   const maxPerGroup = 8;
+  const appendUnique = (songs: Song[]) => {
+    for (const song of songs) {
+      if (allCurated.length >= 24) break;
+      const key = canonicalSongKey(song.title);
+      if (allSeen.has(key)) continue;
+      allSeen.add(key);
+      allCurated.push(song);
+    }
+  };
 
-  allCurated.push(...trendingPool.slice(0, maxPerGroup));
-  allCurated.push(...bollywoodPool.slice(0, maxPerGroup));
-  allCurated.push(...latestPool.slice(0, maxPerGroup));
+  appendUnique(trendingPool.slice(0, maxPerGroup));
+  appendUnique(bollywoodPool.slice(0, maxPerGroup));
+  appendUnique(latestPool.slice(0, maxPerGroup));
 
   // If still less than 24, fill from remaining items in the pools
   if (allCurated.length < 24) {
@@ -275,21 +282,15 @@ export async function fetchQuickPicksFeed(options?: {
       ...bollywoodPool.slice(maxPerGroup),
       ...latestPool.slice(maxPerGroup),
     ];
-    for (const s of remaining) {
-      if (allCurated.length >= 24) break;
-      if (!allCurated.some((item) => item.id === s.id)) {
-        allCurated.push(s);
-      }
-    }
+    appendUnique(remaining);
   }
 
-  // Shuffle "All" so the display order is fresh and diverse
-  const finalAll = shuffleArray(allCurated).slice(0, 24);
+  const finalAll = allCurated.slice(0, 24);
 
   const pool: QuickPicksPool = {
     trending: trendingPool.length > 0 ? trendingPool : finalAll,
     bollywood: bollywoodPool.length > 0 ? bollywoodPool : finalAll,
-    latest: latestPool.length > 0 ? latestPool : finalAll,
+    latest: latestPool,
     all: finalAll,
   };
 
@@ -318,16 +319,20 @@ export function getQuickPicksForCategory(
 
   const cat = (selectedCategory || "All").trim();
 
-  if (cat === "Trending" && pool.trending.length >= 6) {
-    return [...pool.trending.slice(0, 16), ...pool.all].slice(0, 24);
+  if (cat === "Trending") {
+    return pool.trending;
   }
 
-  if (cat === "Bollywood" && pool.bollywood.length >= 6) {
-    return [...pool.bollywood.slice(0, 16), ...pool.all].slice(0, 24);
+  if (cat === "Bollywood") {
+    return pool.bollywood;
   }
 
-  if ((cat === "New Releases" || cat === "Charts") && pool.latest.length >= 6) {
-    return [...pool.latest.slice(0, 16), ...pool.all].slice(0, 24);
+  if (cat === "New Releases") {
+    return pool.latest;
+  }
+
+  if (cat === "Charts") {
+    return pool.trending;
   }
 
   if (cat === "Party Mix" || cat === "Festive") {

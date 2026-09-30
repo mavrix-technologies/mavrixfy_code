@@ -14,6 +14,8 @@ ScrollView,
 StyleSheet,
 View,
 useWindowDimensions,
+type NativeScrollEvent,
+type NativeSyntheticEvent,
 } from "react-native";
 import { Gesture,GestureDetector } from "react-native-gesture-handler";
 import Reanimated,{
@@ -46,6 +48,14 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
     () => getPlaybackProgressSnapshot().positionMillis,
     [s.backgroundVideoId, s.screenSong?.id]
   );
+
+  const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
+
+  const handlePlayerScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = event.nativeEvent.contentOffset?.y ?? 0;
+    const scrolled = y > 50;
+    setIsHeaderScrolled((prev) => (prev !== scrolled ? scrolled : prev));
+  }, []);
 
   const renderQueueItem = useCallback(
     ({ item, index }: { item: Song; index: number }) => (
@@ -102,6 +112,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
             topInset={s.topInset}
             topBarHeight={s.topBarHeight}
             isShortScreen={s.isShortScreen}
+            headerScrollY={s.headerScrollY}
             headerBgOpacity={s.headerBgOpacity}
             topTitleOpacity={s.topTitleOpacity}
             topTitleTranslateY={s.topTitleTranslateY}
@@ -111,8 +122,13 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
             albumName={s.screenSong.album || "Single"}
             songTitle={s.screenSong.title || ""}
             songArtist={s.screenSong.artist || ""}
+            accentColor={s.artworkPalette.accent}
+            backgroundColor={s.artworkPalette.background}
+            isScrolled={isHeaderScrolled}
+            isPlaying={s.playerIsPlaying}
             onClose={safeGoBack}
             onOptionsPress={s.handleSongOptionsPress}
+            onTogglePlay={s.togglePlay}
           />
 
           <AnimatedPlayerScrollView
@@ -128,7 +144,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
             scrollEventThrottle={16}
             onScroll={Animated.event(
               [{ nativeEvent: { contentOffset: { y: s.headerScrollY } } }],
-              { useNativeDriver: true }
+              { useNativeDriver: true, listener: handlePlayerScroll }
             )}
           >
             <PlayerAmbientBackdrop

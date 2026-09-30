@@ -1,4 +1,6 @@
 import SongRow from "@/components/SongRow";
+import { CircularShareButton } from "@/components/navigation/CircularNavButton";
+import { StandardTopHeader } from "@/components/navigation/StandardTopHeader";
 import Colors from "@/constants/colors";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { getArtistDetails } from "@/data/providers/ArtistProvider";
@@ -7,7 +9,6 @@ import { triggerImpact } from "@/lib/haptics";
 import { setLastMix } from "@/lib/lastMix";
 import { convertJioSaavnSong,Song } from "@/lib/musicData";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
-import { safeGoBack } from "@/utils/navigation";
 import { shareArtistMix } from "@/utils/shareUtils";
 import { pickFirst } from "@/utils/stringUtils";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,7 +18,6 @@ import { useCallback,useEffect,useMemo,useState } from "react";
 import {
 FlatList,
 Platform,
-Pressable,
 StyleSheet,
 Text,
 View,
@@ -219,28 +219,17 @@ export function ArtistMixScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
-      {/* Top Navigation Bar */}
-      <View style={styles.header}>
-        <Pressable
-          onPress={safeGoBack}
-          hitSlop={12}
-          style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
-        </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-        <Pressable
-          onPress={handleShare}
-          hitSlop={12}
-          style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Share artist mix"
-        >
-          <Ionicons name="share-outline" size={20} color="#FFFFFF" />
-        </Pressable>
-      </View>
+      {/* Unified Top Navigation Bar */}
+      <StandardTopHeader
+        title={title}
+        topInset={0}
+        rightElement={
+          <CircularShareButton
+            onPress={handleShare}
+            accessibilityLabel="Share artist mix"
+          />
+        }
+      />
 
       {loading ? (
         <ArtistMixGettingReady
@@ -288,32 +277,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
 
-  header: {
-    height: 52,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-  },
-  backBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backBtnPressed: {
-    opacity: 0.7,
-  },
-  headerTitle: {
-    flex: 1,
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontFamily: "Inter_700Bold",
-    textAlign: "center",
-    paddingHorizontal: 8,
-  },
+
+
 
   empty: {
     alignItems: "center",

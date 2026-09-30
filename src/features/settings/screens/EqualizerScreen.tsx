@@ -4,8 +4,6 @@ import { getSettings, saveSettings, type AppSettings } from "@/lib/storage";
 import {
   applyEqualizerBands,
   applyEqualizerEnabled,
-  applySurroundSoundEnabled,
-  applySurroundStrength,
   checkSystemEqualizerAvailable,
   getAudioEffects,
   syncEqualizerWithNative,
@@ -123,7 +121,6 @@ export function EqualizerScreen() {
   const [effectsError, setEffectsError] = useState<string | null>(null);
   const syncedSessionRef = useRef("");
   const equalizerReady = Boolean(effectsState?.sessionId && effectsState.equalizerAvailable && effectsState.equalizerControl !== false);
-  const surroundReady = Boolean(effectsState?.sessionId && effectsState.surroundAvailable && effectsState.surroundControl !== false && effectsState.surroundSupported !== false);
 
   const reportEffectError = useCallback((error: unknown) => {
     const message = error instanceof Error ? error.message : "The audio effect could not be applied.";
@@ -192,7 +189,6 @@ export function EqualizerScreen() {
 
   const enabled = Boolean(settings?.equalizerEnabled);
   const activePresetId = useMemo(() => detectMatchingPreset(bands), [bands]);
-  const surroundEnabled = Boolean(settings?.surroundSoundEnabled);
 
   const handleToggle = useCallback(
     async (newVal: boolean) => {
@@ -213,29 +209,6 @@ export function EqualizerScreen() {
       void saveSettings({ equalizerEnabled: newVal });
     },
     [equalizerReady, reportEffectError]
-  );
-
-  const handleToggleSurround = useCallback(
-    async (newVal: boolean) => {
-      if (!newVal && !surroundReady) {
-        setSettings((prev) => prev ? { ...prev, surroundSoundEnabled: false } : prev);
-        void saveSettings({ surroundSoundEnabled: false });
-        return;
-      }
-      if (!surroundReady) return;
-      void triggerImpact(ImpactFeedbackStyle.Light);
-      const targetStrength = 350;
-      try {
-        if (newVal && effectsState?.strengthSupported) await applySurroundStrength(targetStrength);
-        await applySurroundSoundEnabled(newVal);
-      } catch (error) {
-        reportEffectError(error);
-        return;
-      }
-      setSettings((prev) => (prev ? { ...prev, surroundSoundEnabled: newVal, surroundStrength: targetStrength } : prev));
-      void saveSettings({ surroundSoundEnabled: newVal, surroundStrength: targetStrength });
-    },
-    [effectsState, reportEffectError, surroundReady]
   );
 
   const handleSelectPreset = useCallback(async (preset: EqualizerPreset) => {
@@ -274,7 +247,6 @@ export function EqualizerScreen() {
 
     try {
       await applyEqualizerBands(flatBands);
-      if (surroundReady) await applySurroundSoundEnabled(false);
     } catch (error) {
       reportEffectError(error);
       return;
@@ -285,15 +257,13 @@ export function EqualizerScreen() {
         ? {
             ...prev,
             equalizer: flatBands,
-            surroundSoundEnabled: false,
           }
         : prev
     );
     void saveSettings({
       equalizer: flatBands,
-      surroundSoundEnabled: false,
     });
-  }, [equalizerReady, reportEffectError, surroundReady]);
+  }, [equalizerReady, reportEffectError]);
 
   const onLayoutGraph = useCallback((e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
@@ -356,6 +326,7 @@ export function EqualizerScreen() {
 
       const bandKey = EQUALIZER_BANDS[closestIdx].key;
       const updated = { ...bandsRef.current, [bandKey]: targetDb };
+      bandsRef.current = updated;
 
       setSettings((prev) =>
         prev ? { ...prev, equalizer: updated, equalizerEnabled: true } : prev
@@ -381,6 +352,7 @@ export function EqualizerScreen() {
           void triggerImpact(ImpactFeedbackStyle.Light);
         }
         const updated = { ...bandsRef.current, [bandKey]: targetDb };
+        bandsRef.current = updated;
         setSettings((prev) =>
           prev ? { ...prev, equalizer: updated, equalizerEnabled: true } : prev
         );
@@ -464,9 +436,9 @@ export function EqualizerScreen() {
             />
 
             {/* Subtle vertical grid lines behind each frequency */}
-            {points.map((pt, idx) => (
+            {points.map((pt) => (
               <Line
-                key={`grid-${idx}`}
+                key={`grid-${pt.key}`}
                 x1={pt.x}
                 y1={PAD_TOP - 6}
                 x2={pt.x}
@@ -495,7 +467,7 @@ export function EqualizerScreen() {
             {points.map((pt, idx) => {
               const isSelectedNode = activeBandIdx === idx;
               return (
-                <React.Fragment key={`node-group-${idx}`}>
+                <React.Fragment key={`node-group-${pt.key}`}>
                   {isSelectedNode && (
                     <Circle
                       cx={pt.x}
@@ -521,7 +493,7 @@ export function EqualizerScreen() {
           <View style={styles.frequencyRow} pointerEvents="none">
             {points.map((pt, idx) => (
               <Text
-                key={`freq-${idx}`}
+                key={`freq-${pt.key}`}
                 style={[
                   styles.freqLabel,
                   {
@@ -557,25 +529,6 @@ export function EqualizerScreen() {
             </Text>
           )}
 
-          {/* Stereo panning through the shared audio graph */}
-          <View style={styles.switchRow}>
-            <View style={styles.switchLabelContainer}>
-              <View style={styles.switchTitleWithIcon}>
-                <Ionicons name="headset-outline" size={16} color={Colors.primary} style={{ marginRight: 6 }} />
-                <Text style={styles.switchLabel}>Spatial Panning</Text>
-              </View>
-              <Text style={styles.switchSublabel}>
-                {surroundReady ? "Moves sound gently between left and right; best with headphones" : "Audio engine is starting"}
-              </Text>
-            </View>
-            <Switch
-              value={surroundEnabled}
-              onValueChange={handleToggleSurround}
-              disabled={!surroundReady && !surroundEnabled}
-              trackColor={{ false: "#3E3E3E", true: Colors.primary }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
         </View>
 
         {/* ── Clean Vertical Presets List (Official Spotify Style) ── */}
@@ -712,10 +665,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 20,
     paddingVertical: 14,
-  },
-  switchLabelContainer: {
-    flex: 1,
-    marginRight: 16,
   },
   switchTitleWithIcon: {
     flexDirection: "row",

@@ -236,37 +236,7 @@ export const styles = StyleSheet.create({
     justifyContent: "space-between",
     zIndex: 90,
   },
-  iosCircularNavBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(0, 0, 0, 0.32)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255, 255, 255, 0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  iosCapsuleNavGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(0, 0, 0, 0.32)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255, 255, 255, 0.18)",
-    paddingHorizontal: 2,
-  },
-  iosCapsuleBtn: {
-    width: 36,
-    height: 38,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  iosCapsuleDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 18,
-    backgroundColor: "rgba(255, 255, 255, 0.22)",
-  },
+
 
   // ── Sticky Header ──
   stickyHeader: {

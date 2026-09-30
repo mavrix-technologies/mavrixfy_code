@@ -12,6 +12,7 @@ import { accountStorageKey,getAccountScope } from "@/lib/accountScope";
  */
 
 import { logger } from "@/lib/logger";
+import { getSettings } from "@/lib/storage";
 import {
 DEFAULT_DOWNLOAD_PREFERENCES,
 DownloadItem,
@@ -174,8 +175,14 @@ export async function patchDownload(
 export async function loadDownloadPreferences(): Promise<DownloadPreferences> {
   try {
     const raw = await AsyncStorage.getItem(KEY_PREFS);
-    if (!raw) return { ...DEFAULT_DOWNLOAD_PREFERENCES };
-    return { ...DEFAULT_DOWNLOAD_PREFERENCES, ...(JSON.parse(raw) as Partial<DownloadPreferences>) };
+    const stored = raw ? JSON.parse(raw) as Partial<DownloadPreferences> : {};
+    const settings = await getSettings();
+    return {
+      ...DEFAULT_DOWNLOAD_PREFERENCES,
+      ...stored,
+      quality: settings.downloadQuality,
+      wifiOnly: settings.downloadWifiOnly,
+    };
   } catch {
     return { ...DEFAULT_DOWNLOAD_PREFERENCES };
   }

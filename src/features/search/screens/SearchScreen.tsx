@@ -62,6 +62,8 @@ function SearchScreenView() {
     browseCategories,
     resultFilter,
     searchLoading,
+    searchError,
+    retrySearch,
     hasResults,
     searchDisplayQuery,
     resultDataKey,
@@ -254,6 +256,8 @@ function SearchScreenView() {
           topInset={topInset}
           resultFilter={resultFilter}
           searchLoading={searchLoading}
+          searchError={searchError}
+          onRetry={retrySearch}
           hasResults={hasResults}
           searchDisplayQuery={searchDisplayQuery}
           resultDataKey={resultDataKey}

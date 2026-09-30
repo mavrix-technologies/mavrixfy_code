@@ -1,9 +1,9 @@
 import { searchCatalog } from "@/lib/catalogService";
-import { Song,type JioSaavnImage } from "@/lib/musicData";
+import { getPlayableRemoteAudioUrl,Song,type JioSaavnImage } from "@/lib/musicData";
 import { deduplicateSongs,parseStructuredQuery,rankSongs } from "@/lib/searchUtils";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 
-import { fetchJson } from "@/utils/asyncUtils";
+import { fetchJson,fetchJsonStrict } from "@/utils/asyncUtils";
 export type ResultFilter = "all" | "songs" | "albums" | "artists" | "playlists";
 
 export interface PlaylistResult {
@@ -105,26 +105,11 @@ export async function fetchYouTubeSuggestions(query: string, signal?: AbortSigna
 }
 
 export function parseApiSong(s: any): Song | null {
-  if (!s?.id && !s?.name && !s?.title) return null;
+  if (!s?.id) return null;
 
-  const songId = String(s.id || `song_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+  const songId = String(s.id);
 
-  let audioUrl = "";
-  if (typeof s.downloadUrl === "string") {
-    audioUrl = s.downloadUrl;
-  } else if (Array.isArray(s.downloadUrl)) {
-    const dl = s.downloadUrl;
-    audioUrl =
-      dl.find((d: any) => d.quality === "320kbps")?.url ||
-      dl.find((d: any) => d.quality === "320kbps")?.link ||
-      dl.find((d: any) => d.quality === "160kbps")?.url ||
-      dl.find((d: any) => d.quality === "160kbps")?.link ||
-      dl[dl.length - 1]?.url ||
-      dl[dl.length - 1]?.link ||
-      "";
-  } else if (s.url || s.streamUrl || s.audioUrl) {
-    audioUrl = s.url || s.streamUrl || s.audioUrl;
-  }
+  const audioUrl = getPlayableRemoteAudioUrl(s.downloadUrl, s.audioUrl, s.streamUrl, s.url);
 
   let coverUrl = "";
   if (typeof s.image === "string") {
@@ -268,6 +253,15 @@ const KNOWN_QUERY_SONG_IDS: Record<string, string[]> = {
 };
 const KNOWN_QUERY_KEYS = Object.keys(KNOWN_QUERY_SONG_IDS);
 
+async function fetchSearchSources(requests: Promise<any>[]): Promise<any[]> {
+  const settled = await Promise.allSettled(requests);
+  const catalogSongs = settled[2].status === "fulfilled" ? settled[2].value as Song[] : [];
+  if (settled[0].status === "rejected" && settled[1].status === "rejected" && catalogSongs.length === 0) {
+    throw new Error("Search is unavailable. Please try again.");
+  }
+  return settled.map((result) => result.status === "fulfilled" ? result.value : null);
+}
+
 /**
  * Unified Repository Search
  */
@@ -310,18 +304,18 @@ export async function searchRepository(
   // 2. Fetch API endpoints depending on filter
   if (filter === "all") {
     const fetchPromises: Promise<any>[] = [
-      fetchJson<any>(`${apiUrl}/api/search?query=${encodeURIComponent(searchTerm)}`, signal),
-      fetchJson<any>(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=35`, signal),
+      fetchJsonStrict<any>(`${apiUrl}/api/search?query=${encodeURIComponent(searchTerm)}`, signal),
+      fetchJsonStrict<any>(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=35`, signal),
       catalogPromise,
     ];
 
     if (knownSongIds.length > 0) {
       fetchPromises.push(
-        fetchJson<any>(`${apiUrl}/api/songs?id=${encodeURIComponent(knownSongIds.join(","))}`, signal)
+        fetchJsonStrict<any>(`${apiUrl}/api/songs?id=${encodeURIComponent(knownSongIds.join(","))}`, signal)
       );
     }
 
-    const [globalRes, songsRes, catalogSongs, knownRes] = await Promise.all(fetchPromises);
+    const [globalRes, songsRes, catalogSongs, knownRes] = await fetchSearchSources(fetchPromises);
 
     const knownItems = Array.isArray(knownRes?.data) ? knownRes.data : [];
     const rawSongs = [
@@ -348,7 +342,7 @@ export async function searchRepository(
     let extraSongs: Song[] = [];
     if (topQueryId && !topQueryInResults) {
       try {
-        const singleRes = await fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}`, signal);
+        const singleRes = await fetchJsonStrict<any>(`${apiUrl}/api/songs/${topQueryId}`, signal);
         for (const item of singleRes?.data || []) {
           const parsed = parseApiSong(item);
           if (parsed) extraSongs.push(parsed);
@@ -386,18 +380,18 @@ export async function searchRepository(
 
   if (filter === "songs") {
     const fetchPromises: Promise<any>[] = [
-      fetchJson<any>(`${apiUrl}/api/search?query=${encodeURIComponent(searchTerm)}`, signal),
-      fetchJson<any>(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=35`, signal),
+      fetchJsonStrict<any>(`${apiUrl}/api/search?query=${encodeURIComponent(searchTerm)}`, signal),
+      fetchJsonStrict<any>(`${apiUrl}/api/search/songs?query=${encodeURIComponent(searchTerm)}&limit=35`, signal),
       catalogPromise,
     ];
 
     if (knownSongIds.length > 0) {
       fetchPromises.push(
-        fetchJson<any>(`${apiUrl}/api/songs?id=${encodeURIComponent(knownSongIds.join(","))}`, signal)
+        fetchJsonStrict<any>(`${apiUrl}/api/songs?id=${encodeURIComponent(knownSongIds.join(","))}`, signal)
       );
     }
 
-    const [globalRes, songsRes, catalogSongs, knownRes] = await Promise.all(fetchPromises);
+    const [globalRes, songsRes, catalogSongs, knownRes] = await fetchSearchSources(fetchPromises);
 
     const knownItems = Array.isArray(knownRes?.data) ? knownRes.data : [];
     const rawSongs = [
@@ -422,7 +416,7 @@ export async function searchRepository(
     let extraSongs: Song[] = [];
     if (topQueryId && !topQueryInResults) {
       try {
-        const singleRes = await fetchJson<any>(`${apiUrl}/api/songs/${topQueryId}`, signal);
+        const singleRes = await fetchJsonStrict<any>(`${apiUrl}/api/songs/${topQueryId}`, signal);
         for (const item of singleRes?.data || []) {
           const parsed = parseApiSong(item);
           if (parsed) extraSongs.push(parsed);
@@ -444,7 +438,7 @@ export async function searchRepository(
   }
 
   if (filter === "albums") {
-    const albumsData = await fetchJson<any>(
+    const albumsData = await fetchJsonStrict<any>(
       `${apiUrl}/api/search/albums?query=${encodeURIComponent(searchTerm)}&limit=20`,
       signal
     );
@@ -458,7 +452,7 @@ export async function searchRepository(
   }
 
   if (filter === "artists") {
-    const artistsData = await fetchJson<any>(
+    const artistsData = await fetchJsonStrict<any>(
       `${apiUrl}/api/search/artists?query=${encodeURIComponent(searchTerm)}&limit=20&page=1`,
       signal
     );
@@ -472,7 +466,7 @@ export async function searchRepository(
   }
 
   if (filter === "playlists") {
-    const playlistsData = await fetchJson<any>(
+    const playlistsData = await fetchJsonStrict<any>(
       `${apiUrl}/api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=20`,
       signal
     );

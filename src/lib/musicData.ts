@@ -173,6 +173,20 @@ export function getBestAudioUrl(downloadUrls: unknown): string {
   return sorted[0]?.url || "";
 }
 
+/** Pick a remote stream, excluding provider page links returned as song URLs. */
+export function getPlayableRemoteAudioUrl(...sources: unknown[]): string {
+  for (const source of sources) {
+    const candidate = getBestAudioUrl(source);
+    try {
+      const parsed = new URL(candidate);
+      if (!["http:", "https:"].includes(parsed.protocol)) continue;
+      if (/^(?:www\.)?(?:gaana\.com|jiosaavn\.com|youtube\.com|youtu\.be|spotify\.com)$/.test(parsed.hostname.toLowerCase())) continue;
+      return candidate;
+    } catch { /* Try the next source. */ }
+  }
+  return "";
+}
+
 export type StreamingQuality = "auto" | "low" | "medium" | "high";
 
 export interface ResolvedAudioStream {
@@ -270,7 +284,7 @@ export function convertJioSaavnSong(song: JioSaavnSong): Song {
     duration: toDurationSeconds(song.duration),
     coverUrl: getBestImageUrl(song.image),
     genre: song.language || "",
-    audioUrl: getBestAudioUrl(song.downloadUrl || song.audioUrl || song.url),
+    audioUrl: getPlayableRemoteAudioUrl(song.downloadUrl, song.audioUrl, song.url),
     downloadUrl: song.downloadUrl || song.audioUrl || song.url,
     year: song.year,
     language: song.language,

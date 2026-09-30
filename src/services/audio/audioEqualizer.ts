@@ -1,6 +1,6 @@
 import { Linking, Platform } from "react-native";
 import { isRunningInExpoGo } from "expo";
-import { getStandardAudioEffects, updateStandardAudioEffect } from "./StandardAudioPlayer";
+import { getStandardAudioEffects, setStandardAudioBands, updateStandardAudioEffect } from "./StandardAudioPlayer";
 
 export interface AudioEffectsState {
   sessionId: number;
@@ -37,7 +37,7 @@ function getModule(): AudioEffectsModule {
     throw new Error("Audio effects require an Android or iOS device.");
   }
   if (isRunningInExpoGo()) {
-    throw new Error("Audio effects require a native app build. Expo Go cannot load this module.");
+    throw new Error("Equalizer needs an installed Mavrixfy development or release build. Expo Go does not include its native audio engine.");
   }
   return {
     getAudioEffects: async () => getStandardAudioEffects(),
@@ -81,6 +81,15 @@ function findClosestDb(bands: Record<string, number>, targetFreqHz: number): num
   return bands[closest.key] ?? 0;
 }
 
+function levelsForBands(bands: Record<string, number>, state: AudioEffectsState): number[] {
+  const minLvl = typeof state.minLevel === "number" ? state.minLevel : -1200;
+  const maxLvl = typeof state.maxLevel === "number" ? state.maxLevel : 1200;
+  return [...(state.bands ?? [])].sort((left, right) => left.id - right.id).map((band) => {
+    const db = findClosestDb(bands, band.frequency);
+    return Math.max(minLvl, Math.min(maxLvl, Math.round(db * 100))) / 100;
+  });
+}
+
 export async function applyEqualizerEnabled(enabled: boolean): Promise<void> {
   const state = await getAudioEffects();
   if (!state.equalizerAvailable || state.equalizerControl === false) {
@@ -97,13 +106,7 @@ export async function applyEqualizerBands(bands: Record<string, number>): Promis
   if (!state.equalizerAvailable || state.equalizerControl === false || !state.bands?.length) {
     throw new Error(state.equalizerError || "The equalizer bands are unavailable on this device.");
   }
-  const minLvl = typeof state.minLevel === "number" ? state.minLevel : -1200;
-  const maxLvl = typeof state.maxLevel === "number" ? state.maxLevel : 1200;
-  for (const b of state.bands) {
-    const db = findClosestDb(bands, b.frequency);
-    const millibels = Math.max(minLvl, Math.min(maxLvl, Math.round(db * 100)));
-    await updateAudioEffect(state, "band", millibels, b.id);
-  }
+  setStandardAudioBands(levelsForBands(bands, state));
 }
 
 export async function applySurroundSoundEnabled(enabled: boolean): Promise<void> {
@@ -148,17 +151,11 @@ export async function syncEqualizerWithNative(customSettings?: {
 
     const state = await getAudioEffects();
     if (state.sessionId > 0 && state.equalizerAvailable) {
+      if (settings.equalizer && Array.isArray(state.bands)) {
+        setStandardAudioBands(levelsForBands(settings.equalizer, state));
+      }
       if (typeof settings.equalizerEnabled === "boolean") {
         await updateAudioEffect(state, "equalizer", settings.equalizerEnabled ? 1 : 0);
-      }
-      if (settings.equalizer && Array.isArray(state.bands)) {
-        const minLvl = typeof state.minLevel === "number" ? state.minLevel : -1200;
-        const maxLvl = typeof state.maxLevel === "number" ? state.maxLevel : 1200;
-        for (const b of state.bands) {
-          const db = findClosestDb(settings.equalizer, b.frequency);
-          const millibels = Math.max(minLvl, Math.min(maxLvl, Math.round(db * 100)));
-          await updateAudioEffect(state, "band", millibels, b.id);
-        }
       }
     }
     if (state.sessionId > 0 && state.surroundAvailable) {

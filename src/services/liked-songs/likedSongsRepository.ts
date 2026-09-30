@@ -1,3 +1,4 @@
+import { getAccountScope } from "@/lib/accountScope";
 import { db } from "@/lib/firebase";
 import { addLikedSongToFirestore,removeLikedSongFromFirestore } from "@/lib/firestore";
 import { logger } from "@/lib/logger";
@@ -183,6 +184,7 @@ export async function toggleLikeSong(userId: string | null | undefined, song: So
   const songId = song.id;
   const isCurrentlyLiked = useLikedSongsStore.getState().ids.has(songId);
   const willBeLiked = !isCurrentlyLiked;
+  const previousSong = useLikedSongsStore.getState().songs.find((item) => item.id === songId);
 
   // 1. Instant local UI update
   if (willBeLiked) {
@@ -198,14 +200,18 @@ export async function toggleLikeSong(userId: string | null | undefined, song: So
   // 3. Background Firestore sync
   if (userId) {
     try {
-      if (willBeLiked) {
-        await addLikedSongToFirestore(userId, song);
-      } else {
-        await removeLikedSongFromFirestore(userId, songId);
-      }
+      const saved = willBeLiked
+        ? await addLikedSongToFirestore(userId, song)
+        : await removeLikedSongFromFirestore(userId, songId);
+      if (!saved) throw new Error("Could not sync liked song");
     } catch (error) {
       logger.error("[LikedSongsRepository] Background Firestore sync failed:", error);
-      // Optionally rollback if needed, but onSnapshot will reconcile naturally
+      if (getAccountScope().accountId === userId && useLikedSongsStore.getState().ids.has(songId) === willBeLiked) {
+        if (isCurrentlyLiked && previousSong) useLikedSongsStore.getState().addSongOptimistic(previousSong);
+        else useLikedSongsStore.getState().removeSongOptimistic(songId);
+        void persistCachedLikedSongs(userId, useLikedSongsStore.getState().songs);
+      }
+      return isCurrentlyLiked;
     }
   }
 

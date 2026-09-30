@@ -10,6 +10,7 @@ export interface SearchScreenState {
   searchDisplayQuery: string;
   resultFilter: ResultFilter;
   searchLoading: boolean;
+  searchError: boolean;
   isSearchMode: boolean;
   suggestions: string[];
   suggestionsOpen: boolean;
@@ -20,6 +21,7 @@ export type SearchScreenAction =
   | { type: "SET_SEARCH_LOADING"; loading: boolean }
   | { type: "SEARCH_SUCCESS"; results: SearchResults; displayQuery: string }
   | { type: "SEARCH_RESET"; displayQuery: string }
+  | { type: "SEARCH_FAILED"; displayQuery: string }
   | { type: "SET_SUGGESTIONS"; suggestions: string[] }
   | { type: "SET_SUGGESTIONS_OPEN"; open: boolean }
   | { type: "CLOSE_SUGGESTIONS" }
@@ -56,6 +58,7 @@ export function searchScreenReducer(
       return {
         ...state,
         searchLoading: action.loading,
+        searchError: false,
       };
     case "SEARCH_SUCCESS":
       return {
@@ -63,6 +66,7 @@ export function searchScreenReducer(
         results: action.results,
         searchDisplayQuery: action.displayQuery,
         searchLoading: false,
+        searchError: false,
       };
     case "SEARCH_RESET":
       return {
@@ -70,6 +74,15 @@ export function searchScreenReducer(
         results: EMPTY_RESULTS,
         searchDisplayQuery: action.displayQuery,
         searchLoading: false,
+        searchError: false,
+      };
+    case "SEARCH_FAILED":
+      return {
+        ...state,
+        results: EMPTY_RESULTS,
+        searchDisplayQuery: action.displayQuery,
+        searchLoading: false,
+        searchError: true,
       };
     case "SET_SUGGESTIONS":
       return {
@@ -123,6 +136,7 @@ export function searchScreenReducer(
         results: EMPTY_RESULTS,
         searchDisplayQuery: "",
         searchLoading: false,
+        searchError: false,
       };
     case "CANCEL_SEARCH_MODE":
       return {
@@ -134,6 +148,7 @@ export function searchScreenReducer(
         results: EMPTY_RESULTS,
         searchDisplayQuery: "",
         searchLoading: false,
+        searchError: false,
       };
     default:
       return state;
@@ -146,6 +161,7 @@ export const createInitialSearchState = (routeSearchQuery: string): SearchScreen
   searchDisplayQuery: "",
   resultFilter: "all",
   searchLoading: false,
+  searchError: false,
   isSearchMode: routeSearchQuery.length > 0,
   suggestions: [],
   suggestionsOpen: false,

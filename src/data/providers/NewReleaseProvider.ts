@@ -3,40 +3,39 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAppApiUrl } from "@/lib/api-config";
 import { sortedCopy } from "@/lib/arrayUtils";
 import { getBestAudioUrl,getBestImageUrl,type JioSaavnImage,type Song } from "@/lib/musicData";
-import { fetchJson } from "@/utils/asyncUtils";
+import { fetchJsonStrict } from "@/utils/asyncUtils";
+import { getCurrentYear, isCompilationAlbum, isLikelyNewReleaseSong } from "./homeFreshness";
 
-const DAILY_NEW_RELEASE_CACHE_KEY = "@mavrixfy_daily_new_release_songs_v6"; // bumped: official labels & trending expansion
-const CURRENT_YEAR = new Date().getFullYear();
-const PREVIOUS_YEAR = CURRENT_YEAR - 1;
+const DAILY_NEW_RELEASE_CACHE_KEY = "@mavrixfy_daily_new_release_songs_v7";
 const DEFAULT_LIMIT = 24;
 
-const NEW_RELEASE_QUERIES = [
-  `latest bollywood songs ${CURRENT_YEAR}`,
-  `new bollywood songs ${CURRENT_YEAR}`,
-  `trending bollywood songs ${CURRENT_YEAR}`,
-  `new hindi movie songs ${CURRENT_YEAR}`,
-  `latest hindi film songs ${CURRENT_YEAR}`,
-  `trending hindi songs ${CURRENT_YEAR}`,
-  `latest hindi hits ${CURRENT_YEAR}`,
-  `t-series new songs ${CURRENT_YEAR}`,
-  `zee music company new songs ${CURRENT_YEAR}`,
-  `yrf new songs ${CURRENT_YEAR}`,
-  `saregama new songs ${CURRENT_YEAR}`,
-  `sony music india new songs ${CURRENT_YEAR}`,
-  `tips official new songs ${CURRENT_YEAR}`,
-  `bollywood new releases ${CURRENT_YEAR}`,
-  `new hindi songs ${CURRENT_YEAR}`,
+const getNewReleaseQueries = (year: number) => [
+  `latest bollywood songs ${year}`,
+  `new bollywood songs ${year}`,
+  `trending bollywood songs ${year}`,
+  `new hindi movie songs ${year}`,
+  `latest hindi film songs ${year}`,
+  `trending hindi songs ${year}`,
+  `latest hindi hits ${year}`,
+  `t-series new songs ${year}`,
+  `zee music company new songs ${year}`,
+  `yrf new songs ${year}`,
+  `saregama new songs ${year}`,
+  `sony music india new songs ${year}`,
+  `tips official new songs ${year}`,
+  `bollywood new releases ${year}`,
+  `new hindi songs ${year}`,
 ] as const;
 
-const NEW_RELEASE_ALBUM_QUERIES = [
-  `new hindi movie songs ${CURRENT_YEAR}`,
-  `latest bollywood songs ${CURRENT_YEAR}`,
-  `new bollywood songs ${CURRENT_YEAR}`,
-  `t-series new songs ${CURRENT_YEAR}`,
-  `zee music new songs ${CURRENT_YEAR}`,
-  `yrf new songs ${CURRENT_YEAR}`,
-  `sony music hindi ${CURRENT_YEAR}`,
-  `saregama hindi ${CURRENT_YEAR}`,
+const getNewReleaseAlbumQueries = (year: number) => [
+  `new hindi movie songs ${year}`,
+  `latest bollywood songs ${year}`,
+  `new bollywood songs ${year}`,
+  `t-series new songs ${year}`,
+  `zee music new songs ${year}`,
+  `yrf new songs ${year}`,
+  `sony music hindi ${year}`,
+  `saregama hindi ${year}`,
 ] as const;
 
 const OFFICIAL_LABEL_TERMS = [
@@ -66,8 +65,6 @@ const OFFICIAL_LABEL_TERMS = [
   "svf",
 ] as const;
 
-const COMPILATION_ALBUM_PATTERN =
-  /\b(trending|mix|love songs|wedding|dance|special|hits|playlist|top|best|collection|nonstop|non stop|mashup|jukebox|devotional|bhakti|bhajan|shivratri|romantic|party|workout|chill|viral|reels|classical|learn|practice)\b/i;
 const NON_MOVIE_RELEASE_PATTERN =
   /\b(devotional|bhakti|bhajan|chalisa|hanuman|ram|shri|siya|ayodhya|shivratri|shiv|aarti|mantra|stotra|stuti|laxmi|mahalaxmi|alakh|niranjan|classical|learn|practice|web series|series|season|episode|tv|event song|insta mix|remix|cover|slowed|nightcore|8d|instrumental|karaoke|lofi)\b/i;
 
@@ -211,7 +208,7 @@ function getMovieScore(title: string, album: string): number {
   if (!albumKey || albumKey === titleKey || /^\d{4}$/.test(albumKey)) return 0;
 
   const titleHasMovieSource = /\bfrom\s+["“(]?/i.test(title);
-  if (COMPILATION_ALBUM_PATTERN.test(album) && !titleHasMovieSource) return 0;
+  if (isCompilationAlbum(album) && !titleHasMovieSource) return 0;
 
   const wordCount = albumKey.split(/\s+/).filter(Boolean).length;
   let score = wordCount >= 2 ? 58 : 24;
@@ -228,8 +225,8 @@ function normalizeAlbumCandidate(raw: any, resultRank: number): NewReleaseAlbumC
   if (language && language !== "hindi") return null;
 
   const year = Number.parseInt(cleanText(raw?.year), 10);
-  if (year !== CURRENT_YEAR && year !== PREVIOUS_YEAR) return null;
-  if (COMPILATION_ALBUM_PATTERN.test(name) || NON_MOVIE_RELEASE_PATTERN.test(name)) return null;
+  if (year !== getCurrentYear() && year !== getCurrentYear() - 1) return null;
+  if (isCompilationAlbum(name) || NON_MOVIE_RELEASE_PATTERN.test(name)) return null;
 
   return {
     id,
@@ -298,8 +295,8 @@ function scoreNewReleaseCandidate(candidate: NewReleaseSongCandidate): number {
   const year = Number.parseInt(String(song.year || ""), 10);
   let score = 0;
 
-  if (year === CURRENT_YEAR) score += 520;
-  else if (year === PREVIOUS_YEAR) score += 140;
+  if (year === getCurrentYear()) score += 520;
+  else if (year === getCurrentYear() - 1) score += 140;
   else if (Number.isFinite(year)) score -= 300;
 
   score += candidate.officialScore * 0.8;
@@ -319,11 +316,9 @@ function scoreNewReleaseCandidate(candidate: NewReleaseSongCandidate): number {
 function isCleanNewRelease(candidate: NewReleaseSongCandidate): boolean {
   const song = candidate.song;
   const text = `${song.title} ${song.album} ${song.artist} ${song.genre} ${song.language}`;
-  const year = Number.parseInt(String(song.year || ""), 10);
-  const isFreshYear = year === CURRENT_YEAR || year === PREVIOUS_YEAR;
 
   return (
-    isFreshYear &&
+    isLikelyNewReleaseSong(song) &&
     !NON_MOVIE_RELEASE_PATTERN.test(text)
   );
 }
@@ -403,7 +398,7 @@ async function searchSongs(
     params.push("refresh=1", `ts=${Date.now()}`);
   }
 
-  const payload = await fetchJson(`${buildAppApiUrl("/search/songs")}?${params.join("&")}`, signal);
+  const payload = await fetchJsonStrict<any>(`${buildAppApiUrl("/search/songs")}?${params.join("&")}`, signal, 6500).catch(() => null);
   return unwrapSongResults(payload).flatMap((raw, index) => {
     const song = normalizeNewReleaseCandidate(raw, index);
     return song ? [song] : [];
@@ -425,7 +420,7 @@ async function searchAlbums(
     params.push("refresh=1", `ts=${Date.now()}`);
   }
 
-  const payload = await fetchJson(`${buildAppApiUrl("/search/albums")}?${params.join("&")}`, signal);
+  const payload = await fetchJsonStrict<any>(`${buildAppApiUrl("/search/albums")}?${params.join("&")}`, signal, 6500).catch(() => null);
   return unwrapAlbumResults(payload).flatMap((raw, index) => {
     const album = normalizeAlbumCandidate(raw, index);
     return album ? [album] : [];
@@ -443,7 +438,7 @@ async function fetchAlbumSongs(
     params.push("refresh=1", `ts=${Date.now()}`);
   }
 
-  const payload = await fetchJson(`${buildAppApiUrl("/albums")}?${params.join("&")}`, signal);
+  const payload = await fetchJsonStrict<any>(`${buildAppApiUrl("/albums")}?${params.join("&")}`, signal, 6500).catch(() => null);
   const albumData = payload?.data || {};
   return unwrapSongResults(payload).flatMap((raw, index) => {
     const song = normalizeNewReleaseCandidate(
@@ -468,7 +463,7 @@ async function fetchAlbumNewReleaseSongs(
   signal?: AbortSignal
 ): Promise<NewReleaseSongCandidate[]> {
   // Focus on top 2 album queries on cold boot to avoid socket pool saturation
-  const primaryAlbumQueries = NEW_RELEASE_ALBUM_QUERIES.slice(0, forceRefresh ? 3 : 2);
+  const primaryAlbumQueries = getNewReleaseAlbumQueries(getCurrentYear()).slice(0, forceRefresh ? 3 : 2);
   const albumResults = await Promise.all(
     primaryAlbumQueries.map((query) => searchAlbums(query, 6, forceRefresh, signal))
   );
@@ -503,7 +498,7 @@ export async function getDailyNewReleaseSongs(options?: DailyNewReleaseSongOptio
   }
 
   // Use top 3 high-yielding queries on cold start to get 75+ songs without flooding the network
-  const activeQueries = NEW_RELEASE_QUERIES.slice(0, forceRefresh ? 5 : 3);
+  const activeQueries = getNewReleaseQueries(getCurrentYear()).slice(0, forceRefresh ? 5 : 3);
 
   const [albumSongs, searchSongResults] = await Promise.all([
     fetchAlbumNewReleaseSongs(limit, forceRefresh, signal),

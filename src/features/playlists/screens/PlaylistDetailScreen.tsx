@@ -1,6 +1,13 @@
 import AdMobBanner from "@/components/AdMobBanner";
 import OfflineBanner from "@/components/OfflineBanner";
 import SongRow from "@/components/SongRow";
+import {
+  CapsuleDivider,
+  CapsuleNavButton,
+  CapsuleNavGroup,
+  CircularBackButton,
+  CircularShareButton,
+} from "@/components/navigation/CircularNavButton";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -11,7 +18,6 @@ import * as Animated from "@/lib/nativeAnimated";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { safeGoBack } from "@/utils/navigation";
 import { sharePlaylist } from "@/utils/shareUtils";
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useCallback,useMemo,useRef,useState } from "react";
 import {
@@ -21,6 +27,7 @@ StyleSheet,
 Text,
 View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PlaylistEditModal } from "../components/PlaylistEditModal";
 import { PlaylistHero } from "../components/PlaylistHero";
@@ -292,24 +299,26 @@ function usePlaylistDetailView() {
         ]}
         pointerEvents={isStickyVisible ? "none" : "box-none"}
       >
-        <Pressable onPress={safeGoBack} style={styles.iosCircularNavBtn}>
-          <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
-        </Pressable>
+        <CircularBackButton onPress={safeGoBack} />
 
         {canEdit ? (
-          <View style={styles.iosCapsuleNavGroup}>
-            <Pressable onPress={handleOpenEdit} style={styles.iosCapsuleBtn}>
-              <Ionicons name="pencil" size={16} color="#FFFFFF" />
-            </Pressable>
-            <View style={styles.iosCapsuleDivider} />
-            <Pressable onPress={handleShare} style={styles.iosCapsuleBtn}>
-              <Ionicons name="share-outline" size={17} color="#FFFFFF" />
-            </Pressable>
-          </View>
+          <CapsuleNavGroup>
+            <CapsuleNavButton
+              icon="pencil"
+              iconSize={16}
+              onPress={handleOpenEdit}
+              accessibilityLabel="Edit playlist"
+            />
+            <CapsuleDivider />
+            <CapsuleNavButton
+              icon="share-outline"
+              iconSize={17}
+              onPress={handleShare}
+              accessibilityLabel="Share playlist"
+            />
+          </CapsuleNavGroup>
         ) : (
-          <Pressable onPress={handleShare} style={styles.iosCircularNavBtn}>
-            <Ionicons name="share-outline" size={17} color="#FFFFFF" />
-          </Pressable>
+          <CircularShareButton onPress={handleShare} accessibilityLabel="Share playlist" />
         )}
       </Animated.View>
 
@@ -385,37 +394,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     zIndex: 90,
   },
-  iosCircularNavBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(0, 0, 0, 0.32)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255, 255, 255, 0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  iosCapsuleNavGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(0, 0, 0, 0.32)",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255, 255, 255, 0.18)",
-    paddingHorizontal: 2,
-  },
-  iosCapsuleBtn: {
-    width: 36,
-    height: 38,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  iosCapsuleDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 18,
-    backgroundColor: "rgba(255, 255, 255, 0.22)",
-  },
+
 
   offlineBannerWrap: {
     paddingHorizontal: 16,

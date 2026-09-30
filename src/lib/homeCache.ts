@@ -1,18 +1,15 @@
 import type { ArtistCard } from "@/data/providers/ArtistProvider";
-import type { HomeJioSaavnCategoryData } from "@/data/providers/JioSaavnProvider";
-import type { RecommendationSection } from "@/data/providers/RecommendationProvider";
+import type { CatalogCategoryData } from "@/data/providers/MusicCatalogProvider";
 import { mapFilter } from "@/lib/arrayUtils";
 import { type FirestorePlaylist } from "@/lib/firestore";
 import type { Song } from "@/lib/musicData";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { DeviceEventEmitter } from "react-native";
 
-import type { QuickPicksPool } from "@/data/providers/QuickPicksProvider";
-
 const HOME_PUBLIC_PLAYLISTS_CACHE_KEY = "@mavrixfy_home_public_playlists_v1";
 const HOME_PUBLIC_PLAYLISTS_CACHE_TIME_KEY = "@mavrixfy_home_public_playlists_time_v1";
-const HOME_FEED_CACHE_KEY = "@mavrixfy_home_feed_snapshot_v1";
-const HOME_FEED_CACHE_TIME_KEY = "@mavrixfy_home_feed_snapshot_time_v1";
+const HOME_FEED_CACHE_KEY = "@mavrixfy_home_feed_snapshot_v3";
+const HOME_FEED_CACHE_TIME_KEY = "@mavrixfy_home_feed_snapshot_time_v3";
 const HOME_PUBLIC_PLAYLISTS_TTL_MS = 20 * 60 * 1000;
 const HOME_PUBLIC_PLAYLISTS_MAX_STALE_MS = 12 * 60 * 60 * 1000;
 const HOME_FEED_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -22,12 +19,10 @@ const HOME_FEED_MAX_STALE_MS = 24 * 60 * 60 * 1000;
 export const HOME_CACHE_INVALIDATED_EVENT = "mavrixfy:home-cache-invalidated";
 
 export interface CachedHomeFeedSnapshot {
-  categories: HomeJioSaavnCategoryData[];
+  categories: CatalogCategoryData[];
   publicPlaylists: FirestorePlaylist[];
   featuredArtists: ArtistCard[];
-  newReleaseSongs: Song[];
-  recommendations: RecommendationSection[];
-  quickPicksPool?: QuickPicksPool;
+  quickPickSongs: Song[];
 }
 
 function normalizePublicPlaylist(raw: any): FirestorePlaylist | null {
@@ -115,21 +110,17 @@ function normalizeHomeFeedSnapshot(raw: unknown): CachedHomeFeedSnapshot | null 
   const value = raw as Partial<CachedHomeFeedSnapshot>;
 
   const snapshot: CachedHomeFeedSnapshot = {
-    categories: normalizeArray<HomeJioSaavnCategoryData>(value.categories),
+    categories: normalizeArray<CatalogCategoryData>(value.categories),
     publicPlaylists: normalizePublicPlaylistList(value.publicPlaylists),
     featuredArtists: normalizeArray<ArtistCard>(value.featuredArtists),
-    newReleaseSongs: normalizeArray<Song>(value.newReleaseSongs),
-    recommendations: normalizeArray<RecommendationSection>(value.recommendations),
-    quickPicksPool: value.quickPicksPool && Array.isArray(value.quickPicksPool.all) ? value.quickPicksPool : undefined,
+    quickPickSongs: normalizeArray<Song>(value.quickPickSongs),
   };
 
   const hasAnyContent =
     snapshot.categories.length > 0 ||
     snapshot.publicPlaylists.length > 0 ||
     snapshot.featuredArtists.length > 0 ||
-    snapshot.newReleaseSongs.length > 0 ||
-    snapshot.recommendations.length > 0 ||
-    Boolean(snapshot.quickPicksPool && snapshot.quickPicksPool.all.length > 0);
+    snapshot.quickPickSongs.length > 0;
 
   return hasAnyContent ? snapshot : null;
 }

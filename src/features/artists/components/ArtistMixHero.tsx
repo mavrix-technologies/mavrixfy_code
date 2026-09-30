@@ -13,6 +13,7 @@ export interface ArtistMixHeroProps {
   totalDurationMin: string;
   isPlayingFromMix: boolean;
   isPlaying: boolean;
+  backgroundColor?: string;
   onShuffle: () => void;
   onPlayAll: () => void;
 }
@@ -26,6 +27,7 @@ export const ArtistMixHero = memo(function ArtistMixHero({
   totalDurationMin,
   isPlayingFromMix,
   isPlaying,
+  backgroundColor,
   onShuffle,
   onPlayAll,
 }: ArtistMixHeroProps) {
@@ -38,6 +40,7 @@ export const ArtistMixHero = memo(function ArtistMixHero({
             key={id}
             style={[
               styles.avatarWrap,
+              { borderColor: backgroundColor || Colors.background },
               i > 0 && { marginLeft: -28 },
             ]}
           >

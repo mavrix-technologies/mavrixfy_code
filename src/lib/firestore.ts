@@ -10,6 +10,7 @@ deleteDoc,
 doc,
 getDoc,
 getDocs,
+getDocsFromServer,
 limit,
 orderBy,
 query,
@@ -211,10 +212,11 @@ export async function getPublicPlaylists(maxCount: number = 100): Promise<Firest
         orderBy("updatedAt", "desc"),
         limit(maxCount)
       );
-      querySnapshot = await getDocs(q);
-    } catch {
+      querySnapshot = await getDocsFromServer(q);
+    } catch (error) {
+      if ((error as { code?: string })?.code !== "failed-precondition") throw error;
       const q = query(playlistsRef, where("isPublic", "==", true), limit(maxCount));
-      querySnapshot = await getDocs(q);
+      querySnapshot = await getDocsFromServer(q);
     }
 
     const playlists: FirestorePlaylist[] = [];
@@ -341,7 +343,7 @@ export async function addLikedSongToFirestore(userId: string, song: any): Promis
 
     const docSnap = await getDoc(songDocRef);
     if (docSnap.exists()) {
-      return false; // Return false for duplicates
+      return true; // The requested liked state already exists.
     }
 
     const normalizedTitle = normalizeForDedupe(title);
@@ -401,7 +403,7 @@ export async function removeLikedSongFromFirestore(userId: string, songId: strin
         await deleteDoc(correctRef);
         return true;
       } else {
-        return false;
+        return true; // The requested unliked state already exists.
       }
     } else {
       await deleteDoc(songDocRef);

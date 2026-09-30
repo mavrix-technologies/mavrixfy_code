@@ -4,7 +4,7 @@ import Colors from "@/constants/colors";
 import AdMobBanner from "@/components/AdMobBanner";
 import OfflineBanner from "@/components/OfflineBanner";
 import OfflineScreen from "@/components/OfflineScreen";
-import { useNetwork,useOnReconnect } from "@/contexts/NetworkContext";
+import { useNetwork } from "@/contexts/NetworkContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { triggerImpact } from "@/lib/haptics";
 import * as Haptics from "expo-haptics";
@@ -86,6 +86,7 @@ export function HomeScreen() {
 
   const displayedQuickPicks = useMemo(() => {
     const list = getQuickPicksForCategory(quickPicksPool, selectedCategory);
+    if (selectedCategory === "New Releases") return list;
     return list.length > 0 ? list : quickPickSongs;
   }, [quickPicksPool, selectedCategory, quickPickSongs]);
 
@@ -205,14 +206,6 @@ export function HomeScreen() {
       },
     ],
     [insets.bottom, topInset]
-  );
-
-  useOnReconnect(
-    useCallback(() => {
-      if (!hasContent) {
-        void handleRefresh();
-      }
-    }, [hasContent, handleRefresh])
   );
 
   if (!isOnline && !isChecking && !hasContent && !loading) {
