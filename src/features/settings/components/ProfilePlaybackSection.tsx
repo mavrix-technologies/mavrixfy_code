@@ -45,8 +45,17 @@ export function ProfilePlaybackSection({
 
   const handleToggleEqualizer = useCallback(async (enabled: boolean) => {
     void triggerImpact(ImpactFeedbackStyle.Light);
-    await updateSettings({ equalizerEnabled: enabled });
-    void applyEqualizerEnabled(enabled);
+    if (!enabled) {
+      await updateSettings({ equalizerEnabled: false });
+      void applyEqualizerEnabled(false).catch(() => {});
+      return;
+    }
+    try {
+      await applyEqualizerEnabled(enabled);
+      await updateSettings({ equalizerEnabled: enabled });
+    } catch (error) {
+      Alert.alert("Equalizer unavailable", error instanceof Error ? error.message : "Could not change the equalizer.");
+    }
   }, [updateSettings]);
 
   const handleOpenEqualizer = useCallback(() => {

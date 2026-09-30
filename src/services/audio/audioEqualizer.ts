@@ -32,17 +32,21 @@ interface AudioEffectsModule {
 }
 
 function getModule(): AudioEffectsModule {
-  if (Platform.OS !== "android" && Platform.OS !== "ios") throw new Error("Audio effects require the Android or iOS app.");
-  if (isRunningInExpoGo()) throw new Error("Audio effects require a native app build, not Expo Go.");
+  if (Platform.OS !== "android" && Platform.OS !== "ios") {
+    throw new Error("Audio effects require an Android or iOS device.");
+  }
+  if (isRunningInExpoGo()) {
+    throw new Error("Audio effects require a native app build. Expo Go cannot load this module.");
+  }
   const module = NativeModules.TrackPlayerModule as Partial<AudioEffectsModule> | undefined;
   if (!module?.getAudioEffects || !module.updateAudioEffect) {
-    throw new Error("Install a new native build to use the equalizer and surround controls.");
+    throw new Error("This app build has no audio-effects engine for this platform.");
   }
   return module as AudioEffectsModule;
 }
 
-export function getAudioEffects(): Promise<AudioEffectsState> {
-  try { return getModule().getAudioEffects(); } catch (error) { return Promise.reject(error); }
+export async function getAudioEffects(): Promise<AudioEffectsState> {
+  return getModule().getAudioEffects();
 }
 
 export async function updateAudioEffect(
@@ -51,9 +55,7 @@ export async function updateAudioEffect(
   value = 0,
   band = 0
 ): Promise<AudioEffectsState> {
-  if (!Number.isFinite(value) || !Number.isInteger(band) || !Number.isInteger(state.sessionId) || state.sessionId <= 0) {
-    throw new Error("Play a song before changing audio effects.");
-  }
+  if (state.sessionId <= 0) throw new Error("Play a song before changing audio effects.");
   return getModule().updateAudioEffect(command, Math.round(value), band, state.sessionId);
 }
 
@@ -80,55 +82,48 @@ function findClosestDb(bands: Record<string, number>, targetFreqHz: number): num
 }
 
 export async function applyEqualizerEnabled(enabled: boolean): Promise<void> {
-  try {
-    const state = await getAudioEffects();
-    if (state.sessionId > 0) {
-      await updateAudioEffect(state, "equalizer", enabled ? 1 : 0);
-    }
-  } catch {
-    // Fail silently if audio session is not ready
+  const state = await getAudioEffects();
+  if (!state.equalizerAvailable || state.equalizerControl === false) {
+    throw new Error(state.equalizerError || "The equalizer is unavailable on this device.");
+  }
+  const updated = await updateAudioEffect(state, "equalizer", enabled ? 1 : 0);
+  if (enabled && updated.equalizerEnabled === false) {
+    throw new Error("The device did not activate the equalizer.");
   }
 }
 
 export async function applyEqualizerBands(bands: Record<string, number>): Promise<void> {
-  try {
-    const state = await getAudioEffects();
-    if (state.sessionId > 0 && Array.isArray(state.bands)) {
-      const minLvl = typeof state.minLevel === "number" ? state.minLevel : -1200;
-      const maxLvl = typeof state.maxLevel === "number" ? state.maxLevel : 1200;
-
-      for (const b of state.bands) {
-        const db = findClosestDb(bands, b.frequency);
-        const millibels = Math.max(minLvl, Math.min(maxLvl, Math.round(db * 100)));
-        await updateAudioEffect(state, "band", millibels, b.id);
-      }
-    }
-  } catch {
-    // Fail silently if audio session is not ready
+  const state = await getAudioEffects();
+  if (!state.equalizerAvailable || state.equalizerControl === false || !state.bands?.length) {
+    throw new Error(state.equalizerError || "The equalizer bands are unavailable on this device.");
+  }
+  const minLvl = typeof state.minLevel === "number" ? state.minLevel : -1200;
+  const maxLvl = typeof state.maxLevel === "number" ? state.maxLevel : 1200;
+  for (const b of state.bands) {
+    const db = findClosestDb(bands, b.frequency);
+    const millibels = Math.max(minLvl, Math.min(maxLvl, Math.round(db * 100)));
+    await updateAudioEffect(state, "band", millibels, b.id);
   }
 }
 
 export async function applySurroundSoundEnabled(enabled: boolean): Promise<void> {
-  try {
-    const state = await getAudioEffects();
-    if (state.sessionId > 0) {
-      await updateAudioEffect(state, "surround", enabled ? 1 : 0);
-    }
-  } catch {
-    // Fail silently if audio session is not ready
+  const state = await getAudioEffects();
+  if (!state.surroundAvailable || state.surroundControl === false || state.surroundSupported === false) {
+    throw new Error(state.surroundError || "Surround sound is unavailable on this device.");
+  }
+  const updated = await updateAudioEffect(state, "surround", enabled ? 1 : 0);
+  if (enabled && updated.surroundActive === false) {
+    throw new Error("Surround sound did not activate on the current audio output.");
   }
 }
 
 export async function applySurroundStrength(strength: number): Promise<void> {
-  try {
-    const state = await getAudioEffects();
-    if (state.sessionId > 0) {
-      const clamped = Math.max(0, Math.min(400, Math.round(strength)));
-      await updateAudioEffect(state, "strength", clamped);
-    }
-  } catch {
-    // Fail silently if audio session is not ready
+  const state = await getAudioEffects();
+  if (!state.surroundAvailable || state.surroundControl === false || !state.strengthSupported) {
+    throw new Error(state.surroundError || "Adjustable surround strength is unavailable on this device.");
   }
+  const clamped = Math.max(0, Math.min(1000, Math.round(strength)));
+  await updateAudioEffect(state, "strength", clamped);
 }
 
 export async function syncEqualizerWithNative(customSettings?: {
@@ -141,7 +136,7 @@ export async function syncEqualizerWithNative(customSettings?: {
     let settings = customSettings;
     if (!settings) {
       try {
-        const storage = require("@/lib/storage");
+        const storage = await import("@/lib/storage");
         if (storage?.getSettings) {
           settings = await storage.getSettings();
         }
@@ -168,7 +163,7 @@ export async function syncEqualizerWithNative(customSettings?: {
       if (typeof settings.surroundSoundEnabled === "boolean") {
         await updateAudioEffect(state, "surround", settings.surroundSoundEnabled ? 1 : 0);
         if (settings.surroundSoundEnabled) {
-          const strength = typeof settings.surroundStrength === "number" ? Math.min(400, settings.surroundStrength) : 350;
+          const strength = typeof settings.surroundStrength === "number" ? Math.min(1000, settings.surroundStrength) : 350;
           await updateAudioEffect(state, "strength", strength);
         }
       }
@@ -181,26 +176,35 @@ export async function syncEqualizerWithNative(customSettings?: {
 export async function openDeviceSystemEqualizer(): Promise<boolean> {
   if (Platform.OS !== "android") return false;
   try {
+    const module = NativeModules.TrackPlayerModule as { openAudioEffectControlPanel?: () => Promise<boolean> } | undefined;
+    if (module?.openAudioEffectControlPanel) {
+      await module.openAudioEffectControlPanel();
+      return true;
+    }
+  } catch {
+    // Fallback below
+  }
+
+  try {
     await Linking.sendIntent("android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL");
     return true;
   } catch {
-    try {
-      await Linking.sendIntent("android.settings.SOUND_SETTINGS");
-      return true;
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 
 export async function openDeviceSoundSettings(): Promise<void> {
+  if (Platform.OS === "ios") {
+    await Linking.openSettings();
+    return;
+  }
   if (Platform.OS !== "android") {
-    throw new Error("Device sound settings are only available on Android.");
+    throw new Error("Device sound settings are only available on Android or iOS.");
   }
   await Linking.sendIntent("android.settings.SOUND_SETTINGS");
 }
 
 export async function checkSystemEqualizerAvailable(): Promise<boolean> {
-  if (Platform.OS !== "android" || isRunningInExpoGo()) return false;
-  return true;
+  if (isRunningInExpoGo()) return false;
+  return Platform.OS === "android";
 }

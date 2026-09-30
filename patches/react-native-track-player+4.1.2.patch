@@ -19,7 +19,7 @@ index 0000000..92366e9
 +    }
 +}
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
-index b2409a0..7db317c 100644
+index b2409a0..a8f819c 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/module/MusicModule.kt
 @@ -251,7 +251,7 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
@@ -353,7 +353,7 @@ index b2409a0..7db317c 100644
          if (verifyServiceBoundOrReject(callback)) return@launch
  
          try {
-@@ -569,61 +569,82 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
+@@ -569,61 +569,119 @@ class MusicModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
          } catch (exception: Exception) {
              rejectWithException(callback, exception)
          }
@@ -450,6 +450,43 @@ index b2409a0..7db317c 100644
 +            callback.resolve(Arguments.fromBundle(effects.update(command, value, band, sessionId)))
 +        } catch (error: Exception) {
 +            callback.reject("audio_effect_update_failed", error.message, error)
++        }
++    } }
++
++    @ReactMethod
++    fun openAudioEffectControlPanel(callback: Promise) { scope.launch {
++        try {
++            val context = reactApplicationContext
++            val intent = android.content.Intent(android.media.audiofx.AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
++                putExtra(android.media.audiofx.AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
++                putExtra(android.media.audiofx.AudioEffect.EXTRA_CONTENT_TYPE, android.media.audiofx.AudioEffect.CONTENT_TYPE_MUSIC)
++                val session = musicService.audioEffects?.snapshot()?.getInt("sessionId") ?: 0
++                if (session > 0) {
++                    putExtra(android.media.audiofx.AudioEffect.EXTRA_AUDIO_SESSION, session)
++                }
++                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
++            }
++            if (intent.resolveActivity(context.packageManager) != null) {
++                context.startActivity(intent)
++                callback.resolve(true)
++            } else {
++                val vivoIntent = android.content.Intent("bbk.media.action.DISPLAY_AUDIOFX_CONTROL_PANEL").apply {
++                    addCategory(android.content.Intent.CATEGORY_DEFAULT)
++                    flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
++                }
++                if (vivoIntent.resolveActivity(context.packageManager) != null) {
++                    context.startActivity(vivoIntent)
++                    callback.resolve(true)
++                } else {
++                    val settingsIntent = android.content.Intent(android.provider.Settings.ACTION_SOUND_SETTINGS).apply {
++                        flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
++                    }
++                    context.startActivity(settingsIntent)
++                    callback.resolve(true)
++                }
++            }
++        } catch (error: Exception) {
++            callback.reject("open_failed", error.message, error)
 +        }
 +    } }
 +

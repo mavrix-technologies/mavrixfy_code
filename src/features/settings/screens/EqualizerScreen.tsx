@@ -8,13 +8,16 @@ import {
   applySurroundStrength,
   checkSystemEqualizerAvailable,
   getAudioEffects,
+  type AudioEffectsState,
   openDeviceSystemEqualizer,
 } from "@/services/audio/audioEqualizer";
 import { safeGoBack } from "@/utils/navigation";
 import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
+import { useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Dimensions,
   GestureResponderEvent,
   LayoutChangeEvent,
@@ -116,6 +119,16 @@ export function EqualizerScreen() {
   const [activeBandIdx, setActiveBandIdx] = useState<number | null>(null);
   const [systemEqAvailable, setSystemEqAvailable] = useState(false);
   const [headphonesConnected, setHeadphonesConnected] = useState(false);
+  const [effectsState, setEffectsState] = useState<AudioEffectsState | null>(null);
+  const [effectsError, setEffectsError] = useState<string | null>(null);
+  const equalizerReady = Boolean(effectsState?.sessionId && effectsState.equalizerAvailable && effectsState.equalizerControl !== false);
+  const surroundReady = Boolean(effectsState?.sessionId && effectsState.surroundAvailable && effectsState.surroundControl !== false && effectsState.surroundSupported !== false && headphonesConnected);
+
+  const reportEffectError = useCallback((error: unknown) => {
+    const message = error instanceof Error ? error.message : "The audio effect could not be applied.";
+    setEffectsError(message);
+    Alert.alert("Audio effect unavailable", message);
+  }, []);
 
   const bands = useMemo<Record<string, number>>(() => {
     const raw = settings?.equalizer || {};
@@ -144,49 +157,85 @@ export function EqualizerScreen() {
     void checkSystemEqualizerAvailable().then((avail) => {
       if (mounted) setSystemEqAvailable(avail);
     });
-    void getAudioEffects()
-      .then((eff) => {
-        if (mounted && eff) {
-          setHeadphonesConnected(Boolean(eff.headphonesConnected));
-        }
-      })
-      .catch(() => {});
     return () => {
       mounted = false;
     };
   }, []);
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void getAudioEffects().then((state) => {
+      if (!active) return;
+      setEffectsState(state);
+      setHeadphonesConnected(Boolean(state.headphonesConnected));
+      setEffectsError(null);
+    }).catch((error) => {
+      if (!active) return;
+      setEffectsState(null);
+      setEffectsError(error instanceof Error ? error.message : "Audio effects are unavailable.");
+    });
+    return () => { active = false; };
+  }, []));
 
   const enabled = Boolean(settings?.equalizerEnabled);
   const activePresetId = useMemo(() => detectMatchingPreset(bands), [bands]);
   const surroundEnabled = Boolean(settings?.surroundSoundEnabled);
 
   const handleToggle = useCallback(
-    (newVal: boolean) => {
+    async (newVal: boolean) => {
+      if (!newVal && !equalizerReady) {
+        setSettings((prev) => prev ? { ...prev, equalizerEnabled: false } : prev);
+        void saveSettings({ equalizerEnabled: false });
+        return;
+      }
+      if (!equalizerReady) return;
       void triggerImpact(ImpactFeedbackStyle.Light);
+      try {
+        await applyEqualizerEnabled(newVal);
+      } catch (error) {
+        reportEffectError(error);
+        return;
+      }
       setSettings((prev) => (prev ? { ...prev, equalizerEnabled: newVal } : prev));
       void saveSettings({ equalizerEnabled: newVal });
-      void applyEqualizerEnabled(newVal);
     },
-    []
+    [equalizerReady, reportEffectError]
   );
 
   const handleToggleSurround = useCallback(
-    (newVal: boolean) => {
+    async (newVal: boolean) => {
+      if (!newVal && !surroundReady) {
+        setSettings((prev) => prev ? { ...prev, surroundSoundEnabled: false } : prev);
+        void saveSettings({ surroundSoundEnabled: false });
+        return;
+      }
+      if (!surroundReady) return;
       void triggerImpact(ImpactFeedbackStyle.Light);
       const targetStrength = 350;
+      try {
+        if (newVal && effectsState?.strengthSupported) await applySurroundStrength(targetStrength);
+        await applySurroundSoundEnabled(newVal);
+      } catch (error) {
+        reportEffectError(error);
+        return;
+      }
       setSettings((prev) => (prev ? { ...prev, surroundSoundEnabled: newVal, surroundStrength: targetStrength } : prev));
       void saveSettings({ surroundSoundEnabled: newVal, surroundStrength: targetStrength });
-      void applySurroundSoundEnabled(newVal);
-      if (newVal) {
-        void applySurroundStrength(targetStrength);
-      }
     },
-    []
+    [effectsState, reportEffectError, surroundReady]
   );
 
-  const handleSelectPreset = useCallback((preset: EqualizerPreset) => {
+  const handleSelectPreset = useCallback(async (preset: EqualizerPreset) => {
+    if (!equalizerReady) return;
     void triggerImpact(ImpactFeedbackStyle.Light);
     const newBands = { ...preset.bands };
+    try {
+      await applyEqualizerBands(newBands);
+      await applyEqualizerEnabled(true);
+    } catch (error) {
+      reportEffectError(error);
+      return;
+    }
     setSettings((prev) =>
       prev
         ? {
@@ -200,16 +249,23 @@ export function EqualizerScreen() {
       equalizer: newBands,
       equalizerEnabled: true,
     });
-    void applyEqualizerBands(newBands);
-    void applyEqualizerEnabled(true);
-  }, []);
+  }, [equalizerReady, reportEffectError]);
 
-  const handleResetToFlat = useCallback(() => {
+  const handleResetToFlat = useCallback(async () => {
+    if (!equalizerReady) return;
     void triggerImpact(ImpactFeedbackStyle.Light);
     const flatPreset = EQUALIZER_PRESETS.find((p) => p.id === "flat");
     const flatBands = flatPreset
       ? { ...flatPreset.bands }
       : { "60Hz": 0, "150Hz": 0, "400Hz": 0, "1KHz": 0, "2.4KHz": 0, "15KHz": 0 };
+
+    try {
+      await applyEqualizerBands(flatBands);
+      if (surroundReady) await applySurroundSoundEnabled(false);
+    } catch (error) {
+      reportEffectError(error);
+      return;
+    }
 
     setSettings((prev) =>
       prev
@@ -224,9 +280,7 @@ export function EqualizerScreen() {
       equalizer: flatBands,
       surroundSoundEnabled: false,
     });
-    void applyEqualizerBands(flatBands);
-    void applySurroundSoundEnabled(false);
-  }, []);
+  }, [equalizerReady, reportEffectError, surroundReady]);
 
   const onLayoutGraph = useCallback((e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
@@ -293,10 +347,9 @@ export function EqualizerScreen() {
       setSettings((prev) =>
         prev ? { ...prev, equalizer: updated, equalizerEnabled: true } : prev
       );
-      void applyEqualizerBands(updated);
-      void applyEqualizerEnabled(true);
+      void applyEqualizerBands(updated).then(() => applyEqualizerEnabled(true)).catch(reportEffectError);
     },
-    [points]
+    [points, reportEffectError]
   );
 
   const handleTouchMove = useCallback(
@@ -318,10 +371,10 @@ export function EqualizerScreen() {
         setSettings((prev) =>
           prev ? { ...prev, equalizer: updated, equalizerEnabled: true } : prev
         );
-        void applyEqualizerBands(updated);
+        void applyEqualizerBands(updated).catch(reportEffectError);
       }
     },
-    []
+    [reportEffectError]
   );
 
   const handleTouchEnd = useCallback(() => {
@@ -333,8 +386,8 @@ export function EqualizerScreen() {
       equalizer: currentBands,
       equalizerEnabled: true,
     });
-    void applyEqualizerBands(currentBands);
-  }, []);
+    void applyEqualizerBands(currentBands).catch(reportEffectError);
+  }, [reportEffectError]);
 
   return (
     <View style={[styles.screen, { paddingTop: topInset }]}>
@@ -344,7 +397,7 @@ export function EqualizerScreen() {
           <Ionicons name="chevron-back" size={26} color="#FFFFFF" />
         </Pressable>
         <Text style={styles.headerTitle}>Equalizer</Text>
-        <Pressable onPress={handleResetToFlat} style={styles.resetBtn} hitSlop={14}>
+        <Pressable onPress={handleResetToFlat} disabled={!equalizerReady} style={styles.resetBtn} hitSlop={14}>
           <Text style={styles.resetBtnText}>Reset</Text>
         </Pressable>
       </View>
@@ -362,10 +415,10 @@ export function EqualizerScreen() {
         <View
           style={styles.graphContainer}
           onLayout={onLayoutGraph}
-          onStartShouldSetResponder={() => true}
-          onStartShouldSetResponderCapture={() => true}
-          onMoveShouldSetResponder={() => true}
-          onMoveShouldSetResponderCapture={() => true}
+          onStartShouldSetResponder={() => equalizerReady}
+          onStartShouldSetResponderCapture={() => equalizerReady}
+          onMoveShouldSetResponder={() => equalizerReady}
+          onMoveShouldSetResponderCapture={() => equalizerReady}
           onResponderGrant={handleTouchStart}
           onResponderMove={handleTouchMove}
           onResponderRelease={handleTouchEnd}
@@ -480,10 +533,16 @@ export function EqualizerScreen() {
             <Switch
               value={enabled}
               onValueChange={handleToggle}
+              disabled={!equalizerReady && !enabled}
               trackColor={{ false: "#3E3E3E", true: Colors.primary }}
               thumbColor="#FFFFFF"
             />
           </View>
+          {(!equalizerReady || effectsError) && (
+            <Text style={styles.switchSublabel}>
+              {effectsError ?? (Platform.OS === "ios" ? "This player build has no iOS audio-effects engine." : "Play a song to enable audio effects on this device.")}
+            </Text>
+          )}
 
           {/* 3D Surround Sound Switch (Headphone Protected) */}
           <View style={styles.switchRow}>
@@ -493,14 +552,13 @@ export function EqualizerScreen() {
                 <Text style={styles.switchLabel}>3D Surround Sound</Text>
               </View>
               <Text style={styles.switchSublabel}>
-                {headphonesConnected
-                  ? "Active on headphones • Wide immersive soundstage"
-                  : "Optimized for headphones • Speaker audio protected"}
+                {surroundReady ? "Available on connected headphones" : "Requires supported audio effects and headphones"}
               </Text>
             </View>
             <Switch
               value={surroundEnabled}
               onValueChange={handleToggleSurround}
+              disabled={!surroundReady && !surroundEnabled}
               trackColor={{ false: "#3E3E3E", true: Colors.primary }}
               thumbColor="#FFFFFF"
             />
@@ -515,6 +573,7 @@ export function EqualizerScreen() {
               <Pressable
                 key={preset.id}
                 onPress={() => handleSelectPreset(preset)}
+                disabled={!equalizerReady}
                 style={({ pressed }) => [
                   styles.presetRow,
                   pressed && styles.presetRowPressed,
@@ -555,7 +614,7 @@ export function EqualizerScreen() {
                   <Text style={styles.systemEqTitle}>Device Equalizer & 3D Audio</Text>
                 </View>
                 <Text style={styles.systemEqSubtitle}>
-                  Open phone's native Dolby Atmos & Vivo DeepField sound engine
+                  Open device audio effect controls, if available
                 </Text>
               </View>
               <Ionicons name="open-outline" size={20} color={Colors.primary} />
