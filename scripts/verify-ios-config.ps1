@@ -79,7 +79,7 @@ if (Test-Path "package.json") {
         $iosDeps = @(
             "react-native",
             "expo-router",
-            "react-native-track-player",
+            "react-native-audio-api",
             "@react-native-google-signin/google-signin"
         )
         

@@ -39,7 +39,7 @@ export function ProfilePlaybackSection({
   const equalizerStatusText = useMemo(() => {
     const presetId = detectMatchingPreset(settings.equalizer);
     const presetName = EQUALIZER_PRESETS.find((preset) => preset.id === presetId)?.name;
-    const active = [settings.equalizerEnabled && (presetName || "Custom"), settings.surroundSoundEnabled && "3D Surround"].filter(Boolean);
+    const active = [settings.equalizerEnabled && (presetName || "Custom"), settings.surroundSoundEnabled && "Spatial Panning"].filter(Boolean);
     return active.length ? active.join(" • ") : "Off";
   }, [settings.equalizer, settings.equalizerEnabled, settings.surroundSoundEnabled]);
 

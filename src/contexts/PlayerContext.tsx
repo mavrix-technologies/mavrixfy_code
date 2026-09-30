@@ -10,28 +10,14 @@ import { useAudioSyncListeners } from "@/services/audio/audioSyncListeners";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { resetPlaybackEngine,updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { usePlayerCoreState } from "@/services/audio/usePlayerCoreState";
+import { Event, RepeatMode, StandardAudioPlayer, StandardAudioRenderer, State } from "@/services/audio/StandardAudioPlayer";
 import { isRunningInExpoGo } from "expo";
 import { useEffect,type ReactNode } from "react";
 import { Platform } from "react-native";
 import { PlayerContextTree } from "./PlayerContextProviders";
 
 
-let TrackPlayer: typeof import("react-native-track-player").default | null = null;
-let Event: any = {};
-let RepeatMode: any = {};
-let State: any = {};
-
-if (!isRunningInExpoGo() && Platform.OS !== "web") {
-  try {
-    const rntp = require("react-native-track-player");
-    TrackPlayer = rntp.default || rntp;
-    Event = rntp.Event || {};
-    RepeatMode = rntp.RepeatMode || {};
-    State = rntp.State || {};
-  } catch {
-    // Non-fatal fallback for Expo Go / unlinked runtimes
-  }
-}
+const TrackPlayer = !isRunningInExpoGo() && Platform.OS !== "web" ? StandardAudioPlayer : null;
 
 type NativeSubscription = {
   remove: () => void;
@@ -301,6 +287,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   return (
     <PlayerContextTree playbackValues={playbackValues}>
+      {TrackPlayer ? <StandardAudioRenderer /> : null}
       {children}
     </PlayerContextTree>
   );

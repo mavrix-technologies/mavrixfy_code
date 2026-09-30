@@ -119,12 +119,11 @@ export function EqualizerScreen() {
   const [isDragging, setIsDragging] = useState(false);
   const [activeBandIdx, setActiveBandIdx] = useState<number | null>(null);
   const [systemEqAvailable, setSystemEqAvailable] = useState(false);
-  const [headphonesConnected, setHeadphonesConnected] = useState(false);
   const [effectsState, setEffectsState] = useState<AudioEffectsState | null>(null);
   const [effectsError, setEffectsError] = useState<string | null>(null);
   const syncedSessionRef = useRef("");
   const equalizerReady = Boolean(effectsState?.sessionId && effectsState.equalizerAvailable && effectsState.equalizerControl !== false);
-  const surroundReady = Boolean(effectsState?.sessionId && effectsState.surroundAvailable && effectsState.surroundControl !== false && effectsState.surroundSupported !== false && headphonesConnected);
+  const surroundReady = Boolean(effectsState?.sessionId && effectsState.surroundAvailable && effectsState.surroundControl !== false && effectsState.surroundSupported !== false);
 
   const reportEffectError = useCallback((error: unknown) => {
     const message = error instanceof Error ? error.message : "The audio effect could not be applied.";
@@ -170,7 +169,6 @@ export function EqualizerScreen() {
       void getAudioEffects().then((state) => {
         if (!active) return;
         setEffectsState(state);
-        setHeadphonesConnected(Boolean(state.headphonesConnected));
         setEffectsError(null);
       }).catch((error) => {
         if (!active) return;
@@ -555,21 +553,19 @@ export function EqualizerScreen() {
           </View>
           {(!equalizerReady || effectsError) && (
             <Text style={styles.switchSublabel}>
-              {effectsError ?? effectsState?.equalizerError ?? "Play a supported song to enable the equalizer."}
+              {effectsError ?? effectsState?.equalizerError ?? "Audio engine is starting."}
             </Text>
           )}
 
-          {/* 3D Surround Sound Switch (Headphone Protected) */}
+          {/* Stereo panning through the shared audio graph */}
           <View style={styles.switchRow}>
             <View style={styles.switchLabelContainer}>
               <View style={styles.switchTitleWithIcon}>
                 <Ionicons name="headset-outline" size={16} color={Colors.primary} style={{ marginRight: 6 }} />
-                <Text style={styles.switchLabel}>3D Surround Sound</Text>
+                <Text style={styles.switchLabel}>Spatial Panning</Text>
               </View>
               <Text style={styles.switchSublabel}>
-                {surroundReady
-                  ? (Platform.OS === "ios" ? "Requests iOS Spatial Audio; your headphone settings control the result" : "Available on connected headphones")
-                  : "Requires a playing song and supported headphones"}
+                {surroundReady ? "Moves sound gently between left and right; best with headphones" : "Audio engine is starting"}
               </Text>
             </View>
             <Switch

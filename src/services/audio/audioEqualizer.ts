@@ -1,5 +1,6 @@
-import { Linking, NativeModules, Platform } from "react-native";
+import { Linking, Platform } from "react-native";
 import { isRunningInExpoGo } from "expo";
+import { getStandardAudioEffects, updateStandardAudioEffect } from "./StandardAudioPlayer";
 
 export interface AudioEffectsState {
   sessionId: number;
@@ -38,11 +39,10 @@ function getModule(): AudioEffectsModule {
   if (isRunningInExpoGo()) {
     throw new Error("Audio effects require a native app build. Expo Go cannot load this module.");
   }
-  const module = NativeModules.TrackPlayerModule as Partial<AudioEffectsModule> | undefined;
-  if (!module?.getAudioEffects || !module.updateAudioEffect) {
-    throw new Error("This app build has no audio-effects engine for this platform.");
-  }
-  return module as AudioEffectsModule;
+  return {
+    getAudioEffects: async () => getStandardAudioEffects(),
+    updateAudioEffect: async (command, value, band) => updateStandardAudioEffect(command, value, band),
+  };
 }
 
 export async function getAudioEffects(): Promise<AudioEffectsState> {
@@ -178,16 +178,6 @@ export async function syncEqualizerWithNative(customSettings?: {
 export async function openDeviceSystemEqualizer(): Promise<boolean> {
   if (Platform.OS !== "android") return false;
   try {
-    const module = NativeModules.TrackPlayerModule as { openAudioEffectControlPanel?: () => Promise<boolean> } | undefined;
-    if (module?.openAudioEffectControlPanel) {
-      await module.openAudioEffectControlPanel();
-      return true;
-    }
-  } catch {
-    // Fallback below
-  }
-
-  try {
     await Linking.sendIntent("android.media.action.DISPLAY_AUDIO_EFFECT_CONTROL_PANEL");
     return true;
   } catch {
@@ -207,6 +197,5 @@ export async function openDeviceSoundSettings(): Promise<void> {
 }
 
 export async function checkSystemEqualizerAvailable(): Promise<boolean> {
-  if (isRunningInExpoGo()) return false;
-  return Platform.OS === "android";
+  return Platform.OS === "android" && !isRunningInExpoGo();
 }

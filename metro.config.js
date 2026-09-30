@@ -7,10 +7,6 @@ const config = getDefaultConfig(__dirname);
 config.resolver = {
   ...config.resolver,
   unstable_enablePackageExports: true,
-  blockList: [
-    /node_modules\/react-native-track-player\/lib\/web\/.*/,
-    /node_modules\/react-native-track-player\/.*\.web\.js$/,
-  ],
   assetExts: [...config.resolver.assetExts, 'db', 'mp3', 'ttf', 'obj', 'png', 'jpg'],
   sourceExts: [...config.resolver.sourceExts, 'jsx', 'js', 'ts', 'tsx', 'json'],
   platforms: ['ios', 'android'],

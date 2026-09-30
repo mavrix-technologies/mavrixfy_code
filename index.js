@@ -16,8 +16,6 @@ if (StyleSheet && !StyleSheet.absoluteFillObject) {
 const _RUNTIME_RESOURCES = [
   "expo-env.d.ts",
   "expo-env.d",
-  "plugins/withTrackPlayer.js",
-  "withTrackPlayer",
   "src/types/react-native.d.ts",
   "react-native.d",
 ];
@@ -46,18 +44,6 @@ if (!isRunningInExpoGo() && Platform.OS !== "web") {
     };
   } catch {
     // expo-linking unavailable in this runtime
-  }
-}
-
-if (!isRunningInExpoGo() && Platform.OS !== "web") {
-  try {
-    const trackPlayerModule = require("react-native-track-player");
-    const TrackPlayer = trackPlayerModule.default || trackPlayerModule;
-    TrackPlayer.registerPlaybackService(
-      () => require("./src/services/audio/TrackPlayerAdapter").trackPlayerService
-    );
-  } catch {
-    // native module unavailable in Expo Go and unsupported runtimes
   }
 }
 
