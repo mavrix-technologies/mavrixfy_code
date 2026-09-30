@@ -147,7 +147,7 @@ export async function syncEqualizerWithNative(customSettings?: {
     if (!settings) return;
 
     const state = await getAudioEffects();
-    if (state.sessionId > 0) {
+    if (state.sessionId > 0 && state.equalizerAvailable) {
       if (typeof settings.equalizerEnabled === "boolean") {
         await updateAudioEffect(state, "equalizer", settings.equalizerEnabled ? 1 : 0);
       }
@@ -160,9 +160,11 @@ export async function syncEqualizerWithNative(customSettings?: {
           await updateAudioEffect(state, "band", millibels, b.id);
         }
       }
+    }
+    if (state.sessionId > 0 && state.surroundAvailable) {
       if (typeof settings.surroundSoundEnabled === "boolean") {
         await updateAudioEffect(state, "surround", settings.surroundSoundEnabled ? 1 : 0);
-        if (settings.surroundSoundEnabled) {
+        if (settings.surroundSoundEnabled && state.strengthSupported) {
           const strength = typeof settings.surroundStrength === "number" ? Math.min(1000, settings.surroundStrength) : 350;
           await updateAudioEffect(state, "strength", strength);
         }

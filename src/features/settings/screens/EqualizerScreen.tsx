@@ -8,6 +8,7 @@ import {
   applySurroundStrength,
   checkSystemEqualizerAvailable,
   getAudioEffects,
+  syncEqualizerWithNative,
   type AudioEffectsState,
   openDeviceSystemEqualizer,
 } from "@/services/audio/audioEqualizer";
@@ -121,6 +122,7 @@ export function EqualizerScreen() {
   const [headphonesConnected, setHeadphonesConnected] = useState(false);
   const [effectsState, setEffectsState] = useState<AudioEffectsState | null>(null);
   const [effectsError, setEffectsError] = useState<string | null>(null);
+  const syncedSessionRef = useRef("");
   const equalizerReady = Boolean(effectsState?.sessionId && effectsState.equalizerAvailable && effectsState.equalizerControl !== false);
   const surroundReady = Boolean(effectsState?.sessionId && effectsState.surroundAvailable && effectsState.surroundControl !== false && effectsState.surroundSupported !== false && headphonesConnected);
 
@@ -164,18 +166,31 @@ export function EqualizerScreen() {
 
   useFocusEffect(useCallback(() => {
     let active = true;
-    void getAudioEffects().then((state) => {
-      if (!active) return;
-      setEffectsState(state);
-      setHeadphonesConnected(Boolean(state.headphonesConnected));
-      setEffectsError(null);
-    }).catch((error) => {
-      if (!active) return;
-      setEffectsState(null);
-      setEffectsError(error instanceof Error ? error.message : "Audio effects are unavailable.");
-    });
-    return () => { active = false; };
+    const refresh = () => {
+      void getAudioEffects().then((state) => {
+        if (!active) return;
+        setEffectsState(state);
+        setHeadphonesConnected(Boolean(state.headphonesConnected));
+        setEffectsError(null);
+      }).catch((error) => {
+        if (!active) return;
+        setEffectsState(null);
+        setEffectsError(error instanceof Error ? error.message : "Audio effects are unavailable.");
+      });
+    };
+    refresh();
+    const timer = setInterval(refresh, 1000);
+    return () => { active = false; clearInterval(timer); };
   }, []));
+
+  useEffect(() => {
+    if (!settings || !effectsState?.sessionId ||
+        (!effectsState.equalizerAvailable && !effectsState.surroundAvailable)) return;
+    const syncKey = `${effectsState.sessionId}:${effectsState.equalizerAvailable}:${effectsState.surroundAvailable}`;
+    if (syncedSessionRef.current === syncKey) return;
+    syncedSessionRef.current = syncKey;
+    void syncEqualizerWithNative(settings);
+  }, [settings, effectsState?.sessionId, effectsState?.equalizerAvailable, effectsState?.surroundAvailable]);
 
   const enabled = Boolean(settings?.equalizerEnabled);
   const activePresetId = useMemo(() => detectMatchingPreset(bands), [bands]);
@@ -540,7 +555,7 @@ export function EqualizerScreen() {
           </View>
           {(!equalizerReady || effectsError) && (
             <Text style={styles.switchSublabel}>
-              {effectsError ?? (Platform.OS === "ios" ? "This player build has no iOS audio-effects engine." : "Play a song to enable audio effects on this device.")}
+              {effectsError ?? effectsState?.equalizerError ?? "Play a supported song to enable the equalizer."}
             </Text>
           )}
 
@@ -552,7 +567,9 @@ export function EqualizerScreen() {
                 <Text style={styles.switchLabel}>3D Surround Sound</Text>
               </View>
               <Text style={styles.switchSublabel}>
-                {surroundReady ? "Available on connected headphones" : "Requires supported audio effects and headphones"}
+                {surroundReady
+                  ? (Platform.OS === "ios" ? "Requests iOS Spatial Audio; your headphone settings control the result" : "Available on connected headphones")
+                  : "Requires a playing song and supported headphones"}
               </Text>
             </View>
             <Switch

@@ -563,14 +563,15 @@ index afa6b0f..7717e73 100644
          }
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/PlaybackAudioEffects.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/PlaybackAudioEffects.kt
 new file mode 100644
-index 0000000..bc727c0
+index 0000000..c75675e
 --- /dev/null
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/PlaybackAudioEffects.kt
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,271 @@
 +package com.doublesymmetry.trackplayer.service
 +
 +import android.content.Context
 +import android.media.AudioDeviceInfo
++import android.media.AudioDeviceCallback
 +import android.media.AudioFormat
 +import android.media.AudioManager
 +import android.media.audiofx.AudioEffect
@@ -578,6 +579,8 @@ index 0000000..bc727c0
 +import android.media.audiofx.Virtualizer
 +import android.os.Build
 +import android.os.Bundle
++import android.os.Handler
++import android.os.Looper
 +import com.google.android.exoplayer2.ExoPlayer
 +import com.google.android.exoplayer2.Player
 +import timber.log.Timber
@@ -595,16 +598,24 @@ index 0000000..bc727c0
 +    private var virtualizer: Virtualizer? = null
 +    private var equalizerError: String? = null
 +    private var surroundError: String? = null
++    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
++    private val deviceCallback = object : AudioDeviceCallback() {
++        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = updateVirtualizerRoute()
++        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = updateVirtualizerRoute()
++    }
 +
 +    init {
 +        player.addListener(this)
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
++            audioManager.registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper()))
++        }
 +        attach(player.audioSessionId)
 +    }
 +
 +    override fun onAudioSessionIdChanged(audioSessionId: Int) = attach(audioSessionId)
 +
 +    private fun isHeadphonesConnected(): Boolean {
-+        val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
++        val am = audioManager
 +        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
 +            val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
 +            devices.any { device ->
@@ -620,6 +631,18 @@ index 0000000..bc727c0
 +            }
 +        } else {
 +            am.isWiredHeadsetOn || am.isBluetoothA2dpOn
++        }
++    }
++
++    private fun updateVirtualizerRoute() {
++        try {
++            virtualizer?.let { effect ->
++                if (effect.hasControl()) {
++                    effect.enabled = preferences.getBoolean("surround_enabled", false) && isHeadphonesConnected()
++                }
++            }
++        } catch (error: Exception) {
++            Timber.w(error, "Could not update virtualizer for the audio route")
 +        }
 +    }
 +
@@ -808,10 +831,412 @@ index 0000000..bc727c0
 +
 +    fun release() {
 +        player.removeListener(this)
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
++            audioManager.unregisterAudioDeviceCallback(deviceCallback)
++        }
 +        releaseEffects()
 +        sessionId = 0
 +    }
 +}
+diff --git a/node_modules/react-native-track-player/ios/RNTrackPlayer/RNPlaybackAudioEffects.swift b/node_modules/react-native-track-player/ios/RNTrackPlayer/RNPlaybackAudioEffects.swift
+new file mode 100644
+index 0000000..a238823
+--- /dev/null
++++ b/node_modules/react-native-track-player/ios/RNTrackPlayer/RNPlaybackAudioEffects.swift
+@@ -0,0 +1,321 @@
++import AVFoundation
++import AudioToolbox
++import Foundation
++import MediaToolbox
++
++// The tap processes the AVPlayerItem owned by SwiftAudioEx. It never creates a
++// second player, so queue, lock-screen controls and seeking stay in sync.
++final class RNPlaybackAudioEffects {
++    private static let frequencies: [Double] = [60, 150, 400, 1000, 2400, 15000]
++    private let settings = UserDefaults.standard
++    private let lock = NSLock()
++    private var gains: [Double]
++    private var eqEnabled: Bool
++    private var spatialEnabled: Bool
++    private var revision = 0
++    private var item: AVPlayerItem?
++    private var generation = 0
++    private var sessionId = 0
++    private var tapInstalled = false
++    private var formatSupported = false
++    private var effectError: String?
++    fileprivate var activeSessionId: Int { sessionId }
++
++    init() {
++        gains = (0..<6).map { UserDefaults.standard.double(forKey: "mavrixfy_eq_band_\($0)") }
++        eqEnabled = settings.bool(forKey: "mavrixfy_eq_enabled")
++        spatialEnabled = settings.bool(forKey: "mavrixfy_spatial_enabled")
++    }
++
++    func attach(_ newItem: AVPlayerItem?) {
++        guard item !== newItem else { return }
++        item = newItem
++        generation += 1
++        sessionId = newItem == nil ? 0 : generation
++        tapInstalled = false
++        formatSupported = false
++        effectError = nil
++        guard let newItem = newItem else { return }
++
++        applySpatialPreference(to: newItem)
++
++        // Apple does not run AVPlayerItem.audioMix on HLS streams.
++        if let asset = newItem.asset as? AVURLAsset,
++           asset.url.pathExtension.lowercased() == "m3u8" {
++            effectError = "Equalizer is unavailable for HLS tracks on iOS."
++            return
++        }
++
++        let asset = newItem.asset
++        asset.loadValuesAsynchronously(forKeys: ["tracks"]) { [weak self, weak newItem] in
++            DispatchQueue.main.async {
++                guard let self = self, let target = newItem, self.item === target else { return }
++                var loadError: NSError?
++                guard asset.statusOfValue(forKey: "tracks", error: &loadError) == .loaded,
++                      let track = asset.tracks(withMediaType: .audio).first else {
++                    self.effectError = loadError?.localizedDescription ?? "Audio track could not be opened for equalizer processing."
++                    return
++                }
++                self.installTap(on: target, track: track)
++            }
++        }
++    }
++
++    private func installTap(on target: AVPlayerItem, track: AVAssetTrack) {
++        var callbacks = MTAudioProcessingTapCallbacks(
++            version: kMTAudioProcessingTapCallbacksVersion_0,
++            clientInfo: Unmanaged.passUnretained(self).toOpaque(),
++            init: rnTapInit,
++            finalize: rnTapFinalize,
++            prepare: rnTapPrepare,
++            unprepare: rnTapUnprepare,
++            process: rnTapProcess
++        )
++        var tap: MTAudioProcessingTap?
++        let result = MTAudioProcessingTapCreate(
++            kCFAllocatorDefault, &callbacks,
++            kMTAudioProcessingTapCreationFlag_PreEffects, &tap
++        )
++        guard result == noErr, let processor = tap else {
++            effectError = "Could not create the iOS audio processing tap (\(result))."
++            return
++        }
++        let parameters = AVMutableAudioMixInputParameters(track: track)
++        parameters.audioTapProcessor = processor
++        let mix = AVMutableAudioMix()
++        mix.inputParameters = [parameters]
++        target.audioMix = mix
++        tapInstalled = true
++    }
++
++    private func applySpatialPreference(to target: AVPlayerItem) {
++        if #available(iOS 15.0, *) {
++            target.allowedAudioSpatializationFormats = spatialEnabled
++                ? .monoStereoAndMultichannel : []
++        }
++    }
++
++    private func hasHeadphones() -> Bool {
++        return AVAudioSession.sharedInstance().currentRoute.outputs.contains { output in
++            switch output.portType {
++            case .headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE, .usbAudio:
++                return true
++            default:
++                return false
++            }
++        }
++    }
++
++    private func canRequestSpatialAudio() -> Bool {
++        if #available(iOS 15.0, *) { return hasHeadphones() }
++        return false
++    }
++
++    func snapshot() -> [String: Any] {
++        let eqReady = item != nil && tapInstalled && formatSupported
++        let spatialReady = item != nil && canRequestSpatialAudio()
++        return [
++            "sessionId": sessionId,
++            "equalizerAvailable": eqReady,
++            "equalizerControl": eqReady,
++            "equalizerEnabled": eqEnabled,
++            "equalizerActive": eqReady && eqEnabled,
++            "equalizerError": (effectError as Any?) ?? NSNull(),
++            "minLevel": -1000,
++            "maxLevel": 1000,
++            "bands": Self.frequencies.enumerated().map { index, frequency in
++                ["id": index, "frequency": Int(frequency), "level": Int(gains[index] * 100)]
++            },
++            "presets": [],
++            "surroundAvailable": spatialReady,
++            "surroundSupported": spatialReady,
++            "surroundControl": spatialReady,
++            "surroundEnabled": spatialEnabled,
++            "strengthSupported": false,
++            "headphonesConnected": hasHeadphones()
++        ]
++    }
++
++    func update(command: String, value: Int, band: Int, expectedSession: Int) throws -> [String: Any] {
++        guard sessionId > 0 && sessionId == expectedSession else {
++            throw NSError(domain: "RNAudioEffects", code: 1,
++                          userInfo: [NSLocalizedDescriptionKey: "Audio session changed. Try again."])
++        }
++        switch command {
++        case "equalizer", "band", "reset":
++            guard tapInstalled && formatSupported else {
++                throw NSError(domain: "RNAudioEffects", code: 2,
++                              userInfo: [NSLocalizedDescriptionKey: effectError ?? "Equalizer is not ready for this track."])
++            }
++            lock.lock()
++            if command == "equalizer" {
++                eqEnabled = value != 0
++                settings.set(eqEnabled, forKey: "mavrixfy_eq_enabled")
++            } else if command == "band" {
++                guard band >= 0 && band < gains.count && value >= -1000 && value <= 1000 else {
++                    lock.unlock()
++                    throw NSError(domain: "RNAudioEffects", code: 3,
++                                  userInfo: [NSLocalizedDescriptionKey: "Invalid equalizer band or gain."])
++                }
++                gains[band] = Double(value) / 100
++                settings.set(gains[band], forKey: "mavrixfy_eq_band_\(band)")
++            } else {
++                gains = Array(repeating: 0, count: 6)
++                for index in 0..<6 { settings.set(0, forKey: "mavrixfy_eq_band_\(index)") }
++            }
++            revision += 1
++            lock.unlock()
++        case "surround":
++            guard canRequestSpatialAudio(), let current = item else {
++                throw NSError(domain: "RNAudioEffects", code: 4,
++                              userInfo: [NSLocalizedDescriptionKey: "Spatial Audio needs supported headphones and iOS."])
++            }
++            spatialEnabled = value != 0
++            settings.set(spatialEnabled, forKey: "mavrixfy_spatial_enabled")
++            applySpatialPreference(to: current)
++        case "strength":
++            throw NSError(domain: "RNAudioEffects", code: 5,
++                          userInfo: [NSLocalizedDescriptionKey: "iOS does not expose Spatial Audio strength."])
++        default:
++            throw NSError(domain: "RNAudioEffects", code: 6,
++                          userInfo: [NSLocalizedDescriptionKey: "Unknown audio effect command."])
++        }
++        return snapshot()
++    }
++
++    fileprivate func configuration() -> (Bool, [Double], Int)? {
++        guard lock.try() else { return nil }
++        let result = (eqEnabled, gains, revision)
++        lock.unlock()
++        return result
++    }
++
++    fileprivate func setFormatSupported(_ supported: Bool, for expectedSession: Int) {
++        DispatchQueue.main.async { [weak self] in
++            guard let self = self, self.sessionId == expectedSession else { return }
++            self.formatSupported = supported
++        }
++    }
++}
++
++private struct RNBiquad {
++    var b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0
++
++    static func peak(frequency: Double, gain: Double, sampleRate: Double) -> RNBiquad {
++        guard abs(gain) > 0.001 && frequency < sampleRate * 0.45 else { return RNBiquad() }
++        let a = pow(10.0, gain / 40.0)
++        let omega = 2.0 * Double.pi * frequency / sampleRate
++        let alpha = sin(omega) / 2.0
++        let cosOmega = cos(omega)
++        let a0 = 1.0 + alpha / a
++        return RNBiquad(
++            b0: (1 + alpha * a) / a0,
++            b1: (-2 * cosOmega) / a0,
++            b2: (1 - alpha * a) / a0,
++            a1: (-2 * cosOmega) / a0,
++            a2: (1 - alpha / a) / a0
++        )
++    }
++}
++
++private final class RNTapState {
++    weak var owner: RNPlaybackAudioEffects?
++    let sessionId: Int
++    var sampleRate = 44100.0
++    var channelCount = 2
++    var supported = false
++    var enabled = false
++    var revision = -1
++    var coefficients = Array(repeating: RNBiquad(), count: 6)
++    var z1 = Array(repeating: 0.0, count: 12)
++    var z2 = Array(repeating: 0.0, count: 12)
++
++    init(owner: RNPlaybackAudioEffects) {
++        self.owner = owner
++        sessionId = owner.activeSessionId
++    }
++
++    func refresh() {
++        guard let config = owner?.configuration() else { return }
++        enabled = config.0
++        guard revision != config.2 else { return }
++        revision = config.2
++        let frequencies = [60.0, 150.0, 400.0, 1000.0, 2400.0, 15000.0]
++        coefficients = frequencies.enumerated().map { index, frequency in
++            RNBiquad.peak(frequency: frequency, gain: config.1[index], sampleRate: sampleRate)
++        }
++    }
++}
++
++private func rnTapInit(_ tap: MTAudioProcessingTap,
++                       _ clientInfo: UnsafeMutableRawPointer?,
++                       _ storageOut: UnsafeMutablePointer<UnsafeMutableRawPointer?>) {
++    guard let pointer = clientInfo else { return }
++    let owner = Unmanaged<RNPlaybackAudioEffects>.fromOpaque(pointer).takeUnretainedValue()
++    storageOut.pointee = Unmanaged.passRetained(RNTapState(owner: owner)).toOpaque()
++}
++
++private func rnTapFinalize(_ tap: MTAudioProcessingTap) {
++    Unmanaged<RNTapState>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).release()
++}
++
++private func rnTapPrepare(_ tap: MTAudioProcessingTap, _ maxFrames: CMItemCount,
++                          _ format: UnsafePointer<AudioStreamBasicDescription>) {
++    let state = Unmanaged<RNTapState>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
++    let audio = format.pointee
++    state.sampleRate = audio.mSampleRate
++    state.channelCount = Int(audio.mChannelsPerFrame)
++    state.supported = audio.mFormatID == kAudioFormatLinearPCM &&
++        (audio.mFormatFlags & kAudioFormatFlagIsFloat) != 0 && audio.mBitsPerChannel == 32 &&
++        state.channelCount > 0 && state.channelCount <= 8
++    state.z1 = Array(repeating: 0, count: 6 * max(1, state.channelCount))
++    state.z2 = state.z1
++    state.revision = -1
++    state.refresh()
++    state.owner?.setFormatSupported(state.supported, for: state.sessionId)
++}
++
++private func rnTapUnprepare(_ tap: MTAudioProcessingTap) {
++    let state = Unmanaged<RNTapState>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
++    state.owner?.setFormatSupported(false, for: state.sessionId)
++}
++
++private func rnTapProcess(_ tap: MTAudioProcessingTap, _ frames: CMItemCount,
++                          _ flags: MTAudioProcessingTapFlags,
++                          _ buffers: UnsafeMutablePointer<AudioBufferList>,
++                          _ framesOut: UnsafeMutablePointer<CMItemCount>,
++                          _ flagsOut: UnsafeMutablePointer<MTAudioProcessingTapFlags>) {
++    var sourceFlags = MTAudioProcessingTapFlags()
++    let result = MTAudioProcessingTapGetSourceAudio(tap, frames, buffers, &sourceFlags, nil, framesOut)
++    guard result == noErr else { framesOut.pointee = 0; return }
++    flagsOut.pointee = sourceFlags
++    let state = Unmanaged<RNTapState>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
++    guard state.supported else { return }
++    state.refresh()
++    guard state.enabled else { return }
++
++    let bufferList = UnsafeMutableAudioBufferListPointer(buffers)
++    var channelOffset = 0
++    for buffer in bufferList {
++        guard let raw = buffer.mData else { continue }
++        let channels = Int(buffer.mNumberChannels)
++        guard channels > 0 && channelOffset + channels <= state.channelCount else { continue }
++        let samples = raw.assumingMemoryBound(to: Float.self)
++        for frame in 0..<Int(framesOut.pointee) {
++            for channel in 0..<channels {
++                var value = Double(samples[frame * channels + channel])
++                let stateChannel = channelOffset + channel
++                for band in 0..<6 {
++                    let c = state.coefficients[band]
++                    let index = band * state.channelCount + stateChannel
++                    let w = value - c.a1 * state.z1[index] - c.a2 * state.z2[index]
++                    value = c.b0 * w + c.b1 * state.z1[index] + c.b2 * state.z2[index]
++                    state.z2[index] = state.z1[index]
++                    state.z1[index] = w
++                }
++                samples[frame * channels + channel] = Float(value)
++            }
++        }
++        channelOffset += channels
++    }
++}
+diff --git a/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayer.swift b/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayer.swift
+index 3be1342..b3f767d 100644
+--- a/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayer.swift
++++ b/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayer.swift
+@@ -17,6 +17,7 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
+ 
+     private var hasInitialized = false
+     private let player = QueuedAudioPlayer()
++    private let playbackAudioEffects = RNPlaybackAudioEffects()
+     private let audioSessionController = AudioSessionController.shared
+     private var shouldEmitProgressEvent: Bool = false
+     private var shouldResumePlaybackAfterInterruptionEnds: Bool = false
+@@ -27,6 +28,30 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
+     private var sessionCategoryPolicy: AVAudioSession.RouteSharingPolicy = .default
+     private var sessionCategoryOptions: AVAudioSession.CategoryOptions = []
+ 
++    @objc(getAudioEffects:rejecter:)
++    public func getAudioEffects(resolve: @escaping RCTPromiseResolveBlock, reject: RCTPromiseRejectBlock) {
++        DispatchQueue.main.async {
++            resolve(self.playbackAudioEffects.snapshot())
++        }
++    }
++
++    @objc(updateAudioEffect:value:band:sessionId:resolver:rejecter:)
++    public func updateAudioEffect(
++        command: String, value: NSNumber, band: NSNumber, sessionId: NSNumber,
++        resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock
++    ) {
++        DispatchQueue.main.async {
++            do {
++                resolve(try self.playbackAudioEffects.update(
++                    command: command, value: value.intValue, band: band.intValue,
++                    expectedSession: sessionId.intValue
++                ))
++            } catch {
++                reject("audio_effect_update_failed", error.localizedDescription, error)
++            }
++        }
++    }
++
+     // MARK: - Lifecycle Methods
+ 
+     public override init() {
+@@ -845,6 +870,7 @@ public class RNTrackPlayer: RCTEventEmitter, AudioSessionControllerDelegate {
+         lastIndex: Int?,
+         lastPosition: Double?
+     ) {
++        playbackAudioEffects.attach(player.currentAVPlayerItem)
+ 
+         if let item = item {
+             DispatchQueue.main.async {
+diff --git a/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayerBridge.m b/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayerBridge.m
+index 7741994..44b6d1b 100644
+--- a/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayerBridge.m
++++ b/node_modules/react-native-track-player/ios/RNTrackPlayer/RNTrackPlayerBridge.m
+@@ -11,6 +11,16 @@
+ 
+ @interface RCT_EXTERN_REMAP_MODULE(TrackPlayerModule, RNTrackPlayer, NSObject)
+ 
++RCT_EXTERN_METHOD(getAudioEffects:(RCTPromiseResolveBlock)resolve
++                  rejecter:(RCTPromiseRejectBlock)reject);
++
++RCT_EXTERN_METHOD(updateAudioEffect:(NSString *)command
++                  value:(nonnull NSNumber *)value
++                  band:(nonnull NSNumber *)band
++                  sessionId:(nonnull NSNumber *)sessionId
++                  resolver:(RCTPromiseResolveBlock)resolve
++                  rejecter:(RCTPromiseRejectBlock)reject);
++
+ RCT_EXTERN_METHOD(setupPlayer:(NSDictionary *)data
+                   resolver:(RCTPromiseResolveBlock)resolve
+                   rejecter:(RCTPromiseRejectBlock)reject);
 diff --git a/node_modules/react-native-track-player/src/trackPlayer.ts b/node_modules/react-native-track-player/src/trackPlayer.ts
 index 6f6d723..f7e0972 100644
 --- a/node_modules/react-native-track-player/src/trackPlayer.ts

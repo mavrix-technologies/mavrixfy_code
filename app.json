@@ -124,6 +124,7 @@
         }
       ],
       "./plugins/withTrackPlayer",
+      "./plugins/withIosAudioEffects",
       [
         "expo-build-properties",
         {
