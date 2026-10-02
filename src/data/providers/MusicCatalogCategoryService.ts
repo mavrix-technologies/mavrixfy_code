@@ -443,7 +443,7 @@ export async function fetchTrendingPlaylists(
   return sorted.slice(0, limit);
 }
 
-export async function fetchNewArrivalPlaylists(limit = 10): Promise<CatalogPlaylistResult[]> {
+export function fetchNewArrivalPlaylists(limit = 10): Promise<CatalogPlaylistResult[]> {
   return searchPlaylists(`new hits hindi ${new Date().getFullYear()}`, limit, "new-arrivals", false);
 }
 

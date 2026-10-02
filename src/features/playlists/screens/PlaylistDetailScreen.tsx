@@ -48,7 +48,7 @@ function usePlaylistDetailView() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { isOnline } = useNetwork();
-  const { currentSong, queue } = usePlaybackNowPlaying();
+  const { currentSong } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
   const { playSong, shufflePlay, togglePlay } = usePlayerActions();
 

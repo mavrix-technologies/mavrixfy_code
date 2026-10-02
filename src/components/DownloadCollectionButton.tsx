@@ -15,7 +15,7 @@ import { triggerImpact } from "@/lib/haptics";
 import type { Song } from "@/lib/musicData";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { useCallback,useEffect,useMemo,useState } from "react";
+import { useCallback,useEffect,useMemo,useState,type ComponentProps } from "react";
 import {
 Alert,
 Pressable,
@@ -97,29 +97,25 @@ export default function DownloadCollectionButton({
   compact = false,
 }: Props) {
   const ctx = useDownloadsSafe();
-  const [statusVersion, setStatusVersion] = useState(0);
+  const [, setStatusVersion] = useState(0);
   const songIds = useMemo(() => new Set(songs.map((song) => song.id)), [songs]);
 
   useEffect(() => {
     const onStatus = (songId: string) => {
       if (songIds.has(songId)) setStatusVersion((version) => version + 1);
     };
-    return () => {
-      stopStatus();
-      stopCompleted();
-      stopFailed();
-    };
-    function stopStatus() { /* replaced below */ }
-    function stopCompleted() { /* replaced below */ }
-    function stopFailed() { /* replaced below */ }
+    const unsubs = (["status", "completed", "failed"] as const).map((event) =>
+      onQueueEvent(event, onStatus)
+    );
+    return () => unsubs.forEach((unsubscribe) => unsubscribe());
   }, [songIds]);
 
   // Derive per-collection download state from the store
-  const { completed, downloading, queued, total } = useMemo(() => {
+  const { completed, downloading, queued, total } = (() => {
     if (!ctx || songs.length === 0) {
-      return { completed: 0, downloading: 0, queued: 0, failed: 0, total: 0 };
+      return { completed: 0, downloading: 0, queued: 0, total: 0 };
     }
-    let c = 0, d = 0, q = 0, f = 0;
+    let c = 0, d = 0, q = 0;
     for (const song of songs) {
       const item = ctx.getDownload(song.id);
       if (!item) continue;
@@ -130,10 +126,9 @@ export default function DownloadCollectionButton({
         item.status === "waiting_for_wifi" ||
         item.status === "waiting_for_charging"
       ) q++;
-      else if (item.status === "failed") f++;
     }
-    return { completed: c, downloading: d, queued: q, failed: f, total: songs.length };
-  }, [ctx, songs, statusVersion]);
+    return { completed: c, downloading: d, queued: q, total: songs.length };
+  })();
 
   const allDone = total > 0 && completed === total;
   const isActive = downloading > 0 || queued > 0;
@@ -248,7 +243,7 @@ export default function DownloadCollectionButton({
 
   // ─── Icon / label state ────────────────────────────────────────────────────
 
-  const iconName: any = allDone
+  const iconName: ComponentProps<typeof Ionicons>["name"] = allDone
     ? "arrow-down-circle"
     : isActive
     ? "pause-circle"

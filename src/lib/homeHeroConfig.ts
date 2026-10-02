@@ -68,14 +68,6 @@ export const DEFAULT_HOME_HERO_CONFIG: HomeHeroConfig = {
   ],
 };
 
-const DISABLED_HOME_HERO_CONFIG: HomeHeroConfig = {
-  ...DEFAULT_HOME_HERO_CONFIG,
-  enabled: false,
-  adUnitId: "",
-  adSlotEnabled: false,
-  items: [],
-};
-
 const HOME_HERO_CONFIG_REF = doc(db, "appConfig", "homeHero");
 
 

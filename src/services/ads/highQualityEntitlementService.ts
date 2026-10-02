@@ -30,15 +30,13 @@ export async function unlockHighQuality(_durationHours?: number): Promise<void> 
 export async function requestHighQualityUnlockWithRewardedAd(
   _onLoadingChange?: (loading: boolean) => void
 ): Promise<boolean> {
-  const alreadyUnlocked = await isHighQualityUnlocked();
-  if (alreadyUnlocked) {
-    await saveSettings({ streamingQuality: "high" });
-    return true;
+  if (await isHighQualityUnlocked()) {
+    return saveSettings({ streamingQuality: "high" }).then(() => true);
   }
 
-  const result = await runRewardedAd();
-  // Unsupported runtimes retain free access; a dismissed or failed ad grants no reward.
-  if (result !== "earned" && result !== "unavailable") return false;
-  await unlockHighQuality();
-  return true;
+  return runRewardedAd().then((result) => {
+    // Unsupported runtimes retain free access; a dismissed or failed ad grants no reward.
+    if (result !== "earned" && result !== "unavailable") return false;
+    return unlockHighQuality().then(() => true);
+  });
 }

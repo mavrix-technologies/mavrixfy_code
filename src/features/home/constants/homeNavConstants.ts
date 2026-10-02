@@ -23,23 +23,4 @@ export const MAVRIXFY_MUSIC_CATEGORIES: readonly MusicCategoryItem[] = [
   { id: "Recently Played", label: "Recent", focusedIcon: "time", unfocusedIcon: "time-outline" },
 ] as const;
 
-const TOP_CATEGORIES = [
-  "All",
-  "Trending",
-  "New Releases",
-  "Made For You",
-  "Recently Played",
-  "Charts",
-  "Hindi",
-  "Bollywood",
-  "Punjabi",
-  "English",
-  "Gujarati",
-  "Tamil",
-  "Telugu",
-  "Lo-Fi",
-  "Romantic",
-  "Festive",
-] as const;
-
-export type MavrixfyCategory = (typeof TOP_CATEGORIES)[number] | string;
+export type MavrixfyCategory = string;

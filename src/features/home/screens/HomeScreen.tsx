@@ -86,8 +86,7 @@ export function HomeScreen() {
 
   const displayedQuickPicks = useMemo(() => {
     const list = getQuickPicksForCategory(quickPicksPool, selectedCategory);
-    if (selectedCategory === "New Releases") return list;
-    return list.length > 0 ? list : quickPickSongs;
+    return selectedCategory === "All" && list.length === 0 ? quickPickSongs : list;
   }, [quickPicksPool, selectedCategory, quickPickSongs]);
 
   const sectionData = useHomeSectionData({

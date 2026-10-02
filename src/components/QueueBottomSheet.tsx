@@ -318,7 +318,6 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
       queue,
       userQueuedSongIds,
       autoplaySongIds,
-      isAutoplayLoading,
       queueIndex,
       currentSong,
       isShuffled,

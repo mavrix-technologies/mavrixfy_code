@@ -88,21 +88,6 @@ export const BACKGROUND_YOUTUBE_PRELOAD_HOOK = `
           } catch(e) {}
         }
       };
-      // Outro skip monitor: seamlessly loop before reaching end title cards
-      setInterval(function() {
-        try {
-          if (typeof player !== "undefined" && player && typeof player.getDuration === "function" && typeof player.getCurrentTime === "function") {
-            var dur = player.getDuration() || 0;
-            var curr = player.getCurrentTime() || 0;
-            var outroSkip = Math.min(4.5, dur * 0.08);
-            var introSkip = Math.min(3.5, dur * 0.08);
-            if (dur > 15 && curr >= (dur - outroSkip)) {
-              player.seekTo(introSkip, true);
-              player.playVideo();
-            }
-          }
-        } catch(e) {}
-      }, 1000);
     };
   }
   wrapHooks();

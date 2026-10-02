@@ -134,7 +134,6 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
   const togglePlay = playerActions?.togglePlay ?? noopPlayerAction;
   const nextSong = playerActions?.nextSong ?? noopPlayerAction;
   const prevSong = playerActions?.prevSong ?? noopPlayerAction;
-  const textColor = playerActions?.textColor ?? "#FFFFFF";
   const setAlbumColor = playerActions?.setAlbumColor ?? noopPlayerAction;
   const setTextColor = playerActions?.setTextColor ?? noopPlayerAction;
   const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();

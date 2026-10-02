@@ -138,8 +138,10 @@ export async function saveDownload(item: DownloadItem): Promise<void> {
   const uid = item.accountId ?? getAccountScope().accountId;
   const key = itemKey(item.songId, uid);
   memCache.set(key, item);
-  await AsyncStorage.setItem(key, JSON.stringify(item));
-  await addToIndex(item.songId, uid);
+  await Promise.all([
+    AsyncStorage.setItem(key, JSON.stringify(item)),
+    addToIndex(item.songId, uid),
+  ]);
 }
 
 export function updateDownloadMemory(item: DownloadItem): void {

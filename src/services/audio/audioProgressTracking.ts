@@ -9,6 +9,12 @@ import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 import { useCallback,useEffect,useRef,type MutableRefObject } from "react";
 
+export type SeekOverride = {
+  songId: string | null;
+  seconds: number;
+  startedAt: number;
+} | null;
+
 interface UseAudioProgressTrackingOptions {
   currentSong: Song | null;
   currentSongRef: MutableRefObject<Song | null>;
@@ -42,11 +48,7 @@ export function useAudioProgressTracking({
 }: UseAudioProgressTrackingOptions) {
   const positionSecondsRef = useRef(0);
   const durationSecondsRef = useRef(0);
-  const seekOverrideRef = useRef<{
-    songId: string | null;
-    seconds: number;
-    startedAt: number;
-  } | null>(null);
+  const seekOverrideRef = useRef<SeekOverride>(null);
 
   const updateProgressStore = useCallback((pos: number, dur: number) => {
     positionSecondsRef.current = pos;
@@ -59,7 +61,7 @@ export function useAudioProgressTracking({
     });
   }, []);
 
-  const setSeekOverride = useCallback((override: any) => {
+  const setSeekOverride = useCallback((override: SeekOverride) => {
     seekOverrideRef.current = override;
     if (override && typeof override.seconds === "number") {
       const songDuration = toDurationSeconds(currentSongRef.current?.duration);

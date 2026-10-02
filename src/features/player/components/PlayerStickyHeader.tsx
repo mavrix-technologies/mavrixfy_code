@@ -401,11 +401,7 @@ const localStyles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
+    boxShadow: "0px 2px 4px rgba(0, 0, 0, 0.25)",
   },
   playBtnPressed: {
     opacity: 0.80,

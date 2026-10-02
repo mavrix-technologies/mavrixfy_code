@@ -20,20 +20,24 @@ export function ProfileAccountHeader({
         {user?.picture ? (
           <Image source={{ uri: user.picture }} style={styles.avatarImage} contentFit="cover" />
         ) : (
-          <Ionicons name="person" size={42} color="rgba(255, 255, 255, 0.4)" />
+          <Ionicons name="person" size={28} color="rgba(255, 255, 255, 0.4)" />
         )}
       </View>
-      <Text style={styles.profileName}>
-        {user?.name || (isAuthenticated ? "Mavrixfy User" : "Guest User")}
-      </Text>
-      <Text style={styles.profileEmail}>
-        {user?.email || (isAuthenticated ? "Signed In" : "Not signed in")}
-      </Text>
+      <View style={styles.profileInfo}>
+        <Text style={styles.profileName} numberOfLines={1}>
+          {user?.name || (isAuthenticated ? "Mavrixfy User" : "Guest User")}
+        </Text>
+        <Text style={styles.profileEmail} numberOfLines={1}>
+          {user?.email || (isAuthenticated ? "Signed In" : "Not signed in")}
+        </Text>
+      </View>
       {!isAuthenticated && (
         <Pressable
           onPress={onSignInPress}
           style={styles.signInButton}
           hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Sign in"
         >
           <Text style={styles.signInButtonText}>Sign In</Text>
         </Pressable>
@@ -44,19 +48,22 @@ export function ProfileAccountHeader({
 
 const styles = StyleSheet.create({
   profileHeader: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 24,
-    marginBottom: 8,
+    padding: 16,
+    marginBottom: 6,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
   },
   avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: "rgba(255, 255, 255, 0.07)",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
-    marginBottom: 14,
+    marginRight: 14,
   },
   avatarImage: {
     width: "100%",
@@ -64,25 +71,29 @@ const styles = StyleSheet.create({
   },
   profileName: {
     color: "#FFFFFF",
-    fontSize: 22,
+    fontSize: 17,
     fontFamily: "Inter_700Bold",
+  },
+  profileInfo: {
+    flex: 1,
+    minWidth: 0,
   },
   profileEmail: {
     color: "rgba(255, 255, 255, 0.5)",
-    fontSize: 15,
-    marginTop: 4,
+    fontSize: 12.5,
+    marginTop: 3,
     fontFamily: "Inter_400Regular",
   },
   signInButton: {
-    marginTop: 14,
-    paddingHorizontal: 22,
-    paddingVertical: 9,
+    marginLeft: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
     borderRadius: 22,
     backgroundColor: Colors.primary,
   },
   signInButtonText: {
     color: "#000000",
-    fontSize: 14,
+    fontSize: 12.5,
     fontFamily: "Inter_700Bold",
   },
 });

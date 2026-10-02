@@ -54,18 +54,3 @@ export function calculateEqHeadroomDb(gains: readonly number[], sampleRate: numb
   }
   return peakDb > 0 ? peakDb + 0.75 : 0;
 }
-
-const MAX_PAN = 0.12;
-
-function panAmplitude(strength: number): number {
-  const normalized = Number.isFinite(strength) ? Math.max(0, Math.min(1000, strength)) / 1000 : 0;
-  return MAX_PAN * normalized;
-}
-
-export function calculateSpatialPan(elapsedMs: number, strength: number): number {
-  return Math.sin(elapsedMs / 6000) * panAmplitude(strength);
-}
-
-export function calculateSpatialHeadroomDb(strength: number): number {
-  return 20 * Math.log10(1 + Math.sin((panAmplitude(strength) * Math.PI) / 2));
-}

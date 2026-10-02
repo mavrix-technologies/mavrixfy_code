@@ -74,12 +74,6 @@ export interface Playlist {
   songCount?: number;
 }
 
-export interface Genre {
-  id: string;
-  name: string;
-  color: string;
-}
-
 function normalizeJioSaavnImageUrl(rawUrl: string): string {
   let trimmed = String(rawUrl || "").trim();
   if (!trimmed) return "";
@@ -291,20 +285,5 @@ export function convertJioSaavnSong(song: JioSaavnSong): Song {
     source: isGaanaSong ? undefined : "jiosaavn",  // Don't set source for Gaana songs
   };
 }
-
-const genres: Genre[] = [
-  { id: "bollywood", name: "Bollywood", color: "#E13300" },
-  { id: "punjabi", name: "Punjabi", color: "#BA5D07" },
-  { id: "romantic", name: "Romantic", color: "#DC148C" },
-  { id: "party", name: "Party", color: "#7358FF" },
-  { id: "devotional", name: "Devotional", color: "#ffa726" },
-  { id: "retro", name: "Retro Hits", color: "#ab47bc" },
-  { id: "pop", name: "Pop", color: "#8C67AC" },
-  { id: "hip-hop", name: "Hip-Hop", color: "#E8115B" },
-  { id: "tamil", name: "Tamil", color: "#26a69a" },
-  { id: "telugu", name: "Telugu", color: "#1ABC9C" },
-  { id: "english", name: "English", color: "#42a5f5" },
-  { id: "lofi", name: "Lo-Fi", color: "#477D95" },
-];
 
 export { formatDuration } from "@/utils/timeFormatters";

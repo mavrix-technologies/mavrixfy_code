@@ -11,7 +11,9 @@
  */
 
 import { useAuth } from "@/contexts/AuthContext";
+import { getAccountScope,isCurrentAccount } from "@/lib/accountScope";
 import { downloadCollection,downloadSong,getAllDownloads,getLocalPlaybackUrl,getStorageSummary,onQueueEvent,pauseSongDownload,removeAllDownloads,removeSongDownload,resumeSongDownload,retrySongDownload,syncLicenses,type DownloadResult } from "@/lib/downloads/downloadManager";
+import { restoreInterruptedDownloads } from "@/lib/downloads/downloadQueue";
 import {
 loadDownloadPreferences,
 saveDownloadPreferences,
@@ -87,6 +89,9 @@ const downloadItemStore = {
     for (const item of items) {
       this._items.set(item.songId, item);
     }
+    for (const subscribers of this._listeners.values()) {
+      subscribers.forEach((listener) => listener());
+    }
   },
 
   getAll(): DownloadItem[] {
@@ -153,11 +158,12 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   // ─── Refresh Downloads ────────────────────────────────────────────────────
   const refreshDownloads = useCallback(async () => {
     try {
+      const scope = getAccountScope();
       const [items, summary] = await Promise.all([
         getAllDownloads(),
         getStorageSummary(),
       ]);
-
+      if (!isCurrentAccount(scope)) return;
       downloadItemStore.seed(items);
       setStorageSummary(summary);
     } catch (err) {
@@ -194,7 +200,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     return () => {
       isMounted = false;
     };
-  }, [refreshDownloads]);
+  }, [refreshDownloads, uid]);
 
 
 
@@ -279,6 +285,13 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   const prefsRef = useRef(preferences);
   useEffect(() => { prefsRef.current = preferences; }, [preferences]);
 
+  useEffect(() => {
+    if (!uid || !isInitialized) return;
+    void restoreInterruptedDownloads(prefsRef.current).catch((error) => {
+      logger.error("[DownloadContext] Could not restore interrupted downloads", error);
+    });
+  }, [uid, isInitialized]);
+
   const handleDownloadSong = useCallback(
     async (song: Song, options?: { collectionId?: string }): Promise<DownloadResult> => {
       if (!uid) return { ok: false, reason: "Sign in to download songs." };
@@ -320,8 +333,7 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
     for (const item of downloadItemStore.getAll()) {
       downloadItemStore.delete(item.songId);
     }
-    await removeAllDownloads();
-    await refreshDownloads();
+    await removeAllDownloads().then(refreshDownloads);
   }, [refreshDownloads]);
 
   const handleUpdatePreferences = useCallback(

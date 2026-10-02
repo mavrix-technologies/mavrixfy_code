@@ -387,6 +387,7 @@ function RootLayoutNav() {
         <Stack.Screen name="playlist" />
         <Stack.Screen name="artist" />
         <Stack.Screen name="profile" />
+        <Stack.Screen name="profile/[section]" />
         <Stack.Screen name="login" />
         <Stack.Screen name="equalizer" />
       </Stack>

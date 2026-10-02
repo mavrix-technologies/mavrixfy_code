@@ -19,7 +19,6 @@ export function useLibraryData() {
 
   const playlists = useLibraryStore((s) => s.playlists);
   const followedArtists = useLibraryStore((s) => s.followedArtists);
-  const status = useLibraryStore((s) => s.status);
   const initialized = useLibraryStore((s) => s.initialized);
 
   const [refreshing, setRefreshing] = useState(false);

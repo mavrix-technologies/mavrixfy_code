@@ -9,7 +9,7 @@ import { useStartupPlaybackReconcile } from "./audioStartupReconcile";
 import { updatePlaybackEngineSnapshot } from "./PlaybackEngine";
 import { resolvePlaybackUrlWithDetails,songToTrack } from "./PlayerPlaybackResolver";
 import { fetchAutoplayRecommendations } from "./smartAutoplayService";
-import { setupPlayer } from "./TrackPlayerAdapter";
+import { StandardAudioPlayer } from "./StandardAudioPlayer";
 
 export interface UsePlayerCoreStateOptions {
   TrackPlayer: any;
@@ -100,7 +100,7 @@ export function usePlayerCoreState({
 
     const promise = (async () => {
       try {
-        await setupPlayer();
+        await StandardAudioPlayer.setupPlayer();
         setIsPlayerReady(true);
         return true;
       } catch (error) {

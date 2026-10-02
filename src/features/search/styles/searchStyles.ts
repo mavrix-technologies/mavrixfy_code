@@ -8,39 +8,14 @@ export const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
 
-  // ── Default Stack Native Liquid Glass Search ────────────────────────────────
+  // ── Search field ────────────────────────────────────────────────────────────
   searchBarRow: {
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  searchGlassButton: {
-    width: "100%",
+  idleSearchField: {
     height: 48,
     borderRadius: 24,
-  },
-  searchGlassButtonPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.99 }],
-  },
-  liquidGlassBar: {
-    width: "100%",
-    height: 48,
-    borderRadius: 24,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  searchIcon: {
-    marginRight: 2,
-  },
-  inactiveSearchText: {
-    flex: 1,
-    minWidth: 0,
-    color: "rgba(255, 255, 255, 0.60)",
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-    letterSpacing: -0.1,
   },
 
   // ── Active Search Header ───────────────────────────────────────────────────
@@ -170,7 +145,8 @@ export const styles = StyleSheet.create({
     gap: 8,
   },
   browseCard: {
-    width: "48%",
+    flex: 1,
+    minWidth: 0,
     height: 100,
     borderRadius: 8,
     overflow: "hidden",

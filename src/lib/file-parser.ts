@@ -145,7 +145,7 @@ function parseCSV(content: string): FileParseResult {
       } else {
         errors.push(`Line ${i + 1}: Missing title or artist`);
       }
-    } catch (error) {
+    } catch {
       errors.push(`Line ${i + 1}: Parse error`);
     }
   }

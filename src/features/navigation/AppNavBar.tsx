@@ -26,6 +26,7 @@ import { usePathname,useRouter } from "expo-router";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import {
 Pressable,
+Keyboard,
 StyleSheet,
 View,
 useWindowDimensions,
@@ -63,6 +64,13 @@ export type AppNavBarProps = {
 export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const { push: routerPush, navigate: routerNavigate } = useRouter();
   const pathname = usePathname();
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const show = Keyboard.addListener(IS_IOS ? "keyboardWillShow" : "keyboardDidShow", () => setKeyboardVisible(true));
+    const hide = Keyboard.addListener(IS_IOS ? "keyboardWillHide" : "keyboardDidHide", () => setKeyboardVisible(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
 
   const activeTab = useMemo<VisibleRoute>(() => {
     if (!pathname || pathname === "/" || pathname === "/index") return "index";
@@ -337,7 +345,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const containerGlassBase = Colors.background;
   const playerSectionDivider = "rgba(255,255,255,0.06)";
   const playerProgressFillColor = "rgba(255,255,255,0.90)";
-  const playerTopEdgeTint = "transparent";
   const miniButtonPrimaryBg = "#FFFFFF";
   const miniButtonPrimaryBorder = "transparent";
   const miniSecondaryButtonBg = "transparent";
@@ -365,16 +372,18 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     extrapolate: "clamp",
   });
 
+  const navHidden = hidden || keyboardVisible;
+
   return (
     <>
       <View
-        pointerEvents={hidden ? "none" : "box-none"}
-        accessibilityElementsHidden={hidden}
-        importantForAccessibility={hidden ? "no-hide-descendants" : "auto"}
+        pointerEvents={navHidden ? "none" : "box-none"}
+        accessibilityElementsHidden={navHidden}
+        importantForAccessibility={navHidden ? "no-hide-descendants" : "auto"}
         style={[
           styles.wrapper,
           { bottom: 0 },
-          hidden && styles.wrapperHidden,
+          navHidden && styles.wrapperHidden,
         ]}
       >
         <View

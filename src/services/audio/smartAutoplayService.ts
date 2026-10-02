@@ -18,6 +18,14 @@ function rememberAutoplaySong(id: string) {
   RECENT_AUTOPLAY_IDS.add(id);
 }
 
+function parseSongArray(items: any): Song[] {
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((item) => {
+    const s = parseApiSong(item);
+    return s ? [s] : [];
+  });
+}
+
 /**
  * Cleans a song title down to its core root name, stripping parentheses,
  * version qualifiers (Remix, Lofi, From Film, Acoustic, etc.), and punctuation.
@@ -41,8 +49,10 @@ function extractArtistNames(artistStr?: string | null): { primary: string; secon
   if (!artistStr) return { primary: "" };
   const parts = artistStr
     .split(/[,&/|]/)
-    .map((p) => p.trim())
-    .filter(Boolean);
+    .flatMap((p) => {
+      const trimmed = p.trim();
+      return trimmed ? [trimmed] : [];
+    });
   return {
     primary: parts[0] || "",
     secondary: parts[1] || undefined,
@@ -102,10 +112,7 @@ export async function fetchAutoplayRecommendations({
         `${apiUrl}/api/songs/${encodeURIComponent(seedSong.id)}/suggestions?limit=${Math.max(limit, 15)}`,
         signal
       )
-        .then((res) => {
-          const items = res?.data || res?.results || [];
-          return Array.isArray(items) ? items.map(parseApiSong).filter((s): s is Song => Boolean(s)) : [];
-        })
+        .then((res) => parseSongArray(res?.data || res?.results))
         .catch(() => [])
     );
   }
@@ -117,10 +124,7 @@ export async function fetchAutoplayRecommendations({
         `${apiUrl}/api/search/songs?query=${encodeURIComponent(`${primaryArtist} hits`)}&limit=15`,
         signal
       )
-        .then((res) => {
-          const items = res?.data?.results || res?.data || [];
-          return Array.isArray(items) ? items.map(parseApiSong).filter((s): s is Song => Boolean(s)) : [];
-        })
+        .then((res) => parseSongArray(res?.data?.results || res?.data))
         .catch(() => [])
     );
   }
@@ -132,10 +136,7 @@ export async function fetchAutoplayRecommendations({
         `${apiUrl}/api/search/songs?query=${encodeURIComponent(`${secondaryArtist} hits`)}&limit=10`,
         signal
       )
-        .then((res) => {
-          const items = res?.data?.results || res?.data || [];
-          return Array.isArray(items) ? items.map(parseApiSong).filter((s): s is Song => Boolean(s)) : [];
-        })
+        .then((res) => parseSongArray(res?.data?.results || res?.data))
         .catch(() => [])
     );
   }
@@ -147,10 +148,7 @@ export async function fetchAutoplayRecommendations({
       `${apiUrl}/api/search/songs?query=${encodeURIComponent(genreQuery)}&limit=10`,
       signal
     )
-      .then((res) => {
-        const items = res?.data?.results || res?.data || [];
-        return Array.isArray(items) ? items.map(parseApiSong).filter((s): s is Song => Boolean(s)) : [];
-      })
+      .then((res) => parseSongArray(res?.data?.results || res?.data))
       .catch(() => [])
   );
 
@@ -171,7 +169,10 @@ export async function fetchAutoplayRecommendations({
   existingQueueIds.add(seedSong.id);
 
   const existingQueueTitles = new Set(
-    currentQueue.map((s) => cleanCoreTitle(s.title)).filter(Boolean)
+    currentQueue.flatMap((s) => {
+      const cleaned = cleanCoreTitle(s.title);
+      return cleaned ? [cleaned] : [];
+    })
   );
   if (seedCoreTitle) {
     existingQueueTitles.add(seedCoreTitle);

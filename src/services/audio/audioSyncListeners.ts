@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { songToTrack } from "@/services/audio/PlayerPlaybackResolver";
+import type { SeekOverride } from "@/services/audio/audioProgressTracking";
 import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { carPlayService } from "@/services/carPlayService";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
@@ -32,7 +33,7 @@ interface UseAudioSyncListenersOptions {
   positionSecondsRef: MutableRefObject<number>;
   setNativePosition: (pos: number) => void;
   setNativeDuration: React.Dispatch<React.SetStateAction<number>>;
-  setSeekOverride: (override: any) => void;
+  setSeekOverride: (override: SeekOverride) => void;
   prefetchAdjacentTrackStreams: (queue: Song[], index: number) => void;
   sleepTimerRef: MutableRefObject<SleepTimerState | null>;
   clearSleepTimer: () => void;
@@ -102,9 +103,6 @@ export function useAudioSyncListeners({
       subscribeTrackPlayerEvent(Event.RemotePlay, playIntent),
       subscribeTrackPlayerEvent(Event.RemotePause, pauseIntent),
       subscribeTrackPlayerEvent(Event.RemoteStop, pauseIntent),
-      subscribeTrackPlayerEvent(Event.RemoteDuck, (event: any) => {
-        if (event?.paused || event?.permanent) pauseIntent();
-      }),
       subscribeTrackPlayerEvent(Event.PlaybackState, (event: any) => {
         const nextState = event && typeof event === "object" && "state" in event ? event.state : event;
 

@@ -154,7 +154,7 @@ export const SearchRecentSection = React.memo(function SearchRecentSection({
       style={styles.scrollView}
       contentContainerStyle={[
         styles.content,
-        { paddingTop: topInset + 108, paddingBottom: 146 },
+        { paddingTop: topInset + 64, paddingBottom: 146 },
       ]}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}

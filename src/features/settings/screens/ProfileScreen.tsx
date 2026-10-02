@@ -21,8 +21,8 @@ import { safeGoBack } from "@/utils/navigation";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image } from "expo-image";
-import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback,useEffect,useRef,useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback,useEffect,useState } from "react";
 import {
 Alert,
 Platform,
@@ -39,9 +39,54 @@ import { ProfileLibrarySection } from "../components/ProfileLibrarySection";
 import { ProfilePlaybackSection } from "../components/ProfilePlaybackSection";
 import { SimpleRow } from "../components/SettingsUIComponents";
 
+const PROFILE_SECTIONS = {
+  "streaming-downloads": "Streaming & Downloads",
+  playback: "Playback",
+  controls: "Controls",
+  library: "Library & Data",
+  account: "Account & Security",
+  about: "About",
+} as const;
+
+type ProfileSection = keyof typeof PROFILE_SECTIONS;
+
+interface ProfileAccountSecurityGroupProps {
+  isAuthenticated: boolean;
+  email?: string | null;
+  onLogout: () => void;
+  onDeleteAccount: () => void;
+  onSignIn: () => void;
+}
+
+function ProfileAccountSecurityGroup({
+  isAuthenticated,
+  email,
+  onLogout,
+  onDeleteAccount,
+  onSignIn,
+}: ProfileAccountSecurityGroupProps) {
+  return (
+    <View style={styles.sectionGroup}>
+      {isAuthenticated ? (
+        <>
+          <SimpleRow icon="mail-outline" title="Email" value={email || "—"} />
+          <SimpleRow icon="log-out-outline" title="Sign Out" onPress={onLogout} danger />
+          <SimpleRow icon="trash-outline" title="Delete Account" onPress={onDeleteAccount} danger isLast />
+        </>
+      ) : (
+        <SimpleRow icon="log-in-outline" title="Sign In to Manage Account" onPress={onSignIn} isLast />
+      )}
+    </View>
+  );
+}
+
 export function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { push: routerPush, replace: routerReplace } = useRouter();
+  const { section: sectionParam } = useLocalSearchParams<{ section?: string }>();
+  const section = typeof sectionParam === "string" && sectionParam in PROFILE_SECTIONS
+    ? sectionParam as ProfileSection
+    : null;
   const { user, isAuthenticated, logout } = useAuth();
   const { changeStreamingQuality } = usePlayerActions();
   const { updatePreferences } = useDownloads();
@@ -51,8 +96,6 @@ export function ProfileScreen() {
 
   const [checkingStoreUpdate, setCheckingStoreUpdate] = useState(false);
   const [changingQuality, setChangingQuality] = useState<AppSettings["streamingQuality"] | null>(null);
-
-  const scrollRef = useRef<ScrollView>(null);
 
   const [settings, setSettings] = useState<AppSettings>({
     streamingQuality: "medium",
@@ -224,92 +267,108 @@ export function ProfileScreen() {
 
   const appVersion = getInstalledAppVersion();
   const buildNumber = getInstalledBuildNumber();
+  const openSection = (target: ProfileSection) => routerPush(`/profile/${target}` as any);
 
   return (
     <View style={[styles.screen, { paddingTop: topInset }]}>
       {/* Minimal Header */}
       <View style={styles.header}>
-        <Pressable onPress={safeGoBack} style={styles.backButton} hitSlop={12}>
+        <Pressable
+          onPress={safeGoBack}
+          style={styles.backButton}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
         </Pressable>
-        <Text style={styles.headerTitle}>Profile</Text>
-        {isAuthenticated ? (
-          <Pressable onPress={handleLogout} style={styles.headerActionBtn} hitSlop={12}>
-            <Text style={styles.logoutHeaderBtnText}>Log Out</Text>
-          </Pressable>
-        ) : (
-          <Pressable onPress={() => routerReplace("/login")} style={styles.headerActionBtn} hitSlop={12}>
-            <Text style={styles.signInHeaderBtnText}>Sign In</Text>
-          </Pressable>
-        )}
+        <Text style={styles.headerTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+          {section ? PROFILE_SECTIONS[section] : "Profile"}
+        </Text>
+        <View style={styles.headerActionBtn} />
       </View>
 
       <ScrollView
-        ref={scrollRef}
         style={styles.scrollView}
         contentContainerStyle={[
           styles.scrollBody,
-          { paddingBottom: Math.max(bottomInset, 16) + 32 },
+          { paddingTop: section ? 20 : 10, paddingBottom: Math.max(bottomInset, 16) + 32 },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Profile User Info Card */}
-        <ProfileAccountHeader
-          user={user}
-          isAuthenticated={isAuthenticated}
-          onSignInPress={() => routerReplace("/login")}
-        />
-
-        {/* Audio & Playback Section */}
-        <ProfilePlaybackSection
-          settings={settings}
-          updateSettings={updateSettings}
-          onQualityChange={handleQualityChange}
-          loadingQuality={changingQuality}
-          onOpenEqualizer={() => routerPush("/equalizer" as any)}
-        />
-
-        {/* Library & Data */}
-        <ProfileLibrarySection
-          onDownloadedSongs={() => routerPush("/downloaded-songs" as any)}
-          onImportSongs={() => routerPush("/import-songs" as any)}
-          onClearCache={handleClearCache}
-        />
-
-        {/* Account & Security */}
-        {isAuthenticated && (
+        {!section && (
           <>
-            <Text style={styles.sectionLabel}>ACCOUNT</Text>
+            <ProfileAccountHeader
+              user={user}
+              isAuthenticated={isAuthenticated}
+              onSignInPress={() => routerReplace("/login")}
+            />
+            <Text style={styles.sectionLabel}>PREFERENCES</Text>
             <View style={styles.sectionGroup}>
-              <SimpleRow
-                icon="mail-outline"
-                title="Email"
-                value={user?.email || "—"}
-              />
-              <SimpleRow
-                icon="log-out-outline"
-                title="Sign Out"
-                onPress={handleLogout}
-                danger
-              />
-              <SimpleRow
-                icon="trash-outline"
-                title="Delete Account"
-                onPress={() => routerPush("/delete-account")}
-                danger
-                isLast
-              />
+              <SimpleRow icon="cloud-download-outline" title="Streaming & Downloads" onPress={() => openSection("streaming-downloads")} />
+              <SimpleRow icon="options-outline" title="Equalizer" onPress={() => routerPush("/equalizer" as any)} />
+              <SimpleRow icon="play-circle-outline" title="Playback" onPress={() => openSection("playback")} />
+              <SimpleRow icon="hand-left-outline" title="Controls" onPress={() => openSection("controls")} isLast />
+            </View>
+            <Text style={styles.sectionLabel}>LIBRARY & DATA</Text>
+            <ProfileLibrarySection
+              onDownloadedSongs={() => routerPush("/downloaded-songs" as any)}
+              onImportSongs={() => routerPush("/import-songs" as any)}
+              onClearCache={handleClearCache}
+            />
+
+            <Text style={styles.sectionLabel}>ACCOUNT & SECURITY</Text>
+            <ProfileAccountSecurityGroup
+              isAuthenticated={isAuthenticated}
+              email={user?.email}
+              onLogout={handleLogout}
+              onDeleteAccount={() => routerPush("/delete-account")}
+              onSignIn={() => routerReplace("/login")}
+            />
+
+            <Text style={styles.sectionLabel}>ABOUT</Text>
+            <View style={styles.sectionGroup}>
+              <SimpleRow icon="information-circle-outline" title="About" onPress={() => openSection("about")} isLast />
             </View>
           </>
         )}
 
-        {/* About Section */}
-        <ProfileAboutSection
-          appVersion={appVersion}
-          buildNumber={buildNumber}
-          checkingStoreUpdate={checkingStoreUpdate}
-          onCheckStoreUpdate={() => void handleCheckStoreUpdate()}
-        />
+        {(section === "streaming-downloads" || section === "playback" || section === "controls") && (
+          <ProfilePlaybackSection
+            section={section}
+            settings={settings}
+            updateSettings={updateSettings}
+            onQualityChange={handleQualityChange}
+            loadingQuality={changingQuality}
+          />
+        )}
+
+        {section === "library" && (
+          <ProfileLibrarySection
+            onDownloadedSongs={() => routerPush("/downloaded-songs" as any)}
+            onImportSongs={() => routerPush("/import-songs" as any)}
+            onClearCache={handleClearCache}
+          />
+        )}
+
+        {section === "account" && (
+          <ProfileAccountSecurityGroup
+            isAuthenticated={isAuthenticated}
+            email={user?.email}
+            onLogout={handleLogout}
+            onDeleteAccount={() => routerPush("/delete-account")}
+            onSignIn={() => routerReplace("/login")}
+          />
+        )}
+
+        {section === "about" && (
+          <ProfileAboutSection
+            appVersion={appVersion}
+            buildNumber={buildNumber}
+            checkingStoreUpdate={checkingStoreUpdate}
+            onCheckStoreUpdate={() => void handleCheckStoreUpdate()}
+          />
+        )}
       </ScrollView>
     </View>
   );
@@ -337,27 +396,19 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 18,
     fontFamily: "Inter_700Bold",
+    flex: 1,
+    textAlign: "center",
   },
   headerActionBtn: {
+    minWidth: 40,
     paddingVertical: 8,
     paddingHorizontal: 10,
-  },
-  logoutHeaderBtnText: {
-    color: "#FF5252",
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
-  },
-  signInHeaderBtnText: {
-    color: Colors.primary,
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
   },
   scrollView: {
     flex: 1,
   },
   scrollBody: {
     paddingHorizontal: 16,
-    paddingTop: 10,
   },
   sectionLabel: {
     color: "rgba(255, 255, 255, 0.38)",

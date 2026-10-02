@@ -3,16 +3,12 @@ import { useDownloads } from "@/contexts/DownloadContext";
 import { formatBytes } from "@/lib/downloads/storagePolicy";
 import { triggerImpact } from "@/lib/haptics";
 import { type AppSettings } from "@/lib/storage";
-import { applyEqualizerEnabled, applySurroundSoundEnabled, applySurroundStrength } from "@/services/audio/audioEqualizer";
 import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
-import { useRouter } from "expo-router";
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 import { Alert,Pressable,StyleSheet,Switch,Text,View } from "react-native";
 import {
 DOWNLOAD_QUALITY_OPTIONS,
-detectMatchingPreset,
-EQUALIZER_PRESETS,
 MINI_PLAYER_OPTIONS,
 QUALITY_OPTIONS,
 SMART_AUTOPLAY_OPTIONS,
@@ -21,67 +17,20 @@ VIDEO_QUALITY_OPTIONS,
 import { SegmentPicker } from "./SettingsUIComponents";
 
 interface ProfilePlaybackSectionProps {
+  section: "streaming-downloads" | "playback" | "controls";
   settings: AppSettings;
   updateSettings: (partial: Partial<AppSettings>) => Promise<void>;
   onQualityChange: (value: AppSettings["streamingQuality"]) => Promise<void>;
   loadingQuality?: AppSettings["streamingQuality"] | null;
-  onOpenEqualizer?: () => void;
 }
 
 export function ProfilePlaybackSection({
+  section,
   settings,
   updateSettings,
   onQualityChange,
   loadingQuality,
-  onOpenEqualizer,
 }: ProfilePlaybackSectionProps) {
-  const router = useRouter();
-  const equalizerStatusText = useMemo(() => {
-    const presetId = detectMatchingPreset(settings.equalizer);
-    const presetName = EQUALIZER_PRESETS.find((preset) => preset.id === presetId)?.name;
-    return settings.equalizerEnabled ? `On • ${presetName || "Custom"}` : "Off";
-  }, [settings.equalizer, settings.equalizerEnabled]);
-
-  const handleToggleEqualizer = useCallback(async (enabled: boolean) => {
-    void triggerImpact(ImpactFeedbackStyle.Light);
-    if (!enabled) {
-      await updateSettings({ equalizerEnabled: false });
-      void applyEqualizerEnabled(false).catch(() => {});
-      return;
-    }
-    try {
-      await applyEqualizerEnabled(enabled);
-      await updateSettings({ equalizerEnabled: enabled });
-    } catch (error) {
-      Alert.alert("Equalizer unavailable", error instanceof Error ? error.message : "Could not change the equalizer.");
-    }
-  }, [updateSettings]);
-
-  const handleToggleSpatialPanning = useCallback(async (enabled: boolean) => {
-    void triggerImpact(ImpactFeedbackStyle.Light);
-    try {
-      if (!enabled) {
-        await updateSettings({ surroundSoundEnabled: false });
-        void applySurroundSoundEnabled(false).catch(() => {});
-        return;
-      }
-      const strength = 350;
-      await applySurroundStrength(strength);
-      await applySurroundSoundEnabled(true);
-      await updateSettings({ surroundSoundEnabled: true, surroundStrength: strength });
-    } catch (error) {
-      Alert.alert("Spatial panning unavailable", error instanceof Error ? error.message : "Could not change spatial panning.");
-    }
-  }, [updateSettings]);
-
-  const handleOpenEqualizer = useCallback(() => {
-    if (onOpenEqualizer) {
-      onOpenEqualizer();
-    } else {
-      router.push("/equalizer" as any);
-    }
-  }, [onOpenEqualizer, router]);
-
   const handleDataSaverToggle = useCallback(
     async (enabled: boolean) => {
       if (enabled) {
@@ -130,9 +79,8 @@ export function ProfilePlaybackSection({
 
   return (
     <>
-      {/* ─── 1. Streaming & Downloads ─── */}
-      <Text style={styles.sectionLabel}>STREAMING & DOWNLOADS</Text>
-      <View style={styles.sectionGroup}>
+      {section === "streaming-downloads" && (
+        <View style={styles.sectionGroup}>
         {/* Streaming Quality */}
         <View style={styles.groupBlock}>
           <View style={styles.blockHeader}>
@@ -212,66 +160,11 @@ export function ProfilePlaybackSection({
             thumbColor="#FFFFFF"
           />
         </View>
-      </View>
-
-      {/* ─── 2. Audio & Equalizer ─── */}
-      <Text style={styles.sectionLabel}>AUDIO EFFECTS</Text>
-      <View style={styles.sectionGroup}>
-        <Pressable
-          style={({ pressed }) => [styles.row, styles.rowDivider, pressed && styles.rowPressed]}
-          onPress={handleOpenEqualizer}
-          accessibilityRole="button"
-          accessibilityLabel="Open Equalizer Settings"
-        >
-          <Ionicons
-            name="options-outline"
-            size={22}
-            color={settings.equalizerEnabled ? Colors.primary : "rgba(255, 255, 255, 0.7)"}
-            style={styles.rowIcon}
-          />
-          <View style={styles.rowTextCol}>
-            <Text style={styles.rowTitle}>Equalizer</Text>
-            <Text style={styles.rowSubtitle}>{equalizerStatusText}</Text>
-          </View>
-          <View style={styles.rowTrailingActions}>
-            <Switch
-              value={settings.equalizerEnabled}
-              onValueChange={handleToggleEqualizer}
-              trackColor={{ false: "rgba(255, 255, 255, 0.1)", true: Colors.primary }}
-              thumbColor="#FFFFFF"
-            />
-            <Ionicons
-              name="chevron-forward"
-              size={18}
-              color="rgba(255, 255, 255, 0.25)"
-              style={{ marginLeft: 6 }}
-            />
-          </View>
-        </Pressable>
-        <View style={styles.row}>
-          <Ionicons
-            name="headset-outline"
-            size={22}
-            color={settings.surroundSoundEnabled ? Colors.primary : "rgba(255, 255, 255, 0.7)"}
-            style={styles.rowIcon}
-          />
-          <View style={styles.rowTextCol}>
-            <Text style={styles.rowTitle}>Spatial Panning</Text>
-            <Text style={styles.rowSubtitle}>Subtle stereo movement; not 3D surround</Text>
-          </View>
-          <Switch
-            value={Boolean(settings.surroundSoundEnabled)}
-            onValueChange={handleToggleSpatialPanning}
-            accessibilityLabel="Spatial Panning"
-            trackColor={{ false: "rgba(255, 255, 255, 0.1)", true: Colors.primary }}
-            thumbColor="#FFFFFF"
-          />
         </View>
-      </View>
+      )}
 
-      {/* ─── 3. Playback & Transitions ─── */}
-      <Text style={styles.sectionLabel}>PLAYBACK & TRANSITIONS</Text>
-      <View style={styles.sectionGroup}>
+      {section === "playback" && (
+        <View style={styles.sectionGroup}>
         {/* Video Background */}
         <View style={styles.groupBlock}>
           <View style={styles.blockHeader}>
@@ -322,11 +215,11 @@ export function ProfilePlaybackSection({
           )}
         </View>
 
-      </View>
+        </View>
+      )}
 
-      {/* ─── 4. Controls & Hardware ─── */}
-      <Text style={styles.sectionLabel}>CONTROLS & HARDWARE</Text>
-      <View style={styles.sectionGroup}>
+      {section === "controls" && (
+        <View style={styles.sectionGroup}>
         {/* Mini Player Control */}
         <View style={styles.groupBlock}>
           <View style={styles.blockHeader}>
@@ -356,21 +249,13 @@ export function ProfilePlaybackSection({
             thumbColor="#FFFFFF"
           />
         </View>
-      </View>
+        </View>
+      )}
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionLabel: {
-    color: "rgba(255, 255, 255, 0.38)",
-    fontSize: 12.5,
-    fontFamily: "Inter_700Bold",
-    letterSpacing: 0.9,
-    marginTop: 26,
-    marginBottom: 10,
-    marginLeft: 6,
-  },
   sectionGroup: {
     borderRadius: 16,
     backgroundColor: "rgba(255, 255, 255, 0.04)",
@@ -434,9 +319,5 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontFamily: "Inter_400Regular",
     marginTop: 2,
-  },
-  rowTrailingActions: {
-    flexDirection: "row",
-    alignItems: "center",
   },
 });

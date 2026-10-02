@@ -1,12 +1,12 @@
 /**
  * Music Catalog Feed Service.
- * Fetches verified published homepage catalog modules (trending, charts, new releases, editorial picks).
+ * Reads published homepage catalog modules (trending, charts, new releases, editorial picks).
  */
 
 import { convertJioSaavnSong, type JioSaavnSong, type Song } from "@/lib/musicData";
 import { fetchWithTimeout } from "@/utils/asyncUtils";
 import { getCatalogSearchBaseUrls, mapHomepageItemToPlaylistResult } from "./MusicCatalogNormalizers";
-import type { CatalogCategoryData } from "./MusicCatalogTypes";
+import type { CatalogCategoryData, CatalogPlaylistResult } from "./MusicCatalogTypes";
 
 type HomeModuleItem = {
   id?: string;
@@ -47,6 +47,7 @@ const HOME_CACHE_MS = 10 * 60 * 1000;
 const SECTIONS = [
   { id: "trending", title: "Trending Now", key: "new_trending" },
   { id: "charts", title: "Top Charts", key: "charts" },
+  { id: "most-viral", title: "Viral Hits", titlePattern: /\b(viral|reels)\b/i },
   { id: "new-releases", title: "New Releases", key: "new_albums" },
   { id: "fresh-hits", title: "Fresh Hits", titleMatch: "Fresh Hits" },
   { id: "editorial", title: "Editorial Picks", key: "top_playlists" },
@@ -91,22 +92,26 @@ export function parseOfficialHomeModules(html: string): HomeModule[] {
   return [];
 }
 
+const VALID_FEED_TYPES = new Set(["song", "album", "album_playlist", "playlist"]);
+
 export function buildOfficialHomeFeed(modules: HomeModule[]): OfficialHomeFeed {
   const usedIds = new Set<string>();
   const categories = SECTIONS.flatMap((section) => {
     const module = modules.find((item) =>
-      "key" in section ? item.key === section.key : item.title === section.titleMatch
+      "key" in section ? item.key === section.key
+        : "titlePattern" in section ? section.titlePattern.test(item.title ?? "")
+        : item.title === section.titleMatch
     );
-    const results = (module?.data ?? [])
-      .filter((item) => item && ["song", "album", "album_playlist", "playlist"].includes(item.type ?? ""))
-      .map(mapHomepageItemToPlaylistResult)
-      .filter((item) => {
-        const key = `${item.type}:${item.id}`;
-        if (!item.id || !item.url || usedIds.has(key)) return false;
-        usedIds.add(key);
-        return true;
-      })
-      .slice(0, 12);
+    const results: CatalogPlaylistResult[] = [];
+    for (const item of module?.data ?? []) {
+      if (results.length >= 12) break;
+      if (!item || !VALID_FEED_TYPES.has(item.type ?? "")) continue;
+      const mapped = mapHomepageItemToPlaylistResult(item);
+      const key = `${mapped.type}:${mapped.id}`;
+      if (!mapped.id || !mapped.url || usedIds.has(key)) continue;
+      usedIds.add(key);
+      results.push(mapped);
+    }
     return results.length > 0 ? [{ id: section.id, title: section.title, results }] : [];
   });
 

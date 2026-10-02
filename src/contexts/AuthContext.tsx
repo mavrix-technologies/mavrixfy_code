@@ -575,12 +575,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    await deleteUser(currentUser);
-    await Promise.all([
-      clearAppStorage({ userId: currentUser.uid }),
-      deleteAsync(getDownloadsRootUri(currentUser.uid), { idempotent: true }),
-      clearRateLimit('auth:deleteAccount', userEmail.toLowerCase()),
-    ]);
+    await deleteUser(currentUser).then(() =>
+      Promise.all([
+        clearAppStorage({ userId: currentUser.uid }),
+        deleteAsync(getDownloadsRootUri(currentUser.uid), { idempotent: true }),
+        clearRateLimit('auth:deleteAccount', userEmail.toLowerCase()),
+      ])
+    );
     clearUserCache(currentUser.uid);
   }, []);
 

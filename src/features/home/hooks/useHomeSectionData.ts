@@ -59,9 +59,6 @@ export function useHomeSectionData({
       if (recentlyPlayed.length > 0) {
         items.push({ id: "recently-played", type: "recently-played" });
       }
-      if (quickPickSongs.length > 0) {
-        items.push({ id: "quick-picks", type: "quick-picks" });
-      }
       if (featuredArtists.length > 0) {
         items.push({ id: "artists", type: "artists" });
       }
@@ -151,11 +148,6 @@ export function useHomeSectionData({
       if (rCat) {
         items.push({ id: `cat-${rCat.id}`, type: "category", category: rCat, showAd: false });
       }
-      if (quickPickSongs.length > 0) {
-        items.push({ id: "quick-picks", type: "quick-picks" });
-      } else if (loadingMainContent) {
-        items.push({ id: "loading-quick", type: "loading-quick" });
-      }
       if (publicPlaylists.length > 0) {
         items.push({ id: "public-playlists", type: "public-playlists" });
       }
@@ -167,9 +159,6 @@ export function useHomeSectionData({
       const pCat = categories.find((c) => c.id === "party-mix" || c.id === "moods" || c.id === "trending");
       if (pCat) {
         items.push({ id: `cat-${pCat.id}`, type: "category", category: pCat, showAd: false });
-      }
-      if (quickPickSongs.length > 0) {
-        items.push({ id: "quick-picks", type: "quick-picks" });
       }
       const bCat = categories.find((c) => c.id === "bollywood" || c.id === "fresh-hits");
       if (bCat) {
@@ -183,9 +172,6 @@ export function useHomeSectionData({
       const pCat = categories.find((c) => c.id === "festive" || c.id === "party-mix" || c.id === "bollywood");
       if (pCat) {
         items.push({ id: `cat-${pCat.id}`, type: "category", category: pCat, showAd: false });
-      }
-      if (quickPickSongs.length > 0) {
-        items.push({ id: "quick-picks", type: "quick-picks" });
       }
       if (publicPlaylists.length > 0) {
         items.push({ id: "public-playlists", type: "public-playlists" });
@@ -203,9 +189,6 @@ export function useHomeSectionData({
       }
       if (publicPlaylists.length > 0) {
         items.push({ id: "public-playlists", type: "public-playlists" });
-      }
-      if (quickPickSongs.length > 0) {
-        items.push({ id: "quick-picks", type: "quick-picks" });
       }
       return items;
     }

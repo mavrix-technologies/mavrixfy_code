@@ -110,9 +110,12 @@ function scoreVideoCandidate(vr: any, song: Song): number {
     score += 65;
   } else {
     const words = cleanSongTitle.split(/\s+/).filter((w) => w.length > 2);
-    const matched = words.filter((w) => vidTitle.includes(w));
-    if (matched.length > 0) {
-      score += Math.round((matched.length / words.length) * 45);
+    let matchedCount = 0;
+    for (const w of words) {
+      if (vidTitle.indexOf(w) !== -1) matchedCount++;
+    }
+    if (matchedCount > 0) {
+      score += Math.round((matchedCount / words.length) * 45);
     } else {
       score -= 60; // Title doesn't match at all
     }

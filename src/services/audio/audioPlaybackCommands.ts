@@ -4,6 +4,7 @@ import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { resolveAudioUrl,songToTrack,withResolvedPlaybackUrl } from "@/services/audio/PlayerPlaybackResolver";
 import { isSameQueueContent } from "@/services/audio/audioNativeQueueLane";
+import type { SeekOverride } from "@/services/audio/audioProgressTracking";
 import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { toDurationSeconds } from "@/utils/timeFormatters";
@@ -32,7 +33,7 @@ interface UseAudioPlaybackCommandsOptions {
   positionSecondsRef: MutableRefObject<number>;
   durationSecondsRef?: MutableRefObject<number>;
   isNativeQueueSyncedRef?: MutableRefObject<boolean>;
-  setSeekOverride: (override: any) => void;
+  setSeekOverride: (override: SeekOverride) => void;
   setNativePosition: (pos: number) => void;
   streamUrlCache: MutableRefObject<Map<string, string>>;
   resolvePlaybackUrlCached: (song: Song) => Promise<string | null>;

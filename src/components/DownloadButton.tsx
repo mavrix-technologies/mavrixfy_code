@@ -9,36 +9,12 @@ import Colors from '@/constants/colors';
 import { useDownloads,useSongDownload } from '@/contexts/DownloadContext';
 import { formatBytes } from '@/lib/downloads/storagePolicy';
 import { triggerImpact } from '@/lib/haptics';
-import { logger } from '@/lib/logger';
 import type { Song } from '@/lib/musicData';
 import { requestDownloadWithRewardedAd } from '@/services/ads/rewardedDownloadAdService';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { ActivityIndicator,Alert,Pressable,StyleSheet,Text,View } from 'react-native';
-
-function resolveSongAudioUrl(song: Song): string {
-  if (song.audioUrl) return song.audioUrl;
-  
-  // @ts-ignore
-  const directCandidates = [song.url, song.uri, song.streamUrl, song.downloadUrl];
-  for (const candidate of directCandidates) {
-    if (typeof candidate === 'string' && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-
-  // @ts-ignore
-  const downloadUrlValue = song.downloadUrl;
-  if (downloadUrlValue && typeof downloadUrlValue === 'object') {
-    const nested = (downloadUrlValue as any).url || (downloadUrlValue as any).link;
-    if (typeof nested === 'string' && nested.trim()) {
-      return nested.trim();
-    }
-  }
-
-  return '';
-}
 
 interface DownloadButtonProps {
   song: Song;
@@ -87,27 +63,8 @@ export default function DownloadButton({
     try {
       const targetSong = song;
 
-      let sizeLabel = 'unknown size';
-      let actualSize: number | null = null;
-      
-      const audioUrl = resolveSongAudioUrl(targetSong);
-      if (audioUrl) {
-        try {
-          const response = await fetch(audioUrl, { method: 'HEAD' });
-          const contentLength = response.headers.get('content-length');
-          if (contentLength) {
-            actualSize = parseInt(contentLength, 10);
-            sizeLabel = formatBytes(actualSize);
-          }
-        } catch (err) {
-          logger.warn('[DownloadButton] Failed to fetch download size:', err);
-        }
-      }
-
-      if (!actualSize) {
-        const estimatedBytes = (targetSong.duration || 0) * 25_000;
-        sizeLabel = estimatedBytes > 0 ? `~${formatBytes(estimatedBytes)}` : 'unknown size';
-      }
+      const estimatedBytes = (targetSong.duration || 0) * 25_000;
+      const sizeLabel = estimatedBytes > 0 ? `~${formatBytes(estimatedBytes)}` : 'unknown size';
 
       setIsPreparing(false);
 

@@ -196,8 +196,193 @@ export function LoginScreen() {
 
 export default LoginScreen;
 
-function LoginScreenView() {
-  const insets = useSafeAreaInsets();
+function AuthHeaderSection({ isSignup }: { isSignup: boolean }) {
+  return (
+    <View style={styles.headerArea}>
+      <Text style={styles.titleText}>
+        {isSignup ? "Create an Account" : "Hi There!"}
+      </Text>
+      <Text style={styles.subtitleText}>
+        {isSignup
+          ? "To create an account provide details verify email and set a password."
+          : "Please enter required details."}
+      </Text>
+    </View>
+  );
+}
+
+interface AuthFormInputsProps {
+  isSignup: boolean;
+  fullName: string;
+  setFullName: (val: string) => void;
+  email: string;
+  setEmail: (val: string) => void;
+  password: string;
+  setPassword: (val: string) => void;
+  showPassword: boolean;
+  setShowPassword: React.Dispatch<React.SetStateAction<boolean>>;
+  focusedField: "name" | "email" | "password" | null;
+  setFocusedField: (val: "name" | "email" | "password" | null) => void;
+  resetPasswordLoading: boolean;
+  onForgotPassword: () => void;
+}
+
+function AuthFormInputs({
+  isSignup,
+  fullName,
+  setFullName,
+  email,
+  setEmail,
+  password,
+  setPassword,
+  showPassword,
+  setShowPassword,
+  focusedField,
+  setFocusedField,
+  resetPasswordLoading,
+  onForgotPassword,
+}: AuthFormInputsProps) {
+  return (
+    <>
+      <View style={styles.inputsContainer}>
+        {isSignup && (
+          <AuthField
+            placeholder="Full name"
+            value={fullName}
+            onChangeText={setFullName}
+            autoCapitalize="words"
+            autoComplete="name"
+            textContentType="name"
+            isFocused={focusedField === "name"}
+            onFocus={() => setFocusedField("name")}
+            onBlur={() => setFocusedField(null)}
+          />
+        )}
+
+        <AuthField
+          placeholder="Email address"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoComplete="email"
+          textContentType="emailAddress"
+          isFocused={focusedField === "email"}
+          onFocus={() => setFocusedField("email")}
+          onBlur={() => setFocusedField(null)}
+        />
+
+        <AuthField
+          placeholder="Password"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry={!showPassword}
+          autoComplete={isSignup ? "new-password" : "current-password"}
+          textContentType={isSignup ? "newPassword" : "password"}
+          isFocused={focusedField === "password"}
+          onFocus={() => setFocusedField("password")}
+          onBlur={() => setFocusedField(null)}
+          trailing={
+            <Pressable
+              onPress={() => setShowPassword((prev) => !prev)}
+              hitSlop={12}
+              style={styles.eyeBtn}
+            >
+              <Ionicons
+                name={showPassword ? "eye-off-outline" : "eye-outline"}
+                size={20}
+                color="rgba(255, 255, 255, 0.45)"
+              />
+            </Pressable>
+          }
+        />
+      </View>
+
+      {!isSignup && (
+        <Pressable
+          style={styles.forgotBtn}
+          onPress={onForgotPassword}
+          disabled={resetPasswordLoading}
+          hitSlop={8}
+        >
+          <Text style={styles.forgotText}>
+            {resetPasswordLoading ? "Sending reset link..." : "Forgot Password?"}
+          </Text>
+        </Pressable>
+      )}
+    </>
+  );
+}
+
+interface AuthSubmitActionsProps {
+  isSignup: boolean;
+  loading: boolean;
+  onSubmit: () => void;
+  onToggleMode: () => void;
+  onGuestContinue: () => void;
+}
+
+function AuthSubmitActions({
+  isSignup,
+  loading,
+  onSubmit,
+  onToggleMode,
+  onGuestContinue,
+}: AuthSubmitActionsProps) {
+  return (
+    <>
+      <Pressable
+        style={({ pressed }) => [
+          styles.submitBtnWrap,
+          pressed && styles.btnPressed,
+          loading && styles.submitBtnDisabled,
+        ]}
+        onPress={onSubmit}
+        disabled={loading}
+      >
+        <LinearGradient
+          colors={["#00E58F", "#26E19A", "#48F2A8"]}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={styles.submitBtnGradient}
+        >
+          {loading ? (
+            <ActivityIndicator color="#03140C" size="small" />
+          ) : (
+            <Text style={styles.submitBtnText}>
+              {isSignup ? "Continue" : "Log In"}
+            </Text>
+          )}
+        </LinearGradient>
+      </Pressable>
+
+      <Pressable
+        style={styles.switchPromptRow}
+        onPress={onToggleMode}
+        hitSlop={8}
+      >
+        <Text style={styles.switchPromptText}>
+          {isSignup ? "Have an account?" : "Create an account?"}
+        </Text>
+        <Text style={styles.switchPromptAction}>
+          {isSignup ? "Log In" : "Sign Up"}
+        </Text>
+      </Pressable>
+
+      {GUEST_LOGIN_ENABLED && (
+        <Pressable
+          style={styles.guestBtn}
+          onPress={onGuestContinue}
+          hitSlop={8}
+        >
+          <Text style={styles.guestBtnText}>Continue as Guest</Text>
+        </Pressable>
+      )}
+    </>
+  );
+}
+
+function useLoginFormState() {
   const { replace: routerReplace } = useRouter();
   const {
     login,
@@ -210,8 +395,6 @@ function LoginScreenView() {
     continueAsGuest,
   } = useAuth();
 
-  const topInset = IS_WEB ? 24 : insets.top;
-  const bottomInset = IS_WEB ? 24 : insets.bottom;
   const requiresCustomDevelopmentBuild = !IS_WEB && Constants.appOwnership === "expo";
   const showAppleOption = !IS_ANDROID;
 
@@ -233,14 +416,10 @@ function LoginScreenView() {
     let mounted = true;
     void isAppleSignInAvailable()
       .then((available) => {
-        if (mounted) {
-          setAppleAvailable(available);
-        }
+        if (mounted) setAppleAvailable(available);
       })
       .catch(() => {
-        if (mounted) {
-          setAppleAvailable(false);
-        }
+        if (mounted) setAppleAvailable(false);
       });
 
     return () => {
@@ -401,11 +580,44 @@ function LoginScreenView() {
     routerReplace("/(tabs)");
   };
 
+  return {
+    isSignup,
+    email,
+    setEmail,
+    password,
+    setPassword,
+    fullName,
+    setFullName,
+    showPassword,
+    setShowPassword,
+    loading,
+    googleLoading,
+    appleLoading,
+    showAppleOption,
+    resetPasswordLoading,
+    focusedField,
+    setFocusedField,
+    handleSubmit,
+    handleGoogleSignIn,
+    handleAppleSignIn,
+    handleForgotPassword,
+    handleToggleMode,
+    handleGuestContinue,
+  };
+}
+
+function LoginScreenView() {
+  const insets = useSafeAreaInsets();
+  const topInset = IS_WEB ? 24 : insets.top;
+  const bottomInset = IS_WEB ? 24 : insets.bottom;
+
+  const auth = useLoginFormState();
+
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
 
-      {/* Radiant Glowing Background: Mavrixfy emerald green aura at top, fading completely into pure black at bottom */}
+      {/* Radiant Glowing Background */}
       <LinearGradient
         colors={["#0c4a34", "#083625", "#052217", "#02120d", "#000000", "#000000"]}
         locations={[0, 0.16, 0.32, 0.48, 0.65, 1]}
@@ -442,158 +654,48 @@ function LoginScreenView() {
           bounces={false}
         >
           <View style={styles.mainCard}>
-            {/* Top Brand Logo & Title */}
             <BrandHeader />
 
-            {/* Dynamic Title & Subtitle */}
-            <View style={styles.headerArea}>
-              <Text style={styles.titleText}>
-                {isSignup ? "Create an Account" : "Hi There!"}
-              </Text>
-              <Text style={styles.subtitleText}>
-                {isSignup
-                  ? "To create an account provide details verify email and set a password."
-                  : "Please enter required details."}
-              </Text>
-            </View>
+            <AuthHeaderSection isSignup={auth.isSignup} />
 
-            {/* Social Buttons */}
             <AuthSocialButtons
-              googleLoading={googleLoading}
-              onGoogleSignIn={handleGoogleSignIn}
-              showAppleOption={showAppleOption}
-              appleLoading={appleLoading}
-              onAppleSignIn={handleAppleSignIn}
+              googleLoading={auth.googleLoading}
+              onGoogleSignIn={auth.handleGoogleSignIn}
+              showAppleOption={auth.showAppleOption}
+              appleLoading={auth.appleLoading}
+              onAppleSignIn={auth.handleAppleSignIn}
             />
 
-            {/* Divider */}
             <View style={styles.dividerRow}>
               <View style={styles.dividerLine} />
               <Text style={styles.dividerText}>Or</Text>
               <View style={styles.dividerLine} />
             </View>
 
-            {/* Form Fields */}
-            <View style={styles.inputsContainer}>
-              {isSignup && (
-                <AuthField
-                  placeholder="Full name"
-                  value={fullName}
-                  onChangeText={setFullName}
-                  autoCapitalize="words"
-                  autoComplete="name"
-                  textContentType="name"
-                  isFocused={focusedField === "name"}
-                  onFocus={() => setFocusedField("name")}
-                  onBlur={() => setFocusedField(null)}
-                />
-              )}
+            <AuthFormInputs
+              isSignup={auth.isSignup}
+              fullName={auth.fullName}
+              setFullName={auth.setFullName}
+              email={auth.email}
+              setEmail={auth.setEmail}
+              password={auth.password}
+              setPassword={auth.setPassword}
+              showPassword={auth.showPassword}
+              setShowPassword={auth.setShowPassword}
+              focusedField={auth.focusedField}
+              setFocusedField={auth.setFocusedField}
+              resetPasswordLoading={auth.resetPasswordLoading}
+              onForgotPassword={auth.handleForgotPassword}
+            />
 
-              <AuthField
-                placeholder="Email address"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoComplete="email"
-                textContentType="emailAddress"
-                isFocused={focusedField === "email"}
-                onFocus={() => setFocusedField("email")}
-                onBlur={() => setFocusedField(null)}
-              />
+            <AuthSubmitActions
+              isSignup={auth.isSignup}
+              loading={auth.loading}
+              onSubmit={auth.handleSubmit}
+              onToggleMode={auth.handleToggleMode}
+              onGuestContinue={auth.handleGuestContinue}
+            />
 
-              <AuthField
-                placeholder="Password"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                autoComplete={isSignup ? "new-password" : "current-password"}
-                textContentType={isSignup ? "newPassword" : "password"}
-                isFocused={focusedField === "password"}
-                onFocus={() => setFocusedField("password")}
-                onBlur={() => setFocusedField(null)}
-                trailing={
-                  <Pressable
-                    onPress={() => setShowPassword((prev) => !prev)}
-                    hitSlop={12}
-                    style={styles.eyeBtn}
-                  >
-                    <Ionicons
-                      name={showPassword ? "eye-off-outline" : "eye-outline"}
-                      size={20}
-                      color="rgba(255, 255, 255, 0.45)"
-                    />
-                  </Pressable>
-                }
-              />
-            </View>
-
-            {/* Forgot Password (on Login mode) */}
-            {!isSignup && (
-              <Pressable
-                style={styles.forgotBtn}
-                onPress={handleForgotPassword}
-                disabled={resetPasswordLoading}
-                hitSlop={8}
-              >
-                <Text style={styles.forgotText}>
-                  {resetPasswordLoading ? "Sending reset link..." : "Forgot Password?"}
-                </Text>
-              </Pressable>
-            )}
-
-            {/* Primary Action Button (Theme Emerald-to-Mint Gradient Pill) */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.submitBtnWrap,
-                pressed && styles.btnPressed,
-                loading && styles.submitBtnDisabled,
-              ]}
-              onPress={handleSubmit}
-              disabled={loading}
-            >
-              <LinearGradient
-                colors={["#00E58F", "#26E19A", "#48F2A8"]}
-                start={{ x: 0, y: 0.5 }}
-                end={{ x: 1, y: 0.5 }}
-                style={styles.submitBtnGradient}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#03140C" size="small" />
-                ) : (
-                  <Text style={styles.submitBtnText}>
-                    {isSignup ? "Continue" : "Log In"}
-                  </Text>
-                )}
-              </LinearGradient>
-            </Pressable>
-
-            {/* Switch Mode Prompt */}
-            <Pressable
-              style={styles.switchPromptRow}
-              onPress={handleToggleMode}
-              hitSlop={8}
-            >
-              <Text style={styles.switchPromptText}>
-                {isSignup ? "Have an account?" : "Create an account?"}
-              </Text>
-              <Text style={styles.switchPromptAction}>
-                {isSignup ? "Log In" : "Sign Up"}
-              </Text>
-            </Pressable>
-
-            {/* Optional Dev / Guest Bypass */}
-            {GUEST_LOGIN_ENABLED && (
-              <Pressable
-                style={styles.guestBtn}
-                onPress={handleGuestContinue}
-                hitSlop={8}
-              >
-                <Text style={styles.guestBtnText}>Continue as Guest</Text>
-              </Pressable>
-            )}
-
-            {/* Legal Footer safely inside view, not at the edge of the screen */}
             <AuthLegalFooter />
           </View>
         </ScrollView>

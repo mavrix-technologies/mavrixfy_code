@@ -3,7 +3,6 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { memo } from "react";
 import {
   Insets,
-  Pressable,
   StyleProp,
   StyleSheet,
   Text,

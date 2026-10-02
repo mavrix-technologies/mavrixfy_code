@@ -1,7 +1,23 @@
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { validateLicenseRequest } = require("./licensePolicy.cjs");
+function validateLicenseRequest(user, rights, claims, requestedQuality) {
+  if (["disabled", "banned"].includes(user.subscriptionStatus)) throw new Error("Account disabled");
+  if (rights.downloadable === false || rights.offlineAllowed === false || rights.drmRequired === true) {
+    throw new Error("This track is not available for offline download");
+  }
+  const territories = Array.isArray(rights.territoryRights) ? rights.territoryRights : [];
+  if (territories.length && !territories.includes(String(claims.country || "").toUpperCase())) {
+    throw new Error("This track is not available in your verified region");
+  }
+  const qualities = ["low", "medium", "high"];
+  const requested = qualities.indexOf(requestedQuality);
+  if (requested < 0) throw new Error("Invalid download quality");
+  const maximum = qualities.indexOf(rights.offlineMaxQuality ?? "high");
+  if (maximum < 0) throw new Error("Invalid track rights");
+  return qualities[Math.min(requested, maximum)];
+}
+
 initializeApp();
 
 exports.issueOfflineLicense = onCall({ region: "us-central1", maxInstances: 10 }, async (request) => {
@@ -47,12 +63,25 @@ exports.issueOfflineLicense = onCall({ region: "us-central1", maxInstances: 10 }
 const functionsV1 = require("firebase-functions/v1");
 exports.cleanupDeletedAccount = functionsV1.runWith({ failurePolicy: true }).auth.user().onDelete(async (user) => {
   const db = getFirestore();
-  for (const field of ["createdBy.id", "createdBy.uid", "createdBy._id"]) {
-    const playlists = await db.collection("playlists").where(field, "==", user.uid).get();
-    for (const playlist of playlists.docs) await db.recursiveDelete(playlist.ref);
-  }
-  const shares = await db.collection("playlist_shares").where("createdBy", "==", user.uid).get();
-  for (const share of shares.docs) await share.ref.delete();
-  await db.recursiveDelete(db.doc('users/' + user.uid));
-  await db.doc('likedSongs/' + user.uid).delete();
+  const playlistSnapshots = await Promise.all(
+    ["createdBy.id", "createdBy.uid", "createdBy._id"].map((field) =>
+      db.collection("playlists").where(field, "==", user.uid).get()
+    )
+  );
+  await Promise.all(
+    playlistSnapshots.flatMap((playlists) =>
+      playlists.docs.map((playlist) => db.recursiveDelete(playlist.ref))
+    )
+  );
+  await db
+    .collection("playlist_shares")
+    .where("createdBy", "==", user.uid)
+    .get()
+    .then((shares) =>
+      Promise.all([
+        ...shares.docs.map((share) => share.ref.delete()),
+        db.recursiveDelete(db.doc("users/" + user.uid)),
+        db.doc("likedSongs/" + user.uid).delete(),
+      ])
+    );
 });

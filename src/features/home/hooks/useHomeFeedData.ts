@@ -109,14 +109,10 @@ export function useHomeFeedData() {
             applyPlaylists(snapshot.publicPlaylists);
             applyArtists(snapshot.featuredArtists);
             applySongs(snapshot.quickPickSongs);
-            if (snapshot.quickPickSongs.length > 0) {
-              applyQuickPicksPool({
-                trending: snapshot.quickPickSongs,
-                bollywood: snapshot.quickPickSongs,
-                latest: snapshot.quickPickSongs,
-                all: snapshot.quickPickSongs,
-              });
-            }
+            applyQuickPicksPool(snapshot.quickPicksPool ?? {
+              ...DEFAULT_POOL,
+              all: snapshot.quickPickSongs,
+            });
             session.hydrated = true;
           }
           applyPlaylists(cachedPlaylists);
@@ -128,17 +124,8 @@ export function useHomeFeedData() {
           .then(async (feed) => {
             applyCategories(feed.categories);
             session.updatedAt = Date.now();
-            if (mountedRef.current) setLoading(false);
             const freshSongs = await getOfficialHomeSongs(feed.songs || feed.songIds);
-            if (freshSongs.length > 0) {
-              applySongs(freshSongs);
-              applyQuickPicksPool({
-                trending: freshSongs,
-                bollywood: freshSongs,
-                latest: freshSongs,
-                all: freshSongs,
-              });
-            }
+            return { categories: feed.categories, songs: freshSongs };
           })
           .catch(async (error) => {
             logger.warn("[Home] Official feed unavailable, using search fallback:", error);
@@ -151,16 +138,13 @@ export function useHomeFeedData() {
             } catch (err) {
               logger.warn("[Home] Fallback categories failed:", err);
             }
+            return null;
           });
 
-        const quickPicksTask = fetchQuickPicksFeed({ forceRefresh })
-          .then((pool) => {
-            if (pool && pool.all.length > 0) {
-              applyQuickPicksPool(pool);
-              applySongs(pool.all);
-            }
-          })
-          .catch(() => {});
+        const quickPicksTask = officialTask.then(feed => feed
+          ? fetchQuickPicksFeed({ forceRefresh, categories: feed.categories, newReleaseSongs: feed.songs })
+          : null)
+          .catch(() => null);
 
         const playlistsTask = getPublicPlaylists(8).then(async (items) => {
           if (items.length > 0) {
@@ -171,7 +155,14 @@ export function useHomeFeedData() {
 
         const artistsTask = getFeaturedArtists().then(applyArtists);
 
-        await Promise.allSettled([officialTask, quickPicksTask, playlistsTask, artistsTask]);
+        const [, quickPicksResult] = await Promise.allSettled([
+          officialTask, quickPicksTask, playlistsTask, artistsTask,
+        ]);
+        const pool = quickPicksResult.status === "fulfilled" ? quickPicksResult.value : null;
+        if (pool?.all.length) {
+          applyQuickPicksPool(pool);
+          applySongs(pool.all);
+        }
 
         if (session.categories.length > 0 && mountedRef.current) {
           session.hydrated = true;
@@ -180,6 +171,7 @@ export function useHomeFeedData() {
             publicPlaylists: session.publicPlaylists,
             featuredArtists: session.featuredArtists,
             quickPickSongs: session.quickPickSongs,
+            quickPicksPool: session.quickPicksPool,
           });
         }
         if (mountedRef.current) setLoading(false);
@@ -205,7 +197,7 @@ export function useHomeFeedData() {
   useEffect(() => {
     if (isChecking || initialLoadRef.current) return;
     initialLoadRef.current = true;
-    void loadHomeFeed(true);
+    void loadHomeFeed(false);
   }, [isChecking, loadHomeFeed]);
 
   useFocusEffect(
@@ -220,24 +212,22 @@ export function useHomeFeedData() {
           now - session.updatedAt >= HOME_REFRESH_MS &&
           now - session.attemptedAt >= RETRY_MS
         ) {
-          void loadHomeFeed(true);
+          void loadHomeFeed(false);
         }
       };
       maybeRefresh();
       const appState = AppState.addEventListener("change", (state) => {
         if (state === "active") maybeRefresh();
       });
-      const timer = setInterval(maybeRefresh, RETRY_MS);
       return () => {
         appState.remove();
-        clearInterval(timer);
       };
     }, [isChecking, isOnline, loadHomeFeed, loadRecentlyPlayed])
   );
 
   useOnReconnect(
     useCallback(() => {
-      void loadHomeFeed(true);
+      void loadHomeFeed(false);
     }, [loadHomeFeed])
   );
 

@@ -73,6 +73,8 @@ export function SimpleRow({
     <Pressable
       disabled={!onPress}
       onPress={onPress}
+      accessibilityRole={onPress ? "button" : undefined}
+      accessibilityLabel={title}
       style={({ pressed }) => [
         styles.row,
         !isLast && styles.rowDivider,
@@ -89,7 +91,7 @@ export function SimpleRow({
         {title}
       </Text>
       <View style={styles.rowRight}>
-        {value ? <Text style={styles.rowValue}>{value}</Text> : null}
+        {value ? <Text style={styles.rowValue} numberOfLines={1}>{value}</Text> : null}
         {trailing ??
           (onPress ? (
             <Ionicons
@@ -134,8 +136,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    maxWidth: "65%",
   },
   rowValue: {
+    flexShrink: 1,
     color: "rgba(255, 255, 255, 0.45)",
     fontSize: 14.5,
     fontFamily: "Inter_400Regular",

@@ -63,7 +63,7 @@ function useArtistScreenView() {
 
   const insets = useSafeAreaInsets();
   const { push: routerPush } = useRouter();
-  const { currentSong, queue } = usePlaybackNowPlaying();
+  const { currentSong } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
   const { playSong, shufflePlay, togglePlay } = usePlayerActions();
   const topInset = Platform.OS === "web" ? 20 : insets.top;

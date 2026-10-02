@@ -272,8 +272,7 @@ async function fetchAndRankCategory(
   if (raw.length === 0) return [];
 
   const deduped = dedupeByPlaylistId(raw);
-  const ranked = rankPlaylists(deduped, context, cat.id);
-  return ranked;
+  return rankPlaylists(deduped, context, cat.id);
 }
 
 export function mixForFeed(
@@ -382,8 +381,7 @@ export async function getHomeCatalogCategories(options?: {
     return { id: cat.id, title: cat.title, results: unique, isFresh };
   });
 
-  const nonEmpty = deduped.filter((cat) => cat.results.length > 0);
-  return nonEmpty;
+  return deduped.filter((cat) => cat.results.length > 0);
 }
 
 export const getHomeJioSaavnCategories = getHomeCatalogCategories;

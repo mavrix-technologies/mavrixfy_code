@@ -180,7 +180,9 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
 
           <SmoothControlButton
             style={[styles.prevNextButton, prevNextBtnSizeStyle]}
-            onPressIn={() => {
+            accessibilityLabel="Previous track"
+            accessibilityRole="button"
+            onPress={() => {
               onSkip("prev");
             }}
           >
@@ -197,7 +199,9 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
 
           <SmoothControlButton
             style={[styles.prevNextButton, prevNextBtnSizeStyle]}
-            onPressIn={() => {
+            accessibilityLabel="Next track"
+            accessibilityRole="button"
+            onPress={() => {
               onSkip("next");
             }}
           >

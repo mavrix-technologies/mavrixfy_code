@@ -1,5 +1,6 @@
 import type { ArtistCard } from "@/data/providers/ArtistProvider";
 import type { CatalogCategoryData } from "@/data/providers/MusicCatalogProvider";
+import type { QuickPicksPool } from "@/data/providers/QuickPicksProvider";
 import { mapFilter } from "@/lib/arrayUtils";
 import { type FirestorePlaylist } from "@/lib/firestore";
 import type { Song } from "@/lib/musicData";
@@ -8,8 +9,8 @@ import { DeviceEventEmitter } from "react-native";
 
 const HOME_PUBLIC_PLAYLISTS_CACHE_KEY = "@mavrixfy_home_public_playlists_v1";
 const HOME_PUBLIC_PLAYLISTS_CACHE_TIME_KEY = "@mavrixfy_home_public_playlists_time_v1";
-const HOME_FEED_CACHE_KEY = "@mavrixfy_home_feed_snapshot_v3";
-const HOME_FEED_CACHE_TIME_KEY = "@mavrixfy_home_feed_snapshot_time_v3";
+const HOME_FEED_CACHE_KEY = "@mavrixfy_home_feed_snapshot_v5";
+const HOME_FEED_CACHE_TIME_KEY = "@mavrixfy_home_feed_snapshot_time_v5";
 const HOME_PUBLIC_PLAYLISTS_TTL_MS = 20 * 60 * 1000;
 const HOME_PUBLIC_PLAYLISTS_MAX_STALE_MS = 12 * 60 * 60 * 1000;
 const HOME_FEED_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -23,6 +24,7 @@ export interface CachedHomeFeedSnapshot {
   publicPlaylists: FirestorePlaylist[];
   featuredArtists: ArtistCard[];
   quickPickSongs: Song[];
+  quickPicksPool?: QuickPicksPool;
 }
 
 function normalizePublicPlaylist(raw: any): FirestorePlaylist | null {
@@ -114,6 +116,14 @@ function normalizeHomeFeedSnapshot(raw: unknown): CachedHomeFeedSnapshot | null 
     publicPlaylists: normalizePublicPlaylistList(value.publicPlaylists),
     featuredArtists: normalizeArray<ArtistCard>(value.featuredArtists),
     quickPickSongs: normalizeArray<Song>(value.quickPickSongs),
+    quickPicksPool: value.quickPicksPool && Array.isArray(value.quickPicksPool.all)
+      ? {
+          trending: normalizeArray<Song>(value.quickPicksPool.trending),
+          bollywood: normalizeArray<Song>(value.quickPicksPool.bollywood),
+          latest: normalizeArray<Song>(value.quickPicksPool.latest),
+          all: normalizeArray<Song>(value.quickPicksPool.all),
+        }
+      : undefined,
   };
 
   const hasAnyContent =

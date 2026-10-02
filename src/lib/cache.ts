@@ -118,44 +118,6 @@ class CacheManager {
 export const cache = new CacheManager();
 
 /**
- * Cache key generators
- */
-const CacheKeys = {
-  // User-specific
-  userPlaylists: (userId: string) => `user:${userId}:playlists`,
-  userLikedSongs: (userId: string) => `user:${userId}:liked`,
-  userProfile: (userId: string) => `user:${userId}:profile`,
-  
-  // Public data
-  publicPlaylists: () => 'public:playlists',
-  playlist: (playlistId: string) => `playlist:${playlistId}`,
-  
-  // JioSaavn
-  jiosaavnPlaylist: (playlistId: string) => `jiosaavn:playlist:${playlistId}`,
-  jiosaavnSearch: (query: string) => `jiosaavn:search:${query}`,
-  jiosaavnTrending: () => 'jiosaavn:trending',
-};
-
-/**
- * Cache TTL configurations (in minutes)
- */
-const CacheTTL = {
-  // User data - shorter TTL for freshness
-  userPlaylists: 2,
-  userLikedSongs: 1,
-  userProfile: 5,
-  
-  // Public data - longer TTL
-  publicPlaylists: 10,
-  playlist: 5,
-  
-  // JioSaavn - medium TTL
-  jiosaavnPlaylist: 15,
-  jiosaavnSearch: 10,
-  jiosaavnTrending: 30,
-};
-
-/**
  * Clear user-specific cache on logout
  */
 export function clearUserCache(userId: string): void {

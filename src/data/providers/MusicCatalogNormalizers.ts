@@ -580,9 +580,9 @@ export function mapHomepageItemToPlaylistResult(item: any): CatalogPlaylistResul
   if (typeof item.subtitle === "string" && item.subtitle.trim()) {
     description = item.subtitle.trim();
   } else if (Array.isArray(item.be_subtitle) && item.be_subtitle.length > 0) {
-    description = item.be_subtitle.map((s: any) => s?.text || "").filter(Boolean).join(", ");
+    description = item.be_subtitle.flatMap((s: any) => s?.text ? [s.text] : []).join(", ");
   } else if (Array.isArray(item.subtitle) && item.subtitle.length > 0) {
-    description = item.subtitle.map((s: any) => s?.text || "").filter(Boolean).join(", ");
+    description = item.subtitle.flatMap((s: any) => s?.text ? [s.text] : []).join(", ");
   }
 
   // If description is empty, provide a clean, descriptive label

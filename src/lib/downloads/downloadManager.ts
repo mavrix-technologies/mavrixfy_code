@@ -31,7 +31,7 @@ isTerritoryAllowed,
 import { deleteAllTrackFiles,deleteTrackFiles,getTrackFileSize,getValidatedTrackFileUri,hasSufficientStorage,trackFileExists } from "@/lib/downloads/filesystem";
 import { issueOfflineLicense,refreshLicenses } from "@/lib/downloads/licenseSync";
 import { logger } from "@/lib/logger";
-import { type Song } from "@/lib/musicData";
+import { getBestAudioUrlWithQuality,type Song } from "@/lib/musicData";
 import { type DownloadItem,type DownloadPreferences,type StorageSummary } from "@/types/downloads";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ export async function downloadSong(
 
     // 4. Track rights check.
     const rights = await getTrackRights(song.id);
-    if (!rights.offlineAllowed) {
+    if (!rights.downloadable || !rights.offlineAllowed || rights.drmRequired) {
       return { ok: false, reason: "This track is not available for offline download." };
     }
     if (!isTerritoryAllowed(rights.territoryRights, options?.userCountry ?? null)) {
@@ -99,7 +99,7 @@ export async function downloadSong(
     const existing = await loadDownload(song.id);
     if (existing) {
       if (existing.status === "completed") {
-        return { ok: true };
+        if (await trackFileExists(song.id)) return { ok: true };
       }
       if (
         existing.status === "downloading" ||
@@ -112,6 +112,10 @@ export async function downloadSong(
     }
 
     const license = await issueOfflineLicense(uid, song.id, prefs.quality);
+    const audioUrl = getBestAudioUrlWithQuality(song.downloadUrl, license.quality) || song.audioUrl;
+    if (!/^https?:\/\//i.test(audioUrl)) {
+      return { ok: false, reason: "No downloadable audio URL is available for this song." };
+    }
     // 6. Build the download item.
     const item: DownloadItem = {
       accountId: uid,
@@ -120,7 +124,7 @@ export async function downloadSong(
       artist: song.artist,
       album: song.album ?? "",
       coverUrl: song.coverUrl ?? "",
-      audioUrl: song.audioUrl,
+      audioUrl,
       duration: song.duration,
       quality: license.quality,
       status: "queued",
@@ -145,7 +149,12 @@ export async function downloadSong(
     return { ok: true };
   } catch (err: any) {
     logger.error("[DownloadManager] downloadSong failed", err);
-    return { ok: false, reason: err?.message ?? "Download failed unexpectedly" };
+    return {
+      ok: false,
+      reason: (err?.code === "functions/not-found" || err?.code === "not-found")
+        ? "Offline downloads are temporarily unavailable. Please try again later."
+        : err?.message ?? "Download failed unexpectedly",
+    };
   }
 }
 
@@ -163,19 +172,26 @@ export async function downloadCollection(
   let failed = 0;
   let reason: string | undefined;
 
-  // License issuance updates the same device record for every song. Issuing
-  // licenses concurrently makes Firestore transactions contend with each other.
+  const toDownload: Song[] = [];
   for (const song of songs) {
     const existing = getDownloadSync(song.id);
     if (existing?.status === "completed") {
       skipped++;
-      continue;
+    } else {
+      toDownload.push(song);
     }
+  }
 
-    const result = await downloadSong(song, uid, prefs, {
-      collectionId,
-      userCountry,
-    });
+  const results = await Promise.all(
+    toDownload.map((song) =>
+      downloadSong(song, uid, prefs, {
+        collectionId,
+        userCountry,
+      })
+    )
+  );
+
+  for (const result of results) {
     if (result.ok) {
       queued++;
     } else {

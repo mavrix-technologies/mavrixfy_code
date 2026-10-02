@@ -3,15 +3,13 @@
  * Uses expo-audio (SDK 54+), the modern replacement for expo-av.
  */
 import type { Song } from "@/lib/musicData";
-import type { AudioPlayer,AudioSample } from "expo-audio";
+import type { AudioPlayer } from "expo-audio";
 import { createAudioPlayer,setAudioModeAsync } from "expo-audio";
-import { publishPlaybackAudioSample,resetPlaybackAudioLevels } from "./PlaybackAudioLevels";
 
 // ─── singletons ───────────────────────────────────────────────────────────────
 
 // The one and only active player. Any new loadAndPlay call replaces it.
 let activePlayer: AudioPlayer | null = null;
-let currentUrl: string | null = null;
 let seekBlockUntil = 0;
 let seekResetTimer: ReturnType<typeof setTimeout> | null = null;
 type PlayerSubscription = {
@@ -20,7 +18,6 @@ type PlayerSubscription = {
 
 type PlayerSubscriptions = {
   status?: PlayerSubscription;
-  sample?: PlayerSubscription;
 };
 
 const playerSubscriptions = new WeakMap<AudioPlayer, PlayerSubscriptions>();
@@ -41,15 +38,11 @@ type StatusCallback = (s: {
   didJustFinish: boolean;
 }) => void;
 
-type ErrorCallback = (err: string) => void;
-
 let statusCb: StatusCallback | null = null;
-let errorCb: ErrorCallback | null = null;
 
 export function onStatusUpdate(cb: StatusCallback) { statusCb = cb; }
 function clearListeners(): void {
   statusCb = null;
-  errorCb = null;
 }
 
 // ─── internal helpers ─────────────────────────────────────────────────────────
@@ -64,12 +57,9 @@ function killPlayer(p: AudioPlayer | null): void {
   try { (p as any).setActiveForLockScreen?.(false); } catch {}
   const subscriptions = playerSubscriptions.get(p);
   try { subscriptions?.status?.remove?.(); } catch {}
-  try { subscriptions?.sample?.remove?.(); } catch {}
   playerSubscriptions.delete(p);
-  try { p.setAudioSamplingEnabled(false); } catch {}
   try { p.pause(); } catch {}   // stop audio output immediately
   try { p.release(); } catch {}  // release native resources
-  resetPlaybackAudioLevels();
 }
 
 function clearSeekResetTimer(): void {
@@ -106,28 +96,14 @@ function attachListener(p: AudioPlayer, gen: number): void {
     });
   });
 
-  let sample: PlayerSubscription | undefined;
-  if (p.isAudioSamplingSupported) {
-    try {
-      p.setAudioSamplingEnabled(true);
-      sample = p.addListener("audioSampleUpdate", (audioSample: AudioSample) => {
-        if (gen !== generation) return;
-        publishPlaybackAudioSample(audioSample);
-      });
-    } catch {
-      resetPlaybackAudioLevels();
-    }
-  }
-
-  playerSubscriptions.set(p, { status: status ?? {}, sample });
+  playerSubscriptions.set(p, { status: status ?? {} });
 }
 
 // ─── public API ───────────────────────────────────────────────────────────────
 
 export async function loadAndPlay(url: string, song?: Partial<Song> | null, shouldPlay: () => boolean = () => true): Promise<void> {
   if (!url) {
-    errorCb?.("No audio URL provided");
-    return;
+    throw new Error("No audio URL provided");
   }
 
   // 1. Bump generation and capture the snapshot for this call.
@@ -150,7 +126,6 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
     // 4. If another loadAndPlay fired while we awaited, it already owns playback.
     if (myGen === generation) {
       // 5. Create the new player (synchronous in expo-audio).
-      currentUrl = url;
       seekBlockUntil = 0;
       const p = createAudioPlayer(url, { updateInterval: 500 });
 
@@ -176,7 +151,7 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
             },
             {
               showSeekBackward: false,
-              showSeekForward: true,
+              showSeekForward: false,
               isLiveStream: false,
             }
           );
@@ -189,7 +164,6 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
     }
   } catch (err: any) {
     if (myGen === generation) {
-      errorCb?.(err?.message || String(err) || "Playback failed");
       throw err;
     }
   }
@@ -207,10 +181,8 @@ function stop(): void {
   generation += 1;
   const p = activePlayer;
   activePlayer = null;
-  currentUrl = null;
   clearSeekResetTimer();
   killPlayer(p);
-  resetPlaybackAudioLevels();
 }
 
 export function destroy(): void {

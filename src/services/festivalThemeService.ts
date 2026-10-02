@@ -32,6 +32,7 @@ export interface FestivalThemeConfig {
   themeAccentColor?: string;
   targetQuery?: string;
   isDevPreview?: boolean;
+  aspectRatio?: number;
 
   // Header Title Controls
   titleText?: string;
@@ -203,6 +204,11 @@ export function resolveFestivalThemeConfig(
     themeAccentColor,
     targetQuery,
     isDevPreview: isDevActive && !isPublicActive,
+    aspectRatio:
+      typeof (activeSource.aspectRatio ?? fallbackSource.aspectRatio) === "number" &&
+      (activeSource.aspectRatio ?? fallbackSource.aspectRatio) > 0
+        ? (activeSource.aspectRatio ?? fallbackSource.aspectRatio)
+        : undefined,
 
     titleText,
     titleColor,

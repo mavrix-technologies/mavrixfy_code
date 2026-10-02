@@ -13,6 +13,7 @@ import { getAccountScope,isCurrentAccount } from "@/lib/accountScope";
 import { getMusicApiUrl } from "@/lib/api-config";
 import { getAudioUrlByQuality } from "@/lib/downloads/audioQuality";
 import {
+loadAllDownloads,
 loadDownload,
 saveDownload,
 updateDownloadMemory,
@@ -161,51 +162,6 @@ async function updateStatus(
 // ─── URL refresh ─────────────────────────────────────────────────────────────
 
 /**
- * Resolve all redirects to get the final download URL.
- * This is critical for Gaana URLs which use multiple redirects.
- */
-async function resolveRedirects(url: string): Promise<string> {
-  try {
-    let currentUrl = url;
-    let redirectCount = 0;
-    const MAX_REDIRECTS = 10;
-
-    while (redirectCount < MAX_REDIRECTS) {
-      const response = await fetch(currentUrl, {
-        method: 'HEAD',
-        redirect: 'manual', // Don't follow redirects automatically
-      });
-
-      // Check if it's a redirect (301, 302, 307, 308)
-      if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get('location');
-        if (!location) break;
-        
-        // Handle relative URLs
-        currentUrl = location.startsWith('http') 
-          ? location 
-          : new URL(location, currentUrl).href;
-        
-        redirectCount++;
-        logger.debug(`[DownloadQueue] Redirect ${redirectCount}: ${currentUrl.substring(0, 100)}...`);
-      } else {
-        // No more redirects
-        break;
-      }
-    }
-
-    if (currentUrl !== url) {
-      logger.info(`[DownloadQueue] Resolved ${redirectCount} redirects for download`);
-    }
-
-    return currentUrl;
-  } catch (err) {
-    logger.warn('[DownloadQueue] Failed to resolve redirects, using original URL', err);
-    return url;
-  }
-}
-
-/**
  * Fetch a fresh downloadUrl for a JioSaavn song right before starting the
  * actual download. CDN signed URLs expire in ~15–30 minutes, so the URL stored
  * in the queue at the time the user tapped "Download" may already be stale by
@@ -222,15 +178,19 @@ async function refreshAudioUrl(songId: string, originalUrl: string, quality: Dow
 
   try {
     const apiBase = getMusicApiUrl().replace(/\/$/, "");
-    const url = `${apiBase}/songs?id=${encodeURIComponent(songId)}`;
+    const url = `${apiBase}/api/songs?id=${encodeURIComponent(songId)}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
 
-    const res = await fetch(url, {
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!res.ok) throw new Error(`API ${res.status}`);
     const json = await res.json();
@@ -280,19 +240,24 @@ async function executeDownload(songId: string): Promise<void> {
   const tempUri = getTempDownloadUri(songId);
   const finalUri = getTrackFileUri(songId);
 
-  // Fetch fresh audio URL and resolve redirects while updating status and ensuring directories in parallel
-  const [, , audioUrl] = await Promise.all([
-    ensureDownloadsDirs(),
-    updateStatus(songId, "downloading"),
-    refreshAudioUrl(songId, item.audioUrl, item.quality).then(resolveRedirects),
-  ]);
-  if (suspended || (await loadDownload(songId))?.status !== "downloading") return;
+  try {
+    // Preparation must be inside the failure handler. An API or filesystem
+    // error here previously left the item stuck in "downloading" forever.
+    const [, , audioUrl] = await Promise.all([
+      ensureDownloadsDirs(),
+      updateStatus(songId, "downloading"),
+      refreshAudioUrl(songId, item.audioUrl, item.quality),
+    ]);
+    if (suspended || (await loadDownload(songId))?.status !== "downloading") return;
+    if (!/^https?:\/\//i.test(audioUrl)) throw new Error("No playable audio URL is available for this song.");
 
-  const handle = createDownloadResumable(
-    audioUrl,
-    tempUri,
-    {},
-    (progress) => {
+    // The native downloader follows GET redirects. A separate HEAD request can
+    // be rejected by CDNs and can consume a short-lived signed URL.
+    const handle = createDownloadResumable(
+      audioUrl,
+      tempUri,
+      {},
+      (progress) => {
       // Progress callback: update cache only — no AsyncStorage read per tick
       const { totalBytesWritten, totalBytesExpectedToWrite } = progress;
       const pct =
@@ -319,12 +284,10 @@ async function executeDownload(songId: string): Promise<void> {
           void saveDownload(patched);
         }
       });
-    }
-  );
+      }
+    );
 
-  activeHandles.set(songId, handle);
-
-  try {
+    activeHandles.set(songId, handle);
     const result = await handle.downloadAsync();
 
     if (!result) {
@@ -462,10 +425,11 @@ export async function enqueueDownload(
   } else {
     wifiOnlySongs.delete(songId);
   }
-  await saveDownload({ ...item, status: "queued" });
+  const [, hasSpace] = await Promise.all([
+    saveDownload({ ...item, status: "queued" }),
+    hasSufficientStorage(),
+  ]);
   emitQueueEvent("status", songId, { ...item, status: "queued" });
-
-  const hasSpace = await hasSufficientStorage();
   if (!hasSpace) {
     await updateStatus(songId, "paused", { failureReason: "Insufficient storage" });
     startingSet.delete(songId);
@@ -547,6 +511,24 @@ export async function resumeDownload(
   return startDownload(songId);
 }
 
+/** Restart transfers interrupted when the app process was closed. */
+export async function restoreInterruptedDownloads(prefs: DownloadPreferences): Promise<void> {
+  const scope = getAccountScope();
+  const items = await loadAllDownloads();
+  const eligibleItems = items.filter(
+    (item) => item.status === "downloading" || item.status === "queued" || item.status === "waiting_for_wifi"
+  );
+  await Promise.all(
+    eligibleItems.map(async (item) => {
+      if (suspended || !isCurrentAccount(scope)) return;
+      if (item.status === "downloading") {
+        await updateStatus(item.songId, "queued");
+      }
+      await resumeDownload(item.songId, prefs);
+    })
+  );
+}
+
 export async function cancelDownload(songId: string): Promise<void> {
   wifiOnlySongs.delete(songId);
   clearRetryTimer(songId);
@@ -562,12 +544,12 @@ export async function cancelDownload(songId: string): Promise<void> {
   await updateStatus(songId, "deleted");
 }
 
-export function retryDownload(
+export async function retryDownload(
   songId: string,
   prefs: DownloadPreferences
 ): Promise<void> {
   clearRetryTimer(songId);
-  void updateStatus(songId, "queued", {
+  await updateStatus(songId, "queued", {
     retryCount: 0,
     failureReason: null,
     failedAt: null,
@@ -582,8 +564,10 @@ export async function suspendDownloadQueue(): Promise<void> {
   networkListener?.remove();
   networkListener = null;
   for (const songId of retryTimers.keys()) clearRetryTimer(songId);
-  await Promise.allSettled([...activeHandles.values()].map(handle => handle.cancelAsync()));
-  await Promise.allSettled([...runningTasks]);
+  await Promise.allSettled([
+    ...Array.from(activeHandles.values(), (handle) => handle.cancelAsync()),
+    ...runningTasks,
+  ]);
   activeHandles.clear();
   startingSet.clear();
 }

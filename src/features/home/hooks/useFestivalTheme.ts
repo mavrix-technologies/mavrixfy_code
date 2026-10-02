@@ -5,7 +5,15 @@ getCachedFestivalTheme,
 subscribeRemoteFestivalTheme,
 type FestivalThemeConfig,
 } from "@/services/festivalThemeService";
-import { useEffect,useState } from "react";
+import { Image } from "expo-image";
+import { useEffect, useState } from "react";
+
+function prefetchBannerImage(url?: string | null) {
+  const clean = url?.trim();
+  if (clean && clean.startsWith("http")) {
+    void Image.prefetch(clean);
+  }
+}
 
 export function useFestivalTheme() {
   const [theme, setTheme] = useState<FestivalThemeConfig>(DEFAULT_FESTIVAL_THEME);
@@ -19,13 +27,19 @@ export function useFestivalTheme() {
 
     // 1. Read cached theme immediately
     void getCachedFestivalTheme(isDevOrAdmin).then((cached) => {
-      if (isMounted) setTheme(cached);
+      if (isMounted) {
+        setTheme(cached);
+        prefetchBannerImage(cached.backgroundImageUrl);
+      }
     });
 
     // 2. Real-time live subscription to Firestore appConfig/festivalTheme
     const unsubscribe = subscribeRemoteFestivalTheme(
       (updated) => {
-        if (isMounted) setTheme(updated);
+        if (isMounted) {
+          setTheme(updated);
+          prefetchBannerImage(updated.backgroundImageUrl);
+        }
       },
       { isDevOrAdmin }
     );

@@ -164,11 +164,7 @@ export const styles = StyleSheet.create({
     overflow: "hidden",
     marginTop: 12,
     marginBottom: 14,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    elevation: 8,
+    boxShadow: "0px 6px 16px rgba(38, 225, 154, 0.45)",
   },
   submitBtnGradient: {
     flex: 1,

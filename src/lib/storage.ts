@@ -79,11 +79,6 @@ export interface AppSettings {
   gapless: boolean;
   normalizeVolume: boolean;
   ambientBackdropEnabled: boolean;
-  surroundSoundEnabled?: boolean;
-  surroundStrength?: number;
-  surroundSpeed?: number;
-  reverbPreset?: string;
-  rotating8DEnabled?: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -111,10 +106,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   gapless: true,
   normalizeVolume: false,
   ambientBackdropEnabled: false,
-  surroundSoundEnabled: false,
-  surroundStrength: 600,
-  reverbPreset: "none",
-  rotating8DEnabled: false,
 };
 
 
@@ -432,7 +423,11 @@ function normalizeMiniPlayerSecondaryControl(value: unknown): MiniPlayerSecondar
 }
 
 export async function getSettings(): Promise<AppSettings> {
-  const saved = await getJSON<Partial<AppSettings>>(KEYS.SETTINGS, DEFAULT_SETTINGS);
+  const saved = { ...await getJSON<Partial<AppSettings>>(KEYS.SETTINGS, DEFAULT_SETTINGS) } as Partial<AppSettings> & Record<string, unknown>;
+  // Ignore settings from older builds that offered spatial audio effects.
+  for (const key of ["surroundSoundEnabled", "surroundStrength", "surroundSpeed", "reverbPreset", "rotating8DEnabled"]) {
+    delete saved[key];
+  }
   return {
     ...DEFAULT_SETTINGS,
     ...saved,
@@ -457,11 +452,10 @@ export async function getSettings(): Promise<AppSettings> {
 
 let settingsWriteQueue: Promise<void> = Promise.resolve();
 
-export async function saveSettings(settings: Partial<AppSettings>): Promise<void> {
-  const write = settingsWriteQueue.then(async () => {
-    const current = await getSettings();
-    await setJSON(KEYS.SETTINGS, { ...current, ...settings });
-  });
+export function saveSettings(settings: Partial<AppSettings>): Promise<void> {
+  const write = settingsWriteQueue.then(() =>
+    getSettings().then((current) => setJSON(KEYS.SETTINGS, { ...current, ...settings }))
+  );
   settingsWriteQueue = write.catch(() => {});
   return write;
 }

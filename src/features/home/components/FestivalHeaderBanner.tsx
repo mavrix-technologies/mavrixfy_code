@@ -2,16 +2,21 @@ import Colors from "@/constants/colors";
 import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import React,{ useEffect,useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-StyleSheet,
-Text,
-useWindowDimensions,
-View,
+  ActivityIndicator,
+  Platform,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
 } from "react-native";
 
-// Module-level aspect ratio cache to avoid recalculating on re-renders
+// Module-level aspect ratio cache to avoid recalculating on re-renders across the app lifecycle
 const gBannerAspectRatioCache: Record<string, number> = {};
+
+// Fallback aspect ratio (16:9 is the universal standard for mobile media banners)
+const DEFAULT_BANNER_ASPECT_RATIO = 16 / 9;
 
 interface FestivalHeaderBannerProps {
   themeConfig?: FestivalThemeConfig;
@@ -25,22 +30,57 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
   const screenHeight = windowHeight || 844;
 
   const backgroundImageUrl = themeConfig?.backgroundImageUrl?.trim() || null;
+  const configuredRatio = themeConfig?.aspectRatio;
 
-  // Dynamic aspect ratio state: measures real image width & height for any ratio format
+  // 1. Stable aspect ratio resolution (Configured > Cached > Standard 16:9)
   const [aspectRatio, setAspectRatio] = useState<number>(() => {
+    if (configuredRatio && configuredRatio > 0) return configuredRatio;
     if (backgroundImageUrl && gBannerAspectRatioCache[backgroundImageUrl]) {
       return gBannerAspectRatioCache[backgroundImageUrl];
     }
-    return 1080 / 850;
+    return DEFAULT_BANNER_ASPECT_RATIO;
   });
 
-  useEffect(() => {
-    if (!backgroundImageUrl) return;
+  const [isLoaded, setIsLoaded] = useState<boolean>(() => {
+    // If the image was already measured in cache, it's likely already in memory/disk cache
+    return Boolean(backgroundImageUrl && gBannerAspectRatioCache[backgroundImageUrl]);
+  });
+  const [hasError, setHasError] = useState<boolean>(false);
 
-    if (gBannerAspectRatioCache[backgroundImageUrl]) {
+  // Sync aspect ratio if themeConfig changes dynamically
+  useEffect(() => {
+    if (configuredRatio && configuredRatio > 0) {
+      setAspectRatio(configuredRatio);
+    } else if (backgroundImageUrl && gBannerAspectRatioCache[backgroundImageUrl]) {
       setAspectRatio(gBannerAspectRatioCache[backgroundImageUrl]);
     }
-  }, [backgroundImageUrl]);
+  }, [configuredRatio, backgroundImageUrl]);
+
+  // Handle successful image load
+  const handleLoad = useCallback(
+    (e: { source: { width: number; height: number } }) => {
+      const { width, height } = e.source;
+      setIsLoaded(true);
+      setHasError(false);
+
+      if (width > 0 && height > 0) {
+        const ratio = width / height;
+        if (backgroundImageUrl) {
+          gBannerAspectRatioCache[backgroundImageUrl] = ratio;
+        }
+        // Only update if not explicitly pinned by remote config
+        if (!configuredRatio) {
+          setAspectRatio((prev) => (Math.abs(prev - ratio) > 0.05 ? ratio : prev));
+        }
+      }
+    },
+    [backgroundImageUrl, configuredRatio]
+  );
+
+  const handleError = useCallback(() => {
+    setIsLoaded(true);
+    setHasError(true);
+  }, []);
 
   if (!themeConfig || !themeConfig.enabled) {
     return null;
@@ -51,7 +91,7 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
   const badgeText = themeConfig?.badgeText?.trim() || "";
   const accentColor = themeConfig?.themeAccentColor || "#014D52";
 
-  const hasImage = Boolean(backgroundImageUrl && backgroundImageUrl.length > 0);
+  const hasImage = Boolean(backgroundImageUrl && backgroundImageUrl.length > 0 && !hasError);
   const hasAnyText = subTitle.length > 0 || mainTitle.length > 0 || badgeText.length > 0;
 
   // Don't render an empty banner if there's neither an image nor text
@@ -59,16 +99,19 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
     return null;
   }
 
-  // Responsive banner height: exactly matches the image's aspect ratio (zero bottom gap, zero letterboxing)
-  const effectiveRatio = aspectRatio > 0 ? aspectRatio : 1080 / 850;
+  // 2. Predictable, non-jumping banner geometry
+  // Clamped between 140px and 42% screen height (max 330px on larger phones)
+  const effectiveRatio = aspectRatio > 0 ? aspectRatio : DEFAULT_BANNER_ASPECT_RATIO;
   const rawHeight = Math.round(screenWidth / effectiveRatio);
-  const maxHeight = Math.round(screenHeight * 0.72);
-  const bannerHeight = Math.max(140, Math.min(rawHeight, maxHeight));
+  const minHeight = 140;
+  const maxHeight = Math.round(Math.min(screenHeight * 0.42, 330));
+  const bannerHeight = Math.max(minHeight, Math.min(rawHeight, maxHeight));
 
   return (
     <View
       accessibilityRole="image"
       accessibilityLabel={mainTitle ? `${mainTitle} Special Music Showcase` : "Festival Showcase"}
+      renderToHardwareTextureAndroid={true}
       style={[
         styles.seamlessHeroRoot,
         {
@@ -78,7 +121,22 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
         },
       ]}
     >
-      {/* 1. Full-Width Edge-to-Edge Hero Image — Dynamically sized to exact image ratio */}
+      {/* 1. Underlying Festive Ambient Gradient (Shown during load, on error, or as fallback) */}
+      <LinearGradient
+        colors={[accentColor, "#0B1015"]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+
+      {/* 2. Loading Placeholder Shimmer/Spinner for heavy GIFs on slower connections */}
+      {hasImage && !isLoaded && (
+        <View style={styles.loaderCenter}>
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        </View>
+      )}
+
+      {/* 3. High-Performance Hardware-Accelerated Image / Animated GIF */}
       {hasImage && (
         <Image
           source={{ uri: backgroundImageUrl! }}
@@ -87,33 +145,26 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
           contentPosition="center"
           priority="high"
           cachePolicy="memory-disk"
-          transition={150}
-          onLoad={(e) => {
-            const { width, height } = e.source;
-            if (width > 0 && height > 0) {
-              const ratio = width / height;
-              if (ratio !== aspectRatio) {
-                if (backgroundImageUrl) {
-                  gBannerAspectRatioCache[backgroundImageUrl] = ratio;
-                }
-                setAspectRatio(ratio);
-              }
-            }
-          }}
+          allowDownscaling={true}
+          recyclingKey={backgroundImageUrl!}
+          autoplay={true}
+          transition={250}
+          onLoad={handleLoad}
+          onError={handleError}
         />
       )}
 
-      {/* 2. Fallback Ambient Gradient if No Image is configured */}
-      {!hasImage && (
+      {/* 4. Text Scrim Gradient: Guarantees 100% text readability over dynamic/bright GIF frames */}
+      {hasAnyText && (
         <LinearGradient
-          colors={[accentColor, Colors.background]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
+          colors={["transparent", "rgba(0, 0, 0, 0.28)", "rgba(0, 0, 0, 0.82)"]}
+          locations={[0, 0.45, 1]}
           style={StyleSheet.absoluteFillObject}
+          pointerEvents="none"
         />
       )}
 
-      {/* 6. Text Metadata Overlay at bottom of hero area */}
+      {/* 5. Text Metadata Overlay */}
       {hasAnyText && (
         <View style={styles.textBottomWrapper}>
           {badgeText.length > 0 && (
@@ -146,28 +197,33 @@ const styles = StyleSheet.create({
     width: "100%",
     position: "relative",
     justifyContent: "flex-end",
-    // Completely seamless: 0 margin, 0 padding, 0 border, 0 radius
     marginHorizontal: 0,
     borderRadius: 0,
     borderWidth: 0,
     overflow: "hidden",
   },
+  loaderCenter: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1,
+  },
   textBottomWrapper: {
     width: "100%",
     paddingHorizontal: 20,
-    paddingBottom: 22,
+    paddingBottom: 20,
     justifyContent: "flex-end",
     zIndex: 5,
   },
   badgePill: {
     alignSelf: "flex-start",
-    backgroundColor: "rgba(0, 0, 0, 0.50)",
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
     marginBottom: 6,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(255, 255, 255, 0.22)",
+    borderColor: "rgba(255, 255, 255, 0.25)",
   },
   dateBadge: {
     fontSize: 9.5,
@@ -181,11 +237,14 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     fontFamily: "Inter_700Bold",
     fontWeight: "700",
-    letterSpacing: 3,
+    letterSpacing: 2.5,
     color: "#C5E6DA",
-    opacity: 0.92,
+    opacity: 0.95,
     marginBottom: 4,
     textTransform: "uppercase",
+    textShadowColor: "rgba(0, 0, 0, 0.60)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   mainTitle: {
     fontSize: 24,
@@ -194,9 +253,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     color: "#FFFDF2",
     lineHeight: 30,
-    textShadowColor: "rgba(0, 0, 0, 0.65)",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
+    textShadowColor: "rgba(0, 0, 0, 0.75)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
 });
 
