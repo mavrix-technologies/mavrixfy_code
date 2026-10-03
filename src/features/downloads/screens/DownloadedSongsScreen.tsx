@@ -67,6 +67,7 @@ const songKeyExtractor = (item: Song) => item.id;
 export function DownloadedSongsScreen() {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const bottomPad = Platform.OS === "web" ? 132 : Math.max(150, insets.bottom + 126);
 
   const {
     getAllDownloadItems,
@@ -266,7 +267,7 @@ export function DownloadedSongsScreen() {
           data={filteredSongs}
           keyExtractor={keyExtractor}
           renderItem={renderSong}
-          contentContainerStyle={styles.searchModeListContent}
+          contentContainerStyle={[styles.searchModeListContent, { paddingBottom: bottomPad }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           getItemLayout={getItemLayout}
@@ -422,7 +423,7 @@ export function DownloadedSongsScreen() {
             contentContainerStyle={[
               styles.listContent,
               completedSongs.length === 0 ? styles.listContentEmpty : undefined,
-              { paddingBottom: Math.max(insets.bottom, 0) + 140 },
+              { paddingBottom: bottomPad },
             ]}
             showsVerticalScrollIndicator={false}
             onScroll={handleScroll}

@@ -75,7 +75,15 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const activeTab = useMemo<VisibleRoute>(() => {
     if (!pathname || pathname === "/" || pathname === "/index") return "index";
     if (pathname === "/search" || pathname.startsWith("/search/")) return "search";
-    if (pathname === "/library" || pathname.startsWith("/library/")) return "library";
+    if (
+      pathname === "/library" ||
+      pathname.startsWith("/library/") ||
+      pathname === "/downloads" ||
+      pathname.startsWith("/downloads/") ||
+      pathname === "/downloaded-songs" ||
+      pathname.startsWith("/downloaded-songs/")
+    )
+      return "library";
     if (pathname === "/liked-songs" || pathname.startsWith("/liked-songs/")) return "liked-songs";
     if (
       pathname === "/import-songs" ||

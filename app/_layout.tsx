@@ -127,8 +127,8 @@ LogBox.ignoreLogs([
   "setBackgroundColorAsync",
 ]);
 
-const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "downloads", "profile", "delete-account"]);
-const NAV_OVERLAY_SEGMENTS = new Set(["playlist", "artist"]);
+const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "profile", "delete-account"]);
+const NAV_OVERLAY_SEGMENTS = new Set(["playlist", "artist", "downloads", "downloaded-songs"]);
 
 const GLOBAL_TOAST_VISIBLE_MS = 1050;
 
