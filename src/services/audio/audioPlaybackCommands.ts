@@ -1,3 +1,4 @@
+import { getSettings } from "@/lib/storage";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
@@ -45,7 +46,7 @@ interface UseAudioPlaybackCommandsOptions {
   State: any;
   canUseLightweightAudioFallback: boolean;
   showPlaybackNotice: (msg: string) => void;
-  playSongRef: MutableRefObject<(song: Song, queue?: Song[]) => Promise<void> | void>;
+  playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number) => Promise<void> | void>;
   togglePlayRef: MutableRefObject<() => Promise<void> | void>;
   togglePlayInFlightRef: MutableRefObject<boolean>;
   nextSongRef: MutableRefObject<() => void>;
@@ -104,7 +105,7 @@ export function useAudioPlaybackCommands({
   sleepTimerRef,
 }: UseAudioPlaybackCommandsOptions) {
   const playSong = useCallback(
-    async (song: Song, requestedQueue?: Song[]) => {
+    async (song: Song, requestedQueue?: Song[], startPositionSeconds?: number) => {
       if (!song?.id) return;
       const reqId = ++playRequestIdRef.current;
       pendingPlayRequestRef.current = {
@@ -164,8 +165,9 @@ export function useAudioPlaybackCommands({
       setPlaybackLoading(true);
       setSeekOverride(null);
       if (durationSecondsRef) durationSecondsRef.current = toDurationSeconds(targetSong.duration);
-      positionSecondsRef.current = 0;
-      setNativePosition(0);
+      const initialPos = typeof startPositionSeconds === "number" && startPositionSeconds > 0 ? startPositionSeconds : 0;
+      positionSecondsRef.current = initialPos;
+      setNativePosition(initialPos);
 
       updatePlaybackEngineSnapshot({
         currentSong: targetSong,
@@ -268,25 +270,30 @@ export function useAudioPlaybackCommands({
                 typeof TrackPlayer!.setQueue === "function" &&
                 allTracksValid
               ) {
-                await TrackPlayer!.setQueue(nativeTracks);
-                await TrackPlayer!.skip(targetIndex);
+                await TrackPlayer!.setQueue(nativeTracks, targetIndex, initialPos);
                 if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = true;
               } else if (typeof TrackPlayer!.load === "function") {
-                await TrackPlayer!.load(targetTrack);
+                await TrackPlayer!.load(targetTrack, initialPos);
                 if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
               } else {
                 await TrackPlayer!.reset();
                 await TrackPlayer!.add([targetTrack]);
+                if (initialPos > 0 && typeof TrackPlayer!.seekTo === "function") {
+                  await TrackPlayer!.seekTo(initialPos).catch(() => {});
+                }
                 if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
               }
             } catch (queueErr) {
               logger.error("[Player] Native track load failed:", queueErr);
               try {
                 if (typeof TrackPlayer!.load === "function") {
-                  await TrackPlayer!.load(targetTrack);
+                  await TrackPlayer!.load(targetTrack, initialPos);
                 } else {
                   await TrackPlayer!.reset();
                   await TrackPlayer!.add([targetTrack]);
+                  if (initialPos > 0 && typeof TrackPlayer!.seekTo === "function") {
+                    await TrackPlayer!.seekTo(initialPos).catch(() => {});
+                  }
                 }
               } catch (loadError) {
                 throw loadError;
@@ -296,7 +303,12 @@ export function useAudioPlaybackCommands({
 
             if (reqId !== playRequestIdRef.current) return;
             if (desiredPlayStateRef.current === false) await TrackPlayer!.pause();
-            else await TrackPlayer!.play();
+            else {
+              await TrackPlayer!.play();
+              if (initialPos > 0 && typeof TrackPlayer!.seekTo === "function") {
+                await TrackPlayer!.seekTo(initialPos).catch(() => {});
+              }
+            }
           });
 
           if (reqId !== playRequestIdRef.current) return;
@@ -381,7 +393,8 @@ export function useAudioPlaybackCommands({
       if (queueRef.current.length > 0) {
         const target = queueRef.current[queueIndexRef.current] || queueRef.current[0];
         if (target) {
-          void playSong(target, queueRef.current);
+          const resumePos = positionSecondsRef.current > 0 ? positionSecondsRef.current : 0;
+          void playSong(target, queueRef.current, resumePos);
         }
       }
       togglePlayInFlightRef.current = false;
@@ -408,17 +421,24 @@ export function useAudioPlaybackCommands({
             ]);
             const rawState = typeof playbackState === "object" ? (playbackState as any)?.state : playbackState;
 
-            // If native player has no active track, wrong track, or state is none/stopped/ended/error:
+            const activeId = activeTrack?.id ? String(activeTrack.id) : null;
+            const currentId = currentSongRef.current?.id ? String(currentSongRef.current.id) : null;
+            const isTrackValid = activeTrack && activeTrack.url && activeId === currentId;
+
+            // If native player has no active track, wrong track, or state is none/stopped/error:
             if (
-              !activeTrack ||
-              !activeTrack.url ||
+              !isTrackValid ||
               rawState === State.None ||
               rawState === State.Stopped ||
-              rawState === State.Ended ||
-              rawState === State.Error ||
-              activeTrack.id !== currentSongRef.current.id
+              rawState === State.Error
             ) {
-              await playSong(currentSongRef.current, queueRef.current);
+              const resumePos = positionSecondsRef.current > 0 ? positionSecondsRef.current : 0;
+              await playSong(currentSongRef.current, queueRef.current, resumePos);
+              return;
+            }
+
+            if (rawState === State.Ended) {
+              await playSong(currentSongRef.current, queueRef.current, 0);
               return;
             }
 
@@ -426,7 +446,8 @@ export function useAudioPlaybackCommands({
               await TrackPlayer.play();
             } catch (playErr) {
               logger.warn("[Player] TrackPlayer.play() failed, reloading track via playSong:", playErr);
-              await playSong(currentSongRef.current, queueRef.current);
+              const resumePos = positionSecondsRef.current > 0 ? positionSecondsRef.current : 0;
+              await playSong(currentSongRef.current, queueRef.current, resumePos);
             }
           }
         } else {
@@ -443,7 +464,8 @@ export function useAudioPlaybackCommands({
             isPlayingRef.current = true;
             updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
           } else {
-            void playSong(currentSongRef.current, queueRef.current);
+            const resumePos = positionSecondsRef.current > 0 ? positionSecondsRef.current : 0;
+            void playSong(currentSongRef.current, queueRef.current, resumePos);
           }
         } else {
           setIsPlaying(false);
@@ -455,7 +477,8 @@ export function useAudioPlaybackCommands({
     } catch (error) {
       logger.error("[Player] togglePlay failed", error);
       if (nextPlayState && currentSongRef.current) {
-        void playSong(currentSongRef.current, queueRef.current);
+        const resumePos = positionSecondsRef.current > 0 ? positionSecondsRef.current : 0;
+        void playSong(currentSongRef.current, queueRef.current, resumePos);
       }
     } finally {
       togglePlayInFlightRef.current = false;
@@ -469,6 +492,7 @@ export function useAudioPlaybackCommands({
     isPlayerReady,
     isPlayingRef,
     playSong,
+    positionSecondsRef,
     playbackLoadingRef,
     queueIndexRef,
     queueRef,
@@ -495,7 +519,6 @@ export function useAudioPlaybackCommands({
     } else {
       // Reached end of queue: check smart autoplay before stopping
       try {
-        const { getSettings } = require("@/lib/storage");
         const settings = await getSettings();
         if (
           settings?.smartAutoplayEnabled &&
@@ -516,11 +539,17 @@ export function useAudioPlaybackCommands({
         logger.warn("[Player] Autoplay nextSong error:", err);
       }
 
+      desiredPlayStateRef.current = false;
+      if (TrackPlayer) await TrackPlayer.pause();
+      else if (canUseLightweightAudioFallback) ExpoAvPlayer.pause();
       setIsPlaying(false);
       isPlayingRef.current = false;
       updatePlaybackEngineSnapshot({ isPlaying: false, desiredPlayState: false });
     }
   }, [
+    TrackPlayer,
+    canUseLightweightAudioFallback,
+    desiredPlayStateRef,
     currentSongRef,
     isPlayingRef,
     playSong,

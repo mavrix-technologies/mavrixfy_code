@@ -7,7 +7,7 @@ preloadDominantColors,
 useArtworkPalette,
 } from "@/lib/colorExtractor";
 import {
-DEFAULT_MINI_PLAYER_BANNER_CONFIG,
+DEFAULT_MINI_PLAYER_BANNER_CONFIG, getCachedMiniPlayerBannerConfig,
 subscribeToMiniPlayerBannerConfig,
 type MiniPlayerBannerConfig,
 } from "@/lib/miniPlayerBannerConfig";
@@ -137,7 +137,7 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
   const setAlbumColor = playerActions?.setAlbumColor ?? noopPlayerAction;
   const setTextColor = playerActions?.setTextColor ?? noopPlayerAction;
   const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
-  const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(DEFAULT_MINI_PLAYER_BANNER_CONFIG);
+  const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(() => getCachedMiniPlayerBannerConfig());
   useEffect(() => {
     return subscribeToMiniPlayerBannerConfig(setBannerConfig);
   }, []);
@@ -189,12 +189,19 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
 
   const iosArtworkPalette = useArtworkPalette(activeSong?.coverUrl);
 
+  const lastAccentRef = useRef("");
+  const lastTextRef = useRef("");
+
   useEffect(() => {
-    // Reset cover error for the next song and publish its artwork colors.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCoverFailed(false);
-    setAlbumColor(iosArtworkPalette.accent);
-    setTextColor(iosArtworkPalette.text);
+    if (iosArtworkPalette.accent && iosArtworkPalette.accent !== lastAccentRef.current) {
+      lastAccentRef.current = iosArtworkPalette.accent;
+      setAlbumColor(iosArtworkPalette.accent);
+    }
+    if (iosArtworkPalette.text && iosArtworkPalette.text !== lastTextRef.current) {
+      lastTextRef.current = iosArtworkPalette.text;
+      setTextColor(iosArtworkPalette.text);
+    }
   }, [activeSong?.id, iosArtworkPalette.accent, iosArtworkPalette.text, setAlbumColor, setTextColor]);
 
   const shellBgColor = useMemo(

@@ -1,4 +1,5 @@
 import type { Song } from "@/lib/musicData";
+import { logger } from "@/lib/logger";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import {
@@ -98,6 +99,7 @@ export function useAudioProgressTracking({
 
   // Duration corrections must not reset the user's position.
   useEffect(() => {
+    let active = true;
     const songId = currentSong?.id ?? null;
     if (progressSongIdRef.current === songId) {
       if (currentSong?.duration) setNativeDuration(toDurationSeconds(currentSong.duration));
@@ -107,15 +109,34 @@ export function useAudioProgressTracking({
     if (currentSong?.id) {
       const initialDur = toDurationSeconds(currentSong.duration);
       durationSecondsRef.current = initialDur;
-      positionSecondsRef.current = 0;
       seekOverrideRef.current = null;
-      updateProgressStore(0, initialDur);
+      if (positionSecondsRef.current > 0) {
+        updateProgressStore(positionSecondsRef.current, initialDur);
+      } else {
+        void import("@/services/player/playerPersistenceService").then(({ playerPersistenceService }) => {
+          void playerPersistenceService.loadPlayerState().then((persisted) => {
+            if (!active || progressSongIdRef.current !== songId || positionSecondsRef.current > 0) return;
+            if (
+              persisted?.currentSong?.id === songId &&
+              typeof persisted.positionSeconds === "number" &&
+              persisted.positionSeconds > 0
+            ) {
+              positionSecondsRef.current = persisted.positionSeconds;
+              updateProgressStore(persisted.positionSeconds, initialDur);
+            } else {
+              positionSecondsRef.current = 0;
+              updateProgressStore(0, initialDur);
+            }
+          }).catch((error) => logger.warn("[Audio] Progress restore failed", error));
+        }).catch((error) => logger.warn("[Audio] Progress restore unavailable", error));
+      }
     } else {
       durationSecondsRef.current = 0;
       positionSecondsRef.current = 0;
       seekOverrideRef.current = null;
       resetPlaybackProgress();
     }
+    return () => { active = false; };
   }, [currentSong?.id, currentSong?.duration, setNativeDuration, updateProgressStore]);
 
   useEffect(() => {

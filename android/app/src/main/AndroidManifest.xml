@@ -57,9 +57,10 @@
         <action android:name="androidx.media3.session.MediaSessionService"/>
       </intent-filter>
     </service>
-    <service android:name="com.doublesymmetry.trackplayer.service.MusicService" android:enabled="true" android:exported="true" android:foregroundServiceType="mediaPlayback" tools:replace="android:exported,android:foregroundServiceType">
+    <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc"/>
+    <service android:name="com.mavrixfy.app.MavrixfyMediaBrowserService" android:enabled="true" android:exported="true" >
       <intent-filter>
-        <action android:name="android.intent.action.MEDIA_BUTTON"/>
+        <action android:name="android.media.browse.MediaBrowserService"/>
       </intent-filter>
     </service>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize|assetsPaths" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">

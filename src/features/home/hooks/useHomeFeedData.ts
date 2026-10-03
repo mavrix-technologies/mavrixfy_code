@@ -45,53 +45,50 @@ const session = {
   quickPicksPool: DEFAULT_POOL,
 };
 
+interface HomeFeedState {
+  categories: CatalogCategoryData[];
+  publicPlaylists: FirestorePlaylist[];
+  featuredArtists: ArtistCard[];
+  quickPickSongs: Song[];
+  quickPicksPool: QuickPicksPool;
+  loading: boolean;
+}
+
 export function useHomeFeedData() {
   const { isOnline, isChecking } = useNetwork();
   const mountedRef = useRef(true);
   const activeLoadRef = useRef<Promise<void> | null>(null);
   const initialLoadRef = useRef(false);
-  const [categories, setCategories] = useState(session.categories);
-  const [publicPlaylists, setPublicPlaylists] = useState(session.publicPlaylists);
-  const [featuredArtists, setFeaturedArtists] = useState(session.featuredArtists);
-  const [quickPickSongs, setQuickPickSongs] = useState(session.quickPickSongs);
-  const [quickPicksPool, setQuickPicksPool] = useState<QuickPicksPool>(session.quickPicksPool);
+
+  const [feedState, setFeedState] = useState<HomeFeedState>(() => ({
+    categories: session.categories,
+    publicPlaylists: session.publicPlaylists,
+    featuredArtists: session.featuredArtists,
+    quickPickSongs: session.quickPickSongs,
+    quickPicksPool: session.quickPicksPool,
+    loading: !session.hydrated,
+  }));
+
   const [recentlyPlayed, setRecentlyPlayed] = useState<RecentlyPlayedItem[]>([]);
-  const [loading, setLoading] = useState(!session.hydrated);
   const [refreshing, setRefreshing] = useState(false);
 
-  const applyCategories = useCallback((items: CatalogCategoryData[]) => {
-    if (!mountedRef.current || items.length === 0) return;
-    session.categories = items;
-    setCategories(items);
-  }, []);
-
-  const applySongs = useCallback((items: Song[]) => {
-    if (!mountedRef.current || items.length === 0) return;
-    session.quickPickSongs = items;
-    setQuickPickSongs(items);
-  }, []);
-
-  const applyQuickPicksPool = useCallback((pool: QuickPicksPool) => {
-    if (!mountedRef.current) return;
-    session.quickPicksPool = pool;
-    setQuickPicksPool(pool);
-  }, []);
-
-  const applyPlaylists = useCallback((items: FirestorePlaylist[]) => {
-    if (!mountedRef.current || items.length === 0) return;
-    session.publicPlaylists = items;
-    setPublicPlaylists(items);
-  }, []);
-
-  const applyArtists = useCallback((items: ArtistCard[]) => {
-    if (!mountedRef.current || items.length === 0) return;
-    session.featuredArtists = items;
-    setFeaturedArtists(items);
-  }, []);
-
   const loadRecentlyPlayed = useCallback(async () => {
-    const items = await getRecentlyPlayed().catch(() => []);
-    if (mountedRef.current) setRecentlyPlayed(items.slice(0, 8));
+    try {
+      const items = await getRecentlyPlayed();
+      const top8 = items.slice(0, 8);
+      if (!mountedRef.current) return;
+      setRecentlyPlayed((prev) => {
+        if (
+          prev.length === top8.length &&
+          prev.every((item, i) => item.id === top8[i]?.id)
+        ) {
+          return prev;
+        }
+        return top8;
+      });
+    } catch {
+      // ignore storage read failures
+    }
   }, []);
 
   const loadHomeFeed = useCallback(
@@ -99,31 +96,49 @@ export function useHomeFeedData() {
       if (activeLoadRef.current) return activeLoadRef.current;
       const task = (async () => {
         session.attemptedAt = Date.now();
+
+        // 1. Instant Cache Hydration: Single batched state update
         if (!session.hydrated) {
           const [snapshot, cachedPlaylists] = await Promise.all([
             getCachedHomeFeedSnapshot({ allowStale: true }),
             getCachedHomePublicPlaylists({ allowStale: true }),
           ]);
-          if (snapshot) {
-            applyCategories(snapshot.categories);
-            applyPlaylists(snapshot.publicPlaylists);
-            applyArtists(snapshot.featuredArtists);
-            applySongs(snapshot.quickPickSongs);
-            applyQuickPicksPool(snapshot.quickPicksPool ?? {
+          if (snapshot && mountedRef.current) {
+            const playlists =
+              cachedPlaylists.length > 0 ? cachedPlaylists : snapshot.publicPlaylists;
+            const pool = snapshot.quickPicksPool ?? {
               ...DEFAULT_POOL,
               all: snapshot.quickPickSongs,
-            });
+            };
+            session.categories = snapshot.categories;
+            session.publicPlaylists = playlists;
+            session.featuredArtists = snapshot.featuredArtists;
+            session.quickPickSongs = snapshot.quickPickSongs;
+            session.quickPicksPool = pool;
             session.hydrated = true;
+
+            setFeedState({
+              categories: snapshot.categories,
+              publicPlaylists: playlists,
+              featuredArtists: snapshot.featuredArtists,
+              quickPickSongs: snapshot.quickPickSongs,
+              quickPicksPool: pool,
+              loading: false, // Instant feed ready from cache
+            });
+          } else if (cachedPlaylists.length > 0 && mountedRef.current) {
+            session.publicPlaylists = cachedPlaylists;
+            setFeedState((prev) => ({
+              ...prev,
+              publicPlaylists: cachedPlaylists,
+            }));
           }
-          applyPlaylists(cachedPlaylists);
         }
 
         void loadRecentlyPlayed();
 
+        // 2. Network Fetching: Concurrent fetch without staggered UI re-renders
         const officialTask = getOfficialHomeFeed(forceRefresh)
           .then(async (feed) => {
-            applyCategories(feed.categories);
-            session.updatedAt = Date.now();
             const freshSongs = await getOfficialHomeSongs(feed.songs || feed.songIds);
             return { categories: feed.categories, songs: freshSongs };
           })
@@ -131,50 +146,96 @@ export function useHomeFeedData() {
             logger.warn("[Home] Official feed unavailable, using search fallback:", error);
             try {
               const fallbackCats = await getHomeCatalogCategories({ forceRefresh });
-              if (fallbackCats.length > 0) {
-                applyCategories(fallbackCats);
-                session.updatedAt = Date.now();
-              }
+              return fallbackCats.length > 0 ? { categories: fallbackCats, songs: [] } : null;
             } catch (err) {
               logger.warn("[Home] Fallback categories failed:", err);
+              return null;
             }
-            return null;
           });
 
-        const quickPicksTask = officialTask.then(feed => feed
-          ? fetchQuickPicksFeed({ forceRefresh, categories: feed.categories, newReleaseSongs: feed.songs })
-          : null)
+        const quickPicksTask = officialTask
+          .then((feed) =>
+            feed
+              ? fetchQuickPicksFeed({
+                  forceRefresh,
+                  categories: feed.categories,
+                  newReleaseSongs: feed.songs,
+                })
+              : null
+          )
           .catch(() => null);
 
-        const playlistsTask = getPublicPlaylists(8).then(async (items) => {
-          if (items.length > 0) {
-            applyPlaylists(items);
-            await setCachedHomePublicPlaylists(items);
-          }
-        });
+        const playlistsTask = getPublicPlaylists(8)
+          .then(async (items) => {
+            if (items.length > 0) {
+              await setCachedHomePublicPlaylists(items);
+            }
+            return items;
+          })
+          .catch(() => [] as FirestorePlaylist[]);
 
-        const artistsTask = getFeaturedArtists().then(applyArtists);
+        const artistsTask = getFeaturedArtists().catch(() => [] as ArtistCard[]);
 
-        const [, quickPicksResult] = await Promise.allSettled([
-          officialTask, quickPicksTask, playlistsTask, artistsTask,
-        ]);
-        const pool = quickPicksResult.status === "fulfilled" ? quickPicksResult.value : null;
-        if (pool?.all.length) {
-          applyQuickPicksPool(pool);
-          applySongs(pool.all);
+        const [officialRes, quickPicksRes, playlistsRes, artistsRes] =
+          await Promise.allSettled([
+            officialTask,
+            quickPicksTask,
+            playlistsTask,
+            artistsTask,
+          ]);
+
+        if (!mountedRef.current) return;
+
+        let newCategories = session.categories;
+        let newPlaylists = session.publicPlaylists;
+        let newArtists = session.featuredArtists;
+        let newQuickSongs = session.quickPickSongs;
+        let newPool = session.quickPicksPool;
+
+        if (officialRes.status === "fulfilled" && officialRes.value?.categories?.length) {
+          newCategories = officialRes.value.categories;
+          session.updatedAt = Date.now();
         }
 
-        if (session.categories.length > 0 && mountedRef.current) {
+        if (playlistsRes.status === "fulfilled" && playlistsRes.value.length > 0) {
+          newPlaylists = playlistsRes.value;
+        }
+
+        if (artistsRes.status === "fulfilled" && artistsRes.value.length > 0) {
+          newArtists = artistsRes.value;
+        }
+
+        if (quickPicksRes.status === "fulfilled" && quickPicksRes.value?.all?.length) {
+          newPool = quickPicksRes.value;
+          newQuickSongs = quickPicksRes.value.all;
+        }
+
+        session.categories = newCategories;
+        session.publicPlaylists = newPlaylists;
+        session.featuredArtists = newArtists;
+        session.quickPickSongs = newQuickSongs;
+        session.quickPicksPool = newPool;
+
+        if (session.categories.length > 0) {
           session.hydrated = true;
-          await setCachedHomeFeedSnapshot({
-            categories: session.categories,
-            publicPlaylists: session.publicPlaylists,
-            featuredArtists: session.featuredArtists,
-            quickPickSongs: session.quickPickSongs,
-            quickPicksPool: session.quickPicksPool,
+          void setCachedHomeFeedSnapshot({
+            categories: newCategories,
+            publicPlaylists: newPlaylists,
+            featuredArtists: newArtists,
+            quickPickSongs: newQuickSongs,
+            quickPicksPool: newPool,
           });
         }
-        if (mountedRef.current) setLoading(false);
+
+        // Commit single batched update to UI
+        setFeedState({
+          categories: newCategories,
+          publicPlaylists: newPlaylists,
+          featuredArtists: newArtists,
+          quickPickSongs: newQuickSongs,
+          quickPicksPool: newPool,
+          loading: false,
+        });
       })();
 
       activeLoadRef.current = task;
@@ -184,7 +245,7 @@ export function useHomeFeedData() {
         if (activeLoadRef.current === task) activeLoadRef.current = null;
       }
     },
-    [applyArtists, applyCategories, applyPlaylists, applyQuickPicksPool, applySongs, loadRecentlyPlayed]
+    [loadRecentlyPlayed]
   );
 
   useEffect(() => {
@@ -254,20 +315,20 @@ export function useHomeFeedData() {
   }, [loadHomeFeed]);
 
   const hasContent =
-    categories.length > 0 ||
-    quickPickSongs.length > 0 ||
-    publicPlaylists.length > 0 ||
+    feedState.categories.length > 0 ||
+    feedState.quickPickSongs.length > 0 ||
+    feedState.publicPlaylists.length > 0 ||
     recentlyPlayed.length > 0;
 
   return {
-    categories,
-    publicPlaylists,
-    featuredArtists,
-    quickPickSongs,
-    quickPicksPool,
+    categories: feedState.categories,
+    publicPlaylists: feedState.publicPlaylists,
+    featuredArtists: feedState.featuredArtists,
+    quickPickSongs: feedState.quickPickSongs,
+    quickPicksPool: feedState.quickPicksPool,
     recentlyPlayed,
-    loading,
-    loadingMainContent: loading,
+    loading: feedState.loading,
+    loadingMainContent: feedState.loading,
     refreshing,
     hasContent,
     handleRefresh,

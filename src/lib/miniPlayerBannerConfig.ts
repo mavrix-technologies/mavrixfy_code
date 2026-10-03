@@ -1,7 +1,8 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { db } from "@/lib/firebase";
 import { triggerImpact } from "@/lib/haptics";
 import { ImpactFeedbackStyle } from "expo-haptics";
-import { doc,onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { Linking } from "react-native";
 
 export type MiniPlayerBannerItem = {
@@ -26,7 +27,24 @@ export const DEFAULT_MINI_PLAYER_BANNER_CONFIG: MiniPlayerBannerConfig = {
   items: [],
 };
 
+const STORAGE_KEY_BANNER = "@mavrixfy_mini_banner_config_v1";
 const BANNER_CONFIG_REF = doc(db, "appConfig", "miniPlayerBanner");
+
+let cachedConfig: MiniPlayerBannerConfig = DEFAULT_MINI_PLAYER_BANNER_CONFIG;
+
+// Hydrate from storage immediately on module load
+void (async () => {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY_BANNER);
+    if (raw) {
+      cachedConfig = normalizeBannerConfig(JSON.parse(raw));
+    }
+  } catch {}
+})();
+
+export function getCachedMiniPlayerBannerConfig(): MiniPlayerBannerConfig {
+  return cachedConfig;
+}
 
 function normalizeBannerItem(raw: unknown): MiniPlayerBannerItem | null {
   if (!raw || typeof raw !== "object") return null;
@@ -103,27 +121,29 @@ function normalizeBannerConfig(data: unknown): MiniPlayerBannerConfig {
 }
 
 /**
- * Subscribe to real-time banner config updates from Firestore
+ * Subscribe to real-time banner config updates from Firestore with instant local cache
  */
 export function subscribeToMiniPlayerBannerConfig(
   callback: (config: MiniPlayerBannerConfig) => void
 ): () => void {
+  // Fire immediately with in-memory cached state to eliminate any layout shift
+  callback(cachedConfig);
+
   try {
     return onSnapshot(
       BANNER_CONFIG_REF,
       (snap) => {
-        if (snap.exists()) {
-          callback(normalizeBannerConfig(snap.data()));
-        } else {
-          callback(DEFAULT_MINI_PLAYER_BANNER_CONFIG);
-        }
+        const next = snap.exists() ? normalizeBannerConfig(snap.data()) : DEFAULT_MINI_PLAYER_BANNER_CONFIG;
+        cachedConfig = next;
+        void AsyncStorage.setItem(STORAGE_KEY_BANNER, JSON.stringify(next));
+        callback(next);
       },
       () => {
-        callback(DEFAULT_MINI_PLAYER_BANNER_CONFIG);
+        callback(cachedConfig);
       }
     );
   } catch {
-    callback(DEFAULT_MINI_PLAYER_BANNER_CONFIG);
+    callback(cachedConfig);
     return () => {};
   }
 }

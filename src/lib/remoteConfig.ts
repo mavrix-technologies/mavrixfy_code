@@ -40,7 +40,10 @@ let isFetching = false;
 let initialized = false;
 
 // Listeners for runtime configuration changes
-type RemoteConfigListener = (config: { musicApiUrl: string; appApiUrl: string }) => void;
+type RemoteConfigListener = (config: {
+  musicApiUrl: string;
+  appApiUrl: string;
+}) => void;
 const listeners = new Set<RemoteConfigListener>();
 
 // Hydrate cached values from AsyncStorage as early as possible
@@ -71,7 +74,10 @@ function normalizeUrl(url: string): string {
 }
 
 function notifyListeners(): void {
-  const payload = { musicApiUrl: resolvedMusicApiUrl, appApiUrl: resolvedAppApiUrl };
+  const payload = {
+    musicApiUrl: resolvedMusicApiUrl,
+    appApiUrl: resolvedAppApiUrl,
+  };
   listeners.forEach((listener) => {
     try {
       listener(payload);
@@ -163,7 +169,7 @@ async function performFetch(): Promise<boolean> {
       void AsyncStorage.setItem(STORAGE_KEY_LAST_FETCH, Date.now().toString());
 
       logger.info(
-        `[RemoteConfig] Official Firebase Remote Config activated: musicApiUrl → ${resolvedMusicApiUrl} (version ${data.templateVersion ?? "latest"})`
+        `[RemoteConfig] Official Firebase Remote Config activated: musicApiUrl → ${resolvedMusicApiUrl}, appApiUrl → ${resolvedAppApiUrl} (version ${data.templateVersion ?? "latest"})`
       );
 
       if (changed) {

@@ -51,10 +51,11 @@ function downloadItemToSong(item: DownloadItem): Song {
     artist: item.artist,
     album: item.album,
     coverUrl: item.coverUrl,
-    audioUrl: getTrackFileUri(item.songId),
+    audioUrl: item.localPath || getTrackFileUri(item.songId, "m4a", item.accountId),
     duration: item.duration,
     genre: "",
     source: "local",
+    downloadUrl: item.audioUrl,
   };
 }
 

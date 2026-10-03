@@ -1,3 +1,4 @@
+import { getSettings } from "@/lib/storage";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
@@ -40,9 +41,17 @@ interface UseAudioSyncListenersOptions {
   showPlaybackNotice: (msg: string) => void;
   likedSongs: Song[];
   likedSongsRef: MutableRefObject<Song[]>;
-  playSong: (song: Song, queue?: Song[]) => Promise<void> | void;
+  playSong: (song: Song, queue?: Song[], position?: number) => Promise<void> | void;
+  nextSong: () => Promise<void>;
+  prevSong: () => Promise<void>;
   isNativeQueueSyncedRef?: MutableRefObject<boolean>;
   triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[]) => Promise<Song[]>;
+  isShuffled?: boolean;
+  repeatMode?: "off" | "all" | "one";
+  toggleShuffle?: () => void;
+  toggleRepeat?: () => void;
+  toggleLike?: (song: Song) => Promise<void> | void;
+  likedSongIds?: string[] | Set<string>;
 }
 
 export function useAudioSyncListeners({
@@ -75,8 +84,16 @@ export function useAudioSyncListeners({
   likedSongs,
   likedSongsRef,
   playSong,
+  nextSong,
+  prevSong,
   isNativeQueueSyncedRef,
   triggerAutoplayAppend,
+  isShuffled,
+  repeatMode,
+  toggleShuffle,
+  toggleRepeat,
+  toggleLike,
+  likedSongIds,
 }: UseAudioSyncListenersOptions) {
   const publishedLockScreenDurationRef = useRef<{
     songId: string;
@@ -100,20 +117,45 @@ export function useAudioSyncListeners({
       updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
     };
     const unsubs = [
-      subscribeTrackPlayerEvent(Event.RemotePlay, playIntent),
-      subscribeTrackPlayerEvent(Event.RemotePause, pauseIntent),
-      subscribeTrackPlayerEvent(Event.RemoteStop, pauseIntent),
+      subscribeTrackPlayerEvent(Event.RemotePlay, () => {
+        playIntent();
+        if (playbackLoadingRef.current) return;
+        void TrackPlayer.getActiveTrack().then((track: any) => {
+          if (desiredPlayStateRef.current !== true || playbackLoadingRef.current) return;
+          if (track?.id === currentSongRef.current?.id) return TrackPlayer.play();
+          const song = currentSongRef.current;
+          if (song) return playSong(song, queueRef.current, positionSecondsRef.current);
+        }).catch((error: unknown) => logger.warn("[Audio] Remote play failed", error));
+      }),
+      subscribeTrackPlayerEvent(Event.RemotePause, () => {
+        pauseIntent();
+        void TrackPlayer.pause().catch(() => {});
+      }),
+      subscribeTrackPlayerEvent(Event.RemoteStop, () => {
+        pauseIntent();
+        void TrackPlayer.stop().catch(() => {});
+      }),
+      subscribeTrackPlayerEvent(Event.RemoteNext, () => void nextSong()),
+      subscribeTrackPlayerEvent(Event.RemotePrevious, () => void prevSong()),
+      subscribeTrackPlayerEvent(Event.PlaybackInterruption, (event: { resumed: boolean }) => {
+        if (event.resumed) playIntent();
+        else pauseIntent();
+      }),
       subscribeTrackPlayerEvent(Event.PlaybackState, (event: any) => {
         const nextState = event && typeof event === "object" && "state" in event ? event.state : event;
 
         switch (nextState) {
           case State.Playing:
-            if (playbackLoadingRef.current || desiredPlayStateRef.current === false) break;
+            if (desiredPlayStateRef.current === false) {
+              void TrackPlayer?.pause?.().catch(() => {});
+              break;
+            }
+            playbackLoadingRef.current = false;
+            setPlaybackLoading(false);
             pendingPlayRequestRef.current = null;
             desiredPlayStateRef.current = true;
             setIsPlaying(true);
             isPlayingRef.current = true;
-            setPlaybackLoading(false);
             updatePlaybackEngineSnapshot({ isPlaying: true, isLoading: false, isBuffering: false });
             break;
 
@@ -174,12 +216,36 @@ export function useAudioSyncListeners({
         showPlaybackNotice(`Playback error: ${errorMsg}`);
       }),
       subscribeTrackPlayerEvent(Event.PlaybackProgressUpdated, (event: any) => {
-        if (playbackLoadingRef.current || pendingPlayRequestRef.current) return;
-        if (isNativeQueueSyncedRef?.current && event?.track !== queueIndexRef.current) return;
-        if (typeof event?.position === "number") {
-          setNativePosition(event.position);
-          positionSecondsRef.current = event.position;
+        // Only filter out if this event is explicitly for a stale pending play request
+        if (
+          pendingPlayRequestRef.current &&
+          event?.track?.id &&
+          String(event.track.id) !== String(pendingPlayRequestRef.current.songId)
+        ) {
+          return;
         }
+        if (
+          isNativeQueueSyncedRef?.current &&
+          typeof event?.track === "number" &&
+          event.track !== queueIndexRef.current
+        ) {
+          return;
+        }
+
+        const pos = typeof event?.position === "number" ? event.position : 0;
+        if (pos > 0) {
+          if (playbackLoadingRef.current) {
+            playbackLoadingRef.current = false;
+            setPlaybackLoading(false);
+            updatePlaybackEngineSnapshot({ isLoading: false });
+          }
+          if (pendingPlayRequestRef.current) {
+            pendingPlayRequestRef.current = null;
+          }
+        }
+
+        setNativePosition(pos);
+        positionSecondsRef.current = pos;
         const song = currentSongRef.current;
         const nativeDuration = typeof event?.duration === "number" && event.duration > 0
           ? event.duration
@@ -240,10 +306,10 @@ export function useAudioSyncListeners({
             : null;
 
         const pending = pendingPlayRequestRef.current;
-        if (pending && activeTrackId !== pending.songId) return;
+        if (pending && activeTrackId && String(activeTrackId) !== String(pending.songId)) return;
 
         // If native event confirms the song we already selected, do NOT overwrite or jump
-        if (activeTrackId && currentSong && activeTrackId === currentSong.id) {
+        if (activeTrackId && currentSong && String(activeTrackId) === String(currentSong.id)) {
           return;
         }
 
@@ -259,7 +325,7 @@ export function useAudioSyncListeners({
 
         // Match by ID first across our queue
         if (activeTrackId) {
-          const foundIndex = currentQ.findIndex((s) => s.id === activeTrackId);
+          const foundIndex = currentQ.findIndex((s) => String(s.id) === String(activeTrackId));
           if (foundIndex >= 0) {
             targetSong = currentQ[foundIndex];
             resolvedIndex = foundIndex;
@@ -275,7 +341,7 @@ export function useAudioSyncListeners({
         // If native queue is unsynced and no track ID matched, DO NOT blind-revert to queue[0]!
         if (!targetSong) return;
 
-        if (targetSong.id !== currentSongRef.current?.id) {
+        if (String(targetSong.id) !== String(currentSongRef.current?.id)) {
           currentSongRef.current = targetSong;
           setCurrentSong(targetSong);
           if (resolvedIndex >= 0) {
@@ -315,7 +381,8 @@ export function useAudioSyncListeners({
         }
 
         if (isNativeQueueSyncedRef?.current === false) {
-          const next = queueRef.current[queueIndexRef.current + 1];
+          const next = queueRef.current[queueIndexRef.current + 1] ||
+            (repeatMode === "all" ? queueRef.current[0] : undefined);
           if (next) {
             void playSong(next, queueRef.current);
             return;
@@ -323,7 +390,6 @@ export function useAudioSyncListeners({
         }
 
         try {
-          const { getSettings } = require("@/lib/storage");
           const settings = await getSettings();
           if (!isStillEnded()) return;
           if (settings?.smartAutoplayEnabled && triggerAutoplayAppend) {
@@ -354,7 +420,7 @@ export function useAudioSyncListeners({
       unsubs.forEach((unsub) => unsub?.());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlayerReady, triggerAutoplayAppend]);
+  }, [isPlayerReady, triggerAutoplayAppend, nextSong, prevSong, playSong, repeatMode]);
 
   // Save current playback state (event-driven)
   useEffect(() => {
@@ -424,9 +490,7 @@ export function useAudioSyncListeners({
   useEffect(() => {
     if (Platform.OS !== "ios" || !carPlayService.isAvailable()) return;
 
-    if (likedSongs.length > 0) {
-      void carPlayService.syncFavorites(likedSongs);
-    }
+    void carPlayService.syncFavorites(likedSongs);
 
     playerPersistenceService.getUserPlaylists()
       .then((playlists) => {
@@ -448,6 +512,33 @@ export function useAudioSyncListeners({
       })
       .catch(() => {});
 
+    if (currentSong) {
+      const hasLiked =
+        likedSongIds instanceof Set
+          ? likedSongIds.has(currentSong.id)
+          : Array.isArray(likedSongIds)
+            ? likedSongIds.includes(currentSong.id)
+            : false;
+      const isFav = Boolean(
+        currentSong.id &&
+          (hasLiked || likedSongsRef.current.some((s) => s.id === currentSong.id))
+      );
+      void carPlayService.syncNowPlaying({
+        songId: currentSong.id,
+        title: currentSong.title,
+        artist: currentSong.artist,
+        album: currentSong.album || "",
+        coverUrl: currentSong.coverUrl || "",
+        duration: toDurationSeconds(currentSong.duration),
+        elapsedTime: positionSecondsRef.current || 0,
+        isPlaying: isPlayingRef.current,
+        isFavorite: isFav,
+        isShuffle: Boolean(isShuffled),
+        repeatMode: repeatMode || "off",
+        queueCount: queueRef.current.length,
+      });
+    }
+
     const unsubPlay = carPlayService.onPlaySong((event) => {
       if (event.song && (event.song as Song).id) {
         void playSong(event.song as Song);
@@ -461,8 +552,45 @@ export function useAudioSyncListeners({
       }
     });
 
+    const unsubFav = carPlayService.onToggleFavorite(() => {
+      const active = currentSongRef.current;
+      if (active && toggleLike) {
+        void toggleLike(active);
+      }
+    });
+
+    const unsubShuffle = carPlayService.onToggleShuffle(() => {
+      if (toggleShuffle) {
+        toggleShuffle();
+      }
+    });
+
+    const unsubRepeat = carPlayService.onToggleRepeat(() => {
+      if (toggleRepeat) {
+        toggleRepeat();
+      }
+    });
+
     return () => {
       unsubPlay();
+      unsubFav();
+      unsubShuffle();
+      unsubRepeat();
     };
-  }, [likedSongs, playSong, likedSongsRef, queueRef]);
+  }, [
+    likedSongs,
+    playSong,
+    likedSongsRef,
+    queueRef,
+    currentSong,
+    isShuffled,
+    repeatMode,
+    likedSongIds,
+    toggleShuffle,
+    toggleRepeat,
+    toggleLike,
+    positionSecondsRef,
+    isPlayingRef,
+    currentSongRef,
+  ]);
 }

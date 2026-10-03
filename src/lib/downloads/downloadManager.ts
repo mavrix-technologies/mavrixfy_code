@@ -1,4 +1,5 @@
 import { getAccountScope,isCurrentAccount } from "@/lib/accountScope";
+import { getInfoAsync } from "expo-file-system/legacy";
 /**
  * Download Manager — public API used by UI and playback.
  *
@@ -214,9 +215,28 @@ export async function getLocalPlaybackUrl(songId: string): Promise<string | null
     const item = await loadDownload(songId);
     if (!item || item.status !== "completed") return null;
 
-    const expiry = item.licenseExpiresAt ? Date.parse(item.licenseExpiresAt) : NaN;
-    if (!Number.isFinite(expiry) || Date.now() > expiry + 7 * 24 * 60 * 60 * 1000) return null;
-    return getValidatedTrackFileUri(songId);
+    // Only validate expiration if a license expiration was explicitly stamped
+    if (item.licenseExpiresAt) {
+      const expiry = Date.parse(item.licenseExpiresAt);
+      if (Number.isFinite(expiry) && Date.now() > expiry + 7 * 24 * 60 * 60 * 1000) {
+        return null;
+      }
+    }
+
+    // 1. If item recorded a direct localPath that exists on disk, use it
+    if (item.localPath) {
+      try {
+        const info = await getInfoAsync(item.localPath);
+        if (info.exists && !info.isDirectory && ((info as any).size ?? 0) > 1024) {
+          return item.localPath.startsWith("file://") ? item.localPath : `file://${item.localPath}`;
+        }
+      } catch {
+        // Fall through to validated track file lookup
+      }
+    }
+
+    // 2. Fall back to validated track file URI with account scope and auto-migration
+    return getValidatedTrackFileUri(songId, item.accountId);
   } catch {
     return null;
   }

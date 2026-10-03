@@ -1,31 +1,20 @@
+import EqualizerBars from "@/components/EqualizerBars";
 import Colors from "@/constants/colors";
-import {
-colorWithAlpha,
-} from "@/lib/colorExtractor";
 import { triggerImpact } from "@/lib/haptics";
 import { type Song } from "@/lib/musicData";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { memo,useCallback,useEffect,useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import {
-FlatList,
-Pressable,
-StyleSheet,
-Text,
-useWindowDimensions,
-View,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
 } from "react-native";
-import Animated,{
-Easing,
-interpolateColor,
-useAnimatedStyle,
-useSharedValue,
-withTiming,
-} from "react-native-reanimated";
-
-
 
 import { usePlaybackRowState } from "@/services/audio/PlaybackEngine";
 
@@ -50,7 +39,7 @@ const QuickPickItem = memo(function QuickPickItem({
   onOptionsPress: (song: Song) => void;
   width: number;
 }) {
-  const { isActive } = usePlaybackRowState(song?.id);
+  const { isActive, isPlaying } = usePlaybackRowState(song?.id);
 
   const handlePress = useCallback(() => {
     onPress(song);
@@ -60,36 +49,8 @@ const QuickPickItem = memo(function QuickPickItem({
     onOptionsPress(song);
   }, [onOptionsPress, song]);
 
-  const activeProgress = useSharedValue(isActive ? 1 : 0);
-
-  useEffect(() => {
-    activeProgress.value = withTiming(isActive ? 1 : 0, {
-      duration: 300,
-      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-    });
-  }, [isActive, activeProgress]);
-
-  const activeBg = useMemo(
-    () => colorWithAlpha(accentColor, 0.14, "rgba(255, 255, 255, 0.08)"),
-    [accentColor]
-  );
-
-  const animatedRowStyle = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(
-      activeProgress.value,
-      [0, 1],
-      ["transparent", activeBg]
-    ),
-  }));
-
   return (
-    <Animated.View
-      style={[
-        styles.quickPickRow,
-        { width },
-        animatedRowStyle,
-      ]}
-    >
+    <View style={[styles.quickPickRow, { width }]}>
       <Pressable
         style={({ pressed }) => [
           styles.quickPickMain,
@@ -105,12 +66,25 @@ const QuickPickItem = memo(function QuickPickItem({
           transition={150}
         />
         <View style={styles.quickPickInfo}>
-          <Text
-            style={[styles.quickPickTitle, isActive && { color: accentColor, fontFamily: "Inter_700Bold" }]}
-            numberOfLines={1}
-          >
-            {song.title}
-          </Text>
+          <View style={styles.quickPickTitleRow}>
+            {isActive && (
+              <EqualizerBars
+                color={accentColor}
+                size={2}
+                gap={1.5}
+                isPlaying={isPlaying}
+              />
+            )}
+            <Text
+              style={[
+                styles.quickPickTitle,
+                isActive && styles.quickPickTitleActive,
+              ]}
+              numberOfLines={1}
+            >
+              {song.title}
+            </Text>
+          </View>
           <Text style={styles.quickPickArtist} numberOfLines={1}>
             {song.artist}
           </Text>
@@ -125,10 +99,10 @@ const QuickPickItem = memo(function QuickPickItem({
         <Ionicons
           name="ellipsis-vertical"
           size={18}
-          color={isActive ? accentColor : "rgba(255,255,255,0.70)"}
+          color="rgba(255, 255, 255, 0.70)"
         />
       </Pressable>
-    </Animated.View>
+    </View>
   );
 });
 
@@ -281,10 +255,16 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingRight: 6,
   },
+  quickPickTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
   quickPickTitle: {
     fontSize: 13.5,
     fontFamily: "Inter_600SemiBold",
     color: "#FFFFFF",
+    flex: 1,
   },
   quickPickTitleActive: {
     color: Colors.primary,

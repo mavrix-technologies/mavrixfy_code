@@ -192,7 +192,8 @@
           "optimizeInitialization": true,
           "optimizeAdLoading": true
         }
-      ]
+      ],
+      "./plugins/withAndroidAuto"
     ],
     "experiments": {
       "typedRoutes": true
@@ -228,4 +229,4 @@
     },
     "owner": "satvik1234"
   }
-}
+}

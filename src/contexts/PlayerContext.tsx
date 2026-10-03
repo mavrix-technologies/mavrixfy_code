@@ -6,6 +6,7 @@ import { useAudioProgressTracking } from "@/services/audio/audioProgressTracking
 import { useAudioQualityControl } from "@/services/audio/audioQualityControl";
 import { useAudioQueueOperations } from "@/services/audio/audioQueueOperations";
 import { useAudioSleepTimer } from "@/services/audio/audioSleepTimer";
+import { useAndroidAuto } from "@/services/audio/useAndroidAuto";
 import { useAudioSyncListeners } from "@/services/audio/audioSyncListeners";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { resetPlaybackEngine,updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
@@ -216,6 +217,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     playSong,
   });
 
+  useAndroidAuto({
+    queue: core.queue, currentSong: core.currentSong, likedSongs, playSong,
+    isShuffled: core.isShuffled, repeatMode: core.repeatMode,
+    toggleShuffle, toggleRepeat, toggleLike,
+  });
+
   useAudioSyncListeners({
     isPlayerReady: core.isPlayerReady,
     TrackPlayer,
@@ -246,8 +253,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     likedSongs,
     likedSongsRef,
     playSong,
+    nextSong,
+    prevSong,
     isNativeQueueSyncedRef: core.isNativeQueueSyncedRef,
     triggerAutoplayAppend: core.triggerAutoplayAppend,
+    isShuffled: core.isShuffled,
+    repeatMode: core.repeatMode,
+    toggleShuffle,
+    toggleRepeat,
+    toggleLike,
+    likedSongIds,
   });
 
   const playbackValues = useAudioPlaybackValues({

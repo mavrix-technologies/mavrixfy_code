@@ -1,6 +1,6 @@
 import { logger } from "@/lib/logger";
 import { type Song } from "@/lib/musicData";
-import { NativeEventEmitter,NativeModules,Platform } from "react-native";
+import { NativeEventEmitter, NativeModules, Platform } from "react-native";
 
 const { MavrixfyCarPlayModule } = NativeModules;
 
@@ -14,6 +14,21 @@ export interface CarPlayPlaySongEvent {
   song?: Partial<Song>;
 }
 
+export interface CarPlayNowPlayingState {
+  songId?: string;
+  title?: string;
+  artist?: string;
+  album?: string;
+  coverUrl?: string;
+  duration?: number;
+  elapsedTime?: number;
+  isPlaying?: boolean;
+  isFavorite?: boolean;
+  isShuffle?: boolean;
+  repeatMode?: "off" | "all" | "one";
+  queueCount?: number;
+}
+
 export const carPlayService = {
   isAvailable(): boolean {
     return Platform.OS === "ios" && Boolean(MavrixfyCarPlayModule);
@@ -25,6 +40,28 @@ export const carPlayService = {
       return await MavrixfyCarPlayModule.isConnected();
     } catch {
       return false;
+    }
+  },
+
+  async syncNowPlaying(state: CarPlayNowPlayingState): Promise<void> {
+    if (!this.isAvailable()) return;
+    try {
+      await MavrixfyCarPlayModule.updateNowPlaying({
+        songId: String(state.songId || ""),
+        title: String(state.title || ""),
+        artist: String(state.artist || ""),
+        album: String(state.album || ""),
+        coverUrl: state.coverUrl || "",
+        duration: Number(state.duration) || 0,
+        elapsedTime: Number(state.elapsedTime) || 0,
+        isPlaying: Boolean(state.isPlaying),
+        isFavorite: Boolean(state.isFavorite),
+        isShuffle: Boolean(state.isShuffle),
+        repeatMode: state.repeatMode || "off",
+        queueCount: Number(state.queueCount) || 0,
+      });
+    } catch (err) {
+      logger.warn("[CarPlayService] Failed to sync now playing state:", err);
     }
   },
 
@@ -80,6 +117,30 @@ export const carPlayService = {
   onPlaySong(listener: (event: CarPlayPlaySongEvent) => void): () => void {
     if (!carPlayEmitter) return () => {};
     const subscription = carPlayEmitter.addListener("onCarPlayPlaySong", listener);
+    return () => subscription.remove();
+  },
+
+  onToggleFavorite(listener: () => void): () => void {
+    if (!carPlayEmitter) return () => {};
+    const subscription = carPlayEmitter.addListener("onCarPlayToggleFavorite", listener);
+    return () => subscription.remove();
+  },
+
+  onToggleShuffle(listener: () => void): () => void {
+    if (!carPlayEmitter) return () => {};
+    const subscription = carPlayEmitter.addListener("onCarPlayToggleShuffle", listener);
+    return () => subscription.remove();
+  },
+
+  onToggleRepeat(listener: () => void): () => void {
+    if (!carPlayEmitter) return () => {};
+    const subscription = carPlayEmitter.addListener("onCarPlayToggleRepeat", listener);
+    return () => subscription.remove();
+  },
+
+  onOpenQueue(listener: () => void): () => void {
+    if (!carPlayEmitter) return () => {};
+    const subscription = carPlayEmitter.addListener("onCarPlayOpenQueue", listener);
     return () => subscription.remove();
   },
 

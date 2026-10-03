@@ -10,7 +10,7 @@ import { triggerImpact } from "@/lib/haptics";
 import { globalHomeScrollRef } from "@/lib/homeScrollRef";
 import { useLastMix } from "@/lib/lastMix";
 import {
-DEFAULT_MINI_PLAYER_BANNER_CONFIG,
+DEFAULT_MINI_PLAYER_BANNER_CONFIG, getCachedMiniPlayerBannerConfig,
 subscribeToMiniPlayerBannerConfig,
 type MiniPlayerBannerConfig,
 } from "@/lib/miniPlayerBannerConfig";
@@ -113,7 +113,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const [coverFailed, setCoverFailed] = useState(false);
   const artworkPalette = useArtworkPalette(activeSong?.coverUrl);
   const openPlayerLockRef = useRef(0);
-  const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(DEFAULT_MINI_PLAYER_BANNER_CONFIG);
+  const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(() => getCachedMiniPlayerBannerConfig());
 
   useEffect(() => {
     return subscribeToMiniPlayerBannerConfig(setBannerConfig);
@@ -298,12 +298,19 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     [miniPanGesture, miniTapGesture]
   );
 
+  const lastAccentRef = useRef("");
+  const lastTextRef = useRef("");
+
   useEffect(() => {
-    // Reset cover error for the next song and publish its artwork colors.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCoverFailed(false);
-    setAlbumColor(artworkPalette.accent);
-    setTextColor(artworkPalette.text);
+    if (artworkPalette.accent && artworkPalette.accent !== lastAccentRef.current) {
+      lastAccentRef.current = artworkPalette.accent;
+      setAlbumColor(artworkPalette.accent);
+    }
+    if (artworkPalette.text && artworkPalette.text !== lastTextRef.current) {
+      lastTextRef.current = artworkPalette.text;
+      setTextColor(artworkPalette.text);
+    }
   }, [activeSong?.id, artworkPalette.accent, artworkPalette.text, setAlbumColor, setTextColor]);
 
   const TAB_BAR_HEIGHT = 50;
@@ -316,7 +323,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const conceptSubtext = "#bccbb9";
 
   const safeTextColor = useMemo(() => {
-    const raw = textColor || conceptText;
+    const raw = artworkPalette.text || textColor || conceptText;
     const hex = raw.replace("#", "");
     if (hex.length === 6) {
       const r = parseInt(hex.slice(0, 2), 16);

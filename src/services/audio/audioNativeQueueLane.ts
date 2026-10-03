@@ -22,6 +22,8 @@ interface UseAudioNativeQueueLaneOptions {
   streamUrlCache: MutableRefObject<Map<string, string>>;
   resolvePlaybackUrlCached: (song: Song) => Promise<string | null>;
   isNativeQueueSyncedRef?: MutableRefObject<boolean>;
+  desiredPlayStateRef: MutableRefObject<boolean | null>;
+  currentSongRef: MutableRefObject<Song | null>;
 }
 const RESOLVED_EMPTY_PROMISE: Promise<any> = Promise.resolve();
 
@@ -33,6 +35,8 @@ export function useAudioNativeQueueLane({
   streamUrlCache,
   resolvePlaybackUrlCached,
   isNativeQueueSyncedRef,
+  desiredPlayStateRef,
+  currentSongRef,
 }: UseAudioNativeQueueLaneOptions) {
   const nativeQueueMutationRef = useRef<Promise<any>>(RESOLVED_EMPTY_PROMISE);
 
@@ -99,14 +103,13 @@ export function useAudioNativeQueueLane({
       const forcedUrls = options?.forcedUrls ?? new Map<string, string>();
 
       const nativeTracks = await buildNativeQueueTracks(songs, forcedUrls);
+      if (currentSongRef.current?.id !== songs[activeIndex]?.id) return;
       if (nativeTracks.some((track) => !readAudioCandidate(track?.url))) {
         throw new Error("One or more queue tracks have no playable audio URL.");
       }
 
-      return TrackPlayer.setQueue(nativeTracks)
-        .then(() => TrackPlayer.skip(Math.max(0, Math.min(activeIndex, songs.length - 1))))
-        .then(() => (position > 0 ? TrackPlayer.seekTo(position) : undefined))
-        .then(() => (wasPlaying ? TrackPlayer.play() : TrackPlayer.pause().catch(() => {})))
+      return TrackPlayer.setQueue(nativeTracks, Math.max(0, Math.min(activeIndex, songs.length - 1)), position, true)
+        .then(() => ((desiredPlayStateRef.current ?? wasPlaying) ? TrackPlayer.play() : TrackPlayer.pause().catch(() => {})))
         .then(() => {
           if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = true;
           if (RepeatMode) {
@@ -119,7 +122,7 @@ export function useAudioNativeQueueLane({
           }
         });
     },
-    [buildNativeQueueTracks, isNativeQueueSyncedRef, isPlayerReady, repeatModeRef, RepeatMode, TrackPlayer]
+    [buildNativeQueueTracks, currentSongRef, desiredPlayStateRef, isNativeQueueSyncedRef, isPlayerReady, repeatModeRef, RepeatMode, TrackPlayer]
   );
 
   return {

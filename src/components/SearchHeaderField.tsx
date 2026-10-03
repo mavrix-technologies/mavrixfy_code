@@ -1,13 +1,13 @@
 import Colors from "@/constants/colors";
 import { Ionicons } from "@expo/vector-icons";
-import { forwardRef,memo } from "react";
+import { forwardRef, memo, useImperativeHandle, useRef } from "react";
 import {
-Platform,
-Pressable,
-StyleSheet,
-TextInput,
-type StyleProp,
-type ViewStyle
+  Platform,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
 
 import { LiquidGlassView } from "./LiquidGlassView";
@@ -42,53 +42,68 @@ export const SearchHeaderField = memo(
     ref
   ) {
     const isDark = theme === "dark";
+    const innerInputRef = useRef<TextInput>(null);
+
+    useImperativeHandle(ref, () => innerInputRef.current as TextInput);
+
+    const handleContainerTouch = () => {
+      if (!innerInputRef.current?.isFocused()) {
+        innerInputRef.current?.focus();
+      }
+    };
 
     return (
-      <LiquidGlassView
-        borderRadius={isDark ? 19 : 10}
-        style={[styles.field, isDark ? styles.fieldDark : styles.fieldLight, style]}
+      <Pressable
+        onPress={handleContainerTouch}
+        style={styles.pressableContainer}
+        accessible={false}
       >
-        <Ionicons
-          name="search"
-          size={17}
-          color={isDark ? "rgba(255, 255, 255, 0.65)" : "#8E949B"}
-          style={styles.searchIcon}
-        />
-        <TextInput
-          ref={ref}
-          style={[styles.input, isDark ? styles.inputDark : styles.inputLight]}
-          placeholder={placeholder}
-          placeholderTextColor={isDark ? "rgba(255, 255, 255, 0.45)" : "#8E949B"}
-          value={value}
-          onChangeText={onChangeText}
-          onSubmitEditing={onSubmit}
-          onFocus={onFocus}
-          onBlur={onBlur}
-          autoFocus={autoFocus}
-          inputMode="search"
-          returnKeyType="search"
-          autoCorrect={false}
-          autoCapitalize="none"
-          clearButtonMode={Platform.OS === "ios" ? "while-editing" : "never"}
-          keyboardAppearance="dark"
-          selectionColor={Colors.primary}
-        />
-        {Platform.OS !== "ios" && value.length > 0 ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Clear search"
-            onPress={onClear}
-            hitSlop={8}
-            style={({ pressed }) => [styles.clearButton, pressed && styles.clearButtonPressed]}
-          >
-            <Ionicons
-              name="close-circle"
-              size={18}
-              color={isDark ? "rgba(255, 255, 255, 0.55)" : "#8E949B"}
-            />
-          </Pressable>
-        ) : null}
-      </LiquidGlassView>
+        <LiquidGlassView
+          borderRadius={isDark ? 19 : 10}
+          style={[styles.field, isDark ? styles.fieldDark : styles.fieldLight, style]}
+        >
+          <Ionicons
+            name="search"
+            size={17}
+            color={isDark ? "rgba(255, 255, 255, 0.65)" : "#8E949B"}
+            style={styles.searchIcon}
+          />
+          <TextInput
+            ref={innerInputRef}
+            style={[styles.input, isDark ? styles.inputDark : styles.inputLight]}
+            placeholder={placeholder}
+            placeholderTextColor={isDark ? "rgba(255, 255, 255, 0.45)" : "#8E949B"}
+            value={value}
+            onChangeText={onChangeText}
+            onSubmitEditing={onSubmit}
+            onFocus={onFocus}
+            onBlur={onBlur}
+            autoFocus={autoFocus}
+            inputMode="search"
+            returnKeyType="search"
+            autoCorrect={false}
+            autoCapitalize="none"
+            clearButtonMode={Platform.OS === "ios" ? "while-editing" : "never"}
+            keyboardAppearance="dark"
+            selectionColor={Colors.primary}
+          />
+          {Platform.OS !== "ios" && value.length > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              onPress={onClear}
+              hitSlop={8}
+              style={({ pressed }) => [styles.clearButton, pressed && styles.clearButtonPressed]}
+            >
+              <Ionicons
+                name="close-circle"
+                size={18}
+                color={isDark ? "rgba(255, 255, 255, 0.55)" : "#8E949B"}
+              />
+            </Pressable>
+          ) : null}
+        </LiquidGlassView>
+      </Pressable>
     );
   })
 );
@@ -96,6 +111,9 @@ export const SearchHeaderField = memo(
 export default SearchHeaderField;
 
 const styles = StyleSheet.create({
+  pressableContainer: {
+    width: "100%",
+  },
   field: {
     width: "100%",
     flexDirection: "row",
@@ -121,7 +139,8 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     minWidth: 0,
-    padding: 0,
+    height: "100%",
+    paddingVertical: 0,
   },
   inputLight: {
     color: "#0F172A",

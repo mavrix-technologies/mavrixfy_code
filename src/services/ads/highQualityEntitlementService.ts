@@ -30,6 +30,12 @@ export async function unlockHighQuality(_durationHours?: number): Promise<void> 
 export async function requestHighQualityUnlockWithRewardedAd(
   _onLoadingChange?: (loading: boolean) => void
 ): Promise<boolean> {
+  const isDev = typeof __DEV__ !== "undefined" && __DEV__;
+  if (isDev) {
+    await unlockHighQuality();
+    return true;
+  }
+
   if (await isHighQualityUnlocked()) {
     return saveSettings({ streamingQuality: "high" }).then(() => true);
   }

@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger";
+import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import type { Song } from "@/lib/musicData";
 import { getSettings } from "@/lib/storage";
 import type { PlaybackQualityState } from "@/types/playbackTypes";
@@ -7,7 +8,7 @@ import { useCallback,useEffect,useRef,useState } from "react";
 import { useAudioNativeQueueLane } from "./audioNativeQueueLane";
 import { useStartupPlaybackReconcile } from "./audioStartupReconcile";
 import { updatePlaybackEngineSnapshot } from "./PlaybackEngine";
-import { resolvePlaybackUrlWithDetails,songToTrack } from "./PlayerPlaybackResolver";
+import { resolvePlaybackUrlWithDetails, songToTrack } from "./PlayerPlaybackResolver";
 import { fetchAutoplayRecommendations } from "./smartAutoplayService";
 import { StandardAudioPlayer } from "./StandardAudioPlayer";
 
@@ -203,6 +204,8 @@ export function usePlayerCoreState({
     streamUrlCache,
     resolvePlaybackUrlCached,
     isNativeQueueSyncedRef,
+    desiredPlayStateRef,
+    currentSongRef,
   });
 
   const autoplaySongIdsRef = useRef<string[]>([]);
@@ -213,12 +216,13 @@ export function usePlayerCoreState({
     async (seedSong: Song, currentQueue: Song[]): Promise<Song[]> => {
       if (!seedSong?.id || autoplayInFlightRef.current) return [];
       if (lastAutoplaySeedIdRef.current === seedSong.id) return [];
-
+      autoplayInFlightRef.current = true;
+      const sourceQueue = originalQueueRef.current;
+      const scope = getAccountScope();
       try {
         const settings = await getSettings();
         if (!settings.smartAutoplayEnabled) return [];
 
-        autoplayInFlightRef.current = true;
         lastAutoplaySeedIdRef.current = seedSong.id;
         updatePlaybackEngineSnapshot({ isAutoplayLoading: true });
 
@@ -229,18 +233,22 @@ export function usePlayerCoreState({
           limit: 12,
         });
 
-        if (recommendations.length === 0) {
-          updatePlaybackEngineSnapshot({ isAutoplayLoading: false });
-          return [];
-        }
+        if (!isCurrentAccount(scope) || sourceQueue !== originalQueueRef.current) return [];
+        const existingIds = new Set(queueRef.current.map((song) => song.id));
+        const additions = recommendations.filter((song) => {
+          if (existingIds.has(song.id)) return false;
+          existingIds.add(song.id);
+          return true;
+        });
+        if (additions.length === 0) return [];
 
         const currentActiveQueue = queueRef.current;
         const currentActiveSource = originalQueueRef.current;
-        const nextQueue = [...currentActiveQueue, ...recommendations];
-        const nextSourceQueue = [...currentActiveSource, ...recommendations];
+        const nextQueue = [...currentActiveQueue, ...additions];
+        const nextSourceQueue = [...currentActiveSource, ...additions];
         const newAutoplayIds = [
           ...autoplaySongIdsRef.current,
-          ...recommendations.map((s) => s.id),
+          ...additions.map((s) => s.id),
         ];
 
         autoplaySongIdsRef.current = newAutoplayIds;
@@ -248,48 +256,42 @@ export function usePlayerCoreState({
         setQueue(nextQueue);
         originalQueueRef.current = nextSourceQueue;
         setSourceQueue(nextSourceQueue);
+        const wasNativeQueueSynced = isNativeQueueSyncedRef.current;
+        isNativeQueueSyncedRef.current = false;
 
         updatePlaybackEngineSnapshot({
           queue: nextQueue,
           sourceQueue: nextSourceQueue,
           autoplaySongIds: newAutoplayIds,
-          isAutoplayLoading: false,
         });
 
-        // Proactively add to native TrackPlayer queue
-        if (TrackPlayer && isPlayerReady) {
-          void enqueueNativeQueueMutation(async () => {
-            try {
-              const tracksToAdd = await Promise.all(
-                recommendations.slice(0, 5).map(async (song) => {
-                  const cached = streamUrlCache.current.get(song.id);
-                  const url = cached || (await resolvePlaybackUrlCached(song));
-                  return songToTrack(song, url, streamUrlCache.current);
-                })
-              );
-              const valid = tracksToAdd.filter((t) => Boolean(t && t.url));
-              if (valid.length > 0) {
-                await TrackPlayer.add(valid);
-              }
-            } catch (err) {
-              logger.warn("[Autoplay] Failed to append native tracks:", err);
-            }
-          });
+        if (TrackPlayer && isPlayerReady && wasNativeQueueSynced) {
+          void Promise.all(additions.map(async (song) =>
+                songToTrack(song, await resolvePlaybackUrlCached(song), streamUrlCache.current)
+              )).then((tracks) => enqueueNativeQueueMutation(async () => {
+              if (!isCurrentAccount(scope) || queueRef.current !== nextQueue) return;
+              if (tracks.some((track) => !track.url)) return;
+              const nativeQueue = await TrackPlayer.getQueue();
+              if (!isCurrentAccount(scope) || queueRef.current !== nextQueue || !nativeQueueIdsMatch(nativeQueue, currentActiveQueue)) return;
+              await TrackPlayer.add(tracks);
+              if (queueRef.current === nextQueue) isNativeQueueSyncedRef.current = true;
+          })).catch((error) => logger.warn("[Autoplay] Native queue append failed", error));
         }
 
-        return recommendations;
+        return additions;
       } catch (err) {
         logger.error("[Autoplay] Error appending recommendations:", err);
-        updatePlaybackEngineSnapshot({ isAutoplayLoading: false });
         return [];
       } finally {
         autoplayInFlightRef.current = false;
+        updatePlaybackEngineSnapshot({ isAutoplayLoading: false });
       }
     },
     [
       TrackPlayer,
       enqueueNativeQueueMutation,
       isPlayerReady,
+      nativeQueueIdsMatch,
       originalQueueRef,
       queueRef,
       resolvePlaybackUrlCached,

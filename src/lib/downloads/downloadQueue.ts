@@ -237,14 +237,13 @@ async function executeDownload(songId: string): Promise<void> {
   // If it was cancelled while waiting in the pending queue, skip it
   if (item.status === "deleted" || item.status === "completed") return;
 
-  const tempUri = getTempDownloadUri(songId);
-  const finalUri = getTrackFileUri(songId);
+  const tempUri = getTempDownloadUri(songId, item.accountId);
 
   try {
     // Preparation must be inside the failure handler. An API or filesystem
     // error here previously left the item stuck in "downloading" forever.
     const [, , audioUrl] = await Promise.all([
-      ensureDownloadsDirs(),
+      ensureDownloadsDirs(item.accountId),
       updateStatus(songId, "downloading"),
       refreshAudioUrl(songId, item.audioUrl, item.quality),
     ]);
@@ -311,9 +310,25 @@ async function executeDownload(songId: string): Promise<void> {
       throw new Error(`Audio download returned HTTP ${result.status}${contentType ? ` (${contentType})` : ""}`);
     }
 
+    // Determine canonical extension: JioSaavn CDN & MP4 containers must be .m4a so
+    // react-native-audio-api correctly selects the FFmpeg decoder instead of failing MiniAudio.
+    let ext = "m4a";
+    const cleanUrl = audioUrl.split("?")[0].toLowerCase();
+    if (cleanUrl.endsWith(".mp3") || contentType.includes("audio/mpeg") || contentType.includes("audio/mp3")) {
+      ext = "mp3";
+    } else if (cleanUrl.endsWith(".aac") || contentType.includes("audio/aac")) {
+      ext = "aac";
+    } else if (cleanUrl.endsWith(".flac")) {
+      ext = "flac";
+    } else if (cleanUrl.endsWith(".wav")) {
+      ext = "wav";
+    } else {
+      ext = "m4a";
+    }
+
     // Atomically promote verified temp file to final permanent track location
-    const promoted = await promoteTempToTrack(songId);
-    if (!promoted) {
+    const finalUri = await promoteTempToTrack(songId, ext, item.accountId);
+    if (!finalUri) {
       logger.warn("[DownloadQueue] Downloaded temp file verification failed", { songId });
       const { deleteAsync } = await import("expo-file-system/legacy");
       await deleteAsync(tempUri, { idempotent: true }).catch(() => {});
@@ -327,7 +342,7 @@ async function executeDownload(songId: string): Promise<void> {
 
     // Optional background artwork download (non-blocking)
     if (item.coverUrl && item.coverUrl.startsWith("http")) {
-      const artworkUri = getArtworkFileUri(songId);
+      const artworkUri = getArtworkFileUri(songId, item.accountId);
       const { downloadAsync } = await import("expo-file-system/legacy");
       downloadAsync(item.coverUrl, artworkUri).catch(() => {});
     }

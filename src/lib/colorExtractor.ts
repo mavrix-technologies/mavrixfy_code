@@ -20,6 +20,7 @@ export { colorWithAlpha } from "./colorMath";
  *      to ensure consistent dark-mode styling and WCAG readable text contrast across the UI.
  */
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import { useEffect,useState } from "react";
@@ -170,8 +171,44 @@ export function ensureDarkHexColor(
 }
 
 const COLOR_CACHE_MAX_ENTRIES = 200;
+const STORAGE_KEY_PALETTES = "@mavrixfy_palette_cache_v2";
 const paletteCache = new Map<string, ArtworkPalette>();
 const pendingRequests = new Map<string, Promise<ArtworkPalette>>();
+
+let saveStorageTimeout: ReturnType<typeof setTimeout> | null = null;
+
+// Hydrate persistent cache immediately on module load
+void (async () => {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY_PALETTES);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        for (const [k, v] of Object.entries(parsed)) {
+          if (v && typeof v === "object") {
+            paletteCache.set(k, v as ArtworkPalette);
+          }
+        }
+      }
+    }
+  } catch {}
+})();
+
+function persistPaletteCacheDebounced(): void {
+  if (saveStorageTimeout) clearTimeout(saveStorageTimeout);
+  saveStorageTimeout = setTimeout(() => {
+    try {
+      const obj: Record<string, ArtworkPalette> = {};
+      let count = 0;
+      for (const [k, v] of paletteCache.entries()) {
+        obj[k] = v;
+        count++;
+        if (count >= 150) break;
+      }
+      void AsyncStorage.setItem(STORAGE_KEY_PALETTES, JSON.stringify(obj));
+    } catch {}
+  }, 1000);
+}
 
 let nativeGetColors: NativeGetColors | null | undefined;
 
@@ -271,8 +308,6 @@ export function useArtworkPalette(imageUrl: string | null | undefined): ArtworkP
   useEffect(() => {
     const key = (imageUrl || "").trim();
     if (!key) {
-      // Clear colors from the previous image as soon as the source disappears.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPalette(DEFAULT_ARTWORK_PALETTE);
       return;
     }
@@ -280,7 +315,16 @@ export function useArtworkPalette(imageUrl: string | null | undefined): ArtworkP
     let isMounted = true;
     void extractArtworkColors(key).then((extracted) => {
       if (isMounted) {
-        setPalette(extracted);
+        setPalette((prev) => {
+          if (
+            prev.background === extracted.background &&
+            prev.accent === extracted.accent &&
+            prev.text === extracted.text
+          ) {
+            return prev;
+          }
+          return extracted;
+        });
       }
     });
 
@@ -324,48 +368,34 @@ async function extractArtworkColorsUncached(rawKey: string): Promise<ArtworkPale
   const getColors = resolveNativeGetColors();
 
   if (getColors) {
-    const sources = await buildArtworkSources(cacheKey);
+    try {
+      const result = await getColors(cacheKey, {
+        fallback: "#0E1016",
+        cache: true,
+        quality: "low",
+        key: cacheKey,
+      });
 
-    for (let i = 0; i < sources.length; i++) {
-      try {
-        const result = await getColors(sources[i], {
-          fallback: "#000000",
-          cache: false,
-          quality: "high",
-          key: cacheKey,
-          ...(Platform.OS === "android" ? { pixelSpacing: 5 } : {}),
-        });
-
-        const palette = mapImageColorsToPalette(result);
-        if (!isDefaultPalette(palette)) {
-          setCachedPalette(cacheKey, palette);
-          if (rawKey !== cacheKey) {
-            setCachedPalette(rawKey, palette);
-          }
-          return palette;
+      const palette = mapImageColorsToPalette(result);
+      if (!isDefaultPalette(palette)) {
+        setCachedPalette(cacheKey, palette);
+        if (rawKey !== cacheKey) {
+          setCachedPalette(rawKey, palette);
         }
-      } catch {
-        // Try next source.
+        return palette;
       }
+    } catch {
+      // Native extraction failed or unavailable, fall back smoothly
     }
   }
 
-  // JS Fallback Layer (Expo Go / Web / Native Fallback):
-  try {
-    const palette = await extractArtworkColorsWithJsDecoder(cacheKey);
-    setCachedPalette(cacheKey, palette);
-    if (rawKey !== cacheKey) {
-      setCachedPalette(rawKey, palette);
-    }
-    return palette;
-  } catch {
-    const fallbackPalette = buildPaletteFromUrlHash(cacheKey);
-    setCachedPalette(cacheKey, fallbackPalette);
-    if (rawKey !== cacheKey) {
-      setCachedPalette(rawKey, fallbackPalette);
-    }
-    return fallbackPalette;
+  // Fast jewel palette fallback (0ms, avoids freezing JS thread with full JPEG decode)
+  const fallbackPalette = buildPaletteFromUrlHash(cacheKey);
+  setCachedPalette(cacheKey, fallbackPalette);
+  if (rawKey !== cacheKey) {
+    setCachedPalette(rawKey, fallbackPalette);
   }
+  return fallbackPalette;
 }
 
 async function extractArtworkColorsWithJsDecoder(cacheKey: string): Promise<ArtworkPalette> {
@@ -757,6 +787,7 @@ function setCachedPalette(key: string, value: ArtworkPalette): void {
     if (!oldestKey) break;
     paletteCache.delete(oldestKey);
   }
+  persistPaletteCacheDebounced();
 }
 
 function pickColor(...candidates: (string | undefined | null)[]): string | null {

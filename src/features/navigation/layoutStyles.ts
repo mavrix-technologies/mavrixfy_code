@@ -320,7 +320,7 @@ export const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.28)",
   },
   miniBannerDotActive: {
-    width: 8,
+    transform: [{ scale: 1.25 }],
     borderRadius: 2,
     backgroundColor: "#FFFFFF",
   },

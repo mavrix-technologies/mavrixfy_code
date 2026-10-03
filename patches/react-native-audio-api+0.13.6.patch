@@ -1,0 +1,385 @@
+diff --git a/node_modules/react-native-audio-api/android/build.gradle b/node_modules/react-native-audio-api/android/build.gradle
+index 0033a2b..aeb1126 100644
+--- a/node_modules/react-native-audio-api/android/build.gradle
++++ b/node_modules/react-native-audio-api/android/build.gradle
+@@ -318,11 +318,12 @@ def assertMinimalReactNativeVersion = task assertMinimalReactNativeVersionTask {
+ }
+ 
+ task downloadPrebuiltBinaries(type: Exec) {
+-  def isWindows = Os.isFamily(Os.FAMILY_WINDOWS)
+-  if (isWindows) {
++  onlyIf {
++    !file("../common/cpp/audioapi/external/android").exists() || !file("src/main/jniLibs").exists()
++  }
++  if (Os.isFamily(Os.FAMILY_WINDOWS)) {
+     commandLine 'C:\\Program Files\\Git\\usr\\bin\\bash.exe', '../scripts/download-prebuilt-binaries.sh', 'android', isFFmpegDisabled() ? 'skipffmpeg' : ''
+   } else {
+-    commandLine 'chmod', '+x', '../scripts/download-prebuilt-binaries.sh'
+     commandLine 'bash', '../scripts/download-prebuilt-binaries.sh', 'android', isFFmpegDisabled() ? 'skipffmpeg' : ''
+   }
+   environment 'DISABLE_AUDIOAPI_STATIC_EXTERNAL_LIBS', isStaticExternalLibsDisabled() ? '1' : '0'
+diff --git a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/AudioFocusListener.kt b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/AudioFocusListener.kt
+index b9c4636..15ccf8f 100644
+--- a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/AudioFocusListener.kt
++++ b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/AudioFocusListener.kt
+@@ -1,6 +1,7 @@
+ package com.swmansion.audioapi.system
+ 
+ import android.media.AudioFocusRequest
++import android.media.AudioAttributes
+ import android.media.AudioManager
+ import android.os.Build
+ import android.util.Log
+@@ -13,12 +14,14 @@ class AudioFocusListener(
+   private val audioAPIModule: WeakReference<AudioAPIModule>,
+ ) : AudioManager.OnAudioFocusChangeListener {
+   private var focusRequest: AudioFocusRequest? = null
++  private var hasAudioFocus = false
+   private var isTransientLoss: Boolean = false
+ 
+   override fun onAudioFocusChange(focusChange: Int) {
+     Log.d("AudioFocusListener", "onAudioFocusChange: $focusChange")
+     when (focusChange) {
+       AudioManager.AUDIOFOCUS_LOSS -> {
++        hasAudioFocus = false
+         val body =
+           HashMap<String, Any>().apply {
+             put("type", "began")
+@@ -29,6 +32,7 @@ class AudioFocusListener(
+       }
+ 
+       AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
++        hasAudioFocus = false
+         val body =
+           HashMap<String, Any>().apply {
+             put("type", "began")
+@@ -39,6 +43,7 @@ class AudioFocusListener(
+       }
+ 
+       AudioManager.AUDIOFOCUS_GAIN -> {
++        hasAudioFocus = true
+         val body =
+           HashMap<String, Any>().apply {
+             put("type", "ended")
+@@ -55,20 +60,24 @@ class AudioFocusListener(
+   }
+ 
+   fun requestAudioFocus(focus: Int) {
++    if (hasAudioFocus) return
+     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+       this.focusRequest =
+         AudioFocusRequest
+           .Builder(focus)
++          .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+           .setOnAudioFocusChangeListener(this)
+           .build()
+ 
+-      audioManager.get()?.requestAudioFocus(focusRequest!!)
++      hasAudioFocus = audioManager.get()?.requestAudioFocus(focusRequest!!) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+     } else {
+-      audioManager.get()?.requestAudioFocus(this, AudioManager.STREAM_MUSIC, focus)
++      hasAudioFocus = audioManager.get()?.requestAudioFocus(this, AudioManager.STREAM_MUSIC, focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+     }
+   }
+ 
+   fun abandonAudioFocus() {
++    hasAudioFocus = false
++    isTransientLoss = false
+     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && this.focusRequest != null) {
+       audioManager.get()?.abandonAudioFocusRequest(focusRequest!!)
+     } else {
+diff --git a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/MediaSessionManager.kt b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/MediaSessionManager.kt
+index 5a934a1..965ba6f 100644
+--- a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/MediaSessionManager.kt
++++ b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/MediaSessionManager.kt
+@@ -4,6 +4,7 @@ import android.Manifest
+ import android.app.NotificationChannel
+ import android.app.NotificationManager
+ import android.content.Context
++import android.content.Intent
+ import android.content.IntentFilter
+ import android.content.pm.PackageManager
+ import android.media.AudioDeviceInfo
+@@ -62,6 +63,7 @@ object MediaSessionManager {
+     // Register PlaybackNotificationReceiver
+     val playbackFilter = IntentFilter(PlaybackNotificationReceiver.ACTION_NOTIFICATION_DISMISSED)
+     playbackFilter.addAction(PlaybackNotification.MEDIA_BUTTON)
++    playbackFilter.addAction(Intent.ACTION_MEDIA_BUTTON)
+     playbackFilter.addAction(PlaybackNotificationReceiver.ACTION_SKIP_FORWARD)
+     playbackFilter.addAction(PlaybackNotificationReceiver.ACTION_SKIP_BACKWARD)
+ 
+diff --git a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt
+index 3364c7a..90e544a 100644
+--- a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt
++++ b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt
+@@ -45,6 +45,23 @@ class PlaybackNotification(
+     const val ACTION_SKIP_FORWARD = "com.swmansion.audioapi.ACTION_SKIP_FORWARD"
+     const val ACTION_SKIP_BACKWARD = "com.swmansion.audioapi.ACTION_SKIP_BACKWARD"
+     const val ID = 100
++
++    @JvmStatic
++    var sharedMediaSession: MediaSessionCompat? = null
++
++    @JvmStatic
++    var onSessionCreatedListener: ((MediaSessionCompat) -> Unit)? = null
++
++    @JvmStatic
++    var onMetadataChangedListener: (() -> Unit)? = null
++
++    @JvmStatic var onPlayMediaIdListener: ((String) -> Unit)? = null
++    @JvmStatic var onPlaySearchListener: ((String) -> Unit)? = null
++    @JvmStatic var onSkipQueueItemListener: ((Long) -> Unit)? = null
++    @JvmStatic var activeQueueItemId: Long = -1L
++    @JvmStatic var customPlaybackActions: List<PlaybackStateCompat.CustomAction> = emptyList()
++    @JvmStatic var onCustomPlaybackActionListener: ((String) -> Unit)? = null
++    @JvmStatic var refreshPlaybackActions: (() -> Unit)? = null
+   }
+ 
+   private var mediaSession: MediaSessionCompat? = null
+@@ -67,6 +84,7 @@ class PlaybackNotification(
+   private var playbackStateVal: Int = PlaybackStateCompat.STATE_PAUSED
+ 
+   private var artworkThread: Thread? = null
++  private var artworkGeneration = 0
+ 
+   private fun initializeIfNeeded() {
+     if (isInitialized) return
+@@ -74,8 +92,18 @@ class PlaybackNotification(
+ 
+     createNotificationChannel()
+ 
+-    mediaSession = MediaSessionCompat(context, "PlaybackNotification")
++    if (sharedMediaSession != null) {
++      mediaSession = sharedMediaSession
++    } else {
++      mediaSession = MediaSessionCompat(context, "PlaybackNotification")
++      sharedMediaSession = mediaSession
++      onSessionCreatedListener?.invoke(mediaSession!!)
++    }
+ 
++    refreshPlaybackActions = {
++      updatePlaybackActionState()
++      updatePlaybackState(if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED)
++    }
+     mediaSession?.setCallback(
+       object : MediaSessionCompat.Callback() {
+         override fun onPlay() {
+@@ -113,6 +141,14 @@ class PlaybackNotification(
+           audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_SEEK_TO.ordinal, body)
+         }
+ 
++        override fun onPlayFromMediaId(mediaId: String?, extras: android.os.Bundle?) {
++          onPlayMediaIdListener?.invoke(mediaId.orEmpty())
++        }
++        override fun onPlayFromSearch(query: String?, extras: android.os.Bundle?) {
++          onPlaySearchListener?.invoke(query.orEmpty())
++        }
++        override fun onSkipToQueueItem(id: Long) { onSkipQueueItemListener?.invoke(id) }
++
+         override fun onCustomAction(
+           action: String?,
+           extras: android.os.Bundle?,
+@@ -121,6 +157,8 @@ class PlaybackNotification(
+             onFastForward()
+           } else if (action == "SkipBackward") {
+             onRewind()
++          } else if (action != null) {
++            onCustomPlaybackActionListener?.invoke(action)
+           }
+         }
+       },
+@@ -144,6 +182,7 @@ class PlaybackNotification(
+           PendingIntent.FLAG_IMMUTABLE,
+         )
+       notificationBuilder?.setContentIntent(pendingIntent)
++      mediaSession?.setSessionActivity(pendingIntent)
+     }
+ 
+     val deleteIntent = Intent(PlaybackNotificationReceiver.ACTION_NOTIFICATION_DISMISSED)
+@@ -174,14 +213,21 @@ class PlaybackNotification(
+   override fun hide() {
+     if (!isInitialized) return
+ 
++    artworkGeneration += 1
+     if (artworkThread != null && artworkThread!!.isAlive) {
+       artworkThread!!.interrupt()
+     }
+     artworkThread = null
+ 
+-    mediaSession?.isActive = false
+-    mediaSession?.release()
++    if (sharedMediaSession == mediaSession) {
++      pb.setState(PlaybackStateCompat.STATE_PAUSED, 0, 0f)
++      mediaSession?.setPlaybackState(pb.build())
++    } else {
++      mediaSession?.isActive = false
++      mediaSession?.release()
++    }
+     mediaSession = null
++    refreshPlaybackActions = null
+     notificationBuilder = null
+     isInitialized = false
+ 
+@@ -216,6 +262,9 @@ class PlaybackNotification(
+     notificationBuilder?.setContentInfo(album)
+ 
+     if (info.hasKey("artwork")) {
++      val generation = ++artworkGeneration
++      artwork = null
++      notificationBuilder?.setLargeIcon(null as Bitmap?)
+       if (artworkThread != null && artworkThread!!.isAlive) {
+         artworkThread!!.interrupt()
+       }
+@@ -229,15 +278,16 @@ class PlaybackNotification(
+           info.getString("artwork")
+         }
+ 
+-      if (artworkUri != null) {
++      if (!artworkUri.isNullOrBlank()) {
+         artworkThread =
+           Thread {
+             try {
+               val bitmap = loadArtwork(artworkUri, localArtwork)
+-              if (bitmap != null) {
+-                artwork = bitmap
++              if (bitmap != null && generation == artworkGeneration) {
+                 val context = reactContext.get()
+                 context?.runOnUiQueueThread {
++                  if (generation != artworkGeneration || !isInitialized) return@runOnUiQueueThread
++                  artwork = bitmap
+                   notificationBuilder?.setLargeIcon(bitmap)
+ 
+                   val currentMetadata = mediaSession?.controller?.metadata
+@@ -247,6 +297,7 @@ class PlaybackNotification(
+                   // Trigger update
+                   val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                   notificationManager.notify(notificationId, buildNotification())
++                  onMetadataChangedListener?.invoke()
+                 }
+               }
+             } catch (ex: Exception) {
+@@ -261,10 +312,6 @@ class PlaybackNotification(
+       speed = info.getDouble("speed").toFloat()
+     }
+ 
+-    if (isPlaying && speed == 0F) {
+-      speed = 1F
+-    }
+-
+     if (info.hasKey("elapsedTime")) {
+       elapsedTime = (info.getDouble("elapsedTime") * 1000).toLong()
+     } else {
+@@ -285,7 +332,10 @@ class PlaybackNotification(
+     if (artwork != null) {
+       md.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artwork)
+     }
+-    mediaSession?.setMetadata(md.build())
++    if (listOf("title", "artist", "album", "duration", "artwork").any { info.hasKey(it) }) {
++      mediaSession?.setMetadata(md.build())
++      onMetadataChangedListener?.invoke()
++    }
+ 
+     updateNotificationsActions()
+   }
+@@ -320,7 +370,10 @@ class PlaybackNotification(
+ 
+   private fun updatePlaybackActionState() {
+     val builder = PlaybackStateCompat.Builder()
+-    builder.setActions(controls)
++    builder.setActions(controls or PlaybackStateCompat.ACTION_PLAY_PAUSE or
++      PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH or
++      PlaybackStateCompat.ACTION_SKIP_TO_QUEUE_ITEM)
++    customPlaybackActions.forEach { builder.addCustomAction(it) }
+ 
+     if (hasControl(PlaybackStateCompat.ACTION_REWIND)) {
+       builder.addCustomAction(
+@@ -350,7 +403,8 @@ class PlaybackNotification(
+   private fun updatePlaybackState(playbackStateCode: Int) {
+     isPlaying = playbackStateCode == PlaybackStateCompat.STATE_PLAYING
+ 
+-    pb.setState(playbackStateCode, elapsedTime, speed)
++    pb.setActiveQueueItemId(activeQueueItemId)
++    pb.setState(playbackStateCode, elapsedTime, if (isPlaying) speed else 0f)
+     state = pb.build()
+     mediaSession?.setPlaybackState(state)
+ 
+@@ -481,6 +535,8 @@ class PlaybackNotification(
+         }
+       } else {
+         val connection = URL(url).openConnection()
++        connection.connectTimeout = 10000
++        connection.readTimeout = 10000
+         connection.connect()
+         val inputStream = connection.getInputStream()
+         val bitmap = BitmapFactory.decodeStream(inputStream)
+diff --git a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotificationReceiver.kt b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotificationReceiver.kt
+index d1cb3b6..4d3bd0b 100644
+--- a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotificationReceiver.kt
++++ b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotificationReceiver.kt
+@@ -7,7 +7,7 @@ import com.swmansion.audioapi.AudioAPIModule
+ import com.swmansion.audioapi.system.AudioEvent
+ 
+ /**
+- * Broadcast receiver for handling playback notification dismissal.
++ * Broadcast receiver for handling playback notification dismissal and media buttons.
+  */
+ class PlaybackNotificationReceiver : BroadcastReceiver() {
+   companion object {
+@@ -20,6 +20,8 @@ class PlaybackNotificationReceiver : BroadcastReceiver() {
+     fun setAudioAPIModule(module: AudioAPIModule?) {
+       audioAPIModule = module
+     }
++
++    fun getAudioAPIModule(): AudioAPIModule? = audioAPIModule
+   }
+ 
+   override fun onReceive(
+@@ -40,6 +42,48 @@ class PlaybackNotificationReceiver : BroadcastReceiver() {
+         val body = HashMap<String, Any>().apply { put("value", 15) }
+         audioAPIModule?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_SKIP_BACKWARD.ordinal, body)
+       }
++
++      PlaybackNotification.MEDIA_BUTTON, Intent.ACTION_MEDIA_BUTTON -> {
++        val keyEvent: android.view.KeyEvent? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
++          intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, android.view.KeyEvent::class.java)
++        } else {
++          @Suppress("DEPRECATION")
++          intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
++        }
++
++        if (keyEvent != null && (keyEvent.action == android.view.KeyEvent.ACTION_DOWN || keyEvent.action == android.view.KeyEvent.ACTION_MULTIPLE)) {
++          when (keyEvent.keyCode) {
++            android.view.KeyEvent.KEYCODE_MEDIA_PLAY -> {
++              audioAPIModule?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_PLAY.ordinal, mapOf())
++            }
++            android.view.KeyEvent.KEYCODE_MEDIA_PAUSE -> {
++              audioAPIModule?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_PAUSE.ordinal, mapOf())
++            }
++            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, android.view.KeyEvent.KEYCODE_HEADSETHOOK -> {
++              val playing = PlaybackNotification.sharedMediaSession?.controller?.playbackState?.state == android.support.v4.media.session.PlaybackStateCompat.STATE_PLAYING
++              val event = if (playing) AudioEvent.PLAYBACK_NOTIFICATION_PAUSE else AudioEvent.PLAYBACK_NOTIFICATION_PLAY
++              audioAPIModule?.invokeHandlerWithEventNameAndEventBody(event.ordinal, mapOf())
++            }
++            android.view.KeyEvent.KEYCODE_MEDIA_STOP -> {
++              audioAPIModule?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_STOP.ordinal, mapOf())
++            }
++            android.view.KeyEvent.KEYCODE_MEDIA_NEXT -> {
++              audioAPIModule?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_NEXT_TRACK.ordinal, mapOf())
++            }
++            android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
++              audioAPIModule?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_PREVIOUS_TRACK.ordinal, mapOf())
++            }
++            android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
++              val body = HashMap<String, Any>().apply { put("value", 15) }
++              audioAPIModule?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_SKIP_FORWARD.ordinal, body)
++            }
++            android.view.KeyEvent.KEYCODE_MEDIA_REWIND -> {
++              val body = HashMap<String, Any>().apply { put("value", 15) }
++              audioAPIModule?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_SKIP_BACKWARD.ordinal, body)
++            }
++          }
++        }
++      }
+     }
+   }
+ }

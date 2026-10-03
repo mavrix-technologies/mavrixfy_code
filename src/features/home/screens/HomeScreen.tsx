@@ -43,8 +43,10 @@ HomeUnifiedTopHeader,
 UNIFIED_HEADER_TOTAL_HEIGHT,
 } from "../components/HomeUnifiedTopHeader";
 import { MavrixfyRefreshIndicator } from "../components/MavrixfyRefreshIndicator";
+import { AppShowcaseModal } from "@/components/AppShowcaseModal";
 import { useFestivalTheme } from "../hooks/useFestivalTheme";
 import { useHomeFeedData } from "../hooks/useHomeFeedData";
+import { useAppShowcasePrompt } from "../hooks/useAppShowcasePrompt";
 import {
 HOME_CATEGORY_TITLES,
 useHomeSectionData,
@@ -73,6 +75,7 @@ export function HomeScreen() {
     hasContent,
     handleRefresh,
   } = useHomeFeedData();
+  useAppShowcasePrompt(hasContent && !loadingMainContent && !refreshing && isOnline && !isChecking);
 
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const prevCategoryRef = useRef<string>("All");
@@ -270,12 +273,13 @@ export function HomeScreen() {
         onScroll={scrollHandler}
         onScrollEndDrag={handleScrollEndDrag}
         scrollEventThrottle={16}
-        initialNumToRender={4}
-        maxToRenderPerBatch={3}
-        updateCellsBatchingPeriod={40}
-        windowSize={7}
+        initialNumToRender={3}
+        maxToRenderPerBatch={2}
+        updateCellsBatchingPeriod={50}
+        windowSize={5}
         removeClippedSubviews={Platform.OS === "android"}
       />
+      <AppShowcaseModal />
     </View>
   );
 }

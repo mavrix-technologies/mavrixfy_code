@@ -19,6 +19,7 @@ AppTopHeaderDownloadButton,
 AppTopHeaderProfileButton,
 } from "@/components/AppTopHeader";
 import { LiquidGlassScopeBar } from "@/components/LiquidGlassScopeBar";
+import { LiquidGlassView } from "@/components/LiquidGlassView";
 import OfflineBanner from "@/components/OfflineBanner";
 import OfflineScreen from "@/components/OfflineScreen";
 import { SearchHeaderField } from "@/components/SearchHeaderField";
@@ -180,15 +181,14 @@ function SearchScreenView() {
             </Pressable>
           </View>
 
-          {query.trim().length >= 2 && (
-            <View style={styles.headerScopeBarWrap}>
-              <LiquidGlassScopeBar
-                options={RESULT_FILTERS}
-                activeKey={resultFilter}
-                onSelect={handleResultFilterSelect}
-              />
-            </View>
-          )}
+          {/* Liquid Glass Scope Bar integrated directly in header */}
+          <View style={styles.headerScopeBarWrap}>
+            <LiquidGlassScopeBar
+              options={RESULT_FILTERS}
+              activeKey={resultFilter}
+              onSelect={handleResultFilterSelect}
+            />
+          </View>
         </View>
       ) : (
         <AppTopHeader
@@ -200,25 +200,34 @@ function SearchScreenView() {
         />
       )}
 
-      {/* ── Search field ── */}
+      {/* ── Native Liquid Glass Search Button ── */}
       {!isSearchMode && (
         <View style={[styles.searchBarRow, { paddingTop: topInset + APP_TOP_HEADER_HEIGHT + 8 }]}>
-          <SearchHeaderField
-            value={query}
-            onChangeText={handleChangeText}
-            onSubmit={handleSubmitSearch}
-            onClear={handleClear}
-            onFocus={onFocusSearch}
-            placeholder="Search songs, artists, albums..."
-            theme="dark"
-            style={styles.idleSearchField}
-          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Search songs, albums, artists, playlists"
+            style={({ pressed }) => [styles.searchGlassButton, pressed && styles.searchGlassButtonPressed]}
+            onPress={onFocusSearch}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <LiquidGlassView
+              style={styles.liquidGlassBar}
+              intensity={55}
+              tint="systemMaterialDark"
+              borderRadius={24}
+            >
+              <Ionicons name="search" size={19} color="rgba(255, 255, 255, 0.70)" style={styles.searchIcon} />
+              <Text style={styles.inactiveSearchText} numberOfLines={1}>
+                Search songs, artists, albums...
+              </Text>
+            </LiquidGlassView>
+          </Pressable>
         </View>
       )}
 
       {/* Inline suggestions below search header */}
       {isSearchMode && suggestionsOpen && suggestions.length > 0 && query.trim().length >= 2 && (
-        <View style={[styles.suggestionsDropdown, { top: topInset + 108 }]}>
+        <View style={[styles.suggestionsDropdown, { top: topInset + 104 }]}>
           <FlatList
             data={suggestions}
             keyboardDismissMode="none"

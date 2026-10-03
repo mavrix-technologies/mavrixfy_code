@@ -8,6 +8,7 @@ import type { PlaybackQualityState,ResolvedPlaybackResult } from "@/types/playba
 import { toDurationSeconds } from "@/utils/timeFormatters";
 
 import * as Network from "expo-network";
+import { getInfoAsync } from "expo-file-system/legacy";
 
 export type SongPlaybackSource = Partial<Song> & {
   url?: string;
@@ -247,6 +248,24 @@ export async function resolvePlaybackUrlWithDetails(
           isFallback: false,
         },
       };
+    }
+
+    // Direct local audioUrl fallback (e.g. from DownloadedSongsScreen)
+    if (song.audioUrl && (song.audioUrl.startsWith("file://") || song.audioUrl.startsWith("/"))) {
+      const info = await getInfoAsync(song.audioUrl).catch(() => null);
+      if (info?.exists && !info.isDirectory && ((info as any).size ?? 0) > 1024) {
+        const url = song.audioUrl.startsWith("file://") ? song.audioUrl : `file://${song.audioUrl}`;
+        return {
+          url,
+          qualityState: {
+            requested: effectiveRequested,
+            actualBitrate: 320,
+            qualityLabel: "Offline (320kbps)",
+            unlocked,
+            isFallback: false,
+          },
+        };
+      }
     }
   } catch {
     // Fall through

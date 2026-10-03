@@ -136,27 +136,31 @@ export const MiniPlayerBannerView = React.memo(function MiniPlayerBannerView({
       slideAnim.setValue(0);
       return;
     }
-    const intervalMs = Math.max(2500, (config.intervalSeconds || 4.5) * 1000);
+    const intervalMs = Math.max(3000, (config.intervalSeconds || 4.5) * 1000);
     let timerId: ReturnType<typeof setTimeout> | null = null;
+    let isCancelled = false;
 
     const cycleNext = () => {
+      if (isCancelled) return;
       // Step 1: Smoothly fade and slide out upwards
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 0,
-          duration: 140,
+          duration: 150,
           useNativeDriver: true,
+          isInteraction: false,
         }),
         Animated.timing(slideAnim, {
-          toValue: -6,
-          duration: 140,
+          toValue: -4,
+          duration: 150,
           useNativeDriver: true,
+          isInteraction: false,
         }),
       ]).start(({ finished }) => {
-        if (!finished) return;
+        if (!finished || isCancelled) return;
         // Step 2: Advance index and reset position to bottom offset
         setCurrentIndex((prev) => (prev + 1) % count);
-        slideAnim.setValue(6);
+        slideAnim.setValue(4);
 
         // Step 3: Smoothly fade and slide in from bottom
         Animated.parallel([
@@ -164,13 +168,16 @@ export const MiniPlayerBannerView = React.memo(function MiniPlayerBannerView({
             toValue: 1,
             duration: 180,
             useNativeDriver: true,
+            isInteraction: false,
           }),
           Animated.timing(slideAnim, {
             toValue: 0,
             duration: 180,
             useNativeDriver: true,
+            isInteraction: false,
           }),
-        ]).start(() => {
+        ]).start(({ finished: enterFinished }) => {
+          if (!enterFinished || isCancelled) return;
           timerId = setTimeout(cycleNext, intervalMs);
         });
       });
@@ -179,6 +186,7 @@ export const MiniPlayerBannerView = React.memo(function MiniPlayerBannerView({
     timerId = setTimeout(cycleNext, intervalMs);
 
     return () => {
+      isCancelled = true;
       if (timerId) clearTimeout(timerId);
     };
   }, [count, config.intervalSeconds, fadeAnim, slideAnim]);
