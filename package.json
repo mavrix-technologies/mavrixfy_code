@@ -27,6 +27,7 @@
     "postinstall": "patch-package",
     "typecheck": "tsc --noEmit --pretty false",
     "test": "node --test scripts/*.regression.test.cjs",
+    "test:playback:qa": "node --test scripts/playback-qa.cjs",
     "functions:deploy": "npx firebase-tools deploy --only functions:offline-licenses"
   },
   "dependencies": {

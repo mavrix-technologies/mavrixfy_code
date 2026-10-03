@@ -40,7 +40,6 @@ import { useFonts } from "expo-font";
 import { DarkTheme,Stack,ThemeProvider,useRouter,useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import * as SystemUI from "expo-system-ui";
 import { useCallback,useEffect,useState } from "react";
 import {
 LogBox,
@@ -417,7 +416,12 @@ export default function RootLayout() {
     void logAppOpen();
     void syncEqualizerWithNative();
     if (Platform.OS === "android") {
-      SystemUI.setBackgroundColorAsync(Colors.background).catch(() => { });
+      try {
+        const SystemUI = require("expo-system-ui");
+        SystemUI.setBackgroundColorAsync?.(Colors.background)?.catch?.(() => { });
+      } catch {
+        // SystemUI not available in current environment
+      }
     }
   }, []);
 

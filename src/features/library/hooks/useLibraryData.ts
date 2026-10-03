@@ -1,7 +1,6 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { useOnReconnect } from "@/contexts/NetworkContext";
 import { triggerImpact } from "@/lib/haptics";
-import * as DocumentPicker from "expo-document-picker";
 import * as Haptics from "expo-haptics";
 import { useCallback,useEffect,useState } from "react";
 import { Alert } from "react-native";
@@ -62,6 +61,7 @@ export function useLibraryData() {
 
   const handleSelectImage = useCallback(async () => {
     try {
+      const DocumentPicker = await import("expo-document-picker");
       const result = await DocumentPicker.getDocumentAsync({
         type: ["image/*"],
         copyToCacheDirectory: true,

@@ -8,14 +8,13 @@ import Colors from "@/constants/colors";
 import { IS_IOS,IS_WEB } from "@/constants/platform";
 import { triggerImpact } from "@/lib/haptics";
 import { Ionicons } from "@expo/vector-icons";
-import * as DocumentPicker from "expo-document-picker";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import {
 Alert,
+Linking,
 Pressable,
 ScrollView,
 StyleSheet,
@@ -45,6 +44,7 @@ async function handleFileImport() {
   void triggerImpact(ImpactFeedbackStyle.Medium);
 
   try {
+    const DocumentPicker = await import("expo-document-picker");
     const result = await DocumentPicker.getDocumentAsync({
       type: ["text/plain", "text/csv", "application/csv", "text/comma-separated-values"],
       copyToCacheDirectory: true,
