@@ -113,7 +113,18 @@ export async function downloadSong(
     }
 
     const license = await issueOfflineLicense(uid, song.id, prefs.quality);
-    const audioUrl = getBestAudioUrlWithQuality(song.downloadUrl, license.quality) || song.audioUrl;
+    let audioUrl = getBestAudioUrlWithQuality(song.downloadUrl, license.quality) || song.audioUrl;
+    if (!/^https?:\/\//i.test(audioUrl)) {
+      try {
+        const { resolvePlaybackUrl } = await import("@/services/audio/PlayerPlaybackResolver");
+        const resolved = await resolvePlaybackUrl(song);
+        if (resolved && /^https?:\/\//i.test(resolved)) {
+          audioUrl = resolved;
+        }
+      } catch {
+        // Fall through
+      }
+    }
     if (!/^https?:\/\//i.test(audioUrl)) {
       return { ok: false, reason: "No downloadable audio URL is available for this song." };
     }
@@ -213,30 +224,35 @@ export async function downloadCollection(
 export async function getLocalPlaybackUrl(songId: string): Promise<string | null> {
   try {
     const item = await loadDownload(songId);
-    if (!item || item.status !== "completed") return null;
-
-    // Only validate expiration if a license expiration was explicitly stamped
-    if (item.licenseExpiresAt) {
-      const expiry = Date.parse(item.licenseExpiresAt);
-      if (Number.isFinite(expiry) && Date.now() > expiry + 7 * 24 * 60 * 60 * 1000) {
-        return null;
-      }
-    }
-
-    // 1. If item recorded a direct localPath that exists on disk, use it
-    if (item.localPath) {
-      try {
-        const info = await getInfoAsync(item.localPath);
-        if (info.exists && !info.isDirectory && ((info as any).size ?? 0) > 1024) {
-          return item.localPath.startsWith("file://") ? item.localPath : `file://${item.localPath}`;
+    if (item && item.status === "completed") {
+      // Only validate expiration if a license expiration was explicitly stamped
+      if (item.licenseExpiresAt) {
+        const expiry = Date.parse(item.licenseExpiresAt);
+        if (Number.isFinite(expiry) && Date.now() > expiry + 7 * 24 * 60 * 60 * 1000) {
+          return null;
         }
-      } catch {
-        // Fall through to validated track file lookup
       }
+
+      // 1. If item recorded a direct localPath that exists on disk, use it
+      if (item.localPath) {
+        try {
+          const path = item.localPath.startsWith("file://") ? item.localPath : `file://${item.localPath}`;
+          const info = await getInfoAsync(path);
+          if (info.exists && !info.isDirectory && ((info as any).size ?? 0) > 1024) {
+            return path;
+          }
+        } catch {
+          // Fall through to validated track file lookup
+        }
+      }
+
+      // 2. Fall back to validated track file URI with account scope and auto-migration
+      const validUri = await getValidatedTrackFileUri(songId, item.accountId);
+      if (validUri) return validUri;
     }
 
-    // 2. Fall back to validated track file URI with account scope and auto-migration
-    return getValidatedTrackFileUri(songId, item.accountId);
+    // Direct filesystem check if item is not completed in store
+    return await getValidatedTrackFileUri(songId);
   } catch {
     return null;
   }

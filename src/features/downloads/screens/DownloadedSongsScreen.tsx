@@ -45,13 +45,15 @@ import { DOWNLOADS_UI as UI,styles } from "../styles/downloadedSongsStyles";
 
 
 function downloadItemToSong(item: DownloadItem): Song {
+  const rawPath = item.localPath || getTrackFileUri(item.songId, "m4a", item.accountId);
+  const cleanAudioUrl = rawPath ? (rawPath.startsWith("file://") ? rawPath : `file://${rawPath}`) : "";
   return {
     id: item.songId,
     title: item.title,
     artist: item.artist,
     album: item.album,
     coverUrl: item.coverUrl,
-    audioUrl: item.localPath || getTrackFileUri(item.songId, "m4a", item.accountId),
+    audioUrl: cleanAudioUrl,
     duration: item.duration,
     genre: "",
     source: "local",

@@ -252,11 +252,11 @@ export async function resolvePlaybackUrlWithDetails(
 
     // Direct local audioUrl fallback (e.g. from DownloadedSongsScreen)
     if (song.audioUrl && (song.audioUrl.startsWith("file://") || song.audioUrl.startsWith("/"))) {
-      const info = await getInfoAsync(song.audioUrl).catch(() => null);
+      const cleanUrl = song.audioUrl.startsWith("file://") ? song.audioUrl : `file://${song.audioUrl}`;
+      const info = await getInfoAsync(cleanUrl).catch(() => null);
       if (info?.exists && !info.isDirectory && ((info as any).size ?? 0) > 1024) {
-        const url = song.audioUrl.startsWith("file://") ? song.audioUrl : `file://${song.audioUrl}`;
         return {
-          url,
+          url: cleanUrl,
           qualityState: {
             requested: effectiveRequested,
             actualBitrate: 320,

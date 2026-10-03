@@ -159,6 +159,7 @@ export function parseApiSong(s: any): Song | null {
     coverUrl,
     genre: String(s.language || s.genre || ""),
     audioUrl,
+    downloadUrl: s.downloadUrl || audioUrl,
     year: s.year ? String(s.year) : "",
     source: (s.provider || "jiosaavn") as any,
     playCount: Number(s.playCount) || 0,

@@ -338,3 +338,63 @@ test("a current source error stops playback intent and exposes error state", asy
     f.State.Error,
   );
 });
+
+test("paused song properly resumes when play is called even after handle re-render", async () => {
+  const f = fixture();
+  const p = f.StandardAudioPlayer;
+  await p.setQueue(tracks);
+  const props = f.StandardAudioRenderer().props;
+  let starts = 0;
+  let pauses = 0;
+  const initialHandle = {
+    play() { starts++; },
+    pause() { pauses++; },
+    seekToTime() {},
+  };
+  props.ref(initialHandle);
+  await p.play();
+  props.onLoad();
+  await tick();
+  assert.equal(starts, 1);
+
+  // User pauses song
+  await p.pause();
+  assert.equal(pauses, 1);
+  assert.equal((await p.getPlaybackState()).state, f.State.Paused);
+
+  // React re-renders <Audio> creating a new handle object reference
+  const reRenderedHandle = {
+    play() { starts++; },
+    pause() { pauses++; },
+    seekToTime() {},
+  };
+  props.ref(reRenderedHandle);
+
+  // User resumes playback
+  await p.play();
+  await tick();
+  assert.equal(starts, 2, "playback should resume with re-rendered handle");
+});
+
+test("subsequent onLoad calls safely reuse sourceNode without error", async () => {
+  const f = fixture();
+  const p = f.StandardAudioPlayer;
+  await p.setQueue(tracks);
+  const props = f.StandardAudioRenderer().props;
+  let starts = 0;
+  props.ref({
+    play() { starts++; },
+    pause() {},
+    seekToTime() {},
+  });
+  await p.play();
+  props.onLoad();
+  await tick();
+  assert.equal(starts, 1);
+
+  // Second onLoad trigger (e.g. from buffer/seek)
+  props.onLoad();
+  await tick();
+  assert.notEqual((await p.getPlaybackState()).state, f.State.Error);
+});
+

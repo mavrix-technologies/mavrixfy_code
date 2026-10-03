@@ -81,6 +81,7 @@ let sourceSnapshot = { sourceVersion: 0, url: "" };
 const storeListeners = new Set<() => void>();
 const eventListeners = new Map<string, Set<(payload: any) => void>>();
 let audioHandle: AudioTagHandle | null = null;
+let isSourceLoaded = false;
 let context: AudioContext | null = null;
 const contextListeners = new Set<() => void>();
 let filters: BiquadFilterNode[] = [];
@@ -190,6 +191,7 @@ function select(index: number, initialPosition = 0) {
     throw new Error("Track index is out of range.");
   audioHandle?.pause();
   audioHandle = null;
+  isSourceLoaded = false;
   sourceNode?.disconnect();
   sourceNode = null;
   const previous = activeTrack();
@@ -422,6 +424,7 @@ export const StandardAudioPlayer = {
       AudioManager.observeAudioInterruptions(false);
     audioHandle?.pause();
     audioHandle = null;
+    isSourceLoaded = false;
     playIntentVersion += 1;
     sourceNode?.disconnect();
     sourceNode = null;
@@ -451,7 +454,7 @@ export const StandardAudioPlayer = {
     if (intentVersion !== playIntentVersion || !playback.playWhenReady) return;
     // onLoad owns the first play; calling play before preload completes starts
     // another load inside Audio and can leave overlapping native sources.
-    if (audioHandle && sourceNode?.mediaElement === audioHandle) {
+    if (audioHandle && isSourceLoaded) {
       audioHandle.play();
     }
     updateNotification();
@@ -496,7 +499,9 @@ export const StandardAudioPlayer = {
       0,
       playback.duration > 0 ? Math.min(seconds, playback.duration) : seconds,
     );
-    audioHandle?.seekToTime(position);
+    if (audioHandle && isSourceLoaded) {
+      audioHandle.seekToTime(position);
+    }
     publish({ position });
     emit(Event.PlaybackProgressUpdated, {
       position,
@@ -587,6 +592,7 @@ export function StandardAudioRenderer() {
     return () => {
       audioHandle?.pause();
       audioHandle = null;
+      isSourceLoaded = false;
       sourceNode?.disconnect();
       sourceNode = null;
       effectsReady = false;
@@ -641,10 +647,12 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
         }
         try {
           if (!handleRef.current) throw new Error("Audio source did not load.");
-          sourceNode?.disconnect();
-          sourceNode = audioCtx.createMediaElementSource(handleRef.current);
-          sourceNode.connect(filters[0]);
+          if (!sourceNode) {
+            sourceNode = audioCtx.createMediaElementSource(handleRef.current);
+            sourceNode.connect(filters[0]);
+          }
           audioHandle = handleRef.current;
+          isSourceLoaded = true;
           if (playback.position > 0) {
             handleRef.current.seekToTime(playback.position);
           }

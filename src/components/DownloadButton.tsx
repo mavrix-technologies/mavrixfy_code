@@ -11,6 +11,7 @@ import { formatBytes } from '@/lib/downloads/storagePolicy';
 import { triggerImpact } from '@/lib/haptics';
 import type { Song } from '@/lib/musicData';
 import { requestDownloadWithRewardedAd } from '@/services/ads/rewardedDownloadAdService';
+import { resolvePlaybackUrlWithDetails, withResolvedPlaybackUrl } from '@/services/audio/PlayerPlaybackResolver';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
@@ -35,7 +36,6 @@ export default function DownloadButton({
   showLabel = false,
 }: DownloadButtonProps) {
   const { downloadSong, removeDownload } = useDownloads();
-  const isYouTube = false;
   const [isPreparing, setIsPreparing] = useState(false);
   const download = useSongDownload(song.id);
 
@@ -51,17 +51,20 @@ export default function DownloadButton({
 
   async function handleDownload() {
     if (isDownloading) return;
-    if (isYouTube) {
-      Alert.alert(
-        'Streaming Only',
-        'YouTube songs are available for streaming playback only.'
-      );
-      return;
-    }
 
     setIsPreparing(true);
     try {
-      const targetSong = song;
+      let targetSong = song;
+      if (!targetSong.downloadUrl && !targetSong.audioUrl) {
+        try {
+          const resolved = await resolvePlaybackUrlWithDetails(targetSong);
+          if (resolved?.url) {
+            targetSong = withResolvedPlaybackUrl(targetSong, resolved.url);
+          }
+        } catch {
+          // Fall through
+        }
+      }
 
       const estimatedBytes = (targetSong.duration || 0) * 25_000;
       const sizeLabel = estimatedBytes > 0 ? `~${formatBytes(estimatedBytes)}` : 'unknown size';

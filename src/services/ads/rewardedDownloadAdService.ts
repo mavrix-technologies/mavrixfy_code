@@ -46,13 +46,18 @@ export async function consumeDownloadPass(): Promise<boolean> {
 let requestQueue: Promise<unknown> = Promise.resolve();
 export function requestDownloadWithRewardedAd(_songTitle: string): Promise<boolean> {
   const request = requestQueue.then(async () => {
+    if (typeof __DEV__ !== "undefined" && __DEV__) return true;
     if (await consumeDownloadPass()) return true;
     const result = await runRewardedAd();
     if (result === "earned") {
       await addDownloadPasses(2);
       return true;
     }
-    return result === "unavailable";
+    // If ad is unavailable or fails to fill, allow download without blocking user
+    if (result === "unavailable" || result === "failed") {
+      return true;
+    }
+    return false;
   });
   requestQueue = request.catch(() => undefined);
   return request;
