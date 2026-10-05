@@ -64,7 +64,6 @@
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
       "versionCode": 33002,
-      "supportsTablet": true,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icon_foreground.png",

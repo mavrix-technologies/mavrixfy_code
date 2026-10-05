@@ -32,6 +32,7 @@ module.exports = function withAndroidAuto(config) {
       $: {
         "android:name": "com.mavrixfy.app.MavrixfyMediaBrowserService",
         "android:exported": "true",
+        "android:foregroundServiceType": "mediaPlayback",
       },
       "intent-filter": [
         {

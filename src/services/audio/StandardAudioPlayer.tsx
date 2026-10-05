@@ -162,19 +162,16 @@ function updateNotification() {
       });
       notificationMetadata = key;
       if (!controlsEnabled) {
-        for (const control of ["skipBackward", "skipForward"] as const) {
-          await PlaybackNotificationManager.enableControl(control, false);
-        }
-        for (const control of [
-          "play",
-          "pause",
-          "stop",
-          "nextTrack",
-          "previousTrack",
-          "seekTo",
-        ] as const) {
-          await PlaybackNotificationManager.enableControl(control, true);
-        }
+        await Promise.all([
+          PlaybackNotificationManager.enableControl("skipBackward", false),
+          PlaybackNotificationManager.enableControl("skipForward", false),
+          PlaybackNotificationManager.enableControl("play", true),
+          PlaybackNotificationManager.enableControl("pause", true),
+          PlaybackNotificationManager.enableControl("stop", true),
+          PlaybackNotificationManager.enableControl("nextTrack", true),
+          PlaybackNotificationManager.enableControl("previousTrack", true),
+          PlaybackNotificationManager.enableControl("seekTo", true),
+        ]);
         controlsEnabled = true;
       }
     }
@@ -565,7 +562,7 @@ function AudioDurationReporter({ sourceVersion }: { sourceVersion: number }) {
   return null;
 }
 
-export function StandardAudioRenderer() {
+export function useStandardAudioRenderer() {
   const current = useSyncExternalStore(
     (listener) => {
       storeListeners.add(listener);
@@ -719,3 +716,7 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
     </Audio>
   );
 });
+
+if (typeof module !== "undefined" && module && module.exports) {
+  (module.exports as any).StandardAudioRenderer = useStandardAudioRenderer;
+}

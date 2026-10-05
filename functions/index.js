@@ -63,17 +63,15 @@ exports.issueOfflineLicense = onCall({ region: "us-central1", maxInstances: 10 }
 const functionsV1 = require("firebase-functions/v1");
 exports.cleanupDeletedAccount = functionsV1.runWith({ failurePolicy: true }).auth.user().onDelete(async (user) => {
   const db = getFirestore();
-  const playlistSnapshots = await Promise.all(
+  const deletePlaylists = Promise.all(
     ["createdBy.id", "createdBy.uid", "createdBy._id"].map((field) =>
       db.collection("playlists").where(field, "==", user.uid).get()
     )
+  ).then((snapshots) =>
+    Promise.all(snapshots.flatMap((playlists) => playlists.docs.map((playlist) => db.recursiveDelete(playlist.ref))))
   );
-  await Promise.all(
-    playlistSnapshots.flatMap((playlists) =>
-      playlists.docs.map((playlist) => db.recursiveDelete(playlist.ref))
-    )
-  );
-  await db
+
+  const deleteUserData = db
     .collection("playlist_shares")
     .where("createdBy", "==", user.uid)
     .get()
@@ -84,4 +82,6 @@ exports.cleanupDeletedAccount = functionsV1.runWith({ failurePolicy: true }).aut
         db.doc("likedSongs/" + user.uid).delete(),
       ])
     );
+
+  await Promise.all([deletePlaylists, deleteUserData]);
 });

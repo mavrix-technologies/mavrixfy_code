@@ -145,6 +145,9 @@ export function usePlayerCoreState({
 
       const request = resolvePlaybackUrlWithDetails(song, forcedQuality)
         .then(({ url, qualityState }) => {
+          // Quality changes invalidate pending resolutions. An outgoing
+          // result must not refill the cache or overwrite the new quality.
+          if (streamResolveCache.current.get(song.id) !== request) return url;
           if (url) {
             setStreamCache(song.id, url);
           }
@@ -154,7 +157,9 @@ export function usePlayerCoreState({
           return url;
         })
         .finally(() => {
-          streamResolveCache.current.delete(song.id);
+          if (streamResolveCache.current.get(song.id) === request) {
+            streamResolveCache.current.delete(song.id);
+          }
         });
 
       streamResolveCache.current.set(song.id, request);

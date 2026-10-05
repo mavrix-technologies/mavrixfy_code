@@ -12,6 +12,7 @@ function fixture() {
   const notifications = [];
   const focusRequests = [];
   const snapshots = [];
+  const contextCalls = [];
   let mounted = false;
   const param = () => ({
     value: 0,
@@ -56,6 +57,11 @@ function fixture() {
         mediaElement,
       });
       resume() {
+        contextCalls.push("resume");
+        return Promise.resolve();
+      }
+      suspend() {
+        contextCalls.push("suspend");
         return Promise.resolve();
       }
       close() {
@@ -106,6 +112,7 @@ function fixture() {
   engine.StandardAudioRenderer();
   return {
     ...engine,
+    contextCalls,
     controls,
     system,
     notifications,

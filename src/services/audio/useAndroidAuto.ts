@@ -53,7 +53,7 @@ export function useAndroidAuto({
     };
   }, [playSong, toggleShuffle, toggleRepeat, toggleLike, currentSong]);
   const searchAbort = useRef<AbortController | null>(null);
-  const scopeRef = useRef(getAccountScope());
+  const scopeRef = useRef<ReturnType<typeof getAccountScope> | null>(null);
   const publishedCatalog = useRef({ json: "", id: "" });
   const activeId = currentSong?.id || "";
   const liked = likedSongs.some((song) => song.id === activeId);
@@ -70,7 +70,10 @@ export function useAndroidAuto({
     library.current = {
       queue,
       favorites: likedSongs,
-      recent: isCurrentAccount(scopeRef.current) ? library.current.recent : [],
+      recent:
+        scopeRef.current && isCurrentAccount(scopeRef.current)
+          ? library.current.recent
+          : [],
     };
     scopeRef.current = scope;
     const publish = () => {
