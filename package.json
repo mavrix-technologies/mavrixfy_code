@@ -16,6 +16,7 @@
     "build:eas": "npx eas build --platform android --profile production",
     "build:ios:ipa": "npx eas build --platform ios --profile ios-ipa",
     "build:aab": "npx eas build --platform android --profile production-aab",
+    "build:playstore:aab": "npx eas build --platform android --profile playstore-aab",
     "update:production": "npx eas update --branch production",
     "update:preview": "npx eas update --branch preview",
     "firestore:deploy:indexes": "npx firebase-tools deploy --only firestore:indexes",
