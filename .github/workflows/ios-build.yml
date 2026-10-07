@@ -13,14 +13,17 @@ permissions:
 jobs:
   build-ios:
     name: 🎉 iOS Build (No Code Signing)
-    runs-on: macos-15
-    timeout-minutes: 45
+    runs-on: macos-26
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
     env:
       CI: '1'
       EXPO_NO_TELEMETRY: '1'
+      # SDK 57 needs Xcode 26.4+. Pin the stable SDK-57 EAS toolchain,
+      # rather than relying on the runner's changing default (or Xcode 27).
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
     steps:
       - name: Checkout repository
@@ -40,7 +43,9 @@ jobs:
         id: toolchain
         run: |
           set -euo pipefail
+          test -d "$DEVELOPER_DIR"
           xcodebuild -version
+          xcrun swiftc --version
           xcodebuild -showsdks
           echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
           echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
@@ -87,27 +92,40 @@ jobs:
           pod --version
           cd ios
           # Reintegrate Pods even on cache hits: prebuild created a new project.
-          pod install --repo-update 2>&1 | tee pod-install.log
+          pod install 2>&1 | tee pod-install.log
 
-      # ── SPM (Swift Package Manager) cache ────────────────────────────────
-      # YouTubeKit is fetched from GitHub every build (~15s). Cache it.
-      - name: Cache SPM packages
+      # ExpoModulesJSI builds its own xcframework outside the app DerivedData.
+      # Cache only successful products with the matching compiler/dependencies.
+      - name: Cache ExpoModulesJSI products
         uses: actions/cache@v4
         with:
-          path: ios/build/SourcePackages
-          key: spm-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('plugins/**','package-lock.json') }}
-          restore-keys: |
-            spm-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-
+          path: node_modules/expo-modules-jsi/apple/Products
+          key: expo-jsi-v2-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('package-lock.json','patches/**','ios/Podfile.lock') }}
 
-      # Cache compiler modules, not products/intermediates that can carry an
-      # old bundled JS release or a generated project from another commit.
-      - name: Cache Xcode compiler modules
-        uses: actions/cache@v4
+      # A module-only cache still recompiles most native code. This action
+      # restores compiled objects AND mtimes of unchanged source inputs.
+      # Changed files retain their new timestamps and are rebuilt by Xcode.
+      - name: Restore incremental Xcode build cache
+        uses: irgaly/xcode-cache@282e57619a58eb57a2374be91df1798d46703bfd # v1
         with:
-          path: ios/build/ModuleCache.noindex
-          key: xcode-modules-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('ios/Podfile.lock','package-lock.json','plugins/**') }}
+          deriveddata-directory: ios/build
+          sourcepackages-directory: ios/SourcePackages
+          key: xcode-incremental-v2-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('ios/Podfile.lock','package-lock.json','plugins/**','patches/**','app.json','app.config.js') }}-${{ github.sha }}
           restore-keys: |
-            xcode-modules-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-
+            xcode-incremental-v2-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('ios/Podfile.lock','package-lock.json','plugins/**','patches/**','app.json','app.config.js') }}-
+          swiftpm-cache-key: xcode-spm-v2-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('plugins/**','package-lock.json') }}
+          use-default-mtime-targets: true
+
+      - name: Resolve Swift packages
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          cd ios
+          xcodebuild -resolvePackageDependencies \
+            -workspace Mavrixfy.xcworkspace \
+            -scheme Mavrixfy \
+            -clonedSourcePackagesDirPath "$GITHUB_WORKSPACE/ios/SourcePackages" \
+            2>&1 | tee package-resolution.log
 
       # ── Xcode build ───────────────────────────────────────────────────────
       - name: Build iOS app (no codesign)
@@ -120,7 +138,7 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
-            -clonedSourcePackagesDirPath build/SourcePackages \
+            -clonedSourcePackagesDirPath "$GITHUB_WORKSPACE/ios/SourcePackages" \
             -resultBundlePath build-result.xcresult \
             -destination 'generic/platform=iOS' \
             -parallelizeTargets \
@@ -149,7 +167,9 @@ jobs:
           path: |
             ios/build.log
             ios/pod-install.log
+            ios/package-resolution.log
             ios/build-result.xcresult
+            node_modules/expo-modules-jsi/apple/.DerivedData/Logs/Build
           if-no-files-found: warn
           retention-days: 7
 
