@@ -177,11 +177,12 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
           isActive={isActive}
           isPassed={isPassed}
           isSynced={Boolean(lyricsData?.synced)}
+          currentPositionSeconds={isActive ? currentPositionSeconds : undefined}
           onPress={handleSeekToLine}
         />
       );
     },
-    [activeIndex, lyricsData?.synced, handleSeekToLine]
+    [activeIndex, lyricsData?.synced, currentPositionSeconds, handleSeekToLine]
   );
 
   const keyExtractor = useCallback(
@@ -214,7 +215,7 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
       data={lyricsData.lines}
       keyExtractor={keyExtractor}
       renderItem={renderItem}
-      extraData={activeIndex}
+      extraData={`${activeIndex}_${Math.floor(currentPositionSeconds * 4)}`}
       onScrollToIndexFailed={(info) => {
         setTimeout(() => {
           flatListRef.current?.scrollToIndex({
@@ -447,7 +448,7 @@ export const FullscreenKaraokeModal = memo(function FullscreenKaraokeModal({
         break;
       }
     }
-    return foundIndex >= 0 ? foundIndex : 0;
+    return foundIndex;
   }, [lyricsData, livePosition]);
 
   if (!visible || !song) return null;

@@ -91,6 +91,7 @@ export const styles = StyleSheet.create({
   },
   headerScopeBarWrap: {
     marginTop: 8,
+    gap: 4,
     width: "100%",
   },
 

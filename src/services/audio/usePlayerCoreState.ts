@@ -1,3 +1,4 @@
+import { isYouTubeSong } from "@/services/youtube/YouTubeMusic";
 import { logger } from "@/lib/logger";
 import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import type { Song } from "@/lib/musicData";
@@ -11,6 +12,7 @@ import { updatePlaybackEngineSnapshot } from "./PlaybackEngine";
 import { resolvePlaybackUrlWithDetails, songToTrack } from "./PlayerPlaybackResolver";
 import { fetchAutoplayRecommendations } from "./smartAutoplayService";
 import { StandardAudioPlayer } from "./StandardAudioPlayer";
+import * as ExpoAvPlayer from "./ExpoAvAdapter";
 
 export interface UsePlayerCoreStateOptions {
   TrackPlayer: any;
@@ -137,6 +139,11 @@ export function usePlayerCoreState({
   const resolvePlaybackUrlCached = useCallback(
     async (song: Song, forcedQuality?: "auto" | "low" | "medium" | "high"): Promise<string | null> => {
       if (!song?.id) return null;
+      if (isYouTubeSong(song)) {
+        const { url, qualityState } = await resolvePlaybackUrlWithDetails(song, forcedQuality);
+        if (song.id === currentSongRef.current?.id) setPlaybackQuality(qualityState);
+        return url;
+      }
       const cached = streamUrlCache.current.get(song.id);
       if (cached && !forcedQuality) return cached;
 
@@ -171,11 +178,21 @@ export function usePlayerCoreState({
   const prefetchAdjacentTrackStreams = useCallback(
     (songQueue: Song[], activeIndex: number) => {
       const nextItem = songQueue[activeIndex + 1];
+      const queueAtPrefetch = songQueue;
       if (nextItem) {
-        void resolvePlaybackUrlCached(nextItem).catch(() => null);
+        void resolvePlaybackUrlCached(nextItem)
+          .then((resolvedUrl) => {
+            if (resolvedUrl && queueRef.current === queueAtPrefetch && currentSongRef.current?.id === songQueue[activeIndex]?.id) {
+              if (TrackPlayer && typeof TrackPlayer.updateMetadataForTrack === "function") {
+                void TrackPlayer.updateMetadataForTrack(activeIndex + 1, songToTrack(nextItem, resolvedUrl));
+              }
+              void ExpoAvPlayer.prepareStandby(resolvedUrl, nextItem);
+            }
+          })
+          .catch(() => null);
       }
     },
-    [resolvePlaybackUrlCached]
+    [resolvePlaybackUrlCached, TrackPlayer]
   );
 
   // Hook: Startup Reconcile
@@ -272,10 +289,10 @@ export function usePlayerCoreState({
 
         if (TrackPlayer && isPlayerReady && wasNativeQueueSynced) {
           void Promise.all(additions.map(async (song) =>
-                songToTrack(song, await resolvePlaybackUrlCached(song), streamUrlCache.current)
+                isYouTubeSong(song) ? songToTrack(song) : songToTrack(song, await resolvePlaybackUrlCached(song), streamUrlCache.current)
               )).then((tracks) => enqueueNativeQueueMutation(async () => {
               if (!isCurrentAccount(scope) || queueRef.current !== nextQueue) return;
-              if (tracks.some((track) => !track.url)) return;
+              if (tracks.some((track) => track.source !== "youtube" && !track.url)) return;
               const nativeQueue = await TrackPlayer.getQueue();
               if (!isCurrentAccount(scope) || queueRef.current !== nextQueue || !nativeQueueIdsMatch(nativeQueue, currentActiveQueue)) return;
               await TrackPlayer.add(tracks);

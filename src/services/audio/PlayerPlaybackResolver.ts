@@ -1,3 +1,4 @@
+import { isYouTubeSong, peekYouTubeStream, resolveYouTubeStream, youTubeSongWithStream, rejectYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { getAccountScope } from "@/lib/accountScope";
 import { getLocalPlaybackUrl } from "@/lib/downloads/downloadManager";
 import { logger } from "@/lib/logger";
@@ -85,6 +86,9 @@ export function readDownloadAudioUrl(value: unknown): string {
 export function resolveAudioUrl(source: SongPlaybackSource | null | undefined): string {
   if (!source) return "";
 
+  if (source.id && isYouTubeSong(source as Song) && !source.audioUrl?.startsWith("file://") && !source.audioUrl?.startsWith("/")) {
+    return peekYouTubeStream(source as Song)?.url || "";
+  }
   const directCandidates = [source.audioUrl, source.uri, source.streamUrl];
   for (const candidate of directCandidates) {
     const value = readAudioCandidate(candidate);
@@ -98,6 +102,7 @@ export function resolveAudioUrl(source: SongPlaybackSource | null | undefined): 
 }
 
 export function withResolvedPlaybackUrl(song: Song, audioUrl: string): Song {
+  if (isYouTubeSong(song)) song = youTubeSongWithStream(song);
   const resolvedUrl = readNonEmptyString(audioUrl);
   if (!resolvedUrl || song.audioUrl === resolvedUrl) return song;
   return { ...song, audioUrl: resolvedUrl };
@@ -115,6 +120,7 @@ export function cleanHtmlEntities(str: string): string {
 }
 
 export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?: Map<string, string>): any {
+  if (isYouTubeSong(song)) song = youTubeSongWithStream(song);
   const audioUrl = localUrl || cachedUrlMap?.get(song.id) || resolveAudioUrl(song as SongPlaybackSource);
   const rawDuration =
     song.duration ??
@@ -127,6 +133,9 @@ export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?:
   const album = song.album ? cleanHtmlEntities(readNonEmptyString(song.album) || "") : undefined;
   return {
     id: song.id,
+    source: song.source,
+    youtubeVideoId: song.youtubeVideoId || song.videoId,
+    youtubeAudioExpiresAt: song.youtubeAudioExpiresAt,
     accountId: getAccountScope().accountId ?? "guest",
     url: audioUrl,
     title,
@@ -269,6 +278,16 @@ export async function resolvePlaybackUrlWithDetails(
     }
   } catch {
     // Fall through
+  }
+
+  // YouTube owns resolution and quality reporting; a failure never enters another provider.
+  if (isYouTubeSong(song)) {
+    if (forcedQuality) rejectYouTubeStream(song);
+    const stream = await resolveYouTubeStream(song, targetQuality);
+    const bitrate = Math.round(stream.bitrate / 1000);
+    return { url: stream.url, qualityState: { requested: effectiveRequested,
+      actualBitrate: bitrate, qualityLabel: `${bitrate}kbps${stream.codec ? ` · ${stream.codec}` : ""}`,
+      unlocked, isFallback: false } };
   }
 
   // 2. JioSaavn / Catalogue Songs -> Quality ladder selection

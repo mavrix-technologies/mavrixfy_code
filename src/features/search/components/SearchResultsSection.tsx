@@ -263,6 +263,7 @@ export const SearchTopResultCard = React.memo(function SearchTopResultCard({
 
 export interface SearchResultsSectionProps {
   topInset: number;
+  headerHeight?: number;
   resultFilter: ResultFilter;
   searchLoading: boolean;
   searchError: boolean;
@@ -294,6 +295,7 @@ export interface SearchResultsSectionProps {
 
 export const SearchResultsSection = React.memo(function SearchResultsSection({
   topInset,
+  headerHeight,
   resultFilter,
   searchLoading,
   searchError,
@@ -371,7 +373,7 @@ export const SearchResultsSection = React.memo(function SearchResultsSection({
   );
 
   return (
-    <View style={[styles.resultsWrap, { paddingTop: topInset + 108 }]}>
+    <View style={[styles.resultsWrap, { paddingTop: headerHeight ?? topInset + 108 }]}>
 
       {searchLoading ? (
         <View style={styles.loadingContainer}>

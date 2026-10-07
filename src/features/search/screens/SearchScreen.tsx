@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
-import { useCallback,useRef } from "react";
+import { useCallback,useRef,useState } from "react";
 import {
 FlatList,
 Keyboard,
@@ -125,6 +125,8 @@ function SearchScreenView() {
     [handleSuggestionPress]
   );
 
+  const [searchHeaderHeight, setSearchHeaderHeight] = useState(topInset + 160);
+
   // Early return for offline idle state
   if (!isOnline && query.length === 0) {
     return (
@@ -151,6 +153,7 @@ function SearchScreenView() {
       {/* ── Header ── */}
       {isSearchMode ? (
         <View
+          onLayout={(event) => setSearchHeaderHeight(event.nativeEvent.layout.height)}
           style={[
             styles.activeSearchHeader,
             { paddingTop: topInset + 6 },
@@ -166,7 +169,7 @@ function SearchScreenView() {
                 onSubmit={handleSubmitSearch}
                 onClear={handleClear}
                 autoFocus={true}
-                placeholder="Search songs, artists, albums..."
+                placeholder={searchEngine.searchProvider === "youtube" ? "Search YouTube songs and playlists..." : "Search songs, artists, albums..."}
                 theme="dark"
               />
             </View>
@@ -184,7 +187,14 @@ function SearchScreenView() {
           {/* Liquid Glass Scope Bar integrated directly in header */}
           <View style={styles.headerScopeBarWrap}>
             <LiquidGlassScopeBar
-              options={RESULT_FILTERS}
+              options={searchEngine.youTubeSupported
+                ? [{ key: "jiosaavn", label: "JioSaavn" }, { key: "youtube", label: "YouTube Music" }]
+                : [{ key: "jiosaavn", label: "JioSaavn" }]}
+              activeKey={searchEngine.searchProvider}
+              onSelect={searchEngine.handleSearchProviderSelect}
+            />
+            <LiquidGlassScopeBar
+              options={searchEngine.searchProvider === "youtube" ? RESULT_FILTERS.filter((option) => option.key === "all" || option.key === "songs" || option.key === "playlists") : RESULT_FILTERS}
               activeKey={resultFilter}
               onSelect={handleResultFilterSelect}
             />
@@ -227,7 +237,7 @@ function SearchScreenView() {
 
       {/* Inline suggestions below search header */}
       {isSearchMode && suggestionsOpen && suggestions.length > 0 && query.trim().length >= 2 && (
-        <View style={[styles.suggestionsDropdown, { top: topInset + 104 }]}>
+        <View style={[styles.suggestionsDropdown, { top: searchHeaderHeight }]}>
           <FlatList
             data={suggestions}
             keyboardDismissMode="none"
@@ -241,6 +251,7 @@ function SearchScreenView() {
       {showFocusedRecentSearches ? (
         <SearchRecentSection
           topInset={topInset}
+          headerHeight={isSearchMode ? searchHeaderHeight : undefined}
           recentSearches={recentSearches}
           onScroll={handleHeaderScroll}
           onRecentSearchPress={handleRecentSearchPress}
@@ -255,6 +266,7 @@ function SearchScreenView() {
       ) : (
         <SearchResultsSection
           topInset={topInset}
+          headerHeight={isSearchMode ? searchHeaderHeight : undefined}
           resultFilter={resultFilter}
           searchLoading={searchLoading}
           searchError={searchError}

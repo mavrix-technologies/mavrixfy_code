@@ -6,7 +6,7 @@ const test = require("node:test");
 const ts = require("typescript");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture() {
+function fixture({ youtubeResolver = async () => { throw new Error("Unexpected YouTube resolution"); }, platform = "android" } = {}) {
   const controls = new Map();
   const system = new Map();
   const notifications = [];
@@ -94,8 +94,9 @@ function fixture() {
     module,
     exports: module.exports,
     require(name) {
+      if (name.endsWith("YouTubeMusic")) return { resolveYouTubeStream: youtubeResolver };
       if (name === "react") return react;
-      if (name === "react-native") return { Platform: { OS: "android" } };
+      if (name === "react-native") return { Platform: { OS: platform } };
       if (name === "react-native-audio-api") return audio;
       if (name.endsWith("equalizerDsp"))
         return {

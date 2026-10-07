@@ -10,6 +10,8 @@ import { createAudioPlayer,setAudioModeAsync } from "expo-audio";
 
 // The one and only active player. Any new loadAndPlay call replaces it.
 let activePlayer: AudioPlayer | null = null;
+let standbyPlayer: AudioPlayer | null = null;
+let standbyUrl: string | null = null;
 let seekBlockUntil = 0;
 let seekResetTimer: ReturnType<typeof setTimeout> | null = null;
 type PlayerSubscription = {
@@ -101,6 +103,27 @@ function attachListener(p: AudioPlayer, gen: number): void {
 
 // ─── public API ───────────────────────────────────────────────────────────────
 
+/**
+ * Pre-warms the next track's audio stream in the background ahead of time.
+ * When loadAndPlay is called for this exact URL, playback starts with 0ms buffering gap.
+ */
+export async function prepareStandby(url: string, song?: Partial<Song> | null): Promise<void> {
+  if (!url || standbyUrl === url) return;
+  if (standbyPlayer) {
+    killPlayer(standbyPlayer);
+    standbyPlayer = null;
+    standbyUrl = null;
+  }
+  try {
+    await ensureAudioMode();
+    const p = createAudioPlayer({ uri: url, headers: song?.playbackHeaders }, { updateInterval: 500 });
+    standbyPlayer = p;
+    standbyUrl = url;
+  } catch {
+    // Non-fatal standby prefetch failure
+  }
+}
+
 export async function loadAndPlay(url: string, song?: Partial<Song> | null, shouldPlay: () => boolean = () => true): Promise<void> {
   if (!url) {
     throw new Error("No audio URL provided");
@@ -110,63 +133,80 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
   generation += 1;
   const myGen = generation;
 
-  // 2. Kill the current player RIGHT NOW — before any await.
-  //    This stops audio output immediately and prevents two songs playing.
-  const prev = activePlayer;
-  activePlayer = null;
-  clearSeekResetTimer();
-  killPlayer(prev);
+  let p: AudioPlayer;
 
-  try {
-    if (myGen !== generation) return;
+  // 2. Check if standby pre-buffered player is ready for this URL
+  if (standbyPlayer && standbyUrl === url) {
+    p = standbyPlayer;
+    standbyPlayer = null;
+    standbyUrl = null;
 
-    // 3. Set audio mode once (cached after first call).
-    await ensureAudioMode();
+    const prev = activePlayer;
+    activePlayer = null;
+    clearSeekResetTimer();
+    killPlayer(prev);
 
-    // 4. If another loadAndPlay fired while we awaited, it already owns playback.
-    if (myGen === generation) {
-      // 5. Create the new player (synchronous in expo-audio).
-      seekBlockUntil = 0;
-      const p = createAudioPlayer(url, { updateInterval: 500 });
+    if (myGen !== generation) {
+      killPlayer(p);
+      return;
+    }
+  } else {
+    // Kill standby if it was prepared for a different song
+    if (standbyPlayer) {
+      killPlayer(standbyPlayer);
+      standbyPlayer = null;
+      standbyUrl = null;
+    }
 
-      // 6. Guard again — another call may have arrived during createAudioPlayer.
+    const prev = activePlayer;
+    activePlayer = null;
+    clearSeekResetTimer();
+    killPlayer(prev);
+
+    try {
+      if (myGen !== generation) return;
+      await ensureAudioMode();
+      if (myGen !== generation) return;
+      p = createAudioPlayer({ uri: url, headers: song?.playbackHeaders }, { updateInterval: 500 });
       if (myGen !== generation) {
         killPlayer(p);
         return;
       }
-
-      // 7. Register as the active player, wire events, start playback.
-      activePlayer = p;
-      attachListener(p, myGen);
-
-      if (typeof (p as any).setActiveForLockScreen === "function") {
-        try {
-          (p as any).setActiveForLockScreen(
-            true,
-            {
-              title: song?.title || "Unknown",
-              artist: song?.artist || "Mavrixfy",
-              albumTitle: song?.album || undefined,
-              artworkUrl: song?.coverUrl || undefined,
-            },
-            {
-              showSeekBackward: false,
-              showSeekForward: false,
-              isLiveStream: false,
-            }
-          );
-        } catch {
-          // non-fatal
-        }
+    } catch (err: any) {
+      if (myGen === generation) {
+        throw err;
       }
-
-      if (shouldPlay()) p.play();
-    }
-  } catch (err: any) {
-    if (myGen === generation) {
-      throw err;
+      return;
     }
   }
+
+  // 3. Register as the active player, wire events, start playback.
+  seekBlockUntil = 0;
+  activePlayer = p;
+  attachListener(p, myGen);
+
+  if (typeof (p as any).setActiveForLockScreen === "function") {
+    try {
+      (p as any).setActiveForLockScreen(
+        true,
+        {
+          title: song?.title || "Unknown",
+          artist: song?.artist || "Mavrixfy",
+          albumTitle: song?.album || undefined,
+          artworkUrl: song?.coverUrl || undefined,
+        },
+        {
+          showSeekBackward: false,
+          showSeekForward: false,
+          isLiveStream: false,
+        }
+      );
+    } catch {
+      // non-fatal
+    }
+  }
+
+  if (shouldPlay()) p.play();
 }
 
 export function play(): void {
@@ -183,6 +223,11 @@ function stop(): void {
   activePlayer = null;
   clearSeekResetTimer();
   killPlayer(p);
+  if (standbyPlayer) {
+    killPlayer(standbyPlayer);
+    standbyPlayer = null;
+    standbyUrl = null;
+  }
 }
 
 export function destroy(): void {

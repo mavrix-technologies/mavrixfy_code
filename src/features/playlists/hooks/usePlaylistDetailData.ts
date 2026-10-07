@@ -1,3 +1,4 @@
+import { loadYouTubePlaylist } from "@/services/youtube/YouTubeMusic";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   getCatalogAlbumDetails,
@@ -225,7 +226,7 @@ export function usePlaylistDetailData({
   }, []);
 
   const loadPlaylistData = useCallback(
-    async (isCancelled: () => boolean) => {
+    async (isCancelled: () => boolean, signal?: AbortSignal) => {
       try {
         // 1. FAST MEMORY CACHE CHECK: If playlist already loaded in memory, render it instantly
         const memoryCached = getCachedPlaylist(playlistId);
@@ -241,6 +242,18 @@ export function usePlaylistDetailData({
             finishPlaylistLoad();
             if (!isFirestoreSource && !isJioSaavnSource) return;
           }
+        }
+
+        if (isYouTubeSource) {
+          const data = await loadYouTubePlaylist(playlistId, signal);
+          if (isCancelled()) return;
+          setPlaylistName(data.name);
+          setPlaylistCover(data.coverUrl || initialCover);
+          setPlaylistDescription(`${data.songs.length} songs · YouTube Music`);
+          setSongs(data.songs);
+          setCachedPlaylist(playlistId, { id: playlistId, name: data.name, coverUrl: data.coverUrl,
+            description: `${data.songs.length} songs · YouTube Music`, songs: data.songs, isFirestore: false });
+          return;
         }
 
         // 2. FAST LOCAL CHECK: Custom created or local playlists
@@ -386,6 +399,7 @@ export function usePlaylistDetailData({
     [
       playlistId,
       isLocalCustomPlaylist,
+      isYouTubeSource,
       isJioSaavnSource,
       isFirestoreSource,
       isSongSource,
@@ -404,6 +418,7 @@ export function usePlaylistDetailData({
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     if (!playlistId) {
       // An invalid playlist route has no load callback to report this state.
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -412,10 +427,11 @@ export function usePlaylistDetailData({
     }
 
     resetPlaylistLoadState();
-    void loadPlaylistData(() => cancelled);
+    void loadPlaylistData(() => cancelled, controller.signal);
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [playlistId, resetPlaylistLoadState, loadPlaylistData]);
 

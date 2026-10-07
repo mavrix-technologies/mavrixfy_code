@@ -53,7 +53,7 @@ export const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.78)",
   },
   spotifyCardLineUpcoming: {
-    color: "rgba(0, 0, 0, 0.90)",
+    color: "rgba(255, 255, 255, 0.45)",
   },
   spotifyCardFooter: {
     flexDirection: "row",
@@ -158,13 +158,19 @@ export const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.78)",
   },
   spotifyLineUpcoming: {
-    color: "rgba(0, 0, 0, 0.90)",
+    color: "rgba(255, 255, 255, 0.45)",
+  },
+  spotifyWordBase: {
+    fontSize: 25,
+    lineHeight: 35,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.4,
   },
   spotifyWordActive: {
     color: "#FFFFFF",
   },
   spotifyWordUpcoming: {
-    color: "rgba(0, 0, 0, 0.40)",
+    color: "rgba(255, 255, 255, 0.40)",
   },
   spotifyBreakContainer: {
     paddingVertical: 14,

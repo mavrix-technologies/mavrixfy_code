@@ -152,6 +152,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   });
 
   const { changeStreamingQuality } = useAudioQualityControl({
+    desiredPlayStateRef: core.desiredPlayStateRef,
+    playRequestIdRef: core.playRequestIdRef,
     streamUrlCache: core.streamUrlCache,
     streamResolveCache: core.streamResolveCache,
     currentSongRef: core.currentSongRef,
@@ -225,6 +227,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   });
 
   useAudioSyncListeners({
+    setPlaybackQuality: core.setPlaybackQuality,
     isPlayerReady: core.isPlayerReady,
     TrackPlayer,
     Event,

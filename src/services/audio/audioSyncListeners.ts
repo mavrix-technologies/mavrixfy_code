@@ -1,4 +1,5 @@
 import { getSettings } from "@/lib/storage";
+import { isYouTubeSong, peekYouTubeStream, rejectYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
@@ -7,12 +8,13 @@ import type { SeekOverride } from "@/services/audio/audioProgressTracking";
 import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { carPlayService } from "@/services/carPlayService";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
-import type { SleepTimerState } from "@/types/playbackTypes";
+import type { SleepTimerState, PlaybackQualityState } from "@/types/playbackTypes";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 import { useEffect,useRef,type MutableRefObject } from "react";
 import { AppState,Platform } from "react-native";
 
 interface UseAudioSyncListenersOptions {
+  setPlaybackQuality?: (update: (previous: PlaybackQualityState) => PlaybackQualityState) => void;
   isPlayerReady: boolean;
   TrackPlayer: any;
   Event: any;
@@ -55,6 +57,7 @@ interface UseAudioSyncListenersOptions {
 }
 
 export function useAudioSyncListeners({
+  setPlaybackQuality,
   isPlayerReady,
   TrackPlayer,
   Event,
@@ -95,6 +98,7 @@ export function useAudioSyncListeners({
   toggleLike,
   likedSongIds,
 }: UseAudioSyncListenersOptions) {
+  const youtubeRetryAt = useRef(new Map<string, number>());
   const publishedLockScreenDurationRef = useRef<{
     songId: string;
     duration: number;
@@ -204,6 +208,16 @@ export function useAudioSyncListeners({
         updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false });
       }),
       subscribeTrackPlayerEvent(Event.PlaybackError, (error: any) => {
+        const failedSong = currentSongRef.current;
+        if (error?.trackId && failedSong?.id !== error.trackId) return;
+        if (failedSong && isYouTubeSong(failedSong) && error?.shouldResume &&
+          desiredPlayStateRef.current !== false && Date.now() - (youtubeRetryAt.current.get(failedSong.id) || 0) > 60000) {
+          youtubeRetryAt.current.set(failedSong.id, Date.now());
+          rejectYouTubeStream(failedSong);
+          const resumePosition = positionSecondsRef.current;
+          void playSong(failedSong, queueRef.current, resumePosition);
+          return;
+        }
         logger.error("[Player] PlaybackError event", error);
         pendingPlayRequestRef.current = null;
         desiredPlayStateRef.current = false;
@@ -307,6 +321,14 @@ export function useAudioSyncListeners({
 
         const pending = pendingPlayRequestRef.current;
         if (pending && activeTrackId && String(activeTrackId) !== String(pending.songId)) return;
+
+        const activeSong = currentQ.find((song) => song.id === activeTrackId);
+        const youtubeStream = activeSong && isYouTubeSong(activeSong) ? peekYouTubeStream(activeSong) : undefined;
+        if (youtubeStream) {
+          const bitrate = Math.round(youtubeStream.bitrate / 1000);
+          setPlaybackQuality?.((previous) => ({ ...previous, actualBitrate: bitrate,
+            qualityLabel: `${bitrate}kbps${youtubeStream.codec ? ` · ${youtubeStream.codec}` : ""}`, isFallback: false }));
+        }
 
         // If native event confirms the song we already selected, do NOT overwrite or jump
         if (activeTrackId && currentSong && String(activeTrackId) === String(currentSong.id)) {

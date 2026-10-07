@@ -152,12 +152,14 @@ export const SpotifyLyricLine = memo(function SpotifyLyricLine({
   isActive,
   isPassed,
   isSynced,
+  currentPositionSeconds,
   onPress,
 }: {
   item: LyricLine;
   isActive: boolean;
   isPassed: boolean;
   isSynced: boolean;
+  currentPositionSeconds?: number;
   onPress: (time: number) => void;
 }) {
   const [animValue] = useState(() => new Animated.Value(isActive ? 2 : isPassed ? 1 : 0));
@@ -229,7 +231,24 @@ export const SpotifyLyricLine = memo(function SpotifyLyricLine({
               : styles.spotifyLineUpcoming,
           ]}
         >
-          {item.text || "♪ ♪ ♪"}
+          {isActive && item.words && item.words.length > 0 && typeof currentPositionSeconds === "number" ? (
+            item.words.map((w, wIdx) => {
+              const isWordSung = currentPositionSeconds >= w.start;
+              return (
+                <Text
+                  key={wIdx}
+                  style={[
+                    styles.spotifyWordBase,
+                    isWordSung ? styles.spotifyWordActive : styles.spotifyWordUpcoming,
+                  ]}
+                >
+                  {w.text}{wIdx < item.words!.length - 1 ? " " : ""}
+                </Text>
+              );
+            })
+          ) : (
+            item.text || "♪ ♪ ♪"
+          )}
         </Text>
       </Animated.View>
     </Pressable>

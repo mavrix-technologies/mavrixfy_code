@@ -1,3 +1,4 @@
+import { isYouTubeSong } from "@/services/youtube/YouTubeMusic";
 import { getSettings } from "@/lib/storage";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
@@ -202,7 +203,7 @@ export function useAudioPlaybackCommands({
       try {
         const audioUrl = await Promise.race([
           resolvePlaybackUrlCached(targetSong),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), isYouTubeSong(targetSong) ? 27000 : 12000)),
         ]);
         if (reqId !== playRequestIdRef.current) return;
 
@@ -263,7 +264,7 @@ export function useAudioPlaybackCommands({
                 return songToTrack(queueSong, cachedUrl || null, streamUrlCache.current);
               });
 
-              const hasValidUrl = (t: any) => typeof t?.url === "string" && t.url.length > 5;
+              const hasValidUrl = (t: any) => t?.source === "youtube" || (typeof t?.url === "string" && t.url.length > 5);
               const allTracksValid = nativeTracks.length === q.length && nativeTracks.every(hasValidUrl);
 
               if (

@@ -1,3 +1,4 @@
+import { isYouTubeSong } from "@/services/youtube/YouTubeMusic";
 import type { Song } from "@/lib/musicData";
 import { readAudioCandidate,songToTrack } from "@/services/audio/PlayerPlaybackResolver";
 import { useCallback,useRef,type MutableRefObject } from "react";
@@ -72,6 +73,7 @@ export function useAudioNativeQueueLane({
     ): Promise<any[]> => {
       return Promise.all(
         songs.map(async (song) => {
+          if (isYouTubeSong(song) && !forcedUrls.has(song.id)) return songToTrack(song);
           const forced = forcedUrls.get(song.id);
           if (forced) return songToTrack(song, forced, streamUrlCache.current);
 
@@ -102,9 +104,15 @@ export function useAudioNativeQueueLane({
       const wasPlaying = options?.wasPlaying ?? false;
       const forcedUrls = options?.forcedUrls ?? new Map<string, string>();
 
+      const active = songs[activeIndex];
+      if (active && isYouTubeSong(active) && !forcedUrls.has(active.id)) {
+        const url = await resolvePlaybackUrlCached(active);
+        if (!url) throw new Error("YouTube Music stream unavailable");
+        forcedUrls.set(active.id, url);
+      }
       const nativeTracks = await buildNativeQueueTracks(songs, forcedUrls);
       if (currentSongRef.current?.id !== songs[activeIndex]?.id) return;
-      if (nativeTracks.some((track) => !readAudioCandidate(track?.url))) {
+      if (nativeTracks.some((track) => track?.source !== "youtube" && !readAudioCandidate(track?.url))) {
         throw new Error("One or more queue tracks have no playable audio URL.");
       }
 

@@ -104,7 +104,7 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
         break;
       }
     }
-    return foundIndex >= 0 ? foundIndex : 0;
+    return foundIndex;
   }, [lyricsData, livePosition]);
 
   // Smooth continuous gliding translation to active line

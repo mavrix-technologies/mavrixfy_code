@@ -154,7 +154,7 @@
           "android": {
             "minSdkVersion": 24,
             "targetSdkVersion": 36,
-            "compileSdkVersion": 36,
+            "compileSdkVersion": 37,
             "AsyncStorage_db_size_in_MB": "200",
             "enableShrinkResourcesInReleaseBuilds": true,
             "enableProguardInReleaseBuilds": true,
@@ -192,7 +192,8 @@
           "optimizeAdLoading": true
         }
       ],
-      "./plugins/withAndroidAuto"
+      "./plugins/withAndroidAuto",
+      "./plugins/withYouTubeMusic"
     ],
     "experiments": {
       "typedRoutes": true
@@ -210,7 +211,7 @@
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": "3.3.0-33002",
+    "runtimeVersion": "3.3.0-33002-youtube1",
     "extra": {
       "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",

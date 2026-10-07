@@ -99,6 +99,7 @@ export const SearchBrowseSection = React.memo(function SearchBrowseSection({
 
 export interface SearchRecentSectionProps {
   topInset: number;
+  headerHeight?: number;
   recentSearches: RecentSearchItem[];
   onScroll: (event: any) => void;
   onRecentSearchPress: (item: RecentSearchItem) => void;
@@ -107,6 +108,7 @@ export interface SearchRecentSectionProps {
 
 export const SearchRecentSection = React.memo(function SearchRecentSection({
   topInset,
+  headerHeight,
   recentSearches,
   onScroll,
   onRecentSearchPress,
@@ -154,7 +156,7 @@ export const SearchRecentSection = React.memo(function SearchRecentSection({
       style={styles.scrollView}
       contentContainerStyle={[
         styles.content,
-        { paddingTop: topInset + 64, paddingBottom: 146 },
+        { paddingTop: headerHeight ?? topInset + 64, paddingBottom: 146 },
       ]}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}

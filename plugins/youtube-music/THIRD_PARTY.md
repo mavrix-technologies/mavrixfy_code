@@ -1,0 +1,5 @@
+# YouTube Music native extraction
+
+`YouTubeStreamExtractor.kt`, `InnerTubeXStreamExtractor.kt` and the stream descriptor are adapted from the supplied LastWave-Native checkout (Clash-Projects / LastWave contributors), under GNU GPL v3. The original license is included as `LICENSE-LastWave.txt`. Changes remove LastWave dependency injection and account coupling for anonymous Mavrixfy extraction. NewPipe and InnerTubeX retain their upstream licenses. This module owns catalog/extraction only; it does not instantiate LastWave's player or interact with JioSaavn.
+
+iOS uses Alexander Eichhorn's [YouTubeKit](https://github.com/alexeichhorn/YouTubeKit), pinned to source revision `e5b7d0396ce12bf3444f0d209e8436c83373b7af` via Swift Package Manager. Its MIT license is included in `ios/LICENSE-YouTubeKit.txt` and copied into the iOS app resources by the Expo plugin. Only local extraction is enabled; the package's optional remote extractor is not enabled. The iOS bridge and catalog client are implemented separately from the Android adapters.

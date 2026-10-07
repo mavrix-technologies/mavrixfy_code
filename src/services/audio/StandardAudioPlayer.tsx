@@ -1,3 +1,5 @@
+import type { Song } from "@/lib/musicData";
+import { resolveYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { Platform } from "react-native";
 import React, { useEffect, useRef, useSyncExternalStore } from "react";
 import {
@@ -50,6 +52,10 @@ export const Event = {
 type Track = {
   id?: string;
   url?: string;
+  headers?: Record<string, string>;
+  source?: string;
+  youtubeVideoId?: string;
+  youtubeAudioExpiresAt?: number;
   title?: string;
   artist?: string;
   album?: string;
@@ -77,7 +83,24 @@ let playback: PlaybackSnapshot = {
   sourceVersion: 0,
   repeat: RepeatMode.Off,
 };
-let sourceSnapshot = { sourceVersion: 0, url: "" };
+let sourceSnapshot = { sourceVersion: 0, url: "", source: { uri: "", headers: undefined as Record<string, string> | undefined }, headerKey: "" };
+let standbySnapshot = { url: "", trackId: "", source: { uri: "", headers: undefined as Record<string, string> | undefined }, headerKey: "" };
+let selectionVersion = 0;
+let standbyAudioHandle: AudioTagHandle | null = null;
+let isStandbyLoaded = false;
+let standbyLoadedUrl = "";
+
+function getNextTrack() {
+  if (playback.index < 0 || playback.queue.length === 0) return null;
+  if (playback.index + 1 < playback.queue.length) {
+    return playback.queue[playback.index + 1];
+  }
+  if (playback.repeat === RepeatMode.Queue && playback.queue.length > 1) {
+    return playback.queue[0];
+  }
+  return null;
+}
+
 const storeListeners = new Set<() => void>();
 const eventListeners = new Map<string, Set<(payload: any) => void>>();
 let audioHandle: AudioTagHandle | null = null;
@@ -108,11 +131,25 @@ function emit(name: string, payload: any = {}) {
 function publish(next: Partial<PlaybackSnapshot>) {
   playback = { ...playback, ...next };
   const url = activeTrack()?.url || "";
+  const headers = activeTrack()?.headers;
+  const headerKey = JSON.stringify(headers || {});
   if (
     sourceSnapshot.sourceVersion !== playback.sourceVersion ||
-    sourceSnapshot.url !== url
+    sourceSnapshot.url !== url || sourceSnapshot.headerKey !== headerKey
   ) {
-    sourceSnapshot = { sourceVersion: playback.sourceVersion, url };
+    sourceSnapshot = { sourceVersion: playback.sourceVersion, url, source: { uri: url, headers }, headerKey };
+  }
+  const nextTrack = getNextTrack();
+  const nextUrl = nextTrack?.url || "";
+  const nextHeaders = nextTrack?.headers;
+  const nextHeaderKey = JSON.stringify(nextHeaders || {});
+  if (nextUrl !== standbySnapshot.url || nextHeaderKey !== standbySnapshot.headerKey) {
+    standbySnapshot = { url: nextUrl, trackId: nextTrack?.id || "", source: { uri: nextUrl, headers: nextHeaders }, headerKey: nextHeaderKey };
+    if (nextUrl !== standbyLoadedUrl || nextHeaderKey !== sourceSnapshot.headerKey) {
+      standbyAudioHandle = null;
+      isStandbyLoaded = false;
+      standbyLoadedUrl = "";
+    }
   }
   storeListeners.forEach((listener) => listener());
 }
@@ -126,9 +163,15 @@ function setStatus(status: string) {
   updateNotification();
 }
 function handlePlaybackError(error: unknown) {
-  void StandardAudioPlayer.pause();
+  const shouldResume = playback.playWhenReady;
+  if (activeTrack()?.source === "youtube") {
+    audioHandle?.pause();
+    publish({ playWhenReady: false });
+  } else void StandardAudioPlayer.pause();
   setStatus(State.Error);
   emit(Event.PlaybackError, {
+    trackId: activeTrack()?.id,
+    shouldResume,
     message: error instanceof Error ? error.message : String(error),
   });
 }
@@ -183,16 +226,89 @@ function updateNotification() {
       notificationRunning = false;
     });
 }
-function select(index: number, initialPosition = 0) {
+async function select(index: number, initialPosition = 0) {
   if (index < 0 || index >= playback.queue.length)
     throw new Error("Track index is out of range.");
+
+  const previous = activeTrack();
+  const version = ++selectionVersion;
+  let track = playback.queue[index];
+  if (track.source === "youtube" && !/^(file|content):\/\//i.test(track.url || "")) {
+    const song = { id: track.id, source: "youtube", youtubeVideoId: track.youtubeVideoId } as Song;
+    let stream;
+    try {
+      stream = await resolveYouTubeStream(song);
+    } catch (error) {
+      if (version !== selectionVersion || playback.queue[index]?.id !== track.id) return;
+      // Recovery belongs to the requested track, including automatic queue advances.
+      audioHandle?.pause();
+      audioHandle = null;
+      isSourceLoaded = false;
+      sourceNode?.disconnect();
+      sourceNode = null;
+      publish({ index, position: Math.max(0, initialPosition), duration: Number(track.duration) || 0, sourceVersion: playback.sourceVersion + 1, status: State.Loading });
+      emit(Event.PlaybackActiveTrackChanged, { lastTrack: previous, track, index });
+      throw error;
+    }
+    if (version !== selectionVersion || playback.queue[index]?.id !== track.id) return;
+    track = { ...track, url: stream.url, headers: stream.headers, youtubeAudioExpiresAt: stream.expiresAt };
+    playback = { ...playback, queue: playback.queue.map((item, i) => i === index ? track : item) };
+  }
+  const targetUrl = track?.url || "";
+
+  // ZERO-GAP STANDBY HAND-OFF:
+  // If the target track matches the standby preloaded track:
+  if (
+    targetUrl &&
+    targetUrl === standbyLoadedUrl &&
+    standbyAudioHandle &&
+    isStandbyLoaded &&
+    context
+  ) {
+    audioHandle?.pause();
+    sourceNode?.disconnect();
+
+    audioHandle = standbyAudioHandle;
+    isSourceLoaded = true;
+    standbyAudioHandle = null;
+    isStandbyLoaded = false;
+    standbyLoadedUrl = "";
+
+    try {
+      sourceNode = context.createMediaElementSource(audioHandle);
+      sourceNode.connect(filters[0]);
+    } catch {
+      // non-fatal
+    }
+
+    if (initialPosition > 0) {
+      audioHandle.seekToTime(initialPosition);
+    }
+
+    publish({
+      index,
+      position: Math.max(0, initialPosition),
+      duration: Number(track.duration) || 0,
+      sourceVersion: playback.sourceVersion + 1,
+      status: playback.playWhenReady ? State.Playing : State.Paused,
+    });
+    emit(Event.PlaybackActiveTrackChanged, { lastTrack: previous, track, index });
+    emit(Event.PlaybackState, { state: playback.playWhenReady ? State.Playing : State.Paused });
+    updateNotification();
+
+    if (playback.playWhenReady) {
+      void context.resume().then(() => {
+        audioHandle?.play();
+      });
+    }
+    return;
+  }
+
   audioHandle?.pause();
   audioHandle = null;
   isSourceLoaded = false;
   sourceNode?.disconnect();
   sourceNode = null;
-  const previous = activeTrack();
-  const track = playback.queue[index];
   publish({
     index,
     position: Math.max(0, initialPosition),
@@ -394,13 +510,13 @@ export const StandardAudioPlayer = {
     publish({ queue: [...tracks], index: -1, playWhenReady: wasPlaying });
     const targetIdx =
       initialIndex >= 0 && initialIndex < tracks.length ? initialIndex : 0;
-    select(targetIdx, initialPosition);
+    await select(targetIdx, initialPosition);
   },
   async add(tracks: Track | Track[]) {
     const additions = Array.isArray(tracks) ? tracks : [tracks];
     const previousLength = playback.queue.length;
     publish({ queue: [...playback.queue, ...additions] });
-    if (previousLength === 0 && additions.length) select(0);
+    if (previousLength === 0 && additions.length) await select(0);
   },
   async load(track: Track, initialPosition = 0) {
     await this.setQueue([track], 0, initialPosition);
@@ -413,10 +529,11 @@ export const StandardAudioPlayer = {
       await this.reset();
       return;
     }
-    if (index === selected) select(Math.min(index, next.length - 1));
+    if (index === selected) await select(Math.min(index, next.length - 1));
     else if (index < selected) publish({ index: selected - 1 });
   },
   async reset() {
+    selectionVersion += 1;
     if (Platform.OS === "android")
       AudioManager.observeAudioInterruptions(false);
     audioHandle?.pause();
@@ -475,12 +592,12 @@ export const StandardAudioPlayer = {
     setStatus(State.Stopped);
   },
   async skip(index: number, initialPosition = 0) {
-    select(index, initialPosition);
+    await select(index, initialPosition);
   },
   async skipToNext() {
-    if (playback.index + 1 < playback.queue.length) select(playback.index + 1);
+    if (playback.index + 1 < playback.queue.length) await select(playback.index + 1);
     else if (playback.repeat === RepeatMode.Queue && playback.queue.length)
-      select(0);
+      await select(0);
     else await this.finishQueue();
   },
   async skipToPrevious() {
@@ -488,7 +605,7 @@ export const StandardAudioPlayer = {
       await this.seekTo(0);
       return;
     }
-    select(playback.index - 1);
+    await select(playback.index - 1);
   },
   async seekTo(seconds: number) {
     if (!Number.isFinite(seconds)) return;
@@ -610,6 +727,56 @@ export function useStandardAudioRenderer() {
   );
 }
 
+const StandbyAudioLoader = React.memo(function StandbyAudioLoader({
+  standbyUrl,
+  standbySource,
+  audioCtx,
+}: {
+  standbyUrl: string;
+  standbySource: typeof standbySnapshot.source;
+  audioCtx: AudioContext;
+}) {
+  const handleRef = useRef<AudioTagHandle>(null);
+
+  useEffect(() => {
+    return () => {
+      if (standbyAudioHandle === handleRef.current) {
+        standbyAudioHandle = null;
+        isStandbyLoaded = false;
+        standbyLoadedUrl = "";
+      }
+    };
+  }, []);
+
+  if (!standbyUrl) return null;
+
+  return (
+    <Audio
+      ref={(handle) => {
+        handleRef.current = handle;
+      }}
+      source={standbySource}
+      context={audioCtx}
+      preload="auto"
+      autoPlay={false}
+      onLoad={() => {
+        if (handleRef.current && standbySnapshot.url === standbyUrl) {
+          standbyAudioHandle = handleRef.current;
+          isStandbyLoaded = true;
+          standbyLoadedUrl = standbyUrl;
+        }
+      }}
+      onError={() => {
+        if (standbyAudioHandle === handleRef.current) {
+          standbyAudioHandle = null;
+          isStandbyLoaded = false;
+          standbyLoadedUrl = "";
+        }
+      }}
+    />
+  );
+});
+
 const StandardAudioSource = React.memo(function StandardAudioSource({
   current,
   audioCtx,
@@ -635,7 +802,7 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
           audioHandle = handle;
         }
       }}
-      source={current.url}
+      source={current.source}
       context={audioCtx}
       onLoad={() => {
         if (!isCurrentSource()) {
@@ -703,9 +870,13 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
       onEnded={() => {
         if (!isCurrentSource() || !playback.playWhenReady) return;
         if (playback.repeat === RepeatMode.Track) {
+          if (activeTrack()?.source === "youtube") {
+            void StandardAudioPlayer.skip(playback.index, 0).then(() => StandardAudioPlayer.play()).catch(handlePlaybackError);
+            return;
+          }
           handleRef.current?.seekToTime(0);
           handleRef.current?.play();
-        } else void StandardAudioPlayer.skipToNext();
+        } else void StandardAudioPlayer.skipToNext().catch(handlePlaybackError);
       }}
       onError={(error) => {
         if (!isCurrentSource()) return;
@@ -713,6 +884,14 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
       }}
     >
       <AudioDurationReporter sourceVersion={current.sourceVersion} />
+      {standbySnapshot.url && standbySnapshot.url !== current.url ? (
+        <StandbyAudioLoader
+          key={standbySnapshot.url + standbySnapshot.headerKey}
+          standbyUrl={standbySnapshot.url}
+          standbySource={standbySnapshot.source}
+          audioCtx={audioCtx}
+        />
+      ) : null}
     </Audio>
   );
 });

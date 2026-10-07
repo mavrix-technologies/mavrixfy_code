@@ -32,3 +32,7 @@
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
 -dontwarn okhttp3.**
 -dontwarn okio.**
+# Mavrixfy YouTube Music
+-keep class com.metrolist.innertubex.** { *; }
+-keep class io.ktor.** { *; }
+-keep class org.schabi.newpipe.extractor.** { *; }

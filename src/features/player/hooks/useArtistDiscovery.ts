@@ -22,7 +22,7 @@ export function useArtistDiscovery({
 
   useEffect(() => {
     let active = true;
-    if (!screenSong?.artist) {
+    if (!screenSong?.artist || screenSong.source === "youtube" || screenSong.id.startsWith("youtube_")) {
       // A song without an artist must clear the previous artist's details.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setArtistDetails(null);
@@ -56,10 +56,10 @@ export function useArtistDiscovery({
     return () => {
       active = false;
     };
-  }, [screenSong?.artist]);
+  }, [screenSong?.artist, screenSong?.source, screenSong?.id]);
 
   const relatedSongs = useMemo<Song[]>(() => {
-    if (!artistDetails?.topSongs) return [];
+    if (screenSong?.source === "youtube" || screenSong?.id.startsWith("youtube_") || !artistDetails?.topSongs) return [];
     const filtered = artistDetails.topSongs.flatMap((item: any) => {
       const s = convertJioSaavnSong(item);
       return s.id !== screenSong?.id ? [s] : [];

@@ -24,6 +24,7 @@ function fixture() {
     module,
     exports: module.exports,
     require(name) {
+      if (name.endsWith("YouTubeMusic")) return { isYouTubeSong: song => song.source === "youtube" || song.id?.startsWith("youtube_") };
       if (name === "react")
         return {
           useRef: (value) => ({ current: value }),

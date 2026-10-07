@@ -8,6 +8,7 @@ function pickFirstParam(value: string | string[] | undefined): string {
 export function usePlaylistDetailParams() {
   const params = useLocalSearchParams<{
     id?: string | string[];
+    youtube?: string | string[];
     jiosaavn?: string | string[];
     album?: string | string[];
     song?: string | string[];
@@ -25,7 +26,7 @@ export function usePlaylistDetailParams() {
   const firestoreParam = pickFirstParam(params.firestore);
   const jiosaavnParam = pickFirstParam(params.jiosaavn);
 
-  const isYouTubeSource = false;
+  const isYouTubeSource = pickFirstParam(params.youtube) === "true" || playlistId.startsWith("youtube_playlist_");
 
   const isSongSource =
     pickFirstParam(params.song) === "true" ||
@@ -37,9 +38,10 @@ export function usePlaylistDetailParams() {
       pickFirstParam(params.type) === "album" ||
       sourceLink.includes("/album/"));
   const isFirestoreSource = firestoreParam === "true";
-  const isExplicitLocal = firestoreParam === "false" && jiosaavnParam === "false";
+  const isExplicitLocal = !isYouTubeSource && firestoreParam === "false" && jiosaavnParam === "false";
   const isLocalCustomPlaylist = isExplicitLocal || playlistId.startsWith("user_");
   const isJioSaavnSource =
+    !isYouTubeSource &&
     !isFirestoreSource &&
     !isLocalCustomPlaylist &&
     (jiosaavnParam === "true" || isSongSource || isAlbumSource || sourceLink.length > 0);

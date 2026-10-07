@@ -1,4 +1,5 @@
 import { getApiUrl } from "@/lib/api-config";
+import { isYouTubeSong, relatedYouTubeSongs } from "@/services/youtube/YouTubeMusic";
 import type { Song } from "@/lib/musicData";
 import { parseApiSong } from "@/lib/searchRepository";
 import { deduplicateSongs } from "@/lib/searchUtils";
@@ -86,6 +87,11 @@ export async function fetchAutoplayRecommendations({
   signal,
 }: FetchAutoplayRecommendationsOptions): Promise<Song[]> {
   if (!seedSong) return [];
+  // YouTube queues stay independent; catalog autoplay is never used as a substitute.
+  if (isYouTubeSong(seedSong)) {
+    const used = new Set(currentQueue.map((song) => song.id));
+    return (await relatedYouTubeSongs(seedSong, signal)).filter((song) => !used.has(song.id)).slice(0, limit);
+  }
 
   let mode = explicitMode;
   if (!mode) {
