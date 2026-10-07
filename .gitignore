@@ -12,6 +12,8 @@ expo-env.d.ts
 
 # Native
 ios/
+# Re-include plugin iOS source files (needed for prebuild on CI)
+!plugins/**/ios/
 # android/ - Commented out to allow committing android directory for EAS builds
 android/build/
 android/app/build/
