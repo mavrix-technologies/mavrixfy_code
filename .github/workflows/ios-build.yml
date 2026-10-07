@@ -44,7 +44,7 @@ jobs:
 
       - name: Prebuild iOS
         if: steps.cache-prebuild.outputs.cache-hit != 'true'
-        run: npx expo prebuild --platform ios --clean
+        run: npx expo prebuild --platform ios --clean --no-install
 
       - name: Patch Podfile for XCode compatibility
         run: |

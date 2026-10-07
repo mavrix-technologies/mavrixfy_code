@@ -19,7 +19,11 @@ function fixture(overrides = {}, platform = "android", installed = true) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   vm.runInNewContext(code, { module, exports: module.exports, setTimeout, clearTimeout, Date: { now: () => now },
-    require: name => { if (name === "react-native") return { Platform: { OS: platform }, NativeModules: installed ? { MavrixfyYouTube: native } : {} }; throw new Error(name); } });
+    require: name => {
+      if (name === "react-native") return { Platform: { OS: platform } };
+      if (name === "./SharedYouTubeTransport") return { sharedYouTubeTransport: native };
+      throw new Error(name);
+    } });
   return { ...module.exports, calls, cancelled, rejected, advance: ms => now += ms };
 }
 test("YouTube search keeps provider-qualified IDs and playlist results without a JioSaavn conversion", async () => {
@@ -44,10 +48,10 @@ test("iOS uses the same separate catalog, playlist IDs and stream descriptors", 
   assert.equal(stream.headers.Referer, "https://www.youtube.com/");
 });
 
-test("an iOS build without the native module stays unavailable; web is unsupported", async () => {
+test("iOS without a custom extractor supports shared search; web is unsupported", async () => {
   const missing = fixture({}, "ios", false);
-  assert.equal(missing.youTubeAvailable(), false);
-  await assert.rejects(missing.searchYouTubeMusic("song", "all"), /updated native app build/);
+  assert.equal(missing.youTubeAvailable(), true);
+  assert.equal((await missing.searchYouTubeMusic("song", "all")).songs[0].source, "youtube");
   assert.equal(fixture({}, "web").youTubeAvailable(), false);
 });
 test("stream requests coalesce and near-expiry audio is resolved again", async () => {
@@ -74,7 +78,7 @@ test("playlist continuation accumulates tracks and rejects incomplete pages", as
   const broken = fixture({ playlist: async () => { if (++count === 3) return { songs: [track], cursor: "next" }; throw new Error("page failed"); } });
   await assert.rejects(broken.loadYouTubePlaylist("youtube_playlist_PLabc"), /page failed/);
 });
-test("aborted searches cancel their native work", async () => {
+test("aborted searches cancel their transport request", async () => {
   const f = fixture({ search: () => new Promise(() => {}) });
   const controller = new AbortController();
   const search = f.searchYouTubeMusic("song", "songs", controller.signal);
@@ -131,4 +135,58 @@ test("a local YouTube audio file does not require network extraction", async () 
   const f = playerFixture();
   await f.StandardAudioPlayer.setQueue([{ id: "youtube_abcdefghijk", source: "youtube", url: "file:///music/song.m4a" }]);
   assert.equal((await f.StandardAudioPlayer.getActiveTrack()).url, "file:///music/song.m4a");
+});
+
+test("iPhone Expo Go can import player state without installing the custom JSI audio module", () => {
+  const f = playerFixture({ platform: "ios", expoGo: true });
+  assert.equal(typeof f.StandardAudioPlayer.getPlaybackState, "function");
+});
+
+test("changing YouTube quality resolves a new descriptor rather than reusing medium", async () => {
+  const f = fixture(); const song = f.normalizeYouTubeTrack(track);
+  const medium = await f.resolveYouTubeStream(song, "medium");
+  const low = await f.resolveYouTubeStream(song, "low");
+  assert.notEqual(medium.url, low.url);
+  assert.equal(f.peekYouTubeStream(song).requestedQuality, "low");
+});
+
+test("quality invalidation does not blacklist a healthy YouTube client", async () => {
+  const f = fixture(); const song = f.normalizeYouTubeTrack(track);
+  await f.resolveYouTubeStream(song);
+  f.invalidateYouTubeStream(song);
+  assert.equal(f.peekYouTubeStream(song), undefined);
+  assert.equal(f.rejected.length, 0);
+  await f.resolveYouTubeStream(song, "high");
+  assert.equal(f.calls.length, 2);
+});
+
+test("late older quality cannot overwrite the active YouTube descriptor", async () => {
+  const completions = {};
+  const f = fixture({ resolveStream: (videoId, quality) => new Promise(resolve => {
+    completions[quality] = () => resolve({ videoId, url: `https://media.example/${quality}`,
+      expiresAt: 2000000, headers: { profile: quality }, requestedQuality: quality });
+  }) });
+  const song = f.normalizeYouTubeTrack(track);
+  const medium = f.resolveYouTubeStream(song, "medium");
+  const high = f.resolveYouTubeStream(song, "high");
+  completions.high(); await high;
+  completions.medium(); await medium;
+  assert.equal(f.peekYouTubeStream(song).requestedQuality, "high");
+});
+
+test("rejecting a pending YouTube descriptor prevents it from refilling the cache", async () => {
+  let complete;
+  const f = fixture({ resolveStream: videoId => new Promise(resolve => { complete = () => resolve({
+    videoId, url: "https://media.example/old", expiresAt: 2000000, headers: {},
+  }); }) });
+  const song = f.normalizeYouTubeTrack(track);
+  const pending = f.resolveYouTubeStream(song);
+  f.rejectYouTubeStream(song); complete();
+  await assert.rejects(pending, /superseded/);
+  assert.equal(f.peekYouTubeStream(song), undefined);
+});
+
+test("repeated playlist continuation fails instead of looping", async () => {
+  const f = fixture({ playlist: async () => ({ songs: [track], cursor: "repeated" }) });
+  await assert.rejects(f.loadYouTubePlaylist("youtube_playlist_PLabc"), /repeated page/);
 });

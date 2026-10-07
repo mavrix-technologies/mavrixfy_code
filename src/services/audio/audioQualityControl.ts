@@ -144,12 +144,9 @@ export function useAudioQualityControl({
             }
           });
         } else if (canUseLightweightAudioFallback) {
-          await ExpoAvPlayer.loadAndPlay(newAudioUrl, currentSongRef.current, shouldPlay);
-          if (!isCurrent()) return;
           const positionSec = Math.max(0, positionSecondsRef.current);
-          if (positionSec > 0) {
-            await ExpoAvPlayer.seekTo(positionSec);
-          }
+          await ExpoAvPlayer.loadAndPlay(newAudioUrl, resolvedSong, shouldPlay, positionSec);
+          if (!isCurrent()) return;
           if (!shouldPlay()) {
             try { ExpoAvPlayer.pause(); } catch {}
           }

@@ -1,4 +1,4 @@
-import { isYouTubeSong } from "@/services/youtube/YouTubeMusic";
+import { isYouTubeSong, peekYouTubeStream, youTubePlaybackErrorMessage } from "@/services/youtube/YouTubeMusic";
 import { getSettings } from "@/lib/storage";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
@@ -181,6 +181,7 @@ export function useAudioPlaybackCommands({
         isPlaying: true,
         isLoading: true,
         isBuffering: false,
+        error: null,
       });
 
       // Proactively fetch and append similar songs if queue is near end
@@ -190,12 +191,13 @@ export function useAudioPlaybackCommands({
 
       // 2. Offload persistence completely off the critical tap path
       setTimeout(() => {
+        if (reqId !== playRequestIdRef.current) return;
         playerPersistenceService.addRecentlyPlayed(targetSong).catch(() => {});
         playerPersistenceService.savePlayerState({
           currentSong: targetSong,
           queue: q,
           queueIndex: targetIndex,
-          positionSeconds: 0,
+          positionSeconds: Math.max(0, positionSecondsRef.current),
           updatedAt: Date.now(),
         }).catch(() => {});
       }, 800);
@@ -205,10 +207,11 @@ export function useAudioPlaybackCommands({
         if (!streamUrlCache.current.has(targetSong.id) && isYouTubeSong(targetSong)) {
           void resolvePlaybackUrlCached(targetSong).catch(() => null);
         }
+        let resolutionTimer: ReturnType<typeof setTimeout> | undefined;
         const audioUrl = await Promise.race([
           resolvePlaybackUrlCached(targetSong),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), isYouTubeSong(targetSong) ? 27000 : 12000)),
-        ]);
+          new Promise<null>((resolve) => { resolutionTimer = setTimeout(() => resolve(null), isYouTubeSong(targetSong) ? 27000 : 12000); }),
+        ]).finally(() => clearTimeout(resolutionTimer));
         if (reqId !== playRequestIdRef.current) return;
 
         if (!audioUrl) {
@@ -250,7 +253,7 @@ export function useAudioPlaybackCommands({
             // Fast path: native queue already synchronized -> skip + play directly
             if (!isNewQueue && isNativeQueueSyncedRef?.current) {
               try {
-                await TrackPlayer!.skip(targetIndex);
+                await TrackPlayer!.skip(targetIndex, initialPos);
                 if (reqId !== playRequestIdRef.current) return;
                 if (desiredPlayStateRef.current === false) await TrackPlayer!.pause();
                 else await TrackPlayer!.play();
@@ -321,13 +324,15 @@ export function useAudioPlaybackCommands({
           prefetchAdjacentTrackStreams(q, targetIndex);
         } else if (canUseLightweightAudioFallback) {
           if (reqId !== playRequestIdRef.current) return;
-          await ExpoAvPlayer.loadAndPlay(audioUrl, targetSong, () =>
+          await ExpoAvPlayer.loadAndPlay(audioUrl, resolvedSong, () =>
             reqId === playRequestIdRef.current && desiredPlayStateRef.current !== false
-          );
+          , initialPos);
+          if (reqId === playRequestIdRef.current) prefetchAdjacentTrackStreams(q, targetIndex);
         }
       } catch (error) {
         if (reqId !== playRequestIdRef.current) return;
-        logger.error("[Player] playSong failed", error);
+        const notice = isYouTubeSong(targetSong) ? youTubePlaybackErrorMessage(error) : "Could not start playback.";
+        logger.error("[Player] playSong failed", isYouTubeSong(targetSong) ? { songId: targetSong.id, message: notice } : error);
         if (pendingPlayRequestRef.current?.id === reqId) {
           pendingPlayRequestRef.current = null;
         }
@@ -337,11 +342,12 @@ export function useAudioPlaybackCommands({
         playbackLoadingRef.current = false;
         setPlaybackLoading(false);
         updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
-        showPlaybackNotice("Could not start playback.");
+        showPlaybackNotice(notice);
       } finally {
         if (reqId === playRequestIdRef.current) {
           pendingPlayRequestRef.current = null;
           playbackLoadingRef.current = false;
+          setPlaybackLoading(false);
           updatePlaybackEngineSnapshot({ isLoading: false });
         }
       }
@@ -415,6 +421,14 @@ export function useAudioPlaybackCommands({
         updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
         return;
       }
+      // Signed URLs can expire while paused. Keep local downloads independent
+      // and reload remote YouTube audio at the exact saved position.
+      const activeSong = currentSongRef.current;
+      if (nextPlayState && isYouTubeSong(activeSong) &&
+        !/^(file|content):\/\/|^\//i.test(activeSong.audioUrl || "") && !peekYouTubeStream(activeSong)) {
+        await playSong(activeSong, queueRef.current, Math.max(0, positionSecondsRef.current));
+        return;
+      }
       if (TrackPlayer) {
         if (nextPlayState) {
           setIsPlaying(true);
@@ -469,7 +483,9 @@ export function useAudioPlaybackCommands({
         }
       } else if (canUseLightweightAudioFallback) {
         if (nextPlayState) {
-          if (ExpoAvPlayer.isLoaded()) {
+          if (ExpoAvPlayer.isEnded()) {
+            await playSong(currentSongRef.current, queueRef.current, 0);
+          } else if (ExpoAvPlayer.isLoaded()) {
             ExpoAvPlayer.play();
             setIsPlaying(true);
             isPlayingRef.current = true;

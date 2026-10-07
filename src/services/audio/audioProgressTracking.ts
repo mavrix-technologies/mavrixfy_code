@@ -1,5 +1,6 @@
 import type { Song } from "@/lib/musicData";
 import { logger } from "@/lib/logger";
+import { isYouTubeSong, rejectYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import {
@@ -29,7 +30,7 @@ interface UseAudioProgressTrackingOptions {
   canUseLightweightAudioFallback: boolean;
   TrackPlayer: any;
   nextSongRef: MutableRefObject<() => void>;
-  playSongRef: MutableRefObject<(song: Song, queue?: Song[]) => Promise<void> | void>;
+  playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number) => Promise<void> | void>;
 }
 
 export function useAudioProgressTracking({
@@ -50,6 +51,7 @@ export function useAudioProgressTracking({
   const positionSecondsRef = useRef(0);
   const durationSecondsRef = useRef(0);
   const seekOverrideRef = useRef<SeekOverride>(null);
+  const fallbackRetryRef = useRef<{ songId: string; at: number } | null>(null);
 
   const updateProgressStore = useCallback((pos: number, dur: number) => {
     positionSecondsRef.current = pos;
@@ -144,6 +146,27 @@ export function useAudioProgressTracking({
     if (canUseLightweightAudioFallback) {
       ExpoAvPlayer.onStatusUpdate((status) => {
         if (!mounted) return;
+        if (status.error) {
+          const song = currentSongRef.current;
+          const retry = fallbackRetryRef.current;
+          if (song && isYouTubeSong(song) && desiredPlayStateRef.current !== false &&
+            (retry?.songId !== song.id || Date.now() - retry.at > 60000)) {
+            fallbackRetryRef.current = { songId: song.id, at: Date.now() };
+            const resumePosition = positionSecondsRef.current;
+            rejectYouTubeStream(song);
+            void playSongRef.current(song, queueRef.current, resumePosition);
+          } else {
+            ExpoAvPlayer.pause();
+            desiredPlayStateRef.current = false;
+            isPlayingRef.current = false;
+            playbackLoadingRef.current = false;
+            pendingPlayRequestRef.current = null;
+            setIsPlaying(false);
+            updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false,
+              error: "Audio playback failed. Tap Play to retry." });
+          }
+          return;
+        }
         if (typeof status.position === "number") {
           setNativePosition(status.position);
         }
@@ -151,7 +174,7 @@ export function useAudioProgressTracking({
           setNativeDuration(status.duration);
         }
         if (typeof status.isPlaying === "boolean") {
-          if (!status.isPlaying && (playbackLoadingRef.current || desiredPlayStateRef.current === true)) {
+          if (!status.isPlaying && !status.didJustFinish && (playbackLoadingRef.current || desiredPlayStateRef.current === true)) {
             return;
           }
           // expo-av can report one last playing status from the outgoing

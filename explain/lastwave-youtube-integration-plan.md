@@ -1,5 +1,7 @@
 # LastWave song flow and Mavrixfy integration plan
 
+Current follow-up: the main app now uses a shared TypeScript YouTube transport on Android/iOS. The native recommendation below is historical. See [current flow, fixes and release blockers](youtube-music-implementation.md#current-shared-implementation--7-october-2026). Automated checks and both Hermes exports pass, but current live playback is blocked by YouTube requiring sign-in; actual iPhone/background verification remains pending.
+
 Reviewed 7 October 2026. The review below records the original Android design. YouTube Music support now has Android and iOS native implementations. Android live playback/seek and an Apple iOS simulator build have passed; live iPhone playback still needs device verification. See [implementation and validation](youtube-music-implementation.md). This review uses the active `LastWave-Native/app` sources, not the duplicate project under `reference zip`. Existing uncommitted app changes were preserved.
 
 ## Recommendation

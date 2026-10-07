@@ -1,20 +1,24 @@
 import type { Song } from "@/lib/musicData";
 import { resolveYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { Platform } from "react-native";
+import { isRunningInExpoGo } from "expo";
 import React, { useEffect, useRef, useSyncExternalStore } from "react";
-import {
-  Audio,
-  AudioContext,
-  AudioManager,
-  PlaybackNotificationManager,
-  useAudioTagContext,
-  type AudioTagHandle,
-  type BiquadFilterNode,
-  type GainNode,
-  type MediaElementAudioSourceNode,
+import type {
+  AudioContext as NativeAudioContext,
+  AudioTagHandle,
+  BiquadFilterNode,
+  GainNode,
+  MediaElementAudioSourceNode,
 } from "react-native-audio-api";
 import { logger } from "@/lib/logger";
 import { calculateEqHeadroomDb, EQ_FREQUENCIES_HZ } from "./equalizerDsp";
+
+// Importing this package installs its JSI module immediately. Expo Go does not
+// contain that module, so its expo-audio path must never evaluate this import.
+const { Audio, AudioContext, AudioManager, PlaybackNotificationManager, useAudioTagContext } =
+  (!isRunningInExpoGo() && Platform.OS !== "web"
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    ? require("react-native-audio-api") : {}) as typeof import("react-native-audio-api");
 
 // Playback and effects share one documented AudioContext. A media source can
 // enter this graph only when the Audio component owns the stream.
@@ -105,7 +109,7 @@ const storeListeners = new Set<() => void>();
 const eventListeners = new Map<string, Set<(payload: any) => void>>();
 let audioHandle: AudioTagHandle | null = null;
 let isSourceLoaded = false;
-let context: AudioContext | null = null;
+let context: NativeAudioContext | null = null;
 
 // Native suspend/resume may complete out of order. Reconcile against live intent
 // after each completion so an old Pause cannot silence a newer Play (or vice versa).
@@ -186,7 +190,7 @@ function handlePlaybackError(error: unknown) {
   emit(Event.PlaybackError, {
     trackId: activeTrack()?.id,
     shouldResume,
-    message: error instanceof Error ? error.message : String(error),
+    message: (error instanceof Error ? error.message : String(error)).replace(/https?:\/\/[^\s"']+/g, "[URL]"),
   });
 }
 function updateNotification() {
@@ -251,7 +255,7 @@ async function select(index: number, initialPosition = 0) {
     const song = { id: track.id, source: "youtube", youtubeVideoId: track.youtubeVideoId } as Song;
     let stream;
     try {
-      stream = await resolveYouTubeStream(song);
+      stream = await resolveYouTubeStream(song, typeof track.youtubeRequestedQuality === "string" ? track.youtubeRequestedQuality : undefined);
     } catch (error) {
       if (version !== selectionVersion || playback.queue[index]?.id !== track.id) return;
       // Recovery belongs to the requested track, including automatic queue advances.
@@ -339,7 +343,7 @@ async function select(index: number, initialPosition = 0) {
   updateNotification();
 }
 
-function installGraph(ctx: AudioContext) {
+function installGraph(ctx: NativeAudioContext) {
   filters = EQ_FREQUENCIES_HZ.map((frequency) => {
     const node = ctx.createBiquadFilter();
     node.type = "peaking";
@@ -755,7 +759,7 @@ const StandbyAudioLoader = React.memo(function StandbyAudioLoader({
 }: {
   standbyUrl: string;
   standbySource: typeof standbySnapshot.source;
-  audioCtx: AudioContext;
+  audioCtx: NativeAudioContext;
 }) {
   const handleRef = useRef<AudioTagHandle>(null);
 
@@ -803,7 +807,7 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
   audioCtx,
 }: {
   current: typeof sourceSnapshot;
-  audioCtx: AudioContext;
+  audioCtx: NativeAudioContext;
 }) {
   const handleRef = useRef<AudioTagHandle>(null);
   const isCurrentSource = () =>

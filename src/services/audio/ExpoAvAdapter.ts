@@ -12,6 +12,7 @@ import { createAudioPlayer,setAudioModeAsync } from "expo-audio";
 let activePlayer: AudioPlayer | null = null;
 let standbyPlayer: AudioPlayer | null = null;
 let standbyUrl: string | null = null;
+let standbyGeneration = 0;
 let seekBlockUntil = 0;
 let seekResetTimer: ReturnType<typeof setTimeout> | null = null;
 type PlayerSubscription = {
@@ -23,6 +24,8 @@ type PlayerSubscriptions = {
 };
 
 const playerSubscriptions = new WeakMap<AudioPlayer, PlayerSubscriptions>();
+const cancelReadyWait = new WeakMap<AudioPlayer, () => void>();
+const initialSeekPending = new WeakSet<AudioPlayer>();
 
 // Monotonically increasing request id.
 // Every loadAndPlay increments this. Callbacks from older players are dropped.
@@ -30,6 +33,7 @@ let generation = 0;
 
 // audioMode only needs to be set once per app session.
 let audioModeSet = false;
+let audioModePending: Promise<void> | null = null;
 
 // ─── callbacks ────────────────────────────────────────────────────────────────
 
@@ -38,6 +42,9 @@ type StatusCallback = (s: {
   position: number;
   duration: number;
   didJustFinish: boolean;
+  error?: string | null;
+  isLoaded?: boolean;
+  isBuffering?: boolean;
 }) => void;
 
 let statusCb: StatusCallback | null = null;
@@ -55,6 +62,8 @@ function clearListeners(): void {
  */
 function killPlayer(p: AudioPlayer | null): void {
   if (!p) return;
+  cancelReadyWait.get(p)?.();
+  cancelReadyWait.delete(p);
   try { (p as any).clearLockScreenControls?.(); } catch {}
   try { (p as any).setActiveForLockScreen?.(false); } catch {}
   const subscriptions = playerSubscriptions.get(p);
@@ -74,27 +83,31 @@ function clearSeekResetTimer(): void {
 
 async function ensureAudioMode(): Promise<void> {
   if (audioModeSet) return;
-  try {
+  if (audioModePending) return audioModePending;
+  audioModePending = (async () => {
     await setAudioModeAsync({
       playsInSilentMode: true,
       shouldPlayInBackground: true,
       interruptionMode: "doNotMix",
     });
     audioModeSet = true;
-  } catch {
-    // Non-fatal
-  }
+  })().finally(() => { audioModePending = null; });
+  return audioModePending;
 }
 
 function attachListener(p: AudioPlayer, gen: number): void {
   const status = p.addListener("playbackStatusUpdate", (status) => {
     if (gen !== generation || !statusCb) return;
+    if (initialSeekPending.has(p) && !status.error) return;
     if (Date.now() < seekBlockUntil && !status.didJustFinish) return;
     statusCb({
       isPlaying: status.playing,
       position: status.currentTime ?? 0,
       duration: status.duration ?? 0,
       didJustFinish: status.didJustFinish ?? false,
+      error: status.error,
+      isLoaded: status.isLoaded,
+      isBuffering: status.isBuffering,
     });
   });
 
@@ -109,6 +122,7 @@ function attachListener(p: AudioPlayer, gen: number): void {
  */
 export async function prepareStandby(url: string, song?: Partial<Song> | null): Promise<void> {
   if (!url || standbyUrl === url) return;
+  const request = ++standbyGeneration;
   if (standbyPlayer) {
     killPlayer(standbyPlayer);
     standbyPlayer = null;
@@ -116,6 +130,7 @@ export async function prepareStandby(url: string, song?: Partial<Song> | null): 
   }
   try {
     await ensureAudioMode();
+    if (request !== standbyGeneration) return;
     const p = createAudioPlayer({ uri: url, headers: song?.playbackHeaders }, { updateInterval: 500 });
     standbyPlayer = p;
     standbyUrl = url;
@@ -124,13 +139,14 @@ export async function prepareStandby(url: string, song?: Partial<Song> | null): 
   }
 }
 
-export async function loadAndPlay(url: string, song?: Partial<Song> | null, shouldPlay: () => boolean = () => true): Promise<void> {
+export async function loadAndPlay(url: string, song?: Partial<Song> | null, shouldPlay: () => boolean = () => true, initialPosition = 0): Promise<void> {
   if (!url) {
     throw new Error("No audio URL provided");
   }
 
   // 1. Bump generation and capture the snapshot for this call.
   generation += 1;
+  standbyGeneration += 1;
   const myGen = generation;
 
   let p: AudioPlayer;
@@ -183,6 +199,7 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
   // 3. Register as the active player, wire events, start playback.
   seekBlockUntil = 0;
   activePlayer = p;
+  if (Number.isFinite(initialPosition) && initialPosition > 0) initialSeekPending.add(p);
   attachListener(p, myGen);
 
   if (typeof (p as any).setActiveForLockScreen === "function") {
@@ -206,7 +223,38 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
     }
   }
 
-  if (shouldPlay()) p.play();
+  // A recovered stream must be ready and seeked before output begins. Never
+  // briefly play the opening of a track that should resume halfway through.
+  if (Number.isFinite(initialPosition) && initialPosition > 0) {
+    let subscription: PlayerSubscription | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      if (!p.isLoaded) {
+        await new Promise<void>((resolve, reject) => {
+          cancelReadyWait.set(p, resolve);
+          subscription = p.addListener("playbackStatusUpdate", status => {
+            if (myGen !== generation) resolve();
+            else if (status.error) reject(new Error("Audio could not load for resume"));
+            else if (status.isLoaded) resolve();
+          });
+          timer = setTimeout(() => reject(new Error("Audio resume timed out")), 12000);
+        });
+      }
+      if (myGen !== generation || activePlayer !== p) return;
+      await p.seekTo(initialPosition);
+    } catch (error) {
+      if (myGen !== generation) return;
+      activePlayer = null;
+      killPlayer(p);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      subscription?.remove?.();
+      cancelReadyWait.delete(p);
+      initialSeekPending.delete(p);
+    }
+  }
+  if (myGen === generation && activePlayer === p && shouldPlay()) p.play();
 }
 
 export function play(): void {
@@ -219,6 +267,7 @@ export function pause(): void {
 
 function stop(): void {
   generation += 1;
+  standbyGeneration += 1;
   const p = activePlayer;
   activePlayer = null;
   clearSeekResetTimer();
@@ -251,3 +300,6 @@ export async function seekTo(seconds: number): Promise<void> {
 }
 
 export function isLoaded(): boolean { return activePlayer !== null; }
+export function isEnded(): boolean {
+  return !!activePlayer && activePlayer.duration > 0 && activePlayer.currentTime >= activePlayer.duration - 0.1;
+}

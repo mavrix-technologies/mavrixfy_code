@@ -6,7 +6,7 @@ const test = require("node:test");
 const ts = require("typescript");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture({ youtubeResolver = async () => { throw new Error("Unexpected YouTube resolution"); }, platform = "android" } = {}) {
+function fixture({ youtubeResolver = async () => { throw new Error("Unexpected YouTube resolution"); }, platform = "android", expoGo = false } = {}) {
   const controls = new Map();
   const system = new Map();
   const notifications = [];
@@ -97,7 +97,11 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
       if (name.endsWith("YouTubeMusic")) return { resolveYouTubeStream: youtubeResolver };
       if (name === "react") return react;
       if (name === "react-native") return { Platform: { OS: platform } };
-      if (name === "react-native-audio-api") return audio;
+      if (name === "expo") return { isRunningInExpoGo: () => expoGo };
+      if (name === "react-native-audio-api") {
+        if (expoGo) throw new Error("Expo Go must not evaluate the custom native audio module");
+        return audio;
+      }
       if (name.endsWith("equalizerDsp"))
         return {
           calculateEqHeadroomDb: () => 0,
@@ -110,7 +114,7 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
     },
   });
   const engine = module.exports;
-  engine.StandardAudioRenderer();
+  if (!expoGo) engine.StandardAudioRenderer();
   return {
     ...engine,
     contextCalls,

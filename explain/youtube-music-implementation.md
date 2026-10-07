@@ -1,6 +1,50 @@
 # YouTube Music implementation
 
+## Current shared implementation — 7 October 2026
+
+The main app now lazily loads `src/services/youtube/SharedYouTubeTransport.ts` through `YouTubeMusic.ts`. Both Android and iOS use the same TypeScript catalog/extraction service (`youtubei.js` 18.1.0 with Jinter for Hermes player transforms). It does not call the older Kotlin/Swift extractor bridges. Those sources/plugins remain in the repository/build configuration for reference; they are not a runtime fallback.
+
+Current call flow:
+
+1. Search selects an explicit provider. YouTube `searchYouTubeMusic` calls filtered `music.search` for songs/playlists and produces provider-qualified IDs. The provider is available on Android/iOS including Expo Go. Web extraction is unsupported.
+2. Playlist `loadYouTubePlaylist` calls `music.getPlaylist`, then `getContinuation`. Continuations are bounded, expire, belong to their playlist, and repeated cursors fail. Only a complete result reaches the existing playlist cache. Related/autoplay uses YouTube `music.getUpNext(videoId, true)`.
+3. Playback requests the exact video via `getBasicInfo`, selects an audio-only AAC format, deciphers it with the session player, and carries matching client headers plus the playback nonce. Profiles are VISIONOS, ANDROID_VR, IOS, WEB; these are alternatives within the same YouTube video. There is no JioSaavn song matching or fallback.
+4. An unrestricted HEAD request checks availability without downloading the song first. Tiny ranged GET success is insufficient: earlier live testing found ranged success with full-playback 403. The new HEAD path has automated coverage; current upstream sign-in restrictions prevent its live CDN confirmation in this follow-up.
+5. The descriptor cache requires two minutes of remaining validity and the requested quality. Requests coalesce by song/quality. Rejected and superseded responses cannot refill the active cache; an older quality cannot overwrite newer metadata. Timeouts/cancellation stop further transport stages and suppress late results. Existing library API requests have per-fetch timeouts; cancellation cannot immediately abort every library-owned fetch.
+6. `PlayerPlaybackResolver` passes descriptor headers/expiry/quality to the existing player. Native builds retain `StandardAudioPlayer`, its audio graph, interruption handling and remote media controls. Expo Go uses `ExpoAvAdapter` (expo-audio). Resuming after expiry reloads at the saved position. Expo recovery/quality reload waits for readiness and seeks **before** play, observes the latest pause intent, and cancels outgoing waits.
+7. Recovery rejects the failed profile for a minute and retries the same song once per minute, preserving position. Failure stops with a retry state rather than consuming the queue or changing providers. Standby prefetch carries resolved headers; pending standby work cannot recreate a player after destroy. Finished Expo audio can be replayed from zero. A new play clears stale error state and stale requests cannot overwrite persisted position.
+
+Background configuration explicitly enables expo-audio background playback. The existing audio-session, Android notification service and iOS audio background mode remain responsible for platform behavior. Lock-screen metadata includes title/artist/artwork/duration. See [Expo's background playback requirements](https://docs.expo.dev/versions/latest/sdk/audio/). A successful JS export is not a physical-device background certification.
+
+### Current verification and release status
+
+- Repository regression suite: **79 passed, 0 failed**. Covers native media controls/interruption intent, queues/progress, quality races, YouTube provider separation, expiry/cancellation, playlist continuations, Expo seek-before-play, headers, standby teardown and HEAD/client-rejection logic. A quality change invalidates the cache without blacklisting a healthy client. An iPhone Expo Go import check proves the custom JSI module is not evaluated during player import.
+- Main-app TypeScript check: passed. Focused ESLint: no errors; two existing effect-dependency/disable warnings remain in `audioSyncListeners.ts`.
+- Main-app Android and iOS Hermes exports: passed (3,727 Android modules; 3,471 iOS modules in the final export).
+- Shared live catalog check: 20 songs, 20 playlists; first playlist 14 songs. Majboor (Unplugged) resolves to `dLAYG-TjnVQ`.
+- **Current live playback is blocked:** player endpoints return “Sign in to confirm you’re not a bot” on this connection for all four clients. The earlier standalone prototype now returns the same restriction. No claim is made that the current main-app shared implementation plays this song live or achieves zero startup delay.
+- The previous prototype's Android Expo Go AAC playback, seek and pause passed before this restriction. That result is historical and does not certify this main-app change. Actual iPhone execution, long background playback, remote commands, interruptions and stream-expiry recovery remain unverified.
+- LastWave's Android-only implementation additionally has Media3/disk caching, wake/Wi-Fi locks, casting, lossless upgrades and other features. This change adopts its relevant exact-video, descriptor, stale-request and position-preserving recovery rules; it is not feature parity with every LastWave subsystem.
+
+This is **not yet production-certified**. Release requires live main-app playback/seek/pause/resume tests once the upstream restriction clears, plus physical Android/iPhone background, lock-screen/Bluetooth controls, interruption and expired-stream checks. Private/removed/region-restricted or login-required content may remain unavailable.
+
+Reproduce the live check without exposing signed media URLs:
+
+```powershell
+node scripts/youtube-shared.probe.mjs "Majboor unplugged" dLAYG-TjnVQ
+npm test
+npm run typecheck
+```
+
+For the main app's free foreground Expo Go check, run `npm run start:expo-go -- --tunnel`, open its QR/link in iPhone Expo Go, and select YouTube Music in Search. The script now explicitly selects Expo Go instead of accidentally generating a development-client link. This does not remove the current upstream playback restriction or certify standalone background playback.
+
+## Historical native implementation — superseded at runtime
+
+The remaining sections record earlier native builds and checks. Their native-module requirement and validation numbers describe that earlier version, not the shared implementation above.
+
 Implemented 7 October 2026, following the LastWave source review. Existing karaoke, lyrics, and audio changes in the workspace were preserved.
+
+Earlier TypeScript feasibility prototype: [Expo Go instructions and historical playback results](../prototypes/youtube-expo-go/README.md). Its original Android check passed before the current upstream sign-in restriction. The main app now has its own shared transport described above; the prototype remains a separate test harness.
 
 ## Behavior
 

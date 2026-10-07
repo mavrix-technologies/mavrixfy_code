@@ -218,6 +218,7 @@ export function useAudioSyncListeners({
         if (error?.trackId && failedSong?.id !== error.trackId) return;
         if (failedSong && isYouTubeSong(failedSong) && error?.shouldResume &&
           desiredPlayStateRef.current !== false && Date.now() - (youtubeRetryAt.current.get(failedSong.id) || 0) > 60000) {
+          if (youtubeRetryAt.current.size >= 60) youtubeRetryAt.current.delete(youtubeRetryAt.current.keys().next().value!);
           youtubeRetryAt.current.set(failedSong.id, Date.now());
           rejectYouTubeStream(failedSong);
           const resumePosition = positionSecondsRef.current;

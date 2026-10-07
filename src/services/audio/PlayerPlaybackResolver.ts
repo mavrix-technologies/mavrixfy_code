@@ -1,4 +1,4 @@
-import { isYouTubeSong, peekYouTubeStream, resolveYouTubeStream, youTubeSongWithStream, rejectYouTubeStream } from "@/services/youtube/YouTubeMusic";
+import { isYouTubeSong, peekYouTubeStream, resolveYouTubeStream, youTubeSongWithStream, invalidateYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { getAccountScope } from "@/lib/accountScope";
 import { getLocalPlaybackUrl } from "@/lib/downloads/downloadManager";
 import { logger } from "@/lib/logger";
@@ -136,6 +136,7 @@ export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?:
     source: song.source,
     youtubeVideoId: song.youtubeVideoId || song.videoId,
     youtubeAudioExpiresAt: song.youtubeAudioExpiresAt,
+    youtubeRequestedQuality: isYouTubeSong(song) ? peekYouTubeStream(song)?.requestedQuality : undefined,
     accountId: getAccountScope().accountId ?? "guest",
     url: audioUrl,
     title,
@@ -282,7 +283,7 @@ export async function resolvePlaybackUrlWithDetails(
 
   // YouTube owns resolution and quality reporting; a failure never enters another provider.
   if (isYouTubeSong(song)) {
-    if (forcedQuality) rejectYouTubeStream(song);
+    if (forcedQuality) invalidateYouTubeStream(song);
     const stream = await resolveYouTubeStream(song, targetQuality);
     const bitrate = Math.round(stream.bitrate / 1000);
     return { url: stream.url, qualityState: { requested: effectiveRequested,

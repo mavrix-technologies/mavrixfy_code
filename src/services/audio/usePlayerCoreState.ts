@@ -9,7 +9,7 @@ import { useCallback,useEffect,useRef,useState } from "react";
 import { useAudioNativeQueueLane } from "./audioNativeQueueLane";
 import { useStartupPlaybackReconcile } from "./audioStartupReconcile";
 import { updatePlaybackEngineSnapshot } from "./PlaybackEngine";
-import { resolvePlaybackUrlWithDetails, songToTrack } from "./PlayerPlaybackResolver";
+import { resolvePlaybackUrlWithDetails, songToTrack, withResolvedPlaybackUrl } from "./PlayerPlaybackResolver";
 import { fetchAutoplayRecommendations } from "./smartAutoplayService";
 import { StandardAudioPlayer } from "./StandardAudioPlayer";
 import * as ExpoAvPlayer from "./ExpoAvAdapter";
@@ -180,7 +180,7 @@ export function usePlayerCoreState({
               if (TrackPlayer && typeof TrackPlayer.updateMetadataForTrack === "function") {
                 void TrackPlayer.updateMetadataForTrack(activeIndex + 1, songToTrack(nextItem, resolvedUrl));
               }
-              void ExpoAvPlayer.prepareStandby(resolvedUrl, nextItem);
+              if (!TrackPlayer) void ExpoAvPlayer.prepareStandby(resolvedUrl, withResolvedPlaybackUrl(nextItem, resolvedUrl));
             }
           })
           .catch(() => null);
