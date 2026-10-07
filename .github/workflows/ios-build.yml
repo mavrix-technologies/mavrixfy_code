@@ -181,7 +181,9 @@ jobs:
           plutil -lint "$app_path/Info.plist"
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_path/Info.plist")
           test -f "$app_path/$executable"
-          lipo -verify_arch arm64 "$app_path/$executable"
+          # lipo's -verify_arch consumes all following arguments as architectures.
+          # The executable must come before that operation.
+          xcrun lipo "$app_path/$executable" -verify_arch arm64
           staging="$RUNNER_TEMP/mavrixfy-unsigned-ipa"
           mkdir -p "$staging/Payload"
           ditto "$app_path" "$staging/Payload/Mavrixfy.app"

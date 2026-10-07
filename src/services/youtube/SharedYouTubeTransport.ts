@@ -1,7 +1,8 @@
 import "./runtime";
-import { Constants, Innertube, Platform, YTNodes } from "youtubei.js/react-native";
+import { Constants, Innertube, Platform, Player, YTNodes } from "youtubei.js/react-native";
+import { bestYouTubeThumbnail, youTubeArtworkUrl } from "./YouTubeArtwork";
 import { Jinter } from "jintr";
-import type { NativeTrack, PlaylistPage, YouTubeNative, YouTubeStream } from "./YouTubeMusic";
+import type { NativePlaylist, NativeTrack, PlaylistPage, YouTubeNative, YouTubeStream } from "./YouTubeMusic";
 
 // Interpret player transforms rather than asking Hermes to compile remote code.
 Platform.shim.eval = (data, env) => {
@@ -37,7 +38,13 @@ const cache = {
 let session: Promise<Innertube> | undefined;
 function youtube() {
   return session ??= Innertube.create({ lang: "en", location: "IN", cache, fetch: timedFetch,
-    enable_session_cache: false }).catch(error => { session = undefined; throw error; });
+    enable_session_cache: false, retrieve_player: false }).catch(error => { session = undefined; throw error; });
+}
+let playerRequest: Promise<void> | undefined;
+async function preparePlayer(yt: Innertube) {
+  if (yt.session.player) return;
+  await (playerRequest ??= Player.create(cache, timedFetch).then(player => { yt.session.player = player; })
+    .finally(() => { playerRequest = undefined; }));
 }
 
 const requests = new Map<string, AbortController>();
@@ -53,7 +60,7 @@ function track(item: InstanceType<typeof YTNodes.MusicResponsiveListItem>): Nati
   if (!item.id || !/^[\w-]{11}$/.test(item.id)) return;
   return { videoId: item.id, title: item.title || "YouTube song",
     artist: item.artists?.map(artist => artist.name).join(", ") || item.author?.name || "YouTube Music",
-    coverUrl: item.thumbnails.at(-1)?.url || "", duration: item.duration?.seconds || 0 };
+    coverUrl: youTubeArtworkUrl(bestYouTubeThumbnail(item.thumbnails)), duration: item.duration?.seconds || 0 };
 }
 type MusicPlaylist = Awaited<ReturnType<Innertube["music"]["getPlaylist"]>>;
 const continuations = new Map<string, { playlistId: string; page: MusicPlaylist; at: number }>();
@@ -64,7 +71,37 @@ function safeError(error: unknown) {
 }
 
 export const sharedYouTubeTransport: YouTubeNative = {
+  home(id) {
+    return request(id, async check => {
+      const yt = await youtube(); check();
+      const page = await yt.music.getHomeFeed(); check();
+      const songs: NativeTrack[] = [], playlists: NativePlaylist[] = [];
+      for (const section of page.sections || []) {
+        if (!section.is(YTNodes.MusicCarouselShelf)) continue;
+        for (const item of section.contents) {
+          if (item.is(YTNodes.MusicResponsiveListItem)) {
+            if (item.item_type !== "song" && item.item_type !== "video") continue;
+            const song = track(item); if (song) songs.push(song);
+          } else if (item.is(YTNodes.MusicTwoRowItem)) {
+            const videoId = item.endpoint.payload.videoId;
+            if ((item.item_type === "song" || item.item_type === "video") && typeof videoId === "string" && /^[\w-]{11}$/.test(videoId)) {
+              songs.push({ videoId, title: item.title.toString(),
+                artist: item.artists?.map(artist => artist.name).join(", ") || item.author?.name || "YouTube Music",
+                coverUrl: youTubeArtworkUrl(bestYouTubeThumbnail(item.thumbnail)), duration: 0 });
+            } else if (item.item_type === "playlist" && item.id) {
+              const playlistId = item.id.replace(/^VL/, "");
+              playlists.push({ id: playlistId, name: item.title.toString(), coverUrl: youTubeArtworkUrl(bestYouTubeThumbnail(item.thumbnail)),
+                songCount: 0, description: item.subtitle.toString(),
+                url: `https://music.youtube.com/playlist?list=${encodeURIComponent(playlistId)}` });
+            }
+          }
+        }
+      }
+      return { songs, playlists };
+    });
+  },
   cancel(id) { requests.get(id)?.abort(); },
+  discardPlaylistCursor(cursor) { continuations.delete(cursor); },
   rejectStream(id) {
     if (rejected.size >= 60) rejected.delete(rejected.keys().next().value!);
     rejected.set(id, Date.now());
@@ -81,7 +118,7 @@ export const sharedYouTubeTransport: YouTubeNative = {
       return {
         songs: items(songsPage).flatMap(item => { const song = track(item); return song ? [song] : []; }),
         playlists: items(playlistsPage).flatMap(item => item.id ? [{ id: item.id.replace(/^VL/, ""),
-          name: item.title || item.name || "YouTube playlist", coverUrl: item.thumbnails.at(-1)?.url || "",
+          name: item.title || item.name || "YouTube playlist", coverUrl: youTubeArtworkUrl(bestYouTubeThumbnail(item.thumbnails)),
           songCount: Number(item.item_count) || 0,
           description: item.author?.name || item.authors?.map(author => author.name).join(", ") || "YouTube Music",
           url: `https://music.youtube.com/playlist?list=${encodeURIComponent(item.id.replace(/^VL/, ""))}`,
@@ -108,8 +145,8 @@ export const sharedYouTubeTransport: YouTubeNative = {
         if (continuations.size >= 32) continuations.delete(continuations.keys().next().value!);
         continuations.set(next, { playlistId, page, at: Date.now() });
       }
-      const coverUrl = header?.is(YTNodes.MusicResponsiveHeader) ? header.thumbnail?.contents.at(-1)?.url
-        : header?.is(YTNodes.MusicDetailHeader) ? header.thumbnails.at(-1)?.url : undefined;
+      const coverUrl = header?.is(YTNodes.MusicResponsiveHeader) ? youTubeArtworkUrl(bestYouTubeThumbnail(header.thumbnail?.contents))
+        : header?.is(YTNodes.MusicDetailHeader) ? youTubeArtworkUrl(bestYouTubeThumbnail(header.thumbnails)) : undefined;
       const name = header && "title" in header ? header.title?.toString() : undefined;
       const result: PlaylistPage = { songs, cursor: next, name, coverUrl };
       return result;
@@ -122,7 +159,7 @@ export const sharedYouTubeTransport: YouTubeNative = {
       return page.contents.filterType(YTNodes.PlaylistPanelVideo).map(item => ({
         videoId: item.video_id, title: item.title.toString(),
         artist: item.artists?.map(artist => artist.name).join(", ") || item.author || "YouTube Music",
-        duration: item.duration.seconds, coverUrl: item.thumbnail.at(-1)?.url || "",
+        duration: item.duration.seconds, coverUrl: youTubeArtworkUrl(bestYouTubeThumbnail(item.thumbnail)),
       }));
     });
   },
@@ -131,6 +168,7 @@ export const sharedYouTubeTransport: YouTubeNative = {
       if (!/^[\w-]{11}$/.test(videoId)) throw new Error("Invalid YouTube video ID");
       const yt = await youtube(); check();
       const failures: string[] = [];
+      await preparePlayer(yt); check();
       for (const client of ["VISIONOS", "ANDROID_VR", "IOS", "WEB"] as const) {
         check();
         try {

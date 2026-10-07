@@ -1,7 +1,7 @@
 import DownloadButton from "@/components/DownloadButton";
 import type { Song } from "@/lib/musicData";
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import { useCallback } from "react";
 import {
 FlatList,
@@ -57,9 +57,10 @@ export function SongOptionsMainSheet({
             <View style={styles.grabber} />
             <View style={styles.songHeader}>
               {song.coverUrl ? (
-                <Image
+                <MusicArtwork
                   recyclingKey={`options-${song.id}`}
-                  source={{ uri: song.coverUrl }}
+                  uri={song.coverUrl}
+                  size={64}
                   style={styles.artwork}
                   contentFit="cover"
                 />

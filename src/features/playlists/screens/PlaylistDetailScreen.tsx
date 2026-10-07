@@ -58,6 +58,8 @@ function usePlaylistDetailView() {
 
   const {
     loading,
+    loadingMore,
+    retryLoad,
     playlistName,
     playlistCover,
     playlistDescription,
@@ -132,9 +134,9 @@ function usePlaylistDetailView() {
     return songs.some((s: Song) => s.id === currentSong.id);
   }, [currentSong, songs]);
 
-  const canRemoveSongsFromPlaylist = !params.isJioSaavnSource && (!params.isFirestoreSource || Boolean(user?.id));
+  const canRemoveSongsFromPlaylist = !params.isYouTubeSource && !params.isJioSaavnSource && (!params.isFirestoreSource || Boolean(user?.id));
   const playlistRowSource = params.isFirestoreSource ? "firestore" : "local";
-  const canEdit = !params.isJioSaavnSource && (!params.isFirestoreSource || Boolean(user?.id));
+  const canEdit = !params.isYouTubeSource && !params.isJioSaavnSource && (!params.isFirestoreSource || Boolean(user?.id));
 
   // Scroll listener for sticky cross-fade
   const isStickyVisibleRef = useRef(false);
@@ -199,15 +201,6 @@ function usePlaylistDetailView() {
   );
 
   const playlistSongKeyExtractor = useCallback((item: Song, index: number) => `${item.id}-${index}`, []);
-
-  const getItemLayout = useCallback(
-    (_data: ArrayLike<Song> | null | undefined, index: number) => ({
-      length: 68,
-      offset: 68 * index,
-      index,
-    }),
-    []
-  );
 
   const stickyPlayState = useMemo(
     () => ({
@@ -344,14 +337,20 @@ function usePlaylistDetailView() {
             loadError={loadError}
           />
         }
+        ListFooterComponent={params.isYouTubeSource && (loadingMore || loadError) ? (
+          <View style={{ paddingHorizontal: 16, paddingVertical: 20, gap: 10 }}>
+            <Text style={{ color: Colors.subtext }}>{loadingMore ? "Loading remaining tracks…" : loadError}</Text>
+            {!loadingMore && <Pressable onPress={retryLoad} accessibilityRole="button" hitSlop={10}><Text style={{ color: Colors.text }}>Retry</Text></Pressable>}
+          </View>
+        ) : null}
         contentContainerStyle={contentContainerStyle}
         onScroll={handleScroll}
         scrollEventThrottle={32}
         removeClippedSubviews={Platform.OS === "android"}
         initialNumToRender={12}
-        maxToRenderPerBatch={10}
+        maxToRenderPerBatch={6}
+        updateCellsBatchingPeriod={32}
         windowSize={7}
-        getItemLayout={getItemLayout}
       />
 
       <PlaylistEditModal

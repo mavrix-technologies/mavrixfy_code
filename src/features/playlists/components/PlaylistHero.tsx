@@ -3,7 +3,7 @@ import Colors from "@/constants/colors";
 import { colorWithAlpha,useArtworkPalette } from "@/lib/colorExtractor";
 import { type Song } from "@/lib/musicData";
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import { LinearGradient } from "expo-linear-gradient";
 import React,{ useMemo } from "react";
 import {
@@ -86,8 +86,9 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
     <View style={[styles.hero, { height: heroHeight, paddingTop: topInset + 48 }]}>
       {/* Artwork Background Image or Fallback */}
       {playlistCover ? (
-        <Image
-          source={{ uri: playlistCover }}
+        <MusicArtwork
+          uri={playlistCover}
+          size={heroHeight}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
           priority="high"

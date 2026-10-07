@@ -10,7 +10,7 @@ import { triggerImpact } from "@/lib/haptics";
 import { globalHomeScrollRef } from "@/lib/homeScrollRef";
 import { useLastMix } from "@/lib/lastMix";
 import {
-DEFAULT_MINI_PLAYER_BANNER_CONFIG, getCachedMiniPlayerBannerConfig,
+getCachedMiniPlayerBannerConfig,
 subscribeToMiniPlayerBannerConfig,
 type MiniPlayerBannerConfig,
 } from "@/lib/miniPlayerBannerConfig";
@@ -21,7 +21,9 @@ import { useMiniPlayerSecondaryControl } from "@/lib/storage";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import { Image } from "expo-image";
+import { youTubeDisplayArtworkUrl } from "@/services/youtube/YouTubeArtwork";
 import { usePathname,useRouter } from "expo-router";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import {
@@ -118,7 +120,8 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const handleMiniPlayerLayout = useCallback(() => {
     // no-op — tour removed
   }, []);
-  const [coverFailed, setCoverFailed] = useState(false);
+  const [failedCoverUrl, setFailedCoverUrl] = useState<string>();
+  const coverFailed = failedCoverUrl === activeSong?.coverUrl;
   const artworkPalette = useArtworkPalette(activeSong?.coverUrl);
   const openPlayerLockRef = useRef(0);
   const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(() => getCachedMiniPlayerBannerConfig());
@@ -182,7 +185,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
-    void Image.prefetch(urls, "memory-disk").catch(() => { });
+    void Image.prefetch(urls.map(url => youTubeDisplayArtworkUrl(url, 192)), "memory-disk").catch(() => { });
     preloadDominantColors(urls);
   }, [activeSong?.coverUrl, queue, queueIndex]);
 
@@ -310,7 +313,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const lastTextRef = useRef("");
 
   useEffect(() => {
-    setCoverFailed(false);
     if (artworkPalette.accent && artworkPalette.accent !== lastAccentRef.current) {
       lastAccentRef.current = artworkPalette.accent;
       setAlbumColor(artworkPalette.accent);
@@ -341,8 +343,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
       if (brightness < 120) return "#FFFFFF";
     }
     return raw;
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- textColor is the only reactive value
-  }, [textColor]);
+  }, [textColor, artworkPalette.text]);
 
   const playerTitleColor = safeTextColor;
   const playerSecondaryColor = useMemo(
@@ -443,9 +444,10 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                   >
                     <View style={[styles.coverWrap, { width: miniCoverSlotSize }]}>
                       {coverUrl && !coverFailed ? (
-                        <Image
+                        <MusicArtwork
                           key={activeSong.id}
-                          source={{ uri: coverUrl }}
+                          uri={coverUrl}
+                          size={miniCoverSize}
                           style={[
                             styles.cover,
                             { width: miniCoverSize, height: miniCoverSize },
@@ -455,7 +457,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                           priority="high"
                           decodeFormat="argb"
                           transition={60}
-                          onError={() => setCoverFailed(true)}
+                          onError={() => setFailedCoverUrl(coverUrl)}
                         />
                       ) : (
                         <View
@@ -510,9 +512,10 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                         >
                           <View style={styles.mixChipAvatars}>
                             {mixChipImages.slice(0, 3).map((image, index) => (
-                              <Image
+                              <MusicArtwork
                                 key={image}
-                                source={{ uri: image }}
+                                uri={image}
+                                size={32}
                                 style={[
                                   styles.mixChipAvatar,
                                   index > 0 ? { marginLeft: -8 } : null,

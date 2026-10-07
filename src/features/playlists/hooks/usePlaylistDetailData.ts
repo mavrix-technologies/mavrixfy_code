@@ -81,6 +81,9 @@ export function usePlaylistDetailData({
   const [songs, setSongs] = useState<Song[]>(initialCachedSongs);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const retryLoad = useCallback(() => setLoadAttempt(attempt => attempt + 1), []);
   const [playlistIsPublic, setPlaylistIsPublic] = useState(initialCached?.isPublic ?? false);
 
   // Edit modal state
@@ -205,6 +208,7 @@ export function usePlaylistDetailData({
     }
     setNotFound(false);
     setLoadError("");
+    setLoadingMore(false);
   }, [initialCover, initialDescription, initialSongCount, initialTitle, playlistId]);
 
   const applyLocalPlaylistData = useCallback(
@@ -227,6 +231,7 @@ export function usePlaylistDetailData({
 
   const loadPlaylistData = useCallback(
     async (isCancelled: () => boolean, signal?: AbortSignal) => {
+      let hasYouTubePreview = false;
       try {
         // 1. FAST MEMORY CACHE CHECK: If playlist already loaded in memory, render it instantly
         const memoryCached = getCachedPlaylist(playlistId);
@@ -245,7 +250,16 @@ export function usePlaylistDetailData({
         }
 
         if (isYouTubeSource) {
-          const data = await loadYouTubePlaylist(playlistId, signal);
+          const data = await loadYouTubePlaylist(playlistId, signal, page => {
+            if (isCancelled()) return;
+            hasYouTubePreview = true;
+            setPlaylistName(page.name);
+            setPlaylistCover(page.coverUrl || initialCover);
+            setPlaylistDescription("YouTube Music");
+            setSongs(page.songs);
+            setLoading(false);
+            setLoadingMore(true);
+          });
           if (isCancelled()) return;
           setPlaylistName(data.name);
           setPlaylistCover(data.coverUrl || initialCover);
@@ -390,10 +404,11 @@ export function usePlaylistDetailData({
         }
       } catch {
         if (isCancelled()) return;
-        if (hasPrefilledHeader) setLoadError("Songs could not load right now.");
+        if (hasYouTubePreview) setLoadError("Some tracks could not load. Retry to load the complete playlist.");
+        else if (hasPrefilledHeader) setLoadError("Songs could not load right now.");
         else setNotFound(true);
       } finally {
-        if (!isCancelled()) finishPlaylistLoad();
+        if (!isCancelled()) { finishPlaylistLoad(); setLoadingMore(false); }
       }
     },
     [
@@ -433,7 +448,7 @@ export function usePlaylistDetailData({
       cancelled = true;
       controller.abort();
     };
-  }, [playlistId, resetPlaylistLoadState, loadPlaylistData]);
+  }, [playlistId, resetPlaylistLoadState, loadPlaylistData, loadAttempt]);
 
   const handlePickImage = useCallback(async () => {
     try {
@@ -557,6 +572,8 @@ export function usePlaylistDetailData({
 
   return {
     loading,
+    loadingMore,
+    retryLoad,
     playlistName,
     setPlaylistName,
     playlistCover,

@@ -46,6 +46,9 @@ import { MavrixfyRefreshIndicator } from "../components/MavrixfyRefreshIndicator
 import { AppShowcaseModal } from "@/components/AppShowcaseModal";
 import { useFestivalTheme } from "../hooks/useFestivalTheme";
 import { useHomeFeedData } from "../hooks/useHomeFeedData";
+import { useYouTubeHomeFeed } from "../hooks/useYouTubeHomeFeed";
+import { HomeYouTubeContent } from "../components/HomeYouTubeContent";
+import { clearYouTubeHomeCache } from "@/services/youtube/YouTubeMusic";
 import { useAppShowcasePrompt } from "../hooks/useAppShowcasePrompt";
 import {
 HOME_CATEGORY_TITLES,
@@ -53,14 +56,17 @@ useHomeSectionData,
 type HomeSectionItem,
 } from "../hooks/useHomeSectionData";
 
-const homeSectionKeyExtractor = (item: HomeSectionItem) => item.id;
+type HomeListItem = HomeSectionItem | { id: "youtube-home"; type: "youtube-home" };
+const homeSectionKeyExtractor = (item: HomeListItem) => item.id;
 
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { playSong } = usePlayerActions();
   const { isOnline, isChecking } = useNetwork();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const flatListRef = useRef<FlatList<HomeSectionItem> | null>(null);
+  const flatListRef = useRef<FlatList<HomeListItem> | null>(null);
+  const youtube = useYouTubeHomeFeed();
+  const { refetch: refetchYouTube } = youtube;
 
   const {
     categories,
@@ -92,7 +98,7 @@ export function HomeScreen() {
     return selectedCategory === "All" && list.length === 0 ? quickPickSongs : list;
   }, [quickPicksPool, selectedCategory, quickPickSongs]);
 
-  const sectionData = useHomeSectionData({
+  const jioSectionData = useHomeSectionData({
     selectedCategory,
     categories,
     quickPickSongs: displayedQuickPicks,
@@ -101,12 +107,27 @@ export function HomeScreen() {
     publicPlaylists,
     loadingMainContent,
   });
+  const sectionData = useMemo<HomeListItem[]>(() => {
+    if (Platform.OS === "web") return jioSectionData;
+    const youtubeItem: HomeListItem = { id: "youtube-home", type: "youtube-home" };
+    if (selectedCategory === "YouTube Music") return [youtubeItem];
+    if (selectedCategory !== "All") return jioSectionData;
+    return [...jioSectionData.slice(0, 2), youtubeItem, ...jioSectionData.slice(2)];
+  }, [jioSectionData, selectedCategory]);
+  const retryYouTube = useCallback(() => { clearYouTubeHomeCache(); void refetchYouTube(); }, [refetchYouTube]);
+  const refreshHome = useCallback(async () => {
+    clearYouTubeHomeCache();
+    await Promise.allSettled([handleRefresh(), ...(isOnline && Platform.OS !== "web" ? [refetchYouTube()] : [])]);
+  }, [handleRefresh, isOnline, refetchYouTube]);
 
   const renderSectionItem = useCallback(
-    ({ item }: ListRenderItemInfo<HomeSectionItem>) => {
+    ({ item }: ListRenderItemInfo<HomeListItem>) => {
       let content: React.ReactNode = null;
 
       switch (item.type) {
+        case "youtube-home":
+          content = <HomeYouTubeContent feed={youtube.data} loading={youtube.isFetching || (youtube.isPending && isOnline)} failed={youtube.isError} online={isOnline} onRetry={retryYouTube} />;
+          break;
         case "quick-picks":
           content = (
             <HomeQuickPicks
@@ -164,6 +185,7 @@ export function HomeScreen() {
       playSong,
       publicPlaylists,
       recentlyPlayed,
+      youtube.data, youtube.isFetching, youtube.isPending, youtube.isError, isOnline, retryYouTube,
     ]
   );
 
@@ -191,10 +213,10 @@ export function HomeScreen() {
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       if (event.nativeEvent.contentOffset.y < -55 && !refreshing) {
         void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-        void handleRefresh();
+        void refreshHome();
       }
     },
-    [handleRefresh, refreshing]
+    [refreshHome, refreshing]
   );
 
   const festivalTheme = useFestivalTheme();
@@ -210,7 +232,7 @@ export function HomeScreen() {
     [insets.bottom, topInset]
   );
 
-  if (!isOnline && !isChecking && !hasContent && !loading) {
+  if (!isOnline && !isChecking && !hasContent && !youtube.data && !loading) {
     return <OfflineScreen />;
   }
 

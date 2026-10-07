@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import { LinearGradient } from "expo-linear-gradient";
 import { memo,useCallback,useMemo } from "react";
 import {
@@ -53,12 +54,13 @@ export const QueueSongRow = memo(
           )}
         </View>
 
-        <Image
+        <MusicArtwork
           recyclingKey={item.id}
-          source={{ uri: item.coverUrl || undefined }}
+          uri={item.coverUrl}
+          size={48}
           style={isShortScreen ? styles.queueThumbCompact : styles.queueThumb}
           contentFit="cover"
-          transition={120}
+          transition={0}
         />
 
         <View style={styles.queueTextWrap}>
@@ -204,8 +206,6 @@ export const RelatedSongCard = memo(({ song, onPress }: { song: Song; onPress: (
     onPress(song);
   }, [onPress, song]);
 
-  const imageSource = useMemo(() => ({ uri: song.coverUrl || undefined }), [song.coverUrl]);
-
   return (
     <Pressable
       style={({ pressed }) => [
@@ -214,11 +214,13 @@ export const RelatedSongCard = memo(({ song, onPress }: { song: Song; onPress: (
       ]}
       onPress={handlePress}
     >
-      <Image
-        source={imageSource}
+      <MusicArtwork
+        uri={song.coverUrl}
+        size={240}
+        recyclingKey={song.id}
         style={StyleSheet.absoluteFillObject}
         contentFit="cover"
-        transition={150}
+        transition={0}
       />
       <LinearGradient
         colors={RELATED_GRADIENT_COLORS}

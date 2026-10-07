@@ -91,20 +91,11 @@ function normalizeJioSaavnImageUrl(rawUrl: string): string {
 
 function qualityScore(quality: string | undefined, url: string | undefined): number {
   const qualityKey = String(quality || "").trim().toLowerCase();
-  const direct: Record<string, number> = {
-    "1200x1200": 5,
-    "1000x1000": 4,
-    "500x500": 3,
-    "150x150": 2,
-    "50x50": 1,
-  };
-  if (qualityKey in direct) return direct[qualityKey];
-
-  const match = String(url || "").match(/(\d{2,4})x(\d{2,4})/i);
+  const match = qualityKey.match(/^(\d{2,4})x(\d{2,4})$/i) || String(url || "").match(/(\d{2,4})x(\d{2,4})/i);
   if (!match) return 0;
   const width = Number(match[1]) || 0;
   const height = Number(match[2]) || 0;
-  return Math.max(width, height);
+  return width * height;
 }
 
 export function getBestImageUrl(images: JioSaavnImage[]): string {

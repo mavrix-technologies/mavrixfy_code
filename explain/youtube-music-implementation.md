@@ -38,6 +38,28 @@ npm run typecheck
 
 For the main app's free foreground Expo Go check, run `npm run start:expo-go -- --tunnel`, open its QR/link in iPhone Expo Go, and select YouTube Music in Search. The script now explicitly selects Expo Go instead of accidentally generating a development-client link. This does not remove the current upstream playback restriction or certify standalone background playback.
 
+## YouTube Music on Home
+
+Home now has separate YouTube Music rows in All and a dedicated YouTube Music category, using the existing horizontal card layout. Songs play through the existing resolver with a YouTube-only queue; playlists open the existing YouTube playlist detail flow.
+
+`SharedYouTubeTransport.home` calls `music.getHomeFeed`, accepts actual song/video endpoints and playlist cards, and excludes albums/artists. `YouTubeHomeRecommendations` follows LastWave's home/radio approach: prioritize related songs from at most two recent YouTube songs, deduplicate, exclude recently heard seeds, and spread artists before filling remaining slots. When anonymous home exposes only mixes, sample up to six songs from each of two playlist first pages. No playlist continuation or audio extraction runs during home loading. This uses local listening history and anonymous discovery; it does not claim recommendations from a signed-in YouTube account.
+
+`useYouTubeHomeFeed` keeps its query/cache separate from JioSaavn and keys it by app account, account generation and YouTube history. It refreshes history on screen focus/foreground, refetches stale data, supports reconnect/pull refresh and exposes a retry state. Partial source failures preserve available YouTube content; total failure stays retryable and does not substitute JioSaavn songs.
+
+Live check: `node scripts/youtube-shared.probe.mjs --home` returned 20 playlists, zero direct anonymous home songs, and 100 songs on the first mix page. This checks catalog availability, not physical-device playback.
+
+## Artwork and browsing performance
+
+The installed YouTube parser sorts thumbnail arrays **largest first**. The old `.at(-1)` selection picked the smallest image in search, home, playlists and radio. `YouTubeArtwork.bestYouTubeThumbnail` now chooses by actual dimensions without assuming order. Google artwork transformations request up to 1200 pixels, preserving crop flags and query strings. `getBestImageUrl` also ranks labeled/URL dimensions using the same units; home playlist cards use this ranking instead of assuming array order.
+
+`MusicArtwork` is shared by song rows, home cards/recent/quick picks, playlist hero/search cards, player artwork/queue and Android/iOS mini players. It requests density-aware image sizes (192/512/768/1200), uses native memory/disk caching and downsampling, and keeps failure state per image. Large video surfaces try the video master and fall back to the reported image if unavailable, including the 120×90 placeholder case. Guessed video master URLs are not persisted as canonical metadata. It never matches artwork from another music catalog. Live checks retrieved a 1200×1200 playlist cover and a 1280×720 song thumbnail; actual availability still depends on the source upload.
+
+Catalog requests initialize without retrieving/parsing the YouTube player. Playback lazily prepares a single shared player; concurrent requests coalesce that preparation. Search no longer starts two unsolicited extractions. Active playback prefetches the next YouTube track, while the second-ahead YouTube extraction is skipped. Anonymous home metadata/mix previews have bounded caches and explicit refresh invalidation; preview continuation objects are discarded immediately.
+
+Playlist detail can show the first page before remaining pages complete. A loading footer identifies remaining work, and continuation failure preserves visible songs with a retry action. Only a complete load enters the playlist cache. Playback started during loading uses the currently displayed queue snapshot. The incorrect 68px list geometry for 64px rows was removed; smaller render batches avoid mounting as many rows at once. Public YouTube playlists no longer expose local edit/remove actions.
+
+Validation: 96 regression tests, TypeScript and focused lint; live catalog/image checks. Android/iOS bundle checks verify packaging, not device frame rates or physical iPhone playback. Reproduce catalog/artwork checks with `node scripts/youtube-shared.probe.mjs --home --artwork`.
+
 ## Historical native implementation — superseded at runtime
 
 The remaining sections record earlier native builds and checks. Their native-module requirement and validation numbers describe that earlier version, not the shared implementation above.

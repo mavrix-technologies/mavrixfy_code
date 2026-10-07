@@ -2,7 +2,7 @@ import { triggerImpact } from "@/lib/haptics";
 import type { Song } from "@/lib/musicData";
 import type { RecentlyPlayedItem } from "@/lib/storage";
 import { ImpactFeedbackStyle } from "expo-haptics";
-import { Image } from "expo-image";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import { useRouter } from "expo-router";
 import { memo,useCallback } from "react";
 import {
@@ -35,12 +35,14 @@ const RecentCard = memo(function RecentCard({
       ]}
       onPress={handlePress}
     >
-      <Image
-        source={{ uri: item.imageUrl || undefined }}
+      <MusicArtwork
+        uri={item.imageUrl}
+        size={RECENT_CARD_WIDTH}
+        recyclingKey={item.id}
         style={styles.recentImage}
         contentFit="cover"
         cachePolicy="memory-disk"
-        transition={150}
+        transition={0}
       />
       <Text style={styles.recentTitle} numberOfLines={1}>
         {item.name}
@@ -89,13 +91,15 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
       }
 
       const isJioSaavn = item.type === "jiosaavn-playlist";
+      const isYouTube = item.id.startsWith("youtube_playlist_");
       router.push({
         pathname: "/playlist/[id]",
         params: {
           id: item.id,
           jiosaavn: String(isJioSaavn),
+          youtube: String(isYouTube),
           album: "false",
-          firestore: String(!isJioSaavn),
+          firestore: String(!isJioSaavn && !isYouTube),
           title: item.name,
           cover: item.imageUrl || "",
         },

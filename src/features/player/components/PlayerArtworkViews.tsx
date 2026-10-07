@@ -1,6 +1,6 @@
 import type { Song } from "@/lib/musicData";
 import * as Animated from "@/lib/nativeAnimated";
-import { Image } from "expo-image";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import { memo,useCallback,useEffect,useRef,useState } from "react";
 import { StyleSheet,View } from "react-native";
 import { styles } from "../styles/playerScreenStyles";
@@ -66,9 +66,10 @@ export const StableArtworkImage = memo(function StableArtworkImage({
 
   return (
     <View style={styles.albumArtLayer}>
-      <Image
+      <MusicArtwork
         recyclingKey={`visible-${recyclingKey}-${visibleUri}`}
-        source={{ uri: visibleUri }}
+        uri={visibleUri}
+        size={400}
         style={styles.albumArt}
         contentFit="cover"
         cachePolicy="memory-disk"
@@ -77,9 +78,10 @@ export const StableArtworkImage = memo(function StableArtworkImage({
       />
       {loadingUri ? (
         <Animated.View style={[StyleSheet.absoluteFillObject, { opacity: incomingOpacity }]}>
-          <Image
+          <MusicArtwork
             recyclingKey={`incoming-${recyclingKey}-${loadingUri}`}
-            source={{ uri: loadingUri }}
+            uri={loadingUri}
+            size={400}
             style={styles.albumArt}
             contentFit="cover"
             cachePolicy="memory-disk"

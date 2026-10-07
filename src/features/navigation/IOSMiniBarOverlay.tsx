@@ -7,7 +7,7 @@ preloadDominantColors,
 useArtworkPalette,
 } from "@/lib/colorExtractor";
 import {
-DEFAULT_MINI_PLAYER_BANNER_CONFIG, getCachedMiniPlayerBannerConfig,
+getCachedMiniPlayerBannerConfig,
 subscribeToMiniPlayerBannerConfig,
 type MiniPlayerBannerConfig,
 } from "@/lib/miniPlayerBannerConfig";
@@ -16,7 +16,9 @@ import { globalQueueSheetRef } from "@/lib/queueRef";
 import { useMiniPlayerSecondaryControl } from "@/lib/storage";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { Ionicons } from "@expo/vector-icons";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import { Image } from "expo-image";
+import { youTubeDisplayArtworkUrl } from "@/services/youtube/YouTubeArtwork";
 import { useRouter } from "expo-router";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import { Platform,Pressable,View } from "react-native";
@@ -142,7 +144,8 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
     return subscribeToMiniPlayerBannerConfig(setBannerConfig);
   }, []);
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
-  const [coverFailed, setCoverFailed] = useState(false);
+  const [failedCoverUrl, setFailedCoverUrl] = useState<string>();
+  const coverFailed = failedCoverUrl === activeSong?.coverUrl;
   const openPlayerLockRef = useRef(0);
 
   const openPlayer = useCallback(() => {
@@ -183,7 +186,7 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
     ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
-    void Image.prefetch(urls, "memory-disk").catch(() => { });
+    void Image.prefetch(urls.map(url => youTubeDisplayArtworkUrl(url, 192)), "memory-disk").catch(() => { });
     preloadDominantColors(urls);
   }, [activeSong?.coverUrl, queue, queueIndex]);
 
@@ -193,7 +196,6 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
   const lastTextRef = useRef("");
 
   useEffect(() => {
-    setCoverFailed(false);
     if (iosArtworkPalette.accent && iosArtworkPalette.accent !== lastAccentRef.current) {
       lastAccentRef.current = iosArtworkPalette.accent;
       setAlbumColor(iosArtworkPalette.accent);
@@ -232,14 +234,15 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
           <Pressable style={styles.iosMiniPlayerMain} onPress={openPlayer} android_disableSound>
             <View style={styles.iosMiniPlayerArtworkShell}>
               {activeSong.coverUrl && !coverFailed ? (
-                <Image
-                  source={{ uri: activeSong.coverUrl }}
+                <MusicArtwork
+                  uri={activeSong.coverUrl}
+                  size={48}
                   style={styles.iosMiniPlayerCover}
                   contentFit="cover"
                   cachePolicy="memory-disk"
                   priority="high"
                   transition={100}
-                  onError={() => setCoverFailed(true)}
+                  onError={() => setFailedCoverUrl(activeSong.coverUrl)}
                 />
               ) : (
                 <View

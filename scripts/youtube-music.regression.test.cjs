@@ -21,6 +21,7 @@ function fixture(overrides = {}, platform = "android", installed = true) {
   vm.runInNewContext(code, { module, exports: module.exports, setTimeout, clearTimeout, Date: { now: () => now },
     require: name => {
       if (name === "react-native") return { Platform: { OS: platform } };
+      if (name === "./YouTubeArtwork") return require("./helpers/youtube-artwork-fixture.cjs");
       if (name === "./SharedYouTubeTransport") return { sharedYouTubeTransport: native };
       throw new Error(name);
     } });
@@ -53,6 +54,47 @@ test("iOS without a custom extractor supports shared search; web is unsupported"
   assert.equal(missing.youTubeAvailable(), true);
   assert.equal((await missing.searchYouTubeMusic("song", "all")).songs[0].source, "youtube");
   assert.equal(fixture({}, "web").youTubeAvailable(), false);
+});
+test("home normalizes and deduplicates YouTube IDs without resolving audio", async () => {
+  const f = fixture({ home: async () => ({ songs: [track, track], playlists: [
+    { id: "PLabc", name: "Mix" }, { id: "PLabc", name: "Mix" },
+  ] }) });
+  const home = await f.loadYouTubeHome();
+  assert.equal(home.songs.length, 1);
+  assert.equal(home.songs[0].source, "youtube");
+  assert.equal(home.playlists.length, 1);
+  assert.equal(home.playlists[0].id, "youtube_playlist_PLabc");
+  assert.equal(home.playlists[0].source, "youtube");
+  assert.equal(f.calls.length, 0);
+});
+test("home metadata is reused across seed changes and explicit refresh clears it", async () => {
+  let calls = 0;
+  const f = fixture({ home: async () => { calls++; return { songs: [track], playlists: [] }; } });
+  await f.loadYouTubeHome(); await f.loadYouTubeHome();
+  assert.equal(calls, 1);
+  f.clearYouTubeHomeCache(); await f.loadYouTubeHome();
+  assert.equal(calls, 2);
+});
+test("mix previews are bounded, cached and release their continuation", async () => {
+  let calls = 0; const discarded = [];
+  const f = fixture({ playlist: async () => { calls++; return { songs: [track], cursor: "unused" }; },
+    discardPlaylistCursor: cursor => discarded.push(cursor) });
+  await f.previewYouTubePlaylist("youtube_playlist_mix"); await f.previewYouTubePlaylist("youtube_playlist_mix");
+  assert.equal(calls, 1); assert.equal(discarded.join(","), "unused");
+  f.clearYouTubeHomeCache(); await f.previewYouTubePlaylist("youtube_playlist_mix");
+  assert.equal(calls, 2);
+});
+test("playlist exposes its first page while preserving complete-load semantics", async () => {
+  let complete;
+  const f = fixture({ playlist: async (_, cursor) => cursor ? new Promise(resolve => { complete = resolve; }) : {
+    songs: [track], cursor: "next", name: "Mix", coverUrl: "art.jpg",
+  } });
+  const snapshots = [];
+  const pending = f.loadYouTubePlaylist("youtube_playlist_mix", undefined, page => snapshots.push(page));
+  await tick();
+  assert.equal(snapshots.length, 1); assert.equal(snapshots[0].songs.length, 1);
+  complete({ songs: [{ ...track, videoId: "lmnopqrstuv" }], cursor: "" });
+  assert.equal((await pending).songs.length, 2);
 });
 test("stream requests coalesce and near-expiry audio is resolved again", async () => {
   const f = fixture(); const song = f.normalizeYouTubeTrack(track);

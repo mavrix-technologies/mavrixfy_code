@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import { LinearGradient } from "expo-linear-gradient";
 import React,{ useCallback,useEffect,useRef } from "react";
 import {
@@ -120,12 +121,13 @@ export const SearchResultPlaylistCard = React.memo(function SearchResultPlaylist
       onPress={() => onPress(playlist, meta)}
     >
       <View style={[styles.playlistGridImageWrap, { transform: [{ rotate: `${tilt}deg` }] }]}>
-        <Image
+        <MusicArtwork
           recyclingKey={playlist.id}
-          source={{ uri: getBestImageUrl(playlist.image) }}
+          uri={getBestImageUrl(playlist.image)}
+          size={200}
           style={styles.playlistGridImage}
-          contentFit="contain"
-          transition={160}
+          contentFit="cover"
+          transition={0}
         />
         <LinearGradient
           colors={["transparent", "rgba(0,0,0,0.42)"]}
@@ -227,11 +229,12 @@ export const SearchTopResultCard = React.memo(function SearchTopResultCard({
         onPress={handleTopResultPress}
       >
         {imageUrl ? (
-          <Image
-            source={{ uri: imageUrl }}
+          <MusicArtwork
+            uri={imageUrl}
+            size={96}
             style={[styles.topResultImage, !isSong && styles.topResultImageRound]}
             contentFit="cover"
-            transition={150}
+            transition={0}
           />
         ) : (
           <View style={[styles.topResultImage, styles.artistResultImageFallback, !isSong && styles.topResultImageRound]}>

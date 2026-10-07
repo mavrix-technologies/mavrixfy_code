@@ -187,7 +187,7 @@ export function usePlayerCoreState({
       }
       // Widen prefetch: also warm up the track two positions ahead
       const nextNextItem = songQueue[activeIndex + 2];
-      if (nextNextItem) void resolvePlaybackUrlCached(nextNextItem).catch(() => null);
+      if (nextNextItem && !isYouTubeSong(nextNextItem)) void resolvePlaybackUrlCached(nextNextItem).catch(() => null);
     },
     [resolvePlaybackUrlCached, TrackPlayer]
   );

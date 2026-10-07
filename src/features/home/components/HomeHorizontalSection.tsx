@@ -1,7 +1,8 @@
 import { triggerImpact } from "@/lib/haptics";
 import type { JioSaavnImage } from "@/lib/musicData";
 import * as Haptics from "expo-haptics";
-import { Image } from "expo-image";
+import { MusicArtwork } from "@/components/MusicArtwork";
+import { getBestImageUrl } from "@/lib/musicData";
 import { useRouter } from "expo-router";
 import { memo,useCallback } from "react";
 import {
@@ -38,7 +39,7 @@ const HorizontalCard = memo(function HorizontalCard({
     onPress(item);
   }, [item, onPress]);
 
-  const imageUrl = item.imageUrl || (Array.isArray(item.image) && item.image.length > 0 ? item.image[item.image.length - 1]?.url || item.image[0]?.url : undefined);
+  const imageUrl = item.imageUrl || getBestImageUrl(item.image || []);
 
   return (
     <Pressable
@@ -48,12 +49,14 @@ const HorizontalCard = memo(function HorizontalCard({
       ]}
       onPress={handlePress}
     >
-      <Image
-        source={{ uri: imageUrl || undefined }}
+      <MusicArtwork
+        uri={imageUrl}
+        size={CARD_WIDTH}
+        recyclingKey={item.id}
         style={styles.cardImage}
         contentFit="cover"
         cachePolicy="memory-disk"
-        transition={150}
+        transition={0}
       />
       <Text style={styles.cardTitle} numberOfLines={1}>
         {item.name}
@@ -80,18 +83,21 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
   items,
   isAlbum = false,
   isFirestore = false,
+  onItemPress,
 }: {
   title: string;
   items: HomeCardItem[];
   isAlbum?: boolean;
   isFirestore?: boolean;
+  onItemPress?: (item: HomeCardItem) => void;
 }) {
   const router = useRouter();
 
   const handleCardPress = useCallback(
     (item: HomeCardItem) => {
       void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
-      const imageUrl = item.imageUrl || (Array.isArray(item.image) && item.image.length > 0 ? item.image[item.image.length - 1]?.url || item.image[0]?.url : "");
+      if (onItemPress) { onItemPress(item); return; }
+      const imageUrl = item.imageUrl || getBestImageUrl(item.image || []);
       const isSong = item.type === "song" || Boolean(item.url?.includes("/song/"));
       const isAlbumItem = isAlbum || item.type === "album" || Boolean(item.url?.includes("/album/"));
 
@@ -99,7 +105,8 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
         pathname: "/playlist/[id]",
         params: {
           id: item.id,
-          jiosaavn: String(!isFirestore),
+          jiosaavn: String(!isFirestore && item.source !== "youtube"),
+          youtube: String(item.source === "youtube"),
           album: String(isAlbumItem),
           song: String(isSong),
           type: item.type || (isSong ? "song" : isAlbumItem ? "album" : "playlist"),
@@ -111,7 +118,7 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
         },
       });
     },
-    [isAlbum, isFirestore, router]
+    [isAlbum, isFirestore, router, onItemPress]
   );
 
   const renderItem = useCallback(

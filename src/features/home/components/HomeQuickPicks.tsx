@@ -4,7 +4,7 @@ import { triggerImpact } from "@/lib/haptics";
 import { type Song } from "@/lib/musicData";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { Image } from "expo-image";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import { useRouter } from "expo-router";
 import { memo, useCallback, useMemo } from "react";
 import {
@@ -58,12 +58,14 @@ const QuickPickItem = memo(function QuickPickItem({
         ]}
         onPress={handlePress}
       >
-        <Image
-          source={{ uri: song.coverUrl || undefined }}
+        <MusicArtwork
+          uri={song.coverUrl}
+          size={48}
+          recyclingKey={song.id}
           style={styles.quickPickCover}
           contentFit="cover"
           cachePolicy="memory-disk"
-          transition={150}
+          transition={0}
         />
         <View style={styles.quickPickInfo}>
           <View style={styles.quickPickTitleRow}>

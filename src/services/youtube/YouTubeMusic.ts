@@ -1,9 +1,10 @@
 import { Platform } from "react-native";
 import type { Song } from "@/lib/musicData";
 import type { PlaylistResult, ResultFilter, SearchResults } from "@/lib/searchRepository";
+import { youTubeArtworkUrl } from "./YouTubeArtwork";
 
 export interface NativeTrack { videoId: string; title: string; artist: string; coverUrl: string; duration: number }
-interface NativePlaylist { id: string; name: string; coverUrl: string; songCount: number; url: string; description: string }
+export interface NativePlaylist { id: string; name: string; coverUrl: string; songCount: number; url: string; description: string }
 export interface PlaylistPage { songs: NativeTrack[]; cursor: string; name?: string; coverUrl?: string; songCount?: number }
 export interface YouTubeStream {
   videoId: string; url: string; headers: Record<string, string>; expiresAt: number;
@@ -12,8 +13,10 @@ export interface YouTubeStream {
 }
 // Transport contract retained for callers; implementation is shared TypeScript.
 export interface YouTubeNative {
+  home(requestId: string): Promise<{ songs: NativeTrack[]; playlists: NativePlaylist[] }>;
   search(query: string, filter: string, requestId: string): Promise<{ songs: NativeTrack[]; playlists: NativePlaylist[] }>;
   playlist(playlistId: string, cursor: string, requestId: string): Promise<PlaylistPage>;
+  discardPlaylistCursor?(cursor: string): void;
   resolveStream(videoId: string, quality: string, requestId: string): Promise<YouTubeStream>;
   cancel(requestId: string): void;
   related(videoId: string, requestId: string): Promise<NativeTrack[]>;
@@ -47,7 +50,7 @@ export function normalizeYouTubeTrack(track: NativeTrack): Song {
   if (!/^[\w-]{11}$/.test(track.videoId)) throw new Error("Invalid YouTube video ID");
   return { id: `youtube_${track.videoId}`, source: "youtube", youtubeVideoId: track.videoId, videoId: track.videoId,
     title: track.title || "YouTube song", artist: track.artist || "YouTube Music", album: "", genre: "", duration: Number.isFinite(track.duration) ? Math.max(0, track.duration) : 0,
-    coverUrl: track.coverUrl || `https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg`, audioUrl: "" };
+    coverUrl: youTubeArtworkUrl(track.coverUrl) || `https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg`, audioUrl: "" };
 }
 function normalizeTracks(tracks: NativeTrack[]): Song[] {
   const unique = new Map<string, Song>();
@@ -65,33 +68,71 @@ export async function searchYouTubeMusic(query: string, filter: ResultFilter, si
   const data = await invoke((module, id) => module.search(query.trim(), filter, id), signal);
   const playlists: PlaylistResult[] = data.playlists.map((item) => ({
     id: `youtube_playlist_${item.id}`, name: item.name, songCount: item.songCount,
-    image: item.coverUrl ? [{ quality: "500x500", url: item.coverUrl }] : [], url: item.url, description: item.description,
+    image: item.coverUrl ? [{ quality: "1200x1200", url: youTubeArtworkUrl(item.coverUrl) }] : [], url: item.url, description: item.description,
   }));
   const results: SearchResults = { songs: normalizeTracks(data.songs), playlists, albums: [], artists: [] };
   if (!signal?.aborted) {
     if (searchCache.size >= 40) searchCache.delete(searchCache.keys().next().value!);
     searchCache.set(key, { at: Date.now(), results });
   }
-  // Only two previews, using the same pending stream requests as playback.
-  results.songs.slice(0, 2).forEach((song) => { void resolveYouTubeStream(song).catch(() => {}); });
   return results;
 }
-export async function loadYouTubePlaylist(id: string, signal?: AbortSignal) {
+type YouTubeHome = { songs: Song[]; playlists: (NativePlaylist & { source: "youtube" })[] };
+let homeCache: { at: number; data: YouTubeHome } | undefined;
+let homeCacheGeneration = 0;
+const previewCache = new Map<string, { at: number; songs: Song[] }>();
+export function clearYouTubeHomeCache() { homeCacheGeneration++; homeCache = undefined; previewCache.clear(); }
+export async function loadYouTubeHome(signal?: AbortSignal): Promise<YouTubeHome> {
+  if (signal?.aborted) throw new Error("YouTube request cancelled");
+  if (homeCache && Date.now() - homeCache.at < 1200000) return homeCache.data;
+  const generation = homeCacheGeneration;
+  const data = await invoke((module, id) => module.home(id), signal);
+  const result: YouTubeHome = { songs: normalizeTracks(data.songs), playlists: [...new Map(data.playlists.map(item => [item.id, {
+    ...item, coverUrl: youTubeArtworkUrl(item.coverUrl), id: `youtube_playlist_${item.id}`, source: "youtube" as const,
+  }])).values()] };
+  if (generation === homeCacheGeneration && !signal?.aborted && (result.songs.length || result.playlists.length)) homeCache = { at: Date.now(), data: result };
+  return result;
+}
+export interface YouTubePlaylistResult { name: string; coverUrl: string; songCount: number; songs: Song[] }
+export async function loadYouTubePlaylist(id: string, signal?: AbortSignal, onFirstPage?: (page: YouTubePlaylistResult) => void) {
   const playlistId = id.replace(/^youtube_playlist_/, "");
   let cursor = "";
   let name = "YouTube Music playlist", coverUrl = "", songCount = 0;
   const all: NativeTrack[] = [];
   const seen = new Set<string>();
-  for (let pageIndex = 0; pageIndex < 200; pageIndex++) {
-    const page = await invoke((module, requestId) => module.playlist(playlistId, cursor, requestId), signal);
-    name = page.name || name; coverUrl = page.coverUrl || coverUrl; songCount = page.songCount || songCount;
-    all.push(...page.songs);
-    cursor = page.cursor;
-    if (!cursor) { const songs = normalizeTracks(all); return { name, coverUrl, songCount: songCount || songs.length, songs }; }
-    if (seen.has(cursor)) throw new Error("YouTube playlist returned a repeated page.");
-    seen.add(cursor);
+  try {
+    for (let pageIndex = 0; pageIndex < 200; pageIndex++) {
+      const page = await invoke((module, requestId) => module.playlist(playlistId, cursor, requestId), signal);
+      name = page.name || name; coverUrl = youTubeArtworkUrl(page.coverUrl) || coverUrl; songCount = page.songCount || songCount;
+      all.push(...page.songs);
+      cursor = page.cursor;
+      if (pageIndex === 0 && cursor && onFirstPage && !signal?.aborted) {
+        const songs = normalizeTracks(all);
+        if (songs.length) onFirstPage({ name, coverUrl, songCount: songCount || songs.length, songs });
+      }
+      if (!cursor) { const songs = normalizeTracks(all); return { name, coverUrl, songCount: songCount || songs.length, songs }; }
+      if (seen.has(cursor)) throw new Error("YouTube playlist returned a repeated page.");
+      seen.add(cursor);
+    }
+    throw new Error("YouTube playlist is too large to load completely.");
+  } finally { if (cursor) transport?.discardPlaylistCursor?.(cursor); }
+}
+export async function previewYouTubePlaylist(id: string, signal?: AbortSignal): Promise<Song[]> {
+  if (signal?.aborted) throw new Error("YouTube request cancelled");
+  const cached = previewCache.get(id);
+  if (cached && Date.now() - cached.at < 1200000) return cached.songs;
+  const generation = homeCacheGeneration;
+  const page = await invoke(async (module, requestId) => {
+    const result = await module.playlist(id.replace(/^youtube_playlist_/, ""), "", requestId);
+    if (result.cursor) module.discardPlaylistCursor?.(result.cursor);
+    return result;
+  }, signal);
+  const songs = normalizeTracks(page.songs).slice(0, 6);
+  if (songs.length && !signal?.aborted && generation === homeCacheGeneration) {
+    if (previewCache.size >= 16) previewCache.delete(previewCache.keys().next().value!);
+    previewCache.set(id, { at: Date.now(), songs });
   }
-  throw new Error("YouTube playlist is too large to load completely.");
+  return songs;
 }
 export async function relatedYouTubeSongs(song: Song, signal?: AbortSignal): Promise<Song[]> {
   const id = song.youtubeVideoId || song.videoId || song.id.replace(/^youtube_/, "");

@@ -8,7 +8,7 @@ import { type Song } from "@/lib/musicData";
 import { usePlaybackRowState } from "@/services/audio/PlaybackEngine";
 import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
-import { Image } from "expo-image";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import { router } from "expo-router";
 import { memo,useCallback,useEffect } from "react";
 import {
@@ -44,29 +44,6 @@ interface Props {
   onSongPress?: (song: Song) => void;
   horizontalPadding?: number;
   showSearchSourceMeta?: boolean;
-}
-
-const ROW_ARTWORK_SIZE = 96;
-
-function getSongRowCoverUrl(url: string | undefined): string {
-  if (!url) return "";
-
-  if (url.includes("googleusercontent.com") || url.includes("ggpht.com")) {
-    const rowSquare = `=w${ROW_ARTWORK_SIZE}-h${ROW_ARTWORK_SIZE}-l90-rj`;
-    if (/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i.test(url)) {
-      return url.replace(/=w\d+-h\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i, rowSquare);
-    }
-    if (/=s\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i.test(url)) {
-      return url.replace(/=s\d+(?:-[a-zA-Z0-9-]+)?(?=$|[?#])/i, `=s${ROW_ARTWORK_SIZE}-c-k-c0x00ffffff-no-rj`);
-    }
-  }
-
-  const youtubeMatch = url.match(/https?:\/\/i\.ytimg\.com\/vi\/([a-zA-Z0-9_-]{11})\/[^?#]+/i);
-  if (youtubeMatch?.[1]) {
-    return `https://i.ytimg.com/vi/${youtubeMatch[1]}/mqdefault.jpg`;
-  }
-
-  return url;
 }
 
 const SongRow = memo(function SongRow({
@@ -162,7 +139,7 @@ const SongRow = memo(function SongRow({
 
   if (!song || !song.id || !song.title) return null;
 
-  const rowCoverUrl = getSongRowCoverUrl(song.coverUrl);
+  const rowCoverUrl = song.coverUrl;
 
   return (
     <Pressable
@@ -180,9 +157,10 @@ const SongRow = memo(function SongRow({
     >
       {showCover && rowCoverUrl && (
         <View style={styles.coverWrapper}>
-          <Image
+          <MusicArtwork
             recyclingKey={`${song.id}:${rowCoverUrl}`}
-            source={{ uri: rowCoverUrl }}
+            uri={rowCoverUrl}
+            size={48}
             style={styles.cover}
             contentFit="cover"
             cachePolicy="memory-disk"
@@ -309,7 +287,8 @@ const SongRow = memo(function SongRow({
     prevProps.showSearchSourceMeta === nextProps.showSearchSourceMeta &&
     prevProps.onSongPress === nextProps.onSongPress &&
     Boolean(prevProps.onRemove) === Boolean(nextProps.onRemove) &&
-    prevProps.queueKey === nextProps.queueKey
+    prevProps.queueKey === nextProps.queueKey &&
+    (prevProps.queueKey !== undefined || prevProps.queue === nextProps.queue)
   );
 });
 

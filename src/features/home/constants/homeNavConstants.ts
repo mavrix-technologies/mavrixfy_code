@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { Platform } from "react-native";
 import { type ComponentProps } from "react";
 
 export type IoniconsName = ComponentProps<typeof Ionicons>["name"];
@@ -12,6 +13,7 @@ export interface MusicCategoryItem {
 
 export const MAVRIXFY_MUSIC_CATEGORIES: readonly MusicCategoryItem[] = [
   { id: "All", label: "All", focusedIcon: "musical-notes", unfocusedIcon: "musical-notes-outline" },
+  ...(Platform.OS !== "web" ? [{ id: "YouTube Music", label: "YouTube Music", focusedIcon: "logo-youtube" as const, unfocusedIcon: "logo-youtube" as const }] : []),
   { id: "Trending", label: "Trending", focusedIcon: "flame", unfocusedIcon: "flame-outline" },
   { id: "New Releases", label: "New Hits", focusedIcon: "sparkles", unfocusedIcon: "sparkles-outline" },
   { id: "Bollywood", label: "Bollywood", focusedIcon: "film", unfocusedIcon: "film-outline" },
