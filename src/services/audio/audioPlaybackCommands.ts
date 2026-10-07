@@ -334,6 +334,8 @@ export function useAudioPlaybackCommands({
         desiredPlayStateRef.current = false;
         setIsPlaying(false);
         isPlayingRef.current = false;
+        playbackLoadingRef.current = false;
+        setPlaybackLoading(false);
         updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
         showPlaybackNotice("Could not start playback.");
       } finally {
