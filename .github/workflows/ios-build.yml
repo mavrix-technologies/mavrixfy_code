@@ -15,6 +15,12 @@ jobs:
     name: 🎉 iOS Build (No Code Signing)
     runs-on: macos-15
     timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
 
     steps:
       - name: Checkout repository
@@ -30,38 +36,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # ── Expo prebuild ─────────────────────────────────────────────────────
-      # Cache the generated ios/ directory keyed on files that affect it.
-      # On a cache hit we skip prebuild entirely (saves ~2-3 min).
-      - name: Cache Expo prebuild output
-        id: cache-prebuild
-        uses: actions/cache@v4
-        with:
-          path: ios
-          key: expo-prebuild-${{ runner.os }}-${{ hashFiles('app.config.js','app.json','package-lock.json','plugins/**') }}
-          restore-keys: |
-            expo-prebuild-${{ runner.os }}-
-
-      - name: Prebuild iOS
-        if: steps.cache-prebuild.outputs.cache-hit != 'true'
-        run: npx expo prebuild --platform ios --clean --no-install
-
-      - name: Patch Podfile for XCode compatibility
+      - name: Record native toolchain
+        id: toolchain
         run: |
-          cd ios
+          set -euo pipefail
           xcodebuild -version
-          if grep -q "React Native requires XCode" Podfile 2>/dev/null; then
-            echo "Patching Podfile..."
-            sed -i.bak '/React Native requires XCode/,/raise.*XCode/d' Podfile
-          fi
+          xcodebuild -showsdks
+          echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
+          echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      # ── Expo prebuild ─────────────────────────────────────────────────────
+      # Regenerate the project every time; never restore old JS bundles,
+      # Pods integration or app products through an overlapping ios/ cache.
+      - name: Prebuild iOS
+        run: npx expo prebuild --platform ios --clean --no-install
 
       # ── Ruby / Bundler ────────────────────────────────────────────────────
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.2'
-          bundler-cache: true   # caches gem bundle automatically
-          working-directory: ios
 
       # ── CocoaPods cache ───────────────────────────────────────────────────
       # Key uses package-lock.json + plugins (same inputs that determine pods).
@@ -73,57 +67,61 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cocoapods
-          key: cocoapods-global-${{ runner.os }}-${{ hashFiles('package-lock.json','plugins/**','app.config.js','app.json') }}
+          key: cocoapods-global-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ hashFiles('package-lock.json','plugins/**','app.config.js','app.json') }}
           restore-keys: |
-            cocoapods-global-${{ runner.os }}-
+            cocoapods-global-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-
 
       - name: Cache ios/Pods directory
         id: cache-pods
         uses: actions/cache@v4
         with:
           path: ios/Pods
-          key: cocoapods-pods-${{ runner.os }}-${{ hashFiles('package-lock.json','plugins/**','app.config.js','app.json') }}
+          key: cocoapods-pods-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('package-lock.json','plugins/**','app.config.js','app.json') }}
           restore-keys: |
-            cocoapods-pods-${{ runner.os }}-
+            cocoapods-pods-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-
 
       - name: Install CocoaPods dependencies
-        if: steps.cache-pods.outputs.cache-hit != 'true'
         run: |
+          set -euo pipefail
+          if ! command -v pod >/dev/null 2>&1; then gem install cocoapods --no-document; fi
+          pod --version
           cd ios
-          pod install --repo-update
+          # Reintegrate Pods even on cache hits: prebuild created a new project.
+          pod install --repo-update 2>&1 | tee pod-install.log
 
       # ── SPM (Swift Package Manager) cache ────────────────────────────────
       # YouTubeKit is fetched from GitHub every build (~15s). Cache it.
       - name: Cache SPM packages
         uses: actions/cache@v4
         with:
-          path: ~/Library/Developer/Xcode/DerivedData/*/SourcePackages
-          key: spm-${{ runner.os }}-${{ hashFiles('ios/Mavrixfy.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          path: ios/build/SourcePackages
+          key: spm-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('plugins/**','package-lock.json') }}
           restore-keys: |
-            spm-${{ runner.os }}-
+            spm-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-
 
-      # ── Xcode DerivedData cache ───────────────────────────────────────────
-      # Caches compiled object files — biggest single win for repeat builds.
-      # Key includes source hash so stale cache is never used for wrong code.
-      - name: Cache Xcode DerivedData
+      # Cache compiler modules, not products/intermediates that can carry an
+      # old bundled JS release or a generated project from another commit.
+      - name: Cache Xcode compiler modules
         uses: actions/cache@v4
         with:
-          path: ios/build
-          key: xcode-derived-${{ runner.os }}-${{ hashFiles('ios/Podfile.lock','ios/**/*.swift','ios/**/*.m','ios/**/*.h') }}
+          path: ios/build/ModuleCache.noindex
+          key: xcode-modules-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('ios/Podfile.lock','package-lock.json','plugins/**') }}
           restore-keys: |
-            xcode-derived-${{ runner.os }}-
+            xcode-modules-${{ runner.os }}-${{ steps.toolchain.outputs.arch }}-${{ steps.toolchain.outputs.xcode }}-
 
       # ── Xcode build ───────────────────────────────────────────────────────
       - name: Build iOS app (no codesign)
         run: |
           cd ios
           echo "🔨 Starting xcodebuild..."
-          set -o pipefail
-          xcodebuild -workspace Mavrixfy.xcworkspace \
+          set -euo pipefail
+          if xcodebuild -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -resultBundlePath build-result.xcresult \
             -destination 'generic/platform=iOS' \
             -parallelizeTargets \
             -jobs $(sysctl -n hw.logicalcpu) \
@@ -131,39 +129,57 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            build 2>&1 | tee build.log
-
-          BUILD_EXIT_CODE=${PIPESTATUS[0]}
-          if [ $BUILD_EXIT_CODE -ne 0 ]; then
-            echo "❌ Build failed (exit $BUILD_EXIT_CODE)"
-            tail -200 build.log
-            exit $BUILD_EXIT_CODE
+            build 2>&1 | tee build.log; then
+            echo "✅ Unsigned build completed!"
+          else
+            build_status=$?
+            echo "❌ Build failed (exit $build_status)"
+            tail -n 200 build.log
+            exit "$build_status"
           fi
-          echo "✅ Build completed!"
 
       # ── Artifacts ─────────────────────────────────────────────────────────
-      - name: Upload build logs on failure
-        if: failure()
+      - name: Upload native build diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: ios/build.log
+          path: |
+            ios/build.log
+            ios/pod-install.log
+            ios/build-result.xcresult
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Create IPA
         run: |
-          cd ios/build/Build/Products/Release-iphoneos
-          mkdir -p Payload
-          mv Mavrixfy.app Payload/
-          zip -qq -r -9 Mavrixfy.ipa Payload
-          mv Mavrixfy.ipa ${{ github.workspace }}/
+          set -euo pipefail
+          app_path="$GITHUB_WORKSPACE/ios/build/Build/Products/Release-iphoneos/Mavrixfy.app"
+          test -d "$app_path"
+          plutil -lint "$app_path/Info.plist"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_path/Info.plist")
+          test -f "$app_path/$executable"
+          lipo -verify_arch arm64 "$app_path/$executable"
+          staging="$RUNNER_TEMP/mavrixfy-unsigned-ipa"
+          mkdir -p "$staging/Payload"
+          ditto "$app_path" "$staging/Payload/Mavrixfy.app"
+          cd "$staging"
+          zip -q -r "$GITHUB_WORKSPACE/Mavrixfy.ipa" Payload
+          unzip -tq "$GITHUB_WORKSPACE/Mavrixfy.ipa"
+          cd "$GITHUB_WORKSPACE"
+          shasum -a 256 Mavrixfy.ipa > Mavrixfy.ipa.sha256
+          echo "Unsigned arm64 IPA packaged. Re-sign before installing on an iPhone." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: Mavrixfy-iOS-IPA-Unsigned
-          path: Mavrixfy.ipa
+          path: |
+            Mavrixfy.ipa
+            Mavrixfy.ipa.sha256
+          if-no-files-found: error
           compression-level: 0
           retention-days: 14
 
@@ -191,10 +207,9 @@ jobs:
             1. Install [AltStore](https://altstore.io/)
             2. Download the IPA and open in AltStore
 
-            ### Method 3: Xcode (Mac only)
-            1. Unzip the IPA
-            2. Xcode → Window → Devices and Simulators
-            3. Drag .app file to Installed Apps
+            Free-account installations normally expire after 7 days and require re-signing/refreshing.
+            See https://sideloadly.io/faq for current requirements and supported capabilities.
+            This unsigned device build cannot be installed by simply dragging its .app into Xcode.
 
             ## 📋 Build Details
             - **Build Number:** `${{ github.run_number }}`
@@ -207,5 +222,7 @@ jobs:
             Built automatically using GitHub Actions ✨
           draft: false
           prerelease: false
-          files: Mavrixfy.ipa
+          files: |
+            Mavrixfy.ipa
+            Mavrixfy.ipa.sha256
           make_latest: true
