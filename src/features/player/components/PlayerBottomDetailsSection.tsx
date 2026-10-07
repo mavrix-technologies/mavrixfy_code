@@ -1,6 +1,5 @@
 import React from "react";
 import { Text,View } from "react-native";
-import { ScrollView as GHScrollView } from "react-native-gesture-handler";
 
 import AdMobBanner from "@/components/AdMobBanner";
 import { KaraokeLyricsView } from "@/components/KaraokeLyricsView";
@@ -8,6 +7,7 @@ import type { Song } from "@/lib/musicData";
 import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
 import { styles } from "../styles/playerScreenStyles";
 import { AboutArtistCard,RelatedSongsSection } from "./PlayerDiscoverySections";
+import { PlayerQueueList } from "./PlayerQueueList";
 
 export interface PlayerBottomDetailsSectionProps {
   screenSong: Song;
@@ -72,19 +72,8 @@ export const PlayerBottomDetailsSection = React.memo(function PlayerBottomDetail
           <Text style={styles.playingListTitle}>Queue</Text>
         </View>
         <View style={[styles.queueListViewport, queueViewportStyle]}>
-          <GHScrollView
-            contentContainerStyle={styles.queueListContent}
-            showsVerticalScrollIndicator={false}
-            nestedScrollEnabled
-            bounces={false}
-            overScrollMode="never"
-          >
-            {playingQueue.map((item, index) => (
-              <React.Fragment key={queueKeyExtractor(item, index)}>
-                {renderQueueItem({ item, index })}
-              </React.Fragment>
-            ))}
-          </GHScrollView>
+          <PlayerQueueList songs={playingQueue} rowHeight={isShortScreen ? 48 : 54}
+            keyExtractor={queueKeyExtractor} renderItem={renderQueueItem} />
         </View>
       </View>
 

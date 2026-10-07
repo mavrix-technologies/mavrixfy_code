@@ -1,7 +1,7 @@
 export const PLAYER_SLIDER_MINIMUM_TRACK_COLOR = "#F7FAFF";
 export const PLAYER_SLIDER_MAXIMUM_TRACK_COLOR = "rgba(247,250,255,0.28)";
 export const PLAYER_SLIDER_THUMB_COLOR = "#F7FAFF";
-export const PLAYER_SLIDER_TOUCH_HEIGHT = 12;
+export const PLAYER_SLIDER_TOUCH_HEIGHT = 48;
 export const PLAYER_SLIDER_THUMB_SIZE = 10;
 
 export function clampUnit(value: number): number {

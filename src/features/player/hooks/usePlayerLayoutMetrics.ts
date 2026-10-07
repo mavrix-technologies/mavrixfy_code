@@ -11,14 +11,15 @@ export function usePlayerLayoutMetrics(
   const isShortScreen = screenHeight <= 760;
   const isVeryShortScreen = screenHeight <= 700;
   const topBarHeight = isShortScreen ? 50 : 54;
-  const controlButtonSize = isVeryShortScreen ? 38 : isShortScreen ? 40 : 42;
-  const prevNextButtonSize = isVeryShortScreen ? 46 : isShortScreen ? 50 : 54;
+  const controlButtonSize = 48;
+  const prevNextButtonSize = isVeryShortScreen ? 48 : isShortScreen ? 50 : 54;
   const prevNextIconSize = isVeryShortScreen ? 24 : isShortScreen ? 27 : 30;
   const shuffleRepeatIconSize = isVeryShortScreen ? 18 : isShortScreen ? 19 : 20;
   const playButtonSize = isVeryShortScreen ? 60 : isShortScreen ? 64 : 68;
   const playIconSize = isVeryShortScreen ? 28 : isShortScreen ? 31 : 34;
-  const controlsRowGap = isVeryShortScreen ? 8 : isShortScreen ? 10 : 12;
-  const songDetailActionSize = isVeryShortScreen ? 38 : 42;
+  const controlsRowGap = Math.max(0, Math.min(isVeryShortScreen ? 8 : isShortScreen ? 10 : 12,
+    (screenWidth - (isShortScreen ? 32 : 40) - controlButtonSize * 2 - prevNextButtonSize * 2 - playButtonSize) / 4));
+  const songDetailActionSize = 48;
   const songDetailIconSize = isVeryShortScreen ? 21 : 23;
   const bottomContentPadding =
     IS_WEB ? 16 : Math.max(insets.bottom, 0) + 24;

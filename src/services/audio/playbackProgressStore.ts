@@ -1,5 +1,6 @@
 import type { PlayerProgressContextValue } from "@/types/playbackTypes";
 import { useSyncExternalStore } from "react";
+import { useAppIsActive } from "@/lib/appActivity";
 
 export type ProgressSnapshot = PlayerProgressContextValue;
 
@@ -65,9 +66,12 @@ export function resetPlaybackProgress(): void {
 }
 
 export function usePlaybackProgressStore(): ProgressSnapshot {
+  const foreground = useAppIsActive();
   return useSyncExternalStore(
-    subscribePlaybackProgress,
+    foreground ? subscribePlaybackProgress : subscribeInactive,
     getPlaybackProgressSnapshot,
     getPlaybackProgressSnapshot
   );
 }
+
+const subscribeInactive = () => () => {};

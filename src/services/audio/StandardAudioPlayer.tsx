@@ -106,6 +106,20 @@ const eventListeners = new Map<string, Set<(payload: any) => void>>();
 let audioHandle: AudioTagHandle | null = null;
 let isSourceLoaded = false;
 let context: AudioContext | null = null;
+
+// Native suspend/resume may complete out of order. Reconcile against live intent
+// after each completion so an old Pause cannot silence a newer Play (or vice versa).
+async function synchronizeAudioContext(playing: boolean): Promise<void> {
+  const target = context;
+  if (!target) return;
+  let requested = playing;
+  while (context === target) {
+    if (requested) await target.resume();
+    else await target.suspend();
+    if (context !== target || playback.playWhenReady === requested) return;
+    requested = playback.playWhenReady;
+  }
+}
 const contextListeners = new Set<() => void>();
 let filters: BiquadFilterNode[] = [];
 let outputGain: GainNode | null = null;
@@ -297,8 +311,12 @@ async function select(index: number, initialPosition = 0) {
     updateNotification();
 
     if (playback.playWhenReady) {
-      void context.resume().then(() => {
-        audioHandle?.play();
+      const selectedHandle = audioHandle;
+      const selectedVersion = playback.sourceVersion;
+      void synchronizeAudioContext(true).then(() => {
+        if (playback.playWhenReady && playback.sourceVersion === selectedVersion) selectedHandle?.play();
+      }).catch(error => {
+        if (playback.sourceVersion === selectedVersion) handlePlaybackError(error);
       });
     }
     return;
@@ -552,6 +570,7 @@ export const StandardAudioPlayer = {
     });
     setStatus(State.None);
     updateNotification();
+    await synchronizeAudioContext(false);
   },
   async play() {
     if (!activeTrack()) return;
@@ -560,7 +579,7 @@ export const StandardAudioPlayer = {
     publish({ playWhenReady: true });
     emit(Event.PlaybackPlayWhenReadyChanged, { playWhenReady: true });
     try {
-      await context?.resume();
+      await synchronizeAudioContext(true);
     } catch (error) {
       if (intentVersion === playIntentVersion) handlePlaybackError(error);
       throw error;
@@ -586,6 +605,7 @@ export const StandardAudioPlayer = {
     audioHandle?.pause();
     setStatus(State.Paused);
     updateNotification();
+    await synchronizeAudioContext(false);
   },
   async stop() {
     await Promise.all([this.pause(), this.seekTo(0)]);
@@ -632,6 +652,7 @@ export const StandardAudioPlayer = {
     publish({ playWhenReady: false });
     setStatus(State.Ended);
     emit(Event.PlaybackQueueEnded);
+    await synchronizeAudioContext(false);
   },
   async setRepeatMode(mode: string) {
     publish({ repeat: mode });
@@ -823,8 +844,7 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
           if (playback.playWhenReady) {
             const loadedHandle = handleRef.current;
             const sourceVersion = current.sourceVersion;
-            void audioCtx
-              .resume()
+            void synchronizeAudioContext(true)
               .then(() => {
                 if (
                   playback.sourceVersion === sourceVersion &&

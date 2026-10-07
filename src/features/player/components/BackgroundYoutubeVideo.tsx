@@ -6,6 +6,8 @@ import { StyleSheet,useWindowDimensions,View } from "react-native";
 import YoutubePlayer from "react-native-youtube-iframe";
 
 import { getSettings } from "@/lib/storage";
+import { getPlaybackProgressSnapshot } from "@/services/audio/playbackProgressStore";
+import { startVideoProgressSync } from "../hooks/videoProgressSync";
 
 export const YOUTUBE_PLAYER_REFERRER_URL = "https://mavrixfy.site/";
 export const BACKGROUND_YOUTUBE_CHROME_CROP_PX = 260;
@@ -253,6 +255,16 @@ export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo({
     }
     lastPositionRef.current = effectiveTarget;
   }, [initialOffsetMs, playerReady, isLowEnd]);
+
+  useEffect(() => {
+    if (!active || !playerReady || isLowEnd) return;
+    return startVideoProgressSync({
+      getVideoSeconds: () => playerRef.current.getCurrentTime(),
+      getAudioMillis: () => Math.max(AMBIENT_VIDEO_INTRO_SKIP_SEC * 1000, getPlaybackProgressSnapshot().positionMillis),
+      seek: seconds => playerRef.current?.seekTo(seconds, true),
+      onUnavailable: () => { onVideoActive?.(false); onVideoError?.("Video sync unavailable"); },
+    });
+  }, [active, playerReady, isLowEnd, videoId, onVideoActive, onVideoError]);
 
   const dimensions = useMemo(() => {
     const frameW = Math.max(winW, 220);

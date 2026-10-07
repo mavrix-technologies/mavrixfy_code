@@ -3,6 +3,7 @@
  * Runs 100% on the Reanimated UI thread (no JS frame budget used during animation).
  */
 import Colors from "@/constants/colors";
+import { useAppIsActive } from "@/lib/appActivity";
 import React,{ useEffect } from "react";
 import { StyleSheet,View } from "react-native";
 import Animated,{
@@ -98,7 +99,8 @@ const EqualizerBars = React.memo(function EqualizerBars({
   size = 3,
   gap = 2,
 }: Props) {
-  const isAnimating = active ?? isPlaying ?? false;
+  const foreground = useAppIsActive();
+  const isAnimating = foreground && (active ?? isPlaying ?? false);
   const barColor = color ?? Colors.primary;
 
   return (

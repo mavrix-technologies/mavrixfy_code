@@ -17,7 +17,13 @@ import java.util.concurrent.TimeUnit
 
 /** Explicit, live-network emulator smoke test. Never part of normal offline tests. */
 class YouTubeSmokeRunner : Instrumentation() {
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    private var query = "Arijit Singh"
+    private var selectedVideoId: String? = null
+    override fun onCreate(arguments: Bundle?) {
+        query = arguments?.getString("query") ?: query
+        selectedVideoId = arguments?.getString("videoId")
+        super.onCreate(arguments); start()
+    }
     private fun result(operation: (Promise) -> Unit): ReadableMap {
         val latch = CountDownLatch(1)
         var value: Any? = null
@@ -36,7 +42,7 @@ class YouTubeSmokeRunner : Instrumentation() {
         val module = MavrixfyYouTubeModule(BridgeReactContext(targetContext))
         var player: MediaPlayer? = null
         try {
-            val search = result { module.search("Arijit Singh", "all", "smoke-search", it) }
+            val search = result { module.search(query, "all", "smoke-search", it) }
             val songs = search.getArray("songs")!!
             val playlists = search.getArray("playlists")!!
             check(songs.size() > 0) { "No YouTube Music songs returned" }
@@ -45,7 +51,9 @@ class YouTubeSmokeRunner : Instrumentation() {
             val collection = result { module.playlist(playlists.getMap(0)!!.getString("id")!!, "", "smoke-playlist", it) }
             check(collection.getArray("songs")!!.size() > 0) { "Playlist tracks did not load" }
             report.putInt("playlistSongs", collection.getArray("songs")!!.size())
-            val videoId = songs.getMap(0)!!.getString("videoId")!!
+            val videoId = selectedVideoId ?: songs.getMap(0)!!.getString("videoId")!!
+            report.putString("videoId", videoId)
+            report.putString("songTitle", songs.getMap(0)!!.getString("title"))
             val started = SystemClock.elapsedRealtime()
             val stream = result { module.resolveStream(videoId, "medium", "smoke-stream", it) }
             report.putLong("resolveMs", SystemClock.elapsedRealtime() - started)

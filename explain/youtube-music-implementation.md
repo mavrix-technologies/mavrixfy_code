@@ -43,7 +43,8 @@ The build uses compile SDK 37, with the existing target SDK retained. InnerTubeX
 - Focused lint: passed.
 - Focused playback, quality, queue, streaming, and YouTube regression tests: 46 tests passed, including iOS provider routing, renderer headers and unsupported/missing-native handling.
 - Android debug and instrumentation APK builds: passed for the x86_64 emulator.
-- Full repository suite: 53 passed, 10 failed. Remaining failures concern UI/performance expectations, missing `PlayerQueueList.tsx` / `videoProgressSync.ts`, and audio suspension behavior.
+- Full repository suite (latest follow-up): **63 passed, 0 failed**. Fixed background player/equalizer work, background progress subscriptions, small-screen touch targets and native suspension races. Added bounded queue rendering and cancellable video drift polling, connected to the actual player components. These automated checks do not certify every live YouTube stream.
+- Reported “Majboor unplugged” follow-up: Android debug/test APK compilation passed. The emulator installation succeeded, but the instrumentation did not reach a usable search/playback report and was stopped. The song remains unverified; an exact YouTube link/video ID and testing platform are needed to reproduce the user's selection. No stream-extraction fix is claimed from this attempt.
 - Live Android native probe: **passed**. Search returned 20 songs and 20 playlists; the first playlist returned 11 tracks. Stream resolution took 7,923 ms. Audio advanced to 1,507 ms and reached 10,852 ms after a seek to 10 seconds. The probe used the native bridge and Android MediaPlayer, not the React Native audio renderer.
 - React Native Android bundle: built and app launched. Provider/filter controls and the measured header layout were inspected. A complete physical-device playback/background run remains a release check; the development server reloaded during the final screen test.
 
@@ -70,9 +71,11 @@ The opt-in native probe searches songs and playlists, loads playlist tracks, res
 ```powershell
 cd android
 ./gradlew.bat :app:assembleDebug :app:assembleDebugAndroidTest -PreactNativeArchitectures=x86_64
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb shell am instrument -w com.mavrixfy.app.test/com.mavrixfy.app.youtube.YouTubeSmokeRunner
+adb install -r -t app/build/outputs/apk/debug/app-debug.apk
+adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb shell am instrument --user 0 -w com.mavrixfy.app.test/com.mavrixfy.app.youtube.YouTubeSmokeRunner
 ```
+
+For a reported song, pass `-e query 'Majboor unplugged'` inside a quoted adb shell command before the instrumentation component. Use `-e videoId VIDEO_ID` to resolve the exact selected video rather than the first search match. The report includes the tested video ID.
 
 The native probe does not replace testing the React Native audio renderer on a physical device. Before shipping, exercise song and playlist taps, next/previous, quality changes, pause during resolution, rapid provider changes, lock-screen/background playback, and temporary network loss. This implementation does not claim sample-accurate gapless playback.

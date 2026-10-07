@@ -1,5 +1,6 @@
 import { FullscreenKaraokeModal } from "@/components/FullscreenKaraokeModal";
 import { IS_ANDROID,IS_IOS } from "@/constants/platform";
+import { useAppIsActive } from "@/lib/appActivity";
 import type { Song } from "@/lib/musicData";
 import * as Animated from "@/lib/nativeAnimated";
 import { playerUIStateStore,type PlayerUIState } from "@/lib/playerUIState";
@@ -278,6 +279,7 @@ const LiveFullscreenKaraokeModal = memo(function LiveFullscreenKaraokeModal(
 });
 
 export const PlayerScreen = memo(function PlayerScreen() {
+  const foreground = useAppIsActive();
   const { height: screenHeight } = useWindowDimensions();
 
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
@@ -345,7 +347,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
     };
   });
 
-  if (!activeSong || uiState === "hidden") return null;
+  if (!activeSong || uiState !== "expanded" || !foreground) return null;
 
   const isExpanded = uiState === "expanded";
 
