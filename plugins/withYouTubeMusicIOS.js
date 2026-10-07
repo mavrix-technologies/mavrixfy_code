@@ -1,7 +1,7 @@
 /* global __dirname */
 const fs = require("node:fs");
 const path = require("node:path");
-const { withXcodeProject, IOSConfig } = require("@expo/config-plugins");
+const { withXcodeProject, withDangerousMod, IOSConfig } = require("@expo/config-plugins");
 
 const repository = "https://github.com/alexeichhorn/YouTubeKit.git";
 // Reviewed source revision; no floating extraction dependency in production builds.
@@ -43,19 +43,36 @@ function installPackage(project) {
 }
 
 module.exports = function withYouTubeMusicIOS(config) {
-  return withXcodeProject(config, mod => {
+  // Step 1: Copy Swift/ObjC source files into the ios/ platform directory.
+  // Must use withDangerousMod so this runs AFTER Expo's base mod has created
+  // the ios/ directory tree — withXcodeProject fires too early on a clean prebuild.
+  config = withDangerousMod(config, ["ios", (mod) => {
     const name = mod.modRequest.projectName ?? IOSConfig.XcodeUtils.getProjectName(mod.modRequest.projectRoot);
     const destination = path.join(mod.modRequest.platformProjectRoot, name);
     fs.mkdirSync(destination, { recursive: true });
     for (const file of ["MavrixfyYouTube.swift", "MavrixfyYouTubeBridge.m"]) {
       fs.copyFileSync(path.join(__dirname, "youtube-music/ios", file), path.join(destination, file));
-      IOSConfig.XcodeUtils.addBuildSourceFileToGroup({ filepath: `${name}/${file}`, groupName: name, project: mod.modResults });
     }
     const license = "LICENSE-YouTubeKit.txt";
     fs.copyFileSync(path.join(__dirname, "youtube-music/ios", license), path.join(destination, license));
+    return mod;
+  }]);
+
+  // Step 2: Wire the copied files into the Xcode project (.pbxproj) and install
+  // the YouTubeKit Swift package. withXcodeProject is correct here because it
+  // only modifies mod.modResults (the parsed pbxproj object) — no filesystem
+  // copies happen in this block.
+  config = withXcodeProject(config, (mod) => {
+    const name = mod.modRequest.projectName ?? IOSConfig.XcodeUtils.getProjectName(mod.modRequest.projectRoot);
+    for (const file of ["MavrixfyYouTube.swift", "MavrixfyYouTubeBridge.m"]) {
+      IOSConfig.XcodeUtils.addBuildSourceFileToGroup({ filepath: `${name}/${file}`, groupName: name, project: mod.modResults });
+    }
+    const license = "LICENSE-YouTubeKit.txt";
     IOSConfig.XcodeUtils.addResourceFileToGroup({ filepath: `${name}/${license}`, groupName: name, project: mod.modResults, isBuildFile: true });
     installPackage(mod.modResults);
     return mod;
   });
+
+  return config;
 };
 module.exports.installPackage = installPackage;

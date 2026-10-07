@@ -12,6 +12,7 @@
   "dependencies": {
     "event-target-shim": "6.0.2",
     "expo": "~57.0.24",
+    "expo-app": "file:../..",
     "expo-audio": "~57.0.5",
     "expo-crypto": "~57.0.3",
     "expo-status-bar": "~57.0.1",
