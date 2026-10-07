@@ -77,14 +77,8 @@ export function usePlayerCoreState({
   const streamResolveCache = useRef<Map<string, Promise<string | null>>>(new Map());
   const MAX_STREAM_CACHE = 100;
 
-  useEffect(() => { currentSongRef.current = currentSong; }, [currentSong]);
-  useEffect(() => { queueRef.current = queue; }, [queue]);
-  useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
-  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
-  useEffect(() => { playbackLoadingRef.current = playbackLoading; }, [playbackLoading]);
-  useEffect(() => { repeatModeRef.current = repeatMode; }, [repeatMode]);
-  useEffect(() => { isShuffledRef.current = isShuffled; }, [isShuffled]);
-  useEffect(() => { userQueuedSongIdsRef.current = userQueuedSongIds; }, [userQueuedSongIds]);
+  // Refs are kept synchronously up-to-date at the call site (state setter + ref write together).
+  // Removed one-render-delayed useEffect ref-sync wrappers to prevent auto-pause from stale reads.
 
   const showPlaybackNotice = useCallback((message: string) => {
     const now = Date.now();
@@ -191,6 +185,9 @@ export function usePlayerCoreState({
           })
           .catch(() => null);
       }
+      // Widen prefetch: also warm up the track two positions ahead
+      const nextNextItem = songQueue[activeIndex + 2];
+      if (nextNextItem) void resolvePlaybackUrlCached(nextNextItem).catch(() => null);
     },
     [resolvePlaybackUrlCached, TrackPlayer]
   );

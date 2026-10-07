@@ -201,6 +201,10 @@ export function useAudioPlaybackCommands({
       }, 800);
 
       try {
+        // Pre-warm: fire resolution early if not already cached
+        if (!streamUrlCache.current.has(targetSong.id) && isYouTubeSong(targetSong)) {
+          void resolvePlaybackUrlCached(targetSong).catch(() => null);
+        }
         const audioUrl = await Promise.race([
           resolvePlaybackUrlCached(targetSong),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), isYouTubeSong(targetSong) ? 27000 : 12000)),
@@ -260,7 +264,8 @@ export function useAudioPlaybackCommands({
             try {
               const nativeTracks = q.map((queueSong, index) => {
                 if (index === targetIndex) return targetTrack;
-                const cachedUrl = streamUrlCache.current.get(queueSong.id) || resolveAudioUrl(queueSong);
+                const cachedUrl = streamUrlCache.current.get(queueSong.id) ||
+                  (isYouTubeSong(queueSong) ? '' : resolveAudioUrl(queueSong));
                 return songToTrack(queueSong, cachedUrl || null, streamUrlCache.current);
               });
 
@@ -335,7 +340,6 @@ export function useAudioPlaybackCommands({
         if (reqId === playRequestIdRef.current) {
           pendingPlayRequestRef.current = null;
           playbackLoadingRef.current = false;
-          setPlaybackLoading(false);
           updatePlaybackEngineSnapshot({ isLoading: false });
         }
       }
@@ -444,7 +448,9 @@ export function useAudioPlaybackCommands({
             }
 
             try {
-              await TrackPlayer.play();
+              await enqueueNativeQueueMutation(async () => {
+                await TrackPlayer.play();
+              });
             } catch (playErr) {
               logger.warn("[Player] TrackPlayer.play() failed, reloading track via playSong:", playErr);
               const resumePos = positionSecondsRef.current > 0 ? positionSecondsRef.current : 0;
@@ -455,7 +461,9 @@ export function useAudioPlaybackCommands({
           setIsPlaying(false);
           isPlayingRef.current = false;
           updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
-          await TrackPlayer.pause();
+          await enqueueNativeQueueMutation(async () => {
+            await TrackPlayer.pause();
+          });
         }
       } else if (canUseLightweightAudioFallback) {
         if (nextPlayState) {
@@ -489,6 +497,7 @@ export function useAudioPlaybackCommands({
     canUseLightweightAudioFallback,
     currentSongRef,
     desiredPlayStateRef,
+    enqueueNativeQueueMutation,
     ensurePlayerReady,
     isPlayerReady,
     isPlayingRef,

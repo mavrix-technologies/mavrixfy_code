@@ -94,7 +94,7 @@ const pending = new Map<string, Promise<YouTubeStream>>();
 const generations = new Map<string, number>();
 export function peekYouTubeStream(song: Song): YouTubeStream | undefined {
   const stream = streams.get(song.id);
-  return stream && stream.expiresAt - Date.now() > 120000 ? stream : undefined;
+  return stream && stream.expiresAt - Date.now() > 30000 ? stream : undefined;
 }
 export async function resolveYouTubeStream(song: Song, quality?: string): Promise<YouTubeStream> {
   const cached = peekYouTubeStream(song);

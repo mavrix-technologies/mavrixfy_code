@@ -46,6 +46,9 @@ interface UseAudioSyncListenersOptions {
   playSong: (song: Song, queue?: Song[], position?: number) => Promise<void> | void;
   nextSong: () => Promise<void>;
   prevSong: () => Promise<void>;
+  playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number) => Promise<void> | void>;
+  nextSongRef: MutableRefObject<() => void>;
+  prevSongRef: MutableRefObject<() => void>;
   isNativeQueueSyncedRef?: MutableRefObject<boolean>;
   triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[]) => Promise<Song[]>;
   isShuffled?: boolean;
@@ -89,6 +92,9 @@ export function useAudioSyncListeners({
   playSong,
   nextSong,
   prevSong,
+  playSongRef,
+  nextSongRef,
+  prevSongRef,
   isNativeQueueSyncedRef,
   triggerAutoplayAppend,
   isShuffled,
@@ -128,7 +134,7 @@ export function useAudioSyncListeners({
           if (desiredPlayStateRef.current !== true || playbackLoadingRef.current) return;
           if (track?.id === currentSongRef.current?.id) return TrackPlayer.play();
           const song = currentSongRef.current;
-          if (song) return playSong(song, queueRef.current, positionSecondsRef.current);
+          if (song) return playSongRef.current(song, queueRef.current, positionSecondsRef.current);
         }).catch((error: unknown) => logger.warn("[Audio] Remote play failed", error));
       }),
       subscribeTrackPlayerEvent(Event.RemotePause, () => {
@@ -139,8 +145,8 @@ export function useAudioSyncListeners({
         pauseIntent();
         void TrackPlayer.stop().catch(() => {});
       }),
-      subscribeTrackPlayerEvent(Event.RemoteNext, () => void nextSong()),
-      subscribeTrackPlayerEvent(Event.RemotePrevious, () => void prevSong()),
+      subscribeTrackPlayerEvent(Event.RemoteNext, () => void nextSongRef.current()),
+      subscribeTrackPlayerEvent(Event.RemotePrevious, () => void prevSongRef.current()),
       subscribeTrackPlayerEvent(Event.PlaybackInterruption, (event: { resumed: boolean }) => {
         if (event.resumed) playIntent();
         else pauseIntent();
@@ -191,7 +197,7 @@ export function useAudioSyncListeners({
           return;
         }
         // Queue replacement can reset native intent before our play command.
-        if (playbackLoadingRef.current) return;
+        if (playbackLoadingRef.current && event.playWhenReady) return;
         desiredPlayStateRef.current = event.playWhenReady;
 
         if (event.playWhenReady) {
@@ -215,7 +221,7 @@ export function useAudioSyncListeners({
           youtubeRetryAt.current.set(failedSong.id, Date.now());
           rejectYouTubeStream(failedSong);
           const resumePosition = positionSecondsRef.current;
-          void playSong(failedSong, queueRef.current, resumePosition);
+          void playSongRef.current(failedSong, queueRef.current, resumePosition);
           return;
         }
         logger.error("[Player] PlaybackError event", error);
@@ -320,7 +326,9 @@ export function useAudioSyncListeners({
             : null;
 
         const pending = pendingPlayRequestRef.current;
-        if (pending && activeTrackId && String(activeTrackId) !== String(pending.songId)) return;
+        // Any in-flight pending request means we are mid-transition; ignore ALL native
+        // track-change events until the transition completes.
+        if (pending) return;
 
         const activeSong = currentQ.find((song) => song.id === activeTrackId);
         const youtubeStream = activeSong && isYouTubeSong(activeSong) ? peekYouTubeStream(activeSong) : undefined;
@@ -406,7 +414,7 @@ export function useAudioSyncListeners({
           const next = queueRef.current[queueIndexRef.current + 1] ||
             (repeatMode === "all" ? queueRef.current[0] : undefined);
           if (next) {
-            void playSong(next, queueRef.current);
+            void playSongRef.current(next, queueRef.current);
             return;
           }
         }
@@ -420,7 +428,7 @@ export function useAudioSyncListeners({
               const recs = await triggerAutoplayAppend(seed, queueRef.current);
               if (!isStillEnded() || desiredPlayStateRef.current === false) return;
               if (recs.length > 0) {
-                void playSong(recs[0], queueRef.current);
+                void playSongRef.current(recs[0], queueRef.current);
                 return;
               }
             }
@@ -442,7 +450,9 @@ export function useAudioSyncListeners({
       unsubs.forEach((unsub) => unsub?.());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlayerReady, triggerAutoplayAppend, nextSong, prevSong, playSong, repeatMode]);
+    // playSong, nextSong, prevSong are accessed via refs (playSongRef/nextSongRef/prevSongRef)
+    // to prevent handler reinstall races when function identities change.
+  }, [isPlayerReady, triggerAutoplayAppend, repeatMode]);
 
   // Save current playback state (event-driven)
   useEffect(() => {
