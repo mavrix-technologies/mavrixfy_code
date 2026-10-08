@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 function prefetchBannerImage(url?: string | null) {
   const clean = url?.trim();
   if (clean && clean.startsWith("http")) {
-    void Image.prefetch(clean);
+    void Image.prefetch(clean, "disk").catch(() => {});
   }
 }
 

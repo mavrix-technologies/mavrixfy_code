@@ -25,7 +25,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
-import { FlatList,Pressable,StyleSheet,Text,TextInput,View,type NativeScrollEvent,type NativeSyntheticEvent } from "react-native";
+import {FlatList,Pressable,StyleSheet,Text,TextInput,View,type NativeScrollEvent,type NativeSyntheticEvent } from "react-native";
 import Animated,{
 Easing,
 useAnimatedStyle,
@@ -205,10 +205,11 @@ export function LikedSongsScreen() {
   }, [songs, selectedMood, searchQuery]);
 
   // Stable ref so handleSongPress/renderSong never recreate when list changes
-  const filteredSongsRef = useRef(filteredSongs);
+  const playableFilteredSongs = filteredSongs;
+  const filteredSongsRef = useRef(playableFilteredSongs);
   useEffect(() => {
-    filteredSongsRef.current = filteredSongs;
-  }, [filteredSongs]);
+    filteredSongsRef.current = playableFilteredSongs;
+  }, [playableFilteredSongs]);
 
   const isPlayingFromLikedSongs = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
@@ -217,7 +218,7 @@ export function LikedSongsScreen() {
   }, [currentSong, songs]);
 
   const handlePlayAll = useCallback(() => {
-    const listToPlay = filteredSongs.length > 0 ? filteredSongs : songs;
+    const listToPlay = (filteredSongs.length > 0 ? filteredSongs : songs);
     if (listToPlay.length === 0) return;
     void triggerImpact(ImpactFeedbackStyle.Light);
     if (isPlayingFromLikedSongs && isPlaying) {
@@ -232,7 +233,7 @@ export function LikedSongsScreen() {
   }, [filteredSongs, songs, isPlayingFromLikedSongs, isPlaying, togglePlay, isShuffled, shufflePlay, playSong]);
 
   const handleShufflePlay = useCallback(() => {
-    const listToPlay = filteredSongs.length > 0 ? filteredSongs : songs;
+    const listToPlay = (filteredSongs.length > 0 ? filteredSongs : songs);
     if (listToPlay.length === 0) return;
     void triggerImpact(ImpactFeedbackStyle.Light);
     shufflePlay(listToPlay);
@@ -402,7 +403,7 @@ export function LikedSongsScreen() {
               onShufflePlay={handleShufflePlay}
               leftAction={
                 <DownloadCollectionButton
-                  songs={filteredSongs}
+                  songs={playableFilteredSongs}
                   collectionId="liked-songs"
                   collectionName="Liked Songs"
                   collectionImage=""
@@ -410,6 +411,7 @@ export function LikedSongsScreen() {
                 />
               }
             />
+
 
             {songs.length > 0 && (
               <View style={styles.moodSection}>

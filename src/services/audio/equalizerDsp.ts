@@ -1,8 +1,9 @@
-export const EQ_FREQUENCIES_HZ = [60, 150, 400, 1000, 2400, 15000] as const;
+import { EQ_FREQUENCIES_HZ, EQ_Q } from "./equalizerConfig";
+export { EQ_FREQUENCIES_HZ, EQ_Q } from "./equalizerConfig";
 
 type Coefficients = { b0: number; b1: number; b2: number; a0: number; a1: number; a2: number };
 
-// Peaking Biquad coefficients from the Web Audio specification, with Q = 1.
+// Peaking Biquad coefficients from the Web Audio specification, with Q = sqrt(2), as in LastWave.
 // Measure the combined response so adjacent boosted bands get enough headroom.
 export function calculateEqHeadroomDb(gains: readonly number[], sampleRate: number): number {
   if (!Number.isFinite(sampleRate) || sampleRate < 8000) {
@@ -14,9 +15,10 @@ export function calculateEqHeadroomDb(gains: readonly number[], sampleRate: numb
   for (let index = 0; index < EQ_FREQUENCIES_HZ.length; index++) {
     const gain = gains[index] ?? 0;
     if (!Number.isFinite(gain) || gain === 0) continue;
-    const frequency = Math.min(EQ_FREQUENCIES_HZ[index], nyquist * 0.95);
+    const frequency = EQ_FREQUENCIES_HZ[index];
+    if (frequency >= sampleRate * 0.45) continue;
     const omega = (2 * Math.PI * frequency) / sampleRate;
-    const alpha = Math.sin(omega) / 2;
+    const alpha = Math.sin(omega) / (2 * EQ_Q);
     const cosOmega = Math.cos(omega);
     const A = Math.pow(10, gain / 40);
     filters.push({

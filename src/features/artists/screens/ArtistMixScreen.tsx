@@ -4,10 +4,9 @@ import { StandardTopHeader } from "@/components/navigation/StandardTopHeader";
 import Colors from "@/constants/colors";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { getArtistDetails } from "@/data/providers/ArtistProvider";
-import { mapFilter } from "@/lib/arrayUtils";
 import { triggerImpact } from "@/lib/haptics";
 import { setLastMix } from "@/lib/lastMix";
-import { convertJioSaavnSong,Song } from "@/lib/musicData";
+import { Song } from "@/lib/musicData";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { shareArtistMix } from "@/utils/shareUtils";
 import { pickFirst } from "@/utils/stringUtils";
@@ -121,9 +120,10 @@ export function ArtistMixScreen() {
 
       if (cancelled) return;
 
-      const results = await Promise.allSettled(
-        ids.map((id) => getArtistDetails(id))
-      );
+      const results: PromiseSettledResult<Awaited<ReturnType<typeof getArtistDetails>>>[] = [];
+      for (let offset = 0; offset < ids.length && !cancelled; offset += 2) {
+        results.push(...await Promise.allSettled(ids.slice(offset, offset + 2).map((id, index) => getArtistDetails(id, names[offset + index] || ""))));
+      }
 
       const seen = new Set<string>();
       const merged: Song[] = [];
@@ -132,9 +132,9 @@ export function ArtistMixScreen() {
         const artist = r.value;
         const selectedId = ids[idx];
 
-        const artistSongs = mapFilter(artist.topSongs ?? [], convertJioSaavnSong, (s) => {
+        const artistSongs = (artist.topSongs ?? []).filter((s) => {
           const songArtistId = (s as Song & { artistId?: string }).artistId;
-          return !!s.audioUrl?.trim() && !seen.has(s.id) && (!songArtistId || songArtistId === selectedId);
+          return !seen.has(s.id) && (!songArtistId || songArtistId === selectedId);
         });
 
         artistSongs.forEach((s) => {
@@ -154,7 +154,7 @@ export function ArtistMixScreen() {
     return () => {
       cancelled = true;
     };
-  }, [finishEmptyMixLoad, finishMixLoad, ids, incrementLoadedCount, startMixLoad]);
+  }, [finishEmptyMixLoad, finishMixLoad, ids, incrementLoadedCount, startMixLoad, names]);
 
   const isPlayingFromMix = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;

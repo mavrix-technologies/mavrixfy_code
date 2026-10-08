@@ -2,22 +2,32 @@ import { Platform } from "react-native";
 import type { Song } from "@/lib/musicData";
 import type { PlaylistResult, ResultFilter, SearchResults } from "@/lib/searchRepository";
 import { youTubeArtworkUrl } from "./YouTubeArtwork";
+import { playbackDuration, playbackStreamMetadata } from "../audio/audioTimeline";
+import { artistChannelId, validArtistChannelId, type NativeArtist, type NativeArtistDetails, type ArtistCard, type ArtistDetails } from "./YouTubeArtists";
 
-export interface NativeTrack { videoId: string; title: string; artist: string; coverUrl: string; duration: number }
-export interface NativePlaylist { id: string; name: string; coverUrl: string; songCount: number; url: string; description: string }
+export interface NativeTrack { videoId: string; title: string; artist: string; coverUrl: string; duration: number; artists?: { id: string; name: string }[] }
+export interface NativePlaylist { id: string; name: string; coverUrl: string; songCount: number; url: string; description: string; ownerChannelId?: string; ownerName?: string; kind?: "album" | "playlist" }
+export interface NativeHomeSection { id: string; title: string; songs: NativeTrack[]; playlists: NativePlaylist[]; category?: "new-releases" | "trending" | "discover" }
 export interface PlaylistPage { songs: NativeTrack[]; cursor: string; name?: string; coverUrl?: string; songCount?: number }
 export interface YouTubeStream {
   videoId: string; url: string; headers: Record<string, string>; expiresAt: number;
   bitrate: number; mimeType: string; codec: string; clientProfile: string; resolutionId: string;
   requestedQuality?: string;
+  durationSeconds?: number;
 }
 // Transport contract retained for callers; implementation is shared TypeScript.
+export type NativeHomeFeed = { songs: NativeTrack[]; playlists: NativePlaylist[]; sections?: NativeHomeSection[] };
+export interface YouTubeVideoStream extends YouTubeStream { height: number }
 export interface YouTubeNative {
-  home(requestId: string): Promise<{ songs: NativeTrack[]; playlists: NativePlaylist[] }>;
-  search(query: string, filter: string, requestId: string): Promise<{ songs: NativeTrack[]; playlists: NativePlaylist[] }>;
+  home(requestId: string, onFirstPage?: (feed: NativeHomeFeed) => void): Promise<NativeHomeFeed>;
+  explore(requestId: string): Promise<{ songs: NativeTrack[]; playlists: NativePlaylist[]; sections?: NativeHomeSection[] }>;
+  search(query: string, filter: string, requestId: string): Promise<{ songs: NativeTrack[]; playlists: NativePlaylist[]; artists?: NativeArtist[]; albums?: NativePlaylist[] }>;
+  artist?(channelId: string, requestId: string): Promise<NativeArtistDetails>;
+  artistSongs?(channelId: string, cursor: string, requestId: string): Promise<PlaylistPage>;
   playlist(playlistId: string, cursor: string, requestId: string): Promise<PlaylistPage>;
   discardPlaylistCursor?(cursor: string): void;
   resolveStream(videoId: string, quality: string, requestId: string): Promise<YouTubeStream>;
+  resolveVideoStream(videoId: string, quality: string, requestId: string): Promise<YouTubeVideoStream>;
   cancel(requestId: string): void;
   related(videoId: string, requestId: string): Promise<NativeTrack[]>;
   rejectStream(resolutionId: string): void;
@@ -50,13 +60,15 @@ export function normalizeYouTubeTrack(track: NativeTrack): Song {
   if (!/^[\w-]{11}$/.test(track.videoId)) throw new Error("Invalid YouTube video ID");
   return { id: `youtube_${track.videoId}`, source: "youtube", youtubeVideoId: track.videoId, videoId: track.videoId,
     title: track.title || "YouTube song", artist: track.artist || "YouTube Music", album: "", genre: "", duration: Number.isFinite(track.duration) ? Math.max(0, track.duration) : 0,
-    coverUrl: youTubeArtworkUrl(track.coverUrl) || `https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg`, audioUrl: "" };
+    coverUrl: youTubeArtworkUrl(track.coverUrl) || `https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg`, audioUrl: "",
+    artistRefs: track.artists?.filter(artist => validArtistChannelId(artist.id)).map(artist => ({ ...artist, id: `youtube_artist_${artistChannelId(artist.id)}` })) };
 }
 function normalizeTracks(tracks: NativeTrack[]): Song[] {
   const unique = new Map<string, Song>();
   for (const track of tracks) if (/^[\w-]{11}$/.test(track.videoId)) unique.set(track.videoId, normalizeYouTubeTrack(track));
   return [...unique.values()];
 }
+export function clearYouTubeSearchCache() { searchCache.clear(); }
 const searchCache = new Map<string, { at: number; results: SearchResults }>();
 export async function searchYouTubeMusic(query: string, filter: ResultFilter, signal?: AbortSignal): Promise<SearchResults> {
   if (signal?.aborted) throw new Error("YouTube request cancelled");
@@ -64,38 +76,85 @@ export async function searchYouTubeMusic(query: string, filter: ResultFilter, si
   const key = `${filter}:${query.trim().toLowerCase()}`;
   const cached = searchCache.get(key);
   if (cached && Date.now() - cached.at < 180000) return cached.results;
-  if (filter === "albums" || filter === "artists") return { songs: [], playlists: [], albums: [], artists: [] };
   const data = await invoke((module, id) => module.search(query.trim(), filter, id), signal);
   const playlists: PlaylistResult[] = data.playlists.map((item) => ({
     id: `youtube_playlist_${item.id}`, name: item.name, songCount: item.songCount,
     image: item.coverUrl ? [{ quality: "1200x1200", url: youTubeArtworkUrl(item.coverUrl) }] : [], url: item.url, description: item.description,
   }));
-  const results: SearchResults = { songs: normalizeTracks(data.songs), playlists, albums: [], artists: [] };
+  const results: SearchResults = { songs: normalizeTracks(data.songs), playlists, albums: (data.albums || []).map(item => ({ id: `youtube_album_${item.id}`, name: item.name, songCount: item.songCount, url: item.url, image: item.coverUrl ? [{ quality: "1200x1200", url: youTubeArtworkUrl(item.coverUrl) }] : [], description: item.description })), artists: (data.artists || []).filter(item => validArtistChannelId(item.id)).map(normalizeYouTubeArtist) };
   if (!signal?.aborted) {
     if (searchCache.size >= 40) searchCache.delete(searchCache.keys().next().value!);
     searchCache.set(key, { at: Date.now(), results });
   }
   return results;
 }
-type YouTubeHome = { songs: Song[]; playlists: (NativePlaylist & { source: "youtube" })[] };
+export function normalizeYouTubeArtist(item: NativeArtist): ArtistCard {
+  return { id: `youtube_artist_${artistChannelId(item.id)}`, name: item.name,
+    image: item.coverUrl ? [{ quality: "1200x1200", url: youTubeArtworkUrl(item.coverUrl) }] : [],
+    url: `https://music.youtube.com/channel/${artistChannelId(item.id)}` };
+}
+export async function loadYouTubeArtist(id: string): Promise<ArtistDetails> {
+  if (!validArtistChannelId(id)) throw new Error("Invalid artist channel");
+  const data = await invoke((module, requestId) => {
+    if (!module.artist) throw new Error("Artist browsing is unavailable");
+    return module.artist(artistChannelId(id), requestId);
+  });
+  return { ...normalizeYouTubeArtist(data), url: `https://music.youtube.com/channel/${artistChannelId(id)}`,
+    bio: data.description ? [{ title: "About", text: data.description }] : [],
+    topSongs: normalizeTracks(data.songs), hasMoreSongs: data.hasMoreSongs,
+    topAlbums: data.albums.map(item => ({ id: `youtube_album_${item.id}`, name: item.name, url: item.url,
+      image: item.coverUrl ? [{ quality: "1200x1200", url: youTubeArtworkUrl(item.coverUrl) }] : [] })),
+    similarArtists: data.artists.filter(item => validArtistChannelId(item.id)).map(normalizeYouTubeArtist) };
+}
+export async function loadYouTubeArtistSongs(id: string, cursor = "") {
+  if (!validArtistChannelId(id)) throw new Error("Invalid artist channel");
+  const page = await invoke((module, requestId) => {
+    if (!module.artistSongs) throw new Error("Artist songs are unavailable");
+    return module.artistSongs(artistChannelId(id), cursor, requestId);
+  });
+  return { songs: normalizeTracks(page.songs), cursor: page.cursor };
+}
+export type YouTubeHomePlaylist = NativePlaylist & { source: "youtube" };
+export interface YouTubeHomeSection { id: string; title: string; songs: Song[]; playlists: YouTubeHomePlaylist[]; category?: NativeHomeSection["category"] }
+type YouTubeHome = { songs: Song[]; playlists: YouTubeHomePlaylist[]; sections: YouTubeHomeSection[] };
+function normalizeHomePlaylists(items: NativePlaylist[]): YouTubeHomePlaylist[] {
+  return [...new Map(items.map(item => [item.id, {
+    ...item, coverUrl: youTubeArtworkUrl(item.coverUrl), id: `youtube_${item.kind === "album" ? "album" : "playlist"}_${item.id.replace(/^youtube_(?:playlist|album)_/, "")}`, source: "youtube" as const,
+  }])).values()];
+}
+let exploreCache: { at: number; data: YouTubeHome } | undefined;
 let homeCache: { at: number; data: YouTubeHome } | undefined;
 let homeCacheGeneration = 0;
 const previewCache = new Map<string, { at: number; songs: Song[] }>();
-export function clearYouTubeHomeCache() { homeCacheGeneration++; homeCache = undefined; previewCache.clear(); }
-export async function loadYouTubeHome(signal?: AbortSignal): Promise<YouTubeHome> {
+export function clearYouTubeHomeCache() { homeCacheGeneration++; homeCache = undefined; exploreCache = undefined; previewCache.clear(); }
+export async function loadYouTubeHome(signal?: AbortSignal, onFirstPage?: (feed: YouTubeHome) => void): Promise<YouTubeHome> {
   if (signal?.aborted) throw new Error("YouTube request cancelled");
-  if (homeCache && Date.now() - homeCache.at < 1200000) return homeCache.data;
+  if (homeCache && Date.now() - homeCache.at < 1200000) { onFirstPage?.(homeCache.data); return homeCache.data; }
   const generation = homeCacheGeneration;
-  const data = await invoke((module, id) => module.home(id), signal);
-  const result: YouTubeHome = { songs: normalizeTracks(data.songs), playlists: [...new Map(data.playlists.map(item => [item.id, {
-    ...item, coverUrl: youTubeArtworkUrl(item.coverUrl), id: `youtube_playlist_${item.id}`, source: "youtube" as const,
-  }])).values()] };
+  const data = await invoke((module, id) => module.home(id, onFirstPage ? page => { if (!signal?.aborted) onFirstPage(normalizeHome(page)); } : undefined), signal);
+  const result = normalizeHome(data);
   if (generation === homeCacheGeneration && !signal?.aborted && (result.songs.length || result.playlists.length)) homeCache = { at: Date.now(), data: result };
   return result;
 }
+function normalizeHome(data: { songs: NativeTrack[]; playlists: NativePlaylist[]; sections?: NativeHomeSection[] }): YouTubeHome {
+  return {
+    songs: normalizeTracks(data.songs), playlists: normalizeHomePlaylists(data.playlists).slice(0, 60),
+    sections: (data.sections || []).map(section => ({ ...section,
+      songs: normalizeTracks(section.songs).slice(0, 20), playlists: normalizeHomePlaylists(section.playlists).slice(0, 24),
+    })).filter(section => section.songs.length || section.playlists.length).slice(0, 12),
+  };
+}
+export async function loadYouTubeExplore(signal?: AbortSignal): Promise<YouTubeHome> {
+  if (signal?.aborted) throw new Error("YouTube request cancelled");
+  if (exploreCache && Date.now() - exploreCache.at < 1200000) return exploreCache.data;
+  const generation = homeCacheGeneration;
+  const data = normalizeHome(await invoke((module, id) => module.explore(id), signal));
+  if (generation === homeCacheGeneration && !signal?.aborted && data.sections.length) exploreCache = { at: Date.now(), data };
+  return data;
+}
 export interface YouTubePlaylistResult { name: string; coverUrl: string; songCount: number; songs: Song[] }
 export async function loadYouTubePlaylist(id: string, signal?: AbortSignal, onFirstPage?: (page: YouTubePlaylistResult) => void) {
-  const playlistId = id.replace(/^youtube_playlist_/, "");
+  const playlistId = id.replace(/^youtube_(?:playlist|album)_/, "");
   let cursor = "";
   let name = "YouTube Music playlist", coverUrl = "", songCount = 0;
   const all: NativeTrack[] = [];
@@ -123,7 +182,7 @@ export async function previewYouTubePlaylist(id: string, signal?: AbortSignal): 
   if (cached && Date.now() - cached.at < 1200000) return cached.songs;
   const generation = homeCacheGeneration;
   const page = await invoke(async (module, requestId) => {
-    const result = await module.playlist(id.replace(/^youtube_playlist_/, ""), "", requestId);
+    const result = await module.playlist(id.replace(/^youtube_(?:playlist|album)_/, ""), "", requestId);
     if (result.cursor) module.discardPlaylistCursor?.(result.cursor);
     return result;
   }, signal);
@@ -179,14 +238,28 @@ export function invalidateYouTubeStream(song: Song, rejectProfile = false): void
 }
 export function rejectYouTubeStream(song: Song): void { invalidateYouTubeStream(song, true); }
 export function youTubeSongWithStream(song: Song, stream = peekYouTubeStream(song)): Song {
-  return stream ? { ...song, audioUrl: stream.url, playbackHeaders: stream.headers, youtubeAudioExpiresAt: stream.expiresAt } : song;
+  return stream ? { ...song, ...playbackStreamMetadata(stream), audioUrl: stream.url, youtubeAudioExpiresAt: stream.expiresAt,
+    duration: playbackDuration(song.duration, stream.durationSeconds) } : song;
+}
+export function youTubePlaybackErrorDetails(error: unknown): string {
+  return (error instanceof Error ? `${error.name}: ${error.message}` : String(error))
+    .replace(/https?:\/\/[^\s"']+/g, "[URL]")
+    .replace(/(authorization|cookie|token|signature)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+    .slice(0, 2000);
 }
 export function youTubePlaybackErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = youTubePlaybackErrorDetails(error);
   if (/confirm.*not a bot|sign in|login.required/i.test(message))
     return "YouTube is requiring sign-in for this connection. Please try again later.";
-  if (/private|removed|not available|unavailable|restricted/i.test(message))
+  if (/timed out|timeout|aborterror/i.test(message)) return "YouTube playback timed out. Tap Play to retry.";
+  if (/network request failed|failed to fetch|audio (?:GET )?HTTP/i.test(message))
+    return "Could not connect to this song's audio stream. Tap Play to retry.";
+  if (/private|removed|not available|video unavailable|restricted/i.test(message))
     return "This YouTube song is unavailable right now. Tap Play to retry.";
-  if (/timed out|timeout/i.test(message)) return "YouTube playback timed out. Tap Play to retry.";
   return "Could not play this YouTube song. Tap Play to retry.";
+}
+
+/** Visual streams stay separate from the audio cache and never replace song playback. */
+export function resolveYouTubeVideoStream(videoId: string, quality: string, signal?: AbortSignal): Promise<YouTubeVideoStream> {
+  return invoke((module, id) => module.resolveVideoStream(videoId, quality, id), signal);
 }

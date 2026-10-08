@@ -18,12 +18,23 @@ test("Google artwork sizing preserves crop flags and query strings", () => {
   assert.equal(art.youTubeArtworkUrl(unrelated), unrelated);
   assert.equal(art.youTubeArtworkUrl("https://elsewhere.com/art=s60"), "https://elsewhere.com/art=s60");
 });
-test("video thumbnails use a master on large surfaces and a dependable fallback", () => {
+test("video thumbnails preserve server cropping and use an unpadded fallback", () => {
   const url = "https://i.ytimg.com/vi/abcdefghijk/hq720.jpg?sqp=resize-token";
-  assert.equal(art.youTubeDisplayArtworkUrl(url, 1200), "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg");
-  assert.equal(art.youTubeDisplayArtworkUrl(url, 192), "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg");
-  assert.equal(art.youTubeArtworkFallbackUrl(url), url);
+  assert.equal(art.youTubeDisplayArtworkUrl(url, 1200), url);
+  assert.equal(art.youTubeDisplayArtworkUrl(url, 192), url);
+  assert.equal(art.youTubeArtworkFallbackUrl(url), "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg");
   assert.equal(art.youTubeArtworkUrl(url), url);
+});
+
+test("song artwork prefers a square cover without changing generic playlist ranking", () => {
+  const input = [{ url: "video", width: 1280, height: 720 }, { url: "cover", width: 544, height: 544 },
+    { url: "tiny", width: 60, height: 60 }];
+  assert.equal(art.bestYouTubeSongThumbnail(input), "cover");
+  assert.equal(art.bestYouTubeSongThumbnail([...input].reverse()), "cover");
+  assert.equal(art.bestYouTubeThumbnail(input), "video");
+  assert.equal(art.bestYouTubeSongThumbnail([input[0]]), "video");
+  assert.equal(art.youTubeDisplayArtworkUrl("https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg", 96),
+    "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg");
 });
 test("dense screens get enough artwork pixels without full masters in each row", () => {
   assert.equal(art.artworkPixelSize(48, 3), 192);
@@ -61,7 +72,7 @@ test("artwork fallback is bounded, detects placeholder masters and ignores old c
   const primary = render(props);
   primary.onLoad({ source: { width: 120, height: 90 } });
   const fallback = render(props);
-  assert.match(fallback.source.uri, /hqdefault/);
+  assert.match(fallback.source.uri, /mqdefault/);
   let errors = 0;
   render({ ...props, onError: () => errors++ }).onError({ error: "missing" });
   assert.equal(errors, 1);

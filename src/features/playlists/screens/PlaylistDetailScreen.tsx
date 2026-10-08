@@ -1,6 +1,6 @@
 import AdMobBanner from "@/components/AdMobBanner";
 import OfflineBanner from "@/components/OfflineBanner";
-import SongRow from "@/components/SongRow";
+import SongRow,{ SONG_ROW_HEIGHT } from "@/components/SongRow";
 import {
   CapsuleDivider,
   CapsuleNavButton,
@@ -22,6 +22,7 @@ import * as Haptics from "expo-haptics";
 import { useCallback,useMemo,useRef,useState } from "react";
 import {
 Platform,
+type LayoutChangeEvent,
 Pressable,
 StyleSheet,
 Text,
@@ -55,6 +56,19 @@ function usePlaylistDetailView() {
   const topInset = insets.top;
   const bottomPad = Platform.OS === "web" ? 132 : Math.max(150, insets.bottom + 126);
   const contentContainerStyle = useMemo(() => ({ paddingBottom: bottomPad }), [bottomPad]);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const handleHeaderLayout = useCallback((event: LayoutChangeEvent) => {
+    const height = event.nativeEvent.layout.height;
+    setHeaderHeight(previous => previous === height ? previous : height);
+  }, []);
+  const getSongLayout = useCallback(
+    (_: ArrayLike<Song> | null | undefined, index: number) => ({
+      length: SONG_ROW_HEIGHT,
+      offset: headerHeight + SONG_ROW_HEIGHT * index,
+      index,
+    }),
+    [headerHeight]
+  );
 
   const {
     loading,
@@ -245,7 +259,7 @@ function usePlaylistDetailView() {
   }
 
   const listHeader = (
-    <>
+    <View onLayout={handleHeaderLayout}>
       <PlaylistHero
         topInset={topInset}
         playlistCover={playlistCover}
@@ -279,7 +293,7 @@ function usePlaylistDetailView() {
           {totalDurationLabel ? ` • ${totalDurationLabel}` : totalMinutes > 0 ? ` • ${totalMinutes} min` : ""}
         </Text>
       </View>
-    </>
+    </View>
   );
 
   return (
@@ -329,6 +343,7 @@ function usePlaylistDetailView() {
         data={songs}
         renderItem={renderPlaylistSong}
         keyExtractor={playlistSongKeyExtractor}
+        getItemLayout={headerHeight > 0 ? getSongLayout : undefined}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
           <PlaylistTrackListEmpty
@@ -347,10 +362,10 @@ function usePlaylistDetailView() {
         onScroll={handleScroll}
         scrollEventThrottle={32}
         removeClippedSubviews={Platform.OS === "android"}
-        initialNumToRender={12}
-        maxToRenderPerBatch={6}
+        initialNumToRender={6}
+        maxToRenderPerBatch={4}
         updateCellsBatchingPeriod={32}
-        windowSize={7}
+        windowSize={5}
       />
 
       <PlaylistEditModal

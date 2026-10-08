@@ -1,6 +1,5 @@
 import type { Song } from "@/lib/musicData";
 import type { ResultFilter } from "@/lib/searchRepository";
-import { normalizeText } from "@/lib/searchUtils";
 import type { SearchHistoryItem } from "@/lib/storage";
 import type { Ionicons } from "@expo/vector-icons";
 
@@ -23,20 +22,13 @@ export interface BrowseCategory {
 }
 
 export const RESULT_FILTERS: { key: ResultFilter; label: string }[] = [
-  { key: "all", label: "All" },
   { key: "songs", label: "Songs" },
-  { key: "albums", label: "Albums" },
   { key: "artists", label: "Artists" },
+  { key: "albums", label: "Albums" },
   { key: "playlists", label: "Playlists" },
 ];
 
 export const CARD_ROTATION_PATTERN = [-11, 8, -7, 10, -5, 6] as const;
-export const ALBUM_STAGGER_PATTERN = [0, 7, 3, 9, 2, 5] as const;
-export const ALBUM_TILT_PATTERN = [0.8, -1.0, 1.1, -0.7, 0.6, -0.9] as const;
-export const PLAYLIST_STAGGER_PATTERN = [0, 8, 4, 10, 2, 6] as const;
-export const PLAYLIST_TILT_PATTERN = [-1.1, 0.9, -0.8, 1.2, -0.6, 0.8] as const;
-export const APP_BRAND_ICON = require("../../../assets/images/mavrixfy_icon.png");
-export const MAX_SEARCH_SUGGESTIONS = 8;
 
 export function getRouteSearchQuery(params: { q?: string | string[]; name?: string | string[] }): string {
   const incomingQuery = Array.isArray(params.q)
@@ -49,19 +41,17 @@ export function normalizeRecentSearchLabel(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
 
-export function normalizeSearchSuggestionList(query: string, items: string[]): string[] {
-  const normalizedQuery = normalizeText(query);
+export function normalizeSearchSuggestionList(items: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
 
   for (const item of items) {
     const label = normalizeRecentSearchLabel(String(item || ""));
-    const key = normalizeText(label);
-    if (!key || key.length < 2 || key === normalizedQuery || seen.has(key)) continue;
+    const key = label.toLowerCase();
+    if (!key || seen.has(key)) continue;
 
     seen.add(key);
     out.push(label);
-    if (out.length >= MAX_SEARCH_SUGGESTIONS) break;
   }
 
   return out;

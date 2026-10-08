@@ -36,17 +36,15 @@ export function ProfilePlaybackSection({
       if (enabled) {
         await updateSettings({
           dataSaverEnabled: true,
-          streamingQuality: "low",
           videoBackgroundQuality: "low",
         });
-        void onQualityChange("low");
+        await onQualityChange("low");
       } else {
         await updateSettings({
           dataSaverEnabled: false,
-          streamingQuality: "auto",
           videoBackgroundQuality: "auto",
         });
-        void onQualityChange("auto");
+        await onQualityChange("auto");
       }
     },
     [onQualityChange, updateSettings]

@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { NativeViewGestureHandler } from "react-native-gesture-handler";
 import React,{ memo,useCallback,useState } from "react";
 import {
 Pressable,
@@ -180,6 +181,8 @@ export const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
         { marginTop: isShortScreen ? 14 : 18, marginHorizontal: isShortScreen ? 16 : 20 },
       ]}
     >
+      <NativeViewGestureHandler disallowInterruption>
+      <View collapsable={false}>
       <PlayerSlider
         value={sliderValue}
         minimumValue={0}
@@ -196,6 +199,8 @@ export const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
           text: `${currentDisplayTime} of ${displayDuration}`,
         }}
       />
+      </View>
+      </NativeViewGestureHandler>
       <View style={styles.spotifyTimeRow}>
         <Text style={styles.spotifyTimeText}>{currentDisplayTime}</Text>
         <Text style={styles.spotifyTimeText}>{displayDuration}</Text>

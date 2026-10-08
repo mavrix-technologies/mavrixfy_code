@@ -53,3 +53,24 @@ test("cancelled feed cannot publish results", async () => {
   const f = fixture({ loadYouTubeHome: async () => { controller.abort(); return { songs: [song("youtube_home")], playlists: [] }; } });
   await assert.rejects(f.getYouTubeHomeRecommendations([], controller.signal), /cancelled/);
 });
+
+test("home recommendations preserve original shelves rather than collapsing them into one mixed catalog", async () => {
+  const shelf = { id: "youtube-shelf-0", title: "Hindi hits", songs: [song("youtube_hit")], playlists: [] };
+  const f = fixture({ loadYouTubeHome: async () => ({ songs: shelf.songs, playlists: [], sections: [shelf] }) });
+  const feed = await f.getYouTubeHomeRecommendations([], new AbortController().signal);
+  assert.equal(feed.sections.length, 1);
+  assert.equal(feed.sections[0], shelf);
+  assert.equal(feed.sections[0].title, "Hindi hits");
+});
+
+test("home publishes its catalog before pending radio and playlist preview work finishes", async () => {
+  let finishRadio; const partials = [];
+  const shelf = { id: "shelf", title: "Playlists", songs: [], playlists: [{ id: "youtube_playlist_one" }] };
+  const f = fixture({ loadYouTubeHome: async () => ({ songs: [], playlists: shelf.playlists, sections: [shelf] }),
+    relatedYouTubeSongs: () => new Promise(resolve => { finishRadio = resolve; }) });
+  const pending = f.getYouTubeHomeRecommendations([song("youtube_seed")], new AbortController().signal, feed => partials.push(feed));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(partials[0].sections[0].title, "Playlists");
+  assert.equal(f.calls.length, 0, "preview work must not hold initial catalog rows");
+  finishRadio([song("youtube_radio")]); await pending;
+});

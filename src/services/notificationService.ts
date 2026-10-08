@@ -159,7 +159,6 @@ async function setupAndroidChannels() {
         importance: ch.importance,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: "#26E19A",
-        sound: "default",
       }).catch(() => {})
     )
   );

@@ -1,6 +1,7 @@
+import type { YouTubeVideoQualityPreference } from "@/lib/storage";
 import * as Animated from "@/lib/nativeAnimated";
 import { LinearGradient } from "expo-linear-gradient";
-import React from "react";
+import React, { useMemo } from "react";
 import { styles } from "../styles/playerScreenStyles";
 import { BackgroundYoutubeVideo } from "./BackgroundYoutubeVideo";
 
@@ -9,9 +10,9 @@ export interface PlayerAmbientBackdropProps {
   screenHeight: number;
   screenWidth: number;
   isLowEnd: boolean;
+  quality: YouTubeVideoQualityPreference;
   backgroundVideoId: string | null;
   isScreenFocused: boolean;
-  playerIsPlaying: boolean;
   fullscreenLyricsVisible: boolean;
   initialOffsetMs: number;
   onVideoActive: (active: boolean) => void;
@@ -26,9 +27,9 @@ export const PlayerAmbientBackdrop = React.memo(function PlayerAmbientBackdrop({
   screenHeight,
   screenWidth,
   isLowEnd,
+  quality,
   backgroundVideoId,
   isScreenFocused,
-  playerIsPlaying,
   fullscreenLyricsVisible,
   initialOffsetMs,
   onVideoActive,
@@ -37,39 +38,34 @@ export const PlayerAmbientBackdrop = React.memo(function PlayerAmbientBackdrop({
   activeQueueIndex,
   artCarouselSnapInterval,
 }: PlayerAmbientBackdropProps) {
-  if (!shouldRender || !backgroundVideoId) return null;
-
   const containerH = Math.max(
     Math.round(screenHeight * 0.90),
     Math.round(screenWidth * (16 / 9))
   ) * (isLowEnd ? 0.6 : 1);
+  const hasBackground = shouldRender && Boolean(backgroundVideoId);
+  const containerStyle = useMemo(() => hasBackground ? [styles.backgroundYoutubeContainer, {
+    height: containerH,
+    opacity: artScrollX.interpolate({
+      inputRange: [(activeQueueIndex - 1) * artCarouselSnapInterval, activeQueueIndex * artCarouselSnapInterval,
+        (activeQueueIndex + 1) * artCarouselSnapInterval],
+      outputRange: [0, 1, 0], extrapolate: "clamp",
+    }),
+  }] : undefined, [hasBackground, containerH, artScrollX, activeQueueIndex, artCarouselSnapInterval]);
+  if (!shouldRender || !backgroundVideoId) return null;
 
   return (
     <Animated.View
       pointerEvents="none"
-      style={[
-        styles.backgroundYoutubeContainer,
-        {
-          height: containerH,
-          opacity: artScrollX.interpolate({
-            inputRange: [
-              (activeQueueIndex - 1) * artCarouselSnapInterval,
-              activeQueueIndex * artCarouselSnapInterval,
-              (activeQueueIndex + 1) * artCarouselSnapInterval,
-            ],
-            outputRange: [0, 1, 0],
-            extrapolate: "clamp",
-          }),
-        },
-      ]}
+      style={containerStyle}
     >
       <BackgroundYoutubeVideo
         key={`bg-video-${backgroundVideoId}`}
         videoId={backgroundVideoId}
-        active={isScreenFocused && playerIsPlaying && !fullscreenLyricsVisible}
+        active={isScreenFocused && !fullscreenLyricsVisible}
         initialOffsetMs={initialOffsetMs}
         containerHeight={containerH}
         isLowEnd={isLowEnd}
+        quality={quality}
         onVideoActive={onVideoActive}
         onVideoError={onVideoError}
       />

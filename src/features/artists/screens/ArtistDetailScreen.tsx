@@ -1,3 +1,4 @@
+import { displayArtworkUrl } from "@/lib/artworkDisplay";
 import AdMobBanner from "@/components/AdMobBanner";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
@@ -13,17 +14,16 @@ import {
 getArtistDetails,
 getArtistSongs,
 getImmediateCachedArtist,
-JioSaavnArtist,
-prefetchArtist,
-type JioSaavnArtistAlbum,
-type JioSaavnSimilarArtist,
+ArtistDetails,
+type ArtistAlbum,
+type ArtistCard,
 } from "@/data/providers/ArtistProvider";
-import { mapFilter } from "@/lib/arrayUtils";
 import { colorWithAlpha,useArtworkPalette } from "@/lib/colorExtractor";
-import { isFollowingArtist,toggleFollowArtist,type FollowedArtist } from "@/lib/followedArtists";
-import { convertJioSaavnSong,getBestImageUrl,Song } from "@/lib/musicData";
+import { isFollowingArtist,reconcileFollowedArtist,toggleFollowArtist,type FollowedArtist } from "@/lib/followedArtists";
+import { getBestImageUrl,Song } from "@/lib/musicData";
 import * as Animated from "@/lib/nativeAnimated";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
+import { showGlobalToast } from "@/utils/globalToast";
 import { safeGoBack } from "@/utils/navigation";
 import { shareArtist } from "@/utils/shareUtils";
 import { formatFollowers,pickFirst } from "@/utils/stringUtils";
@@ -69,13 +69,14 @@ function useArtistScreenView() {
   const topInset = Platform.OS === "web" ? 20 : insets.top;
   const bottomPad = Math.max(140, insets.bottom + 120);
 
-  const [artist, setArtist] = useState<JioSaavnArtist | null>(() => getImmediateCachedArtist(artistId));
+  const [artist, setArtist] = useState<ArtistDetails | null>(() => getImmediateCachedArtist(artistId));
   const [loading, setLoading] = useState<boolean>(() => !getImmediateCachedArtist(artistId));
   const [error, setError] = useState("");
   const [following, setFollowing] = useState(false);
   const [extraSongs, setExtraSongs] = useState<Song[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
-  const nextPageRef = useRef(2);
+  const nextPageRef = useRef("");
+  const routeRef = useRef<string | null>(artistId);
   const [hasMore, setHasMore] = useState(true);
   const [showBioModal, setShowBioModal] = useState(false);
 
@@ -121,7 +122,7 @@ function useArtistScreenView() {
   const songs: Song[] = useMemo(() => {
     if (!artist) return [];
     const base = artist?.topSongs
-      ? mapFilter(artist.topSongs, (s) => convertJioSaavnSong(s), (s) => s.audioUrl?.trim())
+      ? artist.topSongs
       : [];
     return [...base, ...extraSongs];
   }, [artist, extraSongs]);
@@ -134,24 +135,13 @@ function useArtistScreenView() {
         name: topAlbums[0].name,
         year: topAlbums[0].year,
         image: getBestImageUrl(topAlbums[0].image),
-        songCount: topAlbums[0].songCount ?? (topAlbums[0].name.toLowerCase().includes("single") ? 1 : 8),
+        songCount: topAlbums[0].songCount ?? 0,
         url: topAlbums[0].url,
         isAlbum: true,
       };
     }
-    if (songs.length > 0) {
-      return {
-        id: songs[0].id,
-        name: `${songs[0].title} - Single`,
-        year: songs[0].year || new Date().getFullYear().toString(),
-        image: songs[0].coverUrl || coverUrl,
-        songCount: 1,
-        url: "",
-        isAlbum: false,
-      };
-    }
     return null;
-  }, [topAlbums, songs, coverUrl]);
+  }, [topAlbums]);
 
   // Is current queue playing from this artist?
   const isPlayingFromThisArtist = useMemo(() => {
@@ -173,7 +163,9 @@ function useArtistScreenView() {
       }
       setError("");
       setExtraSongs([]);
-      nextPageRef.current = 2;
+      setLoadingMore(false);
+      setFollowing(false);
+      nextPageRef.current = "";
       setHasMore(true);
     });
   }, []);
@@ -185,11 +177,12 @@ function useArtistScreenView() {
     });
   }, []);
 
-  const applyArtistDetails = useCallback((data: JioSaavnArtist | null) => {
+  const applyArtistDetails = useCallback((data: ArtistDetails | null) => {
     queueMicrotask(() => {
       if (data) {
         // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
         setArtist(data);
+        setHasMore(data.hasMoreSongs);
       } else {
         setError("Artist not found");
       }
@@ -211,6 +204,7 @@ function useArtistScreenView() {
   // Fetch artist details
   // react-doctor-disable-next-line react-doctor/no-cascading-set-state -- loading an artist resets several independent UI fields at once before async fetches start.
   useEffect(() => {
+    routeRef.current = artistId;
     if (!artistId) {
       // Reset the result when navigating to an invalid artist URL.
        
@@ -222,10 +216,8 @@ function useArtistScreenView() {
     const initialCached = getImmediateCachedArtist(artistId);
     // A route change replaces the visible artist with the cached result before fetching.
     /* eslint-disable react-hooks/set-state-in-effect */
-    if (initialCached) {
-      setArtist(initialCached);
-      setLoading(false);
-    }
+    setArtist(initialCached);
+    setLoading(!initialCached);
     resetArtistLoadState(Boolean(initialCached));
     /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -234,11 +226,12 @@ function useArtistScreenView() {
       if (!cancelled) applyArtistFollowState(v);
     });
 
-    getArtistDetails(artistId)
+    getArtistDetails(artistId, initName)
       .then((data) => {
         if (cancelled) return;
         // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
         applyArtistDetails(data);
+        if (data) void reconcileFollowedArtist(artistId, { id: data.id, name: data.name, image: getBestImageUrl(data.image), followedAt: 0 }).then(value => { if (!cancelled) applyArtistFollowState(value); });
       })
       .catch(() => {
         if (!cancelled) applyArtistLoadFailure();
@@ -249,22 +242,18 @@ function useArtistScreenView() {
 
     return () => {
       cancelled = true;
+      routeRef.current = null;
     };
   }, [
     applyArtistDetails,
     applyArtistFollowState,
     applyArtistLoadFailure,
     artistId,
+    initName,
     finishArtistLoad,
     markArtistNotFound,
     resetArtistLoadState,
   ]);
-
-  // Prefetch similar artists in background
-  useEffect(() => {
-    if (!artist?.similarArtists?.length) return;
-    artist.similarArtists.slice(0, 4).forEach((a) => prefetchArtist(a.id));
-  }, [artist]);
 
   const handlePlayAll = useCallback(() => {
     if (!songs.length) return;
@@ -282,13 +271,14 @@ function useArtistScreenView() {
   }, [songs, isPlayingFromThisArtist, togglePlay, playSong, playScale]);
 
   const handleFollow = useCallback(async () => {
+    if (!artist) return;
     Animated.sequence([
       Animated.spring(followScale, { toValue: 0.82, speed: 50, bounciness: 0, useNativeDriver: true }),
       Animated.spring(followScale, { toValue: 1, speed: 20, bounciness: 14, useNativeDriver: true }),
     ]).start();
 
     const artistCard: FollowedArtist = {
-      id: artistId,
+      id: artist?.id || artistId,
       name: displayName,
       image: coverUrl,
       followedAt: Date.now(),
@@ -296,15 +286,15 @@ function useArtistScreenView() {
     const nowFollowing = await toggleFollowArtist(artistCard);
     setFollowing(nowFollowing);
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps listed
-  }, [artistId, displayName, coverUrl, followScale]);
+  }, [artistId, artist, displayName, coverUrl, followScale]);
 
   const handleShare = useCallback(async () => {
     await shareArtist({
-      id: artistId || "",
+      id: artist?.id || artistId || "",
       name: displayName || "Artist",
       coverUrl,
     });
-  }, [artistId, displayName, coverUrl]);
+  }, [artistId, artist?.id, displayName, coverUrl]);
 
   const handleShuffle = useCallback(() => {
     if (!songs.length) return;
@@ -320,25 +310,26 @@ function useArtistScreenView() {
     if (loadingMore || !hasMore || !artistId) return;
     setLoadingMore(true);
     try {
-      const newSongs = await getArtistSongs(artistId, nextPageRef.current);
-      if (newSongs.length === 0) {
+      const newSongs = await getArtistSongs(artist?.id || artistId, nextPageRef.current);
+      if (routeRef.current !== artistId) return;
+      if (newSongs.songs.length === 0) {
         setHasMore(false);
         return;
       }
-      const converted = mapFilter(newSongs, (s) => convertJioSaavnSong(s), (s) => s.audioUrl?.trim());
+      const converted = newSongs.songs;
       setExtraSongs((prev) => {
-        const existingIds = new Set(prev.map((s) => s.id));
+        const existingIds = new Set([...(artist?.topSongs || []), ...prev].map((s) => s.id));
         const unique = converted.filter((s) => !existingIds.has(s.id));
         return [...prev, ...unique];
       });
-      nextPageRef.current += 1;
-      if (newSongs.length < 10) setHasMore(false);
+      nextPageRef.current = newSongs.cursor;
+      setHasMore(Boolean(newSongs.cursor));
     } catch {
-      setHasMore(false);
+      if (routeRef.current === artistId) showGlobalToast("Could not load more songs. Tap to retry.");
     } finally {
-      setLoadingMore(false);
+      if (routeRef.current === artistId) setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, artistId]);
+  }, [loadingMore, hasMore, artistId, artist]);
 
   const handleSimilarArtistPress = useCallback(
     (id: string, name: string, image: string) => {
@@ -351,13 +342,13 @@ function useArtistScreenView() {
   );
 
   const handleAlbumPress = useCallback(
-    (album: JioSaavnArtistAlbum) => {
+    (album: ArtistAlbum) => {
       routerPush({
         pathname: "/playlist/[id]",
         params: {
           id: album.id,
-          jiosaavn: "true",
-          youtube: "false",
+          jiosaavn: "false",
+          youtube: "true",
           album: "true",
           firestore: "false",
           link: album.url,
@@ -377,8 +368,8 @@ function useArtistScreenView() {
         pathname: "/playlist/[id]",
         params: {
           id: latestRelease.id,
-          jiosaavn: "true",
-          youtube: "false",
+          jiosaavn: "false",
+          youtube: "true",
           album: "true",
           firestore: "false",
           link: latestRelease.url,
@@ -393,11 +384,11 @@ function useArtistScreenView() {
   }, [latestRelease, routerPush, songs, playSong]);
 
   const renderAlbumCard = useCallback(
-    ({ item }: { item: JioSaavnArtistAlbum }) => (
+    ({ item }: { item: ArtistAlbum }) => (
       <Pressable style={styles.albumCard} onPress={() => handleAlbumPress(item)}>
         <Image
           recyclingKey={item.id}
-          source={{ uri: getBestImageUrl(item.image) }}
+          source={{ uri: displayArtworkUrl(getBestImageUrl(item.image), 136) }}
           style={styles.albumCover}
           contentFit="cover"
           transition={80}
@@ -413,7 +404,7 @@ function useArtistScreenView() {
   );
 
   const renderSimilarArtist = useCallback(
-    ({ item }: { item: JioSaavnSimilarArtist }) => {
+    ({ item }: { item: ArtistCard }) => {
       const img = getBestImageUrl(item.image);
       return (
         <Pressable
@@ -422,7 +413,7 @@ function useArtistScreenView() {
         >
           <Image
             recyclingKey={item.id}
-            source={{ uri: img }}
+            source={{ uri: displayArtworkUrl(img, 86) }}
             style={styles.similarAvatar}
             contentFit="cover"
             transition={80}
@@ -539,7 +530,7 @@ function useArtistScreenView() {
             <View style={styles.heroContainer}>
               {coverUrl ? (
                 <Image
-                  source={{ uri: coverUrl }}
+                  source={{ uri: displayArtworkUrl(coverUrl, 480) }}
                   style={StyleSheet.absoluteFill}
                   contentFit="cover"
                   priority="high"
@@ -620,7 +611,7 @@ function useArtistScreenView() {
             {latestRelease ? (
               <Pressable style={styles.latestReleaseCard} onPress={handleLatestReleasePress}>
                 <Image
-                  source={{ uri: latestRelease.image }}
+                  source={{ uri: displayArtworkUrl(latestRelease.image, 128) }}
                   style={styles.latestReleaseThumb}
                   contentFit="cover"
                   transition={80}
@@ -628,13 +619,13 @@ function useArtistScreenView() {
                 />
                 <View style={styles.latestReleaseMeta}>
                   <Text style={styles.latestReleaseDate}>
-                    {latestRelease.year ? `${latestRelease.year} • ` : ""}Latest Release
+                    {latestRelease.year ? `${latestRelease.year} • ` : ""}Featured Release
                   </Text>
                   <Text style={styles.latestReleaseTitle} numberOfLines={1}>
                     {latestRelease.name}
                   </Text>
                   <Text style={styles.latestReleaseCount}>
-                    {latestRelease.songCount} {latestRelease.songCount === 1 ? "song" : "songs"}
+                    {latestRelease.songCount ? `${latestRelease.songCount} songs` : "Album / EP"}
                   </Text>
                 </View>
                 <View style={styles.latestReleaseAction}>
@@ -662,7 +653,7 @@ function useArtistScreenView() {
         ListFooterComponent={
           <>
             {/* Load More Songs Button */}
-            {hasMore ? (
+            {hasMore && !loading && artist ? (
               <Pressable
                 style={styles.loadMoreBtn}
                 onPress={handleLoadMore}
@@ -681,7 +672,7 @@ function useArtistScreenView() {
             {/* ── Section: Albums ── */}
             {topAlbums.length ? (
               <View style={styles.section}>
-                <Text style={styles.carouselSectionTitle}>Albums</Text>
+                <Text style={styles.carouselSectionTitle}>Albums & EPs</Text>
                 <FlatList
                   data={topAlbums}
                   keyExtractor={(item) => item.id}
@@ -805,7 +796,7 @@ function useArtistScreenView() {
 
             <View style={styles.modalHeaderRow}>
               {coverUrl ? (
-                <Image source={{ uri: coverUrl }} style={styles.modalAvatar} contentFit="cover" />
+                <Image source={{ uri: displayArtworkUrl(coverUrl, 60) }} style={styles.modalAvatar} contentFit="cover" />
               ) : null}
               <View style={styles.modalHeaderTextGroup}>
                 <Text style={styles.modalArtistName}>{displayName}</Text>

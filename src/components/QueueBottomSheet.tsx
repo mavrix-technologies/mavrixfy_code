@@ -22,6 +22,7 @@ type BottomSheetFooterProps,
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { Image } from "expo-image";
 import { router } from "expo-router";
+import { expandPlayer } from "@/lib/playerUIState";
 import React,{
 useCallback,
 useMemo,
@@ -514,7 +515,7 @@ const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
 
     const handleNowPlayingPress = useCallback(() => {
       closeSheet();
-      router.push("/player");
+      expandPlayer();
     }, [closeSheet]);
 
     const handleSheetChange = useCallback(

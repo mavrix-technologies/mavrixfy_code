@@ -5,6 +5,8 @@
 import type { Song } from "@/lib/musicData";
 import type { AudioPlayer } from "expo-audio";
 import { createAudioPlayer,setAudioModeAsync } from "expo-audio";
+import { isPrematurePlaybackEnd, playbackDuration, playbackPosition } from "./audioTimeline";
+import { logger } from "@/lib/logger";
 
 // ─── singletons ───────────────────────────────────────────────────────────────
 
@@ -13,8 +15,6 @@ let activePlayer: AudioPlayer | null = null;
 let standbyPlayer: AudioPlayer | null = null;
 let standbyUrl: string | null = null;
 let standbyGeneration = 0;
-let seekBlockUntil = 0;
-let seekResetTimer: ReturnType<typeof setTimeout> | null = null;
 type PlayerSubscription = {
   remove?: () => void;
 };
@@ -26,6 +26,9 @@ type PlayerSubscriptions = {
 const playerSubscriptions = new WeakMap<AudioPlayer, PlayerSubscriptions>();
 const cancelReadyWait = new WeakMap<AudioPlayer, () => void>();
 const initialSeekPending = new WeakSet<AudioPlayer>();
+const finishedPlayers = new WeakSet<AudioPlayer>();
+const resolvedDurations = new WeakMap<AudioPlayer, number>();
+function playerDuration(p: AudioPlayer): number { return playbackDuration(p.duration, resolvedDurations.get(p)); }
 
 // Monotonically increasing request id.
 // Every loadAndPlay increments this. Callbacks from older players are dropped.
@@ -49,7 +52,10 @@ type StatusCallback = (s: {
 
 let statusCb: StatusCallback | null = null;
 
-export function onStatusUpdate(cb: StatusCallback) { statusCb = cb; }
+export function onStatusUpdate(cb: StatusCallback): () => void {
+  statusCb = cb;
+  return () => { if (statusCb === cb) statusCb = null; };
+}
 function clearListeners(): void {
   statusCb = null;
 }
@@ -70,15 +76,7 @@ function killPlayer(p: AudioPlayer | null): void {
   try { subscriptions?.status?.remove?.(); } catch {}
   playerSubscriptions.delete(p);
   try { p.pause(); } catch {}   // stop audio output immediately
-  try { p.release(); } catch {}  // release native resources
-}
-
-function clearSeekResetTimer(): void {
-  if (seekResetTimer) {
-    clearTimeout(seekResetTimer);
-    seekResetTimer = null;
-  }
-  seekBlockUntil = 0;
+  try { p.remove(); } catch {}  // release native resources
 }
 
 async function ensureAudioMode(): Promise<void> {
@@ -95,16 +93,54 @@ async function ensureAudioMode(): Promise<void> {
   return audioModePending;
 }
 
-function attachListener(p: AudioPlayer, gen: number): void {
+function attachListener(p: AudioPlayer, gen: number, shouldPlay: () => boolean): void {
+  let lastPosition = 0;
+  let lastDuration = 0;
+  let hasPlayed = false;
   const status = p.addListener("playbackStatusUpdate", (status) => {
-    if (gen !== generation || !statusCb) return;
+    if (gen !== generation || activePlayer !== p || finishedPlayers.has(p)) return;
+    const duration = playbackDuration(status.duration ?? 0, resolvedDurations.get(p)) || lastDuration;
+    if (duration > 0) lastDuration = duration;
+    const reportedPosition = Number.isFinite(status.currentTime) ? Math.max(0, status.currentTime) : 0;
+    const terminalPosition = Math.max(reportedPosition, Number.isFinite(p.currentTime) ? p.currentTime : 0, lastPosition);
+    if (status.playing) hasPlayed = true;
+    // Some Expo iOS EOF updates contain only stopped playback, after AVQueuePlayer
+    // has removed the item. Reconcile that event against the real stream tail.
+    // Stopped-tail recovery excludes buffering and explicit user Pause.
+    const stoppedAtTail = hasPlayed && shouldPlay() && !initialSeekPending.has(p) &&
+      status.playing === false && status.isBuffering === false && !status.error &&
+      status.playbackState !== "buffering" && duration > 0 && terminalPosition > 0 &&
+      Math.abs(duration - terminalPosition) <= 0.75;
+    const resolvedDuration = resolvedDurations.get(p) || 0;
+    // The connected iPhone reports a 2x AVPlayer duration for these streams.
+    // Use the resolver's actual audio timeline only when that decoder is inflated;
+    // a catalog duration or an ordinary still-playing tail never ends a song.
+    const decoderOverrun = status.playing === true && shouldPlay() && !initialSeekPending.has(p) &&
+      status.isBuffering === false && !status.error && resolvedDuration > 0 &&
+      (status.duration ?? 0) > resolvedDuration * 1.5 && reportedPosition >= resolvedDuration + 0.25;
+    const ended = Boolean(status.didJustFinish || status.playbackState === "ended" || stoppedAtTail || decoderOverrun);
+    const lostTerminalPosition = hasPlayed && status.playing === false && reportedPosition === 0 && !initialSeekPending.has(p);
+    const position = ended || lostTerminalPosition ? terminalPosition : reportedPosition;
+    lastPosition = position;
+    if (ended) {
+      if (finishedPlayers.has(p)) return;
+      if (position > 0 && isPrematurePlaybackEnd(position, resolvedDuration)) {
+        p.pause();
+        statusCb?.({ isPlaying: false, position, duration, didJustFinish: false,
+          error: "Audio stream ended early. Tap Play to retry." });
+        return;
+      }
+      finishedPlayers.add(p);
+      if (decoderOverrun) p.pause();
+      logger.debug("[ExpoAudio] Track completed", { generation: gen, position, duration, nativeEnd: Boolean(status.didJustFinish || status.playbackState === "ended") });
+    }
+    if (!statusCb) return;
     if (initialSeekPending.has(p) && !status.error) return;
-    if (Date.now() < seekBlockUntil && !status.didJustFinish) return;
     statusCb({
       isPlaying: status.playing,
-      position: status.currentTime ?? 0,
-      duration: status.duration ?? 0,
-      didJustFinish: status.didJustFinish ?? false,
+      position,
+      duration,
+      didJustFinish: Boolean(ended),
       error: status.error,
       isLoaded: status.isLoaded,
       isBuffering: status.isBuffering,
@@ -118,7 +154,8 @@ function attachListener(p: AudioPlayer, gen: number): void {
 
 /**
  * Pre-warms the next track's audio stream in the background ahead of time.
- * When loadAndPlay is called for this exact URL, playback starts with 0ms buffering gap.
+ * The standby player stays silent; loadAndPlay removes the outgoing owner
+ * before promoting it. Readiness is still checked before playback.
  */
 export async function prepareStandby(url: string, song?: Partial<Song> | null): Promise<void> {
   if (!url || standbyUrl === url) return;
@@ -144,8 +181,8 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
     throw new Error("No audio URL provided");
   }
 
-  // 1. Bump generation and capture the snapshot for this call.
-  generation += 1;
+  // Retire audible output before promoting the prepared next source.
+  beginTrackChange();
   standbyGeneration += 1;
   const myGen = generation;
 
@@ -156,11 +193,6 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
     p = standbyPlayer;
     standbyPlayer = null;
     standbyUrl = null;
-
-    const prev = activePlayer;
-    activePlayer = null;
-    clearSeekResetTimer();
-    killPlayer(prev);
 
     if (myGen !== generation) {
       killPlayer(p);
@@ -173,11 +205,6 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
       standbyPlayer = null;
       standbyUrl = null;
     }
-
-    const prev = activePlayer;
-    activePlayer = null;
-    clearSeekResetTimer();
-    killPlayer(prev);
 
     try {
       if (myGen !== generation) return;
@@ -197,10 +224,11 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
   }
 
   // 3. Register as the active player, wire events, start playback.
-  seekBlockUntil = 0;
   activePlayer = p;
+  const resolvedDuration = playbackDuration(0, song?.playbackDurationSeconds);
+  if (resolvedDuration > 0) resolvedDurations.set(p, resolvedDuration);
   if (Number.isFinite(initialPosition) && initialPosition > 0) initialSeekPending.add(p);
-  attachListener(p, myGen);
+  attachListener(p, myGen, shouldPlay);
 
   if (typeof (p as any).setActiveForLockScreen === "function") {
     try {
@@ -211,6 +239,8 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
           artist: song?.artist || "Mavrixfy",
           albumTitle: song?.album || undefined,
           artworkUrl: song?.coverUrl || undefined,
+          // Consumed by our native expo-audio patch; stock Expo Go ignores it.
+          durationSeconds: resolvedDuration > 0 ? resolvedDuration : undefined,
         },
         {
           showSeekBackward: false,
@@ -225,7 +255,7 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
 
   // A recovered stream must be ready and seeked before output begins. Never
   // briefly play the opening of a track that should resume halfway through.
-  if (Number.isFinite(initialPosition) && initialPosition > 0) {
+  if (!p.isLoaded || (Number.isFinite(initialPosition) && initialPosition > 0)) {
     let subscription: PlayerSubscription | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -234,14 +264,17 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
           cancelReadyWait.set(p, resolve);
           subscription = p.addListener("playbackStatusUpdate", status => {
             if (myGen !== generation) resolve();
-            else if (status.error) reject(new Error("Audio could not load for resume"));
+            else if (status.error) reject(new Error("Audio could not load"));
             else if (status.isLoaded) resolve();
           });
-          timer = setTimeout(() => reject(new Error("Audio resume timed out")), 12000);
+          timer = setTimeout(() => reject(new Error("Audio loading timed out. Tap Play to retry.")), 12000);
         });
       }
       if (myGen !== generation || activePlayer !== p) return;
-      await p.seekTo(initialPosition);
+      if (Number.isFinite(initialPosition) && initialPosition > 0) {
+        const duration = playerDuration(p);
+        await p.seekTo(playbackPosition(initialPosition, duration));
+      }
     } catch (error) {
       if (myGen !== generation) return;
       activePlayer = null;
@@ -254,10 +287,36 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
       initialSeekPending.delete(p);
     }
   }
-  if (myGen === generation && activePlayer === p && shouldPlay()) p.play();
+  if (myGen === generation && activePlayer === p && shouldPlay()) {
+    let subscription: PlayerSubscription | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        cancelReadyWait.set(p, resolve);
+        subscription = p.addListener("playbackStatusUpdate", status => {
+          if (myGen !== generation || !shouldPlay()) resolve();
+          else if (status.error) reject(new Error("Audio could not start"));
+          else if (status.playing) resolve();
+        });
+        timer = setTimeout(() => reject(new Error("Audio start timed out. Tap Play to retry.")), 12000);
+        p.play();
+        if (p.playing) resolve();
+      });
+    } catch (error) {
+      if (myGen !== generation) return;
+      activePlayer = null;
+      killPlayer(p);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      subscription?.remove?.();
+      cancelReadyWait.delete(p);
+    }
+  }
 }
 
 export function play(): void {
+  if (activePlayer) finishedPlayers.delete(activePlayer);
   try { activePlayer?.play(); } catch {}
 }
 
@@ -265,18 +324,20 @@ export function pause(): void {
   try { activePlayer?.pause(); } catch {}
 }
 
-function stop(): void {
+/** Retire outgoing output while preserving the silent prepared next player. */
+export function beginTrackChange(): void {
   generation += 1;
-  standbyGeneration += 1;
-  const p = activePlayer;
+  const previous = activePlayer;
   activePlayer = null;
-  clearSeekResetTimer();
-  killPlayer(p);
-  if (standbyPlayer) {
-    killPlayer(standbyPlayer);
-    standbyPlayer = null;
-    standbyUrl = null;
-  }
+  killPlayer(previous);
+}
+
+export function stop(): void {
+  beginTrackChange();
+  standbyGeneration += 1;
+  killPlayer(standbyPlayer);
+  standbyPlayer = null;
+  standbyUrl = null;
 }
 
 export function destroy(): void {
@@ -285,21 +346,20 @@ export function destroy(): void {
 }
 
 export async function seekTo(seconds: number): Promise<void> {
-  if (!activePlayer) return;
-  try {
-    if (seekResetTimer) {
-      clearTimeout(seekResetTimer);
-    }
-    seekBlockUntil = Date.now() + 700;
-    await activePlayer.seekTo(seconds);
-    seekResetTimer = setTimeout(() => {
-      seekBlockUntil = 0;
-      seekResetTimer = null;
-    }, 700);
-  } catch {}
+  if (!activePlayer?.isLoaded) throw new Error("Audio is not ready to seek");
+  if (!Number.isFinite(seconds)) throw new Error("Invalid seek position");
+  const duration = playerDuration(activePlayer);
+  const target = playbackPosition(seconds, duration);
+  const player = activePlayer;
+  await player.seekTo(target);
+  finishedPlayers.delete(player);
+}
+
+export function getProgress(): { position: number; duration: number } {
+  return { position: activePlayer?.currentTime ?? 0, duration: activePlayer ? playerDuration(activePlayer) : 0 };
 }
 
 export function isLoaded(): boolean { return activePlayer !== null; }
 export function isEnded(): boolean {
-  return !!activePlayer && activePlayer.duration > 0 && activePlayer.currentTime >= activePlayer.duration - 0.1;
+  return !!activePlayer && finishedPlayers.has(activePlayer);
 }

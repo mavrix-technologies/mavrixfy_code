@@ -5,6 +5,23 @@ const vm = require("node:vm");
 const ts = require("typescript");
 const { fixture: playerFixture, tick } = require("./helpers/audio-player-fixture.cjs");
 const track = { videoId: "abcdefghijk", title: "Same title", artist: "Same artist", coverUrl: "", duration: 180 };
+
+test("extractor aggregate errors retain timeout and network classification", () => {
+  const f = fixture();
+  assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: timeout"), /timed out/);
+  assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: Network request failed"), /connect/);
+  assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: Audio HTTP 403"), /connect/);
+  assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: interpreter error"), /Could not play/);
+  assert.match(f.youTubePlaybackErrorMessage("Video unavailable: private video"), /unavailable/);
+});
+
+test("playback diagnostics redact signed URLs and credentials", () => {
+  const f = fixture();
+  const details = f.youTubePlaybackErrorDetails("Audio HTTP 403 https://rr.googlevideo.com/audio?signature=secret token=secret cookie=secret");
+  assert.match(details, /Audio HTTP 403/);
+  assert.doesNotMatch(details, /secret|googlevideo/);
+  assert.equal(f.youTubePlaybackErrorDetails("x".repeat(3000)).length, 2000);
+});
 function fixture(overrides = {}, platform = "android", installed = true) {
   const calls = [], cancelled = [], rejected = [];
   let now = 1000000;
@@ -21,7 +38,9 @@ function fixture(overrides = {}, platform = "android", installed = true) {
   vm.runInNewContext(code, { module, exports: module.exports, setTimeout, clearTimeout, Date: { now: () => now },
     require: name => {
       if (name === "react-native") return { Platform: { OS: platform } };
+      if (name === "./YouTubeArtists") return require("./helpers/youtube-artists-fixture.cjs");
       if (name === "./YouTubeArtwork") return require("./helpers/youtube-artwork-fixture.cjs");
+      if (name === "../audio/audioTimeline") return require("./helpers/audio-timeline-fixture.cjs");
       if (name === "./SharedYouTubeTransport") return { sharedYouTubeTransport: native };
       throw new Error(name);
     } });
@@ -38,6 +57,32 @@ test("YouTube search keeps provider-qualified IDs and playlist results without a
   assert.equal(results.albums.length, 0);
 });
 
+test("artist search and detail share YouTube identities and playable deferred streams on both platforms", async () => {
+  const channel = "UC" + "a".repeat(22);
+  for (const platform of ["android", "ios"]) {
+    const f = fixture({ search: async () => ({ songs: [], playlists: [], artists: [
+      { id: channel, name: "Artist", coverUrl: "https://lh3.googleusercontent.com/art=w120-h120" },
+      { id: "12345", name: "Other catalog", coverUrl: "" },
+    ] }), artist: async id => ({ id, name: "Artist", coverUrl: "", description: "Real biography",
+      songs: [track], albums: [{ id: "MPREalbum", name: "Release", coverUrl: "", url: "https://music.youtube.com/browse/MPREalbum" }],
+      artists: [{ id: channel, name: "Related", coverUrl: "" }], hasMoreSongs: true }),
+      artistSongs: async () => ({ songs: [track], cursor: "server-page" }),
+    }, platform);
+    const result = await f.searchYouTubeMusic("Artist", "artists");
+    assert.equal(result.artists.length, 1);
+    assert.equal(result.artists[0].id, `youtube_artist_${channel}`);
+    const detail = await f.loadYouTubeArtist(result.artists[0].id);
+    assert.equal(detail.topSongs[0].source, "youtube");
+    assert.equal(detail.topSongs[0].audioUrl, "");
+    assert.equal(detail.topAlbums[0].id, "youtube_album_MPREalbum");
+    assert.equal(detail.topAlbums[0].songCount, undefined);
+    assert.equal(detail.topAlbums[0].year, undefined);
+    assert.equal(detail.hasMoreSongs, true);
+    assert.equal((await f.loadYouTubeArtistSongs(detail.id)).cursor, "server-page");
+    await assert.rejects(f.loadYouTubeArtist("12345"), /Invalid artist/);
+  }
+});
+
 test("iOS uses the same separate catalog, playlist IDs and stream descriptors", async () => {
   const f = fixture({}, "ios");
   assert.equal(f.youTubeAvailable(), true);
@@ -47,6 +92,14 @@ test("iOS uses the same separate catalog, playlist IDs and stream descriptors", 
   const stream = await f.resolveYouTubeStream(results.songs[0]);
   assert.equal(stream.mimeType, "audio/mp4");
   assert.equal(stream.headers.Referer, "https://www.youtube.com/");
+});
+
+test("resolved YouTube audio duration replaces mismatched catalog duration", () => {
+  const f = fixture();
+  const song = { id: "youtube_abcdefghijk", source: "youtube", duration: 376 };
+  const stream = { url: "https://media.example/audio", headers: {}, expiresAt: 1300000, durationSeconds: 188.125 };
+  assert.equal(f.youTubeSongWithStream(song, stream).duration, 188.125);
+  assert.equal(f.youTubeSongWithStream(song, { ...stream, durationSeconds: NaN }).duration, 376);
 });
 
 test("iOS without a custom extractor supports shared search; web is unsupported", async () => {

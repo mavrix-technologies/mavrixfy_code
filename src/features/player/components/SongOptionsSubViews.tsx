@@ -223,8 +223,9 @@ export function GoToArtistsView({
   const handleArtist = useCallback(async (artistName: string) => {
     setSearching(artistName);
     try {
-      const results = await searchArtists(artistName);
-      const artist = results[0];
+      const reference = song.artistRefs?.find(item => item.name.trim().toLowerCase() === artistName.trim().toLowerCase());
+      const results = reference ? [{ ...reference, image: [] }] : await searchArtists(artistName);
+      const artist = results.find(item => item.name.trim().toLowerCase() === artistName.trim().toLowerCase());
       if (!artist?.id) {
         showGlobalToast("Could not find this artist");
         return;
@@ -242,7 +243,7 @@ export function GoToArtistsView({
     } finally {
       setSearching(null);
     }
-  }, []);
+  }, [song.artistRefs]);
 
   const renderArtistName = useCallback(
     ({ item }: { item: string }) => (

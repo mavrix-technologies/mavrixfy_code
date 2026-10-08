@@ -1,4 +1,4 @@
-import * as Animated from "@/lib/nativeAnimated";
+import Animated, { Extrapolation, interpolate, useAnimatedStyle, type SharedValue } from "react-native-reanimated";
 import { normalizeHexColor, rgbToHex } from "@/lib/colorMath";
 import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
 import { Ionicons } from "@expo/vector-icons";
@@ -69,13 +69,7 @@ export interface PlayerStickyHeaderProps {
   topInset: number;
   topBarHeight: number;
   isShortScreen: boolean;
-  headerScrollY?: Animated.Value;
-  /** Controls when the header background fades in (scroll-driven) */
-  headerBgOpacity: Animated.AnimatedInterpolation<number>;
-  topTitleOpacity: Animated.AnimatedInterpolation<number>;
-  topTitleTranslateY: Animated.AnimatedInterpolation<number>;
-  scrolledTitleOpacity: Animated.AnimatedInterpolation<number>;
-  scrolledTitleTranslateY: Animated.AnimatedInterpolation<number>;
+  scrollY: SharedValue<number>;
   sheetTextColor?: string;
   albumName: string;
   songTitle: string;
@@ -95,12 +89,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
   topInset,
   topBarHeight,
   isShortScreen,
-  headerScrollY,
-  headerBgOpacity,
-  topTitleOpacity,
-  topTitleTranslateY,
-  scrolledTitleOpacity,
-  scrolledTitleTranslateY,
+  scrollY,
   sheetTextColor = "#FFFFFF",
   albumName,
   songTitle,
@@ -118,8 +107,27 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
     return getSolidHeaderColor(accentColor, backgroundColor);
   }, [accentColor, backgroundColor]);
 
+  const backgroundStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [0, 45, 95], [0, 0.75, 1], Extrapolation.CLAMP),
+  }));
+  const topTitleStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [0, 40, 80], [1, 0.4, 0], Extrapolation.CLAMP),
+    transform: [{ translateY: interpolate(scrollY.value, [0, 80], [0, -8], Extrapolation.CLAMP) }],
+  }));
+  const scrolledTitleStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [40, 85, 125], [0, 0.5, 1], Extrapolation.CLAMP),
+    transform: [{ translateY: interpolate(scrollY.value, [40, 125], [8, 0], Extrapolation.CLAMP) }],
+  }));
+  const optionsStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [0, 40, 80], [1, 0.4, 0], Extrapolation.CLAMP),
+  }));
+  const playStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [40, 85, 125], [0, 0.5, 1], Extrapolation.CLAMP),
+  }));
+
   return (
     <Animated.View
+      collapsable={false}
       pointerEvents="box-none"
       style={[
         localStyles.stickyHeaderContainer,
@@ -135,7 +143,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
         pointerEvents="none"
         style={[
           StyleSheet.absoluteFillObject,
-          { opacity: headerBgOpacity },
+          backgroundStyle,
         ]}
       >
         {/* Solid static background - 100% opaque (not transparent), artwork-palette tinted */}
@@ -154,7 +162,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
         pointerEvents="none"
         style={[
           localStyles.progressBarAnchor,
-          { opacity: headerBgOpacity },
+          backgroundStyle,
         ]}
       >
         <LiveProgressBar />
@@ -191,10 +199,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
             pointerEvents="none"
             style={[
               localStyles.titleWrap,
-              {
-                opacity: topTitleOpacity,
-                transform: [{ translateY: topTitleTranslateY }],
-              },
+              topTitleStyle,
             ]}
           >
             <Text style={localStyles.caption} numberOfLines={1}>
@@ -214,10 +219,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
             style={[
               localStyles.titleWrap,
               localStyles.titleAbsolute,
-              {
-                opacity: scrolledTitleOpacity,
-                transform: [{ translateY: scrolledTitleTranslateY }],
-              },
+              scrolledTitleStyle,
             ]}
           >
             <Text
@@ -239,7 +241,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
             pointerEvents={isScrolled ? "none" : "auto"}
             style={[
               localStyles.rightButtonLayer,
-              { opacity: topTitleOpacity },
+              optionsStyle,
             ]}
           >
             <Pressable
@@ -265,7 +267,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
             pointerEvents={isScrolled ? "auto" : "none"}
             style={[
               localStyles.rightButtonLayer,
-              { opacity: scrolledTitleOpacity },
+              playStyle,
             ]}
           >
             <Pressable

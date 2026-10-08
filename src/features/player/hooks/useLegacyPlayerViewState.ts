@@ -1,41 +1,28 @@
 import Colors from "@/constants/colors";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { mapFilter } from "@/lib/arrayUtils";
-import { preloadDominantColors } from "@/lib/colorExtractor";
+import { scheduleArtworkPreload } from "@/lib/artworkPreload";
 import type { Song } from "@/lib/musicData";
 import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
-import { playerUIStateStore } from "@/lib/playerUIState";
 import {
 usePlaybackNowPlaying,
 usePlaybackPlayState,
 } from "@/services/audio/PlaybackEngine";
 import { getPlaybackProgressSnapshot } from "@/services/audio/playbackProgressStore";
-import { runAfterIdle } from "@/utils/idleTask";
-import { Image } from "expo-image";
 import { router,useNavigation } from "expo-router";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import { useWindowDimensions } from "react-native";
-import { Gesture } from "react-native-gesture-handler";
-import { withSpring,type SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { scheduleOnRN } from "react-native-worklets";
 import type { ArtworkQueueItem } from "../components/PlayerArtworkViews";
 import { useArtistDiscovery } from "./useArtistDiscovery";
 import { useArtworkCarouselSync } from "./useArtworkCarouselSync";
 import { useArtworkPaletteSync } from "./useArtworkPaletteSync";
 import { useBackgroundVisualVideo } from "./useBackgroundVisualVideo";
 import { useDevTrackHelper } from "./useDevTrackHelper";
-import { usePlayerHeaderAnimation } from "./usePlayerHeaderAnimation";
 import { usePlayerLayoutMetrics } from "./usePlayerLayoutMetrics";
 import { usePlayerLiveQueue } from "./usePlayerLiveQueue";
 
-export const SPRING_CONFIG = { damping: 28, mass: 0.8, stiffness: 220 };
-
-export function collapseOnJS() {
-  playerUIStateStore.collapsePlayer();
-}
-
-export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
+export function useLegacyPlayerViewState(interactionReady: boolean) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -54,6 +41,7 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
 
   const {
     isLowEnd,
+    videoBackgroundQuality,
     backgroundVideoId,
     videoActive,
     handleVideoActive,
@@ -64,7 +52,6 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
   } = useBackgroundVisualVideo({ screenSong, navigation });
 
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
-  const [interactionReady, setInteractionReady] = useState(false);
   const prevSongIdRef = useRef(currentSong?.id);
   const optionsPressLockRef = useRef(false);
   const [fullscreenLyricsVisible, setFullscreenLyricsVisible] = useState(false);
@@ -106,49 +93,9 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     [currentSong?.duration, seekTo]
   );
 
-  /* eslint-disable react-hooks/immutability -- Gesture callbacks update Reanimated shared values after render. */
-  const playerPrimaryDismissGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(!isProgressSeeking)
-        .activeOffsetY(8)
-        .failOffsetY(-8)
-        .failOffsetX([-40, 40])
-        .onUpdate((event) => {
-          if (event.translationY > 0 && translateY) {
-            translateY.value = event.translationY;
-          }
-        })
-        .onEnd((event) => {
-          if (!translateY) return;
-          const flickedDown = event.translationY > 15 && event.velocityY > 500;
-          const draggedFarEnough = event.translationY > 80 || event.translationY > screenHeight * 0.12;
-
-          if (draggedFarEnough || flickedDown) {
-            translateY.value = withSpring(screenHeight, SPRING_CONFIG);
-            scheduleOnRN(collapseOnJS);
-            return;
-          }
-
-          translateY.value = withSpring(0, SPRING_CONFIG);
-        }),
-    [isProgressSeeking, screenHeight, translateY]
-  );
-  /* eslint-enable react-hooks/immutability */
-
   useEffect(() => {
     globalPlayerDetailsVisibleRef.setVisible(true);
-    const cancelIdle = runAfterIdle(() => {
-      setInteractionReady(true);
-    });
-    const fallbackTimer = setTimeout(() => {
-      setInteractionReady(true);
-    }, 300);
-    return () => {
-      globalPlayerDetailsVisibleRef.setVisible(false);
-      cancelIdle();
-      clearTimeout(fallbackTimer);
-    };
+    return () => globalPlayerDetailsVisibleRef.setVisible(false);
   }, []);
 
   const handleSongOptionsPress = useCallback(() => {
@@ -192,15 +139,6 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     artCarouselSnapInterval,
   } = usePlayerLayoutMetrics(screenWidth, screenHeight, insets);
 
-  const {
-    headerScrollY,
-    headerBgOpacity,
-    topTitleOpacity,
-    topTitleTranslateY,
-    scrolledTitleOpacity,
-    scrolledTitleTranslateY,
-  } = usePlayerHeaderAnimation();
-
   const { livePlayingQueue, liveActiveQueueIndex } = usePlayerLiveQueue(
     queue,
     sourceQueue,
@@ -218,6 +156,7 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     handleViewArtistProfile,
     handlePlayRelatedSong,
   } = useArtistDiscovery({
+    enabled: interactionReady,
     screenSong,
     playingQueue,
     activeQueueIndex,
@@ -242,6 +181,7 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
   const playerIsShuffled = isShuffled;
 
   useEffect(() => {
+    if (!interactionReady) return;
     const urls = mapFilter(
       [
         playingQueue[activeQueueIndex - 1]?.coverUrl,
@@ -253,10 +193,8 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     );
 
     if (urls.length === 0) return;
-    const cacheImages = Image.prefetch;
-    void cacheImages(urls, "memory-disk").catch(() => {});
-    preloadDominantColors(urls);
-  }, [activeQueueIndex, liveActiveQueueIndex, playingQueue]);
+    return scheduleArtworkPreload(urls, artSize);
+  }, [activeQueueIndex, artSize, interactionReady, playingQueue]);
 
   const liked = screenSong ? isLiked(screenSong.id) : false;
   const queueRowHeight = isShortScreen ? 48 : 54;
@@ -348,7 +286,6 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     interactionReady,
     seekTo,
     handleLyricSeek,
-    playerPrimaryDismissGesture,
     handleSongOptionsPress,
     topInset,
     isShortScreen,
@@ -367,12 +304,6 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     prevNextBtnSizeStyle,
     artCarouselPageWidth,
     artCarouselSnapInterval,
-    headerScrollY,
-    headerBgOpacity,
-    topTitleOpacity,
-    topTitleTranslateY,
-    scrolledTitleOpacity,
-    scrolledTitleTranslateY,
     playingQueue,
     activeQueueIndex,
     artistDetails,
@@ -407,6 +338,7 @@ export function useLegacyPlayerViewState(translateY?: SharedValue<number>) {
     toggleRepeat,
     shouldRenderBackgroundVideo,
     isLowEnd,
+    videoBackgroundQuality,
     backgroundVideoId,
     videoActive,
     isScreenFocused,

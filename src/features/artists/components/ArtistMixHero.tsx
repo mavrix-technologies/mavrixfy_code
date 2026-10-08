@@ -1,3 +1,4 @@
+import { displayArtworkUrl } from "@/lib/artworkDisplay";
 import Colors from "@/constants/colors";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
@@ -46,7 +47,7 @@ export const ArtistMixHero = memo(function ArtistMixHero({
           >
             <Image
               recyclingKey={`mix-art-${id}`}
-              source={{ uri: images[i] || undefined }}
+              source={{ uri: displayArtworkUrl(images[i], 96) || undefined }}
               style={StyleSheet.absoluteFill}
               contentFit="cover"
               cachePolicy="memory-disk"

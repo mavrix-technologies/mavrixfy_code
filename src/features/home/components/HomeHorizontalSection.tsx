@@ -1,3 +1,4 @@
+import { homeDisplayText } from "./homeDisplayText";
 import { triggerImpact } from "@/lib/haptics";
 import type { JioSaavnImage } from "@/lib/musicData";
 import * as Haptics from "expo-haptics";
@@ -11,6 +12,7 @@ Pressable,
 StyleSheet,
 Text,
 View,
+useWindowDimensions,
 } from "react-native";
 
 const CARD_WIDTH = 148;
@@ -59,11 +61,11 @@ const HorizontalCard = memo(function HorizontalCard({
         transition={0}
       />
       <Text style={styles.cardTitle} numberOfLines={1}>
-        {item.name}
+        {homeDisplayText(item.name, "Playlist")}
       </Text>
       {item.subtitle ? (
         <Text style={styles.cardSubtitle} numberOfLines={1}>
-          {item.subtitle}
+          {homeDisplayText(item.subtitle, "Playlist")}
         </Text>
       ) : item.songCount && item.songCount > 0 ? (
         <Text style={styles.cardSubtitle} numberOfLines={1}>
@@ -84,14 +86,17 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
   isAlbum = false,
   isFirestore = false,
   onItemPress,
+  onSongPress,
 }: {
   title: string;
   items: HomeCardItem[];
   isAlbum?: boolean;
   isFirestore?: boolean;
   onItemPress?: (item: HomeCardItem) => void;
+  onSongPress?: (item: HomeCardItem) => void;
 }) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
 
   const handleCardPress = useCallback(
     (item: HomeCardItem) => {
@@ -99,6 +104,7 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
       if (onItemPress) { onItemPress(item); return; }
       const imageUrl = item.imageUrl || getBestImageUrl(item.image || []);
       const isSong = item.type === "song" || Boolean(item.url?.includes("/song/"));
+      if (isSong && onSongPress) { onSongPress(item); return; }
       const isAlbumItem = isAlbum || item.type === "album" || Boolean(item.url?.includes("/album/"));
 
       router.push({
@@ -118,7 +124,7 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
         },
       });
     },
-    [isAlbum, isFirestore, router, onItemPress]
+    [isAlbum, isFirestore, router, onItemPress, onSongPress]
   );
 
   const renderItem = useCallback(
@@ -144,7 +150,7 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.title}>{homeDisplayText(title)}</Text>
       </View>
 
       <FlatList
@@ -156,9 +162,9 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={ItemSeparatorComponent}
         getItemLayout={getItemLayout}
-        initialNumToRender={5}
-        maxToRenderPerBatch={4}
-        windowSize={5}
+        initialNumToRender={Math.max(1, Math.ceil(width / (CARD_WIDTH + CARD_GAP)))}
+        maxToRenderPerBatch={2}
+        windowSize={3}
         removeClippedSubviews
       />
     </View>

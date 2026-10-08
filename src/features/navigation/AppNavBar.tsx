@@ -3,7 +3,6 @@ import { IS_ANDROID,IS_IOS,IS_WEB } from "@/constants/platform";
 import { useOptionalPlayerActions } from "@/contexts/PlayerContext";
 import { compactMap,mapFilter } from "@/lib/arrayUtils";
 import {
-preloadDominantColors,
 useArtworkPalette,
 } from "@/lib/colorExtractor";
 import { triggerImpact } from "@/lib/haptics";
@@ -22,8 +21,7 @@ import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/Pla
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { MusicArtwork } from "@/components/MusicArtwork";
-import { Image } from "expo-image";
-import { youTubeDisplayArtworkUrl } from "@/services/youtube/YouTubeArtwork";
+import { scheduleArtworkPreload } from "@/lib/artworkPreload";
 import { usePathname,useRouter } from "expo-router";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import {
@@ -37,6 +35,7 @@ import { Gesture,GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 import { styles } from "./layoutStyles";
+
 import {
 MiniPlayerBannerView,
 MiniPlayerProgressBar,
@@ -57,6 +56,7 @@ type VisibleRoute,
 import { MemoizedNavTabItem } from "./NavTabItem";
 
 const MINI_SWIPE_THRESHOLD = 26;
+const miniCoverSize = 44;
 
 export type AppNavBarProps = {
   hidden?: boolean;
@@ -123,7 +123,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const [failedCoverUrl, setFailedCoverUrl] = useState<string>();
   const coverFailed = failedCoverUrl === activeSong?.coverUrl;
   const artworkPalette = useArtworkPalette(activeSong?.coverUrl);
-  const openPlayerLockRef = useRef(0);
   const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(() => getCachedMiniPlayerBannerConfig());
 
   useEffect(() => {
@@ -147,12 +146,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     [routerNavigate]
   );
 
-  const openPlayer = useCallback(() => {
-    const now = Date.now();
-    if (now - openPlayerLockRef.current < 240) return;
-    openPlayerLockRef.current = now;
-    expandPlayer();
-  }, []);
+  const openPlayer = expandPlayer;
 
   const openMiniPlayerQueue = useCallback(() => {
     globalQueueSheetRef.current?.expand();
@@ -185,8 +179,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
-    void Image.prefetch(urls.map(url => youTubeDisplayArtworkUrl(url, 192)), "memory-disk").catch(() => { });
-    preloadDominantColors(urls);
+    return scheduleArtworkPreload(urls, miniCoverSize);
   }, [activeSong?.coverUrl, queue, queueIndex]);
 
   const lastMix = useLastMix();
@@ -369,7 +362,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const coverUrl = activeSong?.coverUrl?.trim();
   const miniPlayerHeight = 55;
   const miniCoverSlotSize = 44;
-  const miniCoverSize = 44;
   const miniControlSize = 36;
   const miniControlRadius = 18;
   const trashShiftX = trashOpacity.interpolate({

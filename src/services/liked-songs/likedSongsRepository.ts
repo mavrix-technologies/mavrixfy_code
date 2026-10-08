@@ -7,10 +7,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
 collection,
 onSnapshot,
-orderBy,
-query,
 type Unsubscribe,
+doc, writeBatch,
 } from "firebase/firestore";
+import { readLikedSong, mergeLikedSongIdentities, likedSongDocumentIds, likedSongIdentityKey, likedAtMillis } from "./likedSongFormat";
 import { useLikedSongsStore } from "./likedSongsStore";
 
 const CACHE_KEY_PREFIX = "@mavrixfy_liked_songs_";
@@ -35,6 +35,10 @@ function sanitizeSongForCache(song: Song): Partial<Song> {
     source: song.source,
     videoId: song.videoId,
     youtubeVideoId: song.youtubeVideoId,
+    likedSongDocumentIds: song.likedSongDocumentIds,
+    catalogUrl: song.catalogUrl,
+    audioUrl: song.source === "youtube" ? "" : song.audioUrl,
+    downloadUrl: song.source === "youtube" ? undefined : song.downloadUrl,
   };
 }
 
@@ -95,6 +99,7 @@ export function subscribeLikedSongs(userId?: string | null): () => void {
 
   cleanupLikedSongsSubscription();
   activeSubscriptionUserId = userId;
+  const generation = subscriptionGeneration;
   useLikedSongsStore.getState().setStatus("loading");
 
   // 1. Instant local-first hydration from cache
@@ -108,52 +113,26 @@ export function subscribeLikedSongs(userId?: string | null): () => void {
   const likedSongsRef = collection(db, "users", userId, "likedSongs");
 
   const handleLikedSongsSnapshot = (snapshot: any) => {
-    if (activeSubscriptionUserId !== userId) return;
-    const songs: Song[] = [];
+    if (activeSubscriptionUserId !== userId || generation !== subscriptionGeneration) return;
+    const documents: { id: string; data: Record<string, any> }[] = [];
     snapshot.forEach((docSnap: any) => {
-      const data = docSnap.data();
-      const songId = docSnap.id;
-      if (!songId) return;
-
-      songs.push({
-        id: songId,
-        title: data.title || data.name || "",
-        artist: data.artist || data.artists || "",
-        coverUrl: data.imageUrl || data.coverUrl || data.image || "",
-        audioUrl: data.audioUrl || data.streamUrl || data.url || data.previewUrl || "",
-        duration: data.duration || 0,
-        album: data.album || data.albumName || "",
-        genre: data.genre || "",
-        source: data.source,
-        videoId: data.videoId,
-        youtubeVideoId: data.youtubeVideoId,
-      });
+      if (docSnap.id) documents.push({ id: docSnap.id, data: docSnap.data({ serverTimestamps: "estimate" }) });
     });
-
-    useLikedSongsStore.getState().setSongs(songs, "ready");
-    void persistCachedLikedSongs(userId, songs);
+    // orderBy(likedAt) silently excludes older likes that only have addedAt/syncedAt.
+    documents.sort((a, b) => likedAtMillis(b.data) - likedAtMillis(a.data));
+    const merged = mergeLikedSongIdentities(documents.map(({ id, data }) => readLikedSong(id, data)));
+    useLikedSongsStore.getState().setSongs(merged, "ready");
+    void persistCachedLikedSongs(userId, merged);
   };
 
   const handleLikedSongsError = (error: any) => {
-    if (activeSubscriptionUserId !== userId) return;
+    if (activeSubscriptionUserId !== userId || generation !== subscriptionGeneration) return;
     logger.warn("[LikedSongsRepository] Realtime listener error, falling back to cached state:", error);
     // Don't blow away cached songs on network errors
     useLikedSongsStore.getState().setStatus("ready");
   };
 
-  try {
-    const q = query(likedSongsRef, orderBy("likedAt", "desc"));
-    activeUnsubscribe = onSnapshot(q, handleLikedSongsSnapshot, (err) => {
-      // If composite index is missing or orderBy fails, fallback to unordered snapshot
-      logger.warn("[LikedSongsRepository] Ordered query failed, falling back to unordered listener:", err);
-      if (activeSubscriptionUserId === userId) {
-        activeUnsubscribe = onSnapshot(likedSongsRef, handleLikedSongsSnapshot, handleLikedSongsError);
-      }
-    });
-  } catch (err) {
-    logger.warn("[LikedSongsRepository] Failed to initialize query, attaching unordered listener:", err);
-    activeUnsubscribe = onSnapshot(likedSongsRef, handleLikedSongsSnapshot, handleLikedSongsError);
-  }
+  activeUnsubscribe = onSnapshot(likedSongsRef, handleLikedSongsSnapshot, handleLikedSongsError);
 
   return cleanupLikedSongsSubscription;
 }
@@ -179,12 +158,29 @@ export function cleanupLikedSongsSubscription(): void {
  * Optimistic Like / Unlike Mutation.
  * Updates Zustand store immediately (0ms) and local cache, then syncs Firestore in background.
  */
+const mutations = new Map<string, Promise<boolean>>();
+/** LastWave's mutation mutex: serialize heart taps so late writes cannot undo a newer tap. */
 export async function toggleLikeSong(userId: string | null | undefined, song: Song): Promise<boolean> {
+  const scope = getAccountScope();
+  const key = `${userId || "guest"}:${scope.generation}`;
+  const previous = mutations.get(key) || Promise.resolve(false);
+  const mutation = previous.catch(() => false).then(() => {
+    const current = getAccountScope();
+    if (current.accountId !== scope.accountId || current.generation !== scope.generation || (userId && current.accountId !== userId)) return false;
+    return performToggleLike(userId, song, scope);
+  });
+  mutations.set(key, mutation);
+  try { return await mutation; }
+  finally { if (mutations.get(key) === mutation) mutations.delete(key); }
+}
+
+async function performToggleLike(userId: string | null | undefined, song: Song, scope: ReturnType<typeof getAccountScope>): Promise<boolean> {
   if (!song?.id) return false;
-  const songId = song.id;
+  const previousSong = useLikedSongsStore.getState().songs.find(item =>
+    likedSongDocumentIds(item).includes(song.id) || likedSongIdentityKey(item) === likedSongIdentityKey(song));
+  const songId = previousSong?.id || song.id;
   const isCurrentlyLiked = useLikedSongsStore.getState().ids.has(songId);
   const willBeLiked = !isCurrentlyLiked;
-  const previousSong = useLikedSongsStore.getState().songs.find((item) => item.id === songId);
 
   // 1. Instant local UI update
   if (willBeLiked) {
@@ -202,11 +198,12 @@ export async function toggleLikeSong(userId: string | null | undefined, song: So
     try {
       const saved = willBeLiked
         ? await addLikedSongToFirestore(userId, song)
-        : await removeLikedSongFromFirestore(userId, songId);
+        : await removeLikedSongWithOrigins(userId, previousSong || song);
       if (!saved) throw new Error("Could not sync liked song");
     } catch (error) {
       logger.error("[LikedSongsRepository] Background Firestore sync failed:", error);
-      if (getAccountScope().accountId === userId && useLikedSongsStore.getState().ids.has(songId) === willBeLiked) {
+      if (getAccountScope().accountId === userId && getAccountScope().generation === scope.generation
+        && useLikedSongsStore.getState().ids.has(songId) === willBeLiked) {
         if (isCurrentlyLiked && previousSong) useLikedSongsStore.getState().addSongOptimistic(previousSong);
         else useLikedSongsStore.getState().removeSongOptimistic(songId);
         void persistCachedLikedSongs(userId, useLikedSongsStore.getState().songs);
@@ -216,4 +213,15 @@ export async function toggleLikeSong(userId: string | null | undefined, song: So
   }
 
   return willBeLiked;
+}
+
+async function removeLikedSongWithOrigins(userId: string, song: Song): Promise<boolean> {
+  if (!song.likedSongDocumentIds?.length) return removeLikedSongFromFirestore(userId, song.id);
+  if (!db) return false;
+  const ids = likedSongDocumentIds(song);
+  if (ids.length > 500) throw new Error("Too many linked like records to remove together.");
+  const batch = writeBatch(db);
+  for (const id of ids) batch.delete(doc(db, "users", userId, "likedSongs", id));
+  await batch.commit();
+  return true;
 }

@@ -308,10 +308,10 @@ function useRootLayoutNavigation() {
 
 const isAndroid = Platform.OS === "android";
 
+// /player is a deep-link bridge; the persistent sheet owns its animation.
 const playerScreenOptions = {
   presentation: "transparentModal" as const,
-  animation: "slide_from_bottom" as const,
-  animationDuration: 250,
+  animation: "none" as const,
   contentStyle: { backgroundColor: "transparent" },
 };
 

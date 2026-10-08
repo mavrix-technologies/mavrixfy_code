@@ -1,4 +1,5 @@
 import { sortedCopy } from "@/lib/arrayUtils";
+import { readLikedSong, mergeLikedSongIdentities, youtubeIdentity, likedAtMillis } from "@/services/liked-songs/likedSongFormat";
 import {
 removeCachedPlaylist,
 setCachedPlaylist,
@@ -239,13 +240,7 @@ export async function getLikedSongsFromFirestore(userId: string): Promise<any[]>
 
     const likedSongsRef = collection(db, "users", userId, "likedSongs");
 
-    let snapshot;
-    try {
-      const q = query(likedSongsRef, orderBy('likedAt', 'desc'));
-      snapshot = await getDocs(q);
-    } catch {
-      snapshot = await getDocs(likedSongsRef);
-    }
+    const snapshot = await getDocs(likedSongsRef);
 
     const likedSongs: any[] = [];
     snapshot.forEach((docSnap) => {
@@ -256,24 +251,13 @@ export async function getLikedSongsFromFirestore(userId: string): Promise<any[]>
         return;
       }
 
-      likedSongs.push({
-        id: songId,
-        title: data.title || data.name || "",
-        artist: data.artist || data.artists || "",
-        coverUrl: data.imageUrl || data.coverUrl || data.image || "",
-        audioUrl: data.audioUrl || data.streamUrl || data.url || data.previewUrl || "",
-        duration: data.duration || 0,
-        album: data.album || data.albumName || "",
-        addedAt: data.likedAt || data.addedAt || data.syncedAt,
-        source: data.source,
-        spotifyId: data.spotifyId,
-        spotifyUrl: data.spotifyUrl,
-        trackId: data.trackId,
-        albumId: data.albumId,
+      likedSongs.push({ ...readLikedSong(songId, data),
+        addedAt: data.likedAt || data.addedAt || data.syncedAt || data.createdAt,
+        spotifyId: data.spotifyId, spotifyUrl: data.spotifyUrl, trackId: data.trackId, albumId: data.albumId,
       });
     });
 
-    return likedSongs;
+    return mergeLikedSongIdentities(likedSongs.sort((a, b) => likedAtMillis({ likedAt: b.addedAt }) - likedAtMillis({ likedAt: a.addedAt })));
   } catch {
     return [];
   }
@@ -334,15 +318,18 @@ export async function addLikedSongToFirestore(userId: string, song: any): Promis
 
     const title = String(song.title || song.name || "").trim();
     const artist = String(song.artist || song.artists || "").trim();
-    const documentId = String(song.id || song._id || song.songId || getSongDedupeKey({ title, artist })).replace(/\//g, "_");
+    const youtubeId = youtubeIdentity(song);
+    const documentId = youtubeId ? `youtube_${youtubeId}` : String(song.id || song._id || song.songId || getSongDedupeKey({ title, artist })).replace(/\//g, "_");
     if (!documentId || !title || !artist) {
       return false;
     }
 
     const songDocRef = doc(db, "users", userId, "likedSongs", documentId);
+    if (song.source === "youtube" && !youtubeId) return false;
 
     const docSnap = await getDoc(songDocRef);
     if (docSnap.exists()) {
+      if (youtubeId) await updateDoc(songDocRef, { source: "youtube", videoId: youtubeId, youtubeVideoId: youtubeId, audioUrl: "", catalogUrl: `https://music.youtube.com/watch?v=${youtubeId}` });
       return true; // The requested liked state already exists.
     }
 
@@ -350,7 +337,7 @@ export async function addLikedSongToFirestore(userId: string, song: any): Promis
     const normalizedArtist = normalizeForDedupe(artist);
 
     await setDoc(songDocRef, {
-      id: song.id || song._id || documentId,
+      id: youtubeId ? documentId : song.id || song._id || documentId,
       title,
       titleLower: normalizedTitle,
       normalizedTitle,
@@ -359,14 +346,17 @@ export async function addLikedSongToFirestore(userId: string, song: any): Promis
       normalizedArtist,
       albumName: song.album || song.albumName || "",
       imageUrl: song.coverUrl || song.imageUrl || "",
-      audioUrl: song.audioUrl || song.streamUrl || "",
+      audioUrl: youtubeId ? "" : song.audioUrl || song.streamUrl || "",
+      catalogUrl: youtubeId ? `https://music.youtube.com/watch?v=${youtubeId}` : song.catalogUrl || song.url || "",
+      ...(!youtubeId && song.downloadUrl ? { downloadUrl: song.downloadUrl } : {}),
       duration: song.duration || 0,
       year: "",
       dedupeKey: `${normalizedTitle}|${normalizedArtist}`,
       createdAt: serverTimestamp(),
       likedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      source: "mavrixfy",
+      source: youtubeId ? "youtube" : ["jiosaavn", "gaana", "local"].includes(song.source) ? song.source : "jiosaavn",
+      ...(youtubeId ? { videoId: youtubeId, youtubeVideoId: youtubeId } : {}),
       client: "mavrixfy_app",
     });
 

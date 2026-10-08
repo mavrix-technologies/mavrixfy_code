@@ -8,6 +8,7 @@ export type GoogleNativeAd = import("react-native-google-mobile-ads").NativeAd;
 let cachedModule: GoogleMobileAdsModule | null | undefined;
 let warnedMissingModule = false;
 let adsInitialized = false;
+let initialization: Promise<void> | null = null;
 
 export function getGoogleMobileAdsModule(): GoogleMobileAdsModule | null {
   if (
@@ -51,21 +52,25 @@ const TEST_DEVICE_IDS: string[] = [
   // "33BE2250B43518CCDA7DE426D04EE231",
 ];
 
-export async function initializeMobileAds(): Promise<void> {
-  if (adsInitialized) return;
+export function initializeMobileAds(): Promise<void> {
+  if (adsInitialized) return Promise.resolve();
+  if (initialization) return initialization;
   const mod = getGoogleMobileAdsModule();
-  if (!mod) return;
-  try {
-    const { default: mobileAds, MaxAdContentRating } = mod;
-    await mobileAds().setRequestConfiguration({
-      maxAdContentRating: MaxAdContentRating.PG,
-      tagForChildDirectedTreatment: false,
-      tagForUnderAgeOfConsent: false,
-      testDeviceIdentifiers: __DEV__ ? ["EMULATOR", ...TEST_DEVICE_IDS] : TEST_DEVICE_IDS,
-    });
-    await mobileAds().initialize();
-    adsInitialized = true;
-  } catch (e) {
-    logger.warn("[Ads] Failed to initialize AdMob:", e);
-  }
+  if (!mod) return Promise.resolve();
+  initialization = (async () => {
+    try {
+      const { default: mobileAds, MaxAdContentRating } = mod;
+      await mobileAds().setRequestConfiguration({
+        maxAdContentRating: MaxAdContentRating.PG,
+        tagForChildDirectedTreatment: false,
+        tagForUnderAgeOfConsent: false,
+        testDeviceIdentifiers: __DEV__ ? ["EMULATOR", ...TEST_DEVICE_IDS] : TEST_DEVICE_IDS,
+      });
+      await mobileAds().initialize();
+      adsInitialized = true;
+    } catch (e) {
+      logger.warn("[Ads] Failed to initialize AdMob:", e);
+    }
+  })().finally(() => { initialization = null; });
+  return initialization;
 }

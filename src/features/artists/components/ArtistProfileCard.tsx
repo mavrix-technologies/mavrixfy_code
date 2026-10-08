@@ -1,3 +1,4 @@
+import { displayArtworkUrl } from "@/lib/artworkDisplay";
 import Colors from "@/constants/colors";
 import type { ArtistCard } from "@/data/providers/ArtistProvider";
 import { getBestImageUrl } from "@/lib/musicData";
@@ -38,7 +39,7 @@ export const ArtistProfileCard = memo(function ArtistProfileCard({
     }
   }, [artist, onLongPress]);
 
-  const imageUrl = artist.image?.length ? getBestImageUrl(artist.image) : "";
+  const imageUrl = displayArtworkUrl(getBestImageUrl(artist.image), cardWidth);
 
   return (
     <Pressable

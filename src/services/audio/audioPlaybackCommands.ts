@@ -1,4 +1,4 @@
-import { isYouTubeSong, peekYouTubeStream, youTubePlaybackErrorMessage } from "@/services/youtube/YouTubeMusic";
+import { isYouTubeSong, peekYouTubeStream, youTubePlaybackErrorMessage, youTubePlaybackErrorDetails } from "@/services/youtube/YouTubeMusic";
 import { getSettings } from "@/lib/storage";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
@@ -10,6 +10,7 @@ import type { SeekOverride } from "@/services/audio/audioProgressTracking";
 import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { toDurationSeconds } from "@/utils/timeFormatters";
+import { playbackPosition } from "./audioTimeline";
 import { useCallback,useEffect,type MutableRefObject } from "react";
 
 interface UseAudioPlaybackCommandsOptions {
@@ -131,6 +132,12 @@ export function useAudioPlaybackCommands({
 
       const targetIndex = songIndexInQueue >= 0 ? songIndexInQueue : Math.max(0, q.findIndex((s) => s.id === song.id));
       const targetSong = q[targetIndex] || song;
+      const sameSong = currentSongRef.current?.id === targetSong.id;
+
+      // Retire outgoing audio and its callbacks before URL resolution or UI swap.
+      // URL prefetch is retained; only the selected track owns audible output.
+      if (TrackPlayer?.beginTrackChange) TrackPlayer.beginTrackChange();
+      else if (!TrackPlayer && canUseLightweightAudioFallback) ExpoAvPlayer.beginTrackChange();
 
       // 1. Instant local UI feedback
       setCurrentSong(targetSong);
@@ -165,7 +172,7 @@ export function useAudioPlaybackCommands({
       playbackLoadingRef.current = true;
       setPlaybackLoading(true);
       setSeekOverride(null);
-      if (durationSecondsRef) durationSecondsRef.current = toDurationSeconds(targetSong.duration);
+      if (durationSecondsRef && !sameSong) durationSecondsRef.current = toDurationSeconds(targetSong.duration);
       const initialPos = typeof startPositionSeconds === "number" && startPositionSeconds > 0 ? startPositionSeconds : 0;
       positionSecondsRef.current = initialPos;
       setNativePosition(initialPos);
@@ -203,10 +210,6 @@ export function useAudioPlaybackCommands({
       }, 800);
 
       try {
-        // Pre-warm: fire resolution early if not already cached
-        if (!streamUrlCache.current.has(targetSong.id) && isYouTubeSong(targetSong)) {
-          void resolvePlaybackUrlCached(targetSong).catch(() => null);
-        }
         let resolutionTimer: ReturnType<typeof setTimeout> | undefined;
         const audioUrl = await Promise.race([
           resolvePlaybackUrlCached(targetSong),
@@ -332,7 +335,11 @@ export function useAudioPlaybackCommands({
       } catch (error) {
         if (reqId !== playRequestIdRef.current) return;
         const notice = isYouTubeSong(targetSong) ? youTubePlaybackErrorMessage(error) : "Could not start playback.";
-        logger.error("[Player] playSong failed", isYouTubeSong(targetSong) ? { songId: targetSong.id, message: notice } : error);
+        // Release logging retains the first string only; include sanitized
+        // extraction diagnostics there so physical-device failures are traceable.
+        logger.error(isYouTubeSong(targetSong)
+          ? `[Player] playSong failed ${JSON.stringify({ songId: targetSong.id, message: notice, cause: youTubePlaybackErrorDetails(error) })}`
+          : "[Player] playSong failed", error);
         if (pendingPlayRequestRef.current?.id === reqId) {
           pendingPlayRequestRef.current = null;
         }
@@ -534,20 +541,25 @@ export function useAudioPlaybackCommands({
   }, [togglePlay, togglePlayRef]);
 
   const nextSong = useCallback(async () => {
+    const requestId = playRequestIdRef.current;
+    const selectedSong = currentSongRef.current;
+    const stillCurrent = () => requestId === playRequestIdRef.current && currentSongRef.current === selectedSong;
     const cq = queueRef.current;
     const ci = queueIndexRef.current;
     if (cq.length === 0) return;
+    logger.debug("[Player] Next requested", { songId: selectedSong?.id, queueIndex: ci, queueSize: cq.length });
 
     if (repeatModeRef.current === "all" || ci < cq.length - 1) {
       const nextIndex = (ci + 1) % cq.length;
       const targetSong = cq[nextIndex];
       if (targetSong) {
-        void playSong(targetSong, cq);
+        await playSong(targetSong, cq);
       }
     } else {
       // Reached end of queue: check smart autoplay before stopping
       try {
         const settings = await getSettings();
+        if (!stillCurrent()) return;
         if (
           settings?.smartAutoplayEnabled &&
           sleepTimerRef?.current?.mode !== "end-of-stack" &&
@@ -557,6 +569,7 @@ export function useAudioPlaybackCommands({
           if (seed) {
             showPlaybackNotice("Finding similar songs...");
             const recs = await triggerAutoplayAppend(seed, cq);
+            if (!stillCurrent() || desiredPlayStateRef.current === false) return;
             if (recs.length > 0) {
               void playSong(recs[0], queueRef.current);
               return;
@@ -567,6 +580,7 @@ export function useAudioPlaybackCommands({
         logger.warn("[Player] Autoplay nextSong error:", err);
       }
 
+      if (!stillCurrent()) return;
       desiredPlayStateRef.current = false;
       if (TrackPlayer) await TrackPlayer.pause();
       else if (canUseLightweightAudioFallback) ExpoAvPlayer.pause();
@@ -581,6 +595,7 @@ export function useAudioPlaybackCommands({
     currentSongRef,
     isPlayingRef,
     playSong,
+    playRequestIdRef,
     queueIndexRef,
     queueRef,
     repeatModeRef,
@@ -596,26 +611,37 @@ export function useAudioPlaybackCommands({
 
   const seekTo = useCallback(
     async (progress: number) => {
-      const durationSeconds = (durationSecondsRef?.current && durationSecondsRef.current > 0)
+      if (!Number.isFinite(progress)) return;
+      const songId = currentSongRef.current?.id;
+      const native = TrackPlayer && isPlayerReady;
+      let engineProgress: { position: number; duration: number } | undefined;
+      if (native && typeof TrackPlayer.getProgress === "function") engineProgress = await TrackPlayer.getProgress().catch(() => undefined);
+      else if (canUseLightweightAudioFallback) engineProgress = ExpoAvPlayer.getProgress();
+      if (currentSongRef.current?.id !== songId) return;
+      const durationSeconds = Number.isFinite(engineProgress?.duration) && engineProgress!.duration > 0
+        ? engineProgress!.duration : (durationSecondsRef?.current && durationSecondsRef.current > 0)
         ? durationSecondsRef.current
         : toDurationSeconds(currentSongRef.current?.duration);
-      if (durationSeconds <= 0) return;
+      if (durationSeconds <= 0 || (!native && !canUseLightweightAudioFallback)) return;
+      if (durationSecondsRef) durationSecondsRef.current = durationSeconds;
 
-      const seconds = Math.max(0, Math.min(durationSeconds, progress * durationSeconds));
+      const seconds = playbackPosition(progress * durationSeconds, durationSeconds);
       setSeekOverride({
         songId: currentSongRef.current?.id || null,
         seconds,
         startedAt: Date.now(),
       });
-      setNativePosition(seconds);
-
-      if (TrackPlayer && isPlayerReady) {
-        await TrackPlayer.seekTo(seconds).catch(() => {});
-      } else if (canUseLightweightAudioFallback) {
-        await ExpoAvPlayer.seekTo(seconds);
+      try {
+        if (native) await TrackPlayer.seekTo(seconds);
+        else await ExpoAvPlayer.seekTo(seconds);
+      } catch {
+        if (currentSongRef.current?.id !== songId) return;
+        setSeekOverride(null);
+        if (Number.isFinite(engineProgress?.position)) setNativePosition(engineProgress!.position);
+        showPlaybackNotice("Could not seek this audio. Please try again.");
       }
     },
-    [canUseLightweightAudioFallback, currentSongRef, durationSecondsRef, isPlayerReady, setNativePosition, setSeekOverride, TrackPlayer]
+    [canUseLightweightAudioFallback, currentSongRef, durationSecondsRef, isPlayerReady, setNativePosition, setSeekOverride, showPlaybackNotice, TrackPlayer]
   );
 
   useEffect(() => {

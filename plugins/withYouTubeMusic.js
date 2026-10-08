@@ -48,6 +48,20 @@ configurations.matching { it.name.endsWith("CompileClasspath") }.configureEach {
     const marker = "# Mavrixfy YouTube Music";
     const content = fs.readFileSync(rules, "utf8");
     if (!content.includes(marker)) fs.appendFileSync(rules, `\n${marker}\n-keep class com.metrolist.innertubex.** { *; }\n-keep class io.ktor.** { *; }\n-keep class org.schabi.newpipe.extractor.** { *; }\n`);
+    const desktopMarker = "# YouTube optional desktop APIs";
+    if (!content.includes(desktopMarker)) fs.appendFileSync(rules, `
+${desktopMarker}
+# Rhino's optional JavaBeans/JVM scripting adapters and Ktor's IDE debugger probe.
+# Android extraction uses Rhino directly, not JSR-223.
+-dontwarn java.beans.BeanDescriptor
+-dontwarn java.beans.BeanInfo
+-dontwarn java.beans.IntrospectionException
+-dontwarn java.beans.Introspector
+-dontwarn java.beans.PropertyDescriptor
+-dontwarn java.lang.management.ManagementFactory
+-dontwarn java.lang.management.RuntimeMXBean
+-dontwarn javax.script.ScriptEngineFactory
+`);
     return mod;
   }]);
 };

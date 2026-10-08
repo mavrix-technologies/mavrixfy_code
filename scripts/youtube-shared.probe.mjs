@@ -1,30 +1,33 @@
 // Live check of the SAME transport used by the app. Never print signed URLs.
 import fs from "node:fs/promises";
-import ts from "typescript";
-import { webcrypto } from "node:crypto";
-import { Event, EventTarget } from "event-target-shim";
-globalThis.crypto ??= webcrypto;
-globalThis.EventTarget ??= EventTarget;
-globalThis.CustomEvent ??= class extends Event {
-  constructor(type, options = {}) { super(type, options); this.detail = options.detail; }
-};
-const source = await fs.readFile(new URL("../src/services/youtube/SharedYouTubeTransport.ts", import.meta.url), "utf8");
-const output = ts.transpileModule(source, { compilerOptions: {
-  module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022,
-} }).outputText.replace('import "./runtime";', "").replace('"./YouTubeArtwork"', '"./youtube-artwork-probe.mjs"');
-const artifact = new URL("../.expo/youtube-shared-probe.mjs", import.meta.url);
-await fs.mkdir(new URL("../.expo/", import.meta.url), { recursive: true });
-const artworkSource = await fs.readFile(new URL("../src/services/youtube/YouTubeArtwork.ts", import.meta.url), "utf8");
-await fs.writeFile(new URL("../.expo/youtube-artwork-probe.mjs", import.meta.url), ts.transpileModule(artworkSource, {
-  compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
-}).outputText);
-await fs.writeFile(artifact, output);
-const { sharedYouTubeTransport: api } = await import(artifact.href);
+import { Buffer } from "node:buffer";
+import { loadYouTubeNodeTransport } from "./helpers/youtube-node-transport.mjs";
+const api = await loadYouTubeNodeTransport();
 try {
-  if (process.argv[2] === "--home") {
+  if (process.argv[2] === "--video") {
+    const quality = process.argv[4] || "low";
+    const stream = await api.resolveVideoStream(process.argv[3] || "Ci0WbaUH3no", quality, "probe-video");
+    console.log(JSON.stringify({ height: stream.height, codec: stream.codec, client: stream.clientProfile }));
+    const response = await fetch(stream.url, { headers: stream.headers, signal: AbortSignal.timeout(12000) });
+    console.log(JSON.stringify({ videoGetStatus: response.status, mime: response.headers.get("content-type") }));
+    await response.body?.cancel();
+    const ceiling = quality === "low" ? 360 : quality === "medium" ? 480 : quality === "auto" ? 720 : Infinity;
+    if (!response.ok || stream.height > ceiling) throw new Error("Video stream validation failed");
+  } else if (process.argv[2] === "--explore") {
+    const explore = await api.explore("probe-explore");
+    console.log(JSON.stringify({ sections: explore.sections.map(section => ({ title: section.title, category: section.category,
+      songs: section.songs.length, items: section.playlists.map(item => ({ name: item.name, kind: item.kind, id: item.id })) })) }));
+    const album = explore.playlists.find(item => item.kind === "album");
+    if (album) {
+      const result = await api.playlist(album.id, "", "probe-album");
+      console.log(JSON.stringify({ album: result.name, songs: result.songs.length, firstSong: result.songs[0]?.title }));
+      if (!result.songs.length) throw new Error("Empty album");
+    }
+  } else if (process.argv[2] === "--home") {
     const home = await api.home("probe-home");
     console.log(JSON.stringify({ homeSongs: home.songs.length, homePlaylists: home.playlists.length,
-      playlistNames: home.playlists.slice(0, 3).map(item => item.name) }));
+      sectionCount: home.sections?.length, shelves: home.sections?.map(section => ({ title: section.title, songs: section.songs.length, playlists: section.playlists.length })),
+      playlistNames: home.playlists.slice(0, 3).map(item => ({ name: item.name, ownerName: item.ownerName, ownerChannelId: item.ownerChannelId })) }));
     if (!home.songs.length && !home.playlists.length) throw new Error("Empty YouTube home feed");
     if (home.playlists.length) {
       const page = await api.playlist(home.playlists[0].id, "", "probe-home-mix");
@@ -48,7 +51,7 @@ try {
   } else {
   const results = await api.search(process.argv[2] || "Majboor unplugged", "all", "probe-search");
   console.log(JSON.stringify({ songs: results.songs.length, playlists: results.playlists.length,
-    firstSongs: results.songs.slice(0, 3).map(({ videoId, title, artist }) => ({ videoId, title, artist })) }));
+    firstSongs: results.songs.slice(0, 3).map(({ videoId, title, artist, duration }) => ({ videoId, title, artist, duration })) }));
   if (!results.songs.length || !results.playlists.length) throw new Error("Search returned no content");
   let page = await api.playlist(results.playlists[0].id, "", "probe-playlist");
   console.log(JSON.stringify({ playlistSongs: page.songs.length, hasMore: !!page.cursor, name: page.name }));
@@ -61,7 +64,7 @@ try {
   const start = Date.now();
   const stream = await api.resolveStream(videoId, "medium", "probe-stream");
   console.log(JSON.stringify({ videoId, client: stream.clientProfile, bitrate: stream.bitrate,
-    resolutionMs: Date.now() - start, expiresAt: stream.expiresAt }));
+    resolutionMs: Date.now() - start, expiresAt: stream.expiresAt, durationSeconds: stream.durationSeconds }));
   const response = await fetch(stream.url, { headers: stream.headers, signal: AbortSignal.timeout(12000) });
   console.log(JSON.stringify({ unrestrictedGetStatus: response.status, mime: response.headers.get("content-type") }));
   await response.body?.cancel();

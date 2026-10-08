@@ -1,8 +1,9 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
+import { useVisibleImageAnimation } from "@/lib/useVisibleImageAnimation";
 import React from "react";
 import { Pressable,StyleSheet,Text,View } from "react-native";
-import Animated from "react-native-reanimated";
+import Animated, { type SharedValue } from "react-native-reanimated";
 
 export const UNIFIED_HEADER_TOP_BAR_HEIGHT = 48;
 
@@ -15,6 +16,7 @@ export interface HomeTopBarRowProps {
   titleColor: string;
   titleText: string;
   topBarAnimatedStyle: any;
+  scrollY?: number | SharedValue<number>;
 }
 
 export const HomeTopBarRow = React.memo(function HomeTopBarRow({
@@ -26,7 +28,10 @@ export const HomeTopBarRow = React.memo(function HomeTopBarRow({
   titleColor,
   titleText,
   topBarAnimatedStyle,
+  scrollY,
 }: HomeTopBarRowProps) {
+  const { imageRef, animationActive } = useVisibleImageAnimation(user?.picture, scrollY,
+    UNIFIED_HEADER_TOP_BAR_HEIGHT * 0.75);
   return (
     <Animated.View
       style={[
@@ -49,6 +54,10 @@ export const HomeTopBarRow = React.memo(function HomeTopBarRow({
         >
           {isAuthenticated && user?.picture ? (
             <Image
+              ref={imageRef}
+              autoplay={animationActive}
+              cachePolicy="memory-disk"
+              allowDownscaling
               source={{ uri: user.picture }}
               style={styles.avatarImage}
               contentFit="cover"

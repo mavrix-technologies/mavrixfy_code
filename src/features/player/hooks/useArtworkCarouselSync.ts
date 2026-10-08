@@ -23,7 +23,7 @@ export function useArtworkCarouselSync({
   prevSong,
   playSong,
 }: UseArtworkCarouselSyncParams) {
-  const [artScrollX] = useState(() => new Animated.Value(0));
+  const [artScrollX] = useState(() => new Animated.Value(activeQueueIndex * artCarouselSnapInterval));
   const artCarouselRef = useRef<FlatList<ArtworkQueueItem> | null>(null);
   const hasAlignedArtCarouselRef = useRef(false);
   const prevCarouselSongIdRef = useRef(currentSongId);

@@ -2,28 +2,21 @@ import { FullscreenKaraokeModal } from "@/components/FullscreenKaraokeModal";
 import { IS_ANDROID,IS_IOS } from "@/constants/platform";
 import { useAppIsActive } from "@/lib/appActivity";
 import type { Song } from "@/lib/musicData";
-import * as Animated from "@/lib/nativeAnimated";
-import { playerUIStateStore,type PlayerUIState } from "@/lib/playerUIState";
+import { collapsePlayer,playerUIStateStore,usePlayerUIState } from "@/lib/playerUIState";
 import { usePlaybackNowPlaying } from "@/services/audio/PlaybackEngine";
 import { getPlaybackProgressSnapshot,usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
-import { safeGoBack } from "@/utils/navigation";
 import { LinearGradient } from "expo-linear-gradient";
 import React,{ memo,useCallback,useEffect,useMemo,useState } from "react";
 import {
 BackHandler,
-ScrollView,
 StyleSheet,
 View,
 useWindowDimensions,
-type NativeScrollEvent,
-type NativeSyntheticEvent,
 } from "react-native";
-import { Gesture,GestureDetector } from "react-native-gesture-handler";
-import Reanimated,{
-useAnimatedStyle,
+import BottomSheet, { BottomSheetScrollView, useScrollEventsHandlersDefault } from "@gorhom/bottom-sheet";
+import {
 useSharedValue,
-withSpring,
-type SharedValue,
+useAnimatedReaction,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { PlayerAmbientBackdrop } from "../components/PlayerAmbientBackdrop";
@@ -34,29 +27,39 @@ import { PlayerControlsSection } from "../components/PlayerControlsSection";
 import { QueueSongRow } from "../components/PlayerDiscoverySections";
 import { PlayerEmptyState } from "../components/PlayerEmptyState";
 import { PlayerStickyHeader } from "../components/PlayerStickyHeader";
-import {
-SPRING_CONFIG,
-collapseOnJS,
-useLegacyPlayerViewState,
-} from "../hooks/useLegacyPlayerViewState";
+import { useLegacyPlayerViewState } from "../hooks/useLegacyPlayerViewState";
+import { usePlayerSheetState } from "../hooks/usePlayerSheetState";
 import { styles } from "../styles/playerScreenStyles";
 
-const AnimatedPlayerScrollView = Animated.createAnimatedComponent(ScrollView);
-
-function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<number> }) {
-  const s = useLegacyPlayerViewState(translateY);
+function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolean }) {
+  const s = useLegacyPlayerViewState(interactionReady);
+  const scrollY = useSharedValue(0);
   const ambientStartPositionMs = useMemo(
     () => getPlaybackProgressSnapshot().positionMillis,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Reset the video offset only for a new song/video.
     [s.backgroundVideoId, s.screenSong?.id]
   );
 
   const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
 
-  const handlePlayerScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const y = event.nativeEvent.contentOffset?.y ?? 0;
-    const scrolled = y > 50;
-    setIsHeaderScrolled((prev) => (prev !== scrolled ? scrolled : prev));
-  }, []);
+  const scrollEventsHandlersHook = useMemo(() => function usePlayerScrollEvents(
+    ref: Parameters<typeof useScrollEventsHandlersDefault>[0],
+    offset: Parameters<typeof useScrollEventsHandlersDefault>[1]
+  ) {
+    const handlers = useScrollEventsHandlersDefault(ref, offset);
+    return {
+      ...handlers,
+      handleOnScroll(event: Parameters<NonNullable<typeof handlers.handleOnScroll>>[0],
+        context: Parameters<NonNullable<typeof handlers.handleOnScroll>>[1]) {
+        "worklet";
+        handlers.handleOnScroll?.(event, context);
+        scrollY.value = Math.max(0, event.contentOffset.y);
+      },
+    };
+  }, [scrollY]);
+  useAnimatedReaction(() => scrollY.value > 50, (scrolled, previous) => {
+    if (scrolled !== previous) scheduleOnRN(setIsHeaderScrolled, scrolled);
+  });
 
   const renderQueueItem = useCallback(
     ({ item, index }: { item: Song; index: number }) => (
@@ -113,12 +116,7 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
             topInset={s.topInset}
             topBarHeight={s.topBarHeight}
             isShortScreen={s.isShortScreen}
-            headerScrollY={s.headerScrollY}
-            headerBgOpacity={s.headerBgOpacity}
-            topTitleOpacity={s.topTitleOpacity}
-            topTitleTranslateY={s.topTitleTranslateY}
-            scrolledTitleOpacity={s.scrolledTitleOpacity}
-            scrolledTitleTranslateY={s.scrolledTitleTranslateY}
+            scrollY={scrollY}
             sheetTextColor={s.sheetTextColor}
             albumName={s.screenSong.album || "Single"}
             songTitle={s.screenSong.title || ""}
@@ -127,12 +125,12 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
             backgroundColor={s.artworkPalette.background}
             isScrolled={isHeaderScrolled}
             isPlaying={s.playerIsPlaying}
-            onClose={safeGoBack}
+            onClose={collapsePlayer}
             onOptionsPress={s.handleSongOptionsPress}
             onTogglePlay={s.togglePlay}
           />
 
-          <AnimatedPlayerScrollView
+          <BottomSheetScrollView
             style={styles.playerScroll}
             contentContainerStyle={[styles.playerScrollContent, { paddingBottom: s.bottomContentPadding }]}
             showsVerticalScrollIndicator={false}
@@ -142,20 +140,16 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
             bounces={IS_IOS}
             alwaysBounceVertical={IS_IOS}
             overScrollMode="never"
-            scrollEventThrottle={16}
-            onScroll={Animated.event(
-              [{ nativeEvent: { contentOffset: { y: s.headerScrollY } } }],
-              { useNativeDriver: true, listener: handlePlayerScroll }
-            )}
+            scrollEventsHandlersHook={scrollEventsHandlersHook}
           >
             <PlayerAmbientBackdrop
               shouldRender={s.shouldRenderBackgroundVideo}
               screenHeight={s.screenHeight}
               screenWidth={s.screenWidth}
               isLowEnd={s.isLowEnd}
+              quality={s.videoBackgroundQuality}
               backgroundVideoId={s.backgroundVideoId}
               isScreenFocused={s.isScreenFocused}
-              playerIsPlaying={s.playerIsPlaying}
               fullscreenLyricsVisible={s.fullscreenLyricsVisible}
               initialOffsetMs={ambientStartPositionMs}
               onVideoActive={s.handleVideoActive}
@@ -174,7 +168,6 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
                 },
               ]}
             >
-              <GestureDetector gesture={s.playerPrimaryDismissGesture}>
                 <View style={styles.playerPrimaryStack}>
                   <PlayerArtworkCarousel
                     artCarouselRef={s.artCarouselRef}
@@ -225,10 +218,9 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
                     onToggleRepeat={s.toggleRepeat}
                   />
                 </View>
-              </GestureDetector>
             </View>
 
-            <PlayerBottomDetailsSection
+            {s.interactionReady && <PlayerBottomDetailsSection
               screenSong={s.screenSong}
               playbackActive={s.playbackState.isPlaying}
               accentColor={s.artworkPalette.accent}
@@ -247,8 +239,8 @@ function LegacyPlayerScreenView({ translateY }: { translateY?: SharedValue<numbe
               onViewArtistProfile={s.handleViewArtistProfile}
               relatedSongs={s.relatedSongs}
               onPlayRelatedSong={s.handlePlayRelatedSong}
-            />
-          </AnimatedPlayerScrollView>
+            />}
+          </BottomSheetScrollView>
         </View>
       </View>
 
@@ -285,9 +277,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
   const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
 
-  const [uiState, setUiState] = useState<PlayerUIState>(() => playerUIStateStore.current);
-
-  useEffect(() => playerUIStateStore.subscribe(setUiState), []);
+  const uiState = usePlayerUIState();
 
   useEffect(() => {
     if (activeSong && playerUIStateStore.current === "hidden") {
@@ -297,15 +287,8 @@ export const PlayerScreen = memo(function PlayerScreen() {
     }
   }, [activeSong]);
 
-  const translateY = useSharedValue(screenHeight);
-
-  useEffect(() => {
-    if (uiState === "expanded") {
-      translateY.value = withSpring(0, SPRING_CONFIG);
-    } else if (uiState === "mini" || uiState === "hidden") {
-      translateY.value = withSpring(screenHeight, SPRING_CONFIG);
-    }
-  }, [uiState, screenHeight, translateY]);
+  const { visible, interactionReady, onAnimate, onChange, onClose } = usePlayerSheetState(uiState);
+  const snapPoints = useMemo(() => [screenHeight], [screenHeight]);
 
   useEffect(() => {
     if (!IS_ANDROID) return;
@@ -319,53 +302,26 @@ export const PlayerScreen = memo(function PlayerScreen() {
     return () => sub.remove();
   }, []);
 
-  /* eslint-disable react-hooks/immutability -- Gesture callbacks update Reanimated shared values after render. */
-  const panGesture = Gesture.Pan()
-    .activeOffsetY(8)
-    .failOffsetY(-8)
-    .failOffsetX([-35, 35])
-    .onUpdate((e) => {
-      if (e.translationY > 0) {
-        translateY.value = e.translationY;
-      }
-    })
-    .onEnd((e) => {
-      if (e.translationY > 100 || (e.translationY > 20 && e.velocityY > 500)) {
-        translateY.value = withSpring(screenHeight, SPRING_CONFIG);
-        scheduleOnRN(collapseOnJS);
-      } else {
-        translateY.value = withSpring(0, SPRING_CONFIG);
-      }
-    });
-  /* eslint-enable react-hooks/immutability */
-
-  const containerStyle = useAnimatedStyle(() => {
-    const isHidden = translateY.value >= screenHeight - 100;
-    return {
-      transform: [{ translateY: Math.max(0, translateY.value) }],
-      opacity: isHidden ? 0 : 1,
-    };
-  });
-
-  if (!activeSong || uiState !== "expanded" || !foreground) return null;
-
-  const isExpanded = uiState === "expanded";
+  if (!activeSong || !visible || !foreground) return null;
 
   return (
-    <Reanimated.View
-      pointerEvents={isExpanded ? "auto" : "none"}
-      style={[
-        styles.sheetContainer,
-        StyleSheet.absoluteFillObject,
-        containerStyle,
-      ]}
-    >
-      <GestureDetector gesture={panGesture}>
-        <Reanimated.View style={styles.contentWrap}>
-          <LegacyPlayerScreenView translateY={translateY} />
-        </Reanimated.View>
-      </GestureDetector>
-    </Reanimated.View>
+    <View pointerEvents="box-none" style={[styles.sheetContainer, StyleSheet.absoluteFillObject]}>
+      <BottomSheet
+        index={uiState === "expanded" ? 0 : -1}
+        snapPoints={snapPoints}
+        enableDynamicSizing={false}
+        enablePanDownToClose
+        enableContentPanningGesture
+        enableOverDrag={false}
+        handleComponent={null}
+        backgroundStyle={{ backgroundColor: "#000000", borderRadius: 0 }}
+        onAnimate={onAnimate}
+        onChange={onChange}
+        onClose={onClose}
+      >
+        <LegacyPlayerScreenView interactionReady={interactionReady} />
+      </BottomSheet>
+    </View>
   );
 });
 

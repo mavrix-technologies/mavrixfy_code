@@ -6,14 +6,17 @@ const test = require("node:test");
 const ts = require("typescript");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture({ youtubeResolver = async () => { throw new Error("Unexpected YouTube resolution"); }, platform = "android", expoGo = false } = {}) {
+function fixture({ youtubeResolver = async () => { throw new Error("Unexpected YouTube resolution"); }, platform = "android", expoGo = false, notificationControl = async () => {} } = {}) {
   const controls = new Map();
   const system = new Map();
   const notifications = [];
   const focusRequests = [];
   const snapshots = [];
+  let rendererNotifications = 0;
   const contextCalls = [];
+  const timers = new Map(); let timerId = 0;
   let mounted = false;
+  let reportedDuration = 0;
   const param = () => ({
     value: 0,
     cancelAndHoldAtTime() {},
@@ -32,8 +35,9 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
       typeof type === "function" && type.name === "StandardAudioSource"
         ? type(props)
         : { type, props: { ...props, children } },
-    useRef: () => ({ current: null }),
-    useSyncExternalStore: (_, get) => {
+    useRef: initial => ({ current: initial }),
+    useSyncExternalStore: (subscribe, get) => {
+      subscribe(() => rendererNotifications++);
       snapshots.push(get);
       return get();
     },
@@ -46,6 +50,7 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
   };
   const audio = {
     Audio: "Audio",
+    useAudioTagContext: () => ({ duration: reportedDuration }),
     AudioContext: class {
       currentTime = 0;
       sampleRate = 48000;
@@ -76,7 +81,7 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
     PlaybackNotificationManager: {
       hide: async () => {},
       show: async (metadata) => notifications.push(metadata),
-      enableControl: async () => {},
+      enableControl: notificationControl,
       addEventListener: (name, fn) => controls.set(name, fn),
     },
   };
@@ -90,11 +95,14 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
     },
   }).outputText;
   const module = { exports: {} };
-  vm.runInNewContext(code, {
+  vm.runInNewContext(code + "\nmodule.exports.reportDurationForTest = AudioDurationReporter;", {
     module,
     exports: module.exports,
+    setTimeout: callback => { const id = ++timerId; timers.set(id, callback); return id; },
+    clearTimeout: id => timers.delete(id),
     require(name) {
       if (name.endsWith("YouTubeMusic")) return { resolveYouTubeStream: youtubeResolver };
+      if (name.endsWith("audioTimeline")) return require("./audio-timeline-fixture.cjs");
       if (name === "react") return react;
       if (name === "react-native") return { Platform: { OS: platform } };
       if (name === "expo") return { isRunningInExpoGo: () => expoGo };
@@ -105,11 +113,11 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
       if (name.endsWith("equalizerDsp"))
         return {
           calculateEqHeadroomDb: () => 0,
-          EQ_FREQUENCIES_HZ: [60, 230, 910, 3600, 14000, 16000],
+          EQ_FREQUENCIES_HZ: [25,40,63,100,160,250,400,630,1000,1600,2500,4000,6300,10000,16000], EQ_Q: Math.SQRT2,
         };
       if (name.endsWith("audioEqualizer"))
         return { syncEqualizerWithNative() {} };
-      if (name.endsWith("logger")) return { logger: { warn() {} } };
+      if (name.endsWith("logger")) return { logger: { warn() {}, error() {} } };
       throw new Error(`Unexpected dependency: ${name}`);
     },
   });
@@ -123,6 +131,13 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
     notifications,
     focusRequests,
     snapshots,
+    rendererNotifications: () => rendererNotifications,
+    reportDuration: duration => {
+      reportedDuration = duration;
+      mounted = false;
+      engine.reportDurationForTest({ sourceVersion: snapshots[0]().sourceVersion });
+    },
+    fireTimers: () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); },
   };
 }
 const tracks = [

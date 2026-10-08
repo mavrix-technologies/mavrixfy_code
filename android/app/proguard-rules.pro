@@ -36,3 +36,15 @@
 -keep class com.metrolist.innertubex.** { *; }
 -keep class io.ktor.** { *; }
 -keep class org.schabi.newpipe.extractor.** { *; }
+
+# YouTube optional desktop APIs
+# Rhino's optional JavaBeans/JVM scripting adapters and Ktor's IDE debugger probe
+# reference desktop-only APIs. Android extraction uses Rhino directly, not JSR-223.
+-dontwarn java.beans.BeanDescriptor
+-dontwarn java.beans.BeanInfo
+-dontwarn java.beans.IntrospectionException
+-dontwarn java.beans.Introspector
+-dontwarn java.beans.PropertyDescriptor
+-dontwarn java.lang.management.ManagementFactory
+-dontwarn java.lang.management.RuntimeMXBean
+-dontwarn javax.script.ScriptEngineFactory

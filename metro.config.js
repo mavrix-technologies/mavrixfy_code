@@ -1,11 +1,20 @@
 const { getDefaultConfig } = require("expo/metro-config");
 
 const config = getDefaultConfig(__dirname);
+const defaultBlockList = config.resolver.blockList;
 
 // Keep Metro aligned with the current Expo config. New architecture is already
 // disabled in the native project settings where it actually matters.
 config.resolver = {
   ...config.resolver,
+  // Native compilers produce thousands of files while Metro is running.
+  // Keep these outputs out of the JS file map without excluding package build/ JS.
+  blockList: [
+    ...(Array.isArray(defaultBlockList) ? defaultBlockList : defaultBlockList ? [defaultBlockList] : []),
+    /[/\\](?:\.gradle|\.cxx)[/\\]/,
+    /[/\\]android[/\\](?:app[/\\])?build[/\\]/,
+    /[/\\]ios[/\\](?:Pods|build)[/\\]/,
+  ],
   unstable_enablePackageExports: true,
   assetExts: [...config.resolver.assetExts, 'db', 'mp3', 'ttf', 'obj', 'png', 'jpg'],
   sourceExts: [...config.resolver.sourceExts, 'jsx', 'js', 'ts', 'tsx', 'json'],

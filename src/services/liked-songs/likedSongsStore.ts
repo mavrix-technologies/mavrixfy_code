@@ -1,4 +1,5 @@
 import type { Song } from "@/lib/musicData";
+import { likedSongDocumentIds, mergeLikedSongIdentities } from "./likedSongFormat";
 import { create } from "zustand";
 
 export interface LikedSongsState {
@@ -22,9 +23,9 @@ export const useLikedSongsStore = create<LikedSongsState>((set) => ({
 
   setSongs: (songs, status = "ready") => {
     const validSongs = Array.isArray(songs)
-      ? songs.filter((s) => Boolean(s && s.id && s.title))
+      ? mergeLikedSongIdentities(songs.filter((s) => Boolean(s && s.id && s.title)))
       : [];
-    const ids = new Set(validSongs.map((s) => s.id));
+    const ids = new Set(validSongs.flatMap(likedSongDocumentIds));
     set({
       songs: validSongs,
       ids,
@@ -39,12 +40,8 @@ export const useLikedSongsStore = create<LikedSongsState>((set) => ({
       if (state.ids.has(song.id)) {
         return state;
       }
-      const nextIds = new Set(state.ids);
-      nextIds.add(song.id);
-      return {
-        songs: [song, ...state.songs.filter((s) => s.id !== song.id)],
-        ids: nextIds,
-      };
+      const songs = mergeLikedSongIdentities([song, ...state.songs]);
+      return { songs, ids: new Set(songs.flatMap(likedSongDocumentIds)) };
     });
   },
 
@@ -54,12 +51,8 @@ export const useLikedSongsStore = create<LikedSongsState>((set) => ({
       if (!state.ids.has(songId)) {
         return state;
       }
-      const nextIds = new Set(state.ids);
-      nextIds.delete(songId);
-      return {
-        songs: state.songs.filter((s) => s.id !== songId),
-        ids: nextIds,
-      };
+      const songs = state.songs.filter(s => !likedSongDocumentIds(s).includes(songId));
+      return { songs, ids: new Set(songs.flatMap(likedSongDocumentIds)) };
     });
   },
 

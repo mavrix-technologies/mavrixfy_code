@@ -1,3 +1,4 @@
+import type { YouTubeHomePlaylist, YouTubeHomeSection } from "./YouTubeMusic";
 import type { Song } from "@/lib/musicData";
 import { isYouTubeSong, loadYouTubeHome, previewYouTubePlaylist, relatedYouTubeSongs } from "./YouTubeMusic";
 
@@ -18,22 +19,46 @@ export function rankYouTubeRecommendations(candidates: Song[], seeds: Song[], li
   return [...selected, ...deferred].slice(0, limit);
 }
 
-export async function getYouTubeHomeRecommendations(seeds: Song[], signal: AbortSignal) {
+export interface YouTubeRecommendationFeed { songs: Song[]; playlists: YouTubeHomePlaylist[]; sections: YouTubeHomeSection[]; personalized: boolean }
+export async function getYouTubeHomeRecommendations(seeds: Song[], signal: AbortSignal,
+  onPartial?: (feed: YouTubeRecommendationFeed) => void): Promise<YouTubeRecommendationFeed> {
   const youtubeSeeds = seeds.filter(isYouTubeSong).slice(0, 2);
-  const [homeResult, ...radioResults] = await Promise.allSettled([
-    loadYouTubeHome(signal), ...youtubeSeeds.map(seed => relatedYouTubeSongs(seed, signal)),
-  ]);
+  // Start both independently, but publish usable catalog rows without waiting
+  // for radio generation or playlist previews.
+  const radioTask = Promise.allSettled(youtubeSeeds.map(seed => relatedYouTubeSongs(seed, signal)));
+  const home = await loadYouTubeHome(signal, page => {
+    if (!signal.aborted && page.sections?.length) onPartial?.({ songs: rankYouTubeRecommendations(page.songs, seeds),
+      playlists: page.playlists.slice(0, 60), sections: page.sections, personalized: false });
+  }).catch(() => ({ songs: [], playlists: [], sections: [] }));
   if (signal.aborted) throw new Error("YouTube request cancelled");
-  const home = homeResult.status === "fulfilled" ? homeResult.value : { songs: [], playlists: [] };
+  const baseSections: YouTubeHomeSection[] = [...(home.sections || [])];
+  if (!baseSections.length) {
+    if (home.songs.length) baseSections.push({ id: "youtube-discover", title: "Discover", songs: rankYouTubeRecommendations(home.songs, [], 20), playlists: [] });
+    if (home.playlists.length) baseSections.push({ id: "youtube-playlists", title: "Mixes & playlists", songs: [], playlists: home.playlists.slice(0, 60) });
+  }
+  if (baseSections.length) onPartial?.({ songs: rankYouTubeRecommendations(home.songs, seeds), playlists: home.playlists.slice(0, 60), sections: baseSections, personalized: false });
+  const radioResults = await radioTask;
+  if (signal.aborted) throw new Error("YouTube request cancelled");
   const radio = radioResults.flatMap(result => result.status === "fulfilled" ? result.value as Song[] : []);
+  const sampledSections: YouTubeHomeSection[] = [];
   let songs = rankYouTubeRecommendations([...radio, ...home.songs], seeds);
   // Anonymous home can expose only mixes. Sample two, as LastWave does, without
   // substituting a JioSaavn search or resolving streams during feed loading.
   if (songs.length < 6 && home.playlists.length) {
-    const mixes = await Promise.allSettled(home.playlists.slice(0, 2).map(item => previewYouTubePlaylist(item.id, signal)));
+    const sampledPlaylists = home.playlists.slice(0, 2);
+    const mixes = await Promise.allSettled(sampledPlaylists.map(item => previewYouTubePlaylist(item.id, signal)));
+    mixes.forEach((result, index) => {
+      if (result.status !== "fulfilled") return;
+      const songs = rankYouTubeRecommendations(result.value, [], 20);
+      if (songs.length) sampledSections.push({ id: `youtube-preview-${sampledPlaylists[index].id}`,
+        title: sampledPlaylists[index].name ? `From ${sampledPlaylists[index].name}` : "Playlist discoveries", songs, playlists: [] });
+    });
     songs = rankYouTubeRecommendations([...songs, ...mixes.flatMap(result => result.status === "fulfilled" ? result.value : [])], seeds);
   }
   if (signal.aborted) throw new Error("YouTube request cancelled");
   if (!songs.length && !home.playlists.length) throw new Error("YouTube Music recommendations are unavailable. Please retry.");
-  return { songs, playlists: home.playlists.slice(0, 20), personalized: radio.length > 0 };
+  const sections: YouTubeHomeSection[] = [...sampledSections, ...baseSections];
+  if (radio.length) sections.unshift({ id: "youtube-for-you", title: "Recommended for you",
+    songs: rankYouTubeRecommendations(radio, seeds, 20), playlists: [] });
+  return { songs, playlists: home.playlists.slice(0, 60), sections: sections.filter(section => section.songs.length || section.playlists.length).slice(0, 12), personalized: radio.length > 0 };
 }

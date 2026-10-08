@@ -22,10 +22,7 @@ import type { Song } from "@/lib/musicData";
 import { getRecentlyPlayed, type RecentlyPlayedItem } from "@/lib/storage";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, DeviceEventEmitter } from "react-native";
-
-const HOME_REFRESH_MS = 20 * 60 * 1000;
-const RETRY_MS = 60 * 1000;
+import { DeviceEventEmitter } from "react-native";
 
 const DEFAULT_POOL: QuickPicksPool = {
   trending: [],
@@ -36,8 +33,6 @@ const DEFAULT_POOL: QuickPicksPool = {
 
 const session = {
   hydrated: false,
-  updatedAt: 0,
-  attemptedAt: 0,
   categories: [] as CatalogCategoryData[],
   publicPlaylists: [] as FirestorePlaylist[],
   featuredArtists: [] as ArtistCard[],
@@ -54,8 +49,8 @@ interface HomeFeedState {
   loading: boolean;
 }
 
-export function useHomeFeedData() {
-  const { isOnline, isChecking } = useNetwork();
+export function useHomeFeedData({ compact = false }: { compact?: boolean } = {}) {
+  const { isChecking } = useNetwork();
   const mountedRef = useRef(true);
   const activeLoadRef = useRef<Promise<void> | null>(null);
   const initialLoadRef = useRef(false);
@@ -95,8 +90,6 @@ export function useHomeFeedData() {
     async (forceRefresh = false) => {
       if (activeLoadRef.current) return activeLoadRef.current;
       const task = (async () => {
-        session.attemptedAt = Date.now();
-
         // 1. Instant Cache Hydration: Single batched state update
         if (!session.hydrated) {
           const [snapshot, cachedPlaylists] = await Promise.all([
@@ -139,7 +132,7 @@ export function useHomeFeedData() {
         // 2. Network Fetching: Concurrent fetch without staggered UI re-renders
         const officialTask = getOfficialHomeFeed(forceRefresh)
           .then(async (feed) => {
-            const freshSongs = await getOfficialHomeSongs(feed.songs || feed.songIds);
+            const freshSongs = compact ? [] : await getOfficialHomeSongs(feed.songs || feed.songIds);
             return { categories: feed.categories, songs: freshSongs };
           })
           .catch(async (error) => {
@@ -153,7 +146,7 @@ export function useHomeFeedData() {
             }
           });
 
-        const quickPicksTask = officialTask
+        const quickPicksTask = compact ? Promise.resolve(null) : officialTask
           .then((feed) =>
             feed
               ? fetchQuickPicksFeed({
@@ -165,7 +158,7 @@ export function useHomeFeedData() {
           )
           .catch(() => null);
 
-        const playlistsTask = getPublicPlaylists(8)
+        const playlistsTask = compact ? Promise.resolve([] as FirestorePlaylist[]) : getPublicPlaylists(8)
           .then(async (items) => {
             if (items.length > 0) {
               await setCachedHomePublicPlaylists(items);
@@ -174,7 +167,7 @@ export function useHomeFeedData() {
           })
           .catch(() => [] as FirestorePlaylist[]);
 
-        const artistsTask = getFeaturedArtists().catch(() => [] as ArtistCard[]);
+        const artistsTask = compact ? Promise.resolve([] as ArtistCard[]) : getFeaturedArtists().catch(() => [] as ArtistCard[]);
 
         const [officialRes, quickPicksRes, playlistsRes, artistsRes] =
           await Promise.allSettled([
@@ -194,7 +187,6 @@ export function useHomeFeedData() {
 
         if (officialRes.status === "fulfilled" && officialRes.value?.categories?.length) {
           newCategories = officialRes.value.categories;
-          session.updatedAt = Date.now();
         }
 
         if (playlistsRes.status === "fulfilled" && playlistsRes.value.length > 0) {
@@ -245,7 +237,7 @@ export function useHomeFeedData() {
         if (activeLoadRef.current === task) activeLoadRef.current = null;
       }
     },
-    [loadRecentlyPlayed]
+    [compact, loadRecentlyPlayed]
   );
 
   useEffect(() => {
@@ -258,32 +250,13 @@ export function useHomeFeedData() {
   useEffect(() => {
     if (isChecking || initialLoadRef.current) return;
     initialLoadRef.current = true;
-    void loadHomeFeed(false);
+    if (!session.hydrated) void loadHomeFeed(false);
   }, [isChecking, loadHomeFeed]);
 
   useFocusEffect(
     useCallback(() => {
       void loadRecentlyPlayed();
-      const maybeRefresh = () => {
-        const now = Date.now();
-        if (
-          isOnline &&
-          !isChecking &&
-          initialLoadRef.current &&
-          now - session.updatedAt >= HOME_REFRESH_MS &&
-          now - session.attemptedAt >= RETRY_MS
-        ) {
-          void loadHomeFeed(false);
-        }
-      };
-      maybeRefresh();
-      const appState = AppState.addEventListener("change", (state) => {
-        if (state === "active") maybeRefresh();
-      });
-      return () => {
-        appState.remove();
-      };
-    }, [isChecking, isOnline, loadHomeFeed, loadRecentlyPlayed])
+    }, [loadRecentlyPlayed])
   );
 
   useOnReconnect(
@@ -294,7 +267,6 @@ export function useHomeFeedData() {
 
   useEffect(() => {
     const listener = DeviceEventEmitter.addListener(HOME_CACHE_INVALIDATED_EVENT, () => {
-      session.updatedAt = 0;
       void loadHomeFeed(true);
     });
     return () => listener.remove();

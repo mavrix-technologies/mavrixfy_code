@@ -1,3 +1,4 @@
+import { homeDisplayText } from "./homeDisplayText";
 import EqualizerBars from "@/components/EqualizerBars";
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
@@ -84,11 +85,11 @@ const QuickPickItem = memo(function QuickPickItem({
               ]}
               numberOfLines={1}
             >
-              {song.title}
+              {homeDisplayText(song.title, "Song")}
             </Text>
           </View>
           <Text style={styles.quickPickArtist} numberOfLines={1}>
-            {song.artist}
+            {homeDisplayText(song.artist, "Artist")}
           </Text>
         </View>
       </Pressable>
@@ -198,7 +199,7 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
         getItemLayout={getItemLayout}
         initialNumToRender={2}
         maxToRenderPerBatch={2}
-        windowSize={5}
+        windowSize={3}
         removeClippedSubviews
       />
     </View>

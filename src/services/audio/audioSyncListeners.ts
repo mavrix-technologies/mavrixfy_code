@@ -35,7 +35,7 @@ interface UseAudioSyncListenersOptions {
   pendingPlayRequestRef: MutableRefObject<PendingPlayRequest | null>;
   positionSecondsRef: MutableRefObject<number>;
   setNativePosition: (pos: number) => void;
-  setNativeDuration: React.Dispatch<React.SetStateAction<number>>;
+  setNativeDuration: (value: number | ((previous: number) => number), source?: "media" | "catalog") => void;
   setSeekOverride: (override: SeekOverride) => void;
   prefetchAdjacentTrackStreams: (queue: Song[], index: number) => void;
   sleepTimerRef: MutableRefObject<SleepTimerState | null>;
@@ -197,7 +197,7 @@ export function useAudioSyncListeners({
           return;
         }
         // Queue replacement can reset native intent before our play command.
-        if (playbackLoadingRef.current && event.playWhenReady) return;
+        if (playbackLoadingRef.current || pendingPlayRequestRef.current) return;
         desiredPlayStateRef.current = event.playWhenReady;
 
         if (event.playWhenReady) {
@@ -383,7 +383,7 @@ export function useAudioSyncListeners({
           setNativePosition(0);
           positionSecondsRef.current = 0;
           const initialDuration = toDurationSeconds(event?.track?.duration || targetSong.duration);
-          setNativeDuration(initialDuration > 0 ? initialDuration : 0);
+          setNativeDuration(initialDuration > 0 ? initialDuration : 0, "catalog");
           updatePlaybackEngineSnapshot({
             currentSong: targetSong,
             ...(resolvedIndex >= 0 ? { queueIndex: resolvedIndex } : {}),
@@ -450,9 +450,9 @@ export function useAudioSyncListeners({
     return () => {
       unsubs.forEach((unsub) => unsub?.());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     // playSong, nextSong, prevSong are accessed via refs (playSongRef/nextSongRef/prevSongRef)
     // to prevent handler reinstall races when function identities change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlayerReady, triggerAutoplayAppend, repeatMode]);
 
   // Save current playback state (event-driven)

@@ -1,6 +1,7 @@
 import { mapFilter,sortedCopy } from "@/lib/arrayUtils";
 import { toDurationSeconds } from "@/utils/timeFormatters";
-export interface Song {
+import type { PlaybackStreamMetadata } from "@/services/audio/audioTimeline";
+export interface Song extends PlaybackStreamMetadata {
   id: string;
   title: string;
   artist: string;
@@ -21,8 +22,12 @@ export interface Song {
   youtubeVideoType?: string;
   youtubeNativeAudio?: boolean;
   youtubeAudioExpiresAt?: number;
-  playbackHeaders?: Record<string, string>;
+  artistRefs?: { id: string; name: string }[];
   downloadUrl?: unknown;
+  /** Original Firestore like document identities retained after explicit playback migration. */
+  likedSongDocumentIds?: string[];
+  /** Durable catalog link, never a signed audio stream URL. */
+  catalogUrl?: string;
 }
 
 export interface JioSaavnImage {

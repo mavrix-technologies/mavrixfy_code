@@ -3,7 +3,6 @@ import Colors from "@/constants/colors";
 import { useOptionalPlayerActions } from "@/contexts/PlayerContext";
 import { mapFilter } from "@/lib/arrayUtils";
 import {
-preloadDominantColors,
 useArtworkPalette,
 } from "@/lib/colorExtractor";
 import {
@@ -17,11 +16,12 @@ import { useMiniPlayerSecondaryControl } from "@/lib/storage";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { Ionicons } from "@expo/vector-icons";
 import { MusicArtwork } from "@/components/MusicArtwork";
-import { Image } from "expo-image";
-import { youTubeDisplayArtworkUrl } from "@/services/youtube/YouTubeArtwork";
+import { scheduleArtworkPreload } from "@/lib/artworkPreload";
 import { useRouter } from "expo-router";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import { Platform,Pressable,View } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { styles } from "./layoutStyles";
 import { noopPlayerAction } from "./layoutUtils";
@@ -146,14 +146,12 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const [failedCoverUrl, setFailedCoverUrl] = useState<string>();
   const coverFailed = failedCoverUrl === activeSong?.coverUrl;
-  const openPlayerLockRef = useRef(0);
-
-  const openPlayer = useCallback(() => {
-    const now = Date.now();
-    if (now - openPlayerLockRef.current < 240) return;
-    openPlayerLockRef.current = now;
-    expandPlayer();
-  }, []);
+  const openPlayer = expandPlayer;
+  const expandGesture = useMemo(() => Gesture.Pan()
+    .activeOffsetY(-10).failOffsetY(10).failOffsetX([-15, 15])
+    .onEnd(event => {
+      if (event.translationY < -20 || event.velocityY < -500) scheduleOnRN(expandPlayer);
+    }), []);
 
   const openMiniPlayerQueue = useCallback(() => {
     globalQueueSheetRef.current?.expand();
@@ -186,8 +184,7 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
     ], (url) => url?.trim(), (url): url is string => Boolean(url));
 
     if (urls.length === 0) return;
-    void Image.prefetch(urls.map(url => youTubeDisplayArtworkUrl(url, 192)), "memory-disk").catch(() => { });
-    preloadDominantColors(urls);
+    return scheduleArtworkPreload(urls, 48);
   }, [activeSong?.coverUrl, queue, queueIndex]);
 
   const iosArtworkPalette = useArtworkPalette(activeSong?.coverUrl);
@@ -225,7 +222,8 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
   const shellBorderColor = "rgba(255,255,255,0.08)";
 
   return (
-    <View pointerEvents="box-none" style={[styles.iosMiniPlayerRoot, { bottom: bottomOffset }]}>
+    <GestureDetector gesture={expandGesture}>
+    <View collapsable={false} pointerEvents="box-none" style={[styles.iosMiniPlayerRoot, { bottom: bottomOffset }]}>
       <View style={[styles.iosMiniPlayerShell, { backgroundColor: shellBgColor, borderColor: shellBorderColor }]}>
         {bannerConfig.enabled && bannerConfig.items.length > 0 ? (
           <MiniPlayerBannerView config={bannerConfig} />
@@ -315,6 +313,7 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
         <IOSMiniPlayerProgressBar fillColor={progressFillColor} />
       </View>
     </View>
+    </GestureDetector>
   );
 }
 

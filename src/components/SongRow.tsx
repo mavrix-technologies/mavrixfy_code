@@ -10,7 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { MusicArtwork } from "@/components/MusicArtwork";
 import { router } from "expo-router";
-import { memo,useCallback,useEffect } from "react";
+import { memo,useCallback,useEffect,useRef } from "react";
 import {
 Platform,
 Pressable,
@@ -27,6 +27,7 @@ withTiming,
 } from "react-native-reanimated";
 
 const AnimatedText = Animated.createAnimatedComponent(Text);
+export const SONG_ROW_HEIGHT = 64;
 
 interface Props {
   song: Song;
@@ -68,7 +69,12 @@ const SongRow = memo(function SongRow({
 
   // Smooth cross-fade when active song changes — runs 100% on UI thread
   const activeAnim = useSharedValue(isActive ? 1 : 0);
+  const previousActive = useRef(isActive);
   useEffect(() => {
+    // New virtualized rows already have the right color. Starting a 0 → 0
+    // animation for each mounting row adds work to the scroll frame budget.
+    if (previousActive.current === isActive) return;
+    previousActive.current = isActive;
     activeAnim.value = withTiming(isActive ? 1 : 0, {
       duration: 150,
       easing: Easing.inOut(Easing.quad),
@@ -298,8 +304,8 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    minHeight: 64,
-    height: 64,
+    minHeight: SONG_ROW_HEIGHT,
+    height: SONG_ROW_HEIGHT,
     paddingVertical: 8,
     paddingHorizontal: 10,
     width: "100%",

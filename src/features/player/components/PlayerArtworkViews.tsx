@@ -23,10 +23,12 @@ export const StableArtworkImage = memo(function StableArtworkImage({
   uri,
   recyclingKey,
   priority,
+  size,
 }: {
   uri: string;
   recyclingKey: string;
   priority: "high" | "normal";
+  size: number;
 }) {
   const initialUriRef = useRef(uri);
   const [visibleUri, setVisibleUri] = useState(initialUriRef.current);
@@ -69,7 +71,7 @@ export const StableArtworkImage = memo(function StableArtworkImage({
       <MusicArtwork
         recyclingKey={`visible-${recyclingKey}-${visibleUri}`}
         uri={visibleUri}
-        size={400}
+        size={size}
         style={styles.albumArt}
         contentFit="cover"
         cachePolicy="memory-disk"
@@ -81,7 +83,7 @@ export const StableArtworkImage = memo(function StableArtworkImage({
           <MusicArtwork
             recyclingKey={`incoming-${recyclingKey}-${loadingUri}`}
             uri={loadingUri}
-            size={400}
+            size={size}
             style={styles.albumArt}
             contentFit="cover"
             cachePolicy="memory-disk"

@@ -80,13 +80,18 @@ function AllArtistsScreenView() {
   }, []);
 
   useEffect(() => {
+    let active = true;
     getAllPopularArtists()
-      .then(setPopular)
-      .finally(() => setLoadingPopular(false));
+      .then(data => { if (active) setPopular(data); })
+      .catch(() => { if (active) setPopular([]); })
+      .finally(() => { if (active) setLoadingPopular(false); });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    const id = ++searchIdRef.current;
+    const controller = new AbortController();
     const trimmed = query.trim();
     if (!trimmed) {
       // Clear the previous query as soon as the search field is emptied.
@@ -95,11 +100,10 @@ function AllArtistsScreenView() {
       return;
     }
     startArtistSearch();
-    const id = ++searchIdRef.current;
     debounceRef.current = setTimeout(async () => {
       try {
         if (searchIdRef.current !== id) return;
-        const results = await searchArtists(trimmed);
+        const results = await searchArtists(trimmed, controller.signal);
         if (searchIdRef.current === id) {
           finishArtistSearch(id, results);
         }
@@ -108,6 +112,7 @@ function AllArtistsScreenView() {
       }
     }, SEARCH_DEBOUNCE_MS);
     return () => {
+      controller.abort();
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [clearArtistSearch, finishArtistSearch, query, startArtistSearch]);

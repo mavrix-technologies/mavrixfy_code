@@ -1,12 +1,11 @@
 import { useFocusEffect,useRouter } from "expo-router";
 import { useCallback,useEffect,useMemo,useReducer,useRef,useState } from "react";
-import { type FlatList,Keyboard,Platform } from "react-native";
+import { Keyboard,Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppTopHeaderScrollElevation } from "@/components/AppTopHeader";
 import { useNetwork,useOnReconnect } from "@/contexts/NetworkContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import { sortedCopy } from "@/lib/arrayUtils";
 import { getBestImageUrl,type Song } from "@/lib/musicData";
 import {
 type AlbumResult,
@@ -15,8 +14,9 @@ fetchYouTubeSuggestions,
 type PlaylistResult,
 type ResultFilter,
 searchRepository,
-clearMemorySearchCache,
+
 } from "@/lib/searchRepository";
+import { clearYouTubeSearchCache } from "@/services/youtube/YouTubeMusic";
 import { normalizeText } from "@/lib/searchUtils";
 import {
 addSearchHistoryItem,
@@ -43,11 +43,6 @@ type SearchScreenState,
 export {
 createInitialSearchState,searchScreenReducer,type SearchScreenAction,type SearchScreenState
 };
-
-const BROWSE_CATEGORIES = [
-  ...STITCH_BROWSE_CATEGORIES.filter((item) => item.isHero),
-  ...sortedCopy(STITCH_BROWSE_CATEGORIES.filter((item) => !item.isHero), () => Math.random() - 0.5),
-];
 
 export function useSearchEngine(params: { q?: string | string[]; name?: string | string[] }) {
   const insets = useSafeAreaInsets();
@@ -82,27 +77,23 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeqRef = useRef(0);
-  const suggestionsClosedForQueryRef = useRef<string | null>(null);
+  const suggestionsClosedForQueryRef = useRef<string | null>(routeSearchQuery ? normalizeText(routeSearchQuery) : null);
   const appliedRouteSearchQueryRef = useRef(routeSearchQuery);
   const activeSearchAbortRef = useRef<AbortController | null>(null);
   const lastQueryRef = useRef("");
+  const issuedKeyRef = useRef("");
   const suggestionsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestionsAbortRef = useRef<AbortController | null>(null);
 
-  const resultsPlaylistsListRef = useRef<FlatList<PlaylistResult> | null>(null);
-  const resultsAlbumsListRef = useRef<FlatList<AlbumResult> | null>(null);
-  const resultsArtistsListRef = useRef<FlatList<ArtistResult> | null>(null);
-  const resultsSongsListRef = useRef<FlatList<Song> | null>(null);
-
   const topInset = Platform.OS === "web" ? 67 : insets.top;
-  const browseCategories = BROWSE_CATEGORIES;
+  const browseCategories = STITCH_BROWSE_CATEGORIES;
 
   const performSearch = useCallback(
     async (searchQuery: string) => {
       const requestId = ++requestSeqRef.current;
       const normalizedQuery = searchQuery.trim();
 
-      if (normalizedQuery.length < 2) {
+      if (!normalizedQuery) {
         activeSearchAbortRef.current?.abort();
         activeSearchAbortRef.current = null;
         dispatch({ type: "SEARCH_RESET", displayQuery: "" });
@@ -113,6 +104,8 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
       const controller = new AbortController();
       activeSearchAbortRef.current = controller;
 
+      issuedKeyRef.current = `${resultFilter}:${normalizedQuery}`;
+      lastQueryRef.current = normalizedQuery;
       dispatch({ type: "SET_SEARCH_LOADING", loading: true });
 
       try {
@@ -141,9 +134,14 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   );
 
   const handleChangeText = useCallback((text: string) => {
+    if (text === query) return;
+    issuedKeyRef.current = "";
+    requestSeqRef.current++;
+    activeSearchAbortRef.current?.abort();
+    suggestionsAbortRef.current?.abort();
     dispatch({ type: "SET_QUERY", query: text });
     suggestionsClosedForQueryRef.current = null;
-  }, []);
+  }, [query]);
 
   useFocusEffect(
     useCallback(() => {
@@ -166,8 +164,8 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   useOnReconnect(
     useCallback(() => {
       const trimmed = query.trim();
-      if (trimmed.length >= 2) {
-        clearMemorySearchCache();
+      if (trimmed.length > 0) {
+        clearYouTubeSearchCache();
         void performSearch(trimmed);
       }
     }, [query, performSearch])
@@ -176,7 +174,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   // Debounced query suggestions
   useEffect(() => {
     const trimmed = query.trim();
-    if (trimmed.length < 2) {
+    if (!trimmed) {
       dispatch({ type: "CLOSE_SUGGESTIONS" });
       return;
     }
@@ -197,12 +195,12 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
 
       void fetchYouTubeSuggestions(trimmed, controller.signal)
         .then((rawSuggestions) => {
-          if (controller.signal.aborted) return;
-          const cleanSuggestions = normalizeSearchSuggestionList(trimmed, rawSuggestions);
+          if (controller.signal.aborted || suggestionsClosedForQueryRef.current === normalizeText(trimmed)) return;
+          const cleanSuggestions = normalizeSearchSuggestionList(rawSuggestions);
           dispatch({ type: "SET_SUGGESTIONS", suggestions: cleanSuggestions });
         })
         .catch(() => {});
-    }, 150);
+    }, 120);
 
     return () => {
       if (suggestionsTimerRef.current) {
@@ -214,7 +212,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
 
   const rememberRecentSearch = useCallback((label: string) => {
     const normalized = normalizeRecentSearchLabel(label);
-    if (normalized.length < 2) return;
+    if (!normalized) return;
 
     setRecentSearches((prev) => {
       const nextItem: RecentSearchItem = {
@@ -240,7 +238,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
 
   useEffect(() => {
     const next = routeSearchQuery;
-    if (next.length < 2 || next === appliedRouteSearchQueryRef.current) return;
+    if (!next || next === appliedRouteSearchQueryRef.current) return;
 
     appliedRouteSearchQueryRef.current = next;
     applyProgrammaticSearchQuery(next);
@@ -279,7 +277,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
       }
 
       const next = item.label.trim();
-      if (next.length < 2) return;
+      if (!next) return;
       resetHeaderElevation();
       dispatch({ type: "SELECT_QUERY", query: next });
       suggestionsClosedForQueryRef.current = normalizeText(next);
@@ -295,9 +293,9 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   const handleSuggestionPress = useCallback(
     (suggestion: string) => {
       const next = normalizeRecentSearchLabel(suggestion);
-      if (next.length < 2) return;
+      if (!next) return;
       resetHeaderElevation();
-      dispatch({ type: "SELECT_QUERY", query: next, resetFilter: true });
+      dispatch({ type: "SELECT_QUERY", query: next });
       suggestionsClosedForQueryRef.current = normalizeText(next);
       Keyboard.dismiss();
       rememberRecentSearch(next);
@@ -319,10 +317,16 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
 
   const handleResultFilterSelect = useCallback(
     (filter: ResultFilter) => {
+      if (filter === resultFilter) return;
+      issuedKeyRef.current = "";
+      suggestionsClosedForQueryRef.current = normalizeText(query);
+      suggestionsAbortRef.current?.abort();
+      activeSearchAbortRef.current?.abort();
+      requestSeqRef.current++;
       resetHeaderElevation();
       dispatch({ type: "SET_RESULT_FILTER", filter });
     },
-    [resetHeaderElevation]
+    [resetHeaderElevation, resultFilter, query]
   );
 
   const cancelActiveSearchWork = useCallback(() => {
@@ -336,7 +340,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
 
   const handleSubmitSearch = useCallback(() => {
     const trimmed = query.trim();
-    if (trimmed.length < 2) return;
+    if (!trimmed) return;
     suggestionsClosedForQueryRef.current = normalizeText(trimmed);
     dispatch({ type: "CLOSE_SUGGESTIONS" });
     Keyboard.dismiss();
@@ -349,6 +353,8 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
 
   const handleClear = useCallback(() => {
     requestSeqRef.current += 1;
+    issuedKeyRef.current = "";
+    suggestionsAbortRef.current?.abort();
     cancelActiveSearchWork();
     suggestionsClosedForQueryRef.current = null;
     dispatch({ type: "CLEAR_SEARCH" });
@@ -361,6 +367,8 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
 
   const handleCancelSearchMode = useCallback(() => {
     requestSeqRef.current += 1;
+    issuedKeyRef.current = "";
+    suggestionsAbortRef.current?.abort();
     cancelActiveSearchWork();
     suggestionsClosedForQueryRef.current = null;
     resetHeaderElevation();
@@ -370,20 +378,19 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   // Main search debounce pipeline
   useEffect(() => {
     const trimmed = query.trim();
-    if (trimmed.length < 2) {
+    if (!trimmed) {
       requestSeqRef.current += 1;
       cancelActiveSearchWork();
       dispatch({ type: "SEARCH_RESET", displayQuery: "" });
       lastQueryRef.current = "";
+      issuedKeyRef.current = "";
       return;
     }
 
-    if (trimmed === lastQueryRef.current) {
-      dispatch({ type: "SET_SEARCH_LOADING", loading: true });
-      void performSearch(trimmed);
-      return;
-    }
-
+    if (`${resultFilter}:${trimmed}` === issuedKeyRef.current) return;
+    issuedKeyRef.current = "";
+    requestSeqRef.current++;
+    activeSearchAbortRef.current?.abort();
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
@@ -392,7 +399,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     const searchTimer = setTimeout(() => {
       lastQueryRef.current = trimmed;
       void performSearch(trimmed);
-    }, 180);
+    }, lastQueryRef.current === trimmed ? 0 : 400);
     debounceTimer.current = searchTimer;
 
     return () => {
@@ -411,36 +418,8 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     playlists: playlistResults,
   } = results;
 
-  const hasResults =
-    songResults.length > 0 ||
-    albumResults.length > 0 ||
-    artistResults.length > 0 ||
-    playlistResults.length > 0;
-
-  const showFocusedRecentSearches = isSearchMode && query.trim().length < 2;
-  const showBrowse = !isSearchMode && query.trim().length < 2;
-  const resultDataKey = `${query.trim()}-${resultFilter}-${songResults.length}-${albumResults.length}-${artistResults.length}-${playlistResults.length}-${searchLoading ? 1 : 0}`;
-
-  const showAlbumResults = (resultFilter === "all" || resultFilter === "albums") && albumResults.length > 0;
-  const showArtistResults = (resultFilter === "all" || resultFilter === "artists") && artistResults.length > 0;
-  const showPlaylistResults = (resultFilter === "all" || resultFilter === "playlists") && playlistResults.length > 0;
-  const showSongResults = (resultFilter === "all" || resultFilter === "songs") && songResults.length > 0;
-
-  const topSong = songResults[0];
-  const topArtist = artistResults[0];
-
-  const displayedSongs = useMemo(() => {
-    if (showSongResults) {
-      return songResults;
-    }
-    return [];
-  }, [showSongResults, songResults]);
-
-  const featuredSongs = useMemo(() => songResults.slice(0, 5), [songResults]);
-  const featuredAlbums = useMemo(() => albumResults.slice(0, 5), [albumResults]);
-  const featuredArtists = useMemo(() => artistResults.slice(0, 5), [artistResults]);
-  const featuredPlaylists = useMemo(() => playlistResults.slice(0, 5), [playlistResults]);
-
+  const showFocusedRecentSearches = isSearchMode && query.trim().length === 0;
+  const showBrowse = !isSearchMode && query.trim().length === 0;
   const handleSongResultPress = useCallback(
     (song: Song) => {
       const activeQueue = songResults.length > 0 ? songResults : [song];
@@ -479,8 +458,8 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
           pathname: "/playlist/[id]",
           params: {
             id: String(album.id).trim(),
-            jiosaavn: "true",
-            youtube: "false",
+            jiosaavn: "false",
+            youtube: "true",
             album: "true",
             firestore: "false",
             link: album.url || "",
@@ -506,8 +485,8 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
           pathname: "/playlist/[id]",
           params: {
             id: String(playlist.id).trim(),
-            jiosaavn: "true",
-            youtube: "false",
+            jiosaavn: "false",
+            youtube: "true",
             firestore: "false",
             link: playlist.url || "",
             title: playlist.name,
@@ -526,6 +505,14 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   );
 
 
+  const suggestionRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const matching = recentSearches.filter(item => item.type === "query" && item.label.toLowerCase().includes(q)).slice(0, 3);
+    const seen = new Set(matching.map(item => item.label.toLowerCase()));
+    return [...matching.map(item => ({ label: item.label, isHistory: true })),
+      ...suggestions.filter(label => !seen.has(label.toLowerCase())).map(label => ({ label, isHistory: false }))];
+  }, [query, recentSearches, suggestions]);
+
   return {
     isOnline,
     topInset,
@@ -534,6 +521,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     isHeaderElevated,
     suggestionsOpen,
     suggestions,
+    suggestionRows,
     showFocusedRecentSearches,
     showBrowse,
     recentSearches,
@@ -542,28 +530,11 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     searchLoading,
     searchError,
     retrySearch: () => void performSearch(query.trim()),
-    hasResults,
     searchDisplayQuery,
-    resultDataKey,
-    displayedSongs,
     songResults,
     albumResults,
     artistResults,
     playlistResults,
-    topSong,
-    topArtist,
-    featuredSongs,
-    featuredAlbums,
-    featuredArtists,
-    featuredPlaylists,
-    showAlbumResults,
-    showArtistResults,
-    showPlaylistResults,
-    showSongResults,
-    resultsPlaylistsListRef,
-    resultsAlbumsListRef,
-    resultsArtistsListRef,
-    resultsSongsListRef,
     handleHeaderScroll,
     handleChangeText,
     handleSubmitSearch,

@@ -10,12 +10,13 @@ type NativeSyntheticEvent,
 } from "react-native";
 
 import Colors from "@/constants/colors";
+import { FlatList as GestureFlatList } from "react-native-gesture-handler";
 import { IS_IOS } from "@/constants/platform";
 import { styles } from "../styles/playerScreenStyles";
 import { StableArtworkImage,type ArtworkQueueItem } from "./PlayerArtworkViews";
 
 const AnimatedSongFlatList = Animated.createAnimatedComponent(
-  FlatList as React.ComponentType<any>
+  GestureFlatList as React.ComponentType<any>
 );
 
 export interface PlayerArtworkCarouselProps {
@@ -120,6 +121,7 @@ export const PlayerArtworkCarousel = React.memo(function PlayerArtworkCarousel({
               {song.coverUrl?.trim() ? (
                 <StableArtworkImage
                   uri={song.coverUrl.trim()}
+                  size={artSize}
                   recyclingKey={item.artworkKey}
                   priority={isActiveCard ? "high" : "normal"}
                 />
@@ -165,6 +167,7 @@ export const PlayerArtworkCarousel = React.memo(function PlayerArtworkCarousel({
         contentContainerStyle={styles.artCarouselContent}
         style={styles.artCarousel}
         getItemLayout={artCarouselGetItemLayout}
+        initialScrollIndex={activeQueueIndex}
         initialNumToRender={3}
         maxToRenderPerBatch={2}
         windowSize={3}

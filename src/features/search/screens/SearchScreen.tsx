@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
-import { useCallback,useRef,useState } from "react";
+import { useCallback,useRef } from "react";
 import {
 FlatList,
 Keyboard,
@@ -18,7 +18,7 @@ APP_TOP_HEADER_HEIGHT,
 AppTopHeaderDownloadButton,
 AppTopHeaderProfileButton,
 } from "@/components/AppTopHeader";
-import { LiquidGlassScopeBar } from "@/components/LiquidGlassScopeBar";
+import { SearchFilterBar } from "../components/SearchFilterBar";
 import { LiquidGlassView } from "@/components/LiquidGlassView";
 import OfflineBanner from "@/components/OfflineBanner";
 import OfflineScreen from "@/components/OfflineScreen";
@@ -31,7 +31,6 @@ SearchRecentSection,
 import { SearchResultsSection } from "../components/SearchResultsSection";
 import { useSearchEngine } from "../hooks/useSearchEngine";
 import { styles } from "../styles/searchStyles";
-import { RESULT_FILTERS } from "../types";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -55,7 +54,7 @@ function SearchScreenView() {
     isSearchMode,
     isHeaderElevated,
     suggestionsOpen,
-    suggestions,
+    suggestionRows,
     showFocusedRecentSearches,
     showBrowse,
     recentSearches,
@@ -64,24 +63,11 @@ function SearchScreenView() {
     searchLoading,
     searchError,
     retrySearch,
-    hasResults,
     searchDisplayQuery,
-    resultDataKey,
-    displayedSongs,
     songResults,
     albumResults,
     artistResults,
     playlistResults,
-    topSong,
-    topArtist,
-    featuredSongs,
-    featuredAlbums,
-    featuredArtists,
-    featuredPlaylists,
-    resultsPlaylistsListRef,
-    resultsAlbumsListRef,
-    resultsArtistsListRef,
-    resultsSongsListRef,
     handleHeaderScroll,
     handleChangeText,
     handleSubmitSearch,
@@ -111,22 +97,22 @@ function SearchScreenView() {
     handleCancelSearchMode();
   }, [handleCancelSearchMode]);
 
-  const renderSuggestion = useCallback(
-    ({ item: suggestion }: { item: string }) => (
-      <Pressable
-        style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]}
-        onPressIn={() => handleSuggestionPress(suggestion)}
-      >
-        <Ionicons name="search-outline" size={18} color={Colors.subtext} style={styles.suggestionIcon} />
+  const renderSuggestion = useCallback(({ item }: { item: { label: string; isHistory: boolean } }) => {
+    const index = item.label.toLowerCase().indexOf(query.trim().toLowerCase());
+    const length = query.trim().length;
+    return (
+      <Pressable style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]} onPress={() => handleSuggestionPress(item.label)}>
+        <Ionicons name={item.isHistory ? "time-outline" : "search-outline"} size={18} color={Colors.subtext} style={styles.suggestionIcon} />
         <Text style={styles.suggestionText} numberOfLines={1}>
-          {suggestion}
+          {index < 0 ? item.label : <>{item.label.slice(0, index)}<Text style={{ fontFamily: "Inter_700Bold" }}>{item.label.slice(index, index + length)}</Text>{item.label.slice(index + length)}</>}
         </Text>
+        <Pressable style={styles.suggestionInsertButton} accessibilityLabel={`Insert ${item.label}`} onPress={event => { event.stopPropagation(); handleChangeText(item.label); inputRef.current?.focus(); }}>
+          <Ionicons name="arrow-up-outline" size={20} color={Colors.subtext} style={{ transform: [{ rotate: "-45deg" }] }} />
+        </Pressable>
       </Pressable>
-    ),
-    [handleSuggestionPress]
-  );
+    );
+  }, [query, handleSuggestionPress, handleChangeText]);
 
-  const [searchHeaderHeight, setSearchHeaderHeight] = useState(topInset + 160);
 
   // Early return for offline idle state
   if (!isOnline && query.length === 0) {
@@ -154,7 +140,6 @@ function SearchScreenView() {
       {/* ── Header ── */}
       {isSearchMode ? (
         <View
-          onLayout={(event) => setSearchHeaderHeight(event.nativeEvent.layout.height)}
           style={[
             styles.activeSearchHeader,
             { paddingTop: topInset + 6 },
@@ -185,10 +170,9 @@ function SearchScreenView() {
             </Pressable>
           </View>
 
-          {/* Liquid Glass Scope Bar integrated directly in header */}
+          {/* Search filters share the header width on compact devices. */}
           <View style={styles.headerScopeBarWrap}>
-            <LiquidGlassScopeBar
-              options={RESULT_FILTERS}
+            <SearchFilterBar
               activeKey={resultFilter}
               onSelect={handleResultFilterSelect}
             />
@@ -229,23 +213,16 @@ function SearchScreenView() {
         </View>
       )}
 
-      {/* Inline suggestions below search header */}
-      {isSearchMode && suggestionsOpen && suggestions.length > 0 && query.trim().length >= 2 && (
-        <View style={[styles.suggestionsDropdown, { top: searchHeaderHeight }]}>
-          <FlatList
-            data={suggestions}
-            keyboardDismissMode="none"
-            keyboardShouldPersistTaps="always"
-            keyExtractor={(suggestion) => `suggestion-${suggestion}`}
-            renderItem={renderSuggestion}
-          />
+      {isSearchMode && suggestionsOpen && suggestionRows.length > 0 && query.trim() ? (
+        <View style={styles.resultsWrap}>
+          <FlatList data={suggestionRows} automaticallyAdjustKeyboardInsets keyboardDismissMode="none" keyboardShouldPersistTaps="always"
+            keyExtractor={item => `${item.isHistory ? "history" : "suggestion"}:${item.label}`}
+            renderItem={renderSuggestion} contentContainerStyle={{ paddingBottom: 146 }} initialNumToRender={10} />
         </View>
-      )}
-
-      {showFocusedRecentSearches ? (
+      ) : showFocusedRecentSearches ? (
         <SearchRecentSection
           topInset={topInset}
-          headerHeight={isSearchMode ? searchHeaderHeight : undefined}
+          headerHeight={isSearchMode ? 0 : undefined}
           recentSearches={recentSearches}
           onScroll={handleHeaderScroll}
           onRecentSearchPress={handleRecentSearchPress}
@@ -260,35 +237,21 @@ function SearchScreenView() {
       ) : (
         <SearchResultsSection
           topInset={topInset}
-          headerHeight={isSearchMode ? searchHeaderHeight : undefined}
+          headerHeight={isSearchMode ? 0 : undefined}
           resultFilter={resultFilter}
           searchLoading={searchLoading}
           searchError={searchError}
           onRetry={retrySearch}
-          hasResults={hasResults}
           searchDisplayQuery={searchDisplayQuery}
-          resultDataKey={resultDataKey}
-          displayedSongs={displayedSongs}
           songResults={songResults}
           albumResults={albumResults}
           artistResults={artistResults}
           playlistResults={playlistResults}
-          topSong={topSong}
-          topArtist={topArtist}
-          featuredSongs={featuredSongs}
-          featuredAlbums={featuredAlbums}
-          featuredArtists={featuredArtists}
-          featuredPlaylists={featuredPlaylists}
           onScroll={handleHeaderScroll}
-          onFilterSelect={handleResultFilterSelect}
           onSongPress={handleSongResultPress}
           onArtistPress={handleArtistPress}
           onAlbumPress={handleAlbumPress}
           onPlaylistPress={handlePlaylistPress}
-          resultsPlaylistsListRef={resultsPlaylistsListRef}
-          resultsAlbumsListRef={resultsAlbumsListRef}
-          resultsArtistsListRef={resultsArtistsListRef}
-          resultsSongsListRef={resultsSongsListRef}
         />
       )}
     </View>

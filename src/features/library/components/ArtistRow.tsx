@@ -1,3 +1,4 @@
+import { displayArtworkUrl } from "@/lib/artworkDisplay";
 import Colors from "@/constants/colors";
 import { type FollowedArtist } from "@/lib/followedArtists";
 import { Image } from "expo-image";
@@ -18,7 +19,7 @@ export const ArtistRow = memo(function ArtistRow({ artist, onPress }: ArtistRowP
     >
       <Image
         recyclingKey={artist.id}
-        source={{ uri: artist.image || undefined }}
+        source={{ uri: displayArtworkUrl(artist.image, 56) || undefined }}
         style={styles.artistAvatar}
         contentFit="cover"
         transition={150}

@@ -383,3 +383,61 @@ index d1cb3b6..4d3bd0b 100644
      }
    }
  }
+diff --git a/node_modules/react-native-audio-api/common/cpp/audioapi/core/sources/AudioFileSourceNode.cpp b/node_modules/react-native-audio-api/common/cpp/audioapi/core/sources/AudioFileSourceNode.cpp
+index a11a641..c1750b1 100644
+--- a/node_modules/react-native-audio-api/common/cpp/audioapi/core/sources/AudioFileSourceNode.cpp
++++ b/node_modules/react-native-audio-api/common/cpp/audioapi/core/sources/AudioFileSourceNode.cpp
+@@ -738,7 +738,8 @@ std::shared_ptr<DSPAudioBuffer> AudioFileSourceNode::processDecodedOutput(
+   bufferingStateDispatcher_.advance(/* hasData */ true, framesToProcess);
+ 
+   if (hasFreshChunk && incoming.state == StreamState::END_OF_STREAM) {
+-    currentTime_.store(duration_, std::memory_order_release);
++    // Preserve the actual decoded position. EOF can also mean a truncated
++    // remote stream; fabricating duration here hides interruption from clients.
+     sendOnPositionChangedEvent(0);
+     clearPendingDecoderChunk();
+ 
+diff --git a/node_modules/react-native-audio-api/src/Audio/Audio.tsx b/node_modules/react-native-audio-api/src/Audio/Audio.tsx
+index c78fea4..55cee25 100644
+--- a/node_modules/react-native-audio-api/src/Audio/Audio.tsx
++++ b/node_modules/react-native-audio-api/src/Audio/Audio.tsx
+@@ -92,10 +92,10 @@ const Audio = React.memo(
+       playRef.current();
+     }, []);
+     const handleEnded = useCallback(
+-      (endedDuration: number) => {
++      (endedPosition: number) => {
+         setPlaybackState('idle');
+-        setCurrentTime(endedDuration);
+-        onEndedCallback();
++        setCurrentTime(endedPosition);
++        onEndedCallback(endedPosition);
+       },
+       [onEndedCallback]
+     );
+diff --git a/node_modules/react-native-audio-api/src/Audio/types.ts b/node_modules/react-native-audio-api/src/Audio/types.ts
+index c77d18c..281e652 100644
+--- a/node_modules/react-native-audio-api/src/Audio/types.ts
++++ b/node_modules/react-native-audio-api/src/Audio/types.ts
+@@ -83,7 +83,7 @@ interface AudioEventProps {
+   onLoad: TMPEmptyEventHandler;
+   onError: TMPErrorEventHandler;
+   onPositionChange: TMPNumberEventHandler;
+-  onEnded: TMPEmptyEventHandler;
++  onEnded: TMPNumberEventHandler;
+   onPlay: TMPEmptyEventHandler;
+   onPause: TMPEmptyEventHandler;
+   onVolumeChange: TMPNumberEventHandler;
+diff --git a/node_modules/react-native-audio-api/src/Audio/useAudioSourceLoader.ts b/node_modules/react-native-audio-api/src/Audio/useAudioSourceLoader.ts
+index e559ffc..8c9ce1c 100644
+--- a/node_modules/react-native-audio-api/src/Audio/useAudioSourceLoader.ts
++++ b/node_modules/react-native-audio-api/src/Audio/useAudioSourceLoader.ts
+@@ -126,7 +126,7 @@ export function useAudioSourceLoader({
+     const { duration: nextDuration } = fileSource.attach({
+       loop,
+       onEnded: () => {
+-        onEndedRef.current(nextDuration);
++        onEndedRef.current(fileSource.getCurrentTime());
+         spawnFileSource();
+       },
+     });

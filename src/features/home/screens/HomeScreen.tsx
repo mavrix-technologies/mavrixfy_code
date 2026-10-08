@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import { getFeaturedArtists } from "@/data/providers/ArtistProvider";
 import React,{ useCallback,useMemo,useRef,useState } from "react";
 
 import Colors from "@/constants/colors";
@@ -6,16 +8,13 @@ import OfflineBanner from "@/components/OfflineBanner";
 import OfflineScreen from "@/components/OfflineScreen";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
-import { triggerImpact } from "@/lib/haptics";
-import * as Haptics from "expo-haptics";
 import {
 FlatList,
 Platform,
+RefreshControl,
 StyleSheet,
 View,
 type ListRenderItemInfo,
-type NativeScrollEvent,
-type NativeSyntheticEvent,
 } from "react-native";
 import Animated,{
 useAnimatedScrollHandler,
@@ -31,6 +30,7 @@ import {
 HomeHorizontalSection,
 type HomeCardItem,
 } from "../components/HomeHorizontalSection";
+import { homeDisplayText } from "../components/homeDisplayText";
 import { HomeQuickPicks } from "../components/HomeQuickPicks";
 import { HomeRecentlyPlayed } from "../components/HomeRecentlyPlayed";
 import {
@@ -42,21 +42,20 @@ import {
 HomeUnifiedTopHeader,
 UNIFIED_HEADER_TOTAL_HEIGHT,
 } from "../components/HomeUnifiedTopHeader";
-import { MavrixfyRefreshIndicator } from "../components/MavrixfyRefreshIndicator";
 import { AppShowcaseModal } from "@/components/AppShowcaseModal";
 import { useFestivalTheme } from "../hooks/useFestivalTheme";
 import { useHomeFeedData } from "../hooks/useHomeFeedData";
 import { useYouTubeHomeFeed } from "../hooks/useYouTubeHomeFeed";
-import { HomeYouTubeContent } from "../components/HomeYouTubeContent";
+import { HomeYouTubeContent, HomeYouTubeStatus } from "../components/HomeYouTubeContent";
 import { clearYouTubeHomeCache } from "@/services/youtube/YouTubeMusic";
 import { useAppShowcasePrompt } from "../hooks/useAppShowcasePrompt";
 import {
 HOME_CATEGORY_TITLES,
 useHomeSectionData,
-type HomeSectionItem,
+
 } from "../hooks/useHomeSectionData";
 
-type HomeListItem = HomeSectionItem | { id: "youtube-home"; type: "youtube-home" };
+import { buildHomeSections, type HomeListItem } from "../hooks/buildHomeSections";
 const homeSectionKeyExtractor = (item: HomeListItem) => item.id;
 
 export function HomeScreen() {
@@ -65,14 +64,17 @@ export function HomeScreen() {
   const { isOnline, isChecking } = useNetwork();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const flatListRef = useRef<FlatList<HomeListItem> | null>(null);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const refreshInFlightRef = useRef(false);
   const youtube = useYouTubeHomeFeed();
-  const { refetch: refetchYouTube } = youtube;
+  const { refetch: refetchYouTube, explore } = youtube;
+  const { refetch: refetchExplore } = explore;
 
   const {
     categories,
     publicPlaylists,
     recentlyPlayed,
-    featuredArtists,
+    featuredArtists: cachedArtists,
     quickPickSongs,
     quickPicksPool,
     loading,
@@ -80,8 +82,13 @@ export function HomeScreen() {
     refreshing,
     hasContent,
     handleRefresh,
-  } = useHomeFeedData();
-  useAppShowcasePrompt(hasContent && !loadingMainContent && !refreshing && isOnline && !isChecking);
+  } = useHomeFeedData({ compact: Platform.OS !== "web" });
+  const artistsQuery = useQuery({ queryKey: ["home", "youtube-artists-v1"], queryFn: () => getFeaturedArtists(),
+    enabled: isOnline && Platform.OS !== "web", staleTime: 2 * 60 * 60 * 1000,
+    refetchOnMount: false, refetchOnWindowFocus: false, refetchOnReconnect: false });
+  const { refetch: refetchArtists } = artistsQuery;
+  const featuredArtists = artistsQuery.data || cachedArtists;
+  useAppShowcasePrompt((hasContent || Boolean(youtube.data)) && !loadingMainContent && !refreshing && isOnline && !isChecking);
 
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const prevCategoryRef = useRef<string>("All");
@@ -107,26 +114,42 @@ export function HomeScreen() {
     publicPlaylists,
     loadingMainContent,
   });
-  const sectionData = useMemo<HomeListItem[]>(() => {
-    if (Platform.OS === "web") return jioSectionData;
-    const youtubeItem: HomeListItem = { id: "youtube-home", type: "youtube-home" };
-    if (selectedCategory === "YouTube Music") return [youtubeItem];
-    if (selectedCategory !== "All") return jioSectionData;
-    return [...jioSectionData.slice(0, 2), youtubeItem, ...jioSectionData.slice(2)];
-  }, [jioSectionData, selectedCategory]);
+  const sectionData = useMemo(() => buildHomeSections(selectedCategory, Platform.OS !== "web",
+    youtube.data?.sections || [], jioSectionData, explore.data?.sections || []), [jioSectionData, selectedCategory, youtube.data?.sections, explore.data?.sections]);
   const retryYouTube = useCallback(() => { clearYouTubeHomeCache(); void refetchYouTube(); }, [refetchYouTube]);
+  const retryExplore = useCallback(() => { clearYouTubeHomeCache(); void refetchExplore(); }, [refetchExplore]);
   const refreshHome = useCallback(async () => {
-    clearYouTubeHomeCache();
-    await Promise.allSettled([handleRefresh(), ...(isOnline && Platform.OS !== "web" ? [refetchYouTube()] : [])]);
-  }, [handleRefresh, isOnline, refetchYouTube]);
+    if (!isOnline || refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
+    setPullRefreshing(true);
+    try {
+      clearYouTubeHomeCache();
+      await handleRefresh();
+      await Promise.allSettled([refetchArtists(), ...(Platform.OS !== "web" ? [refetchYouTube(), refetchExplore()] : [])]);
+    } finally {
+      refreshInFlightRef.current = false;
+      setPullRefreshing(false);
+    }
+  }, [handleRefresh, isOnline, refetchYouTube, refetchExplore, refetchArtists]);
 
   const renderSectionItem = useCallback(
     ({ item }: ListRenderItemInfo<HomeListItem>) => {
       let content: React.ReactNode = null;
 
       switch (item.type) {
-        case "youtube-home":
-          content = <HomeYouTubeContent feed={youtube.data} loading={youtube.isFetching || (youtube.isPending && isOnline)} failed={youtube.isError} online={isOnline} onRetry={retryYouTube} />;
+        case "releases-status":
+          content = <HomeYouTubeStatus hasFeed={Boolean(explore.data)} loading={explore.isFetching || (explore.isPending && isOnline)} failed={explore.isError} online={isOnline} onRetry={retryExplore} emptyMessage={explore.data && !sectionData.some(row => row.type === "youtube-section") ? "Nothing to show yet. Pull to refresh." : undefined} />;
+          break;
+        case "youtube-quick-picks":
+          content = youtube.data?.songs.length
+            ? <HomeQuickPicks songs={youtube.data.songs} playSong={playSong} />
+            : youtube.isFetching && isOnline ? <HomeQuickPicksSkeleton /> : null;
+          break;
+        case "youtube-section":
+          content = <HomeYouTubeContent section={item.section} />;
+          break;
+        case "youtube-status":
+          content = <HomeYouTubeStatus hasFeed={Boolean(youtube.data)} loading={youtube.isFetching || (youtube.isPending && isOnline)} failed={youtube.isError} online={isOnline} onRetry={retryYouTube} />;
           break;
         case "quick-picks":
           content = (
@@ -146,7 +169,7 @@ export function HomeScreen() {
           content = (
             <React.Fragment>
               <HomeHorizontalSection
-                title={HOME_CATEGORY_TITLES[item.category.id] || item.category.title}
+                title={homeDisplayText(HOME_CATEGORY_TITLES[item.category.id] || item.category.title)}
                 items={item.category.results as unknown as HomeCardItem[]}
               />
               {item.showAd && !loadingMainContent ? (
@@ -185,39 +208,21 @@ export function HomeScreen() {
       playSong,
       publicPlaylists,
       recentlyPlayed,
-      youtube.data, youtube.isFetching, youtube.isPending, youtube.isError, isOnline, retryYouTube,
+      youtube.data, youtube.isFetching, youtube.isPending, youtube.isError, isOnline, retryYouTube, explore.data, explore.isFetching, explore.isPending, explore.isError, retryExplore, sectionData,
     ]
   );
 
   const keyExtractor = homeSectionKeyExtractor;
 
-  // 100% UI-Thread Reanimated SharedValues for 60/120 FPS native scrolling
+  // Header and banner visibility track scrolling on the UI thread.
   const scrollY = useSharedValue(0);
-  const pullProgress = useSharedValue(0);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
       "worklet";
-      const offsetY = event.contentOffset.y;
-      scrollY.value = offsetY;
-
-      if (offsetY < 0) {
-        pullProgress.value = Math.min(1, Math.max(0, -offsetY / 68));
-      } else if (pullProgress.value > 0) {
-        pullProgress.value = 0;
-      }
+      scrollY.value = event.contentOffset.y;
     },
   });
-
-  const handleScrollEndDrag = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (event.nativeEvent.contentOffset.y < -55 && !refreshing) {
-        void triggerImpact(Haptics.ImpactFeedbackStyle.Medium);
-        void refreshHome();
-      }
-    },
-    [refreshHome, refreshing]
-  );
 
   const festivalTheme = useFestivalTheme();
 
@@ -232,7 +237,7 @@ export function HomeScreen() {
     [insets.bottom, topInset]
   );
 
-  if (!isOnline && !isChecking && !hasContent && !youtube.data && !loading) {
+  if (!isOnline && !isChecking && !hasContent && !youtube.data && !explore.data && !loading) {
     return <OfflineScreen />;
   }
 
@@ -256,14 +261,6 @@ export function HomeScreen() {
         themeConfig={festivalTheme}
       />
 
-      {/* ── Dedicated Mavrixfy Reanimated Refresh Indicator (Top Visual Overlay) ── */}
-      <MavrixfyRefreshIndicator
-        progress={pullProgress}
-        refreshing={refreshing}
-        topOffset={topInset + UNIFIED_HEADER_TOTAL_HEIGHT + 6}
-        color={festivalTheme?.enabled ? (festivalTheme.activeColor || "#FFFFFF") : undefined}
-      />
-
       {/* ── Home Content Scroll Layer (Animated FlatList running on UI Thread) ── */}
       <Animated.FlatList
         ref={flatListRef as any}
@@ -284,7 +281,11 @@ export function HomeScreen() {
                 ]}
                 pointerEvents="none"
               />
-              <FestivalHeaderBanner themeConfig={festivalTheme} />
+              <FestivalHeaderBanner
+                themeConfig={festivalTheme}
+                scrollY={scrollY}
+                contentTopOffset={topInset + UNIFIED_HEADER_TOTAL_HEIGHT}
+              />
             </View>
           ) : null
         }
@@ -293,12 +294,22 @@ export function HomeScreen() {
         contentContainerStyle={contentContainerStyle}
         showsVerticalScrollIndicator={false}
         onScroll={scrollHandler}
-        onScrollEndDrag={handleScrollEndDrag}
+        refreshControl={
+          <RefreshControl
+            refreshing={pullRefreshing}
+            onRefresh={refreshHome}
+            enabled={isOnline}
+            tintColor={Colors.primary}
+            colors={[Colors.primary]}
+            progressBackgroundColor={Colors.surface}
+            progressViewOffset={topInset + UNIFIED_HEADER_TOTAL_HEIGHT}
+          />
+        }
         scrollEventThrottle={16}
         initialNumToRender={3}
         maxToRenderPerBatch={2}
         updateCellsBatchingPeriod={50}
-        windowSize={5}
+        windowSize={3}
         removeClippedSubviews={Platform.OS === "android"}
       />
       <AppShowcaseModal />

@@ -39,11 +39,10 @@ export function searchScreenReducer(
   switch (action.type) {
     case "SET_QUERY": {
       const trimmed = action.query.trim();
-      if (trimmed.length < 2) {
+      if (!trimmed) {
         return {
           ...state,
           query: action.query,
-          resultFilter: "all",
           suggestions: [],
           suggestionsOpen: false,
         };
@@ -52,6 +51,9 @@ export function searchScreenReducer(
         ...state,
         query: action.query,
         suggestionsOpen: true,
+        suggestions: [],
+        results: EMPTY_RESULTS,
+        searchError: false,
       };
     }
     case "SET_SEARCH_LOADING":
@@ -108,7 +110,7 @@ export function searchScreenReducer(
         query: action.query,
         suggestionsOpen: false,
         suggestions: [],
-        ...(action.resetFilter ? { resultFilter: "all" } : {}),
+        ...(action.resetFilter ? { resultFilter: "songs" } : {}),
       };
     case "APPLY_PROGRAMMATIC_QUERY":
       return {
@@ -120,7 +122,11 @@ export function searchScreenReducer(
     case "SET_RESULT_FILTER":
       return {
         ...state,
-        resultFilter: state.query.trim().length < 2 ? "all" : action.filter,
+        resultFilter: action.filter,
+        suggestionsOpen: false,
+        suggestions: [],
+        results: EMPTY_RESULTS,
+        searchLoading: Boolean(state.query.trim()),
       };
     case "ACTIVATE_SEARCH_MODE":
       return {
@@ -159,7 +165,7 @@ export const createInitialSearchState = (routeSearchQuery: string): SearchScreen
   query: routeSearchQuery,
   results: EMPTY_RESULTS,
   searchDisplayQuery: "",
-  resultFilter: "all",
+  resultFilter: "songs",
   searchLoading: false,
   searchError: false,
   isSearchMode: routeSearchQuery.length > 0,

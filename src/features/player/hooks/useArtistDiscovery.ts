@@ -1,5 +1,5 @@
-import { getArtistDetails,searchArtists } from "@/data/providers/ArtistProvider";
-import { convertJioSaavnSong,getBestImageUrl,type Song } from "@/lib/musicData";
+import { getArtistDetails,searchArtists,type ArtistDetails } from "@/data/providers/ArtistProvider";
+import { getBestImageUrl,type Song } from "@/lib/musicData";
 import { safeGoBack } from "@/utils/navigation";
 import { router } from "expo-router";
 import { useCallback,useEffect,useMemo,useState } from "react";
@@ -19,8 +19,9 @@ export function useArtistDiscovery({
   activeQueueIndex,
   playSong,
 }: UseArtistDiscoveryParams) {
-  const [artistDetails, setArtistDetails] = useState<any>(null);
+  const [artistDetails, setArtistDetails] = useState<ArtistDetails | null>(null);
   const [artistLoading, setArtistLoading] = useState(false);
+  const channelId = screenSong?.artistRefs?.[0]?.id;
 
   useEffect(() => {
     if (!enabled) return;
@@ -35,21 +36,28 @@ export function useArtistDiscovery({
     async function loadArtist() {
       if (!active) return;
       setArtistLoading(true);
+      setArtistDetails(null);
       try {
         const currentArtist = screenSong?.artist;
         if (!currentArtist) return;
         const query = currentArtist.split(",")[0].trim();
+        if (channelId) {
+          const details = await getArtistDetails(channelId);
+          if (active) setArtistDetails(details);
+          return;
+        }
         const artists = await searchArtists(query);
         if (!active) return;
         if (artists.length > 0) {
-          const details = await getArtistDetails(artists[0].id);
+          const match = artists.find(artist => artist.name.toLowerCase() === query.toLowerCase());
+          const details = match ? await getArtistDetails(match.id) : null;
           if (!active) return;
           setArtistDetails(details);
         } else {
           setArtistDetails(null);
         }
       } catch {
-        // Ignore fetch errors
+        if (active) setArtistDetails(null);
       } finally {
         if (active) setArtistLoading(false);
       }
@@ -59,14 +67,11 @@ export function useArtistDiscovery({
     return () => {
       active = false;
     };
-  }, [enabled, screenSong?.artist]);
+  }, [enabled, screenSong?.artist, channelId]);
 
   const relatedSongs = useMemo<Song[]>(() => {
     if (!artistDetails?.topSongs) return [];
-    const filtered = artistDetails.topSongs.flatMap((item: any) => {
-      const s = convertJioSaavnSong(item);
-      return s.id !== screenSong?.id ? [s] : [];
-    });
+    const filtered = artistDetails.topSongs.filter(song => song.id !== screenSong?.id);
     return filtered.slice(0, 5);
   }, [artistDetails, screenSong?.id]);
 

@@ -1,3 +1,4 @@
+import { FLAT_EQUALIZER, normalizeEqualizer } from "@/services/audio/equalizerConfig";
 import { logger } from "@/lib/logger";
 import { normalizeSmartAutoplayMode,type SmartAutoplayMode } from "@/lib/smartAutoplayConfig";
 import { runAfterIdle } from "@/utils/idleTask";
@@ -91,14 +92,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   downloadQuality: "high",
   downloadWifiOnly: false,
   dataSaverEnabled: false,
-  equalizer: {
-    "60Hz": 0,
-    "150Hz": 0,
-    "400Hz": 0,
-    "1KHz": 0,
-    "2.4KHz": 0,
-    "15KHz": 0,
-  },
+  equalizer: { ...FLAT_EQUALIZER },
   equalizerEnabled: false,
   hapticsEnabled: false,
   miniPlayerSecondaryControl: "queue",
@@ -431,10 +425,7 @@ export async function getSettings(): Promise<AppSettings> {
   return {
     ...DEFAULT_SETTINGS,
     ...saved,
-    equalizer: {
-      ...DEFAULT_SETTINGS.equalizer,
-      ...(saved.equalizer || {}),
-    },
+    equalizer: normalizeEqualizer(saved.equalizer),
     hapticsEnabled: Boolean(saved.hapticsEnabled),
     videoBackgroundQuality: normalizeYouTubeVideoQuality(saved.videoBackgroundQuality),
     smartAutoplayEnabled: saved.smartAutoplayEnabled !== undefined ? Boolean(saved.smartAutoplayEnabled) : DEFAULT_SETTINGS.smartAutoplayEnabled,
@@ -451,11 +442,19 @@ export async function getSettings(): Promise<AppSettings> {
 }
 
 let settingsWriteQueue: Promise<void> = Promise.resolve();
+const settingsListeners = new Set<(settings: AppSettings) => void>();
+export function subscribeSettings(listener: (settings: AppSettings) => void): () => void {
+  settingsListeners.add(listener);
+  return () => { settingsListeners.delete(listener); };
+}
 
 export function saveSettings(settings: Partial<AppSettings>): Promise<void> {
-  const write = settingsWriteQueue.then(() =>
-    getSettings().then((current) => setJSON(KEYS.SETTINGS, { ...current, ...settings }))
-  );
+  const write = settingsWriteQueue.then(async () => {
+    const current = await getSettings();
+    await setJSON(KEYS.SETTINGS, { ...current, ...settings });
+    const updated = await getSettings();
+    settingsListeners.forEach(listener => listener(updated));
+  });
   settingsWriteQueue = write.catch(() => {});
   return write;
 }

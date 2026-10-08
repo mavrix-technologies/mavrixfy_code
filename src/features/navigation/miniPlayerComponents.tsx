@@ -18,7 +18,6 @@ Text,
 View
 } from "react-native";
 import { styles } from "./layoutStyles";
-import { toProgressWidth } from "./layoutUtils";
 
 export type MiniPlayerSecondaryControlButtonProps = {
   control: MiniPlayerSecondaryControl;
@@ -93,21 +92,24 @@ export function MiniPlayerSecondaryControlButton({
 
 export const MiniPlayerProgressBar = React.memo(function MiniPlayerProgressBar({
   fillColor,
+  ios = false,
 }: {
   fillColor: string;
+  ios?: boolean;
 }) {
   const playerProgress = useOptionalPlayerProgress();
   const progress = playerProgress?.progress ?? 0;
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- `progress` is the destructured reactive value from playerProgress.progress
-  const progressWidth = useMemo(() => toProgressWidth(progress), [progress]);
+  const scaleX = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
 
   return (
-    <View pointerEvents="none" style={styles.playerProgressTrack}>
+    <View pointerEvents="none" style={ios ? styles.iosMiniPlayerProgressTrack : styles.playerProgressTrack}>
       <View
         style={[
-          styles.playerProgressFill,
+          ios ? styles.iosMiniPlayerProgressFill : styles.playerProgressFill,
           {
-            width: progressWidth,
+            width: "100%",
+            transformOrigin: "left center",
+            transform: [{ scaleX }],
             backgroundColor: fillColor,
           },
         ]}
@@ -257,21 +259,7 @@ export const IOSMiniPlayerProgressBar = React.memo(function IOSMiniPlayerProgres
 }: {
   fillColor: string;
 }) {
-  const playerProgress = useOptionalPlayerProgress();
-  const progress = playerProgress?.progress ?? 0;
-  // react-doctor-disable-next-line react-doctor/exhaustive-deps -- `progress` is the destructured reactive value from playerProgress.progress
-  const progressWidth = useMemo(() => toProgressWidth(progress), [progress]);
-
-  return (
-    <View pointerEvents="none" style={styles.iosMiniPlayerProgressTrack}>
-      <View
-        style={[
-          styles.iosMiniPlayerProgressFill,
-          { width: progressWidth, backgroundColor: fillColor },
-        ]}
-      />
-    </View>
-  );
+  return <MiniPlayerProgressBar fillColor={fillColor} ios />;
 });
 IOSMiniPlayerProgressBar.displayName = "IOSMiniPlayerProgressBar";
 

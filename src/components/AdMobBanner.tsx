@@ -1,24 +1,30 @@
 import { AD_UNITS } from "@/constants/admob";
-import { getGoogleMobileAdsModule,initializeMobileAds } from "@/lib/googleMobileAds";
+import { getGoogleMobileAdsModule,initializeMobileAds,type GoogleMobileAdsModule } from "@/lib/googleMobileAds";
 import { logger } from "@/lib/logger";
-import { useEffect,useState } from "react";
+import { memo,useEffect,useState } from "react";
 import { StyleSheet,View } from "react-native";
 
 const BANNER_AD_UNIT_ID = AD_UNITS.BANNER || AD_UNITS.NATIVE;
+const REQUEST_OPTIONS = { requestNonPersonalizedAdsOnly: true };
 
 interface AdMobBannerProps {
-  loadDelayMs?: number; // Backwards-compatible prop
+  loadDelayMs?: number;
 }
 
-export default function AdMobBanner(_props: AdMobBannerProps) {
+const AdMobBanner = memo(function AdMobBanner({ loadDelayMs = 0 }: AdMobBannerProps) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [adsModule, setAdsModule] = useState<GoogleMobileAdsModule | null>(null);
 
   useEffect(() => {
-    void initializeMobileAds();
-  }, []);
-
-  const adsModule = getGoogleMobileAdsModule();
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void initializeMobileAds().then(() => {
+        if (!cancelled) setAdsModule(getGoogleMobileAdsModule());
+      });
+    }, Math.max(0, loadDelayMs));
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [loadDelayMs]);
 
   if (!adsModule || !BANNER_AD_UNIT_ID || hasError) {
     return null;
@@ -31,9 +37,7 @@ export default function AdMobBanner(_props: AdMobBannerProps) {
       <BannerAd
         unitId={BANNER_AD_UNIT_ID}
         size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
-        requestOptions={{
-          requestNonPersonalizedAdsOnly: true,
-        }}
+        requestOptions={REQUEST_OPTIONS}
         onAdLoaded={() => {
           setIsLoaded(true);
         }}
@@ -44,7 +48,9 @@ export default function AdMobBanner(_props: AdMobBannerProps) {
       />
     </View>
   );
-}
+});
+
+export default AdMobBanner;
 
 const styles = StyleSheet.create({
   container: {

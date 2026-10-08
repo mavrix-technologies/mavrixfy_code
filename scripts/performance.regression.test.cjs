@@ -39,7 +39,7 @@ test('decorative consumers share one lifecycle listener and release it on unmoun
 
 test('collapsed/background player creates no full player UI; expanding/restoring recreates it', () => {
   const react = {
-    memo: fn => fn, useEffect() {}, useCallback: fn => fn,
+    memo: fn => fn, useEffect() {}, useCallback: fn => fn, useMemo: fn => fn(),
     useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}],
     createElement: (type, props, ...children) => ({ type, props, children }),
   };
@@ -49,7 +49,7 @@ test('collapsed/background player creates no full player UI; expanding/restoring
     react,
     '@/lib/appActivity': { useAppIsActive: () => foreground },
     '@/constants/platform': { IS_ANDROID: false },
-    '@/lib/playerUIState': { playerUIStateStore: ui },
+    '@/lib/playerUIState': { playerUIStateStore: ui, usePlayerUIState: () => ui.current },
     '@/services/audio/PlaybackEngine': { usePlaybackNowPlaying: () => ({ currentSong: { id: 'song' }, queue: [], queueIndex: 0 }) },
     '@/lib/nativeAnimated': { createAnimatedComponent: () => 'AnimatedScrollView' },
     'react-native': { useWindowDimensions: () => ({ height: 800 }), StyleSheet: { absoluteFillObject: {} } },
@@ -60,6 +60,10 @@ test('collapsed/background player creates no full player UI; expanding/restoring
       return gesture;
     } }, GestureDetector: 'GestureDetector' },
     '../styles/playerScreenStyles': { styles: {} },
+    '../hooks/usePlayerSheetState': { usePlayerSheetState: () => ({
+      visible: ui.current === 'expanded', interactionReady: false,
+    }) },
+    '@gorhom/bottom-sheet': { default: 'NativeBottomSheet' },
   };
   for (const name of ['@/components/FullscreenKaraokeModal', '@/services/audio/playbackProgressStore', '@/utils/navigation',
     'expo-linear-gradient', 'react-native-worklets', '../components/PlayerAmbientBackdrop', '../components/PlayerArtworkCarousel',
@@ -156,64 +160,6 @@ test('small-screen controls meet 48 dp and fit 320 dp portrait layouts', () => {
       + metrics.playButtonSize + metrics.controlsRowGap * 4 + (metrics.isShortScreen ? 32 : 40);
     assert.ok(controlsWidth <= width, `${width}x${height}: controls need ${controlsWidth} dp`);
   }
-});
-
-function fakeClock() {
-  let now = 0; let id = 0; const jobs = new Map();
-  const schedule = (fn, delay, period) => { jobs.set(++id, { fn, time: now + delay, period }); return id; };
-  return {
-    setTimeout: (fn, delay) => schedule(fn, delay, 0), clearTimeout: key => jobs.delete(key),
-    setInterval: (fn, delay) => schedule(fn, delay, delay), clearInterval: key => jobs.delete(key),
-    advance: milliseconds => {
-      const end = now + milliseconds;
-      while (true) {
-        const next = [...jobs].sort((a, b) => a[1].time - b[1].time)[0];
-        if (!next || next[1].time > end) break;
-        const [key, job] = next; now = job.time;
-        if (job.period) job.time += job.period; else jobs.delete(key);
-        job.fn();
-      }
-      now = end;
-    },
-    pending: () => jobs.size,
-  };
-}
-const tick = () => new Promise(resolve => setImmediate(resolve));
-
-test('video drift checks use live audio progress at most once per five seconds', async () => {
-  const clock = fakeClock();
-  const { startVideoProgressSync } = load('src/features/player/hooks/videoProgressSync.ts', {}, clock);
-  let calls = 0; let audio = 20000; let video = 20; const seeks = [];
-  const stop = startVideoProgressSync({
-    getVideoSeconds: async () => { calls++; return video; }, getAudioMillis: () => audio,
-    seek: seconds => seeks.push(seconds), onUnavailable: () => assert.fail('responsive player marked unavailable'),
-  });
-  await tick(); assert.equal(calls, 1); assert.deepEqual(seeks, []);
-  audio = 28000; video = 22;
-  clock.advance(4999); await tick(); assert.equal(calls, 1);
-  clock.advance(1); await tick(); assert.equal(calls, 2); assert.deepEqual(seeks, [28]);
-  stop(); clock.advance(60000); await tick(); assert.equal(calls, 2); assert.equal(clock.pending(), 0);
-});
-
-test('a stalled WebView stops polling and ignores late responses after timeout/unmount', async () => {
-  const clock = fakeClock();
-  const { startVideoProgressSync } = load('src/features/player/hooks/videoProgressSync.ts', {}, clock);
-  let resolve; let calls = 0; let unavailable = 0; let seeks = 0;
-  const stop = startVideoProgressSync({
-    getVideoSeconds: () => { calls++; return new Promise(done => { resolve = done; }); },
-    getAudioMillis: () => 40000, seek: () => seeks++, onUnavailable: () => unavailable++,
-  });
-  await tick(); clock.advance(60000); await tick();
-  assert.equal(calls, 1); assert.equal(unavailable, 1); assert.equal(clock.pending(), 0);
-  resolve(0); await tick(); assert.equal(seeks, 0); stop();
-  const cleanClock = fakeClock();
-  const sync = load('src/features/player/hooks/videoProgressSync.ts', {}, cleanClock);
-  let late; const cancel = sync.startVideoProgressSync({
-    getVideoSeconds: () => new Promise(done => { late = done; }), getAudioMillis: () => 50000,
-    seek: () => assert.fail('unmounted player sought'), onUnavailable: () => assert.fail('unmounted player failed'),
-  });
-  await tick(); cancel(); cleanClock.advance(60000); late(0); await tick();
-  assert.equal(cleanClock.pending(), 0);
 });
 
 test('paused, stopped, ended, and reset playback suspend native audio processing', async () => {

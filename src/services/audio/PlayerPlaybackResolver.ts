@@ -3,7 +3,7 @@ import { getAccountScope } from "@/lib/accountScope";
 import { getLocalPlaybackUrl } from "@/lib/downloads/downloadManager";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
-import { resolveAudioStreamWithQuality } from "@/lib/musicData";
+import { convertJioSaavnSong, resolveAudioStreamWithQuality } from "@/lib/musicData";
 import * as Storage from "@/lib/storage";
 import type { PlaybackQualityState,ResolvedPlaybackResult } from "@/types/playbackTypes";
 import { toDurationSeconds } from "@/utils/timeFormatters";
@@ -136,6 +136,7 @@ export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?:
     source: song.source,
     youtubeVideoId: song.youtubeVideoId || song.videoId,
     youtubeAudioExpiresAt: song.youtubeAudioExpiresAt,
+    playbackDurationSeconds: song.playbackDurationSeconds,
     youtubeRequestedQuality: isYouTubeSong(song) ? peekYouTubeStream(song)?.requestedQuality : undefined,
     accountId: getAccountScope().accountId ?? "guest",
     url: audioUrl,
@@ -289,6 +290,18 @@ export async function resolvePlaybackUrlWithDetails(
     return { url: stream.url, qualityState: { requested: effectiveRequested,
       actualBitrate: bitrate, qualityLabel: `${bitrate}kbps${stream.codec ? ` · ${stream.codec}` : ""}`,
       unlocked, isFallback: false } };
+  }
+
+  // Older like caches did not retain audio URLs. Refresh by the original catalog ID,
+  // only inside the original provider lane; this cannot run after a YouTube failure.
+  if (song.likedSongDocumentIds?.length && (!song.source || song.source === "jiosaavn")
+    && !resolveAudioUrl(song)) {
+    const { getCatalogSongDetails } = await import("@/data/providers/MusicCatalogDetailsProvider");
+    const details = await getCatalogSongDetails(song.id);
+    if (details?.id === song.id) {
+      const fresh = convertJioSaavnSong(details);
+      song = { ...song, audioUrl: fresh.audioUrl, downloadUrl: fresh.downloadUrl };
+    }
   }
 
   // 2. JioSaavn / Catalogue Songs -> Quality ladder selection

@@ -1,21 +1,13 @@
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
-import { getSettings, saveSettings, type AppSettings } from "@/lib/storage";
-import { detectMatchingPreset,EQUALIZER_BANDS as EQUALIZER_BAND_KEYS,EQUALIZER_PRESETS,type EqualizerPreset } from "../constants/settingsConstants";
-import {
-  applyEqualizerBands,
-  applyEqualizerEnabled,
-  checkSystemEqualizerAvailable,
-  getAudioEffects,
-  syncEqualizerWithNative,
-  type AudioEffectsState,
-  openDeviceSystemEqualizer,
-} from "@/services/audio/audioEqualizer";
+import { getSettings } from "@/lib/storage";
+import { detectMatchingPreset,EQUALIZER_PRESETS,type EqualizerPreset } from "../constants/settingsConstants";
+import { previewEqualizer, saveEqualizer, equalizerSupported, type EqualizerSettings } from "@/services/audio/audioEqualizer";
+import { EQ_FREQUENCIES_HZ, EQ_MAX_GAIN_DB, FLAT_EQUALIZER, normalizeEqualizer } from "@/services/audio/equalizerConfig";
 import { safeGoBack } from "@/utils/navigation";
 import { isRunningInExpoGo } from "expo";
 import { Ionicons } from "@expo/vector-icons";
 import { ImpactFeedbackStyle } from "expo-haptics";
-import { useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -40,17 +32,17 @@ import Svg, {
   Stop,
 } from "react-native-svg";
 
-const EQUALIZER_BANDS = EQUALIZER_BAND_KEYS.map((key) => ({
-  key,
-  label: key.endsWith("KHz") ? key.replace("KHz", " kHz") : key.replace("Hz", " Hz"),
-}));
-
+const EQUALIZER_BANDS = [
+  { key: "60Hz", label: "60 Hz", hz: 60 }, { key: "150Hz", label: "150 Hz", hz: 150 },
+  { key: "400Hz", label: "400 Hz", hz: 400 }, { key: "1KHz", label: "1 kHz", hz: 1000 },
+  { key: "2.4KHz", label: "2.4 kHz", hz: 2400 }, { key: "15KHz", label: "15 kHz", hz: 15000 },
+];
 const GRAPH_HEIGHT = 220;
 const PAD_TOP = 28;
 const PAD_BOTTOM = 28;
 const USABLE_HEIGHT = GRAPH_HEIGHT - PAD_TOP - PAD_BOTTOM;
-const MIN_DB = -10;
-const MAX_DB = 10;
+const MIN_DB = -EQ_MAX_GAIN_DB;
+const MAX_DB = EQ_MAX_GAIN_DB;
 const DB_RANGE = MAX_DB - MIN_DB;
 
 interface EqualizerTopBarProps {
@@ -222,7 +214,6 @@ interface EqualizerControlsSectionProps {
   equalizerReady: boolean;
   effectsError: string | null;
   activePresetId: string | null;
-  systemEqAvailable: boolean;
   onToggle: (newVal: boolean) => void;
   onSelectPreset: (preset: EqualizerPreset) => void;
 }
@@ -232,7 +223,6 @@ function EqualizerControlsSection({
   equalizerReady,
   effectsError,
   activePresetId,
-  systemEqAvailable,
   onToggle,
   onSelectPreset,
 }: EqualizerControlsSectionProps) {
@@ -285,31 +275,6 @@ function EqualizerControlsSection({
         })}
       </View>
 
-      {systemEqAvailable && (
-        <View style={styles.systemEqSection}>
-          <Pressable
-            onPress={() => {
-              void triggerImpact(ImpactFeedbackStyle.Medium);
-              void openDeviceSystemEqualizer();
-            }}
-            style={({ pressed }) => [
-              styles.systemEqButton,
-              pressed && styles.presetRowPressed,
-            ]}
-          >
-            <View style={styles.systemEqInfo}>
-              <View style={styles.switchTitleWithIcon}>
-                <Ionicons name="hardware-chip-outline" size={16} color={Colors.primary} style={{ marginRight: 6 }} />
-                <Text style={styles.systemEqTitle}>Device Equalizer</Text>
-              </View>
-              <Text style={styles.systemEqSubtitle}>
-                Open device audio effect controls, if available
-              </Text>
-            </View>
-            <Ionicons name="open-outline" size={20} color={Colors.primary} />
-          </Pressable>
-        </View>
-      )}
     </>
   );
 }
@@ -318,165 +283,40 @@ function useEqualizerState() {
   const { width: windowWidth } = useWindowDimensions();
   const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
   const containerWidth = measuredWidth ?? windowWidth;
-  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [settings, setSettings] = useState<EqualizerSettings | null>(null);
+  const current = useRef<EqualizerSettings>({ equalizer: { ...FLAT_EQUALIZER }, equalizerEnabled: false });
   const [isDragging, setIsDragging] = useState(false);
   const [activeBandIdx, setActiveBandIdx] = useState<number | null>(null);
-  const [systemEqAvailable, setSystemEqAvailable] = useState(false);
-  const [effectsState, setEffectsState] = useState<AudioEffectsState | null>(null);
-  const [effectsError, setEffectsError] = useState<string | null>(null);
-  const syncedSessionRef = useRef("");
-  const equalizerReady = Boolean(effectsState?.sessionId && effectsState.equalizerAvailable && effectsState.equalizerControl !== false);
-
-  const reportEffectError = useCallback((error: unknown) => {
-    const message = error instanceof Error ? error.message : "The audio effect could not be applied.";
-    setEffectsError(message);
-    Alert.alert("Audio effect unavailable", message);
-  }, []);
-
-  const bands = useMemo<Record<string, number>>(() => {
-    const raw = settings?.equalizer || {};
-    return {
-      "60Hz": typeof raw["60Hz"] === "number" ? raw["60Hz"] : 0,
-      "150Hz": typeof raw["150Hz"] === "number" ? raw["150Hz"] : 0,
-      "400Hz": typeof raw["400Hz"] === "number" ? raw["400Hz"] : 0,
-      "1KHz": typeof raw["1KHz"] === "number" ? raw["1KHz"] : 0,
-      "2.4KHz": typeof raw["2.4KHz"] === "number" ? raw["2.4KHz"] : 0,
-      "15KHz": typeof raw["15KHz"] === "number" ? raw["15KHz"] : 0,
-    };
-  }, [settings?.equalizer]);
-
   const activeBandIndexRef = useRef<number | null>(null);
-  const bandsRef = useRef(bands);
-
-  useEffect(() => {
-    bandsRef.current = bands;
-  }, [bands]);
-
+  const equalizerReady = settings !== null;
+  const effectsError = equalizerSupported() ? null : "Presets are saved. To hear the equalizer, use an installed APK or IPA; Expo Go does not include the audio processor.";
   useEffect(() => {
     let mounted = true;
-    void getSettings().then((s) => {
-      if (mounted) setSettings(s);
-    });
-    void checkSystemEqualizerAvailable().then((avail) => {
-      if (mounted) setSystemEqAvailable(avail);
-    });
-    return () => {
-      mounted = false;
-    };
+    void getSettings().then(saved => { if (mounted) {
+      const initial = { equalizer: saved.equalizer, equalizerEnabled: saved.equalizerEnabled };
+      current.current = initial; setSettings(initial);
+    } })
+      .catch(() => Alert.alert("Settings unavailable", "Please reopen the equalizer."));
+    return () => { mounted = false; };
   }, []);
-
-  useFocusEffect(useCallback(() => {
-    let active = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let attempts = 0;
-    const refresh = () => {
-      void getAudioEffects().then((state) => {
-        if (!active) return;
-        setEffectsState(state);
-        setEffectsError(null);
-        if (!state.sessionId && attempts < 5) {
-          attempts++;
-          timer = setTimeout(refresh, 1000);
-        }
-      }).catch((error) => {
-        if (!active) return;
-        setEffectsState(null);
-        setEffectsError(error instanceof Error ? error.message : "Audio effects are unavailable.");
-      });
-    };
-    refresh();
-    return () => {
-      active = false;
-      if (timer) clearTimeout(timer);
-    };
-  }, []));
-
-  useEffect(() => {
-    if (!settings || !effectsState?.sessionId || !effectsState.equalizerAvailable) return;
-    const syncKey = `${effectsState.sessionId}:${effectsState.equalizerAvailable}`;
-    if (syncedSessionRef.current === syncKey) return;
-    syncedSessionRef.current = syncKey;
-    void syncEqualizerWithNative(settings);
-  }, [settings, effectsState?.sessionId, effectsState?.equalizerAvailable]);
-
+  const update = useCallback((next: EqualizerSettings, persist: boolean) => {
+    current.current = next;
+    setSettings(next);
+    if (persist) void saveEqualizer(next).catch(() => Alert.alert("Settings not saved", "Please try again."));
+    else previewEqualizer(next);
+  }, []);
+  const bands = useMemo(() => Object.fromEntries(EQUALIZER_BANDS.map(band => {
+    const hz = EQ_FREQUENCIES_HZ.reduce((nearest, value) => Math.abs(Math.log(band.hz / value)) < Math.abs(Math.log(band.hz / nearest)) ? value : nearest);
+    return [band.key, settings?.equalizer[`${hz}Hz`] ?? 0];
+  })), [settings]);
   const enabled = Boolean(settings?.equalizerEnabled);
-  const activePresetId = useMemo(() => detectMatchingPreset(bands), [bands]);
-
-  const handleToggle = useCallback(
-    async (newVal: boolean) => {
-      if (!newVal && !equalizerReady) {
-        setSettings((prev) => prev ? { ...prev, equalizerEnabled: false } : prev);
-        void saveSettings({ equalizerEnabled: false });
-        return;
-      }
-      if (!equalizerReady) return;
-      void triggerImpact(ImpactFeedbackStyle.Light);
-      try {
-        await applyEqualizerEnabled(newVal);
-      } catch (error) {
-        reportEffectError(error);
-        return;
-      }
-      setSettings((prev) => (prev ? { ...prev, equalizerEnabled: newVal } : prev));
-      void saveSettings({ equalizerEnabled: newVal });
-    },
-    [equalizerReady, reportEffectError]
-  );
-
-  const handleSelectPreset = useCallback(async (preset: EqualizerPreset) => {
-    if (!equalizerReady) return;
+  const activePresetId = settings ? detectMatchingPreset(settings.equalizer) : null;
+  const handleToggle = useCallback((enabled: boolean) => update({ ...current.current, equalizerEnabled: enabled }, true), [update]);
+  const handleSelectPreset = useCallback((preset: EqualizerPreset) => {
     void triggerImpact(ImpactFeedbackStyle.Light);
-    const newBands = { ...preset.bands };
-    try {
-      await applyEqualizerBands(newBands);
-      await applyEqualizerEnabled(true);
-    } catch (error) {
-      reportEffectError(error);
-      return;
-    }
-    setSettings((prev) =>
-      prev
-        ? {
-            ...prev,
-            equalizer: newBands,
-            equalizerEnabled: true,
-          }
-        : prev
-    );
-    void saveSettings({
-      equalizer: newBands,
-      equalizerEnabled: true,
-    });
-  }, [equalizerReady, reportEffectError]);
-
-  const handleResetToFlat = useCallback(async () => {
-    if (!equalizerReady) return;
-    void triggerImpact(ImpactFeedbackStyle.Light);
-    const flatPreset = EQUALIZER_PRESETS.find((p) => p.id === "flat");
-    const flatBands = flatPreset
-      ? { ...flatPreset.bands }
-      : { "60Hz": 0, "150Hz": 0, "400Hz": 0, "1KHz": 0, "2.4KHz": 0, "15KHz": 0 };
-
-    try {
-      await applyEqualizerBands(flatBands);
-    } catch (error) {
-      reportEffectError(error);
-      return;
-    }
-
-    setSettings((prev) =>
-      prev
-        ? {
-            ...prev,
-            equalizer: flatBands,
-          }
-        : prev
-    );
-    void saveSettings({
-      equalizer: flatBands,
-    });
-  }, [equalizerReady, reportEffectError]);
-
+    update({ equalizer: { ...preset.bands }, equalizerEnabled: true }, true);
+  }, [update]);
+  const handleResetToFlat = useCallback(() => update({ equalizer: { ...FLAT_EQUALIZER }, equalizerEnabled: true }, true), [update]);
   const onLayoutGraph = useCallback((e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
     if (w > 0) {
@@ -513,100 +353,36 @@ function useEqualizerState() {
     return { linePath: lPath, fillPath: fPath };
   }, [points]);
 
-  // Touch and drag handling using Gesture Responder System
-  const handleTouchStart = useCallback(
-    (evt: GestureResponderEvent) => {
-      const { locationX, locationY } = evt.nativeEvent;
 
-      let closestIdx = 0;
-      let minDistance = Infinity;
-      points.forEach((pt, idx) => {
-        const dist = Math.abs(pt.x - locationX);
-        if (dist < minDistance) {
-          minDistance = dist;
-          closestIdx = idx;
-        }
-      });
-
-      activeBandIndexRef.current = closestIdx;
-      setActiveBandIdx(closestIdx);
-      setIsDragging(true);
-
-      const clampedY = Math.max(PAD_TOP, Math.min(GRAPH_HEIGHT - PAD_BOTTOM, locationY));
-      const ratio = 1 - (clampedY - PAD_TOP) / USABLE_HEIGHT;
-      const targetDb = Math.max(MIN_DB, Math.min(MAX_DB, Math.round(ratio * DB_RANGE + MIN_DB)));
-
-      const bandKey = EQUALIZER_BANDS[closestIdx].key;
-      const updated = { ...bandsRef.current, [bandKey]: targetDb };
-      bandsRef.current = updated;
-
-      setSettings((prev) =>
-        prev ? { ...prev, equalizer: updated, equalizerEnabled: true } : prev
-      );
-      void applyEqualizerBands(updated).then(() => applyEqualizerEnabled(true)).catch(reportEffectError);
-    },
-    [points, reportEffectError]
-  );
-
-  const handleTouchMove = useCallback(
-    (evt: GestureResponderEvent) => {
-      const idx = activeBandIndexRef.current;
-      if (idx === null || idx < 0 || idx >= EQUALIZER_BANDS.length) return;
-
-      const { locationY } = evt.nativeEvent;
-      const clampedY = Math.max(PAD_TOP, Math.min(GRAPH_HEIGHT - PAD_BOTTOM, locationY));
-      const ratio = 1 - (clampedY - PAD_TOP) / USABLE_HEIGHT;
-      const targetDb = Math.max(MIN_DB, Math.min(MAX_DB, Math.round(ratio * DB_RANGE + MIN_DB)));
-
-      const bandKey = EQUALIZER_BANDS[idx].key;
-      if (bandsRef.current[bandKey] !== targetDb) {
-        if (targetDb === 0) {
-          void triggerImpact(ImpactFeedbackStyle.Light);
-        }
-        const updated = { ...bandsRef.current, [bandKey]: targetDb };
-        bandsRef.current = updated;
-        setSettings((prev) =>
-          prev ? { ...prev, equalizer: updated, equalizerEnabled: true } : prev
-        );
-        void applyEqualizerBands(updated).catch(reportEffectError);
-      }
-    },
-    [reportEffectError]
-  );
-
+  // Keep the original six-handle graph; a manual curve maps to the shared 15-band DSP.
+  const dragBands = useRef<Record<string, number>>({});
+  const changeAt = useCallback((idx: number, y: number) => {
+    const ratio = 1 - (Math.max(PAD_TOP, Math.min(GRAPH_HEIGHT - PAD_BOTTOM, y)) - PAD_TOP) / USABLE_HEIGHT;
+    const db = Math.max(MIN_DB, Math.min(MAX_DB, Math.round(ratio * DB_RANGE + MIN_DB)));
+    dragBands.current = { ...dragBands.current, [EQUALIZER_BANDS[idx].key]: db };
+    update({ equalizer: normalizeEqualizer(dragBands.current), equalizerEnabled: true }, false);
+  }, [update]);
+  const handleTouchStart = useCallback((evt: GestureResponderEvent) => {
+    if (!equalizerReady) return;
+    const { locationX, locationY } = evt.nativeEvent;
+    let closest = 0;
+    points.forEach((pt, idx) => { if (Math.abs(pt.x - locationX) < Math.abs(points[closest].x - locationX)) closest = idx; });
+    dragBands.current = { ...bands };
+    activeBandIndexRef.current = closest;
+    setActiveBandIdx(closest); setIsDragging(true); changeAt(closest, locationY);
+  }, [bands, changeAt, equalizerReady, points]);
+  const handleTouchMove = useCallback((evt: GestureResponderEvent) => {
+    const idx = activeBandIndexRef.current;
+    if (idx !== null) changeAt(idx, evt.nativeEvent.locationY);
+  }, [changeAt]);
   const handleTouchEnd = useCallback(() => {
-    setIsDragging(false);
-    setActiveBandIdx(null);
+    if (activeBandIndexRef.current === null) return;
     activeBandIndexRef.current = null;
-    const currentBands = bandsRef.current;
-    void saveSettings({
-      equalizer: currentBands,
-      equalizerEnabled: true,
-    });
-    void applyEqualizerBands(currentBands).catch(reportEffectError);
-  }, [reportEffectError]);
-
-  return {
-    equalizerReady,
-    enabled,
-    activeBandIdx,
-    points,
-    padX,
-    graphWidth,
-    fillPath,
-    linePath,
-    effectsError,
-    activePresetId,
-    systemEqAvailable,
-    isDragging,
-    handleToggle,
-    handleSelectPreset,
-    handleResetToFlat,
-    onLayoutGraph,
-    handleTouchStart,
-    handleTouchMove,
-    handleTouchEnd,
-  };
+    setIsDragging(false); setActiveBandIdx(null); update(current.current, true);
+  }, [update]);
+  return { equalizerReady, enabled, activeBandIdx, points, padX, graphWidth, fillPath, linePath,
+    effectsError, activePresetId, isDragging, handleToggle, handleSelectPreset, handleResetToFlat,
+    onLayoutGraph, handleTouchStart, handleTouchMove, handleTouchEnd };
 }
 
 export function EqualizerScreen() {
@@ -652,7 +428,6 @@ export function EqualizerScreen() {
           equalizerReady={eq.equalizerReady}
           effectsError={eq.effectsError}
           activePresetId={eq.activePresetId}
-          systemEqAvailable={eq.systemEqAvailable}
           onToggle={eq.handleToggle}
           onSelectPreset={eq.handleSelectPreset}
         />
@@ -735,10 +510,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
   },
-  switchTitleWithIcon: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
   switchLabel: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
@@ -771,33 +542,5 @@ const styles = StyleSheet.create({
   presetNameSelected: {
     color: Colors.primary,
     fontFamily: "Inter_600SemiBold",
-  },
-  systemEqSection: {
-    marginTop: 16,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255, 255, 255, 0.12)",
-  },
-  systemEqButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-  },
-  systemEqInfo: {
-    flex: 1,
-    marginRight: 16,
-  },
-  systemEqTitle: {
-    fontSize: 16,
-    fontFamily: "Inter_600SemiBold",
-    color: "#FFFFFF",
-  },
-  systemEqSubtitle: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    color: "rgba(255, 255, 255, 0.6)",
-    marginTop: 2,
   },
 });

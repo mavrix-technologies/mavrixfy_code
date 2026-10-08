@@ -9,8 +9,8 @@ import { DeviceEventEmitter } from "react-native";
 
 const HOME_PUBLIC_PLAYLISTS_CACHE_KEY = "@mavrixfy_home_public_playlists_v1";
 const HOME_PUBLIC_PLAYLISTS_CACHE_TIME_KEY = "@mavrixfy_home_public_playlists_time_v1";
-const HOME_FEED_CACHE_KEY = "@mavrixfy_home_feed_snapshot_v5";
-const HOME_FEED_CACHE_TIME_KEY = "@mavrixfy_home_feed_snapshot_time_v5";
+const HOME_FEED_CACHE_KEY = "@mavrixfy_home_feed_snapshot_v6";
+const HOME_FEED_CACHE_TIME_KEY = "@mavrixfy_home_feed_snapshot_time_v6";
 const HOME_PUBLIC_PLAYLISTS_TTL_MS = 20 * 60 * 1000;
 const HOME_PUBLIC_PLAYLISTS_MAX_STALE_MS = 12 * 60 * 60 * 1000;
 const HOME_FEED_CACHE_TTL_MS = 30 * 60 * 1000;

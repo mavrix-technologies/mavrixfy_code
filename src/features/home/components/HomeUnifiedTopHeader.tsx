@@ -6,12 +6,11 @@ import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import React,{ useCallback,useEffect,useMemo,useRef } from "react";
+import React,{ useCallback,useMemo } from "react";
 import {
-FlatList,
 Platform,
 StyleSheet,
-type ListRenderItemInfo,
+ScrollView,
 } from "react-native";
 import Animated,{
 useAnimatedStyle,
@@ -36,8 +35,6 @@ UNIFIED_HEADER_MENU_HEIGHT,UNIFIED_HEADER_TOP_BAR_HEIGHT
 export const UNIFIED_HEADER_TOTAL_HEIGHT =
   UNIFIED_HEADER_TOP_BAR_HEIGHT + UNIFIED_HEADER_MENU_HEIGHT;
 
-const categoryKeyExtractor = (item: MusicCategoryItem) => item.id;
-
 interface HomeUnifiedTopHeaderProps {
   topInset: number;
   selectedCategory: string;
@@ -57,7 +54,6 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
 }: HomeUnifiedTopHeaderProps) {
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
-  const flatListRef = useRef<FlatList<MusicCategoryItem> | null>(null);
   const isIOS = Platform.OS === "ios";
 
   // Dynamic remote Title customization
@@ -93,31 +89,15 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
     router.push("/downloads");
   }, [router]);
 
-  // Production-Ready Official Method: Native FlatList scrollToIndex with viewPosition: 0.5 (Dead-center)
   const handleCategoryPress = useCallback(
-    (item: MusicCategoryItem, index: number) => {
+    (item: MusicCategoryItem) => {
       if (item.id === selectedCategory) return;
       if (Platform.OS !== "web") {
         void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
       }
-      flatListRef.current?.scrollToIndex({
-        index,
-        viewPosition: 0.5,
-        animated: true,
-      });
       onSelectCategory(item.id);
     },
     [onSelectCategory, selectedCategory]
-  );
-
-  const handleScrollToIndexFailed = useCallback(
-    (info: { index: number; highestMeasuredFrameIndex: number; averageItemLength: number }) => {
-      flatListRef.current?.scrollToOffset({
-        offset: info.index * (info.averageItemLength || 75),
-        animated: true,
-      });
-    },
-    []
   );
 
   // 100% UI-Thread Reanimated Transforms (Seamless shrink, zero layout shifts, zero CPU frame drops)
@@ -173,12 +153,16 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
   // Dynamic Category Items (Custom categories or label overrides)
   const categoriesData = useMemo(() => {
     if (Array.isArray(themeConfig?.customCategories) && themeConfig.customCategories.length > 0) {
-      return themeConfig.customCategories.map((cat) => ({
+      return MAVRIXFY_MUSIC_CATEGORIES.map((item) => {
+        const cat = themeConfig.customCategories?.find(category => category.id === item.id);
+        if (!cat) return item;
+        return {
         id: cat.id,
         label: cat.label || cat.id,
         focusedIcon: (cat.icon as any) || "musical-notes",
         unfocusedIcon: (`${cat.icon || "musical-notes"}-outline` as any),
-      }));
+        };
+      });
     }
 
     const labelOverrides = themeConfig?.menuLabels;
@@ -192,24 +176,13 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
     return MAVRIXFY_MUSIC_CATEGORIES;
   }, [themeConfig?.customCategories, themeConfig?.menuLabels]);
 
-  // Auto-center category on load or external selection
-  useEffect(() => {
-    const index = categoriesData.findIndex((c) => c.id === selectedCategory);
-    if (index >= 0) {
-      flatListRef.current?.scrollToIndex({
-        index,
-        viewPosition: 0.5,
-        animated: true,
-      });
-    }
-  }, [selectedCategory, categoriesData]);
-
   const renderCategoryItem = useCallback(
-    ({ item, index }: ListRenderItemInfo<MusicCategoryItem>) => {
+    (item: MusicCategoryItem, index: number) => {
       const active = selectedCategory === item.id;
 
       return (
         <CategoryTabItem
+          key={item.id}
           item={item}
           index={index}
           active={active}
@@ -289,25 +262,15 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
         titleColor={titleColor}
         titleText={titleText}
         topBarAnimatedStyle={topBarAnimatedStyle}
+        scrollY={scrollY}
       />
 
-      {/* ── Sticky Menu Rail Row: Official High-Performance FlatList ── */}
+      {/* A small native scroll row keeps every menu option mounted without clipping. */}
       <Animated.View style={[styles.menuRailRow, menuRailAnimatedStyle]} pointerEvents="box-none">
-        <FlatList
-          ref={flatListRef}
-          data={categoriesData}
-          keyExtractor={categoryKeyExtractor}
-          renderItem={renderCategoryItem}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          showsVerticalScrollIndicator={false}
-          overScrollMode="never"
-          bounces={false}
-          contentContainerStyle={styles.menuScrollContent}
-          style={styles.menuFlatList}
-          onScrollToIndexFailed={handleScrollToIndexFailed}
-          extraData={selectedCategory}
-        />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}
+          overScrollMode="never" removeClippedSubviews={false} contentContainerStyle={styles.menuScrollContent}>
+          {categoriesData.map(renderCategoryItem)}
+        </ScrollView>
       </Animated.View>
     </Animated.View>
   );
@@ -328,11 +291,8 @@ const styles = StyleSheet.create({
     position: "relative",
     zIndex: 2,
   },
-  menuFlatList: {
-    flexGrow: 0,
-    height: UNIFIED_HEADER_MENU_HEIGHT,
-  },
   menuScrollContent: {
+    flexDirection: "row",
     paddingHorizontal: 12,
     alignItems: "center",
     height: UNIFIED_HEADER_MENU_HEIGHT,

@@ -26,7 +26,7 @@ export function usePlaylistDetailParams() {
   const firestoreParam = pickFirstParam(params.firestore);
   const jiosaavnParam = pickFirstParam(params.jiosaavn);
 
-  const isYouTubeSource = pickFirstParam(params.youtube) === "true" || playlistId.startsWith("youtube_playlist_");
+  const isYouTubeSource = pickFirstParam(params.youtube) === "true" || /^youtube_(?:playlist|album)_/.test(playlistId);
 
   const isSongSource =
     pickFirstParam(params.song) === "true" ||

@@ -11,6 +11,7 @@ Pressable,
 StyleSheet,
 Text,
 View,
+useWindowDimensions,
 } from "react-native";
 
 const RECENT_CARD_WIDTH = 100;
@@ -62,6 +63,7 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
   playSong: (song: Song, queue?: Song[]) => void;
 }) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
 
   const handleRecentPress = useCallback(
     (item: RecentlyPlayedItem) => {
@@ -91,14 +93,14 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
       }
 
       const isJioSaavn = item.type === "jiosaavn-playlist";
-      const isYouTube = item.id.startsWith("youtube_playlist_");
+      const isYouTube = /^youtube_(?:playlist|album)_/.test(item.id);
       router.push({
         pathname: "/playlist/[id]",
         params: {
           id: item.id,
           jiosaavn: String(isJioSaavn),
           youtube: String(isYouTube),
-          album: "false",
+          album: String(item.id.startsWith("youtube_album_")),
           firestore: String(!isJioSaavn && !isYouTube),
           title: item.name,
           cover: item.imageUrl || "",
@@ -143,9 +145,9 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={ItemSeparatorComponent}
         getItemLayout={getItemLayout}
-        initialNumToRender={5}
-        maxToRenderPerBatch={4}
-        windowSize={5}
+        initialNumToRender={Math.max(1, Math.ceil(width / (RECENT_CARD_WIDTH + RECENT_CARD_GAP)))}
+        maxToRenderPerBatch={2}
+        windowSize={3}
         removeClippedSubviews
       />
     </View>

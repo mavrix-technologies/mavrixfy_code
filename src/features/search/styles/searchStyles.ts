@@ -49,11 +49,6 @@ export const styles = StyleSheet.create({
 
   // ── Active Search Header ───────────────────────────────────────────────────
   activeSearchHeader: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 25,
     paddingHorizontal: 16,
     paddingBottom: 10,
     backgroundColor: Colors.background,
@@ -450,18 +445,9 @@ export const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  // ── Suggestions Dropdown ─────────────────────────────────────────────────────
-  suggestionsDropdown: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    maxHeight: 360,
-    backgroundColor: "rgba(18, 22, 28, 0.98)",
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.08)",
-    zIndex: 999,
-  },
+  // ── Search suggestions ─────────────────────────────────────────────────────
   suggestionRow: {
+    minHeight: 56,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
@@ -469,6 +455,7 @@ export const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "rgba(255,255,255,0.06)",
   },
+  suggestionInsertButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   suggestionRowPressed: {
     backgroundColor: "rgba(255,255,255,0.07)",
   },

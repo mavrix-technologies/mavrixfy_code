@@ -11,7 +11,8 @@ import type {
   MediaElementAudioSourceNode,
 } from "react-native-audio-api";
 import { logger } from "@/lib/logger";
-import { calculateEqHeadroomDb, EQ_FREQUENCIES_HZ } from "./equalizerDsp";
+import { calculateEqHeadroomDb, EQ_FREQUENCIES_HZ, EQ_Q } from "./equalizerDsp";
+import { isPrematurePlaybackEnd, playbackDuration, playbackPosition, playbackStreamMetadata, type PlaybackStreamMetadata } from "./audioTimeline";
 
 // Importing this package installs its JSI module immediately. Expo Go does not
 // contain that module, so its expo-audio path must never evaluate this import.
@@ -53,7 +54,7 @@ export const Event = {
   PlaybackQueueEnded: "playback-queue-ended",
 } as const;
 
-type Track = {
+type Track = PlaybackStreamMetadata & {
   id?: string;
   url?: string;
   headers?: Record<string, string>;
@@ -88,27 +89,39 @@ let playback: PlaybackSnapshot = {
   repeat: RepeatMode.Off,
 };
 let sourceSnapshot = { sourceVersion: 0, url: "", source: { uri: "", headers: undefined as Record<string, string> | undefined }, headerKey: "" };
-let standbySnapshot = { url: "", trackId: "", source: { uri: "", headers: undefined as Record<string, string> | undefined }, headerKey: "" };
 let selectionVersion = 0;
-let standbyAudioHandle: AudioTagHandle | null = null;
-let isStandbyLoaded = false;
-let standbyLoadedUrl = "";
+let sourceReady = true;
 
-function getNextTrack() {
-  if (playback.index < 0 || playback.queue.length === 0) return null;
-  if (playback.index + 1 < playback.queue.length) {
-    return playback.queue[playback.index + 1];
-  }
-  if (playback.repeat === RepeatMode.Queue && playback.queue.length > 1) {
-    return playback.queue[0];
-  }
-  return null;
+// Invalidate callbacks and disconnect output before any asynchronous resolution.
+function detachCurrentSource() {
+  clearStartWatchdog();
+  selectionVersion += 1;
+  playIntentVersion += 1;
+  sourceReady = false;
+  playback = { ...playback, sourceVersion: playback.sourceVersion + 1 };
+  audioHandle?.pause();
+  audioHandle = null;
+  isSourceLoaded = false;
+  sourceNode?.disconnect();
+  sourceNode = null;
+  publish({});
 }
 
 const storeListeners = new Set<() => void>();
 const eventListeners = new Map<string, Set<(payload: any) => void>>();
 let audioHandle: AudioTagHandle | null = null;
 let isSourceLoaded = false;
+let startWatchdog: ReturnType<typeof setTimeout> | undefined;
+function clearStartWatchdog() { clearTimeout(startWatchdog); startWatchdog = undefined; }
+function armStartWatchdog() {
+  clearStartWatchdog();
+  const version = playback.sourceVersion;
+  startWatchdog = setTimeout(() => {
+    startWatchdog = undefined;
+    if (playback.sourceVersion === version && playback.playWhenReady && playback.status !== State.Playing)
+      handlePlaybackError(new Error("Audio did not start within 15 seconds. Tap Play to retry."));
+  }, 15000);
+}
 let context: NativeAudioContext | null = null;
 
 // Native suspend/resume may complete out of order. Reconcile against live intent
@@ -137,8 +150,8 @@ let notifiedSecond = -1;
 let playIntentVersion = 0;
 let interruptionResumeVersion: number | null = null;
 
-let effectSettings = { enabled: false, gains: [0, 0, 0, 0, 0, 0] };
-let effectsReady = false;
+let effectSettings = { enabled: false, gains: EQ_FREQUENCIES_HZ.map(() => 0) };
+
 let ducked = false;
 let appliedGainTargets = EQ_FREQUENCIES_HZ.map(() => 0);
 let outputGainTarget = 1;
@@ -148,28 +161,17 @@ function emit(name: string, payload: any = {}) {
 }
 function publish(next: Partial<PlaybackSnapshot>) {
   playback = { ...playback, ...next };
-  const url = activeTrack()?.url || "";
+  const url = sourceReady ? activeTrack()?.url || "" : "";
   const headers = activeTrack()?.headers;
-  const headerKey = JSON.stringify(headers || {});
+  const headerKey = headers === sourceSnapshot.source.headers
+    ? sourceSnapshot.headerKey : JSON.stringify(headers || {});
   if (
     sourceSnapshot.sourceVersion !== playback.sourceVersion ||
     sourceSnapshot.url !== url || sourceSnapshot.headerKey !== headerKey
   ) {
     sourceSnapshot = { sourceVersion: playback.sourceVersion, url, source: { uri: url, headers }, headerKey };
+    storeListeners.forEach((listener) => listener());
   }
-  const nextTrack = getNextTrack();
-  const nextUrl = nextTrack?.url || "";
-  const nextHeaders = nextTrack?.headers;
-  const nextHeaderKey = JSON.stringify(nextHeaders || {});
-  if (nextUrl !== standbySnapshot.url || nextHeaderKey !== standbySnapshot.headerKey) {
-    standbySnapshot = { url: nextUrl, trackId: nextTrack?.id || "", source: { uri: nextUrl, headers: nextHeaders }, headerKey: nextHeaderKey };
-    if (nextUrl !== standbyLoadedUrl || nextHeaderKey !== sourceSnapshot.headerKey) {
-      standbyAudioHandle = null;
-      isStandbyLoaded = false;
-      standbyLoadedUrl = "";
-    }
-  }
-  storeListeners.forEach((listener) => listener());
 }
 function activeTrack() {
   return playback.queue[playback.index] ?? null;
@@ -181,6 +183,9 @@ function setStatus(status: string) {
   updateNotification();
 }
 function handlePlaybackError(error: unknown) {
+  clearStartWatchdog();
+  const message = (error instanceof Error ? error.message : String(error)).replace(/https?:\/\/[^\s"']+/g, "[URL]");
+  logger.error("[Audio] Playback source failed", { trackId: activeTrack()?.id, message });
   const shouldResume = playback.playWhenReady;
   if (activeTrack()?.source === "youtube") {
     audioHandle?.pause();
@@ -190,7 +195,7 @@ function handlePlaybackError(error: unknown) {
   emit(Event.PlaybackError, {
     trackId: activeTrack()?.id,
     shouldResume,
-    message: (error instanceof Error ? error.message : String(error)).replace(/https?:\/\/[^\s"']+/g, "[URL]"),
+    message,
   });
 }
 function updateNotification() {
@@ -223,16 +228,16 @@ function updateNotification() {
       });
       notificationMetadata = key;
       if (!controlsEnabled) {
-        await Promise.all([
-          PlaybackNotificationManager.enableControl("skipBackward", false),
-          PlaybackNotificationManager.enableControl("skipForward", false),
-          PlaybackNotificationManager.enableControl("play", true),
-          PlaybackNotificationManager.enableControl("pause", true),
-          PlaybackNotificationManager.enableControl("stop", true),
-          PlaybackNotificationManager.enableControl("nextTrack", true),
-          PlaybackNotificationManager.enableControl("previousTrack", true),
-          PlaybackNotificationManager.enableControl("seekTo", true),
-        ]);
+        // Configure controls in order instead of flooding the native media
+        // session with a burst of intermediate notification updates.
+        await PlaybackNotificationManager.enableControl("skipBackward", false);
+        await PlaybackNotificationManager.enableControl("skipForward", false);
+        await PlaybackNotificationManager.enableControl("play", true);
+        await PlaybackNotificationManager.enableControl("pause", true);
+        await PlaybackNotificationManager.enableControl("stop", true);
+        await PlaybackNotificationManager.enableControl("nextTrack", true);
+        await PlaybackNotificationManager.enableControl("previousTrack", true);
+        await PlaybackNotificationManager.enableControl("seekTo", true);
         controlsEnabled = true;
       }
     }
@@ -245,11 +250,13 @@ function updateNotification() {
     });
 }
 async function select(index: number, initialPosition = 0) {
+  clearStartWatchdog();
   if (index < 0 || index >= playback.queue.length)
     throw new Error("Track index is out of range.");
 
   const previous = activeTrack();
-  const version = ++selectionVersion;
+  detachCurrentSource();
+  const version = selectionVersion;
   let track = playback.queue[index];
   if (track.source === "youtube" && !/^(file|content):\/\//i.test(track.url || "")) {
     const song = { id: track.id, source: "youtube", youtubeVideoId: track.youtubeVideoId } as Song;
@@ -258,79 +265,17 @@ async function select(index: number, initialPosition = 0) {
       stream = await resolveYouTubeStream(song, typeof track.youtubeRequestedQuality === "string" ? track.youtubeRequestedQuality : undefined);
     } catch (error) {
       if (version !== selectionVersion || playback.queue[index]?.id !== track.id) return;
-      // Recovery belongs to the requested track, including automatic queue advances.
-      audioHandle?.pause();
-      audioHandle = null;
-      isSourceLoaded = false;
-      sourceNode?.disconnect();
-      sourceNode = null;
-      publish({ index, position: Math.max(0, initialPosition), duration: Number(track.duration) || 0, sourceVersion: playback.sourceVersion + 1, status: State.Loading });
+      publish({ index, position: Math.max(0, initialPosition), duration: Number(track.duration) || 0, status: State.Loading });
       emit(Event.PlaybackActiveTrackChanged, { lastTrack: previous, track, index });
       throw error;
     }
     if (version !== selectionVersion || playback.queue[index]?.id !== track.id) return;
-    track = { ...track, url: stream.url, headers: stream.headers, youtubeAudioExpiresAt: stream.expiresAt };
+    track = { ...track, ...playbackStreamMetadata(stream), url: stream.url, headers: stream.headers, youtubeAudioExpiresAt: stream.expiresAt,
+      duration: playbackDuration(Number(track.duration) || 0, stream.durationSeconds) };
     playback = { ...playback, queue: playback.queue.map((item, i) => i === index ? track : item) };
   }
-  const targetUrl = track?.url || "";
-
-  // ZERO-GAP STANDBY HAND-OFF:
-  // If the target track matches the standby preloaded track:
-  if (
-    targetUrl &&
-    targetUrl === standbyLoadedUrl &&
-    standbyAudioHandle &&
-    isStandbyLoaded &&
-    context
-  ) {
-    audioHandle?.pause();
-    sourceNode?.disconnect();
-
-    audioHandle = standbyAudioHandle;
-    isSourceLoaded = true;
-    standbyAudioHandle = null;
-    isStandbyLoaded = false;
-    standbyLoadedUrl = "";
-
-    try {
-      sourceNode = context.createMediaElementSource(audioHandle);
-      sourceNode.connect(filters[0]);
-    } catch {
-      // non-fatal
-    }
-
-    if (initialPosition > 0) {
-      audioHandle.seekToTime(initialPosition);
-    }
-
-    publish({
-      index,
-      position: Math.max(0, initialPosition),
-      duration: Number(track.duration) || 0,
-      sourceVersion: playback.sourceVersion + 1,
-      status: playback.playWhenReady ? State.Playing : State.Paused,
-    });
-    emit(Event.PlaybackActiveTrackChanged, { lastTrack: previous, track, index });
-    emit(Event.PlaybackState, { state: playback.playWhenReady ? State.Playing : State.Paused });
-    updateNotification();
-
-    if (playback.playWhenReady) {
-      const selectedHandle = audioHandle;
-      const selectedVersion = playback.sourceVersion;
-      void synchronizeAudioContext(true).then(() => {
-        if (playback.playWhenReady && playback.sourceVersion === selectedVersion) selectedHandle?.play();
-      }).catch(error => {
-        if (playback.sourceVersion === selectedVersion) handlePlaybackError(error);
-      });
-    }
-    return;
-  }
-
-  audioHandle?.pause();
-  audioHandle = null;
-  isSourceLoaded = false;
-  sourceNode?.disconnect();
-  sourceNode = null;
+  if (version !== selectionVersion) return;
+  sourceReady = true;
   publish({
     index,
     position: Math.max(0, initialPosition),
@@ -340,6 +285,7 @@ async function select(index: number, initialPosition = 0) {
   });
   emit(Event.PlaybackActiveTrackChanged, { lastTrack: previous, track, index });
   emit(Event.PlaybackState, { state: State.Loading });
+  if (playback.playWhenReady) armStartWatchdog();
   updateNotification();
 }
 
@@ -348,7 +294,7 @@ function installGraph(ctx: NativeAudioContext) {
     const node = ctx.createBiquadFilter();
     node.type = "peaking";
     node.frequency.value = Math.min(frequency, ctx.sampleRate * 0.475);
-    node.Q.value = 1;
+    node.Q.value = EQ_Q;
     return node;
   });
   outputGain = ctx.createGain();
@@ -358,7 +304,7 @@ function installGraph(ctx: NativeAudioContext) {
     filters[i].connect(filters[i + 1]);
   filters[filters.length - 1].connect(outputGain);
   outputGain.connect(ctx.destination);
-  effectsReady = true;
+
   applyEffectSettings();
   void import("./audioEqualizer").then(({ syncEqualizerWithNative }) =>
     syncEqualizerWithNative(),
@@ -386,7 +332,7 @@ function applyEffectSettings() {
     outputGainTarget = targetOutput;
   }
   filters.forEach((node, index) => {
-    const target = targetGains[index];
+    const target = EQ_FREQUENCIES_HZ[index] < context!.sampleRate * 0.45 ? targetGains[index] : 0;
     if (Math.abs(target - appliedGainTargets[index]) < 0.0001) return;
     node.gain.cancelAndHoldAtTime(now);
     node.gain.setTargetAtTime(target, now + (attenuating ? 0.05 : 0), 0.04);
@@ -394,39 +340,18 @@ function applyEffectSettings() {
   });
 }
 
-export function getStandardAudioEffects() {
-  return {
-    sessionId: effectsReady ? 1 : 0,
-    equalizerAvailable: effectsReady,
-    equalizerControl: effectsReady,
-    equalizerEnabled: effectSettings.enabled,
-    minLevel: -1000,
-    maxLevel: 1000,
-    bands: EQ_FREQUENCIES_HZ.map((frequency, id) => ({
-      id,
-      frequency,
-      level: effectSettings.gains[id] * 100,
-    })),
-  };
-}
-
-export function setStandardEqualizerEnabled(enabled: boolean) {
-  if (!effectsReady) throw new Error("Audio engine is still starting.");
+export function setStandardEqualizer(gains: readonly number[], enabled: boolean) {
+  if (gains.length !== EQ_FREQUENCIES_HZ.length)
+    throw new Error("Invalid EQ bands.");
+  effectSettings.gains = gains.map((gain) =>
+    Number.isFinite(gain) ? Math.max(-8, Math.min(8, gain)) : 0,
+  );
   effectSettings.enabled = enabled;
   applyEffectSettings();
 }
 
-export function setStandardAudioBands(gains: readonly number[]) {
-  if (!effectsReady) throw new Error("Audio engine is still starting.");
-  if (gains.length !== EQ_FREQUENCIES_HZ.length)
-    throw new Error("Invalid EQ bands.");
-  effectSettings.gains = gains.map((gain) =>
-    Number.isFinite(gain) ? Math.max(-10, Math.min(10, gain)) : 0,
-  );
-  applyEffectSettings();
-}
-
 export const StandardAudioPlayer = {
+  beginTrackChange() { detachCurrentSource(); },
   async setupPlayer() {
     if (initialized) return;
     AudioManager.setAudioSessionOptions({ iosCategory: "playback" });
@@ -555,6 +480,7 @@ export const StandardAudioPlayer = {
     else if (index < selected) publish({ index: selected - 1 });
   },
   async reset() {
+    clearStartWatchdog();
     selectionVersion += 1;
     if (Platform.OS === "android")
       AudioManager.observeAudioInterruptions(false);
@@ -582,6 +508,7 @@ export const StandardAudioPlayer = {
     const intentVersion = ++playIntentVersion;
     publish({ playWhenReady: true });
     emit(Event.PlaybackPlayWhenReadyChanged, { playWhenReady: true });
+    if (playback.status !== State.Playing) armStartWatchdog();
     try {
       await synchronizeAudioContext(true);
     } catch (error) {
@@ -597,6 +524,7 @@ export const StandardAudioPlayer = {
     updateNotification();
   },
   async pause(releaseFocus = true) {
+    clearStartWatchdog();
     if (releaseFocus && ducked) {
       ducked = false;
       applyEffectSettings();
@@ -633,10 +561,7 @@ export const StandardAudioPlayer = {
   },
   async seekTo(seconds: number) {
     if (!Number.isFinite(seconds)) return;
-    const position = Math.max(
-      0,
-      playback.duration > 0 ? Math.min(seconds, playback.duration) : seconds,
-    );
+    const position = playbackPosition(seconds, playback.duration);
     if (audioHandle && isSourceLoaded) {
       audioHandle.seekToTime(position);
     }
@@ -649,6 +574,7 @@ export const StandardAudioPlayer = {
     updateNotification();
   },
   async finishQueue() {
+    clearStartWatchdog();
     playIntentVersion += 1;
     audioHandle?.pause();
     if (Platform.OS === "android")
@@ -692,12 +618,14 @@ export const StandardAudioPlayer = {
 function AudioDurationReporter({ sourceVersion }: { sourceVersion: number }) {
   const { duration } = useAudioTagContext();
   useEffect(() => {
+    const track = activeTrack();
+    const nextDuration = playbackDuration(duration, track?.playbackDurationSeconds);
     if (
-      duration > 0 &&
+      nextDuration > 0 &&
       playback.sourceVersion === sourceVersion &&
-      Math.abs(playback.duration - duration) > 0.5
+      Math.abs(playback.duration - nextDuration) > 0.5
     ) {
-      publish({ duration });
+      publish({ duration: nextDuration });
       updateNotification();
     }
   }, [duration, sourceVersion]);
@@ -729,12 +657,13 @@ export function useStandardAudioRenderer() {
     installGraph(created);
     contextListeners.forEach((listener) => listener());
     return () => {
+      clearStartWatchdog();
       audioHandle?.pause();
       audioHandle = null;
       isSourceLoaded = false;
       sourceNode?.disconnect();
       sourceNode = null;
-      effectsReady = false;
+
       context = null;
       filters = [];
       outputGain = null;
@@ -752,56 +681,6 @@ export function useStandardAudioRenderer() {
   );
 }
 
-const StandbyAudioLoader = React.memo(function StandbyAudioLoader({
-  standbyUrl,
-  standbySource,
-  audioCtx,
-}: {
-  standbyUrl: string;
-  standbySource: typeof standbySnapshot.source;
-  audioCtx: NativeAudioContext;
-}) {
-  const handleRef = useRef<AudioTagHandle>(null);
-
-  useEffect(() => {
-    return () => {
-      if (standbyAudioHandle === handleRef.current) {
-        standbyAudioHandle = null;
-        isStandbyLoaded = false;
-        standbyLoadedUrl = "";
-      }
-    };
-  }, []);
-
-  if (!standbyUrl) return null;
-
-  return (
-    <Audio
-      ref={(handle) => {
-        handleRef.current = handle;
-      }}
-      source={standbySource}
-      context={audioCtx}
-      preload="auto"
-      autoPlay={false}
-      onLoad={() => {
-        if (handleRef.current && standbySnapshot.url === standbyUrl) {
-          standbyAudioHandle = handleRef.current;
-          isStandbyLoaded = true;
-          standbyLoadedUrl = standbyUrl;
-        }
-      }}
-      onError={() => {
-        if (standbyAudioHandle === handleRef.current) {
-          standbyAudioHandle = null;
-          isStandbyLoaded = false;
-          standbyLoadedUrl = "";
-        }
-      }}
-    />
-  );
-});
-
 const StandardAudioSource = React.memo(function StandardAudioSource({
   current,
   audioCtx,
@@ -810,13 +689,15 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
   audioCtx: NativeAudioContext;
 }) {
   const handleRef = useRef<AudioTagHandle>(null);
+  const endedRef = useRef(false);
   const isCurrentSource = () =>
-    playback.sourceVersion === current.sourceVersion && context === audioCtx;
+    !endedRef.current && playback.sourceVersion === current.sourceVersion && context === audioCtx;
   const onPlaying = () => {
     if (!isCurrentSource() || !playback.playWhenReady) {
       handleRef.current?.pause();
       return;
     }
+    clearStartWatchdog();
     setStatus(State.Playing);
   };
   return (
@@ -891,16 +772,31 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
           updateNotification();
         }
       }}
-      onEnded={() => {
+      onEnded={(position?: number) => {
         if (!isCurrentSource() || !playback.playWhenReady) return;
-        if (playback.repeat === RepeatMode.Track) {
-          if (activeTrack()?.source === "youtube") {
-            void StandardAudioPlayer.skip(playback.index, 0).then(() => StandardAudioPlayer.play()).catch(handlePlaybackError);
-            return;
-          }
-          handleRef.current?.seekToTime(0);
-          handleRef.current?.play();
-        } else void StandardAudioPlayer.skipToNext().catch(handlePlaybackError);
+        clearStartWatchdog();
+        const actualEnd = typeof position === "number" && Number.isFinite(position) ? position : playback.position;
+        if (isPrematurePlaybackEnd(actualEnd, playback.duration)) {
+          publish({ position: actualEnd });
+          emit(Event.PlaybackProgressUpdated, { position: actualEnd, duration: playback.duration, track: playback.index });
+          handlePlaybackError(new Error(`Audio stream ended early at ${Math.round(actualEnd)} of ${Math.round(playback.duration)} seconds.`));
+          // Retire the interrupted decoder before Audio's automatic respawn.
+          endedRef.current = true;
+          return;
+        }
+        const end = playback.duration > 0 ? playback.duration : playback.position;
+        publish({ position: end });
+        emit(Event.PlaybackProgressUpdated, { position: end, duration: end, track: playback.index });
+        // Audio's loader respawns after onEnded. Retire this owner before that
+        // callback can load/play it again, and handle completion only once.
+        endedRef.current = true;
+        const advance = playback.repeat === RepeatMode.Track
+          ? StandardAudioPlayer.skip(playback.index, 0)
+          : StandardAudioPlayer.skipToNext();
+        const selection = selectionVersion;
+        void advance.catch(error => {
+          if (selectionVersion === selection) handlePlaybackError(error);
+        });
       }}
       onError={(error) => {
         if (!isCurrentSource()) return;
@@ -908,14 +804,7 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
       }}
     >
       <AudioDurationReporter sourceVersion={current.sourceVersion} />
-      {standbySnapshot.url && standbySnapshot.url !== current.url ? (
-        <StandbyAudioLoader
-          key={standbySnapshot.url + standbySnapshot.headerKey}
-          standbyUrl={standbySnapshot.url}
-          standbySource={standbySnapshot.source}
-          audioCtx={audioCtx}
-        />
-      ) : null}
+
     </Audio>
   );
 });

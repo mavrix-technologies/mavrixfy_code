@@ -1,4 +1,9 @@
 import { hslToRgb,normalizeHexColor,rgbToHex,rgbToHsl } from "./colorMath";
+import { artworkAnalysisUrl } from "@/services/youtube/YouTubeArtwork";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
+import { useEffect,useState } from "react";
+import { Platform } from "react-native";
 export { colorWithAlpha } from "./colorMath";
 /**
  * colorExtractor.ts — Artwork Color Extraction Architecture
@@ -13,18 +18,13 @@ export { colorWithAlpha } from "./colorMath";
  *    - Uses `UIImageColors` to extract background, primary, secondary, and detail.
  *
  * 3. JS Fallback Layer (Expo Go / Web):
- *    - Pure-JS decode + sampled RGB/HSL extraction.
+ *    - Deterministic palette without JS image decoding.
  *
  * 4. Mavrixfy Presentation Layer:
  *    - Custom Spotify-inspired transforms (`getSpotifyMiniPlayerBg`, `ensureDarkHexColor`)
  *      to ensure consistent dark-mode styling and WCAG readable text contrast across the UI.
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import Constants from "expo-constants";
-import * as FileSystem from "expo-file-system/legacy";
-import { useEffect,useState } from "react";
-import { Platform } from "react-native";
 
 type ImageColorsResult =
   | {
@@ -272,15 +272,17 @@ export function extractArtworkColors(imageUrl: string): Promise<ArtworkPalette> 
 }
 
 export function preloadDominantColors(imageUrls: (string | null | undefined)[]): void {
-  // If native image-colors is not available (e.g. Expo Go / JS fallback),
-  // do NOT aggressively preload 50 songs in JS because decoding 50 JPEGs concurrently causes heating.
+  // Expo Go uses an immediate deterministic palette; no preload is needed.
   if (!canUseNativeImageColors()) return;
 
-  for (const rawUrl of imageUrls) {
-    const url = rawUrl?.trim();
-    if (!url || paletteCache.has(url) || pendingRequests.has(url)) continue;
-    void extractArtworkColors(url).catch(() => {});
-  }
+  // Preloading is sequential so adjacent covers don't compete with playback/rendering.
+  void (async () => {
+    for (const rawUrl of imageUrls) {
+      const url = rawUrl?.trim();
+      if (!url || paletteCache.has(normalizeArtworkUrl(url))) continue;
+      await extractArtworkColors(url).catch(() => {});
+    }
+  })();
 }
 
 export function getImmediateArtworkPalette(imageUrl: string | null | undefined): ArtworkPalette {
@@ -307,10 +309,7 @@ export function useArtworkPalette(imageUrl: string | null | undefined): ArtworkP
 
   useEffect(() => {
     const key = (imageUrl || "").trim();
-    if (!key) {
-      setPalette(DEFAULT_ARTWORK_PALETTE);
-      return;
-    }
+    if (!key) return;
 
     let isMounted = true;
     void extractArtworkColors(key).then((extracted) => {
@@ -333,7 +332,7 @@ export function useArtworkPalette(imageUrl: string | null | undefined): ArtworkP
     };
   }, [imageUrl]);
 
-  return palette;
+  return imageUrl?.trim() ? palette : DEFAULT_ARTWORK_PALETTE;
 }
 
 function canUseNativeImageColors(): boolean {
@@ -369,7 +368,7 @@ async function extractArtworkColorsUncached(rawKey: string): Promise<ArtworkPale
 
   if (getColors) {
     try {
-      const result = await getColors(cacheKey, {
+      const result = await getColors(artworkAnalysisUrl(cacheKey), {
         fallback: "#0E1016",
         cache: true,
         quality: "low",
@@ -396,60 +395,6 @@ async function extractArtworkColorsUncached(rawKey: string): Promise<ArtworkPale
     setCachedPalette(rawKey, fallbackPalette);
   }
   return fallbackPalette;
-}
-
-async function extractArtworkColorsWithJsDecoder(cacheKey: string): Promise<ArtworkPalette> {
-  try {
-    const localUri = await cacheRemoteArtwork(cacheKey);
-    const bytes = await FileSystem.readAsStringAsync(localUri, {
-      encoding: "base64",
-    }).then(base64ToBytes).catch(() => new Uint8Array());
-
-    if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) {
-      return extractPaletteFromJpeg(bytes);
-    }
-  } catch {
-    // Graceful fallback
-  }
-
-  return buildPaletteFromUrlHash(cacheKey);
-}
-
-function extractPaletteFromJpeg(bytes: Uint8Array): ArtworkPalette {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const jpeg = require("jpeg-js") as {
-    decode: (
-      input: Uint8Array,
-      options: { useTArray: boolean; formatAsRGBA: boolean; maxMemoryUsageInMB?: number }
-    ) => { data: Uint8Array; width: number; height: number };
-  };
-
-  const { data, width, height } = jpeg.decode(bytes, {
-    useTArray: true,
-    formatAsRGBA: false, // 3 channels (RGB)
-    maxMemoryUsageInMB: 6,
-  });
-
-  const swatchesRgb = sampleDominantSwatchesFromPixels(data, width, height, 3);
-  const primary = swatchesRgb[0] || { r: 35, g: 45, b: 60 };
-  const rawHexSwatches = swatchesRgb.map((s) => rgbToHex(s.r, s.g, s.b));
-  const rawDomHex = rgbToHex(primary.r, primary.g, primary.b);
-  const rawVibHex = rawHexSwatches[1] || rawDomHex;
-
-  const background = transformToSeamlessBackground(rawDomHex);
-  const accent = transformToVibrantAccent(rawVibHex);
-  const swatches = dedupeAndDarkenSwatches(rawHexSwatches, background);
-
-  return {
-    background,
-    accent,
-    text: "#FFFFFF",
-    isDark: true,
-    primary: accent,
-    rawDominant: rawDomHex,
-    rawVibrant: rawVibHex,
-    swatches,
-  };
 }
 
 const PRESET_JEWEL_PALETTES: [string, string][] = [
@@ -486,91 +431,6 @@ export function buildPaletteFromUrlHash(url: string): ArtworkPalette {
     rawVibrant: accent,
     swatches,
   };
-}
-
-function sampleDominantSwatchesFromPixels(
-  data: Uint8Array,
-  width: number,
-  height: number,
-  channels = 3
-): { r: number; g: number; b: number }[] {
-  const step = Math.max(6, Math.floor(Math.sqrt((width * height) / 350)));
-  const bins: { rSum: number; gSum: number; bSum: number; count: number; maxSat: number }[] = Array.from(
-    { length: 13 },
-    () => ({ rSum: 0, gSum: 0, bSum: 0, count: 0, maxSat: 0 })
-  );
-
-  for (let y = 0; y < height; y += step) {
-    for (let x = 0; x < width; x += step) {
-      const index = (y * width + x) * channels;
-      if (index + 2 >= data.length) continue;
-      const alpha = channels === 4 ? data[index + 3] : 255;
-      if (alpha < 32) continue;
-
-      const r = data[index];
-      const g = data[index + 1];
-      const b = data[index + 2];
-      const { h, s, l } = rgbToHsl(r, g, b);
-
-      if (l < 0.06 || l > 0.94) continue;
-
-      let binIdx = 12; // neutral
-      if (s >= 0.10) {
-        binIdx = Math.min(11, Math.floor(h / 30));
-      }
-
-      bins[binIdx].rSum += r;
-      bins[binIdx].gSum += g;
-      bins[binIdx].bSum += b;
-      bins[binIdx].count += 1;
-      bins[binIdx].maxSat = Math.max(bins[binIdx].maxSat, s);
-    }
-  }
-
-  // Populate bins that have pixels
-  const populated = bins.filter((b) => b.count > 0);
-
-  if (populated.length === 0) {
-    return [{ r: 83, g: 83, b: 86 }];
-  }
-
-  // 1. Dominant: Highest pixel count (true dominant color of the image)
-  const sortedByCount = [...populated].sort((a, b) => b.count - a.count);
-  const dominantBin = sortedByCount[0];
-
-  // 2. Vibrant: Highest vibrancy / saturation (avoiding neutral bin 12 if possible)
-  const coloredBins = populated.filter((b) => b !== bins[12] && b.maxSat >= 0.18);
-  const vibrantBin =
-    coloredBins.length > 0
-      ? coloredBins.sort((a, b) => b.count * b.maxSat - a.count * a.maxSat)[0]
-      : sortedByCount[1] || dominantBin;
-
-  const result: { r: number; g: number; b: number }[] = [];
-  result.push({
-    r: Math.round(dominantBin.rSum / dominantBin.count),
-    g: Math.round(dominantBin.gSum / dominantBin.count),
-    b: Math.round(dominantBin.bSum / dominantBin.count),
-  });
-
-  if (vibrantBin !== dominantBin) {
-    result.push({
-      r: Math.round(vibrantBin.rSum / vibrantBin.count),
-      g: Math.round(vibrantBin.gSum / vibrantBin.count),
-      b: Math.round(vibrantBin.bSum / vibrantBin.count),
-    });
-  }
-
-  for (const b of sortedByCount) {
-    if (b !== dominantBin && b !== vibrantBin) {
-      result.push({
-        r: Math.round(b.rSum / b.count),
-        g: Math.round(b.gSum / b.count),
-        b: Math.round(b.bSum / b.count),
-      });
-    }
-  }
-
-  return result;
 }
 
 export function dedupeAndDarkenSwatches(swatches: (string | undefined | null)[], primaryBg?: string): string[] {
@@ -617,56 +477,6 @@ export function dedupeAndDarkenSwatches(swatches: (string | undefined | null)[],
   }
 
   return result.slice(0, 5);
-}
-
-async function buildArtworkSources(cacheKey: string): Promise<string[]> {
-  const normalized = normalizeArtworkUrl(cacheKey);
-  if (!normalized) return [];
-
-  if (normalized.startsWith("file://") || normalized.startsWith("data:") || normalized.startsWith("content://")) {
-    return [normalized];
-  }
-
-  if (!normalized.startsWith("http")) {
-    return [normalized];
-  }
-
-  // On iOS: react-native-image-colors uses URLSession.shared.dataTask which directly downloads
-  // HTTP/HTTPS in memory. Passing local file:// URLs to URLSession on iOS fails with error -1002 (unsupported URL).
-  // Thus, the remote HTTPS URL must be the primary source on iOS.
-  if (Platform.OS === "ios") {
-    return [normalized];
-  }
-
-  // On Android, attempt caching for fast local decode, fallback to remote URL
-  try {
-    const localUri = await cacheRemoteArtwork(normalized);
-    return [localUri, normalized];
-  } catch {
-    return [normalized];
-  }
-}
-
-async function cacheRemoteArtwork(remoteUrl: string): Promise<string> {
-  const extensionMatch = remoteUrl.match(/\.(jpe?g|png|webp|gif)(\?|#|$)/i);
-  const extension = extensionMatch?.[1]?.toLowerCase() ?? "jpg";
-  const fileName = `art-${hashString(remoteUrl)}.${extension}`;
-  const cacheDir = FileSystem.cacheDirectory;
-  if (!cacheDir) {
-    throw new Error("Cache directory unavailable.");
-  }
-  const localUri = `${cacheDir}${fileName}`;
-
-  try {
-    const existing = await FileSystem.getInfoAsync(localUri).catch(() => ({ exists: false }));
-    if (existing.exists) {
-      return localUri;
-    }
-    const downloaded = await FileSystem.downloadAsync(remoteUrl, localUri);
-    return downloaded.uri;
-  } catch (e) {
-    throw e;
-  }
 }
 
 function mapImageColorsToPalette(result: ImageColorsResult): ArtworkPalette {
@@ -797,22 +607,3 @@ function pickColor(...candidates: (string | undefined | null)[]): string | null 
   }
   return null;
 }
-
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = globalThis.atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-function hashString(value: string): string {
-  let hash = 0;
-  for (let i = 0; i < value.length; i++) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
-

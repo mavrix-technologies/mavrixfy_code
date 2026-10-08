@@ -8,6 +8,8 @@
  * unnecessary re-renders in sibling components.
  */
 
+import { useSyncExternalStore } from "react";
+
 export type PlayerUIState = "hidden" | "mini" | "expanded";
 
 type UIStateListener = (state: PlayerUIState) => void;
@@ -49,6 +51,13 @@ export const playerUIStateStore = {
     this._emit("mini");
   },
 };
+
+const subscribePlayerUI = (listener: () => void) => playerUIStateStore.subscribe(listener);
+const getPlayerUIState = () => playerUIStateStore.current;
+
+export function usePlayerUIState(): PlayerUIState {
+  return useSyncExternalStore(subscribePlayerUI, getPlayerUIState, getPlayerUIState);
+}
 
 /** Imperative expand — call from MiniPlayer tap, openPlayer(), etc. */
 export function expandPlayer() {

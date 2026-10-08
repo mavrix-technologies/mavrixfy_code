@@ -1,16 +1,18 @@
-import Colors from "@/constants/colors";
+import { useVisibleImageAnimation } from "@/lib/useVisibleImageAnimation";
 import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import { type SharedValue } from "react-native-reanimated";
 import {
   ActivityIndicator,
-  Platform,
+  PixelRatio,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from "react-native";
+import { getFestivalArtworkUrl } from "./festivalArtwork";
 
 // Module-level aspect ratio cache to avoid recalculating on re-renders across the app lifecycle
 const gBannerAspectRatioCache: Record<string, number> = {};
@@ -20,16 +22,24 @@ const DEFAULT_BANNER_ASPECT_RATIO = 16 / 9;
 
 interface FestivalHeaderBannerProps {
   themeConfig?: FestivalThemeConfig;
+  scrollY?: SharedValue<number>;
+  contentTopOffset?: number;
 }
 
 export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
   themeConfig,
+  scrollY,
+  contentTopOffset = 0,
 }: FestivalHeaderBannerProps) {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const screenWidth = windowWidth || 390;
   const screenHeight = windowHeight || 844;
 
   const backgroundImageUrl = themeConfig?.backgroundImageUrl?.trim() || null;
+  const [failedOptimizedSource, setFailedOptimizedSource] = useState<string | null>(null);
+  const optimizedSource = backgroundImageUrl
+    ? getFestivalArtworkUrl(backgroundImageUrl, screenWidth * PixelRatio.get()) : null;
+  const imageSource = optimizedSource === failedOptimizedSource ? backgroundImageUrl : optimizedSource;
   const configuredRatio = themeConfig?.aspectRatio;
 
   // 1. Stable aspect ratio resolution (Configured > Cached > Standard 16:9)
@@ -46,6 +56,15 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
     return Boolean(backgroundImageUrl && gBannerAspectRatioCache[backgroundImageUrl]);
   });
   const [hasError, setHasError] = useState<boolean>(false);
+
+  const effectiveRatio = aspectRatio > 0 ? aspectRatio : DEFAULT_BANNER_ASPECT_RATIO;
+  const rawHeight = Math.round(screenWidth / effectiveRatio);
+  const minHeight = 140;
+  const maxHeight = Math.round(Math.min(screenHeight * 0.42, 330));
+  const bannerHeight = Math.max(minHeight, Math.min(rawHeight, maxHeight));
+
+  const { imageRef, animationActive } = useVisibleImageAnimation(imageSource, scrollY,
+    contentTopOffset + bannerHeight);
 
   // Sync aspect ratio if themeConfig changes dynamically
   useEffect(() => {
@@ -78,9 +97,13 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
   );
 
   const handleError = useCallback(() => {
+    if (imageSource && imageSource !== backgroundImageUrl) {
+      setFailedOptimizedSource(imageSource);
+      return;
+    }
     setIsLoaded(true);
     setHasError(true);
-  }, []);
+  }, [imageSource, backgroundImageUrl]);
 
   if (!themeConfig || !themeConfig.enabled) {
     return null;
@@ -101,17 +124,11 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
 
   // 2. Predictable, non-jumping banner geometry
   // Clamped between 140px and 42% screen height (max 330px on larger phones)
-  const effectiveRatio = aspectRatio > 0 ? aspectRatio : DEFAULT_BANNER_ASPECT_RATIO;
-  const rawHeight = Math.round(screenWidth / effectiveRatio);
-  const minHeight = 140;
-  const maxHeight = Math.round(Math.min(screenHeight * 0.42, 330));
-  const bannerHeight = Math.max(minHeight, Math.min(rawHeight, maxHeight));
 
   return (
     <View
       accessibilityRole="image"
       accessibilityLabel={mainTitle ? `${mainTitle} Special Music Showcase` : "Festival Showcase"}
-      renderToHardwareTextureAndroid={true}
       style={[
         styles.seamlessHeroRoot,
         {
@@ -139,7 +156,8 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
       {/* 3. High-Performance Hardware-Accelerated Image / Animated GIF */}
       {hasImage && (
         <Image
-          source={{ uri: backgroundImageUrl! }}
+          ref={imageRef}
+          source={{ uri: imageSource! }}
           style={StyleSheet.absoluteFillObject}
           contentFit="cover"
           contentPosition="center"
@@ -147,7 +165,7 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
           cachePolicy="memory-disk"
           allowDownscaling={true}
           recyclingKey={backgroundImageUrl!}
-          autoplay={true}
+          autoplay={animationActive}
           transition={250}
           onLoad={handleLoad}
           onError={handleError}

@@ -71,7 +71,7 @@ function normalizeSnapshot(next: PlaybackEngineSnapshot): PlaybackEngineSnapshot
   return {
     ...next,
     currentSongId: next.currentSong?.id ?? null,
-    queueIds: next.queue.map((song) => song.id),
+    queueIds: next.queue === snapshot.queue ? snapshot.queueIds : next.queue.map((song) => song.id),
     activeIndex: next.queueIndex,
   };
 }
@@ -93,7 +93,8 @@ function subscribePlaybackEngine(listener: Listener): () => void {
 
 export function updatePlaybackEngineSnapshot(update: SnapshotUpdater): void {
   const patch = typeof update === "function" ? update(snapshot) : update;
-  if (!patch || Object.keys(patch).length === 0) return;
+  if (!patch || !Object.keys(patch).some((key) =>
+    !Object.is(snapshot[key as keyof SnapshotPatch], patch[key as keyof SnapshotPatch]))) return;
 
   const next = normalizeSnapshot({
     ...snapshot,
@@ -101,7 +102,6 @@ export function updatePlaybackEngineSnapshot(update: SnapshotUpdater): void {
     updatedAt: Date.now(),
   });
 
-  if (shallowEqualObject(snapshot, next)) return;
   snapshot = next;
   emitPlaybackEngine();
 }

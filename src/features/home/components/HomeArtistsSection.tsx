@@ -1,3 +1,4 @@
+import { displayArtworkUrl } from "@/lib/artworkDisplay";
 import Colors from "@/constants/colors";
 import type { ArtistCard } from "@/data/providers/ArtistProvider";
 import { triggerImpact } from "@/lib/haptics";
@@ -29,7 +30,7 @@ const ArtistItem = memo(function ArtistItem({
     onPress(artist);
   }, [artist, onPress]);
 
-  const imageUrl = getBestImageUrl(artist.image);
+  const imageUrl = displayArtworkUrl(getBestImageUrl(artist.image), ARTIST_CARD_WIDTH);
 
   return (
     <Pressable
