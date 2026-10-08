@@ -496,7 +496,7 @@ export const SearchResultsSection = React.memo(function SearchResultsSection({
                   <Text style={styles.sectionActionText}>See all</Text>
                 </Pressable>
               </View>
-              <View style={styles.sectionSongsList}>
+              <View>
                 {featuredSongs.map((song) => (
                   <SongRow
                     key={song.id}

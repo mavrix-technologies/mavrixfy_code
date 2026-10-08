@@ -102,10 +102,6 @@ export const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 146,
   },
-  sectionSongsList: {
-    marginHorizontal: 0,
-  },
-
   // ── Recent searches ─────────────────────────────────────────────────────────
   recentSection: {
     paddingBottom: 24,
@@ -301,7 +297,6 @@ export const styles = StyleSheet.create({
     marginBottom: 14,
   },
   sectionHeaderRow: {
-    paddingHorizontal: 16,
     marginBottom: 10,
     marginTop: 8,
     flexDirection: "row",
