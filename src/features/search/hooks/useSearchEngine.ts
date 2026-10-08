@@ -1,4 +1,3 @@
-import { searchYouTubeMusic, youTubeAvailable } from "@/services/youtube/YouTubeMusic";
 import { useFocusEffect,useRouter } from "expo-router";
 import { useCallback,useEffect,useMemo,useReducer,useRef,useState } from "react";
 import { type FlatList,Keyboard,Platform } from "react-native";
@@ -73,7 +72,6 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     suggestions,
     suggestionsOpen,
   } = state;
-  const [searchProvider, setSearchProvider] = useState<"jiosaavn" | "youtube">("jiosaavn");
   const [recentSearches, setRecentSearches] = useState<RecentSearchItem[]>([]);
 
   const {
@@ -118,9 +116,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
       dispatch({ type: "SET_SEARCH_LOADING", loading: true });
 
       try {
-        const nextResults = await (searchProvider === "youtube"
-          ? searchYouTubeMusic(normalizedQuery, resultFilter, controller.signal)
-          : searchRepository(normalizedQuery, resultFilter, controller.signal));
+        const nextResults = await searchRepository(normalizedQuery, resultFilter, controller.signal);
 
         if (requestId !== requestSeqRef.current || controller.signal.aborted) {
           return;
@@ -141,7 +137,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
         }
       }
     },
-    [resultFilter, searchProvider]
+    [resultFilter]
   );
 
   const handleChangeText = useCallback((text: string) => {
@@ -509,8 +505,8 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
           pathname: "/playlist/[id]",
           params: {
             id: String(playlist.id).trim(),
-            jiosaavn: searchProvider === "jiosaavn" ? "true" : "false",
-            youtube: searchProvider === "youtube" ? "true" : "false",
+            jiosaavn: "true",
+            youtube: "false",
             firestore: "false",
             link: playlist.url || "",
             title: playlist.name,
@@ -525,23 +521,11 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
         }
       );
     },
-    [routerPush, searchProvider]
+    [routerPush]
   );
 
-  const handleSearchProviderSelect = useCallback((provider: "jiosaavn" | "youtube") => {
-    requestSeqRef.current += 1;
-    cancelActiveSearchWork();
-    lastQueryRef.current = "";
-    dispatch({ type: "SEARCH_RESET", displayQuery: "" });
-    dispatch({ type: "SET_RESULT_FILTER", filter: "all" });
-    dispatch({ type: "CLOSE_SUGGESTIONS" });
-    setSearchProvider(provider);
-  }, [cancelActiveSearchWork]);
 
   return {
-    searchProvider,
-    handleSearchProviderSelect,
-    youTubeSupported: youTubeAvailable(),
     isOnline,
     topInset,
     query,

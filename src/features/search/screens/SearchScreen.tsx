@@ -169,7 +169,7 @@ function SearchScreenView() {
                 onSubmit={handleSubmitSearch}
                 onClear={handleClear}
                 autoFocus={true}
-                placeholder={searchEngine.searchProvider === "youtube" ? "Search YouTube songs and playlists..." : "Search songs, artists, albums..."}
+                placeholder="Search songs, artists, albums..."
                 theme="dark"
               />
             </View>
@@ -187,14 +187,7 @@ function SearchScreenView() {
           {/* Liquid Glass Scope Bar integrated directly in header */}
           <View style={styles.headerScopeBarWrap}>
             <LiquidGlassScopeBar
-              options={searchEngine.youTubeSupported
-                ? [{ key: "jiosaavn", label: "JioSaavn" }, { key: "youtube", label: "YouTube Music" }]
-                : [{ key: "jiosaavn", label: "JioSaavn" }]}
-              activeKey={searchEngine.searchProvider}
-              onSelect={searchEngine.handleSearchProviderSelect}
-            />
-            <LiquidGlassScopeBar
-              options={searchEngine.searchProvider === "youtube" ? RESULT_FILTERS.filter((option) => option.key === "all" || option.key === "songs" || option.key === "playlists") : RESULT_FILTERS}
+              options={RESULT_FILTERS}
               activeKey={resultFilter}
               onSelect={handleResultFilterSelect}
             />
