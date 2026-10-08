@@ -436,9 +436,10 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     return [];
   }, [showSongResults, songResults]);
 
-  const featuredAlbums = useMemo(() => albumResults.slice(0, 6), [albumResults]);
+  const featuredSongs = useMemo(() => songResults.slice(0, 5), [songResults]);
+  const featuredAlbums = useMemo(() => albumResults.slice(0, 5), [albumResults]);
   const featuredArtists = useMemo(() => artistResults.slice(0, 5), [artistResults]);
-  const featuredPlaylists = useMemo(() => playlistResults.slice(0, 6), [playlistResults]);
+  const featuredPlaylists = useMemo(() => playlistResults.slice(0, 5), [playlistResults]);
 
   const handleSongResultPress = useCallback(
     (song: Song) => {
@@ -551,6 +552,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     playlistResults,
     topSong,
     topArtist,
+    featuredSongs,
     featuredAlbums,
     featuredArtists,
     featuredPlaylists,

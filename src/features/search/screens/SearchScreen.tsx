@@ -74,6 +74,7 @@ function SearchScreenView() {
     playlistResults,
     topSong,
     topArtist,
+    featuredSongs,
     featuredAlbums,
     featuredArtists,
     featuredPlaylists,
@@ -274,6 +275,7 @@ function SearchScreenView() {
           playlistResults={playlistResults}
           topSong={topSong}
           topArtist={topArtist}
+          featuredSongs={featuredSongs}
           featuredAlbums={featuredAlbums}
           featuredArtists={featuredArtists}
           featuredPlaylists={featuredPlaylists}

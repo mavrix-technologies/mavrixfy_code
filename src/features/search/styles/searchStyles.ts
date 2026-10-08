@@ -98,6 +98,13 @@ export const styles = StyleSheet.create({
   // ── Scroll / shared ─────────────────────────────────────────────────────────
   scrollView: { flex: 1 },
   content: {},
+  allViewScrollContent: {
+    paddingTop: 8,
+    paddingBottom: 146,
+  },
+  sectionSongsList: {
+    marginHorizontal: 0,
+  },
 
   // ── Recent searches ─────────────────────────────────────────────────────────
   recentSection: {
