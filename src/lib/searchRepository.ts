@@ -1,6 +1,7 @@
 import { searchCatalog } from "@/lib/catalogService";
 import { getPlayableRemoteAudioUrl,Song,type JioSaavnImage } from "@/lib/musicData";
 import { deduplicateSongs,parseStructuredQuery,rankSongs } from "@/lib/searchUtils";
+import { searchYouTubeMusic } from "@/services/youtube/YouTubeMusic";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 
 import { fetchJson,fetchJsonStrict } from "@/utils/asyncUtils";
@@ -364,13 +365,29 @@ export async function searchRepository(
       globalRes?.data?.artists?.results || globalRes?.data?.artists || [],
       12
     );
-    const playlists = normalizePlaylists(
+    const jsPlaylists = normalizePlaylists(
       globalRes?.data?.playlists?.results || globalRes?.data?.playlists || [],
       12
     );
 
+    // Fetch YouTube Music songs + playlists in parallel; failures must not crash the search.
+    const [ytResult] = await Promise.allSettled([
+      searchYouTubeMusic(searchTerm, "all", signal),
+    ]);
+    const ytSongs: Song[] =
+      ytResult.status === "fulfilled" ? ytResult.value.songs : [];
+    if (ytResult.status === "rejected") {
+      console.warn("[searchRepository] YouTube Music search failed:", ytResult.reason);
+    }
+    const ytPlaylists =
+      ytResult.status === "fulfilled" ? ytResult.value.playlists : [];
+
+    // JioSaavn songs first, YouTube appended after deduplication
+    const finalSongs = deduplicateSongs([...rankedSongs, ...ytSongs]);
+    const playlists = [...jsPlaylists, ...ytPlaylists];
+
     const results: SearchResults = {
-      songs: rankedSongs,
+      songs: finalSongs,
       albums,
       artists,
       playlists,
@@ -430,9 +447,21 @@ export async function searchRepository(
     const mergedSongs = deduplicateSongs([...catalogSongs, ...parsedApiSongs, ...extraSongs]);
     const rankedSongs = rankSongs(mergedSongs, normalizedQuery, {}, topQueryId);
 
+    // Fetch YouTube Music songs in parallel; failures must not crash the search.
+    const [ytSongsResult] = await Promise.allSettled([
+      searchYouTubeMusic(searchTerm, "songs", signal),
+    ]);
+    const ytSongs: Song[] =
+      ytSongsResult.status === "fulfilled" ? ytSongsResult.value.songs : [];
+    if (ytSongsResult.status === "rejected") {
+      console.warn("[searchRepository] YouTube Music songs search failed:", ytSongsResult.reason);
+    }
+
+    const finalSongs = deduplicateSongs([...rankedSongs, ...ytSongs]);
+
     const results: SearchResults = {
       ...EMPTY_RESULTS,
-      songs: rankedSongs,
+      songs: finalSongs,
     };
     setCachedSearch(cacheKey, results);
     return results;
@@ -467,14 +496,32 @@ export async function searchRepository(
   }
 
   if (filter === "playlists") {
-    const playlistsData = await fetchJsonStrict<any>(
-      `${apiUrl}/api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=20`,
-      signal
-    );
-    const rawPlaylists = playlistsData?.data?.results || playlistsData?.results || [];
+    // Fetch JioSaavn and YouTube Music playlists in parallel.
+    const [jsPlaylistsResult, ytPlaylistsResult] = await Promise.allSettled([
+      fetchJsonStrict<any>(
+        `${apiUrl}/api/search/playlists?query=${encodeURIComponent(searchTerm)}&limit=20`,
+        signal
+      ),
+      searchYouTubeMusic(searchTerm, "playlists", signal),
+    ]);
+
+    const jsRaw =
+      jsPlaylistsResult.status === "fulfilled"
+        ? jsPlaylistsResult.value?.data?.results || jsPlaylistsResult.value?.results || []
+        : [];
+    if (jsPlaylistsResult.status === "rejected") {
+      console.warn("[searchRepository] JioSaavn playlists search failed:", jsPlaylistsResult.reason);
+    }
+
+    const ytPlaylists =
+      ytPlaylistsResult.status === "fulfilled" ? ytPlaylistsResult.value.playlists : [];
+    if (ytPlaylistsResult.status === "rejected") {
+      console.warn("[searchRepository] YouTube Music playlists search failed:", ytPlaylistsResult.reason);
+    }
+
     const results: SearchResults = {
       ...EMPTY_RESULTS,
-      playlists: normalizePlaylists(rawPlaylists, 20),
+      playlists: [...normalizePlaylists(jsRaw, 20), ...ytPlaylists],
     };
     setCachedSearch(cacheKey, results);
     return results;

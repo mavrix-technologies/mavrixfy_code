@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import { useCallback,useEffect,useMemo,useState } from "react";
 
 export interface UseArtistDiscoveryParams {
+  enabled?: boolean;
   screenSong: Song | null;
   playingQueue: Song[];
   activeQueueIndex: number;
@@ -12,6 +13,7 @@ export interface UseArtistDiscoveryParams {
 }
 
 export function useArtistDiscovery({
+  enabled = true,
   screenSong,
   playingQueue,
   activeQueueIndex,
@@ -21,8 +23,9 @@ export function useArtistDiscovery({
   const [artistLoading, setArtistLoading] = useState(false);
 
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
-    if (!screenSong?.artist || screenSong.source === "youtube" || screenSong.id.startsWith("youtube_")) {
+    if (!screenSong?.artist) {
       // A song without an artist must clear the previous artist's details.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setArtistDetails(null);
@@ -56,10 +59,10 @@ export function useArtistDiscovery({
     return () => {
       active = false;
     };
-  }, [screenSong?.artist, screenSong?.source, screenSong?.id]);
+  }, [enabled, screenSong?.artist]);
 
   const relatedSongs = useMemo<Song[]>(() => {
-    if (screenSong?.source === "youtube" || screenSong?.id.startsWith("youtube_") || !artistDetails?.topSongs) return [];
+    if (!artistDetails?.topSongs) return [];
     const filtered = artistDetails.topSongs.flatMap((item: any) => {
       const s = convertJioSaavnSong(item);
       return s.id !== screenSong?.id ? [s] : [];
