@@ -4,16 +4,7 @@ import { Buffer } from "node:buffer";
 import { loadYouTubeNodeTransport } from "./helpers/youtube-node-transport.mjs";
 const api = await loadYouTubeNodeTransport();
 try {
-  if (process.argv[2] === "--video") {
-    const quality = process.argv[4] || "low";
-    const stream = await api.resolveVideoStream(process.argv[3] || "Ci0WbaUH3no", quality, "probe-video");
-    console.log(JSON.stringify({ height: stream.height, codec: stream.codec, client: stream.clientProfile }));
-    const response = await fetch(stream.url, { headers: stream.headers, signal: AbortSignal.timeout(12000) });
-    console.log(JSON.stringify({ videoGetStatus: response.status, mime: response.headers.get("content-type") }));
-    await response.body?.cancel();
-    const ceiling = quality === "low" ? 360 : quality === "medium" ? 480 : quality === "auto" ? 720 : Infinity;
-    if (!response.ok || stream.height > ceiling) throw new Error("Video stream validation failed");
-  } else if (process.argv[2] === "--explore") {
+  if (process.argv[2] === "--explore") {
     const explore = await api.explore("probe-explore");
     console.log(JSON.stringify({ sections: explore.sections.map(section => ({ title: section.title, category: section.category,
       songs: section.songs.length, items: section.playlists.map(item => ({ name: item.name, kind: item.kind, id: item.id })) })) }));

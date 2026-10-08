@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { Buffer } = require("node:buffer");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const ts = require("typescript");
@@ -35,13 +36,13 @@ function fixture({ info, fetchStatus = () => 200, contentType = "audio/mp4", mus
         return { ok: status >= 200 && status < 300, status };
       } }, require: name => {
       if (name === "./runtime") return {};
-      if (name === "./YouTubeVideoFormats") return require("./helpers/youtube-video-fixture.cjs");
       if (name === "expo/fetch") return { fetch: streamFetchOverride ? (url, options) => streamFetchOverride(url, options, fetchStream) : fetchStream };
       if (name === "./YouTubeArtists") return require("./helpers/youtube-artists-fixture.cjs");
       if (name === "./YouTubeArtwork") return require("./helpers/youtube-artwork-fixture.cjs");
       if (name === "jintr") return { Jinter: class {} };
       if (name === "youtubei.js/react-native") return {
-        Constants: constants, Platform: { shim: {} }, YTNodes: nodes, Parser: parser,
+        Constants: constants, Platform: { shim: {} }, YTNodes: nodes, Parser: { addRuntimeParser() {}, ...parser },
+        Helpers: { YTNode: class { constructor() {} } },
         Player: { create: async () => { playerLoads.push(true); return {}; } },
         Innertube: { create: async options => { sessionOptions.push(options); return yt; } },
       };
@@ -271,9 +272,13 @@ test("cancelled extraction cannot validate or return a late player response", as
   assert.equal(f.requests.length, 0);
 });
 test("upstream login restriction remains an explicit YouTube failure", async () => {
-  const f = fixture({ info: async () => ({ playability_status: { status: "LOGIN_REQUIRED",
-    reason: "Sign in to confirm you are not a bot" } }) });
-  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "stream"), /Sign in/);
+  const clients = [];
+  const f = fixture({ info: async (_, { client }) => {
+    clients.push(client);
+    return { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you are not a bot" } };
+  } });
+  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "stream"), /LOGIN_REQUIRED: Sign in/);
+  assert.deepEqual(clients, ["VISIONOS", "ANDROID_VR", "TV", "WEB"]);
   assert.equal(f.requests.length, 0);
 });
 
@@ -372,12 +377,3 @@ test("search surfaces a selected-category failure while preserving other success
   assert.equal(result.songs.length, 0); assert.equal(result.albums.length, 0);
 });
 
-test("visual resolution uses H264 within the chosen ceiling without changing audio resolution", async () => {
-  const audio = {has_audio:true,has_video:false,mime_type:'audio/mp4',bitrate:128000,url:'https://rr1.googlevideo.com/videoplayback?expire=2000'};
-  const videos=[360,480,720,1080].map(height=>({has_audio:false,has_video:true,height,mime_type:'video/mp4; codecs="avc1.64001f"',bitrate:height*1000,url:'https://rr1.googlevideo.com/videoplayback?expire=2000&height='+height}));
-  const f=fixture({contentType:'video/mp4',info:async()=>({playability_status:{status:'OK'},streaming_data:{adaptive_formats:[audio,...videos]}})});
-  for(const [quality,height] of [['low',360],['medium',480],['auto',720],['high',1080]]) {
-    const result=await f.api.resolveVideoStream('abcdefghijk',quality,'visual-'+quality);
-    assert.equal(result.height,height);assert.equal(result.codec,'h264');
-  }
-});

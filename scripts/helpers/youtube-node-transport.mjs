@@ -15,7 +15,6 @@ export async function loadYouTubeNodeTransport() {
   } }).outputText.replace('import "./runtime";', "")
     .replace('import { fetch as streamFetch } from "expo/fetch";', 'const streamFetch = globalThis.fetch;')
     .replace('"./YouTubeArtwork"', '"./youtube-artwork-probe.mjs"')
-    .replace('"./YouTubeVideoFormats"', '"./youtube-video-probe.mjs"')
   .replace('"./YouTubeArtists"', '"./youtube-artists-probe.mjs"');
   const artifact = new URL("../../.expo/youtube-shared-probe.mjs", import.meta.url);
   await fs.mkdir(new URL("../../.expo/", import.meta.url), { recursive: true });
@@ -25,10 +24,6 @@ export async function loadYouTubeNodeTransport() {
   }).outputText);
   await fs.writeFile(artifact, output);
   await fs.writeFile(new URL("../../.expo/youtube-artists-probe.mjs", import.meta.url), ts.transpileModule(await fs.readFile(new URL("../../src/services/youtube/YouTubeArtists.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText);
-  await fs.writeFile(new URL("../../.expo/youtube-video-probe.mjs", import.meta.url), ts.transpileModule(
-    await fs.readFile(new URL("../../src/services/youtube/YouTubeVideoFormats.ts", import.meta.url), "utf8"), {
-      compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
-    }).outputText);
   const { sharedYouTubeTransport: api } = await import(artifact.href);
 
   return api;

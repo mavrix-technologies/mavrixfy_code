@@ -12,7 +12,7 @@ export function youtubeIdentity(song: Partial<Song>): string | null {
     if (validVideoId(id)) return id;
   }
   // LastWave StoredTrack uses a permanent watch URL instead of a signed stream.
-  const url = song.catalogUrl;
+  const url = song.youtubeUrl || song.catalogUrl;
   if (!url) return null;
   if (song.source === "youtube" && validVideoId(url)) return url;
   try {
@@ -28,8 +28,18 @@ export function likedSongDocumentIds(song: Song): string[] {
   const aliases = Array.isArray(song.likedSongDocumentIds) ? song.likedSongDocumentIds : [];
   return [...new Set([song.id, ...aliases])].filter(id => typeof id === "string" && !!id && !id.includes("/"));
 }
+/** Only offer a JioSaavn-to-YouTube mapping when this like has a usable legacy audio URL. */
+export function hasJioSaavnAudioUrl(song: Partial<Song>): boolean {
+  if (song.source !== "jiosaavn" || typeof song.audioUrl !== "string" || !song.audioUrl.trim()) return false;
+  try {
+    const url = new URL(song.audioUrl);
+    const host = url.hostname.toLowerCase();
+    return (url.protocol === "https:" || url.protocol === "http:")
+      && !host.endsWith("youtube.com") && host !== "youtu.be" && !host.endsWith("googlevideo.com");
+  } catch { return false; }
+}
 export function needsLikedSongMigration(song: Song): boolean {
-  return !youtubeIdentity(song) && song.source !== "local" && song.source !== "gaana";
+  return !youtubeIdentity(song) && hasJioSaavnAudioUrl(song);
 }
 /** Durable metadata only: signed playback URLs must not be persisted for YouTube. */
 export function youtubeLikedMetadata(song: Song) {
@@ -38,7 +48,7 @@ export function youtubeLikedMetadata(song: Song) {
   return { id: `youtube_${id}`, source: "youtube" as const, youtubeVideoId: id, videoId: id,
     title: song.title, artist: song.artist, album: song.album || "", coverUrl: song.coverUrl || "",
     duration: Number.isFinite(song.duration) ? Math.max(0, song.duration) : 0, genre: song.genre || "", audioUrl: "",
-    catalogUrl: `https://music.youtube.com/watch?v=${id}` };
+    youtubeUrl: `https://music.youtube.com/watch?v=${id}` };
 }
 export function readLikedSong(documentId: string, data: Record<string, any>): Song {
   const artistValue = data.artist || data.artists?.primary || data.artists || "";
@@ -52,15 +62,8 @@ export function readLikedSong(documentId: string, data: Record<string, any>): So
     coverUrl: typeof image === "string" ? image : Array.isArray(image) ? image[image.length - 1]?.url || "" : "",
     audioUrl: data.audioUrl || data.streamUrl || data.url || data.previewUrl || "",
     source: ["youtube", "jiosaavn", "gaana", "local"].includes(data.source) ? data.source : "jiosaavn", videoId: data.videoId, youtubeVideoId: data.youtubeVideoId, downloadUrl: data.downloadUrl,
-    catalogUrl: data.catalogUrl || (/^https?:\/\/([^/]+\.)?((jiosaavn|saavn|youtube)\.com|youtu\.be)\//i.test(data.url || "") ? data.url : ""), likedSongDocumentIds: [documentId] };
-  const mapping = data.playbackMapping;
-  if (mapping?.version === 1 && mapping.song?.source === "youtube" && youtubeIdentity(mapping.song)
-    && typeof mapping.song.title === "string" && !!mapping.song.title.trim()
-    && typeof mapping.song.artist === "string" && !!mapping.song.artist.trim()) {
-    const youtube = youtubeLikedMetadata(mapping.song);
-    const enabled = mapping.enabled !== false;
-    return { ...(enabled ? youtube : original), likedSongDocumentIds: [documentId] };
-  }
+    catalogUrl: data.catalogUrl || (/^https?:\/\/([^/]+\.)?((jiosaavn|saavn|youtube)\.com|youtu\.be)\//i.test(data.url || "") ? data.url : ""),
+    youtubeUrl: data.youtubeUrl || "", likedSongDocumentIds: [documentId] };
   const id = youtubeIdentity(original);
   return id ? { ...original, ...youtubeLikedMetadata({ ...original, youtubeVideoId: id }) } : original;
 }

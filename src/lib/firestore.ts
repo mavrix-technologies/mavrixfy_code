@@ -329,7 +329,7 @@ export async function addLikedSongToFirestore(userId: string, song: any): Promis
 
     const docSnap = await getDoc(songDocRef);
     if (docSnap.exists()) {
-      if (youtubeId) await updateDoc(songDocRef, { source: "youtube", videoId: youtubeId, youtubeVideoId: youtubeId, audioUrl: "", catalogUrl: `https://music.youtube.com/watch?v=${youtubeId}` });
+      if (youtubeId) await updateDoc(songDocRef, { source: "youtube", videoId: youtubeId, youtubeVideoId: youtubeId, audioUrl: "", youtubeUrl: `https://music.youtube.com/watch?v=${youtubeId}` });
       return true; // The requested liked state already exists.
     }
 
@@ -347,7 +347,7 @@ export async function addLikedSongToFirestore(userId: string, song: any): Promis
       albumName: song.album || song.albumName || "",
       imageUrl: song.coverUrl || song.imageUrl || "",
       audioUrl: youtubeId ? "" : song.audioUrl || song.streamUrl || "",
-      catalogUrl: youtubeId ? `https://music.youtube.com/watch?v=${youtubeId}` : song.catalogUrl || song.url || "",
+      ...(youtubeId ? { youtubeUrl: `https://music.youtube.com/watch?v=${youtubeId}` } : {}),
       ...(!youtubeId && song.downloadUrl ? { downloadUrl: song.downloadUrl } : {}),
       duration: song.duration || 0,
       year: "",

@@ -33,7 +33,7 @@ export const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0, 0, 0, 0.54)",
   },
-  backgroundYoutubeContainer: {
+  ambientArtworkContainer: {
     position: "absolute",
     top: 0,
     left: 0,

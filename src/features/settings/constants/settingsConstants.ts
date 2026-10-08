@@ -26,16 +26,6 @@ export const MINI_PLAYER_OPTIONS: {
   { label: "More", value: "more", icon: "ellipsis-horizontal" },
 ];
 
-export const VIDEO_QUALITY_OPTIONS: {
-  label: string;
-  value: AppSettings["videoBackgroundQuality"];
-}[] = [
-  { label: "Auto", value: "auto" },
-  { label: "Low", value: "low" },
-  { label: "Medium", value: "medium" },
-  { label: "High", value: "high" },
-];
-
 export const DOWNLOAD_QUALITY_OPTIONS: {
   label: string;
   value: AppSettings["downloadQuality"];

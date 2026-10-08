@@ -30,6 +30,7 @@
     "typecheck": "tsc --noEmit --pretty false",
     "test": "node --test scripts/*.regression.test.cjs",
     "liked:backfill": "node scripts/backfill-liked-youtube.mjs",
+    "liked:simplify": "node scripts/simplify-liked-song-fields.mjs",
     "functions:deploy": "npx firebase-tools deploy --only functions:offline-licenses"
   },
   "dependencies": {

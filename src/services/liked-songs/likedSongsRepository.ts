@@ -36,6 +36,7 @@ function sanitizeSongForCache(song: Song): Partial<Song> {
     videoId: song.videoId,
     youtubeVideoId: song.youtubeVideoId,
     likedSongDocumentIds: song.likedSongDocumentIds,
+    youtubeUrl: song.youtubeUrl,
     catalogUrl: song.catalogUrl,
     audioUrl: song.source === "youtube" ? "" : song.audioUrl,
     downloadUrl: song.source === "youtube" ? undefined : song.downloadUrl,

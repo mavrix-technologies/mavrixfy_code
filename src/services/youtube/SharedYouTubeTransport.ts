@@ -1,11 +1,28 @@
-import { selectVideoFormats } from "./YouTubeVideoFormats";
 import "./runtime";
-import { Constants, Innertube, Parser, Platform, Player, YTNodes } from "youtubei.js/react-native";
+import { Constants, Helpers, Innertube, Parser, Platform, Player, YTNodes } from "youtubei.js/react-native";
 import { bestYouTubeSongThumbnail, bestYouTubeThumbnail, youTubeArtworkUrl } from "./YouTubeArtwork";
 import { Jinter } from "jintr";
 import { fetch as streamFetch } from "expo/fetch";
 import type { NativeHomeSection, NativePlaylist, NativeTrack, PlaylistPage, YouTubeNative, YouTubeStream } from "./YouTubeMusic";
 import { validArtistChannelId, type NativeArtist, type NativeArtistDetails } from "./YouTubeArtists";
+
+// YouTube recently added this command to player-error responses. Register its
+// stable shape before parsing any response so youtubei.js doesn't emit a noisy
+// "class not found" warning and JIT a replacement on every app session.
+class PlayerErrorCommand extends Helpers.YTNode {
+  static type = "PlayerErrorCommand";
+  command: { click_tracking_params: string; auth_required_command: InstanceType<typeof YTNodes.NavigationEndpoint> };
+
+  constructor(data: any) {
+    super();
+    this.command = {
+      click_tracking_params: data.command.clickTrackingParams,
+      auth_required_command: new YTNodes.NavigationEndpoint(data.command.authRequiredCommand),
+    };
+  }
+}
+
+Parser.addRuntimeParser("PlayerErrorCommand", PlayerErrorCommand);
 
 // Interpret player transforms rather than asking Hermes to compile remote code.
 Platform.shim.eval = (data, env) => {
@@ -358,12 +375,10 @@ export const sharedYouTubeTransport: YouTubeNative = {
       }));
     });
   },
-  resolveStream(videoId, quality, id) { return resolveMediaStream(videoId, quality, id); },
-  resolveVideoStream(videoId, quality, id) { return resolveMediaStream(videoId, quality, id, true); },
+  resolveStream(videoId, quality, id) { return resolveAudioStream(videoId, quality, id); },
 };
 
-function resolveMediaStream(videoId: string, quality: string, id: string, video = false) {
-
+function resolveAudioStream(videoId: string, quality: string, id: string) {
     return request(id, async (check, signal) => {
       if (!/^[\w-]{11}$/.test(videoId)) throw new Error("Invalid YouTube video ID");
       let yt = await youtube(); check();
@@ -377,21 +392,25 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
           check();
           try {
             const resolutionId = `${videoId}:${client}`;
-            if (!video && Date.now() - (rejected.get(resolutionId) || 0) < 60000) throw new Error("Recently rejected audio profile");
+            if (Date.now() - (rejected.get(resolutionId) || 0) < 60000) throw new Error("Recently rejected audio profile");
             // WEB player requests need the signature timestamp, not just the
             // decipher function after a response has already been rejected.
             if (client === "WEB") { await preparePlayer(yt); check(); }
             const info = await yt.getBasicInfo(videoId, { client }); check();
-            if (info.playability_status?.status !== "OK") throw new Error(info.playability_status?.reason || "Video unavailable");
-            const formats = [...(info.streaming_data?.adaptive_formats || []), ...(video ? info.streaming_data?.formats || [] : [])]
-              .filter(format => (video ? format.has_video && format.mime_type.startsWith("video/mp4") && /avc1/i.test(format.mime_type) : format.has_audio && !format.has_video && format.mime_type.startsWith("audio/mp4")) &&
+            if (info.playability_status?.status !== "OK") {
+              const status = info.playability_status?.status || "UNKNOWN";
+              const reason = info.playability_status?.reason || "Video unavailable";
+              throw new Error(`${status}: ${reason}`);
+            }
+            const formats = (info.streaming_data?.adaptive_formats || [])
+              .filter(format => format.has_audio && !format.has_video && format.mime_type.startsWith("audio/mp4") &&
                 (format.url || format.signature_cipher || format.cipher))
               .sort((a, b) => a.bitrate - b.bitrate);
             if (!formats.length) throw new Error("No compatible AAC audio stream");
             // Medium avoids premium/high-bitrate formats when a standard AAC
             // format exists. High selects the best actually available AAC track.
             const standard = formats.filter(format => format.bitrate <= 160000);
-            const candidates = video ? selectVideoFormats(formats, quality) : quality === "low" ? formats : quality === "medium"
+            const candidates = quality === "low" ? formats : quality === "medium"
               ? (standard.length ? standard.reverse() : formats)
               : formats.reverse();
             const formatFailures: string[] = [];
@@ -422,7 +441,7 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
                   try {
                     check();
                     if (!response.ok) throw new Error(`Audio GET HTTP ${response.status}`);
-                    if (!(video ? /^video\/mp4(?:;|$)/i : /^audio\/mp4(?:;|$)/i).test(response.headers.get("content-type") || ""))
+                    if (!/^audio\/mp4(?:;|$)/i.test(response.headers.get("content-type") || ""))
                       throw new Error("Audio GET returned a non-AAC response");
                   } finally { await response.body?.cancel(); }
                 } finally {
@@ -432,8 +451,8 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
                 }
                 // After a decoder/CDN failure, try a different client for this exact
                 // video once; the rejected profile becomes eligible after a minute.
-                const stream: YouTubeStream & { height: number } = { videoId, url, headers, expiresAt, height: video ? format.height || 0 : 0,
-                  bitrate: format.bitrate, mimeType: format.mime_type, codec: video ? "h264" : "aac", clientProfile: client, resolutionId,
+                const stream: YouTubeStream = { videoId, url, headers, expiresAt,
+                  bitrate: format.bitrate, mimeType: format.mime_type, codec: "aac", clientProfile: client, resolutionId,
                   durationSeconds: Number.isFinite(format.approx_duration_ms) && format.approx_duration_ms > 0
                     ? format.approx_duration_ms / 1000 : undefined };
                 return stream;
@@ -449,6 +468,6 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
         if (previous && (await previous) === yt && session === previous) session = undefined;
         check(); yt = await youtube(); check();
       }
-      throw new Error(`YouTube ${video ? "video" : "audio"} unavailable. ${failures.join("; ")}`);
+      throw new Error(`YouTube audio unavailable. ${failures.join("; ")}`);
     });
 }

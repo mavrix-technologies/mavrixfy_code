@@ -15,6 +15,7 @@ function sheetFixture() {
   useState:initial=>{const i=index++;if(!(i in slots))slots[i]=initial;return[slots[i],value=>{slots[i]=value;dirty=true;}];},
   useRef:value=>{const i=index++;if(!(i in slots))slots[i]={current:value};return slots[i];},
   useCallback:(fn,deps)=>{const i=index++;if(!slots[i]||deps.some((d,j)=>d!==slots[i].deps[j]))slots[i]={deps,fn};return slots[i].fn;},
+  useLayoutEffect:fn=>fn(),
  };
  const {usePlayerSheetState}=load('src/features/player/hooks/usePlayerSheetState.ts',{
   react,'@/lib/playerUIState':{playerUIStateStore:ui,collapsePlayer:()=>{ui.current='mini';}},

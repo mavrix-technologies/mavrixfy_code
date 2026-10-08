@@ -29,7 +29,7 @@ export interface PlayerArtworkCarouselProps {
   artScrollX: Animated.Value;
   playingQueueLength: number;
   isProgressSeeking: boolean;
-  ambientVideoLayoutActive: boolean;
+  ambientArtworkEnabled: boolean;
   onArtworkSongChange: (index: number) => void;
   onScroll: any;
   onMomentumScrollEnd: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
@@ -46,23 +46,24 @@ export const PlayerArtworkCarousel = React.memo(function PlayerArtworkCarousel({
   artScrollX,
   playingQueueLength,
   isProgressSeeking,
-  ambientVideoLayoutActive,
+  ambientArtworkEnabled,
   onArtworkSongChange,
   onScroll,
   onMomentumScrollEnd,
   artCarouselGetItemLayout,
 }: PlayerArtworkCarouselProps) {
-  const [videoCrossfadeAnim] = React.useState(
-    () => new Animated.Value(ambientVideoLayoutActive ? 0 : 1)
+  const [ambientArtworkOpacity] = React.useState(
+    () => new Animated.Value(ambientArtworkEnabled ? 0 : 1)
   );
 
   React.useEffect(() => {
-    Animated.timing(videoCrossfadeAnim, {
-      toValue: ambientVideoLayoutActive ? 0 : 1,
-      duration: ambientVideoLayoutActive ? 550 : 250,
+    Animated.timing(ambientArtworkOpacity, {
+      toValue: ambientArtworkEnabled ? 0 : 1,
+      duration: ambientArtworkEnabled ? 350 : 250,
       useNativeDriver: true,
+      isInteraction: false,
     }).start();
-  }, [ambientVideoLayoutActive, videoCrossfadeAnim]);
+  }, [ambientArtworkEnabled, ambientArtworkOpacity]);
 
   const renderArtworkCard = useCallback(
     ({ item, index }: { item: ArtworkQueueItem; index: number }) => {
@@ -87,7 +88,7 @@ export const PlayerArtworkCarousel = React.memo(function PlayerArtworkCarousel({
       });
 
       const cardOpacity = isActiveCard
-        ? Animated.multiply(slideOpacity, videoCrossfadeAnim)
+        ? Animated.multiply(slideOpacity, ambientArtworkOpacity)
         : slideOpacity;
 
       const slideTranslateY = artScrollX.interpolate({
@@ -141,8 +142,8 @@ export const PlayerArtworkCarousel = React.memo(function PlayerArtworkCarousel({
       artCarouselSnapInterval,
       artScrollX,
       artSize,
+      ambientArtworkOpacity,
       onArtworkSongChange,
-      videoCrossfadeAnim,
     ]
   );
 

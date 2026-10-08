@@ -4,21 +4,30 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 const moduleObject = { exports: {} };
-vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../../src/services/liked-songs/likedSongFormat.ts'), 'utf8'), {
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(process.cwd(), 'src/services/liked-songs/likedSongFormat.ts'), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText, { module: moduleObject, exports: moduleObject.exports, URL });
 const format = moduleObject.exports;
 
-const text = (value) => value.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+const text = (value) => value.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+const canonicalTitle = value => text(value
+  .replace(/\s*[([]\s*(?:feat\.?|ft\.?)\b[^)\]]*[)\]]/gi, " ")
+  .replace(/\s+(?:feat\.?|ft\.?)\b.*$/i, " "));
 function rankLikedSongVersions(original, candidates) {
   const tokens = (value) => new Set(text(value).split(" ").filter(Boolean));
   const overlap = (a, b) => a.size && b.size ? [...a].filter(word => b.has(word)).length / Math.max(a.size, b.size) : 0;
+  // JioSaavn includes composers/lyricists; YT Music often lists only performers.
+  // Compare complete artist names, never accept a shared first/surname alone.
+  const names = value => value.split(/,|&|\band\b/i).map(text).filter(Boolean);
+  const originalArtists = new Set(names(original.artist));
   const version = (value) => (text(value).match(/\b(remix|cover|live|unplugged|instrumental|slowed|sped|acoustic|karaoke|reprise)\b/g) || []).sort().join("|");
-  const originalTitle = text(original.title).replace(/\s+from\s+.*$/, "");
+  const originalTitle = canonicalTitle(original.title).replace(/\s+from\s+.*$/, "");
   return candidates.filter(song => !!format.youtubeIdentity(song)).map(song => {
-    const title = text(song.title).replace(/\s+from\s+.*$/, "");
+    const title = canonicalTitle(song.title).replace(/\s+from\s+.*$/, "");
     const titleMatch = title === originalTitle ? 1 : overlap(tokens(title), tokens(originalTitle));
-    const artistMatch = overlap(tokens(original.artist), tokens(song.artist));
+    const candidateArtists = names(song.artist);
+    const artistMatch = candidateArtists.length && candidateArtists.every(name => originalArtists.has(name))
+      ? 1 : overlap(tokens(original.artist), tokens(song.artist));
     const durationKnown = original.duration > 30 && song.duration > 30;
     const delta = Math.abs(original.duration - song.duration);
     const durationMatch = durationKnown ? Math.max(0, 1 - delta / Math.max(15, original.duration * 0.1)) : 0;
@@ -32,11 +41,11 @@ function rankLikedSongVersions(original, candidates) {
 }
 
 function hasMapping(data) {
-  return data.playbackMapping?.version === 1 && !!format.youtubeIdentity(data.playbackMapping.song || {});
+  return !!format.youtubeIdentity({ youtubeUrl: data.youtubeUrl, source: data.source, videoId: data.videoId, youtubeVideoId: data.youtubeVideoId, id: data.id })
+    || (data.playbackMapping?.version === 1 && !!format.youtubeIdentity(data.playbackMapping.song || {}));
 }
 function classify(documentId, data) {
   if (hasMapping(data)) return 'mapped';
-  if (data.playbackMapping != null) return 'unsupported-mapping';
   const song = format.readLikedSong(documentId, data);
   if (!format.needsLikedSongMigration(song)) return 'other-provider';
   if (!song.title.trim() || !song.artist.trim()) return 'incomplete';
@@ -47,18 +56,7 @@ function buildUpdate(documentId, data, selected, score, timestamp) {
   const original = format.readLikedSong(documentId, data);
   const match = rankLikedSongVersions(original, [selected])[0];
   if (!match?.eligible || match.score !== score) throw Error('Recording match is not confident.');
-  const song = format.youtubeLikedMetadata(selected);
-  const raw = { ...data };
-  delete raw.playbackBackup; delete raw.playbackMapping; delete raw.playbackLinks;
-  return {
-    playbackBackup: data.playbackBackup || { version: 1, original: raw, createdAt: timestamp },
-    playbackLinks: {
-      jiosaavn: { id: documentId, catalogUrl: original.catalogUrl || '', audioUrl: original.audioUrl || '' },
-      youtube: { id: song.youtubeVideoId, catalogUrl: song.catalogUrl },
-    },
-    playbackMapping: { version: 1, enabled: true, song, matchScore: score,
-      confirmedBy: 'admin-backfill-v1', confirmedAt: timestamp },
-  };
+  return { youtubeUrl: `https://music.youtube.com/watch?v=${format.youtubeIdentity(selected)}` };
 }
 async function applyUpdate(db, initial, selected, score, timestamp) {
   return db.runTransaction(async transaction => {
@@ -72,13 +70,12 @@ async function applyUpdate(db, initial, selected, score, timestamp) {
     return 'updated';
   });
 }
-async function restoreUpdate(db, reference, timestamp) {
+async function restoreUpdate(db, reference, deleteField) {
   return db.runTransaction(async transaction => {
     const latest = await transaction.get(reference);
     if (!latest.exists) return 'deleted';
-    const mapping = latest.data().playbackMapping;
-    if (!hasMapping(latest.data()) || mapping.confirmedBy !== 'admin-backfill-v1' || mapping.enabled === false) return 'unchanged';
-    transaction.update(reference, { 'playbackMapping.enabled': false, 'playbackMapping.restoredAt': timestamp() });
+    if (!hasMapping(latest.data())) return 'unchanged';
+    transaction.update(reference, { youtubeUrl: deleteField() });
     return 'restored';
   });
 }

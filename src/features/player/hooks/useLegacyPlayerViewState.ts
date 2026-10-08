@@ -17,7 +17,7 @@ import type { ArtworkQueueItem } from "../components/PlayerArtworkViews";
 import { useArtistDiscovery } from "./useArtistDiscovery";
 import { useArtworkCarouselSync } from "./useArtworkCarouselSync";
 import { useArtworkPaletteSync } from "./useArtworkPaletteSync";
-import { useBackgroundVisualVideo } from "./useBackgroundVisualVideo";
+import { useAmbientArtwork } from "./useAmbientArtwork";
 import { useDevTrackHelper } from "./useDevTrackHelper";
 import { usePlayerLayoutMetrics } from "./usePlayerLayoutMetrics";
 import { usePlayerLiveQueue } from "./usePlayerLiveQueue";
@@ -39,17 +39,7 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
 
   const screenSong = currentSong ?? null;
 
-  const {
-    isLowEnd,
-    videoBackgroundQuality,
-    backgroundVideoId,
-    videoActive,
-    handleVideoActive,
-    handleVideoError,
-    isScreenFocused,
-    shouldRenderBackgroundVideo,
-    ambientVideoLayoutActive,
-  } = useBackgroundVisualVideo({ screenSong, navigation });
+  const { shouldRenderAmbientArtwork, ambientArtworkReady, onAmbientArtworkLoad } = useAmbientArtwork({ screenSong, navigation });
 
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
   const prevSongIdRef = useRef(currentSong?.id);
@@ -336,16 +326,10 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
     togglePlay,
     toggleShuffle,
     toggleRepeat,
-    shouldRenderBackgroundVideo,
-    isLowEnd,
-    videoBackgroundQuality,
-    backgroundVideoId,
-    videoActive,
-    isScreenFocused,
+    shouldRenderAmbientArtwork,
+    ambientArtworkReady,
+    onAmbientArtworkLoad,
     fullscreenLyricsVisible,
     setFullscreenLyricsVisible,
-    handleVideoActive,
-    handleVideoError,
-    ambientVideoLayoutActive,
   };
 }

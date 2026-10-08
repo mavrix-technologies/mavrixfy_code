@@ -18,8 +18,6 @@ export interface Song extends PlaybackStreamMetadata {
   playCount?: number;
   videoId?: string;
   youtubeVideoId?: string;
-  youtubeVisualVideoId?: string;
-  youtubeVideoType?: string;
   youtubeNativeAudio?: boolean;
   youtubeAudioExpiresAt?: number;
   artistRefs?: { id: string; name: string }[];
@@ -28,6 +26,8 @@ export interface Song extends PlaybackStreamMetadata {
   likedSongDocumentIds?: string[];
   /** Durable catalog link, never a signed audio stream URL. */
   catalogUrl?: string;
+  /** Permanent YouTube Music watch URL; audioUrl remains the legacy provider URL. */
+  youtubeUrl?: string;
 }
 
 export interface JioSaavnImage {

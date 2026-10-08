@@ -17,7 +17,6 @@ export interface YouTubeStream {
 }
 // Transport contract retained for callers; implementation is shared TypeScript.
 export type NativeHomeFeed = { songs: NativeTrack[]; playlists: NativePlaylist[]; sections?: NativeHomeSection[] };
-export interface YouTubeVideoStream extends YouTubeStream { height: number }
 export interface YouTubeNative {
   home(requestId: string, onFirstPage?: (feed: NativeHomeFeed) => void): Promise<NativeHomeFeed>;
   explore(requestId: string): Promise<{ songs: NativeTrack[]; playlists: NativePlaylist[]; sections?: NativeHomeSection[] }>;
@@ -27,7 +26,6 @@ export interface YouTubeNative {
   playlist(playlistId: string, cursor: string, requestId: string): Promise<PlaylistPage>;
   discardPlaylistCursor?(cursor: string): void;
   resolveStream(videoId: string, quality: string, requestId: string): Promise<YouTubeStream>;
-  resolveVideoStream(videoId: string, quality: string, requestId: string): Promise<YouTubeVideoStream>;
   cancel(requestId: string): void;
   related(videoId: string, requestId: string): Promise<NativeTrack[]>;
   rejectStream(resolutionId: string): void;
@@ -259,7 +257,3 @@ export function youTubePlaybackErrorMessage(error: unknown): string {
   return "Could not play this YouTube song. Tap Play to retry.";
 }
 
-/** Visual streams stay separate from the audio cache and never replace song playback. */
-export function resolveYouTubeVideoStream(videoId: string, quality: string, signal?: AbortSignal): Promise<YouTubeVideoStream> {
-  return invoke((module, id) => module.resolveVideoStream(videoId, quality, id), signal);
-}

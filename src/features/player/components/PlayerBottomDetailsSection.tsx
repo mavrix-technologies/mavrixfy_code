@@ -16,7 +16,7 @@ export interface PlayerBottomDetailsSectionProps {
   onTogglePlay: () => void;
   onLyricSeek: (seconds: number) => void;
   onToggleFullScreenLyrics: () => void;
-  ambientVideoLayoutActive: boolean;
+  ambientArtworkEnabled: boolean;
   isShortScreen: boolean;
   queueViewportStyle: any;
   playingQueue: Song[];
@@ -37,7 +37,7 @@ export const PlayerBottomDetailsSection = React.memo(function PlayerBottomDetail
   onTogglePlay,
   onLyricSeek,
   onToggleFullScreenLyrics,
-  ambientVideoLayoutActive,
+  ambientArtworkEnabled,
   isShortScreen,
   queueViewportStyle,
   playingQueue,
@@ -65,7 +65,7 @@ export const PlayerBottomDetailsSection = React.memo(function PlayerBottomDetail
       <View
         style={[
           styles.playingListSection,
-          ambientVideoLayoutActive && styles.playingListSectionAmbient,
+          ambientArtworkEnabled && styles.playingListSectionAmbient,
         ]}
       >
         <View style={[styles.playingListHeader, isShortScreen && styles.playingListHeaderCompact]}>

@@ -89,8 +89,8 @@ if (args.includes('--help')) {
       let status, selected, score;
       try {
         if (!/^users\/[^/]+\/likedSongs\/[^/]+$/.test(snapshot.ref.path)) status = 'unsupported-path';
-        else if (restore) status = apply ? await restoreUpdate(db, snapshot.ref, admin.firestore.FieldValue.serverTimestamp) :
-          hasMapping(data) && data.playbackMapping.confirmedBy === 'admin-backfill-v1' && data.playbackMapping.enabled !== false ? 'would-restore' : 'unchanged';
+        else if (restore) status = apply ? await restoreUpdate(db, snapshot.ref, admin.firestore.FieldValue.delete) :
+          hasMapping(data) ? 'would-restore' : 'unchanged';
         else {
           status = classify(snapshot.id, data);
           if (status === 'eligible') {

@@ -5,12 +5,13 @@ const backfill=require('./helpers/liked-backfill.cjs');
 const legacy={id:'saavn-old',source:'jiosaavn',title:'Chaleya',artist:'Arijit Singh, Shilpa Rao',album:'Jawan',duration:200,coverUrl:'old.jpg',audioUrl:'https://saavncdn.com/audio',genre:'',likedSongDocumentIds:['saavn-old']};
 const selected={...legacy,id:'youtube_abcdefghijk',source:'youtube',youtubeVideoId:'abcdefghijk',coverUrl:'new.jpg',audioUrl:'https://signed.example/?secret',likedSongDocumentIds:undefined};
 function storeFixture(){let state;const create=initializer=>{const set=update=>{const value=typeof update==='function'?update(state):update;state={...state,...value};};state=initializer(set);return{getState:()=>state};};return load('src/services/liked-songs/likedSongsStore.ts',{zustand:{create},'./likedSongFormat':format}).useLikedSongsStore;}
-test('mapping hydrates canonical playback without changing original document metadata or timing',()=>{
- const data={...legacy,likedAt:123,imageUrl:'old.jpg',playbackMapping:{version:1,song:format.youtubeLikedMetadata(selected)}};
+test('youtubeUrl hydrates canonical playback while preserving the released JioSaavn audioUrl',()=>{
+ const data={...legacy,likedAt:123,imageUrl:'old.jpg',youtubeUrl:'https://music.youtube.com/watch?v=abcdefghijk'};
  const before=JSON.stringify(data);const song=format.readLikedSong('saavn-old',data);
  assert.equal(song.id,'youtube_abcdefghijk');assert.equal(song.source,'youtube');assert.equal(song.audioUrl,'');
  assert.deepEqual([...song.likedSongDocumentIds],['saavn-old']);assert.equal(JSON.stringify(data),before);
- assert.equal(format.readLikedSong('saavn-old',{...data,playbackMapping:{version:1,song:{source:'youtube',youtubeVideoId:'bad'}}}).id,'saavn-old');
+ assert.equal(data.audioUrl,legacy.audioUrl);
+ assert.equal(format.readLikedSong('saavn-old',{...data,youtubeUrl:'https://music.youtube.com/watch?v=bad'}).id,'saavn-old');
 });
 test('legacy source=mavrixfy YouTube IDs recover, duplicates retain all unlike identities',()=>{
  const oldYoutube=format.readLikedSong('youtube_abcdefghijk',{title:'Chaleya',artist:'Singer',source:'mavrixfy',audioUrl:'expired'});
@@ -28,6 +29,7 @@ test('Firestore writer persists canonical provider/IDs, never a signed YouTube U
  'firebase/firestore':{doc:(_, ...parts)=>parts.join('/'),getDoc:async()=>({exists:()=>false}),serverTimestamp:()=>123,setDoc:async(...args)=>writes.push(args)}});
  assert.equal(await api.addLikedSongToFirestore('owner',{...selected,id:'old-id'}),true);
  assert.equal(writes[0][0],'users/owner/likedSongs/youtube_abcdefghijk');assert.equal(writes[0][1].source,'youtube');assert.equal(writes[0][1].youtubeVideoId,'abcdefghijk');assert.equal(writes[0][1].audioUrl,'');
+ assert.equal(writes[0][1].youtubeUrl,'https://music.youtube.com/watch?v=abcdefghijk');assert.equal('catalogUrl' in writes[0][1],false);
 });
 
 function repositoryFixture({failDelete=false}={}){
@@ -44,7 +46,7 @@ function repositoryFixture({failDelete=false}={}){
 }
 test('legacy likes without likedAt remain visible; realtime hydration preserves aliases and cache',async()=>{
  const f=repositoryFixture();f.api.subscribeLikedSongs('owner');
- f.listeners[0](f.snapshot([['saavn-old',{...legacy,addedAt:2,playbackMapping:{version:1,song:format.youtubeLikedMetadata(selected)}}],['another-old',{...legacy,title:'Other',addedAt:1}]]));
+ f.listeners[0](f.snapshot([['saavn-old',{...legacy,addedAt:2,youtubeUrl:'https://music.youtube.com/watch?v=abcdefghijk'}],['another-old',{...legacy,title:'Other',addedAt:1}]]));
  assert.equal(f.store.getState().songs.length,2);assert.equal(f.store.getState().songs[0].id,selected.id);assert.equal(f.store.getState().ids.has('saavn-old'),true);
  const cached=JSON.parse(f.cache.at(-1)[1]);assert.deepEqual(cached[0].likedSongDocumentIds,['saavn-old']);
  f.api.cleanupLikedSongsSubscription();f.api.subscribeLikedSongs('owner');f.listeners[0](f.snapshot([['stale',{...legacy}]]));assert.equal(f.store.getState().songs.length,0);
@@ -73,19 +75,18 @@ function adminFixture({exists=true,changed=false,record={...legacy,likedAt:42},r
  let data=record,writes=[];const ref={path:'users/owner/likedSongs/saavn-old'};
  const initial={ref,id:legacy.id,updateTime:{revision:1}};
  const db={runTransaction:async callback=>{
-  const transaction={get:async()=>({ref,id:legacy.id,exists,data:()=>data,updateTime:{isEqual:()=>!changed}}),update:(reference,update)=>{writes.push(update);if(update.playbackMapping)data={...data,...update};else data={...data,playbackMapping:{...data.playbackMapping,enabled:false}};}};
+  const transaction={get:async()=>({ref,id:legacy.id,exists,data:()=>data,updateTime:{isEqual:()=>!changed}}),update:(reference,update)=>{writes.push(update);data={...data,...update};if(update.youtubeUrl===null)delete data.youtubeUrl;}};
   return callback(transaction);
  }};
  return{db,initial,writes,data:()=>data};
 }
-test('admin backfill preserves every root field and first backup, stores no temporary YouTube URL',async()=>{
+test('admin backfill adds just youtubeUrl and preserves every legacy field',async()=>{
  const f=adminFixture();const before=JSON.stringify(f.data());
  assert.equal(await backfill.applyUpdate(f.db,f.initial,selected,100,()=>123),'updated');
- assert.equal(JSON.stringify(f.data().playbackBackup.original),before);
- assert.deepEqual(Object.keys(f.writes[0]),['playbackBackup','playbackLinks','playbackMapping']);
+ assert.equal(JSON.stringify({...f.data(),youtubeUrl:undefined}),before);
+ assert.deepEqual(Object.keys(f.writes[0]),['youtubeUrl']);
  assert.equal(f.data().likedAt,42);assert.equal(f.data().audioUrl,legacy.audioUrl);
- assert.equal(f.data().playbackLinks.youtube.catalogUrl,'https://music.youtube.com/watch?v=abcdefghijk');
- assert.equal(f.data().playbackMapping.song.audioUrl,'');
+ assert.equal(f.data().youtubeUrl,'https://music.youtube.com/watch?v=abcdefghijk');
  assert.equal(await backfill.applyUpdate(f.db,f.initial,selected,100,()=>456),'mapped');assert.equal(f.writes.length,1);
 });
 test('admin backfill never overwrites changed, deleted, unsupported or manually restored records',async()=>{
@@ -96,16 +97,11 @@ test('admin backfill never overwrites changed, deleted, unsupported or manually 
  }
  assert.throws(()=>backfill.buildUpdate(legacy.id,legacy,{...selected,title:'Chaleya Remix'},10,123));
 });
-test('admin rollback retains both formats and backup, and skips user-confirmed mappings',async()=>{
+test('admin rollback removes youtubeUrl and reveals the preserved JioSaavn song',async()=>{
  const f=adminFixture();await backfill.applyUpdate(f.db,f.initial,selected,100,()=>123);
- const backup=JSON.stringify(f.data().playbackBackup);
- assert.equal(await backfill.restoreUpdate(f.db,f.initial.ref,()=>456),'restored');
- assert.equal(JSON.stringify(f.data().playbackBackup),backup);
+ assert.equal(await backfill.restoreUpdate(f.db,f.initial.ref,()=>null),'restored');
  assert.equal(format.readLikedSong(legacy.id,f.data()).id,legacy.id);
- assert.equal(f.data().playbackMapping.song.id,selected.id);
  assert.equal(await backfill.restoreUpdate(f.db,f.initial.ref,()=>789),'unchanged');
- const manual=adminFixture({record:{...legacy,playbackMapping:{version:1,enabled:true,song:format.youtubeLikedMetadata(selected),confirmedBy:'user'}}});
- assert.equal(await backfill.restoreUpdate(manual.db,manual.initial.ref,()=>123),'unchanged');assert.equal(manual.writes.length,0);
 });
 test('LastWave identity deduplicates normalized title/artist while preserving both provider IDs',()=>{
  const merged=format.mergeLikedSongIdentities([{...legacy,title:'  Chaleya  ',artist:'Arijit  Singh, Shilpa Rao'},selected]);
@@ -129,6 +125,13 @@ test('LastWave permanent URL identity restores YouTube likes without saved strea
  }
  assert.equal(format.youtubeIdentity({...legacy,catalogUrl:'https://fakeyoutube.com/watch?v=abcdefghijk'}),null);
 });
+test('JioSaavn mapping eligibility requires a valid legacy playback URL',()=>{
+ assert.equal(format.needsLikedSongMigration(legacy),true);
+ assert.equal(format.needsLikedSongMigration({...legacy,audioUrl:''}),false);
+ assert.equal(format.needsLikedSongMigration({...legacy,source:'gaana'}),false);
+ assert.equal(format.needsLikedSongMigration({...legacy,source:'youtube',youtubeUrl:'https://music.youtube.com/watch?v=abcdefghijk'}),false);
+ assert.equal(format.needsLikedSongMigration({...legacy,audioUrl:'not-a-url'}),false);
+});
 test('missing legacy duration can match exact title/artist but never a different artist',()=>{
  const unknown={...legacy,duration:0};assert.equal(backfill.classify(legacy.id,unknown),'eligible');
  assert.equal(backfill.rankLikedSongVersions(unknown,[selected])[0].eligible,true);
@@ -138,4 +141,19 @@ test('serialized heart mutations settle in tap order',async()=>{
  const f=repositoryFixture();const song={...selected,likedSongDocumentIds:[selected.id]};
  const first=f.api.toggleLikeSong('owner',song),second=f.api.toggleLikeSong('owner',song);
  assert.equal(await first,true);assert.equal(await second,false);assert.equal(f.store.getState().songs.length,0);
+});
+
+
+test('complete performer names can be a subset of original composer/lyricist credits',()=>{
+ const original={...legacy,artist:'Shellee, Mame Khan, Amit Trivedi'};
+ assert.equal(backfill.rankLikedSongVersions(original,[{...selected,artist:'Mame Khan, Amit Trivedi'}])[0].eligible,true);
+ assert.equal(backfill.rankLikedSongVersions(original,[{...selected,artist:'Mame Unknown'}])[0].eligible,false);
+});
+
+test('backfill normalizes accents and featuring suffixes while retaining version and duration guards',()=>{
+ const original={...legacy,title:'No Batidao (Reborn)',artist:'ZXKAI',duration:106};
+ const reborn={...selected,title:'No Batidão [Reborn] (feat. ATLXS)',artist:'ZXKAI',duration:106};
+ assert.equal(backfill.rankLikedSongVersions(original,[reborn])[0].eligible,true);
+ assert.equal(backfill.rankLikedSongVersions(original,[{...reborn,title:'No Batidão (Ultra Slowed)'}])[0].eligible,false);
+ assert.equal(backfill.rankLikedSongVersions(original,[{...reborn,duration:220}])[0].eligible,false);
 });

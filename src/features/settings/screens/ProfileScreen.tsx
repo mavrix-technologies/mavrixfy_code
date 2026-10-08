@@ -101,7 +101,6 @@ export function ProfileScreen() {
     streamingQuality: "medium",
     highQualityUnlocked: false,
     highQualityExpiresAt: null,
-    videoBackgroundQuality: "auto",
     smartAutoplayEnabled: true,
     smartAutoplayMode: "similar-trending",
     downloadQuality: "high",
