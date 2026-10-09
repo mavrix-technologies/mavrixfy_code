@@ -1,25 +1,27 @@
 import AdMobBanner from "@/components/AdMobBanner";
 import OfflineBanner from "@/components/OfflineBanner";
+import DownloadCollectionButton from "@/components/DownloadCollectionButton";
 import SongRow,{ SONG_ROW_HEIGHT } from "@/components/SongRow";
 import {
   CapsuleDivider,
   CapsuleNavButton,
   CapsuleNavGroup,
   CircularBackButton,
-  CircularShareButton,
 } from "@/components/navigation/CircularNavButton";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { useArtworkPalette } from "@/lib/colorExtractor";
+import { getSavedCollections, toggleSavedCollection } from "@/lib/savedCollections";
 import { type Song,formatDuration } from "@/lib/musicData";
 import * as Animated from "@/lib/nativeAnimated";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { safeGoBack } from "@/utils/navigation";
+import { showGlobalToast } from "@/utils/globalToast";
 import { sharePlaylist } from "@/utils/shareUtils";
 import * as Haptics from "expo-haptics";
-import { useCallback,useMemo,useRef,useState } from "react";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import {
 Platform,
 type LayoutChangeEvent,
@@ -52,6 +54,7 @@ function usePlaylistDetailView() {
   const { currentSong } = usePlaybackNowPlaying();
   const { isPlaying } = usePlaybackPlayState();
   const { playSong, shufflePlay, togglePlay } = usePlayerActions();
+  const [isCollectionLiked, setIsCollectionLiked] = useState(false);
 
   const topInset = insets.top;
   const bottomPad = Platform.OS === "web" ? 132 : Math.max(150, insets.bottom + 126);
@@ -142,6 +145,45 @@ function usePlaylistDetailView() {
   const collectionKind = params.isSongSource ? "Single" : params.isAlbumSource ? "Album" : "Playlist";
   const collectionKindLower = params.isSongSource ? "single" : params.isAlbumSource ? "album" : "playlist";
   const downloadCollectionId = params.isAlbumSource ? `album:${params.playlistId}` : params.playlistId;
+  const savedCollectionId = `${params.isFirestoreSource ? "firestore" : params.isYouTubeSource ? "youtube" : params.isJioSaavnSource ? "jiosaavn" : "local"}:${params.playlistId}`;
+
+  useEffect(() => {
+    let active = true;
+    void getSavedCollections().then((items) => {
+      if (active) setIsCollectionLiked(items.some((item) => item.id === savedCollectionId));
+    }).catch(() => { if (active) setIsCollectionLiked(false); });
+    return () => { active = false; };
+  }, [savedCollectionId]);
+
+  const handleLikeCollection = useCallback(async () => {
+    try {
+      const saved = await toggleSavedCollection({
+        id: savedCollectionId,
+        kind: "playlist",
+        title: playlistName || params.initialTitle || "Playlist",
+        image: playlistCover || params.initialCover,
+        description: playlistDescription || params.initialDescription,
+        subtitle: `${effectiveSongCount} ${effectiveSongCount === 1 ? "song" : "songs"}`,
+        route: "playlist",
+        params: {
+          id: params.playlistId,
+          youtube: String(params.isYouTubeSource),
+          jiosaavn: String(params.isJioSaavnSource),
+          album: String(params.isAlbumSource),
+          song: String(params.isSongSource),
+          link: params.sourceLink,
+          firestore: String(params.isFirestoreSource),
+          title: playlistName || params.initialTitle,
+          description: playlistDescription || params.initialDescription,
+          cover: playlistCover || params.initialCover,
+          songCount: String(effectiveSongCount),
+        },
+      });
+      setIsCollectionLiked(saved);
+    } catch {
+      showGlobalToast("Couldn't update your Library. Try again.");
+    }
+  }, [savedCollectionId, playlistName, params.initialTitle, playlistCover, params.initialCover, playlistDescription, params.initialDescription, effectiveSongCount, params.playlistId, params.isYouTubeSource, params.isJioSaavnSource, params.isAlbumSource, params.isSongSource, params.sourceLink, params.isFirestoreSource]);
 
   const isPlayingFromThisPlaylist = useMemo(() => {
     if (!currentSong || songs.length === 0) return false;
@@ -230,12 +272,12 @@ function usePlaylistDetailView() {
     () => ({
       isFirestoreSource: params.isFirestoreSource,
       playlistIsPublic,
-      canEdit,
       loading,
       isPlayingFromThisPlaylist,
       isPlaying,
+      isLiked: isCollectionLiked,
     }),
-    [params.isFirestoreSource, playlistIsPublic, canEdit, loading, isPlayingFromThisPlaylist, isPlaying]
+    [params.isFirestoreSource, playlistIsPublic, loading, isPlayingFromThisPlaylist, isPlaying, isCollectionLiked]
   );
 
   if (notFound) {
@@ -264,18 +306,15 @@ function usePlaylistDetailView() {
         topInset={topInset}
         playlistCover={playlistCover}
         playlistName={playlistName}
-        playlistDescription={playlistDescription}
         collectionKind={collectionKind}
-        collectionKindLower={collectionKindLower}
         effectiveSongCount={effectiveSongCount}
         totalMinutes={totalMinutes}
         stateFlags={heroStateFlags}
         songs={songs}
-        downloadCollectionId={downloadCollectionId}
         backgroundColor={backgroundColor}
-        onOpenEdit={handleOpenEdit}
         onPlayAll={handlePlayAll}
         onShufflePlay={handleShufflePlay}
+        onLike={handleLikeCollection}
       />
 
       {!isOnline && (
@@ -317,6 +356,17 @@ function usePlaylistDetailView() {
               accessibilityLabel="Edit playlist"
             />
             <CapsuleDivider />
+            <View style={styles.navDownloadButton}>
+              <DownloadCollectionButton
+                collectionId={downloadCollectionId}
+                collectionName={playlistName}
+                collectionImage={playlistCover}
+                collectionType={collectionKindLower as "playlist" | "album"}
+                songs={songs}
+                compact
+              />
+            </View>
+            <CapsuleDivider />
             <CapsuleNavButton
               icon="share-outline"
               iconSize={17}
@@ -325,7 +375,25 @@ function usePlaylistDetailView() {
             />
           </CapsuleNavGroup>
         ) : (
-          <CircularShareButton onPress={handleShare} accessibilityLabel="Share playlist" />
+          <CapsuleNavGroup>
+            <View style={styles.navDownloadButton}>
+              <DownloadCollectionButton
+                collectionId={downloadCollectionId}
+                collectionName={playlistName}
+                collectionImage={playlistCover}
+                collectionType={collectionKindLower as "playlist" | "album"}
+                songs={songs}
+                compact
+              />
+            </View>
+            <CapsuleDivider />
+            <CapsuleNavButton
+              icon="share-outline"
+              iconSize={17}
+              onPress={handleShare}
+              accessibilityLabel="Share playlist"
+            />
+          </CapsuleNavGroup>
         )}
       </Animated.View>
 
@@ -408,6 +476,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     zIndex: 90,
   },
+  navDownloadButton: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
 
 
   offlineBannerWrap: {

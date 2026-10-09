@@ -43,6 +43,8 @@ export interface DownloadItem {
   coverUrl: string;
   /** Remote audio URL used to fetch the file. */
   audioUrl: string;
+  /** Durable YouTube identity; signed stream URLs are resolved only when transfer starts. */
+  youtubeVideoId?: string;
   /** Duration in seconds. */
   duration: number;
 
@@ -55,6 +57,9 @@ export interface DownloadItem {
   totalBytes: number;
 
   quality: DownloadQuality;
+  /** Bitrate in bits/second reported by the selected source; absent for older downloads. */
+  audioBitrate?: number;
+  audioCodec?: string;
   /** Absolute path to the local file once completed. */
   localPath: string | null;
 

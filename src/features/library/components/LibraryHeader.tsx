@@ -1,10 +1,12 @@
 import { NavLikedIcon } from "@/components/OfficialNavIcons";
 import Colors from "@/constants/colors";
 import { type FollowedArtist } from "@/lib/followedArtists";
+import type { SavedCollection } from "@/lib/savedCollections";
 import { Ionicons } from "@expo/vector-icons";
 import { memo } from "react";
 import { Pressable,StyleSheet,Text,View } from "react-native";
 import { ArtistRow } from "./ArtistRow";
+import { SavedCollectionRow } from "./SavedCollectionRow";
 
 export type Filter = "playlists" | "artists" | "favorite" | null;
 export type ViewMode = "list" | "grid";
@@ -15,11 +17,13 @@ interface LibraryHeaderProps {
   viewMode: ViewMode;
   likedSongCount: number;
   followedArtists: FollowedArtist[];
+  savedCollections: SavedCollection[];
   onSelectFilter: (filter: Filter) => void;
   onChangeViewMode: (mode: ViewMode) => void;
   onOpenLikedSongs: () => void;
   onOpenArtist: (artist: FollowedArtist) => void;
   onBrowseArtists: () => void;
+  onOpenSavedCollection: (collection: SavedCollection) => void;
 }
 
 export const LibraryHeader = memo(function LibraryHeader({
@@ -28,13 +32,16 @@ export const LibraryHeader = memo(function LibraryHeader({
   viewMode,
   likedSongCount,
   followedArtists,
+  savedCollections,
   onSelectFilter,
   onChangeViewMode,
   onOpenLikedSongs,
   onOpenArtist,
   onBrowseArtists,
+  onOpenSavedCollection,
 }: LibraryHeaderProps) {
   const showArtistsSection = filter === null || filter === "artists";
+  const showSavedSection = filter !== "artists";
 
   return (
     <View style={[styles.headerBlock, { paddingTop: topPadding }]}>
@@ -88,6 +95,15 @@ export const LibraryHeader = memo(function LibraryHeader({
           <Text style={styles.sectionTitle}>Following</Text>
           {followedArtists.map((artist) => (
             <ArtistRow key={artist.id} artist={artist} onPress={onOpenArtist} />
+          ))}
+        </View>
+      ) : null}
+
+      {showSavedSection && savedCollections.length > 0 ? (
+        <View style={styles.artistsSection}>
+          <Text style={styles.sectionTitle}>Saved Collections</Text>
+          {savedCollections.map((collection) => (
+            <SavedCollectionRow key={collection.id} collection={collection} onPress={onOpenSavedCollection} />
           ))}
         </View>
       ) : null}

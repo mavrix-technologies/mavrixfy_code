@@ -266,6 +266,7 @@ export function LikedSongsScreen() {
           song={item}
           queue={filteredSongsRef.current}
           queueKey="liked-songs"
+          optionContext="liked"
           horizontalPadding={4}
           showDownload={false}
           onSongPress={handleSongPress}

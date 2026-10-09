@@ -114,10 +114,6 @@ export function initAppShowcaseFirestore(): () => void {
         currentConfig = normalizeConfig(data);
         void AsyncStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(currentConfig));
         notifyListeners();
-        logger.info("[ShowcaseConfig] Real-time Firestore config updated:", {
-          enabled: currentConfig.enabled,
-          devEnabled: currentConfig.devEnabled,
-        });
       }
     },
     (error) => {
@@ -143,7 +139,6 @@ export async function deployAppShowcaseFirestore(
       updatedAt: new Date().toISOString(),
     };
     await setDoc(showcaseDocRef, payload, { merge: true });
-    logger.info("[ShowcaseConfig] Successfully deployed config update to Firestore doc appConfig/appShowcase!");
     return true;
   } catch (error) {
     logger.warn("[ShowcaseConfig] Failed to deploy config to Firestore:", error);

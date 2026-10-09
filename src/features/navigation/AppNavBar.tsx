@@ -282,7 +282,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   );
 
   // The gesture callback runs on taps, after render; openPlayer reads its lock ref there.
-  /* eslint-disable react-hooks/refs */
   const miniTapGesture = useMemo(
     () =>
       Gesture.Tap()
@@ -295,8 +294,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
         }),
     [openPlayer]
   );
-  /* eslint-enable react-hooks/refs */
-
   const miniSwipeGesture = useMemo(
     () => Gesture.Exclusive(miniPanGesture, miniTapGesture),
     [miniPanGesture, miniTapGesture]

@@ -10,7 +10,7 @@ function load(file, dependencies) {
  return module.exports;
 }
 function sheetFixture() {
- const slots=[];let index=0;let dirty=false;const ui={current:'mini'};
+ const slots=[];let index=0;let dirty=false;const ui={current:'mini',revision:0};
  const react={
   useState:initial=>{const i=index++;if(!(i in slots))slots[i]=initial;return[slots[i],value=>{slots[i]=value;dirty=true;}];},
   useRef:value=>{const i=index++;if(!(i in slots))slots[i]={current:value};return slots[i];},
@@ -18,9 +18,10 @@ function sheetFixture() {
   useLayoutEffect:fn=>fn(),
  };
  const {usePlayerSheetState}=load('src/features/player/hooks/usePlayerSheetState.ts',{
-  react,'@/lib/playerUIState':{playerUIStateStore:ui,collapsePlayer:()=>{ui.current='mini';}},
+  react,'@/lib/playerUIState':{playerUIStateStore:ui,collapsePlayer:()=>setState('mini')},
  });
- function render(state=ui.current){ui.current=state;let result;do{dirty=false;index=0;result=usePlayerSheetState(state);}while(dirty);return result;}
+ function setState(state){if(ui.current!==state){ui.current=state;ui.revision++;}}
+ function render(state=ui.current){setState(state);let result;do{dirty=false;index=0;result=usePlayerSheetState(state);}while(dirty);return result;}
  return{render,ui};
 }
 test('native sheet retains content through closing and loads details after opening completes',()=>{
@@ -32,13 +33,24 @@ test('native sheet retains content through closing and loads details after openi
 });
 test('native sheet reopening ignores an obsolete closing destination',()=>{
  const f=sheetFixture();let s=f.render('expanded');s.onAnimate(0,-1);
- f.render('mini');s=f.render('expanded');s.onAnimate(-1,0);s.onClose();
+ f.render('mini');f.render('expanded');s.onClose();
  assert.equal(f.ui.current,'expanded');assert.equal(f.render().visible,true);
 });
 test('content pan completion collapses the same global player; next open starts fresh',()=>{
  const f=sheetFixture();const s=f.render('expanded');s.onChange(0);
  s.onAnimate(0,-1);s.onClose();assert.equal(f.ui.current,'mini');assert.equal(f.render().visible,false);
  const next=f.render('expanded');assert.equal(next.visible,true);assert.equal(next.interactionReady,false);
+});
+
+test('rapid close and reopen invalidates an old native close completion',()=>{
+ const f=sheetFixture();const oldClose=f.render('expanded');
+ oldClose.onAnimate(0,-1);
+ f.render('mini');
+ const reopened=f.render('expanded');
+ oldClose.onClose();
+ assert.equal(f.ui.current,'expanded');
+ assert.equal(f.render().visible,true);
+ assert.equal(reopened.interactionReady,false);
 });
 
 test('player deep-link bridge opens the existing sheet and returns to its underlying screen',()=>{

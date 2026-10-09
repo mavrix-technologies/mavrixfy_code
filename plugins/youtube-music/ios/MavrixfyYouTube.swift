@@ -21,7 +21,7 @@ final class MavrixfyYouTube: NSObject, RCTInvalidating {
             } catch is CancellationError {
                 reject("YOUTUBE_CANCELLED", "YouTube request cancelled", nil)
             } catch {
-                reject("YOUTUBE_UNAVAILABLE", "YouTube Music could not load this item. Please retry.", nil)
+                reject("YOUTUBE_UNAVAILABLE", "Mavrixfy Music could not load this item. Please retry.", nil)
             }
             self.removeJob(id)
         }
@@ -192,7 +192,7 @@ private actor YouTubeMusicCatalog {
         guard let id, id.range(of: "^[A-Za-z0-9_-]{11}$", options: .regularExpression) != nil else { return nil }
         let labels = columns(item)
         let durations = renderers(item, "musicResponsiveListItemFixedColumnRenderer").map { text($0["text"]) }
-        let artist = labels.dropFirst().first?.components(separatedBy: " • ").first ?? "YouTube Music"
+        let artist = labels.dropFirst().first?.components(separatedBy: " • ").first ?? "Mavrixfy Music"
         return ["videoId": id, "title": labels.first ?? "", "artist": artist,
                 "coverUrl": thumbnail(item), "duration": duration(durations.first ?? labels.last?.components(separatedBy: " • ").last ?? "")]
     }

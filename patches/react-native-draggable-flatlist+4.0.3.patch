@@ -1,0 +1,187 @@
+diff --git a/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx b/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx
+index d3add83..f3173ed 100644
+--- a/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx
++++ b/node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx
+@@ -1,119 +1,72 @@
++import { useCallback, useEffect } from "react";
++import type { ScrollView } from "react-native";
+ import {
+   runOnJS,
++  scrollTo,
+   useAnimatedReaction,
+-  useDerivedValue,
+-  useSharedValue,
++  useAnimatedRef,
++  useFrameCallback,
++  type FrameInfo,
+ } from "react-native-reanimated";
+-import { DEFAULT_PROPS, SCROLL_POSITION_TOLERANCE } from "../constants";
++import { DEFAULT_PROPS } from "../constants";
+ import { useProps } from "../context/propsContext";
+ import { useAnimatedValues } from "../context/animatedValueContext";
+ import { useRefs } from "../context/refContext";
+ 
+ export function useAutoScroll() {
+   const { flatlistRef } = useRefs();
+-
++  const scrollRef = useAnimatedRef<ScrollView>();
+   const {
+     autoscrollThreshold = DEFAULT_PROPS.autoscrollThreshold,
+     autoscrollSpeed = DEFAULT_PROPS.autoscrollSpeed,
+   } = useProps();
+-
+   const {
+-    scrollOffset,
+-    scrollViewSize,
+-    containerSize,
+-    activeCellSize,
+-    hoverOffset,
+-    activeIndexAnim,
++    scrollOffset, scrollViewSize, containerSize, activeCellSize,
++    hoverOffset, activeIndexAnim, isTouchActiveNative, disabled, horizontalAnim,
+   } = useAnimatedValues();
+ 
+-  const hoverScreenOffset = useDerivedValue(() => {
+-    return hoverOffset.value - scrollOffset.value;
+-  }, []);
+-
+-  const isScrolledUp = useDerivedValue(() => {
+-    return scrollOffset.value - SCROLL_POSITION_TOLERANCE <= 0;
+-  }, []);
+-
+-  const isScrolledDown = useDerivedValue(() => {
+-    return (
+-      scrollOffset.value + containerSize.value + SCROLL_POSITION_TOLERANCE >=
+-      scrollViewSize.value
+-    );
+-  }, []);
+-
+-  const distToTopEdge = useDerivedValue(() => {
+-    return Math.max(0, hoverScreenOffset.value);
+-  }, []);
+-
+-  const distToBottomEdge = useDerivedValue(() => {
+-    const hoverPlusActiveCell = hoverScreenOffset.value + activeCellSize.value;
+-    return Math.max(0, containerSize.value - hoverPlusActiveCell);
+-  }, []);
+-
+-  const isAtTopEdge = useDerivedValue(() => {
+-    return distToTopEdge.value <= autoscrollThreshold;
+-  });
+-
+-  const isAtBottomEdge = useDerivedValue(() => {
+-    return distToBottomEdge.value <= autoscrollThreshold;
+-  }, []);
+-
+-  const scrollTarget = useSharedValue(0);
+-  const dragIsActive = useDerivedValue(() => {
+-    return activeIndexAnim.value >= 0;
+-  }, []);
+-
++  useEffect(() => {
++    if (!flatlistRef || !("current" in flatlistRef)) return;
++    const nativeScrollView = flatlistRef.current?.getNativeScrollRef();
++    if (nativeScrollView) scrollRef(nativeScrollView as ScrollView);
++  }, [flatlistRef, scrollRef]);
++
++  const { setActive } = useFrameCallback(useCallback((frame: FrameInfo) => {
++    "worklet";
++    if (activeIndexAnim.value < 0 || !isTouchActiveNative.value || disabled.value) return;
++    if (!scrollRef()) return;
++    const maxOffset = Math.max(0, scrollViewSize.value - containerSize.value);
++    if (maxOffset === 0 || containerSize.value <= 0 || autoscrollThreshold <= 0 || autoscrollSpeed <= 0) return;
++
++    // Keep edge zones separate even in a short viewport. Use the dragged row's
++    // clamped native position; the finger may already be beyond the list edge.
++    const edgeSize = Math.min(autoscrollThreshold, containerSize.value / 4);
++    const rowTop = hoverOffset.value - scrollOffset.value;
++    const topDistance = Math.max(0, rowTop);
++    const bottomDistance = Math.max(0, containerSize.value - rowTop - activeCellSize.value);
++    const direction = topDistance < edgeSize && topDistance <= bottomDistance
++      ? -1 : bottomDistance < edgeSize ? 1 : 0;
++    if (!direction) return;
++    const distance = direction < 0 ? topDistance : bottomDistance;
++    const strength = Math.max(0.15, 1 - distance / edgeSize);
++    // Preserve the public speed setting's scale (~100 => 600 points/second).
++    const elapsed = Math.min(32, Math.max(0, frame.timeSincePreviousFrame ?? 16));
++    const next = Math.max(0, Math.min(maxOffset,
++      scrollOffset.value + direction * autoscrollSpeed * 6 * strength * elapsed / 1000));
++    if (next === scrollOffset.value) return;
++    scrollTo(scrollRef, horizontalAnim.value ? next : 0, horizontalAnim.value ? 0 : next, false);
++  }, [scrollRef, scrollOffset, scrollViewSize, containerSize, activeCellSize,
++    hoverOffset, activeIndexAnim, isTouchActiveNative, disabled, horizontalAnim,
++    autoscrollThreshold, autoscrollSpeed]), false);
++
++  // No frame loop while idle. Only activation/release cross to JS; every scroll
++  // command and edge calculation stays on the UI thread during the gesture.
+   useAnimatedReaction(
+-    () => {
+-      return dragIsActive.value;
++    () => activeIndexAnim.value >= 0 && isTouchActiveNative.value && !disabled.value,
++    (active, previous) => {
++      if (active !== previous) runOnJS(setActive)(active);
+     },
+-    (cur, prev) => {
+-      if (cur && !prev) {
+-        scrollTarget.value = scrollOffset.value;
+-      }
+-    }
++    [setActive],
+   );
+-
+-  const shouldAutoScroll = useDerivedValue(() => {
+-    const scrollTargetDiff = Math.abs(scrollTarget.value - scrollOffset.value);
+-    const hasScrolledToTarget = scrollTargetDiff < SCROLL_POSITION_TOLERANCE;
+-
+-    const isAtEdge = isAtTopEdge.value || isAtBottomEdge.value;
+-    const topDisabled = isAtTopEdge.value && isScrolledUp.value;
+-    const bottomDisabled = isAtBottomEdge.value && isScrolledDown.value;
+-    const isEdgeDisabled = topDisabled || bottomDisabled;
+-
+-    const cellIsActive = activeIndexAnim.value >= 0;
+-
+-    return hasScrolledToTarget && isAtEdge && !isEdgeDisabled && cellIsActive;
+-  }, []);
+-
+-  function scrollToInternal(offset: number) {
+-    if (flatlistRef && "current" in flatlistRef) {
+-      flatlistRef.current?.scrollToOffset({ offset, animated: true });
+-    }
+-  }
+-
+-  useDerivedValue(() => {
+-    if (!shouldAutoScroll.value) return;
+-
+-    const distFromEdge = isAtTopEdge.value
+-      ? distToTopEdge.value
+-      : distToBottomEdge.value;
+-    const speedPct = 1 - distFromEdge / autoscrollThreshold!;
+-    const offset = speedPct * autoscrollSpeed;
+-    const targetOffset = isAtTopEdge.value
+-      ? Math.max(0, scrollOffset.value - offset)
+-      : Math.min(
+-          scrollOffset.value + offset,
+-          scrollViewSize.value - containerSize.value
+-        );
+-
+-    scrollTarget.value = targetOffset;
+-    // Reanimated scrollTo is crashing on android. use 'regular' scrollTo until figured out.
+-    // scrollTo(scrollViewRef, targetX, targetY, true);
+-    runOnJS(scrollToInternal)(targetOffset);
+-  }, []);
+-
+   return null;
+ }
+diff --git a/node_modules/react-native-draggable-flatlist/src/hooks/useCellTranslate.tsx b/node_modules/react-native-draggable-flatlist/src/hooks/useCellTranslate.tsx
+index efea240..349472a 100644
+--- a/node_modules/react-native-draggable-flatlist/src/hooks/useCellTranslate.tsx
++++ b/node_modules/react-native-draggable-flatlist/src/hooks/useCellTranslate.tsx
+@@ -53,7 +53,7 @@ export function useCellTranslate({ cellIndex, cellSize, cellOffset }: Params) {
+         result = cellIndex - 1;
+       } else if (
+         hoverPlusActiveSize >= offsetPlusHalfSize &&
+-        hoverPlusActiveSize < offsetPlusSize
++        hoverPlusActiveSize <= offsetPlusSize
+       ) {
+         // bottom edge of active cell overlaps bottom half of current cell
+         result = cellIndex;

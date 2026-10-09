@@ -46,8 +46,8 @@ export function usePlayerCoreState({
   const [textColor, setTextColor] = useState("#FFFFFF");
   const [playbackQuality, setPlaybackQuality] = useState<PlaybackQualityState>({
     requested: "medium",
-    actualBitrate: 160,
-    qualityLabel: "160kbps",
+    actualBitrate: 0,
+    qualityLabel: "Original audio",
     unlocked: false,
     isFallback: false,
   });

@@ -126,19 +126,21 @@ test("display artwork covers device pixels without oversized list thumbnails", (
     "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg");
 });
 
-test("palette analysis shrinks recognized artwork only, preserving display masters and signed queries", () => {
+test("palette analysis preserves the displayed artwork source and signed crop parameters", () => {
   const master = "https://lh3.googleusercontent.com/art=w1200-h1200-l90-rj?token=x";
-  assert.equal(art.artworkAnalysisUrl(master), "https://lh3.googleusercontent.com/art=w128-h128-l90-rj?token=x");
+  assert.equal(art.artworkAnalysisUrl(master), "https://lh3.googleusercontent.com/art=w512-h512-l90-rj?token=x");
   assert.equal(art.youTubeDisplayArtworkUrl(master, 1200), master);
   assert.equal(art.artworkAnalysisUrl("https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg"),
     "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg");
+  assert.equal(art.artworkAnalysisUrl("https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg?sqp=crop"),
+    "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg?sqp=crop");
   assert.equal(art.artworkAnalysisUrl("https://c.saavncdn.com/123/song-500x500.jpg?token=a"),
-    "https://c.saavncdn.com/123/song-150x150.jpg?token=a");
+    "https://c.saavncdn.com/123/song-500x500.jpg?token=a");
   const unknown = "https://elsewhere.com/song-500x500.jpg?token=s1200";
   assert.equal(art.artworkAnalysisUrl(unknown), unknown);
 });
 
-test("native palette extraction uses the small source and coalesces requests under the master cache key", async () => {
+test("native palette extraction uses accurate sampling and coalesces requests under a versioned cache key", async () => {
   const calls = [];
   const math = load("src/lib/colorMath.ts", {});
   const colors = load("src/lib/colorExtractor.ts", {
@@ -157,10 +159,38 @@ test("native palette extraction uses the small source and coalesces requests und
   const palettes = await Promise.all(Array.from({ length: 10 }, () => colors.extractArtworkColors(master)));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].uri, art.artworkAnalysisUrl(master));
-  assert.equal(calls[0].options.key, master);
+  assert.equal(calls[0].options.key, `artwork-palette-v3:${master}`);
+  assert.equal(calls[0].options.quality, "high");
+  assert.equal(calls[0].options.pixelSpacing, 2);
   assert.equal(colors.getImmediateArtworkPalette(master), palettes[0]);
   await colors.extractArtworkColors(master);
   assert.equal(calls.length, 1);
+});
+
+test("Expo Go samples real JPEG artwork pixels instead of showing a black placeholder", async () => {
+  const jpeg = require("jpeg-js");
+  const width = 24, height = 24;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    pixels[i * 4] = 210; pixels[i * 4 + 1] = 36; pixels[i * 4 + 2] = 54; pixels[i * 4 + 3] = 255;
+  }
+  const bytes = jpeg.encode({ data: pixels, width, height }, 90).data;
+  const colors = load("src/lib/colorExtractor.ts", {
+    "./colorMath": load("src/lib/colorMath.ts", {}),
+    "@/services/youtube/YouTubeArtwork": art,
+    "@react-native-async-storage/async-storage": { getItem: async () => null, setItem: async () => {} },
+    "expo-constants": { executionEnvironment: "storeClient", appOwnership: "expo" },
+    "react-native": { Platform: { OS: "ios" } },
+    "jpeg-js": jpeg,
+    react: {},
+  }, "", {
+    AbortController,
+    fetch: async () => ({ ok: true, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) }),
+    setTimeout: () => 1, clearTimeout() {},
+  });
+  const palette = await colors.extractArtworkColors("https://art.test/cover.jpg");
+  assert.match(palette.rawDominant, /^#D[0-9A-F]{5}$/);
+  assert.notEqual(palette.background, colors.DEFAULT_ARTWORK_PALETTE.background);
 });
 
 test("banner delay prevents a native ad from mounting before initialization and cancels unmounted work", async () => {

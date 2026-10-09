@@ -8,9 +8,11 @@ getUserFirestorePlaylists,
 type FirestorePlaylist,
 } from "@/lib/firestore";
 import { formatDuration,getBestImageUrl,type Song } from "@/lib/musicData";
+import { searchYouTubeMusic } from "@/services/youtube/YouTubeMusic";
 import { addSongToPlaylist,getUserPlaylists } from "@/lib/storage";
 import { showGlobalToast } from "@/utils/globalToast";
 import { Ionicons } from "@expo/vector-icons";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import { router } from "expo-router";
 import React,{ useCallback,useEffect,useMemo,useState } from "react";
 import {
@@ -328,6 +330,107 @@ export function MavrixfyCodeView({ song, onBack }: { song: Song; onBack: () => v
           <Text style={styles.codeHint}>Long-press the ID to copy</Text>
         </View>
       </View>
+    </View>
+  );
+}
+
+// ─── Sub-view: Choose a saved song's YouTube version ─────────────────────────
+export function LikedSongMatchesView({
+  song,
+  onBack,
+  onSelect,
+  selectingId,
+  bottomPad,
+}: {
+  song: Song;
+  onBack: () => void;
+  onSelect: (match: Song) => void;
+  selectingId: string | null;
+  bottomPad: number;
+}) {
+  const [result, setResult] = useState<{ key: string; matches: Song[]; failed: boolean } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const queryKey = `${song.title}\u0000${song.artist}\u0000${attempt}`;
+  const loading = result?.key !== queryKey;
+  const failed = result?.key === queryKey && result.failed;
+  const matches = result?.key === queryKey ? result.matches : [];
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    void searchYouTubeMusic([song.title, song.artist].filter(Boolean).join(" "), "songs", controller.signal)
+      .then(result => {
+        if (active) setResult({ key: queryKey, matches: result.songs, failed: false });
+      })
+      .catch(() => {
+        if (active && !controller.signal.aborted) setResult({ key: queryKey, matches: [], failed: true });
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [queryKey, song.artist, song.title]);
+
+  const renderMatch = useCallback(({ item }: { item: Song }) => {
+    const isSelecting = selectingId === item.id;
+    return (
+      <Pressable
+        style={({ pressed }) => [styles.playlistRow, pressed && styles.rowPressed]}
+        onPress={() => onSelect(item)}
+        disabled={Boolean(selectingId)}
+        accessibilityRole="button"
+        accessibilityLabel={`Replace this saved song with ${item.title} by ${item.artist}`}
+      >
+        {item.coverUrl ? (
+          <MusicArtwork recyclingKey={`liked-match-${item.id}`} uri={item.coverUrl} size={48}
+            style={styles.playlistThumb} contentFit="cover" cachePolicy="memory-disk" />
+        ) : (
+          <View style={[styles.playlistThumb, styles.playlistThumbFallback]}>
+            <Ionicons name="musical-notes" size={18} color="#777" />
+          </View>
+        )}
+        <View style={styles.playlistInfo}>
+          <Text style={styles.playlistName} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.playlistCount} numberOfLines={1}>
+            {[item.artist, item.duration ? formatDuration(item.duration) : ""].filter(Boolean).join(" • ")}
+          </Text>
+        </View>
+        {isSelecting ? <ActivityIndicator size="small" color={Colors.primary} /> :
+          <Ionicons name="checkmark-circle-outline" size={22} color={Colors.primary} />}
+      </Pressable>
+    );
+  }, [onSelect, selectingId]);
+
+  return (
+    <View style={styles.subView}>
+      <SubHeader title="Choose song version" onBack={onBack} />
+      <View style={styles.divider} />
+      <View style={{ paddingHorizontal: 18, paddingVertical: 10 }}>
+        <Text style={styles.emptyHint}>
+          Tap a match to replace this exact Liked Songs entry for “{song.title}”. Your original saved record and JioSaavn URL stay preserved.
+        </Text>
+      </View>
+      {loading ? (
+        <View style={styles.centered}><ActivityIndicator color={Colors.primary} /><Text style={styles.emptyHint}>Finding song versions…</Text></View>
+      ) : failed ? (
+        <View style={styles.centered}>
+          <Text style={styles.emptyMsg}>Could not load song versions</Text>
+          <Pressable style={styles.closeButton} onPress={() => setAttempt(value => value + 1)}>
+            <Text style={styles.closeButtonText}>Try again</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <FlatList
+          data={matches}
+          keyExtractor={item => item.id}
+          renderItem={renderMatch}
+          style={styles.playlistList}
+          contentContainerStyle={[styles.playlistListContent, { paddingBottom: bottomPad }]}
+          showsVerticalScrollIndicator
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={<View style={styles.centered}><Text style={styles.emptyMsg}>No song versions found</Text></View>}
+        />
+      )}
     </View>
   );
 }

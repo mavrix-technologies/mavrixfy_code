@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons,MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React,{ useEffect,useRef } from "react";
 import {
@@ -61,7 +61,7 @@ export const SpotifyMotionSaveButton = React.memo(
       }
 
       if (liked) {
-        // Energetic spring bounce & rotation to checkmark
+        // Give the filled heart a light spring when a song is saved.
         likedProgress.value = withSpring(1, SPRING_CONFIG);
 
         // Tactile celebratory pulse ripple
@@ -70,7 +70,7 @@ export const SpotifyMotionSaveButton = React.memo(
         pulseScale.value = withTiming(1.65, { duration: 340 });
         pulseOpacity.value = withTiming(0, { duration: 340 });
       } else {
-        // Smooth counter-rotation and spring back to plus
+        // Return smoothly to the outline heart when a song is unsaved.
         likedProgress.value = withSpring(0, SPRING_CONFIG);
         pulseOpacity.value = 0;
       }
@@ -98,27 +98,22 @@ export const SpotifyMotionSaveButton = React.memo(
       };
     });
 
-    // Unliked Plus Icon animation: rotates 90deg and scales down to fade out
-    const plusIconStyle = useAnimatedStyle(() => {
+    // Crossfade between add and liked states.
+    const addIconStyle = useAnimatedStyle(() => {
       const opacity = interpolate(likedProgress.value, [0, 0.45, 1], [1, 0, 0]);
       const scale = interpolate(likedProgress.value, [0, 1], [1, 0.55]);
-      const rotate = `${interpolate(likedProgress.value, [0, 1], [0, 90])}deg`;
-
       return {
         opacity,
-        transform: [{ scale }, { rotate }],
+        transform: [{ scale }],
       };
     });
 
-    // Liked Checkmark Icon animation: rotates from -90deg and scales up with snap
-    const checkmarkIconStyle = useAnimatedStyle(() => {
+    const likedHeartStyle = useAnimatedStyle(() => {
       const opacity = interpolate(likedProgress.value, [0, 0.55, 1], [0, 0, 1]);
       const scale = interpolate(likedProgress.value, [0, 1], [0.55, 1]);
-      const rotate = `${interpolate(likedProgress.value, [0, 1], [-90, 0])}deg`;
-
       return {
         opacity,
-        transform: [{ scale }, { rotate }],
+        transform: [{ scale }],
       };
     });
 
@@ -138,7 +133,7 @@ export const SpotifyMotionSaveButton = React.memo(
         accessibilityRole="button"
         accessibilityLabel={
           accessibilityLabel ??
-          (liked ? "Remove from your library" : "Save to your library")
+          (liked ? "Remove from Liked Songs" : "Add to Liked Songs")
         }
         accessibilityState={{ selected: liked }}
         hitSlop={8}
@@ -148,7 +143,7 @@ export const SpotifyMotionSaveButton = React.memo(
         style={[styles.buttonBase, style]}
       >
         <Animated.View style={[styles.contentWrap, containerAnimatedStyle]}>
-          {/* Subtle green pulse ring on like */}
+          {/* Subtle pulse ring confirms the save action. */}
           <Animated.View
             pointerEvents="none"
             style={[
@@ -163,19 +158,19 @@ export const SpotifyMotionSaveButton = React.memo(
             ]}
           />
 
-          {/* Plus in circle (Unliked State) */}
-          <Animated.View style={[styles.iconLayer, plusIconStyle]}>
+          {/* Add to Liked Songs */}
+          <Animated.View style={[styles.iconLayer, addIconStyle]}>
             <Ionicons
-              name="add-circle-outline"
+              name="add"
               size={iconSize}
               color={inactiveColor}
             />
           </Animated.View>
 
-          {/* Checkmark in circle (Liked State) */}
-          <Animated.View style={[styles.iconLayer, checkmarkIconStyle]}>
-            <Ionicons
-              name="checkmark-circle"
+          {/* Liked */}
+          <Animated.View style={[styles.iconLayer, likedHeartStyle]}>
+            <MaterialCommunityIcons
+              name="heart"
               size={iconSize}
               color={activeColor}
             />

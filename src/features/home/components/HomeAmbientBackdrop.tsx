@@ -1,7 +1,11 @@
 import Colors from "@/constants/colors";
 import {
+ARTWORK_AMBIENT_GRADIENT_LOCATIONS,
+ARTWORK_AMBIENT_TRANSITION_DURATION_MS,
 colorWithAlpha,
-extractArtworkColors
+extractArtworkColors,
+getArtworkAmbientGradientStops,
+type ArtworkAmbientGradientStops,
 } from "@/lib/colorExtractor";
 import { type Song } from "@/lib/musicData";
 import { type FestivalThemeConfig } from "@/services/festivalThemeService";
@@ -18,32 +22,19 @@ type SharedValue,
 
 import { usePlaybackNowPlaying } from "@/services/audio/PlaybackEngine";
 
-type GradientStops = readonly [string, string, string, string];
-
-const DEFAULT_GRADIENT_COLORS: GradientStops = [
+const DEFAULT_GRADIENT_COLORS: ArtworkAmbientGradientStops = [
   Colors.background,
   Colors.background,
   Colors.background,
   Colors.background,
 ] as const;
 
-const GRADIENT_LOCATIONS = [0, 0.40, 0.75, 1] as const;
 const GRADIENT_START = { x: 0.5, y: 0 } as const;
 const GRADIENT_END = { x: 0.5, y: 1 } as const;
-const TRANSITION_DURATION_MS = 850;
 const TRANSITION_EASING = Easing.bezier(0.25, 0.1, 0.25, 1);
 
 let gCachedCoverUrl: string | null = null;
-let gCachedColorStops: GradientStops = DEFAULT_GRADIENT_COLORS;
-
-function buildColorStopsFromPalette(accent: string, background: string): GradientStops {
-  return [
-    colorWithAlpha(accent, 0.42, "rgba(20, 24, 32, 0.50)"),
-    colorWithAlpha(background, 0.65, "rgba(18, 22, 28, 0.50)"),
-    colorWithAlpha(Colors.background, 0.90, Colors.background),
-    Colors.background,
-  ];
-}
+let gCachedColorStops: ArtworkAmbientGradientStops = DEFAULT_GRADIENT_COLORS;
 
 interface HomeAmbientBackdropProps {
   currentSong?: Song | null;
@@ -64,8 +55,8 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
 
 
   // Dynamic Song Ambient Color Extraction State (Original Git Logic)
-  const [colorsA, setColorsA] = useState<GradientStops>(gCachedColorStops);
-  const [colorsB, setColorsB] = useState<GradientStops>(DEFAULT_GRADIENT_COLORS);
+  const [colorsA, setColorsA] = useState<ArtworkAmbientGradientStops>(gCachedColorStops);
+  const [colorsB, setColorsB] = useState<ArtworkAmbientGradientStops>(DEFAULT_GRADIENT_COLORS);
 
   const activeLayerRef = useRef<0 | 1>(0);
   const opacityA = useSharedValue(1);
@@ -101,13 +92,13 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
     if (!coverUrl) {
       if (activeLayerRef.current === 0) {
         setColorsB(DEFAULT_GRADIENT_COLORS);
-        opacityB.value = withTiming(1, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
-        opacityA.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        opacityB.value = withTiming(1, { duration: ARTWORK_AMBIENT_TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        opacityA.value = withTiming(0, { duration: ARTWORK_AMBIENT_TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
         activeLayerRef.current = 1;
       } else {
         setColorsA(DEFAULT_GRADIENT_COLORS);
-        opacityA.value = withTiming(1, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
-        opacityB.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        opacityA.value = withTiming(1, { duration: ARTWORK_AMBIENT_TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        opacityB.value = withTiming(0, { duration: ARTWORK_AMBIENT_TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
         activeLayerRef.current = 0;
       }
       gCachedCoverUrl = null;
@@ -119,19 +110,19 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
     extractArtworkColors(coverUrl).then((palette) => {
       if (!isMounted) return;
 
-      const newStops = buildColorStopsFromPalette(palette.accent, palette.background);
+      const newStops = getArtworkAmbientGradientStops(palette.accent, palette.background, Colors.background);
       gCachedCoverUrl = coverUrl;
       gCachedColorStops = newStops;
 
       if (activeLayerRef.current === 0) {
         setColorsB(newStops);
-        opacityB.value = withTiming(1, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
-        opacityA.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        opacityB.value = withTiming(1, { duration: ARTWORK_AMBIENT_TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        opacityA.value = withTiming(0, { duration: ARTWORK_AMBIENT_TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
         activeLayerRef.current = 1;
       } else {
         setColorsA(newStops);
-        opacityA.value = withTiming(1, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
-        opacityB.value = withTiming(0, { duration: TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        opacityA.value = withTiming(1, { duration: ARTWORK_AMBIENT_TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
+        opacityB.value = withTiming(0, { duration: ARTWORK_AMBIENT_TRANSITION_DURATION_MS, easing: TRANSITION_EASING });
         activeLayerRef.current = 0;
       }
     });
@@ -144,7 +135,7 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
   // 1. FESTIVAL THEME MODE: Seamless Smaller Ambient Color Blur
   if (isFestivalMode) {
     const festiveAccent = themeConfig?.themeAccentColor || "#014D52";
-    const festiveStops: GradientStops = [
+    const festiveStops: ArtworkAmbientGradientStops = [
       colorWithAlpha(festiveAccent, 0.38, "rgba(1, 77, 82, 0.38)"),
       colorWithAlpha(festiveAccent, 0.14, "rgba(1, 77, 82, 0.14)"),
       "rgba(11, 15, 20, 0.85)",
@@ -161,7 +152,7 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
       >
         <LinearGradient
           colors={festiveStops}
-          locations={GRADIENT_LOCATIONS}
+          locations={ARTWORK_AMBIENT_GRADIENT_LOCATIONS}
           start={GRADIENT_START}
           end={GRADIENT_END}
           style={styles.gradientFill}
@@ -182,7 +173,7 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
       <Animated.View style={[styles.gradientFill, animatedStyleA]}>
         <LinearGradient
           colors={colorsA}
-          locations={GRADIENT_LOCATIONS}
+          locations={ARTWORK_AMBIENT_GRADIENT_LOCATIONS}
           start={GRADIENT_START}
           end={GRADIENT_END}
           style={styles.gradientFill}
@@ -191,7 +182,7 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
       <Animated.View style={[styles.gradientFill, animatedStyleB]}>
         <LinearGradient
           colors={colorsB}
-          locations={GRADIENT_LOCATIONS}
+          locations={ARTWORK_AMBIENT_GRADIENT_LOCATIONS}
           start={GRADIENT_START}
           end={GRADIENT_END}
           style={styles.gradientFill}

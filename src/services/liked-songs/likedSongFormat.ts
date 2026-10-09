@@ -7,14 +7,20 @@ export function likedAtMillis(data: Record<string, any>): number {
   return Number.isFinite(value) ? value : 0;
 }
 export function youtubeIdentity(song: Partial<Song>): string | null {
+  // The permanent watch URL is the user's selected saved version. It must win
+  // over older identity fields when a user explicitly chooses a replacement.
+  const selectedUrl = youtubeIdFromUrl(song.youtubeUrl);
+  if (selectedUrl) return selectedUrl;
   if (song.source === "youtube" || song.id?.startsWith("youtube_")) {
     const id = song.youtubeVideoId || song.videoId || song.id?.slice(8);
     if (validVideoId(id)) return id;
   }
   // LastWave StoredTrack uses a permanent watch URL instead of a signed stream.
-  const url = song.youtubeUrl || song.catalogUrl;
-  if (!url) return null;
-  if (song.source === "youtube" && validVideoId(url)) return url;
+  return youtubeIdFromUrl(song.catalogUrl);
+}
+function youtubeIdFromUrl(url: unknown): string | null {
+  if (typeof url !== "string" || !url) return null;
+  if (validVideoId(url)) return url;
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase();
@@ -65,7 +71,8 @@ export function readLikedSong(documentId: string, data: Record<string, any>): So
     catalogUrl: data.catalogUrl || (/^https?:\/\/([^/]+\.)?((jiosaavn|saavn|youtube)\.com|youtu\.be)\//i.test(data.url || "") ? data.url : ""),
     youtubeUrl: data.youtubeUrl || "", likedSongDocumentIds: [documentId] };
   const id = youtubeIdentity(original);
-  return id ? { ...original, ...youtubeLikedMetadata({ ...original, youtubeVideoId: id }) } : original;
+  return id ? { ...original, ...youtubeLikedMetadata({ ...original, youtubeVideoId: id }),
+    catalogUrl: `https://music.youtube.com/watch?v=${id}` } : original;
 }
 export function mergeLikedSongIdentities(songs: Song[]): Song[] {
   const unique = new Map<string, Song>();

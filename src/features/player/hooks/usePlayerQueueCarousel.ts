@@ -4,30 +4,30 @@ import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import type { FlatList,NativeScrollEvent,NativeSyntheticEvent } from "react-native";
 import type { ArtworkQueueItem } from "../components/PlayerArtworkViews";
 
-export interface UseArtworkCarouselSyncParams {
+export interface UsePlayerQueueSwipeParams {
   playingQueue: Song[];
   activeQueueIndex: number;
   currentSongId: string | undefined;
-  artCarouselSnapInterval: number;
+  pageWidth: number;
   nextSong: () => Promise<any> | void;
   prevSong: () => Promise<any> | void;
   playSong: (song: Song, queue: Song[]) => void;
 }
 
-export function useArtworkCarouselSync({
+export function usePlayerQueueSwipe({
   playingQueue,
   activeQueueIndex,
   currentSongId,
-  artCarouselSnapInterval,
+  pageWidth,
   nextSong,
   prevSong,
   playSong,
-}: UseArtworkCarouselSyncParams) {
-  const [artScrollX] = useState(() => new Animated.Value(activeQueueIndex * artCarouselSnapInterval));
-  const artCarouselRef = useRef<FlatList<ArtworkQueueItem> | null>(null);
-  const hasAlignedArtCarouselRef = useRef(false);
-  const prevCarouselSongIdRef = useRef(currentSongId);
-  const pendingArtworkTargetIndexRef = useRef<number | null>(null);
+}: UsePlayerQueueSwipeParams) {
+  const [scrollX] = useState(() => new Animated.Value(activeQueueIndex * pageWidth));
+  const listRef = useRef<FlatList<ArtworkQueueItem> | null>(null);
+  const hasAlignedListRef = useRef(false);
+  const prevListSongIdRef = useRef(currentSongId);
+  const pendingTargetIndexRef = useRef<number | null>(null);
   const userScrolledToIndexRef = useRef<number | null>(null);
   const skipCooldownRef = useRef(false);
   const skipCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -44,7 +44,7 @@ export function useArtworkCarouselSync({
     };
   }, [clearSkipCooldownTimer]);
 
-  const handleArtworkSongChange = useCallback(
+  const handleTrackChange = useCallback(
     (targetIndex: number) => {
       if (targetIndex < 0 || targetIndex >= playingQueue.length || targetIndex === activeQueueIndex) {
         return;
@@ -68,79 +68,79 @@ export function useArtworkCarouselSync({
   );
 
   useEffect(() => {
-    pendingArtworkTargetIndexRef.current = activeQueueIndex;
+    pendingTargetIndexRef.current = activeQueueIndex;
   }, [activeQueueIndex]);
 
-  const handleArtworkScrollFinished = useCallback(
+  const handleScrollFinished = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (playingQueue.length <= 1 || artCarouselSnapInterval <= 0) {
+      if (playingQueue.length <= 1 || pageWidth <= 0) {
         return;
       }
 
-      const rawIndex = Math.round(event.nativeEvent.contentOffset.x / artCarouselSnapInterval);
+      const rawIndex = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
       const targetIndex = Math.max(0, Math.min(rawIndex, playingQueue.length - 1));
 
       if (
         targetIndex === activeQueueIndex ||
-        targetIndex === pendingArtworkTargetIndexRef.current
+        targetIndex === pendingTargetIndexRef.current
       ) {
         return;
       }
 
       // Mark that user manually scrolled the list here so useEffect doesn't fight the gesture
       userScrolledToIndexRef.current = targetIndex;
-      pendingArtworkTargetIndexRef.current = targetIndex;
-      handleArtworkSongChange(targetIndex);
+      pendingTargetIndexRef.current = targetIndex;
+      handleTrackChange(targetIndex);
     },
-    [activeQueueIndex, artCarouselSnapInterval, handleArtworkSongChange, playingQueue.length]
+    [activeQueueIndex, pageWidth, handleTrackChange, playingQueue.length]
   );
 
-  const handleArtworkScroll = useMemo(
+  const handleScroll = useMemo(
     () =>
-      Animated.event([{ nativeEvent: { contentOffset: { x: artScrollX } } }], {
+      Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], {
         useNativeDriver: true,
       }),
-    [artScrollX]
+    [scrollX]
   );
 
   useEffect(() => {
-    if (!artCarouselRef.current || artCarouselSnapInterval <= 0 || playingQueue.length === 0) {
+    if (!listRef.current || pageWidth <= 0 || playingQueue.length === 0) {
       return;
     }
 
-    const songChanged = currentSongId !== prevCarouselSongIdRef.current;
-    prevCarouselSongIdRef.current = currentSongId;
+    const songChanged = currentSongId !== prevListSongIdRef.current;
+    prevListSongIdRef.current = currentSongId;
 
     if (songChanged) {
-      hasAlignedArtCarouselRef.current = false;
+      hasAlignedListRef.current = false;
     }
 
     // If the carousel was already positioned here by manual user flick, do NOT bounce back
     if (userScrolledToIndexRef.current === activeQueueIndex) {
       userScrolledToIndexRef.current = null;
-      hasAlignedArtCarouselRef.current = true;
+      hasAlignedListRef.current = true;
       return;
     }
 
-    const targetOffset = activeQueueIndex * artCarouselSnapInterval;
-    const shouldAnimate = hasAlignedArtCarouselRef.current && songChanged;
+    const targetOffset = activeQueueIndex * pageWidth;
+    const shouldAnimate = hasAlignedListRef.current && songChanged;
 
     try {
-      artCarouselRef.current.scrollToOffset({
+      listRef.current.scrollToOffset({
         offset: targetOffset,
         animated: shouldAnimate,
       });
-      hasAlignedArtCarouselRef.current = true;
+      hasAlignedListRef.current = true;
     } catch {
       // Ignore scroll errors
     }
-  }, [activeQueueIndex, artCarouselSnapInterval, currentSongId, playingQueue.length]);
+  }, [activeQueueIndex, pageWidth, currentSongId, playingQueue.length]);
 
   return {
-    artScrollX,
-    artCarouselRef,
-    handleArtworkSongChange,
-    handleArtworkScrollFinished,
-    handleArtworkScroll,
+    scrollX,
+    listRef,
+    handleTrackChange,
+    handleScrollFinished,
+    handleScroll,
   };
 }

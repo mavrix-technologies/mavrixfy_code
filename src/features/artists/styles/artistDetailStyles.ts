@@ -29,7 +29,7 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingBottom: 14,
-    gap: 6,
+    gap: 4,
   },
   appleMusicArtistName: {
     color: "#FFFFFF",
@@ -46,38 +46,6 @@ export const styles = StyleSheet.create({
     textShadowColor: "rgba(0, 0, 0, 0.85)",
     textShadowOffset: { width: 0, height: 3 },
     textShadowRadius: 10,
-  },
-
-  // ── Apple Music 3-Button Action Row ──
-  appleMusicActionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 18,
-    marginTop: 6,
-  },
-  appleMusicCircleBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(255, 255, 255, 0.16)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  appleMusicCircleBtnActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  appleMusicMainPlayBtn: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    boxShadow: "0px 6px 16px rgba(0, 0, 0, 0.35)",
   },
 
   // ── Featured "Latest Release" Glass Card ──

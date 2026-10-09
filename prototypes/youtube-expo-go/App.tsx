@@ -11,7 +11,7 @@ export default function App() {
   const [playlists, setPlaylists] = useState<YouTubePlaylist[]>([]);
   const [tab, setTab] = useState<'songs' | 'playlists'>('songs');
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('Search YouTube Music to begin.');
+  const [message, setMessage] = useState('Search Mavrixfy Music to begin.');
   const [error, setError] = useState('');
   const [current, setCurrent] = useState<YouTubeSong>();
   const [quality, setQuality] = useState('');
@@ -34,23 +34,16 @@ export default function App() {
     if (status.didJustFinish) wantsPlay.current = false;
   }, [status.didJustFinish]);
 
-  useEffect(() => {
-    if (status.currentTime > 0 && status.playing) {
-      console.info('[YT prototype] playback advancing', current?.videoId, Math.round(status.currentTime));
-    }
-  }, [status.currentTime, status.playing, current?.videoId]);
-
   const search = async () => {
     Keyboard.dismiss();
     if (!query.trim()) return;
     const version = ++request.current;
-    setBusy(true); setError(''); setMessage('Searching YouTube Music…');
+    setBusy(true); setError(''); setMessage('Searching Mavrixfy Music…');
     try {
       const result = await searchYouTube(query);
       if (!mounted.current || version !== request.current) return;
       setSongs(result.songs); setPlaylists(result.playlists); setTab('songs');
       setMessage(`${result.songs.length} songs · ${result.playlists.length} playlists`);
-      console.info('[YT prototype] search', result.songs.length, result.playlists.length);
     } catch (reason) { if (mounted.current && version === request.current) setError(safeError(reason)); }
     finally { if (mounted.current && version === request.current) setBusy(false); }
   };
@@ -82,12 +75,10 @@ export default function App() {
       player.replace({ uri: stream.url, headers: stream.headers });
       setQuality(`AAC · ${Math.round(stream.bitrate / 1000)} kbps · ${stream.client}`);
       setMessage('Stream ready. Waiting for audio playback…');
-      console.info('[YT prototype] stream ready', song.videoId, stream.client, stream.bitrate);
       if (wantsPlay.current) player.play();
     } catch (reason) {
       if (mounted.current && version === playbackRequest.current) {
         wantsPlay.current = false; setPlayIntent(false); setMessage('This stream could not be played.'); setError(safeError(reason));
-        console.info('[YT prototype] resolution failed', song.videoId, safeError(reason));
       }
     }
   };
@@ -105,7 +96,7 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.eyebrow}>MAVRIXFY · EXPO GO TEST</Text>
-        <Text style={styles.heading}>YouTube Music</Text>
+        <Text style={styles.heading}>Mavrixfy Music</Text>
         <Text style={styles.subtitle}>Shared TypeScript on Android + iOS</Text>
         <View style={styles.search}>
           <TextInput value={query} onChangeText={setQuery} style={styles.input} placeholder="Song or artist"

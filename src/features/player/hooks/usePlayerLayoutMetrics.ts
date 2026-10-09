@@ -13,8 +13,8 @@ export function usePlayerLayoutMetrics(
   const topBarHeight = isShortScreen ? 50 : 54;
   const controlButtonSize = 48;
   const prevNextButtonSize = isVeryShortScreen ? 48 : isShortScreen ? 50 : 54;
-  const prevNextIconSize = isVeryShortScreen ? 24 : isShortScreen ? 27 : 30;
-  const shuffleRepeatIconSize = isVeryShortScreen ? 18 : isShortScreen ? 19 : 20;
+  const prevNextIconSize = isVeryShortScreen ? 32 : isShortScreen ? 36 : 40;
+  const shuffleRepeatIconSize = isVeryShortScreen ? 24 : isShortScreen ? 26 : 28;
   const playButtonSize = isVeryShortScreen ? 60 : isShortScreen ? 64 : 68;
   const playIconSize = isVeryShortScreen ? 28 : isShortScreen ? 31 : 34;
   const controlsRowGap = Math.max(0, Math.min(isVeryShortScreen ? 8 : isShortScreen ? 10 : 12,
@@ -24,15 +24,15 @@ export function usePlayerLayoutMetrics(
   const bottomContentPadding =
     IS_WEB ? 16 : Math.max(insets.bottom, 0) + 24;
 
-  const largeArtworkByWidth = Math.min(
+  const trackSwipeHeightByWidth = Math.min(
     screenWidth - (isShortScreen ? 44 : 38),
     isShortScreen ? 348 : 388
   );
-  const largeArtworkByHeight = Math.max(
+  const trackSwipeHeightByScreen = Math.max(
     isVeryShortScreen ? 220 : 240,
     Math.floor(screenHeight * (isVeryShortScreen ? 0.34 : isShortScreen ? 0.38 : 0.42))
   );
-  const artSize = Math.min(largeArtworkByWidth, largeArtworkByHeight);
+  const trackSwipeAreaHeight = Math.min(trackSwipeHeightByWidth, trackSwipeHeightByScreen);
 
   const ctrlBtnBase = useMemo(
     () => ({
@@ -68,8 +68,7 @@ export function usePlayerLayoutMetrics(
     [prevNextButtonSize]
   );
 
-  const artCarouselPageWidth = screenWidth;
-  const artCarouselSnapInterval = artCarouselPageWidth;
+  const trackSwipePageWidth = screenWidth;
 
   return {
     topInset,
@@ -86,11 +85,10 @@ export function usePlayerLayoutMetrics(
     songDetailActionSize,
     songDetailIconSize,
     bottomContentPadding,
-    artSize,
+    trackSwipeAreaHeight,
     playerIconBtnStyle,
     songDetailActionBtnStyle,
     prevNextBtnSizeStyle,
-    artCarouselPageWidth,
-    artCarouselSnapInterval,
+    trackSwipePageWidth,
   };
 }

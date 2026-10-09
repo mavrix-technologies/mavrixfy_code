@@ -54,6 +54,7 @@ export function sortedCopy<T>(
 export function shuffleArray<T>(items: readonly T[]): T[] {
   if (!items || items.length <= 1) return items ? [...items] : [];
   const result = [...items];
+  // Fisher–Yates: each remaining item is selected once, in linear time.
   for (let i = result.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [result[i], result[j]] = [result[j], result[i]];
@@ -61,54 +62,18 @@ export function shuffleArray<T>(items: readonly T[]): T[] {
   return result;
 }
 
-export function createShuffledPlaybackQueue<T extends { id: string }>(
-  items: readonly T[],
-  startItem?: T | null
-): { shuffledQueue: T[]; targetSong: T; targetIndex: number } | null {
-  if (!Array.isArray(items) || items.length === 0) return null;
-  const source = items.filter((s) => Boolean(s?.id));
-  if (source.length === 0) return null;
+/** Builds one playback order while leaving the caller's canonical queue intact. */
+export function shufflePlaybackQueue<T extends { id: string }>(
+  source: readonly T[],
+  anchorIndex = -1,
+): { queue: T[]; index: number } | null {
+  if (!Array.isArray(source) || source.length === 0) return null;
 
-  const target = startItem || source[Math.floor(Math.random() * source.length)] || source[0];
-  const others = source.filter((s) => s.id !== target.id);
-  const shuffledOthers = shuffleArray(others);
+  const items = [...source];
+  const hasAnchor = Number.isInteger(anchorIndex) && anchorIndex >= 0 && anchorIndex < items.length;
+  const anchor = hasAnchor ? items.splice(anchorIndex, 1)[0] : undefined;
+  const queue = shuffleArray(items);
+  if (anchor) queue.unshift(anchor);
 
-  return {
-    shuffledQueue: [target, ...shuffledOthers],
-    targetSong: target,
-    targetIndex: 0,
-  };
-}
-
-export function toggleQueueShuffleState<T extends { id: string }>(params: {
-  isShuffled: boolean;
-  currentSong: T | null;
-  activeQueue: readonly T[];
-  originalQueue: readonly T[];
-}): {
-  nextIsShuffled: boolean;
-  nextQueue: T[];
-  nextIndex: number;
-} {
-  const nextIsShuffled = !params.isShuffled;
-  const current = params.currentSong;
-  const canonicalSource =
-    params.originalQueue.length > 0 ? params.originalQueue : params.activeQueue;
-
-  if (nextIsShuffled) {
-    if (!current) {
-      return { nextIsShuffled: true, nextQueue: shuffleArray(canonicalSource), nextIndex: 0 };
-    }
-    const others = canonicalSource.filter((s) => s.id !== current.id);
-    return {
-      nextIsShuffled: true,
-      nextQueue: [current, ...shuffleArray(others)],
-      nextIndex: 0,
-    };
-  }
-  const nextQueue = [...canonicalSource];
-  const nextIndex = current
-    ? Math.max(0, nextQueue.findIndex((s) => s.id === current.id))
-    : 0;
-  return { nextIsShuffled: false, nextQueue, nextIndex };
+  return { queue, index: 0 };
 }

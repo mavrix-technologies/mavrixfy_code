@@ -16,10 +16,15 @@ type UIStateListener = (state: PlayerUIState) => void;
 
 const listeners = new Set<UIStateListener>();
 let _currentState: PlayerUIState = "hidden";
+let _revision = 0;
 
 export const playerUIStateStore = {
   get current(): PlayerUIState {
     return _currentState;
+  },
+
+  get revision(): number {
+    return _revision;
   },
 
   subscribe(listener: UIStateListener): () => void {
@@ -32,6 +37,7 @@ export const playerUIStateStore = {
   _emit(state: PlayerUIState) {
     if (_currentState === state) return;
     _currentState = state;
+    _revision += 1;
     listeners.forEach((l) => l(state));
   },
 

@@ -13,6 +13,12 @@ test('youtubeUrl hydrates canonical playback while preserving the released JioSa
  assert.equal(data.audioUrl,legacy.audioUrl);
  assert.equal(format.readLikedSong('saavn-old',{...data,youtubeUrl:'https://music.youtube.com/watch?v=bad'}).id,'saavn-old');
 });
+test('a newly selected permanent URL overrides a previous YouTube version without changing the old like ID',()=>{
+ const data={...legacy,source:'youtube',youtubeVideoId:'abcdefghijk',videoId:'abcdefghijk',youtubeUrl:'https://music.youtube.com/watch?v=12345678901'};
+ const song=format.readLikedSong('saavn-old',data);
+ assert.equal(song.id,'youtube_12345678901');assert.equal(song.youtubeVideoId,'12345678901');
+ assert.equal(song.likedSongDocumentIds[0],'saavn-old');assert.equal(song.audioUrl,'');
+});
 test('legacy source=mavrixfy YouTube IDs recover, duplicates retain all unlike identities',()=>{
  const oldYoutube=format.readLikedSong('youtube_abcdefghijk',{title:'Chaleya',artist:'Singer',source:'mavrixfy',audioUrl:'expired'});
  assert.equal(oldYoutube.source,'youtube');assert.equal(oldYoutube.youtubeVideoId,'abcdefghijk');assert.equal(oldYoutube.audioUrl,'');
@@ -32,17 +38,17 @@ test('Firestore writer persists canonical provider/IDs, never a signed YouTube U
  assert.equal(writes[0][1].youtubeUrl,'https://music.youtube.com/watch?v=abcdefghijk');assert.equal('catalogUrl' in writes[0][1],false);
 });
 
-function repositoryFixture({failDelete=false}={}){
- const store=storeFixture();let listeners=[],deletes=[],cache=[];
+function repositoryFixture({failDelete=false,failUpdate=false}={}){
+ const store=storeFixture();let listeners=[],deletes=[],updates=[],cache=[];
  const api=load('src/services/liked-songs/likedSongsRepository.ts',{
  '@/lib/accountScope':{getAccountScope:()=>({accountId:'owner'})},'@/lib/firebase':{db:{}},
  '@/lib/firestore':{addLikedSongToFirestore:async()=>true,removeLikedSongFromFirestore:async()=>assert.fail('mapped unlike must remove all identities')},
  '@/lib/logger':{logger:{warn(){},error(){}}},'@react-native-async-storage/async-storage':{getItem:async()=>null,setItem:async(...args)=>cache.push(args)},
  'firebase/firestore':{collection:(_, ...parts)=>parts.join('/'),onSnapshot:(ref,fn)=>{listeners.push(fn);return()=>{};},doc:(_, ...parts)=>parts.join('/'),
- writeBatch:()=>({delete:ref=>deletes.push(ref),commit:async()=>{if(failDelete)throw Error('offline');}})},
+ writeBatch:()=>({delete:ref=>deletes.push(ref),update:(ref,value)=>updates.push([ref,value]),commit:async()=>{if(failDelete||failUpdate)throw Error('offline');}})},
  './likedSongFormat':format,'./likedSongsStore':{useLikedSongsStore:store}});
  const snapshot=records=>({forEach:fn=>records.forEach(([id,data])=>fn({id,data:()=>data}))});
- return{api,store,listeners,deletes,cache,snapshot};
+ return{api,store,listeners,deletes,updates,cache,snapshot};
 }
 test('legacy likes without likedAt remain visible; realtime hydration preserves aliases and cache',async()=>{
  const f=repositoryFixture();f.api.subscribeLikedSongs('owner');
@@ -58,6 +64,32 @@ test('unlike removes canonical and original documents, while failed writes resto
   assert.deepEqual(new Set(f.deletes),new Set(['users/owner/likedSongs/saavn-old','users/owner/likedSongs/youtube_abcdefghijk']));
   assert.equal(liked,failDelete);assert.equal(f.store.getState().ids.has('saavn-old'),failDelete);assert.equal(f.store.getState().ids.has(selected.id),failDelete);
  }
+});
+test('selecting a saved-song match updates its YouTube URL and artwork while keeping every original like identity',async()=>{
+ const f=repositoryFixture();const saved={...legacy,likedSongDocumentIds:['saavn-old']};const other={...legacy,id:'other-song',title:'Different song',likedSongDocumentIds:['other-song']};f.store.getState().setSongs([other,saved]);
+ const match={...selected,title:'Chaleya (Official Audio)',artist:'Arijit Singh',duration:201};
+ assert.equal(await f.api.replaceLikedSongYouTubeVersion('owner',saved,match),true);
+ assert.deepEqual(JSON.parse(JSON.stringify(f.updates)),[['users/owner/likedSongs/saavn-old',{youtubeUrl:'https://music.youtube.com/watch?v=abcdefghijk',imageUrl:'new.jpg'}]]);
+ const currentSongs=f.store.getState().songs;const current=currentSongs[1];assert.equal(current.id,'youtube_abcdefghijk');
+ assert.equal(currentSongs.length,2);assert.equal(currentSongs[0].id,'other-song');
+ assert.deepEqual([...current.likedSongDocumentIds],['saavn-old']);assert.equal(current.title,match.title);
+ assert.equal(f.store.getState().ids.has('saavn-old'),true);
+});
+test('reselecting the same video refreshes stale saved artwork without changing its identity',async()=>{
+ const f=repositoryFixture();const saved={...selected,coverUrl:'stale-art.jpg',likedSongDocumentIds:['saavn-old']};f.store.getState().setSongs([saved]);
+ const match={...selected,coverUrl:'fresh-art.jpg'};
+ assert.equal(await f.api.replaceLikedSongYouTubeVersion('owner',saved,match),true);
+ assert.deepEqual(JSON.parse(JSON.stringify(f.updates)),[
+  ['users/owner/likedSongs/youtube_abcdefghijk',{youtubeUrl:'https://music.youtube.com/watch?v=abcdefghijk',imageUrl:'fresh-art.jpg'}],
+  ['users/owner/likedSongs/saavn-old',{youtubeUrl:'https://music.youtube.com/watch?v=abcdefghijk',imageUrl:'fresh-art.jpg'}],
+ ]);
+ assert.equal(f.store.getState().songs[0].id,'youtube_abcdefghijk');
+ assert.equal(f.store.getState().songs[0].coverUrl,'fresh-art.jpg');
+});
+test('failed selected-version writes do not change the local liked-song projection',async()=>{
+ const f=repositoryFixture({failUpdate:true});const saved={...legacy,likedSongDocumentIds:['saavn-old']};f.store.getState().setSongs([saved]);
+ await assert.rejects(f.api.replaceLikedSongYouTubeVersion('owner',saved,selected));
+ assert.equal(f.store.getState().songs[0].id,'saavn-old');assert.equal(f.updates.length,1);
 });
 
 

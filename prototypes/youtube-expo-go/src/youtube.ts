@@ -52,8 +52,8 @@ function youtube() {
 function song(item: InstanceType<typeof YTNodes.MusicResponsiveListItem>): YouTubeSong | undefined {
   const videoId = item.id;
   if (!videoId || !/^[\w-]{11}$/.test(videoId)) return;
-  return { id: `youtube_${videoId}`, videoId, title: item.title || 'YouTube song',
-    artist: item.artists?.map(artist => artist.name).join(', ') || item.author?.name || 'YouTube',
+  return { id: `youtube_${videoId}`, videoId, title: item.title || 'Mavrixfy Music track',
+    artist: item.artists?.map(artist => artist.name).join(', ') || item.author?.name || 'Mavrixfy Music',
     duration: item.duration?.seconds || 0, coverUrl: item.thumbnails.at(-1)?.url || '' };
 }
 
@@ -67,8 +67,8 @@ export async function searchYouTube(query: string) {
     section.is(YTNodes.MusicShelf) ? [...section.contents.as(YTNodes.MusicResponsiveListItem)] : []);
   const songs = musicItems(songPage).map(song).filter((item): item is YouTubeSong => !!item);
   const playlists: YouTubePlaylist[] = musicItems(playlistPage).flatMap(item => item.id ? [{
-    id: item.id, title: item.title || item.name || 'YouTube playlist',
-    artist: item.author?.name || item.authors?.map(author => author.name).join(', ') || 'YouTube',
+    id: item.id, title: item.title || item.name || 'Mavrixfy Music playlist',
+    artist: item.author?.name || item.authors?.map(author => author.name).join(', ') || 'Mavrixfy Music',
     coverUrl: item.thumbnails.at(-1)?.url || '',
   }] : []);
   return { songs, playlists };
@@ -85,10 +85,10 @@ const streams = new Map<string, YouTubeStream>();
 export function invalidateStream(videoId: string) { streams.delete(videoId); }
 
 export async function resolveStream(videoId: string, onStage: (stage: string) => void = () => {}) {
-  if (!/^[\w-]{11}$/.test(videoId)) throw new Error('Invalid YouTube video ID.');
+  if (!/^[\w-]{11}$/.test(videoId)) throw new Error('Invalid Mavrixfy Music track ID.');
   const existing = streams.get(videoId);
   if (existing && existing.expiresAt > Date.now() + 120000) return existing;
-  onStage('Loading YouTube player…');
+  onStage('Loading Mavrixfy Music…');
   const yt = await youtube();
   const failures: string[] = [];
   // Same exact video with alternative YouTube clients; never JioSaavn matching.

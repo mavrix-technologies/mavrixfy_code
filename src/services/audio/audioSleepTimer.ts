@@ -1,6 +1,7 @@
 import type { SleepTimerSelection,SleepTimerState } from "@/types/playbackTypes";
 import { showGlobalToast } from "@/utils/globalToast";
 import { useCallback,useEffect,useRef,useState } from "react";
+import { formatSleepTimerDuration, isValidSleepTimerDuration } from "./sleepTimerDuration";
 
 interface UseAudioSleepTimerOptions {
   onTimerExpire: () => void;
@@ -22,6 +23,8 @@ export function useAudioSleepTimer({ onTimerExpire }: UseAudioSleepTimerOptions)
     }
   }, []);
 
+  useEffect(() => clearSleepTimerTimeout, [clearSleepTimerTimeout]);
+
   const clearSleepTimer = useCallback(() => {
     clearSleepTimerTimeout();
     sleepTimerRef.current = null;
@@ -30,17 +33,18 @@ export function useAudioSleepTimer({ onTimerExpire }: UseAudioSleepTimerOptions)
 
   const setSleepTimer = useCallback(
     (selection: SleepTimerSelection) => {
+      if (selection !== "end-of-stack" && !isValidSleepTimerDuration(selection)) return;
       clearSleepTimerTimeout();
 
       if (selection === "end-of-stack") {
         const nextTimer: SleepTimerState = {
           mode: "end-of-stack",
-          label: "End of stack",
+          label: "End of queue",
           endsAt: null,
         };
         sleepTimerRef.current = nextTimer;
         setSleepTimerState(nextTimer);
-        showGlobalToast("Sleep timer set for end of stack");
+        showGlobalToast("Sleep timer set for end of queue");
         return;
       }
 
@@ -48,12 +52,12 @@ export function useAudioSleepTimer({ onTimerExpire }: UseAudioSleepTimerOptions)
       const endsAt = Date.now() + minutes * 60 * 1000;
       const nextTimer: SleepTimerState = {
         mode: "duration",
-        label: minutes === 60 ? "1 hour" : `${minutes} min`,
+        label: formatSleepTimerDuration(minutes),
         endsAt,
       };
       sleepTimerRef.current = nextTimer;
       setSleepTimerState(nextTimer);
-      showGlobalToast(`Sleep timer set for ${minutes} min`);
+      showGlobalToast(`Sleep timer set for ${nextTimer.label}`);
 
       sleepTimerTimeoutRef.current = setTimeout(() => {
         onTimerExpire();

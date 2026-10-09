@@ -1,43 +1,34 @@
-/**
- * QueueBottomSheet — Spotify-style queue panel that slides up from inside the
- * player screen. Driven by @gorhom/bottom-sheet with native spring physics.
- *
- * Features:
- *  - Two snap points: collapsed (pill handle) → fully expanded (full queue)
- *  - Drag-to-reorder with DraggableFlatList
- *  - Swipe-left to remove individual tracks
- *  - Section dividers: "Added to queue" vs "Playing next"
- *  - Now-playing row at the top with play/pause toggle
- *  - Shuffle & sleep-timer footer buttons
- *  - Smooth backdrop dim that tracks sheet position via Reanimated
- */
+/** Queue sheet: the list owns scrolling/reordering; the header owns dismissal. */
 
 import { Ionicons } from "@expo/vector-icons";
-import BottomSheet,{
-BottomSheetBackdrop,
-BottomSheetFooter,
-type BottomSheetBackdropProps,
-type BottomSheetFooterProps,
+import BottomSheet, {
+  BottomSheetBackdrop,
+  BottomSheetView,
+  type BottomSheetBackdropProps,
 } from "@gorhom/bottom-sheet";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { Image } from "expo-image";
-import { router } from "expo-router";
+import QueueSleepTimer from "@/features/player/components/QueueSleepTimer";
+import { PlayerPlayButton } from "@/features/player/components/PlayerControlComponents";
 import { expandPlayer } from "@/lib/playerUIState";
-import React,{
-useCallback,
-useMemo,
-useRef,
-useState
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
 import {
-Platform,
-Pressable,
-Text,
-View,
+  BackHandler,
+  type ViewToken,
+  Platform,
+  Pressable,
+  Text,
+  View,
 } from "react-native";
-import DraggableFlatList,{
-ScaleDecorator,
-type RenderItemParams,
+import DraggableFlatList, {
+  type RenderItemParams,
 } from "react-native-draggable-flatlist";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -46,29 +37,25 @@ import Colors from "@/constants/colors";
 import { usePlayerActions } from "@/contexts/PlayerContext";
 import { triggerImpact } from "@/lib/haptics";
 import { type Song } from "@/lib/musicData";
+import type { QueueBottomSheetRef } from "@/lib/queueRef";
 import {
-usePlaybackPlayState,
-usePlaybackQueueState,
+  usePlaybackPlayState,
+  usePlaybackQueueState,
 } from "@/services/audio/PlaybackEngine";
+import { resolveQueueDragMove } from "@/services/audio/queueDrag";
 
-import { s } from "./styles/queueBottomSheetStyles";
+import { QUEUE_ROW_HEIGHT, s } from "./styles/queueBottomSheetStyles";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type QueueItem = {
   song: Song;
-  index: number;
   key: string;
-  section: "user" | "playlist" | "autoplay";
-  isFirstInSection: boolean;
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 type QueueRowProps = {
   item: Song;
-  itemIndex: number;
-  isCurrent: boolean;
-  isPlaying: boolean;
   onPress: (song: Song) => void;
   onDrag: () => void;
   isDragging?: boolean;
@@ -78,9 +65,6 @@ type QueueRowProps = {
 const QueueRow = React.memo(
   ({
     item,
-    itemIndex,
-    isCurrent,
-    isPlaying,
     onPress,
     onDrag,
     isDragging,
@@ -91,15 +75,14 @@ const QueueRow = React.memo(
     }, [isDragging, item, onPress]);
 
     return (
-      <View style={[s.rowLayer, isDragging && s.draggingRow]}>
+      <View style={[s.row, s.rowLayer]}>
         <Pressable
-          style={({ pressed }) => [s.row, pressed && !isDragging && s.rowPressed]}
+          style={({ pressed }) => [s.rowContent, pressed && !isDragging && s.rowPressed]}
           onPress={handlePress}
           disabled={isDragging}
           accessibilityRole="button"
-          accessibilityLabel={`${isCurrent ? "Now playing: " : ""}${item.title} by ${item.artist || "Unknown"}`}
+          accessibilityLabel={`${item.title} by ${item.artist || "Unknown"}`}
         >
-          {/* Artwork */}
           <View style={s.artWrap}>
             <Image
               recyclingKey={item.id}
@@ -107,22 +90,11 @@ const QueueRow = React.memo(
               style={s.artwork}
               contentFit="cover"
             />
-            {isCurrent && (
-              <View style={s.artOverlay}>
-                <Ionicons
-                  name={isPlaying ? "pause" : "play"}
-                  size={14}
-                  color="#FFFFFF"
-                  style={!isPlaying ? { marginLeft: 1 } : undefined}
-                />
-              </View>
-            )}
           </View>
 
-          {/* Text */}
           <View style={s.textWrap}>
             <Text
-              style={[s.title, isCurrent && s.titleActive]}
+              style={s.title}
               numberOfLines={1}
             >
               {item.title}
@@ -131,22 +103,20 @@ const QueueRow = React.memo(
               {item.artist || "Unknown Artist"}
             </Text>
           </View>
+        </Pressable>
 
-          {/* Drag Handle — Long press initiates smooth lift and reorder */}
-          <Pressable
-            style={s.dragHandle}
-            hitSlop={{ top: 12, bottom: 12, left: 8, right: 14 }}
-            delayLongPress={100}
-            onLongPress={onDrag}
-            accessibilityRole="button"
-            accessibilityLabel="Drag to reorder"
-          >
-            <Ionicons
-              name="menu"
-              size={22}
-              color={isDragging ? Colors.primary : "#8E8E93"}
-            />
-          </Pressable>
+        <Pressable
+          style={s.dragHandle}
+          hitSlop={{ top: 10, bottom: 10, left: 8, right: 10 }}
+          onPressIn={onDrag}
+          accessibilityRole="button"
+          accessibilityLabel="Drag to reorder"
+        >
+          <Ionicons
+            name="menu"
+            size={22}
+            color={isDragging ? Colors.primary : "#8E8E93"}
+          />
         </Pressable>
       </View>
     );
@@ -156,19 +126,43 @@ QueueRow.displayName = "QueueRow";
 
 type QueueHeaderProps = {
   upcomingQueueLength: number;
+  isShuffled: boolean;
+  sleepTimer: { label: string } | null;
+  onShuffle: () => void;
+  onTimer: () => void;
 };
-const QueueHeader = React.memo(({ upcomingQueueLength }: QueueHeaderProps) => {
+const QueueHeader = React.memo(({ upcomingQueueLength, isShuffled, sleepTimer, onShuffle, onTimer }: QueueHeaderProps) => {
   return (
-    <View style={s.handleContainer}>
-      <View style={s.handle} />
+    <View style={s.queueHeader}>
       <View style={s.handleTitleRow}>
         <View style={s.handleTitleLeft}>
           <Text style={s.handleTitle}>Queue</Text>
-          {upcomingQueueLength > 0 && (
-            <Text style={s.handleSubtitle}>
-              {upcomingQueueLength} upcoming
+          <Text style={s.handleSubtitle} numberOfLines={1}>
+            {upcomingQueueLength > 0 ? `${upcomingQueueLength} upcoming` : "No upcoming songs"}
+          </Text>
+        </View>
+        <View style={s.headerControls}>
+          <Pressable
+            style={({ pressed }) => [s.headerButton, isShuffled && s.headerButtonActive, pressed && s.rowPressed]}
+            onPress={onShuffle}
+            accessibilityRole="button"
+            accessibilityLabel="Shuffle queue"
+            accessibilityState={{ selected: isShuffled }}
+          >
+            <Ionicons name="shuffle" size={22} color={isShuffled ? Colors.primary : "#FFFFFF"} />
+            <Text style={[s.headerButtonLabel, isShuffled && s.headerButtonLabelActive]} numberOfLines={1}>Shuffle</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [s.headerButton, sleepTimer && s.headerButtonActive, pressed && s.rowPressed]}
+            onPress={onTimer}
+            accessibilityRole="button"
+            accessibilityLabel={sleepTimer ? `Sleep timer: ${sleepTimer.label}` : "Sleep timer"}
+          >
+            <Ionicons name="timer-outline" size={22} color={sleepTimer ? Colors.primary : "#FFFFFF"} />
+            <Text style={[s.headerButtonLabel, sleepTimer && s.headerButtonLabelActive]} numberOfLines={1}>
+              {sleepTimer?.label ?? "Timer"}
             </Text>
-          )}
+          </Pressable>
         </View>
       </View>
     </View>
@@ -178,128 +172,60 @@ QueueHeader.displayName = "QueueHeader";
 
 type QueueNowPlayingProps = {
   nowPlaying: Song | null;
-  isPlaying: boolean;
-  isShuffled: boolean;
-  upcomingQueueLength: number;
   onPress: () => void;
-  togglePlay: () => void;
 };
 const QueueNowPlaying = React.memo(
   ({
     nowPlaying,
-    isPlaying,
-    isShuffled,
-    upcomingQueueLength,
     onPress,
-    togglePlay,
   }: QueueNowPlayingProps) => {
+    const { isPlaying } = usePlaybackPlayState();
+    const { togglePlay } = usePlayerActions();
     if (!nowPlaying) return null;
     return (
       <View style={s.nowPlayingWrap}>
-        <Pressable
-          style={({ pressed }) => [s.nowPlayingRow, pressed && s.rowPressed]}
-          onPress={onPress}
-          accessibilityRole="button"
-          accessibilityLabel={`Now playing: ${nowPlaying.title}`}
-        >
-          <Image
-            recyclingKey={nowPlaying.id}
-            source={{ uri: nowPlaying.coverUrl }}
-            style={s.nowArtwork}
-            contentFit="cover"
-          />
-          <View style={s.nowTextWrap}>
-            <View style={s.nowBadgeRow}>
-              <View style={s.nowBadge}>
-                <Ionicons name="musical-note" size={9} color={Colors.primary} />
-                <Text style={s.nowBadgeText}>Now playing</Text>
-              </View>
-            </View>
-            <Text style={s.nowTitle} numberOfLines={1}>
-              {nowPlaying.title}
-            </Text>
-            <Text style={s.nowArtist} numberOfLines={1}>
-              {nowPlaying.artist || "Unknown Artist"}
-            </Text>
-          </View>
+        <Text style={s.nowLabel}>Now playing</Text>
+        <View style={s.nowPlayingRow}>
           <Pressable
-            onPress={togglePlay}
-            hitSlop={10}
-            style={s.playBtn}
+            style={({ pressed }) => [s.rowContent, pressed && s.rowPressed]}
+            onPress={onPress}
             accessibilityRole="button"
-            accessibilityLabel={isPlaying ? "Pause" : "Play"}
+            accessibilityLabel={`Now playing: ${nowPlaying.title}`}
           >
-            <Ionicons
-              name={isPlaying ? "pause" : "play"}
-              size={28}
-              color="#111111"
-              style={!isPlaying ? { marginLeft: 2 } : undefined}
+            <Image
+              recyclingKey={nowPlaying.id}
+              source={{ uri: nowPlaying.coverUrl }}
+              style={s.nowArtwork}
+              contentFit="cover"
             />
+            <View style={s.nowTextWrap}>
+              <Text style={s.nowTitle} numberOfLines={1}>
+                {nowPlaying.title}
+              </Text>
+              <Text style={s.nowArtist} numberOfLines={1}>
+                {nowPlaying.artist || "Unknown Artist"}
+              </Text>
+            </View>
           </Pressable>
-        </Pressable>
-
-        {upcomingQueueLength > 0 && isShuffled && (
-          <View style={s.shuffleRow}>
-            <Ionicons name="shuffle" size={16} color="#9E9E9E" />
-            <Text style={s.shuffleText}>Shuffling from playlist</Text>
-          </View>
-        )}
+          <PlayerPlayButton
+            active={isPlaying}
+            buttonSize={44}
+            iconSize={24}
+            onAccentColor={Colors.primary}
+            style={s.playBtn}
+            onPress={togglePlay}
+            accessibilityLabel={isPlaying ? "Pause" : "Play"}
+          />
+        </View>
       </View>
     );
   }
 );
 QueueNowPlaying.displayName = "QueueNowPlaying";
 
-type QueueFooterProps = {
-  sleepTimer: { label: string } | null;
-  bottomPad: number;
-  handleShuffle: () => void;
-  handleTimer: () => void;
-};
-const QueueFooter = React.memo(
-  ({ sleepTimer, bottomPad, handleShuffle, handleTimer }: QueueFooterProps) => {
-    return (
-      <View style={[s.footer, { paddingBottom: bottomPad }]}>
-        <Pressable
-          style={({ pressed }) => [s.ctrlBtn, pressed && s.ctrlBtnPressed]}
-          onPress={handleShuffle}
-          accessibilityRole="button"
-          accessibilityLabel="Shuffle queue"
-        >
-          <Ionicons name="shuffle" size={22} color={Colors.primary} />
-          <Text style={[s.ctrlLabel, s.ctrlLabelActive]}>Shuffle</Text>
-        </Pressable>
-
-        <Pressable
-          style={({ pressed }) => [s.ctrlBtn, pressed && s.ctrlBtnPressed]}
-          onPress={handleTimer}
-          accessibilityRole="button"
-          accessibilityLabel={
-            sleepTimer ? `Sleep timer: ${sleepTimer.label}` : "Sleep timer"
-          }
-        >
-          <Ionicons
-            name="timer-outline"
-            size={24}
-            color={sleepTimer ? Colors.primary : "#FFFFFF"}
-          />
-          <Text style={[s.ctrlLabel, sleepTimer && s.ctrlLabelActive]}>
-            {sleepTimer ? sleepTimer.label : "Timer"}
-          </Text>
-        </Pressable>
-      </View>
-    );
-  }
-);
-QueueFooter.displayName = "QueueFooter";
-
 // ─── Main exported component ─────────────────────────────────────────────────
 
-export type QueueBottomSheetRef = {
-  expand: () => void;
-  collapse: () => void;
-  close: () => void;
-};
+export type { QueueBottomSheetRef } from "@/lib/queueRef";
 
 type Props = {
   /** Pass a callback so the player can tell if the sheet is open */
@@ -308,313 +234,328 @@ type Props = {
 };
 
 const queueItemKeyExtractor = (item: QueueItem) => item.key;
+const getQueueItemLayout = (_data: unknown, index: number) => ({
+  index, length: QUEUE_ROW_HEIGHT, offset: QUEUE_ROW_HEIGHT * index,
+});
+const QUEUE_SNAP_POINTS = ["94%"];
+const QUEUE_SPRING = { damping: 24, mass: 0.8, stiffness: 260, overshootClamping: true };
+const ROW_SPRING = { damping: 28, mass: 0.5, stiffness: 220, overshootClamping: true };
 
-// react-doctor-disable-next-line react-doctor/no-giant-component -- queue gestures, sheet index state, and playback actions are tightly coordinated in this bottom sheet.
-const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
-    const insets = useSafeAreaInsets();
-    const sheetRef = useRef<BottomSheet>(null);
+type QueueContentProps = {
+  interactionReady: boolean;
+  onClose: () => void;
+  onReady: () => void;
+};
 
-    // ── Queue state ──────────────────────────────────────────────────────────
-    const {
-      queue,
-      userQueuedSongIds,
-      autoplaySongIds,
-      queueIndex,
-      currentSong,
-      isShuffled,
-    } = usePlaybackQueueState();
-    const { isPlaying } = usePlaybackPlayState();
-    const {
-      playSong,
-      reorderQueue,
-      shuffleQueue,
-      sleepTimer,
-      togglePlay,
-    } = usePlayerActions();
+/** Playback subscriptions and list allocations exist only while the sheet is visible. */
+const QueueContent = React.memo(({ interactionReady, onClose, onReady }: QueueContentProps) => {
+  const insets = useSafeAreaInsets();
+  const [timerOpen, setTimerOpen] = useState(false);
+  const handleTimerBack = useCallback(() => setTimerOpen(false), []);
 
-    const lastPlaceholderRef = useRef<number | null>(null);
-    const currentSheetIndexRef = useRef(-1);
-    const isClosingRef = useRef(false);
-    const [isSheetMounted, setIsSheetMounted] = useState(false);
-    const [listReady] = useState(true);
+  useEffect(() => {
+    if (Platform.OS !== "android" || !timerOpen) return;
+    // Registered after the shell handler, so Back returns to the queue first.
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      handleTimerBack();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [handleTimerBack, timerOpen]);
 
-    const finishClosedSheet = useCallback(() => {
-      isClosingRef.current = false;
-      currentSheetIndexRef.current = -1;
-      setIsSheetMounted(false);
-    }, []);
+  // ── Queue state ──────────────────────────────────────────────────────────
+  const {
+    queue,
+    queueIndex,
+    currentSong,
+    isShuffled,
+  } = usePlaybackQueueState();
+  const {
+    playSong,
+    reorderQueue,
+    shuffleQueue,
+    sleepTimer,
+  } = usePlayerActions();
 
-    const expandSheet = useCallback(() => {
-      if (!isSheetMounted) {
-        setIsSheetMounted(true);
-      }
-      requestAnimationFrame(() => {
-        sheetRef.current?.snapToIndex(0);
-      });
-    }, [isSheetMounted]);
+  const queueRef = useRef(queue);
+  useLayoutEffect(() => { queueRef.current = queue; }, [queue]);
+  const dragItemRef = useRef<{ visibleSongs: Song[]; from: number } | null>(null);
 
-    const closeSheet = useCallback(() => {
-      sheetRef.current?.close();
-    }, []);
+  // ── Derived queue data ───────────────────────────────────────────────────
+  const nowPlaying = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
 
-    // Expose imperative handle
-    React.useImperativeHandle(ref, () => ({
-      expand: expandSheet,
-      collapse: closeSheet,
-      close: closeSheet,
-    }), [closeSheet, expandSheet]);
+  const upcomingQueue = useMemo(() => {
+    const start = currentSong ? Math.max(0, queueIndex + 1) : 0;
+    return queue.slice(start).filter((s) => Boolean(s?.id));
+  }, [currentSong, queue, queueIndex]);
 
-    // ── Derived queue data ───────────────────────────────────────────────────
-    const nowPlaying = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
+  const data: QueueItem[] = useMemo(() => {
+    const occurrences = new Map<string, number>();
 
-    const upcomingQueue = useMemo(() => {
-      const start = currentSong ? Math.max(0, queueIndex + 1) : 0;
-      return queue.slice(start).filter((s) => Boolean(s?.id));
-    }, [currentSong, queue, queueIndex]);
+    return upcomingQueue.map((song) => {
+      const occurrence = occurrences.get(song.id) ?? 0;
+      occurrences.set(song.id, occurrence + 1);
+      return {
+        song,
+        key: `queue-entry:${song.id}:${occurrence}`,
+      };
+    });
+  }, [upcomingQueue]);
 
-    const userQueuedCount = useMemo(() => {
-      const start = currentSong ? Math.max(0, queueIndex + 1) : 0;
-      return Math.max(
-        0,
-        Math.min(userQueuedSongIds.length, queue.length - start)
+  // ── Handlers ─────────────────────────────────────────────────────────────
+  const handleSongPress = useCallback(
+    (song: Song) => {
+      playSong(song, queueRef.current);
+    },
+    [playSong]
+  );
+
+  const handleDragBegin = useCallback((index: number) => {
+    const item = data[index];
+    dragItemRef.current = item
+      ? { visibleSongs: data.map((entry) => entry.song), from: index }
+      : null;
+    triggerImpact(ImpactFeedbackStyle.Medium);
+  }, [data]);
+
+  const handleDragEnd = useCallback(
+    ({ from, to }: { from: number; to: number; data: QueueItem[] }) => {
+      const draggedItem = dragItemRef.current;
+      dragItemRef.current = null;
+      if (from === to) return;
+      if (!draggedItem || from !== draggedItem.from) return;
+      // DraggableFlatList's `to` is the final visible slot. Map it through
+      // the order captured at drag start, because its `data` is already
+      // reordered and `data[to]` would point back to the dragged song.
+      const firstUpcomingIndex = currentSong ? Math.max(0, queueIndex + 1) : 0;
+      const move = resolveQueueDragMove(
+        queue,
+        draggedItem.visibleSongs,
+        from,
+        to,
+        firstUpcomingIndex,
       );
-    }, [currentSong, queue.length, queueIndex, userQueuedSongIds.length]);
-
-    const data: QueueItem[] = useMemo(() => {
-      const start = currentSong ? Math.max(0, queueIndex + 1) : 0;
-      const autoplaySet = new Set(autoplaySongIds || []);
-
-      return upcomingQueue.map((song, idx) => {
-        const isAutoplay = autoplaySet.has(song.id);
-        const section: QueueItem["section"] =
-          idx < userQueuedCount ? "user" : isAutoplay ? "autoplay" : "playlist";
-
-        return {
-          song,
-          index: start + idx,
-          key: `${song.id}-${start + idx}`,
-          section,
-          isFirstInSection:
-            idx === 0 ||
-            idx === userQueuedCount ||
-            (isAutoplay && idx > 0 && !autoplaySet.has(upcomingQueue[idx - 1]?.id)),
-        };
-      });
-    }, [autoplaySongIds, currentSong, queueIndex, upcomingQueue, userQueuedCount]);
-
-    // ── Handlers ─────────────────────────────────────────────────────────────
-    const handleSongPress = useCallback(
-      (song: Song) => {
-        playSong(song, queue);
-      },
-      [playSong, queue]
-    );
-
-    const handleDragBegin = useCallback(() => {
-      lastPlaceholderRef.current = null;
-      triggerImpact(ImpactFeedbackStyle.Medium);
-    }, []);
-
-    const handleDragEnd = useCallback(
-      ({ from, to }: { from: number; to: number }) => {
-        lastPlaceholderRef.current = null;
-        if (from === to) return;
+      if (move) {
         triggerImpact(ImpactFeedbackStyle.Light);
-        const start = currentSong ? Math.max(0, queueIndex + 1) : 0;
-        void reorderQueue(start + from, start + to);
-      },
-      [currentSong, queueIndex, reorderQueue]
-    );
+        void reorderQueue(move.from, move.to, { queue, queueIndex });
+      }
+    },
+    [currentSong, queue, queueIndex, reorderQueue]
+  );
 
-    const handleShuffle = useCallback(() => {
-      triggerImpact(ImpactFeedbackStyle.Medium);
-      void shuffleQueue();
-    }, [shuffleQueue]);
+  const handleShuffle = useCallback(() => {
+    triggerImpact(ImpactFeedbackStyle.Medium);
+    void shuffleQueue();
+  }, [shuffleQueue]);
 
-    const handleTimer = useCallback(() => {
-      triggerImpact(ImpactFeedbackStyle.Light);
-      closeSheet();
-      router.push("/sleep-timer");
-    }, [closeSheet]);
+  const handleTimer = useCallback(() => {
+    triggerImpact(ImpactFeedbackStyle.Light);
+    setTimerOpen(true);
+  }, []);
 
-    // ── Render item ──────────────────────────────────────────────────────────
-    const renderItem = useCallback(
-      ({ item, drag, isActive }: RenderItemParams<QueueItem>) => (
-        <ScaleDecorator activeScale={1.03}>
-          <View style={isActive ? s.draggingRow : undefined}>
-            {item.isFirstInSection ? (
-              <View style={s.sectionHeader}>
-                <Text style={s.sectionTitle}>
-                  {item.section === "user"
-                    ? "Next in queue"
-                    : item.section === "autoplay"
-                      ? "Recommended for you"
-                      : "Playing next"}
-                </Text>
-              </View>
-            ) : null}
-            <QueueRow
-              item={item.song}
-              itemIndex={item.index}
-              isCurrent={false}
-              isPlaying={isPlaying}
-              onPress={handleSongPress}
-              onDrag={drag}
-              isDragging={isActive}
-            />
+  // ── Render item ──────────────────────────────────────────────────────────
+  const renderItem = useCallback(
+    ({ item, drag, isActive }: RenderItemParams<QueueItem>) => (
+      <QueueRow
+        item={item.song}
+        onPress={handleSongPress}
+        onDrag={drag}
+        isDragging={isActive}
+      />
+    ),
+    [handleSongPress]
+  );
+
+  const bottomPad = Math.max(insets.bottom, 12);
+
+  const handleViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken<QueueItem>[] }) => {
+    if (viewableItems.some(item => item.isViewable)) onReady();
+  }, [onReady]);
+
+  const handleNowPlayingPress = useCallback(() => {
+    onClose();
+    expandPlayer();
+  }, [onClose]);
+
+  return (
+    <BottomSheetView style={s.sheetContent} onLayout={data.length === 0 ? onReady : undefined}>
+      {/* Keep the list mounted and measured so Back preserves its scroll position. */}
+      <View style={[s.contentPage, timerOpen && s.hiddenPage]} pointerEvents={timerOpen ? "none" : "auto"}
+        accessibilityElementsHidden={timerOpen} importantForAccessibility={timerOpen ? "no-hide-descendants" : "auto"}>
+      <QueueHeader
+        upcomingQueueLength={upcomingQueue.length}
+        isShuffled={isShuffled}
+        sleepTimer={sleepTimer}
+        onShuffle={handleShuffle}
+        onTimer={handleTimer}
+      />
+      {/* ── Now playing ──────────────────────────────────────────────── */}
+      <QueueNowPlaying
+        nowPlaying={nowPlaying}
+        onPress={handleNowPlayingPress}
+      />
+
+      {interactionReady && <AdMobBanner />}
+
+      {upcomingQueue.length > 0 && (
+        <View style={s.sectionHeader}>
+          <Text style={s.sectionTitle}>Playing next</Text>
+          <Text style={s.reorderHint}>Drag to reorder</Text>
+        </View>
+      )}
+
+      {/* ── Upcoming queue list ──────────────────────────────────────── */}
+      <DraggableFlatList
+        data={data}
+        renderItem={renderItem}
+        keyExtractor={queueItemKeyExtractor}
+        getItemLayout={getQueueItemLayout}
+        onDragBegin={handleDragBegin}
+        onDragEnd={handleDragEnd}
+        onViewableItemsChanged={handleViewableItemsChanged}
+        activationDistance={10}
+        autoscrollThreshold={96}
+        autoscrollSpeed={100}
+        animationConfig={ROW_SPRING}
+        containerStyle={s.list}
+        style={s.list}
+        contentContainerStyle={s.listContent}
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={12}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        ListEmptyComponent={
+          <View style={s.emptyState}>
+            <Ionicons name="list" size={40} color="#4A4A4A" />
+            <Text style={s.emptyTitle}>Queue is empty</Text>
+            <Text style={s.emptySubtitle}>
+              Add songs to your queue to see them here
+            </Text>
           </View>
-        </ScaleDecorator>
-      ),
-      [handleSongPress, isPlaying]
-    );
-
-    const keyExtractor = queueItemKeyExtractor;
-
-    // ── Backdrop ─────────────────────────────────────────────────────────────
-    const renderBackdrop = useCallback(
-      (props: BottomSheetBackdropProps) => (
-        <BottomSheetBackdrop
-          {...props}
-          disappearsOnIndex={-1}
-          appearsOnIndex={0}
-          opacity={0.52}
-          pressBehavior="close"
-        />
-      ),
-      []
-    );
-
-    const renderHandle = useCallback(
-      () => (
-        <QueueHeader
-          upcomingQueueLength={upcomingQueue.length}
-        />
-      ),
-      [upcomingQueue.length]
-    );
-
-    // ── Snap points ──────────────────────────────────────────────────────────
-    // Full Spotify height queue sheet with downward swipe to dismiss.
-    const snapPoints = useMemo(() => ["94%"], []);
-
-    const bottomPad = Math.max(insets.bottom, 12);
-
-    const renderFooter = useCallback(
-      (props: BottomSheetFooterProps) => (
-        <BottomSheetFooter {...props} bottomInset={0}>
-          <QueueFooter
-            sleepTimer={sleepTimer}
-            bottomPad={bottomPad}
-            handleShuffle={handleShuffle}
-            handleTimer={handleTimer}
-          />
-        </BottomSheetFooter>
-      ),
-      [sleepTimer, bottomPad, handleShuffle, handleTimer]
-    );
-
-    const handleNowPlayingPress = useCallback(() => {
-      closeSheet();
-      expandPlayer();
-    }, [closeSheet]);
-
-    const handleSheetChange = useCallback(
-      (index: number) => {
-        currentSheetIndexRef.current = index;
-        if (index >= 0) {
-          isClosingRef.current = false;
         }
-        onSheetChange?.(index);
-      },
-      [onSheetChange]
-    );
+      />
+      <View style={{ height: bottomPad }} />
+      </View>
+      {timerOpen && <QueueSleepTimer onBack={handleTimerBack} />}
+    </BottomSheetView>
+  );
+});
+QueueContent.displayName = "QueueContent";
 
-    if (!isSheetMounted) {
-      return null;
+type QueueSheetState = {
+  index: -1 | 0;
+  visible: boolean;
+  interactionReady: boolean;
+  revision: number;
+};
+
+/** Keep native layout ready; release the list only after a current close completes. */
+const QueueBottomSheet = ({ onSheetChange, ref }: Props) => {
+  const sheetRef = useRef<BottomSheet>(null);
+  const contentReady = useRef(false);
+  const revision = useRef(0);
+  const closingRevision = useRef<number | null>(null);
+  const [state, setState] = useState<QueueSheetState>({
+    index: -1, visible: false, interactionReady: false, revision: 0,
+  });
+
+  const expandSheet = useCallback(() => {
+    const nextRevision = ++revision.current;
+    closingRevision.current = null;
+    setState(previous => ({
+      index: 0, visible: true,
+      interactionReady: previous.visible && previous.interactionReady,
+      revision: nextRevision,
+    }));
+  }, []);
+  const closeSheet = useCallback(() => {
+    const nextRevision = ++revision.current;
+    const ready = contentReady.current;
+    closingRevision.current = ready ? nextRevision : null;
+    setState(previous => ({ ...previous, index: -1,
+      visible: previous.visible && ready,
+      revision: nextRevision }));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!contentReady.current) return;
+    // Install callbacks for this request before starting the native animation.
+    if (state.index === 0) sheetRef.current?.snapToIndex(0);
+    else sheetRef.current?.close();
+  }, [state.index, state.revision]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || !state.visible) return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      closeSheet();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [closeSheet, state.visible]);
+
+  React.useImperativeHandle(ref, () => ({
+    expand: expandSheet, collapse: closeSheet, close: closeSheet,
+  }), [closeSheet, expandSheet]);
+
+  const handleContentReady = useCallback(() => {
+    if (state.revision !== revision.current) return;
+    // Wait for native list measurements, not just the outer content container.
+    if (state.index !== 0 || contentReady.current) return;
+    contentReady.current = true;
+    sheetRef.current?.snapToIndex(0);
+  }, [state.index, state.revision]);
+
+  const handleAnimate = useCallback((_from: number, to: number) => {
+    if (state.revision !== revision.current) return;
+    closingRevision.current = to === -1 ? state.revision : null;
+  }, [state.revision]);
+  const handleChange = useCallback((index: number) => {
+    if (state.revision !== revision.current) return;
+    if (index === 0) {
+      setState(previous => previous.index === 0 && !previous.interactionReady
+        ? { ...previous, interactionReady: true } : previous);
     }
+    onSheetChange?.(index);
+  }, [onSheetChange, state.revision]);
+  const handleClose = useCallback(() => {
+    if (closingRevision.current !== revision.current || state.revision !== revision.current) return;
+    closingRevision.current = null;
+    contentReady.current = false;
+    setState(previous => ({ ...previous, index: -1, visible: false,
+      interactionReady: false }));
+  }, [state.revision]);
 
-    return (
-      <BottomSheet
-        ref={sheetRef}
-        index={0}
-        snapPoints={snapPoints}
-        animateOnMount
-        enablePanDownToClose
-        enableDynamicSizing={false}
-        handleComponent={renderHandle}
-        backdropComponent={renderBackdrop}
-        footerComponent={renderFooter}
-        backgroundStyle={s.sheetBg}
-        onChange={handleSheetChange}
-        onClose={finishClosedSheet}
-        style={{ zIndex: 999 }}
-        // Native spring physics identical to Spotify feel
-        animationConfigs={{
-          damping: 24,
-          mass: 0.8,
-          stiffness: 260,
-          overshootClamping: false,
-        }}
-      >
-        {/* ── Now playing ──────────────────────────────────────────────── */}
-        <QueueNowPlaying
-          nowPlaying={nowPlaying}
-          isPlaying={isPlaying}
-          isShuffled={isShuffled}
-          upcomingQueueLength={upcomingQueue.length}
-          onPress={handleNowPlayingPress}
-          togglePlay={togglePlay}
-        />
+  const renderBackdrop = useCallback((props: BottomSheetBackdropProps) => (
+    <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0}
+      opacity={0.52} pressBehavior="close" />
+  ), []);
+  const renderHandle = useCallback(() => (
+    <View style={s.handleContainer}><View style={s.handle} /></View>
+  ), []);
 
-        <AdMobBanner loadDelayMs={600} />
-
-        {/* ── Upcoming queue list ──────────────────────────────────────── */}
-        {listReady ? (
-          <DraggableFlatList
-            data={data}
-            renderItem={renderItem}
-            keyExtractor={keyExtractor}
-            onDragBegin={handleDragBegin}
-            onDragEnd={handleDragEnd}
-            onPlaceholderIndexChange={(i) => {
-              lastPlaceholderRef.current = i;
-            }}
-            activationDistance={10}
-            autoscrollThreshold={120}
-            autoscrollSpeed={160}
-            dragItemOverflow
-            animationConfig={{
-              damping: 28,
-              mass: 0.5,
-              stiffness: 220,
-              overshootClamping: true,
-            }}
-            containerStyle={s.list}
-            style={s.list}
-            contentContainerStyle={s.listContent}
-            showsVerticalScrollIndicator={false}
-            nestedScrollEnabled={true}
-            removeClippedSubviews={Platform.OS === "android"}
-            initialNumToRender={12}
-            maxToRenderPerBatch={10}
-            windowSize={7}
-            ListEmptyComponent={
-              <View style={s.emptyState}>
-                <Ionicons name="list" size={40} color="#4A4A4A" />
-                <Text style={s.emptyTitle}>Queue is empty</Text>
-                <Text style={s.emptySubtitle}>
-                  Add songs to your queue to see them here
-                </Text>
-              </View>
-            }
-            ListFooterComponent={<View style={{ height: bottomPad + 76 }} />}
-          />
-        ) : (
-          <View style={s.listPlaceholder} />
-        )}
-      </BottomSheet>
-    );
-  };
+  return (
+    <BottomSheet
+      ref={sheetRef}
+      index={-1}
+      snapPoints={QUEUE_SNAP_POINTS}
+      animateOnMount={false}
+      enablePanDownToClose
+      enableContentPanningGesture={false}
+      enableDynamicSizing={false}
+      handleComponent={renderHandle}
+      backdropComponent={renderBackdrop}
+      backgroundStyle={s.sheetBg}
+      style={s.sheetLayer}
+      animationConfigs={QUEUE_SPRING}
+      onAnimate={handleAnimate}
+      onChange={handleChange}
+      onClose={handleClose}
+    >
+      {state.visible && <QueueContent interactionReady={state.interactionReady}
+        onClose={closeSheet} onReady={handleContentReady} />}
+    </BottomSheet>
+  );
+};
 
 QueueBottomSheet.displayName = "QueueBottomSheet";
 export default QueueBottomSheet;

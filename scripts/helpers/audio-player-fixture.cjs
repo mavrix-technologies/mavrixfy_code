@@ -6,7 +6,7 @@ const test = require("node:test");
 const ts = require("typescript");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture({ youtubeResolver = async () => { throw new Error("Unexpected YouTube resolution"); }, platform = "android", expoGo = false, notificationControl = async () => {} } = {}) {
+function fixture({ youtubeResolver = async () => { throw new Error("Unexpected YouTube resolution"); }, platform = "android", expoGo = false, notificationControl = async () => {}, streamingQuality = "medium", headroomDb = () => 0 } = {}) {
   const controls = new Map();
   const system = new Map();
   const notifications = [];
@@ -17,17 +17,20 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
   const timers = new Map(); let timerId = 0;
   let mounted = false;
   let reportedDuration = 0;
+  const qualityPreference = { current: streamingQuality };
+  const graph = { filters: [], gains: [], sources: [], destination: { kind: "destination" } };
   const param = () => ({
     value: 0,
     cancelAndHoldAtTime() {},
-    setTargetAtTime() {},
+    setTargetAtTime(value) { this.value = value; },
   });
   const node = () => ({
     gain: param(),
     frequency: param(),
     Q: param(),
-    connect() {},
-    disconnect() {},
+    connections: new Set(),
+    connect(target) { this.connections.add(target); },
+    disconnect() { this.connections.clear(); },
   });
   const react = {
     memo: (component) => component,
@@ -54,13 +57,12 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
     AudioContext: class {
       currentTime = 0;
       sampleRate = 48000;
-      destination = {};
-      createGain = node;
-      createBiquadFilter = node;
-      createMediaElementSource = (mediaElement) => ({
-        ...node(),
-        mediaElement,
-      });
+      destination = graph.destination;
+      createGain = () => { const next = node(); next.gain.value = 1; graph.gains.push(next); return next; };
+      createBiquadFilter = () => { const next = node(); graph.filters.push(next); return next; };
+      createMediaElementSource = (mediaElement) => {
+        const next = { ...node(), mediaElement }; graph.sources.push(next); return next;
+      };
       resume() {
         contextCalls.push("resume");
         return Promise.resolve();
@@ -102,17 +104,19 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
     clearTimeout: id => timers.delete(id),
     require(name) {
       if (name.endsWith("YouTubeMusic")) return { resolveYouTubeStream: youtubeResolver };
+      if (name.endsWith("PlayerPlaybackResolver")) return { getRequestedQualityPreference: async () => ({ effective: qualityPreference.current }) };
       if (name.endsWith("audioTimeline")) return require("./audio-timeline-fixture.cjs");
       if (name === "react") return react;
       if (name === "react-native") return { Platform: { OS: platform } };
       if (name === "expo") return { isRunningInExpoGo: () => expoGo };
+      if (name === "./nativeAudioApi") return { nativeAudioApi: expoGo ? {} : audio };
       if (name === "react-native-audio-api") {
         if (expoGo) throw new Error("Expo Go must not evaluate the custom native audio module");
         return audio;
       }
       if (name.endsWith("equalizerDsp"))
         return {
-          calculateEqHeadroomDb: () => 0,
+          calculateEqHeadroomDb: headroomDb,
           EQ_FREQUENCIES_HZ: [25,40,63,100,160,250,400,630,1000,1600,2500,4000,6300,10000,16000], EQ_Q: Math.SQRT2,
         };
       if (name.endsWith("audioEqualizer"))
@@ -125,6 +129,8 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
   if (!expoGo) engine.StandardAudioRenderer();
   return {
     ...engine,
+    graph,
+    qualityPreference,
     contextCalls,
     controls,
     system,

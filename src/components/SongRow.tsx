@@ -37,7 +37,7 @@ interface Props {
   showCover?: boolean;
   showDownload?: boolean;
   showDivider?: boolean;
-  optionContext?: "playlist";
+  optionContext?: "playlist" | "liked";
   playlistId?: string;
   playlistSource?: "local" | "firestore";
   playlistName?: string;
@@ -102,6 +102,11 @@ const SongRow = memo(function SongRow({
             downloadUrl: song.downloadUrl,
             source: song.source,
             genre: song.genre || "",
+            videoId: song.videoId,
+            youtubeVideoId: song.youtubeVideoId,
+            youtubeUrl: song.youtubeUrl,
+            catalogUrl: song.catalogUrl,
+            likedSongDocumentIds: song.likedSongDocumentIds,
           }),
           showDownload: showDownload ? "1" : "0",
           canRemove: onRemove || canRemoveFromPlaylist ? "1" : "0",

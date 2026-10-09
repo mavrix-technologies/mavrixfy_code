@@ -12,6 +12,7 @@ import { triggerImpact } from '@/lib/haptics';
 import type { Song } from '@/lib/musicData';
 import { requestDownloadWithRewardedAd } from '@/services/ads/rewardedDownloadAdService';
 import { resolvePlaybackUrlWithDetails, withResolvedPlaybackUrl } from '@/services/audio/PlayerPlaybackResolver';
+import { isYouTubeSong } from '@/services/youtube/YouTubeMusic';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
@@ -55,7 +56,7 @@ export default function DownloadButton({
     setIsPreparing(true);
     try {
       let targetSong = song;
-      if (!targetSong.downloadUrl && !targetSong.audioUrl) {
+      if (!isYouTubeSong(targetSong) && !targetSong.downloadUrl && !targetSong.audioUrl) {
         try {
           const resolved = await resolvePlaybackUrlWithDetails(targetSong);
           if (resolved?.url) {

@@ -56,7 +56,7 @@ export async function getYouTubeHomeRecommendations(seeds: Song[], signal: Abort
     songs = rankYouTubeRecommendations([...songs, ...mixes.flatMap(result => result.status === "fulfilled" ? result.value : [])], seeds);
   }
   if (signal.aborted) throw new Error("YouTube request cancelled");
-  if (!songs.length && !home.playlists.length) throw new Error("YouTube Music recommendations are unavailable. Please retry.");
+  if (!songs.length && !home.playlists.length) throw new Error("Mavrixfy Music recommendations are unavailable. Please retry.");
   const sections: YouTubeHomeSection[] = [...sampledSections, ...baseSections];
   if (radio.length) sections.unshift({ id: "youtube-for-you", title: "Recommended for you",
     songs: rankYouTubeRecommendations(radio, seeds, 20), playlists: [] });

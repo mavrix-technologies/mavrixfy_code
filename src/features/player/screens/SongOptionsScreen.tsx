@@ -4,6 +4,8 @@ import { usePlayerActions } from "@/contexts/PlayerContext";
 import { removeSongFromFirestorePlaylist } from "@/lib/firestore";
 import type { Song } from "@/lib/musicData";
 import { removeSongFromPlaylist } from "@/lib/storage";
+import { replaceLikedSongYouTubeVersion } from "@/services/liked-songs";
+import { youtubeIdentity } from "@/services/liked-songs/likedSongFormat";
 import { showGlobalToast } from "@/utils/globalToast";
 import { shareSong } from "@/utils/shareUtils";
 import { unescapeHtml } from "@/utils/stringUtils";
@@ -24,6 +26,7 @@ import type { SongOptionMenuItem } from "../components/SongOptionsSubComponents"
 import {
 AddToPlaylistView,
 GoToArtistsView,
+LikedSongMatchesView,
 MavrixfyCodeView,
 SheetWrap,
 SongCreditsView,
@@ -31,7 +34,7 @@ SongCreditsView,
 import { styles } from "../styles/songOptionsStyles";
 import { dismissOptions } from "../utils/songOptionsUtils";
 
-type SubView = "main" | "add-to-playlist" | "go-to-artists" | "song-credits" | "mavrixfy-code";
+type SubView = "main" | "add-to-playlist" | "go-to-artists" | "song-credits" | "mavrixfy-code" | "song-matches";
 
 function parseSongParam(value: string | string[] | undefined): Song | null {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -53,6 +56,11 @@ function parseSongParam(value: string | string[] | undefined): Song | null {
       language: parsed.language,
       source: parsed.source,
       playCount: parsed.playCount,
+      videoId: parsed.videoId,
+      youtubeVideoId: parsed.youtubeVideoId,
+      youtubeUrl: parsed.youtubeUrl,
+      catalogUrl: parsed.catalogUrl,
+      likedSongDocumentIds: Array.isArray(parsed.likedSongDocumentIds) ? parsed.likedSongDocumentIds : [parsed.id],
     };
   } catch {
     return null;
@@ -116,6 +124,26 @@ export function SongOptionsScreen() {
     if (!song) return;
     await shareSong(song);
   }, [song]);
+
+  const [selectingMatchId, setSelectingMatchId] = useState<string | null>(null);
+  const handleSelectMatch = useCallback(async (match: Song) => {
+    if (!song || !userId || selectingMatchId) return;
+    if (youtubeIdentity(song) === youtubeIdentity(match) && (!match.coverUrl || song.coverUrl === match.coverUrl)) {
+      showGlobalToast("This version is already saved");
+      return;
+    }
+    setSelectingMatchId(match.id);
+    try {
+      const updated = await replaceLikedSongYouTubeVersion(userId, song, match);
+      if (!updated) throw new Error("The saved song could not be updated");
+      showGlobalToast("Song replaced with selected version");
+      dismissOptions();
+    } catch {
+      showGlobalToast("Could not update this saved song. Try again.");
+    } finally {
+      setSelectingMatchId(null);
+    }
+  }, [selectingMatchId, song, userId]);
 
   const handleGoToAlbum = useCallback(() => {
     if (!song) return;
@@ -203,6 +231,14 @@ export function SongOptionsScreen() {
       </SheetWrap>
     );
   }
+  if (subView === "song-matches") {
+    return (
+      <SheetWrap>
+        <LikedSongMatchesView song={song} onBack={() => setSubView("main")} onSelect={match => void handleSelectMatch(match)}
+          selectingId={selectingMatchId} bottomPad={bottomPad} />
+      </SheetWrap>
+    );
+  }
 
   const menuItems: SongOptionMenuItem[] = [
     {
@@ -266,6 +302,15 @@ export function SongOptionsScreen() {
       onPress: () => setSubView("mavrixfy-code"),
     },
   ];
+
+  if (optionContext === "liked" && liked && userId) {
+    menuItems.splice(1, 0, {
+      label: "Find another version",
+      icon: "swap-horizontal-outline",
+      chevron: true,
+      onPress: () => setSubView("song-matches"),
+    });
+  }
 
   if (canRemove) {
     menuItems.splice(2, 0, {

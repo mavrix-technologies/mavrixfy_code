@@ -332,11 +332,12 @@ export function useAudioSyncListeners({
         if (pending) return;
 
         const activeSong = currentQ.find((song) => song.id === activeTrackId);
-        const youtubeStream = activeSong && isYouTubeSong(activeSong) ? peekYouTubeStream(activeSong) : undefined;
+        const localTrack = /^(?:file|content):\/\//i.test(event?.track?.url || "");
+        const youtubeStream = !localTrack && activeSong && isYouTubeSong(activeSong) ? peekYouTubeStream(activeSong) : undefined;
         if (youtubeStream) {
-          const bitrate = Math.round(youtubeStream.bitrate / 1000);
+          const bitrate = Number.isFinite(youtubeStream.bitrate) && youtubeStream.bitrate > 0 ? Math.round(youtubeStream.bitrate / 1000) : 0;
           setPlaybackQuality?.((previous) => ({ ...previous, actualBitrate: bitrate,
-            qualityLabel: `${bitrate}kbps${youtubeStream.codec ? ` · ${youtubeStream.codec}` : ""}`, isFallback: false }));
+            qualityLabel: `${bitrate > 0 ? `${bitrate}kbps` : "Original audio"}${youtubeStream.codec ? ` · ${youtubeStream.codec}` : ""}`, isFallback: false }));
         }
 
         // If native event confirms the song we already selected, do NOT overwrite or jump

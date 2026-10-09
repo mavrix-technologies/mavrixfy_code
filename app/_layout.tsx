@@ -22,6 +22,7 @@ import { initRemoteConfig } from "@/lib/remoteConfig";
 import { getRecentlyPlayed,runOneTimeMigrations } from "@/lib/storage";
 import { showAppLaunchAd } from "@/services/ads/appLaunchAdService";
 import { syncEqualizerWithNative } from "@/services/audio/audioEqualizer";
+import { YouTubePoTokenHost } from "@/services/youtube/YouTubePoTokenHost";
 import { checkAppVersion,registerForPushNotificationsAsync } from "@/services/notificationService";
 import { showGlobalToast,subscribeGlobalToast } from "@/utils/globalToast";
 import { runAfterIdle } from "@/utils/idleTask";
@@ -331,15 +332,6 @@ const songOptionsScreenOptions = {
   contentStyle: { backgroundColor: isAndroid ? "transparent" : "#1E1E1E" },
 };
 
-const sleepTimerScreenOptions = {
-  presentation: isAndroid ? ("transparentModal" as const) : ("formSheet" as const),
-  animation: isAndroid ? ("none" as const) : ("slide_from_bottom" as const),
-  animationDuration: 220,
-  sheetAllowedDetents: [0.62],
-  sheetCornerRadius: 24,
-  contentStyle: { backgroundColor: isAndroid ? "transparent" : Colors.background },
-};
-
 const artistMixScreenOptions = {
   presentation: isAndroid ? ("formSheet" as const) : ("card" as const),
   ...(isAndroid && {
@@ -379,7 +371,6 @@ function RootLayoutNav() {
         <Stack.Screen name="player" options={playerScreenOptions} />
         <Stack.Screen name="queue" options={queueScreenOptions} />
         <Stack.Screen name="song-options" options={songOptionsScreenOptions} />
-        <Stack.Screen name="sleep-timer" options={sleepTimerScreenOptions} />
         <Stack.Screen name="artist-mix" options={artistMixScreenOptions} />
         <Stack.Screen name="downloaded-songs" />
         <Stack.Screen name="downloads" />
@@ -399,6 +390,7 @@ function RootLayoutNav() {
 
       {/* Global Player Overlay — always mounted globally above all screens (tabs, playlist, artist, etc.) */}
       <PlayerScreen />
+      <YouTubePoTokenHost />
 
       <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
         <QueueBottomSheet ref={globalQueueSheetRef} />

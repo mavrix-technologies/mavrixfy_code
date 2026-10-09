@@ -54,7 +54,6 @@ export async function showAppLaunchAd(): Promise<void> {
 
     // 4-second safety timeout: never freeze app on slow networks
     timeoutId = setTimeout(() => {
-      logger.info("[Ads] Launch ad request timed out, continuing into app.");
       cleanup();
     }, 4000);
 

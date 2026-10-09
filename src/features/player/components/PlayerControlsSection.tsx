@@ -1,11 +1,10 @@
-import { Ionicons } from "@expo/vector-icons";
+import { MaterialCommunityIcons,MaterialIcons } from "@expo/vector-icons";
 import React from "react";
-import { Text,View } from "react-native";
+import { View } from "react-native";
 
 import { PingPongScroll } from "@/components/PingPongScroll";
 import type { Song } from "@/lib/musicData";
 import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
-import { shareSong } from "@/utils/shareUtils";
 import { unescapeHtml } from "@/utils/stringUtils";
 import { styles } from "../styles/playerScreenStyles";
 import {
@@ -30,6 +29,7 @@ export interface PlayerControlsSectionProps {
   interactionReady: boolean;
   liked: boolean;
   onToggleLike: () => void;
+  onOpenQueue: () => void;
   onSeekTo: (progress: number) => void;
   onSeekingChange: (isSeeking: boolean) => void;
   controlsRowGap: number;
@@ -62,6 +62,7 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
   interactionReady,
   liked,
   onToggleLike,
+  onOpenQueue,
   onSeekTo,
   onSeekingChange,
   controlsRowGap,
@@ -126,17 +127,17 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
             activeColor={selectedControlIconColor}
             inactiveColor="#FFFFFF"
             accessibilityLabel={
-              liked ? "Remove from your library" : "Save to your library"
+              liked ? "Remove from Liked Songs" : "Add to Liked Songs"
             }
           />
-
           <SmoothControlButton
-            accessibilityLabel="Share song"
+            accessibilityLabel="Open playback queue"
+            accessibilityRole="button"
             style={[styles.songDetailActionButton, songDetailActionBtnStyle]}
-            onPress={() => void shareSong(screenSong)}
+            onPress={onOpenQueue}
           >
-            <Ionicons
-              name="share-outline"
+            <MaterialIcons
+              name="queue-music"
               size={songDetailIconSize}
               color="#FFFFFF"
             />
@@ -171,8 +172,8 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
             ]}
             onPress={onToggleShuffle}
           >
-            <Ionicons
-              name="shuffle"
+              <MaterialCommunityIcons
+                name="shuffle-variant"
               size={shuffleRepeatIconSize}
               color={playerIsShuffled ? selectedControlIconColor : sideControlIconColor}
             />
@@ -186,7 +187,7 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
               onSkip("prev");
             }}
           >
-            <Ionicons name="play-skip-back" size={prevNextIconSize} color={activeControlIconColor} />
+            <MaterialCommunityIcons name="skip-previous" size={prevNextIconSize} color={activeControlIconColor} />
           </SmoothControlButton>
 
           <PlayerPlayButton
@@ -205,7 +206,7 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
               onSkip("next");
             }}
           >
-            <Ionicons name="play-skip-forward" size={prevNextIconSize} color={activeControlIconColor} />
+            <MaterialCommunityIcons name="skip-next" size={prevNextIconSize} color={activeControlIconColor} />
           </SmoothControlButton>
 
           <SmoothControlButton
@@ -215,14 +216,11 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
             ]}
             onPress={onToggleRepeat}
           >
-            <Ionicons
-              name="repeat"
+            <MaterialCommunityIcons
+              name={playerRepeatMode === "one" ? "repeat-once" : "repeat"}
               size={shuffleRepeatIconSize}
               color={playerRepeatMode !== "off" ? selectedControlIconColor : sideControlIconColor}
             />
-            {playerRepeatMode === "one" && (
-              <Text style={[styles.repeatOneBadge, { color: selectedControlIconColor }]}>1</Text>
-            )}
           </SmoothControlButton>
         </View>
       </View>

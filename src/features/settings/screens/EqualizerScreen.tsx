@@ -13,7 +13,6 @@ import {
   Alert,
   GestureResponderEvent,
   LayoutChangeEvent,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -387,8 +386,8 @@ function useEqualizerState() {
 
 export function EqualizerScreen() {
   const insets = useSafeAreaInsets();
-  const topInset = Platform.OS === "web" ? 16 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 20 : insets.bottom;
+  const topInset = insets.top;
+  const bottomInset = insets.bottom;
 
   const eq = useEqualizerState();
 

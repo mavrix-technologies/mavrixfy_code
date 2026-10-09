@@ -1,4 +1,4 @@
-import { hslToRgb,normalizeHexColor,rgbToHex,rgbToHsl } from "./colorMath";
+import { colorWithAlpha,hslToRgb,normalizeHexColor,rgbToHex,rgbToHsl } from "./colorMath";
 import { artworkAnalysisUrl } from "@/services/youtube/YouTubeArtwork";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
@@ -17,8 +17,8 @@ export { colorWithAlpha } from "./colorMath";
  * 2. Native Layer (iOS):
  *    - Uses `UIImageColors` to extract background, primary, secondary, and detail.
  *
- * 3. JS Fallback Layer (Expo Go / Web):
- *    - Deterministic palette without JS image decoding.
+ * 3. Fallback Layer (Expo Go / extraction errors):
+ *    - Neutral theme colors; artwork colors are never guessed from the URL.
  *
  * 4. Mavrixfy Presentation Layer:
  *    - Custom Spotify-inspired transforms (`getSpotifyMiniPlayerBg`, `ensureDarkHexColor`)
@@ -72,6 +72,24 @@ export interface ArtworkPalette {
   rawVibrant?: string;
   /** All extracted discrete color swatches directly from the artwork. */
   swatches?: string[];
+}
+
+export type ArtworkAmbientGradientStops = readonly [string, string, string, string];
+export const ARTWORK_AMBIENT_GRADIENT_LOCATIONS = [0, 0.40, 0.75, 1] as const;
+export const ARTWORK_AMBIENT_TRANSITION_DURATION_MS = 850;
+
+/** Shared artwork-driven ambient gradient used by Home and the full player. */
+export function getArtworkAmbientGradientStops(
+  accent: string,
+  background: string,
+  baseColor: string
+): ArtworkAmbientGradientStops {
+  return [
+    colorWithAlpha(accent, 0.42, "rgba(20, 24, 32, 0.50)"),
+    colorWithAlpha(background, 0.65, "rgba(18, 22, 28, 0.50)"),
+    colorWithAlpha(baseColor, 0.90, baseColor),
+    baseColor,
+  ];
 }
 
 /** @deprecated Use ArtworkPalette */
@@ -135,7 +153,7 @@ export function transformToSeamlessBackground(hexColor: string): string {
   targetL = Math.max(0.08, Math.min(0.16, targetL));
 
   // Maintain natural saturation of the extracted color (accurate, no artificial neon or wash):
-  const targetS = Math.min(0.85, Math.max(0.32, s));
+  const targetS = Math.min(0.85, s);
 
   const darkRgb = hslToRgb(h, targetS, targetL);
   return rgbToHex(darkRgb.r, darkRgb.g, darkRgb.b);
@@ -171,7 +189,7 @@ export function ensureDarkHexColor(
 }
 
 const COLOR_CACHE_MAX_ENTRIES = 200;
-const STORAGE_KEY_PALETTES = "@mavrixfy_palette_cache_v2";
+const STORAGE_KEY_PALETTES = "@mavrixfy_palette_cache_v3";
 const paletteCache = new Map<string, ArtworkPalette>();
 const pendingRequests = new Map<string, Promise<ArtworkPalette>>();
 
@@ -272,7 +290,7 @@ export function extractArtworkColors(imageUrl: string): Promise<ArtworkPalette> 
 }
 
 export function preloadDominantColors(imageUrls: (string | null | undefined)[]): void {
-  // Expo Go uses an immediate deterministic palette; no preload is needed.
+  // Expo Go does not include the native image-colors module.
   if (!canUseNativeImageColors()) return;
 
   // Preloading is sequential so adjacent covers don't compete with playback/rendering.
@@ -303,36 +321,34 @@ export function getImmediateArtworkPalette(imageUrl: string | null | undefined):
  * Reusable hook for reactive artwork color extraction with instant cache retrieval.
  */
 export function useArtworkPalette(imageUrl: string | null | undefined): ArtworkPalette {
-  const [palette, setPalette] = useState<ArtworkPalette>(() =>
-    getImmediateArtworkPalette(imageUrl)
-  );
+  const key = normalizeArtworkUrl(imageUrl);
+  const [resolved, setResolved] = useState<{ key: string; palette: ArtworkPalette }>(() => ({
+    key,
+    palette: getImmediateArtworkPalette(key),
+  }));
 
   useEffect(() => {
-    const key = (imageUrl || "").trim();
     if (!key) return;
 
     let isMounted = true;
     void extractArtworkColors(key).then((extracted) => {
       if (isMounted) {
-        setPalette((prev) => {
-          if (
-            prev.background === extracted.background &&
-            prev.accent === extracted.accent &&
-            prev.text === extracted.text
-          ) {
-            return prev;
-          }
-          return extracted;
-        });
+        setResolved((previous) => previous.key === key
+          && previous.palette.background === extracted.background
+          && previous.palette.accent === extracted.accent
+          && previous.palette.text === extracted.text
+          ? previous
+          : { key, palette: extracted });
       }
     });
 
     return () => {
       isMounted = false;
     };
-  }, [imageUrl]);
+  }, [key]);
 
-  return imageUrl?.trim() ? palette : DEFAULT_ARTWORK_PALETTE;
+  if (!key) return DEFAULT_ARTWORK_PALETTE;
+  return resolved.key === key ? resolved.palette : getImmediateArtworkPalette(key);
 }
 
 function canUseNativeImageColors(): boolean {
@@ -371,8 +387,9 @@ async function extractArtworkColorsUncached(rawKey: string): Promise<ArtworkPale
       const result = await getColors(artworkAnalysisUrl(cacheKey), {
         fallback: "#0E1016",
         cache: true,
-        quality: "low",
-        key: cacheKey,
+        quality: "high",
+        pixelSpacing: 2,
+        key: `artwork-palette-v3:${cacheKey}`,
       });
 
       const palette = mapImageColorsToPalette(result);
@@ -388,49 +405,67 @@ async function extractArtworkColorsUncached(rawKey: string): Promise<ArtworkPale
     }
   }
 
-  // Fast jewel palette fallback (0ms, avoids freezing JS thread with full JPEG decode)
-  const fallbackPalette = buildPaletteFromUrlHash(cacheKey);
-  setCachedPalette(cacheKey, fallbackPalette);
-  if (rawKey !== cacheKey) {
-    setCachedPalette(rawKey, fallbackPalette);
-  }
-  return fallbackPalette;
+  const palette = await extractJpegArtworkPalette(artworkAnalysisUrl(cacheKey)).catch(() => null);
+  if (!palette) return DEFAULT_ARTWORK_PALETTE;
+  setCachedPalette(cacheKey, palette);
+  if (rawKey !== cacheKey) setCachedPalette(rawKey, palette);
+  return palette;
 }
 
-const PRESET_JEWEL_PALETTES: [string, string][] = [
-  ["#0D2420", "#26E19A"], // Emerald Teal
-  ["#111D30", "#3E8BFF"], // Sapphire Ocean
-  ["#231530", "#A259FF"], // Royal Amethyst
-  ["#281912", "#FF7A45"], // Sepia Ember
-  ["#1F2420", "#52C41A"], // Forest Jade
-  ["#28141F", "#FF4D88"], // Ruby Crimson
-  ["#1A2228", "#13C2C2"], // Cyan Marine
-  ["#221E14", "#FAAD14"], // Sunset Topaz
-  ["#1A162B", "#8C65FF"], // Lavender Velvet
-  ["#261B20", "#FF6B8B"], // Rose Plum
-];
+/** Small Expo Go fallback: sample real JPEG pixels when the native module is absent. */
+async function extractJpegArtworkPalette(imageUrl: string): Promise<ArtworkPalette | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(imageUrl, {
+      headers: { Accept: "image/jpeg,image/*;q=0.8" },
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
 
-export function buildPaletteFromUrlHash(url: string): ArtworkPalette {
-  let hash = 0;
-  for (let i = 0; i < url.length; i++) {
-    hash = (hash << 5) - hash + url.charCodeAt(i);
-    hash |= 0;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes.length > 2_000_000) return null;
+
+    // Lazy load so production native builds continue to use native Palette/UIImageColors.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const jpeg = require("jpeg-js") as { decode: (input: Uint8Array, options: Record<string, unknown>) => { width: number; height: number; data: Uint8Array } };
+    const image = jpeg.decode(bytes, { useTArray: true, formatAsRGBA: true, maxResolutionInMP: 1, maxMemoryUsageInMB: 12 });
+    if (!image.width || !image.height || image.width * image.height > 1_000_000) return null;
+
+    const bins = new Map<number, { r: number; g: number; b: number; count: number }>();
+    const stride = Math.max(1, Math.ceil(Math.sqrt((image.width * image.height) / 12_000)));
+    for (let y = 0; y < image.height; y += stride) {
+      for (let x = 0; x < image.width; x += stride) {
+        const offset = (y * image.width + x) * 4;
+        const r = image.data[offset], g = image.data[offset + 1], b = image.data[offset + 2];
+        const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+        const bin = bins.get(key) || { r: 0, g: 0, b: 0, count: 0 };
+        bin.r += r; bin.g += g; bin.b += b; bin.count++;
+        bins.set(key, bin);
+      }
+    }
+
+    const swatches = [...bins.values()].map(bin => {
+      const r = Math.round(bin.r / bin.count), g = Math.round(bin.g / bin.count), b = Math.round(bin.b / bin.count);
+      const hex = rgbToHex(r, g, b);
+      return { hex, count: bin.count, stats: getColorStats(hex)! };
+    });
+    if (!swatches.length) return null;
+
+    const dominant = swatches.reduce((best, next) => next.count > best.count ? next : best);
+    const vibrant = swatches
+      .filter(color => color.stats.s >= 0.14 && color.stats.l >= 0.10 && color.stats.l <= 0.88)
+      .sort((a, b) => (b.count * b.stats.vibrancy) - (a.count * a.stats.vibrancy))[0] || dominant;
+    const background = transformToSeamlessBackground(dominant.hex);
+    const accent = transformToVibrantAccent(vibrant.hex);
+    return {
+      background, accent, text: "#FFFFFF", isDark: true, primary: accent,
+      rawDominant: dominant.hex, rawVibrant: vibrant.hex,
+      swatches: dedupeAndDarkenSwatches(swatches.sort((a, b) => b.count - a.count).slice(0, 5).map(color => color.hex), background),
+    };
+  } finally {
+    clearTimeout(timeout);
   }
-  const idx = Math.abs(hash) % PRESET_JEWEL_PALETTES.length;
-  const [bg, accent] = PRESET_JEWEL_PALETTES[idx];
-  const background = transformToSeamlessBackground(bg);
-  const vibrantAccent = transformToVibrantAccent(accent);
-  const swatches = dedupeAndDarkenSwatches([bg, accent]);
-  return {
-    background,
-    accent: vibrantAccent,
-    text: "#FFFFFF",
-    isDark: true,
-    primary: vibrantAccent,
-    rawDominant: bg,
-    rawVibrant: accent,
-    swatches,
-  };
 }
 
 export function dedupeAndDarkenSwatches(swatches: (string | undefined | null)[], primaryBg?: string): string[] {
@@ -496,22 +531,11 @@ function mapImageColorsToPalette(result: ImageColorsResult): ArtworkPalette {
       ? candidates.slice().sort((a, b) => b.vibrancy - a.vibrancy)[0].hex
       : result.primary || result.detail || result.background || DEFAULT_ARTWORK_PALETTE.accent;
 
-    // Pick the dominant background:
-    // 1. If result.background has color (s >= 0.10) and is not washed-out white (l < 0.88), it's the natural dominant tone.
-    // 2. If result.background is near-white or black/fallback, check for a rich colored candidate swatch.
-    let bestDominant = result.background;
-    if (!bgStats || bgStats.hex === "#000000" || bgStats.hex === "#0E1016" || bgStats.l > 0.88 || bgStats.s < 0.10) {
-      const coloredCandidate = candidates.find((c) => c.s >= 0.15 && c.l >= 0.10 && c.l <= 0.85);
-      if (coloredCandidate) {
-        bestDominant = coloredCandidate.hex;
-      } else if (bgStats && bgStats.hex !== "#000000" && bgStats.l < 0.88) {
-        bestDominant = bgStats.hex;
-      } else if (primaryStats && primaryStats.hex !== "#000000" && primaryStats.hex !== "#0E1016") {
-        bestDominant = primaryStats.hex;
-      } else {
-        bestDominant = DEFAULT_ARTWORK_PALETTE.background;
-      }
-    }
+    // UIImageColors' background is the artwork's dominant/background tone.
+    // Keep neutral and black covers neutral instead of substituting a vivid detail.
+    const bestDominant = bgStats && bgStats.hex !== "#000000" && bgStats.hex !== "#0E1016"
+      ? bgStats.hex
+      : result.background || DEFAULT_ARTWORK_PALETTE.background;
 
     const rawDom = normalizeHexColor(bestDominant) ?? DEFAULT_ARTWORK_PALETTE.background;
     const rawVib = normalizeHexColor(bestAccent) ?? DEFAULT_ARTWORK_PALETTE.accent;

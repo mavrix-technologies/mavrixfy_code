@@ -75,16 +75,22 @@ export function PlayerPlayButton({
   iconSize,
   onAccentColor,
   onPress,
+  style,
+  accessibilityLabel,
 }: {
   active: boolean;
   buttonSize: number;
   iconSize: number;
   onAccentColor: string;
   onPress: () => void;
+  style?: StyleProp<ViewStyle>;
+  accessibilityLabel?: string;
 }) {
   return (
     <SmoothControlButton
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? (active ? "Pause" : "Play")}
       style={[
         styles.playButton,
         {
@@ -95,6 +101,7 @@ export function PlayerPlayButton({
           borderWidth: 1,
           borderColor: "rgba(255,255,255,0.92)",
         },
+        style,
       ]}
     >
       <Ionicons

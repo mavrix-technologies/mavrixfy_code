@@ -12,6 +12,7 @@ DOWNLOAD_QUALITY_OPTIONS,
 MINI_PLAYER_OPTIONS,
 QUALITY_OPTIONS,
 SMART_AUTOPLAY_OPTIONS,
+VIDEO_QUALITY_OPTIONS,
 } from "../constants/settingsConstants";
 import { SegmentPicker } from "./SettingsUIComponents";
 
@@ -35,11 +36,13 @@ export function ProfilePlaybackSection({
       if (enabled) {
         await updateSettings({
           dataSaverEnabled: true,
+          videoBackgroundQuality: "low",
         });
         await onQualityChange("low");
       } else {
         await updateSettings({
           dataSaverEnabled: false,
+          videoBackgroundQuality: "auto",
         });
         await onQualityChange("auto");
       }
@@ -160,15 +163,12 @@ export function ProfilePlaybackSection({
 
       {section === "playback" && (
         <View style={styles.sectionGroup}>
-        {/* Ambient Artwork */}
+        {/* Video Background */}
         <View style={styles.groupBlock}>
           <View style={styles.blockHeader}>
             <View style={styles.blockTitleRow}>
-              <Ionicons name="image-outline" size={21} color="rgba(255, 255, 255, 0.7)" />
-              <View>
-                <Text style={styles.blockTitle}>Artwork Background</Text>
-                <Text style={styles.rowSubtitle}>Use the current song cover behind the player</Text>
-              </View>
+              <Ionicons name="videocam-outline" size={21} color="rgba(255, 255, 255, 0.7)" />
+              <Text style={styles.blockTitle}>Video Background</Text>
             </View>
             <Switch
               value={settings.ambientBackdropEnabled}
@@ -177,6 +177,15 @@ export function ProfilePlaybackSection({
               thumbColor="#FFFFFF"
             />
           </View>
+          {settings.ambientBackdropEnabled && (
+            <View style={styles.subSegmentWrapper}>
+              <SegmentPicker
+                options={VIDEO_QUALITY_OPTIONS}
+                value={settings.videoBackgroundQuality}
+                onChange={(val) => updateSettings({ videoBackgroundQuality: val })}
+              />
+            </View>
+          )}
         </View>
 
         {/* Smart Autoplay */}

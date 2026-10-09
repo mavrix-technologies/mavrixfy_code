@@ -13,11 +13,11 @@ import { router,useNavigation } from "expo-router";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import { useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { ArtworkQueueItem } from "../components/PlayerArtworkViews";
 import { useArtistDiscovery } from "./useArtistDiscovery";
-import { useArtworkCarouselSync } from "./useArtworkCarouselSync";
+import { usePlayerQueueSwipe } from "./usePlayerQueueCarousel";
+import type { ArtworkQueueItem } from "../components/PlayerArtworkViews";
 import { useArtworkPaletteSync } from "./useArtworkPaletteSync";
-import { useAmbientArtwork } from "./useAmbientArtwork";
+import { useBackgroundVisualVideo } from "./useBackgroundVisualVideo";
 import { useDevTrackHelper } from "./useDevTrackHelper";
 import { usePlayerLayoutMetrics } from "./usePlayerLayoutMetrics";
 import { usePlayerLiveQueue } from "./usePlayerLiveQueue";
@@ -39,7 +39,14 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
 
   const screenSong = currentSong ?? null;
 
-  const { shouldRenderAmbientArtwork, ambientArtworkReady, onAmbientArtworkLoad } = useAmbientArtwork({ screenSong, navigation });
+  const {
+    isLowEnd,
+    videoBackgroundQuality,
+    backgroundVideoId,
+    isScreenFocused,
+    shouldRenderBackgroundVideo,
+    videoBackgroundRequested,
+  } = useBackgroundVisualVideo({ screenSong, navigation });
 
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
   const prevSongIdRef = useRef(currentSong?.id);
@@ -121,12 +128,11 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
     controlsRowGap,
     songDetailIconSize,
     bottomContentPadding,
-    artSize,
+    trackSwipeAreaHeight,
     playerIconBtnStyle,
     songDetailActionBtnStyle,
     prevNextBtnSizeStyle,
-    artCarouselPageWidth,
-    artCarouselSnapInterval,
+    trackSwipePageWidth,
   } = usePlayerLayoutMetrics(screenWidth, screenHeight, insets);
 
   const { livePlayingQueue, liveActiveQueueIndex } = usePlayerLiveQueue(
@@ -138,6 +144,28 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
 
   const playingQueue = livePlayingQueue;
   const activeQueueIndex = liveActiveQueueIndex;
+
+  const artworkQueue = useMemo<ArtworkQueueItem[]>(() => {
+    const occurrenceByKey = new Map<string, number>();
+    return playingQueue.map((song) => {
+      const baseKey = String(song.id || song.audioUrl || song.coverUrl || song.title || "artwork");
+      const occurrence = occurrenceByKey.get(baseKey) ?? 0;
+      occurrenceByKey.set(baseKey, occurrence + 1);
+      return { song, artworkKey: occurrence === 0 ? baseKey : `${baseKey}-${occurrence}` };
+    });
+  }, [playingQueue]);
+
+  useEffect(() => {
+    if (!interactionReady) return;
+    const urls = mapFilter(
+      [playingQueue[activeQueueIndex - 1]?.coverUrl, playingQueue[activeQueueIndex]?.coverUrl,
+        playingQueue[activeQueueIndex + 1]?.coverUrl],
+      (url) => url?.trim(),
+      (url): url is string => Boolean(url)
+    );
+    if (urls.length === 0) return;
+    return scheduleArtworkPreload(urls, trackSwipeAreaHeight);
+  }, [activeQueueIndex, interactionReady, playingQueue, trackSwipeAreaHeight]);
 
   const {
     artistDetails,
@@ -153,70 +181,24 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
     playSong,
   });
 
-  const artworkQueue = useMemo<ArtworkQueueItem[]>(() => {
-    const occurrenceByKey = new Map<string, number>();
-    return playingQueue.map((song) => {
-      const baseKey = String(song.id || song.audioUrl || song.coverUrl || song.title || "artwork");
-      const occurrence = occurrenceByKey.get(baseKey) ?? 0;
-      occurrenceByKey.set(baseKey, occurrence + 1);
-      return {
-        song,
-        artworkKey: occurrence === 0 ? baseKey : `${baseKey}-${occurrence}`,
-      };
-    });
-  }, [playingQueue]);
-
   const playerIsPlaying = playbackState.isPlaying;
   const playerRepeatMode = repeatMode;
   const playerIsShuffled = isShuffled;
 
-  useEffect(() => {
-    if (!interactionReady) return;
-    const urls = mapFilter(
-      [
-        playingQueue[activeQueueIndex - 1]?.coverUrl,
-        playingQueue[activeQueueIndex]?.coverUrl,
-        playingQueue[activeQueueIndex + 1]?.coverUrl,
-      ],
-      (url) => url?.trim(),
-      (url): url is string => Boolean(url)
-    );
-
-    if (urls.length === 0) return;
-    return scheduleArtworkPreload(urls, artSize);
-  }, [activeQueueIndex, artSize, interactionReady, playingQueue]);
-
   const liked = screenSong ? isLiked(screenSong.id) : false;
-  const queueRowHeight = isShortScreen ? 48 : 54;
-  const queueViewportHeight = Math.min(
-    playingQueue.length * queueRowHeight + 16,
-    Math.round(screenHeight * 0.55)
-  );
-  const queueViewportStyle = useMemo(
-    () => ({ height: queueViewportHeight }),
-    [queueViewportHeight]
-  );
-
   const sheetTextColor = Colors.text;
   const sheetMutedTextColor = "rgba(223,226,235,0.68)";
   const activeControlIconColor = "#FFFFFF";
   const sideControlIconColor = "#FFFFFF";
   const selectedControlIconColor = Colors.primary;
 
-  const artCarouselGetItemLayout = useCallback(
-    (_: ArtworkQueueItem[] | null | undefined, index: number) => ({
-      length: artCarouselSnapInterval,
-      offset: artCarouselSnapInterval * index,
+  const trackSwipeGetItemLayout = useCallback(
+    (_: ArrayLike<Song> | null | undefined, index: number) => ({
+      length: trackSwipePageWidth,
+      offset: trackSwipePageWidth * index,
       index,
     }),
-    [artCarouselSnapInterval]
-  );
-
-  const handleQueueSongPress = useCallback(
-    (song: Song) => {
-      playSong(song, playingQueue);
-    },
-    [playSong, playingQueue]
+    [trackSwipePageWidth]
   );
 
   const handleSkip = useCallback(
@@ -231,37 +213,20 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
   );
 
   const {
-    artScrollX,
-    artCarouselRef,
-    handleArtworkSongChange,
-    handleArtworkScrollFinished,
-    handleArtworkScroll,
-  } = useArtworkCarouselSync({
+    scrollX,
+    listRef,
+    handleTrackChange,
+    handleScrollFinished,
+    handleScroll,
+  } = usePlayerQueueSwipe({
     playingQueue,
     activeQueueIndex,
     currentSongId: currentSong?.id,
-    artCarouselSnapInterval,
+    pageWidth: trackSwipePageWidth,
     nextSong,
     prevSong,
     playSong,
   });
-
-  const queueKeyExtractor = useCallback((item: Song, index: number) => {
-    const baseKey = String(item.id || item.audioUrl || item.title || "queue-song");
-    return `${baseKey}-${index}`;
-  }, []);
-
-  const getQueueItemLayout = useCallback(
-    (_data: ArrayLike<Song> | null | undefined, index: number) => {
-      const rowH = isShortScreen ? 48 : 54;
-      return {
-        length: rowH,
-        offset: rowH * index,
-        index,
-      };
-    },
-    [isShortScreen]
-  );
 
   return {
     screenWidth,
@@ -288,12 +253,12 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
     controlsRowGap,
     songDetailIconSize,
     bottomContentPadding,
-    artSize,
+    trackSwipeAreaHeight,
     playerIconBtnStyle,
     songDetailActionBtnStyle,
     prevNextBtnSizeStyle,
-    artCarouselPageWidth,
-    artCarouselSnapInterval,
+    trackSwipePageWidth,
+    artworkQueue,
     playingQueue,
     activeQueueIndex,
     artistDetails,
@@ -301,35 +266,33 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
     relatedSongs,
     handleViewArtistProfile,
     handlePlayRelatedSong,
-    artworkQueue,
     playerIsPlaying,
     playerRepeatMode,
     playerIsShuffled,
     liked,
     toggleLike,
-    queueViewportStyle,
     sheetTextColor,
     sheetMutedTextColor,
     activeControlIconColor,
     sideControlIconColor,
     selectedControlIconColor,
-    artCarouselGetItemLayout,
-    handleQueueSongPress,
+    trackSwipeGetItemLayout,
     handleSkip,
-    artScrollX,
-    artCarouselRef,
-    handleArtworkSongChange,
-    handleArtworkScrollFinished,
-    handleArtworkScroll,
-    queueKeyExtractor,
-    getQueueItemLayout,
+    scrollX,
+    listRef,
+    handleTrackChange,
+    handleScrollFinished,
+    handleScroll,
     togglePlay,
     toggleShuffle,
     toggleRepeat,
-    shouldRenderAmbientArtwork,
-    ambientArtworkReady,
-    onAmbientArtworkLoad,
+    shouldRenderBackgroundVideo,
+    isLowEnd,
+    videoBackgroundQuality,
+    backgroundVideoId,
+    isScreenFocused,
     fullscreenLyricsVisible,
     setFullscreenLyricsVisible,
+    videoBackgroundRequested,
   };
 }

@@ -1,9 +1,9 @@
 const fs = require("node:fs");
 const vm = require("node:vm");
 const ts = require("typescript");
-function fixture({ loaded = true, starts = true, fakeTimers = false, mode = async () => {} } = {}) {
+function fixture({ loaded = true, starts = true, fakeTimers = false, mode = async () => {}, audioFactory } = {}) {
   const players = [];
-  const timers = new Map(); let timerId = 0;
+  const timers = new Map(); const timerDelays = []; let timerId = 0;
   const module = { exports: {} };
   const expo = {
     setAudioModeAsync: mode,
@@ -24,13 +24,14 @@ function fixture({ loaded = true, starts = true, fakeTimers = false, mode = asyn
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   vm.runInNewContext(code, { module, exports: module.exports,
-    setTimeout: fakeTimers ? callback => { const id = ++timerId; timers.set(id, callback); return id; } : setTimeout,
+    setTimeout: fakeTimers ? (callback, delay) => { const id = ++timerId; timers.set(id, callback); timerDelays.push(delay); return id; } : setTimeout,
     clearTimeout: fakeTimers ? id => timers.delete(id) : clearTimeout,
-    require: name => { if (name === "expo-audio") return expo;
+    require: name => { if (name === "./audioPlayerFactory") return audioFactory || { ...expo, supportsStandby: true, retainPlayerAfterStartError: () => false };
+      if (name === "expo-audio") return audioFactory || expo;
       if (name === "./audioTimeline") return require("./audio-timeline-fixture.cjs");
       if (name === "@/lib/logger") return { logger: { debug() {} } };
       throw new Error(name); } });
-  return { ...module.exports, players, fireTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); } };
+  return { ...module.exports, players, timerDelays, fireTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); } };
 }
 
 module.exports = { fixture };

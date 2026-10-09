@@ -1,6 +1,8 @@
 import type { Song } from "@/lib/musicData";
+import type { QueueOrderSnapshot } from "@/services/audio/queueDrag";
 
-export type SleepTimerSelection = 5 | 10 | 15 | 30 | 45 | 60 | "end-of-stack";
+/** Duration in whole minutes, or stop at the end of the queue. */
+export type SleepTimerSelection = number | "end-of-stack";
 
 export interface SleepTimerState {
   mode: "duration" | "end-of-stack";
@@ -10,6 +12,7 @@ export interface SleepTimerState {
 
 export interface PlaybackQualityState {
   requested: "auto" | "low" | "medium" | "high";
+  /** Reported source bitrate in kbps; 0 means not known, never an assumed quality tier. */
   actualBitrate: number;
   qualityLabel: string;
   unlocked: boolean;
@@ -56,7 +59,7 @@ export interface PlayerActionsContextValue {
   addToQueue: (song: Song) => void;
   playNext: (song: Song) => void;
   removeFromQueue: (index: number) => void;
-  reorderQueue: (fromIndex: number, toIndex: number) => void;
+  reorderQueue: (fromIndex: number, toIndex: number, expectedState?: QueueOrderSnapshot) => void;
   clearQueue: () => void;
   shuffleQueue: () => void;
   setSleepTimer: (selection: SleepTimerSelection) => void;

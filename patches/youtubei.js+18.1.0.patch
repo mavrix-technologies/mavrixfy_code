@@ -1,0 +1,40 @@
+diff --git a/node_modules/youtubei.js/dist/src/parser/classes/Tab.d.ts b/node_modules/youtubei.js/dist/src/parser/classes/Tab.d.ts
+index c400e16..c2f22b2 100644
+--- a/node_modules/youtubei.js/dist/src/parser/classes/Tab.d.ts
++++ b/node_modules/youtubei.js/dist/src/parser/classes/Tab.d.ts
+@@ -3,12 +3,13 @@ import NavigationEndpoint from './NavigationEndpoint.js';
+ import SectionList from './SectionList.js';
+ import MusicQueue from './MusicQueue.js';
+ import RichGrid from './RichGrid.js';
++import Message from './Message.js';
+ import { YTNode } from '../helpers.js';
+ export default class Tab extends YTNode {
+     static type: string;
+     title: string;
+     selected: boolean;
+     endpoint: NavigationEndpoint;
+-    content: SectionList | MusicQueue | RichGrid | null;
++    content: SectionList | MusicQueue | RichGrid | Message | null;
+     constructor(data: RawNode);
+ }
+diff --git a/node_modules/youtubei.js/dist/src/parser/classes/Tab.js b/node_modules/youtubei.js/dist/src/parser/classes/Tab.js
+index 0939742..3944d5d 100644
+--- a/node_modules/youtubei.js/dist/src/parser/classes/Tab.js
++++ b/node_modules/youtubei.js/dist/src/parser/classes/Tab.js
+@@ -3,6 +3,7 @@ import NavigationEndpoint from './NavigationEndpoint.js';
+ import SectionList from './SectionList.js';
+ import MusicQueue from './MusicQueue.js';
+ import RichGrid from './RichGrid.js';
++import Message from './Message.js';
+ import { YTNode } from '../helpers.js';
+ export default class Tab extends YTNode {
+     static type = 'Tab';
+@@ -15,7 +16,7 @@ export default class Tab extends YTNode {
+         this.title = data.title || 'N/A';
+         this.selected = !!data.selected;
+         this.endpoint = new NavigationEndpoint(data.endpoint);
+-        this.content = Parser.parseItem(data.content, [SectionList, MusicQueue, RichGrid]);
++        this.content = Parser.parseItem(data.content, [SectionList, MusicQueue, RichGrid, Message]);
+     }
+ }
+ //# sourceMappingURL=Tab.js.map

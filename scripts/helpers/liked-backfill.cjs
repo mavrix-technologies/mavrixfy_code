@@ -41,8 +41,10 @@ function rankLikedSongVersions(original, candidates) {
 }
 
 function hasMapping(data) {
-  return !!format.youtubeIdentity({ youtubeUrl: data.youtubeUrl, source: data.source, videoId: data.videoId, youtubeVideoId: data.youtubeVideoId, id: data.id })
-    || (data.playbackMapping?.version === 1 && !!format.youtubeIdentity(data.playbackMapping.song || {}));
+  // Any mapping version belongs to a newer or manually controlled rollout;
+  // never let the automated backfill overwrite it just because we cannot read it.
+  if (data.playbackMapping != null) return true;
+  return !!format.youtubeIdentity({ youtubeUrl: data.youtubeUrl, source: data.source, videoId: data.videoId, youtubeVideoId: data.youtubeVideoId, id: data.id });
 }
 function classify(documentId, data) {
   if (hasMapping(data)) return 'mapped';

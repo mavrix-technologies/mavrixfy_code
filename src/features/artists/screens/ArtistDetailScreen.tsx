@@ -1,5 +1,6 @@
 import { displayArtworkUrl } from "@/lib/artworkDisplay";
 import AdMobBanner from "@/components/AdMobBanner";
+import { CollectionActionRow } from "@/components/CollectionActionRow";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
 import {
@@ -79,12 +80,6 @@ function useArtistScreenView() {
   const routeRef = useRef<string | null>(artistId);
   const [hasMore, setHasMore] = useState(true);
   const [showBioModal, setShowBioModal] = useState(false);
-
-  const [followScale] = useState(() => new Animated.Value(1));
-
-  const [playScale] = useState(() => new Animated.Value(1));
-
-  const [shuffleScale] = useState(() => new Animated.Value(1));
 
   const [stickyOpacity] = useState(() => new Animated.Value(0));
   const [isStickyVisible, setIsStickyVisible] = useState(false);
@@ -257,26 +252,16 @@ function useArtistScreenView() {
 
   const handlePlayAll = useCallback(() => {
     if (!songs.length) return;
-    Animated.sequence([
-      Animated.spring(playScale, { toValue: 0.9, speed: 50, bounciness: 0, useNativeDriver: true }),
-      Animated.spring(playScale, { toValue: 1, speed: 20, bounciness: 12, useNativeDriver: true }),
-    ]).start();
-
     if (isPlayingFromThisArtist) {
       togglePlay();
       return;
     }
     playSong(songs[0], songs);
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps listed
-  }, [songs, isPlayingFromThisArtist, togglePlay, playSong, playScale]);
+  }, [songs, isPlayingFromThisArtist, togglePlay, playSong]);
 
   const handleFollow = useCallback(async () => {
     if (!artist) return;
-    Animated.sequence([
-      Animated.spring(followScale, { toValue: 0.82, speed: 50, bounciness: 0, useNativeDriver: true }),
-      Animated.spring(followScale, { toValue: 1, speed: 20, bounciness: 14, useNativeDriver: true }),
-    ]).start();
-
     const artistCard: FollowedArtist = {
       id: artist?.id || artistId,
       name: displayName,
@@ -286,7 +271,7 @@ function useArtistScreenView() {
     const nowFollowing = await toggleFollowArtist(artistCard);
     setFollowing(nowFollowing);
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps listed
-  }, [artistId, artist, displayName, coverUrl, followScale]);
+  }, [artistId, artist, displayName, coverUrl]);
 
   const handleShare = useCallback(async () => {
     await shareArtist({
@@ -298,13 +283,9 @@ function useArtistScreenView() {
 
   const handleShuffle = useCallback(() => {
     if (!songs.length) return;
-    Animated.sequence([
-      Animated.spring(shuffleScale, { toValue: 0.85, speed: 50, bounciness: 0, useNativeDriver: true }),
-      Animated.spring(shuffleScale, { toValue: 1, speed: 20, bounciness: 12, useNativeDriver: true }),
-    ]).start();
     shufflePlay(songs);
   // react-doctor-disable-next-line react-doctor/exhaustive-deps -- all reactive deps listed
-  }, [songs, shufflePlay, shuffleScale]);
+  }, [songs, shufflePlay]);
 
   const handleLoadMore = useCallback(async () => {
     if (loadingMore || !hasMore || !artistId) return;
@@ -558,52 +539,17 @@ function useArtistScreenView() {
                   {displayName}
                 </Text>
 
-                {/* ── Signature 3-Button Action Row (Shuffle, Play, Like) ── */}
-                <View style={styles.appleMusicActionRow}>
-                  {/* Left: Shuffle Button */}
-                  <Animated.View style={{ transform: [{ scale: shuffleScale }] }}>
-                    <Pressable
-                      style={styles.appleMusicCircleBtn}
-                      onPress={handleShuffle}
-                      disabled={!songs.length}
-                    >
-                      <Ionicons name="shuffle" size={19} color="#FFFFFF" />
-                    </Pressable>
-                  </Animated.View>
+                <CollectionActionRow
+                  onShuffle={handleShuffle}
+                  onPlay={handlePlayAll}
+                  onLike={handleFollow}
+                  isPlaying={isPlayingFromThisArtist && isPlaying}
+                  isLiked={following}
+                  disabled={!songs.length}
+                  playLabel="Play"
+                  likedLabel="artist"
+                />
 
-                  {/* Center: Prominent White Play Button */}
-                  <Animated.View style={{ transform: [{ scale: playScale }] }}>
-                    <Pressable
-                      style={styles.appleMusicMainPlayBtn}
-                      onPress={handlePlayAll}
-                      disabled={!songs.length}
-                    >
-                      <Ionicons
-                        name={isPlayingFromThisArtist && isPlaying ? "pause" : "play"}
-                        size={24}
-                        color="#000000"
-                        style={!isPlayingFromThisArtist || !isPlaying ? { marginLeft: 2 } : undefined}
-                      />
-                    </Pressable>
-                  </Animated.View>
-
-                  {/* Right: Like / Favorite Heart Button */}
-                  <Animated.View style={{ transform: [{ scale: followScale }] }}>
-                    <Pressable
-                      style={[
-                        styles.appleMusicCircleBtn,
-                        following && styles.appleMusicCircleBtnActive,
-                      ]}
-                      onPress={handleFollow}
-                    >
-                      <Ionicons
-                        name={following ? "heart" : "heart-outline"}
-                        size={19}
-                        color={following ? "#FFFFFF" : "#FFFFFF"}
-                      />
-                    </Pressable>
-                  </Animated.View>
-                </View>
               </View>
             </View>
 

@@ -1,6 +1,6 @@
 import { isYouTubeSong, peekYouTubeStream, resolveYouTubeStream, youTubeSongWithStream, invalidateYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { getAccountScope } from "@/lib/accountScope";
-import { getLocalPlaybackUrl } from "@/lib/downloads/downloadManager";
+import { getLocalPlaybackUrl, getSongDownload } from "@/lib/downloads/downloadManager";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { convertJioSaavnSong, resolveAudioStreamWithQuality } from "@/lib/musicData";
@@ -137,7 +137,6 @@ export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?:
     youtubeVideoId: song.youtubeVideoId || song.videoId,
     youtubeAudioExpiresAt: song.youtubeAudioExpiresAt,
     playbackDurationSeconds: song.playbackDurationSeconds,
-    youtubeRequestedQuality: isYouTubeSong(song) ? peekYouTubeStream(song)?.requestedQuality : undefined,
     accountId: getAccountScope().accountId ?? "guest",
     url: audioUrl,
     title,
@@ -178,8 +177,8 @@ export async function detectAutoStreamingQuality(unlocked: boolean): Promise<"lo
     ) {
       return unlocked ? "high" : "medium";
     }
-  } catch (err) {
-    logger.debug("[Player] Network state query failed, defaulting to medium", err);
+  } catch {
+    // Keep the safe medium-quality default when network state is unavailable.
   }
   return "medium";
 }
@@ -233,15 +232,20 @@ export async function resolvePlaybackUrlWithDetails(
   }
 
   const effectiveRequested = forcedQuality || requested;
-  const defaultBitrate = targetQuality === "high" ? 320 : targetQuality === "medium" ? 160 : 96;
-  const defaultLabel = effectiveRequested === "auto" ? `Auto (${defaultBitrate}kbps)` : `${defaultBitrate}kbps`;
-
   const defaultQualityState: PlaybackQualityState = {
     requested: effectiveRequested,
-    actualBitrate: defaultBitrate,
-    qualityLabel: defaultLabel,
+    actualBitrate: 0,
+    qualityLabel: "Original audio",
     unlocked,
     isFallback: false,
+  };
+
+  const offlineQuality = async (): Promise<PlaybackQualityState> => {
+    const download = await getSongDownload(song.id).catch(() => null);
+    const bitrate = download?.status === "completed" && typeof download.audioBitrate === "number" &&
+      Number.isFinite(download.audioBitrate) && download.audioBitrate > 0 ? Math.round(download.audioBitrate / 1000) : 0;
+    return { ...defaultQualityState, actualBitrate: bitrate,
+      qualityLabel: bitrate > 0 ? `Offline (${bitrate}kbps${download?.audioCodec ? ` · ${download.audioCodec}` : ""})` : "Offline" };
   };
 
   try {
@@ -251,13 +255,7 @@ export async function resolvePlaybackUrlWithDetails(
       const url = local.startsWith("file://") || local.startsWith("http") ? local : `file://${local}`;
       return {
         url,
-        qualityState: {
-          requested: effectiveRequested,
-          actualBitrate: 320,
-          qualityLabel: "Offline (320kbps)",
-          unlocked,
-          isFallback: false,
-        },
+        qualityState: await offlineQuality(),
       };
     }
 
@@ -268,13 +266,7 @@ export async function resolvePlaybackUrlWithDetails(
       if (info?.exists && !info.isDirectory && ((info as any).size ?? 0) > 1024) {
         return {
           url: cleanUrl,
-          qualityState: {
-            requested: effectiveRequested,
-            actualBitrate: 320,
-            qualityLabel: "Offline (320kbps)",
-            unlocked,
-            isFallback: false,
-          },
+          qualityState: await offlineQuality(),
         };
       }
     }
@@ -286,9 +278,9 @@ export async function resolvePlaybackUrlWithDetails(
   if (isYouTubeSong(song)) {
     if (forcedQuality) invalidateYouTubeStream(song);
     const stream = await resolveYouTubeStream(song, targetQuality);
-    const bitrate = Math.round(stream.bitrate / 1000);
+    const bitrate = Number.isFinite(stream.bitrate) && stream.bitrate > 0 ? Math.round(stream.bitrate / 1000) : 0;
     return { url: stream.url, qualityState: { requested: effectiveRequested,
-      actualBitrate: bitrate, qualityLabel: `${bitrate}kbps${stream.codec ? ` · ${stream.codec}` : ""}`,
+      actualBitrate: bitrate, qualityLabel: `${bitrate > 0 ? `${bitrate}kbps` : "Original audio"}${stream.codec ? ` · ${stream.codec}` : ""}`,
       unlocked, isFallback: false } };
   }
 

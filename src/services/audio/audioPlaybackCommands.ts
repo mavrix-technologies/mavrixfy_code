@@ -334,12 +334,23 @@ export function useAudioPlaybackCommands({
         }
       } catch (error) {
         if (reqId !== playRequestIdRef.current) return;
+        const nativeStartupTimedOut = error instanceof Error && /^Audio (?:loading|start) timed out\.$/.test(error.message);
         const notice = isYouTubeSong(targetSong) ? youTubePlaybackErrorMessage(error) : "Could not start playback.";
-        // Release logging retains the first string only; include sanitized
-        // extraction diagnostics there so physical-device failures are traceable.
-        logger.error(isYouTubeSong(targetSong)
-          ? `[Player] playSong failed ${JSON.stringify({ songId: targetSong.id, message: notice, cause: youTubePlaybackErrorDetails(error) })}`
-          : "[Player] playSong failed", error);
+        const upstreamRequiresSignIn = isYouTubeSong(targetSong) && /LOGIN_REQUIRED|SIGN_IN_REQUIRED/.test(youTubePlaybackErrorDetails(error));
+        // A missing `playing` event by the startup deadline is not a native
+        // decoder error. Keep it quiet for users and log it as a retryable
+        // connection delay; explicit errors still get the normal notice.
+        if (nativeStartupTimedOut || upstreamRequiresSignIn) {
+          logger.warn(upstreamRequiresSignIn ? "[Player] Upstream requires verification for this track" : "[Player] Audio startup is still pending after the native wait window",
+            { songId: targetSong.id, reason: upstreamRequiresSignIn ? "sign_in_required" : "startup_timeout",
+              ...(upstreamRequiresSignIn ? { cause: youTubePlaybackErrorDetails(error) } : {}) });
+        } else {
+          // Release logging retains the first string only; include sanitized
+          // extraction diagnostics there so physical-device failures are traceable.
+          logger.error(isYouTubeSong(targetSong)
+            ? `[Player] playSong failed ${JSON.stringify({ songId: targetSong.id, message: notice, cause: youTubePlaybackErrorDetails(error) })}`
+            : "[Player] playSong failed", error);
+        }
         if (pendingPlayRequestRef.current?.id === reqId) {
           pendingPlayRequestRef.current = null;
         }
@@ -349,7 +360,7 @@ export function useAudioPlaybackCommands({
         playbackLoadingRef.current = false;
         setPlaybackLoading(false);
         updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
-        showPlaybackNotice(notice);
+        if (!nativeStartupTimedOut) showPlaybackNotice(notice);
       } finally {
         if (reqId === playRequestIdRef.current) {
           pendingPlayRequestRef.current = null;
@@ -547,7 +558,6 @@ export function useAudioPlaybackCommands({
     const cq = queueRef.current;
     const ci = queueIndexRef.current;
     if (cq.length === 0) return;
-    logger.debug("[Player] Next requested", { songId: selectedSong?.id, queueIndex: ci, queueSize: cq.length });
 
     if (repeatModeRef.current === "all" || ci < cq.length - 1) {
       const nextIndex = (ci + 1) % cq.length;

@@ -1,4 +1,5 @@
 import type { Song } from "@/lib/musicData";
+import type { QueueOrderSnapshot } from "@/services/audio/queueDrag";
 import type {
 PlaybackQualityState,
 PlayerActionsContextValue,
@@ -33,7 +34,7 @@ interface UseAudioPlaybackValuesProps {
   addToQueue: (song: Song) => void;
   playNext: (song: Song) => void;
   removeFromQueue: (index: number) => void;
-  reorderQueue: (from: number, to: number) => void;
+  reorderQueue: (from: number, to: number, expectedState?: QueueOrderSnapshot) => void;
   clearQueue: () => void;
   shuffleQueue: () => void;
   setSleepTimer: (selection: SleepTimerSelection) => void;

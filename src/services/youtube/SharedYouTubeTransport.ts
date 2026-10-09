@@ -1,9 +1,12 @@
 import "./runtime";
+import { selectVideoFormats } from "./YouTubeVideoFormats";
+import { youtubePoTokens } from "./YouTubePoToken";
 import { Constants, Helpers, Innertube, Parser, Platform, Player, YTNodes } from "youtubei.js/react-native";
 import { bestYouTubeSongThumbnail, bestYouTubeThumbnail, youTubeArtworkUrl } from "./YouTubeArtwork";
 import { Jinter } from "jintr";
 import { fetch as streamFetch } from "expo/fetch";
-import type { NativeHomeSection, NativePlaylist, NativeTrack, PlaylistPage, YouTubeNative, YouTubeStream } from "./YouTubeMusic";
+import type { NativeHomeSection, NativePlaylist, NativeTrack, PlaylistPage, YouTubeNative, YouTubeStream, YouTubeVideoStream } from "./YouTubeMusic";
+import { officialMusicVideoSearchQueries, selectOfficialMusicVideo } from "./officialMusicVideo";
 import { validArtistChannelId, type NativeArtist, type NativeArtistDetails } from "./YouTubeArtists";
 
 // YouTube recently added this command to player-error responses. Register its
@@ -97,8 +100,8 @@ async function request<T>(id: string, run: (check: () => void, signal: AbortSign
 
 function track(item: InstanceType<typeof YTNodes.MusicResponsiveListItem>): NativeTrack | undefined {
   if (!item.id || !/^[\w-]{11}$/.test(item.id)) return;
-  return { videoId: item.id, title: item.title || "YouTube song",
-    artist: item.artists?.map(artist => artist.name).join(", ") || item.author?.name || "YouTube Music",
+  return { videoId: item.id, title: item.title || "Mavrixfy Music track",
+    artist: item.artists?.map(artist => artist.name).join(", ") || item.author?.name || "Mavrixfy Music",
     artists: item.artists?.flatMap(artist => artist.channel_id && validArtistChannelId(artist.channel_id) ? [{ id: artist.channel_id, name: artist.name }] : []),
     coverUrl: youTubeArtworkUrl(bestYouTubeSongThumbnail(item.thumbnails)), duration: item.duration?.seconds || 0 };
 }
@@ -123,13 +126,12 @@ const rejected = new Map<string, number>();
 function safeError(error: unknown) {
   return (error instanceof Error ? error.message : String(error)).replace(/https?:\/\/[^\s"']+/g, "[URL]").slice(0, 400);
 }
-
 function parseHomeShelves(homeSections: Iterable<InstanceType<typeof YTNodes.MusicCarouselShelf> | InstanceType<typeof YTNodes.MusicTastebuilderShelf>>, includeAlbums = false) {
   const songs: NativeTrack[] = [], playlists: NativePlaylist[] = [];
   const sections: NativeHomeSection[] = [];
   for (const section of homeSections) {
     if (!section.is(YTNodes.MusicCarouselShelf)) continue;
-    const row: NativeHomeSection = { id: `youtube-${includeAlbums ? "explore" : "shelf"}-${sections.length}`, title: section.header?.title?.toString() || "Explore YouTube Music", songs: [], playlists: [] };
+    const row: NativeHomeSection = { id: `youtube-${includeAlbums ? "explore" : "shelf"}-${sections.length}`, title: section.header?.title?.toString() || "Explore Mavrixfy Music", songs: [], playlists: [] };
     for (const item of section.contents) {
       if (item.is(YTNodes.MusicResponsiveListItem)) {
         if (item.item_type !== "song" && item.item_type !== "video") continue;
@@ -138,7 +140,7 @@ function parseHomeShelves(homeSections: Iterable<InstanceType<typeof YTNodes.Mus
         const videoId = item.endpoint.payload.videoId;
         if ((item.item_type === "song" || item.item_type === "video") && typeof videoId === "string" && /^[\w-]{11}$/.test(videoId)) {
           row.songs.push({ videoId, title: item.title.toString(),
-            artist: item.artists?.map(artist => artist.name).join(", ") || item.author?.name || "YouTube Music",
+            artist: item.artists?.map(artist => artist.name).join(", ") || item.author?.name || "Mavrixfy Music",
             artists: item.artists?.flatMap(artist => artist.channel_id && validArtistChannelId(artist.channel_id) ? [{ id: artist.channel_id, name: artist.name }] : []),
             coverUrl: youTubeArtworkUrl(bestYouTubeSongThumbnail(item.thumbnail)), duration: 0 });
         } else if ((item.item_type === "playlist" || (includeAlbums && item.item_type === "album")) && item.id) {
@@ -370,48 +372,96 @@ export const sharedYouTubeTransport: YouTubeNative = {
       const page = await yt.music.getUpNext(videoId, true); check();
       return page.contents.filterType(YTNodes.PlaylistPanelVideo).map(item => ({
         videoId: item.video_id, title: item.title.toString(),
-        artist: item.artists?.map(artist => artist.name).join(", ") || item.author || "YouTube Music",
+        artist: item.artists?.map(artist => artist.name).join(", ") || item.author || "Mavrixfy Music",
         duration: item.duration.seconds, coverUrl: youTubeArtworkUrl(bestYouTubeSongThumbnail(item.thumbnail)),
       }));
     });
   },
-  resolveStream(videoId, quality, id) { return resolveAudioStream(videoId, quality, id); },
+  resolveStream(videoId, quality, id) { return resolveMediaStream(videoId, quality, id); },
+  resolveVideoStream(videoId, quality, id) { return resolveMediaStream(videoId, quality, id, true) as Promise<YouTubeVideoStream>; },
+  resolveOfficialMusicVideo(query, id) {
+    return request(id, async check => {
+      const yt = await youtube(); check();
+      for (const searchQuery of officialMusicVideoSearchQueries(query)) {
+        const search = await yt.music.search(searchQuery, { type: "video" }); check();
+        const candidates = (search.contents || []).flatMap(section => section.is(YTNodes.MusicShelf) ? section.contents : [])
+          .filter(item => item.item_type === "video")
+          .map(item => {
+            // Classification is on the title's watch endpoint, not the row's
+            // optional browse endpoint. Search rows can also omit `id`.
+            const titleRun = item.flex_columns[0]?.title.runs?.[0];
+            const endpoint = (titleRun && "endpoint" in titleRun ? titleRun.endpoint : undefined) || item.endpoint;
+            const payload = endpoint?.payload;
+            return {
+              videoId: item.id || payload?.videoId || "",
+              title: item.title || "",
+              durationSeconds: item.duration?.seconds || 0,
+              musicVideoType: payload?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType || "",
+              artists: (item.authors || []).map(author => ({ id: author.channel_id, name: author.name })),
+            };
+          });
+        const matched = selectOfficialMusicVideo(candidates, query);
+        if (matched) return matched;
+      }
+      return null;
+    });
+  },
 };
 
-function resolveAudioStream(videoId: string, quality: string, id: string) {
+type StreamClient = "VISIONOS" | "ANDROID_VR" | "TV" | "MWEB" | "WEB";
+const successfulClients: { audio?: StreamClient; video?: StreamClient } = {};
+function resolveMediaStream(videoId: string, quality: string, id: string, video = false) {
     return request(id, async (check, signal) => {
       if (!/^[\w-]{11}$/.test(videoId)) throw new Error("Invalid YouTube video ID");
       let yt = await youtube(); check();
       const failures: string[] = [];
+      const lane = video ? "video" : "audio";
+      let proof: Promise<string | null> | undefined;
+      const mintProof = () => proof ??= youtubePoTokens.mint(videoId, yt.session.context.client.visitorData || "", async () => {
+        const response = await yt.getAttestationChallenge("ENGAGEMENT_TYPE_UNBOUND");
+        const challenge = response.bg_challenge;
+        if (!challenge?.program || !challenge.global_name) throw new Error("Attestation challenge unavailable");
+        return { program: challenge.program, globalName: challenge.global_name,
+          interpreterUrl: { privateDoNotAccessOrElseTrustedResourceUrlWrappedValue:
+            challenge.interpreter_url.private_do_not_access_or_else_trusted_resource_url_wrapped_value } };
+      });
       // Direct clients already supply usable URLs. Only ciphered formats need
       // player preparation; don't rewrite the signed direct URL on Hermes.
       // IOS formats can reject open-ended decoder requests (see LastWave).
       for (let round = 0; round < 2; round++) {
-        const clients = round === 0 ? ["VISIONOS", "ANDROID_VR", "TV", "WEB"] as const : ["VISIONOS", "ANDROID_VR"] as const;
+        const clients: StreamClient[] = round === 0 ? ["VISIONOS", "ANDROID_VR", "TV", "MWEB", "WEB"] : ["VISIONOS", "ANDROID_VR"];
+        const preferred = successfulClients[lane];
+        if (preferred && clients.includes(preferred)) clients.sort((a, b) => Number(b === preferred) - Number(a === preferred));
         for (const client of clients) {
           check();
           try {
             const resolutionId = `${videoId}:${client}`;
-            if (Date.now() - (rejected.get(resolutionId) || 0) < 60000) throw new Error("Recently rejected audio profile");
+            if (!video && Date.now() - (rejected.get(resolutionId) || 0) < 60000) throw new Error("Recently rejected audio profile");
+            if (client === "MWEB" && !proof && preferred !== "MWEB") continue;
+            // Web proofs belong to a Web client, never VISIONOS/ANDROID_VR.
+            // Bootstrap overlaps remaining direct profiles after an access failure.
+            const poToken = client === "MWEB" ? await mintProof() : undefined;
+            check();
+            if (client === "MWEB" && !poToken) { failures.push(`MWEB: Attestation unavailable (${youtubePoTokens.failureReason || "no native token host"})`); continue; }
             // WEB player requests need the signature timestamp, not just the
             // decipher function after a response has already been rejected.
-            if (client === "WEB") { await preparePlayer(yt); check(); }
-            const info = await yt.getBasicInfo(videoId, { client }); check();
+            if (client === "WEB" || client === "MWEB") { await preparePlayer(yt); check(); }
+            const info = await yt.getBasicInfo(videoId, { client, ...(poToken ? { po_token: poToken } : {}) }); check();
             if (info.playability_status?.status !== "OK") {
               const status = info.playability_status?.status || "UNKNOWN";
               const reason = info.playability_status?.reason || "Video unavailable";
               throw new Error(`${status}: ${reason}`);
             }
-            const formats = (info.streaming_data?.adaptive_formats || [])
-              .filter(format => format.has_audio && !format.has_video && format.mime_type.startsWith("audio/mp4") &&
+            const formats = [...(info.streaming_data?.adaptive_formats || []), ...(video ? info.streaming_data?.formats || [] : [])]
+              .filter(format => (video ? format.has_video && format.mime_type.startsWith("video/mp4") && /avc1/i.test(format.mime_type) : format.has_audio && !format.has_video && format.mime_type.startsWith("audio/mp4")) &&
                 (format.url || format.signature_cipher || format.cipher))
               .sort((a, b) => a.bitrate - b.bitrate);
-            if (!formats.length) throw new Error("No compatible AAC audio stream");
+            if (!formats.length) throw new Error(video ? "No compatible H.264 video stream" : "No compatible AAC audio stream");
             // Medium avoids premium/high-bitrate formats when a standard AAC
             // format exists. High selects the best actually available AAC track.
             const standard = formats.filter(format => format.bitrate <= 160000);
-            const candidates = quality === "low" ? formats : quality === "medium"
-              ? (standard.length ? standard.reverse() : formats)
+            const candidates = video ? selectVideoFormats(formats, quality) : quality === "low" ? formats : quality === "medium"
+              ? (standard.length ? standard.reverse() : formats.reverse())
               : formats.reverse();
             const formatFailures: string[] = [];
             for (const format of candidates.slice(0, 2)) {
@@ -424,8 +474,10 @@ function resolveAudioStream(videoId: string, quality: string, id: string) {
                 const playbackUrl = new URL(url); check();
                 if (playbackUrl.protocol !== "https:" || !playbackUrl.hostname.endsWith(".googlevideo.com"))
                   throw new Error("Invalid YouTube audio origin");
+                // Add the video-bound GVS proof without re-encoding the signed URL.
+                if (poToken && !playbackUrl.searchParams.has("pot")) url += `${url.includes("?") ? "&" : "?"}pot=${encodeURIComponent(poToken)}`;
                 const headers = { ...Constants.STREAM_HEADERS,
-                  "User-Agent": client === "WEB" ? "Mozilla/5.0" : Constants.CLIENTS[client].USER_AGENT };
+                  "User-Agent": client === "WEB" || client === "MWEB" ? "Mozilla/5.0" : Constants.CLIENTS[client].USER_AGENT };
                 const expiresAt = Number(playbackUrl.searchParams.get("expire")) * 1000;
                 if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() + 120000) throw new Error("Audio URL expires too soon");
                 // Validate the same open-ended GET used for playback. Expo's streaming
@@ -441,8 +493,8 @@ function resolveAudioStream(videoId: string, quality: string, id: string) {
                   try {
                     check();
                     if (!response.ok) throw new Error(`Audio GET HTTP ${response.status}`);
-                    if (!/^audio\/mp4(?:;|$)/i.test(response.headers.get("content-type") || ""))
-                      throw new Error("Audio GET returned a non-AAC response");
+                    if (!(video ? /^video\/mp4(?:;|$)/i : /^audio\/mp4(?:;|$)/i).test(response.headers.get("content-type") || ""))
+                      throw new Error(video ? "Video GET returned a non-MP4 response" : "Audio GET returned a non-AAC response");
                   } finally { await response.body?.cancel(); }
                 } finally {
                   clearTimeout(timer);
@@ -451,23 +503,30 @@ function resolveAudioStream(videoId: string, quality: string, id: string) {
                 }
                 // After a decoder/CDN failure, try a different client for this exact
                 // video once; the rejected profile becomes eligible after a minute.
-                const stream: YouTubeStream = { videoId, url, headers, expiresAt,
-                  bitrate: format.bitrate, mimeType: format.mime_type, codec: "aac", clientProfile: client, resolutionId,
+                const stream: YouTubeStream | YouTubeVideoStream = { videoId, url, headers, expiresAt,
+                  ...(video ? { height: format.height || 0 } : {}),
+                  bitrate: format.bitrate, mimeType: format.mime_type, codec: video ? "h264" : "aac", clientProfile: client, resolutionId,
                   durationSeconds: Number.isFinite(format.approx_duration_ms) && format.approx_duration_ms > 0
                     ? format.approx_duration_ms / 1000 : undefined };
+                successfulClients[lane] = client;
                 return stream;
               } catch (error) { check(); formatFailures.push(safeError(error)); }
             }
             throw new Error(formatFailures.join(", "));
-          } catch (error) { check(); failures.push(`${client}: ${safeError(error)}`); }
+          } catch (error) {
+            check();
+            const detail = safeError(error);
+            failures.push(`${client}: ${detail}`);
+            if (round === 0 && /LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot|HTTP (?:401|403)/i.test(detail)) void mintProof();
+          }
         }
         // A long-lived visitor session can become stale. Refresh it once after
         // access/session rejection; never retry private/removed videos endlessly.
         if (round !== 0 || !failures.some(error => /HTTP (?:401|403)|status code (?:401|403)|page needs to be reloaded/i.test(error))) break;
         const previous = session;
         if (previous && (await previous) === yt && session === previous) session = undefined;
-        check(); yt = await youtube(); check();
+        check(); yt = await youtube(); proof = undefined; check();
       }
-      throw new Error(`YouTube audio unavailable. ${failures.join("; ")}`);
+      throw new Error(`YouTube ${video ? "video" : "audio"} unavailable. ${failures.join("; ")}`);
     });
 }

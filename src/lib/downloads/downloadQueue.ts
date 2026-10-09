@@ -22,12 +22,13 @@ import {
 ensureDownloadsDirs,
 getArtworkFileUri,
 getTempDownloadUri,
-getTrackFileUri,
 hasSufficientStorage,
 promoteTempToTrack,
 } from "@/lib/downloads/filesystem";
 import { logger } from "@/lib/logger";
 import { getBestAudioUrlWithQuality } from "@/lib/musicData";
+import { invalidateYouTubeStream, resolveYouTubeStream } from "@/services/youtube/YouTubeMusic";
+import type { Song } from "@/lib/musicData";
 import { type DownloadItem,type DownloadPreferences,type DownloadStatus } from "@/types/downloads";
 import {
 createDownloadResumable,
@@ -162,18 +163,29 @@ async function updateStatus(
 // ─── URL refresh ─────────────────────────────────────────────────────────────
 
 /**
- * Fetch a fresh downloadUrl for a JioSaavn song right before starting the
- * actual download. CDN signed URLs expire in ~15–30 minutes, so the URL stored
- * in the queue at the time the user tapped "Download" may already be stale by
- * the time the download slot opens.
- *
- * Falls back to the original URL if the API call fails or times out.
+ * Resolve short-lived source URLs only when a queue slot is ready. YouTube
+ * uses its durable video ID; JioSaavn refreshes through its catalog API.
  */
-async function refreshAudioUrl(songId: string, originalUrl: string, quality: DownloadItem["quality"]): Promise<string> {
-  // Only attempt refresh for JioSaavn songs (numeric IDs or short alphanumeric)
-  // YouTube and Cloudinary URLs have their own expiry handling
-  if (!songId || songId.startsWith("youtube_") || originalUrl.includes("cloudinary")) {
-    return getAudioUrlByQuality(originalUrl, quality);
+async function resolveDownloadSource(item: DownloadItem): Promise<{ url: string; headers?: Record<string, string>; audioBitrate?: number; audioCodec?: string }> {
+  const { songId, audioUrl: originalUrl, quality } = item;
+  if (songId.startsWith("youtube_") || item.youtubeVideoId) {
+    const videoId = item.youtubeVideoId || songId.replace(/^youtube_/, "");
+    if (!/^[\w-]{11}$/.test(videoId)) throw new Error("This Mavrixfy Music download has an invalid track ID.");
+    const song: Song = {
+      id: `youtube_${videoId}`, youtubeVideoId: videoId, videoId, source: "youtube",
+      title: item.title, artist: item.artist, album: item.album, duration: item.duration,
+      coverUrl: item.coverUrl, genre: "", audioUrl: "",
+    };
+    const stream = await resolveYouTubeStream(song, quality);
+    if (!stream.url.startsWith("https://") || stream.expiresAt <= Date.now() + 30_000) {
+      throw new Error("The Mavrixfy Music download link expired. Please retry the download.");
+    }
+    return { url: stream.url, headers: stream.headers, audioBitrate: stream.bitrate, audioCodec: stream.codec };
+  }
+
+  // JioSaavn and other direct audio sources retain their own URL handling.
+  if (!songId || originalUrl.includes("cloudinary")) {
+    return { url: getAudioUrlByQuality(originalUrl, quality) };
   }
 
   try {
@@ -209,15 +221,14 @@ async function refreshAudioUrl(songId: string, originalUrl: string, quality: Dow
       const qualityMap = { low: "low" as const, medium: "medium" as const, high: "high" as const };
       const resolved = getBestAudioUrlWithQuality(freshDownloadUrl, qualityMap[quality] ?? "high");
       if (resolved && resolved.startsWith("http")) {
-        logger.debug("[DownloadQueue] Refreshed audio URL for", songId);
-        return resolved;
+        return { url: resolved };
       }
     }
   } catch (err: any) {
     logger.warn("[DownloadQueue] URL refresh failed, using original", { songId, error: err?.message });
   }
 
-  return getAudioUrlByQuality(originalUrl, quality);
+  return { url: getAudioUrlByQuality(originalUrl, quality) };
 }
 
 // ─── Core download execution ──────────────────────────────────────────────────
@@ -242,11 +253,12 @@ async function executeDownload(songId: string): Promise<void> {
   try {
     // Preparation must be inside the failure handler. An API or filesystem
     // error here previously left the item stuck in "downloading" forever.
-    const [, , audioUrl] = await Promise.all([
+    const [, , source] = await Promise.all([
       ensureDownloadsDirs(item.accountId),
       updateStatus(songId, "downloading"),
-      refreshAudioUrl(songId, item.audioUrl, item.quality),
+      resolveDownloadSource(item),
     ]);
+    const { url: audioUrl, headers } = source;
     if (suspended || (await loadDownload(songId))?.status !== "downloading") return;
     if (!/^https?:\/\//i.test(audioUrl)) throw new Error("No playable audio URL is available for this song.");
 
@@ -255,7 +267,7 @@ async function executeDownload(songId: string): Promise<void> {
     const handle = createDownloadResumable(
       audioUrl,
       tempUri,
-      {},
+      { headers },
       (progress) => {
       // Progress callback: update cache only — no AsyncStorage read per tick
       const { totalBytesWritten, totalBytesExpectedToWrite } = progress;
@@ -348,6 +360,8 @@ async function executeDownload(songId: string): Promise<void> {
     }
 
     const completedItem = await updateStatus(songId, "completed", {
+      audioBitrate: source.audioBitrate,
+      audioCodec: source.audioCodec,
       progress: 100,
       localPath: finalUri,
       totalBytes: result.headers?.["Content-Length"]
@@ -379,6 +393,13 @@ async function executeDownload(songId: string): Promise<void> {
     }
 
     logger.error("[DownloadQueue] download failed", { songId, error: err?.message });
+
+    if (songId.startsWith("youtube_") || item.youtubeVideoId) {
+      const videoId = item.youtubeVideoId || songId.replace(/^youtube_/, "");
+      if (/^[\w-]{11}$/.test(videoId)) {
+        invalidateYouTubeStream({ id: `youtube_${videoId}` });
+      }
+    }
 
     const current = await loadDownload(songId);
     const retryCount = (current?.retryCount ?? 0) + 1;

@@ -42,7 +42,7 @@ class MavrixfyYouTubeModule(context: ReactApplicationContext) : ReactContextBase
                         .joinToString(" <- ") { it.javaClass.simpleName + ": " + it.message.orEmpty().replace(Regex("https?://[^\\s]+"), "[redacted]").take(240) }
                     android.util.Log.w("MavrixfyYouTube", causes)
                 }
-                promise.reject("YOUTUBE_UNAVAILABLE", "YouTube Music could not load this item. Please retry.")
+                promise.reject("YOUTUBE_UNAVAILABLE", "Mavrixfy Music could not load this item. Please retry.")
             }
             finally { jobs.remove(id); YouTubeRequests.cancel(id) }
         }

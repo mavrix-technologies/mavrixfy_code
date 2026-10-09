@@ -168,10 +168,6 @@ async function performFetch(): Promise<boolean> {
 
       void AsyncStorage.setItem(STORAGE_KEY_LAST_FETCH, Date.now().toString());
 
-      logger.info(
-        `[RemoteConfig] Official Firebase Remote Config activated: musicApiUrl → ${resolvedMusicApiUrl}, appApiUrl → ${resolvedAppApiUrl} (version ${data.templateVersion ?? "latest"})`
-      );
-
       if (changed) {
         notifyListeners();
       }
@@ -208,7 +204,6 @@ export async function initRemoteConfig(force = false): Promise<void> {
       if (lastFetchStr) {
         const elapsed = Date.now() - parseInt(lastFetchStr, 10);
         if (elapsed < FETCH_TTL_MS) {
-          logger.info(`[RemoteConfig] Using cached config (fetched ${Math.round(elapsed / 1000)}s ago)`);
           return;
         }
       }

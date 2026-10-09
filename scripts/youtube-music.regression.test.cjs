@@ -11,6 +11,7 @@ test("extractor aggregate errors retain timeout and network classification", () 
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: timeout"), /timed out/);
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: Network request failed"), /connect/);
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: Audio HTTP 403"), /connect/);
+  assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. SIGN_IN_REQUIRED: YouTube requires verification"), /connection to verify/);
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: interpreter error"), /Could not play/);
   assert.match(f.youTubePlaybackErrorMessage("Video unavailable: private video"), /unavailable/);
 });
@@ -21,6 +22,18 @@ test("playback diagnostics redact signed URLs and credentials", () => {
   assert.match(details, /Audio HTTP 403/);
   assert.doesNotMatch(details, /secret|googlevideo/);
   assert.equal(f.youTubePlaybackErrorDetails("x".repeat(3000)).length, 2000);
+});
+
+test("network change discards signed streams so the next play resolves for the new connection", async () => {
+  const f = fixture();
+  const song = f.normalizeYouTubeTrack(track);
+  const first = await f.resolveYouTubeStream(song, "high");
+  assert.equal(await f.resolveYouTubeStream(song, "high"), first);
+  f.clearYouTubeConnectionStreams();
+  assert.equal(f.peekYouTubeStream(song), undefined);
+  const fresh = await f.resolveYouTubeStream(song, "high");
+  assert.notEqual(first.url, fresh.url);
+  assert.equal(f.calls.length, 2);
 });
 function fixture(overrides = {}, platform = "android", installed = true) {
   const calls = [], cancelled = [], rejected = [];

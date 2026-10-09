@@ -1,9 +1,9 @@
 import { displayArtworkUrl } from "@/lib/artworkDisplay";
 import Colors from "@/constants/colors";
-import { Ionicons } from "@expo/vector-icons";
+import { CollectionActionRow } from "@/components/CollectionActionRow";
 import { Image } from "expo-image";
 import { memo } from "react";
-import { Pressable,StyleSheet,Text,View } from "react-native";
+import { StyleSheet,Text,View } from "react-native";
 
 export interface ArtistMixHeroProps {
   ids: string[];
@@ -17,6 +17,8 @@ export interface ArtistMixHeroProps {
   backgroundColor?: string;
   onShuffle: () => void;
   onPlayAll: () => void;
+  onLike: () => void;
+  isLiked: boolean;
 }
 
 export const ArtistMixHero = memo(function ArtistMixHero({
@@ -31,6 +33,8 @@ export const ArtistMixHero = memo(function ArtistMixHero({
   backgroundColor,
   onShuffle,
   onPlayAll,
+  onLike,
+  isLiked,
 }: ArtistMixHeroProps) {
   return (
     <View style={styles.heroSection}>
@@ -77,38 +81,18 @@ export const ArtistMixHero = memo(function ArtistMixHero({
         {songsCount} Tracks • {totalDurationMin}
       </Text>
 
-      {/* Minimal 2-Button Action Bar */}
-      {songsCount > 0 && (
-        <View style={styles.actionsRow}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.shuffleBtn,
-              pressed && styles.btnPressed,
-            ]}
-            onPress={onShuffle}
-          >
-            <Ionicons name="shuffle" size={18} color="#FFFFFF" />
-            <Text style={styles.shuffleBtnText}>Shuffle</Text>
-          </Pressable>
+      {/* Shared Shuffle / Play / Like actions */}
+      <CollectionActionRow
+        onShuffle={onShuffle}
+        onPlay={onPlayAll}
+        onLike={onLike}
+        isPlaying={isPlayingFromMix && isPlaying}
+        isLiked={isLiked}
+        disabled={songsCount === 0}
+        playLabel="Play"
+        likedLabel="mix"
+      />
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.playBtn,
-              pressed && styles.btnPressed,
-            ]}
-            onPress={onPlayAll}
-          >
-            <Ionicons
-              name={isPlayingFromMix && isPlaying ? "pause" : "play"}
-              size={18}
-              color="#000000"
-            />
-            <Text style={styles.playBtnText}>
-              {isPlayingFromMix && isPlaying ? "Pause" : "Play All"}
-            </Text>
-          </Pressable>
-        </View>
-      )}
     </View>
   );
 });
@@ -117,7 +101,7 @@ const styles = StyleSheet.create({
   heroSection: {
     alignItems: "center",
     paddingTop: 16,
-    paddingBottom: 24,
+    paddingBottom: 18,
   },
   avatarRow: {
     flexDirection: "row",
@@ -171,49 +155,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_500Medium",
     textAlign: "center",
-    marginBottom: 20,
+    marginBottom: 12,
   },
 
-  actionsRow: {
-    flexDirection: "row",
-    gap: 12,
-    width: "100%",
-    paddingHorizontal: 4,
-  },
-  shuffleBtn: {
-    flex: 1,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  shuffleBtnText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontFamily: "Inter_600SemiBold",
-  },
-  playBtn: {
-    flex: 1.2,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: Colors.primary,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  playBtnText: {
-    color: "#000000",
-    fontSize: 14,
-    fontFamily: "Inter_700Bold",
-  },
-  btnPressed: {
-    opacity: 0.8,
-    transform: [{ scale: 0.98 }],
-  },
 });

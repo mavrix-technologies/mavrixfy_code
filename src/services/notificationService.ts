@@ -199,13 +199,11 @@ export async function registerForPushNotificationsAsync(
   userId: string
 ): Promise<DeviceRegistration | null> {
   if (IS_ANDROID && isRunningInExpoGo()) {
-    logger.info("[NotifService] Push notifications skipped in Android Expo Go");
     return null;
   }
 
   // iOS simulators don't support push
   if (!Device.isDevice && IS_IOS) {
-    logger.info("[NotifService] Push not supported on iOS simulator");
     return null;
   }
 
@@ -218,7 +216,6 @@ export async function registerForPushNotificationsAsync(
   try {
     const hasPermission = await requestNotificationPermission();
     if (!hasPermission) {
-      logger.info("[NotifService] Push permission not granted");
       return null;
     }
 

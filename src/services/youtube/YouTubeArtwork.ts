@@ -58,13 +58,9 @@ export function artworkPixelSize(layoutSize: number, density: number): number {
     .find(size => size >= needed) || 1200;
 }
 
-/** Small color-analysis input only; displayed/persisted artwork keeps its full quality. */
+/** Keep the artwork crop while limiting color analysis to a small image. */
 export function artworkAnalysisUrl(raw: string): string {
   const video = raw.match(/^https?:\/\/i\.ytimg\.com\/vi(?:_webp)?\/([\w-]{11})\/[^/?]+/i);
-  if (video) return `https://i.ytimg.com/vi/${video[1]}/mqdefault.jpg`;
-  const host = raw.match(/^https?:\/\/([^/]+)/i)?.[1]?.toLowerCase();
-  if (host && (host === "saavncdn.com" || host.endsWith(".saavncdn.com"))) {
-    return raw.replace(/-(?:50|150|500)x(?:50|150|500)(\.[a-z]+)(?=[?#]|$)/i, "-150x150$1");
-  }
-  return youTubeArtworkUrl(raw, 128);
+  if (video && !/[?&]sqp=/.test(raw)) return `https://i.ytimg.com/vi/${video[1]}/mqdefault.jpg`;
+  return youTubeArtworkUrl(raw, 512);
 }

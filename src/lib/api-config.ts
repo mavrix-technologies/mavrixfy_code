@@ -85,10 +85,6 @@ const APP_API_BASE_URL = getConfiguredApiBaseUrl(
   toUrlFromDomain(Constants.expoConfig?.extra?.musicApiDomain as string | undefined) || "https://mavrixfy-song-api.vercel.app"
 );
 
-if (__DEV__) {
-  logger.info(`[Music API Config] Active local API URL: ${SONG_API_BASE_URL}`);
-}
-
 function isPrivateHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
   return (

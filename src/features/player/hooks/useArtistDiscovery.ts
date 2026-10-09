@@ -1,8 +1,11 @@
-import { getArtistDetails,searchArtists,type ArtistDetails } from "@/data/providers/ArtistProvider";
+import { getArtistDetails,type ArtistDetails } from "@/data/providers/ArtistProvider";
 import { getBestImageUrl,type Song } from "@/lib/musicData";
+import { isYouTubeSong,relatedYouTubeSongs,searchYouTubeMusic } from "@/services/youtube/YouTubeMusic";
+import { validArtistChannelId } from "@/services/youtube/YouTubeArtists";
 import { safeGoBack } from "@/utils/navigation";
 import { router } from "expo-router";
-import { useCallback,useEffect,useMemo,useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback,useEffect,useState } from "react";
 
 export interface UseArtistDiscoveryParams {
   enabled?: boolean;
@@ -21,12 +24,35 @@ export function useArtistDiscovery({
 }: UseArtistDiscoveryParams) {
   const [artistDetails, setArtistDetails] = useState<ArtistDetails | null>(null);
   const [artistLoading, setArtistLoading] = useState(false);
-  const channelId = screenSong?.artistRefs?.[0]?.id;
+  const channelId = screenSong?.artistRefs?.find((artist) => validArtistChannelId(artist.id))?.id;
+  const artistQuery = screenSong?.artist?.split(",")[0].trim() || "";
+  const { data: relatedSongs = [] } = useQuery({
+    queryKey: ["playerRelatedSongs", screenSong?.id, screenSong?.title, screenSong?.artist],
+    enabled: enabled && Boolean(screenSong?.title),
+    staleTime: 10 * 60_000,
+    gcTime: 30 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    queryFn: async ({ signal }) => {
+      const song = screenSong!;
+      const candidates = isYouTubeSong(song)
+        ? await relatedYouTubeSongs(song, signal)
+        : (await searchYouTubeMusic(
+            `${song.title} ${song.artist.split(",")[0]}`.trim(), "songs", signal
+          )).songs;
+      const seen = new Set<string>();
+      return candidates.filter(candidate => {
+        if (!isYouTubeSong(candidate) || candidate.id === song.id || seen.has(candidate.id)) return false;
+        seen.add(candidate.id);
+        return true;
+      }).slice(0, 5);
+    },
+  });
 
   useEffect(() => {
     if (!enabled) return;
     let active = true;
-    if (!screenSong?.artist) {
+    if (!artistQuery) {
       // A song without an artist must clear the previous artist's details.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setArtistDetails(null);
@@ -38,24 +64,8 @@ export function useArtistDiscovery({
       setArtistLoading(true);
       setArtistDetails(null);
       try {
-        const currentArtist = screenSong?.artist;
-        if (!currentArtist) return;
-        const query = currentArtist.split(",")[0].trim();
-        if (channelId) {
-          const details = await getArtistDetails(channelId);
-          if (active) setArtistDetails(details);
-          return;
-        }
-        const artists = await searchArtists(query);
-        if (!active) return;
-        if (artists.length > 0) {
-          const match = artists.find(artist => artist.name.toLowerCase() === query.toLowerCase());
-          const details = match ? await getArtistDetails(match.id) : null;
-          if (!active) return;
-          setArtistDetails(details);
-        } else {
-          setArtistDetails(null);
-        }
+        const details = await getArtistDetails(channelId || "", artistQuery);
+        if (active) setArtistDetails(details);
       } catch {
         if (active) setArtistDetails(null);
       } finally {
@@ -67,13 +77,7 @@ export function useArtistDiscovery({
     return () => {
       active = false;
     };
-  }, [enabled, screenSong?.artist, channelId]);
-
-  const relatedSongs = useMemo<Song[]>(() => {
-    if (!artistDetails?.topSongs) return [];
-    const filtered = artistDetails.topSongs.filter(song => song.id !== screenSong?.id);
-    return filtered.slice(0, 5);
-  }, [artistDetails, screenSong?.id]);
+  }, [enabled, artistQuery, channelId]);
 
   const handleViewArtistProfile = useCallback(() => {
     if (!artistDetails) return;
@@ -92,7 +96,10 @@ export function useArtistDiscovery({
 
   const handlePlayRelatedSong = useCallback(
     (song: Song) => {
-      playSong(song, [song, ...playingQueue.slice(activeQueueIndex + 1)]);
+      const upcomingYouTubeSongs = playingQueue
+        .slice(activeQueueIndex + 1)
+        .filter((upcoming) => isYouTubeSong(upcoming) && upcoming.id !== song.id);
+      playSong(song, [song, ...upcomingYouTubeSongs]);
     },
     [playingQueue, activeQueueIndex, playSong]
   );

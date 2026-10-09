@@ -107,7 +107,7 @@ export function useAudioNativeQueueLane({
       const active = songs[activeIndex];
       if (active && isYouTubeSong(active) && !forcedUrls.has(active.id)) {
         const url = await resolvePlaybackUrlCached(active);
-        if (!url) throw new Error("YouTube Music stream unavailable");
+        if (!url) throw new Error("Mavrixfy Music stream unavailable");
         forcedUrls.set(active.id, url);
       }
       const nativeTracks = await buildNativeQueueTracks(songs, forcedUrls);
@@ -130,7 +130,7 @@ export function useAudioNativeQueueLane({
           }
         });
     },
-    [buildNativeQueueTracks, currentSongRef, desiredPlayStateRef, isNativeQueueSyncedRef, isPlayerReady, repeatModeRef, RepeatMode, TrackPlayer]
+    [buildNativeQueueTracks, currentSongRef, desiredPlayStateRef, isNativeQueueSyncedRef, isPlayerReady, repeatModeRef, RepeatMode, resolvePlaybackUrlCached, TrackPlayer]
   );
 
   return {

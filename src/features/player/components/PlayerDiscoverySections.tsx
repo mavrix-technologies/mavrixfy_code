@@ -1,112 +1,18 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { MusicArtwork } from "@/components/MusicArtwork";
-import { LinearGradient } from "expo-linear-gradient";
 import { memo,useCallback,useMemo } from "react";
 import {
 ActivityIndicator,
 FlatList,
 Pressable,
-StyleSheet,
 Text,
 View,
 } from "react-native";
 import { Pressable as GHPressable } from "react-native-gesture-handler";
 
-import EqualizerBars from "@/components/EqualizerBars";
-import { formatDuration,getBestImageUrl,type Song } from "@/lib/musicData";
-import { formatFollowers } from "@/utils/stringUtils";
+import { getBestImageUrl,type Song } from "@/lib/musicData";
 import { styles } from "../styles/playerScreenStyles";
-
-export const QueueSongRow = memo(
-  ({
-    item,
-    index,
-    isCurrent,
-    isShortScreen,
-    active,
-    onPress,
-  }: {
-    item: Song;
-    index: number;
-    isCurrent: boolean;
-    isShortScreen: boolean;
-    active: boolean;
-    onPress: (item: Song) => void;
-  }) => {
-    const handlePress = useCallback(() => onPress(item), [item, onPress]);
-    const rowStyle = useMemo(
-      () => [
-        styles.queueRow,
-        isCurrent ? styles.queueRowActive : null,
-        isShortScreen ? styles.queueRowCompact : null,
-      ],
-      [isCurrent, isShortScreen]
-    );
-
-    return (
-      <GHPressable style={rowStyle} onPress={handlePress}>
-        <View style={styles.queueLead}>
-          {isCurrent ? (
-            <EqualizerBars active={active} size={3} color="#F7FAFF" />
-          ) : (
-            <Text style={styles.queueIndex}>{index + 1}</Text>
-          )}
-        </View>
-
-        <MusicArtwork
-          recyclingKey={item.id}
-          uri={item.coverUrl}
-          size={48}
-          style={isShortScreen ? styles.queueThumbCompact : styles.queueThumb}
-          contentFit="cover"
-          transition={0}
-        />
-
-        <View style={styles.queueTextWrap}>
-          <Text
-            style={isCurrent ? styles.queueTitleActive : styles.queueTitle}
-            numberOfLines={1}
-          >
-            {item.title}
-          </Text>
-          <Text
-            style={isCurrent ? styles.queueMetaActive : styles.queueMeta}
-            numberOfLines={1}
-          >
-            {item.artist}
-          </Text>
-        </View>
-
-        <Text style={isCurrent ? styles.queueDurationActive : styles.queueDuration}>
-          {formatDuration(item.duration)}
-        </Text>
-      </GHPressable>
-    );
-  },
-  (prev, next) => {
-    if (!prev.isCurrent && !next.isCurrent) {
-      return (
-        prev.item.id === next.item.id &&
-        prev.index === next.index &&
-        prev.isShortScreen === next.isShortScreen &&
-        prev.item.title === next.item.title &&
-        prev.item.artist === next.item.artist
-      );
-    }
-    return (
-      prev.item.id === next.item.id &&
-      prev.index === next.index &&
-      prev.isCurrent === next.isCurrent &&
-      prev.isShortScreen === next.isShortScreen &&
-      prev.active === next.active &&
-      prev.item.title === next.item.title &&
-      prev.item.artist === next.item.artist
-    );
-  }
-);
-
-QueueSongRow.displayName = "QueueSongRow";
 
 export const AboutArtistCard = memo(({
   artistDetails,
@@ -123,8 +29,9 @@ export const AboutArtistCard = memo(({
         <View style={styles.artistSectionHeader}>
           <Text style={styles.artistSectionTitle}>About the Artist</Text>
         </View>
-        <View style={styles.artistSpotifyCard}>
+        <View style={styles.artistProfileCard}>
           <ActivityIndicator size="small" color="rgba(255,255,255,0.35)" />
+          <Text style={styles.artistLoadingText}>Loading artist</Text>
         </View>
       </View>
     );
@@ -133,9 +40,7 @@ export const AboutArtistCard = memo(({
   if (!artistDetails) return null;
 
   const imageUrl = artistDetails.image?.length ? getBestImageUrl(artistDetails.image) : "";
-  const followerText = artistDetails.followerCount ? formatFollowers(artistDetails.followerCount) : "";
   const bioText = artistDetails.bio?.[0]?.text || "";
-  const dominantType = artistDetails.dominantType || artistDetails.dominantLanguage || "";
 
   return (
     <View style={styles.artistCardContainer}>
@@ -144,52 +49,39 @@ export const AboutArtistCard = memo(({
       </View>
 
       <Pressable
-        style={({ pressed }) => [styles.artistSpotifyCard, pressed && { opacity: 0.88 }]}
+        style={({ pressed }) => [styles.artistProfileCard, pressed && styles.artistProfilePressed]}
         onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`View ${artistDetails.name}`}
       >
         {imageUrl ? (
           <Image
             source={{ uri: imageUrl }}
-            style={styles.artistSpotifyBanner}
+            style={styles.artistAvatar}
             contentFit="cover"
-            transition={200}
+            transition={120}
           />
         ) : (
-          <View style={[styles.artistSpotifyBanner, styles.artistSpotifyBannerFallback]}>
-            <Ionicons name="person" size={40} color="rgba(255,255,255,0.2)" />
+          <View style={[styles.artistAvatar, styles.artistAvatarFallback]}>
+            <Ionicons name="person" size={28} color="rgba(255,255,255,0.5)" />
           </View>
         )}
 
-        <View style={styles.artistSpotifyBody}>
-          <View style={styles.artistSpotifyNameRow}>
-            <View style={styles.artistSpotifyNameWrap}>
-              <Text style={styles.artistSpotifyName} numberOfLines={1}>
-                {artistDetails.name}
-              </Text>
-              {artistDetails.isVerified && (
-                <Ionicons name="checkmark-circle" size={16} color="#1ED760" style={{ marginLeft: 5 }} />
-              )}
-            </View>
-            <View style={styles.artistFollowBtn}>
-              <Text style={styles.artistFollowBtnText}>Follow</Text>
-            </View>
-          </View>
-
-          {followerText ? (
-            <Text style={styles.artistSpotifyListeners}>
-              {followerText} monthly listeners
-            </Text>
-          ) : null}
-
+        <View style={styles.artistProfileBody}>
+          <Text style={styles.artistProfileName} numberOfLines={1}>
+            {artistDetails.name}
+          </Text>
           {bioText ? (
-            <Text style={styles.artistSpotifyBio} numberOfLines={3}>
+            <Text style={styles.artistProfileBio} numberOfLines={2}>
               {bioText}
             </Text>
-          ) : null}
-
-          {dominantType ? (
-            <Text style={styles.artistSpotifyTag}>{dominantType}</Text>
-          ) : null}
+          ) : (
+            <Text style={styles.artistProfileSubtext} numberOfLines={1}>Artist profile</Text>
+          )}
+          <View style={styles.artistViewLink}>
+            <Text style={styles.artistViewLinkText}>View artist</Text>
+            <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.78)" />
+          </View>
         </View>
       </Pressable>
     </View>
@@ -198,8 +90,7 @@ export const AboutArtistCard = memo(({
 
 AboutArtistCard.displayName = "AboutArtistCard";
 
-const RELATED_GRADIENT_COLORS = ["transparent", "rgba(0,0,0,0.75)"] as const;
-const RELATED_GRADIENT_LOCATIONS = [0.4, 1] as const;
+const RELATED_CARD_SNAP_INTERVAL = 170;
 
 export const RelatedSongCard = memo(({ song, onPress }: { song: Song; onPress: (song: Song) => void }) => {
   const handlePress = useCallback(() => {
@@ -209,29 +100,26 @@ export const RelatedSongCard = memo(({ song, onPress }: { song: Song; onPress: (
   return (
     <Pressable
       style={({ pressed }) => [
-        styles.relatedVideoCard,
-        pressed && styles.relatedVideoCardPressed,
+        styles.relatedSongCard,
+        pressed && styles.relatedSongCardPressed,
       ]}
       onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={`Play ${song.title} by ${song.artist}`}
     >
       <MusicArtwork
         uri={song.coverUrl}
-        size={240}
+        size={154}
         recyclingKey={song.id}
-        style={StyleSheet.absoluteFillObject}
+        style={styles.relatedSongArtwork}
         contentFit="cover"
         transition={0}
       />
-      <LinearGradient
-        colors={RELATED_GRADIENT_COLORS}
-        locations={RELATED_GRADIENT_LOCATIONS}
-        style={StyleSheet.absoluteFillObject}
-      />
-      <View style={styles.relatedVideoCardInfo}>
-        <Text style={styles.relatedVideoCardTitle} numberOfLines={2}>
+      <View style={styles.relatedSongInfo}>
+        <Text style={styles.relatedSongTitle} numberOfLines={2}>
           {song.title}
         </Text>
-        <Text style={styles.relatedVideoCardArtist} numberOfLines={1}>
+        <Text style={styles.relatedSongArtist} numberOfLines={1}>
           {song.artist}
         </Text>
       </View>
@@ -270,7 +158,7 @@ export const RelatedSongsSection = memo(({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.relatedCardsScroll}
         decelerationRate="fast"
-        snapToInterval={148}
+        snapToInterval={RELATED_CARD_SNAP_INTERVAL}
         snapToAlignment="start"
       />
     </View>

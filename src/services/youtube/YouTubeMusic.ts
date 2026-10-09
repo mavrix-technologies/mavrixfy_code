@@ -4,6 +4,7 @@ import type { PlaylistResult, ResultFilter, SearchResults } from "@/lib/searchRe
 import { youTubeArtworkUrl } from "./YouTubeArtwork";
 import { playbackDuration, playbackStreamMetadata } from "../audio/audioTimeline";
 import { artistChannelId, validArtistChannelId, type NativeArtist, type NativeArtistDetails, type ArtistCard, type ArtistDetails } from "./YouTubeArtists";
+import type { OfficialMusicVideoQuery } from "./officialMusicVideo";
 
 export interface NativeTrack { videoId: string; title: string; artist: string; coverUrl: string; duration: number; artists?: { id: string; name: string }[] }
 export interface NativePlaylist { id: string; name: string; coverUrl: string; songCount: number; url: string; description: string; ownerChannelId?: string; ownerName?: string; kind?: "album" | "playlist" }
@@ -15,6 +16,7 @@ export interface YouTubeStream {
   requestedQuality?: string;
   durationSeconds?: number;
 }
+export interface YouTubeVideoStream extends YouTubeStream { height: number }
 // Transport contract retained for callers; implementation is shared TypeScript.
 export type NativeHomeFeed = { songs: NativeTrack[]; playlists: NativePlaylist[]; sections?: NativeHomeSection[] };
 export interface YouTubeNative {
@@ -26,6 +28,8 @@ export interface YouTubeNative {
   playlist(playlistId: string, cursor: string, requestId: string): Promise<PlaylistPage>;
   discardPlaylistCursor?(cursor: string): void;
   resolveStream(videoId: string, quality: string, requestId: string): Promise<YouTubeStream>;
+  resolveVideoStream(videoId: string, quality: string, requestId: string): Promise<YouTubeVideoStream>;
+  resolveOfficialMusicVideo(query: OfficialMusicVideoQuery, requestId: string): Promise<string | null>;
   cancel(requestId: string): void;
   related(videoId: string, requestId: string): Promise<NativeTrack[]>;
   rejectStream(resolutionId: string): void;
@@ -35,7 +39,7 @@ let sequence = 0;
 export function isYouTubeSong(song: Pick<Song, "source" | "id">): boolean { return song.source === "youtube" || song.id.startsWith("youtube_"); }
 export function youTubeAvailable(): boolean { return Platform.OS === "android" || Platform.OS === "ios"; }
 function getTransport(): YouTubeNative {
-  if (!youTubeAvailable()) throw new Error("YouTube Music is supported on Android and iOS.");
+  if (!youTubeAvailable()) throw new Error("Mavrixfy Music is unavailable on this platform.");
   // Load extractor only when YouTube is used, keeping JioSaavn startup light.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return transport ??= require("./SharedYouTubeTransport").sharedYouTubeTransport;
@@ -49,7 +53,7 @@ async function invoke<T>(operation: (module: YouTubeNative, id: string) => Promi
   const cancelled = new Promise<never>((_, reject) => {
     abort = () => { module.cancel(id); reject(new Error("YouTube request cancelled")); };
     signal?.addEventListener("abort", abort, { once: true });
-    timer = setTimeout(() => { module.cancel(id); reject(new Error("YouTube Music request timed out. Please retry.")); }, 26000);
+    timer = setTimeout(() => { module.cancel(id); reject(new Error("Mavrixfy Music request timed out. Please retry.")); }, 26000);
   });
   try { return await Promise.race([operation(module, id), cancelled]); }
   finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
@@ -57,7 +61,7 @@ async function invoke<T>(operation: (module: YouTubeNative, id: string) => Promi
 export function normalizeYouTubeTrack(track: NativeTrack): Song {
   if (!/^[\w-]{11}$/.test(track.videoId)) throw new Error("Invalid YouTube video ID");
   return { id: `youtube_${track.videoId}`, source: "youtube", youtubeVideoId: track.videoId, videoId: track.videoId,
-    title: track.title || "YouTube song", artist: track.artist || "YouTube Music", album: "", genre: "", duration: Number.isFinite(track.duration) ? Math.max(0, track.duration) : 0,
+    title: track.title || "Mavrixfy Music track", artist: track.artist || "Mavrixfy Music", album: "", genre: "", duration: Number.isFinite(track.duration) ? Math.max(0, track.duration) : 0,
     coverUrl: youTubeArtworkUrl(track.coverUrl) || `https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg`, audioUrl: "",
     artistRefs: track.artists?.filter(artist => validArtistChannelId(artist.id)).map(artist => ({ ...artist, id: `youtube_artist_${artistChannelId(artist.id)}` })) };
 }
@@ -154,7 +158,7 @@ export interface YouTubePlaylistResult { name: string; coverUrl: string; songCou
 export async function loadYouTubePlaylist(id: string, signal?: AbortSignal, onFirstPage?: (page: YouTubePlaylistResult) => void) {
   const playlistId = id.replace(/^youtube_(?:playlist|album)_/, "");
   let cursor = "";
-  let name = "YouTube Music playlist", coverUrl = "", songCount = 0;
+  let name = "Mavrixfy Music playlist", coverUrl = "", songCount = 0;
   const all: NativeTrack[] = [];
   const seen = new Set<string>();
   try {
@@ -198,6 +202,13 @@ export async function relatedYouTubeSongs(song: Song, signal?: AbortSignal): Pro
 const streams = new Map<string, YouTubeStream>();
 const pending = new Map<string, Promise<YouTubeStream>>();
 const latest = new Map<string, Promise<YouTubeStream>>();
+// A signed URL can be bound to the old connection. This does not stop audio
+// already handed to the player or clear catalog/library caches.
+export function clearYouTubeConnectionStreams(): void {
+  streams.clear();
+  pending.clear();
+  latest.clear();
+}
 export function peekYouTubeStream(song: Song, quality?: string): YouTubeStream | undefined {
   const stream = streams.get(song.id);
   return stream && stream.expiresAt - Date.now() > 120000 && (!quality || stream.requestedQuality === quality) ? stream : undefined;
@@ -227,7 +238,7 @@ export async function resolveYouTubeStream(song: Song, quality?: string): Promis
   latest.set(song.id, promise);
   return promise;
 }
-export function invalidateYouTubeStream(song: Song, rejectProfile = false): void {
+export function invalidateYouTubeStream(song: Pick<Song, "id">, rejectProfile = false): void {
   const previous = streams.get(song.id);
   if (rejectProfile && previous) transport?.rejectStream(previous.resolutionId);
   streams.delete(song.id);
@@ -247,13 +258,32 @@ export function youTubePlaybackErrorDetails(error: unknown): string {
 }
 export function youTubePlaybackErrorMessage(error: unknown): string {
   const message = youTubePlaybackErrorDetails(error);
-  if (/confirm.*not a bot|sign in|login.required/i.test(message))
-    return "YouTube is requiring sign-in for this connection. Please try again later.";
-  if (/timed out|timeout|aborterror/i.test(message)) return "YouTube playback timed out. Tap Play to retry.";
+  if (/allow audio in this browser/i.test(message)) return "Tap Play to allow audio in this browser.";
+  if (/LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot/i.test(message))
+    return "YouTube is asking this connection to verify, so this track can't play here right now. Try again later.";
+  if (/sign in/i.test(message))
+    return "This track needs sign-in outside Mavrixfy. Try another version.";
+  if (/timed out|timeout|aborterror/i.test(message)) return "Mavrixfy Music playback timed out. Tap Play to retry.";
   if (/network request failed|failed to fetch|audio (?:GET )?HTTP/i.test(message))
     return "Could not connect to this song's audio stream. Tap Play to retry.";
   if (/private|removed|not available|video unavailable|restricted/i.test(message))
-    return "This YouTube song is unavailable right now. Tap Play to retry.";
-  return "Could not play this YouTube song. Tap Play to retry.";
+    return "This Mavrixfy Music track is unavailable right now. Tap Play to retry.";
+  return "Could not play this Mavrixfy Music track. Tap Play to retry.";
+}
+
+/** Resolve a separate visual-only video stream; it never enters the audio cache. */
+export function resolveYouTubeVideoStream(videoId: string, quality: string, signal?: AbortSignal): Promise<YouTubeVideoStream> {
+  return invoke((module, id) => module.resolveVideoStream(videoId, quality, id), signal);
+}
+
+export function resolveOfficialYouTubeMusicVideo(song: Pick<Song, "title" | "artist" | "duration" | "artistRefs">,
+  signal?: AbortSignal): Promise<string | null> {
+  const query: OfficialMusicVideoQuery = {
+    title: song.title,
+    artist: song.artist,
+    durationSeconds: song.duration,
+    artistChannelIds: song.artistRefs?.map(artist => artist.id) || [],
+  };
+  return invoke((module, id) => module.resolveOfficialMusicVideo(query, id), signal);
 }
 

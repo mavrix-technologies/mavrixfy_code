@@ -11,11 +11,12 @@ import Colors from "@/constants/colors";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { useLikedSongs } from "@/contexts/PlayerContext";
 import { type FollowedArtist } from "@/lib/followedArtists";
+import { getSavedCollections, type SavedCollection } from "@/lib/savedCollections";
 import { triggerImpact } from "@/lib/haptics";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import React,{ useCallback,useMemo,useState } from "react";
 import { FlatList,RefreshControl,StyleSheet,Text,View,type ListRenderItemInfo } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -63,6 +64,7 @@ export function LibraryScreen() {
   const { likedSongsCount } = useLikedSongs();
   const [filter, setFilter] = useState<Filter>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [savedCollections, setSavedCollections] = useState<SavedCollection[]>([]);
   const { isHeaderElevated, handleHeaderScroll } = useAppTopHeaderScrollElevation();
 
   const {
@@ -86,6 +88,16 @@ export function LibraryScreen() {
   } = useLibraryData();
 
   const topInset = insets.top;
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void getSavedCollections()
+        .then((items) => { if (active) setSavedCollections(items); })
+        .catch(() => { if (active) setSavedCollections([]); });
+      return () => { active = false; };
+    }, [])
+  );
 
   const handleAddPress = useCallback(() => {
     void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
@@ -124,6 +136,15 @@ export function LibraryScreen() {
       pathname: "/artist/[id]",
       params: { id: artist.id, name: artist.name, image: artist.image },
     });
+  }, []);
+
+  const openSavedCollection = useCallback((collection: SavedCollection) => {
+    void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+    if (collection.route === "artist-mix") {
+      router.push({ pathname: "/artist-mix", params: collection.params });
+      return;
+    }
+    router.push({ pathname: "/playlist/[id]", params: { ...collection.params, id: collection.params.id || "" } });
   }, []);
 
   const openBrowseArtists = useCallback(() => {
@@ -218,11 +239,13 @@ export function LibraryScreen() {
         viewMode={viewMode}
         likedSongCount={likedSongsCount}
         followedArtists={followedArtists}
+        savedCollections={savedCollections}
         onSelectFilter={setFilter}
         onChangeViewMode={setViewMode}
         onOpenLikedSongs={openLikedSongs}
         onOpenArtist={openArtistProfile}
         onBrowseArtists={openBrowseArtists}
+        onOpenSavedCollection={openSavedCollection}
       />
     ),
     [
@@ -231,9 +254,11 @@ export function LibraryScreen() {
       viewMode,
       likedSongsCount,
       followedArtists,
+      savedCollections,
       openLikedSongs,
       openArtistProfile,
       openBrowseArtists,
+      openSavedCollection,
     ]
   );
 

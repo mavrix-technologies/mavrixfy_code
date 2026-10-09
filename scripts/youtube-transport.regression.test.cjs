@@ -4,15 +4,44 @@ const { Buffer } = require("node:buffer");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const ts = require("typescript");
+const officialMusicVideo = { exports: {} };
+vm.runInNewContext(ts.transpileModule(fs.readFileSync("src/services/youtube/officialMusicVideo.ts", "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { module: officialMusicVideo, exports: officialMusicVideo.exports });
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function fixture({ info, fetchStatus = () => 200, contentType = "audio/mp4", music = {}, nodes = {}, actions = {}, parser = {}, lazyPlayer = false, ciphered = false, apiText = "{}", responseClass = Response, streamFetchOverride, timerScale = 1 } = {}) {
+
+test("real music parser retains empty-tab messages alongside a usable queue without type warnings", async () => {
+  const { Parser, YTNodes } = await import("youtubei.js");
+  const errors = [];
+  Parser.setParserErrorHandler(error => errors.push(error));
+  const queue = new YTNodes.Tab({ selected: true, content: { musicQueueRenderer: {
+    content: { playlistPanelRenderer: { playlistId: "RDAMVMQKnJzg-fqBw", contents: [] } },
+  } } });
+  const empty = new YTNodes.Tab({ title: "Lyrics", content: {
+    messageRenderer: { text: { simpleText: "Lyrics aren't available" } },
+  } });
+  const restricted = new YTNodes.Tab({ content: {
+    messageRenderer: { text: { simpleText: "Sign in to confirm you're not a bot" } },
+  } });
+  assert.ok(queue.content.is(YTNodes.MusicQueue));
+  assert.equal(queue.content.content.playlist_id, "RDAMVMQKnJzg-fqBw");
+  assert.ok(empty.content.is(YTNodes.Message));
+  assert.equal(empty.content.text.toString(), "Lyrics aren't available");
+  assert.match(restricted.content.text.toString(), /Sign in/);
+  assert.equal(errors.length, 0);
+  // The patch accepts a real supported shape; it doesn't disable validation.
+  const unsupported = new YTNodes.Tab({ content: { buttonRenderer: { text: { simpleText: "Unexpected" } } } });
+  assert.equal(unsupported.content, null);
+  assert.ok(errors.some(error => error.error_type === "typecheck"));
+});
+function fixture({ info, fetchStatus = () => 200, contentType = "audio/mp4", music = {}, nodes = {}, actions = {}, parser = {}, lazyPlayer = false, ciphered = false, apiText = "{}", responseClass = Response, streamFetchOverride, timerScale = 1, mintProof = async () => null } = {}) {
   const clients = [], requests = [];
   const playerLoads = [], sessionOptions = [], cancelledBodies = [];
   const format = { has_audio: true, has_video: false, mime_type: "audio/mp4", bitrate: 128000, approx_duration_ms: 188125,
     url: ciphered ? undefined : "https://rr1.googlevideo.com/videoplayback?expire=2000&n=original%2Bvalue",
     signature_cipher: ciphered ? "cipher" : undefined,
     decipher: async () => "https://rr1.googlevideo.com/videoplayback?expire=2000" };
-  const yt = { music, actions, session: { player: lazyPlayer ? undefined : {} }, getBasicInfo: info || (async (_, { client }) => {
+  const yt = { music, actions, session: { player: lazyPlayer ? undefined : {}, context: { client: { visitorData: "visitor" } } }, getBasicInfo: info || (async (_, { client }) => {
     clients.push(client); return { cpn: "playback-nonce", playability_status: { status: "OK" },
       streaming_data: { adaptive_formats: [format] } };
   }) };
@@ -36,9 +65,12 @@ function fixture({ info, fetchStatus = () => 200, contentType = "audio/mp4", mus
         return { ok: status >= 200 && status < 300, status };
       } }, require: name => {
       if (name === "./runtime") return {};
+      if (name === "./YouTubePoToken") return { youtubePoTokens: { mint: mintProof } };
       if (name === "expo/fetch") return { fetch: streamFetchOverride ? (url, options) => streamFetchOverride(url, options, fetchStream) : fetchStream };
       if (name === "./YouTubeArtists") return require("./helpers/youtube-artists-fixture.cjs");
       if (name === "./YouTubeArtwork") return require("./helpers/youtube-artwork-fixture.cjs");
+      if (name === "./YouTubeVideoFormats") return require("./helpers/youtube-video-fixture.cjs");
+      if (name === "./officialMusicVideo") return officialMusicVideo.exports;
       if (name === "jintr") return { Jinter: class {} };
       if (name === "youtubei.js/react-native") return {
         Constants: constants, Platform: { shim: {} }, YTNodes: nodes, Parser: { addRuntimeParser() {}, ...parser },
@@ -50,6 +82,41 @@ function fixture({ info, fetchStatus = () => 200, contentType = "audio/mp4", mus
     } });
   return { api: module.exports.sharedYouTubeTransport, clients, requests, playerLoads, sessionOptions, cancelledBodies };
 }
+
+test("official video lookup reads title endpoints and localized shelves, then searches credits only on a miss", async () => {
+  const MusicShelf = class {};
+  const calls = [];
+  const row = (videoId, musicVideoType, artist) => ({ item_type: "video", title: "Maand", duration: { seconds: 186 },
+    authors: [{ name: artist }], flex_columns: [{ title: { runs: [{ endpoint: { payload: {
+      videoId, watchEndpointMusicSupportedConfigs: { watchEndpointMusicConfig: { musicVideoType } },
+    } } }] } }] });
+  const f = fixture({ nodes: { MusicShelf }, music: { search: async (query, options) => {
+    calls.push(query); assert.equal(options.type, "video");
+    return { contents: [{ title: { toString: () => "Vídeos" }, is: type => type === MusicShelf,
+      contents: calls.length === 1 ? [row("fanvid12345", "MUSIC_VIDEO_TYPE_UGC", "Bayaan")]
+        : [row("zFk1ke2pcTA", "MUSIC_VIDEO_TYPE_OMV", "Bayaan")] }] };
+  } } });
+  const selected = await f.api.resolveOfficialMusicVideo({ title: "Maand", artist: "Bayaan, Hasan Raheem & Rovalio",
+    durationSeconds: 185, artistChannelIds: [] }, "official-video");
+  assert.equal(selected, "zFk1ke2pcTA");
+  assert.deepEqual(calls, ["maand official video", "Bayaan, Hasan Raheem & Rovalio maand official music video"]);
+});
+
+test("official video lookup stops after a matching first response and does not request audio", async () => {
+  const MusicShelf = class {};
+  let searches = 0;
+  const f = fixture({ nodes: { MusicShelf }, music: { search: async () => {
+    searches++;
+    return { contents: [{ is: type => type === MusicShelf, contents: [{ item_type: "video", id: "j18MRhEfmPk",
+      title: "Ishqa Ve (feat. Yuvraj Tung)", duration: { seconds: 230 }, authors: [{ name: "Zeeshan Ali" }],
+      flex_columns: [{ title: { runs: [{ endpoint: { payload: {
+        watchEndpointMusicSupportedConfigs: { watchEndpointMusicConfig: { musicVideoType: "MUSIC_VIDEO_TYPE_OMV" } },
+      } } }] } }] }] }] };
+  } } });
+  assert.equal(await f.api.resolveOfficialMusicVideo({ title: "Ishqa Ve", artist: "Zeeshan Ali",
+    durationSeconds: 208, artistChannelIds: [] }, "official-video"), "j18MRhEfmPk");
+  assert.equal(searches, 1); assert.equal(f.clients.length, 0); assert.equal(f.requests.length, 0);
+});
 
 test("artist browse follows the actual top-songs endpoint and scopes continuation to its channel", async () => {
   const nodes = Object.fromEntries(["MusicResponsiveListItem", "MusicTwoRowItem", "MusicShelf", "MusicCarouselShelf", "MusicImmersiveHeader", "MusicVisualHeader", "MusicPlaylistShelf", "MusicDescriptionShelf", "ContinuationItem", "AppendContinuationItemsAction"].map(name => [name, class {}]));
@@ -155,6 +222,13 @@ test("YouTube low, medium and high select real distinct available AAC bitrates",
   }
   const limited = fixture();
   assert.equal((await limited.api.resolveStream("abcdefghijk", "high", "limited")).bitrate, 128000);
+});
+
+test("medium without a standard AAC tier chooses the best available source instead of the lowest", async () => {
+  const formats = [192000, 256000].map(bitrate => ({ has_audio: true, has_video: false,
+    mime_type: "audio/mp4", bitrate, url: `https://rr1.googlevideo.com/videoplayback?expire=2000&bitrate=${bitrate}` }));
+  const f = fixture({ info: async () => ({ playability_status: { status: "OK" }, streaming_data: { adaptive_formats: formats } }) });
+  assert.equal((await f.api.resolveStream("abcdefghijk", "medium", "medium-without-standard")).bitrate, 256000);
 });
 test("API fetch uses the same anonymous stack and preserves buffered response metadata", async () => {
   const f = fixture();
@@ -271,15 +345,66 @@ test("cancelled extraction cannot validate or return a late player response", as
   await assert.rejects(pending, /cancelled/);
   assert.equal(f.requests.length, 0);
 });
-test("upstream login restriction remains an explicit YouTube failure", async () => {
+test("a login-rejected client does not prevent the next profile from resolving the stream", async () => {
+  const clients = [];
+  const f = fixture({ info: async (videoId, { client }) => {
+    clients.push(client);
+    if (client === "VISIONOS") return { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you are not a bot" } };
+    return { playability_status: { status: "OK" }, streaming_data: { adaptive_formats: [{ has_audio: true,
+      has_video: false, mime_type: "audio/mp4", bitrate: 128000,
+      url: `https://rr1.googlevideo.com/videoplayback?expire=2000&video=${videoId}` }] } };
+  } });
+  const stream = await f.api.resolveStream("abcdefghijk", "medium", "stream");
+  assert.equal(stream.clientProfile, "ANDROID_VR");
+  assert.deepEqual(clients, ["VISIONOS", "ANDROID_VR"]);
+  assert.equal(f.requests.length, 1);
+});
+
+test("all rejected profiles remain bounded and report the upstream verification reason", async () => {
   const clients = [];
   const f = fixture({ info: async (_, { client }) => {
     clients.push(client);
     return { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you are not a bot" } };
   } });
-  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "stream"), /LOGIN_REQUIRED: Sign in/);
+  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "stream"), /LOGIN_REQUIRED: Sign in to confirm/);
   assert.deepEqual(clients, ["VISIONOS", "ANDROID_VR", "TV", "WEB"]);
   assert.equal(f.requests.length, 0);
+});
+
+test("attested MWEB uses a video-bound proof for player and GVS without re-encoding the signed URL", async () => {
+  const proof = "a".repeat(160), calls = [];
+  const f = fixture({ mintProof: async () => proof, info: async (videoId, options) => {
+    calls.push(options);
+    if (options.client !== "MWEB") return { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you are not a bot" } };
+    assert.equal(options.po_token, proof);
+    return { playability_status: { status: "OK" }, streaming_data: { adaptive_formats: [{ has_audio: true,
+      has_video: false, mime_type: "audio/mp4", bitrate: 128000,
+      url: `https://rr1.googlevideo.com/videoplayback?expire=2000&n=original%2Bvalue&video=${videoId}` }] } };
+  } });
+  const stream = await f.api.resolveStream("abcdefghijk", "high", "attested");
+  assert.equal(stream.clientProfile, "MWEB");
+  assert.equal(stream.url, `https://rr1.googlevideo.com/videoplayback?expire=2000&n=original%2Bvalue&video=abcdefghijk&pot=${proof}`);
+  assert.equal(f.requests[0].url, stream.url);
+  assert.equal(calls.filter(item => item.client !== "MWEB").every(item => !item.po_token), true);
+  calls.length = 0;
+  await f.api.resolveStream("12345678901", "high", "second-attested");
+  assert.deepEqual(calls.map(item => item.client), ["MWEB"]);
+});
+
+test("a working direct profile avoids attestation and is prioritized on the next song", async () => {
+  const calls = []; let mints = 0;
+  const f = fixture({ mintProof: async () => { mints++; return null; }, info: async (videoId, { client }) => {
+    calls.push(client);
+    if (client === "VISIONOS") throw new Error("No compatible format");
+    return { playability_status: { status: "OK" }, streaming_data: { adaptive_formats: [{ has_audio: true,
+      has_video: false, mime_type: "audio/mp4", bitrate: 128000,
+      url: `https://rr1.googlevideo.com/videoplayback?expire=2000&video=${videoId}` }] } };
+  } });
+  await f.api.resolveStream("abcdefghijk", "high", "first-profile");
+  calls.length = 0;
+  await f.api.resolveStream("12345678901", "high", "second-profile");
+  assert.deepEqual(calls, ["ANDROID_VR"]);
+  assert.equal(mints, 0);
 });
 
 test("home keeps upstream shelf titles and preserves linked playlist publisher identity", async () => {

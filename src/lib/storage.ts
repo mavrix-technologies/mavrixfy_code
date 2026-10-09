@@ -52,12 +52,21 @@ export interface UserPlaylist {
   updatedAt: number;
 }
 
+export type YouTubeVideoQualityPreference = "auto" | "low" | "medium" | "high";
+
+function normalizeYouTubeVideoQuality(value: unknown): YouTubeVideoQualityPreference {
+  return value === "low" || value === "medium" || value === "high" || value === "auto"
+    ? value
+    : "auto";
+}
+
 export type MiniPlayerSecondaryControl = "queue" | "next" | "prev" | "more";
 
 export interface AppSettings {
   streamingQuality: "auto" | "low" | "medium" | "high";
   highQualityUnlocked: boolean;
   highQualityExpiresAt?: number | null;
+  videoBackgroundQuality: YouTubeVideoQualityPreference;
   smartAutoplayEnabled: boolean;
   smartAutoplayMode: SmartAutoplayMode;
   downloadQuality: "low" | "medium" | "high";
@@ -77,6 +86,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   streamingQuality: "medium",
   highQualityUnlocked: false,
   highQualityExpiresAt: null,
+  videoBackgroundQuality: "auto",
   smartAutoplayEnabled: true,
   smartAutoplayMode: "similar-trending",
   downloadQuality: "high",
@@ -409,7 +419,7 @@ function normalizeMiniPlayerSecondaryControl(value: unknown): MiniPlayerSecondar
 export async function getSettings(): Promise<AppSettings> {
   const saved = { ...await getJSON<Partial<AppSettings>>(KEYS.SETTINGS, DEFAULT_SETTINGS) } as Partial<AppSettings> & Record<string, unknown>;
   // Ignore settings from older builds that offered spatial audio effects.
-  for (const key of ["surroundSoundEnabled", "surroundStrength", "surroundSpeed", "reverbPreset", "rotating8DEnabled", "videoBackgroundQuality"]) {
+  for (const key of ["surroundSoundEnabled", "surroundStrength", "surroundSpeed", "reverbPreset", "rotating8DEnabled"]) {
     delete saved[key];
   }
   return {
@@ -417,6 +427,7 @@ export async function getSettings(): Promise<AppSettings> {
     ...saved,
     equalizer: normalizeEqualizer(saved.equalizer),
     hapticsEnabled: Boolean(saved.hapticsEnabled),
+    videoBackgroundQuality: normalizeYouTubeVideoQuality(saved.videoBackgroundQuality),
     smartAutoplayEnabled: saved.smartAutoplayEnabled !== undefined ? Boolean(saved.smartAutoplayEnabled) : DEFAULT_SETTINGS.smartAutoplayEnabled,
     smartAutoplayMode: normalizeSmartAutoplayMode(saved.smartAutoplayMode),
     miniPlayerSecondaryControl: normalizeMiniPlayerSecondaryControl(saved.miniPlayerSecondaryControl),

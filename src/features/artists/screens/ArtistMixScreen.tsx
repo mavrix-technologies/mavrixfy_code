@@ -6,11 +6,12 @@ import { usePlayerActions } from "@/contexts/PlayerContext";
 import { getArtistDetails } from "@/data/providers/ArtistProvider";
 import { triggerImpact } from "@/lib/haptics";
 import { setLastMix } from "@/lib/lastMix";
+import { getSavedCollections, toggleSavedCollection } from "@/lib/savedCollections";
+import { showGlobalToast } from "@/utils/globalToast";
 import { Song } from "@/lib/musicData";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { shareArtistMix } from "@/utils/shareUtils";
 import { pickFirst } from "@/utils/stringUtils";
-import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
 import { useCallback,useEffect,useMemo,useState } from "react";
@@ -71,10 +72,43 @@ export function ArtistMixScreen() {
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadedCount, setLoadedCount] = useState(0);
+  const [isLiked, setIsLiked] = useState(false);
 
   const mixIds = useMemo(() => ids.join(","), [ids]);
   const mixNames = useMemo(() => names.join(","), [names]);
   const mixImages = useMemo(() => images.join(","), [images]);
+  const title = names.length > 0
+    ? names.length === 1
+      ? `${names[0]} Mix`
+      : `${names.slice(0, 2).join(" & ")}${names.length > 2 ? ` +${names.length - 2}` : ""} Mix`
+    : "Artist Mix";
+  const mixSavedId = `artist-mix:${mixIds}`;
+
+  useEffect(() => {
+    let active = true;
+    void getSavedCollections().then((items) => {
+      if (active) setIsLiked(items.some((item) => item.id === mixSavedId));
+    }).catch(() => { if (active) setIsLiked(false); });
+    return () => { active = false; };
+  }, [mixSavedId]);
+
+  const handleLike = useCallback(async () => {
+    try {
+      const saved = await toggleSavedCollection({
+        id: mixSavedId,
+        kind: "artist-mix",
+        title,
+        image: images[0] || "",
+        description: names.length ? `A personalized mix featuring ${names.join(", ")}.` : "A personalized artist mix.",
+        subtitle: `${ids.length} ${ids.length === 1 ? "artist" : "artists"}`,
+        route: "artist-mix",
+        params: { ids: mixIds, names: mixNames, images: mixImages },
+      });
+      setIsLiked(saved);
+    } catch {
+      showGlobalToast("Couldn't update your Library. Try again.");
+    }
+  }, [mixSavedId, title, images, names, ids.length, mixIds, mixNames, mixImages]);
 
   const startMixLoad = useCallback(() => {
     setLoading(true);
@@ -177,12 +211,6 @@ export function ArtistMixScreen() {
     shufflePlay(songs);
   }, [songs, shufflePlay]);
 
-  const title = names.length > 0
-    ? names.length === 1
-      ? `${names[0]} Mix`
-      : `${names.slice(0, 2).join(" & ")}${names.length > 2 ? ` +${names.length - 2}` : ""} Mix`
-    : "Artist Mix";
-
   const totalDurationMin = useMemo(() => {
     const totalSec = songs.reduce((acc, s) => acc + (s.duration || 0), 0);
     const hrs = Math.floor(totalSec / 3600);
@@ -257,11 +285,12 @@ export function ArtistMixScreen() {
               isPlaying={isPlaying}
               onShuffle={handleShuffle}
               onPlayAll={handlePlayAll}
+              onLike={handleLike}
+              isLiked={isLiked}
             />
           }
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Ionicons name="musical-notes-outline" size={44} color="rgba(255,255,255,0.2)" />
               <Text style={styles.emptyText}>No songs available for these artists</Text>
             </View>
           }

@@ -1,23 +1,11 @@
+import { MusicArtwork } from "@/components/MusicArtwork";
 import type { Song } from "@/lib/musicData";
 import * as Animated from "@/lib/nativeAnimated";
-import { MusicArtwork } from "@/components/MusicArtwork";
-import { memo,useCallback,useEffect,useRef,useState } from "react";
-import { StyleSheet,View } from "react-native";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { StyleSheet, View } from "react-native";
 import { styles } from "../styles/playerScreenStyles";
 
-export type ArtworkQueueItem = {
-  song: Song;
-  artworkKey: string;
-};
-
-export const CinematicPlayerBackground = memo(function CinematicPlayerBackground() {
-  return (
-    <View
-      pointerEvents="none"
-      style={styles.backgroundLayer}
-    />
-  );
-});
+export type ArtworkQueueItem = { song: Song; artworkKey: string };
 
 export const StableArtworkImage = memo(function StableArtworkImage({
   uri,
@@ -34,9 +22,7 @@ export const StableArtworkImage = memo(function StableArtworkImage({
   const [visibleUri, setVisibleUri] = useState(initialUriRef.current);
   const loadingUri = uri === visibleUri ? null : uri;
   const incomingOpacityRef = useRef<Animated.Value | null>(null);
-  if (incomingOpacityRef.current === null) {
-    incomingOpacityRef.current = new Animated.Value(1);
-  }
+  if (incomingOpacityRef.current === null) incomingOpacityRef.current = new Animated.Value(1);
   const incomingOpacity = incomingOpacityRef.current!;
 
   useEffect(() => {
@@ -44,7 +30,6 @@ export const StableArtworkImage = memo(function StableArtworkImage({
       incomingOpacity.setValue(1);
       return;
     }
-
     incomingOpacity.stopAnimation();
     incomingOpacity.setValue(0);
   }, [incomingOpacity, loadingUri]);
@@ -55,12 +40,8 @@ export const StableArtworkImage = memo(function StableArtworkImage({
       duration: 180,
       useNativeDriver: true,
       isInteraction: false,
-    }).start(({ finished }) => {
-      if (!finished) return;
-      setVisibleUri(uri);
-    });
+    }).start(({ finished }) => { if (finished) setVisibleUri(uri); });
   }, [incomingOpacity, uri]);
-
   const handleIncomingError = useCallback(() => {
     incomingOpacity.setValue(1);
     setVisibleUri(uri);

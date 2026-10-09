@@ -4,9 +4,9 @@ import { useAppIsActive } from "@/lib/appActivity";
 import type { Song } from "@/lib/musicData";
 import { collapsePlayer,playerUIStateStore,usePlayerUIState } from "@/lib/playerUIState";
 import { usePlaybackNowPlaying } from "@/services/audio/PlaybackEngine";
-import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
-import { LinearGradient } from "expo-linear-gradient";
-import React,{ memo,useCallback,useEffect,useMemo,useState } from "react";
+import { getPlaybackProgressSnapshot,usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
+import { globalQueueSheetRef } from "@/lib/queueRef";
+import React,{ memo,useCallback,useEffect,useMemo,useRef,useState } from "react";
 import {
 BackHandler,
 StyleSheet,
@@ -20,11 +20,9 @@ useAnimatedReaction,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { PlayerAmbientBackdrop } from "../components/PlayerAmbientBackdrop";
-import { PlayerArtworkCarousel } from "../components/PlayerArtworkCarousel";
-import { CinematicPlayerBackground } from "../components/PlayerArtworkViews";
+import { PlayerTrackCarousel } from "../components/PlayerTrackCarousel";
 import { PlayerBottomDetailsSection } from "../components/PlayerBottomDetailsSection";
 import { PlayerControlsSection } from "../components/PlayerControlsSection";
-import { QueueSongRow } from "../components/PlayerDiscoverySections";
 import { PlayerEmptyState } from "../components/PlayerEmptyState";
 import { PlayerStickyHeader } from "../components/PlayerStickyHeader";
 import { useLegacyPlayerViewState } from "../hooks/useLegacyPlayerViewState";
@@ -33,7 +31,18 @@ import { styles } from "../styles/playerScreenStyles";
 
 function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolean }) {
   const s = useLegacyPlayerViewState(interactionReady);
+  const [videoFrameSongId, setVideoFrameSongId] = useState<string | null>(null);
+  const videoVisible = s.shouldRenderBackgroundVideo && videoFrameSongId === s.screenSong?.id;
+  const handleVideoFirstFrame = useCallback(() => {
+    setVideoFrameSongId(s.screenSong?.id || null);
+  }, [s.screenSong?.id]);
   const scrollY = useSharedValue(0);
+  const ambientStartPositionMs = useMemo(
+    () => getPlaybackProgressSnapshot().positionMillis,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Reset the video offset only for a new song/video.
+    [s.backgroundVideoId, s.screenSong?.id]
+  );
+
   const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
 
   const scrollEventsHandlersHook = useMemo(() => function usePlayerScrollEvents(
@@ -55,20 +64,6 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
     if (scrolled !== previous) scheduleOnRN(setIsHeaderScrolled, scrolled);
   });
 
-  const renderQueueItem = useCallback(
-    ({ item, index }: { item: Song; index: number }) => (
-      <QueueSongRow
-        item={item}
-        index={index}
-        isCurrent={index === s.activeQueueIndex}
-        isShortScreen={s.isShortScreen}
-        active={s.playerIsPlaying}
-        onPress={s.handleQueueSongPress}
-      />
-    ),
-    [s.activeQueueIndex, s.handleQueueSongPress, s.isShortScreen, s.playerIsPlaying]
-  );
-
   if (!s.screenSong) {
     return (
       <PlayerEmptyState
@@ -82,29 +77,6 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
   return (
     <View style={styles.container}>
       <View style={styles.playerSheetSurface}>
-        <View style={StyleSheet.absoluteFillObject}>
-          <CinematicPlayerBackground />
-        </View>
-
-        {!s.shouldRenderAmbientArtwork ? (
-          <View
-            pointerEvents="none"
-            style={[
-              styles.lowerDarkBackdrop,
-              { top: Math.max(180, s.topInset + s.topBarHeight + s.artSize - (s.isShortScreen ? 20 : 10)) },
-            ]}
-          >
-            <LinearGradient
-              pointerEvents="none"
-              colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.40)", "rgba(0,0,0,0.75)", "#000000"]}
-              locations={[0, 0.40, 0.75, 1]}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 1 }}
-              style={StyleSheet.absoluteFillObject}
-            />
-          </View>
-        ) : null}
-
         <View style={[styles.playerForeground, { paddingBottom: 0 }]}>
           <PlayerStickyHeader
             topInset={s.topInset}
@@ -137,14 +109,21 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
             scrollEventsHandlersHook={scrollEventsHandlersHook}
           >
             <PlayerAmbientBackdrop
-              enabled={s.shouldRenderAmbientArtwork}
-              coverUrl={s.screenSong.coverUrl}
-              onArtworkLoad={s.onAmbientArtworkLoad}
+              shouldRender={s.shouldRenderBackgroundVideo}
               screenHeight={s.screenHeight}
               screenWidth={s.screenWidth}
-              artScrollX={s.artScrollX}
+              isLowEnd={s.isLowEnd}
+              quality={s.videoBackgroundQuality}
+              backgroundVideoId={s.backgroundVideoId}
+              isScreenFocused={s.isScreenFocused}
+              fullscreenLyricsVisible={s.fullscreenLyricsVisible}
+              initialOffsetMs={ambientStartPositionMs}
+              trackScrollX={s.scrollX}
               activeQueueIndex={s.activeQueueIndex}
-              artCarouselSnapInterval={s.artCarouselSnapInterval}
+              trackPageWidth={s.trackSwipePageWidth}
+              artworkPalette={s.artworkPalette}
+              screenSong={s.screenSong}
+              onVideoFirstFrame={handleVideoFirstFrame}
             />
             <View
               style={[
@@ -157,21 +136,20 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
               ]}
             >
                 <View style={styles.playerPrimaryStack}>
-                  <PlayerArtworkCarousel
-                    artCarouselRef={s.artCarouselRef}
+                  <PlayerTrackCarousel
+                    listRef={s.listRef}
                     artworkQueue={s.artworkQueue}
-                    artCarouselSnapInterval={s.artCarouselSnapInterval}
-                    artCarouselPageWidth={s.artCarouselPageWidth}
-                    artSize={s.artSize}
+                    pageWidth={s.trackSwipePageWidth}
+                    pageSnapInterval={s.trackSwipePageWidth}
+                    artworkSize={s.trackSwipeAreaHeight}
                     activeQueueIndex={s.activeQueueIndex}
-                    artScrollX={s.artScrollX}
-                    playingQueueLength={s.playingQueue.length}
+                    scrollX={s.scrollX}
                     isProgressSeeking={s.isProgressSeeking}
-                    ambientArtworkEnabled={s.ambientArtworkReady}
-                    onArtworkSongChange={s.handleArtworkSongChange}
-                    onScroll={s.handleArtworkScroll}
-                    onMomentumScrollEnd={s.handleArtworkScrollFinished}
-                    artCarouselGetItemLayout={s.artCarouselGetItemLayout}
+                    videoVisible={videoVisible}
+                    onTrackPress={s.handleTrackChange}
+                    onScroll={s.handleScroll}
+                    onMomentumScrollEnd={s.handleScrollFinished}
+                    getItemLayout={s.trackSwipeGetItemLayout}
                   />
 
                   <PlayerControlsSection
@@ -189,6 +167,7 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
                     interactionReady={s.interactionReady}
                     liked={s.liked}
                     onToggleLike={() => s.toggleLike(s.screenSong!)}
+                    onOpenQueue={() => globalQueueSheetRef.current?.expand()}
                     onSeekTo={s.seekTo}
                     onSeekingChange={s.setIsProgressSeeking}
                     controlsRowGap={s.controlsRowGap}
@@ -215,13 +194,6 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
               onTogglePlay={s.togglePlay}
               onLyricSeek={s.handleLyricSeek}
               onToggleFullScreenLyrics={() => s.setFullscreenLyricsVisible(true)}
-              ambientArtworkEnabled={s.shouldRenderAmbientArtwork}
-              isShortScreen={s.isShortScreen}
-              queueViewportStyle={s.queueViewportStyle}
-              playingQueue={s.playingQueue}
-              queueKeyExtractor={s.queueKeyExtractor}
-              renderQueueItem={renderQueueItem}
-              getQueueItemLayout={s.getQueueItemLayout}
               artistDetails={s.artistDetails}
               artistLoading={s.artistLoading}
               onViewArtistProfile={s.handleViewArtistProfile}
@@ -277,6 +249,16 @@ export const PlayerScreen = memo(function PlayerScreen() {
 
   const { visible, interactionReady, onAnimate, onChange, onClose } = usePlayerSheetState(uiState);
   const snapPoints = useMemo(() => [screenHeight], [screenHeight]);
+  const bottomSheetRef = useRef<React.ElementRef<typeof BottomSheet>>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    if (uiState === "expanded") {
+      bottomSheetRef.current?.snapToIndex(0);
+    } else {
+      bottomSheetRef.current?.close();
+    }
+  }, [uiState, visible]);
 
   useEffect(() => {
     if (!IS_ANDROID) return;
@@ -295,6 +277,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
   return (
     <View pointerEvents="box-none" style={[styles.sheetContainer, StyleSheet.absoluteFillObject]}>
       <BottomSheet
+        ref={bottomSheetRef}
         index={uiState === "expanded" ? 0 : -1}
         snapPoints={snapPoints}
         enableDynamicSizing={false}

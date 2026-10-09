@@ -10,7 +10,7 @@ onSnapshot,
 type Unsubscribe,
 doc, writeBatch,
 } from "firebase/firestore";
-import { readLikedSong, mergeLikedSongIdentities, likedSongDocumentIds, likedSongIdentityKey, likedAtMillis } from "./likedSongFormat";
+import { readLikedSong, mergeLikedSongIdentities, likedSongDocumentIds, likedSongIdentityKey, likedAtMillis, youtubeIdentity, youtubeLikedMetadata } from "./likedSongFormat";
 import { useLikedSongsStore } from "./likedSongsStore";
 
 const CACHE_KEY_PREFIX = "@mavrixfy_liked_songs_";
@@ -153,6 +153,47 @@ export function cleanupLikedSongsSubscription(): void {
   }
   activeSubscriptionUserId = null;
   useLikedSongsStore.getState().reset();
+}
+
+/** Replace a saved song's YouTube version while preserving its original like records and audio URLs. */
+export async function replaceLikedSongYouTubeVersion(userId: string | null | undefined, savedSong: Song, selectedSong: Song): Promise<boolean> {
+  if (!userId || !db || !savedSong?.id) return false;
+  const scope = getAccountScope();
+  if (scope.accountId !== userId) return false;
+  const videoId = youtubeIdentity(selectedSong);
+  const documentIds = likedSongDocumentIds(savedSong);
+  if (!videoId || documentIds.length === 0 || documentIds.length > 500) return false;
+
+  const batch = writeBatch(db);
+  const permanentUrl = `https://music.youtube.com/watch?v=${videoId}`;
+  for (const id of documentIds) {
+    batch.update(doc(db, "users", userId, "likedSongs", id), {
+      youtubeUrl: permanentUrl,
+      ...(selectedSong.coverUrl ? { imageUrl: selectedSong.coverUrl } : {}),
+    });
+  }
+  await batch.commit();
+
+  const currentScope = getAccountScope();
+  if (currentScope.accountId !== userId || currentScope.generation !== scope.generation) return true;
+
+  const replacement: Song = {
+    ...youtubeLikedMetadata({ ...selectedSong, youtubeVideoId: videoId }),
+    likedSongDocumentIds: documentIds,
+  };
+  const linkedIds = new Set(documentIds);
+  const currentSongs = useLikedSongsStore.getState().songs;
+  const exists = currentSongs.some(song =>
+    song.id === savedSong.id || likedSongDocumentIds(song).some(id => linkedIds.has(id))
+  );
+  const nextSongs = exists ? currentSongs.map(song =>
+    song.id === savedSong.id || likedSongDocumentIds(song).some(id => linkedIds.has(id))
+      ? replacement
+      : song
+  ) : [replacement, ...currentSongs];
+  useLikedSongsStore.getState().setSongs(nextSongs, "ready");
+  void persistCachedLikedSongs(userId, useLikedSongsStore.getState().songs);
+  return true;
 }
 
 /**

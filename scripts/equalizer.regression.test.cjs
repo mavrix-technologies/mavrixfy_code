@@ -4,6 +4,7 @@ function load(file, deps={}) {
  {module,exports:module.exports,require:name=>{if(!(name in deps))throw Error(name);return deps[name];}});return module.exports;
 }
 const config=load('src/services/audio/equalizerConfig.ts');
+const { fixture: playerFixture, tracks } = require('./helpers/audio-player-fixture.cjs');
 test('LastWave curves use 15 ISO bands and ±8dB validated migration',()=>{
  assert.equal(config.EQ_FREQUENCIES_HZ.length,15);assert.equal(config.EQ_Q,Math.SQRT2);
  for(const preset of config.EQUALIZER_PRESETS){assert.equal(Object.keys(preset.bands).length,15);assert.equal(config.detectMatchingPreset(preset.bands),preset.id);}
@@ -11,6 +12,41 @@ test('LastWave curves use 15 ISO bands and ±8dB validated migration',()=>{
  assert.equal(migrated['63Hz'],4);assert.equal(migrated['16000Hz'],6);
  const safe=config.normalizeEqualizer({'25Hz':Infinity,'40Hz':100,'63Hz':-100});assert.equal(safe['25Hz'],0);assert.equal(safe['40Hz'],8);assert.equal(safe['63Hz'],-8);
  assert.equal(Object.values(config.normalizeEqualizer(null)).every(v=>v===0),true);
+});
+
+for (const platform of ['ios', 'android']) test(`${platform}: disabled/flat EQ bypasses filters, enabled EQ retains safe headroom and system ducking`, async () => {
+ const dsp = load('src/services/audio/equalizerDsp.ts', { './equalizerConfig': config });
+ const f = playerFixture({ platform, headroomDb: dsp.calculateEqHeadroomDb });
+ await f.StandardAudioPlayer.setupPlayer();
+ await f.StandardAudioPlayer.setQueue(tracks);
+ const audio = f.StandardAudioRenderer().props;
+ audio.ref({ pause() {}, play() {}, seekToTime() {} });
+ audio.onLoad();
+ const source = f.graph.sources[0], gain = f.graph.gains[0], filters = f.graph.filters;
+ assert.deepEqual([...source.connections], [f.graph.destination]);
+ assert.equal(gain.connections.size, 0, 'unused effects are disconnected from the render graph');
+ assert.equal(filters.at(-1).connections.size, 0);
+ assert.equal(audio.volume, 1);
+ assert.equal(audio.playbackRate, 1);
+ assert.equal(audio.preservesPitch, false);
+ f.setStandardEqualizer(Array(15).fill(0), true);
+ assert.deepEqual([...source.connections], [f.graph.destination]);
+ const gains = Array(15).fill(8);
+ f.setStandardEqualizer(gains, true);
+ assert.deepEqual([...source.connections], [filters[0]]);
+ assert.equal(gain.connections.has(f.graph.destination), true);
+ assert.ok(gain.gain.value > 0 && gain.gain.value < 1, 'intentional EQ boost receives headroom against clipping');
+ assert.equal(filters[0].gain.value, 8);
+ f.setStandardEqualizer(gains, false);
+ assert.deepEqual([...source.connections], [f.graph.destination]);
+ assert.equal(gain.connections.size, 0);
+ assert.equal(filters[0].gain.value, 0);
+ f.system.get('duck')();
+ assert.deepEqual([...source.connections], [gain]);
+ assert.equal(gain.gain.value, 0.2);
+ await f.StandardAudioPlayer.pause();
+ assert.deepEqual([...source.connections], [f.graph.destination]);
+ assert.equal(gain.connections.size, 0);
 });
 test('combined-response headroom is finite and bands above sample rate limit are skipped',()=>{
  const dsp=load('src/services/audio/equalizerDsp.ts',{'./equalizerConfig':config});

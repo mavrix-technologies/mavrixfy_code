@@ -26,13 +26,23 @@ export const MINI_PLAYER_OPTIONS: {
   { label: "More", value: "more", icon: "ellipsis-horizontal" },
 ];
 
+export const VIDEO_QUALITY_OPTIONS: {
+  label: string;
+  value: AppSettings["videoBackgroundQuality"];
+}[] = [
+  { label: "Auto", value: "auto" },
+  { label: "Low", value: "low" },
+  { label: "Medium", value: "medium" },
+  { label: "High", value: "high" },
+];
+
 export const DOWNLOAD_QUALITY_OPTIONS: {
   label: string;
   value: AppSettings["downloadQuality"];
 }[] = [
-  { label: "96 kbps", value: "low" },
-  { label: "160 kbps", value: "medium" },
-  { label: "320 kbps", value: "high" },
+  { label: "Low", value: "low" },
+  { label: "Medium", value: "medium" },
+  { label: "High", value: "high" },
 ];
 
 export const CROSSFADE_OPTIONS: {

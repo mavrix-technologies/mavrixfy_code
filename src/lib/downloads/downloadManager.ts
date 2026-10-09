@@ -34,6 +34,7 @@ import { issueOfflineLicense,refreshLicenses } from "@/lib/downloads/licenseSync
 import { logger } from "@/lib/logger";
 import { getBestAudioUrlWithQuality,type Song } from "@/lib/musicData";
 import { type DownloadItem,type DownloadPreferences,type StorageSummary } from "@/types/downloads";
+import { isYouTubeSong } from "@/services/youtube/YouTubeMusic";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -113,8 +114,9 @@ export async function downloadSong(
     }
 
     const license = await issueOfflineLicense(uid, song.id, prefs.quality);
-    let audioUrl = getBestAudioUrlWithQuality(song.downloadUrl, license.quality) || song.audioUrl;
-    if (!/^https?:\/\//i.test(audioUrl)) {
+    const youtube = isYouTubeSong(song);
+    let audioUrl = youtube ? "" : getBestAudioUrlWithQuality(song.downloadUrl, license.quality) || song.audioUrl;
+    if (!youtube && !/^https?:\/\//i.test(audioUrl)) {
       try {
         const { resolvePlaybackUrl } = await import("@/services/audio/PlayerPlaybackResolver");
         const resolved = await resolvePlaybackUrl(song);
@@ -125,8 +127,11 @@ export async function downloadSong(
         // Fall through
       }
     }
-    if (!/^https?:\/\//i.test(audioUrl)) {
+    if (!youtube && !/^https?:\/\//i.test(audioUrl)) {
       return { ok: false, reason: "No downloadable audio URL is available for this song." };
+    }
+    if (youtube && !/^[\w-]{11}$/.test(song.youtubeVideoId || song.videoId || song.id.replace(/^youtube_/, ""))) {
+      return { ok: false, reason: "This Mavrixfy Music track has no valid ID for offline download." };
     }
     // 6. Build the download item.
     const item: DownloadItem = {
@@ -137,6 +142,7 @@ export async function downloadSong(
       album: song.album ?? "",
       coverUrl: song.coverUrl ?? "",
       audioUrl,
+      ...(youtube ? { youtubeVideoId: song.youtubeVideoId || song.videoId || song.id.replace(/^youtube_/, "") } : {}),
       duration: song.duration,
       quality: license.quality,
       status: "queued",

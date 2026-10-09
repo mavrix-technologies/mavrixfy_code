@@ -66,7 +66,7 @@ test('collapsed/background player creates no full player UI; expanding/restoring
     '@gorhom/bottom-sheet': { default: 'NativeBottomSheet' },
   };
   for (const name of ['@/components/FullscreenKaraokeModal', '@/services/audio/playbackProgressStore', '@/utils/navigation',
-    'expo-linear-gradient', 'react-native-worklets', '../components/PlayerAmbientBackdrop', '../components/PlayerArtworkCarousel',
+    'expo-linear-gradient', 'react-native-worklets', '../components/PlayerAmbientBackdrop', '../components/PlayerTrackCarousel',
     '../components/PlayerArtworkViews', '../components/PlayerBottomDetailsSection', '../components/PlayerControlsSection',
     '../components/PlayerDiscoverySections', '../components/PlayerEmptyState', '../components/PlayerStickyHeader',
     '../hooks/useLegacyPlayerViewState']) dependencies[name] = {};

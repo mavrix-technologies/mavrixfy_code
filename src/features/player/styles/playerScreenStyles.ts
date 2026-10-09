@@ -1,5 +1,4 @@
 import Colors from "@/constants/colors";
-import { IS_ANDROID } from "@/constants/platform";
 import {
 PLAYER_SLIDER_MAXIMUM_TRACK_COLOR,
 PLAYER_SLIDER_MINIMUM_TRACK_COLOR,
@@ -9,7 +8,6 @@ PLAYER_SLIDER_TOUCH_HEIGHT,
 } from "@/lib/sliderUtils";
 import { StyleSheet } from "react-native";
 import { playerArtistStyles } from "./playerArtistStyles";
-import { playerQueueStyles } from "./playerQueueStyles";
 
 export const styles = StyleSheet.create({
   sheetContainer: {
@@ -22,53 +20,33 @@ export const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: "transparent",
+    backgroundColor: "#000000",
   },
   playerSheetSurface: {
     flex: 1,
-    backgroundColor: "transparent",
+    backgroundColor: "#000000",
     overflow: "visible",
   },
   backdropOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0, 0, 0, 0.54)",
   },
-  ambientArtworkContainer: {
+  backgroundYoutubeContainer: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     overflow: "hidden",
-    zIndex: IS_ANDROID ? 0 : -1,
+    zIndex: 0,
   },
-  activeCardReanimatedContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 99,
-  },
-  backgroundLayer: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#000000",
+  ambientColorContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 0,
     overflow: "hidden",
   },
-  backgroundColorWash: {
-    opacity: 0.2,
-  },
-  lowerDarkBackdrop: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "transparent",
-  },
-  lowerDarkFade: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: -132,
-    height: 132,
-  },
-
   playerForeground: {
     flex: 1,
   },
@@ -89,6 +67,8 @@ export const styles = StyleSheet.create({
   },
   playerContent: {
     flexGrow: 0,
+    position: "relative",
+    zIndex: 1,
   },
   playerPrimaryStack: {
     flex: 1,
@@ -169,6 +149,22 @@ export const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
   },
+  trackSwipeArea: {
+    flex: 1,
+    paddingHorizontal: 0,
+    marginTop: 6,
+    overflow: "hidden",
+  },
+  trackSwipeList: {
+    width: "100%",
+    overflow: "visible",
+  },
+  trackSwipeContent: {
+    alignItems: "stretch",
+  },
+  trackSwipePage: {
+    backgroundColor: "transparent",
+  },
   artWrap: {
     flex: 1,
     alignItems: "center",
@@ -194,13 +190,6 @@ export const styles = StyleSheet.create({
     borderRadius: 22,
     overflow: "hidden",
     backgroundColor: "transparent",
-  },
-  artFrameDefault: {
-    borderRadius: 22,
-  },
-  youtubeArtFrame: {
-    borderRadius: 22,
-    backgroundColor: "#000000",
   },
   albumArt: {
     width: "100%",
@@ -493,15 +482,6 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  playingListSection: {
-    alignSelf: "stretch",
-    marginTop: 0,
-    overflow: "hidden",
-    backgroundColor: "transparent",
-  },
-  playingListSectionAmbient: {
-    backgroundColor: "transparent",
-  },
   roundIconButton: {
     width: 42,
     height: 42,
@@ -542,14 +522,6 @@ export const styles = StyleSheet.create({
     boxShadow: "none",
     flexShrink: 0,
     overflow: "hidden",
-  },
-  repeatOneBadge: {
-    position: "absolute",
-    bottom: 5,
-    right: 7,
-    color: Colors.primary,
-    fontSize: 10,
-    fontFamily: "Inter_700Bold",
   },
   emptyContainer: {
     flex: 1,
@@ -619,6 +591,5 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.cardBorder,
   },
-  ...playerQueueStyles,
   ...playerArtistStyles,
 });

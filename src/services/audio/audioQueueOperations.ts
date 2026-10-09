@@ -1,8 +1,11 @@
-import { createShuffledPlaybackQueue,toggleQueueShuffleState } from "@/lib/arrayUtils";
+import { shufflePlaybackQueue } from "@/lib/arrayUtils";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
+import type { QueueOrderSnapshot } from "@/services/audio/queueDrag";
+import { isYouTubeSong } from "@/services/youtube/YouTubeMusic";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { songToTrack,withResolvedPlaybackUrl } from "@/services/audio/PlayerPlaybackResolver";
+import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { useCallback,type MutableRefObject } from "react";
 
 interface UseAudioQueueOperationsOptions {
@@ -70,13 +73,37 @@ export function useAudioQueueOperations({
   showPlaybackNotice,
   playSong,
 }: UseAudioQueueOperationsOptions) {
+  const persistQueueState = useCallback((songs: Song[], index: number) => {
+    const currentSong = currentSongRef.current;
+    if (!currentSong) return;
+    void playerPersistenceService.savePlayerState({
+      currentSong,
+      queue: songs,
+      queueIndex: index,
+      positionSeconds: Math.max(0, positionSecondsRef.current),
+      updatedAt: Date.now(),
+    }).catch(() => {});
+  }, [currentSongRef, positionSecondsRef]);
+
   const toggleShuffle = useCallback(() => {
-    const { nextIsShuffled, nextQueue, nextIndex } = toggleQueueShuffleState({
-      isShuffled: isShuffledRef.current,
-      currentSong: currentSongRef.current,
-      activeQueue: queueRef.current,
-      originalQueue: originalQueueRef.current,
-    });
+    const nextIsShuffled = !isShuffledRef.current;
+    const sourceQueue = originalQueueRef.current.length > 0
+      ? originalQueueRef.current
+      : queueRef.current;
+    const currentSong = currentSongRef.current;
+    let currentIndex = currentSong
+      ? sourceQueue.findIndex((song) => song === currentSong)
+      : -1;
+    if (currentSong && currentIndex < 0)
+      currentIndex = sourceQueue.findIndex((song) => song.id === currentSong.id);
+    const nextQueue = nextIsShuffled
+      ? shufflePlaybackQueue(sourceQueue, currentIndex)?.queue ?? []
+      : [...sourceQueue];
+    const nextIndex = nextIsShuffled
+      ? 0
+      : currentSong
+        ? Math.max(0, nextQueue.findIndex((song) => song === currentSong || song.id === currentSong.id))
+        : 0;
 
     isShuffledRef.current = nextIsShuffled;
     setIsShuffled(nextIsShuffled);
@@ -90,6 +117,7 @@ export function useAudioQueueOperations({
       queue: nextQueue as Song[],
       queueIndex: nextIndex,
     });
+    persistQueueState(nextQueue as Song[], nextIndex);
 
     if (TrackPlayer && isPlayerReady && nextQueue.length > 0) {
       void enqueueNativeQueueMutation(async () => {
@@ -118,15 +146,21 @@ export function useAudioQueueOperations({
     TrackPlayer,
     positionSecondsRef,
     isPlayingRef,
+    persistQueueState,
   ]);
 
   const shufflePlay = useCallback(
     async (songs: Song[], startSong?: Song) => {
-      const result = createShuffledPlaybackQueue(songs, startSong);
+      const sourceQueue = songs.filter((song) => Boolean(song?.id));
+      const startIndex = startSong
+        ? sourceQueue.findIndex((song) => song === startSong || song.id === startSong.id)
+        : -1;
+      const result = shufflePlaybackQueue(sourceQueue, startIndex);
       if (!result) return;
 
-      const { shuffledQueue, targetSong } = result;
-      const canonicalSource = [...songs];
+      const { queue: shuffledQueue } = result;
+      const targetSong = shuffledQueue[0];
+      const canonicalSource = sourceQueue;
 
       originalQueueRef.current = canonicalSource;
       setSourceQueue(canonicalSource);
@@ -176,14 +210,15 @@ export function useAudioQueueOperations({
           return;
         }
 
-        const resolvedUrl = await resolvePlaybackUrlCached(song);
-        if (!resolvedUrl) {
+        const isYouTube = isYouTubeSong(song);
+        const resolvedUrl = isYouTube ? null : await resolvePlaybackUrlCached(song);
+        if (!isYouTube && !resolvedUrl) {
           showPlaybackNotice("Could not add song: audio unavailable.");
           return;
         }
 
         const previousQueue = queueRef.current;
-        const songWithUrl = withResolvedPlaybackUrl(song, resolvedUrl);
+        const songWithUrl = resolvedUrl ? withResolvedPlaybackUrl(song, resolvedUrl) : song;
         const nextQueue = [...previousQueue, songWithUrl];
         queueRef.current = nextQueue;
         setQueue(nextQueue);
@@ -192,7 +227,17 @@ export function useAudioQueueOperations({
         originalQueueRef.current = nextSourceQueue;
         setSourceQueue(nextSourceQueue);
 
-        setUserQueuedSongIds((prev) => (prev.includes(song.id) ? prev : [...prev, song.id]));
+        const nextUserQueuedSongIds = userQueuedSongIdsRef.current.includes(song.id)
+          ? userQueuedSongIdsRef.current
+          : [...userQueuedSongIdsRef.current, song.id];
+        userQueuedSongIdsRef.current = nextUserQueuedSongIds;
+        setUserQueuedSongIds(nextUserQueuedSongIds);
+        updatePlaybackEngineSnapshot({
+          queue: nextQueue,
+          sourceQueue: nextSourceQueue,
+          userQueuedSongIds: nextUserQueuedSongIds,
+        });
+        persistQueueState(nextQueue, queueIndexRef.current);
 
         if (TrackPlayer && isPlayerReady) {
           try {
@@ -227,11 +272,13 @@ export function useAudioQueueOperations({
       originalQueueRef,
       setSourceQueue,
       setUserQueuedSongIds,
+      userQueuedSongIdsRef,
       TrackPlayer,
       streamUrlCache,
       queueIndexRef,
       positionSecondsRef,
       isPlayingRef,
+      persistQueueState,
     ]
   );
 
@@ -246,8 +293,9 @@ export function useAudioQueueOperations({
       showPlaybackNotice("Playing next");
 
       void enqueueNativeQueueMutation(async () => {
-        const resolvedUrl = await resolvePlaybackUrlCached(song);
-        if (!resolvedUrl) {
+        const isYouTube = isYouTubeSong(song);
+        const resolvedUrl = isYouTube ? null : await resolvePlaybackUrlCached(song);
+        if (!isYouTube && !resolvedUrl) {
           showPlaybackNotice("Could not queue song: audio unavailable.");
           return;
         }
@@ -258,7 +306,7 @@ export function useAudioQueueOperations({
         const cleanQ = currentQ.filter((s) => s.id !== song.id);
         const currentIndexInClean = cleanQ.findIndex((s) => s.id === currentSongRef.current?.id);
         const insertAt = Math.max(0, (currentIndexInClean >= 0 ? currentIndexInClean : 0) + 1);
-        const nextSongWithUrl = withResolvedPlaybackUrl(song, resolvedUrl);
+        const nextSongWithUrl = resolvedUrl ? withResolvedPlaybackUrl(song, resolvedUrl) : song;
         const nextQueue = [
           ...cleanQ.slice(0, insertAt),
           nextSongWithUrl,
@@ -278,13 +326,22 @@ export function useAudioQueueOperations({
         const sourceInsertAt = Math.max(0, (sci >= 0 ? sci : 0) + 1);
         const nextSourceQueue = [
           ...cleanSourceQ.slice(0, sourceInsertAt),
-          song,
+          nextSongWithUrl,
           ...cleanSourceQ.slice(sourceInsertAt),
         ];
         originalQueueRef.current = nextSourceQueue;
         setSourceQueue(nextSourceQueue);
 
-        setUserQueuedSongIds((prev) => [song.id, ...prev.filter((id) => id !== song.id)]);
+        const nextUserQueuedSongIds = [song.id, ...userQueuedSongIdsRef.current.filter((id) => id !== song.id)];
+        userQueuedSongIdsRef.current = nextUserQueuedSongIds;
+        setUserQueuedSongIds(nextUserQueuedSongIds);
+        updatePlaybackEngineSnapshot({
+          queue: nextQueue,
+          sourceQueue: nextSourceQueue,
+          userQueuedSongIds: nextUserQueuedSongIds,
+          queueIndex: nextActiveIndex,
+        });
+        persistQueueState(nextQueue, nextActiveIndex);
 
         if (TrackPlayer && isPlayerReady) {
           try {
@@ -325,10 +382,12 @@ export function useAudioQueueOperations({
       setQueue,
       setSourceQueue,
       setUserQueuedSongIds,
+      userQueuedSongIdsRef,
       setQueueIndex,
       showPlaybackNotice,
       streamUrlCache,
       TrackPlayer,
+      persistQueueState,
     ]
   );
 
@@ -363,6 +422,7 @@ export function useAudioQueueOperations({
         userQueuedSongIds: userQueuedSongIdsRef.current,
         queueIndex: nextIndex,
       });
+      persistQueueState(nextQueue, nextIndex);
 
       if (TrackPlayer && isPlayerReady) {
         void enqueueNativeQueueMutation(async () => {
@@ -392,43 +452,68 @@ export function useAudioQueueOperations({
       setUserQueuedSongIds,
       userQueuedSongIdsRef,
       TrackPlayer,
+      persistQueueState,
     ]
   );
 
   const reorderQueue = useCallback(
-    (from: number, to: number) => {
+    (from: number, to: number, expectedState?: QueueOrderSnapshot) => {
       const currentQ = queueRef.current;
-      if (from === to || from < 0 || to < 0 || from >= currentQ.length || to >= currentQ.length) return;
+      if (expectedState && (currentQ !== expectedState.queue || queueIndexRef.current !== expectedState.queueIndex)) return;
+      if (!Number.isInteger(from) || !Number.isInteger(to) ||
+        from === to || from < 0 || to < 0 || from >= currentQ.length || to >= currentQ.length) return;
 
-      const item = currentQ[from];
-      const withoutItem = currentQ.filter((_, i) => i !== from);
-      const nextQueue = [
-        ...withoutItem.slice(0, to),
-        item,
-        ...withoutItem.slice(to),
-      ];
+      const nextQueue = [...currentQ];
+      const [movedSong] = nextQueue.splice(from, 1);
+      nextQueue.splice(to, 0, movedSong);
 
-      const currentSongId = currentSongRef.current?.id;
-      const nextIndex = currentSongId
-        ? nextQueue.findIndex((s) => s.id === currentSongId)
-        : queueIndexRef.current;
+      // Preserve the playing occurrence, including queues with duplicate songs.
+      let nextIndex = queueIndexRef.current;
+      if (nextIndex === from) nextIndex = to;
+      else if (from < to && nextIndex > from && nextIndex <= to) nextIndex -= 1;
+      else if (from > to && nextIndex >= to && nextIndex < from) nextIndex += 1;
+      const safeNextIndex = Math.max(0, nextIndex);
+      const updateSourceOrder = !isShuffledRef.current;
 
       queueRef.current = nextQueue;
       setQueue(nextQueue);
-      setQueueIndex(Math.max(0, nextIndex));
-      queueIndexRef.current = Math.max(0, nextIndex);
+      setQueueIndex(safeNextIndex);
+      queueIndexRef.current = safeNextIndex;
+      if (updateSourceOrder) {
+        originalQueueRef.current = nextQueue;
+        setSourceQueue(nextQueue);
+      }
 
       updatePlaybackEngineSnapshot({
         queue: nextQueue,
-        queueIndex: Math.max(0, nextIndex),
+        queueIndex: safeNextIndex,
+        ...(updateSourceOrder ? { sourceQueue: nextQueue } : {}),
       });
+      persistQueueState(nextQueue, safeNextIndex);
 
       if (TrackPlayer && isPlayerReady) {
         void enqueueNativeQueueMutation(async () => {
           try {
+            if (queueRef.current !== nextQueue) return;
+            const nativeQueue = await TrackPlayer.getQueue();
+            if (queueRef.current !== nextQueue) return;
+
+            if (
+              typeof TrackPlayer.move === "function" &&
+              nativeQueueIdsMatch(nativeQueue, currentQ)
+            ) {
+              try {
+                await TrackPlayer.move(from, to);
+                return;
+              } catch (moveError) {
+                logger.warn("[Player] Native queue move failed; syncing the reordered queue", moveError);
+              }
+            }
+
+            if (queueRef.current !== nextQueue) return;
             await replaceNativeQueuePreservingState(
               nextQueue,
-              Math.max(0, nextIndex),
+              safeNextIndex,
               {
                 position: positionSecondsRef.current,
                 wasPlaying: isPlayingRef.current,
@@ -441,17 +526,21 @@ export function useAudioQueueOperations({
       }
     },
     [
-      currentSongRef,
       enqueueNativeQueueMutation,
       isPlayerReady,
+      isShuffledRef,
       isPlayingRef,
+      nativeQueueIdsMatch,
+      originalQueueRef,
       positionSecondsRef,
       queueIndexRef,
       queueRef,
       replaceNativeQueuePreservingState,
       setQueue,
       setQueueIndex,
+      setSourceQueue,
       TrackPlayer,
+      persistQueueState,
     ]
   );
 
@@ -473,6 +562,7 @@ export function useAudioQueueOperations({
       userQueuedSongIds: [],
       queueIndex: 0,
     });
+    persistQueueState(nextQueue, 0);
 
     if (TrackPlayer && isPlayerReady) {
       void enqueueNativeQueueMutation(async () => {
@@ -502,6 +592,7 @@ export function useAudioQueueOperations({
     setUserQueuedSongIds,
     userQueuedSongIdsRef,
     TrackPlayer,
+    persistQueueState,
   ]);
 
   const shuffleQueue = useCallback(() => {

@@ -6,7 +6,6 @@ import type { Song } from "@/lib/musicData";
 import type { AudioPlayer } from "expo-audio";
 import { createAudioPlayer,setAudioModeAsync } from "expo-audio";
 import { isPrematurePlaybackEnd, playbackDuration, playbackPosition } from "./audioTimeline";
-import { logger } from "@/lib/logger";
 
 // ─── singletons ───────────────────────────────────────────────────────────────
 
@@ -37,6 +36,11 @@ let generation = 0;
 // audioMode only needs to be set once per app session.
 let audioModeSet = false;
 let audioModePending: Promise<void> | null = null;
+
+// Expo Go is often used on a phone over Wi-Fi/cellular data. Allow native
+// buffering time to settle before treating startup as unavailable.
+const NATIVE_LOAD_TIMEOUT_MS = 30_000;
+const NATIVE_START_TIMEOUT_MS = 30_000;
 
 // ─── callbacks ────────────────────────────────────────────────────────────────
 
@@ -132,7 +136,6 @@ function attachListener(p: AudioPlayer, gen: number, shouldPlay: () => boolean):
       }
       finishedPlayers.add(p);
       if (decoderOverrun) p.pause();
-      logger.debug("[ExpoAudio] Track completed", { generation: gen, position, duration, nativeEnd: Boolean(status.didJustFinish || status.playbackState === "ended") });
     }
     if (!statusCb) return;
     if (initialSeekPending.has(p) && !status.error) return;
@@ -267,7 +270,7 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
             else if (status.error) reject(new Error("Audio could not load"));
             else if (status.isLoaded) resolve();
           });
-          timer = setTimeout(() => reject(new Error("Audio loading timed out. Tap Play to retry.")), 12000);
+          timer = setTimeout(() => reject(new Error("Audio loading timed out.")), NATIVE_LOAD_TIMEOUT_MS);
         });
       }
       if (myGen !== generation || activePlayer !== p) return;
@@ -295,10 +298,10 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
         cancelReadyWait.set(p, resolve);
         subscription = p.addListener("playbackStatusUpdate", status => {
           if (myGen !== generation || !shouldPlay()) resolve();
-          else if (status.error) reject(new Error("Audio could not start"));
+          else if (status.error) reject(new Error(status.error));
           else if (status.playing) resolve();
         });
-        timer = setTimeout(() => reject(new Error("Audio start timed out. Tap Play to retry.")), 12000);
+        timer = setTimeout(() => reject(new Error("Audio start timed out.")), NATIVE_START_TIMEOUT_MS);
         p.play();
         if (p.playing) resolve();
       });

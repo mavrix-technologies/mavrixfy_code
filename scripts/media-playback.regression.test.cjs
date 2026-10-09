@@ -2,6 +2,23 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { fixture, tracks, tick } = require("./helpers/audio-player-fixture.cjs");
 
+test("lazy YouTube queue entries use current High quality and ignore stale prefetched metadata", async () => {
+  const requested = [];
+  const f = fixture({ streamingQuality: "high", youtubeResolver: async (song, quality) => {
+    requested.push(quality);
+    return { url: `https://audio.test/${song.id}-${quality}`, bitrate: quality === "high" ? 256000 : 50000,
+      expiresAt: Date.now() + 300000, durationSeconds: 180 };
+  } });
+  const queue = ["a", "b"].map(id => ({ id: `youtube_${id}`, source: "youtube", youtubeVideoId: id,
+    youtubeRequestedQuality: "medium", duration: 180 }));
+  await f.StandardAudioPlayer.setQueue(queue);
+  assert.equal((await f.StandardAudioPlayer.getActiveTrack()).url, "https://audio.test/youtube_a-high");
+  f.qualityPreference.current = "low";
+  await f.StandardAudioPlayer.skipToNext();
+  assert.equal((await f.StandardAudioPlayer.getActiveTrack()).url, "https://audio.test/youtube_b-low");
+  assert.deepEqual(requested, ["high", "low"]);
+});
+
 test("progress and play-state updates leave the native source renderer untouched", async () => {
   const f = fixture();
   const p = f.StandardAudioPlayer;
@@ -17,6 +34,54 @@ test("progress and play-state updates leave the native source renderer untouched
   await p.skip(1);
   assert.ok(f.rendererNotifications() > before);
   assert.equal((await p.getActiveTrack()).id, "b");
+});
+
+test("moving a queue entry keeps the active audio source and playback position intact", async () => {
+  const f = fixture();
+  const p = f.StandardAudioPlayer;
+  await p.setQueue(tracks);
+  await p.play();
+  const sourceProps = f.StandardAudioRenderer().props;
+  sourceProps.onPositionChange(42);
+  const before = f.snapshots[0]();
+
+  await p.move(1, 0);
+
+  assert.equal(JSON.stringify((await p.getQueue()).map(track => track.id)), JSON.stringify(["b", "a"]));
+  assert.equal((await p.getActiveTrack()).id, "a");
+  assert.equal((await p.getActiveTrackIndex()), 1);
+  assert.equal((await p.getProgress()).position, 42);
+  assert.equal(f.snapshots[0](), before);
+});
+
+test("native queue move rejects invalid indices without changing audio or queue", async () => {
+  const f = fixture();
+  const p = f.StandardAudioPlayer;
+  await p.setQueue(tracks);
+  const before = f.snapshots[0]();
+  for (const invalid of [-1, 0.5, NaN, Infinity, tracks.length]) {
+    await p.move(invalid, 1);
+    await p.move(1, invalid);
+  }
+  assert.equal(JSON.stringify((await p.getQueue()).map(track => track.id)), JSON.stringify(tracks.map(track => track.id)));
+  assert.equal(f.snapshots[0](), before);
+});
+
+test("Play Next insertion keeps queue order and the current track position", async () => {
+  const f = fixture();
+  const p = f.StandardAudioPlayer;
+  await p.setQueue(tracks);
+  await p.play();
+  const sourceProps = f.StandardAudioRenderer().props;
+  sourceProps.onPositionChange(31);
+  const next = { id: "next", url: "https://example.com/next.mp3" };
+
+  await p.add([next], 1);
+
+  assert.equal(JSON.stringify((await p.getQueue()).map(track => track.id)), JSON.stringify(["a", "next", "b"]));
+  assert.equal((await p.getActiveTrack()).id, "a");
+  assert.equal((await p.getActiveTrackIndex()), 0);
+  assert.equal((await p.getProgress()).position, 31);
 });
 
 test("media controls do not mutate the shared Android notification concurrently", async () => {
@@ -398,7 +463,7 @@ test("subsequent onLoad calls safely reuse sourceNode without error", async () =
 test("downloads and downloaded-songs segments display nav overlay and are not unmounted", async () => {
   const fs = require("node:fs");
   const path = require("node:path");
-  const layoutSource = fs.readFileSync(path.join(__dirname, "../app/_layout.tsx"), "utf8");
+  const layoutSource = fs.readFileSync(path.resolve("app/_layout.tsx"), "utf8");
 
   assert.match(layoutSource, /NAV_OVERLAY_SEGMENTS\s*=\s*new Set\(\[[^\]]*"downloads"[^\]]*\]\)/);
   assert.match(layoutSource, /NAV_OVERLAY_SEGMENTS\s*=\s*new Set\(\[[^\]]*"downloaded-songs"[^\]]*\]\)/);

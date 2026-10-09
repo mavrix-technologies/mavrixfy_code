@@ -2,129 +2,123 @@ import { StyleSheet } from "react-native";
 
 export const playerArtistStyles = StyleSheet.create({
   artistCardContainer: {
-    marginTop: 28,
-    marginBottom: 8,
+    marginTop: 24,
+    marginBottom: 4,
   },
   artistSectionHeader: {
     paddingHorizontal: 16,
-    marginBottom: 10,
+    marginBottom: 12,
     flexDirection: "row",
     alignItems: "center",
   },
   artistSectionTitle: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 11,
+    color: "rgba(255,255,255,0.92)",
+    fontSize: 17,
     fontFamily: "Inter_700Bold",
-    letterSpacing: 1.1,
-    textTransform: "uppercase",
+    letterSpacing: -0.2,
   },
 
-  // ── Spotify-style artist card ──────────────────────────────────────────────
-  artistSpotifyCard: {
+  artistProfileCard: {
     marginHorizontal: 16,
-    borderRadius: 12,
-    overflow: "hidden",
-    backgroundColor: "#1A1E27",
+    minHeight: 100,
+    borderRadius: 18,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.08)",
   },
-  artistSpotifyBanner: {
-    width: "100%",
-    height: 180,
+  artistProfilePressed: {
+    opacity: 0.82,
+    transform: [{ scale: 0.99 }],
   },
-  artistSpotifyBannerFallback: {
-    backgroundColor: "#1E2330",
+  artistAvatar: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    flexShrink: 0,
+  },
+  artistAvatarFallback: {
     alignItems: "center",
     justifyContent: "center",
   },
-  artistSpotifyBody: {
-    padding: 16,
-    paddingTop: 14,
-  },
-  artistSpotifyNameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    marginBottom: 5,
-  },
-  artistSpotifyNameWrap: {
+  artistProfileBody: {
     flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
     minWidth: 0,
+    justifyContent: "center",
+    gap: 4,
   },
-  artistSpotifyName: {
+  artistProfileName: {
     color: "#FFFFFF",
-    fontSize: 20,
-    fontFamily: "Inter_800ExtraBold",
-    flexShrink: 1,
-  },
-  artistFollowBtn: {
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.45)",
-    borderRadius: 20,
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-  },
-  artistFollowBtnText: {
-    color: "#FFFFFF",
-    fontSize: 13,
+    fontSize: 17,
     fontFamily: "Inter_700Bold",
   },
-  artistSpotifyListeners: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-    marginBottom: 10,
-  },
-  artistSpotifyBio: {
-    color: "rgba(255,255,255,0.75)",
-    fontSize: 13,
+  artistProfileBio: {
+    color: "rgba(255,255,255,0.62)",
+    fontSize: 12,
     fontFamily: "Inter_400Regular",
-    lineHeight: 19,
-    marginBottom: 8,
+    lineHeight: 16,
   },
-  artistSpotifyTag: {
-    color: "rgba(255,255,255,0.35)",
-    fontSize: 11,
+  artistProfileSubtext: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 12,
     fontFamily: "Inter_500Medium",
-    textTransform: "capitalize",
-    marginTop: 4,
+  },
+  artistViewLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    marginTop: 2,
+  },
+  artistViewLinkText: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 12,
+    fontFamily: "Inter_600SemiBold",
+  },
+  artistLoadingText: {
+    color: "rgba(255,255,255,0.58)",
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
   },
 
-  // ── You Might Also Like ── horizontal video cards ──────────────────────────
   relatedSongsContainer: {
-    marginTop: 28,
-    marginBottom: 48,
+    marginTop: 26,
+    marginBottom: 40,
   },
   relatedCardsScroll: {
     paddingHorizontal: 16,
-    gap: 10,
+    gap: 16,
+    paddingBottom: 4,
   },
-  relatedVideoCard: {
-    width: 140,
-    height: 190,
-    borderRadius: 10,
-    overflow: "hidden",
-    backgroundColor: "#1A1E27",
+  relatedSongCard: {
+    width: 154,
+    height: 218,
+    borderRadius: 14,
   },
-  relatedVideoCardPressed: {
-    opacity: 0.82,
+  relatedSongArtwork: {
+    width: 154,
+    height: 154,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
-  relatedVideoCardInfo: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    padding: 10,
-    paddingBottom: 11,
+  relatedSongCardPressed: {
+    opacity: 0.78,
+    transform: [{ scale: 0.98 }],
   },
-  relatedVideoCardTitle: {
+  relatedSongInfo: {
+    paddingTop: 9,
+    paddingHorizontal: 2,
+  },
+  relatedSongTitle: {
     color: "#FFFFFF",
     fontSize: 13,
     fontFamily: "Inter_700Bold",
     lineHeight: 17,
   },
-  relatedVideoCardArtist: {
+  relatedSongArtist: {
     color: "rgba(255,255,255,0.6)",
     fontSize: 11,
     fontFamily: "Inter_400Regular",

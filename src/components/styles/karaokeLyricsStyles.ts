@@ -34,6 +34,7 @@ export const styles = StyleSheet.create({
     height: 132,
     overflow: "hidden",
     marginBottom: 16,
+    paddingHorizontal: 5,
     justifyContent: "flex-start",
   },
   spotifyCardLineWrap: {

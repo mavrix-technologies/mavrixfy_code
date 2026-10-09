@@ -255,7 +255,7 @@ export function usePlaylistDetailData({
             hasYouTubePreview = true;
             setPlaylistName(page.name);
             setPlaylistCover(page.coverUrl || initialCover);
-            setPlaylistDescription("YouTube Music");
+            setPlaylistDescription("Mavrixfy Music");
             setSongs(page.songs);
             setLoading(false);
             setLoadingMore(true);
@@ -263,10 +263,10 @@ export function usePlaylistDetailData({
           if (isCancelled()) return;
           setPlaylistName(data.name);
           setPlaylistCover(data.coverUrl || initialCover);
-          setPlaylistDescription(`${data.songs.length} songs · YouTube Music`);
+          setPlaylistDescription(`${data.songs.length} songs · Mavrixfy Music`);
           setSongs(data.songs);
           setCachedPlaylist(playlistId, { id: playlistId, name: data.name, coverUrl: data.coverUrl,
-            description: `${data.songs.length} songs · YouTube Music`, songs: data.songs, isFirestore: false });
+            description: `${data.songs.length} songs · Mavrixfy Music`, songs: data.songs, isFirestore: false });
           return;
         }
 

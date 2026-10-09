@@ -30,7 +30,7 @@ function installPackage(project) {
   target.packageProductDependencies ??= [];
   if (!target.packageProductDependencies.some(item => item.value === productId)) target.packageProductDependencies.push({ value: productId, comment: "YouTubeKit" });
   const frameworks = target.buildPhases.find(item => objects.PBXFrameworksBuildPhase?.[item.value]);
-  if (!frameworks) throw new Error("YouTube Music: iOS app Frameworks build phase is missing.");
+  if (!frameworks) throw new Error("Mavrixfy Music: iOS app Frameworks build phase is missing.");
   const phase = objects.PBXFrameworksBuildPhase[frameworks.value];
   const buildFiles = objects.PBXBuildFile;
   if (!phase.files.some(item => buildFiles[item.value]?.productRef === productId)) {

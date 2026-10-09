@@ -199,9 +199,6 @@
     "experiments": {
       "typedRoutes": true
     },
-    "web": {
-      "bundler": "metro"
-    },
     "platforms": [
       "ios",
       "android"

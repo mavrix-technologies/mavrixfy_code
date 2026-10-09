@@ -104,6 +104,7 @@ function detachCurrentSource() {
   isSourceLoaded = false;
   sourceNode?.disconnect();
   sourceNode = null;
+  sourceRoute = null;
   publish({});
 }
 
@@ -141,6 +142,7 @@ const contextListeners = new Set<() => void>();
 let filters: BiquadFilterNode[] = [];
 let outputGain: GainNode | null = null;
 let sourceNode: MediaElementAudioSourceNode | null = null;
+let sourceRoute: "equalizer" | "duck" | "direct" | null = null;
 let initialized = false;
 let controlsEnabled = false;
 let notificationPending = false;
@@ -262,7 +264,12 @@ async function select(index: number, initialPosition = 0) {
     const song = { id: track.id, source: "youtube", youtubeVideoId: track.youtubeVideoId } as Song;
     let stream;
     try {
-      stream = await resolveYouTubeStream(song, typeof track.youtubeRequestedQuality === "string" ? track.youtubeRequestedQuality : undefined);
+      // Lazy queue entries may have no stream yet, or metadata from a previous
+      // quality. Every selection uses the current effective preference.
+      const { getRequestedQualityPreference } = await import("./PlayerPlaybackResolver");
+      const { effective } = await getRequestedQualityPreference();
+      if (version !== selectionVersion) return;
+      stream = await resolveYouTubeStream(song, effective);
     } catch (error) {
       if (version !== selectionVersion || playback.queue[index]?.id !== track.id) return;
       publish({ index, position: Math.max(0, initialPosition), duration: Number(track.duration) || 0, status: State.Loading });
@@ -302,14 +309,27 @@ function installGraph(ctx: NativeAudioContext) {
   outputGainTarget = 1;
   for (let i = 0; i < filters.length - 1; i++)
     filters[i].connect(filters[i + 1]);
-  filters[filters.length - 1].connect(outputGain);
-  outputGain.connect(ctx.destination);
-
   applyEffectSettings();
   void import("./audioEqualizer").then(({ syncEqualizerWithNative }) =>
     syncEqualizerWithNative(),
   );
 }
+
+function connectSourceOutput() {
+  if (!sourceNode || !context || !outputGain) return;
+  const equalizerActive = effectSettings.enabled && effectSettings.gains.some((gain, index) =>
+    gain !== 0 && EQ_FREQUENCIES_HZ[index] < context!.sampleRate * 0.45);
+  const route = equalizerActive ? "equalizer" : ducked ? "duck" : "direct";
+  if (sourceRoute === route) return;
+  sourceNode.disconnect();
+  filters[filters.length - 1].disconnect();
+  outputGain.disconnect();
+  if (route === "equalizer") filters[filters.length - 1].connect(outputGain);
+  if (route !== "direct") outputGain.connect(context.destination);
+  sourceNode.connect(route === "equalizer" ? filters[0] : route === "duck" ? outputGain : context.destination);
+  sourceRoute = route;
+}
+
 function applyEffectSettings() {
   if (!context || !outputGain) return;
   const now = context.currentTime;
@@ -338,6 +358,9 @@ function applyEffectSettings() {
     node.gain.setTargetAtTime(target, now + (attenuating ? 0.05 : 0), 0.04);
     appliedGainTargets[index] = target;
   });
+  // Disabled/flat EQ bypasses all filters and headroom gain. System ducking
+  // remains a temporary focus behavior, with direct output restored afterward.
+  connectSourceOutput();
 }
 
 export function setStandardEqualizer(gains: readonly number[], enabled: boolean) {
@@ -459,10 +482,21 @@ export const StandardAudioPlayer = {
       initialIndex >= 0 && initialIndex < tracks.length ? initialIndex : 0;
     await select(targetIdx, initialPosition);
   },
-  async add(tracks: Track | Track[]) {
+  async add(tracks: Track | Track[], insertAt?: number) {
     const additions = Array.isArray(tracks) ? tracks : [tracks];
     const previousLength = playback.queue.length;
-    publish({ queue: [...playback.queue, ...additions] });
+    const insertionIndex = Math.max(
+      0,
+      Math.min(previousLength, Number.isInteger(insertAt) ? Number(insertAt) : previousLength),
+    );
+    const nextQueue = [...playback.queue];
+    nextQueue.splice(insertionIndex, 0, ...additions);
+
+    if (insertionIndex <= playback.index && playback.index >= 0) {
+      publish({ queue: nextQueue, index: playback.index + additions.length });
+    } else {
+      publish({ queue: nextQueue });
+    }
     if (previousLength === 0 && additions.length) await select(0);
   },
   async load(track: Track, initialPosition = 0) {
@@ -479,6 +513,27 @@ export const StandardAudioPlayer = {
     if (index === selected) await select(Math.min(index, next.length - 1));
     else if (index < selected) publish({ index: selected - 1 });
   },
+  async move(fromIndex: number, toIndex: number) {
+    const length = playback.queue.length;
+    if (
+      !Number.isInteger(fromIndex) || !Number.isInteger(toIndex) ||
+      fromIndex === toIndex ||
+      fromIndex < 0 || toIndex < 0 ||
+      fromIndex >= length || toIndex >= length
+    ) return;
+
+    const nextQueue = [...playback.queue];
+    const [movedTrack] = nextQueue.splice(fromIndex, 1);
+    nextQueue.splice(toIndex, 0, movedTrack);
+
+    let nextIndex = playback.index;
+    if (nextIndex === fromIndex) nextIndex = toIndex;
+    else if (fromIndex < toIndex && nextIndex > fromIndex && nextIndex <= toIndex) nextIndex -= 1;
+    else if (fromIndex > toIndex && nextIndex >= toIndex && nextIndex < fromIndex) nextIndex += 1;
+
+    // Moving queue entries never reloads the active audio source or resets progress.
+    publish({ queue: nextQueue, index: nextIndex });
+  },
   async reset() {
     clearStartWatchdog();
     selectionVersion += 1;
@@ -490,6 +545,7 @@ export const StandardAudioPlayer = {
     playIntentVersion += 1;
     sourceNode?.disconnect();
     sourceNode = null;
+    sourceRoute = null;
     publish({
       queue: [],
       index: -1,
@@ -663,6 +719,7 @@ export function useStandardAudioRenderer() {
       isSourceLoaded = false;
       sourceNode?.disconnect();
       sourceNode = null;
+      sourceRoute = null;
 
       context = null;
       filters = [];
@@ -710,6 +767,9 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
       }}
       source={current.source}
       context={audioCtx}
+      volume={1}
+      playbackRate={1}
+      preservesPitch={false}
       onLoad={() => {
         if (!isCurrentSource()) {
           handleRef.current?.pause();
@@ -719,7 +779,8 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
           if (!handleRef.current) throw new Error("Audio source did not load.");
           if (!sourceNode) {
             sourceNode = audioCtx.createMediaElementSource(handleRef.current);
-            sourceNode.connect(filters[0]);
+            sourceRoute = null;
+            connectSourceOutput();
           }
           audioHandle = handleRef.current;
           isSourceLoaded = true;

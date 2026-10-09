@@ -6,7 +6,6 @@ import {
   accountStorageKey,
   getAccountScope,
 } from "@/lib/accountScope";
-import { logger } from "@/lib/logger";
 import { getSettings } from "@/lib/storage";
 
 const STORAGE_KEY = "@mavrixfy_app_showcase_prompt_v1";
@@ -63,9 +62,6 @@ export function useAppShowcasePrompt(ready: boolean): void {
           // 2. Check Streaming Quality: If user is ALREADY on 320 kbps (high), NEVER show!
           const settings = await getSettings();
           if (settings.streamingQuality === "high") {
-            if (isDev) {
-              logger.info("[AppShowcase] Skipped: streaming quality is already 320 kbps (high).");
-            }
             return;
           }
 
@@ -81,7 +77,6 @@ export function useAppShowcasePrompt(ready: boolean): void {
           }
 
           if (!isPromptEnabled) {
-            if (isDev) logger.info("[AppShowcase] Skipped: showcase disabled in Firestore appConfig/appShowcase.");
             return;
           }
 
@@ -94,8 +89,6 @@ export function useAppShowcasePrompt(ready: boolean): void {
             if (shownThisSession) return;
             if (history.count >= MAX_SHOW_COUNT) return;
             if (Date.now() - history.lastShownAt < COOLDOWN_INTERVAL_MS) return;
-          } else {
-            logger.info(`[AppShowcase] Firestore devEnabled is ON | Quality is '${settings.streamingQuality}' -> Triggering banner in 3s!`);
           }
 
           // 5. Lifecycle state guard before presenting

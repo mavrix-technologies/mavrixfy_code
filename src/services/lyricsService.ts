@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { unescapeHtml } from "@/utils/stringUtils";
 
 export interface LyricWord {
   text: string;
@@ -19,7 +20,7 @@ export interface LyricsResult {
   synced: boolean;
   lines: LyricLine[];
   plainLyrics?: string;
-  provider: "apple" | "betterlyrics" | "lrclib" | "lyrics.ovh" | "jiosaavn" | "none";
+  provider: "apple" | "lrclib" | "none";
   trackName?: string;
   artistName?: string;
 }
@@ -32,27 +33,32 @@ export interface FetchSongParams {
   duration?: number;
 }
 
-const STORAGE_KEY = "@mavrixfy_lyrics_cache_v2";
+const STORAGE_KEY = "@mavrixfy_lyrics_cache_v3";
 const MAX_PERSISTENT_ENTRIES = 120;
+const NEGATIVE_CACHE_TTL_MS = 60_000;
+const MAX_LOOKUP_DURATION_MS = 8_000;
 const memoryCache = new Map<string, LyricsResult>();
-let persistentCacheLoaded = false;
+const pendingRequests = new Map<string, Promise<LyricsResult>>();
+const negativeCacheUntil = new Map<string, number>();
+let persistentCacheLoad: Promise<void> | null = null;
 
 async function loadPersistentCache(): Promise<void> {
-  if (persistentCacheLoaded) return;
-  persistentCacheLoaded = true;
-  try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed: Record<string, LyricsResult> = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") {
-        for (const [k, v] of Object.entries(parsed)) {
-          if (v && Array.isArray(v.lines) && v.lines.length > 0) {
-            memoryCache.set(k, v);
+  if (!persistentCacheLoad) {
+    persistentCacheLoad = (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed: Record<string, LyricsResult> = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            for (const [k, v] of Object.entries(parsed)) {
+              if (v && Array.isArray(v.lines) && v.lines.length > 0) memoryCache.set(k, v);
+            }
           }
         }
-      }
-    }
-  } catch {}
+      } catch {}
+    })();
+  }
+  await persistentCacheLoad;
 }
 
 async function persistLyricsEntry(key: string, result: LyricsResult): Promise<void> {
@@ -74,6 +80,12 @@ async function persistLyricsEntry(key: string, result: LyricsResult): Promise<vo
     }
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
   } catch {}
+}
+
+function lyricsCacheKey(song: FetchSongParams): string {
+  const normalized = (value: string) => sanitizeTrackTitle(value).toLowerCase().replace(/\s+/g, " ").trim();
+  const durationBucket = song.duration && song.duration > 0 ? Math.round(song.duration / 5) * 5 : 0;
+  return [normalized(song.title), normalized(sanitizeArtistName(song.artist || "")), normalized(song.album || ""), durationBucket].join("|");
 }
 
 /**
@@ -257,8 +269,8 @@ function parseTtml(ttml: string): LyricLine[] {
     return m ? m[1] : null;
   }
 
-  const rawLines: LyricLine[] = [];
-  let lineIdx = 0;
+  const originalLines: LyricLine[] = [];
+  const romanizedLines: LyricLine[] = [];
   let pMatch: RegExpExecArray | null;
 
   pRegex.lastIndex = 0;
@@ -266,42 +278,64 @@ function parseTtml(ttml: string): LyricLine[] {
     const pAttrs = pMatch[1];
     const pContent = pMatch[2];
 
-    // Skip background / translation roles
     const role = getAttr(pAttrs, "ttm:role") || getAttr(pAttrs, "role") || "";
-    if (role === "x-translation" || role === "x-roman") continue;
+    if (role === "x-translation" || role === "x-bg") continue;
+    const paragraphIsRomanized = role === "x-roman";
 
-    const pBegin = parseTtmlTimeSec(getAttr(pAttrs, "begin"));
-    const pEnd = parseTtmlTimeSec(getAttr(pAttrs, "end") ?? undefined) || pBegin;
+    const beginAttr = getAttr(pAttrs, "begin");
+    const endAttr = getAttr(pAttrs, "end");
+    const pBegin = parseTtmlTimeSec(beginAttr);
+    const pEnd = endAttr ? parseTtmlTimeSec(endAttr) : pBegin;
 
-    const words: LyricWord[] = [];
+    const originalWords: LyricWord[] = [];
+    const romanizedWords: LyricWord[] = [];
     let spanMatch: RegExpExecArray | null;
     spanRegex.lastIndex = 0;
 
     while ((spanMatch = spanRegex.exec(pContent)) !== null) {
       const sAttrs = spanMatch[1];
       const spanRole = getAttr(sAttrs, "ttm:role") || getAttr(sAttrs, "role") || "";
-      if (spanRole === "x-translation" || spanRole === "x-roman" || spanRole === "x-bg") continue;
+      if (spanRole === "x-translation" || spanRole === "x-bg") continue;
 
-      const rawText = spanMatch[2].replace(/<[^>]+>/g, "").trim();
+      const rawText = unescapeHtml(spanMatch[2].replace(/<[^>]+>/g, " "));
       if (!rawText) continue;
 
-      const sBegin = parseTtmlTimeSec(getAttr(sAttrs, "begin")) || pBegin;
-      const sEnd = parseTtmlTimeSec(getAttr(sAttrs, "end") ?? undefined) || sBegin;
-      words.push({ text: rawText, start: sBegin, end: sEnd });
+      const spanBegin = getAttr(sAttrs, "begin");
+      const spanEnd = getAttr(sAttrs, "end");
+      const sBegin = spanBegin ? parseTtmlTimeSec(spanBegin) : pBegin;
+      const sEnd = spanEnd ? parseTtmlTimeSec(spanEnd) : sBegin;
+      const targetWords = paragraphIsRomanized || spanRole === "x-roman" ? romanizedWords : originalWords;
+      targetWords.push({ text: rawText, start: sBegin, end: Math.max(sBegin, sEnd) });
     }
 
-    const plainText = pContent.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    if (!plainText) continue;
+    const paragraphText = unescapeHtml(pContent.replace(/<[^>]+>/g, " "));
+    const originalText = originalWords.length ? originalWords.map((word) => word.text).join(" ") : paragraphText;
+    const romanizedText = romanizedWords.length ? romanizedWords.map((word) => word.text).join(" ") : "";
 
-    rawLines.push({
-      id: `ttml_${Math.round(pBegin * 1000)}_${lineIdx++}`,
-      time: pBegin,
-      duration: Math.max(0, pEnd - pBegin),
-      text: plainText,
-      words: words.length > 0 ? words : undefined,
-    });
+    if (originalText) {
+      originalLines.push({
+        id: `ttml_${Math.round(pBegin * 1000)}_${originalLines.length}`,
+        time: pBegin,
+        duration: Math.max(0, pEnd - pBegin),
+        text: originalText,
+        words: originalWords.length ? originalWords : undefined,
+      });
+    }
+    if (romanizedText || paragraphIsRomanized && paragraphText) {
+      romanizedLines.push({
+        id: `ttml_roman_${Math.round(pBegin * 1000)}_${romanizedLines.length}`,
+        time: pBegin,
+        duration: Math.max(0, pEnd - pBegin),
+        text: romanizedText || paragraphText,
+        words: romanizedWords.length ? romanizedWords : undefined,
+      });
+    }
   }
 
+  const rawLines = romanizedLines.length >= Math.ceil(originalLines.length * 0.8) && romanizedLines.length > 0
+    ? romanizedLines
+    : originalLines;
+  rawLines.sort((a, b) => a.time - b.time);
   if (rawLines.length === 0) return [];
 
   // Insert instrumental breaks for gaps >= 7 seconds
@@ -348,12 +382,13 @@ function parseTtml(ttml: string): LyricLine[] {
 async function fetchFromBini(
   title: string,
   artist: string,
-  durationSeconds?: number
+  durationSeconds?: number,
+  timeoutMs = 4500
 ): Promise<LyricsResult | null> {
   if (!title) return null;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const params = new URLSearchParams({ track: title });
@@ -364,33 +399,40 @@ async function fetchFromBini(
     const searchRes = await fetch(searchUrl, {
       signal: controller.signal,
       headers: {
-        "User-Agent": "LastWave-Android/1.0 (https://github.com/clash-projects/lastwave)",
         Accept: "application/json",
       },
     });
-    clearTimeout(timeoutId);
     if (!searchRes.ok) return null;
 
     const searchData = await searchRes.json();
-    const results: any[] = Array.isArray(searchData?.results) ? searchData.results : [];
+    const results: Record<string, unknown>[] = Array.isArray(searchData?.results) ? searchData.results : [];
     if (results.length === 0) return null;
 
-    // Prefer word-timed results; pick first match
-    const hit = results.find((r) => r?.timing_type === "word") || results[0];
-    if (!hit?.lyricsUrl) return null;
-
-    // Fetch the TTML document
-    const ttmlController = new AbortController();
-    const ttmlTimeout = setTimeout(() => ttmlController.abort(), 5000);
+    const hit = results
+      .filter((result) => typeof result.lyricsUrl === "string")
+      .map((result) => ({
+        result,
+        score: scoreLyricsCandidate(
+          String(result.track_name || ""),
+          String(result.artist_name || ""),
+          "",
+          Number(result.duration) || 0,
+          title,
+          artist,
+          "",
+          durationSeconds
+        ) + (result.timing_type === "word" ? 1 : 0),
+      }))
+      .filter((candidate) => candidate.score >= 7)
+      .sort((a, b) => b.score - a.score)[0]?.result;
+    if (!hit || typeof hit.lyricsUrl !== "string") return null;
 
     const ttmlRes = await fetch(hit.lyricsUrl, {
-      signal: ttmlController.signal,
+      signal: controller.signal,
       headers: {
-        "User-Agent": "LastWave-Android/1.0 (https://github.com/clash-projects/lastwave)",
         Accept: "text/xml, application/xml, */*",
       },
     });
-    clearTimeout(ttmlTimeout);
     if (!ttmlRes.ok) return null;
 
     const ttmlText = await ttmlRes.text();
@@ -401,393 +443,225 @@ async function fetchFromBini(
         synced: true,
         lines,
         provider: "apple",
-        trackName: hit.track_name || title,
-        artistName: hit.artist_name || artist,
+        trackName: String(hit.track_name || title),
+        artistName: String(hit.artist_name || artist),
       };
     }
   } catch {
+    return null;
+  } finally {
     clearTimeout(timeoutId);
   }
 
   return null;
 }
 
-// ─── 1. Apple Music Word-by-Word Provider (Paxsenix) ──────────────────────────
-
-async function resolveAppleMusicTrackId(title: string, artist: string, durationSeconds?: number): Promise<number | null> {
-  const query = `${title} ${artist}`.trim();
-  if (!query) return null;
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-  try {
-    const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=5`;
-    const res = await fetch(itunesUrl, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    const results = data?.results;
-    if (!Array.isArray(results) || results.length === 0) return null;
-
-    const cleanTitle = title.toLowerCase().trim();
-    const cleanArtist = artist.toLowerCase().trim();
-    const targetMs = durationSeconds && durationSeconds > 0 ? durationSeconds * 1000 : null;
-
-    let bestMatch: any = null;
-    let bestScore = -1;
-
-    for (const item of results) {
-      if (!item?.trackId) continue;
-      const trackName = String(item.trackName || "").toLowerCase();
-      const artistName = String(item.artistName || "").toLowerCase();
-
-      let score = 0;
-      if (trackName.includes(cleanTitle) || cleanTitle.includes(trackName)) score += 3;
-      if (artistName.includes(cleanArtist) || cleanArtist.includes(artistName)) score += 2;
-
-      if (targetMs && item.trackTimeMillis) {
-        const diff = Math.abs(item.trackTimeMillis - targetMs);
-        if (diff < 5000) score += 2;
-        else if (diff < 12000) score += 1;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = item;
-      }
-    }
-
-    if (bestMatch && bestScore >= 3) {
-      return Number(bestMatch.trackId);
-    }
-  } catch {
-    clearTimeout(timeoutId);
-  }
-
-  return null;
+function normalizeLyricsMatch(value: string): string {
+  return sanitizeTrackTitle(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s'’.,!?:;()\[\]{}_/-]+/g, "");
 }
 
-async function fetchFromAppleMusicPaxsenix(
+function scoreLyricsCandidate(
+  candidateTitle: string,
+  candidateArtist: string,
+  candidateAlbum: string,
+  candidateDuration: number,
   title: string,
   artist: string,
-  durationSeconds?: number
-): Promise<LyricsResult | null> {
-  const trackId = await resolveAppleMusicTrackId(title, artist, durationSeconds);
-  if (!trackId) return null;
+  album: string,
+  duration?: number
+): number {
+  const expectedTitle = normalizeLyricsMatch(title);
+  const actualTitle = normalizeLyricsMatch(candidateTitle);
+  if (!expectedTitle || !actualTitle) return Number.NEGATIVE_INFINITY;
 
+  let score = 0;
+  if (actualTitle === expectedTitle) score += 6;
+  else if (
+    (actualTitle.includes(expectedTitle) || expectedTitle.includes(actualTitle)) &&
+    Math.min(actualTitle.length, expectedTitle.length) / Math.max(actualTitle.length, expectedTitle.length) >= 0.85
+  ) score += 4;
+  else return Number.NEGATIVE_INFINITY;
+
+  const expectedArtist = normalizeLyricsMatch(artist);
+  const actualArtist = normalizeLyricsMatch(candidateArtist);
+  if (expectedArtist) {
+    if (!actualArtist) return Number.NEGATIVE_INFINITY;
+    if (actualArtist === expectedArtist) score += 4;
+    else if (actualArtist.includes(expectedArtist) || expectedArtist.includes(actualArtist)) score += 2;
+    else return Number.NEGATIVE_INFINITY;
+  }
+
+  const expectedAlbum = normalizeLyricsMatch(album);
+  const actualAlbum = normalizeLyricsMatch(candidateAlbum);
+  if (expectedAlbum && actualAlbum === expectedAlbum) score += 1;
+
+  if (duration && duration > 0 && candidateDuration > 0) {
+    const difference = Math.abs(duration - candidateDuration);
+    if (difference > 12) return Number.NEGATIVE_INFINITY;
+    if (difference <= 2) score += 2;
+    else if (difference <= 8) score += 1;
+  }
+  return score;
+}
+
+async function queryLrclib(
+  title: string,
+  artist: string,
+  album: string,
+  timeoutMs = 3500
+): Promise<Record<string, unknown>[] | null> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
-
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const url = `https://lyrics.paxsenix.org/apple-music/lyrics?id=${trackId}&v=2`;
-    const res = await fetch(url, {
+    const params = new URLSearchParams({ track_name: title });
+    if (artist) params.set("artist_name", artist);
+    if (album) params.set("album_name", album);
+    const response = await fetch(`https://lrclib.net/api/search?${params.toString()}`, {
       signal: controller.signal,
       headers: {
-        "User-Agent": "LastWave",
         Accept: "application/json",
-      },
-    });
-    clearTimeout(timeoutId);
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    if (!data) return null;
-
-    // Check if syllable/word-level lyrics array is present
-    if (Array.isArray(data.lyrics) && data.lyrics.length > 0) {
-      const lines: LyricLine[] = [];
-
-      for (let i = 0; i < data.lyrics.length; i++) {
-        const rawLine = data.lyrics[i];
-        const lineWords: LyricWord[] = [];
-        let assembledText = "";
-
-        const textArray = Array.isArray(rawLine.text) ? rawLine.text : [];
-        for (const w of textArray) {
-          if (!w?.text) continue;
-          const startSec = (Number(w.timestamp) || 0) / 1000;
-          const endSec = (Number(w.endtime) || Number(w.timestamp) || 0) / 1000;
-
-          if (w.part && lineWords.length > 0) {
-            lineWords[lineWords.length - 1].text += w.text;
-            lineWords[lineWords.length - 1].end = Math.max(lineWords[lineWords.length - 1].end, endSec);
-            assembledText += w.text;
-          } else {
-            lineWords.push({
-              text: w.text,
-              start: startSec,
-              end: endSec,
-            });
-            assembledText += (assembledText ? " " : "") + w.text;
-          }
-        }
-
-        const lineStart = (Number(rawLine.timestamp) || 0) / 1000;
-        const lineEnd = (Number(rawLine.endtime) || Number(rawLine.timestamp) || 0) / 1000;
-
-        if (assembledText.trim()) {
-          lines.push({
-            id: `apple_${lineStart}_${i}`,
-            time: lineStart,
-            duration: Math.max(0, lineEnd - lineStart),
-            text: assembledText.trim(),
-            words: lineWords.length > 0 ? lineWords : undefined,
-          });
-        }
-      }
-
-      if (lines.length > 0) {
-        return {
-          synced: true,
-          lines,
-          plainLyrics: data.plain || undefined,
-          provider: "apple",
-          trackName: title,
-          artistName: artist,
-        };
-      }
-    }
-
-    // Fallback to LRC if provided in response
-    if (data.lrc && typeof data.lrc === "string") {
-      const lines = parseLrc(data.lrc);
-      if (lines.length > 0) {
-        return {
-          synced: true,
-          lines,
-          plainLyrics: data.plain || undefined,
-          provider: "apple",
-          trackName: title,
-          artistName: artist,
-        };
-      }
-    }
-  } catch {
-    clearTimeout(timeoutId);
-  }
-
-  return null;
-}
-
-// ─── 2. BetterLyrics Word-Sync Provider ───────────────────────────────────────
-
-async function fetchFromBetterLyrics(title: string, artist: string): Promise<LyricsResult | null> {
-  if (!title || !artist) return null;
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-  try {
-    const url = `https://lyrics-api.boidu.dev/getLyrics?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`;
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    if (data?.lrc && typeof data.lrc === "string") {
-      const lines = parseLrc(data.lrc);
-      if (lines.length > 0) {
-        return {
-          synced: true,
-          lines,
-          plainLyrics: data.plain || undefined,
-          provider: "betterlyrics",
-          trackName: title,
-          artistName: artist,
-        };
-      }
-    }
-  } catch {
-    clearTimeout(timeoutId);
-  }
-
-  return null;
-}
-
-// ─── 3. LRCLIB Multi-Search Provider ──────────────────────────────────────────
-
-async function queryLrclib(endpoint: string, queryParams: Record<string, string>): Promise<any> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-  try {
-    const params = new URLSearchParams(queryParams);
-    const res = await fetch(`https://lrclib.net/api/${endpoint}?${params.toString()}`, {
-      signal: controller.signal,
-      headers: {
         "User-Agent": "Mavrixfy-App/1.0 (https://mavrixfy.site)",
       },
     });
-    clearTimeout(timeoutId);
-    if (!res.ok) return null;
-    return await res.json();
+    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) return null;
+    const data: unknown = await response.json();
+    return Array.isArray(data) ? data.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object")) : null;
   } catch {
-    clearTimeout(timeoutId);
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
-function processLrclibItem(item: any): LyricsResult | null {
-  if (!item || typeof item !== "object") return null;
+function processLrclibItem(item: Record<string, unknown>): LyricsResult | null {
+  if (item.instrumental === true) return null;
 
-  if (item.syncedLyrics && typeof item.syncedLyrics === "string") {
-    const lines = parseLrc(item.syncedLyrics);
-    if (lines.length > 0) {
-      return {
-        synced: true,
-        lines,
-        plainLyrics: item.plainLyrics || undefined,
-        provider: "lrclib",
-        trackName: item.name,
-        artistName: item.artistName,
-      };
-    }
+  const syncedLyrics = typeof item.syncedLyrics === "string" ? item.syncedLyrics : "";
+  const lines = parseLrc(syncedLyrics);
+  if (lines.length > 0) {
+    return {
+      synced: true,
+      lines,
+      plainLyrics: typeof item.plainLyrics === "string" ? item.plainLyrics : undefined,
+      provider: "lrclib",
+      trackName: String(item.trackName || item.name || ""),
+      artistName: String(item.artistName || ""),
+    };
   }
 
-  if (item.plainLyrics && typeof item.plainLyrics === "string") {
-    const lines = parsePlainText(item.plainLyrics);
-    if (lines.length > 0) {
-      return {
-        synced: false,
-        lines,
-        plainLyrics: item.plainLyrics,
-        provider: "lrclib",
-        trackName: item.name,
-        artistName: item.artistName,
-      };
-    }
-  }
-
-  return null;
+  const plainLyrics = typeof item.plainLyrics === "string" ? item.plainLyrics : "";
+  const plainLines = parsePlainText(plainLyrics);
+  return plainLines.length > 0 ? {
+    synced: false,
+    lines: plainLines,
+    plainLyrics,
+    provider: "lrclib",
+    trackName: String(item.trackName || item.name || ""),
+    artistName: String(item.artistName || ""),
+  } : null;
 }
 
-async function fetchFromLrclibMulti(title: string, artist: string): Promise<LyricsResult | null> {
+async function fetchFromLrclib(
+  title: string,
+  artist: string,
+  album: string,
+  duration?: number,
+  timeoutMs = 3500
+): Promise<LyricsResult | null> {
   if (!title) return null;
+  const items = await queryLrclib(title, artist, album, timeoutMs);
+  if (!items?.length) return null;
 
-  // Direct exact query
-  const direct = await queryLrclib("get", { track_name: title, artist_name: artist });
-  const directRes = processLrclibItem(direct);
-  if (directRes) return directRes;
+  const ranked = items
+    .map((item) => ({
+      item,
+      score: scoreLyricsCandidate(
+        String(item.trackName || item.name || ""),
+        String(item.artistName || ""),
+        String(item.albumName || ""),
+        Number(item.duration) || 0,
+        title,
+        artist,
+        album,
+        duration
+      ),
+    }))
+    .filter((candidate) => candidate.score >= (artist ? 8 : 6))
+    .sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score;
+      return Number(Boolean(b.item.syncedLyrics)) - Number(Boolean(a.item.syncedLyrics));
+    });
 
-  // Search query
-  const searchList = await queryLrclib("search", { q: `${title} ${artist}`.trim() });
-  if (Array.isArray(searchList)) {
-    const syncedMatch = searchList.find((it) => Boolean(it.syncedLyrics));
-    if (syncedMatch) {
-      const res = processLrclibItem(syncedMatch);
-      if (res) return res;
-    }
-    const plainMatch = searchList.find((it) => Boolean(it.plainLyrics));
-    if (plainMatch) {
-      const res = processLrclibItem(plainMatch);
-      if (res) return res;
-    }
-  }
-
-  return null;
-}
-
-// ─── 4. Lyrics.ovh Fallback Provider ──────────────────────────────────────────
-
-async function fetchFromLyricsOvh(title: string, artist: string): Promise<LyricsResult | null> {
-  if (!title || !artist) return null;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-  try {
-    const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`;
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (!res.ok) return null;
-    const json = await res.json();
-    if (json.lyrics && typeof json.lyrics === "string") {
-      const lines = parsePlainText(json.lyrics);
-      if (lines.length > 0) {
-        return {
-          synced: false,
-          lines,
-          plainLyrics: json.lyrics,
-          provider: "lyrics.ovh",
-          trackName: title,
-          artistName: artist,
-        };
-      }
-    }
-  } catch {
-    clearTimeout(timeoutId);
+  for (const candidate of ranked) {
+    const result = processLrclibItem(candidate.item);
+    if (result) return result;
   }
   return null;
 }
+// ─── Lyrics lookup ─────────────────────────────────────────────────────────────
 
-// ─── Master Pipeline ──────────────────────────────────────────────────────────
+async function fetchLyrics(song: FetchSongParams, cacheKey: string): Promise<LyricsResult> {
+  await loadPersistentCache();
+  const cached = memoryCache.get(cacheKey);
+  if (cached) return cached;
+
+  const negativeUntil = negativeCacheUntil.get(cacheKey) || 0;
+  if (negativeUntil > Date.now()) return { synced: false, lines: [], provider: "none" };
+  negativeCacheUntil.delete(cacheKey);
+
+  const title = sanitizeTrackTitle(song.title) || song.title.trim();
+  const coreTitle = getCoreTrackTitle(title);
+  const artist = sanitizeArtistName(song.artist || "");
+  const album = sanitizeTrackTitle(song.album || "");
+  const deadline = Date.now() + MAX_LOOKUP_DURATION_MS;
+  const remaining = () => Math.max(0, deadline - Date.now());
+  let result = remaining() > 0
+    ? await fetchFromLrclib(title, artist, album, song.duration, Math.min(3500, remaining()))
+    : null;
+
+  if (!result && remaining() > 0) {
+    result = await fetchFromBini(title, artist, song.duration, Math.min(4500, remaining()));
+  }
+
+  if (!result && coreTitle && coreTitle !== title && remaining() > 0) {
+    result = await fetchFromLrclib(coreTitle, artist, album, song.duration, Math.min(3500, remaining()));
+  }
+
+  if (!result && coreTitle && coreTitle !== title && remaining() > 0) {
+    result = await fetchFromBini(coreTitle, artist, song.duration, Math.min(4500, remaining()));
+  }
+
+  if (result?.lines.length) {
+    memoryCache.set(cacheKey, result);
+    negativeCacheUntil.delete(cacheKey);
+    void persistLyricsEntry(cacheKey, result);
+    return result;
+  }
+
+  negativeCacheUntil.set(cacheKey, Date.now() + NEGATIVE_CACHE_TTL_MS);
+  return { synced: false, lines: [], provider: "none" };
+}
 
 export async function getSongLyrics(song: FetchSongParams): Promise<LyricsResult> {
-  if (!song?.title) {
+  if (!song?.title?.trim()) return { synced: false, lines: [], provider: "none" };
+
+  const cacheKey = lyricsCacheKey(song);
+  const cached = memoryCache.get(cacheKey);
+  if (cached) return cached;
+  if ((negativeCacheUntil.get(cacheKey) || 0) > Date.now()) {
     return { synced: false, lines: [], provider: "none" };
   }
 
-  const cacheKey = `${song.id || ""}_${song.title}_${song.artist || ""}`.toLowerCase();
+  const pending = pendingRequests.get(cacheKey);
+  if (pending) return pending;
 
-  // 1. Check in-memory cache – skip "none" so a new provider attempt can succeed
-  const cached = memoryCache.get(cacheKey);
-  if (cached && cached.provider !== "none") return cached;
-
-  // 2. Check persistent storage cache
-  await loadPersistentCache();
-  const persistentCached = memoryCache.get(cacheKey);
-  if (persistentCached && persistentCached.provider !== "none") return persistentCached;
-
-  const fullClean = sanitizeTrackTitle(song.title);
-  const coreTitle = getCoreTrackTitle(song.title);
-  const cleanArtist = sanitizeArtistName(song.artist || "");
-
-  // Priority 0: Bini (lyrics-api.binimum.org) – Apple Music TTML, real word-by-word sync
-  let result = await fetchFromBini(fullClean || song.title, cleanArtist, song.duration);
-
-  if (!result && coreTitle && coreTitle !== fullClean) {
-    result = await fetchFromBini(coreTitle, cleanArtist, song.duration);
-  }
-
-  // Priority 1: Apple Music via Paxsenix (syllable-level, may return 503 when busy)
-  if (!result) {
-    result = await fetchFromAppleMusicPaxsenix(fullClean || song.title, cleanArtist, song.duration);
-  }
-  if (!result && coreTitle && coreTitle !== fullClean) {
-    result = await fetchFromAppleMusicPaxsenix(coreTitle, cleanArtist, song.duration);
-  }
-
-  // Priority 2: BetterLyrics Word-sync API (boidu.dev)
-  if (!result) {
-    result = await fetchFromBetterLyrics(fullClean || song.title, cleanArtist);
-  }
-
-  // Priority 3: LRCLIB Multi-Search (line-synced LRC)
-  if (!result) {
-    result = await fetchFromLrclibMulti(fullClean || song.title, cleanArtist);
-  }
-  if (!result && coreTitle && coreTitle !== fullClean) {
-    result = await fetchFromLrclibMulti(coreTitle, cleanArtist);
-  }
-
-  // Priority 4: Plain text fallback (lyrics.ovh)
-  if (!result && cleanArtist) {
-    result = await fetchFromLyricsOvh(coreTitle || fullClean || song.title, cleanArtist);
-  }
-
-  const finalResult: LyricsResult = result || {
-    synced: false,
-    lines: [],
-    provider: "none",
-  };
-
-  // Cache result
-  if (finalResult.lines.length > 0) {
-    void persistLyricsEntry(cacheKey, finalResult);
-  } else {
-    memoryCache.set(cacheKey, finalResult);
-  }
-
-  return finalResult;
+  const request = fetchLyrics(song, cacheKey).finally(() => {
+    pendingRequests.delete(cacheKey);
+  });
+  pendingRequests.set(cacheKey, request);
+  return request;
 }

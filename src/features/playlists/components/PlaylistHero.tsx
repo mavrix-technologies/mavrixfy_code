@@ -1,4 +1,4 @@
-import DownloadCollectionButton from "@/components/DownloadCollectionButton";
+import { CollectionActionRow } from "@/components/CollectionActionRow";
 import Colors from "@/constants/colors";
 import { colorWithAlpha,useArtworkPalette } from "@/lib/colorExtractor";
 import { type Song } from "@/lib/musicData";
@@ -6,64 +6,53 @@ import { Ionicons } from "@expo/vector-icons";
 import { MusicArtwork } from "@/components/MusicArtwork";
 import { LinearGradient } from "expo-linear-gradient";
 import React,{ useMemo } from "react";
-import {
-Pressable,
-StyleSheet,
-Text,
-View,
-} from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 export interface PlaylistHeroStateFlags {
   isFirestoreSource: boolean;
   playlistIsPublic: boolean;
-  canEdit: boolean;
   loading: boolean;
   isPlayingFromThisPlaylist: boolean;
   isPlaying: boolean;
+  isLiked: boolean;
 }
 
 interface PlaylistHeroProps {
   topInset: number;
   playlistCover: string;
   playlistName: string;
-  playlistDescription: string;
   collectionKind: string;
-  collectionKindLower: string;
   effectiveSongCount: number;
   totalMinutes: number;
   stateFlags: PlaylistHeroStateFlags;
   songs: Song[];
-  downloadCollectionId: string;
   backgroundColor?: string;
-  onOpenEdit: () => void;
   onPlayAll: () => void;
   onShufflePlay: () => void;
+  onLike: () => void;
 }
 
 export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
   topInset,
   playlistCover,
   playlistName,
-  playlistDescription,
   collectionKind,
-  collectionKindLower,
   effectiveSongCount,
   totalMinutes,
   stateFlags,
   songs,
-  downloadCollectionId,
   backgroundColor,
-  onOpenEdit,
   onPlayAll,
   onShufflePlay,
+  onLike,
 }) => {
   const {
     isFirestoreSource,
     playlistIsPublic,
-    canEdit,
     loading,
     isPlayingFromThisPlaylist,
     isPlaying,
+    isLiked,
   } = stateFlags;
 
   const palette = useArtworkPalette(playlistCover);
@@ -149,84 +138,17 @@ export const PlaylistHero: React.FC<PlaylistHeroProps> = ({
           {displayName}
         </Text>
 
-        {/* Optional Description */}
-        {playlistDescription ? (
-          <Text style={styles.description} numberOfLines={2}>
-            {playlistDescription}
-          </Text>
-        ) : null}
+        <CollectionActionRow
+          onShuffle={onShufflePlay}
+          onPlay={onPlayAll}
+          onLike={onLike}
+          isPlaying={isPlayingFromThisPlaylist && isPlaying}
+          isLiked={isLiked}
+          disabled={loading || songs.length === 0}
+          playLabel="Play"
+          likedLabel="playlist"
+        />
 
-        {/* ── Signature 3-Button Action Row (Shuffle, Play, Download/Edit) ── */}
-        <View style={styles.heroActions}>
-          {/* Left: Shuffle Button */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.appleMusicCircleBtn,
-              pressed && styles.circleBtnPressed,
-            ]}
-            onPress={onShufflePlay}
-            disabled={loading || songs.length === 0}
-            accessibilityRole="button"
-            accessibilityLabel="Shuffle playlist"
-          >
-            <Ionicons name="shuffle" size={18} color="#FFFFFF" />
-          </Pressable>
-
-          {/* Center: Prominent White Play Button */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.appleMusicMainPlayBtn,
-              pressed && styles.mainPlayBtnPressed,
-            ]}
-            onPress={onPlayAll}
-            disabled={loading || songs.length === 0}
-            accessibilityRole="button"
-            accessibilityLabel={
-              isPlayingFromThisPlaylist && isPlaying
-                ? "Pause playlist"
-                : "Play playlist"
-            }
-          >
-            <Ionicons
-              name={isPlayingFromThisPlaylist && isPlaying ? "pause" : "play"}
-              size={23}
-              color="#000000"
-              style={
-                !isPlayingFromThisPlaylist || !isPlaying
-                  ? { marginLeft: 2 }
-                  : undefined
-              }
-            />
-          </Pressable>
-
-          {/* Right: Download Collection or Edit Button */}
-          {songs.length > 0 ? (
-            <View style={styles.appleMusicCircleBtn}>
-              <DownloadCollectionButton
-                collectionId={downloadCollectionId}
-                collectionName={displayName}
-                collectionImage={playlistCover}
-                collectionType={collectionKindLower as "playlist" | "album"}
-                songs={songs}
-                compact
-              />
-            </View>
-          ) : canEdit ? (
-            <Pressable
-              style={({ pressed }) => [
-                styles.appleMusicCircleBtn,
-                pressed && styles.circleBtnPressed,
-              ]}
-              onPress={onOpenEdit}
-              accessibilityRole="button"
-              accessibilityLabel="Edit playlist"
-            >
-              <Ionicons name="pencil" size={16} color="#FFFFFF" />
-            </Pressable>
-          ) : (
-            <View style={{ width: 38, height: 38 }} />
-          )}
-        </View>
       </View>
     </View>
   );
@@ -284,48 +206,5 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0, 0, 0, 0.85)",
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,
-  },
-  description: {
-    color: "rgba(255, 255, 255, 0.68)",
-    fontSize: 11.5,
-    lineHeight: 15,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-    paddingHorizontal: 24,
-  },
-
-  heroActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
-    marginTop: 6,
-  },
-  appleMusicCircleBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(255, 255, 255, 0.16)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.18)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  circleBtnPressed: {
-    opacity: 0.75,
-    transform: [{ scale: 0.95 }],
-  },
-  appleMusicMainPlayBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    boxShadow: "0px 6px 16px rgba(0, 0, 0, 0.35)",
-  },
-  mainPlayBtnPressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.94 }],
   },
 });
