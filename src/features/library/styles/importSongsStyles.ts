@@ -233,25 +233,11 @@ export const styles = StyleSheet.create({
     color: Colors.subtext,
     flexShrink: 1,
   },
-  matchBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-  },
-  matchBadgeHigh: {
-    backgroundColor: "rgba(38, 225, 154, 0.18)",
-  },
-  matchBadgeMedium: {
-    backgroundColor: "rgba(255, 193, 7, 0.18)",
-  },
-  matchBadgeLow: {
-    backgroundColor: "rgba(244, 67, 54, 0.18)",
-  },
-  matchBadgeText: {
-    fontSize: 10,
-    fontFamily: "Inter_600SemiBold",
-    color: Colors.text,
+  songStatus: {
+    marginTop: 3,
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: Colors.inactive,
   },
   removeButton: {
     padding: 4,

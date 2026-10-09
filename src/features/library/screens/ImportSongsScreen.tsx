@@ -147,7 +147,7 @@ export function ImportSongsScreen() {
           {/* Clean Title & Subtitle */}
           <Text style={styles.title}>Import Songs</Text>
           <Text style={styles.subtitle}>
-            Select a CSV or TXT file to import songs into your library.
+            Choose a CSV or TXT file. We’ll match your songs in Mavrixfy Music before adding them.
           </Text>
 
           {/* Primary Action Button */}

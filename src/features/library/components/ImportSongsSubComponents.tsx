@@ -35,9 +35,9 @@ export function ImportedSongRow({
 
   return (
     <View style={styles.songItem}>
-      {song.imageUrl ? (
+      {song.matchedSong?.coverUrl ? (
         <Image
-          source={{ uri: song.imageUrl }}
+          source={{ uri: song.matchedSong.coverUrl }}
           style={styles.songArtwork}
           contentFit="cover"
           cachePolicy="memory-disk"
@@ -50,31 +50,14 @@ export function ImportedSongRow({
 
       <View style={styles.songInfo}>
         <Text style={styles.songTitle} numberOfLines={1}>
-          {song.title}
+          {song.matchedSong?.title || song.title}
         </Text>
         <View style={styles.songMetaRow}>
           <Text style={styles.songArtist} numberOfLines={1}>
-            {song.artist}
+            {song.matchedSong?.artist || song.artist || "Unknown artist"}
           </Text>
-          {song.matchConfidence ? (
-            <View
-              style={[
-                styles.matchBadge,
-                song.matchConfidence === "high" && styles.matchBadgeHigh,
-                song.matchConfidence === "medium" && styles.matchBadgeMedium,
-                song.matchConfidence === "low" && styles.matchBadgeLow,
-              ]}
-            >
-              <Text style={styles.matchBadgeText}>
-                {song.matchConfidence === "high"
-                  ? "High"
-                  : song.matchConfidence === "medium"
-                  ? "Good"
-                  : "Low"}
-              </Text>
-            </View>
-          ) : null}
         </View>
+        {song.message ? <Text style={styles.songStatus} numberOfLines={1}>{song.message}</Text> : null}
       </View>
 
       <Pressable

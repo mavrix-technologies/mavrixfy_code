@@ -1,47 +1,14 @@
+import type { Song } from "@/lib/musicData";
+
 export interface ParsedSong {
   title: string;
   artist: string;
   album?: string;
-  duration?: string;
-  imageUrl?: string;
-  audioUrl?: string;
-  status: 'ready' | 'added' | 'error' | 'searching';
+  /** Source duration in seconds, never milliseconds or formatted display text. */
+  duration?: number;
+  status: "ready" | "error";
   message?: string;
-  matchConfidence?: 'high' | 'medium' | 'low';
-  spotifyUri?: string;
-  isrc?: string;
-  popularity?: number;
-  explicit?: boolean;
-}
-
-export interface SpotifyTrack {
-  id: string;
-  name: string;
-  artists: { name: string }[];
-  album: {
-    name: string;
-    images: { url: string }[];
-  };
-  duration_ms: number;
-  preview_url?: string;
-  added_at: string;
-  status: 'ready' | 'added' | 'error' | 'searching' | 'skipped';
-  message?: string;
-}
-
-export interface ImportProgress {
-  total: number;
-  processed: number;
-  added: number;
-  skipped: number;
-  errors: number;
-  percentage: number;
-}
-
-export interface MatchResult {
-  song: any;
-  confidence: number;
-  matchScore: number;
+  matchedSong?: Song;
 }
 
 export interface FileParseResult {

@@ -1,5 +1,5 @@
 import { sortedCopy } from "@/lib/arrayUtils";
-import { readLikedSong, mergeLikedSongIdentities, youtubeIdentity, likedAtMillis } from "@/services/liked-songs/likedSongFormat";
+import { readLikedSong, mergeLikedSongIdentities, youtubeIdentity, youtubeLikedMetadata, likedAtMillis } from "@/services/liked-songs/likedSongFormat";
 import {
 removeCachedPlaylist,
 setCachedPlaylist,
@@ -298,15 +298,20 @@ export async function getPlaylistById(playlistId: string): Promise<FirestorePlay
 export function firestorePlaylistToLocalSongs(playlist: FirestorePlaylist): any[] {
   if (!playlist || !playlist.songs) return [];
 
-  return playlist.songs.map((song: any) => ({
-    id: song.id || song.songId || "",
-    title: song.title || song.name || "",
-    artist: song.artist || song.artists || "",
-    coverUrl: song.coverUrl || song.image || song.imageUrl || "",
-    audioUrl: song.audioUrl || song.streamUrl || song.url || "",
-    duration: song.duration || 0,
-    album: song.album || "",
-  }));
+  return playlist.songs.map((song: any) => {
+    const normalized = {
+      id: song.id || song.songId || "",
+      title: song.title || song.name || "",
+      artist: song.artist || song.artists || "",
+      coverUrl: song.coverUrl || song.image || song.imageUrl || "",
+      audioUrl: song.audioUrl || song.streamUrl || song.url || "",
+      duration: song.duration || 0,
+      album: song.album || "",
+    };
+    const videoId = youtubeIdentity(song);
+    return videoId ? { ...normalized, ...youtubeLikedMetadata({ ...normalized, genre: "", source: "youtube", youtubeVideoId: videoId }),
+      ...(song.artistRefs?.length ? { artistRefs: song.artistRefs } : {}) } : normalized;
+  });
 }
 
 // Add liked song to Firestore (matches web app exactly)
@@ -409,6 +414,8 @@ export async function addSongToFirestorePlaylist(playlistId: string, song: any):
   try {
     if (!db) return false;
 
+    const videoId = youtubeIdentity(song);
+    if (song.source === "youtube" && !videoId) return false;
     const playlistRef = doc(db, "playlists", playlistId);
     const songs = await runTransaction(db, async (transaction) => {
       const snapshot = await transaction.get(playlistRef);
@@ -418,7 +425,9 @@ export async function addSongToFirestorePlaylist(playlistId: string, song: any):
       const next = [...existing, {
         id: song.id, title: song.title, artist: song.artist,
         album: song.album || "", imageUrl: song.coverUrl || "",
-        audioUrl: song.audioUrl || song.streamUrl || "",
+        audioUrl: videoId ? "" : song.audioUrl || song.streamUrl || "",
+        ...(videoId ? { source: "youtube", youtubeUrl: `https://music.youtube.com/watch?v=${videoId}` } : {}),
+        ...(videoId && song.artistRefs?.length ? { artistRefs: song.artistRefs } : {}),
         duration: song.duration || 0, addedAt: new Date().toISOString(),
       }];
       transaction.update(playlistRef, { songs: next, songCount: next.length, updatedAt: serverTimestamp() });

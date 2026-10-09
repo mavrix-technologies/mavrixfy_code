@@ -6,11 +6,12 @@ addLikedSongToFirestore,
 addSongToFirestorePlaylist,
 createFirestorePlaylist,
 getUserFirestorePlaylists,
+getLikedSongsFromFirestore,
+getPlaylistById,
 } from "@/lib/firestore";
 import { triggerImpact } from "@/lib/haptics";
-import { logger } from "@/lib/logger";
-import { type Song } from "@/lib/musicData";
-import { getMatchConfidence,searchSong } from "@/lib/song-matcher";
+import { youtubeIdentity } from "@/services/liked-songs/likedSongFormat";
+import { dedupeImportRows,matchImportedSongs } from "@/lib/song-matcher";
 import { addSongToPlaylist,createUserPlaylist,getUserPlaylists } from "@/lib/storage";
 import { ParsedSong } from "@/types/import";
 import { safeGoBack } from "@/utils/navigation";
@@ -39,7 +40,7 @@ ImportedSongRow
 } from "../components/ImportSongsSubComponents";
 
 function getParsedSongKey(song: ParsedSong): string {
-  return song.spotifyUri || song.isrc || `${song.title}-${song.artist}`;
+  return JSON.stringify([song.title, song.artist, song.duration || 0]);
 }
 
 async function readSelectedFileContent(uri: string): Promise<string> {
@@ -68,11 +69,7 @@ export function ImportSongsFileScreen() {
   const { user } = useAuth();
 
   const isMountedRef = useRef(true);
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  const importingRef = useRef(false);
 
   const [step, setStep] = useState<ImportStep>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -90,9 +87,9 @@ export function ImportSongsFileScreen() {
   const [duplicates, setDuplicates] = useState(0);
 
   // Destination modal state
-  const [importDestination, setImportDestination] = useState<"liked" | "new-playlist" | "existing-playlist">("liked");
+  const [importDestination, setImportDestination] = useState<"liked" | "new-playlist" | "existing-playlist">(() => user?.id ? "liked" : "new-playlist");
   const [showDestinationModal, setShowDestinationModal] = useState(false);
-  const [newPlaylistName, setNewPlaylistName] = useState("");
+  const [newPlaylistName, setNewPlaylistName] = useState(() => (fileName || "Imported Playlist").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim());
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [userPlaylists, setUserPlaylists] = useState<ImportDestinationPlaylist[]>([]);
 
@@ -100,7 +97,7 @@ export function ImportSongsFileScreen() {
   const isFirestorePlaylistRef = useRef(false);
 
   const readySongCount = useMemo(
-    () => parsedSongs.reduce((count, song) => count + (song.audioUrl ? 1 : 0), 0),
+    () => parsedSongs.reduce((count, song) => count + (song.matchedSong ? 1 : 0), 0),
     [parsedSongs]
   );
 
@@ -118,165 +115,38 @@ export function ImportSongsFileScreen() {
     }
   }, [user]);
 
-  // Search all parsed songs with controlled batch concurrency (10 parallel per batch)
-  const searchAllSongs = useCallback(async (songs: ParsedSong[]) => {
-    if (songs.length === 0) return;
-    if (!isMountedRef.current) return;
-
-    setStep("searching");
-    setProcessedCount(0);
-    setFoundCount(0);
-    setSearchProgress(0);
-
-    const updatedSongs = [...songs];
-    const BATCH_SIZE = 10;
-    let found = 0;
-    let processed = 0;
-
-    for (let batchStart = 0; batchStart < updatedSongs.length; batchStart += BATCH_SIZE) {
-      if (!isMountedRef.current) return;
-      const batchEnd = Math.min(batchStart + BATCH_SIZE, updatedSongs.length);
-      const batchPromises: Promise<void>[] = [];
-
-      for (let i = batchStart; i < batchEnd; i++) {
-        const song = updatedSongs[i];
-        batchPromises.push(
-          (async () => {
-            try {
-              if (!isMountedRef.current) return;
-              const matchResult = await searchSong(song.title, song.artist, song.album, song);
-              if (!isMountedRef.current) return;
-
-              if (matchResult && matchResult.song) {
-                const matchedSong = matchResult.song;
-                let audioUrl = "";
-                const downloadUrls = matchedSong.downloadUrl;
-                if (downloadUrls) {
-                  if (Array.isArray(downloadUrls)) {
-                    const urls = downloadUrls;
-                    const downloadUrl =
-                      urls[urls.length - 1] || urls[4] || urls[3] || urls[2] || urls[1] || urls[0];
-                    audioUrl = downloadUrl?.url || downloadUrl?.link || downloadUrl || "";
-                  } else if (typeof downloadUrls === "string") {
-                    audioUrl = downloadUrls;
-                  }
-                }
-
-                let imageUrl = "";
-                const matchedImages = matchedSong.image;
-                if (matchedImages) {
-                  if (Array.isArray(matchedImages)) {
-                    const images = matchedImages;
-                    const image = images[images.length - 1] || images[2] || images[1] || images[0];
-                    imageUrl = image?.url || image?.link || image || "";
-                  } else if (typeof matchedImages === "string") {
-                    imageUrl = matchedImages;
-                  }
-                }
-
-                if (!imageUrl && matchResult.song.imageUrl) imageUrl = matchResult.song.imageUrl;
-                if (!audioUrl && matchResult.song.audioUrl) audioUrl = matchResult.song.audioUrl;
-
-                const confidence = getMatchConfidence(matchResult.confidence);
-
-                updatedSongs[i] = {
-                  ...song,
-                  status: "ready",
-                  message:
-                    confidence === "high"
-                      ? "High match"
-                      : confidence === "medium"
-                      ? "Good match"
-                      : "Low match",
-                  matchConfidence: confidence,
-                  imageUrl,
-                  audioUrl,
-                  duration: matchResult.song.duration || song.duration,
-                  album: matchResult.song.album?.name || matchResult.song.album || song.album,
-                };
-
-                if (audioUrl) found++;
-              } else {
-                updatedSongs[i] = {
-                  ...song,
-                  status: "ready",
-                  message: "Not found",
-                  matchConfidence: "low",
-                };
-              }
-            } catch {
-              updatedSongs[i] = {
-                ...song,
-                status: "ready",
-                message: "Search failed",
-              };
-            } finally {
-              processed++;
-              if (isMountedRef.current) {
-                setProcessedCount(processed);
-                setFoundCount(found);
-                setSearchProgress(Math.floor((processed / updatedSongs.length) * 100));
-              }
-            }
-          })()
-        );
-      }
-
-      await Promise.all(batchPromises);
-
-      // Brief yield between batches to keep UI fluid
-      if (batchEnd < updatedSongs.length) {
-        await new Promise((resolve) => setTimeout(resolve, 150));
-      }
-    }
-
-    if (!isMountedRef.current) return;
-    setParsedSongs(updatedSongs);
-    setStep("review");
-  }, []);
-
-  // Read and parse file on mount
-  const loadFile = useCallback(async () => {
-    if (!fileUri) {
-      setErrorMessage("No file selected");
-      setStep("error");
-      return;
-    }
-
-    try {
-      const content = await readSelectedFileContent(fileUri);
-      if (!isMountedRef.current) return;
-
-      if (!content || content.trim().length === 0) {
-        setErrorMessage("File is empty or could not be read");
-        setStep("error");
-        return;
-      }
-
-      const result = parseFile(content, fileName || "file.txt");
-      if (!isMountedRef.current) return;
-
-      if (result.errors.length > 0 && result.songs.length === 0) {
-        setErrorMessage(
-          `Could not parse any songs.\n${result.errors.slice(0, 4).join("\n")}`
-        );
-        setStep("error");
-        return;
-      }
-
-      setParsedSongs(result.songs);
-      await searchAllSongs(result.songs);
-    } catch (error: any) {
-      if (isMountedRef.current) {
-        setErrorMessage(`Failed to read file: ${error?.message || "Unknown error"}`);
-        setStep("error");
-      }
-    }
-  }, [fileName, fileUri, searchAllSongs]);
-
   useEffect(() => {
-    void Promise.resolve().then(loadFile);
-  }, [loadFile]);
+    const controller = new AbortController();
+    isMountedRef.current = true;
+    async function loadAndMatch() {
+      if (!fileUri) throw new Error("No file selected");
+      const content = await readSelectedFileContent(fileUri);
+      if (controller.signal.aborted) return;
+      const result = parseFile(content, fileName || "file.txt");
+      if (!result.songs.length) throw new Error(result.errors.slice(0, 4).join("\n") || "No songs found in this file.");
+      const songs = dedupeImportRows(result.songs);
+      setParsedSongs(songs);
+      setProcessedCount(0);
+      setFoundCount(0);
+      setSearchProgress(0);
+      setStep("searching");
+      const matched = await matchImportedSongs(songs, controller.signal, (processed, found) => {
+        if (controller.signal.aborted) return;
+        setProcessedCount(processed);
+        setFoundCount(found);
+        setSearchProgress(Math.floor(processed / songs.length * 100));
+      });
+      if (controller.signal.aborted) return;
+      setParsedSongs(matched);
+      setStep("review");
+    }
+    void loadAndMatch().catch(error => {
+      if (controller.signal.aborted) return;
+      setErrorMessage(error instanceof Error ? error.message : "Could not read this file.");
+      setStep("error");
+    });
+    return () => { isMountedRef.current = false; controller.abort(); };
+  }, [fileName, fileUri]);
 
   const openDestinationModal = useCallback(() => {
     setShowDestinationModal(true);
@@ -288,7 +158,13 @@ export function ImportSongsFileScreen() {
   }, []);
 
   const handleConfirmImport = async () => {
-    if (parsedSongs.length === 0) return;
+    if (!readySongCount || importingRef.current) return;
+    if (importDestination === "liked" && !user?.id) {
+      setErrorMessage("Sign in to import liked songs, or choose a playlist.");
+      setStep("error");
+      return;
+    }
+    importingRef.current = true;
 
     setShowDestinationModal(false);
     void triggerImpact(ImpactFeedbackStyle.Medium);
@@ -331,6 +207,19 @@ export function ImportSongsFileScreen() {
         isNewPlaylistFirestore = isFirestore;
       }
 
+      if (importDestination !== "liked" && !playlistId) throw new Error("Choose a valid destination playlist.");
+      if (!isMountedRef.current) return;
+      const existingSongs = importDestination === "liked"
+        ? await getLikedSongsFromFirestore(user!.id)
+        : isNewPlaylistFirestore
+          ? (await getPlaylistById(playlistId!))?.songs || []
+          : (await getUserPlaylists()).find(playlist => playlist.id === playlistId)?.songs || [];
+      if (!isMountedRef.current) return;
+      const existingIds = new Set(existingSongs.map(song => {
+        const id = youtubeIdentity(song);
+        return id ? "youtube_" + id : song.id;
+      }));
+
       let added = 0;
       let skipped = 0;
       let dupes = 0;
@@ -340,7 +229,7 @@ export function ImportSongsFileScreen() {
         if (!isMountedRef.current) return;
         const song = parsedSongs[i];
 
-        if (!song.audioUrl) {
+        if (!song.matchedSong) {
           skipped++;
           setSkippedCount(skipped);
           setImportProgress(Math.floor(((i + 1) / parsedSongs.length) * 100));
@@ -348,20 +237,13 @@ export function ImportSongsFileScreen() {
         }
 
         try {
-          const songId = `${song.title.toLowerCase().replace(/[^a-z0-9]/g, "-")}-${song.artist
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, "-")}`.substring(0, 100);
-
-          const appSong: Song = {
-            id: songId,
-            title: song.title,
-            artist: song.artist,
-            album: song.album || "",
-            coverUrl: song.imageUrl || "",
-            audioUrl: song.audioUrl,
-            duration: parseInt(song.duration || "0", 10),
-            genre: "",
-          };
+          const appSong = song.matchedSong;
+          if (existingIds.has(appSong.id)) {
+            dupes++;
+            setDuplicates(dupes);
+            setImportProgress(Math.floor(((i + 1) / parsedSongs.length) * 100));
+            continue;
+          }
 
           let addSuccess = false;
 
@@ -381,24 +263,18 @@ export function ImportSongsFileScreen() {
             }
           }
 
-          if (!addSuccess) {
-            dupes++;
-            setDuplicates(dupes);
-          } else {
-            added++;
-            setAddedCount(added);
-          }
-        } catch (error) {
-          logger.error("Failed to add imported song", { title: song.title, error });
+          if (!isMountedRef.current) return;
+          if (!addSuccess) throw new Error("Song could not be saved.");
+          existingIds.add(appSong.id);
+          added++;
+          setAddedCount(added);
+        } catch {
+          if (!isMountedRef.current) return;
           skipped++;
           setSkippedCount(skipped);
         }
 
         setImportProgress(Math.floor(((i + 1) / parsedSongs.length) * 100));
-      }
-
-      if (isNewPlaylistFirestore) {
-        await new Promise((resolve) => setTimeout(resolve, 600));
       }
 
       if (isMountedRef.current) {
@@ -409,6 +285,8 @@ export function ImportSongsFileScreen() {
         setErrorMessage(error?.message || "Import failed");
         setStep("error");
       }
+    } finally {
+      importingRef.current = false;
     }
   };
 
@@ -500,7 +378,7 @@ export function ImportSongsFileScreen() {
           </View>
 
           {skippedCount > 0 && (
-            <Text style={styles.skippedNoticeText}>{skippedCount} skipped (no stream match)</Text>
+            <Text style={styles.skippedNoticeText}>{skippedCount} not added</Text>
           )}
         </View>
       </View>
@@ -526,7 +404,7 @@ export function ImportSongsFileScreen() {
           )}
           {skippedCount > 0 && (
             <Text style={styles.completeDetailText}>
-              {skippedCount} {skippedCount === 1 ? "song" : "songs"} could not be matched
+              {skippedCount} {skippedCount === 1 ? "song" : "songs"} could not be matched or saved
             </Text>
           )}
 
