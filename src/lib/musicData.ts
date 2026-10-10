@@ -121,7 +121,7 @@ export function normalizeAudioCandidates(downloadUrls: unknown): AudioCandidate[
 
   if (typeof downloadUrls === "string") {
     const url = downloadUrls.trim();
-    return url ? [{ quality: "320kbps", url }] : [];
+    return url ? [{ quality: "", url }] : [];
   }
 
   if (Array.isArray(downloadUrls)) {
@@ -134,7 +134,7 @@ export function normalizeAudioCandidates(downloadUrls: unknown): AudioCandidate[
         if (!item || typeof item !== "object") return null;
         const obj = item as { quality?: unknown; url?: unknown; link?: unknown };
         const urlValue = typeof obj.url === "string" ? obj.url : typeof obj.link === "string" ? obj.link : "";
-        const qualityValue = typeof obj.quality === "string" ? obj.quality : "";
+        const qualityValue = typeof obj.quality === "string" ? obj.quality.trim() : "";
         const url = urlValue.trim();
         if (!url) return null;
         return { quality: qualityValue, url };
@@ -157,8 +157,7 @@ export function getBestAudioUrl(downloadUrls: unknown): string {
   if (candidates.length === 0) return "";
 
   const sorted = sortedCopy(candidates, (a, b) => {
-    const qualityOrder: Record<string, number> = { "320kbps": 4, "160kbps": 3, "96kbps": 2, "48kbps": 1, "12kbps": 0 };
-    return (qualityOrder[b.quality] || 0) - (qualityOrder[a.quality] || 0);
+    return parseBitrateFromQuality(b.quality) - parseBitrateFromQuality(a.quality);
   });
   return sorted[0]?.url || "";
 }
@@ -190,22 +189,8 @@ export function parseBitrateFromQuality(quality: string | undefined): number {
   if (!quality) return 0;
   const match = String(quality).match(/(\d+)\s*k/i);
   if (match) return parseInt(match[1], 10);
-  const direct: Record<string, number> = {
-    "320kbps": 320,
-    "160kbps": 160,
-    "96kbps": 96,
-    "48kbps": 48,
-    "12kbps": 12,
-  };
-  return direct[quality.toLowerCase()] || 0;
+  return 0;
 }
-
-export const QUALITY_LADDER: Record<StreamingQuality, number[]> = {
-  auto: [160, 96, 48, 320, 12],
-  low: [96, 48, 12, 160, 320],
-  medium: [160, 96, 48, 320, 12],
-  high: [320, 160, 96, 48, 12],
-} as const;
 
 export const QUALITY_LABELS: Record<StreamingQuality, string[]> = {
   auto: ["160kbps", "96kbps", "48kbps", "320kbps", "12kbps"],
@@ -230,7 +215,7 @@ export function resolveAudioStreamWithQuality(
     const pref = targetPreferences[i].toLowerCase();
     const found = candidatesByQuality.get(pref);
     if (found && found.url) {
-      const bitrate = parseBitrateFromQuality(found.quality) || (quality === "high" ? 320 : quality === "medium" ? 160 : 96);
+      const bitrate = parseBitrateFromQuality(found.quality);
       return {
         url: found.url,
         bitrate,
@@ -240,13 +225,13 @@ export function resolveAudioStreamWithQuality(
     }
   }
 
-  const bestUrl = getBestAudioUrl(downloadUrls);
-  if (!bestUrl) return null;
+  const best = sortedCopy(candidates, (a, b) => parseBitrateFromQuality(b.quality) - parseBitrateFromQuality(a.quality))[0];
+  const bitrate = parseBitrateFromQuality(best.quality);
 
   return {
-    url: bestUrl,
-    bitrate: 160,
-    qualityLabel: "160kbps",
+    url: best.url,
+    bitrate,
+    qualityLabel: best.quality || "Original audio",
     isFallback: true,
   };
 }

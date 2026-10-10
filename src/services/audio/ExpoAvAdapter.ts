@@ -1,8 +1,8 @@
 /**
- * expo-audio based player — Expo Go fallback.
- * Uses expo-audio (SDK 54+), the modern replacement for expo-av.
+ * Expo Audio player for the Expo Go runtime. Custom builds use StandardAudioPlayer.
  */
 import type { Song } from "@/lib/musicData";
+import { logger } from "@/lib/logger";
 import type { AudioPlayer } from "expo-audio";
 import { createAudioPlayer,setAudioModeAsync } from "expo-audio";
 import { isPrematurePlaybackEnd, playbackDuration, playbackPosition } from "./audioTimeline";
@@ -13,6 +13,7 @@ import { isPrematurePlaybackEnd, playbackDuration, playbackPosition } from "./au
 let activePlayer: AudioPlayer | null = null;
 let standbyPlayer: AudioPlayer | null = null;
 let standbyUrl: string | null = null;
+let standbyHeaders = "";
 let standbyGeneration = 0;
 type PlayerSubscription = {
   remove?: () => void;
@@ -24,6 +25,7 @@ type PlayerSubscriptions = {
 
 const playerSubscriptions = new WeakMap<AudioPlayer, PlayerSubscriptions>();
 const cancelReadyWait = new WeakMap<AudioPlayer, () => void>();
+const cancelStartWait = new WeakMap<AudioPlayer, () => void>();
 const initialSeekPending = new WeakSet<AudioPlayer>();
 const finishedPlayers = new WeakSet<AudioPlayer>();
 const resolvedDurations = new WeakMap<AudioPlayer, number>();
@@ -74,8 +76,9 @@ function killPlayer(p: AudioPlayer | null): void {
   if (!p) return;
   cancelReadyWait.get(p)?.();
   cancelReadyWait.delete(p);
-  try { (p as any).clearLockScreenControls?.(); } catch {}
-  try { (p as any).setActiveForLockScreen?.(false); } catch {}
+  cancelStartWait.get(p)?.();
+  cancelStartWait.delete(p);
+  try { p.clearLockScreenControls(); } catch {}
   const subscriptions = playerSubscriptions.get(p);
   try { subscriptions?.status?.remove?.(); } catch {}
   playerSubscriptions.delete(p);
@@ -161,7 +164,8 @@ function attachListener(p: AudioPlayer, gen: number, shouldPlay: () => boolean):
  * before promoting it. Readiness is still checked before playback.
  */
 export async function prepareStandby(url: string, song?: Partial<Song> | null): Promise<void> {
-  if (!url || standbyUrl === url) return;
+  const headers = JSON.stringify(song?.playbackHeaders || {});
+  if (!url || (standbyUrl === url && standbyHeaders === headers)) return;
   const request = ++standbyGeneration;
   if (standbyPlayer) {
     killPlayer(standbyPlayer);
@@ -174,6 +178,7 @@ export async function prepareStandby(url: string, song?: Partial<Song> | null): 
     const p = createAudioPlayer({ uri: url, headers: song?.playbackHeaders }, { updateInterval: 500 });
     standbyPlayer = p;
     standbyUrl = url;
+    standbyHeaders = headers;
   } catch {
     // Non-fatal standby prefetch failure
   }
@@ -192,7 +197,7 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
   let p: AudioPlayer;
 
   // 2. Check if standby pre-buffered player is ready for this URL
-  if (standbyPlayer && standbyUrl === url) {
+  if (standbyPlayer && standbyUrl === url && standbyHeaders === JSON.stringify(song?.playbackHeaders || {})) {
     p = standbyPlayer;
     standbyPlayer = null;
     standbyUrl = null;
@@ -218,7 +223,7 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
         killPlayer(p);
         return;
       }
-    } catch (err: any) {
+    } catch (err) {
       if (myGen === generation) {
         throw err;
       }
@@ -233,27 +238,22 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
   if (Number.isFinite(initialPosition) && initialPosition > 0) initialSeekPending.add(p);
   attachListener(p, myGen, shouldPlay);
 
-  if (typeof (p as any).setActiveForLockScreen === "function") {
-    try {
-      (p as any).setActiveForLockScreen(
-        true,
-        {
-          title: song?.title || "Unknown",
-          artist: song?.artist || "Mavrixfy",
-          albumTitle: song?.album || undefined,
-          artworkUrl: song?.coverUrl || undefined,
-          // Consumed by our native expo-audio patch; stock Expo Go ignores it.
-          durationSeconds: resolvedDuration > 0 ? resolvedDuration : undefined,
-        },
-        {
-          showSeekBackward: false,
-          showSeekForward: false,
-          isLiveStream: false,
-        }
-      );
-    } catch {
-      // non-fatal
-    }
+  try {
+    const metadata = {
+      title: song?.title || "Unknown",
+      artist: song?.artist || "Mavrixfy",
+      albumTitle: song?.album || undefined,
+      artworkUrl: song?.coverUrl || undefined,
+      // Consumed by our native expo-audio patch; stock Expo Go ignores it.
+      durationSeconds: resolvedDuration > 0 ? resolvedDuration : undefined,
+    };
+    p.setActiveForLockScreen(true, metadata, {
+      showSeekBackward: false,
+      showSeekForward: false,
+      isLiveStream: false,
+    });
+  } catch (error) {
+    logger.warn("[Audio] Expo lock-screen controls unavailable", error);
   }
 
   // A recovered stream must be ready and seeked before output begins. Never
@@ -267,7 +267,7 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
           cancelReadyWait.set(p, resolve);
           subscription = p.addListener("playbackStatusUpdate", status => {
             if (myGen !== generation) resolve();
-            else if (status.error) reject(new Error("Audio could not load"));
+            else if (status.error) reject(new Error(status.error));
             else if (status.isLoaded) resolve();
           });
           timer = setTimeout(() => reject(new Error("Audio loading timed out.")), NATIVE_LOAD_TIMEOUT_MS);
@@ -295,7 +295,7 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await new Promise<void>((resolve, reject) => {
-        cancelReadyWait.set(p, resolve);
+        cancelStartWait.set(p, resolve);
         subscription = p.addListener("playbackStatusUpdate", status => {
           if (myGen !== generation || !shouldPlay()) resolve();
           else if (status.error) reject(new Error(status.error));
@@ -313,18 +313,20 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
     } finally {
       clearTimeout(timer);
       subscription?.remove?.();
-      cancelReadyWait.delete(p);
+      cancelStartWait.delete(p);
     }
   }
 }
 
 export function play(): void {
   if (activePlayer) finishedPlayers.delete(activePlayer);
-  try { activePlayer?.play(); } catch {}
+  activePlayer?.play();
 }
 
 export function pause(): void {
-  try { activePlayer?.pause(); } catch {}
+  if (!activePlayer) return;
+  activePlayer.pause();
+  cancelStartWait.get(activePlayer)?.();
 }
 
 /** Retire outgoing output while preserving the silent prepared next player. */
@@ -362,7 +364,7 @@ export function getProgress(): { position: number; duration: number } {
   return { position: activePlayer?.currentTime ?? 0, duration: activePlayer ? playerDuration(activePlayer) : 0 };
 }
 
-export function isLoaded(): boolean { return activePlayer !== null; }
+export function isLoaded(): boolean { return Boolean(activePlayer?.isLoaded); }
 export function isEnded(): boolean {
   return !!activePlayer && finishedPlayers.has(activePlayer);
 }

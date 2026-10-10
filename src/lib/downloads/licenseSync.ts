@@ -31,7 +31,7 @@ export async function issueOfflineLicense(
       return result.data;
     }
   } catch (err: any) {
-    const errCode = err?.code || "";
+    const errCode = String(err?.code || "").replace(/^functions\//, "");
     const errMsg = String(err?.message || "");
 
     // If the server explicitly denied or exhausted quota, rethrow the error

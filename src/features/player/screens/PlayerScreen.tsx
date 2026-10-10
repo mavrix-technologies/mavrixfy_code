@@ -1,7 +1,6 @@
 import { FullscreenKaraokeModal } from "@/components/FullscreenKaraokeModal";
 import { IS_ANDROID,IS_IOS } from "@/constants/platform";
 import { useAppIsActive } from "@/lib/appActivity";
-import type { Song } from "@/lib/musicData";
 import { collapsePlayer,playerUIStateStore,usePlayerUIState } from "@/lib/playerUIState";
 import { usePlaybackNowPlaying } from "@/services/audio/PlaybackEngine";
 import { getPlaybackProgressSnapshot,usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";

@@ -119,15 +119,10 @@ export function cleanHtmlEntities(str: string): string {
     .replace(/&apos;/g, "'");
 }
 
-export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?: Map<string, string>): any {
+export function songToTrack(song: Song, localUrl?: string | null, cachedUrlMap?: Map<string, string>) {
   if (isYouTubeSong(song)) song = youTubeSongWithStream(song);
   const audioUrl = localUrl || cachedUrlMap?.get(song.id) || resolveAudioUrl(song as SongPlaybackSource);
-  const rawDuration =
-    song.duration ??
-    (song as any)?.duration_ms ??
-    (song as any)?.durationSeconds ??
-    (song as any)?.duration_sec;
-  const duration = toDurationSeconds(rawDuration);
+  const duration = toDurationSeconds(song.duration);
   const title = cleanHtmlEntities(readNonEmptyString(song.title) || "Unknown");
   const artist = cleanHtmlEntities(readNonEmptyString(song.artist) || "Mavrixfy");
   const album = song.album ? cleanHtmlEntities(readNonEmptyString(song.album) || "") : undefined;
@@ -248,6 +243,9 @@ export async function resolvePlaybackUrlWithDetails(
       qualityLabel: bitrate > 0 ? `Offline (${bitrate}kbps${download?.audioCodec ? ` · ${download.audioCodec}` : ""})` : "Offline" };
   };
 
+  const localSource = song.audioUrl && (song.audioUrl.startsWith("file://") || song.audioUrl.startsWith("/"))
+    ? song.audioUrl : null;
+  if (localSource) song = { ...song, audioUrl: "" };
   try {
     // 1. Local downloaded file
     const local = await getLocalPlaybackUrl(song.id);
@@ -260,10 +258,13 @@ export async function resolvePlaybackUrlWithDetails(
     }
 
     // Direct local audioUrl fallback (e.g. from DownloadedSongsScreen)
-    if (song.audioUrl && (song.audioUrl.startsWith("file://") || song.audioUrl.startsWith("/"))) {
-      const cleanUrl = song.audioUrl.startsWith("file://") ? song.audioUrl : `file://${song.audioUrl}`;
-      const info = await getInfoAsync(cleanUrl).catch(() => null);
-      if (info?.exists && !info.isDirectory && ((info as any).size ?? 0) > 1024) {
+    if (localSource) {
+      // Managed downloads are validated only by getLocalPlaybackUrl. A retained
+      // screen/queue snapshot must not bypass a revoked, expired or missing file.
+      const download = await getSongDownload(song.id);
+      const cleanUrl = localSource.startsWith("file://") ? localSource : `file://${localSource}`;
+      const info = download ? null : await getInfoAsync(cleanUrl).catch(() => null);
+      if (info?.exists && !info.isDirectory && info.size > 1024) {
         return {
           url: cleanUrl,
           qualityState: await offlineQuality(),

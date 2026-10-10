@@ -23,6 +23,18 @@ module.exports = function withAndroidAuto(config) {
       },
     });
     app.service ||= [];
+    // Custom builds use Audio API for playback and its shared car/notification
+    // session. Expo Audio is only used by Expo Go, which owns its own manifest.
+    const expoAudioService = app.service.find(
+      (entry) => entry.$["android:name"] === "expo.modules.audio.service.AudioControlsService",
+    );
+    if (expoAudioService) {
+      mod.modResults.manifest.$["xmlns:tools"] = "http://schemas.android.com/tools";
+      expoAudioService.$["android:enabled"] = "false";
+      const replaced = new Set((expoAudioService.$["tools:replace"] || "").split(",").filter(Boolean));
+      replaced.add("android:enabled");
+      expoAudioService.$["tools:replace"] = [...replaced].join(",");
+    }
     app.service = app.service.filter(
       (entry) =>
         entry.$["android:name"] !==

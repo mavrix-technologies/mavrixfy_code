@@ -1,13 +1,14 @@
-import { getAccountScope } from "@/lib/accountScope";
+import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { useEffect,useRef,type MutableRefObject } from "react";
+import type { NativePlaybackPlayer, State as AudioState } from "./StandardAudioPlayer";
 
 interface UseStartupPlaybackReconcileOptions {
-  TrackPlayer: any;
-  State: any;
+  TrackPlayer: NativePlaybackPlayer | null;
+  State: typeof AudioState;
   isPlayerReady: boolean;
   ensurePlayerReady: () => Promise<boolean>;
   currentSongRef: MutableRefObject<Song | null>;
@@ -20,6 +21,9 @@ interface UseStartupPlaybackReconcileOptions {
   setQueueIndex: (index: number) => void;
   isPlayingRef: MutableRefObject<boolean>;
   setIsPlaying: (playing: boolean) => void;
+  playRequestIdRef: MutableRefObject<number>;
+  desiredPlayStateRef: MutableRefObject<boolean | null>;
+  isNativeQueueSyncedRef: MutableRefObject<boolean>;
 }
 
 export function useStartupPlaybackReconcile(options: UseStartupPlaybackReconcileOptions) {
@@ -45,28 +49,43 @@ export function useStartupPlaybackReconcile(options: UseStartupPlaybackReconcile
         setQueueIndex,
         isPlayingRef,
         setIsPlaying,
+        playRequestIdRef,
+        desiredPlayStateRef,
+        isNativeQueueSyncedRef,
       } = optionsRef.current;
+
+      // Restoration only owns an untouched startup session. A Play request or
+      // account change during an asynchronous read always takes precedence.
+      if (currentSongRef.current || playRequestIdRef.current > 0) return;
+      const requestId = playRequestIdRef.current;
+      const scope = getAccountScope();
+      const canRestore = () => mounted && isCurrentAccount(scope) &&
+        playRequestIdRef.current === requestId && !currentSongRef.current;
 
       try {
         if (TrackPlayer) {
           const ready = isPlayerReady || (await ensurePlayerReady());
+          if (!canRestore()) return;
           if (ready) {
             const [activeTrack, nativeQueue, playbackState] = await Promise.all([
               TrackPlayer.getActiveTrack().catch(() => null),
               TrackPlayer.getQueue().catch(() => []),
               TrackPlayer.getPlaybackState().catch(() => null),
             ]);
+            if (!canRestore()) return;
             const rawState = (playbackState as any)?.state ?? playbackState;
             const isPlayingNow = rawState === State.Playing;
 
-            const owner = getAccountScope().accountId ?? "guest";
+            const owner = scope.accountId ?? "guest";
             if (activeTrack?.id && activeTrack.accountId !== owner) await TrackPlayer.reset();
+            if (!canRestore()) return;
             if (activeTrack?.id && activeTrack.accountId === owner && Array.isArray(nativeQueue) && nativeQueue.length > 0) {
               const [rawIndex, persisted] = await Promise.all([
                 TrackPlayer.getActiveTrackIndex().catch(() => 0),
                 playerPersistenceService.loadPlayerState().catch(() => null),
               ]);
-              const activeIndex = typeof rawIndex === "number" ? rawIndex : 0;
+              if (!canRestore()) return;
+              const activeIndex = Number.isInteger(rawIndex) && rawIndex >= 0 && rawIndex < nativeQueue.length ? rawIndex : 0;
               const persistedMap = new Map((persisted?.queue || []).map((s: Song) => [s.id, s]));
 
               const mappedSongs: Song[] = nativeQueue.map((t: any) => {
@@ -90,7 +109,7 @@ export function useStartupPlaybackReconcile(options: UseStartupPlaybackReconcile
               });
               const currentActiveSong = mappedSongs[activeIndex] || mappedSongs[0];
 
-              if (mounted) {
+              if (canRestore()) {
                 setCurrentSong(currentActiveSong);
                 currentSongRef.current = currentActiveSong;
                 setQueue(mappedSongs);
@@ -101,6 +120,8 @@ export function useStartupPlaybackReconcile(options: UseStartupPlaybackReconcile
                 queueIndexRef.current = activeIndex;
                 setIsPlaying(isPlayingNow);
                 isPlayingRef.current = isPlayingNow;
+                desiredPlayStateRef.current = isPlayingNow;
+                isNativeQueueSyncedRef.current = true;
 
                 updatePlaybackEngineSnapshot({
                   currentSong: currentActiveSong,
@@ -117,10 +138,13 @@ export function useStartupPlaybackReconcile(options: UseStartupPlaybackReconcile
         }
 
         const persisted = await playerPersistenceService.loadPlayerState();
-        if (!mounted || !persisted?.currentSong?.id || currentSongRef.current) return;
+        if (!canRestore() || !persisted?.currentSong?.id) return;
         const song = persisted.currentSong;
         const q = Array.isArray(persisted.queue) && persisted.queue.length > 0 ? persisted.queue : [song];
-        const qIndex = Math.max(0, Math.min(persisted.queueIndex || 0, q.length - 1));
+        const requestedIndex = persisted.queueIndex;
+        let qIndex = Number.isInteger(requestedIndex) && requestedIndex >= 0 && requestedIndex < q.length &&
+          q[requestedIndex]?.id === song.id ? requestedIndex : q.findIndex((item) => item.id === song.id);
+        if (qIndex < 0) { q.push(song); qIndex = q.length - 1; }
 
         setCurrentSong(song);
         currentSongRef.current = song;
@@ -132,6 +156,8 @@ export function useStartupPlaybackReconcile(options: UseStartupPlaybackReconcile
         queueIndexRef.current = qIndex;
         setIsPlaying(false);
         isPlayingRef.current = false;
+        desiredPlayStateRef.current = false;
+        isNativeQueueSyncedRef.current = false;
 
         updatePlaybackEngineSnapshot({
           currentSong: song,

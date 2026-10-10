@@ -5,12 +5,13 @@ const ts = require('typescript');
 const test = require('node:test');
 const { fixture: audioFixture, tick } = require('./helpers/audio-player-fixture.cjs');
 
-async function fixture({ singleNativeTrack = false, fallback = false } = {}) {
+async function fixture({ singleNativeTrack = false, fallback = false, duplicateNativeTrack = false } = {}) {
   const audio = audioFixture();
   const songs = ['a', 'b', 'c'].map(id => ({
     id, title: id.toUpperCase(), artist: id, duration: 180,
     audioUrl: `https://test/${id}-old.mp3`, coverUrl: `https://test/${id}.jpg`,
   }));
+  if (duplicateNativeTrack) songs[0].id = songs[1].id;
   const native = songs.map(s => ({ ...s, url: s.audioUrl, artwork: s.coverUrl }));
   const player = audio.StandardAudioPlayer;
   await player.setQueue(singleNativeTrack ? [native[1]] : native, singleNativeTrack ? 0 : 1, 30);
@@ -159,4 +160,14 @@ test('fallback receives pause intent before loading the quality stream', async (
   f.resolve(0, 'high'); await pending;
   assert.equal(f.fallbackLoads[0].shouldPlay, false);
   assert.equal(f.fallbackLoads[0].song.coverUrl, 'https://test/b.jpg');
+});
+
+test('quality reload preserves the active occurrence of a duplicated song ID', async () => {
+  const f = await fixture({ duplicateNativeTrack: true });
+  const pending = f.changeStreamingQuality('high'); await tick();
+  f.resolve(0, 'high'); await pending;
+  assert.equal(await f.player.getActiveTrackIndex(), 1);
+  assert.equal(f.queues[0][1], 1);
+  assert.equal((await f.player.getQueue())[0].url, 'https://test/a-old.mp3');
+  assert.equal((await f.player.getQueue())[1].url, 'https://test/b-high.mp3');
 });

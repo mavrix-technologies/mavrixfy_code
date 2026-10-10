@@ -12,10 +12,18 @@ index 33db27c..a34c464 100644
  
  struct LockScreenOptions: Record {
 diff --git a/node_modules/expo-audio/ios/MediaController.swift b/node_modules/expo-audio/ios/MediaController.swift
-index e977f57..289c95b 100644
+index e977f57..2c4c3fa 100644
 --- a/node_modules/expo-audio/ios/MediaController.swift
 +++ b/node_modules/expo-audio/ios/MediaController.swift
-@@ -80,13 +80,27 @@ class MediaController {
+@@ -14,6 +14,7 @@ class MediaController {
+   private var artworkLoadToken: UUID?
+   private var currentArtworkItemIdentifier: ObjectIdentifier?
+   private var isLiveStream = false
++  private var remoteCommandTargets: [(command: MPRemoteCommand, target: Any)] = []
+ 
+   func setActivePlayer(_ player: AudioPlayer?, options: LockScreenOptions? = nil) {
+     performOnMain {
+@@ -80,13 +81,27 @@ class MediaController {
        info.removeValue(forKey: MPMediaItemPropertyPlaybackDuration)
        info.removeValue(forKey: MPNowPlayingInfoPropertyElapsedPlaybackTime)
      } else {
@@ -45,11 +53,41 @@ index e977f57..289c95b 100644
    private func applyUserMetadata(_ info: inout [String: Any], from metadata: Metadata) {
      if let title = metadata.title {
        info[MPMediaItemPropertyTitle] = title
-@@ -264,12 +278,13 @@ class MediaController {
+@@ -232,7 +247,8 @@ class MediaController {
+   }
+ 
+   private func enableRemoteCommands(options: LockScreenOptions?) {
+-    remoteCommandCenter.playCommand.addTarget { [weak self] _ in
++    removeRemoteCommandTargets()
++    addRemoteCommandTarget(remoteCommandCenter.playCommand) { [weak self] _ in
+       guard let player = self?.activePlayer else {
+         return .commandFailed
+       }
+@@ -241,7 +257,7 @@ class MediaController {
+       return .success
      }
  
-     remoteCommandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+-    remoteCommandCenter.pauseCommand.addTarget { [weak self] _ in
++    addRemoteCommandTarget(remoteCommandCenter.pauseCommand) { [weak self] _ in
+       guard let player = self?.activePlayer else {
+         return .commandFailed
+       }
+@@ -250,7 +266,7 @@ class MediaController {
+       return .success
+     }
+ 
+-    remoteCommandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
++    addRemoteCommandTarget(remoteCommandCenter.togglePlayPauseCommand) { [weak self] _ in
+       guard let player = self?.activePlayer else {
+         return .commandFailed
+       }
+@@ -263,20 +279,21 @@ class MediaController {
+       return .success
+     }
+ 
+-    remoteCommandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
 -      guard let player = self?.activePlayer,
++    addRemoteCommandTarget(remoteCommandCenter.changePlaybackPositionCommand) { [weak self] event in
 +      guard let self, let player = self.activePlayer,
        let event = event as? MPChangePlaybackPositionCommandEvent else {
          return .commandFailed
@@ -61,3 +99,46 @@ index e977f57..289c95b 100644
        player.ref.seek(to: seekTime)
  
        return .success
+     }
+ 
+     remoteCommandCenter.skipForwardCommand.preferredIntervals = [10.0]
+-    remoteCommandCenter.skipForwardCommand.addTarget { [weak self] event in
++    addRemoteCommandTarget(remoteCommandCenter.skipForwardCommand) { [weak self] event in
+       guard let player = self?.activePlayer,
+       let event = event as? MPSkipIntervalCommandEvent else {
+         return .commandFailed
+@@ -290,7 +307,7 @@ class MediaController {
+     }
+ 
+     remoteCommandCenter.skipBackwardCommand.preferredIntervals = [10.0]
+-    remoteCommandCenter.skipBackwardCommand.addTarget { [weak self] event in
++    addRemoteCommandTarget(remoteCommandCenter.skipBackwardCommand) { [weak self] event in
+       guard let player = self?.activePlayer,
+       let event = event as? MPSkipIntervalCommandEvent else {
+         return .commandFailed
+@@ -319,12 +336,18 @@ class MediaController {
+     remoteCommandCenter.skipForwardCommand.isEnabled = false
+     remoteCommandCenter.skipBackwardCommand.isEnabled = false
+ 
+-    // Remove event targets
+-    remoteCommandCenter.playCommand.removeTarget(self)
+-    remoteCommandCenter.pauseCommand.removeTarget(self)
+-    remoteCommandCenter.togglePlayPauseCommand.removeTarget(self)
+-    remoteCommandCenter.changePlaybackPositionCommand.removeTarget(self)
+-    remoteCommandCenter.skipForwardCommand.removeTarget(self)
+-    remoteCommandCenter.skipBackwardCommand.removeTarget(self)
++    removeRemoteCommandTargets()
++  }
++
++  private func addRemoteCommandTarget(
++    _ command: MPRemoteCommand,
++    handler: @escaping (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus
++  ) {
++    remoteCommandTargets.append((command, command.addTarget(handler: handler)))
++  }
++
++  private func removeRemoteCommandTargets() {
++    remoteCommandTargets.forEach { $0.command.removeTarget($0.target) }
++    remoteCommandTargets.removeAll()
+   }
+ }

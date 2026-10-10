@@ -18,8 +18,30 @@ index 0033a2b..aeb1126 100644
      commandLine 'bash', '../scripts/download-prebuilt-binaries.sh', 'android', isFFmpegDisabled() ? 'skipffmpeg' : ''
    }
    environment 'DISABLE_AUDIOAPI_STATIC_EXTERNAL_LIBS', isStaticExternalLibsDisabled() ? '1' : '0'
+diff --git a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/AudioAPIModule.kt b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/AudioAPIModule.kt
+index 3086591..87fe838 100644
+--- a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/AudioAPIModule.kt
++++ b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/AudioAPIModule.kt
+@@ -15,7 +15,6 @@ import com.facebook.react.bridge.ReadableMap
+ import com.facebook.react.common.annotations.FrameworkAPI
+ import com.facebook.react.module.annotations.ReactModule
+ import com.facebook.react.turbomodule.core.CallInvokerHolderImpl
+-import com.swmansion.audioapi.system.ForegroundServiceManager
+ import com.swmansion.audioapi.system.MediaSessionManager
+ import com.swmansion.audioapi.system.NativeFileInfo
+ import com.swmansion.audioapi.system.PermissionRequestListener
+@@ -103,8 +102,7 @@ class AudioAPIModule(
+ 
+   override fun invalidate() {
+     reactContext.get()?.removeLifecycleEventListener(this)
+-    // Cleanup foreground service manager
+-    ForegroundServiceManager.cleanup()
++    MediaSessionManager.cleanup(this)
+   }
+ 
+   override fun getDevicePreferredSampleRate(): Double = MediaSessionManager.getDevicePreferredSampleRate()
 diff --git a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/AudioFocusListener.kt b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/AudioFocusListener.kt
-index b9c4636..15ccf8f 100644
+index b9c4636..4f0f0c7 100644
 --- a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/AudioFocusListener.kt
 +++ b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/AudioFocusListener.kt
 @@ -1,6 +1,7 @@
@@ -61,7 +83,7 @@ index b9c4636..15ccf8f 100644
          val body =
            HashMap<String, Any>().apply {
              put("type", "ended")
-@@ -55,20 +60,24 @@ class AudioFocusListener(
+@@ -55,20 +60,31 @@ class AudioFocusListener(
    }
  
    fun requestAudioFocus(focus: Int) {
@@ -79,6 +101,13 @@ index b9c4636..15ccf8f 100644
      } else {
 -      audioManager.get()?.requestAudioFocus(this, AudioManager.STREAM_MUSIC, focus)
 +      hasAudioFocus = audioManager.get()?.requestAudioFocus(this, AudioManager.STREAM_MUSIC, focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
++    }
++    if (!hasAudioFocus) {
++      isTransientLoss = false
++      audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(
++        AudioEvent.INTERRUPTION.ordinal,
++        mapOf("type" to "began", "shouldResume" to false),
++      )
      }
    }
  
@@ -89,18 +118,46 @@ index b9c4636..15ccf8f 100644
        audioManager.get()?.abandonAudioFocusRequest(focusRequest!!)
      } else {
 diff --git a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/MediaSessionManager.kt b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/MediaSessionManager.kt
-index 5a934a1..965ba6f 100644
+index 5a934a1..790a33c 100644
 --- a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/MediaSessionManager.kt
 +++ b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/MediaSessionManager.kt
-@@ -4,6 +4,7 @@ import android.Manifest
+@@ -4,6 +4,8 @@ import android.Manifest
  import android.app.NotificationChannel
  import android.app.NotificationManager
  import android.content.Context
++import android.content.BroadcastReceiver
 +import android.content.Intent
  import android.content.IntentFilter
  import android.content.pm.PackageManager
  import android.media.AudioDeviceInfo
-@@ -62,6 +63,7 @@ object MediaSessionManager {
+@@ -36,6 +38,18 @@ object MediaSessionManager {
+   private lateinit var audioFocusListener: AudioFocusListener
+   private lateinit var volumeChangeListener: VolumeChangeListener
+   private lateinit var playbackNotificationReceiver: PlaybackNotificationReceiver
++  private var initialized = false
++  private var observingVolume = false
++  private val noisyReceiver = object : BroadcastReceiver() {
++    override fun onReceive(context: Context?, intent: Intent?) {
++      if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
++        audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(
++          AudioEvent.ROUTE_CHANGE.ordinal,
++          mapOf("reason" to "OldDeviceUnavailable"),
++        )
++      }
++    }
++  }
+ 
+   // New notification system
+   private lateinit var notificationRegistry: NotificationRegistry
+@@ -44,6 +58,7 @@ object MediaSessionManager {
+     audioAPIModule: WeakReference<AudioAPIModule>,
+     reactContext: WeakReference<ReactApplicationContext>,
+   ) {
++    cleanup()
+     this.audioAPIModule = audioAPIModule
+     this.reactContext = reactContext
+     this.audioManager = reactContext.get()?.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+@@ -62,6 +77,7 @@ object MediaSessionManager {
      // Register PlaybackNotificationReceiver
      val playbackFilter = IntentFilter(PlaybackNotificationReceiver.ACTION_NOTIFICATION_DISMISSED)
      playbackFilter.addAction(PlaybackNotification.MEDIA_BUTTON)
@@ -108,23 +165,88 @@ index 5a934a1..965ba6f 100644
      playbackFilter.addAction(PlaybackNotificationReceiver.ACTION_SKIP_FORWARD)
      playbackFilter.addAction(PlaybackNotificationReceiver.ACTION_SKIP_BACKWARD)
  
+@@ -82,6 +98,26 @@ object MediaSessionManager {
+ 
+     // Initialize new notification system
+     this.notificationRegistry = NotificationRegistry(this.reactContext, this.audioAPIModule)
++    ContextCompat.registerReceiver(
++      this.reactContext.get()!!,
++      noisyReceiver,
++      IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),
++      ContextCompat.RECEIVER_NOT_EXPORTED,
++    )
++    initialized = true
++  }
++
++  fun cleanup(owner: AudioAPIModule? = null) {
++    if (!initialized || (owner != null && audioAPIModule.get() !== owner)) return
++    notificationRegistry.cleanup()
++    audioFocusListener.abandonAudioFocus()
++    if (observingVolume) observeVolumeChanges(false)
++    reactContext.get()?.let {
++      it.unregisterReceiver(playbackNotificationReceiver)
++      it.unregisterReceiver(noisyReceiver)
++    }
++    PlaybackNotificationReceiver.setAudioAPIModule(null)
++    initialized = false
+   }
+ 
+   fun getDevicePreferredSampleRate(): Double {
+@@ -102,6 +138,7 @@ object MediaSessionManager {
+   }
+ 
+   fun observeVolumeChanges(observe: Boolean) {
++    if (observe == observingVolume) return
+     if (observe) {
+       ContextCompat.registerReceiver(
+         reactContext.get()!!,
+@@ -112,6 +149,7 @@ object MediaSessionManager {
+     } else {
+       reactContext.get()?.unregisterReceiver(volumeChangeListener)
+     }
++    observingVolume = observe
+   }
+ 
+   fun requestRecordingPermissions(permissionListener: PermissionListener) {
+diff --git a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/NotificationRegistry.kt b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/NotificationRegistry.kt
+index 91b1d34..8a304f9 100644
+--- a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/NotificationRegistry.kt
++++ b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/NotificationRegistry.kt
+@@ -143,7 +143,6 @@ class NotificationRegistry(
+         "playback" -> {
+           PlaybackNotification(
+             reactContext,
+-            audioAPIModule,
+             PlaybackNotification.ID,
+             "audio_playback",
+           )
 diff --git a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt
-index 3364c7a..90e544a 100644
+index 3364c7a..e92aeea 100644
 --- a/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt
 +++ b/node_modules/react-native-audio-api/android/src/main/java/com/swmansion/audioapi/system/notification/PlaybackNotification.kt
-@@ -45,6 +45,23 @@ class PlaybackNotification(
+@@ -17,7 +17,6 @@ import androidx.media.app.NotificationCompat.MediaStyle
+ import com.facebook.react.bridge.ReactApplicationContext
+ import com.facebook.react.bridge.ReadableMap
+ import com.facebook.react.bridge.ReadableType
+-import com.swmansion.audioapi.AudioAPIModule
+ import com.swmansion.audioapi.R
+ import com.swmansion.audioapi.system.AudioEvent
+ import java.io.IOException
+@@ -36,7 +35,6 @@ import java.net.URL
+  */
+ class PlaybackNotification(
+   private val reactContext: WeakReference<ReactApplicationContext>,
+-  private val audioAPIModule: WeakReference<AudioAPIModule>,
+   private val notificationId: Int,
+   private val channelId: String,
+ ) : BaseNotification {
+@@ -45,6 +43,17 @@ class PlaybackNotification(
      const val ACTION_SKIP_FORWARD = "com.swmansion.audioapi.ACTION_SKIP_FORWARD"
      const val ACTION_SKIP_BACKWARD = "com.swmansion.audioapi.ACTION_SKIP_BACKWARD"
      const val ID = 100
 +
 +    @JvmStatic
 +    var sharedMediaSession: MediaSessionCompat? = null
-+
-+    @JvmStatic
-+    var onSessionCreatedListener: ((MediaSessionCompat) -> Unit)? = null
-+
-+    @JvmStatic
-+    var onMetadataChangedListener: (() -> Unit)? = null
 +
 +    @JvmStatic var onPlayMediaIdListener: ((String) -> Unit)? = null
 +    @JvmStatic var onPlaySearchListener: ((String) -> Unit)? = null
@@ -136,7 +258,7 @@ index 3364c7a..90e544a 100644
    }
  
    private var mediaSession: MediaSessionCompat? = null
-@@ -67,6 +84,7 @@ class PlaybackNotification(
+@@ -67,6 +76,7 @@ class PlaybackNotification(
    private var playbackStateVal: Int = PlaybackStateCompat.STATE_PAUSED
  
    private var artworkThread: Thread? = null
@@ -144,7 +266,7 @@ index 3364c7a..90e544a 100644
  
    private fun initializeIfNeeded() {
      if (isInitialized) return
-@@ -74,8 +92,18 @@ class PlaybackNotification(
+@@ -74,44 +84,66 @@ class PlaybackNotification(
  
      createNotificationChannel()
  
@@ -154,7 +276,6 @@ index 3364c7a..90e544a 100644
 +    } else {
 +      mediaSession = MediaSessionCompat(context, "PlaybackNotification")
 +      sharedMediaSession = mediaSession
-+      onSessionCreatedListener?.invoke(mediaSession!!)
 +    }
  
 +    refreshPlaybackActions = {
@@ -163,23 +284,65 @@ index 3364c7a..90e544a 100644
 +    }
      mediaSession?.setCallback(
        object : MediaSessionCompat.Callback() {
++        private fun dispatch(event: AudioEvent, body: Map<String, Any> = emptyMap()) {
++          // The car browser keeps this token across React context reloads.
++          // Resolve the current bridge instead of retaining the outgoing one.
++          PlaybackNotificationReceiver.getAudioAPIModule()?.invokeHandlerWithEventNameAndEventBody(event.ordinal, body)
++        }
          override fun onPlay() {
-@@ -113,6 +141,14 @@ class PlaybackNotification(
-           audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_SEEK_TO.ordinal, body)
+-          audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_PLAY.ordinal, mapOf())
++          dispatch(AudioEvent.PLAYBACK_NOTIFICATION_PLAY)
          }
  
+         override fun onPause() {
+-          audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_PAUSE.ordinal, mapOf())
++          dispatch(AudioEvent.PLAYBACK_NOTIFICATION_PAUSE)
+         }
+ 
+         override fun onStop() {
+-          audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_STOP.ordinal, mapOf())
++          dispatch(AudioEvent.PLAYBACK_NOTIFICATION_STOP)
+         }
+ 
+         override fun onSkipToNext() {
+-          audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_NEXT_TRACK.ordinal, mapOf())
++          dispatch(AudioEvent.PLAYBACK_NOTIFICATION_NEXT_TRACK)
+         }
+ 
+         override fun onSkipToPrevious() {
+-          audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_PREVIOUS_TRACK.ordinal, mapOf())
++          dispatch(AudioEvent.PLAYBACK_NOTIFICATION_PREVIOUS_TRACK)
+         }
+ 
+         override fun onFastForward() {
+           val body = HashMap<String, Any>().apply { put("value", 15) }
+-          audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_SKIP_FORWARD.ordinal, body)
++          dispatch(AudioEvent.PLAYBACK_NOTIFICATION_SKIP_FORWARD, body)
+         }
+ 
+         override fun onRewind() {
+           val body = HashMap<String, Any>().apply { put("value", 15) }
+-          audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_SKIP_BACKWARD.ordinal, body)
++          dispatch(AudioEvent.PLAYBACK_NOTIFICATION_SKIP_BACKWARD, body)
+         }
+ 
+         override fun onSeekTo(pos: Long) {
+           val body = HashMap<String, Any>().apply { put("value", pos / 1000.0) }
+-          audioAPIModule.get()?.invokeHandlerWithEventNameAndEventBody(AudioEvent.PLAYBACK_NOTIFICATION_SEEK_TO.ordinal, body)
++          dispatch(AudioEvent.PLAYBACK_NOTIFICATION_SEEK_TO, body)
++        }
++
 +        override fun onPlayFromMediaId(mediaId: String?, extras: android.os.Bundle?) {
 +          onPlayMediaIdListener?.invoke(mediaId.orEmpty())
 +        }
 +        override fun onPlayFromSearch(query: String?, extras: android.os.Bundle?) {
 +          onPlaySearchListener?.invoke(query.orEmpty())
-+        }
+         }
 +        override fun onSkipToQueueItem(id: Long) { onSkipQueueItemListener?.invoke(id) }
-+
+ 
          override fun onCustomAction(
            action: String?,
-           extras: android.os.Bundle?,
-@@ -121,6 +157,8 @@ class PlaybackNotification(
+@@ -121,6 +153,8 @@ class PlaybackNotification(
              onFastForward()
            } else if (action == "SkipBackward") {
              onRewind()
@@ -188,7 +351,7 @@ index 3364c7a..90e544a 100644
            }
          }
        },
-@@ -144,6 +182,7 @@ class PlaybackNotification(
+@@ -144,6 +178,7 @@ class PlaybackNotification(
            PendingIntent.FLAG_IMMUTABLE,
          )
        notificationBuilder?.setContentIntent(pendingIntent)
@@ -196,7 +359,7 @@ index 3364c7a..90e544a 100644
      }
  
      val deleteIntent = Intent(PlaybackNotificationReceiver.ACTION_NOTIFICATION_DISMISSED)
-@@ -174,14 +213,21 @@ class PlaybackNotification(
+@@ -174,14 +209,24 @@ class PlaybackNotification(
    override fun hide() {
      if (!isInitialized) return
  
@@ -209,8 +372,11 @@ index 3364c7a..90e544a 100644
 -    mediaSession?.isActive = false
 -    mediaSession?.release()
 +    if (sharedMediaSession == mediaSession) {
-+      pb.setState(PlaybackStateCompat.STATE_PAUSED, 0, 0f)
++      pb = PlaybackStateCompat.Builder().setActions(
++        PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH,
++      ).setState(PlaybackStateCompat.STATE_NONE, 0, 0f)
 +      mediaSession?.setPlaybackState(pb.build())
++      mediaSession?.setMetadata(null)
 +    } else {
 +      mediaSession?.isActive = false
 +      mediaSession?.release()
@@ -220,7 +386,7 @@ index 3364c7a..90e544a 100644
      notificationBuilder = null
      isInitialized = false
  
-@@ -216,6 +262,9 @@ class PlaybackNotification(
+@@ -216,6 +261,9 @@ class PlaybackNotification(
      notificationBuilder?.setContentInfo(album)
  
      if (info.hasKey("artwork")) {
@@ -230,7 +396,7 @@ index 3364c7a..90e544a 100644
        if (artworkThread != null && artworkThread!!.isAlive) {
          artworkThread!!.interrupt()
        }
-@@ -229,15 +278,16 @@ class PlaybackNotification(
+@@ -229,15 +277,16 @@ class PlaybackNotification(
            info.getString("artwork")
          }
  
@@ -250,15 +416,7 @@ index 3364c7a..90e544a 100644
                    notificationBuilder?.setLargeIcon(bitmap)
  
                    val currentMetadata = mediaSession?.controller?.metadata
-@@ -247,6 +297,7 @@ class PlaybackNotification(
-                   // Trigger update
-                   val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-                   notificationManager.notify(notificationId, buildNotification())
-+                  onMetadataChangedListener?.invoke()
-                 }
-               }
-             } catch (ex: Exception) {
-@@ -261,10 +312,6 @@ class PlaybackNotification(
+@@ -261,10 +310,6 @@ class PlaybackNotification(
        speed = info.getDouble("speed").toFloat()
      }
  
@@ -269,19 +427,18 @@ index 3364c7a..90e544a 100644
      if (info.hasKey("elapsedTime")) {
        elapsedTime = (info.getDouble("elapsedTime") * 1000).toLong()
      } else {
-@@ -285,7 +332,10 @@ class PlaybackNotification(
+@@ -285,7 +330,9 @@ class PlaybackNotification(
      if (artwork != null) {
        md.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artwork)
      }
 -    mediaSession?.setMetadata(md.build())
 +    if (listOf("title", "artist", "album", "duration", "artwork").any { info.hasKey(it) }) {
 +      mediaSession?.setMetadata(md.build())
-+      onMetadataChangedListener?.invoke()
 +    }
  
      updateNotificationsActions()
    }
-@@ -320,7 +370,10 @@ class PlaybackNotification(
+@@ -320,7 +367,10 @@ class PlaybackNotification(
  
    private fun updatePlaybackActionState() {
      val builder = PlaybackStateCompat.Builder()
@@ -293,7 +450,7 @@ index 3364c7a..90e544a 100644
  
      if (hasControl(PlaybackStateCompat.ACTION_REWIND)) {
        builder.addCustomAction(
-@@ -350,7 +403,8 @@ class PlaybackNotification(
+@@ -350,7 +400,8 @@ class PlaybackNotification(
    private fun updatePlaybackState(playbackStateCode: Int) {
      isPlaying = playbackStateCode == PlaybackStateCompat.STATE_PLAYING
  
@@ -303,7 +460,7 @@ index 3364c7a..90e544a 100644
      state = pb.build()
      mediaSession?.setPlaybackState(state)
  
-@@ -481,6 +535,8 @@ class PlaybackNotification(
+@@ -481,6 +532,8 @@ class PlaybackNotification(
          }
        } else {
          val connection = URL(url).openConnection()
@@ -397,6 +554,272 @@ index a11a641..c1750b1 100644
      sendOnPositionChangedEvent(0);
      clearPendingDecoderChunk();
  
+diff --git a/node_modules/react-native-audio-api/ios/audioapi/ios/AudioAPIModule.mm b/node_modules/react-native-audio-api/ios/audioapi/ios/AudioAPIModule.mm
+index 818d17d..e98e6df 100644
+--- a/node_modules/react-native-audio-api/ios/audioapi/ios/AudioAPIModule.mm
++++ b/node_modules/react-native-audio-api/ios/audioapi/ios/AudioAPIModule.mm
+@@ -60,10 +60,17 @@ RCT_EXPORT_MODULE(AudioAPIModule);
+ 
+ - (void)invalidate
+ {
++  if ([NSThread isMainThread]) {
++    [self.notificationManager cleanup];
++    [self.notificationRegistry cleanup];
++  } else {
++    dispatch_sync(dispatch_get_main_queue(), ^{
++      [self.notificationManager cleanup];
++      [self.notificationRegistry cleanup];
++    });
++  }
+   [self.audioEngine cleanup];
+-  [self.notificationManager cleanup];
+   [self.audioSessionManager cleanup];
+-  [self.notificationRegistry cleanup];
+ 
+   _eventHandler = nullptr;
+ 
+@@ -293,7 +300,7 @@ RCT_EXPORT_METHOD(
+     showNotification : (NSString *)type key : (NSString *)key options : (NSDictionary *)
+         options resolve : (RCTPromiseResolveBlock)resolve reject : (RCTPromiseRejectBlock)reject)
+ {
+-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
++  dispatch_async(dispatch_get_main_queue(), ^{
+     BOOL success = [self.notificationRegistry showNotificationWithType:type
+                                                                    key:key
+                                                                options:options];
+@@ -310,7 +317,7 @@ RCT_EXPORT_METHOD(
+     hideNotification : (NSString *)key resolve : (RCTPromiseResolveBlock)resolve reject : (
+         RCTPromiseRejectBlock)reject)
+ {
+-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
++  dispatch_async(dispatch_get_main_queue(), ^{
+     BOOL success = [self.notificationRegistry hideNotificationWithKey:key];
+ 
+     if (success) {
+@@ -325,7 +332,7 @@ RCT_EXPORT_METHOD(
+     isNotificationActive : (NSString *)key resolve : (RCTPromiseResolveBlock)resolve reject : (
+         RCTPromiseRejectBlock)reject)
+ {
+-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
++  dispatch_async(dispatch_get_main_queue(), ^{
+     BOOL isActive = [self.notificationRegistry isNotificationActiveWithKey:key];
+     resolve(@(isActive));
+   });
+diff --git a/node_modules/react-native-audio-api/ios/audioapi/ios/system/SystemNotificationManager.mm b/node_modules/react-native-audio-api/ios/audioapi/ios/system/SystemNotificationManager.mm
+index 5557d58..c0afba6 100644
+--- a/node_modules/react-native-audio-api/ios/audioapi/ios/system/SystemNotificationManager.mm
++++ b/node_modules/react-native-audio-api/ios/audioapi/ios/system/SystemNotificationManager.mm
+@@ -24,6 +24,9 @@ static NSString *NotificationManagerContext = @"SystemNotificationManagerContext
+ - (void)cleanup
+ {
+   [self observeVolumeChanges:NO];
++  [self stopPollingSecondaryAudioHint];
++  [self.notificationCenter removeObserver:self];
++  self.audioInterruptionsObserved = NO;
+   self.notificationCenter = nil;
+ }
+ 
+diff --git a/node_modules/react-native-audio-api/ios/audioapi/ios/system/notification/PlaybackNotification.mm b/node_modules/react-native-audio-api/ios/audioapi/ios/system/notification/PlaybackNotification.mm
+index ce533ba..115b450 100644
+--- a/node_modules/react-native-audio-api/ios/audioapi/ios/system/notification/PlaybackNotification.mm
++++ b/node_modules/react-native-audio-api/ios/audioapi/ios/system/notification/PlaybackNotification.mm
+@@ -15,6 +15,8 @@
+ @implementation PlaybackNotification {
+   BOOL _isInitialized;
+   NSMutableDictionary *_currentInfo;
++  NSUInteger _artworkGeneration;
++  NSURLSessionDataTask *_artworkTask;
+ }
+ 
+ - (instancetype)initWithAudioAPIModule:(AudioAPIModule *)audioAPIModule
+@@ -73,56 +75,45 @@
+     // Continuing lets us update metadata if provided mixed with controls
+   }
+ 
++  _isActive = true;
+   // Update the now playing info
+   [self updateNowPlayingInfo:options];
+ 
+-  _isActive = true;
+-
+   return true;
+ }
+ 
+ - (BOOL)hide
+ {
+-  if (!_isActive) {
++  if (!_isActive && !_isInitialized) {
+     return true;
+   }
+ 
+   // Clear now playing info
++  _artworkGeneration += 1;
++  [_artworkTask cancel];
++  _artworkTask = nil;
+   self.playingInfoCenter.nowPlayingInfo = nil;
+   self.artworkUrl = nil;
+   [_currentInfo removeAllObjects];
+ 
+   _isActive = false;
+-
+-  return true;
+-}
+-
+-- (void)cleanup
+-{
+-  // Hide if active
+-  if (_isActive) {
+-    [self hide];
++  for (NSString *control in @[@"play", @"pause", @"stop", @"nextTrack", @"previousTrack",
++                             @"skipForward", @"skipBackward", @"seekForward", @"seekBackward", @"seekTo"]) {
++    [self enableRemoteCommand:control enabled:NO];
+   }
+ 
+-  // Disable all remote commands
+-  MPRemoteCommandCenter *remoteCenter = [MPRemoteCommandCenter sharedCommandCenter];
+-  [remoteCenter.playCommand removeTarget:self];
+-  [remoteCenter.pauseCommand removeTarget:self];
+-  [remoteCenter.stopCommand removeTarget:self];
+-  [remoteCenter.nextTrackCommand removeTarget:self];
+-  [remoteCenter.previousTrackCommand removeTarget:self];
+-  [remoteCenter.skipForwardCommand removeTarget:self];
+-  [remoteCenter.skipBackwardCommand removeTarget:self];
+-  [remoteCenter.seekForwardCommand removeTarget:self];
+-  [remoteCenter.seekBackwardCommand removeTarget:self];
+-  [remoteCenter.changePlaybackPositionCommand removeTarget:self];
+-
+   // Disable remote control events
+   dispatch_async(dispatch_get_main_queue(), ^{
+     [[UIApplication sharedApplication] endReceivingRemoteControlEvents];
+   });
+ 
+   _isInitialized = false;
++  return true;
++}
++
++- (void)cleanup
++{
++  [self hide];
+ }
+ 
+ - (BOOL)isActive
+@@ -168,22 +159,6 @@
+ 
+   self.playingInfoCenter.nowPlayingInfo = nowPlayingInfo;
+ 
+-  // Handle playback state
+-  NSString *state = _currentInfo[@"state"];
+-  MPNowPlayingPlaybackState playbackState = MPNowPlayingPlaybackStatePaused;
+-
+-  if (state) {
+-    if ([state isEqualToString:@"playing"]) {
+-      playbackState = MPNowPlayingPlaybackStatePlaying;
+-    } else if ([state isEqualToString:@"paused"]) {
+-      playbackState = MPNowPlayingPlaybackStatePaused;
+-    } else {
+-      playbackState = MPNowPlayingPlaybackStatePaused;
+-    }
+-  }
+-
+-  self.playingInfoCenter.playbackState = playbackState;
+-
+   // Handle artwork
+   NSString *artworkUrl = [self getArtworkUrl:_currentInfo[@"artwork"]];
+   [self updateArtworkIfNeeded:artworkUrl];
+@@ -207,53 +182,33 @@
+ 
+ - (void)updateArtworkIfNeeded:(NSString *)artworkUrl
+ {
+-  if (!artworkUrl) {
++  MPNowPlayingInfoCenter *center = [MPNowPlayingInfoCenter defaultCenter];
++  if ([artworkUrl isEqualToString:self.artworkUrl]) {
+     return;
+   }
+ 
+-  MPNowPlayingInfoCenter *center = [MPNowPlayingInfoCenter defaultCenter];
+-  if ([artworkUrl isEqualToString:self.artworkUrl] &&
+-      center.nowPlayingInfo[MPMediaItemPropertyArtwork] != nil) {
++  NSUInteger generation = ++_artworkGeneration;
++  [_artworkTask cancel];
++  _artworkTask = nil;
++  self.artworkUrl = artworkUrl.length > 0 ? artworkUrl : nil;
++  NSMutableDictionary *current = [center.nowPlayingInfo mutableCopy];
++  [current removeObjectForKey:MPMediaItemPropertyArtwork];
++  center.nowPlayingInfo = current;
++  if (artworkUrl.length == 0) {
+     return;
+   }
+ 
+-  self.artworkUrl = artworkUrl;
+-
+-  // Load artwork asynchronously
+-  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+-    NSURL *url = nil;
+-    NSData *imageData = nil;
+-    UIImage *image = nil;
+-
+-    @try {
+-      if ([artworkUrl hasPrefix:@"http://"] || [artworkUrl hasPrefix:@"https://"]) {
+-        // Remote URL
+-        url = [NSURL URLWithString:artworkUrl];
+-        imageData = [NSData dataWithContentsOfURL:url];
+-      } else {
+-        // Local file - try as resource or file path
+-        NSString *imagePath = [[NSBundle mainBundle] pathForResource:artworkUrl ofType:nil];
+-        if (imagePath) {
+-          imageData = [NSData dataWithContentsOfFile:imagePath];
+-        } else {
+-          // Try as absolute path
+-          imageData = [NSData dataWithContentsOfFile:artworkUrl];
+-        }
+-      }
+-
+-      if (imageData) {
+-        image = [UIImage imageWithData:imageData];
+-      }
+-    } @catch (NSException *exception) {
+-      // Failed to load artwork
+-    }
+-
++  void (^publishArtwork)(NSData *) = ^(NSData *imageData) {
++    UIImage *image = imageData ? [UIImage imageWithData:imageData] : nil;
+     if (image) {
+       MPMediaItemArtwork *artwork = [[MPMediaItemArtwork alloc]
+           initWithBoundsSize:image.size
+               requestHandler:^UIImage *_Nonnull(CGSize size) { return image; }];
+ 
+       dispatch_async(dispatch_get_main_queue(), ^{
++        if (!_isActive || generation != _artworkGeneration) {
++          return;
++        }
+         NSMutableDictionary *nowPlayingInfo = [center.nowPlayingInfo mutableCopy];
+         if (!nowPlayingInfo) {
+           nowPlayingInfo = [[NSMutableDictionary alloc] init];
+@@ -262,7 +217,23 @@
+         center.nowPlayingInfo = nowPlayingInfo;
+       });
+     }
+-  });
++  };
++  if ([artworkUrl hasPrefix:@"http://"] || [artworkUrl hasPrefix:@"https://"]) {
++    NSURL *url = [NSURL URLWithString:artworkUrl];
++    if (!url) return;
++    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
++    request.timeoutInterval = 10;
++    _artworkTask = [[NSURLSession sharedSession] dataTaskWithRequest:request
++        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
++          if (!error) publishArtwork(data);
++        }];
++    [_artworkTask resume];
++  } else {
++    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
++      NSString *imagePath = [[NSBundle mainBundle] pathForResource:artworkUrl ofType:nil];
++      publishArtwork([NSData dataWithContentsOfFile:imagePath ?: artworkUrl]);
++    });
++  }
+ }
+ 
+ - (void)enableControl:(NSString *)control enabled:(BOOL)enabled
 diff --git a/node_modules/react-native-audio-api/src/Audio/Audio.tsx b/node_modules/react-native-audio-api/src/Audio/Audio.tsx
 index c78fea4..55cee25 100644
 --- a/node_modules/react-native-audio-api/src/Audio/Audio.tsx

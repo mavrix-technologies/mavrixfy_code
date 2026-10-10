@@ -11,13 +11,13 @@ import { useStartupPlaybackReconcile } from "./audioStartupReconcile";
 import { updatePlaybackEngineSnapshot } from "./PlaybackEngine";
 import { resolvePlaybackUrlWithDetails, songToTrack, withResolvedPlaybackUrl } from "./PlayerPlaybackResolver";
 import { fetchAutoplayRecommendations } from "./smartAutoplayService";
-import { StandardAudioPlayer } from "./StandardAudioPlayer";
+import type { NativePlaybackPlayer, State as AudioState, RepeatMode as AudioRepeatMode } from "./StandardAudioPlayer";
 import * as ExpoAvPlayer from "./ExpoAvAdapter";
 
 export interface UsePlayerCoreStateOptions {
-  TrackPlayer: any;
-  State: any;
-  RepeatMode: any;
+  TrackPlayer: NativePlaybackPlayer | null;
+  State: typeof AudioState;
+  RepeatMode: typeof AudioRepeatMode;
 }
 
 export interface PendingPlayRequest {
@@ -69,7 +69,6 @@ export function usePlayerCoreState({
   const nextSongRef = useRef<() => void>(() => {});
   const prevSongRef = useRef<() => void>(() => {});
   const togglePlayRef = useRef<() => Promise<void> | void>(() => {});
-  const togglePlayInFlightRef = useRef(false);
   const seekToRef = useRef<(progress: number) => Promise<void> | void>(() => {});
   const playSongRef = useRef<(song: Song, queue?: Song[]) => Promise<void> | void>(() => {});
 
@@ -97,7 +96,7 @@ export function usePlayerCoreState({
 
     const promise = (async () => {
       try {
-        await StandardAudioPlayer.setupPlayer();
+        await TrackPlayer.setupPlayer();
         setIsPlayerReady(true);
         return true;
       } catch (error) {
@@ -139,7 +138,10 @@ export function usePlayerCoreState({
         return url;
       }
       const cached = streamUrlCache.current.get(song.id);
-      if (cached && !forcedQuality) return cached;
+      // Files and download licenses can change while the app remains open.
+      // Re-enter the resolver's download/file validation on every selection.
+      if (cached && /^(?:file|content):\/\/|^\//i.test(cached)) streamUrlCache.current.delete(song.id);
+      else if (cached && !forcedQuality) return cached;
 
       const pending = streamResolveCache.current.get(song.id);
       if (pending && !forcedQuality) return pending;
@@ -208,6 +210,9 @@ export function usePlayerCoreState({
     setQueueIndex,
     isPlayingRef,
     setIsPlaying,
+    playRequestIdRef,
+    desiredPlayStateRef,
+    isNativeQueueSyncedRef,
   });
 
   // Hook: Native Queue Mutation Lane
@@ -225,6 +230,8 @@ export function usePlayerCoreState({
     isNativeQueueSyncedRef,
     desiredPlayStateRef,
     currentSongRef,
+    queueRef,
+    playRequestIdRef,
   });
 
   const autoplaySongIdsRef = useRef<string[]>([]);
@@ -362,7 +369,6 @@ export function usePlayerCoreState({
     nextSongRef,
     prevSongRef,
     togglePlayRef,
-    togglePlayInFlightRef,
     seekToRef,
     playSongRef,
     streamUrlCache,

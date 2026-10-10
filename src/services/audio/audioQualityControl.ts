@@ -11,6 +11,7 @@ withResolvedPlaybackUrl,
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import type { PlaybackQualityState } from "@/types/playbackTypes";
 import { useCallback,useRef,type MutableRefObject } from "react";
+import type { NativePlaybackPlayer, RepeatMode as AudioRepeatMode } from "./StandardAudioPlayer";
 
 interface UseAudioQualityControlOptions {
   desiredPlayStateRef?: MutableRefObject<boolean | null>;
@@ -27,12 +28,12 @@ interface UseAudioQualityControlOptions {
   setQueue: (songs: Song[]) => void;
   originalQueueRef: MutableRefObject<Song[]>;
   setSourceQueue: (songs: Song[]) => void;
-  TrackPlayer: any;
+  TrackPlayer: NativePlaybackPlayer | null;
   isPlayerReady: boolean;
   ensurePlayerReady: () => Promise<boolean>;
-  RepeatMode: any;
+  RepeatMode: typeof AudioRepeatMode;
   repeatModeRef: MutableRefObject<"off" | "all" | "one">;
-  enqueueNativeQueueMutation: <T>(op: () => Promise<T>) => Promise<T>;
+  enqueueNativeQueueMutation: (op: () => Promise<void>) => Promise<void>;
   canUseLightweightAudioFallback: boolean;
   showPlaybackNotice: (msg: string) => void;
 }
@@ -114,8 +115,10 @@ export function useAudioQualityControl({
             if (!isCurrent()) return;
             const nativeQueue = await TrackPlayer!.getQueue();
             if (!isCurrent()) return;
-            const activeIdx = nativeQueue.findIndex((track: any) => track.id === resolvedSong.id);
-            if (!nativeQueue.length || activeIdx < 0 || activeIdx >= nativeQueue.length) return;
+            const activeIdx = await TrackPlayer!.getActiveTrackIndex();
+            if (!isCurrent()) return;
+            if (!nativeQueue.length || !Number.isInteger(activeIdx) || activeIdx < 0 || activeIdx >= nativeQueue.length ||
+              nativeQueue[activeIdx]?.id !== resolvedSong.id) return;
 
             const updatedNativeQueue = nativeQueue.map((track: any, idx: number) =>
               idx === activeIdx

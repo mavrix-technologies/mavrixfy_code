@@ -29,7 +29,7 @@ function fixture({ loaded = true, starts = true, fakeTimers = false, mode = asyn
     require: name => { if (name === "./audioPlayerFactory") return audioFactory || { ...expo, supportsStandby: true, retainPlayerAfterStartError: () => false };
       if (name === "expo-audio") return audioFactory || expo;
       if (name === "./audioTimeline") return require("./audio-timeline-fixture.cjs");
-      if (name === "@/lib/logger") return { logger: { debug() {} } };
+      if (name === "@/lib/logger") return { logger: { debug() {}, warn() {} } };
       throw new Error(name); } });
   return { ...module.exports, players, timerDelays, fireTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); } };
 }

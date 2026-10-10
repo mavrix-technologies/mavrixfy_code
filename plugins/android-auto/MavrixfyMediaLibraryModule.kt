@@ -26,7 +26,8 @@ class MavrixfyMediaLibraryModule(private val context: ReactApplicationContext) :
       }
     }
     PlaybackNotification.onSkipQueueItemListener = { index ->
-      val song = MavrixfyMediaBrowserService.catalog.optJSONArray("queue")?.optJSONObject(index.toInt())
+      val queue = MavrixfyMediaBrowserService.catalog.optJSONArray("queue")
+      val song = if (queue != null && index >= 0 && index < queue.length().toLong()) queue.optJSONObject(index.toInt()) else null
       if (song != null) emit("MavrixfyPlayMediaId", "id", song.optString("id"))
     }
   }
@@ -66,6 +67,7 @@ class MavrixfyMediaLibraryModule(private val context: ReactApplicationContext) :
       session.setQueue(items)
       session.setQueueTitle("Queue")
       PlaybackNotification.activeQueueItemId = activeIndex
+      PlaybackNotification.refreshPlaybackActions?.invoke()
     }
   }
   @ReactMethod fun reportError(message: String) {

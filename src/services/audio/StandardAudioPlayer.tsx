@@ -208,7 +208,7 @@ function updateNotification() {
     while (notificationPending) {
       notificationPending = false;
       const track = activeTrack();
-      if (!track) {
+      if (!track || playback.status === State.Stopped || playback.status === State.Ended || playback.status === State.None) {
         await PlaybackNotificationManager.hide();
         controlsEnabled = false;
         notificationMetadata = "";
@@ -249,17 +249,37 @@ function updateNotification() {
     )
     .finally(() => {
       notificationRunning = false;
+      // An update can arrive after the loop exits but before this finalizer.
+      // Drain it so terminal state and metadata are never lost at that boundary.
+      if (notificationPending) updateNotification();
     });
 }
 async function select(index: number, initialPosition = 0) {
   clearStartWatchdog();
-  if (index < 0 || index >= playback.queue.length)
+  if (!Number.isInteger(index) || index < 0 || index >= playback.queue.length)
     throw new Error("Track index is out of range.");
 
   const previous = activeTrack();
   detachCurrentSource();
   const version = selectionVersion;
   let track = playback.queue[index];
+  // Reserve selection before resolution so another Next/Previous or queue edit
+  // operates on the requested item, rather than the outgoing decoder's index.
+  publish({ index, position: playbackPosition(initialPosition, Number(track.duration) || 0),
+    duration: Number(track.duration) || 0, status: State.Loading });
+  if (track.id && /^file:\/\//i.test(track.url || "")) {
+    const { getSongDownload, getLocalPlaybackUrl } = await import("@/lib/downloads/downloadManager");
+    const download = await getSongDownload(track.id);
+    if (version !== selectionVersion) return;
+    if (download) {
+      const local = await getLocalPlaybackUrl(track.id);
+      if (version !== selectionVersion) return;
+      if (!local) throw new Error("Offline audio is no longer available. Tap Play to refresh the stream.");
+      index = playback.index;
+      track = { ...playback.queue[index], url: local };
+      playback = { ...playback, queue: playback.queue.map((item, i) => i === index ? track : item) };
+    }
+  }
   if (track.source === "youtube" && !/^(file|content):\/\//i.test(track.url || "")) {
     const song = { id: track.id, source: "youtube", youtubeVideoId: track.youtubeVideoId } as Song;
     let stream;
@@ -271,13 +291,15 @@ async function select(index: number, initialPosition = 0) {
       if (version !== selectionVersion) return;
       stream = await resolveYouTubeStream(song, effective);
     } catch (error) {
-      if (version !== selectionVersion || playback.queue[index]?.id !== track.id) return;
+      if (version !== selectionVersion || activeTrack()?.id !== track.id) return;
+      index = playback.index;
       publish({ index, position: Math.max(0, initialPosition), duration: Number(track.duration) || 0, status: State.Loading });
       emit(Event.PlaybackActiveTrackChanged, { lastTrack: previous, track, index });
       throw error;
     }
-    if (version !== selectionVersion || playback.queue[index]?.id !== track.id) return;
-    track = { ...track, ...playbackStreamMetadata(stream), url: stream.url, headers: stream.headers, youtubeAudioExpiresAt: stream.expiresAt,
+    if (version !== selectionVersion || activeTrack()?.id !== track.id) return;
+    index = playback.index;
+    track = { ...playback.queue[index], ...playbackStreamMetadata(stream), url: stream.url, headers: stream.headers, youtubeAudioExpiresAt: stream.expiresAt,
       duration: playbackDuration(Number(track.duration) || 0, stream.durationSeconds) };
     playback = { ...playback, queue: playback.queue.map((item, i) => i === index ? track : item) };
   }
@@ -312,7 +334,7 @@ function installGraph(ctx: NativeAudioContext) {
   applyEffectSettings();
   void import("./audioEqualizer").then(({ syncEqualizerWithNative }) =>
     syncEqualizerWithNative(),
-  );
+  ).catch(error => logger.warn("[Audio] Equalizer initialization failed", error));
 }
 
 function connectSourceOutput() {
@@ -416,7 +438,7 @@ export const StandardAudioPlayer = {
       if (event.type === "began") {
         const wasPlaying = playback.playWhenReady;
         emit(Event.PlaybackInterruption, { resumed: false });
-        void StandardAudioPlayer.pause(false);
+        void StandardAudioPlayer.pause(false).catch(error => logger.warn("[Audio] Interruption pause failed", error));
         interruptionResumeVersion = wasPlaying ? playIntentVersion : null;
       } else {
         ducked = false;
@@ -444,7 +466,7 @@ export const StandardAudioPlayer = {
         return;
       interruptionResumeVersion = null;
       emit(Event.PlaybackInterruption, { resumed: false });
-      void StandardAudioPlayer.pause();
+      void StandardAudioPlayer.pause().catch(error => logger.warn("[Audio] Route-change pause failed", error));
     });
     initialized = true;
   },
@@ -503,6 +525,7 @@ export const StandardAudioPlayer = {
     await this.setQueue([track], 0, initialPosition);
   },
   async remove(index: number) {
+    if (!Number.isInteger(index) || index < 0 || index >= playback.queue.length) return;
     const next = playback.queue.filter((_, i) => i !== index);
     const selected = playback.index;
     publish({ queue: next });
@@ -560,22 +583,29 @@ export const StandardAudioPlayer = {
   },
   async play() {
     if (!activeTrack()) return;
-    AudioManager.observeAudioInterruptions(true);
+    if (playback.status === State.Ended || playback.status === State.Error) {
+      const selection = selectionVersion + 1;
+      const selectionIntent = playIntentVersion + 1;
+      await select(playback.index, playback.status === State.Ended ? 0 : playback.position);
+      if (selectionVersion !== selection || playIntentVersion !== selectionIntent) return;
+    }
     const intentVersion = ++playIntentVersion;
     publish({ playWhenReady: true });
     emit(Event.PlaybackPlayWhenReadyChanged, { playWhenReady: true });
-    if (playback.status !== State.Playing) armStartWatchdog();
     try {
+      // Native focus denial emits an interruption. Record intent first so that
+      // callback can cancel it before any output starts.
+      AudioManager.observeAudioInterruptions(true);
+      if (intentVersion !== playIntentVersion || !playback.playWhenReady) return;
+      if (playback.status !== State.Playing) armStartWatchdog();
       await synchronizeAudioContext(true);
+      if (intentVersion !== playIntentVersion || !playback.playWhenReady) return;
+      // onLoad owns the first play; starting before preload completes would
+      // initiate another load inside Audio.
+      if (audioHandle && isSourceLoaded) audioHandle.play();
     } catch (error) {
       if (intentVersion === playIntentVersion) handlePlaybackError(error);
       throw error;
-    }
-    if (intentVersion !== playIntentVersion || !playback.playWhenReady) return;
-    // onLoad owns the first play; calling play before preload completes starts
-    // another load inside Audio and can leave overlapping native sources.
-    if (audioHandle && isSourceLoaded) {
-      audioHandle.play();
     }
     updateNotification();
   },
@@ -596,8 +626,10 @@ export const StandardAudioPlayer = {
     await synchronizeAudioContext(false);
   },
   async stop() {
-    await Promise.all([this.pause(), this.seekTo(0)]);
-    setStatus(State.Stopped);
+    const paused = this.pause();
+    const intentVersion = playIntentVersion;
+    await Promise.all([paused, this.seekTo(0)]);
+    if (intentVersion === playIntentVersion) setStatus(State.Stopped);
   },
   async skip(index: number, initialPosition = 0) {
     await select(index, initialPosition);
@@ -616,7 +648,7 @@ export const StandardAudioPlayer = {
     await select(playback.index - 1);
   },
   async seekTo(seconds: number) {
-    if (!Number.isFinite(seconds)) return;
+    if (!Number.isFinite(seconds)) throw new Error("Invalid seek position");
     const position = playbackPosition(seconds, playback.duration);
     if (audioHandle && isSourceLoaded) {
       audioHandle.seekToTime(position);
@@ -670,6 +702,8 @@ export const StandardAudioPlayer = {
     if (index === playback.index) updateNotification();
   },
 };
+
+export type NativePlaybackPlayer = typeof StandardAudioPlayer;
 
 function AudioDurationReporter({ sourceVersion }: { sourceVersion: number }) {
   const { duration } = useAudioTagContext();
@@ -725,7 +759,7 @@ export function useStandardAudioRenderer() {
       filters = [];
       outputGain = null;
       contextListeners.forEach((listener) => listener());
-      void created.close();
+      void created.close().catch(error => logger.warn("[Audio] Context disposal failed", error));
     };
   }, []);
   if (!audioCtx || !current.url) return null;
@@ -869,7 +903,3 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
     </Audio>
   );
 });
-
-if (typeof module !== "undefined" && module && module.exports) {
-  (module.exports as any).StandardAudioRenderer = useStandardAudioRenderer;
-}

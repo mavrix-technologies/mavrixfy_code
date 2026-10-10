@@ -5,6 +5,7 @@ const test = require("node:test");
 const ts = require("typescript");
 
 function fixture() {
+  let generation = 0;
   let resolve;
   const pending = new Promise((done) => {
     resolve = done;
@@ -24,6 +25,7 @@ function fixture() {
     module,
     exports: module.exports,
     require(name) {
+      if (name.endsWith("accountScope")) return { getAccountScope: () => ({ accountId: null, generation }), isCurrentAccount: scope => scope.generation === generation };
       if (name.endsWith("YouTubeMusic")) return { isYouTubeSong: song => song.source === "youtube" || song.id?.startsWith("youtube_") };
       if (name === "react")
         return {
@@ -60,7 +62,7 @@ function fixture() {
     desiredPlayStateRef,
     currentSongRef,
   });
-  return { lane, resolve, calls, desiredPlayStateRef, currentSongRef };
+  return { lane, resolve, calls, desiredPlayStateRef, currentSongRef, changeAccount: () => generation++ };
 }
 
 test("pause wins while queue URLs are resolving", async () => {
@@ -80,5 +82,20 @@ test("a resolved queue edit cannot replace a newly selected song", async () => {
   f.currentSongRef.current = { id: "b" };
   f.resolve("https://example.com/a.mp3");
   await pending;
+  assert.deepEqual(f.calls, []);
+});
+
+test("a queue edit cannot load or resume a previous account's audio", async () => {
+  const f = fixture();
+  const pending = f.lane.replaceNativeQueuePreservingState([{ id: "a" }], 0, { wasPlaying: true });
+  f.changeAccount(); f.resolve("https://example.com/a.mp3"); await pending;
+  assert.deepEqual(f.calls, []);
+});
+
+test("queued mutations from the previous account are cancelled before reaching the singleton player", async () => {
+  const f = fixture();
+  const pending = f.lane.enqueueNativeQueueMutation(async () => { await Promise.resolve(); f.changeAccount(); });
+  const next = f.lane.enqueueNativeQueueMutation(async () => f.calls.push("outdated mutation"));
+  await pending; await next;
   assert.deepEqual(f.calls, []);
 });

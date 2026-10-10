@@ -5,9 +5,9 @@ const ts = require('typescript');
 const test = require('node:test');
 const { fixture: audioFixture, tracks } = require('./helpers/audio-player-fixture.cjs');
 
-function load(file, dependencies = {}, globals = {}) {
+function load(file, dependencies = {}, globals = {}, extraSource = '') {
   const module = { exports: {} };
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8') + extraSource, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
   }).outputText, { module, exports: module.exports, require: name => {
     if (!(name in dependencies)) throw Error(`Unmocked dependency ${name}`);
@@ -39,7 +39,7 @@ test('decorative consumers share one lifecycle listener and release it on unmoun
 
 test('collapsed/background player creates no full player UI; expanding/restoring recreates it', () => {
   const react = {
-    memo: fn => fn, useEffect() {}, useCallback: fn => fn, useMemo: fn => fn(),
+    memo: fn => fn, useEffect() {}, useCallback: fn => fn, useMemo: fn => fn(), useRef: value => ({ current: value }),
     useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}],
     createElement: (type, props, ...children) => ({ type, props, children }),
   };
@@ -50,6 +50,7 @@ test('collapsed/background player creates no full player UI; expanding/restoring
     '@/lib/appActivity': { useAppIsActive: () => foreground },
     '@/constants/platform': { IS_ANDROID: false },
     '@/lib/playerUIState': { playerUIStateStore: ui, usePlayerUIState: () => ui.current },
+    '@/lib/queueRef': { globalQueueSheetRef: { current: null } },
     '@/services/audio/PlaybackEngine': { usePlaybackNowPlaying: () => ({ currentSong: { id: 'song' }, queue: [], queueIndex: 0 }) },
     '@/lib/nativeAnimated': { createAnimatedComponent: () => 'AnimatedScrollView' },
     'react-native': { useWindowDimensions: () => ({ height: 800 }), StyleSheet: { absoluteFillObject: {} } },
@@ -121,27 +122,46 @@ test('background progress keeps audio state current without notifying UI subscri
   store.updatePlaybackProgress({ positionMillis: 3000 }); assert.equal(notifications, 2); cleanup();
 });
 
-test('a 10,000-song queue keeps mounted rows bounded and retains every scroll position', () => {
-  const { getQueueWindow } = load('src/features/player/components/PlayerQueueList.tsx', {
-    react: { memo: fn => fn }, 'react-native': {}, 'react-native-gesture-handler': {}, '../styles/playerScreenStyles': {},
-  });
-  for (const rowHeight of [48, 54]) {
-    for (const viewport of [200, 400, 600]) {
-      const visible = Math.ceil(viewport / rowHeight);
-      for (const count of [0, 1, 8, 50, 10000]) {
-        for (const offset of [0, 15, 300, count * rowHeight / 2, count * rowHeight + 100]) {
-          const range = getQueueWindow(count, rowHeight, viewport, offset);
-          assert.ok(range.start >= 0 && range.end <= count && range.start <= range.end);
-          assert.ok(range.end - range.start <= visible * 4);
-          assert.equal(range.top + (range.end - range.start) * rowHeight + range.bottom, count * rowHeight);
-          if (count) {
-            const first = Math.min(count - 1, Math.floor(offset / rowHeight));
-            assert.ok(range.start <= first && range.end > first);
-            assert.ok(range.end >= Math.min(count, first + visible));
-          }
-        }
-      }
-    }
+test('a 10,000-song queue retains all rows with bounded native virtualization settings and exact scroll offsets', () => {
+  const queue = Array.from({ length: 10000 }, (_, index) => ({ id: String(index) }));
+  const react = {
+    memo: fn => fn, useEffect() {}, useLayoutEffect() {}, useCallback: fn => fn, useMemo: fn => fn(),
+    useRef: value => ({ current: value }), useState: value => [value, () => {}],
+    createElement: (type, props, ...children) => ({ type, props, children }),
+  };
+  const rowHeight = 60;
+  const deps = {
+    react, 'react-native': { Platform: { OS: 'ios' }, View: 'View', Text: 'Text' },
+    '@expo/vector-icons': {}, '@gorhom/bottom-sheet': { BottomSheetView: 'BottomSheetView' },
+    'expo-haptics': {}, 'expo-image': {}, 'react-native-draggable-flatlist': { __esModule: true, default: 'DraggableFlatList' },
+    'react-native-safe-area-context': { useSafeAreaInsets: () => ({ bottom: 0 }) },
+    '@/contexts/PlayerContext': { usePlayerActions: () => ({}) },
+    '@/services/audio/PlaybackEngine': {
+      usePlaybackQueueState: () => ({ queue, currentSong: null, queueIndex: 0 }),
+    },
+    './styles/queueBottomSheetStyles': { QUEUE_ROW_HEIGHT: rowHeight, s: {} },
+  };
+  for (const name of ['@/components/AdMobBanner', '@/constants/colors', '@/lib/haptics', '@/lib/playerUIState',
+    '@/services/audio/queueDrag', '@/features/player/components/QueueSleepTimer',
+    '@/features/player/components/PlayerControlComponents']) deps[name] = {};
+  // Expose the real content component only inside this VM fixture.
+  const { QueueContent } = load('src/components/QueueBottomSheet.tsx', deps, {}, '\nexport { QueueContent };');
+  const content = QueueContent({ interactionReady: false, onClose() {}, onReady() {} });
+  const findList = node => node?.type === 'DraggableFlatList' ? node : node?.children?.map(findList).find(Boolean);
+  const list = findList(content);
+  assert.ok(list);
+  assert.equal(list.props.data.length, queue.length);
+  assert.ok(list.props.initialNumToRender <= 12);
+  assert.ok(list.props.maxToRenderPerBatch <= 10);
+  assert.ok(list.props.windowSize <= 7);
+  for (const index of [0, 1, 50, 5000, 9999]) {
+    const item = list.props.data[index];
+    assert.equal(item.song, queue[index]);
+    assert.equal(list.props.keyExtractor(item), item.key);
+    const layout = list.props.getItemLayout(list.props.data, index);
+    assert.equal(layout.index, index);
+    assert.equal(layout.length, rowHeight);
+    assert.equal(layout.offset, index * rowHeight);
   }
 });
 

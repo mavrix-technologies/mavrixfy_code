@@ -26,6 +26,7 @@ export function usePlayerLiveQueue(
   const liveActiveQueueIndex = useMemo(() => {
     if (livePlayingQueue.length === 0) return 0;
     if (currentSong?.id) {
+      if (livePlayingQueue[queueIndex]?.id === currentSong.id) return queueIndex;
       const currentIndex = livePlayingQueue.findIndex((song) => song.id === currentSong.id);
       if (currentIndex >= 0) {
         return currentIndex;

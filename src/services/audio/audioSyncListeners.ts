@@ -1,4 +1,5 @@
 import { getSettings } from "@/lib/storage";
+import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import { isYouTubeSong, peekYouTubeStream, rejectYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
@@ -12,13 +13,14 @@ import type { SleepTimerState, PlaybackQualityState } from "@/types/playbackType
 import { toDurationSeconds } from "@/utils/timeFormatters";
 import { useEffect,useRef,type MutableRefObject } from "react";
 import { AppState,Platform } from "react-native";
+import type { NativePlaybackPlayer, State as AudioState, Event as AudioEvent } from "./StandardAudioPlayer";
 
 interface UseAudioSyncListenersOptions {
   setPlaybackQuality?: (update: (previous: PlaybackQualityState) => PlaybackQualityState) => void;
   isPlayerReady: boolean;
-  TrackPlayer: any;
-  Event: any;
-  State: any;
+  TrackPlayer: NativePlaybackPlayer | null;
+  Event: typeof AudioEvent;
+  State: typeof AudioState;
   subscribeTrackPlayerEvent: (eventName: unknown, listener: (...args: any[]) => void) => () => void;
   currentSong: Song | null;
   currentSongRef: MutableRefObject<Song | null>;
@@ -44,8 +46,6 @@ interface UseAudioSyncListenersOptions {
   likedSongs: Song[];
   likedSongsRef: MutableRefObject<Song[]>;
   playSong: (song: Song, queue?: Song[], position?: number) => Promise<void> | void;
-  nextSong: () => Promise<void>;
-  prevSong: () => Promise<void>;
   playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number) => Promise<void> | void>;
   nextSongRef: MutableRefObject<() => void>;
   prevSongRef: MutableRefObject<() => void>;
@@ -90,8 +90,6 @@ export function useAudioSyncListeners({
   likedSongs,
   likedSongsRef,
   playSong,
-  nextSong,
-  prevSong,
   playSongRef,
   nextSongRef,
   prevSongRef,
@@ -226,14 +224,14 @@ export function useAudioSyncListeners({
           return;
         }
         logger.error("[Player] PlaybackError event", error);
+        const errorMsg = error?.message || error?.code || "Playback failed";
         pendingPlayRequestRef.current = null;
         desiredPlayStateRef.current = false;
         setIsPlaying(false);
         isPlayingRef.current = false;
+        playbackLoadingRef.current = false;
         setPlaybackLoading(false);
-        updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
-
-        const errorMsg = error?.message || error?.code || "Playback failed";
+        updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false, error: String(errorMsg) });
         showPlaybackNotice(`Playback error: ${errorMsg}`);
       }),
       subscribeTrackPlayerEvent(Event.PlaybackProgressUpdated, (event: any) => {
@@ -266,7 +264,6 @@ export function useAudioSyncListeners({
         }
 
         setNativePosition(pos);
-        positionSecondsRef.current = pos;
         const song = currentSongRef.current;
         const nativeDuration = typeof event?.duration === "number" && event.duration > 0
           ? event.duration
@@ -316,7 +313,6 @@ export function useAudioSyncListeners({
       }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
         const currentQ = queueRef.current;
-        const currentSong = currentSongRef.current;
 
         // 1. Identify track by ID if available from native event
         const activeTrackId =
@@ -340,11 +336,6 @@ export function useAudioSyncListeners({
             qualityLabel: `${bitrate > 0 ? `${bitrate}kbps` : "Original audio"}${youtubeStream.codec ? ` · ${youtubeStream.codec}` : ""}`, isFallback: false }));
         }
 
-        // If native event confirms the song we already selected, do NOT overwrite or jump
-        if (activeTrackId && currentSong && String(activeTrackId) === String(currentSong.id)) {
-          return;
-        }
-
         const nextIndex =
           typeof event?.index === "number"
             ? event.index
@@ -355,8 +346,15 @@ export function useAudioSyncListeners({
         let targetSong: Song | undefined;
         let resolvedIndex = -1;
 
-        // Match by ID first across our queue
-        if (activeTrackId) {
+        // A synchronized native index identifies the playing occurrence even
+        // when the queue contains the same song more than once.
+        if (isNativeQueueSyncedRef?.current && nextIndex >= 0 && nextIndex < currentQ.length &&
+          (!activeTrackId || String(currentQ[nextIndex].id) === String(activeTrackId))) {
+          targetSong = currentQ[nextIndex];
+          resolvedIndex = nextIndex;
+        }
+
+        if (!targetSong && activeTrackId) {
           const foundIndex = currentQ.findIndex((s) => String(s.id) === String(activeTrackId));
           if (foundIndex >= 0) {
             targetSong = currentQ[foundIndex];
@@ -373,7 +371,7 @@ export function useAudioSyncListeners({
         // If native queue is unsynced and no track ID matched, DO NOT blind-revert to queue[0]!
         if (!targetSong) return;
 
-        if (String(targetSong.id) !== String(currentSongRef.current?.id)) {
+        if (String(targetSong.id) !== String(currentSongRef.current?.id) || resolvedIndex !== queueIndexRef.current) {
           currentSongRef.current = targetSong;
           setCurrentSong(targetSong);
           if (resolvedIndex >= 0) {
@@ -405,10 +403,12 @@ export function useAudioSyncListeners({
           !playbackLoadingRef.current && !pendingPlayRequestRef.current;
         if (sleepTimerRef.current?.mode === "end-of-stack") {
           clearSleepTimer();
+          desiredPlayStateRef.current = false;
           setIsPlaying(false);
           isPlayingRef.current = false;
+          playbackLoadingRef.current = false;
           setPlaybackLoading(false);
-          updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
+          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false });
           return;
         }
 
@@ -443,8 +443,9 @@ export function useAudioSyncListeners({
         desiredPlayStateRef.current = false;
         setIsPlaying(false);
         isPlayingRef.current = false;
+        playbackLoadingRef.current = false;
         setPlaybackLoading(false);
-        updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false });
+        updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false });
       }),
     ];
 
@@ -459,9 +460,10 @@ export function useAudioSyncListeners({
   // Save current playback state (event-driven)
   useEffect(() => {
     if (!currentSong) return;
+    const scope = getAccountScope();
 
     const persist = () => {
-      if (!currentSongRef.current) return;
+      if (!isCurrentAccount(scope) || !currentSongRef.current) return;
       playerPersistenceService.savePlayerState({
         currentSong: currentSongRef.current,
         queue: queueRef.current,
@@ -487,19 +489,32 @@ export function useAudioSyncListeners({
   useEffect(() => {
     const handleAppStateChange = async (nextState: string) => {
       if (nextState === "active" && TrackPlayer && isPlayerReady) {
+        const selectedSong = currentSongRef.current;
+        const selectedQueue = queueRef.current;
+        if (playbackLoadingRef.current || pendingPlayRequestRef.current) return;
         try {
-          const [activeTrack, prog] = await Promise.all([
+          const [activeTrack, prog, nativeIndex] = await Promise.all([
             TrackPlayer.getActiveTrack().catch(() => null),
             TrackPlayer.getProgress().catch(() => null),
+            TrackPlayer.getActiveTrackIndex().catch(() => undefined),
           ]);
-          if (activeTrack?.id && activeTrack.id !== currentSongRef.current?.id) {
-            const foundIdx = queueRef.current.findIndex((s: Song) => s.id === activeTrack.id);
+          if (currentSongRef.current !== selectedSong || queueRef.current !== selectedQueue ||
+            playbackLoadingRef.current || pendingPlayRequestRef.current) return;
+          if (!activeTrack?.id) return;
+          const synchronizedIndex = isNativeQueueSyncedRef?.current && typeof nativeIndex === "number" && Number.isInteger(nativeIndex) &&
+            selectedQueue[nativeIndex]?.id === activeTrack.id ? nativeIndex : -1;
+          if (activeTrack.id !== currentSongRef.current?.id ||
+            (synchronizedIndex >= 0 && synchronizedIndex !== queueIndexRef.current)) {
+            const foundIdx = synchronizedIndex >= 0 ? synchronizedIndex : selectedQueue.findIndex((s: Song) => s.id === activeTrack.id);
             if (foundIdx >= 0) {
               const target = queueRef.current[foundIdx];
               currentSongRef.current = target;
               setCurrentSong(target);
               setQueueIndex(foundIdx);
               queueIndexRef.current = foundIdx;
+              updatePlaybackEngineSnapshot({ currentSong: target, queueIndex: foundIdx });
+            } else {
+              return;
             }
           }
           if (prog) {
@@ -518,7 +533,7 @@ export function useAudioSyncListeners({
 
     const sub = AppState.addEventListener("change", handleAppStateChange);
     return () => sub.remove();
-  }, [isPlayerReady, TrackPlayer, currentSongRef, queueIndexRef, queueRef, setCurrentSong, setNativeDuration, setNativePosition, setQueueIndex]);
+  }, [isPlayerReady, TrackPlayer, currentSongRef, isNativeQueueSyncedRef, pendingPlayRequestRef, playbackLoadingRef, queueIndexRef, queueRef, setCurrentSong, setNativeDuration, setNativePosition, setQueueIndex]);
 
   // Sync state and listen for playback requests from Apple CarPlay
   useEffect(() => {

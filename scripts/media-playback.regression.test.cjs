@@ -240,7 +240,7 @@ test("seek rejects non-finite values and clamps to track duration", async () => 
   await p.setQueue(tracks);
   await p.seekTo(999);
   assert.equal((await p.getProgress()).position, 180);
-  await p.seekTo(NaN);
+  await assert.rejects(p.seekTo(NaN), /Invalid seek position/);
   assert.equal((await p.getProgress()).position, 180);
   await p.seekTo(-1);
   assert.equal((await p.getProgress()).position, 0);

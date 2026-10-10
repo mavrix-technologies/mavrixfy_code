@@ -17,6 +17,7 @@ function flow(provider='youtube') {
  setPlaybackLoading:noop,showPlaybackNotice:msg=>errors.push(msg),prefetchAdjacentTrackStreams:noop,
  resolvePlaybackUrlCached:async song=>song.audioUrl};
  const imports={react:{useCallback:fn=>fn,useRef:ref,useEffect:fn=>fn()},
+ '@/lib/accountScope':{getAccountScope:()=>({accountId:null,generation:0}),isCurrentAccount:()=>true},
  '@/services/audio/ExpoAvAdapter':adapter,'@/lib/storage':{getSettings:async()=>({smartAutoplayEnabled:false})},
  '@/services/audio/PlaybackEngine':{updatePlaybackEngineSnapshot:noop},
  '@/services/audio/PlayerPlaybackResolver':{withResolvedPlaybackUrl:(song,audioUrl)=>({...song,audioUrl}),resolveAudioUrl:s=>s.audioUrl},

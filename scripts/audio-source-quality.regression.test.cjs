@@ -91,3 +91,13 @@ test("a YouTube source rejection never uses a retained JioSaavn URL or quality l
     audioUrl: "https://aac.saavncdn.com/backup.mp4", downloadUrl: [{ quality: "320kbps" }] }, "high"), /Source rejected/);
   assert.equal(f.catalog.length, 0);
 });
+
+test("a stale local queue URL cannot bypass managed download revocation or an unavailable file", async () => {
+  for (const status of ["revoked", "expired", "deleted", "paused", "completed"]) {
+    const f = fixture({ download: { status } });
+    const youtube = await f.resolvePlaybackUrlWithDetails({ ...song, audioUrl: "file:///managed.m4a" });
+    assert.equal(youtube.url, f.original);
+    const catalog = await f.resolvePlaybackUrlWithDetails({ id: "catalog", source: "jiosaavn", audioUrl: "file:///managed.m4a" });
+    assert.equal(catalog.url, null);
+  }
+});

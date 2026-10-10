@@ -8,6 +8,7 @@ function fixture({ native = false, fails = false, pendingProgress } = {}) {
   const targets = [], overrides = [], positions = [], notices = [];
   const song = { id: "youtube_abcdefghijk", duration: 376 };
   const options = { currentSongRef: { current: song }, durationSecondsRef: { current: 376 }, State: {},
+    playRequestIdRef: { current: 0 },
     isPlayerReady: native, canUseLightweightAudioFallback: !native,
     setSeekOverride: value => overrides.push(value), setNativePosition: value => positions.push(value),
     showPlaybackNotice: value => notices.push(value) };
@@ -48,6 +49,15 @@ test("late native progress cannot seek a newly selected song", async () => {
   const f = fixture({ native: true, pendingProgress: new Promise(done => { resolve = done; }) });
   const pending = f.seekTo(0.5);
   f.options.currentSongRef.current = { id: "youtube_lmnopqrstuv", duration: 100 };
+  resolve({ duration: 200, position: 30 }); await pending;
+  assert.equal(f.targets.length, 0);
+});
+
+test("late seek progress cannot seek a newer playback request for the same song", async () => {
+  let resolve;
+  const f = fixture({ native: true, pendingProgress: new Promise(done => { resolve = done; }) });
+  const pending = f.seekTo(0.5);
+  f.options.playRequestIdRef.current++;
   resolve({ duration: 200, position: 30 }); await pending;
   assert.equal(f.targets.length, 0);
 });

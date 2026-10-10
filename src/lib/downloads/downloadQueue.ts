@@ -88,9 +88,8 @@ function launchDownload(songId: string): void {
   const task = executeDownload(songId).catch((error) => {
     logger.error("[DownloadQueue] Could not start download", { songId, error });
   }).finally(() => {
-    startingSet.delete(songId);
     runningTasks.delete(task);
-    drainQueue();
+    releaseSlot(songId);
   });
   runningTasks.add(task);
 }
@@ -150,10 +149,11 @@ function drainQueue() {
 async function updateStatus(
   songId: string,
   status: DownloadStatus,
-  extra?: Partial<DownloadItem>
+  extra?: Partial<DownloadItem>,
+  expectedStatus?: DownloadStatus
 ): Promise<DownloadItem | null> {
   const item = await loadDownload(songId);
-  if (!item) return null;
+  if (!item || (expectedStatus && (suspended || item.status !== expectedStatus))) return null;
   const updated: DownloadItem = { ...item, status, ...extra };
   await saveDownload(updated);
   emitQueueEvent("status", songId, updated);
@@ -194,35 +194,33 @@ async function resolveDownloadSource(item: DownloadItem): Promise<{ url: string;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
 
-    let res: Response;
     try {
-      res = await fetch(url, {
+      const res = await fetch(url, {
         headers: { Accept: "application/json" },
         signal: controller.signal,
       });
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      const json = await res.json();
+
+      // Response shape: { success: true, data: { songs: [...] } } or { success: true, data: [...] }
+      const songs: any[] =
+        Array.isArray(json?.data) ? json.data :
+        Array.isArray(json?.data?.songs) ? json.data.songs :
+        Array.isArray(json?.data?.results) ? json.data.results :
+        [];
+
+      const song = songs[0];
+      const freshDownloadUrl = song?.downloadUrl ?? song?.download_url ?? song?.audioUrl;
+
+      if (freshDownloadUrl) {
+        const qualityMap = { low: "low" as const, medium: "medium" as const, high: "high" as const };
+        const resolved = getBestAudioUrlWithQuality(freshDownloadUrl, qualityMap[quality] ?? "high");
+        if (resolved && resolved.startsWith("http")) {
+          return { url: resolved };
+        }
+      }
     } finally {
       clearTimeout(timer);
-    }
-
-    if (!res.ok) throw new Error(`API ${res.status}`);
-    const json = await res.json();
-
-    // Response shape: { success: true, data: { songs: [...] } } or { success: true, data: [...] }
-    const songs: any[] =
-      Array.isArray(json?.data) ? json.data :
-      Array.isArray(json?.data?.songs) ? json.data.songs :
-      Array.isArray(json?.data?.results) ? json.data.results :
-      [];
-
-    const song = songs[0];
-    const freshDownloadUrl = song?.downloadUrl ?? song?.download_url ?? song?.audioUrl;
-
-    if (freshDownloadUrl) {
-      const qualityMap = { low: "low" as const, medium: "medium" as const, high: "high" as const };
-      const resolved = getBestAudioUrlWithQuality(freshDownloadUrl, qualityMap[quality] ?? "high");
-      if (resolved && resolved.startsWith("http")) {
-        return { url: resolved };
-      }
     }
   } catch (err: any) {
     logger.warn("[DownloadQueue] URL refresh failed, using original", { songId, error: err?.message });
@@ -306,14 +304,12 @@ async function executeDownload(songId: string): Promise<void> {
       if ((await loadDownload(songId))?.status === "downloading") {
         await updateStatus(songId, "paused");
       }
-      releaseSlot(songId);
       return;
     }
 
     if ((await loadDownload(songId))?.status !== "downloading") {
       const { deleteAsync } = await import("expo-file-system/legacy");
       await deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-      releaseSlot(songId);
       return;
     }
 
@@ -340,6 +336,15 @@ async function executeDownload(songId: string): Promise<void> {
 
     // Atomically promote verified temp file to final permanent track location
     const finalUri = await promoteTempToTrack(songId, ext, item.accountId);
+    // Promotion performs filesystem I/O. Pause/delete may have won while it was
+    // pending, and the promoted file must not revive that abandoned transfer.
+    if (suspended || (await loadDownload(songId))?.status !== "downloading") {
+      if (finalUri) {
+        const { deleteAsync } = await import("expo-file-system/legacy");
+        await deleteAsync(finalUri, { idempotent: true }).catch(() => {});
+      }
+      return;
+    }
     if (!finalUri) {
       logger.warn("[DownloadQueue] Downloaded temp file verification failed", { songId });
       const { deleteAsync } = await import("expo-file-system/legacy");
@@ -347,16 +352,8 @@ async function executeDownload(songId: string): Promise<void> {
       await updateStatus(songId, "failed", {
         failureReason: "Downloaded file was empty or missing — stream URL may have expired",
         failedAt: new Date().toISOString(),
-      });
-      releaseSlot(songId);
+      }, "downloading");
       return;
-    }
-
-    // Optional background artwork download (non-blocking)
-    if (item.coverUrl && item.coverUrl.startsWith("http")) {
-      const artworkUri = getArtworkFileUri(songId, item.accountId);
-      const { downloadAsync } = await import("expo-file-system/legacy");
-      downloadAsync(item.coverUrl, artworkUri).catch(() => {});
     }
 
     const completedItem = await updateStatus(songId, "completed", {
@@ -371,10 +368,21 @@ async function executeDownload(songId: string): Promise<void> {
       completedAt: new Date().toISOString(),
       failureReason: null,
       failedAt: null,
-    });
+    }, "downloading");
 
     if (completedItem) emitQueueEvent("completed", songId, completedItem);
-    releaseSlot(songId);
+    else {
+      const { deleteAsync } = await import("expo-file-system/legacy");
+      await deleteAsync(finalUri, { idempotent: true }).catch(() => {});
+    }
+
+    // Optional artwork starts after the guarded commit and cannot delay it.
+    if (completedItem && item.coverUrl?.startsWith("http")) {
+      const artworkUri = getArtworkFileUri(songId, item.accountId);
+      void import("expo-file-system/legacy")
+        .then(({ downloadAsync }) => downloadAsync(item.coverUrl, artworkUri))
+        .catch(() => {});
+    }
 
   } catch (err: any) {
     const { deleteAsync } = await import("expo-file-system/legacy");
@@ -388,9 +396,12 @@ async function executeDownload(songId: string): Promise<void> {
       if ((await loadDownload(songId))?.status === "downloading") {
         await updateStatus(songId, "paused");
       }
-      releaseSlot(songId);
       return;
     }
+
+    const current = await loadDownload(songId);
+    // A late transport failure cannot undo a user pause/delete or account teardown.
+    if (suspended || !current || current.status !== "downloading") return;
 
     logger.error("[DownloadQueue] download failed", { songId, error: err?.message });
 
@@ -401,11 +412,8 @@ async function executeDownload(songId: string): Promise<void> {
       }
     }
 
-    const current = await loadDownload(songId);
     const retryCount = (current?.retryCount ?? 0) + 1;
     const MAX_RETRIES = 3;
-
-    releaseSlot(songId); // free the slot before retry delay
 
     if (!suspended && retryCount <= MAX_RETRIES) {
       await updateStatus(songId, "queued", {
@@ -510,11 +518,10 @@ export async function pauseDownload(songId: string): Promise<void> {
   if (pendingIdx !== -1) pendingQueue.splice(pendingIdx, 1);
 
   const handle = activeHandles.get(songId);
+  await updateStatus(songId, "paused");
   if (handle) {
     try { await handle.pauseAsync(); } catch { /* ignore */ }
-    // releaseSlot called inside executeDownload catch block
   }
-  await updateStatus(songId, "paused");
 }
 
 export async function resumeDownload(
@@ -573,11 +580,10 @@ export async function cancelDownload(songId: string): Promise<void> {
   if (pendingIdx !== -1) pendingQueue.splice(pendingIdx, 1);
 
   const handle = activeHandles.get(songId);
+  await updateStatus(songId, "deleted");
   if (handle) {
     try { await handle.cancelAsync(); } catch { /* ignore */ }
-    releaseSlot(songId);
   }
-  await updateStatus(songId, "deleted");
 }
 
 export async function retryDownload(

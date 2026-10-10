@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { MusicArtwork } from "@/components/MusicArtwork";
-import { memo,useCallback,useMemo } from "react";
+import { memo,useCallback } from "react";
 import {
 ActivityIndicator,
 FlatList,
@@ -9,7 +9,6 @@ Pressable,
 Text,
 View,
 } from "react-native";
-import { Pressable as GHPressable } from "react-native-gesture-handler";
 
 import { getBestImageUrl,type Song } from "@/lib/musicData";
 import { styles } from "../styles/playerScreenStyles";

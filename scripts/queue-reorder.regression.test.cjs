@@ -59,6 +59,7 @@ function fixture({ shuffled = false, nativeIds, queueIds = ["a", "b", "c", "d"],
     module,
     exports: module.exports,
     require(name) {
+      if (name.endsWith("accountScope")) return { getAccountScope: () => ({ accountId: null, generation: 0 }), isCurrentAccount: () => true };
       if (name === "react") return { useCallback: fn => fn };
       if (name.endsWith("YouTubeMusic")) return {
         isYouTubeSong: song => song.source === "youtube" || song.id?.startsWith("youtube_"),

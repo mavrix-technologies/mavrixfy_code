@@ -4,6 +4,40 @@ const vm = require("node:vm");
 const test = require("node:test");
 const ts = require("typescript");
 
+test("prebuild keeps one car browser and the custom playback notification owner", () => {
+  let manifestMod;
+  const module = { exports: {} };
+  vm.runInNewContext(fs.readFileSync("plugins/withAndroidAuto.js", "utf8"), {
+    module,
+    __dirname: "plugins",
+    require(name) {
+      if (name === "@expo/config-plugins") return {
+        withAndroidManifest(config, callback) { manifestMod = callback; return config; },
+        withAppBuildGradle: (config) => config,
+        withMainApplication: (config) => config,
+        withDangerousMod: (config) => config,
+      };
+      return require(name);
+    },
+  });
+  module.exports({});
+  const expoService = { $: {
+    "android:name": "expo.modules.audio.service.AudioControlsService",
+    "android:exported": "false",
+    "android:foregroundServiceType": "mediaPlayback",
+    "tools:replace": "android:foregroundServiceType",
+  } };
+  const mod = { modResults: { manifest: { $: {}, application: [{ service: [expoService] }] } } };
+  manifestMod(mod);
+  manifestMod(mod);
+  const app = mod.modResults.manifest.application[0];
+  assert.equal(expoService.$["android:enabled"], "false");
+  assert.equal(expoService.$["android:foregroundServiceType"], "mediaPlayback");
+  assert.equal(expoService.$["tools:replace"], "android:foregroundServiceType,android:enabled");
+  assert.equal(app.service.filter(service => service.$["android:name"] === "com.mavrixfy.app.MavrixfyMediaBrowserService").length, 1);
+  assert.equal(app["meta-data"].length, 1);
+});
+
 test("car controls publish app state and ignore actions for an old track", async () => {
   const listeners = new Map();
   const effects = [];

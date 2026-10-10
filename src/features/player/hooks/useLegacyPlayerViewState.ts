@@ -223,8 +223,6 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
     activeQueueIndex,
     currentSongId: currentSong?.id,
     pageWidth: trackSwipePageWidth,
-    nextSong,
-    prevSong,
     playSong,
   });
 

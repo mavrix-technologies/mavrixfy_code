@@ -33,41 +33,20 @@ export function getAudioUrlByQuality(baseUrl: string, quality: DownloadQuality):
     return baseUrl;
   }
 
-  const targetBitrate = qualityToBitrate(quality);
-  const bitrateNum = targetBitrate.replace("kbps", "");
-
-  // Pattern 1: /320/ or /128/ or /96/ etc — but only on known audio CDN hosts
-  // to avoid false positives on unrelated numeric path segments.
+  // Only the provider's own audio paths have a known bitrate convention.
+  // Preserve unrelated source URLs and signed query parameters byte for byte.
   try {
-    const { host } = new URL(baseUrl);
-    const isJioHost = JIOSAAVN_HOST_SUFFIXES.some((h) => host.endsWith(h));
-    if (isJioHost) {
-      const withSlashes = baseUrl.replace(
-        /\/(?:320|256|192|160|128|96|64|48|32)\//g,
-        `/${bitrateNum}/`
-      );
-      if (withSlashes !== baseUrl) {
-        return withSlashes;
-      }
-    }
+    const { hostname, protocol } = new URL(baseUrl);
+    if (!/^https?:$/.test(protocol) || !JIOSAAVN_HOST_SUFFIXES.some((h) => hostname === h || hostname.endsWith(`.${h}`))) return baseUrl;
   } catch {
-    // Not an absolute URL — skip the host-scoped slash pattern.
+    return baseUrl;
   }
-
-  // Pattern 2: _320 or _128 etc in filename (the real JioSaavn encoding).
-  // Anchored before a file extension, trailing underscore, or end of path.
-  const withUnderscore = baseUrl.replace(/_(?:320|256|192|160|128|96|64|48|32)(?=\.|_|$)/g, `_${bitrateNum}`);
-  if (withUnderscore !== baseUrl) {
-    return withUnderscore;
-  }
-
-  // Pattern 3: -320 or -128 etc
-  const withDash = baseUrl.replace(/-(?:320|256|192|160|128|96|64|48|32)(?=\.|_|$|-)/g, `-${bitrateNum}`);
-  if (withDash !== baseUrl) {
-    return withDash;
-  }
-
-  // If no pattern matched, return original URL
-  // (it's likely already the best quality)
-  return baseUrl;
+  const parts = baseUrl.match(/^(https?:\/\/[^/?#]+)([^?#]*)(.*)$/i);
+  if (!parts) return baseUrl;
+  const bitrateNum = qualityToBitrate(quality).replace("kbps", "");
+  const path = parts[2]
+    .replace(/\/(?:320|256|192|160|128|96|64|48|32)\//g, `/${bitrateNum}/`)
+    .replace(/_(?:320|256|192|160|128|96|64|48|32)(?=\.|_|$)/g, `_${bitrateNum}`)
+    .replace(/-(?:320|256|192|160|128|96|64|48|32)(?=\.|_|$|-)/g, `-${bitrateNum}`);
+  return `${parts[1]}${path}${parts[3]}`;
 }

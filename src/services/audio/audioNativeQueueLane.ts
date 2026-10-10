@@ -1,7 +1,9 @@
 import { isYouTubeSong } from "@/services/youtube/YouTubeMusic";
+import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import type { Song } from "@/lib/musicData";
 import { readAudioCandidate,songToTrack } from "@/services/audio/PlayerPlaybackResolver";
 import { useCallback,useRef,type MutableRefObject } from "react";
+import type { NativePlaybackPlayer, RepeatMode as AudioRepeatMode } from "./StandardAudioPlayer";
 
 export const isSameQueueContent = (
   a: Song[] | undefined | null,
@@ -16,8 +18,8 @@ export const isSameQueueContent = (
 };
 
 interface UseAudioNativeQueueLaneOptions {
-  TrackPlayer: any;
-  RepeatMode: any;
+  TrackPlayer: NativePlaybackPlayer | null;
+  RepeatMode: typeof AudioRepeatMode;
   isPlayerReady: boolean;
   repeatModeRef: MutableRefObject<"off" | "all" | "one">;
   streamUrlCache: MutableRefObject<Map<string, string>>;
@@ -25,8 +27,10 @@ interface UseAudioNativeQueueLaneOptions {
   isNativeQueueSyncedRef?: MutableRefObject<boolean>;
   desiredPlayStateRef: MutableRefObject<boolean | null>;
   currentSongRef: MutableRefObject<Song | null>;
+  queueRef?: MutableRefObject<Song[]>;
+  playRequestIdRef?: MutableRefObject<number>;
 }
-const RESOLVED_EMPTY_PROMISE: Promise<any> = Promise.resolve();
+const RESOLVED_EMPTY_PROMISE: Promise<void> = Promise.resolve();
 
 export function useAudioNativeQueueLane({
   TrackPlayer,
@@ -38,12 +42,16 @@ export function useAudioNativeQueueLane({
   isNativeQueueSyncedRef,
   desiredPlayStateRef,
   currentSongRef,
+  queueRef,
+  playRequestIdRef,
 }: UseAudioNativeQueueLaneOptions) {
-  const nativeQueueMutationRef = useRef<Promise<any>>(RESOLVED_EMPTY_PROMISE);
+  const nativeQueueMutationRef = useRef<Promise<void>>(RESOLVED_EMPTY_PROMISE);
 
   const enqueueNativeQueueMutation = useCallback(
-    <T,>(operation: () => Promise<T>): Promise<T> => {
-      const run = nativeQueueMutationRef.current.then(operation, operation);
+    (operation: () => Promise<void>): Promise<void> => {
+      const scope = getAccountScope();
+      const runOperation = () => isCurrentAccount(scope) ? operation() : Promise.resolve();
+      const run = nativeQueueMutationRef.current.then(runOperation, runOperation);
       nativeQueueMutationRef.current = run.then(
         () => undefined,
         () => undefined
@@ -70,7 +78,7 @@ export function useAudioNativeQueueLane({
     async (
       songs: Song[],
       forcedUrls: Map<string, string> = new Map()
-    ): Promise<any[]> => {
+    ): Promise<ReturnType<typeof songToTrack>[]> => {
       return Promise.all(
         songs.map(async (song) => {
           if (isYouTubeSong(song) && !forcedUrls.has(song.id)) return songToTrack(song);
@@ -78,7 +86,7 @@ export function useAudioNativeQueueLane({
           if (forced) return songToTrack(song, forced, streamUrlCache.current);
 
           const cached = streamUrlCache.current.get(song.id);
-          if (cached) return songToTrack(song, cached, streamUrlCache.current);
+          if (cached && !/^(?:file|content):\/\/|^\//i.test(cached)) return songToTrack(song, cached, streamUrlCache.current);
 
           const resolved = await resolvePlaybackUrlCached(song);
           return songToTrack(song, resolved, streamUrlCache.current);
@@ -99,6 +107,11 @@ export function useAudioNativeQueueLane({
       }
     ) => {
       if (!TrackPlayer || !isPlayerReady || songs.length === 0) return;
+      const scope = getAccountScope();
+      const selectedSong = currentSongRef.current;
+      const requestId = playRequestIdRef?.current;
+      const isCurrent = () => isCurrentAccount(scope) && currentSongRef.current === selectedSong &&
+        (!queueRef || queueRef.current === songs) && requestId === playRequestIdRef?.current;
 
       const position = Math.max(0, options?.position ?? 0);
       const wasPlaying = options?.wasPlaying ?? false;
@@ -111,14 +124,19 @@ export function useAudioNativeQueueLane({
         forcedUrls.set(active.id, url);
       }
       const nativeTracks = await buildNativeQueueTracks(songs, forcedUrls);
-      if (currentSongRef.current?.id !== songs[activeIndex]?.id) return;
+      if (!isCurrent() ||
+        currentSongRef.current?.id !== songs[activeIndex]?.id) return;
       if (nativeTracks.some((track) => track?.source !== "youtube" && !readAudioCandidate(track?.url))) {
         throw new Error("One or more queue tracks have no playable audio URL.");
       }
 
       return TrackPlayer.setQueue(nativeTracks, Math.max(0, Math.min(activeIndex, songs.length - 1)), position, true)
-        .then(() => ((desiredPlayStateRef.current ?? wasPlaying) ? TrackPlayer.play() : TrackPlayer.pause().catch(() => {})))
         .then(() => {
+          if (!isCurrent()) return;
+          return (desiredPlayStateRef.current ?? wasPlaying) ? TrackPlayer.play() : TrackPlayer.pause().catch(() => {});
+        })
+        .then(() => {
+          if (!isCurrent()) return;
           if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = true;
           if (RepeatMode) {
             const repeatMap: Record<string, any> = {
@@ -130,7 +148,7 @@ export function useAudioNativeQueueLane({
           }
         });
     },
-    [buildNativeQueueTracks, currentSongRef, desiredPlayStateRef, isNativeQueueSyncedRef, isPlayerReady, repeatModeRef, RepeatMode, resolvePlaybackUrlCached, TrackPlayer]
+    [buildNativeQueueTracks, currentSongRef, desiredPlayStateRef, isNativeQueueSyncedRef, isPlayerReady, playRequestIdRef, queueRef, repeatModeRef, RepeatMode, resolvePlaybackUrlCached, TrackPlayer]
   );
 
   return {

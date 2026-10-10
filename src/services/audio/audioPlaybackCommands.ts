@@ -1,5 +1,6 @@
 import { isYouTubeSong, peekYouTubeStream, youTubePlaybackErrorMessage, youTubePlaybackErrorDetails } from "@/services/youtube/YouTubeMusic";
 import { getSettings } from "@/lib/storage";
+import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
@@ -11,6 +12,7 @@ import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 import { playbackPosition } from "./audioTimeline";
+import type { NativePlaybackPlayer, State as AudioState } from "./StandardAudioPlayer";
 import { useCallback,useEffect,type MutableRefObject } from "react";
 
 interface UseAudioPlaybackCommandsOptions {
@@ -41,16 +43,15 @@ interface UseAudioPlaybackCommandsOptions {
   streamUrlCache: MutableRefObject<Map<string, string>>;
   resolvePlaybackUrlCached: (song: Song) => Promise<string | null>;
   prefetchAdjacentTrackStreams: (queue: Song[], index: number) => void;
-  enqueueNativeQueueMutation: <T>(op: () => Promise<T>) => Promise<T>;
-  TrackPlayer: any;
+  enqueueNativeQueueMutation: (op: () => Promise<void>) => Promise<void>;
+  TrackPlayer: NativePlaybackPlayer | null;
   isPlayerReady: boolean;
   ensurePlayerReady: () => Promise<boolean>;
-  State: any;
+  State: typeof AudioState;
   canUseLightweightAudioFallback: boolean;
   showPlaybackNotice: (msg: string) => void;
   playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number) => Promise<void> | void>;
   togglePlayRef: MutableRefObject<() => Promise<void> | void>;
-  togglePlayInFlightRef: MutableRefObject<boolean>;
   nextSongRef: MutableRefObject<() => void>;
   prevSongRef: MutableRefObject<() => void>;
   seekToRef: MutableRefObject<(progress: number) => Promise<void> | void>;
@@ -97,7 +98,6 @@ export function useAudioPlaybackCommands({
   showPlaybackNotice,
   playSongRef,
   togglePlayRef,
-  togglePlayInFlightRef,
   nextSongRef,
   prevSongRef,
   seekToRef,
@@ -109,6 +109,7 @@ export function useAudioPlaybackCommands({
   const playSong = useCallback(
     async (song: Song, requestedQueue?: Song[], startPositionSeconds?: number) => {
       if (!song?.id) return;
+      const scope = getAccountScope();
       const reqId = ++playRequestIdRef.current;
       pendingPlayRequestRef.current = {
         id: reqId,
@@ -116,9 +117,9 @@ export function useAudioPlaybackCommands({
       };
 
       const hasRequestedQueue = Array.isArray(requestedQueue) && requestedQueue.length > 0;
-      const songIndexInQueue = hasRequestedQueue
-        ? requestedQueue.findIndex((s) => s.id === song.id)
-        : queueRef.current.findIndex((s) => s.id === song.id);
+      const candidateQueue = hasRequestedQueue ? requestedQueue : queueRef.current;
+      const occurrenceIndex = candidateQueue.indexOf(song);
+      const songIndexInQueue = occurrenceIndex >= 0 ? occurrenceIndex : candidateQueue.findIndex((s) => s.id === song.id);
 
       const isNewQueue = hasRequestedQueue
         ? !isSameQueueContent(requestedQueue, queueRef.current)
@@ -198,7 +199,7 @@ export function useAudioPlaybackCommands({
 
       // 2. Offload persistence completely off the critical tap path
       setTimeout(() => {
-        if (reqId !== playRequestIdRef.current) return;
+        if (reqId !== playRequestIdRef.current || !isCurrentAccount(scope)) return;
         playerPersistenceService.addRecentlyPlayed(targetSong).catch(() => {});
         playerPersistenceService.savePlayerState({
           currentSong: targetSong,
@@ -215,7 +216,7 @@ export function useAudioPlaybackCommands({
           resolvePlaybackUrlCached(targetSong),
           new Promise<null>((resolve) => { resolutionTimer = setTimeout(() => resolve(null), isYouTubeSong(targetSong) ? 27000 : 12000); }),
         ]).finally(() => clearTimeout(resolutionTimer));
-        if (reqId !== playRequestIdRef.current) return;
+        if (reqId !== playRequestIdRef.current || !isCurrentAccount(scope)) return;
 
         if (!audioUrl) {
           if (pendingPlayRequestRef.current?.id === reqId) {
@@ -224,7 +225,8 @@ export function useAudioPlaybackCommands({
           desiredPlayStateRef.current = false;
           setIsPlaying(false);
           isPlayingRef.current = false;
-          updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
+          updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false,
+            error: "Playback stream timed out or unavailable." });
           showPlaybackNotice("Playback stream timed out or unavailable.");
           return;
         }
@@ -243,7 +245,8 @@ export function useAudioPlaybackCommands({
             desiredPlayStateRef.current = false;
             setIsPlaying(false);
             isPlayingRef.current = false;
-            updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
+            updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false,
+              error: "Audio player initialization failed." });
             showPlaybackNotice("Audio player initialization failed.");
             return;
           }
@@ -256,11 +259,19 @@ export function useAudioPlaybackCommands({
             // Fast path: native queue already synchronized -> skip + play directly
             if (!isNewQueue && isNativeQueueSyncedRef?.current) {
               try {
-                await TrackPlayer!.skip(targetIndex, initialPos);
+                const nativeQueue = await TrackPlayer!.getQueue();
                 if (reqId !== playRequestIdRef.current) return;
-                if (desiredPlayStateRef.current === false) await TrackPlayer!.pause();
-                else await TrackPlayer!.play();
-                return;
+                const nativeTrack = nativeQueue[targetIndex];
+                // Resolution may replace an expired URL or revoke a managed
+                // local file. Only reuse the native item if it still matches.
+                if (nativeTrack?.id === targetSong.id && nativeTrack.url === audioUrl) {
+                  await TrackPlayer!.skip(targetIndex, initialPos);
+                  if (reqId !== playRequestIdRef.current) return;
+                  if (desiredPlayStateRef.current === false) await TrackPlayer!.pause();
+                  else await TrackPlayer!.play();
+                  return;
+                }
+                if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
               } catch {
                 if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
               }
@@ -278,38 +289,17 @@ export function useAudioPlaybackCommands({
               const hasValidUrl = (t: any) => t?.source === "youtube" || (typeof t?.url === "string" && t.url.length > 5);
               const allTracksValid = nativeTracks.length === q.length && nativeTracks.every(hasValidUrl);
 
-              if (
-                typeof TrackPlayer!.setQueue === "function" &&
-                allTracksValid
-              ) {
+              if (allTracksValid) {
                 await TrackPlayer!.setQueue(nativeTracks, targetIndex, initialPos);
                 if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = true;
-              } else if (typeof TrackPlayer!.load === "function") {
-                await TrackPlayer!.load(targetTrack, initialPos);
-                if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
               } else {
-                await TrackPlayer!.reset();
-                await TrackPlayer!.add([targetTrack]);
-                if (initialPos > 0 && typeof TrackPlayer!.seekTo === "function") {
-                  await TrackPlayer!.seekTo(initialPos).catch(() => {});
-                }
+                await TrackPlayer!.load(targetTrack, initialPos);
                 if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
               }
             } catch (queueErr) {
               logger.error("[Player] Native track load failed:", queueErr);
-              try {
-                if (typeof TrackPlayer!.load === "function") {
-                  await TrackPlayer!.load(targetTrack, initialPos);
-                } else {
-                  await TrackPlayer!.reset();
-                  await TrackPlayer!.add([targetTrack]);
-                  if (initialPos > 0 && typeof TrackPlayer!.seekTo === "function") {
-                    await TrackPlayer!.seekTo(initialPos).catch(() => {});
-                  }
-                }
-              } catch (loadError) {
-                throw loadError;
-              }
+              if (reqId !== playRequestIdRef.current || !isCurrentAccount(scope)) return;
+              await TrackPlayer!.load(targetTrack, initialPos);
               if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
             }
 
@@ -317,9 +307,6 @@ export function useAudioPlaybackCommands({
             if (desiredPlayStateRef.current === false) await TrackPlayer!.pause();
             else {
               await TrackPlayer!.play();
-              if (initialPos > 0 && typeof TrackPlayer!.seekTo === "function") {
-                await TrackPlayer!.seekTo(initialPos).catch(() => {});
-              }
             }
           });
 
@@ -359,7 +346,8 @@ export function useAudioPlaybackCommands({
         isPlayingRef.current = false;
         playbackLoadingRef.current = false;
         setPlaybackLoading(false);
-        updatePlaybackEngineSnapshot({ desiredPlayState: null, isPlaying: false, isLoading: false, isBuffering: false });
+        updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false,
+          error: nativeStartupTimedOut ? "Audio playback timed out. Tap Play to retry." : notice });
         if (!nativeStartupTimedOut) showPlaybackNotice(notice);
       } finally {
         if (reqId === playRequestIdRef.current) {
@@ -414,11 +402,12 @@ export function useAudioPlaybackCommands({
   }, [playSong, playSongRef]);
 
   const togglePlay = useCallback(async () => {
-    if (togglePlayInFlightRef.current) return;
-    togglePlayInFlightRef.current = true;
-
     const nextPlayState = !isPlayingRef.current;
     desiredPlayStateRef.current = nextPlayState;
+    const requestId = playRequestIdRef.current;
+    const selectedSongId = currentSongRef.current?.id;
+    const isCurrent = () => requestId === playRequestIdRef.current &&
+      selectedSongId === currentSongRef.current?.id && desiredPlayStateRef.current === nextPlayState;
 
     if (!currentSongRef.current) {
       if (queueRef.current.length > 0) {
@@ -428,7 +417,6 @@ export function useAudioPlaybackCommands({
           void playSong(target, queueRef.current, resumePos);
         }
       }
-      togglePlayInFlightRef.current = false;
       return;
     }
 
@@ -453,11 +441,21 @@ export function useAudioPlaybackCommands({
           isPlayingRef.current = true;
           updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
           const ready = isPlayerReady || (await ensurePlayerReady());
+          if (!isCurrent()) return;
+          if (!ready) {
+            desiredPlayStateRef.current = false;
+            isPlayingRef.current = false;
+            setIsPlaying(false);
+            updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, error: "Audio player initialization failed." });
+            showPlaybackNotice("Audio player initialization failed.");
+            return;
+          }
           if (ready) {
             const [activeTrack, playbackState] = await Promise.all([
               TrackPlayer.getActiveTrack().catch(() => null),
               TrackPlayer.getPlaybackState().catch(() => null),
             ]);
+            if (!isCurrent()) return;
             const rawState = typeof playbackState === "object" ? (playbackState as any)?.state : playbackState;
 
             const activeId = activeTrack?.id ? String(activeTrack.id) : null;
@@ -483,9 +481,11 @@ export function useAudioPlaybackCommands({
 
             try {
               await enqueueNativeQueueMutation(async () => {
+                if (!isCurrent()) return;
                 await TrackPlayer.play();
               });
             } catch (playErr) {
+              if (!isCurrent()) return;
               logger.warn("[Player] TrackPlayer.play() failed, reloading track via playSong:", playErr);
               const resumePos = positionSecondsRef.current > 0 ? positionSecondsRef.current : 0;
               await playSong(currentSongRef.current, queueRef.current, resumePos);
@@ -496,6 +496,7 @@ export function useAudioPlaybackCommands({
           isPlayingRef.current = false;
           updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
           await enqueueNativeQueueMutation(async () => {
+            if (!isCurrent()) return;
             await TrackPlayer.pause();
           });
         }
@@ -520,13 +521,12 @@ export function useAudioPlaybackCommands({
         }
       }
     } catch (error) {
+      if (!isCurrent()) return;
       logger.error("[Player] togglePlay failed", error);
       if (nextPlayState && currentSongRef.current) {
         const resumePos = positionSecondsRef.current > 0 ? positionSecondsRef.current : 0;
         void playSong(currentSongRef.current, queueRef.current, resumePos);
       }
-    } finally {
-      togglePlayInFlightRef.current = false;
     }
   }, [
     State,
@@ -543,7 +543,8 @@ export function useAudioPlaybackCommands({
     queueIndexRef,
     queueRef,
     setIsPlaying,
-    togglePlayInFlightRef,
+    playRequestIdRef,
+    showPlaybackNotice,
     TrackPlayer,
   ]);
 
@@ -594,6 +595,7 @@ export function useAudioPlaybackCommands({
       desiredPlayStateRef.current = false;
       if (TrackPlayer) await TrackPlayer.pause();
       else if (canUseLightweightAudioFallback) ExpoAvPlayer.pause();
+      if (!stillCurrent()) return;
       setIsPlaying(false);
       isPlayingRef.current = false;
       updatePlaybackEngineSnapshot({ isPlaying: false, desiredPlayState: false });
@@ -623,11 +625,13 @@ export function useAudioPlaybackCommands({
     async (progress: number) => {
       if (!Number.isFinite(progress)) return;
       const songId = currentSongRef.current?.id;
+      const requestId = playRequestIdRef?.current;
+      const isCurrent = () => requestId === playRequestIdRef?.current && currentSongRef.current?.id === songId;
       const native = TrackPlayer && isPlayerReady;
       let engineProgress: { position: number; duration: number } | undefined;
       if (native && typeof TrackPlayer.getProgress === "function") engineProgress = await TrackPlayer.getProgress().catch(() => undefined);
       else if (canUseLightweightAudioFallback) engineProgress = ExpoAvPlayer.getProgress();
-      if (currentSongRef.current?.id !== songId) return;
+      if (!isCurrent()) return;
       const durationSeconds = Number.isFinite(engineProgress?.duration) && engineProgress!.duration > 0
         ? engineProgress!.duration : (durationSecondsRef?.current && durationSecondsRef.current > 0)
         ? durationSecondsRef.current
@@ -645,13 +649,13 @@ export function useAudioPlaybackCommands({
         if (native) await TrackPlayer.seekTo(seconds);
         else await ExpoAvPlayer.seekTo(seconds);
       } catch {
-        if (currentSongRef.current?.id !== songId) return;
+        if (!isCurrent()) return;
         setSeekOverride(null);
         if (Number.isFinite(engineProgress?.position)) setNativePosition(engineProgress!.position);
         showPlaybackNotice("Could not seek this audio. Please try again.");
       }
     },
-    [canUseLightweightAudioFallback, currentSongRef, durationSecondsRef, isPlayerReady, setNativePosition, setSeekOverride, showPlaybackNotice, TrackPlayer]
+    [canUseLightweightAudioFallback, currentSongRef, durationSecondsRef, isPlayerReady, playRequestIdRef, setNativePosition, setSeekOverride, showPlaybackNotice, TrackPlayer]
   );
 
   useEffect(() => {

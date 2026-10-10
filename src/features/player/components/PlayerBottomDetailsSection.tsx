@@ -5,7 +5,6 @@ import AdMobBanner from "@/components/AdMobBanner";
 import { KaraokeLyricsView } from "@/components/KaraokeLyricsView";
 import type { Song } from "@/lib/musicData";
 import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
-import { styles } from "../styles/playerScreenStyles";
 import { AboutArtistCard,RelatedSongsSection } from "./PlayerDiscoverySections";
 
 export interface PlayerBottomDetailsSectionProps {

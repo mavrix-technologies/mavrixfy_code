@@ -6,10 +6,11 @@ const test = require("node:test");
 const ts = require("typescript");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture({ youtubeResolver = async () => { throw new Error("Unexpected YouTube resolution"); }, platform = "android", expoGo = false, notificationControl = async () => {}, streamingQuality = "medium", headroomDb = () => 0 } = {}) {
+function fixture({ youtubeResolver = async () => { throw new Error("Unexpected YouTube resolution"); }, platform = "android", expoGo = false, notificationControl = async () => {}, streamingQuality = "medium", headroomDb = () => 0, downloads = { getSongDownload: async () => null } } = {}) {
   const controls = new Map();
   const system = new Map();
   const notifications = [];
+  let hiddenNotifications = 0;
   const focusRequests = [];
   const snapshots = [];
   let rendererNotifications = 0;
@@ -81,7 +82,7 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
       addSystemEventListener: (name, fn) => system.set(name, fn),
     },
     PlaybackNotificationManager: {
-      hide: async () => {},
+      hide: async () => { hiddenNotifications++; },
       show: async (metadata) => notifications.push(metadata),
       enableControl: notificationControl,
       addEventListener: (name, fn) => controls.set(name, fn),
@@ -104,6 +105,7 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
     clearTimeout: id => timers.delete(id),
     require(name) {
       if (name.endsWith("YouTubeMusic")) return { resolveYouTubeStream: youtubeResolver };
+      if (name.endsWith("downloadManager")) return downloads;
       if (name.endsWith("PlayerPlaybackResolver")) return { getRequestedQualityPreference: async () => ({ effective: qualityPreference.current }) };
       if (name.endsWith("audioTimeline")) return require("./audio-timeline-fixture.cjs");
       if (name === "react") return react;
@@ -126,15 +128,18 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
     },
   });
   const engine = module.exports;
+  engine.StandardAudioRenderer = engine.useStandardAudioRenderer;
   if (!expoGo) engine.StandardAudioRenderer();
   return {
     ...engine,
+    audioManager: audio.AudioManager,
     graph,
     qualityPreference,
     contextCalls,
     controls,
     system,
     notifications,
+    hiddenNotifications: () => hiddenNotifications,
     focusRequests,
     snapshots,
     rendererNotifications: () => rendererNotifications,

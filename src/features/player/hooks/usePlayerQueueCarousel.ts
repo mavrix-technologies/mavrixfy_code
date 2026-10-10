@@ -9,8 +9,6 @@ export interface UsePlayerQueueSwipeParams {
   activeQueueIndex: number;
   currentSongId: string | undefined;
   pageWidth: number;
-  nextSong: () => Promise<any> | void;
-  prevSong: () => Promise<any> | void;
   playSong: (song: Song, queue: Song[]) => void;
 }
 
@@ -19,8 +17,6 @@ export function usePlayerQueueSwipe({
   activeQueueIndex,
   currentSongId,
   pageWidth,
-  nextSong,
-  prevSong,
   playSong,
 }: UsePlayerQueueSwipeParams) {
   const [scrollX] = useState(() => new Animated.Value(activeQueueIndex * pageWidth));

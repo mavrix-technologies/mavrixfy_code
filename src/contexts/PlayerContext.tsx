@@ -52,6 +52,11 @@ usePlayerActions,usePlayerBrowse,usePlayerProgress,usePlayerRowActions
 const canUseLightweightAudioFallback = Boolean(isRunningInExpoGo() || !TrackPlayer);
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
+  const { firebaseUser } = useAuth();
+  return <PlayerSessionProvider key={firebaseUser?.uid ?? "guest"}>{children}</PlayerSessionProvider>;
+}
+
+function PlayerSessionProvider({ children }: { children: ReactNode }) {
   const { user: authUser } = useAuth();
   const core = usePlayerCoreState({ TrackPlayer, State, RepeatMode });
   useEffect(() => () => {
@@ -78,8 +83,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     playbackLoadingRef: core.playbackLoadingRef,
     desiredPlayStateRef: core.desiredPlayStateRef,
     pendingPlayRequestRef: core.pendingPlayRequestRef,
+    playRequestIdRef: core.playRequestIdRef,
     canUseLightweightAudioFallback,
-    TrackPlayer,
     nextSongRef: core.nextSongRef,
     playSongRef: core.playSongRef,
   });
@@ -137,7 +142,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     showPlaybackNotice: core.showPlaybackNotice,
     playSongRef: core.playSongRef,
     togglePlayRef: core.togglePlayRef,
-    togglePlayInFlightRef: core.togglePlayInFlightRef,
     nextSongRef: core.nextSongRef,
     prevSongRef: core.prevSongRef,
     seekToRef: core.seekToRef,
@@ -257,8 +261,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     likedSongs,
     likedSongsRef,
     playSong,
-    nextSong,
-    prevSong,
     playSongRef: core.playSongRef,
     nextSongRef: core.nextSongRef,
     prevSongRef: core.prevSongRef,

@@ -158,7 +158,7 @@
             "AsyncStorage_db_size_in_MB": "200",
             "enableShrinkResourcesInReleaseBuilds": true,
             "enableProguardInReleaseBuilds": true,
-            "extraProguardRules": "-keep class com.facebook.hermes.unicode.** { *; }\n-keep class com.facebook.jni.** { *; }\n-keep class com.doublesymmetry.** { *; }\n-keep class expo.modules.updates.** { *; }\n-keep class kotlin.** { *; }\n-keep class kotlin.reflect.** { *; }\n-keep class com.google.android.gms.** { *; }\n-dontwarn com.google.android.gms.**\n-keep class com.google.firebase.** { *; }\n-dontwarn com.google.firebase.**\n-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod\n-dontwarn okhttp3.**\n-dontwarn okio.**",
+            "extraProguardRules": "-keep class com.facebook.hermes.unicode.** { *; }\n-keep class com.facebook.jni.** { *; }\n-keep class expo.modules.updates.** { *; }\n-keep class kotlin.** { *; }\n-keep class kotlin.reflect.** { *; }\n-keep class com.google.android.gms.** { *; }\n-dontwarn com.google.android.gms.**\n-keep class com.google.firebase.** { *; }\n-dontwarn com.google.firebase.**\n-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod\n-dontwarn okhttp3.**\n-dontwarn okio.**",
             "useLegacyPackaging": false,
             "packagingOptions": {
               "pickFirst": [

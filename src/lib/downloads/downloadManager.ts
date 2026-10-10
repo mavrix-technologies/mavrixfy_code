@@ -33,7 +33,7 @@ import { deleteAllTrackFiles,deleteTrackFiles,getTrackFileSize,getValidatedTrack
 import { issueOfflineLicense,refreshLicenses } from "@/lib/downloads/licenseSync";
 import { logger } from "@/lib/logger";
 import { getBestAudioUrlWithQuality,type Song } from "@/lib/musicData";
-import { type DownloadItem,type DownloadPreferences,type StorageSummary } from "@/types/downloads";
+import { LICENSE_GRACE_PERIOD_DAYS,type DownloadItem,type DownloadPreferences,type StorageSummary } from "@/types/downloads";
 import { isYouTubeSong } from "@/services/youtube/YouTubeMusic";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -229,12 +229,14 @@ export async function downloadCollection(
  */
 export async function getLocalPlaybackUrl(songId: string): Promise<string | null> {
   try {
+    const scope = getAccountScope();
     const item = await loadDownload(songId);
+    if (!isCurrentAccount(scope) || (item && item.status !== "completed")) return null;
     if (item && item.status === "completed") {
       // Only validate expiration if a license expiration was explicitly stamped
       if (item.licenseExpiresAt) {
         const expiry = Date.parse(item.licenseExpiresAt);
-        if (Number.isFinite(expiry) && Date.now() > expiry + 7 * 24 * 60 * 60 * 1000) {
+        if (Number.isFinite(expiry) && Date.now() > expiry + LICENSE_GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000) {
           return null;
         }
       }
@@ -244,7 +246,7 @@ export async function getLocalPlaybackUrl(songId: string): Promise<string | null
         try {
           const path = item.localPath.startsWith("file://") ? item.localPath : `file://${item.localPath}`;
           const info = await getInfoAsync(path);
-          if (info.exists && !info.isDirectory && ((info as any).size ?? 0) > 1024) {
+          if (isCurrentAccount(scope) && info.exists && !info.isDirectory && ((info as any).size ?? 0) > 1024) {
             return path;
           }
         } catch {
@@ -254,11 +256,12 @@ export async function getLocalPlaybackUrl(songId: string): Promise<string | null
 
       // 2. Fall back to validated track file URI with account scope and auto-migration
       const validUri = await getValidatedTrackFileUri(songId, item.accountId);
-      if (validUri) return validUri;
+      if (validUri) return isCurrentAccount(scope) ? validUri : null;
     }
 
-    // Direct filesystem check if item is not completed in store
-    return await getValidatedTrackFileUri(songId);
+    // Preserve recovery of older local files that have no managed download record.
+    const validUri = await getValidatedTrackFileUri(songId);
+    return isCurrentAccount(scope) ? validUri : null;
   } catch {
     return null;
   }

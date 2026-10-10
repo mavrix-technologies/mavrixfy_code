@@ -3,14 +3,14 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const ts = require("typescript");
-function fixture() {
+function fixture({ position = 40, requestId = 1, persistedRead = async () => null } = {}) {
   const slots = []; let cursor = 0, effects = [], status, next = 0;
   const updates = [];
   const ref = current => ({ current });
   const song = { id: "youtube_abcdefghijk", source: "youtube", duration: 200 };
   const options = { currentSong: song, currentSongRef: ref(song), queueRef: ref([song]), repeatModeRef: ref("off"),
     isPlayingRef: ref(true), setIsPlaying() {}, playbackLoadingRef: ref(false), desiredPlayStateRef: ref(null),
-    pendingPlayRequestRef: ref(null), canUseLightweightAudioFallback: true, TrackPlayer: null,
+    pendingPlayRequestRef: ref(null), playRequestIdRef: ref(requestId), canUseLightweightAudioFallback: true, TrackPlayer: null,
     nextSongRef: ref(() => next++), playSongRef: ref(() => {}) };
   const module = { exports: {} };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync("src/services/audio/audioProgressTracking.ts", "utf8"), {
@@ -24,11 +24,12 @@ function fixture() {
     if (name.includes("timeFormatters")) return { toDurationSeconds: Number };
     if (name.includes("YouTubeMusic")) return { isYouTubeSong: () => true, rejectYouTubeStream() {} };
     if (name.includes("logger")) return { logger: { warn() {} } };
+    if (name.includes("playerPersistenceService")) return { playerPersistenceService: { loadPlayerState: persistedRead } };
     throw new Error(name);
   } });
   const render = () => { cursor = 0; effects = []; const result = module.exports.useAudioProgressTracking(options);
-    result.positionSecondsRef.current = 40; effects.forEach(fn => fn()); return result; };
-  return { render, song, updates, emit: value => status(value), next: () => next };
+    result.positionSecondsRef.current = position; effects.forEach(fn => fn()); return result; };
+  return { render, song, options, updates, emit: value => status(value), next: () => next };
 }
 test("catalog updates cannot replace the decoder duration or reset position", () => {
   const f = fixture(); const hook = f.render();
@@ -69,4 +70,24 @@ test("YouTube stream timeline survives a decoder duration jump from 3:20 to 6:16
   f.emit({ isPlaying: false, position: 376, duration: 376, didJustFinish: true });
   assert.equal(f.updates.at(-1).duration, 200373);
   assert.equal(f.updates.at(-1).positionMillis, 200373);
+});
+
+test("fresh Play at zero does not read an old saved position for the same song", async () => {
+  let reads = 0;
+  const f = fixture({ position: 0, persistedRead: async () => { reads++; return { currentSong: { id: "youtube_abcdefghijk" }, positionSeconds: 80 }; } });
+  const hook = f.render();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reads, 0);
+  assert.equal(hook.positionSecondsRef.current, 0);
+});
+
+test("startup progress restoration cannot overwrite a Play issued during its storage read", async () => {
+  let complete;
+  const f = fixture({ position: 0, requestId: 0, persistedRead: () => new Promise(resolve => { complete = resolve; }) });
+  const hook = f.render();
+  await new Promise(resolve => setImmediate(resolve));
+  f.options.playRequestIdRef.current++;
+  complete({ currentSong: f.song, positionSeconds: 80 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(hook.positionSecondsRef.current, 0);
 });

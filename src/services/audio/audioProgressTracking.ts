@@ -28,8 +28,8 @@ interface UseAudioProgressTrackingOptions {
   playbackLoadingRef: MutableRefObject<boolean>;
   desiredPlayStateRef: MutableRefObject<boolean | null>;
   pendingPlayRequestRef: MutableRefObject<PendingPlayRequest | null>;
+  playRequestIdRef: MutableRefObject<number>;
   canUseLightweightAudioFallback: boolean;
-  TrackPlayer: any;
   nextSongRef: MutableRefObject<() => void>;
   playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number) => Promise<void> | void>;
 }
@@ -44,8 +44,8 @@ export function useAudioProgressTracking({
   playbackLoadingRef,
   desiredPlayStateRef,
   pendingPlayRequestRef,
+  playRequestIdRef,
   canUseLightweightAudioFallback,
-  TrackPlayer,
   nextSongRef,
   playSongRef,
 }: UseAudioProgressTrackingOptions) {
@@ -123,10 +123,10 @@ export function useAudioProgressTracking({
       seekOverrideRef.current = null;
       if (positionSecondsRef.current > 0) {
         updateProgressStore(positionSecondsRef.current, initialDur);
-      } else {
+      } else if (playRequestIdRef.current === 0) {
         void import("@/services/player/playerPersistenceService").then(({ playerPersistenceService }) => {
           void playerPersistenceService.loadPlayerState().then((persisted) => {
-            if (!active || progressSongIdRef.current !== songId || positionSecondsRef.current > 0) return;
+            if (!active || playRequestIdRef.current !== 0 || progressSongIdRef.current !== songId || positionSecondsRef.current > 0) return;
             if (
               persisted?.currentSong?.id === songId &&
               typeof persisted.positionSeconds === "number" &&
@@ -140,6 +140,8 @@ export function useAudioProgressTracking({
             }
           }).catch((error) => logger.warn("[Audio] Progress restore failed", error));
         }).catch((error) => logger.warn("[Audio] Progress restore unavailable", error));
+      } else {
+        updateProgressStore(0, initialDur);
       }
     } else {
       durationSecondsRef.current = 0;
@@ -148,7 +150,7 @@ export function useAudioProgressTracking({
       resetPlaybackProgress();
     }
     return () => { active = false; };
-  }, [currentSong?.id, currentSong?.duration, currentSong?.playbackDurationSeconds, setNativeDuration, updateProgressStore]);
+  }, [currentSong?.id, currentSong?.duration, currentSong?.playbackDurationSeconds, playRequestIdRef, setNativeDuration, updateProgressStore]);
 
   useEffect(() => {
     let mounted = true;
@@ -172,7 +174,7 @@ export function useAudioProgressTracking({
             playbackLoadingRef.current = false;
             pendingPlayRequestRef.current = null;
             setIsPlaying(false);
-            updatePlaybackEngineSnapshot({ isPlaying: false, isLoading: false, isBuffering: false,
+            updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false,
               error: "Audio playback failed. Tap Play to retry." });
           }
           return;
