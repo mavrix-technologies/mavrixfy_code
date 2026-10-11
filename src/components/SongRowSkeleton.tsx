@@ -1,4 +1,5 @@
 import * as Animated from "@/lib/nativeAnimated";
+import { useAppIsActive } from "@/lib/appActivity";
 import { useEffect,useState } from "react";
 import { StyleSheet,View } from "react-native";
 
@@ -32,9 +33,11 @@ function SkeletonRow({ shimmer }: { shimmer: Animated.Value }) {
 }
 
 export default function SongRowSkeleton({ count = 8 }: { count?: number }) {
+  const foreground = useAppIsActive();
   const [shimmer] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
+    if (!foreground) return;
     const anim = Animated.loop(
       Animated.sequence([
         Animated.timing(shimmer, {
@@ -53,7 +56,7 @@ export default function SongRowSkeleton({ count = 8 }: { count?: number }) {
     );
     anim.start();
     return () => anim.stop();
-  }, [shimmer]);
+  }, [foreground, shimmer]);
 
   const keys = SKELETON_KEYS.slice(0, Math.max(1, Math.min(count, SKELETON_KEYS.length)));
 

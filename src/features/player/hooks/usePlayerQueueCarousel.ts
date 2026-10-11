@@ -107,10 +107,6 @@ export function usePlayerQueueSwipe({
     const songChanged = currentSongId !== prevListSongIdRef.current;
     prevListSongIdRef.current = currentSongId;
 
-    if (songChanged) {
-      hasAlignedListRef.current = false;
-    }
-
     // If the carousel was already positioned here by manual user flick, do NOT bounce back
     if (userScrolledToIndexRef.current === activeQueueIndex) {
       userScrolledToIndexRef.current = null;

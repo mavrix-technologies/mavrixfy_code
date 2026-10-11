@@ -7,7 +7,7 @@ import AdMobBanner from "@/components/AdMobBanner";
 import OfflineBanner from "@/components/OfflineBanner";
 import OfflineScreen from "@/components/OfflineScreen";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { usePlayerActions } from "@/contexts/PlayerContext";
+import { usePlayerRowActions } from "@/contexts/PlayerContext";
 import {
 FlatList,
 Platform,
@@ -60,7 +60,7 @@ const homeSectionKeyExtractor = (item: HomeListItem) => item.id;
 
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { playSong } = usePlayerActions();
+  const { playSong } = usePlayerRowActions();
   const { isOnline, isChecking } = useNetwork();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const flatListRef = useRef<FlatList<HomeListItem> | null>(null);

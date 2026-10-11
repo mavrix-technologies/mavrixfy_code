@@ -58,7 +58,7 @@ function engineFixture() {
  const noop=()=>{};const scroll={handleHeaderScroll:noop,resetHeaderElevation:noop};const push=noop,play=noop;
  const imports={react,'expo-router':{useRouter:()=>({push}),useFocusEffect:noop},'react-native':{Platform:{OS:'android'},Keyboard:{dismiss:noop}},
  'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:0})},'@/components/AppTopHeader':{useAppTopHeaderScrollElevation:()=>scroll},
- '@/contexts/NetworkContext':{useNetwork:()=>({isOnline:true}),useOnReconnect:noop},'@/contexts/PlayerContext':{usePlayerActions:()=>({playSong:play})},
+ '@/contexts/NetworkContext':{useNetwork:()=>({isOnline:true}),useOnReconnect:noop},'@/contexts/PlayerContext':{usePlayerRowActions:()=>({playSong:play})},
  '@/lib/musicData':{},'@/lib/searchUtils':{normalizeText:s=>s.toLowerCase()},'@/services/youtube/YouTubeMusic':{clearYouTubeSearchCache:noop},
  '@/lib/storage':{addSearchHistoryItem:async()=>[]},'../types':{getRouteSearchQuery:()=>'',normalizeRecentSearchLabel:s=>s.trim(),normalizeSearchSuggestionList:s=>s,STITCH_BROWSE_CATEGORIES:[],toRecentSearchItems:s=>s},
  './searchEngineReducer':reducer,'@/lib/searchRepository':{searchRepository:(q,filter,signal)=>new Promise(resolve=>requests.push({q,filter,signal,resolve})),fetchYouTubeSuggestions:(q,signal)=>new Promise(resolve=>suggestions.push({q,signal,resolve}))}};

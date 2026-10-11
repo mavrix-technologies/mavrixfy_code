@@ -1,43 +1,10 @@
 import Animated, { Extrapolation, interpolate, useAnimatedStyle, type SharedValue } from "react-native-reanimated";
-import { normalizeHexColor, rgbToHex } from "@/lib/colorMath";
+import { getSolidHeaderColor } from "@/lib/colorExtractor";
 import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
 import { Ionicons } from "@expo/vector-icons";
 import React, { memo, useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { unescapeHtml } from "@/utils/stringUtils";
-
-// ─── Solid Opaque Color Generator (Artwork Color Extractor Logic) ─────────────
-// Produces a 100% solid, fully opaque (non-transparent) background color
-// blended from the extracted artwork palette onto a dark base (#0A0C12).
-function getSolidHeaderColor(accentHex?: string, bgHex?: string): string {
-  const accentNorm = normalizeHexColor(accentHex);
-  const bgNorm = normalizeHexColor(bgHex);
-
-  if (accentNorm) {
-    const ar = parseInt(accentNorm.slice(1, 3), 16);
-    const ag = parseInt(accentNorm.slice(3, 5), 16);
-    const ab = parseInt(accentNorm.slice(5, 7), 16);
-
-    // If bgNorm is available, blend accent with it; otherwise use #0A0C12 (10, 12, 18)
-    const br = bgNorm ? parseInt(bgNorm.slice(1, 3), 16) : 10;
-    const bg = bgNorm ? parseInt(bgNorm.slice(3, 5), 16) : 12;
-    const bb = bgNorm ? parseInt(bgNorm.slice(5, 7), 16) : 18;
-
-    // Blend 18% of extracted artwork accent onto dark base for a rich, solid tint
-    const ratio = 0.18;
-    const r = Math.round(br * (1 - ratio) + ar * ratio);
-    const g = Math.round(bg * (1 - ratio) + ag * ratio);
-    const b = Math.round(bb * (1 - ratio) + ab * ratio);
-
-    return rgbToHex(r, g, b);
-  }
-
-  if (bgNorm) {
-    return bgNorm;
-  }
-
-  return "#0A0C12";
-}
 
 // ─── White progress bar — pinned to the very bottom edge of the sticky header ───
 const LiveProgressBar = memo(function LiveProgressBar() {
@@ -81,6 +48,7 @@ export interface PlayerStickyHeaderProps {
   isPlaying: boolean;
   onClose: () => void;
   onOptionsPress: () => void;
+  onEnterStandBy: () => void;
   onTogglePlay: () => void;
 }
 
@@ -100,6 +68,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
   isPlaying,
   onClose,
   onOptionsPress,
+  onEnterStandBy,
   onTogglePlay,
 }: PlayerStickyHeaderProps) {
   // Derive a 100% solid, fully opaque background color from the artwork color extractor
@@ -235,6 +204,16 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
         </View>
 
         {/* Right: 3-dot (normal without scrolling) / Play button (scrolled sticky header) */}
+        <View style={localStyles.headerActions}>
+          <Pressable
+            style={({ pressed }) => [localStyles.iconBtn, pressed && localStyles.iconBtnPressed]}
+            onPress={onEnterStandBy}
+            accessibilityRole="button"
+            accessibilityLabel="Open StandBy"
+            accessibilityHint="Open the landscape player"
+          >
+            <Ionicons name="phone-landscape-outline" size={24} color={sheetTextColor} />
+          </Pressable>
         <View style={localStyles.rightSlot}>
           {/* Normal without scrolling: 3-dot options button */}
           <Animated.View
@@ -250,7 +229,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
                 pressed && localStyles.iconBtnPressed,
               ]}
               onPress={!isScrolled ? onOptionsPress : undefined}
-              hitSlop={12}
+              hitSlop={{ top: 12, bottom: 12 }}
               accessibilityRole="button"
               accessibilityLabel="Open song options"
             >
@@ -276,7 +255,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
                 pressed && localStyles.playBtnPressed,
               ]}
               onPress={isScrolled ? onTogglePlay : undefined}
-              hitSlop={12}
+              hitSlop={{ top: 12, bottom: 12 }}
               accessibilityRole="button"
               accessibilityLabel={isPlaying ? "Pause" : "Play"}
             >
@@ -288,6 +267,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
               />
             </Pressable>
           </Animated.View>
+        </View>
         </View>
       </View>
     </Animated.View>
@@ -369,12 +349,13 @@ const localStyles = StyleSheet.create({
     textAlign: "center",
   },
   rightSlot: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
   },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 4 },
   rightButtonLayer: {
     position: "absolute",
     top: 0,
@@ -385,9 +366,9 @@ const localStyles = StyleSheet.create({
     justifyContent: "center",
   },
   iconBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
   },

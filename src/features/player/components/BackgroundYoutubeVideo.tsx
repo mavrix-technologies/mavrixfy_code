@@ -21,9 +21,11 @@ export type BackgroundYoutubeVideoProps = {
   quality: YouTubeVideoQualityPreference;
   song: Song;
   onFirstFrame?: () => void;
+  cropVertical?: number;
+  backgroundColor?: string;
 };
 
-function NativeVisual({ videoId, stream, active, initialOffsetMs, onFirstFrame }: BackgroundYoutubeVideoProps & { stream: YouTubeVideoStream }) {
+function NativeVisual({ videoId, stream, active, initialOffsetMs, onFirstFrame, cropVertical = BACKGROUND_VIDEO_CROP_PX }: BackgroundYoutubeVideoProps & { stream: YouTubeVideoStream }) {
   const player = useVideoPlayer({ uri: stream.url, headers: stream.headers }, instance => {
     instance.loop = true;
     instance.muted = true;
@@ -69,7 +71,7 @@ function NativeVisual({ videoId, stream, active, initialOffsetMs, onFirstFrame }
   }, [active, player]);
   return <Animated.View style={[StyleSheet.absoluteFillObject, { opacity }]} pointerEvents="none">
     <VideoView player={player} style={{ position: "absolute", left: 0, right: 0,
-      top: -BACKGROUND_VIDEO_CROP_PX, bottom: -BACKGROUND_VIDEO_CROP_PX }} contentFit="cover"
+      top: -cropVertical, bottom: -cropVertical }} contentFit="cover"
       nativeControls={false} surfaceType="textureView" onFirstFrameRender={onFrame}
       playsInline
       allowsPictureInPicture={false} fullscreenOptions={{ enable: false }} />
@@ -129,7 +131,7 @@ export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo(props
       });
     }
   }, [error, officialVideoId, quality]);
-  return <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { overflow: "hidden", backgroundColor: "#000" }]}>
+  return <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { overflow: "hidden", backgroundColor: props.backgroundColor ?? "#000" }]}>
     {stream && officialVideoId && <NativeVisual key={`${officialVideoId}:${quality}:${stream.url}`}
       {...props} videoId={officialVideoId} stream={stream} />}
   </View>;

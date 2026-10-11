@@ -181,6 +181,10 @@ export function useAudioProgressTracking({
         }
         if (status.didJustFinish) {
           if (desiredPlayStateRef.current === false) return;
+          desiredPlayStateRef.current = true;
+          isPlayingRef.current = true;
+          playbackLoadingRef.current = true;
+          setIsPlaying(true);
           const songId = currentSongRef.current?.id;
           if (!songId || finishedSongRef.current === songId) return;
           finishedSongRef.current = songId;
@@ -212,7 +216,9 @@ export function useAudioProgressTracking({
             return;
           }
           if (status.isPlaying) {
-            desiredPlayStateRef.current = null;
+            desiredPlayStateRef.current = true;
+            playbackLoadingRef.current = false;
+            // loading cleared above
             pendingPlayRequestRef.current = null;
           }
           if (status.isPlaying !== isPlayingRef.current) {

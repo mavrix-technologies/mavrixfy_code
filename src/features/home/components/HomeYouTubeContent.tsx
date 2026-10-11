@@ -1,6 +1,6 @@
 import { memo, useCallback, useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { usePlayerActions } from "@/contexts/PlayerContext";
+import { usePlayerRowActions } from "@/contexts/PlayerContext";
 import type { YouTubeHomeSection } from "@/services/youtube/YouTubeMusic";
 import { youtubePlaylistPublisher } from "@/services/youtube/YouTubePlaylistIdentity";
 import { HomeHorizontalSection, type HomeCardItem } from "./HomeHorizontalSection";
@@ -8,7 +8,7 @@ import { homeDisplayText } from "./homeDisplayText";
 import { HomeSectionSkeleton } from "./HomeSkeletons";
 
 export const HomeYouTubeContent = memo(function HomeYouTubeContent({ section }: { section: YouTubeHomeSection }) {
-  const { playSong } = usePlayerActions();
+  const { playSong } = usePlayerRowActions();
   const songs = useMemo<HomeCardItem[]>(() => section.songs.map(song => ({
     id: song.id, name: song.title, imageUrl: song.coverUrl, subtitle: homeDisplayText(song.artist, "Artist"), type: "song", source: "youtube",
   })), [section.songs]);

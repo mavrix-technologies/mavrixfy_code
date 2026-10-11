@@ -67,6 +67,8 @@ export interface PlayerActionsContextValue {
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
   changeStreamingQuality: (quality: "auto" | "low" | "medium" | "high") => Promise<void>;
+  volume: number;
+  setVolume: (volume: number) => void;
 }
 
 export interface ResolvedPlaybackResult {

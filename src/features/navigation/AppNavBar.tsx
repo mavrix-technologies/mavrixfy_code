@@ -465,11 +465,13 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                         text={activeSong.title}
                         style={[styles.songTitle, { color: playerTitleColor }]}
                         velocity={15}
+                        showFade={false}
                       />
                       <PingPongScroll
                         text={activeSong.artist}
                         style={[styles.songArtist, { color: playerSecondaryColor }]}
                         velocity={12}
+                        showFade={false}
                       />
                     </View>
                   </Animated.View>

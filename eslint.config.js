@@ -4,7 +4,16 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ["dist/*"],
+    ignores: ["dist/**", "outputs/**", ".expo/**", "android/**", "ios/**"],
+  },
+  {
+    files: ["scripts/**/*.cjs"],
+    languageOptions: { globals: require('globals').node },
+  },
+  {
+    // VM fixtures execute hooks with a simulated dispatcher, outside React components.
+    files: ["scripts/**/*.regression.test.cjs"],
+    rules: { "react-hooks/rules-of-hooks": "off" },
   },
   // ─── Architectural Boundary Rules ────────────────────────────────────────────
   // Rule 1: src/features/** must NOT import directly from legacy root app/ or legacy provider/audio aliases

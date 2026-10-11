@@ -70,16 +70,16 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
   const loadRecentlyPlayed = useCallback(async () => {
     try {
       const items = await getRecentlyPlayed();
-      const top8 = items.slice(0, 8);
+      const topItems = items.slice(0, 16);
       if (!mountedRef.current) return;
       setRecentlyPlayed((prev) => {
         if (
-          prev.length === top8.length &&
-          prev.every((item, i) => item.id === top8[i]?.id)
+          prev.length === topItems.length &&
+          prev.every((item, i) => item.id === topItems[i]?.id)
         ) {
           return prev;
         }
-        return top8;
+        return topItems;
       });
     } catch {
       // ignore storage read failures

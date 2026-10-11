@@ -91,11 +91,34 @@ let playback: PlaybackSnapshot = {
 let sourceSnapshot = { sourceVersion: 0, url: "", source: { uri: "", headers: undefined as Record<string, string> | undefined }, headerKey: "" };
 let selectionVersion = 0;
 let sourceReady = true;
+const selectionWaiters = new Set<() => void>();
+
+// A replaced selection must release the queue lane even if its network read
+// never settles. Its eventual result is still guarded by selectionVersion.
+async function waitForSelection<T>(operation: Promise<T>, version: number): Promise<T | undefined> {
+  if (version !== selectionVersion) return undefined;
+  let cancel: () => void = () => {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<undefined>((resolve, reject) => {
+        cancel = () => resolve(undefined);
+        selectionWaiters.add(cancel);
+        timer = setTimeout(() => reject(new Error("Audio loading timed out.")), 27000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    selectionWaiters.delete(cancel);
+  }
+}
 
 // Invalidate callbacks and disconnect output before any asynchronous resolution.
 function detachCurrentSource() {
   clearStartWatchdog();
   selectionVersion += 1;
+  selectionWaiters.forEach(cancel => cancel());
   playIntentVersion += 1;
   sourceReady = false;
   playback = { ...playback, sourceVersion: playback.sourceVersion + 1 };
@@ -111,6 +134,7 @@ function detachCurrentSource() {
 const storeListeners = new Set<() => void>();
 const eventListeners = new Map<string, Set<(payload: any) => void>>();
 let audioHandle: AudioTagHandle | null = null;
+let currentVolume = 1;
 let isSourceLoaded = false;
 let startWatchdog: ReturnType<typeof setTimeout> | undefined;
 function clearStartWatchdog() { clearTimeout(startWatchdog); startWatchdog = undefined; }
@@ -268,16 +292,26 @@ async function select(index: number, initialPosition = 0) {
   publish({ index, position: playbackPosition(initialPosition, Number(track.duration) || 0),
     duration: Number(track.duration) || 0, status: State.Loading });
   if (track.id && /^file:\/\//i.test(track.url || "")) {
-    const { getSongDownload, getLocalPlaybackUrl } = await import("@/lib/downloads/downloadManager");
-    const download = await getSongDownload(track.id);
-    if (version !== selectionVersion) return;
-    if (download) {
-      const local = await getLocalPlaybackUrl(track.id);
+    try {
+      const { getSongDownload, getLocalPlaybackUrl } = await import("@/lib/downloads/downloadManager");
+      const download = await waitForSelection(getSongDownload(track.id), version);
       if (version !== selectionVersion) return;
-      if (!local) throw new Error("Offline audio is no longer available. Tap Play to refresh the stream.");
+      if (download) {
+        const local = await waitForSelection(getLocalPlaybackUrl(track.id), version);
+        if (version !== selectionVersion) return;
+        if (!local) throw new Error("Offline audio is no longer available. Tap Play to refresh the stream.");
+        index = playback.index;
+        track = { ...playback.queue[index], url: local };
+        playback = { ...playback, queue: playback.queue.map((item, i) => i === index ? track : item) };
+      }
+    } catch (error) {
+      if (version !== selectionVersion) return;
       index = playback.index;
-      track = { ...playback.queue[index], url: local };
-      playback = { ...playback, queue: playback.queue.map((item, i) => i === index ? track : item) };
+      track = playback.queue[index];
+      // Reconcile the selected item before reporting its failure, so the app
+      // does not discard the error as belonging to the outgoing track.
+      emit(Event.PlaybackActiveTrackChanged, { lastTrack: previous, track, index });
+      throw error;
     }
   }
   if (track.source === "youtube" && !/^(file|content):\/\//i.test(track.url || "")) {
@@ -287,9 +321,11 @@ async function select(index: number, initialPosition = 0) {
       // Lazy queue entries may have no stream yet, or metadata from a previous
       // quality. Every selection uses the current effective preference.
       const { getRequestedQualityPreference } = await import("./PlayerPlaybackResolver");
-      const { effective } = await getRequestedQualityPreference();
-      if (version !== selectionVersion) return;
-      stream = await resolveYouTubeStream(song, effective);
+      stream = await waitForSelection((async () => {
+        const { effective } = await getRequestedQualityPreference();
+        if (version !== selectionVersion) return undefined;
+        return resolveYouTubeStream(song, effective);
+      })(), version);
     } catch (error) {
       if (version !== selectionVersion || activeTrack()?.id !== track.id) return;
       index = playback.index;
@@ -297,7 +333,7 @@ async function select(index: number, initialPosition = 0) {
       emit(Event.PlaybackActiveTrackChanged, { lastTrack: previous, track, index });
       throw error;
     }
-    if (version !== selectionVersion || activeTrack()?.id !== track.id) return;
+    if (!stream || version !== selectionVersion || activeTrack()?.id !== track.id) return;
     index = playback.index;
     track = { ...playback.queue[index], ...playbackStreamMetadata(stream), url: stream.url, headers: stream.headers, youtubeAudioExpiresAt: stream.expiresAt,
       duration: playbackDuration(Number(track.duration) || 0, stream.durationSeconds) };
@@ -314,7 +350,12 @@ async function select(index: number, initialPosition = 0) {
   });
   emit(Event.PlaybackActiveTrackChanged, { lastTrack: previous, track, index });
   emit(Event.PlaybackState, { state: State.Loading });
-  if (playback.playWhenReady) armStartWatchdog();
+  if (playback.playWhenReady) {
+    if (Platform.OS === "android") {
+      AudioManager.observeAudioInterruptions(true);
+    }
+    armStartWatchdog();
+  }
   updateNotification();
 }
 
@@ -498,7 +539,7 @@ export const StandardAudioPlayer = {
       updateNotification();
       return;
     }
-    const wasPlaying = playback.playWhenReady;
+    const wasPlaying = playback.playWhenReady || playback.status === State.Playing || playback.status === State.Loading;
     publish({ queue: [...tracks], index: -1, playWhenReady: wasPlaying });
     const targetIdx =
       initialIndex >= 0 && initialIndex < tracks.length ? initialIndex : 0;
@@ -560,6 +601,7 @@ export const StandardAudioPlayer = {
   async reset() {
     clearStartWatchdog();
     selectionVersion += 1;
+    selectionWaiters.forEach(cancel => cancel());
     if (Platform.OS === "android")
       AudioManager.observeAudioInterruptions(false);
     audioHandle?.pause();
@@ -593,8 +635,8 @@ export const StandardAudioPlayer = {
     publish({ playWhenReady: true });
     emit(Event.PlaybackPlayWhenReadyChanged, { playWhenReady: true });
     try {
-      // Native focus denial emits an interruption. Record intent first so that
-      // callback can cancel it before any output starts.
+      // Native focus denial emits an interruption. Record intent first so its
+      // callback can cancel this attempt when the bridge delivers the event.
       AudioManager.observeAudioInterruptions(true);
       if (intentVersion !== playIntentVersion || !playback.playWhenReady) return;
       if (playback.status !== State.Playing) armStartWatchdog();
@@ -674,6 +716,12 @@ export const StandardAudioPlayer = {
   },
   async setRepeatMode(mode: string) {
     publish({ repeat: mode });
+  },
+  setVolume(level: number) {
+    if (!Number.isFinite(level)) return;
+    const clamped = Math.max(0, Math.min(1, level));
+    audioHandle?.setVolume(clamped);
+    currentVolume = clamped;
   },
   async getQueue() {
     return playback.queue;
@@ -801,7 +849,7 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
       }}
       source={current.source}
       context={audioCtx}
-      volume={1}
+      volume={currentVolume}
       playbackRate={1}
       preservesPitch={false}
       onLoad={() => {
@@ -822,6 +870,9 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
             handleRef.current.seekToTime(playback.position);
           }
           if (playback.playWhenReady) {
+            if (Platform.OS === "android") {
+              AudioManager.observeAudioInterruptions(true);
+            }
             const loadedHandle = handleRef.current;
             const sourceVersion = current.sourceVersion;
             void synchronizeAudioContext(true)

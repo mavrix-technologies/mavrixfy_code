@@ -1,18 +1,18 @@
-import { useArtworkPalette } from "@/lib/colorExtractor";
 import { type Song } from "@/lib/musicData";
 import * as Animated from "@/lib/nativeAnimated";
-import { getSongLyrics,type LyricsResult } from "@/services/lyricsService";
-import { Ionicons,MaterialIcons } from "@expo/vector-icons";
-import { memo,useEffect,useMemo,useState } from "react";
+import { getSongLyrics, type LyricsResult } from "@/services/lyricsService";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
-ActivityIndicator,
-Pressable,
-Text,
-View,
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 import {
-PREVIEW_LINE_HEIGHT,
-SpotifyCardPreviewLine,
+  PREVIEW_LINE_HEIGHT,
+  SpotifyCardPreviewLine,
 } from "./KaraokeLyricsSubComponents";
 import { getSpotifyLyricsBg } from "./karaokeLyricsUtils";
 import { styles } from "./styles/karaokeLyricsStyles";
@@ -43,17 +43,55 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
 }: KaraokeLyricsViewProps) {
   const [lyricsData, setLyricsData] = useState<LyricsResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const artworkPalette = useArtworkPalette(song?.coverUrl);
   const [offsetAnim] = useState(() => new Animated.Value(0));
 
-  const songSeed = useMemo(() => `${song?.id || ""}_${song?.title || ""}_${song?.artist || ""}`, [song?.id, song?.title, song?.artist]);
-
-  const effectiveAccent = accentColor || (artworkPalette.accent !== "#0E1016" ? artworkPalette.accent : undefined) || (artworkPalette.primary !== "#0E1016" ? artworkPalette.primary : undefined);
-
-  const cardBgColor = useMemo(
-    () => getSpotifyLyricsBg(effectiveAccent, songSeed),
-    [effectiveAccent, songSeed]
+  const songSeed = song?.title || song?.id;
+  const targetBgColor = useMemo(
+    () => getSpotifyLyricsBg(accentColor, songSeed),
+    [accentColor, songSeed]
   );
+
+  // Dual-layer smooth background color crossfade on song change
+  const [colorA, setColorA] = useState(targetBgColor);
+  const [colorB, setColorB] = useState(targetBgColor);
+  const activeColorRef = useRef(targetBgColor);
+  const opacityA = useRef(new Animated.Value(1)).current;
+  const opacityB = useRef(new Animated.Value(0)).current;
+  const activeLayerRef = useRef<0 | 1>(0);
+
+  useEffect(() => {
+    if (targetBgColor === activeColorRef.current) return;
+
+    const nextLayer = activeLayerRef.current === 0 ? 1 : 0;
+    const fadeOut = nextLayer === 0 ? opacityB : opacityA;
+    const fadeIn = nextLayer === 0 ? opacityA : opacityB;
+
+    if (nextLayer === 0) {
+      setColorA(targetBgColor);
+    } else {
+      setColorB(targetBgColor);
+    }
+
+    activeLayerRef.current = nextLayer;
+    activeColorRef.current = targetBgColor;
+
+    Animated.parallel([
+      Animated.timing(fadeIn, {
+        toValue: 1,
+        duration: 320,
+        useNativeDriver: true,
+      }),
+      Animated.timing(fadeOut, {
+        toValue: 0,
+        duration: 320,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [targetBgColor, opacityA, opacityB]);
+
+  // Smooth content crossfade on song change
+  const contentFadeAnim = useRef(new Animated.Value(1)).current;
+  const contentSlideAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (!song?.title) {
@@ -63,6 +101,13 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
 
     let isCurrent = true;
     setLoading(true);
+
+    // Gently fade out previous song lyrics during transition
+    Animated.timing(contentFadeAnim, {
+      toValue: 0.2,
+      duration: 140,
+      useNativeDriver: true,
+    }).start();
 
     getSongLyrics({
       id: song.id,
@@ -74,19 +119,37 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
         if (isCurrent) {
           setLyricsData(res);
           setLoading(false);
+          contentSlideAnim.setValue(6);
+          Animated.parallel([
+            Animated.timing(contentFadeAnim, {
+              toValue: 1,
+              duration: 250,
+              useNativeDriver: true,
+            }),
+            Animated.timing(contentSlideAnim, {
+              toValue: 0,
+              duration: 250,
+              useNativeDriver: true,
+            }),
+          ]).start();
         }
       })
       .catch(() => {
         if (isCurrent) {
           setLyricsData({ synced: false, lines: [], provider: "none" });
           setLoading(false);
+          Animated.timing(contentFadeAnim, {
+            toValue: 1,
+            duration: 200,
+            useNativeDriver: true,
+          }).start();
         }
       });
 
     return () => {
       isCurrent = false;
     };
-  }, [song?.id, song?.title, song?.artist, song?.duration]);
+  }, [song?.id, song?.title, song?.artist, song?.duration, contentFadeAnim, contentSlideAnim]);
 
   const livePosition = currentPositionSeconds;
 
@@ -129,10 +192,25 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
       onPress={onToggleFullScreen}
       style={({ pressed }) => [
         styles.spotifyCardContainer,
-        { backgroundColor: cardBgColor },
         pressed && styles.spotifyCardPressed,
       ]}
     >
+      {/* Dual layer smooth background color crossfade */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          { backgroundColor: colorA, opacity: opacityA },
+        ]}
+      />
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          { backgroundColor: colorB, opacity: opacityB },
+        ]}
+      />
+
       {/* Header with Title on Left & Lyrics Icon on Top Right */}
       <View style={styles.spotifyCardHeader}>
         <Text style={styles.spotifyCardHeaderTitle}>Lyrics</Text>
@@ -146,36 +224,44 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
         </Pressable>
       </View>
 
-      {/* Body */}
-      {loading ? (
-        <View style={styles.spotifyCardLoading}>
-          <ActivityIndicator size="small" color="#FFFFFF" />
-          <Text style={styles.spotifyCardSubtext}>Loading lyrics...</Text>
-        </View>
-      ) : !hasLyrics || !lyricsData ? (
-        <View style={styles.spotifyCardLoading}>
-          <Ionicons name="musical-notes-outline" size={22} color="rgba(255,255,255,0.4)" />
-          <Text style={styles.spotifyCardSubtext}>No lyrics available for this song</Text>
-        </View>
-      ) : (
-        <View style={styles.spotifyCardViewport} pointerEvents="none">
-          <Animated.View style={{ transform: [{ translateY: offsetAnim }] }}>
-            {lyricsData.lines.map((line, index) => {
-              const isActive = index === activeIndex;
-              const isPassed = index < activeIndex;
-              return (
-                <SpotifyCardPreviewLine
-                  key={line.id || `card_line_${line.time}_${line.text}`}
-                  item={line}
-                  isActive={isActive}
-                  isPassed={isPassed}
-                  isSynced={Boolean(lyricsData.synced)}
-                />
-              );
-            })}
-          </Animated.View>
-        </View>
-      )}
+      {/* Body with smooth content transition */}
+      <Animated.View
+        style={{
+          opacity: contentFadeAnim,
+          transform: [{ translateY: contentSlideAnim }],
+        }}
+      >
+        {loading ? (
+          <View style={styles.spotifyCardLoading}>
+            <ActivityIndicator size="small" color="#FFFFFF" />
+            <Text style={styles.spotifyCardSubtext}>Loading lyrics...</Text>
+          </View>
+        ) : !hasLyrics || !lyricsData ? (
+          <View style={styles.spotifyCardLoading}>
+            <Ionicons name="musical-notes-outline" size={22} color="rgba(255,255,255,0.4)" />
+            <Text style={styles.spotifyCardSubtext}>No lyrics available for this song</Text>
+          </View>
+        ) : (
+          <View style={styles.spotifyCardViewport} pointerEvents="none">
+            <Animated.View style={{ transform: [{ translateY: offsetAnim }] }}>
+              {lyricsData.lines.map((line, index) => {
+                const isActive = index === activeIndex;
+                const isPassed = index < activeIndex;
+                return (
+                  <SpotifyCardPreviewLine
+                    key={line.id || `card_line_${line.time}_${line.text}`}
+                    item={line}
+                    isActive={isActive}
+                    isPassed={isPassed}
+                    isSynced={Boolean(lyricsData.synced)}
+                      isPlaying={Boolean(isPlaying)}
+                  />
+                );
+              })}
+            </Animated.View>
+          </View>
+        )}
+      </Animated.View>
 
       {/* Bottom Button Pill */}
       <View style={styles.spotifyCardFooter}>

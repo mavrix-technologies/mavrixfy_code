@@ -42,6 +42,8 @@ interface UseAudioPlaybackValuesProps {
   setAlbumColor: (color: string) => void;
   setTextColor: (color: string) => void;
   changeStreamingQuality: (quality: "auto" | "low" | "medium" | "high") => Promise<void>;
+  volume?: number;
+  setVolume?: (volume: number) => void;
 }
 
 export function useAudioPlaybackValues(props: UseAudioPlaybackValuesProps) {
@@ -78,6 +80,8 @@ export function useAudioPlaybackValues(props: UseAudioPlaybackValuesProps) {
     setAlbumColor,
     setTextColor,
     changeStreamingQuality,
+    volume = 1,
+    setVolume = () => {},
   } = props;
 
   const rowActionsValue = useMemo(
@@ -137,6 +141,8 @@ export function useAudioPlaybackValues(props: UseAudioPlaybackValuesProps) {
       setAlbumColor,
       setTextColor,
       changeStreamingQuality,
+      volume,
+      setVolume,
     }),
     [
       isShuffled,
@@ -168,6 +174,8 @@ export function useAudioPlaybackValues(props: UseAudioPlaybackValuesProps) {
       setAlbumColor,
       setTextColor,
       changeStreamingQuality,
+      volume,
+      setVolume,
     ]
   );
 

@@ -34,6 +34,7 @@ function playerDuration(p: AudioPlayer): number { return playbackDuration(p.dura
 // Monotonically increasing request id.
 // Every loadAndPlay increments this. Callbacks from older players are dropped.
 let generation = 0;
+let currentVolume = 1;
 
 // audioMode only needs to be set once per app session.
 let audioModeSet = false;
@@ -176,6 +177,7 @@ export async function prepareStandby(url: string, song?: Partial<Song> | null): 
     await ensureAudioMode();
     if (request !== standbyGeneration) return;
     const p = createAudioPlayer({ uri: url, headers: song?.playbackHeaders }, { updateInterval: 500 });
+    try { p.volume = currentVolume; } catch {}
     standbyPlayer = p;
     standbyUrl = url;
     standbyHeaders = headers;
@@ -219,6 +221,7 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
       await ensureAudioMode();
       if (myGen !== generation) return;
       p = createAudioPlayer({ uri: url, headers: song?.playbackHeaders }, { updateInterval: 500 });
+      try { p.volume = currentVolume; } catch {}
       if (myGen !== generation) {
         killPlayer(p);
         return;
@@ -367,4 +370,20 @@ export function getProgress(): { position: number; duration: number } {
 export function isLoaded(): boolean { return Boolean(activePlayer?.isLoaded); }
 export function isEnded(): boolean {
   return !!activePlayer && finishedPlayers.has(activePlayer);
+}
+
+export function setVolume(level: number): void {
+  if (!Number.isFinite(level)) return;
+  const clamped = Math.max(0, Math.min(1, level));
+  currentVolume = clamped;
+  if (activePlayer) {
+    try { activePlayer.volume = clamped; } catch {}
+  }
+  if (standbyPlayer) {
+    try { standbyPlayer.volume = clamped; } catch {}
+  }
+}
+
+export function getVolume(): number {
+  return currentVolume;
 }

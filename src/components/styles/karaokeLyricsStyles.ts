@@ -7,6 +7,8 @@ export const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginVertical: 12,
     borderRadius: 16,
+    overflow: "hidden",
+    position: "relative",
     paddingHorizontal: 20,
     paddingTop: 18,
     paddingBottom: 18,
@@ -76,7 +78,8 @@ export const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
   },
   spotifyCardLoading: {
-    paddingVertical: 24,
+    height: 132,
+    marginBottom: 16,
     alignItems: "center",
     justifyContent: "center",
     gap: 8,

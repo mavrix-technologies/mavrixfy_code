@@ -1,6 +1,5 @@
 import { PlayerSlider } from "@/components/PlayerSlider";
 import { IS_ANDROID,IS_WEB } from "@/constants/platform";
-import { useArtworkPalette } from "@/lib/colorExtractor";
 import { triggerImpact } from "@/lib/haptics";
 import { formatDuration,type Song } from "@/lib/musicData";
 import { getSongLyrics,type LyricLine,type LyricsResult } from "@/services/lyricsService";
@@ -91,6 +90,7 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
   currentPositionSeconds,
   screenHeight,
   visible,
+  isPlaying,
   onSeek,
 }: {
   lyricsData: LyricsResult | null;
@@ -99,6 +99,7 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
   currentPositionSeconds: number;
   screenHeight: number;
   visible: boolean;
+  isPlaying: boolean;
   onSeek: (seconds: number) => void;
 }) {
   const isUserScrollingRef = useRef(false);
@@ -167,6 +168,7 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
             item={item}
             isActive={isActive}
             isPassed={isPassed}
+            isPlaying={isPlaying}
             onPress={handleSeekToLine}
           />
         );
@@ -177,12 +179,13 @@ const SpotifyModalLyricsList = memo(function SpotifyModalLyricsList({
           isActive={isActive}
           isPassed={isPassed}
           isSynced={Boolean(lyricsData?.synced)}
+          isPlaying={isPlaying}
           currentPositionSeconds={isActive ? currentPositionSeconds : undefined}
           onPress={handleSeekToLine}
         />
       );
     },
-    [activeIndex, lyricsData?.synced, currentPositionSeconds, handleSeekToLine]
+    [activeIndex, lyricsData?.synced, currentPositionSeconds, handleSeekToLine, isPlaying]
   );
 
   const keyExtractor = useCallback(
@@ -356,15 +359,10 @@ export const FullscreenKaraokeModal = memo(function FullscreenKaraokeModal({
   const [lyricsData, setLyricsData] = useState<LyricsResult | null>(null);
   const [loading, setLoading] = useState(false);
   const translateY = useSharedValue(0);
-  const artworkPalette = useArtworkPalette(song?.coverUrl);
-
-  const songSeed = useMemo(() => `${song?.id || ""}_${song?.title || ""}_${song?.artist || ""}`, [song?.id, song?.title, song?.artist]);
-
-  const effectiveAccent = accentColor || (artworkPalette.accent !== "#0E1016" ? artworkPalette.accent : undefined) || (artworkPalette.primary !== "#0E1016" ? artworkPalette.primary : undefined);
-
+  const songSeed = song?.title || song?.id;
   const screenBgColor = useMemo(
-    () => getSpotifyLyricsBg(effectiveAccent, songSeed),
-    [effectiveAccent, songSeed]
+    () => getSpotifyLyricsBg(accentColor, songSeed),
+    [accentColor, songSeed]
   );
 
   const handleDismiss = useCallback(() => {
@@ -456,7 +454,13 @@ export const FullscreenKaraokeModal = memo(function FullscreenKaraokeModal({
   const totalDuration = durationSeconds > 0 ? durationSeconds : song.duration || 180;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={false}
+      supportedOrientations={["portrait", "landscape-left", "landscape-right"]}
+      onRequestClose={onClose}
+    >
       <Reanimated.View
         style={[styles.spotifyModalRoot, { backgroundColor: screenBgColor }, sheetAnimatedStyle]}
         renderToHardwareTextureAndroid={true}
@@ -470,6 +474,7 @@ export const FullscreenKaraokeModal = memo(function FullscreenKaraokeModal({
           currentPositionSeconds={livePosition}
           screenHeight={screenHeight}
           visible={visible}
+          isPlaying={isPlaying}
           onSeek={onSeek}
         />
         <SpotifyModalBottomBar

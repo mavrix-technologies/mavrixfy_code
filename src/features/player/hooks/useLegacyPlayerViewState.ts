@@ -3,7 +3,6 @@ import { usePlayerActions } from "@/contexts/PlayerContext";
 import { mapFilter } from "@/lib/arrayUtils";
 import { scheduleArtworkPreload } from "@/lib/artworkPreload";
 import type { Song } from "@/lib/musicData";
-import { globalPlayerDetailsVisibleRef } from "@/lib/playerModalRef";
 import {
 usePlaybackNowPlaying,
 usePlaybackPlayState,
@@ -16,7 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useArtistDiscovery } from "./useArtistDiscovery";
 import { usePlayerQueueSwipe } from "./usePlayerQueueCarousel";
 import type { ArtworkQueueItem } from "../components/PlayerArtworkViews";
-import { useArtworkPaletteSync } from "./useArtworkPaletteSync";
+import { useArtworkPalette } from "@/lib/colorExtractor";
 import { useBackgroundVisualVideo } from "./useBackgroundVisualVideo";
 import { useDevTrackHelper } from "./useDevTrackHelper";
 import { usePlayerLayoutMetrics } from "./usePlayerLayoutMetrics";
@@ -65,10 +64,7 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
     isLiked,
   } = usePlayerActions();
 
-  const { artworkPalette } = useArtworkPaletteSync({
-    screenSong,
-    interactionReady,
-  });
+  const artworkPalette = useArtworkPalette(screenSong?.coverUrl);
 
   const { isLoadingDevTrack, handleLoadDevTrack } = useDevTrackHelper(playSong);
 
@@ -89,11 +85,6 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
     },
     [currentSong?.duration, seekTo]
   );
-
-  useEffect(() => {
-    globalPlayerDetailsVisibleRef.setVisible(true);
-    return () => globalPlayerDetailsVisibleRef.setVisible(false);
-  }, []);
 
   const handleSongOptionsPress = useCallback(() => {
     if (!screenSong || optionsPressLockRef.current) return;
@@ -129,6 +120,10 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
     songDetailIconSize,
     bottomContentPadding,
     trackSwipeAreaHeight,
+    trackSwipeCardWidth,
+    trackSwipeCardGap,
+    trackSwipeSnapInterval,
+    trackSwipeSideInset,
     playerIconBtnStyle,
     songDetailActionBtnStyle,
     prevNextBtnSizeStyle,
@@ -190,7 +185,7 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
   const sheetMutedTextColor = "rgba(223,226,235,0.68)";
   const activeControlIconColor = "#FFFFFF";
   const sideControlIconColor = "#FFFFFF";
-  const selectedControlIconColor = Colors.primary;
+  const selectedControlIconColor = artworkPalette.accent || "#FFFFFF";
 
   const trackSwipeGetItemLayout = useCallback(
     (_: ArrayLike<Song> | null | undefined, index: number) => ({
@@ -252,6 +247,10 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
     songDetailIconSize,
     bottomContentPadding,
     trackSwipeAreaHeight,
+    trackSwipeCardWidth,
+    trackSwipeCardGap,
+    trackSwipeSnapInterval,
+    trackSwipeSideInset,
     playerIconBtnStyle,
     songDetailActionBtnStyle,
     prevNextBtnSizeStyle,

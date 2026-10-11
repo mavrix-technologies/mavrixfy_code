@@ -1,10 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getApps,initializeApp } from "firebase/app";
 import { getAuth,initializeAuth } from "firebase/auth";
-import { getFirestore,initializeFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore, setLogLevel } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { Platform } from "react-native";
 import { getExpoExtra } from "./expoExtra";
+
+// Suppress transient WebChannel retry warnings in console
+setLogLevel("error");
 
 const { getReactNativePersistence } = require("firebase/auth") as {
   getReactNativePersistence: (storage: typeof AsyncStorage) => unknown;
@@ -42,7 +45,8 @@ export const auth = (() => {
 export const db = (() => {
   try {
     return initializeFirestore(app, {
-      experimentalAutoDetectLongPolling: true,
+      experimentalForceLongPolling: Platform.OS !== "web",
+      experimentalAutoDetectLongPolling: Platform.OS === "web",
       ignoreUndefinedProperties: true,
     });
   } catch {

@@ -1,4 +1,5 @@
 import * as Animated from "@/lib/nativeAnimated";
+import { useAppIsActive } from "@/lib/appActivity";
 import type { LyricLine } from "@/services/lyricsService";
 import { memo,useCallback,useEffect,useState } from "react";
 import { Pressable,Text,View } from "react-native";
@@ -15,19 +16,22 @@ export const SpotifyInstrumentalBreak = memo(function SpotifyInstrumentalBreak({
   isPassed,
   onPress,
   isCompact = false,
+  isPlaying = true,
 }: {
   item: LyricLine;
   isActive: boolean;
   isPassed: boolean;
   onPress?: (time: number) => void;
   isCompact?: boolean;
+  isPlaying?: boolean;
 }) {
+  const foreground = useAppIsActive();
   const [dot1] = useState(() => new Animated.Value(0));
   const [dot2] = useState(() => new Animated.Value(0));
   const [dot3] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
-    if (isActive) {
+    if (isActive && isPlaying && foreground) {
       const makePulse = (anim: Animated.Value, delay: number) => {
         return Animated.loop(
           Animated.sequence([
@@ -36,11 +40,13 @@ export const SpotifyInstrumentalBreak = memo(function SpotifyInstrumentalBreak({
               toValue: 1,
               duration: 450,
               useNativeDriver: true,
+              isInteraction: false,
             }),
             Animated.timing(anim, {
               toValue: 0,
               duration: 450,
               useNativeDriver: true,
+              isInteraction: false,
             }),
           ])
         );
@@ -62,7 +68,7 @@ export const SpotifyInstrumentalBreak = memo(function SpotifyInstrumentalBreak({
       dot2.setValue(0);
       dot3.setValue(0);
     }
-  }, [isActive, dot1, dot2, dot3]);
+  }, [isActive, isPlaying, foreground, dot1, dot2, dot3]);
 
   const dot1Scale = dot1.interpolate({
     inputRange: [0, 1],
@@ -153,6 +159,7 @@ export const SpotifyLyricLine = memo(function SpotifyLyricLine({
   isPassed,
   isSynced,
   currentPositionSeconds,
+  isPlaying = true,
   onPress,
 }: {
   item: LyricLine;
@@ -160,6 +167,7 @@ export const SpotifyLyricLine = memo(function SpotifyLyricLine({
   isPassed: boolean;
   isSynced: boolean;
   currentPositionSeconds?: number;
+  isPlaying?: boolean;
   onPress: (time: number) => void;
 }) {
   const [animValue] = useState(() => new Animated.Value(isActive ? 2 : isPassed ? 1 : 0));
@@ -187,6 +195,7 @@ export const SpotifyLyricLine = memo(function SpotifyLyricLine({
         isActive={isActive}
         isPassed={isPassed}
         onPress={onPress}
+        isPlaying={isPlaying}
       />
     );
   }
@@ -263,11 +272,13 @@ export const SpotifyCardPreviewLine = memo(function SpotifyCardPreviewLine({
   isActive,
   isPassed,
   isSynced,
+  isPlaying = false,
 }: {
   item: LyricLine;
   isActive: boolean;
   isPassed: boolean;
   isSynced: boolean;
+  isPlaying?: boolean;
 }) {
   const [animValue] = useState(() => new Animated.Value(isActive ? 2 : isPassed ? 1 : 0));
 
@@ -296,6 +307,7 @@ export const SpotifyCardPreviewLine = memo(function SpotifyCardPreviewLine({
           isActive={isActive}
           isPassed={isPassed}
           isCompact={true}
+          isPlaying={isPlaying}
         />
       </Animated.View>
     );

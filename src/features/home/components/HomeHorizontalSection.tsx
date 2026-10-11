@@ -15,7 +15,7 @@ View,
 useWindowDimensions,
 } from "react-native";
 
-const CARD_WIDTH = 148;
+const CARD_WIDTH = 140;
 const CARD_GAP = 14;
 
 export interface HomeCardItem {
@@ -176,17 +176,17 @@ const styles = StyleSheet.create({
     width: CARD_GAP,
   },
   container: {
-    marginVertical: 12,
+    marginVertical: 14,
   },
   header: {
     paddingHorizontal: 16,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   title: {
-    fontSize: 20,
+    fontSize: 22,
     fontFamily: "Inter_700Bold",
     color: "#FFFFFF",
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
   listContent: {
     paddingHorizontal: 16,
@@ -195,12 +195,13 @@ const styles = StyleSheet.create({
     width: CARD_WIDTH,
   },
   cardPressed: {
-    opacity: 0.8,
+    opacity: 0.82,
+    transform: [{ scale: 0.98 }],
   },
   cardImage: {
     width: CARD_WIDTH,
     height: CARD_WIDTH,
-    borderRadius: 10,
+    borderRadius: 16,
     backgroundColor: "#161B22",
   },
   cardTitle: {
@@ -208,11 +209,12 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
     color: "#FFFFFF",
     marginTop: 8,
+    letterSpacing: -0.2,
   },
   cardSubtitle: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.6)",
-    marginTop: 2,
+    color: "rgba(255, 255, 255, 0.60)",
+    marginTop: 3,
   },
 });

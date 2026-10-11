@@ -24,15 +24,19 @@ export function usePlayerLayoutMetrics(
   const bottomContentPadding =
     IS_WEB ? 16 : Math.max(insets.bottom, 0) + 24;
 
-  const trackSwipeHeightByWidth = Math.min(
-    screenWidth - (isShortScreen ? 44 : 38),
-    isShortScreen ? 348 : 388
-  );
+  const cardGap = 16;
+  const targetCardWidth = Math.max(200, Math.round(screenWidth * 0.79));
+
   const trackSwipeHeightByScreen = Math.max(
     isVeryShortScreen ? 220 : 240,
     Math.floor(screenHeight * (isVeryShortScreen ? 0.34 : isShortScreen ? 0.38 : 0.42))
   );
-  const trackSwipeAreaHeight = Math.min(trackSwipeHeightByWidth, trackSwipeHeightByScreen);
+  const cardWidth = Math.min(targetCardWidth, trackSwipeHeightByScreen);
+  const trackSwipeAreaHeight = cardWidth;
+  const trackSwipeCardWidth = cardWidth;
+  const trackSwipeCardGap = cardGap;
+  const trackSwipeSnapInterval = cardWidth + cardGap;
+  const trackSwipeSideInset = Math.max(0, Math.round((screenWidth - cardWidth) / 2));
 
   const ctrlBtnBase = useMemo(
     () => ({
@@ -68,7 +72,7 @@ export function usePlayerLayoutMetrics(
     [prevNextButtonSize]
   );
 
-  const trackSwipePageWidth = screenWidth;
+  const trackSwipePageWidth = trackSwipeSnapInterval;
 
   return {
     topInset,
@@ -86,6 +90,10 @@ export function usePlayerLayoutMetrics(
     songDetailIconSize,
     bottomContentPadding,
     trackSwipeAreaHeight,
+    trackSwipeCardWidth,
+    trackSwipeCardGap,
+    trackSwipeSnapInterval,
+    trackSwipeSideInset,
     playerIconBtnStyle,
     songDetailActionBtnStyle,
     prevNextBtnSizeStyle,

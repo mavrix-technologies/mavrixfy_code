@@ -2,17 +2,22 @@ import { FullscreenKaraokeModal } from "@/components/FullscreenKaraokeModal";
 import { IS_ANDROID,IS_IOS } from "@/constants/platform";
 import { useAppIsActive } from "@/lib/appActivity";
 import { collapsePlayer,playerUIStateStore,usePlayerUIState } from "@/lib/playerUIState";
-import { usePlaybackNowPlaying } from "@/services/audio/PlaybackEngine";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
+import { usePlayerActions } from "@/contexts/PlayerContextDefs";
+import { useArtworkPalette } from "@/lib/colorExtractor";
+import type { Song } from "@/lib/musicData";
 import { getPlaybackProgressSnapshot,usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
 import { globalQueueSheetRef } from "@/lib/queueRef";
-import React,{ memo,useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
+import React,{ memo,useCallback,useEffect,useMemo,useState } from "react";
 import {
 BackHandler,
 StyleSheet,
 View,
-useWindowDimensions,
 } from "react-native";
 import BottomSheet, { BottomSheetScrollView, useScrollEventsHandlersDefault } from "@gorhom/bottom-sheet";
+import { StatusBar } from "expo-status-bar";
+import { useKeepAwake } from "expo-keep-awake";
 import {
 useSharedValue,
 useAnimatedReaction,
@@ -26,10 +31,13 @@ import { PlayerEmptyState } from "../components/PlayerEmptyState";
 import { PlayerStickyHeader } from "../components/PlayerStickyHeader";
 import { useLegacyPlayerViewState } from "../hooks/useLegacyPlayerViewState";
 import { usePlayerSheetState } from "../hooks/usePlayerSheetState";
+import { useStandByMode } from "../hooks/useStandByMode";
+import { StandByOverlay } from "../components/StandByOverlay";
 import { styles } from "../styles/playerScreenStyles";
 
-function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolean }) {
+function LegacyPlayerScreenView({ interactionReady, onEnterStandBy }: { interactionReady: boolean; onEnterStandBy: () => void }) {
   const s = useLegacyPlayerViewState(interactionReady);
+
   const [videoFrameSongId, setVideoFrameSongId] = useState<string | null>(null);
   const videoVisible = s.shouldRenderBackgroundVideo && videoFrameSongId === s.screenSong?.id;
   const handleVideoFirstFrame = useCallback(() => {
@@ -92,6 +100,7 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
             isPlaying={s.playerIsPlaying}
             onClose={collapsePlayer}
             onOptionsPress={s.handleSongOptionsPress}
+            onEnterStandBy={onEnterStandBy}
             onTogglePlay={s.togglePlay}
           />
 
@@ -128,7 +137,7 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
               style={[
                 styles.playerContent,
                 {
-                  height: s.screenHeight - (s.isShortScreen ? 48 : 58),
+                  height: s.screenHeight - (s.isVeryShortScreen ? 68 : s.isShortScreen ? 82 : 98),
                   paddingTop: s.topInset + s.topBarHeight,
                   paddingBottom: 6,
                 },
@@ -138,8 +147,10 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
                   <PlayerTrackCarousel
                     listRef={s.listRef}
                     artworkQueue={s.artworkQueue}
-                    pageWidth={s.trackSwipePageWidth}
-                    pageSnapInterval={s.trackSwipePageWidth}
+                    cardWidth={s.trackSwipeCardWidth}
+                    cardGap={s.trackSwipeCardGap}
+                    pageSnapInterval={s.trackSwipeSnapInterval}
+                    sideInset={s.trackSwipeSideInset}
                     artworkSize={s.trackSwipeAreaHeight}
                     activeQueueIndex={s.activeQueueIndex}
                     scrollX={s.scrollX}
@@ -153,6 +164,10 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
 
                   <PlayerControlsSection
                     screenSong={s.screenSong}
+                    artworkQueue={s.artworkQueue}
+                    activeQueueIndex={s.activeQueueIndex}
+                    scrollX={s.scrollX}
+                    pageSnapInterval={s.trackSwipeSnapInterval}
                     sheetTextColor={s.sheetTextColor}
                     sheetMutedTextColor={s.sheetMutedTextColor}
                     selectedControlIconColor={s.selectedControlIconColor}
@@ -186,24 +201,26 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
                 </View>
             </View>
 
-            {s.interactionReady && <PlayerBottomDetailsSection
-              screenSong={s.screenSong}
-              playbackActive={s.playbackState.isPlaying}
-              accentColor={s.artworkPalette.accent}
-              onTogglePlay={s.togglePlay}
-              onLyricSeek={s.handleLyricSeek}
-              onToggleFullScreenLyrics={() => s.setFullscreenLyricsVisible(true)}
-              artistDetails={s.artistDetails}
-              artistLoading={s.artistLoading}
-              onViewArtistProfile={s.handleViewArtistProfile}
-              relatedSongs={s.relatedSongs}
-              onPlayRelatedSong={s.handlePlayRelatedSong}
-            />}
+            {s.screenSong && (
+              <PlayerBottomDetailsSection
+                screenSong={s.screenSong}
+                playbackActive={s.playbackState.isPlaying}
+                accentColor={s.artworkPalette.accent}
+                onTogglePlay={s.togglePlay}
+                onLyricSeek={s.handleLyricSeek}
+                onToggleFullScreenLyrics={() => s.setFullscreenLyricsVisible(true)}
+                artistDetails={s.artistDetails}
+                artistLoading={s.artistLoading}
+                onViewArtistProfile={s.handleViewArtistProfile}
+                relatedSongs={s.relatedSongs}
+                onPlayRelatedSong={s.handlePlayRelatedSong}
+              />
+            )}
           </BottomSheetScrollView>
         </View>
       </View>
 
-      <LiveFullscreenKaraokeModal
+      {s.fullscreenLyricsVisible && <LiveFullscreenKaraokeModal
         visible={s.fullscreenLyricsVisible}
         song={s.screenSong}
         isPlaying={s.playbackState.isPlaying}
@@ -211,7 +228,7 @@ function LegacyPlayerScreenView({ interactionReady }: { interactionReady: boolea
         onTogglePlay={s.togglePlay}
         onSeek={s.handleLyricSeek}
         onClose={() => s.setFullscreenLyricsVisible(false)}
-      />
+      />}
     </View>
   );
 }
@@ -229,14 +246,40 @@ const LiveFullscreenKaraokeModal = memo(function LiveFullscreenKaraokeModal(
   );
 });
 
+const SHEET_SNAP_POINTS = ["100%"];
+
+function StandByKeepAwake() {
+  useKeepAwake(undefined, { suppressDeactivateWarnings: true });
+  return null;
+}
+
 export const PlayerScreen = memo(function PlayerScreen() {
   const foreground = useAppIsActive();
-  const { height: screenHeight } = useWindowDimensions();
 
-  const { currentSong, queue, queueIndex } = usePlaybackNowPlaying();
+  const { currentSong, queue, queueIndex, isShuffled, repeatMode } = usePlaybackNowPlaying();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
 
   const uiState = usePlayerUIState();
+  const isPlayerExpanded = uiState === "expanded";
+
+  const standBy = useStandByMode({ isPlayerExpanded: isPlayerExpanded && Boolean(activeSong) });
+  const { isStandByActive, exitStandBy } = standBy;
+
+  useEffect(() => {
+    if (!standBy.isStandByActive) return;
+    globalQueueSheetRef.current?.collapse();
+    globalAddSongsSheetRef.current?.collapse();
+  }, [standBy.isStandByActive]);
+
+  const { isPlaying } = usePlaybackPlayState();
+  const { togglePlay, nextSong, prevSong, seekTo, toggleShuffle, toggleRepeat, toggleLike, isLiked, playSong } = usePlayerActions();
+  const artworkPalette = useArtworkPalette(activeSong?.coverUrl);
+  const handleToggleLike = useCallback(() => {
+    if (activeSong) void toggleLike(activeSong);
+  }, [activeSong, toggleLike]);
+  const handlePlayQueueSong = useCallback((song: Song) => {
+    playSong(song, queue);
+  }, [playSong, queue]);
 
   useEffect(() => {
     if (activeSong && playerUIStateStore.current === "hidden") {
@@ -246,39 +289,38 @@ export const PlayerScreen = memo(function PlayerScreen() {
     }
   }, [activeSong]);
 
-  const { visible, interactionReady, onAnimate, onChange, onClose } = usePlayerSheetState(uiState);
-  const snapPoints = useMemo(() => [screenHeight], [screenHeight]);
-  const bottomSheetRef = useRef<React.ElementRef<typeof BottomSheet>>(null);
-
-  useEffect(() => {
-    if (!visible) return;
-    if (uiState === "expanded") {
-      bottomSheetRef.current?.snapToIndex(0);
-    } else {
-      bottomSheetRef.current?.close();
-    }
-  }, [uiState, visible]);
+  const { visible, interactionReady, animateOnMount, onAnimate, onChange, onClose } = usePlayerSheetState(
+    uiState,
+    standBy.isStandByActive,
+    foreground
+  );
 
   useEffect(() => {
     if (!IS_ANDROID) return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       if (playerUIStateStore.current === "expanded") {
+        if (isStandByActive) {
+          exitStandBy();
+          return true;
+        }
         playerUIStateStore.collapsePlayer();
         return true;
       }
       return false;
     });
     return () => sub.remove();
-  }, []);
+  }, [isStandByActive, exitStandBy]);
 
   if (!activeSong || !visible || !foreground) return null;
 
   return (
     <View pointerEvents="box-none" style={[styles.sheetContainer, StyleSheet.absoluteFillObject]}>
-      <BottomSheet
-        ref={bottomSheetRef}
+      <StatusBar hidden={standBy.isStandByActive} animated style="light" />
+      {standBy.isStandByActive && <StandByKeepAwake />}
+      {!standBy.isStandByActive && <BottomSheet
         index={uiState === "expanded" ? 0 : -1}
-        snapPoints={snapPoints}
+        animateOnMount={animateOnMount}
+        snapPoints={SHEET_SNAP_POINTS}
         enableDynamicSizing={false}
         enablePanDownToClose
         enableContentPanningGesture
@@ -289,8 +331,34 @@ export const PlayerScreen = memo(function PlayerScreen() {
         onChange={onChange}
         onClose={onClose}
       >
-        <LegacyPlayerScreenView interactionReady={interactionReady} />
-      </BottomSheet>
+        <LegacyPlayerScreenView interactionReady={interactionReady} onEnterStandBy={standBy.enterStandBy} />
+      </BottomSheet>}
+
+      <StandByOverlay
+        visible={standBy.isStandByActive}
+        song={activeSong}
+        accentColor={artworkPalette?.accent}
+        backgroundColor={artworkPalette?.background}
+        liked={isLiked(activeSong.id)}
+        queue={queue}
+        queueIndex={queueIndex}
+        isPlaying={isPlaying}
+        isShuffled={isShuffled}
+        repeatMode={repeatMode}
+        standByStyle={standBy.standByStyle}
+        controlsDimmed={standBy.controlsDimmed}
+        onTogglePlay={togglePlay}
+        onSkipNext={nextSong}
+        onSkipPrev={prevSong}
+        onToggleShuffle={toggleShuffle}
+        onToggleRepeat={toggleRepeat}
+        onSeek={seekTo}
+        onSelectStyle={standBy.selectStyle}
+        onToggleLike={handleToggleLike}
+        onPlayQueueSong={handlePlayQueueSong}
+        onExitStandBy={standBy.exitStandBy}
+        onTouchActivity={standBy.handleTouch}
+      />
     </View>
   );
 });

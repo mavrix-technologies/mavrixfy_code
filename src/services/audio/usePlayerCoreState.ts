@@ -44,6 +44,22 @@ export function usePlayerCoreState({
   const [playbackLoading, setPlaybackLoading] = useState(false);
   const [albumColor, setAlbumColor] = useState("#282828");
   const [textColor, setTextColor] = useState("#FFFFFF");
+  const [volume, setVolumeState] = useState(1);
+
+  const setVolume = useCallback((val: number) => {
+    if (!Number.isFinite(val)) return;
+    const clamped = Math.max(0, Math.min(1, val));
+    try {
+      if (TrackPlayer) TrackPlayer.setVolume(clamped);
+      else ExpoAvPlayer.setVolume(clamped);
+    } catch (error) {
+      logger.warn("[Audio] Volume change failed", error);
+      return;
+    }
+    setVolumeState(clamped);
+    updatePlaybackEngineSnapshot({ volume: clamped });
+  }, [TrackPlayer]);
+
   const [playbackQuality, setPlaybackQuality] = useState<PlaybackQualityState>({
     requested: "medium",
     actualBitrate: 0,
@@ -328,6 +344,8 @@ export function usePlayerCoreState({
   );
 
   return {
+    volume,
+    setVolume,
     isPlayerReady,
     setIsPlayerReady,
     currentSong,

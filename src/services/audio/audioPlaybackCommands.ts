@@ -402,7 +402,7 @@ export function useAudioPlaybackCommands({
   }, [playSong, playSongRef]);
 
   const togglePlay = useCallback(async () => {
-    const nextPlayState = !isPlayingRef.current;
+    const nextPlayState = !(desiredPlayStateRef.current ?? isPlayingRef.current);
     desiredPlayStateRef.current = nextPlayState;
     const requestId = playRequestIdRef.current;
     const selectedSongId = currentSongRef.current?.id;
@@ -421,7 +421,7 @@ export function useAudioPlaybackCommands({
     }
 
     try {
-      if (nextPlayState && playbackLoadingRef.current) {
+      if (nextPlayState && pendingPlayRequestRef.current?.id === requestId) {
         setIsPlaying(true);
         isPlayingRef.current = true;
         updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
@@ -539,7 +539,7 @@ export function useAudioPlaybackCommands({
     isPlayingRef,
     playSong,
     positionSecondsRef,
-    playbackLoadingRef,
+    pendingPlayRequestRef,
     queueIndexRef,
     queueRef,
     setIsPlaying,

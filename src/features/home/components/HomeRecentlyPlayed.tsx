@@ -4,17 +4,17 @@ import type { RecentlyPlayedItem } from "@/lib/storage";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { MusicArtwork } from "@/components/MusicArtwork";
 import { useRouter } from "expo-router";
-import { memo,useCallback } from "react";
+import { memo, useCallback, useMemo } from "react";
 import {
-FlatList,
-Pressable,
-StyleSheet,
-Text,
-View,
-useWindowDimensions,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
 } from "react-native";
 
-const RECENT_CARD_WIDTH = 100;
+const RECENT_CARD_WIDTH = 112;
 const RECENT_CARD_GAP = 12;
 
 const RecentCard = memo(function RecentCard({
@@ -27,6 +27,17 @@ const RecentCard = memo(function RecentCard({
   const handlePress = useCallback(() => {
     onPress(item);
   }, [item, onPress]);
+
+  const subtitle = useMemo(() => {
+    if (item.data && typeof item.data === "object") {
+      if (item.data.artist) return item.data.artist;
+      if (item.data.subtitle) return item.data.subtitle;
+      if (item.data.channelTitle) return item.data.channelTitle;
+      if (item.data.author) return item.data.author;
+    }
+    if ((item as any).artist) return (item as any).artist;
+    return item.type === "song" ? "Song" : "Playlist";
+  }, [item]);
 
   return (
     <Pressable
@@ -49,7 +60,7 @@ const RecentCard = memo(function RecentCard({
         {item.name}
       </Text>
       <Text style={styles.recentSubtitle} numberOfLines={1}>
-        {item.type === "song" ? "Song" : "Playlist"}
+        {subtitle}
       </Text>
     </Pressable>
   );
@@ -87,7 +98,10 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
         }
 
         if (song?.id) {
-          playSong(song, [song]);
+          const songQueue = items
+            .filter((i) => i.type === "song" && i.data && typeof i.data === "object" && (i.data as any).id)
+            .map((i) => i.data as Song);
+          playSong(song, songQueue.length > 0 ? songQueue : [song]);
           return;
         }
       }
@@ -107,7 +121,7 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
         },
       });
     },
-    [playSong, router]
+    [items, playSong, router]
   );
 
   const renderItem = useCallback(
@@ -146,7 +160,7 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
         ItemSeparatorComponent={ItemSeparatorComponent}
         getItemLayout={getItemLayout}
         initialNumToRender={Math.max(1, Math.ceil(width / (RECENT_CARD_WIDTH + RECENT_CARD_GAP)))}
-        maxToRenderPerBatch={2}
+        maxToRenderPerBatch={3}
         windowSize={3}
         removeClippedSubviews
       />
@@ -175,24 +189,28 @@ const styles = StyleSheet.create({
     width: RECENT_CARD_WIDTH,
   },
   recentCardPressed: {
-    opacity: 0.8,
+    opacity: 0.82,
+    transform: [{ scale: 0.98 }],
   },
   recentImage: {
     width: RECENT_CARD_WIDTH,
     height: RECENT_CARD_WIDTH,
-    borderRadius: 8,
+    borderRadius: 14,
     backgroundColor: "#161B22",
   },
   recentTitle: {
     fontSize: 13,
+    lineHeight: 17,
     fontFamily: "Inter_600SemiBold",
     color: "#FFFFFF",
     marginTop: 6,
+    letterSpacing: -0.2,
   },
   recentSubtitle: {
-    fontSize: 11,
+    fontSize: 11.5,
+    lineHeight: 15,
     fontFamily: "Inter_400Regular",
-    color: "rgba(255,255,255,0.6)",
+    color: "rgba(255, 255, 255, 0.60)",
     marginTop: 2,
   },
 });

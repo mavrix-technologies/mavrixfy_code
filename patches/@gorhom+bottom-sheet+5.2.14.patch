@@ -1,0 +1,139 @@
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedLayout.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedLayout.js
+index 973d05c..b484b5f 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedLayout.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedLayout.js
+@@ -86,7 +86,7 @@ function useAnimatedLayout(containerLayoutState, topInset, bottomInset, modal, s
+     });
+   }, [state, verticalInset, modal]);
+   (0, _react.useEffect)(() => {
+-    _reactNative.Dimensions.addEventListener('change', ({
++    const subscription = _reactNative.Dimensions.addEventListener('change', ({
+       window
+     }) => {
+       state.modify(_state => {
+@@ -96,6 +96,7 @@ function useAnimatedLayout(containerLayoutState, topInset, bottomInset, modal, s
+         return _state;
+       });
+     });
++    return () => subscription.remove();
+   }, [state]);
+   //#endregion
+ 
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useReactiveSharedValue.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useReactiveSharedValue.js
+index 9677560..d052733 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useReactiveSharedValue.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useReactiveSharedValue.js
+@@ -30,9 +30,14 @@ const useReactiveSharedValue = value => {
+       // @ts-expect-error
+       valueRef.current = (0, _reactNativeReanimated.makeMutable)(value);
+     }
+-  } else if (initialValueRef.current !== value) {
+-    valueRef.current.value = value;
+   }
++  (0, _react.useLayoutEffect)(() => {
++    if (value && typeof value === 'object' && 'value' in value) return;
++    if (valueRef.current && initialValueRef.current !== value) {
++      initialValueRef.current = value;
++      valueRef.current.value = value;
++    }
++  }, [value]);
+   (0, _react.useEffect)(() => {
+     return () => {
+       if (valueRef.current) {
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedLayout.js b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedLayout.js
+index b0eec93..67713a2 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedLayout.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedLayout.js
+@@ -82,7 +82,7 @@ export function useAnimatedLayout(containerLayoutState, topInset, bottomInset, m
+     });
+   }, [state, verticalInset, modal]);
+   useEffect(() => {
+-    Dimensions.addEventListener('change', ({
++    const subscription = Dimensions.addEventListener('change', ({
+       window
+     }) => {
+       state.modify(_state => {
+@@ -92,6 +92,7 @@ export function useAnimatedLayout(containerLayoutState, topInset, bottomInset, m
+         return _state;
+       });
+     });
++    return () => subscription.remove();
+   }, [state]);
+   //#endregion
+ 
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useReactiveSharedValue.js b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useReactiveSharedValue.js
+index f0461dd..498d422 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useReactiveSharedValue.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useReactiveSharedValue.js
+@@ -1,6 +1,6 @@
+ "use strict";
+ 
+-import { useEffect, useRef } from 'react';
++import { useEffect, useLayoutEffect, useRef } from 'react';
+ import { cancelAnimation, makeMutable } from 'react-native-reanimated';
+ export const useReactiveSharedValue = value => {
+   const initialValueRef = useRef(null);
+@@ -26,9 +26,14 @@ export const useReactiveSharedValue = value => {
+       // @ts-expect-error
+       valueRef.current = makeMutable(value);
+     }
+-  } else if (initialValueRef.current !== value) {
+-    valueRef.current.value = value;
+   }
++  useLayoutEffect(() => {
++    if (value && typeof value === 'object' && 'value' in value) return;
++    if (valueRef.current && initialValueRef.current !== value) {
++      initialValueRef.current = value;
++      valueRef.current.value = value;
++    }
++  }, [value]);
+   useEffect(() => {
+     return () => {
+       if (valueRef.current) {
+diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedLayout.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedLayout.ts
+index 68c674d..564833c 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedLayout.ts
++++ b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedLayout.ts
+@@ -106,13 +106,14 @@ export function useAnimatedLayout(
+     [state, verticalInset, modal]
+   );
+   useEffect(() => {
+-    Dimensions.addEventListener('change', ({ window }) => {
++    const subscription = Dimensions.addEventListener('change', ({ window }) => {
+       state.modify(_state => {
+         'worklet';
+         _state.window = window;
+         return _state;
+       });
+     });
++    return () => subscription.remove();
+   }, [state]);
+   //#endregion
+ 
+diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useReactiveSharedValue.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useReactiveSharedValue.ts
+index 905fd06..5de7781 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/hooks/useReactiveSharedValue.ts
++++ b/node_modules/@gorhom/bottom-sheet/src/hooks/useReactiveSharedValue.ts
+@@ -1,4 +1,4 @@
+-import { useEffect, useRef } from 'react';
++import { useEffect, useLayoutEffect, useRef } from 'react';
+ import type { SharedValue } from 'react-native-reanimated';
+ import { cancelAnimation, makeMutable } from 'react-native-reanimated';
+ import type { Primitive } from '../types';
+@@ -28,9 +28,14 @@ export const useReactiveSharedValue = <T>(
+       // @ts-expect-error
+       valueRef.current = makeMutable(value);
+     }
+-  } else if (initialValueRef.current !== value) {
+-    valueRef.current.value = value as T;
+   }
++  useLayoutEffect(() => {
++    if (value && typeof value === 'object' && 'value' in value) return;
++    if (valueRef.current && initialValueRef.current !== value) {
++      initialValueRef.current = value;
++      valueRef.current.value = value as T;
++    }
++  }, [value]);
+ 
+   useEffect(() => {
+     return () => {

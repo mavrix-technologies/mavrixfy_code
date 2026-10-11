@@ -12,6 +12,7 @@ import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { resetPlaybackEngine,updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { usePlayerCoreState } from "@/services/audio/usePlayerCoreState";
 import { StandardAudioRenderer } from "@/services/audio/StandardAudioRenderer";
+import { logger } from "@/lib/logger";
 import { Event, RepeatMode, StandardAudioPlayer, State } from "@/services/audio/StandardAudioPlayer";
 import { isRunningInExpoGo } from "expo";
 import { useEffect,type ReactNode } from "react";
@@ -62,7 +63,7 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => () => {
     core.playRequestIdRef.current += 1;
     core.desiredPlayStateRef.current = false;
-    void TrackPlayer?.reset().catch(() => {});
+    void TrackPlayer?.reset().catch(error => logger.warn("[Audio] Session reset failed", error));
     ExpoAvPlayer.destroy();
     resetPlaybackEngine();
   }, [core.playRequestIdRef, core.desiredPlayStateRef]);
@@ -94,9 +95,9 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
       const desiredRef = core.desiredPlayStateRef;
       desiredRef.current = false;
       if (TrackPlayer) {
-        TrackPlayer.pause().catch(() => {});
+        void TrackPlayer.pause().catch(error => logger.warn("[Audio] Sleep timer pause failed", error));
       } else if (canUseLightweightAudioFallback) {
-        try { ExpoAvPlayer.pause(); } catch {}
+        try { ExpoAvPlayer.pause(); } catch (error) { logger.warn("[Audio] Sleep timer pause failed", error); }
       }
       core.setIsPlaying(false);
       const playingRef = core.isPlayingRef;
@@ -268,6 +269,7 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
     triggerAutoplayAppend: core.triggerAutoplayAppend,
     isShuffled: core.isShuffled,
     repeatMode: core.repeatMode,
+    repeatModeRef: core.repeatModeRef,
     toggleShuffle,
     toggleRepeat,
     toggleLike,
@@ -307,6 +309,8 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
     setAlbumColor: core.setAlbumColor,
     setTextColor: core.setTextColor,
     changeStreamingQuality,
+    volume: core.volume,
+    setVolume: core.setVolume,
   });
 
   return (

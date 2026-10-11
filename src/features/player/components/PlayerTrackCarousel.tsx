@@ -21,8 +21,11 @@ const AnimatedSongFlatList = Animated.createAnimatedComponent(
 export interface PlayerTrackCarouselProps {
   listRef: React.MutableRefObject<FlatList<ArtworkQueueItem> | null>;
   artworkQueue: ArtworkQueueItem[];
-  pageWidth: number;
+  cardWidth?: number;
+  cardGap?: number;
+  pageWidth?: number;
   pageSnapInterval: number;
+  sideInset?: number;
   artworkSize: number;
   activeQueueIndex: number;
   scrollX: Animated.Value;
@@ -37,8 +40,11 @@ export interface PlayerTrackCarouselProps {
 export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
   listRef,
   artworkQueue,
+  cardWidth,
+  cardGap,
   pageWidth,
   pageSnapInterval,
+  sideInset,
   artworkSize,
   activeQueueIndex,
   scrollX,
@@ -50,6 +56,9 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
   getItemLayout,
 }: PlayerTrackCarouselProps) {
   const [videoCrossfadeAnim] = React.useState(() => new Animated.Value(videoVisible ? 0 : 1));
+  const actualCardWidth = cardWidth ?? artworkSize;
+  const actualCardGap = cardGap ?? 14;
+  const actualSideInset = sideInset ?? Math.max(0, Math.round((pageSnapInterval - actualCardWidth) / 2));
 
   React.useEffect(() => {
     Animated.timing(videoCrossfadeAnim, {
@@ -62,30 +71,80 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
   const renderArtworkCard = useCallback(
     ({ item, index }: { item: ArtworkQueueItem; index: number }) => {
       const isActiveCard = index === activeQueueIndex;
+      const isLastCard = index === artworkQueue.length - 1;
       const inputRange = [
         (index - 1) * pageSnapInterval,
         index * pageSnapInterval,
         (index + 1) * pageSnapInterval,
       ];
-      const slideScale = scrollX.interpolate({ inputRange, outputRange: [0.86, 1, 0.86], extrapolate: "clamp" });
-      const slideOpacity = scrollX.interpolate({ inputRange, outputRange: [0.35, 1, 0.35], extrapolate: "clamp" });
-      const cardOpacity = isActiveCard ? Animated.multiply(slideOpacity, videoCrossfadeAnim) : slideOpacity;
-      const slideTranslateY = scrollX.interpolate({ inputRange, outputRange: [4, 0, 4], extrapolate: "clamp" });
+      const slideScale = scrollX.interpolate({
+        inputRange,
+        outputRange: [0.75, 1, 0.75],
+        extrapolate: "clamp",
+      });
+      const slideOpacity = scrollX.interpolate({
+        inputRange,
+        outputRange: [0.38, 1, 0.38],
+        extrapolate: "clamp",
+      });
+      const slideTranslateX = scrollX.interpolate({
+        inputRange,
+        outputRange: [-28, 0, 28],
+        extrapolate: "clamp",
+      });
+
+      // Swipe factor: when actively dragging carousel away from center, smoothly crossfade cards in
+      const swipeProgress = scrollX.interpolate({
+        inputRange: [
+          (activeQueueIndex - 1) * pageSnapInterval,
+          activeQueueIndex * pageSnapInterval,
+          (activeQueueIndex + 1) * pageSnapInterval,
+        ],
+        outputRange: [1, 0, 1],
+        extrapolate: "clamp",
+      });
+
+      // When video is on (videoCrossfadeAnim -> 0) and at rest (swipeProgress = 0), card visibility is 0 (all cards hidden).
+      // When dragging or when video is off (videoCrossfadeAnim = 1), cards smoothly fade in.
+      const effectiveCardVisibility = Animated.add(
+        videoCrossfadeAnim,
+        swipeProgress
+      ).interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 1],
+        extrapolate: "clamp",
+      });
+
+      const cardOpacity = Animated.multiply(slideOpacity, effectiveCardVisibility);
 
       return (
         <Pressable
-          style={[styles.artCarouselTouch, { width: pageWidth, height: artworkSize }]}
+          style={[
+            styles.artCarouselTouch,
+            {
+              width: actualCardWidth,
+              height: artworkSize,
+              marginRight: isLastCard ? 0 : actualCardGap,
+            },
+          ]}
           onPress={() => onTrackPress(index)}
-          disabled={isActiveCard}
+          disabled={isActiveCard || videoVisible}
           accessibilityRole="button"
           accessibilityLabel={isActiveCard ? "Current track artwork" : `Play track ${index + 1}`}
         >
           <Animated.View
+            pointerEvents={videoVisible ? "none" : "auto"}
             style={[
               styles.artFrame,
               styles.artCarouselCard,
-              { width: artworkSize, height: artworkSize },
-              { opacity: cardOpacity, transform: [{ translateY: slideTranslateY }, { scale: slideScale }] },
+              { width: actualCardWidth, height: artworkSize },
+              {
+                opacity: cardOpacity,
+                transform: [
+                  { translateX: slideTranslateX },
+                  { scale: slideScale },
+                ],
+              },
             ]}
           >
             <View style={styles.albumArtParallax}>
@@ -106,7 +165,18 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
         </Pressable>
       );
     },
-    [activeQueueIndex, artworkSize, onTrackPress, pageSnapInterval, pageWidth, scrollX, videoCrossfadeAnim]
+    [
+      activeQueueIndex,
+      actualCardGap,
+      actualCardWidth,
+      artworkQueue.length,
+      artworkSize,
+      onTrackPress,
+      pageSnapInterval,
+      scrollX,
+      videoCrossfadeAnim,
+      videoVisible,
+    ]
   );
 
   return (
@@ -117,7 +187,7 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
         keyExtractor={(item: ArtworkQueueItem) => item.artworkKey}
         renderItem={renderArtworkCard}
         horizontal
-        pagingEnabled={IS_IOS}
+        pagingEnabled={false}
         showsHorizontalScrollIndicator={false}
         bounces={false}
         scrollEnabled={artworkQueue.length > 1 && !isProgressSeeking}
@@ -125,14 +195,20 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
         disableIntervalMomentum
         snapToAlignment="start"
         snapToInterval={pageSnapInterval}
-        contentContainerStyle={styles.artCarouselContent}
+        contentContainerStyle={[
+          styles.artCarouselContent,
+          {
+            paddingLeft: actualSideInset,
+            paddingRight: actualSideInset,
+          },
+        ]}
         style={styles.artCarousel}
         getItemLayout={getItemLayout}
         initialScrollIndex={activeQueueIndex}
         initialNumToRender={3}
-        maxToRenderPerBatch={2}
-        windowSize={3}
-        updateCellsBatchingPeriod={80}
+        maxToRenderPerBatch={3}
+        windowSize={5}
+        updateCellsBatchingPeriod={50}
         removeClippedSubviews={false}
         onScroll={onScroll}
         scrollEventThrottle={16}

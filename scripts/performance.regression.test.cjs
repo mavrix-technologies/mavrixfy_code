@@ -39,22 +39,44 @@ test('decorative consumers share one lifecycle listener and release it on unmoun
 
 test('collapsed/background player creates no full player UI; expanding/restoring recreates it', () => {
   const react = {
-    memo: fn => fn, useEffect() {}, useCallback: fn => fn, useMemo: fn => fn(), useRef: value => ({ current: value }),
+    memo: fn => fn, useEffect: fn => fn(), useLayoutEffect: fn => fn(), useCallback: fn => fn, useMemo: fn => fn(), useRef: value => ({ current: value }),
     useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}],
     createElement: (type, props, ...children) => ({ type, props, children }),
   };
   let foreground = true;
+  let landscape = false;
+  let windowHeight = 800;
+  let standbyEnabled = false;
+  const closedSheets = [];
+  const playedQueueSongs = [];
   const ui = { current: 'mini' };
   const dependencies = {
     react,
     '@/lib/appActivity': { useAppIsActive: () => foreground },
     '@/constants/platform': { IS_ANDROID: false },
     '@/lib/playerUIState': { playerUIStateStore: ui, usePlayerUIState: () => ui.current },
-    '@/lib/queueRef': { globalQueueSheetRef: { current: null } },
-    '@/services/audio/PlaybackEngine': { usePlaybackNowPlaying: () => ({ currentSong: { id: 'song' }, queue: [], queueIndex: 0 }) },
+    '@/lib/queueRef': { globalQueueSheetRef: { current: { collapse: () => closedSheets.push('queue') } } },
+    '@/lib/addSongsSheetRef': { globalAddSongsSheetRef: { current: { collapse: () => closedSheets.push('add-songs') } } },
+    'expo-status-bar': { StatusBar: 'StatusBar' },
+    'expo-keep-awake': { useKeepAwake() {} },
+    'expo-router': { router: { push() {} } },
+    '@/services/audio/PlaybackEngine': {
+      usePlaybackNowPlaying: () => ({ currentSong: { id: 'song' }, queue: [], queueIndex: 0 }),
+      usePlaybackPlayState: () => ({ isPlaying: false }),
+      usePlaybackQueueState: () => ({ isShuffled: false, repeatMode: 'off' }),
+    },
+    '@/contexts/PlayerContextDefs': {
+      usePlayerActions: () => ({
+        togglePlay: () => {}, nextSong: () => {}, prevSong: () => {}, seekTo: () => {}, toggleShuffle: () => {}, toggleRepeat: () => {}, toggleLike: () => {}, isLiked: () => false,
+        playSong: (song, queue) => playedQueueSongs.push({ song, queue }),
+      }),
+    },
+    '@/lib/colorExtractor': {
+      useArtworkPalette: () => ({ accent: '#fff', background: '#000' }),
+    },
     '@/lib/nativeAnimated': { createAnimatedComponent: () => 'AnimatedScrollView' },
-    'react-native': { useWindowDimensions: () => ({ height: 800 }), StyleSheet: { absoluteFillObject: {} } },
-    'react-native-reanimated': { View: 'AnimatedView', useSharedValue: value => ({ value }), useAnimatedStyle: fn => fn() },
+    'react-native': { useWindowDimensions: () => ({ height: windowHeight }), StyleSheet: { absoluteFillObject: {} } },
+    'react-native-reanimated': { View: 'AnimatedView', useSharedValue: value => ({ value, get() { return this.value; }, set(next) { this.value = next; } }), useAnimatedStyle: fn => fn() },
     'react-native-gesture-handler': { Gesture: { Pan: () => {
       const gesture = {};
       for (const method of ['activeOffsetY', 'failOffsetY', 'failOffsetX', 'onUpdate', 'onEnd']) gesture[method] = () => gesture;
@@ -64,19 +86,62 @@ test('collapsed/background player creates no full player UI; expanding/restoring
     '../hooks/usePlayerSheetState': { usePlayerSheetState: () => ({
       visible: ui.current === 'expanded', interactionReady: false,
     }) },
-    '@gorhom/bottom-sheet': { default: 'NativeBottomSheet' },
+    '@gorhom/bottom-sheet': { __esModule: true, default: 'NativeBottomSheet', BottomSheetView: 'BottomSheetView' },
   };
   for (const name of ['@/components/FullscreenKaraokeModal', '@/services/audio/playbackProgressStore', '@/utils/navigation',
     'expo-linear-gradient', 'react-native-worklets', '../components/PlayerAmbientBackdrop', '../components/PlayerTrackCarousel',
     '../components/PlayerArtworkViews', '../components/PlayerBottomDetailsSection', '../components/PlayerControlsSection',
     '../components/PlayerDiscoverySections', '../components/PlayerEmptyState', '../components/PlayerStickyHeader',
-    '../hooks/useLegacyPlayerViewState']) dependencies[name] = {};
+    '../hooks/useLegacyPlayerViewState', '../components/StandByOverlay']) dependencies[name] = {};
+  dependencies['../components/StandByOverlay'] = { StandByOverlay: 'StandByOverlay' };
+  dependencies['../hooks/useStandByMode'] = {
+    useStandByMode: () => ({
+      isLandscape: landscape,
+      isStandByActive: standbyEnabled && ui.current === 'expanded',
+      enterStandBy: () => { standbyEnabled = true; },
+      exitStandBy: () => { standbyEnabled = false; },
+      standByStyle: 'classic',
+      controlsDimmed: false,
+      handleTouch: () => {},
+      selectStyle: () => {},
+    }),
+  };
   const { PlayerScreen } = load('src/features/player/screens/PlayerScreen.tsx', dependencies);
   assert.equal(PlayerScreen(), null);
   ui.current = 'expanded';
   const expanded = PlayerScreen();
   const containsDetails = node => Boolean(node && (node.type?.name === 'LegacyPlayerScreenView' || node.children?.some(containsDetails)));
+  const containsWakeLock = node => Boolean(node && (node.type?.name === 'StandByKeepAwake' || node.children?.some(containsWakeLock)));
   assert.ok(containsDetails(expanded));
+  assert.equal(containsWakeLock(expanded), false);
+  const containsSheet = node => Boolean(node && (node.type === 'NativeBottomSheet' || node.children?.some(containsSheet)));
+  assert.equal(containsSheet(expanded), true);
+  const firstSheet = expanded.children.find(child => child?.type === 'NativeBottomSheet');
+  assert.equal(firstSheet.props.containerLayoutState, undefined, 'native sheet measures its own hosting container');
+  assert.equal(expanded.props.onLayout, undefined, 'no competing window-height synchronization');
+  landscape = true;
+  windowHeight = 390;
+  assert.ok(containsDetails(PlayerScreen()), 'rotation alone does not activate StandBy');
+  const details = expanded.children.find(child => child?.type === 'NativeBottomSheet').children[0];
+  details.props.onEnterStandBy();
+  const standby = PlayerScreen();
+  assert.equal(containsDetails(standby), false);
+  assert.equal(containsWakeLock(standby), true);
+  assert.equal(containsSheet(standby), false, 'landscape has no unused native sheet gesture surface');
+  assert.deepEqual(closedSheets, ['queue', 'add-songs']);
+  const overlay = standby.children.find(child => child?.type === 'StandByOverlay');
+  const queuedSong = { id: 'upcoming-song' };
+  overlay.props.onPlayQueueSong(queuedSong);
+  assert.equal(playedQueueSongs[0].song, queuedSong);
+  assert.equal(playedQueueSongs[0].queue, overlay.props.queue);
+  assert.equal(overlay.props.onOpenQueue, undefined, 'standby has no sheet-opening queue callback');
+  overlay.props.onExitStandBy();
+  assert.equal(ui.current, 'expanded', 'exit returns to full player rather than collapsing');
+  landscape = false;
+  windowHeight = 844;
+  const restoredSheet = PlayerScreen().children.find(child => child?.type === 'NativeBottomSheet');
+  assert.equal(restoredSheet.props.containerLayoutState, undefined, 'restoration receives a fresh native measurement');
+  assert.ok(containsDetails(PlayerScreen()));
   foreground = false; assert.equal(PlayerScreen(), null);
   foreground = true; assert.ok(containsDetails(PlayerScreen()));
   ui.current = 'mini'; assert.equal(PlayerScreen(), null);
@@ -103,6 +168,31 @@ test('playing equalizer bars stop their repeat loops when the app backgrounds', 
   Bars({ isPlaying: true }); assert.equal(repeats, 3);
   cleanup.splice(0).forEach(fn => fn()); foreground = false;
   Bars({ isPlaying: true }); assert.equal(repeats, 3); assert.ok(cancelled >= 6);
+});
+
+test('player header opens StandBy from the button immediately left of song options', () => {
+  const react = { memo: fn => fn, useMemo: fn => fn(), createElement: (type, props, ...children) => ({ type, props, children }) };
+  const { PlayerStickyHeader } = load('src/features/player/components/PlayerStickyHeader.tsx', {
+    react,
+    'react-native-reanimated': { __esModule: true, default: { View: 'AnimatedView' }, Extrapolation: { CLAMP: 0 }, interpolate: () => 1, useAnimatedStyle: fn => fn() },
+    'react-native': { View: 'View', Pressable: 'Pressable', Text: 'Text', StyleSheet: { create: styles => styles, absoluteFillObject: {}, hairlineWidth: 1 } },
+    '@/lib/colorExtractor': { getSolidHeaderColor: () => '#000' },
+    '@/services/audio/playbackProgressStore': { usePlaybackProgressStore: () => ({ positionMillis: 0, duration: 0 }) },
+    '@expo/vector-icons': { Ionicons: 'Icon' },
+    '@/utils/stringUtils': { unescapeHtml: value => value },
+  });
+  for (const isScrolled of [false, true]) {
+    let opened = 0;
+    const tree = PlayerStickyHeader({ topInset: 0, topBarHeight: 54, scrollY: { value: 0 }, isScrolled, isPlaying: false, onEnterStandBy: () => opened++ });
+    const nodes = [];
+    const visit = node => { if (node && typeof node === 'object') { nodes.push(node); node.children?.forEach(visit); } };
+    visit(tree);
+    const entry = nodes.find(node => node.props?.accessibilityLabel === 'Open StandBy');
+    const options = nodes.find(node => node.props?.accessibilityLabel === 'Open song options');
+    assert.ok(nodes.indexOf(entry) < nodes.indexOf(options));
+    entry.props.onPress();
+    assert.equal(opened, 1);
+  }
 });
 
 test('background progress keeps audio state current without notifying UI subscribers', () => {

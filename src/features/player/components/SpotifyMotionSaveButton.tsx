@@ -27,6 +27,7 @@ export interface SpotifyMotionSaveButtonProps {
   activeColor?: string;
   inactiveColor?: string;
   accessibilityLabel?: string;
+  hitSlop?: any;
 }
 
 const SPRING_CONFIG = {
@@ -44,6 +45,7 @@ export const SpotifyMotionSaveButton = React.memo(
     activeColor = Colors.primary || "#1ED760",
     inactiveColor = "#FFFFFF",
     accessibilityLabel,
+    hitSlop,
   }: SpotifyMotionSaveButtonProps) {
     const isFirstRender = useRef(true);
 
@@ -136,7 +138,7 @@ export const SpotifyMotionSaveButton = React.memo(
           (liked ? "Remove from Liked Songs" : "Add to Liked Songs")
         }
         accessibilityState={{ selected: liked }}
-        hitSlop={8}
+        hitSlop={hitSlop ?? 8}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         onPress={handlePress}

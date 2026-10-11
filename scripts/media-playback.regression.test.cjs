@@ -526,3 +526,62 @@ for (const platform of ['android','ios']) {
     });
   }
 }
+
+for (const platform of ["android", "ios"]) {
+  test(`${platform}: replacing a hung stream releases the serialized queue and starts the latest track`, async () => {
+    let resolveOld;
+    const f = fixture({ platform, youtubeResolver: () => new Promise(resolve => { resolveOld = resolve; }) });
+    const p = f.StandardAudioPlayer;
+    let lane = Promise.resolve();
+    const enqueue = operation => (lane = lane.then(operation));
+    let oldSettled = false;
+    const old = enqueue(async () => {
+      await p.setQueue([{ id: "old", source: "youtube", youtubeVideoId: "old" }]);
+      oldSettled = true;
+    });
+    await tick();
+    assert.equal(typeof resolveOld, "function");
+    p.beginTrackChange();
+    let newSettled = false;
+    const latest = enqueue(async () => {
+      await p.setQueue(tracks, 1);
+      await p.play();
+      newSettled = true;
+    });
+    await tick(); await tick();
+    assert.equal(oldSettled, true, "obsolete resolution cannot hold the lane");
+    assert.equal(newSettled, true, "Next must reach native playback before the old network request settles");
+    await old; await latest;
+    let starts = 0;
+    const source = f.StandardAudioRenderer().props;
+    source.ref({ play() { starts++; source.onPlay(); }, pause() {}, seekToTime() {} });
+    source.onLoad(); await tick();
+    assert.equal(starts, 1);
+    assert.equal((await p.getActiveTrack()).id, "b");
+    assert.equal((await p.getPlaybackState()).state, f.State.Playing);
+    resolveOld({ url: "https://obsolete.example/old", durationSeconds: 180 });
+    await tick();
+    assert.equal((await p.getActiveTrack()).id, "b", "late resolution cannot restore the old song");
+    await p.pause(); await p.play(); await tick();
+    assert.equal(starts, 2, "latest source can still pause and resume");
+  });
+}
+
+test("a native stream-resolution timeout releases the queue operation with a retryable error", async () => {
+  const f = fixture({ youtubeResolver: () => new Promise(() => {}) });
+  const pending = f.StandardAudioPlayer.setQueue([{ id: "hung", source: "youtube", youtubeVideoId: "hung" }]);
+  const rejected = assert.rejects(pending, /Audio loading timed out/);
+  await tick(); f.fireTimers(); await rejected;
+  await f.StandardAudioPlayer.setQueue(tracks, 1);
+  assert.equal((await f.StandardAudioPlayer.getActiveTrack()).id, "b");
+});
+
+test("reset cancels a pending local-download validation", async () => {
+  const f = fixture({ downloads: { getSongDownload: () => new Promise(() => {}) } });
+  let settled = false;
+  const pending = f.StandardAudioPlayer.setQueue([{ id: "local", url: "file:///local.m4a" }]).then(() => { settled = true; });
+  await tick(); await f.StandardAudioPlayer.reset(); await tick();
+  assert.equal(settled, true);
+  await pending;
+  assert.equal(await f.StandardAudioPlayer.getActiveTrack(), null);
+});

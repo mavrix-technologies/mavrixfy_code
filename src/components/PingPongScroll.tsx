@@ -1,13 +1,31 @@
 import * as Animated from "@/lib/nativeAnimated";
-import React,{ useEffect,useMemo,useRef,useState } from "react";
-import { Easing,Platform,StyleSheet,Text,TextStyle,View,type LayoutChangeEvent,type NativeSyntheticEvent,type StyleProp,type TextLayoutEventData } from "react-native";
+import { useAppIsActive } from "@/lib/appActivity";
+import { LinearGradient } from "expo-linear-gradient";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Easing,
+  Platform,
+  StyleSheet,
+  Text,
+  type LayoutChangeEvent,
+  type NativeSyntheticEvent,
+  type StyleProp,
+  type TextLayoutEventData,
+  type TextStyle,
+  View,
+} from "react-native";
 
-interface PingPongScrollProps {
+export interface PingPongScrollProps {
   text: string;
   className?: string;
   style?: StyleProp<TextStyle>;
   velocity?: number;
   paused?: boolean;
+  showFade?: boolean;
+  fadeColor?: string;
+  fadeWidth?: number;
+  startDelay?: number;
+  endDelay?: number;
 }
 
 export const PingPongScroll: React.FC<PingPongScrollProps> = ({
@@ -16,23 +34,60 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
   style,
   velocity = 15,
   paused = false,
+  showFade = false,
+  fadeColor = "rgba(8, 10, 16, 0.98)",
+  fadeWidth = 22,
+  startDelay = 1500,
+  endDelay = 1200,
 }) => {
+  const foreground = useAppIsActive();
   const displayText = text;
   const [containerWidth, setContainerWidth] = useState(0);
-  const [textWidth, setTextWidth] = useState(0);
+  const [measurement, setMeasurement] = useState({ text, width: 0 });
+  const textWidth = measurement.text === text ? measurement.width : 0;
   const [animatedValue] = useState(() => new Animated.Value(0));
-
   const [contentOpacity] = useState(() => new Animated.Value(1));
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
-  const GAP = 28;
+
   const MEASURE_WIDTH = 10000;
 
-  // Derive needsScroll during render — no state needed
-  const overflow = textWidth - containerWidth;
-  // Multiple native marquee loops keep older Android GPUs composing at 60fps
-  // even when the rest of the player is static. Android gets a stable,
-  // single-line label; iOS keeps the marquee where compositor cost is lower.
-  const needsScroll = Platform.OS !== "android" && !paused && overflow > 6 && containerWidth > 0 && textWidth > 0;
+  // Derive overflow and needsScroll
+  const overflow = Math.max(0, textWidth - containerWidth);
+  const needsScroll = foreground && !paused && overflow > 6 && containerWidth > 0 && textWidth > 0;
+  const distance = overflow;
+
+  const transparentFade = useMemo(() => {
+    if (fadeColor.startsWith("rgba(")) {
+      return fadeColor.replace(/,\s*[\d.]+\)$/, ", 0)");
+    }
+    if (fadeColor.startsWith("rgb(")) {
+      return fadeColor.replace("rgb(", "rgba(").replace(")", ", 0)");
+    }
+    return "rgba(0, 0, 0, 0)";
+  }, [fadeColor]);
+
+  // Smooth edge fade opacities:
+  // At start (animatedValue = 0): leftFade is 0 (first letters crystal clear), rightFade is 1 (overflowing end softly fades)
+  // While scrolling: both left and right edges softly fade
+  // At end (animatedValue = -distance): leftFade is 1, rightFade is 0 (last letters crystal clear)
+  const leftFadeOpacity = useMemo(() => {
+    if (!needsScroll) return 0;
+    return animatedValue.interpolate({
+      inputRange: [-16, 0],
+      outputRange: [1, 0],
+      extrapolate: "clamp",
+    });
+  }, [needsScroll, animatedValue]);
+
+  const rightFadeOpacity = useMemo(() => {
+    if (!needsScroll || distance <= 0) return 0;
+    const fadeThreshold = Math.min(0, -distance + 16);
+    return animatedValue.interpolate({
+      inputRange: [-distance, fadeThreshold],
+      outputRange: [0, 1],
+      extrapolate: "clamp",
+    });
+  }, [needsScroll, distance, animatedValue]);
 
   useEffect(() => {
     Animated.timing(contentOpacity, {
@@ -52,7 +107,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
 
     animatedValue.setValue(0);
 
-    if (!needsScroll) {
+    if (!needsScroll || distance <= 0) {
       return () => {
         if (animationRef.current) {
           animationRef.current.stop();
@@ -61,12 +116,12 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
       };
     }
 
-    const distance = overflow + GAP;
-    const duration = Math.max(900, Math.round((distance / Math.max(8, velocity)) * 1000));
+    const duration = Math.max(1200, Math.round((distance / Math.max(10, velocity)) * 1000));
+    const returnDuration = Math.max(900, Math.round((distance / Math.max(12, velocity * 1.3)) * 1000));
 
     const animation = Animated.loop(
       Animated.sequence([
-        Animated.delay(850),
+        Animated.delay(startDelay),
         Animated.timing(animatedValue, {
           toValue: -distance,
           duration,
@@ -74,15 +129,15 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
           useNativeDriver: Platform.OS !== "web",
           isInteraction: false,
         }),
-        Animated.delay(500),
+        Animated.delay(endDelay),
         Animated.timing(animatedValue, {
           toValue: 0,
-          duration,
-          easing: Easing.linear,
+          duration: returnDuration,
+          easing: Easing.inOut(Easing.cubic),
           useNativeDriver: Platform.OS !== "web",
           isInteraction: false,
         }),
-        Animated.delay(450),
+        Animated.delay(500),
       ])
     );
 
@@ -95,11 +150,11 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
         animationRef.current = null;
       }
     };
-  }, [animatedValue, displayText, needsScroll, overflow, velocity]);
+  }, [animatedValue, displayText, needsScroll, distance, velocity, startDelay, endDelay]);
 
   const handleContainerLayout = (event: LayoutChangeEvent) => {
     const { width } = event.nativeEvent.layout;
-    if (width > 0) setContainerWidth((current) => current === width ? current : width);
+    if (width > 0) setContainerWidth((current) => (current === width ? current : width));
   };
 
   const handleTextLinesLayout = (event: NativeSyntheticEvent<TextLayoutEventData>) => {
@@ -107,7 +162,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
     if (typeof lineWidth === "number") {
       const measuredWidth = Math.ceil(lineWidth);
       if (measuredWidth > 0 && measuredWidth !== textWidth) {
-        setTextWidth(measuredWidth);
+        setMeasurement({ text, width: measuredWidth });
       }
     }
   };
@@ -133,8 +188,16 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
     return rest;
   }, [style]);
 
+  const isCentered = sanitizedTextStyle.textAlign === "center";
+
   return (
-    <View style={styles.container} onLayout={handleContainerLayout}>
+    <View
+      style={[
+        styles.container,
+        !needsScroll && isCentered ? { alignItems: "center" } : { alignItems: "flex-start" },
+      ]}
+      onLayout={handleContainerLayout}
+    >
       <Text
         style={[styles.measureText, sanitizedTextStyle, { width: MEASURE_WIDTH }]}
         numberOfLines={1}
@@ -146,6 +209,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
       <Animated.View
         style={[
           styles.contentLayer,
+          !needsScroll && isCentered ? { alignItems: "center" } : { alignItems: "flex-start" },
           {
             opacity: contentOpacity,
             transform: [
@@ -160,7 +224,14 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
         ]}
       >
         {!needsScroll ? (
-          <Text style={[styles.text, sanitizedTextStyle]} numberOfLines={1}>
+          <Text
+            style={[
+              styles.text,
+              sanitizedTextStyle,
+              isCentered && { width: "100%", textAlign: "center" },
+            ]}
+            numberOfLines={1}
+          >
             {displayText}
           </Text>
         ) : (
@@ -171,12 +242,61 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
               { transform: [{ translateX: animatedValue }] },
             ]}
           >
-            <Text style={[styles.text, sanitizedTextStyle]} numberOfLines={1}>
+            <Text
+              style={[
+                styles.text,
+                sanitizedTextStyle,
+                { textAlign: "left" },
+              ]}
+              numberOfLines={1}
+            >
               {displayText}
             </Text>
           </Animated.View>
         )}
       </Animated.View>
+
+      {/* Seamless Left Edge Gradient Fade */}
+      {showFade && needsScroll && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.fadeEdgeLeft,
+            {
+              width: fadeWidth,
+              opacity: leftFadeOpacity,
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={[fadeColor, transparentFade]}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+        </Animated.View>
+      )}
+
+      {/* Seamless Right Edge Gradient Fade */}
+      {showFade && needsScroll && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.fadeEdgeRight,
+            {
+              width: fadeWidth,
+              opacity: rightFadeOpacity,
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={[transparentFade, fadeColor]}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+        </Animated.View>
+      )}
 
       <Animated.Text
         style={styles.hiddenTextFix}
@@ -193,6 +313,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     width: "100%",
     justifyContent: "center",
+    position: "relative",
   },
   measureText: {
     position: "absolute",
@@ -202,12 +323,27 @@ const styles = StyleSheet.create({
   },
   animatedTrack: {
     flexDirection: "row",
+    alignItems: "center",
   },
   contentLayer: {
     width: "100%",
   },
   text: {
     flexShrink: 0,
+  },
+  fadeEdgeLeft: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 10,
+  },
+  fadeEdgeRight: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 10,
   },
   hiddenTextFix: {
     position: "absolute",

@@ -19,6 +19,7 @@ export interface PlaybackEngineSnapshot {
   error: string | null;
   isShuffled: boolean;
   repeatMode: "off" | "all" | "one";
+  volume: number;
   updatedAt: number;
 }
 
@@ -44,6 +45,7 @@ const INITIAL_SNAPSHOT: PlaybackEngineSnapshot = {
   error: null,
   isShuffled: false,
   repeatMode: "off",
+  volume: 1,
   updatedAt: 0,
 };
 

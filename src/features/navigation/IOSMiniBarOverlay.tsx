@@ -259,11 +259,13 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
                 text={activeSong.title}
                 style={[styles.iosMiniPlayerTitle, { color: "#FFFFFF" }]}
                 velocity={14}
+                showFade={false}
               />
               <PingPongScroll
                 text={activeSong.artist}
                 style={[styles.iosMiniPlayerArtist, { color: "rgba(255, 255, 255, 0.70)" }]}
                 velocity={11}
+                showFade={false}
               />
             </View>
           </Pressable>

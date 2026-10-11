@@ -53,6 +53,7 @@ interface UseAudioSyncListenersOptions {
   triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[]) => Promise<Song[]>;
   isShuffled?: boolean;
   repeatMode?: "off" | "all" | "one";
+  repeatModeRef?: MutableRefObject<"off" | "all" | "one">;
   toggleShuffle?: () => void;
   toggleRepeat?: () => void;
   toggleLike?: (song: Song) => Promise<void> | void;
@@ -97,6 +98,7 @@ export function useAudioSyncListeners({
   triggerAutoplayAppend,
   isShuffled,
   repeatMode,
+  repeatModeRef,
   toggleShuffle,
   toggleRepeat,
   toggleLike,
@@ -383,6 +385,9 @@ export function useAudioSyncListeners({
           positionSecondsRef.current = 0;
           const initialDuration = toDurationSeconds(event?.track?.duration || targetSong.duration);
           setNativeDuration(initialDuration > 0 ? initialDuration : 0, "catalog");
+
+          // The native player already selected this source. Reconcile metadata
+          // without reloading it or overriding a user's pause/resume intent.
           updatePlaybackEngineSnapshot({
             currentSong: targetSong,
             ...(resolvedIndex >= 0 ? { queueIndex: resolvedIndex } : {}),
@@ -397,7 +402,8 @@ export function useAudioSyncListeners({
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, async () => {
-        if (playbackLoadingRef.current || pendingPlayRequestRef.current) return;
+        const wantsPlayback = () => desiredPlayStateRef.current !== false;
+        if (!wantsPlayback() || playbackLoadingRef.current || pendingPlayRequestRef.current) return;
         const endedSong = currentSongRef.current;
         const isStillEnded = () => currentSongRef.current === endedSong &&
           !playbackLoadingRef.current && !pendingPlayRequestRef.current;
@@ -412,13 +418,12 @@ export function useAudioSyncListeners({
           return;
         }
 
-        if (isNativeQueueSyncedRef?.current === false) {
-          const next = queueRef.current[queueIndexRef.current + 1] ||
-            (repeatMode === "all" ? queueRef.current[0] : undefined);
-          if (next) {
-            void playSongRef.current(next, queueRef.current);
-            return;
-          }
+        const effectiveRepeat = repeatModeRef?.current || repeatMode;
+        const next = queueRef.current[queueIndexRef.current + 1] ||
+          (effectiveRepeat === "all" ? queueRef.current[0] : undefined);
+        if (next) {
+          void playSongRef.current(next, queueRef.current);
+          return;
         }
 
         try {
@@ -428,7 +433,7 @@ export function useAudioSyncListeners({
             const seed = currentSongRef.current || queueRef.current[queueRef.current.length - 1];
             if (seed) {
               const recs = await triggerAutoplayAppend(seed, queueRef.current);
-              if (!isStillEnded() || desiredPlayStateRef.current === false) return;
+              if (!isStillEnded() || !wantsPlayback()) return;
               if (recs.length > 0) {
                 void playSongRef.current(recs[0], queueRef.current);
                 return;

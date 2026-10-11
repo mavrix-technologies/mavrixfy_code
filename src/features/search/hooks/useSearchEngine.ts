@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppTopHeaderScrollElevation } from "@/components/AppTopHeader";
 import { useNetwork,useOnReconnect } from "@/contexts/NetworkContext";
-import { usePlayerActions } from "@/contexts/PlayerContext";
+import { usePlayerRowActions } from "@/contexts/PlayerContext";
 import { getBestImageUrl,type Song } from "@/lib/musicData";
 import {
 type AlbumResult,
@@ -48,7 +48,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   const insets = useSafeAreaInsets();
   const { push: routerPush } = useRouter();
   const { isOnline } = useNetwork();
-  const { playSong } = usePlayerActions();
+  const { playSong } = usePlayerRowActions();
 
   const routeSearchQuery = getRouteSearchQuery(params);
   const [state, dispatch] = useReducer(

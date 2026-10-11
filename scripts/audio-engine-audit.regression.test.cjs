@@ -99,7 +99,7 @@ test("a stale native Stop completion cannot overwrite a newer Play state", async
   assert.equal((await p.getPlaybackState()).state, f.State.Playing);
 });
 
-test("native focus denial cancels playback before the source can start", async () => {
+test("an immediate native focus-denial event cancels playback before the source can start", async () => {
   const f = nativeFixture();
   const p = f.StandardAudioPlayer;
   await p.setupPlayer();
@@ -192,6 +192,9 @@ test("automatic native advance revalidates a managed download instead of opening
     getLocalPlaybackUrl: async () => valid ? "file:///managed.m4a" : null,
   } });
   const p = f.StandardAudioPlayer;
+  const events = [];
+  p.addEventListener(f.Event.PlaybackActiveTrackChanged, ({ track }) => events.push(`track:${track.id}`));
+  p.addEventListener(f.Event.PlaybackError, ({ trackId }) => events.push(`error:${trackId}`));
   await p.setQueue([tracks[0], { id: "offline", url: "file:///managed.m4a", duration: 180 }]);
   await p.play();
   valid = false;
@@ -199,5 +202,42 @@ test("automatic native advance revalidates a managed download instead of opening
   await tick();
   assert.equal((await p.getActiveTrack()).id, "offline");
   assert.equal((await p.getPlaybackState()).state, f.State.Error);
+  assert.deepEqual(events.slice(-2), ["track:offline", "error:offline"], "selected-track reconciliation must precede its error");
   assert.equal(f.StandardAudioRenderer(), null, "the revoked source must never be published to Audio");
+});
+
+
+test("native volume changes use the live audio handle and survive track replacement without reloading the stream", async () => {
+  const f = nativeFixture(); const p = f.StandardAudioPlayer; const changes = [];
+  p.setVolume(0.4);
+  await p.setQueue(tracks);
+  const audio = f.StandardAudioRenderer().props;
+  assert.equal(audio.volume, 0.4);
+  audio.ref({ pause() {}, play() {}, seekToTime() {}, setVolume: value => changes.push(value) });
+  audio.onLoad();
+  const sourceVersion = f.snapshots[0]().sourceVersion;
+  const notifications = f.rendererNotifications();
+  p.setVolume(0.2); p.setVolume(2); p.setVolume(-2); p.setVolume(NaN); p.setVolume(Infinity);
+  assert.deepEqual(changes, [0.2, 1, 0]);
+  assert.equal(f.snapshots[0]().sourceVersion, sourceVersion);
+  assert.equal(f.rendererNotifications(), notifications, "volume cannot restart or resolve the source");
+  await p.skipToNext();
+  assert.equal(f.StandardAudioRenderer().props.volume, 0, "new tracks retain mute");
+});
+
+test("Expo volume applies to the active and prepared player and survives standby promotion", async () => {
+  const f = expoFixture();
+  f.setVolume(0.4);
+  await f.loadAndPlay("https://example.test/a");
+  assert.equal(f.players[0].volume, 0.4);
+  await f.prepareStandby("https://example.test/b");
+  assert.equal(f.players[1].volume, 0.4);
+  f.setVolume(0.2);
+  assert.ok(f.players.every(player => player.volume === 0.2));
+  f.setVolume(NaN);
+  assert.equal(f.getVolume(), 0.2);
+  await f.loadAndPlay("https://example.test/b");
+  assert.equal(f.getVolume(), 0.2);
+  assert.equal(f.players[1].volume, 0.2);
+  f.destroy();
 });

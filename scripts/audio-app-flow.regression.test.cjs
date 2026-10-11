@@ -182,6 +182,43 @@ test("native duplicate-track advancement updates the playing occurrence", () => 
   assert.equal(f.snapshots.at(-1).queueIndex, 1);
 });
 
+test("native track reconciliation preserves pause intent and does not restart the selected source", async () => {
+  const f = fixture({ activeIndex: 0 });
+  const reloads = [];
+  f.options.playSongRef.current = (...args) => reloads.push(args);
+  f.listen();
+  f.events.get("active")({ track: { id: "b" }, index: 1 });
+  assert.equal(f.options.currentSongRef.current.id, "b");
+  assert.equal(f.options.desiredPlayStateRef.current, false);
+  assert.equal(f.options.isPlayingRef.current, false);
+  assert.equal(f.options.playbackLoadingRef.current, false);
+  assert.equal(reloads.length, 0);
+  f.options.TrackPlayer.getActiveTrack = async () => ({ id: "b", url: "https://audio.example/b" });
+  await f.commands.togglePlay();
+  assert.deepEqual(f.calls, [["play"]], "resume reaches the native player instead of returning as stuck loading");
+});
+
+test("native track advancement keeps active playback without loading it a second time", () => {
+  const f = fixture({ activeIndex: 0 });
+  f.options.desiredPlayStateRef.current = true;
+  f.options.isPlayingRef.current = true;
+  f.options.playSongRef.current = () => { throw Error("native source must not be reloaded"); };
+  f.listen();
+  f.events.get("active")({ track: { id: "b" }, index: 1 });
+  assert.equal(f.options.queueIndexRef.current, 1);
+  assert.equal(f.options.isPlayingRef.current, true);
+  assert.equal(f.options.playbackLoadingRef.current, false);
+});
+
+test("a late queue-ended event cannot start another song after pause", async () => {
+  const f = fixture({ activeIndex: 0 });
+  f.options.playSongRef.current = () => { throw Error("paused queue must not advance"); };
+  f.listen();
+  await f.events.get("ended")();
+  assert.equal(f.options.currentSongRef.current.id, "a");
+  assert.equal(f.options.desiredPlayStateRef.current, false);
+});
+
 test("native progress keeps the effective seek position written by the progress hook", () => {
   const f = fixture(); f.options.setNativePosition = () => { f.options.positionSecondsRef.current = 90; }; f.listen();
   f.events.get("progress")({ position: 30, duration: 180 });
@@ -299,3 +336,42 @@ test("a previous end-of-queue pause cannot clear a newer selection's playback st
   assert.equal(f.options.isPlayingRef.current, true);
   assert.equal(f.snapshots.length, 0);
 });
+
+test("a stale loading flag cannot swallow Play when no selection is pending", async () => {
+  const f = fixture();
+  f.options.playbackLoadingRef.current = true;
+  await f.commands.togglePlay();
+  assert.deepEqual(f.calls, [["play"]]);
+});
+
+test("Play toggles the latest intent while reported playback state lags", async () => {
+  const f = fixture();
+  f.options.desiredPlayStateRef.current = true;
+  f.options.isPlayingRef.current = false;
+  await f.commands.togglePlay();
+  assert.deepEqual(f.calls, [["pause"]]);
+  assert.equal(f.options.desiredPlayStateRef.current, false);
+  await f.commands.togglePlay();
+  assert.deepEqual(f.calls, [["pause"], ["play"]]);
+});
+
+for (const resume of [false, true]) {
+  test(`Pause during Next loading ${resume ? "followed by Play starts" : "keeps paused"} the selected song`, async () => {
+    const f = fixture();
+    const loading = deferred();
+    f.options.TrackPlayer.setQueue = async () => loading.promise;
+    const next = f.commands.nextSong();
+    await tick();
+    assert.equal(f.options.currentSongRef.current.id, "c");
+    assert.ok(f.options.pendingPlayRequestRef.current);
+    await f.commands.togglePlay();
+    assert.equal(f.options.desiredPlayStateRef.current, false);
+    if (resume) await f.commands.togglePlay();
+    assert.equal(f.options.desiredPlayStateRef.current, resume);
+    loading.resolve(); await next;
+    assert.equal(f.calls.some(([name]) => name === "play"), resume);
+    assert.equal(f.options.isPlayingRef.current, resume);
+    assert.equal(f.options.playbackLoadingRef.current, false);
+    assert.equal(f.options.pendingPlayRequestRef.current, null);
+  });
+}

@@ -47,5 +47,7 @@ export function buildHomeSections(category: string, youtubeEnabled: boolean, sec
   jio.forEach((item, index) => result.splice(Math.min(4 + index * 4, result.length - 1), 0, item));
   const artists = jioSections.find(item => item.type === "artists");
   if (artists) result.splice(Math.min(3, result.length), 0, artists);
+  const recent = jioSections.find(item => item.type === "recently-played");
+  if (recent) result.splice(1, 0, recent);
   return result;
 }
