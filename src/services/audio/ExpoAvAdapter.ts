@@ -6,15 +6,12 @@ import { logger } from "@/lib/logger";
 import type { AudioPlayer } from "expo-audio";
 import { createAudioPlayer,setAudioModeAsync } from "expo-audio";
 import { isPrematurePlaybackEnd, playbackDuration, playbackPosition } from "./audioTimeline";
+import { clearPreparedAudio, prepareNextAudio, releasePreparedAudio, takePreparedAudio } from "./nextTrackPreload";
 
 // ─── singletons ───────────────────────────────────────────────────────────────
 
 // The one and only active player. Any new loadAndPlay call replaces it.
 let activePlayer: AudioPlayer | null = null;
-let standbyPlayer: AudioPlayer | null = null;
-let standbyUrl: string | null = null;
-let standbyHeaders = "";
-let standbyGeneration = 0;
 type PlayerSubscription = {
   remove?: () => void;
 };
@@ -26,6 +23,7 @@ type PlayerSubscriptions = {
 const playerSubscriptions = new WeakMap<AudioPlayer, PlayerSubscriptions>();
 const cancelReadyWait = new WeakMap<AudioPlayer, () => void>();
 const cancelStartWait = new WeakMap<AudioPlayer, () => void>();
+const cancelBufferWait = new WeakMap<AudioPlayer, () => void>();
 const initialSeekPending = new WeakSet<AudioPlayer>();
 const finishedPlayers = new WeakSet<AudioPlayer>();
 const resolvedDurations = new WeakMap<AudioPlayer, number>();
@@ -79,6 +77,8 @@ function killPlayer(p: AudioPlayer | null): void {
   cancelReadyWait.delete(p);
   cancelStartWait.get(p)?.();
   cancelStartWait.delete(p);
+  cancelBufferWait.get(p)?.();
+  cancelBufferWait.delete(p);
   try { p.clearLockScreenControls(); } catch {}
   const subscriptions = playerSubscriptions.get(p);
   try { subscriptions?.status?.remove?.(); } catch {}
@@ -130,6 +130,17 @@ function attachListener(p: AudioPlayer, gen: number, shouldPlay: () => boolean):
     const lostTerminalPosition = hasPlayed && status.playing === false && reportedPosition === 0 && !initialSeekPending.has(p);
     const position = ended || lostTerminalPosition ? terminalPosition : reportedPosition;
     lastPosition = position;
+    if (status.isBuffering && shouldPlay() && !cancelBufferWait.has(p)) {
+      const timer = setTimeout(() => {
+        cancelBufferWait.delete(p);
+        if (gen !== generation || activePlayer !== p || !shouldPlay()) return;
+        statusCb?.({ isPlaying: false, position: lastPosition, duration: lastDuration,
+          didJustFinish: false, error: "Audio stream remained stalled for 30 seconds." });
+      }, 30_000);
+      cancelBufferWait.set(p, () => clearTimeout(timer));
+    } else if (!status.isBuffering || !shouldPlay()) {
+      cancelBufferWait.get(p)?.(); cancelBufferWait.delete(p);
+    }
     if (ended) {
       if (finishedPlayers.has(p)) return;
       if (position > 0 && isPrematurePlaybackEnd(position, resolvedDuration)) {
@@ -160,30 +171,11 @@ function attachListener(p: AudioPlayer, gen: number, shouldPlay: () => boolean):
 // ─── public API ───────────────────────────────────────────────────────────────
 
 /**
- * Pre-warms the next track's audio stream in the background ahead of time.
- * The standby player stays silent; loadAndPlay removes the outgoing owner
- * before promoting it. Readiness is still checked before playback.
+ * Prepares next-track bytes without a second decoder or audio-focus owner.
  */
-export async function prepareStandby(url: string, song?: Partial<Song> | null): Promise<void> {
-  const headers = JSON.stringify(song?.playbackHeaders || {});
-  if (!url || (standbyUrl === url && standbyHeaders === headers)) return;
-  const request = ++standbyGeneration;
-  if (standbyPlayer) {
-    killPlayer(standbyPlayer);
-    standbyPlayer = null;
-    standbyUrl = null;
-  }
-  try {
-    await ensureAudioMode();
-    if (request !== standbyGeneration) return;
-    const p = createAudioPlayer({ uri: url, headers: song?.playbackHeaders }, { updateInterval: 500 });
-    try { p.volume = currentVolume; } catch {}
-    standbyPlayer = p;
-    standbyUrl = url;
-    standbyHeaders = headers;
-  } catch {
-    // Non-fatal standby prefetch failure
-  }
+export async function prepareNextTrack(url: string, song?: Partial<Song> | null): Promise<void> {
+  // Preload is optional; a cache/network failure leaves normal streaming intact.
+  await prepareNextAudio(url, song?.playbackHeaders).catch(() => {});
 }
 
 export async function loadAndPlay(url: string, song?: Partial<Song> | null, shouldPlay: () => boolean = () => true, initialPosition = 0): Promise<void> {
@@ -191,47 +183,28 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
     throw new Error("No audio URL provided");
   }
 
-  // Retire audible output before promoting the prepared next source.
+  // Retire audible output before consuming prepared next-track data.
   beginTrackChange();
-  standbyGeneration += 1;
   const myGen = generation;
 
   let p: AudioPlayer;
 
-  // 2. Check if standby pre-buffered player is ready for this URL
-  if (standbyPlayer && standbyUrl === url && standbyHeaders === JSON.stringify(song?.playbackHeaders || {})) {
-    p = standbyPlayer;
-    standbyPlayer = null;
-    standbyUrl = null;
-
+  try {
+    await ensureAudioMode();
+    if (myGen !== generation) return;
+    const prepared = await takePreparedAudio(url, song?.playbackHeaders, () => myGen === generation);
+    if (myGen !== generation) return;
+    p = createAudioPlayer(prepared ? { uri: prepared } : { uri: url, headers: song?.playbackHeaders },
+      { updateInterval: 500, keepAudioSessionActive: true });
+    try { p.volume = currentVolume; } catch {}
     if (myGen !== generation) {
       killPlayer(p);
       return;
     }
-  } else {
-    // Kill standby if it was prepared for a different song
-    if (standbyPlayer) {
-      killPlayer(standbyPlayer);
-      standbyPlayer = null;
-      standbyUrl = null;
-    }
-
-    try {
-      if (myGen !== generation) return;
-      await ensureAudioMode();
-      if (myGen !== generation) return;
-      p = createAudioPlayer({ uri: url, headers: song?.playbackHeaders }, { updateInterval: 500 });
-      try { p.volume = currentVolume; } catch {}
-      if (myGen !== generation) {
-        killPlayer(p);
-        return;
-      }
-    } catch (err) {
-      if (myGen === generation) {
-        throw err;
-      }
-      return;
-    }
+  } catch (err) {
+    if (myGen !== generation) return;
+    releasePreparedAudio();
+    throw err;
   }
 
   // 3. Register as the active player, wire events, start playback.
@@ -285,6 +258,7 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
       if (myGen !== generation) return;
       activePlayer = null;
       killPlayer(p);
+      releasePreparedAudio();
       throw error;
     } finally {
       clearTimeout(timer);
@@ -312,6 +286,7 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
       if (myGen !== generation) return;
       activePlayer = null;
       killPlayer(p);
+      releasePreparedAudio();
       throw error;
     } finally {
       clearTimeout(timer);
@@ -329,23 +304,22 @@ export function play(): void {
 export function pause(): void {
   if (!activePlayer) return;
   activePlayer.pause();
+  cancelBufferWait.get(activePlayer)?.(); cancelBufferWait.delete(activePlayer);
   cancelStartWait.get(activePlayer)?.();
 }
 
-/** Retire outgoing output while preserving the silent prepared next player. */
+/** Retire outgoing output while retaining next-track data. */
 export function beginTrackChange(): void {
   generation += 1;
   const previous = activePlayer;
   activePlayer = null;
   killPlayer(previous);
+  releasePreparedAudio();
 }
 
 export function stop(): void {
   beginTrackChange();
-  standbyGeneration += 1;
-  killPlayer(standbyPlayer);
-  standbyPlayer = null;
-  standbyUrl = null;
+  clearPreparedAudio();
 }
 
 export function destroy(): void {
@@ -378,9 +352,6 @@ export function setVolume(level: number): void {
   currentVolume = clamped;
   if (activePlayer) {
     try { activePlayer.volume = clamped; } catch {}
-  }
-  if (standbyPlayer) {
-    try { standbyPlayer.volume = clamped; } catch {}
   }
 }
 

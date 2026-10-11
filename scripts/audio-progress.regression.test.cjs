@@ -22,7 +22,7 @@ function fixture({ position = 40, requestId = 1, persistedRead = async () => nul
     if (name.includes("playbackProgressStore")) return { updatePlaybackProgress: value => updates.push(value), resetPlaybackProgress() {} };
     if (name.includes("PlaybackEngine")) return { updatePlaybackEngineSnapshot() {} };
     if (name.includes("timeFormatters")) return { toDurationSeconds: Number };
-    if (name.includes("YouTubeMusic")) return { isYouTubeSong: () => true, rejectYouTubeStream() {} };
+    if (name.includes("YouTubeMusic")) return { isYouTubeSong: song => song?.source === "youtube", rejectYouTubeStream() {} };
     if (name.includes("logger")) return { logger: { warn() {} } };
     if (name.includes("playerPersistenceService")) return { playerPersistenceService: { loadPlayerState: persistedRead } };
     throw new Error(name);
@@ -31,6 +31,26 @@ function fixture({ position = 40, requestId = 1, persistedRead = async () => nul
     result.positionSecondsRef.current = position; effects.forEach(fn => fn()); return result; };
   return { render, song, options, updates, emit: value => status(value), next: () => next };
 }
+
+test("Expo transport recovery covers ordinary remote songs and resumes at the last reported position", () => {
+  const f = fixture(); f.song.source = "jiosaavn"; f.song.audioUrl = "https://media.example/song.mp3";
+  const resumes = []; f.options.playSongRef.current = (...args) => resumes.push(args);f.render();
+  for (let attempt = 0; attempt < 4; attempt++) {
+    f.emit({ error: "Audio stream remained stalled for 30 seconds.", position: 90, duration: 200 });
+  }
+  assert.equal(resumes.length, 3);
+  assert.ok(resumes.every(args => args[2] === 90));
+  assert.equal(f.options.desiredPlayStateRef.current, false);
+});
+
+test("Expo transport recovery does not resume a user-paused song or retry a decoder failure", () => {
+  for (const paused of [true, false]) {
+    const f = fixture();let resumed = 0;f.options.playSongRef.current = () => resumed++;f.render();
+    f.options.desiredPlayStateRef.current = !paused;
+    f.emit({ error: paused ? "network connection lost" : "unsupported codec", position: 90, duration: 200 });
+    assert.equal(resumed, 0);
+  }
+});
 test("catalog updates cannot replace the decoder duration or reset position", () => {
   const f = fixture(); const hook = f.render();
   hook.setNativeDuration(100); hook.setNativePosition(50);

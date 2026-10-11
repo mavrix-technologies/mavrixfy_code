@@ -1,5 +1,5 @@
 import type { Song } from "@/lib/musicData";
-import { resolveYouTubeStream } from "@/services/youtube/YouTubeMusic";
+import { resolveYouTubeStream, rejectYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { Platform } from "react-native";
 import { isRunningInExpoGo } from "expo";
 import React, { useEffect, useRef, useSyncExternalStore } from "react";
@@ -12,7 +12,8 @@ import type {
 } from "react-native-audio-api";
 import { logger } from "@/lib/logger";
 import { calculateEqHeadroomDb, EQ_FREQUENCIES_HZ, EQ_Q } from "./equalizerDsp";
-import { isPrematurePlaybackEnd, playbackDuration, playbackPosition, playbackStreamMetadata, type PlaybackStreamMetadata } from "./audioTimeline";
+import { isPrematurePlaybackEnd, isTransientPlaybackFailure, playbackDuration, playbackPosition, playbackStreamMetadata, type PlaybackStreamMetadata } from "./audioTimeline";
+import { prepareNextAudio, takePreparedAudio, releasePreparedAudio, clearPreparedAudio } from "./nextTrackPreload";
 
 // Importing this package installs its JSI module immediately. Expo Go does not
 // contain that module, so its expo-audio path must never evaluate this import.
@@ -91,7 +92,11 @@ let playback: PlaybackSnapshot = {
 let sourceSnapshot = { sourceVersion: 0, url: "", source: { uri: "", headers: undefined as Record<string, string> | undefined }, headerKey: "" };
 let selectionVersion = 0;
 let sourceReady = true;
+let selectedSource: { uri: string; headers?: Record<string, string> } | null = null;
 const selectionWaiters = new Set<() => void>();
+let recoveryAttempts = 0;
+let lastRecoveryPosition = -1;
+let lastRecoveryTrackId: string | undefined;
 
 // A replaced selection must release the queue lane even if its network read
 // never settles. Its eventual result is still guarded by selectionVersion.
@@ -125,6 +130,8 @@ function detachCurrentSource() {
   audioHandle?.pause();
   audioHandle = null;
   isSourceLoaded = false;
+  selectedSource = null;
+  releasePreparedAudio();
   sourceNode?.disconnect();
   sourceNode = null;
   sourceRoute = null;
@@ -137,7 +144,11 @@ let audioHandle: AudioTagHandle | null = null;
 let currentVolume = 1;
 let isSourceLoaded = false;
 let startWatchdog: ReturnType<typeof setTimeout> | undefined;
-function clearStartWatchdog() { clearTimeout(startWatchdog); startWatchdog = undefined; }
+let bufferingWatchdog: ReturnType<typeof setTimeout> | undefined;
+function clearStartWatchdog() {
+  clearTimeout(startWatchdog); startWatchdog = undefined;
+  clearTimeout(bufferingWatchdog); bufferingWatchdog = undefined;
+}
 function armStartWatchdog() {
   clearStartWatchdog();
   const version = playback.sourceVersion;
@@ -187,8 +198,8 @@ function emit(name: string, payload: any = {}) {
 }
 function publish(next: Partial<PlaybackSnapshot>) {
   playback = { ...playback, ...next };
-  const url = sourceReady ? activeTrack()?.url || "" : "";
-  const headers = activeTrack()?.headers;
+  const url = sourceReady ? selectedSource?.uri || activeTrack()?.url || "" : "";
+  const headers = selectedSource ? selectedSource.headers : activeTrack()?.headers;
   const headerKey = headers === sourceSnapshot.source.headers
     ? sourceSnapshot.headerKey : JSON.stringify(headers || {});
   if (
@@ -223,6 +234,38 @@ function handlePlaybackError(error: unknown) {
     shouldResume,
     message,
   });
+}
+
+/** One owner retries interrupted remote streams without advancing the queue. */
+function recoverStream(error: unknown, position: number): boolean {
+  const track = activeTrack();
+  if (!playback.playWhenReady || !track || !/^https?:\/\//i.test(track.url || "")) return false;
+  const progressed = track.id !== lastRecoveryTrackId || position > lastRecoveryPosition + 5;
+  recoveryAttempts = progressed ? 1 : recoveryAttempts + 1;
+  lastRecoveryTrackId = track.id;
+  lastRecoveryPosition = position;
+  if (recoveryAttempts > 3) return false;
+  if (track.source === "youtube" && track.id) {
+    rejectYouTubeStream({ id: track.id, source: "youtube", youtubeVideoId: track.youtubeVideoId } as Song);
+  }
+  logger.warn("[Audio] Recovering interrupted stream", { trackId: track.id, position, attempt: recoveryAttempts });
+  const pending = select(playback.index, position);
+  const version = selectionVersion;
+  void pending.catch(failure => {
+    if (version === selectionVersion && playback.playWhenReady) handlePlaybackError(failure || error);
+  });
+  return true;
+}
+
+function armBufferingWatchdog() {
+  if (bufferingWatchdog !== undefined) return;
+  const version = playback.sourceVersion;
+  bufferingWatchdog = setTimeout(() => {
+    bufferingWatchdog = undefined;
+    if (version !== playback.sourceVersion || !playback.playWhenReady || playback.status !== State.Buffering) return;
+    const error = new Error("Audio stream remained stalled for 30 seconds.");
+    if (!recoverStream(error, playback.position)) handlePlaybackError(error);
+  }, 30_000);
 }
 function updateNotification() {
   notificationPending = true;
@@ -287,6 +330,11 @@ async function select(index: number, initialPosition = 0) {
   detachCurrentSource();
   const version = selectionVersion;
   let track = playback.queue[index];
+  if (track?.id !== lastRecoveryTrackId) {
+    recoveryAttempts = 0;
+    lastRecoveryPosition = -1;
+    lastRecoveryTrackId = track?.id;
+  }
   // Reserve selection before resolution so another Next/Previous or queue edit
   // operates on the requested item, rather than the outgoing decoder's index.
   publish({ index, position: playbackPosition(initialPosition, Number(track.duration) || 0),
@@ -340,6 +388,9 @@ async function select(index: number, initialPosition = 0) {
     playback = { ...playback, queue: playback.queue.map((item, i) => i === index ? track : item) };
   }
   if (version !== selectionVersion) return;
+  const prepared = await waitForSelection(takePreparedAudio(track.url || "", track.headers, () => version === selectionVersion), version);
+  if (version !== selectionVersion) return;
+  selectedSource = prepared ? { uri: prepared } : { uri: track.url || "", headers: track.headers };
   sourceReady = true;
   publish({
     index,
@@ -437,6 +488,7 @@ export function setStandardEqualizer(gains: readonly number[], enabled: boolean)
 }
 
 export const StandardAudioPlayer = {
+  prepareTrack(track: Track) { return prepareNextAudio(track.url || "", track.headers); },
   beginTrackChange() { detachCurrentSource(); },
   async setupPlayer() {
     if (initialized) return;
@@ -480,12 +532,14 @@ export const StandardAudioPlayer = {
         const wasPlaying = playback.playWhenReady;
         emit(Event.PlaybackInterruption, { resumed: false });
         void StandardAudioPlayer.pause(false).catch(error => logger.warn("[Audio] Interruption pause failed", error));
+        // Android's began event sets shouldResume=false for BOTH permanent
+        // and transient loss. Only the ended event determines resume permission.
         interruptionResumeVersion = wasPlaying ? playIntentVersion : null;
       } else {
         ducked = false;
         applyEffectSettings();
         const canResume =
-          event.shouldResume && interruptionResumeVersion === playIntentVersion;
+          event.shouldResume === true && interruptionResumeVersion === playIntentVersion;
         interruptionResumeVersion = null;
         if (canResume) {
           emit(Event.PlaybackInterruption, { resumed: true });
@@ -600,6 +654,11 @@ export const StandardAudioPlayer = {
   },
   async reset() {
     clearStartWatchdog();
+    clearPreparedAudio();
+    selectedSource = null;
+    recoveryAttempts = 0;
+    lastRecoveryPosition = -1;
+    lastRecoveryTrackId = undefined;
     selectionVersion += 1;
     selectionWaiters.forEach(cancel => cancel());
     if (Platform.OS === "android")
@@ -661,7 +720,10 @@ export const StandardAudioPlayer = {
       AudioManager.observeAudioInterruptions(false);
     playIntentVersion += 1;
     publish({ playWhenReady: false });
-    emit(Event.PlaybackPlayWhenReadyChanged, { playWhenReady: false });
+    emit(Event.PlaybackPlayWhenReadyChanged, {
+      playWhenReady: false,
+      reason: releaseFocus ? "pause" : "interruption",
+    });
     audioHandle?.pause();
     setStatus(State.Paused);
     updateNotification();
@@ -804,6 +866,7 @@ export function useStandardAudioRenderer() {
       sourceRoute = null;
 
       context = null;
+      clearPreparedAudio();
       filters = [];
       outputGain = null;
       contextListeners.forEach((listener) => listener());
@@ -901,8 +964,10 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
           setStatus(State.Paused);
       }}
       onWaiting={() => {
-        if (isCurrentSource() && playback.playWhenReady)
+        if (isCurrentSource() && playback.playWhenReady) {
           setStatus(State.Buffering);
+          armBufferingWatchdog();
+        }
       }}
       onPlaying={onPlaying}
       onPositionChange={(position) => {
@@ -925,9 +990,9 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
         if (isPrematurePlaybackEnd(actualEnd, playback.duration)) {
           publish({ position: actualEnd });
           emit(Event.PlaybackProgressUpdated, { position: actualEnd, duration: playback.duration, track: playback.index });
-          handlePlaybackError(new Error(`Audio stream ended early at ${Math.round(actualEnd)} of ${Math.round(playback.duration)} seconds.`));
-          // Retire the interrupted decoder before Audio's automatic respawn.
           endedRef.current = true;
+          const error = new Error(`Audio stream ended early at ${Math.round(actualEnd)} of ${Math.round(playback.duration)} seconds.`);
+          if (!recoverStream(error, actualEnd)) handlePlaybackError(error);
           return;
         }
         const end = playback.duration > 0 ? playback.duration : playback.position;
@@ -946,6 +1011,12 @@ const StandardAudioSource = React.memo(function StandardAudioSource({
       }}
       onError={(error) => {
         if (!isCurrentSource()) return;
+        // Decode/configuration failures require correction, not a reconnect loop.
+        if (isTransientPlaybackFailure(error.message) &&
+          recoverStream(error, playback.position)) {
+          endedRef.current = true;
+          return;
+        }
         handlePlaybackError(error);
       }}
     >

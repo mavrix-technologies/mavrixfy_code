@@ -255,15 +255,20 @@ test("rapid standby exit and re-entry renders immediately without visibility ani
   assert.equal(f.animations.length, 0);
 });
 
-test("StandBy title remains readable without a marquee through Reduce Motion changes", async () => {
+test("StandBy title uses pingpong marquee and respects Reduce Motion changes", async () => {
   const f = fixture();
   const overlay = f.mount(f.StandByOverlay, props());
   overlay.render();
   await f.resolveReduceMotion(false);
-  assert.equal(find(overlay.render(), element => element.type === "PingPongScroll"), undefined);
+  const activeTree = overlay.render();
+  const pingPong = find(activeTree, element => element.type === "PingPongScroll");
+  assert.ok(pingPong, "title renders using PingPongScroll");
+  assert.equal(pingPong.props.paused, false);
   f.setReduceMotion(true);
   const staticTree = overlay.render();
-  assert.equal(find(staticTree, element => element.type === "PingPongScroll"), undefined);
+  const pausedPingPong = find(staticTree, element => element.type === "PingPongScroll");
+  assert.ok(pausedPingPong);
+  assert.equal(pausedPingPong.props.paused, true, "pauses marquee when Reduce Motion is enabled");
   assert.equal(overlay.render(props({ visible: false })), null);
 });
 
@@ -409,31 +414,21 @@ test("only Queue and Lyrics remain in the action row and both open inline", () =
   actions.unmount();
 });
 
-test("Ambient always supplies artwork/gradient fallback and gates video through settings and Reduce Motion", () => {
+test("StandBy Ambient uses artwork and colors without mounting any media player", () => {
   const f = fixture();
-  let video = { shouldRenderBackgroundVideo: true, backgroundVideoId: "testVideoId", isScreenFocused: true, videoBackgroundQuality: "low", isLowEnd: true };
   const { StandByAmbientBackdrop } = load("src/features/player/components/StandByAmbientBackdrop.tsx", {
     react: f.react, "react-native": f.native, "expo-image": { Image: "Image" },
     "expo-linear-gradient": { LinearGradient: "LinearGradient" },
-    "expo-router": { useNavigation: () => ({}) },
-    "@/services/audio/playbackProgressStore": { getPlaybackProgressSnapshot: () => ({ positionMillis: 5000 }) },
-    "../hooks/useBackgroundVisualVideo": { useBackgroundVisualVideo: () => video },
-    "./BackgroundYoutubeVideo": { BackgroundYoutubeVideo: "BackgroundYoutubeVideo" },
   }, { React: f.react });
   const backdropProps = { song: { id: "song", coverUrl: "https://example.test/cover.jpg" }, accentColor: "#3f8faa", backgroundColor: "#223344", reduceMotion: false };
   const backdrop = f.mount(StandByAmbientBackdrop, backdropProps);
   let tree = backdrop.render();
   assert.ok(find(tree, element => element.type === "Image"));
   assert.ok(find(tree, element => element.type === "LinearGradient"));
-  const nativeVideo = find(tree, element => element.type === "BackgroundYoutubeVideo");
-  assert.equal(nativeVideo.props.cropVertical, 0);
-  assert.equal(nativeVideo.props.backgroundColor, "transparent");
-  assert.equal(nativeVideo.props.quality, "low");
-  assert.equal(nativeVideo.props.initialOffsetMs, 5000);
+  assert.equal(find(tree, element => element.type === "BackgroundYoutubeVideo"), undefined);
   tree = backdrop.render({ ...backdropProps, reduceMotion: true });
   assert.equal(find(tree, element => element.type === "BackgroundYoutubeVideo"), undefined);
   assert.ok(find(tree, element => element.type === "Image"));
-  video = { ...video, shouldRenderBackgroundVideo: false };
   tree = backdrop.render(backdropProps);
   assert.equal(find(tree, element => element.type === "BackgroundYoutubeVideo"), undefined);
   tree = backdrop.render({ ...backdropProps, song: { id: "missing-cover" } });
@@ -604,9 +599,17 @@ test("synced inline lyrics highlight, seek with the latest duration, pause follo
   row.props.onPress();
   assert.deepEqual(seeks, [0.5, 0.25]);
   const text = find(row, element => element.type === "Text");
-  assert.equal(text.props.style[0].fontSize, 28);
-  assert.equal(text.props.style[0].lineHeight, 38);
-  assert.equal(list.props.getItemLayout(null, 2).length, 136);
+  assert.equal(text.props.style[0].fontSize, 22);
+  assert.equal(text.props.style[0].lineHeight, 30);
+  assert.equal(text.props.allowFontScaling, true);
+  assert.equal(text.props.numberOfLines, undefined, "long lyrics wrap without a hard cutoff");
+  assert.equal(list.props.getItemLayout, undefined, "wrapped lyrics use natural height instead of fixed blank space");
+  assert.equal(row.props.style[1].minHeight, 44);
+  assert.equal(row.props.style[1].height, undefined);
+  const offsets = [];
+  list.props.ref.current.scrollToOffset = value => offsets.push(value);
+  list.props.onScrollToIndexFailed({ index: 2, averageItemLength: 50 });
+  assert.deepEqual(offsets.map(value => value.offset), [100]);
   list.props.onScrollBeginDrag();
   f.setSnapshot({ positionMillis: 10_000, duration: 361_000 }); panel.render();
   assert.equal(scrolls.length, 0, "following does not interrupt dragging");
@@ -618,7 +621,11 @@ test("synced inline lyrics highlight, seek with the latest duration, pause follo
   assert.equal(find(tree, element => element.props.accessibilityLabel === "Follow current lyrics"), undefined);
   assert.equal(find(tree, element => element.type === "Text" && element.props.children === "Lyrics"), undefined);
   assert.ok(scrolls.length > 0);
-  assert.ok(scrolls.every(value => value.index === 2 && value.animated === false));
+  assert.ok(scrolls.every(value => value.index === 2 && value.animated === false && value.viewPosition === 0.5));
+  const activeList = find(tree, element => element.type === "FlatList");
+  activeList.props.onLayout({ nativeEvent: { layout: { height: 240 } } });
+  const resizedList = find(panel.render(), element => element.type === "FlatList");
+  assert.equal(resizedList.props.contentContainerStyle.paddingVertical, 98, "first and last lines can reach the center of the measured viewport");
   assert.equal(find(tree, element => element.type === "Modal"), undefined);
   panel.unmount();
   assert.equal(f.subscriptions(), 0);
@@ -775,9 +782,11 @@ test("title and progress share an inset that leaves room for the slider thumb, a
   const progress = f.mount(progressElement.type, progressElement.props);
   assert.equal(progress.render().props.style.paddingHorizontal, info.props.style.paddingHorizontal);
   assert.ok(info.props.style.paddingHorizontal >= 6, "thumb including its pressed scale fits at either endpoint");
-  const title = find(info, element => element.type === "Text");
-  assert.equal(title.props.numberOfLines, 2);
-  assert.equal(title.props.style[0].lineHeight, 34);
+  const title = find(info, element => element.type === "PingPongScroll");
+  assert.ok(title, "title uses PingPongScroll");
+  assert.equal(title.props.style[0].lineHeight, 32);
+  const timeRow = find(progress.render(), element => element.type === "View" && element.props.style?.marginTop < 0);
+  assert.ok(timeRow, "timeRow is pulled close to progress bar with negative margin");
   for (const label of ["Exit StandBy", "StandBy style: Classic"]) {
     const button = find(tree, element => element.props.accessibilityLabel === label);
     assert.equal(button.props.style.borderRadius, button.props.style.width / 2);

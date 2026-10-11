@@ -38,11 +38,11 @@ test("Expo control failures reach command callers and readiness reflects native 
 
 test("a prepared Expo stream cannot reuse credentials from another source request", async () => {
   const f = expoFixture();
-  await f.prepareStandby("https://example.test/audio", { playbackHeaders: { Authorization: "old" } });
+  await f.prepareNextTrack("https://example.test/audio", { playbackHeaders: { Authorization: "old" } });
   await f.loadAndPlay("https://example.test/audio", { playbackHeaders: { Authorization: "new" } });
-  assert.equal(f.players.length, 2);
-  assert.equal(f.players[0].calls.some(([call]) => call === "remove"), true);
-  assert.equal(f.players[1].source.headers.Authorization, "new");
+  assert.equal(f.players.length, 1);
+  assert.equal(f.players[0].source.headers.Authorization, "new");
+  assert.equal(f.players[0].source.uri, "https://example.test/audio");
   f.destroy();
 });
 
@@ -225,13 +225,13 @@ test("native volume changes use the live audio handle and survive track replacem
   assert.equal(f.StandardAudioRenderer().props.volume, 0, "new tracks retain mute");
 });
 
-test("Expo volume applies to the active and prepared player and survives standby promotion", async () => {
+test("Expo volume applies to the active player and survives prepared-data selection", async () => {
   const f = expoFixture();
   f.setVolume(0.4);
   await f.loadAndPlay("https://example.test/a");
   assert.equal(f.players[0].volume, 0.4);
-  await f.prepareStandby("https://example.test/b");
-  assert.equal(f.players[1].volume, 0.4);
+  await f.prepareNextTrack("https://example.test/b");
+  assert.equal(f.players.length, 1, "preload never allocates another audio player");
   f.setVolume(0.2);
   assert.ok(f.players.every(player => player.volume === 0.2));
   f.setVolume(NaN);

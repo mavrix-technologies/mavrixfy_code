@@ -6,7 +6,7 @@ const test = require("node:test");
 const ts = require("typescript");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture({ youtubeResolver = async () => { throw new Error("Unexpected YouTube resolution"); }, platform = "android", expoGo = false, notificationControl = async () => {}, streamingQuality = "medium", headroomDb = () => 0, downloads = { getSongDownload: async () => null } } = {}) {
+function fixture({ youtubeResolver = async () => { throw new Error("Unexpected YouTube resolution"); }, platform = "android", expoGo = false, notificationControl = async () => {}, streamingQuality = "medium", headroomDb = () => 0, downloads = { getSongDownload: async () => null }, preloader = {} } = {}) {
   const controls = new Map();
   const system = new Map();
   const notifications = [];
@@ -104,7 +104,7 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
     setTimeout: callback => { const id = ++timerId; timers.set(id, callback); return id; },
     clearTimeout: id => timers.delete(id),
     require(name) {
-      if (name.endsWith("YouTubeMusic")) return { resolveYouTubeStream: youtubeResolver };
+      if (name.endsWith("YouTubeMusic")) return { resolveYouTubeStream: youtubeResolver, rejectYouTubeStream() {} };
       if (name.endsWith("downloadManager")) return downloads;
       if (name.endsWith("PlayerPlaybackResolver")) return { getRequestedQualityPreference: async () => ({ effective: qualityPreference.current }) };
       if (name.endsWith("audioTimeline")) return require("./audio-timeline-fixture.cjs");
@@ -112,6 +112,10 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
       if (name === "react-native") return { Platform: { OS: platform } };
       if (name === "expo") return { isRunningInExpoGo: () => expoGo };
       if (name === "./nativeAudioApi") return { nativeAudioApi: expoGo ? {} : audio };
+      if (name === "./nextTrackPreload") return {
+        prepareNextAudio: async () => {}, takePreparedAudio: () => null,
+        releasePreparedAudio() {}, clearPreparedAudio() {}, ...preloader,
+      };
       if (name === "react-native-audio-api") {
         if (expoGo) throw new Error("Expo Go must not evaluate the custom native audio module");
         return audio;

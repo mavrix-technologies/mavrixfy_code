@@ -6,7 +6,7 @@ test("Expo audio keeps a buffering source alive for the native startup window", 
   const player = fixture({ starts: false, fakeTimers: true });
   const loading = player.loadAndPlay("https://audio.invalid/track", { title: "Track" });
 
-  for (let i = 0; i < 8 && player.players.length === 0; i++) await Promise.resolve();
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(player.players.length, 1);
   assert.ok(player.timerDelays.includes(30_000), "startup should allow slow native buffering");
   assert.ok(player.players[0].calls.some(([name]) => name === "play"));

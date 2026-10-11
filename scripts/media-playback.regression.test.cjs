@@ -2,6 +2,109 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { fixture, tracks, tick } = require("./helpers/audio-player-fixture.cjs");
 
+for (const platform of ["android", "ios"]) {
+  test(`${platform}: two complete track timelines advance once and finish without a halfway pause`, async () => {
+    const f = fixture({ platform }); const p = f.StandardAudioPlayer;
+    await p.setQueue(tracks); await p.play();
+    let ended = 0; p.addEventListener(f.Event.PlaybackQueueEnded, () => ended++);
+    for (let index = 0; index < tracks.length; index++) {
+      const props = f.StandardAudioRenderer().props;
+      props.onPlaying();
+      for (let position = 0; position <= tracks[index].duration; position++) {
+        props.onPositionChange(position);
+        assert.equal((await p.getPlaybackState()).state, f.State.Playing);
+        assert.equal(await p.getActiveTrackIndex(), index);
+      }
+      props.onEnded(tracks[index].duration); props.onEnded(tracks[index].duration);
+      await tick();
+    }
+    assert.equal(ended, 1);
+    assert.equal((await p.getPlaybackState()).state, f.State.Ended);
+  });
+}
+
+test("Android transient focus loss resumes only on the matching permitted ended event", async () => {
+  const f = fixture(); const p = f.StandardAudioPlayer;
+  await p.setupPlayer(); await p.setQueue(tracks); await p.play();
+  f.StandardAudioRenderer().props.onPlaying();
+  const readiness = [];
+  p.addEventListener(f.Event.PlaybackPlayWhenReadyChanged, event => readiness.push(event));
+  f.system.get("interruption")({ type: "began", shouldResume: false });
+  assert.equal(readiness.at(-1).reason, "interruption");
+  assert.equal((await p.getPlaybackState()).state, f.State.Paused);
+  f.system.get("interruption")({ type: "ended", shouldResume: true });
+  await tick(); f.StandardAudioRenderer().props.onPlaying();
+  assert.equal((await p.getPlaybackState()).state, f.State.Playing);
+  await p.pause();
+  assert.equal(readiness.at(-1).reason, "pause");
+  f.system.get("interruption")({ type: "ended", shouldResume: true });
+  assert.equal((await p.getPlaybackState()).state, f.State.Paused);
+});
+
+test("a mid-track buffering timeout reloads the same track at its last position", async () => {
+  const f = fixture(); const p = f.StandardAudioPlayer;
+  await p.setQueue(tracks); await p.play();
+  const props = f.StandardAudioRenderer().props;
+  props.onPlaying(); props.onPositionChange(90); props.onWaiting(); props.onWaiting();
+  f.fireTimers(); await tick();
+  assert.equal(await p.getActiveTrackIndex(), 0);
+  assert.equal((await p.getProgress()).position, 90);
+  f.StandardAudioRenderer().props.onPlaying();
+  assert.equal((await p.getPlaybackState()).state, f.State.Playing);
+});
+
+test("Pause cancels stall recovery and a successful buffer refill never reloads the source", async () => {
+  const f = fixture(); const p = f.StandardAudioPlayer;
+  await p.setQueue(tracks); await p.play();
+  const props = f.StandardAudioRenderer().props;
+  props.onPlaying(); props.onWaiting(); props.onPlaying();
+  const source = f.snapshots[0](); f.fireTimers();
+  assert.equal(f.snapshots[0](), source);
+  props.onWaiting(); await p.pause(); f.fireTimers();
+  assert.equal(f.snapshots[0](), source);
+  assert.equal((await p.getPlaybackState()).state, f.State.Paused);
+});
+
+test("repeated interrupted streams stop after three reconnects rather than loop indefinitely", async () => {
+  const f = fixture(); const p = f.StandardAudioPlayer;
+  await p.setQueue(tracks); await p.play();
+  const errors = []; p.addEventListener(f.Event.PlaybackError, error => errors.push(error));
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const props = f.StandardAudioRenderer().props;
+    props.onPlaying(); props.onPositionChange(90); props.onEnded(90); await tick();
+  }
+  assert.equal(errors.length, 1);
+  assert.equal(await p.getActiveTrackIndex(), 0);
+  assert.equal((await p.getPlaybackState()).state, f.State.Error);
+});
+
+test("a completed next-track preload supplies local audio without altering the original queue URL", async () => {
+  const f = fixture({ preloader: { takePreparedAudio: url => url === tracks[1].url ? "file:///cache/next.audio" : null } });
+  const p = f.StandardAudioPlayer;
+  await p.setQueue(tracks); await p.play(); await p.skip(1);
+  assert.equal(f.StandardAudioRenderer().props.source.uri, "file:///cache/next.audio");
+  assert.equal((await p.getActiveTrack()).url, tracks[1].url);
+  const props = f.StandardAudioRenderer().props;
+  props.onPlaying(); props.onPositionChange(40);
+  await p.updateMetadataForTrack(1, { title: "Updated" });
+  assert.equal(f.StandardAudioRenderer().props.source.uri, "file:///cache/next.audio");
+});
+
+test("a late failed reconnect cannot stop a newer selected song", async () => {
+  let rejectRecovery; let resolutions = 0;
+  const f = fixture({ youtubeResolver: async () => {
+    if (++resolutions === 1) return { url: "https://media.example/audio", durationSeconds: 180 };
+    return new Promise((_, reject) => { rejectRecovery = reject; });
+  } }); const p = f.StandardAudioPlayer;
+  await p.setQueue([{ id: "youtube_abcdefghijk", source: "youtube" }, tracks[1]]);await p.play();
+  const props = f.StandardAudioRenderer().props;
+  props.onPlaying();props.onPositionChange(90);props.onEnded(90);await tick();
+  await p.skip(1);f.StandardAudioRenderer().props.onPlaying();
+  rejectRecovery(new Error("network failed"));await tick();
+  assert.equal(await p.getActiveTrackIndex(),1);
+  assert.equal((await p.getPlaybackState()).state,f.State.Playing);
+});
+
 test("lazy YouTube queue entries use current High quality and ignore stale prefetched metadata", async () => {
   const requested = [];
   const f = fixture({ streamingQuality: "high", youtubeResolver: async (song, quality) => {
@@ -349,10 +452,12 @@ for (const platform of ["android", "ios"]) {
     props.onPositionChange(88); props.onEnded(90); props.onEnded(90); props.onLoad(); await tick();
     assert.equal(await p.getActiveTrackIndex(), 0);
     assert.equal((await p.getProgress()).position, 90);
-    assert.equal((await p.getPlaybackState()).state, f.State.Error);
-    assert.equal(errors.length, 1);
-    assert.equal(errors[0].shouldResume, true);
-    assert.match(errors[0].message, /ended early/);
+    assert.equal((await p.getPlaybackState()).state, f.State.Loading);
+    assert.equal(errors.length, 0);
+    const recovered = f.StandardAudioRenderer().props;
+    recovered.onPlaying(); recovered.onPositionChange(120);
+    assert.equal((await p.getProgress()).position, 120);
+    assert.equal((await p.getPlaybackState()).state, f.State.Playing);
   });
 }
 test("native source that never starts emits a bounded recoverable error", async () => {

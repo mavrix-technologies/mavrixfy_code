@@ -92,6 +92,17 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
   };
 }
 
+test("shared Next starts the selected audio even when output is temporarily paused", async () => {
+  const f = fixture();
+  f.options.desiredPlayStateRef.current = true;
+  f.options.isPlayingRef.current = false;
+  f.options.TrackPlayer.skip = async index => f.calls.push(["skip", index]);
+  await f.commands.nextSong();
+  assert.equal(f.options.currentSongRef.current.id, "c");
+  assert.deepEqual(f.calls, [["skip", 2], ["play"]]);
+  assert.equal(f.options.desiredPlayStateRef.current, true);
+});
+
 test("rapid Pause cancels an earlier resume while native initialization is pending", async () => {
   const ready = deferred(); const f = fixture({ ready: false, initialization: ready });
   const pending = f.commands.togglePlay();

@@ -26,6 +26,11 @@ export function isPrematurePlaybackEnd(position: number, duration: number): bool
   return Number.isFinite(position) && position >= 0 && Number.isFinite(duration) && duration > 0 && duration - position > 2;
 }
 
+/** Reconnect transport failures; unsupported formats and decoder errors need correction. */
+export function isTransientPlaybackFailure(message: string): boolean {
+  return /network|connection|timeout|timed out|stalled|http.*(?:403|408|429|5\d\d)|stream.*(?:read|closed|interrupted|ended early)/i.test(message);
+}
+
 export function playbackProgress(position: number, duration: number) {
   const safeDuration = playbackDuration(duration);
   const safePosition = playbackPosition(position, safeDuration);

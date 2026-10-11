@@ -9,7 +9,7 @@ updatePlaybackProgress,
 } from "@/services/audio/playbackProgressStore";
 import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { toDurationSeconds } from "@/utils/timeFormatters";
-import { playbackDuration, playbackPosition, playbackProgress } from "./audioTimeline";
+import { isTransientPlaybackFailure, playbackDuration, playbackPosition, playbackProgress } from "./audioTimeline";
 import { useCallback,useEffect,useRef,type MutableRefObject } from "react";
 
 export type SeekOverride = {
@@ -52,7 +52,7 @@ export function useAudioProgressTracking({
   const positionSecondsRef = useRef(0);
   const durationSecondsRef = useRef(0);
   const seekOverrideRef = useRef<SeekOverride>(null);
-  const fallbackRetryRef = useRef<{ songId: string; at: number } | null>(null);
+  const fallbackRetryRef = useRef<{ songId: string; count: number; position: number; at: number } | null>(null);
   const mediaDurationRef = useRef<{ songId: string | null; seconds: number } | null>(null);
   const finishedSongRef = useRef<string | null>(null);
 
@@ -161,11 +161,14 @@ export function useAudioProgressTracking({
         if (status.error) {
           const song = currentSongRef.current;
           const retry = fallbackRetryRef.current;
-          if (song && isYouTubeSong(song) && desiredPlayStateRef.current !== false &&
-            (retry?.songId !== song.id || Date.now() - retry.at > 60000)) {
-            fallbackRetryRef.current = { songId: song.id, at: Date.now() };
-            const resumePosition = positionSecondsRef.current;
-            rejectYouTubeStream(song);
+          const currentPos = Math.max(positionSecondsRef.current, Number.isFinite(status.position) ? status.position : 0);
+          const progressed = !retry || retry.songId !== song?.id || currentPos > (retry.position || 0) + 5;
+          const retryCount = progressed ? 0 : ((retry?.count || 0) + 1);
+          const remote = song && (isYouTubeSong(song) || /^https?:\/\//i.test(song.audioUrl || ""));
+          if (song && remote && isTransientPlaybackFailure(status.error) && desiredPlayStateRef.current !== false && retryCount < 3) {
+            fallbackRetryRef.current = { songId: song.id, count: retryCount, position: currentPos, at: Date.now() };
+            const resumePosition = currentPos;
+            if (isYouTubeSong(song)) rejectYouTubeStream(song);
             void playSongRef.current(song, queueRef.current, resumePosition);
           } else {
             ExpoAvPlayer.pause();
@@ -204,6 +207,10 @@ export function useAudioProgressTracking({
         }
         if (typeof status.duration === "number" && status.duration > 0) {
           setNativeDuration(status.duration);
+        }
+        if (status.isBuffering && desiredPlayStateRef.current !== false) {
+          updatePlaybackEngineSnapshot({ isBuffering: true });
+          return;
         }
         if (typeof status.isPlaying === "boolean") {
           if (status.isPlaying) finishedSongRef.current = null;

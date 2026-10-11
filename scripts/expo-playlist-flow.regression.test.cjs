@@ -5,6 +5,26 @@ const vm=require('node:vm');
 const ts=require('typescript');
 const {fixture:expoFixture}=require('./helpers/expo-player-fixture.cjs');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+
+for (const provider of ['youtube','jiosaavn']) {
+ test(`Expo ${provider}: two entire songs play through the shared queue without a halfway pause`,async()=>{
+  const f=flow(provider); const queue=f.songs.slice(0,2);
+  await f.commands.playSong(queue[0],queue);
+  for(let index=0;index<2;index++) {
+   const player=f.adapter.players[index];
+   for(let position=1;position<180;position++) {
+    player.emit({playing:true,currentTime:position,duration:180,isLoaded:true,isBuffering:false});
+    assert.equal(f.options.queueIndexRef.current,index);
+    assert.equal(f.options.isPlayingRef.current,true);
+   }
+   player.emit({playing:false,currentTime:180,duration:180,didJustFinish:true,isLoaded:true,isBuffering:false});
+   for(let wait=0;wait<5;wait++)await tick();
+  }
+  assert.equal(f.adapter.players.length,2);
+  assert.equal(f.options.desiredPlayStateRef.current,false);
+  assert.equal(f.errors.length,0);f.adapter.destroy();
+ });
+}
 function flow(provider='youtube') {
  const adapter=expoFixture();const ref=current=>({current});const noop=()=>{};const errors=[];
  const songs=['a','b','c'].map(id=>({id:provider+'_'+id,source:provider,title:id,artist:'Artist',duration:180,playbackDurationSeconds:180,audioUrl:'https://media.example/'+id}));

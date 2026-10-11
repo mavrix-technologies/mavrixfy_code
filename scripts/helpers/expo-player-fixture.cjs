@@ -3,13 +3,15 @@ const vm = require("node:vm");
 const ts = require("typescript");
 function fixture({ loaded = true, starts = true, fakeTimers = false, mode = async () => {}, audioFactory } = {}) {
   const players = [];
+  const preloads = new Map(); const releasedPreloads = [];
+  let activePreload = null;
   const timers = new Map(); const timerDelays = []; let timerId = 0;
   const module = { exports: {} };
   const expo = {
     setAudioModeAsync: mode,
-    createAudioPlayer(source) {
+    createAudioPlayer(source, options) {
       const listeners = new Set();
-      const player = { source, isLoaded: loaded, calls: [],
+      const player = { source, options, isLoaded: loaded, calls: [],
         addListener(_, listener) { listeners.add(listener); return { remove: () => listeners.delete(listener) }; },
         emit(status) { for (const listener of [...listeners]) listener(status); },
         seekTo: async seconds => { player.calls.push(["seek", seconds]); },
@@ -28,10 +30,20 @@ function fixture({ loaded = true, starts = true, fakeTimers = false, mode = asyn
     clearTimeout: fakeTimers ? id => timers.delete(id) : clearTimeout,
     require: name => { if (name === "./audioPlayerFactory") return audioFactory || { ...expo, supportsStandby: true, retainPlayerAfterStartError: () => false };
       if (name === "expo-audio") return audioFactory || expo;
+      if (name === "./nextTrackPreload") return {
+        prepareNextAudio: async (url, headers) => { preloads.set(JSON.stringify([url, headers]), `file:///next-track-${preloads.size}.audio`); },
+        takePreparedAudio: async (url, headers, isCurrent) => {
+          const key = JSON.stringify([url, headers]);
+          if (!isCurrent() || !preloads.has(key)) return null;
+          activePreload = preloads.get(key); preloads.delete(key); return activePreload;
+        },
+        releasePreparedAudio: () => { if(activePreload) releasedPreloads.push(activePreload); activePreload = null; },
+        clearPreparedAudio: () => { preloads.clear(); if(activePreload) releasedPreloads.push(activePreload); activePreload = null; },
+      };
       if (name === "./audioTimeline") return require("./audio-timeline-fixture.cjs");
       if (name === "@/lib/logger") return { logger: { debug() {}, warn() {} } };
       throw new Error(name); } });
-  return { ...module.exports, players, timerDelays, fireTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); } };
+  return { ...module.exports, players, preloads, releasedPreloads, timerDelays, fireTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); } };
 }
 
 module.exports = { fixture };

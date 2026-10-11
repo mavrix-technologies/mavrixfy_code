@@ -1,20 +1,13 @@
-import { memo, useState } from "react";
+import { memo } from "react";
 import { StyleSheet, View } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { useNavigation } from "expo-router";
 import type { Song } from "@/lib/musicData";
-import { getPlaybackProgressSnapshot } from "@/services/audio/playbackProgressStore";
-import { useBackgroundVisualVideo } from "../hooks/useBackgroundVisualVideo";
-import { BackgroundYoutubeVideo } from "./BackgroundYoutubeVideo";
 
-/** Mounted only in Ambient so Classic and Night never allocate a video decoder. */
+/** Visuals only: StandBy never creates a media player or changes audio focus. */
 export const StandByAmbientBackdrop = memo(function StandByAmbientBackdrop({
   song, accentColor, backgroundColor, reduceMotion,
 }: { song: Song; accentColor: string; backgroundColor: string; reduceMotion: boolean }) {
-  const navigation = useNavigation();
-  const video = useBackgroundVisualVideo({ screenSong: song, navigation });
-  const [initialOffsetMs] = useState(() => getPlaybackProgressSnapshot().positionMillis);
 
   return (
     <View pointerEvents="none" accessible={false} style={StyleSheet.absoluteFillObject}>
@@ -26,18 +19,6 @@ export const StandByAmbientBackdrop = memo(function StandByAmbientBackdrop({
           blurRadius={42}
           transition={reduceMotion ? 0 : 350}
           style={[StyleSheet.absoluteFillObject, { opacity: 0.45 }]}
-        />
-      )}
-      {!reduceMotion && video.shouldRenderBackgroundVideo && video.backgroundVideoId && (
-        <BackgroundYoutubeVideo
-          videoId={video.backgroundVideoId}
-          song={song}
-          active={video.isScreenFocused}
-          quality={video.videoBackgroundQuality}
-          isLowEnd={video.isLowEnd}
-          initialOffsetMs={initialOffsetMs}
-          cropVertical={0}
-          backgroundColor="transparent"
         />
       )}
       <LinearGradient

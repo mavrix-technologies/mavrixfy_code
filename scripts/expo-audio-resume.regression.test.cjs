@@ -3,6 +3,30 @@ const assert = require("node:assert/strict");
 const { fixture } = require("./helpers/expo-player-fixture.cjs");
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test("Expo mid-song buffering has a bounded timeout without reporting natural completion", async () => {
+  const f = fixture({ fakeTimers: true }); const received = [];
+  f.onStatusUpdate(status => received.push(status));
+  await f.loadAndPlay("https://media.example/audio", { playbackDurationSeconds: 180 });
+  f.players[0].emit({ playing: true, currentTime: 90, duration: 180, isBuffering: false });
+  f.players[0].emit({ playing: false, currentTime: 90, duration: 180, isBuffering: true });
+  f.fireTimers();
+  assert.match(received.at(-1).error, /stalled/);
+  assert.equal(received.at(-1).position, 90);
+  assert.equal(received.at(-1).didJustFinish, false);f.destroy();
+});
+
+test("Expo Pause or native buffer refill cancels the stall timeout", async () => {
+  const f = fixture({ fakeTimers: true }); const received = [];
+  f.onStatusUpdate(status => received.push(status));
+  await f.loadAndPlay("https://media.example/audio");
+  const player = f.players[0];
+  player.emit({ playing: false, currentTime: 90, duration: 180, isBuffering: true });
+  player.emit({ playing: true, currentTime: 91, duration: 180, isBuffering: false });f.fireTimers();
+  assert.equal(received.some(status => status.error), false);
+  player.emit({ playing: false, currentTime: 91, duration: 180, isBuffering: true });f.pause();f.fireTimers();
+  assert.equal(received.some(status => status.error), false);f.destroy();
+});
+
 test("Expo early EOF reports interruption without finishing or advancing the song", async () => {
   const f = fixture(); let received;
   f.onStatusUpdate(status => { received = status; });
@@ -76,12 +100,11 @@ test("late ready status cannot seek or start an outgoing Expo source", async () 
   f.destroy();
 });
 
-test("pending standby creation cannot survive destroy", async () => {
-  let completeMode;
-  const f = fixture({ mode: () => new Promise(resolve => { completeMode = resolve; }) });
-  const pending = f.prepareStandby("https://media.example/next");
-  f.destroy(); completeMode(); await pending;
-  assert.equal(f.players.length, 0);
+test("Expo next-track prefetch creates no player and destroy clears its data", async () => {
+  const f = fixture();
+  await f.prepareNextTrack("https://media.example/next");
+  assert.equal(f.preloads.size, 1); assert.equal(f.players.length, 0);
+  f.destroy(); assert.equal(f.preloads.size, 0);
 });
 
 test("Expo completion reaches progress listeners even when the last status is paused", async () => {
@@ -182,13 +205,15 @@ test('Expo decoder duration estimates cannot veto actual native completion witho
  assert.equal(received.didJustFinish,true);f.destroy();
 });
 
-test('Expo next promotion keeps the prepared player and starts it without creating a third decoder',async()=>{
+test('Expo next starts from prepared bytes without a second preload decoder',async()=>{
  const f=fixture();await f.loadAndPlay('https://media.example/first');const first=f.players[0];
- await f.prepareStandby('https://media.example/next');const prepared=f.players[1];
+ await f.prepareNextTrack('https://media.example/next');assert.equal(f.players.length,1);
  f.beginTrackChange();assert.equal(first.calls.some(([name])=>name==='remove'),true);
- assert.equal(prepared.calls.length,0);
  await f.loadAndPlay('https://media.example/next');
- assert.equal(f.players.length,2);assert.equal(prepared.calls[0][0],'play');f.destroy();
+ assert.equal(f.players.length,2);const next=f.players[1];
+ assert.match(next.source.uri,/^file:/);assert.equal(next.source.headers,undefined);
+ assert.equal(next.options.keepAudioSessionActive,true);assert.equal(next.calls[0][0],'play');
+ assert.equal(f.releasedPreloads.length,0);f.destroy();assert.equal(f.releasedPreloads.length,1);
 });
 
 test('Expo media metadata uses resolved stream seconds instead of catalog or decoder duration',async()=>{

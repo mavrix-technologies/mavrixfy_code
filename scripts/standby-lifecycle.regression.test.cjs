@@ -120,6 +120,30 @@ function hookFixture({ web = false, storage = {}, impact = async () => {} } = {}
   };
 }
 
+test('StandBy entry, style, rotation, exit and unmount leave the shared audio source playing', async () => {
+  const { fixture, tracks } = require('./helpers/audio-player-fixture.cjs');
+  const audio = fixture(); const player = audio.StandardAudioPlayer;
+  await player.setQueue(tracks); await player.play();
+  const source = audio.StandardAudioRenderer();
+  const sourceVersion = audio.snapshots[0]().sourceVersion;
+  source.props.onPlaying(); source.props.onPositionChange(45);
+  const ui = hookFixture(); let state = ui.render();
+  state.enterStandBy(); state = ui.render();
+  state.selectStyle('ambient'); state = ui.render();
+  ui.setDimensions(390, 844); state = ui.render();
+  ui.setForeground(false); ui.render();
+  ui.setForeground(true); state = ui.render();
+  state.exitStandBy(); ui.render(); ui.unmount();
+  assert.equal((await player.getPlaybackState()).state, audio.State.Playing);
+  assert.equal((await player.getProgress()).position, 45);
+  assert.equal(audio.snapshots[0]().sourceVersion, sourceVersion);
+  assert.equal(audio.StandardAudioRenderer().props.source, source.props.source);
+  await player.skipToNext();
+  const next = audio.StandardAudioRenderer(); next.props.onPlaying();
+  assert.equal(await player.getActiveTrackIndex(), 1);
+  assert.equal((await player.getPlaybackState()).state, audio.State.Playing);
+});
+
 test('late landscape completion is followed by portrait restoration before cleanup settles', async () => {
   const opening = deferred();
   const f = orientationFixture({ lockAsync: lock => lock === 1 ? opening.promise : Promise.resolve() });

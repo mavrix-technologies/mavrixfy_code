@@ -1,6 +1,6 @@
 import { getSettings } from "@/lib/storage";
 import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
-import { isYouTubeSong, peekYouTubeStream, rejectYouTubeStream } from "@/services/youtube/YouTubeMusic";
+import { isYouTubeSong, peekYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
@@ -104,7 +104,6 @@ export function useAudioSyncListeners({
   toggleLike,
   likedSongIds,
 }: UseAudioSyncListenersOptions) {
-  const youtubeRetryAt = useRef(new Map<string, number>());
   const publishedLockScreenDurationRef = useRef<{
     songId: string;
     duration: number;
@@ -148,8 +147,16 @@ export function useAudioSyncListeners({
       subscribeTrackPlayerEvent(Event.RemoteNext, () => void nextSongRef.current()),
       subscribeTrackPlayerEvent(Event.RemotePrevious, () => void prevSongRef.current()),
       subscribeTrackPlayerEvent(Event.PlaybackInterruption, (event: { resumed: boolean }) => {
-        if (event.resumed) playIntent();
-        else pauseIntent();
+        if (event.resumed) {
+          playIntent();
+        } else {
+          // A transient system interruption pauses output temporarily.
+          // Do not overwrite user play intent (desiredPlayState) so that
+          // playback can automatically resume when the interruption ends.
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          updatePlaybackEngineSnapshot({ isPlaying: false });
+        }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackState, (event: any) => {
         const nextState = event && typeof event === "object" && "state" in event ? event.state : event;
@@ -167,6 +174,7 @@ export function useAudioSyncListeners({
             setIsPlaying(true);
             isPlayingRef.current = true;
             updatePlaybackEngineSnapshot({ isPlaying: true, isLoading: false, isBuffering: false });
+            prefetchAdjacentTrackStreams(queueRef.current, queueIndexRef.current);
             break;
 
           case State.Paused:
@@ -188,6 +196,9 @@ export function useAudioSyncListeners({
       }),
       subscribeTrackPlayerEvent(Event.PlaybackPlayWhenReadyChanged, (event: any) => {
         if (typeof event?.playWhenReady !== "boolean") return;
+        // Output stops during a system interruption without cancelling the
+        // user's Play intent. The native interruption handler owns its resume.
+        if (!event.playWhenReady && event.reason === "interruption") return;
         // A native queue replacement may emit a stale resume after the user
         // has paused. The explicit user intent must always win that race.
         if (desiredPlayStateRef.current === false) {
@@ -215,16 +226,12 @@ export function useAudioSyncListeners({
       }),
       subscribeTrackPlayerEvent(Event.PlaybackError, (error: any) => {
         const failedSong = currentSongRef.current;
-        if (error?.trackId && failedSong?.id !== error.trackId) return;
-        if (failedSong && isYouTubeSong(failedSong) && error?.shouldResume &&
-          desiredPlayStateRef.current !== false && Date.now() - (youtubeRetryAt.current.get(failedSong.id) || 0) > 60000) {
-          if (youtubeRetryAt.current.size >= 60) youtubeRetryAt.current.delete(youtubeRetryAt.current.keys().next().value!);
-          youtubeRetryAt.current.set(failedSong.id, Date.now());
-          rejectYouTubeStream(failedSong);
-          const resumePosition = positionSecondsRef.current;
-          void playSongRef.current(failedSong, queueRef.current, resumePosition);
-          return;
-        }
+        const isSameTrack = !error?.trackId || !failedSong?.id ||
+          failedSong.id === error.trackId ||
+          failedSong.id.replace(/^youtube_/, "") === String(error.trackId).replace(/^youtube_/, "");
+        if (!isSameTrack) return;
+        // The native source owns reconnects. A terminal error must not trigger
+        // a second retry loop that competes with its queue/selection generation.
         logger.error("[Player] PlaybackError event", error);
         const errorMsg = error?.message || error?.code || "Playback failed";
         pendingPlayRequestRef.current = null;

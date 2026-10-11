@@ -191,23 +191,27 @@ export function usePlayerCoreState({
     (songQueue: Song[], activeIndex: number) => {
       const nextItem = songQueue[activeIndex + 1];
       const queueAtPrefetch = songQueue;
+      const accountAtPrefetch = getAccountScope();
       if (nextItem) {
         void resolvePlaybackUrlCached(nextItem)
-          .then((resolvedUrl) => {
-            if (resolvedUrl && queueRef.current === queueAtPrefetch && currentSongRef.current?.id === songQueue[activeIndex]?.id) {
+          .then(async (resolvedUrl) => {
+            if (resolvedUrl && isCurrentAccount(accountAtPrefetch) && queueRef.current === queueAtPrefetch && currentSongRef.current?.id === songQueue[activeIndex]?.id) {
               if (TrackPlayer && typeof TrackPlayer.updateMetadataForTrack === "function") {
                 void TrackPlayer.updateMetadataForTrack(activeIndex + 1, songToTrack(nextItem, resolvedUrl));
+                const { state } = await TrackPlayer.getPlaybackState();
+                // Give the selected decoder priority during startup/rebuffering.
+                if (state === State.Playing && isCurrentAccount(accountAtPrefetch) && queueRef.current === queueAtPrefetch &&
+                  currentSongRef.current?.id === songQueue[activeIndex]?.id) {
+                  await TrackPlayer.prepareTrack(songToTrack(nextItem, resolvedUrl));
+                }
               }
-              if (!TrackPlayer) void ExpoAvPlayer.prepareStandby(resolvedUrl, withResolvedPlaybackUrl(nextItem, resolvedUrl));
+              if (!TrackPlayer) void ExpoAvPlayer.prepareNextTrack(resolvedUrl, withResolvedPlaybackUrl(nextItem, resolvedUrl));
             }
           })
           .catch(() => null);
       }
-      // Widen prefetch: also warm up the track two positions ahead
-      const nextNextItem = songQueue[activeIndex + 2];
-      if (nextNextItem && !isYouTubeSong(nextNextItem)) void resolvePlaybackUrlCached(nextNextItem).catch(() => null);
     },
-    [resolvePlaybackUrlCached, TrackPlayer]
+    [resolvePlaybackUrlCached, TrackPlayer, State]
   );
 
   // Hook: Startup Reconcile

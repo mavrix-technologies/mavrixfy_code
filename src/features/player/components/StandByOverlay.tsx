@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { BatteryState, useBatteryLevel, useBatteryState } from "expo-battery";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAppIsActive } from "@/lib/appActivity";
+import { PingPongScroll } from "@/components/PingPongScroll";
 import { PlayerSlider } from "@/components/PlayerSlider";
 import { formatDuration, type Song } from "@/lib/musicData";
 import { getPlaybackProgressSnapshot, subscribePlaybackProgress } from "@/services/audio/playbackProgressStore";
@@ -137,6 +138,18 @@ export const StandByOverlay = memo(function StandByOverlay({
   const title = unescapeHtml(song?.title || "No track playing");
   const artist = unescapeHtml(song?.artist || "Unknown Artist");
   const titleStyle = [styles.trackTitle, layout.compact && styles.compactTrackTitle, { color: primaryColor }];
+  const artistStyle = [styles.trackArtist, layout.compact && styles.compactTrackArtist, { color: secondaryColor }];
+  const pingPongFade = (() => {
+    if (isNightMode || !isAmbient) return "rgba(0, 0, 0, 0.98)";
+    if (backgroundColor && backgroundColor.startsWith("#")) {
+      const hex = backgroundColor.slice(1);
+      const r = parseInt(hex.substring(0, 2), 16) || 20;
+      const g = parseInt(hex.substring(2, 4), 16) || 24;
+      const b = parseInt(hex.substring(4, 6), 16) || 34;
+      return `rgba(${r}, ${g}, ${b}, 0.95)`;
+    }
+    return "rgba(20, 24, 34, 0.95)";
+  })();
   const runAction = (action: () => void) => {
     onTouchActivity();
     action();
@@ -144,6 +157,8 @@ export const StandByOverlay = memo(function StandByOverlay({
   const nextStyle = standByStyle === "classic" ? "night" : standByStyle === "night" ? "ambient" : "classic";
   const styleName = standByStyle === "classic" ? "Classic" : standByStyle === "night" ? "Night" : "Ambient";
   const compactControls = layout.compact || layout.controlsWidth < STANDBY_CONTROL_SIZE * 4 + 64;
+  const artworkSize = Math.max(0, layout.artworkSize - 24);
+  const verticalSpacing = { gap: Math.max(10, Math.min(28, Math.round(layout.contentHeight / 20))) };
   const controlButtonStyle = [styles.controlButton, compactControls && styles.compactControl];
 
   const controlRows = (
@@ -183,7 +198,7 @@ export const StandByOverlay = memo(function StandByOverlay({
   // scroll the whole pane, where all controls cannot physically fit together.
   const scrollAll = layout.contentHeight < 300 || fontScale > 1.4;
   const trackDetails = (
-    <View style={[styles.trackDetails, layout.compact && styles.compactGaps]}>
+    <View style={[styles.trackDetails, verticalSpacing]}>
       <View style={[styles.header, { opacity: controlsOpacity }]}>
         <StandByClock active={visible} compact={layout.compact} primaryColor={primaryColor} secondaryColor={secondaryColor} />
         <View style={styles.headerActions}>
@@ -200,17 +215,37 @@ export const StandByOverlay = memo(function StandByOverlay({
 
       <View testID="standby-track-info" style={styles.trackInfo}>
         <View style={styles.trackText} accessible accessibilityLabel={`${title}, ${artist}`}>
-          <Text numberOfLines={2} style={titleStyle}>{title}</Text>
-          <Text numberOfLines={2} style={[styles.trackArtist, { color: secondaryColor }]}>{artist}</Text>
+          <PingPongScroll
+            text={title}
+            style={titleStyle}
+            velocity={14}
+            paused={reduceMotion}
+            showFade
+            fadeColor={pingPongFade}
+            fadeWidth={layout.compact ? 14 : 18}
+            startDelay={1500}
+            endDelay={1200}
+          />
+          <PingPongScroll
+            text={artist}
+            style={artistStyle}
+            velocity={11}
+            paused={reduceMotion}
+            showFade
+            fadeColor={pingPongFade}
+            fadeWidth={layout.compact ? 14 : 18}
+            startDelay={2000}
+            endDelay={1200}
+          />
         </View>
         <Pressable onPress={() => runAction(onToggleLike)} style={styles.saveButton} accessibilityRole="button" accessibilityLabel={liked ? "Remove from liked songs" : "Save to liked songs"} accessibilityState={{ selected: liked }}>
-          <Ionicons name={liked ? "heart" : "heart-outline"} size={24} color={liked ? selectedColor : primaryColor} />
+          <Ionicons name={liked ? "heart" : "heart-outline"} size={22} color={liked ? selectedColor : primaryColor} />
         </Pressable>
       </View>
     </View>
   );
   const transport = (
-    <View testID="standby-transport" style={[styles.transport, layout.compact && styles.compactGaps]}>
+    <View testID="standby-transport" style={[styles.transport, verticalSpacing]}>
       <StandByProgress active={visible} songDuration={song?.duration ?? 0} color={secondaryColor} onSeek={onSeek} onTouchActivity={onTouchActivity} />
 
       {layout.controlsWidth < STANDBY_MIN_CONTROLS_WIDTH ? (
@@ -246,9 +281,9 @@ export const StandByOverlay = memo(function StandByOverlay({
     >
       {layout.showArtwork && (
         <View testID="standby-artwork" collapsable={false} style={[styles.artworkColumn, { width: layout.artworkColumnWidth }]}>
-          <View collapsable={false} style={[styles.artworkCard, { width: layout.artworkSize, height: layout.artworkSize }]}>
+          <View collapsable={false} style={[styles.artworkCard, { width: artworkSize, height: artworkSize }]}>
           {song?.coverUrl ? (
-            <Image source={{ uri: song.coverUrl }} style={{ width: layout.artworkSize, height: layout.artworkSize }} contentFit="contain" transition={0} accessible={false} />
+            <Image source={{ uri: song.coverUrl }} style={{ width: artworkSize, height: artworkSize }} contentFit="contain" transition={0} accessible={false} />
           ) : (
             <View style={styles.artworkFallback}>
               <Ionicons name="musical-notes" size={Math.min(layout.artworkColumnWidth, layout.contentHeight) * 0.35} color={secondaryColor} />
@@ -256,20 +291,23 @@ export const StandByOverlay = memo(function StandByOverlay({
           )}
           {isNightMode && <View pointerEvents="none" style={styles.artworkNightOverlay} />}
           </View>
+          <View style={styles.brand} accessible accessibilityLabel="Mavrixfy Music">
+            <Text numberOfLines={1} style={[styles.brandLabel, { color: secondaryColor }]}>MAVRIXFY MUSIC</Text>
+          </View>
         </View>
       )}
 
       <View testID="standby-content" style={styles.contentSection}>
         {panel === null ? (
-          <View style={[styles.playerPane, layout.compact && styles.compactGaps]}>
+          <View style={[styles.playerPane, verticalSpacing]}>
             {scrollAll ? (
-              <ScrollView style={styles.panelScroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} bounces={false}>
+              <ScrollView style={styles.panelScroll} contentContainerStyle={[styles.content, verticalSpacing]} showsVerticalScrollIndicator={false} bounces={false}>
                 {trackDetails}
                 {transport}
               </ScrollView>
             ) : (
               <>
-                <ScrollView testID="standby-metadata-scroll" style={styles.panelScroll} contentContainerStyle={styles.metadataContent} showsVerticalScrollIndicator={false} bounces={false}>
+                <ScrollView testID="standby-metadata-scroll" style={styles.metadataScroll} contentContainerStyle={styles.metadataContent} showsVerticalScrollIndicator={false} bounces={false}>
                   {trackDetails}
                 </ScrollView>
                 {transport}
@@ -334,7 +372,7 @@ const StandByProgress = memo(function StandByProgress({ active, songDuration, co
         accessibilityLabel="Playback position"
         accessibilityValue={durationSeconds > 0 ? { min: 0, max: durationSeconds, now: value, text: `${formatDuration(Math.floor(value))} of ${formatDuration(Math.floor(durationSeconds))}` } : { text: "Duration unavailable" }}
       />
-      <View style={styles.timeRow}>
+      <View pointerEvents="none" style={styles.timeRow}>
         <Text style={[styles.timeText, { color }]}>{formatDuration(Math.floor(value))}</Text>
         <Text style={[styles.timeText, { color }]}>{durationSeconds > 0 ? `-${formatDuration(Math.ceil(Math.max(0, durationSeconds - value)))}` : "--:--"}</Text>
       </View>
@@ -368,7 +406,7 @@ const StandByClock = memo(function StandByClock({ active, compact, primaryColor,
         {`${now.getHours() % 12 || 12}:${String(now.getMinutes()).padStart(2, "0")} ${now.getHours() >= 12 ? "PM" : "AM"}`}
       </Text>
       <View style={styles.dateRow}>
-        <Text numberOfLines={1} style={[styles.clockDate, { color: secondaryColor }]}>
+        <Text numberOfLines={1} style={[styles.clockDate, compact && styles.compactClockDate, { color: secondaryColor }]}>
           {now.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }).toUpperCase()}
         </Text>
         {active && foreground && <StandByBattery color={secondaryColor} />}
@@ -399,39 +437,43 @@ const styles = StyleSheet.create({
   artworkFallback: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#181A20" },
   artworkNightOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(255, 59, 48, 0.28)" },
   contentSection: { flex: 1, minWidth: 0, overflow: "hidden" },
-  playerPane: { flex: 1, minHeight: 0, gap: 12 },
+  playerPane: { flex: 1, minHeight: 0, justifyContent: "center", gap: 12 },
   panelScroll: { flex: 1, minHeight: 0 },
-  metadataContent: { flexGrow: 1 },
+  metadataScroll: { flexGrow: 0, flexShrink: 1, minHeight: 0 },
+  metadataContent: { flexGrow: 0 },
   trackDetails: { gap: 12 },
+  brand: { height: 16, marginTop: 8, maxWidth: "100%", alignItems: "center", justifyContent: "center" },
+  brandLabel: { fontSize: 9, fontFamily: "Inter_600SemiBold", letterSpacing: 1.2, textAlign: "center", opacity: 0.65 },
   transport: { flexShrink: 0, gap: 12 },
-  content: { flexGrow: 1, justifyContent: "space-between", gap: 12 },
-  detailPane: { flex: 1, minHeight: 0 },
+  content: { flexGrow: 1, justifyContent: "center", gap: 12 },
+  detailPane: { flex: 1, minHeight: 0, paddingHorizontal: 8 },
   detailHeader: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   backButton: { minWidth: 48, minHeight: 48, flexDirection: "row", alignItems: "center", gap: 4 },
   backLabel: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
   paneTitle: { fontSize: 16, fontFamily: "Inter_700Bold" },
-  header: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  header: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8, paddingHorizontal: 8 },
   clock: { flex: 1, minWidth: 100 },
-  clockTime: { fontSize: 32, fontFamily: "Inter_600SemiBold", letterSpacing: -0.8, fontVariant: ["tabular-nums"] },
-  compactClockTime: { fontSize: 26 },
-  dateRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 2 },
-  clockDate: { fontSize: 11, fontFamily: "Inter_600SemiBold", letterSpacing: 0.8 },
-  battery: { flexDirection: "row", alignItems: "center", gap: 4 },
-  batteryText: { fontSize: 11, fontFamily: "Inter_500Medium", fontVariant: ["tabular-nums"] },
+  clockTime: { fontSize: 44, lineHeight: 48, fontFamily: "Inter_700Bold", letterSpacing: -1.2, fontVariant: ["tabular-nums"] },
+  compactClockTime: { fontSize: 32, lineHeight: 36 },
+  dateRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10, marginTop: 4 },
+  clockDate: { fontSize: 13, fontFamily: "Inter_600SemiBold", letterSpacing: 1.0 },
+  compactClockDate: { fontSize: 11 },
+  battery: { flexDirection: "row", alignItems: "center", gap: 5 },
+  batteryText: { fontSize: 12, fontFamily: "Inter_600SemiBold", fontVariant: ["tabular-nums"] },
   headerActions: { flexDirection: "row", flexWrap: "wrap", maxWidth: "100%", alignItems: "center", gap: 4 },
   headerButton: { width: STANDBY_CONTROL_SIZE, height: STANDBY_CONTROL_SIZE, borderRadius: STANDBY_CONTROL_SIZE / 2, backgroundColor: "rgba(255, 255, 255, 0.1)", alignItems: "center", justifyContent: "center" },
   trackInfo: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8 },
-  trackText: { flex: 1, minWidth: 0 },
+  trackText: { flex: 1, minWidth: 0, justifyContent: "center" },
   saveButton: { width: STANDBY_CONTROL_SIZE, height: STANDBY_CONTROL_SIZE, alignItems: "center", justifyContent: "center" },
-  trackTitle: { fontSize: 26, lineHeight: 34, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
-  compactTrackTitle: { fontSize: 22, lineHeight: 30 },
-  trackArtist: { fontSize: 14, lineHeight: 20, fontFamily: "Inter_400Regular", marginTop: 4 },
+  trackTitle: { fontSize: 26, lineHeight: 32, fontFamily: "Inter_700Bold", letterSpacing: -0.5 },
+  compactTrackTitle: { fontSize: 20, lineHeight: 26 },
+  trackArtist: { fontSize: 16, lineHeight: 22, fontFamily: "Inter_500Medium", marginTop: 4 },
+  compactTrackArtist: { fontSize: 13, lineHeight: 18, marginTop: 2 },
   progress: { paddingHorizontal: 8 },
-  timeRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  timeText: { fontSize: 12, fontFamily: "Inter_400Regular", fontVariant: ["tabular-nums"] },
+  timeRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: -16 },
+  timeText: { fontSize: 12, lineHeight: 15, fontFamily: "Inter_500Medium", fontVariant: ["tabular-nums"] },
   controlRows: { gap: 8 },
   compactRows: { gap: 4 },
-  compactGaps: { gap: 8 },
   controls: { flexDirection: "row", alignItems: "center" },
   controlButton: { width: STANDBY_CONTROL_SIZE, height: 64, alignItems: "center", justifyContent: "center" },
   compactControl: { height: 56 },

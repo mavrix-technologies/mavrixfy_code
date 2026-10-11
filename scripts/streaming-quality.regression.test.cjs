@@ -42,7 +42,7 @@ async function fixture({ nativeSingleTrack = false } = {}) {
     module, exports:module.exports,
     require(name) {
       if (name.endsWith("YouTubeMusic")) return { isYouTubeSong: song => song.source === "youtube" || song.id?.startsWith("youtube_") };
-      if (name.endsWith("ExpoAvAdapter")) return { prepareStandby: async () => {} };
+      if (name.endsWith("ExpoAvAdapter")) return { prepareNextTrack: async () => {} };
       if (name === 'react') return { useCallback:fn => fn, useRef:value => ({ current:value }) };
       if (name.endsWith('logger')) return { logger:{ error:noop } };
       if (name.endsWith('ExpoAvAdapter')) return {};
@@ -144,7 +144,7 @@ test('invalidated stream resolution cannot refill cache or remove a newer pendin
     module,exports:module.exports,
     require(name) {
       if (name.endsWith("YouTubeMusic")) return { isYouTubeSong: song => song.source === "youtube" || song.id?.startsWith("youtube_") };
-      if (name.endsWith("ExpoAvAdapter")) return { prepareStandby: async () => {} };
+      if (name.endsWith("ExpoAvAdapter")) return { prepareNextTrack: async () => {} };
       if (name === 'react') return {
         useCallback:fn => fn, useEffect:noop, useRef:value => ({ current:value }), useState:value => [value,noop],
       };
