@@ -50,6 +50,16 @@ jobs:
           echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
           echo "xcode=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
+      - name: Test iOS playback command conversion
+        run: |
+          set -euo pipefail
+          xcrun swiftc \
+            -parse-as-library \
+            modules/mavrixfy-playback/ios/PlaybackCommandValues.swift \
+            scripts/ios-playback-command-values.test.swift \
+            -o "$RUNNER_TEMP/ios-playback-command-tests"
+          "$RUNNER_TEMP/ios-playback-command-tests"
+
       # ── Expo prebuild ─────────────────────────────────────────────────────
       # Regenerate the project every time; never restore old JS bundles,
       # Pods integration or app products through an overlapping ios/ cache.

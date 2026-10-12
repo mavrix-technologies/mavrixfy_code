@@ -49,10 +49,17 @@ class PlaybackIntegrationTest {
     val scenario = ActivityScenario.launch(PlaybackTestActivity::class.java)
     lateinit var engine: PlaybackEngine
     val transitions = CopyOnWriteArrayList<Int>(); val errors = CopyOnWriteArrayList<Map<String, Any?>>()
+    val progress = CopyOnWriteArrayList<Map<String, Any?>>()
     try {
       onMain {
         engine = PlaybackEngine.get(context)
-        engine.emit = { name, data -> if (name == "playback-active-track") transitions.add((data["index"] as Number).toInt()); if (name == "playback-error") errors.add(data) }
+        engine.emit = { name, data ->
+          when (name) {
+            "playback-active-track" -> transitions.add((data["index"] as Number).toInt())
+            "playback-error" -> errors.add(data)
+            "playback-progress" -> progress.add(data)
+          }
+        }
         context.startService(Intent(context, PlaybackService::class.java))
         engine.command("setQueue", mapOf("tracks" to files, "index" to 0)); engine.command("play", emptyMap())
       }
@@ -67,6 +74,12 @@ class PlaybackIntegrationTest {
       assertTrue("Native decoder errors: $errors", errors.isEmpty())
       assertEquals(listOf(0, 1), transitions.toList())
       assertEquals(1, (state(engine)["index"] as Number).toInt())
+      for (track in 0..1) {
+        val positions = progress.filter { (it["track"] as Number).toInt() == track }
+          .map { (it["position"] as Number).toDouble() }
+        assertTrue("Track $track did not publish advancing native progress", positions.size >= 2 && positions.last() > positions.first() + 1)
+        assertTrue("Track $track has invalid progress", positions.all { it.isFinite() && it in 0.0..8.1 })
+      }
     } finally { onMain { engine.command("reset", emptyMap()); engine.emit = null }; scenario.close() }
   }
   @Test fun pauseSeekAndQueueReorderPreserveNativeIntentAndPosition() {
@@ -82,8 +95,12 @@ class PlaybackIntegrationTest {
       assertEquals(false, state(engine)["playWhenReady"])
       assertEquals(1, (state(engine)["index"] as Number).toInt())
       assertTrue((state(engine)["position"] as Number).toDouble() >= 4.9)
+      val pausedPosition = (state(engine)["position"] as Number).toDouble()
+      Thread.sleep(750)
+      assertEquals("Position advanced while paused", pausedPosition, (state(engine)["position"] as Number).toDouble(), 0.1)
       onMain { engine.command("play", emptyMap()) }
       awaitCondition { state(engine)["state"] == "playing" }
+      awaitCondition { (state(engine)["position"] as Number).toDouble() > pausedPosition + 0.5 }
     } finally { onMain { engine.command("reset", emptyMap()) }; scenario.close() }
   }
   @Test fun namedPlatformMediaKeysPauseResumeAndSelectNextWithoutCrashing() {

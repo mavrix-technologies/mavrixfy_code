@@ -241,6 +241,35 @@ test("a late queue-ended event cannot start another song after pause", async () 
   assert.equal(f.options.desiredPlayStateRef.current, false);
 });
 
+test("an unresolved native successor resolves through the shared controller without ending the sleep timer", async () => {
+  const f = fixture({ activeIndex: 0 });
+  f.options.desiredPlayStateRef.current = true;
+  const timer = { mode: "end-of-stack" };
+  f.options.sleepTimerRef.current = timer;
+  const selections = [];
+  f.options.playSongRef.current = (song, queue) => selections.push({ song, queue });
+  f.listen();
+  await f.events.get("ended")({ reason: "unresolved-next" });
+  assert.equal(selections.length, 1);
+  assert.equal(selections[0].song, f.songs[1]);
+  assert.equal(selections[0].queue, f.songs);
+  assert.equal(f.options.sleepTimerRef.current, timer);
+  assert.equal(f.options.desiredPlayStateRef.current, true);
+});
+
+test("an unresolved successor cannot resume after user pause or compete with an active selection", async () => {
+  for (const mode of ["paused", "loading", "pending"]) {
+    const f = fixture({ activeIndex: 0 });
+    f.options.desiredPlayStateRef.current = mode !== "paused";
+    f.options.playbackLoadingRef.current = mode === "loading";
+    if (mode === "pending") f.options.pendingPlayRequestRef.current = { id: 7, songId: "c" };
+    f.options.playSongRef.current = () => { throw Error("must not replace current user intent"); };
+    f.listen();
+    await f.events.get("ended")({ reason: "unresolved-next" });
+    assert.equal(f.options.currentSongRef.current.id, "a");
+  }
+});
+
 test("native progress keeps the effective seek position written by the progress hook", () => {
   const f = fixture(); f.options.setNativePosition = () => { f.options.positionSecondsRef.current = 90; }; f.listen();
   f.events.get("progress")({ position: 30, duration: 180 });

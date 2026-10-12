@@ -30,9 +30,10 @@ class PlaybackService : MediaLibraryService() {
   private val resolutionTimeout = Runnable { failResolution("Song selection timed out") }
   private fun failResolution(message: String) {
     handler.removeCallbacks(resolutionTimeout)
-    pendingResolution?.setException(IllegalStateException(message))
+    val future = pendingResolution
     pendingResolution = null
     pendingId = null
+    future?.setException(IllegalStateException(message))
   }
   private val engine get() = PlaybackEngine.get(this)
   private fun item(id: String, title: String, artist: String? = null, cover: String? = null, browsable: Boolean = false): MediaItem =
@@ -62,7 +63,7 @@ class PlaybackService : MediaLibraryService() {
     val remotePlayer = object : ForwardingPlayer(engine.player) {
       override fun play() { engine.internalChange = false; engine.event("remote-play"); engine.player.play() }
       override fun pause() { engine.cancelCarResolution?.invoke(); engine.internalChange = false; engine.event("remote-pause"); engine.player.pause() }
-      override fun setPlayWhenReady(ready: Boolean) { engine.internalChange = false; engine.event(if (ready) "remote-play" else "remote-pause"); engine.player.playWhenReady = ready }
+      override fun setPlayWhenReady(ready: Boolean) { if (!ready) engine.cancelCarResolution?.invoke(); engine.internalChange = false; engine.event(if (ready) "remote-play" else "remote-pause"); engine.player.playWhenReady = ready }
       override fun stop() { engine.cancelCarResolution?.invoke(); engine.internalChange = false; engine.event("remote-stop"); engine.player.stop() }
       private fun select(action: () -> Unit) { val resume = engine.internalChange; engine.internalChange = false; engine.remoteSelection = true; action(); if (resume) engine.player.play(); Handler(Looper.getMainLooper()).post { engine.remoteSelection = false } }
       override fun seekToNext() { select { engine.player.seekToNext() } }

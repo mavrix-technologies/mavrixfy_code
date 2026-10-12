@@ -221,3 +221,91 @@ Rebuild the unsigned IPA on the macOS CI runner, re-sign/install it, then retest
 the reproduced failures, long queues, consecutive complete songs, native Next,
 Pause/Resume, seek, repeat, background/lock, interruptions and StandBy rotation.
 The installed iPhone app remains the previous native binary until that rebuild.
+
+## Follow-up code verification on 2026-10-12
+
+Reviewed the shared playback/event controller, native queue/transport handling,
+StandBy activation/orientation/layout and the iOS workflow/config/patch inputs.
+StandBy uses the shared playback actions and does not own a separate decoder or
+pause/resume lifecycle on entry/exit.
+
+Additional fixes from this review:
+
+- iOS upcoming-window updates preserve the active interruption's resume token
+  when retaining the current item. Actual source changes still invalidate it.
+- Repeat completion checks the item, selection revision, interruption and play
+  intent before resuming. Seek ignores cancelled/outgoing-item completions.
+- An unresolved iOS successor requests resolution from the shared controller
+  rather than failing an unsupported placeholder. It does not clear the
+  end-of-stack timer or override explicit Pause/a pending selection.
+- Android cancelled browse futures clear their stored request before notifying
+  listeners; remote `setPlayWhenReady(false)` also cancels pending selection.
+- Removed two unused player imports and corrected one array-type lint warning.
+
+Final checks: all 517 JavaScript regressions passed (including two new unresolved
+successor flow tests), TypeScript passed, full-app lint returned zero errors and
+10 remaining require-import warnings, and Android module/test Kotlin compilation
+passed. Workflow YAML, dependency lock consistency and installed orientation
+patch checks passed. A Swift grammar parser reported no syntax errors in the
+playback module or patched orientation source; this is NOT Swift type checking
+or an Xcode build. Updated iOS compilation and real-device
+playback/rotation/interruptions remain required after rebuilding the IPA.
+
+## iOS repeated-first-song correction
+
+The reported symptom was selecting a second song while the first song's audio
+played again. Inspecting the installed Expo SDK's conversion source found a
+platform-specific command bug: `DynamicDictionaryType` hydrates `[String: Any]`
+through `DynamicRawType<Any>`, and `JavaScriptValue.getAny()` returns `Double`
+for JS numbers. The player read `args["index"] as? Int ?? 0` and `args["to"] as?
+Int. A supplied nonzero JS index could therefore fail its cast and select zero;
+upcoming-track updates and queue moves were affected by the same conversion.
+Android already converts through `Number.toInt()` and does not have this cast.
+
+`PlaybackCommandValues.index` now accepts bridged numeric values, converts exact
+finite integers, and rejects booleans/fractions/invalid values instead of
+silently choosing the first song. Both `index` and `to` use that conversion.
+Removed the duplicate stored AVPlayerItem array; AVQueuePlayer's own `items()`
+is the native queue source, with the logical item-index map retained. This is
+still one Apple AVQueuePlayer/AVAudioSession/MPRemoteCommandCenter implementation.
+No Android engine changes were made for this reported iOS symptom.
+
+The macOS workflow now compiles and runs the actual Foundation conversion helper
+with `scripts/ios-playback-command-values.test.swift` before iOS prebuild. That
+test reproduces Expo's Double dictionary values, checks indices 0–213, queue-move
+indices, NSNumber/native integer inputs and invalid inputs. Windows syntax/YAML
+checks, TypeScript and 517 JS regressions pass. The new Swift test and AVFoundation
+behavior still require macOS CI execution and an updated signed IPA on the phone.
+Pushing only older changes or applying a JS OTA cannot replace the installed
+native implementation; include the new Swift helper and CI test in the rebuild.
+
+## Latest local verification on 2026-10-12
+
+The Medium_Phone Android emulator (x86_64, Android 17) ran all five native
+instrumentation tests successfully. Added assertions verify native progress
+advances on both complete eight-second audio fixtures, stays stable while
+paused, and advances after resuming. The same suite covers automatic Next with
+the activity backgrounded, foreground service ownership, named media-key
+Play/Pause/manual Next, seek/reorder, simulated transient audio focus, and
+asynchronous browse selection/cancellation. Results are in
+`android/build/reports/androidTests/connected/debug/index.html` relative to this
+module, with the invocation log at the repository's
+`outputs/final-playback-native-tests.log`.
+
+Full-app TypeScript and 517 JavaScript regressions passed; lint has zero errors
+and ten existing require-import warnings. These checks exercise native decoder
+state and shared controller logic, not audible remote-song playback or visual
+progress-bar/StandBy rotation on a physical device. The emulator used no audio
+output. No physical Android target was connected for this run.
+
+The USB iPhone still has the earlier native binary. Windows has no Xcode/Swift
+compiler, so the new Foundation helper test and full iOS build await macOS CI,
+followed by installation and physical playback tests. Production readiness
+remains unverified until that completes, along with actual headset/call and
+network interruption coverage. The previously observed anonymous ADB media-key
+crash remains an upstream Media3 issue; named controller tests do not cover it.
+
+The native player uses Apple's AVQueuePlayer and Android's Media3 service APIs,
+but iOS header-dependent streams still use the undocumented
+`AVURLAssetHTTPHeaderFieldsKey` option. That path cannot be described as entirely
+documented Apple API and requires explicit stream/device compatibility testing.

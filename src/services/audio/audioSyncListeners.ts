@@ -417,9 +417,14 @@ export function useAudioSyncListeners({
           }
         }
       }),
-      subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, async () => {
+      subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, async (event?: { reason?: string }) => {
         const wantsPlayback = () => desiredPlayStateRef.current !== false;
         if (!wantsPlayback() || playbackLoadingRef.current || pendingPlayRequestRef.current) return;
+        if (event?.reason === "unresolved-next") {
+          const next = queueRef.current[queueIndexRef.current + 1];
+          if (next) void playSongRef.current(next, queueRef.current);
+          return;
+        }
         const endedSong = currentSongRef.current;
         const isStillEnded = () => currentSongRef.current === endedSong &&
           !playbackLoadingRef.current && !pendingPlayRequestRef.current;

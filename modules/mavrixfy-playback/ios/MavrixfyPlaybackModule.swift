@@ -27,7 +27,6 @@ private final class NativePlayback {
   let player = AVQueuePlayer()
   var emit: ((String, [String: Any]) -> Void)?
   private var tracks = [[String: Any]]()
-  private var items = [AVPlayerItem]()
   private var itemIndices = [ObjectIdentifier: Int]()
   private let queueWindowSize = 3
   private let playbackLog = Logger(subsystem: "com.mavrixfy.playback", category: "Playback")
@@ -80,12 +79,24 @@ private final class NativePlayback {
     })
     notifications.append(center.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] event in
       guard let self, let ended = event.object as? AVPlayerItem, let endedIndex = self.itemIndices[ObjectIdentifier(ended)] else { return }
-      if self.repeatMode == "track", self.intendedPlay { self.player.seek(to: .zero) { [weak self] _ in DispatchQueue.main.async { if self?.intendedPlay == true { self?.player.play() } } } }
+      if self.repeatMode == "track", self.intendedPlay {
+        let revision = self.revision
+        self.player.seek(to: .zero) { [weak self] finished in
+          DispatchQueue.main.async {
+            guard let self, finished, self.revision == revision, self.interruptionRevision == nil,
+              self.player.currentItem === ended, self.intendedPlay else { return }
+            self.player.play()
+          }
+        }
+      }
       else if endedIndex == self.tracks.count - 1 {
         if self.repeatMode == "queue", self.intendedPlay { do { try self.select(0, 0) } catch { self.fail(error.localizedDescription) } }
         else { self.event("playback-state", ["state": "ended"]); self.event("playback-queue-ended") }
       } else if self.player.currentItem == nil, self.intendedPlay {
-        do { try self.select(endedIndex + 1, 0) } catch { self.fail(error.localizedDescription, error: error) }
+        // An unresolved successor is absent from the native window. Let the
+        // shared controller resolve it without treating this as playlist end.
+        self.index = endedIndex
+        self.event("playback-queue-ended", ["reason": "unresolved-next"])
       }
       if ended !== self.player.currentItem { self.itemIndices.removeValue(forKey: ObjectIdentifier(ended)) }
     })
@@ -128,8 +139,9 @@ private final class NativePlayback {
   private func pause() { revision += 1; interruptionRevision = nil; intendedPlay = false; player.pause(); event("playback-play-when-ready", ["playWhenReady": false, "reason": "pause"]); nowPlaying() }
   private func seek(_ seconds: Double) {
     guard seconds.isFinite else { return }
-    player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600)) { [weak self] _ in
-      DispatchQueue.main.async { guard let self else { return }; self.event("playback-progress", ["position": self.position(), "duration": self.duration(), "track": self.index]); self.nowPlaying() }
+    let item = player.currentItem
+    player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600)) { [weak self] finished in
+      DispatchQueue.main.async { guard let self, finished, self.player.currentItem === item else { return }; self.event("playback-progress", ["position": self.position(), "duration": self.duration(), "track": self.index]); self.nowPlaying() }
     }
   }
   private func makeItem(_ track: [String: Any]) throws -> AVPlayerItem {
@@ -144,12 +156,13 @@ private final class NativePlayback {
     guard tracks.indices.contains(next) else { throw NSError(domain: "MavrixfyPlayback", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid queue index."]) }
     let retained = preserveCurrent && player.currentItem?.status != .failed ? player.currentItem : nil
     let selected = try retained ?? makeItem(tracks[next])
-    revision += 1; interruptionRevision = nil
+    // Updating only the upcoming window must preserve an active interruption's
+    // resume intent. Only an actual source/selection change invalidates it.
+    if retained == nil { revision += 1; interruptionRevision = nil }
     if retained == nil { player.pause(); player.removeAllItems() }
     else { player.items().filter { $0 !== retained }.forEach { player.remove($0) } }
     itemIndices = [ObjectIdentifier(selected): next]
     failedItem = nil
-    items = [selected]
     if retained == nil { player.insert(selected, after: nil) }
     fillQueueWindow(from: next)
     index = next; if retained == nil { seek(seconds) }; reconcileItem()
@@ -158,16 +171,16 @@ private final class NativePlayback {
   private func fillQueueWindow(from currentIndex: Int) {
     // AVQueuePlayer starts loading inserted assets. Keep the logical playlist
     // in tracks; enqueue only the current item and two resolved successors.
-    items = player.items()
-    while items.count < queueWindowSize {
-      let next = currentIndex + items.count
+    var queued = player.items()
+    while queued.count < queueWindowSize {
+      let next = currentIndex + queued.count
       guard tracks.indices.contains(next), let raw = tracks[next]["url"] as? String, !raw.isEmpty else { break }
       do {
         let item = try makeItem(tracks[next])
         guard player.canInsert(item, after: nil) else { break }
         itemIndices[ObjectIdentifier(item)] = next
         player.insert(item, after: nil)
-        items.append(item)
+        queued.append(item)
       } catch { break }
     }
   }
@@ -236,20 +249,21 @@ private final class NativePlayback {
     MPNowPlayingInfoCenter.default().nowPlayingInfo = info
   }
   func command(_ name: String, _ args: [String: Any]) throws -> [String: Any] {
-    let next = args["index"] as? Int ?? 0; let seconds = args["position"] as? Double ?? 0
+    let next = try PlaybackCommandValues.index(args["index"])
+    let seconds = args["position"] as? Double ?? 0
     switch name {
     case "setQueue":
       let old = tracks.indices.contains(index) ? tracks[index] : nil
       tracks = args["tracks"] as? [[String: Any]] ?? []
       let preserve = args["preserveCurrentTrack"] as? Bool == true && tracks.indices.contains(next) && old?["id"] as? String == tracks[next]["id"] as? String && old?["url"] as? String == tracks[next]["url"] as? String && (old?["headers"] as? [String: String] ?? [:]) == (tracks[next]["headers"] as? [String: String] ?? [:])
-      if tracks.isEmpty { pause(); player.removeAllItems(); items = []; itemIndices = [:]; index = -1 } else { try select(next, seconds, preserveCurrent: preserve) }
+      if tracks.isEmpty { pause(); player.removeAllItems(); itemIndices = [:]; index = -1 } else { try select(next, seconds, preserveCurrent: preserve) }
     case "play": try play()
     case "begin": revision += 1; intendedPlay = true; player.pause(); event("playback-play-when-ready", ["playWhenReady": false, "reason": "source-change"])
     case "pause": pause()
     case "stop": pause(); seek(0)
     case "seek": seek(seconds)
     case "skip": try select(next, seconds)
-    case "reset": pause(); player.removeAllItems(); items = []; itemIndices = [:]; tracks = []; index = -1; MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    case "reset": pause(); player.removeAllItems(); itemIndices = [:]; tracks = []; index = -1; MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     case "repeat": repeatMode = args["mode"] as? String ?? "off"; player.actionAtItemEnd = repeatMode == "track" ? .pause : .advance
     case "volume": player.volume = Float(max(0, min(1, args["volume"] as? Double ?? 1)))
     case "update":
@@ -261,8 +275,10 @@ private final class NativePlayback {
         if oldURL != tracks[next]["url"] as? String || oldHeaders != (tracks[next]["headers"] as? [String: String] ?? [:]) { try select(index, position(), preserveCurrent: next != index) } else { nowPlaying() }
       }
     case "add": let at = max(0, min(tracks.count, next)); let additions = args["tracks"] as? [[String: Any]] ?? []; tracks.insert(contentsOf: additions, at: at); if index >= 0 { try select(at <= index ? index + additions.count : index, position(), preserveCurrent: true) } else if !tracks.isEmpty { try select(0, 0) }
-    case "remove": if tracks.indices.contains(next) { let preserve = next != index; let retainedPosition = preserve ? position() : 0; tracks.remove(at: next); if tracks.isEmpty { pause(); player.removeAllItems(); items = []; itemIndices = [:]; index = -1 } else { try select(min(index > next ? index - 1 : index, tracks.count - 1), retainedPosition, preserveCurrent: preserve) } }
-    case "move": if tracks.indices.contains(next), let to = args["to"] as? Int, tracks.indices.contains(to) {
+    case "remove": if tracks.indices.contains(next) { let preserve = next != index; let retainedPosition = preserve ? position() : 0; tracks.remove(at: next); if tracks.isEmpty { pause(); player.removeAllItems(); itemIndices = [:]; index = -1 } else { try select(min(index > next ? index - 1 : index, tracks.count - 1), retainedPosition, preserveCurrent: preserve) } }
+    case "move": if tracks.indices.contains(next), let value = args["to"] {
+      let to = try PlaybackCommandValues.index(value)
+      guard tracks.indices.contains(to) else { break }
       var selected = index
       if next == index { selected = to } else if next < index && to >= index { selected -= 1 } else if next > index && to <= index { selected += 1 }
       tracks.insert(tracks.remove(at: next), at: to); try select(selected, position(), preserveCurrent: true)

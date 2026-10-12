@@ -9,7 +9,6 @@ import {
   type NativeSyntheticEvent,
 } from "react-native";
 import Colors from "@/constants/colors";
-import { IS_IOS } from "@/constants/platform";
 import { FlatList as GestureFlatList } from "react-native-gesture-handler";
 import { styles } from "../styles/playerScreenStyles";
 import { StableArtworkImage, type ArtworkQueueItem } from "./PlayerArtworkViews";

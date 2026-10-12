@@ -10,7 +10,7 @@ export interface OfficialMusicVideoCandidate {
   title: string;
   durationSeconds: number;
   musicVideoType: string;
-  artists: Array<{ id?: string; name: string }>;
+  artists: { id?: string; name: string }[];
 }
 
 function normalize(value: string): string {

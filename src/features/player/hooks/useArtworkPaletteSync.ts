@@ -1,7 +1,4 @@
-import {
-  useArtworkPalette,
-  type ArtworkPalette,
-} from "@/lib/colorExtractor";
+import { useArtworkPalette } from "@/lib/colorExtractor";
 import type { Song } from "@/lib/musicData";
 
 export interface UseArtworkPaletteSyncParams {
