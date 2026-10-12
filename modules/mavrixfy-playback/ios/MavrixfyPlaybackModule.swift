@@ -117,11 +117,7 @@ private final class NativePlayback {
   private func event(_ name: String, _ body: [String: Any] = [:]) { emit?(name, body) }
   private func position() -> Double { let value = player.currentTime().seconds; return value.isFinite ? max(0, value) : 0 }
   private func duration() -> Double {
-    let measured = player.currentItem?.duration.seconds ?? 0
-    if measured.isFinite && measured > 0 { return measured }
-    guard tracks.indices.contains(index) else { return 0 }
-    let known = tracks[index]["playbackDurationSeconds"] as? Double ?? tracks[index]["duration"] as? Double ?? 0
-    return known.isFinite && known > 0 ? known : 0
+    return player.currentItem.map { PlaybackTimeline.duration($0) } ?? 0
   }
   private func status() -> String {
     if player.currentItem?.status == .failed { return "error" }
@@ -148,7 +144,9 @@ private final class NativePlayback {
   private func seek(_ seconds: Double) {
     guard seconds.isFinite else { return }
     let item = player.currentItem
-    player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+    let end = duration()
+    let target = end > 0 ? min(max(0, seconds), end) : max(0, seconds)
+    player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
       DispatchQueue.main.async { guard let self, finished, self.player.currentItem === item, self.tracks.indices.contains(self.index) else { return }; self.event("playback-progress", ["position": self.position(), "duration": self.duration(), "track": self.index, "trackId": self.tracks[self.index]["id"] ?? ""]); self.nowPlaying() }
     }
   }
@@ -161,12 +159,15 @@ private final class NativePlayback {
       AVURLAssetPreferPreciseDurationAndTimingKey: true,
       "AVURLAssetHTTPHeaderFieldsKey": track["headers"] as? [String: String] ?? [:]
     ])
-    return AVPlayerItem(asset: asset)
+    let item = AVPlayerItem(asset: asset, automaticallyLoadedAssetKeys: ["tracks", "duration"])
+    PlaybackTimeline.configure(item, streamDuration: track["playbackDurationSeconds"] as? Double)
+    return item
   }
   private func select(_ next: Int, _ seconds: Double, preserveCurrent: Bool = false) throws {
     guard tracks.indices.contains(next) else { throw NSError(domain: "MavrixfyPlayback", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid queue index."]) }
     let retained = preserveCurrent && player.currentItem?.status != .failed ? player.currentItem : nil
     let selected = try retained ?? makeItem(tracks[next])
+    if retained != nil { PlaybackTimeline.configure(selected, streamDuration: tracks[next]["playbackDurationSeconds"] as? Double) }
     // Updating only the upcoming window must preserve an active interruption's
     // resume intent. Only an actual source/selection change invalidates it.
     if retained == nil { revision += 1; interruptionRevision = nil }
@@ -293,7 +294,13 @@ private final class NativePlayback {
         let metadata = args["metadata"] as? [String: Any] ?? [:]; let oldURL = tracks[next]["url"] as? String
         let oldHeaders = tracks[next]["headers"] as? [String: String] ?? [:]
         tracks[next].merge(metadata) { _, new in new }
-        if oldURL != tracks[next]["url"] as? String || oldHeaders != (tracks[next]["headers"] as? [String: String] ?? [:]) { try select(index, position(), preserveCurrent: next != index) } else { nowPlaying() }
+        if oldURL != tracks[next]["url"] as? String || oldHeaders != (tracks[next]["headers"] as? [String: String] ?? [:]) { try select(index, position(), preserveCurrent: next != index) }
+        else {
+          for item in player.items() where itemIndices[ObjectIdentifier(item)] == next {
+            PlaybackTimeline.configure(item, streamDuration: tracks[next]["playbackDurationSeconds"] as? Double)
+          }
+          nowPlaying()
+        }
       }
     case "add": let at = max(0, min(tracks.count, next)); let additions = args["tracks"] as? [[String: Any]] ?? []; tracks.insert(contentsOf: additions, at: at); if index >= 0 { try select(at <= index ? index + additions.count : index, position(), preserveCurrent: true) } else if !tracks.isEmpty { try select(0, 0) }
     case "remove": if tracks.indices.contains(next) { let preserve = next != index; let retainedPosition = preserve ? position() : 0; tracks.remove(at: next); if tracks.isEmpty { pause(); player.removeAllItems(); itemIndices = [:]; index = -1 } else { try select(min(index > next ? index - 1 : index, tracks.count - 1), retainedPosition, preserveCurrent: preserve) } }

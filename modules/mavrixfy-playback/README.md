@@ -435,3 +435,29 @@ The iPhone was unavailable to USB tools (`NoDeviceConnectedError`), so the new
 format has not been played through AVPlayer to completion on that phone.
 Re-test full playback, seek, automatic Next and lock-screen timing on the
 updated app before considering the silent-tail symptom resolved.
+
+## Native iOS timeline boundary
+
+The official `Subha Hone Na De` video (`Y7G-tYRzwYY`) resolves through the
+actual iOS transport to 271.557 seconds, AAC-LC (`mp4a.40.2`), about 131 kb/s.
+The supplied IPA screenshot shows 9:03, approximately twice that timeline.
+Expo preview already uses resolved-stream timing and has a decoder-overrun
+recovery; the native IPA previously used raw `AVPlayerItem.duration` alone.
+
+Native items now set Apple's `forwardPlaybackEndTime` from the selected
+stream's finite positive `playbackDurationSeconds` before enqueueing. Asset
+tracks and duration are loaded before readiness. The same effective native
+boundary supplies snapshots, progress, seek limits and Now Playing metadata.
+Apple's raw item duration excludes this boundary, so the effective duration
+is calculated once in `PlaybackTimeline`. Catalog duration never sets an end
+boundary or native seek limit. Local/unknown-duration sources retain the
+default native EOF. Updating metadata or preserving the current item updates
+its boundary without restarting playback. Android and Expo are unchanged.
+
+The macOS workflow now compiles a real AVFoundation regression using local
+PCM assets: native boundary EOF/automatic Next, pause/resume, seek on the
+successor, and invalid/unknown durations. This test has not run on Windows;
+Swift grammar parsing is not native compilation. 530 JavaScript regressions
+and TypeScript passed locally. USB diagnostics currently report no connected
+iPhone. A new signed IPA and device testing remain required to confirm the
+timing fix and check that complete audio plays before automatic Next.

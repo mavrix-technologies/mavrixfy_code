@@ -61,6 +61,16 @@ jobs:
           "$RUNNER_TEMP/ios-playback-command-tests"
 
       # ── Expo prebuild ─────────────────────────────────────────────────────
+      - name: Test native iOS playback timeline
+        run: |
+          set -euo pipefail
+          xcrun swiftc \
+            -parse-as-library \
+            modules/mavrixfy-playback/ios/PlaybackTimeline.swift \
+            scripts/ios-playback-timeline.test.swift \
+            -o "$RUNNER_TEMP/ios-playback-timeline-tests"
+          "$RUNNER_TEMP/ios-playback-timeline-tests"
+
       # Regenerate the project every time; never restore old JS bundles,
       # Pods integration or app products through an overlapping ios/ cache.
       - name: Prebuild iOS
