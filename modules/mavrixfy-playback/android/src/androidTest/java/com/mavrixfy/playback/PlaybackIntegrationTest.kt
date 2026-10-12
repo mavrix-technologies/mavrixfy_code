@@ -160,4 +160,64 @@ class PlaybackIntegrationTest {
       onMain { engine.command("reset", emptyMap()); engine.emit = null }; scenario.close()
     }
   }
+
+  @Test fun legacyBrowseSelectionWaitsForSharedControllerAndDoesNotClearItsQueue() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val scenario = ActivityScenario.launch(PlaybackTestActivity::class.java)
+    val remote = AtomicReference<android.media.session.MediaController>()
+    val requests = CopyOnWriteArrayList<Map<String, Any?>>()
+    var browser: MediaBrowser? = null
+    lateinit var engine: PlaybackEngine
+    val files = listOf(mapOf("id" to "browse-a", "url" to tone("browse-a.wav", 30)), mapOf("id" to "browse-b", "url" to tone("browse-b.wav", 30)))
+    try {
+      onMain {
+        engine = PlaybackEngine.get(context)
+        engine.emit = { name, data ->
+          if (name == "car-play-media") {
+            requests.add(data)
+            // Reproduce an asynchronous JS resolver finishing after the callback.
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+              val id = data["id"]
+              if (id == "missing") engine.command("carResolution", mapOf("requestId" to data["requestId"], "error" to "Unavailable"))
+              else if (id != "cancelled") {
+                val index = files.indexOfFirst { it["id"] == id }
+                engine.command("setQueue", mapOf("tracks" to files, "index" to index))
+                engine.command("play", emptyMap())
+                engine.command("carResolution", mapOf("requestId" to data["requestId"], "mediaId" to id))
+              }
+            }, 300)
+          }
+        }
+        context.startService(Intent(context, PlaybackService::class.java))
+        engine.command("setQueue", mapOf("tracks" to files)); engine.command("play", emptyMap())
+        browser = MediaBrowser(context, ComponentName(context, PlaybackService::class.java), object : MediaBrowser.ConnectionCallback() {
+          override fun onConnected() { remote.set(android.media.session.MediaController(context, browser!!.sessionToken)) }
+        }, null)
+        browser!!.connect()
+      }
+      awaitCondition { remote.get() != null }
+      for (id in listOf("browse-b", "browse-a", "browse-b")) {
+        onMain { remote.get().transportControls.playFromMediaId(id, null) }
+        awaitCondition { state(engine)["state"] == "playing" && (state(engine)["queue"] as List<*>).size == 2 && state(engine)["index"] == files.indexOfFirst { it["id"] == id } }
+        Thread.sleep(600)
+        assertEquals("playing", state(engine)["state"])
+        assertTrue((state(engine)["position"] as Number).toDouble() > 0.1)
+      }
+      onMain { remote.get().transportControls.playFromMediaId("missing", null) }
+      awaitCondition { requests.any { it["id"] == "missing" } }
+      Thread.sleep(600)
+      assertEquals("playing", state(engine)["state"])
+      assertEquals(2, (state(engine)["queue"] as List<*>).size)
+      onMain { remote.get().transportControls.playFromMediaId("cancelled", null) }
+      awaitCondition { requests.any { it["id"] == "cancelled" } }
+      onMain { engine.command("pause", emptyMap()) }
+      val cancelled = requests.last()
+      onMain { engine.command("carResolution", mapOf("requestId" to cancelled["requestId"], "mediaId" to "browse-b")) }
+      Thread.sleep(600)
+      assertEquals(false, state(engine)["playWhenReady"])
+    } finally {
+      onMain { browser?.disconnect(); engine.command("reset", emptyMap()); engine.emit = null }
+      scenario.close()
+    }
+  }
 }

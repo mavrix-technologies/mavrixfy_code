@@ -79,7 +79,7 @@ if (Test-Path "package.json") {
         $iosDeps = @(
             "react-native",
             "expo-router",
-            "react-native-audio-api",
+            "expo-modules-core",
             "@react-native-google-signin/google-signin"
         )
         
@@ -88,6 +88,18 @@ if (Test-Path "package.json") {
                 Write-Host "   ✅ $dep`: $($deps.$dep)" -ForegroundColor Green
             } else {
                 Write-Host "   ⚠️  $dep not found" -ForegroundColor Yellow
+            }
+        }
+        foreach ($nativeFile in @(
+            "modules/mavrixfy-playback/expo-module.config.json",
+            "modules/mavrixfy-playback/ios/MavrixfyPlayback.podspec",
+            "modules/mavrixfy-playback/ios/MavrixfyPlaybackModule.swift"
+        )) {
+            if (Test-Path -LiteralPath $nativeFile) {
+                Write-Host "   ✅ $nativeFile" -ForegroundColor Green
+            } else {
+                Write-Host "   ❌ Missing local playback module file: $nativeFile" -ForegroundColor Red
+                $ErrorCount++
             }
         }
     } catch {

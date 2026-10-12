@@ -145,6 +145,9 @@ export function getNativeCarClient() {
     updateCatalog(json: string, _activeId: string) { void command("catalog", { json }).catch(error => logger.warn("[Car] Catalog failed", error)); },
     updateControls(id: string, shuffled: boolean, repeat: string, liked: boolean) { void command("controls", { id, shuffled, repeat, liked }).catch(error => logger.warn("[Car] Controls failed", error)); },
     reportError(message: string) { logger.warn("[Car]", message); },
+    async completeSelection(requestId: string, mediaId?: string, error?: string) {
+      await command("carResolution", { requestId, mediaId, error });
+    },
   };
 }
 export function getNativeAudioEffects() { return lastEffects; }

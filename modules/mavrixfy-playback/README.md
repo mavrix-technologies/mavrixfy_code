@@ -58,7 +58,9 @@ gradlew.bat :mavrixfy-playback:connectedDebugAndroidTest
 ```
 
 Instrumentation covers two complete generated audio files with automatic Next
-while backgrounded, plus pause/seek/reorder/resume. It does not prove remote
+while backgrounded, pause/seek/reorder/resume, named platform media-button
+commands, and transient audio-focus loss/gain with explicit-pause protection.
+It does not prove remote
 stream reliability or audible physical-device output. Before release, compile
 and exercise iOS on Xcode/iPhone and verify real streams, airplane mode,
 screen lock, rotation/StandBy, headset disconnect, calls, Bluetooth, car
@@ -126,3 +128,62 @@ A 60-second locked/background capture is in `outputs/performance/`.
 `dumpsys cpuinfo` reported an older foreground sampling window on this device,
 so its repeated CPU figures cannot establish current background CPU usage.
 USB charging also prevents a meaningful battery-drain conclusion.
+
+## External-controller verification on 2026-10-12
+
+All four native instrumentation tests passed on the vivo Android 11 phone.
+Named platform media-button Pause/Play/Next/headset-hook commands passed via
+the application's own MediaBrowser session token. Simulated transient audio
+focus paused and resumed playback; explicit user Pause during the interruption
+prevented automatic resume. This is not a real incoming-call test.
+
+boAt Rockerz 400 Bluetooth audio output was confirmed by the user and the
+device's A2DP route. Physical headset transport results remain inconclusive:
+another audio application was active during those checks.
+
+Google's Android Auto Desktop Head Unit connected over the phone's head-unit
+server and ADB port 5277. DHU checks passed for Pause/Resume, Next/Previous,
+automatic track advance, Queue/Recently Played browsing and song selection,
+and Liked Songs browsing. Selecting "Tu Meri Main Tera Main Tera Tu Meri"
+outside the previous queue reached playing state. However, selecting "Apna
+Bana Le" failed on retry: DHU displayed "Could not load your selection" and
+the native session became stopped with empty metadata. A later retry of the
+previously successful "Tu Meri" selection also ended stopped. This exposed a
+race in the old `onAddMediaItems` callback: it emitted an asynchronous JavaScript
+selection and immediately returned an empty list, allowing Media3 to clear the
+shared controller's queue.
+The selected tracks reached native playing state with advancing position;
+title/artwork updates were observed after settling. The native service stayed
+foreground and the application process remained alive. These checks do not
+establish physical car audio, cold-start catalog availability, voice search,
+or safety of anonymous ADB media-key dispatch (the upstream crash above).
+Local screenshots and native-state/log captures are under `outputs/dhu-*`
+and `outputs/android-auto-*`.
+
+The fix uses `onSetMediaItems` with a pending `ListenableFuture`. The shared
+controller completes its normal selection before acknowledging the request;
+Media3 then receives the populated native playlist and current start position.
+Unavailable selections fail the future instead of returning an empty playlist.
+Request IDs reject stale acknowledgements, new selections supersede old ones,
+and explicit Pause/Stop/reset, service destruction and a 30-second deadline
+settle pending requests. No second audio engine or resolver was introduced.
+
+All five physical-phone native instrumentation tests passed, including a new
+legacy MediaBrowser/MediaController test with delayed selection, repeated
+switching, unavailable media and Pause cancellation. TypeScript, changed-code
+lint and all 515 JavaScript regression tests passed; the updated car-bridge test
+also passed. The rebuilt APK was installed preserving app data. DHU selected
+"Apna Bana Le", switched to "Tu Meri", and selected "Apna Bana Le" again; all
+reached playing state with advancing position. The repeated "Apna" playback
+reached 3:33 before an intentional DHU Pause. Foreground service and app process
+remained alive, with no application crash/playback failure in the captured logs.
+DHU Resume and Next subsequently passed. "Saiyaara" played to completion and
+automatically advanced to "Naal Nachna" without touch; the next track reached
+native playing state with an advancing position.
+Native runtime version is now `3.3.0-33002-native-player2` to prevent an older
+OTA JavaScript bundle from running with the new acknowledgement contract.
+Expo regenerated the Android runtime resource from app config. The final
+runtime-2 release APK built successfully, its signature/runtime resource were
+verified, and it was installed without clearing app data. A fresh DHU selection
+of "Apna Bana Le" reached playing state at 21 seconds with `error=null` and
+`isForeground=true`; final app logs had no matching crash/playback failure.

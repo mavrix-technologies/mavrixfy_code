@@ -86,8 +86,13 @@ test('resolved next source updates the native queue without allocating a preload
   assert.equal(f.calls.at(-1)[0],'update');
   assert.equal(f.calls.at(-1)[1].onlyUpcoming,true);
 });
-test('Android car browsing uses the same native bridge',async()=>{
-  const f=fixture();const car=f.getNativeCarClient();let id;
-  car.addListener('MavrixfyPlayMediaId',event=>id=event.id);await f.NativePlaybackPlayer.setupPlayer();
-  f.emit('car-play-media',{id:'b'});assert.equal(id,'b');
+test('Android car browsing acknowledges the native request without a second playback command',async()=>{
+  const f=fixture();const car=f.getNativeCarClient();let event;
+  car.addListener('MavrixfyPlayMediaId',value=>event=value);await f.NativePlaybackPlayer.setupPlayer();
+  f.emit('car-play-media',{id:'b',requestId:'selection-1'});assert.deepEqual(event,{id:'b',requestId:'selection-1'});
+  await car.completeSelection(event.requestId,event.id);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.calls.at(-1))),['carResolution',{requestId:'selection-1',mediaId:'b'}]);
+  await car.completeSelection('selection-2',undefined,'Unavailable');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.calls.at(-1))),['carResolution',{requestId:'selection-2',error:'Unavailable'}]);
+  assert.equal(f.calls.some(([name])=>name==='play'||name==='setQueue'),false);
 });

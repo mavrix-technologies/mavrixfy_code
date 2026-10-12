@@ -134,53 +134,71 @@ export function useAndroidAuto({
         }
       },
     );
-    const playSelection = (id: string) => {
+    const playSelection = async (id: string, requestId: string) => {
       searchAbort.current?.abort();
       const groups = Object.values(library.current);
       const selectedQueue = groups.find((songs) =>
         songs.some((song) => song.id === id),
       );
       const selected = selectedQueue?.find((song) => song.id === id);
-      if (selected) void actions.current.playSong(selected, selectedQueue);
-      else
+      if (!selected) {
         mediaLibrary.reportError(
           "This song is no longer available. Select another song.",
         );
+        await mediaLibrary.completeSelection(requestId, undefined, "Song unavailable");
+        return;
+      }
+      try {
+        await actions.current.playSong(selected, selectedQueue);
+        await mediaLibrary.completeSelection(requestId, selected.id);
+      } catch (error) {
+        logger.warn("[AndroidAuto] Selection failed", error);
+        await mediaLibrary.completeSelection(requestId, undefined, "Song selection failed");
+      }
     };
     const play = emitter.addListener(
       "MavrixfyPlayMediaId",
-      ({ id }: { id: string }) => playSelection(id),
+      ({ id, requestId }: { id: string; requestId: string }) => {
+        void playSelection(id, requestId).catch(error => logger.warn("[AndroidAuto] Selection acknowledgement failed", error));
+      },
     );
     const search = emitter.addListener(
       "MavrixfyPlaySearch",
-      ({ query }: { query: string }) => {
+      ({ query, requestId }: { query: string; requestId: string }) => {
         searchAbort.current?.abort();
         const first =
           library.current.queue[0] ||
           library.current.recent[0] ||
           library.current.favorites[0];
         if (!query.trim()) {
-          if (first) playSelection(first.id);
+          if (first) void playSelection(first.id, requestId).catch(error => logger.warn("[AndroidAuto] Selection acknowledgement failed", error));
+          else void mediaLibrary.completeSelection(requestId, undefined, "No songs available").catch(error => logger.warn("[AndroidAuto] Selection acknowledgement failed", error));
           return;
         }
         const controller = new AbortController();
         searchAbort.current = controller;
         const scope = getAccountScope();
         void searchRepository(query, "songs", controller.signal)
-          .then((results) => {
-            if (controller.signal.aborted || !isCurrentAccount(scope)) return;
-            if (results.songs[0])
-              void actions.current.playSong(results.songs[0], results.songs);
-            else
+          .then(async (results) => {
+            if (controller.signal.aborted || !isCurrentAccount(scope)) {
+              await mediaLibrary.completeSelection(requestId, undefined, "Search cancelled");
+              return;
+            }
+            if (results.songs[0]) {
+              await actions.current.playSong(results.songs[0], results.songs);
+              await mediaLibrary.completeSelection(requestId, results.songs[0].id);
+            } else {
               mediaLibrary.reportError("No songs found. Try another search.");
+              await mediaLibrary.completeSelection(requestId, undefined, "No songs found");
+            }
           })
-          .catch((error) => {
-            if (controller.signal.aborted) return;
+          .catch(async (error) => {
             logger.warn("[AndroidAuto] Voice search failed", error);
             mediaLibrary.reportError(
               "Search is unavailable. Check your connection and try again.",
             );
-          });
+            await mediaLibrary.completeSelection(requestId, undefined, "Search failed");
+          }).catch(error => logger.warn("[AndroidAuto] Search acknowledgement failed", error));
       },
     );
     return () => {

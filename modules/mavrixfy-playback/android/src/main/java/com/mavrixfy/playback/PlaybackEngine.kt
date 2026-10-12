@@ -63,6 +63,8 @@ class PlaybackEngine private constructor(private val context: Context) {
   var catalog = JSONObject()
   var controls = emptyMap<String, Any?>()
   var controlsChanged: (() -> Unit)? = null
+  var carResolutionComplete: ((Map<String, Any?>) -> Unit)? = null
+  var cancelCarResolution: (() -> Unit)? = null
   var remoteSelection = false
   var internalChange = false
   private var tracks = mutableListOf<Map<String, Any?>>()
@@ -145,6 +147,7 @@ class PlaybackEngine private constructor(private val context: Context) {
     val index = (args["index"] as? Number)?.toInt() ?: 0
     val position = ((args["position"] as? Number)?.toDouble() ?: 0.0).coerceAtLeast(0.0)
     when (name) {
+      "carResolution" -> carResolutionComplete?.invoke(args)
       "catalog" -> catalog = JSONObject(args["json"] as? String ?: "{}")
       "controls" -> { controls = args; controlsChanged?.invoke() }
       "setQueue" -> {
@@ -180,10 +183,10 @@ class PlaybackEngine private constructor(private val context: Context) {
       "skip" -> if (index in tracks.indices) { player.seekTo(index, (position * 1000).toLong()); player.prepare() }
       "begin" -> { internalChange = true; player.pause() }
       "play" -> { internalChange = false; if (player.playbackState == Player.STATE_ENDED) player.seekToDefaultPosition(); if (player.playbackState == Player.STATE_IDLE) player.prepare(); player.play() }
-      "pause" -> { internalChange = false; player.pause() }
-      "stop" -> { internalChange = false; player.pause(); player.seekTo(0) }
+      "pause" -> { cancelCarResolution?.invoke(); internalChange = false; player.pause() }
+      "stop" -> { cancelCarResolution?.invoke(); internalChange = false; player.pause(); player.seekTo(0) }
       "seek" -> { player.seekTo((position * 1000).toLong()); event("playback-progress", mapOf("position" to position, "duration" to duration(), "track" to player.currentMediaItemIndex)) }
-      "reset" -> { internalChange = false; player.stop(); player.clearMediaItems(); tracks.clear(); equalizer?.enabled = false }
+      "reset" -> { cancelCarResolution?.invoke(); internalChange = false; player.stop(); player.clearMediaItems(); tracks.clear(); equalizer?.enabled = false }
       "repeat" -> player.repeatMode = when(args["mode"]) { "track" -> Player.REPEAT_MODE_ONE; "queue" -> Player.REPEAT_MODE_ALL; else -> Player.REPEAT_MODE_OFF }
       "volume" -> player.volume = ((args["volume"] as? Number)?.toFloat() ?: 1f).coerceIn(0f, 1f)
       "equalizer" -> { gains = (args["gains"] as? List<Number> ?: emptyList()).map { it.toDouble() }; eqEnabled = args["enabled"] == true; runCatching { applyEqualizer() } }

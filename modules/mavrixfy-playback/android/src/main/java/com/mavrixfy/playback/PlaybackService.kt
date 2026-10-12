@@ -13,6 +13,8 @@ import androidx.media3.session.LibraryResult
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
+import java.util.UUID
 import android.os.Bundle
 import android.app.PendingIntent
 import androidx.media3.session.SessionCommand
@@ -22,6 +24,16 @@ import androidx.media3.session.CommandButton
 /** The OS service, rather than a React view, owns the native media session. */
 class PlaybackService : MediaLibraryService() {
   private var session: MediaLibrarySession? = null
+  private val handler = Handler(Looper.getMainLooper())
+  private var pendingResolution: SettableFuture<MediaSession.MediaItemsWithStartPosition>? = null
+  private var pendingId: String? = null
+  private val resolutionTimeout = Runnable { failResolution("Song selection timed out") }
+  private fun failResolution(message: String) {
+    handler.removeCallbacks(resolutionTimeout)
+    pendingResolution?.setException(IllegalStateException(message))
+    pendingResolution = null
+    pendingId = null
+  }
   private val engine get() = PlaybackEngine.get(this)
   private fun item(id: String, title: String, artist: String? = null, cover: String? = null, browsable: Boolean = false): MediaItem =
     MediaItem.Builder().setMediaId(id).setMediaMetadata(MediaMetadata.Builder().setTitle(title).setArtist(artist)
@@ -29,11 +41,29 @@ class PlaybackService : MediaLibraryService() {
   override fun onCreate() {
     super.onCreate()
     engine.attachService()
+    engine.cancelCarResolution = { failResolution("Song selection cancelled") }
+    engine.carResolutionComplete = { args ->
+      if (args["requestId"] == pendingId && pendingResolution != null) {
+        val expectedId = args["mediaId"] as? String
+        val player = engine.player
+        if (args["error"] != null || player.mediaItemCount == 0 || player.currentMediaItem?.mediaId != expectedId || player.playerError != null) {
+          failResolution("Selected song could not be resolved")
+        } else {
+          val result = MediaSession.MediaItemsWithStartPosition(
+            (0 until player.mediaItemCount).map(player::getMediaItemAt), player.currentMediaItemIndex, player.currentPosition)
+          val future = pendingResolution
+          pendingResolution = null
+          pendingId = null
+          handler.removeCallbacks(resolutionTimeout)
+          future?.set(result)
+        }
+      }
+    }
     val remotePlayer = object : ForwardingPlayer(engine.player) {
       override fun play() { engine.internalChange = false; engine.event("remote-play"); engine.player.play() }
-      override fun pause() { engine.internalChange = false; engine.event("remote-pause"); engine.player.pause() }
+      override fun pause() { engine.cancelCarResolution?.invoke(); engine.internalChange = false; engine.event("remote-pause"); engine.player.pause() }
       override fun setPlayWhenReady(ready: Boolean) { engine.internalChange = false; engine.event(if (ready) "remote-play" else "remote-pause"); engine.player.playWhenReady = ready }
-      override fun stop() { engine.internalChange = false; engine.event("remote-stop"); engine.player.stop() }
+      override fun stop() { engine.cancelCarResolution?.invoke(); engine.internalChange = false; engine.event("remote-stop"); engine.player.stop() }
       private fun select(action: () -> Unit) { val resume = engine.internalChange; engine.internalChange = false; engine.remoteSelection = true; action(); if (resume) engine.player.play(); Handler(Looper.getMainLooper()).post { engine.remoteSelection = false } }
       override fun seekToNext() { select { engine.player.seekToNext() } }
       override fun seekToPrevious() { select { engine.player.seekToPrevious() } }
@@ -62,13 +92,22 @@ class PlaybackService : MediaLibraryService() {
         }
         return Futures.immediateFuture(LibraryResult.ofItemList(children.drop(page.coerceAtLeast(0) * pageSize.coerceAtLeast(1)).take(pageSize.coerceAtLeast(1)), params))
       }
-      override fun onAddMediaItems(session: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>): ListenableFuture<MutableList<MediaItem>> {
-        mediaItems.firstOrNull()?.let {
-          val query = it.requestMetadata.searchQuery
-          if (query != null) engine.event("car-search", mapOf("query" to query))
-          else engine.event("car-play-media", mapOf("id" to it.mediaId))
-        }
-        return Futures.immediateFuture(mutableListOf())
+      override fun onSetMediaItems(session: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+        failResolution("Song selection superseded")
+        val requested = mediaItems.getOrNull(startIndex.coerceAtLeast(0))
+          ?: return Futures.immediateFailedFuture(IllegalArgumentException("Empty song selection"))
+        if (engine.emit == null) return Futures.immediateFailedFuture(IllegalStateException("Open Mavrixfy to load its music catalog"))
+        val id = UUID.randomUUID().toString()
+        val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+        pendingId = id
+        pendingResolution = future
+        handler.postDelayed(resolutionTimeout, 30000)
+        val query = requested.requestMetadata.searchQuery
+        if (query != null) engine.event("car-search", mapOf("query" to query, "requestId" to id))
+        else engine.event("car-play-media", mapOf("id" to requested.mediaId, "requestId" to id))
+        // Media3 applies the resolved queue only after the shared controller
+        // has completed selection. An empty immediate result clears that queue.
+        return future
       }
     }).build()
     // JS controls the player directly, so no MediaController bind implicitly
@@ -88,6 +127,9 @@ class PlaybackService : MediaLibraryService() {
   }
   override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
   override fun onDestroy() {
+    failResolution("Playback service stopped")
+    engine.carResolutionComplete = null
+    engine.cancelCarResolution = null
     engine.controlsChanged = null
     session?.release()
     session = null
