@@ -2,6 +2,7 @@ import ExpoModulesCore
 import AVFoundation
 import MediaPlayer
 import UIKit
+import OSLog
 
 public final class MavrixfyPlaybackModule: Module {
   public func definition() -> ModuleDefinition {
@@ -27,6 +28,9 @@ private final class NativePlayback {
   var emit: ((String, [String: Any]) -> Void)?
   private var tracks = [[String: Any]]()
   private var items = [AVPlayerItem]()
+  private var itemIndices = [ObjectIdentifier: Int]()
+  private let queueWindowSize = 3
+  private let playbackLog = Logger(subsystem: "com.mavrixfy.playback", category: "Playback")
   private var index = -1
   private var intendedPlay = false
   private var revision = 0
@@ -40,6 +44,7 @@ private final class NativePlayback {
   private var notifications = [NSObjectProtocol]()
   private var progressObserver: Any?
   private var itemObservation: NSKeyValueObservation?
+  private var failedItem: ObjectIdentifier?
   private init() {
     player.automaticallyWaitsToMinimizeStalling = true
     observations.append(player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
@@ -74,16 +79,19 @@ private final class NativePlayback {
       self?.event("remote-pause"); self?.pause()
     })
     notifications.append(center.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] event in
-      guard let self, let ended = event.object as? AVPlayerItem, self.items.contains(where: { $0 === ended }) else { return }
+      guard let self, let ended = event.object as? AVPlayerItem, let endedIndex = self.itemIndices[ObjectIdentifier(ended)] else { return }
       if self.repeatMode == "track", self.intendedPlay { self.player.seek(to: .zero) { [weak self] _ in DispatchQueue.main.async { if self?.intendedPlay == true { self?.player.play() } } } }
-      else if ended === self.items.last {
+      else if endedIndex == self.tracks.count - 1 {
         if self.repeatMode == "queue", self.intendedPlay { do { try self.select(0, 0) } catch { self.fail(error.localizedDescription) } }
         else { self.event("playback-state", ["state": "ended"]); self.event("playback-queue-ended") }
+      } else if self.player.currentItem == nil, self.intendedPlay {
+        do { try self.select(endedIndex + 1, 0) } catch { self.fail(error.localizedDescription, error: error) }
       }
+      if ended !== self.player.currentItem { self.itemIndices.removeValue(forKey: ObjectIdentifier(ended)) }
     })
     notifications.append(center.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: nil, queue: .main) { [weak self] event in
       guard let self, let item = event.object as? AVPlayerItem, item === self.player.currentItem else { return }
-      self.fail("Native audio stream failed.")
+      self.failItem(item, error: event.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)
     })
     let commands = MPRemoteCommandCenter.shared()
     commands.playCommand.addTarget { [weak self] _ in guard let self else { return .commandFailed }; do { self.event("remote-play"); try self.play(); return .success } catch { self.fail(error.localizedDescription); return .commandFailed } }
@@ -112,7 +120,9 @@ private final class NativePlayback {
   }
   private func play() throws {
     revision += 1; intendedPlay = true
-    if player.currentItem == nil, tracks.indices.contains(index) { try select(index, 0) }
+    if tracks.indices.contains(index), player.currentItem == nil || player.currentItem?.status == .failed {
+      try select(index, player.currentItem == nil ? 0 : position())
+    }
     try activate(); player.play(); event("playback-play-when-ready", ["playWhenReady": true]); nowPlaying()
   }
   private func pause() { revision += 1; interruptionRevision = nil; intendedPlay = false; player.pause(); event("playback-play-when-ready", ["playWhenReady": false, "reason": "pause"]); nowPlaying() }
@@ -123,37 +133,79 @@ private final class NativePlayback {
     }
   }
   private func makeItem(_ track: [String: Any]) throws -> AVPlayerItem {
-    let raw = (track["url"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "mavrixfy://unresolved/\(track["id"] as? String ?? "track")"
-    guard let url = URL(string: raw) else { throw NSError(domain: "MavrixfyPlayback", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid playback URL."]) }
+    guard let raw = track["url"] as? String, let url = URL(string: raw),
+      ["https", "http", "file"].contains(url.scheme?.lowercased() ?? "") else {
+      throw NSError(domain: "MavrixfyPlayback", code: 1, userInfo: [NSLocalizedDescriptionKey: "Playback stream is not ready. Select the song again."])
+    }
     let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": track["headers"] as? [String: String] ?? [:]])
     return AVPlayerItem(asset: asset)
   }
   private func select(_ next: Int, _ seconds: Double, preserveCurrent: Bool = false) throws {
     guard tracks.indices.contains(next) else { throw NSError(domain: "MavrixfyPlayback", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid queue index."]) }
-    var prepared = try tracks[next...].map(makeItem)
-    let retained = preserveCurrent ? player.currentItem : nil
-    if let retained { prepared[0] = retained }
+    let retained = preserveCurrent && player.currentItem?.status != .failed ? player.currentItem : nil
+    let selected = try retained ?? makeItem(tracks[next])
     revision += 1; interruptionRevision = nil
     if retained == nil { player.pause(); player.removeAllItems() }
     else { player.items().filter { $0 !== retained }.forEach { player.remove($0) } }
-    items = prepared
-    prepared.filter { $0 !== retained }.forEach { player.insert($0, after: nil) }
+    itemIndices = [ObjectIdentifier(selected): next]
+    failedItem = nil
+    items = [selected]
+    if retained == nil { player.insert(selected, after: nil) }
+    fillQueueWindow(from: next)
     index = next; if retained == nil { seek(seconds) }; reconcileItem()
     if intendedPlay && retained == nil { try activate(); player.play() }
   }
+  private func fillQueueWindow(from currentIndex: Int) {
+    // AVQueuePlayer starts loading inserted assets. Keep the logical playlist
+    // in tracks; enqueue only the current item and two resolved successors.
+    items = player.items()
+    while items.count < queueWindowSize {
+      let next = currentIndex + items.count
+      guard tracks.indices.contains(next), let raw = tracks[next]["url"] as? String, !raw.isEmpty else { break }
+      do {
+        let item = try makeItem(tracks[next])
+        guard player.canInsert(item, after: nil) else { break }
+        itemIndices[ObjectIdentifier(item)] = next
+        player.insert(item, after: nil)
+        items.append(item)
+      } catch { break }
+    }
+  }
   private func reconcileItem() {
-    guard let current = player.currentItem, let offset = items.firstIndex(where: { $0 === current }) else { return }
-    // AVQueuePlayer removes completed items; original identities preserve queue indices.
-    let base = tracks.count - items.count
-    index = base + offset
+    guard let current = player.currentItem, let currentIndex = itemIndices[ObjectIdentifier(current)], tracks.indices.contains(currentIndex) else { return }
+    index = currentIndex
+    fillQueueWindow(from: currentIndex)
     itemObservation = current.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-      DispatchQueue.main.async { guard let self, item === self.player.currentItem else { return }; if item.status == .failed { self.fail("Native audio stream failed.") } }
+      DispatchQueue.main.async { guard let self, item === self.player.currentItem else { return }; if item.status == .failed { self.failItem(item) } }
     }
     event("playback-active-track", ["index": index, "track": tracks[index], "externalSelection": remoteSelection])
     remoteSelection = false
     nowPlaying()
   }
-  private func fail(_ message: String) { pause(); event("playback-error", ["trackId": tracks.indices.contains(index) ? tracks[index]["id"] ?? "" : "", "message": message]) }
+  private func failItem(_ item: AVPlayerItem, error: Error? = nil) {
+    let identity = ObjectIdentifier(item)
+    guard failedItem != identity else { return }
+    failedItem = identity
+    let nativeError = error ?? item.error
+    let log = item.errorLog()?.events.last
+    if let log {
+      playbackLog.error("Stream error domain=\(log.errorDomain ?? "unknown", privacy: .public) code=\(log.errorStatusCode, privacy: .public)")
+    }
+    fail(nativeError?.localizedDescription ?? "Native audio stream failed.", error: nativeError)
+  }
+  private func fail(_ message: String, error: Error? = nil) {
+    pause()
+    var details: [String: Any] = ["trackId": tracks.indices.contains(index) ? tracks[index]["id"] ?? "" : "", "message": message]
+    if let nativeError = error as NSError? {
+      details["code"] = "\(nativeError.domain):\(nativeError.code)"
+      playbackLog.error("Playback error domain=\(nativeError.domain, privacy: .public) code=\(nativeError.code, privacy: .public)")
+      if let underlying = nativeError.userInfo[NSUnderlyingErrorKey] as? NSError {
+        details["underlyingCode"] = "\(underlying.domain):\(underlying.code)"
+        playbackLog.error("Underlying error domain=\(underlying.domain, privacy: .public) code=\(underlying.code, privacy: .public)")
+      }
+    }
+    event("playback-error", details)
+  }
   private func nowPlaying() {
     guard tracks.indices.contains(index) else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; return }
     let track = tracks[index]
@@ -190,14 +242,14 @@ private final class NativePlayback {
       let old = tracks.indices.contains(index) ? tracks[index] : nil
       tracks = args["tracks"] as? [[String: Any]] ?? []
       let preserve = args["preserveCurrentTrack"] as? Bool == true && tracks.indices.contains(next) && old?["id"] as? String == tracks[next]["id"] as? String && old?["url"] as? String == tracks[next]["url"] as? String && (old?["headers"] as? [String: String] ?? [:]) == (tracks[next]["headers"] as? [String: String] ?? [:])
-      if tracks.isEmpty { pause(); player.removeAllItems(); items = []; index = -1 } else { try select(next, seconds, preserveCurrent: preserve) }
+      if tracks.isEmpty { pause(); player.removeAllItems(); items = []; itemIndices = [:]; index = -1 } else { try select(next, seconds, preserveCurrent: preserve) }
     case "play": try play()
     case "begin": revision += 1; intendedPlay = true; player.pause(); event("playback-play-when-ready", ["playWhenReady": false, "reason": "source-change"])
     case "pause": pause()
     case "stop": pause(); seek(0)
     case "seek": seek(seconds)
     case "skip": try select(next, seconds)
-    case "reset": pause(); player.removeAllItems(); items = []; tracks = []; index = -1; MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    case "reset": pause(); player.removeAllItems(); items = []; itemIndices = [:]; tracks = []; index = -1; MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     case "repeat": repeatMode = args["mode"] as? String ?? "off"; player.actionAtItemEnd = repeatMode == "track" ? .pause : .advance
     case "volume": player.volume = Float(max(0, min(1, args["volume"] as? Double ?? 1)))
     case "update":
@@ -209,7 +261,7 @@ private final class NativePlayback {
         if oldURL != tracks[next]["url"] as? String || oldHeaders != (tracks[next]["headers"] as? [String: String] ?? [:]) { try select(index, position(), preserveCurrent: next != index) } else { nowPlaying() }
       }
     case "add": let at = max(0, min(tracks.count, next)); let additions = args["tracks"] as? [[String: Any]] ?? []; tracks.insert(contentsOf: additions, at: at); if index >= 0 { try select(at <= index ? index + additions.count : index, position(), preserveCurrent: true) } else if !tracks.isEmpty { try select(0, 0) }
-    case "remove": if tracks.indices.contains(next) { let preserve = next != index; let retainedPosition = preserve ? position() : 0; tracks.remove(at: next); if tracks.isEmpty { pause(); player.removeAllItems(); items = []; index = -1 } else { try select(min(index > next ? index - 1 : index, tracks.count - 1), retainedPosition, preserveCurrent: preserve) } }
+    case "remove": if tracks.indices.contains(next) { let preserve = next != index; let retainedPosition = preserve ? position() : 0; tracks.remove(at: next); if tracks.isEmpty { pause(); player.removeAllItems(); items = []; itemIndices = [:]; index = -1 } else { try select(min(index > next ? index - 1 : index, tracks.count - 1), retainedPosition, preserveCurrent: preserve) } }
     case "move": if tracks.indices.contains(next), let to = args["to"] as? Int, tracks.indices.contains(to) {
       var selected = index
       if next == index { selected = to } else if next < index && to >= index { selected -= 1 } else if next > index && to <= index { selected += 1 }

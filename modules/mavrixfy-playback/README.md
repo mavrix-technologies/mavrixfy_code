@@ -187,3 +187,37 @@ runtime-2 release APK built successfully, its signature/runtime resource were
 verified, and it was installed without clearing app data. A fresh DHU selection
 of "Apna Bana Le" reached playing state at 21 seconds with `error=null` and
 `isForeground=true`; final app logs had no matching crash/playback failure.
+
+## USB iPhone investigation on 2026-10-12
+
+Connected an iPhone running iOS 27.0.1 using the existing trusted USB pairing.
+Read-only checks verified the installed 3.3.0/33002 sideloaded app, audio
+background mode and a successful `native-player2` embedded-update launch.
+The user reproduced the "Salaam India" playback failure. Live Mavrixfy
+AVFoundation logs included `NSURLErrorDomain -1001` (timeout) and `-1002`
+(unsupported URL). The crash-report service returned no Mavrixfy crash reports.
+Other media processes were also active; their audio/logs are not app test passes.
+
+Source inspection found that iOS eagerly inserted the entire remaining logical
+playlist into AVQueuePlayer, including synthetic unresolved URLs. Saved queues
+contained 43–214 songs. The source fix limits inserted assets to the current
+song and two resolved successors, replenishes that window on native transitions
+and maps item identities to logical indices. Unresolved placeholders are no
+longer sent to AVFoundation. Explicit Retry recreates a failed item. Item errors
+now retain native/underlying error codes and log error-domain/code diagnostics
+without logging stream URLs or headers. Duplicate notifications for the same
+failed item are suppressed. This addresses confirmed unsafe loading behavior;
+it does not prove that every reported timeout was caused by queue pressure.
+
+USB logs also reported UIKit rejecting the legacy UIDevice orientation setter.
+`patches/expo-screen-orientation+57.0.2.patch` retains that fallback only before
+iOS 16 and updates supported orientations before requesting scene geometry on
+modern iOS. Targeted patch-package application was verified.
+
+TypeScript and all 515 JavaScript regressions passed. Swift compilation and the
+new native behavior have NOT been verified on the phone: Windows lacks Xcode,
+and the device's screenshot/developer service returned `InvalidService`.
+Rebuild the unsigned IPA on the macOS CI runner, re-sign/install it, then retest
+the reproduced failures, long queues, consecutive complete songs, native Next,
+Pause/Resume, seek, repeat, background/lock, interruptions and StandBy rotation.
+The installed iPhone app remains the previous native binary until that rebuild.
