@@ -114,7 +114,13 @@ private final class NativePlayback {
   }
   private func event(_ name: String, _ body: [String: Any] = [:]) { emit?(name, body) }
   private func position() -> Double { let value = player.currentTime().seconds; return value.isFinite ? max(0, value) : 0 }
-  private func duration() -> Double { let value = player.currentItem?.duration.seconds ?? 0; return value.isFinite ? max(0, value) : 0 }
+  private func duration() -> Double {
+    let measured = player.currentItem?.duration.seconds ?? 0
+    if measured.isFinite && measured > 0 { return measured }
+    guard tracks.indices.contains(index) else { return 0 }
+    let known = tracks[index]["playbackDurationSeconds"] as? Double ?? tracks[index]["duration"] as? Double ?? 0
+    return known.isFinite && known > 0 ? known : 0
+  }
   private func status() -> String {
     if player.currentItem?.status == .failed { return "error" }
     if tracks.isEmpty { return "none" }
@@ -140,7 +146,7 @@ private final class NativePlayback {
   private func seek(_ seconds: Double) {
     guard seconds.isFinite else { return }
     let item = player.currentItem
-    player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600)) { [weak self] finished in
+    player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
       DispatchQueue.main.async { guard let self, finished, self.player.currentItem === item else { return }; self.event("playback-progress", ["position": self.position(), "duration": self.duration(), "track": self.index]); self.nowPlaying() }
     }
   }

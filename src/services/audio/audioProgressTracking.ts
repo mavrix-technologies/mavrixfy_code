@@ -92,16 +92,19 @@ export function useAudioProgressTracking({
     const reported = typeof durOrFn === "function" ? durOrFn(durationSecondsRef.current) : durOrFn;
     if (!Number.isFinite(reported) || reported < 0) return;
     const song = currentSongRef.current;
-    const dur = playbackDuration(reported, song?.playbackDurationSeconds);
+    const dur = canUseLightweightAudioFallback
+      ? playbackDuration(reported, song?.playbackDurationSeconds)
+      : source === "media"
+        ? playbackDuration(reported) || playbackDuration(0, song?.playbackDurationSeconds)
+        : playbackDuration(0, song?.playbackDurationSeconds) || playbackDuration(reported);
     const songId = currentSongRef.current?.id ?? null;
     if (source === "media" && dur > 0) mediaDurationRef.current = { songId, seconds: dur };
-    if (source === "catalog" && mediaDurationRef.current?.songId === songId &&
-      playbackDuration(0, song?.playbackDurationSeconds) === 0) return;
+    if (source === "catalog" && mediaDurationRef.current?.songId === songId) return;
     durationSecondsRef.current = dur;
     const songDuration = toDurationSeconds(currentSongRef.current?.duration);
     const effectiveDur = dur > 0 ? dur : songDuration;
     updateProgressStore(positionSecondsRef.current, effectiveDur);
-  }, [currentSongRef, updateProgressStore]);
+  }, [canUseLightweightAudioFallback, currentSongRef, updateProgressStore]);
 
   const progressSongIdRef = useRef<string | null>(null);
 
@@ -117,8 +120,11 @@ export function useAudioProgressTracking({
     finishedSongRef.current = null;
     if (mediaDurationRef.current?.songId !== songId) mediaDurationRef.current = null;
     if (currentSong?.id) {
-      const initialDur = playbackDuration(mediaDurationRef.current?.songId === songId ? mediaDurationRef.current.seconds : toDurationSeconds(currentSong.duration),
-        currentSong.playbackDurationSeconds);
+      const knownDuration = mediaDurationRef.current?.songId === songId ? mediaDurationRef.current.seconds : toDurationSeconds(currentSong.duration);
+      const initialDur = canUseLightweightAudioFallback
+        ? playbackDuration(knownDuration, currentSong.playbackDurationSeconds)
+        : playbackDuration(mediaDurationRef.current?.songId === songId ? mediaDurationRef.current.seconds : 0)
+          || playbackDuration(0, currentSong.playbackDurationSeconds) || playbackDuration(knownDuration);
       durationSecondsRef.current = initialDur;
       seekOverrideRef.current = null;
       if (positionSecondsRef.current > 0) {
@@ -150,7 +156,7 @@ export function useAudioProgressTracking({
       resetPlaybackProgress();
     }
     return () => { active = false; };
-  }, [currentSong?.id, currentSong?.duration, currentSong?.playbackDurationSeconds, playRequestIdRef, setNativeDuration, updateProgressStore]);
+  }, [canUseLightweightAudioFallback, currentSong?.id, currentSong?.duration, currentSong?.playbackDurationSeconds, playRequestIdRef, setNativeDuration, updateProgressStore]);
 
   useEffect(() => {
     let mounted = true;
@@ -202,11 +208,11 @@ export function useAudioProgressTracking({
           }
           return;
         }
-        if (typeof status.position === "number") {
-          setNativePosition(status.position);
-        }
         if (typeof status.duration === "number" && status.duration > 0) {
           setNativeDuration(status.duration);
+        }
+        if (typeof status.position === "number") {
+          setNativePosition(status.position);
         }
         if (status.isBuffering && desiredPlayStateRef.current !== false) {
           updatePlaybackEngineSnapshot({ isBuffering: true });

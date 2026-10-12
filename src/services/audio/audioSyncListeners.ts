@@ -4,14 +4,13 @@ import { isYouTubeSong, peekYouTubeStream } from "@/services/youtube/YouTubeMusi
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
-import { songToTrack } from "@/services/audio/PlayerPlaybackResolver";
 import type { SeekOverride } from "@/services/audio/audioProgressTracking";
 import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { carPlayService } from "@/services/carPlayService";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import type { SleepTimerState, PlaybackQualityState } from "@/types/playbackTypes";
 import { toDurationSeconds } from "@/utils/timeFormatters";
-import { useEffect,useRef,type MutableRefObject } from "react";
+import { useEffect,type MutableRefObject } from "react";
 import { AppState,Platform } from "react-native";
 import type { NativePlaybackPlayer, State as AudioState, Event as AudioEvent } from "./NativePlaybackPlayer";
 
@@ -106,11 +105,6 @@ export function useAudioSyncListeners({
   toggleLike,
   likedSongIds,
 }: UseAudioSyncListenersOptions) {
-  const publishedLockScreenDurationRef = useRef<{
-    songId: string;
-    duration: number;
-  } | null>(null);
-
   // TrackPlayer native event handlers
   useEffect(() => {
     if (!isPlayerReady || !TrackPlayer) return;
@@ -133,18 +127,18 @@ export function useAudioSyncListeners({
         if (playbackLoadingRef.current) return;
         void TrackPlayer.getActiveTrack().then((track: any) => {
           if (desiredPlayStateRef.current !== true || playbackLoadingRef.current) return;
-          if (track?.id === currentSongRef.current?.id) return TrackPlayer.play();
+          // Native already executed the transport command. Only resolve a
+          // restored selection that has no matching native source.
+          if (track?.id === currentSongRef.current?.id) return;
           const song = currentSongRef.current;
           if (song) return playSongRef.current(song, queueRef.current, positionSecondsRef.current);
         }).catch((error: unknown) => logger.warn("[Audio] Remote play failed", error));
       }),
       subscribeTrackPlayerEvent(Event.RemotePause, () => {
         pauseIntent();
-        void TrackPlayer.pause().catch(() => {});
       }),
       subscribeTrackPlayerEvent(Event.RemoteStop, () => {
         pauseIntent();
-        void TrackPlayer.stop().catch(() => {});
       }),
       subscribeTrackPlayerEvent(Event.RemoteNext, () => void nextSongRef.current()),
       subscribeTrackPlayerEvent(Event.RemotePrevious, () => void prevSongRef.current()),
@@ -275,13 +269,10 @@ export function useAudioSyncListeners({
           }
         }
 
-        setNativePosition(pos);
         const song = currentSongRef.current;
         const nativeDuration = typeof event?.duration === "number" && event.duration > 0
           ? event.duration
           : 0;
-        const catalogDuration = toDurationSeconds(song?.duration);
-        const duration = nativeDuration || catalogDuration;
 
         if (nativeDuration > 0) {
           const dur = nativeDuration;
@@ -290,38 +281,9 @@ export function useAudioSyncListeners({
             song.duration = dur;
           }
         }
+        // Install this source's duration before clamping its position.
+        setNativePosition(pos);
 
-        // SwiftAudioEx uses its AVPlayer duration for Now Playing. Several
-        // music streams report that as zero, despite the catalogue already
-        // knowing the track length. Set the best available duration once per
-        // track (and again only if native later reports a different value).
-        const previouslyPublished = publishedLockScreenDurationRef.current;
-        const shouldPublishDuration = Boolean(
-          song &&
-          duration > 0 &&
-          (previouslyPublished?.songId !== song.id ||
-            Math.abs((previouslyPublished?.duration ?? 0) - duration) > 0.5)
-        );
-
-        if (
-          shouldPublishDuration &&
-          song &&
-          Platform.OS === "ios" &&
-          typeof TrackPlayer?.updateMetadataForTrack === "function"
-        ) {
-          publishedLockScreenDurationRef.current = { songId: song.id, duration };
-          const track = songToTrack(song);
-          const trackIndex = typeof event?.track === "number" ? event.track : queueIndexRef.current;
-          TrackPlayer.updateMetadataForTrack(trackIndex, {
-            title: track.title,
-            artist: track.artist,
-            album: track.album,
-            artwork: track.artwork,
-            genre: track.genre,
-            duration,
-            isLiveStream: false,
-          }).catch(() => {});
-        }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
         const currentQ = queueRef.current;
@@ -519,11 +481,9 @@ export function useAudioSyncListeners({
         const selectedQueue = queueRef.current;
         if (playbackLoadingRef.current || pendingPlayRequestRef.current) return;
         try {
-          const [activeTrack, prog, nativeIndex] = await Promise.all([
-            TrackPlayer.getActiveTrack().catch(() => null),
-            TrackPlayer.getProgress().catch(() => null),
-            TrackPlayer.getActiveTrackIndex().catch(() => undefined),
-          ]);
+          const prog = await TrackPlayer.getPlaybackSnapshot();
+          const nativeIndex = prog.index;
+          const activeTrack = prog.queue[nativeIndex];
           if (currentSongRef.current !== selectedSong || queueRef.current !== selectedQueue ||
             playbackLoadingRef.current || pendingPlayRequestRef.current) return;
           if (!activeTrack?.id) return;
@@ -544,11 +504,11 @@ export function useAudioSyncListeners({
             }
           }
           if (prog) {
-            if (typeof prog.position === "number") {
-              setNativePosition(prog.position);
-            }
             if (typeof prog.duration === "number" && prog.duration > 0) {
               setNativeDuration(prog.duration);
+            }
+            if (typeof prog.position === "number") {
+              setNativePosition(prog.position);
             }
           }
         } catch {

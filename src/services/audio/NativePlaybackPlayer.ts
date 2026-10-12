@@ -125,6 +125,7 @@ export const NativePlaybackPlayer = {
   async getActiveTrack() { const state = await snapshot(); return state.queue[state.index]; },
   async getActiveTrackIndex() { return (await snapshot()).index; },
   async getPlaybackState() { return { state: (await snapshot()).state }; },
+  getPlaybackSnapshot: snapshot,
   async getProgress() { const state = await snapshot(); return { position: state.position, duration: state.duration, buffered: 0 }; },
   async updateMetadataForTrack(index: number, metadata: Partial<NativeTrack>) { await command("update", { index, metadata }); },
   async prepareTrack(track: NativeTrack) {

@@ -11,7 +11,7 @@ import type { SeekOverride } from "@/services/audio/audioProgressTracking";
 import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { toDurationSeconds } from "@/utils/timeFormatters";
-import { playbackPosition } from "./audioTimeline";
+import { playbackDuration, playbackPosition } from "./audioTimeline";
 import type { NativePlaybackPlayer, State as AudioState } from "./NativePlaybackPlayer";
 import { useCallback,useEffect,type MutableRefObject } from "react";
 
@@ -632,10 +632,14 @@ export function useAudioPlaybackCommands({
       if (native && typeof TrackPlayer.getProgress === "function") engineProgress = await TrackPlayer.getProgress().catch(() => undefined);
       else if (canUseLightweightAudioFallback) engineProgress = ExpoAvPlayer.getProgress();
       if (!isCurrent()) return;
-      const durationSeconds = Number.isFinite(engineProgress?.duration) && engineProgress!.duration > 0
+      const reportedDuration = Number.isFinite(engineProgress?.duration) && engineProgress!.duration > 0
         ? engineProgress!.duration : (durationSecondsRef?.current && durationSecondsRef.current > 0)
         ? durationSecondsRef.current
         : toDurationSeconds(currentSongRef.current?.duration);
+      // Native owns its clock; resolver metadata is only a missing-duration fallback.
+      const durationSeconds = native
+        ? playbackDuration(engineProgress?.duration ?? 0) || playbackDuration(0, currentSongRef.current?.playbackDurationSeconds) || playbackDuration(reportedDuration)
+        : playbackDuration(reportedDuration, currentSongRef.current?.playbackDurationSeconds);
       if (durationSeconds <= 0 || (!native && !canUseLightweightAudioFallback)) return;
       if (durationSecondsRef) durationSecondsRef.current = durationSeconds;
 

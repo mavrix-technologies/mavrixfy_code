@@ -72,6 +72,15 @@ test("invalid native timestamps cannot corrupt progress", () => {
   assert.equal(f.updates.at(-1).progress, 0.5);
 });
 
+test("a larger decoder timeline is installed before its position is clamped", () => {
+  const f = fixture(); const hook = f.render();
+  hook.setNativeDuration(100); hook.setNativePosition(50);
+  f.emit({ isPlaying: true, position: 180, duration: 200 });
+  assert.equal(f.updates.at(-1).duration, 200000);
+  assert.equal(f.updates.at(-1).positionMillis, 180000);
+  assert.equal(f.updates.at(-1).progress, 0.9);
+});
+
 test("seek override ends as soon as the decoder acknowledges the target", () => {
   const f = fixture(); const hook = f.render(); hook.setNativeDuration(188);
   hook.setSeekOverride({ songId: f.song.id, seconds: 90, startedAt: Date.now() });
@@ -90,6 +99,26 @@ test("YouTube stream timeline survives a decoder duration jump from 3:20 to 6:16
   f.emit({ isPlaying: false, position: 376, duration: 376, didJustFinish: true });
   assert.equal(f.updates.at(-1).duration, 200373);
   assert.equal(f.updates.at(-1).positionMillis, 200373);
+});
+
+test("native duration owns displayed progress even when resolver metadata disagrees", () => {
+  const f = fixture(); f.options.canUseLightweightAudioFallback = false;
+  f.song.playbackDurationSeconds = 200.373;
+  const hook = f.render(); hook.setNativeDuration(376); hook.setNativePosition(188);
+  assert.equal(f.updates.at(-1).duration, 376000);
+  assert.equal(f.updates.at(-1).progress, 0.5);
+  f.song.duration = 240; f.render();
+  assert.equal(hook.durationSecondsRef.current, 376);
+});
+
+test("native startup uses current stream duration only until the decoder publishes its clock", () => {
+  const f = fixture(); f.options.canUseLightweightAudioFallback = false;
+  f.song.duration = 100; f.song.playbackDurationSeconds = 200;
+  const hook = f.render();
+  assert.equal(hook.durationSecondsRef.current, 200);
+  hook.setNativeDuration(376);
+  hook.setNativeDuration(240, "catalog");
+  assert.equal(hook.durationSecondsRef.current, 376);
 });
 
 test("fresh Play at zero does not read an old saved position for the same song", async () => {

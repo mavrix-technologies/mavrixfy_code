@@ -44,6 +44,27 @@ test("native slider clamps against engine duration and restores position on fail
   assert.equal(f.notices.length, 1);
 });
 
+test("native seek follows the decoder clock while Expo preview uses its resolved timeline", async () => {
+  for (const native of [false, true]) {
+    for (const ratio of [0.5, 1]) {
+      const f = fixture({ native, pendingProgress: { duration: 376, position: 30 } });
+      f.options.currentSongRef.current.playbackDurationSeconds = 200.373;
+      await f.seekTo(ratio);
+      const duration = native ? 376 : 200.373;
+      assert.equal(f.targets[0], ratio * duration);
+      assert.equal(f.options.durationSecondsRef.current, duration);
+      assert.equal(f.overrides.at(-1).seconds, ratio * duration);
+    }
+  }
+});
+
+test("native seek uses current stream metadata before catalog fallback when decoder duration is unknown", async () => {
+  const f = fixture({ native: true, pendingProgress: { duration: 0, position: 30 } });
+  f.options.currentSongRef.current.playbackDurationSeconds = 200.373;
+  await f.seekTo(0.5);
+  assert.equal(f.targets[0], 100.1865);
+});
+
 test("late native progress cannot seek a newly selected song", async () => {
   let resolve;
   const f = fixture({ native: true, pendingProgress: new Promise(done => { resolve = done; }) });

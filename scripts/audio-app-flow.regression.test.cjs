@@ -46,7 +46,7 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     nativeQueueIdsMatch: (native, queue) => native.length === queue.length && native.every((item, index) => item.id === queue[index].id),
     replaceNativeQueuePreservingState: async (queue, index) => { calls.push(["replace", queue.map(song => song.id), index]); },
     subscribeTrackPlayerEvent: (event, callback) => { events.set(event, callback); return noop; },
-    Event: { PlaybackProgressUpdated: "progress", PlaybackActiveTrackChanged: "active", PlaybackQueueEnded: "ended", PlaybackError: "error" },
+    Event: { PlaybackProgressUpdated: "progress", PlaybackActiveTrackChanged: "active", PlaybackQueueEnded: "ended", PlaybackError: "error", RemotePlay: "remote-play", RemotePause: "remote-pause", RemoteStop: "remote-stop" },
     State: { Playing: "playing", Paused: "paused", None: "none", Stopped: "stopped", Error: "error", Ended: "ended" },
     RepeatMode: { Off: "off", Queue: "all", Track: "one" },
   };
@@ -60,6 +60,14 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     remove: async index => { calls.push(["remove", index]); nativeQueue.splice(index, 1); },
     setQueue: async (queue, index) => { nativeQueue = queue; calls.push(["queue", index]); },
     reset: async () => { calls.push(["reset"]); nativeQueue = []; },
+    getPlaybackSnapshot: async () => {
+      const queue = await options.TrackPlayer.getQueue();
+      const track = await options.TrackPlayer.getActiveTrack();
+      const index = await options.TrackPlayer.getActiveTrackIndex();
+      const progress = await options.TrackPlayer.getProgress();
+      const state = await options.TrackPlayer.getPlaybackState();
+      return { queue: track ? queue.map((item, i) => i === index ? track : item) : [], index, ...progress, state: state.state };
+    },
   };
   let accountGeneration = 0;
   const storage = { loadPlayerState: async () => null, savePlayerState: async state => saved.push(state), addRecentlyPlayed: async () => {} };
@@ -276,6 +284,31 @@ test("native progress keeps the effective seek position written by the progress 
   assert.equal(f.options.positionSecondsRef.current, 90);
 });
 
+test("native transport notifications reconcile intent without echoing Play Pause or Stop", async () => {
+  const f = fixture(); f.listen();
+  await f.events.get("remote-play")(); await tick();
+  assert.equal(f.options.desiredPlayStateRef.current, true);
+  await f.events.get("remote-pause")();
+  assert.equal(f.options.desiredPlayStateRef.current, false);
+  await f.events.get("remote-stop")();
+  assert.deepEqual(f.calls, []);
+});
+
+test("native progress applies the new duration before clamping its position", () => {
+  const f = fixture();
+  f.options.durationSecondsRef.current = 100;
+  f.options.setNativeDuration = value => {
+    f.options.durationSecondsRef.current = typeof value === "function" ? value(f.options.durationSecondsRef.current) : value;
+  };
+  f.options.setNativePosition = value => {
+    f.options.positionSecondsRef.current = Math.min(value, f.options.durationSecondsRef.current);
+  };
+  f.listen();
+  f.events.get("progress")({ track: 1, position: 180, duration: 200 });
+  assert.equal(f.options.positionSecondsRef.current, 180);
+  assert.equal(f.options.durationSecondsRef.current, 200);
+});
+
 test("foreground reads cannot overwrite a selection made while the reads are pending", async () => {
   const f = fixture(); const active = deferred();
   f.options.TrackPlayer.getActiveTrack = () => active.promise; f.listen();
@@ -285,6 +318,23 @@ test("foreground reads cannot overwrite a selection made while the reads are pen
   active.resolve({ id: "a" }); await sync;
   assert.equal(f.options.currentSongRef.current.id, "c");
   assert.equal(f.snapshots.length, 0);
+});
+
+test("foreground reconciliation consumes one native snapshot for track index duration and position", async () => {
+  const f = fixture();
+  f.options.TrackPlayer.getPlaybackSnapshot = async () => ({
+    queue: f.songs, index: 2, position: 150, duration: 300, state: "playing",
+  });
+  f.options.TrackPlayer.getActiveTrack = f.options.TrackPlayer.getProgress = f.options.TrackPlayer.getActiveTrackIndex = () => {
+    throw Error("Separate reads can combine two different native tracks");
+  };
+  const durations = [];
+  f.options.setNativeDuration = value => durations.push(value);
+  f.listen(); await f.foreground[0]("active");
+  assert.equal(f.options.currentSongRef.current.id, "c");
+  assert.equal(f.options.queueIndexRef.current, 2);
+  assert.equal(f.options.positionSecondsRef.current, 150);
+  assert.deepEqual(durations, [300]);
 });
 
 test("end-of-queue sleep timer clears resume intent", async () => {

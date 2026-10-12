@@ -309,3 +309,61 @@ The native player uses Apple's AVQueuePlayer and Android's Media3 service APIs,
 but iOS header-dependent streams still use the undocumented
 `AVURLAssetHTTPHeaderFieldsKey` option. That path cannot be described as entirely
 documented Apple API and requires explicit stream/device compatibility testing.
+
+## Seek/progress follow-up on 2026-10-12
+
+The shared seek command previously multiplied the slider ratio by the raw native
+duration, while the displayed timeline preferred the resolved stream duration.
+The native flow now uses the decoder's valid duration for both seek and display;
+stream metadata is a missing-duration fallback. Expo preview retains its
+existing stream-timeline normalization.
+Native/Expo progress and foreground reconciliation install the incoming duration
+before its position, avoiding an irreversible clamp to the previous duration.
+Now Playing metadata is published by the native player. The iOS seek requests
+zero tolerance through AVPlayer's documented precise-seek overload; this can
+increase decoding delay and still needs an updated native build/device test.
+
+All 520 JavaScript regressions pass, including native/Expo seek at 50% and 100%
+with conflicting duration estimates and position updates beyond an older
+duration. TypeScript passes; lint has zero errors and ten require-import
+warnings. USB iPhone connection and installed app metadata were verified, but
+syslog did not expose the actual seek position. Audible seek correctness and the
+new Swift overload are not device-verified; Swift syntax parsing is not an
+Xcode compilation. The reported remaining visual issues need a specific
+reproduction before being considered fixed.
+
+## Playback connection review
+
+Compared the reference LastWave-Native `MusicPlayer.effectiveDuration` and
+duration ownership logic with the shared controller, native adapters,
+startup/foreground reconciliation, queue mutation lane, stream preparation,
+quality changes, normal player and StandBy actions. LastWave is an Android
+reference, not evidence of iOS behavior. Its valid player duration takes priority
+over metadata; metadata is an item-scoped startup fallback.
+
+Removed the JS lock-screen duration publishing path and duplicate native remote
+Play/Pause/Stop echoes. Native transport events reconcile intent; an absent or
+mismatched restored native source still uses the shared resolver. iOS Now
+Playing reads the native duration, falling back to current track metadata only
+while AVPlayer duration is unavailable. Native progress and seek no longer
+force a resolver duration over an established decoder clock.
+
+Startup and foreground reconciliation now read one existing bridge snapshot for
+queue, active index, state and progress, instead of combining separate native
+reads that could straddle automatic Next. No additional decoder, playback
+timer, transport bridge or native dependency was added. The UI sends shared
+actions and observes playback; StandBy does not own an audio engine.
+
+This follows Android's documented Player/MediaSession service ownership and
+Apple's AVPlayer time observation model:
+- https://developer.android.com/media/media3/session/player
+- https://developer.apple.com/documentation/avfoundation/monitoring-playback-progress-in-your-app
+
+Updated regressions cover native clock priority, unknown-duration fallback,
+non-echoing remote transport and atomic foreground reconciliation. Physical
+iOS build/playback/seek/rotation validation remains required; this code review
+does not certify all UI flows or production readiness. Stream resolution still
+runs in the shared JS controller; unresolved background successors therefore
+remain dependent on that controller being able to execute. A fully native
+resolver or server-resolved queue would be a separate architectural migration,
+not something provided by AVPlayer or Media3 alone.

@@ -67,23 +67,19 @@ export function useStartupPlaybackReconcile(options: UseStartupPlaybackReconcile
           const ready = isPlayerReady || (await ensurePlayerReady());
           if (!canRestore()) return;
           if (ready) {
-            const [activeTrack, nativeQueue, playbackState] = await Promise.all([
-              TrackPlayer.getActiveTrack().catch(() => null),
-              TrackPlayer.getQueue().catch(() => []),
-              TrackPlayer.getPlaybackState().catch(() => null),
-            ]);
+            const nativeState = await TrackPlayer.getPlaybackSnapshot();
+            const nativeQueue = nativeState.queue;
+            const activeTrack = nativeQueue[nativeState.index];
             if (!canRestore()) return;
-            const rawState = (playbackState as any)?.state ?? playbackState;
+            const rawState = nativeState.state;
             const isPlayingNow = rawState === State.Playing;
 
             const owner = scope.accountId ?? "guest";
             if (activeTrack?.id && activeTrack.accountId !== owner) await TrackPlayer.reset();
             if (!canRestore()) return;
             if (activeTrack?.id && activeTrack.accountId === owner && Array.isArray(nativeQueue) && nativeQueue.length > 0) {
-              const [rawIndex, persisted] = await Promise.all([
-                TrackPlayer.getActiveTrackIndex().catch(() => 0),
-                playerPersistenceService.loadPlayerState().catch(() => null),
-              ]);
+              const rawIndex = nativeState.index;
+              const persisted = await playerPersistenceService.loadPlayerState().catch(() => null);
               if (!canRestore()) return;
               const activeIndex = Number.isInteger(rawIndex) && rawIndex >= 0 && rawIndex < nativeQueue.length ? rawIndex : 0;
               const persistedMap = new Map((persisted?.queue || []).map((s: Song) => [s.id, s]));
