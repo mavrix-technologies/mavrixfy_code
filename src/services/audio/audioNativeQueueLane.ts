@@ -3,7 +3,7 @@ import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import type { Song } from "@/lib/musicData";
 import { readAudioCandidate,songToTrack } from "@/services/audio/PlayerPlaybackResolver";
 import { useCallback,useRef,type MutableRefObject } from "react";
-import type { NativePlaybackPlayer, RepeatMode as AudioRepeatMode } from "./StandardAudioPlayer";
+import type { NativePlaybackPlayer, RepeatMode as AudioRepeatMode } from "./NativePlaybackPlayer";
 
 export const isSameQueueContent = (
   a: Song[] | undefined | null,

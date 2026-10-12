@@ -4,7 +4,7 @@
   "version": "3.3.0",
   "scripts": {
     "expo:start:static:build": "npx expo start --no-dev --minify --localhost",
-    "start": "npx expo start",
+    "start": "npx expo start --dev-client",
     "start:expo-go": "npx expo start --go",
     "start:dev-client": "npx expo start --dev-client",
     "youtube:expo-go": "npm --prefix prototypes/youtube-expo-go start --",
@@ -86,7 +86,6 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
-    "react-native-audio-api": "^0.13.6",
     "react-native-draggable-flatlist": "4.0.3",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-google-mobile-ads": "16.3.3",

@@ -11,7 +11,7 @@ withResolvedPlaybackUrl,
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import type { PlaybackQualityState } from "@/types/playbackTypes";
 import { useCallback,useRef,type MutableRefObject } from "react";
-import type { NativePlaybackPlayer, RepeatMode as AudioRepeatMode } from "./StandardAudioPlayer";
+import type { NativePlaybackPlayer, RepeatMode as AudioRepeatMode } from "./NativePlaybackPlayer";
 
 interface UseAudioQualityControlOptions {
   desiredPlayStateRef?: MutableRefObject<boolean | null>;

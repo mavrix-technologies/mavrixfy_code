@@ -103,6 +103,17 @@ test("shared Next starts the selected audio even when output is temporarily paus
   assert.equal(f.options.desiredPlayStateRef.current, true);
 });
 
+test("native remote selection cancels a pending JS stream request before reconciling the selected track", () => {
+  const f = fixture();f.listen();
+  f.options.playRequestIdRef.current = 10;
+  f.options.pendingPlayRequestRef.current = { id: 10, songId: "b" };
+  f.options.playbackLoadingRef.current = true;
+  f.events.get("active")({ index: 2, track: { id: "c" }, externalSelection: true });
+  assert.equal(f.options.playRequestIdRef.current, 11);
+  assert.equal(f.options.pendingPlayRequestRef.current, null);
+  assert.equal(f.options.currentSongRef.current.id, "c");
+});
+
 test("rapid Pause cancels an earlier resume while native initialization is pending", async () => {
   const ready = deferred(); const f = fixture({ ready: false, initialization: ready });
   const pending = f.commands.togglePlay();

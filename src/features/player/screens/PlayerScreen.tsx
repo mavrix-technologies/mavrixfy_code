@@ -1,5 +1,5 @@
 import { FullscreenKaraokeModal } from "@/components/FullscreenKaraokeModal";
-import { IS_ANDROID,IS_IOS } from "@/constants/platform";
+import { IS_ANDROID,IS_IOS,IS_WEB } from "@/constants/platform";
 import { useAppIsActive } from "@/lib/appActivity";
 import { collapsePlayer,playerUIStateStore,usePlayerUIState } from "@/lib/playerUIState";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
@@ -14,6 +14,7 @@ import {
 BackHandler,
 StyleSheet,
 View,
+type LayoutChangeEvent,
 } from "react-native";
 import BottomSheet, { BottomSheetScrollView, useScrollEventsHandlersDefault } from "@gorhom/bottom-sheet";
 import { StatusBar } from "expo-status-bar";
@@ -255,6 +256,11 @@ function StandByKeepAwake() {
 
 export const PlayerScreen = memo(function PlayerScreen() {
   const foreground = useAppIsActive();
+  const [portraitLayoutReady, setPortraitLayoutReady] = useState(true);
+  const onPlayerLayout = useCallback(({ nativeEvent }: LayoutChangeEvent) => {
+    const { width, height } = nativeEvent.layout;
+    setPortraitLayoutReady(height >= width);
+  }, []);
 
   const { currentSong, queue, queueIndex, isShuffled, repeatMode } = usePlaybackNowPlaying();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
@@ -314,10 +320,10 @@ export const PlayerScreen = memo(function PlayerScreen() {
   if (!activeSong || !visible || !foreground) return null;
 
   return (
-    <View pointerEvents="box-none" style={[styles.sheetContainer, StyleSheet.absoluteFillObject]}>
+    <View pointerEvents="box-none" onLayout={onPlayerLayout} style={[styles.sheetContainer, StyleSheet.absoluteFillObject]}>
       <StatusBar hidden={standBy.isStandByActive} animated style="light" />
       {standBy.isStandByActive && <StandByKeepAwake />}
-      {!standBy.isStandByActive && <BottomSheet
+      {!standBy.isStandByActive && (IS_WEB || portraitLayoutReady) && <BottomSheet
         index={uiState === "expanded" ? 0 : -1}
         animateOnMount={animateOnMount}
         snapPoints={SHEET_SNAP_POINTS}

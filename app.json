@@ -129,14 +129,6 @@
         }
       ],
       [
-        "react-native-audio-api",
-        {
-          "iosBackgroundMode": true,
-          "androidForegroundService": true,
-          "androidFSTypes": ["mediaPlayback"]
-        }
-      ],
-      [
         "expo-build-properties",
         {
           "ios": {
@@ -200,6 +192,7 @@
         }
       ],
       "./plugins/withAndroidAuto",
+      "./plugins/withPlaybackBuild",
       "./plugins/withYouTubeMusic"
     ],
     "experiments": {
@@ -215,7 +208,7 @@
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": "3.3.0-33002-youtube1",
+    "runtimeVersion": "3.3.0-33002-native-player1",
     "extra": {
       "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",

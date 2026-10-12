@@ -4,7 +4,7 @@ import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { useEffect,useRef,type MutableRefObject } from "react";
-import type { NativePlaybackPlayer, State as AudioState } from "./StandardAudioPlayer";
+import type { NativePlaybackPlayer, State as AudioState } from "./NativePlaybackPlayer";
 
 interface UseStartupPlaybackReconcileOptions {
   TrackPlayer: NativePlaybackPlayer | null;

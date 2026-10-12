@@ -319,7 +319,7 @@ async function executeDownload(songId: string): Promise<void> {
     }
 
     // Determine canonical extension: JioSaavn CDN & MP4 containers must be .m4a so
-    // react-native-audio-api correctly selects the FFmpeg decoder instead of failing MiniAudio.
+    // native players receive an extension matching the audio container.
     let ext = "m4a";
     const cleanUrl = audioUrl.split("?")[0].toLowerCase();
     if (cleanUrl.endsWith(".mp3") || contentType.includes("audio/mpeg") || contentType.includes("audio/mp3")) {

@@ -54,14 +54,24 @@ test('combined-response headroom is finite and bands above sample rate limit are
  assert.ok(dsp.calculateEqHeadroomDb(Array(15).fill(8),48000)>8);
  const gains=Array(15).fill(0);gains[14]=8;assert.equal(dsp.calculateEqHeadroomDb(gains,22050),0);
 });
-for(const os of ['ios','android'])test(`${os}: preset commits atomically, stale restore cannot overwrite preview, Expo Go only persists`,async()=>{
+for(const os of ['android'])test(`${os}: preset commits atomically, stale restore cannot overwrite preview, Expo Go only persists`,async()=>{
  let expoGo=false, restore;const calls=[],saved=[];
  const api=load('src/services/audio/audioEqualizer.ts',{
  'react-native':{Platform:{OS:os}},expo:{isRunningInExpoGo:()=>expoGo},
  '@/lib/storage':{getSettings:()=>new Promise(resolve=>restore=resolve),saveSettings:async value=>saved.push(value)},
- '@/lib/logger':{logger:{warn(){}}},'./StandardAudioPlayer':{setStandardEqualizer:(...args)=>calls.push(args),getStandardAudioEffects:()=>({equalizerAvailable:true})},'./equalizerConfig':config});
+ '@/lib/logger':{logger:{warn(){}}},'./NativePlaybackPlayer':{setNativeEqualizer:(...args)=>calls.push(args)},'./equalizerConfig':config});
  const pending=api.syncEqualizerWithNative();const next={equalizer:config.EQUALIZER_PRESETS[1].bands,equalizerEnabled:true};
  api.previewEqualizer(next);restore({equalizer:config.FLAT_EQUALIZER,equalizerEnabled:false});await pending;assert.equal(calls.length,1);
  await api.saveEqualizer(next);assert.equal(calls.at(-1)[0].length,15);assert.equal(calls.at(-1)[1],true);assert.equal(saved[0].equalizerEnabled,true);
  expoGo=true;const before=calls.length;await api.saveEqualizer(next);assert.equal(calls.length,before);assert.equal(saved.length,2);
+});
+test('iOS preserves EQ preferences without pretending AVPlayer processes them',async()=>{
+ const calls=[],saved=[];
+ const api=load('src/services/audio/audioEqualizer.ts',{
+ 'react-native':{Platform:{OS:'ios'}},expo:{isRunningInExpoGo:()=>false},
+ '@/lib/storage':{getSettings:async()=>({}),saveSettings:async value=>saved.push(value)},
+ '@/lib/logger':{logger:{warn(){}}},'./NativePlaybackPlayer':{setNativeEqualizer:(...args)=>calls.push(args)},'./equalizerConfig':config});
+ assert.equal(api.equalizerSupported(),false);
+ await api.saveEqualizer({equalizer:config.EQUALIZER_PRESETS[1].bands,equalizerEnabled:true});
+ assert.equal(calls.length,0);assert.equal(saved.length,1);
 });

@@ -1,117 +1,38 @@
-/* global __dirname */
 const fs = require("node:fs");
 const path = require("node:path");
-const {
-  withAndroidManifest,
-  withAppBuildGradle,
-  withMainApplication,
-  withDangerousMod,
-} = require("@expo/config-plugins");
+const { withAndroidManifest, withMainApplication, withDangerousMod } = require("@expo/config-plugins");
 
+/** Media3's local module supplies the only playback/library service. */
 module.exports = function withAndroidAuto(config) {
-  config = withAndroidManifest(config, (mod) => {
+  config = withAndroidManifest(config, mod => {
     const app = mod.modResults.manifest.application[0];
-    app["meta-data"] ||= [];
-    app["meta-data"] = app["meta-data"].filter(
-      (entry) =>
-        entry.$["android:name"] !== "com.google.android.gms.car.application",
-    );
-    app["meta-data"].push({
-      $: {
-        "android:name": "com.google.android.gms.car.application",
-        "android:resource": "@xml/automotive_app_desc",
-      },
-    });
-    app.service ||= [];
-    // Custom builds use Audio API for playback and its shared car/notification
-    // session. Expo Audio is only used by Expo Go, which owns its own manifest.
-    const expoAudioService = app.service.find(
-      (entry) => entry.$["android:name"] === "expo.modules.audio.service.AudioControlsService",
-    );
-    if (expoAudioService) {
+    app["meta-data"] = (app["meta-data"] || []).filter(entry => entry.$["android:name"] !== "com.google.android.gms.car.application");
+    app["meta-data"].push({ $: { "android:name": "com.google.android.gms.car.application", "android:resource": "@xml/automotive_app_desc" } });
+    app.service = (app.service || []).filter(entry => entry.$["android:name"] !== "com.mavrixfy.app.MavrixfyMediaBrowserService");
+    // The Expo Go fallback runs in Expo Go's binary, never in this build.
+    let service = app.service.find(entry => entry.$["android:name"] === "expo.modules.audio.service.AudioControlsService");
+    if (!service) { service = { $: { "android:name": "expo.modules.audio.service.AudioControlsService", "android:exported": "false", "android:foregroundServiceType": "mediaPlayback" } }; app.service.push(service); }
+    {
       mod.modResults.manifest.$["xmlns:tools"] = "http://schemas.android.com/tools";
-      expoAudioService.$["android:enabled"] = "false";
-      const replaced = new Set((expoAudioService.$["tools:replace"] || "").split(",").filter(Boolean));
-      replaced.add("android:enabled");
-      expoAudioService.$["tools:replace"] = [...replaced].join(",");
-    }
-    app.service = app.service.filter(
-      (entry) =>
-        entry.$["android:name"] !==
-        "com.mavrixfy.app.MavrixfyMediaBrowserService",
-    );
-    app.service.push({
-      $: {
-        "android:name": "com.mavrixfy.app.MavrixfyMediaBrowserService",
-        "android:exported": "true",
-        "android:foregroundServiceType": "mediaPlayback",
-      },
-      "intent-filter": [
-        {
-          action: [
-            {
-              $: { "android:name": "android.media.browse.MediaBrowserService" },
-            },
-          ],
-        },
-      ],
-    });
-    return mod;
-  });
-  config = withAppBuildGradle(config, (mod) => {
-    if (
-      !mod.modResults.contents.includes(
-        'implementation("androidx.media:media:1.7.0")',
-      )
-    ) {
-      mod.modResults.contents = mod.modResults.contents.replace(
-        "dependencies {",
-        'dependencies {\n    implementation("androidx.media:media:1.7.0")',
-      );
+      service.$["android:enabled"] = "false";
+      service.$["tools:replace"] = [...new Set((service.$["tools:replace"] || "").split(",").filter(Boolean).concat("android:enabled"))].join(",");
     }
     return mod;
   });
-  config = withMainApplication(config, (mod) => {
-    if (
-      !mod.modResults.contents.includes("add(MavrixfyMediaLibraryPackage())")
-    ) {
-      mod.modResults.contents = mod.modResults.contents.replace(
-        "PackageList(this).packages.apply {",
-        "PackageList(this).packages.apply {\n          add(MavrixfyMediaLibraryPackage())",
-      );
-    }
+  config = withMainApplication(config, mod => {
+    mod.modResults.contents = mod.modResults.contents.replace(/\s*add\(MavrixfyMediaLibraryPackage\(\)\)/g, "");
     return mod;
   });
-  return withDangerousMod(config, [
-    "android",
-    (mod) => {
-      const target = path.join(
-        mod.modRequest.platformProjectRoot,
-        "app/src/main",
-      );
-      const java = path.join(target, "java/com/mavrixfy/app");
-      fs.mkdirSync(java, { recursive: true });
-      for (const file of [
-        "MavrixfyMediaBrowserService.kt",
-        "MavrixfyMediaLibraryModule.kt",
-        "MavrixfyMediaLibraryPackage.kt",
-      ]) {
-        fs.copyFileSync(
-          path.join(__dirname, "android-auto", file),
-          path.join(java, file),
-        );
-      }
-      fs.mkdirSync(path.join(target, "res/xml"), { recursive: true });
-      fs.cpSync(
-        path.join(__dirname, "android-auto/drawable"),
-        path.join(target, "res/drawable"),
-        { recursive: true },
-      );
-      fs.writeFileSync(
-        path.join(target, "res/xml/automotive_app_desc.xml"),
-        '<automotiveApp><uses name="media" /></automotiveApp>\n',
-      );
-      return mod;
-    },
-  ]);
+  return withDangerousMod(config, ["android", mod => {
+    const root = path.resolve(mod.modRequest.platformProjectRoot);
+    for (const name of ["MavrixfyMediaBrowserService.kt", "MavrixfyMediaLibraryModule.kt", "MavrixfyMediaLibraryPackage.kt"]) {
+      const file = path.resolve(root, "app/src/main/java/com/mavrixfy/app", name);
+      if (!file.startsWith(root + path.sep)) throw new Error("Invalid generated source path");
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    }
+    const directory = path.join(root, "app/src/main/res/xml");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, "automotive_app_desc.xml"), '<automotiveApp><uses name="media" /></automotiveApp>\n');
+    return mod;
+  }]);
 };

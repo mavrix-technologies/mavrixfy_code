@@ -4,7 +4,7 @@ const vm = require("node:vm");
 const test = require("node:test");
 const ts = require("typescript");
 
-test("prebuild keeps one car browser and the custom playback notification owner", () => {
+test("prebuild retires the old car browser and leaves playback ownership to the native module", () => {
   let manifestMod;
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync("plugins/withAndroidAuto.js", "utf8"), {
@@ -34,7 +34,7 @@ test("prebuild keeps one car browser and the custom playback notification owner"
   assert.equal(expoService.$["android:enabled"], "false");
   assert.equal(expoService.$["android:foregroundServiceType"], "mediaPlayback");
   assert.equal(expoService.$["tools:replace"], "android:foregroundServiceType,android:enabled");
-  assert.equal(app.service.filter(service => service.$["android:name"] === "com.mavrixfy.app.MavrixfyMediaBrowserService").length, 1);
+  assert.equal(app.service.filter(service => service.$["android:name"] === "com.mavrixfy.app.MavrixfyMediaBrowserService").length, 0);
   assert.equal(app["meta-data"].length, 1);
 });
 
@@ -83,6 +83,7 @@ test("car controls publish app state and ignore actions for an old track", async
             }
           },
         };
+      if (name === "./NativePlaybackPlayer") return { getNativeCarClient: () => ({ ...native, addListener(name, fn) { listeners.set(name, fn); return { remove() { listeners.delete(name); } }; } }) };
       if (name.endsWith("accountScope"))
         return { getAccountScope: () => "user", isCurrentAccount: () => true };
       if (name.endsWith("logger")) return { logger: { warn() {} } };

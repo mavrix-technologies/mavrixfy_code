@@ -12,7 +12,7 @@ import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 import { playbackPosition } from "./audioTimeline";
-import type { NativePlaybackPlayer, State as AudioState } from "./StandardAudioPlayer";
+import type { NativePlaybackPlayer, State as AudioState } from "./NativePlaybackPlayer";
 import { useCallback,useEffect,type MutableRefObject } from "react";
 
 interface UseAudioPlaybackCommandsOptions {

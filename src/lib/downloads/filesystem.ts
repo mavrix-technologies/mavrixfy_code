@@ -135,8 +135,8 @@ const CANDIDATE_AUDIO_EXTENSIONS = ["m4a", "mp4", "mp3", "aac", "wav", "flac"] a
 /**
  * Returns the local audio file URI if the file physically exists and is non-empty.
  * Also checks across candidate extensions (m4a, mp4, mp3) and migrates misnamed
- * track.mp3 files containing MP4/AAC container streams so react-native-audio-api
- * correctly uses the FFmpeg decoder instead of failing MiniAudio MP3 decoding.
+ * track.mp3 files containing MP4/AAC container streams so native players
+ * receive the correct container extension.
  */
 export async function getValidatedTrackFileUri(
   songId: string,
@@ -154,7 +154,7 @@ export async function getValidatedTrackFileUri(
         const info = await getInfoAsync(uri);
         if (info.exists && !info.isDirectory && ((info as any).size ?? 0) > 1024) {
           // If file is named track.mp3, inspect the header to see if it is actually
-          // an MP4/AAC stream. If so, rename to track.m4a for react-native-audio-api.
+          // an MP4/AAC stream. If so, rename to track.m4a for native playback.
           if (ext === "mp3") {
             try {
               const header = await readAsStringAsync(uri, { encoding: "base64", length: 64 });

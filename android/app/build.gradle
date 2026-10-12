@@ -2,13 +2,6 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
-// YouTube runtime metadata isolation: reflection keeps newer library metadata out of Kotlin 2.1 compilation.
-configurations.matching { it.name.endsWith("CompileClasspath") }.configureEach {
-    resolutionStrategy.force("org.jetbrains.kotlin:kotlin-stdlib:2.1.20",
-        "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.20", "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.1.20",
-        "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.8.1", "org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.8.1")
-}
-
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
@@ -104,10 +97,6 @@ android {
         versionName "3.3.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
-
-        ndk {
-            abiFilters (*(findProperty('reactNativeArchitectures')?.split(',') ?: ['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64']))
-        }
     }
     signingConfigs {
         debug {
@@ -116,25 +105,15 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        release {
-            def uploadStoreFile = findProperty('MAVRIXFY_UPLOAD_STORE_FILE') ?: System.getenv('MAVRIXFY_UPLOAD_STORE_FILE')
-            def uploadStorePassword = findProperty('MAVRIXFY_UPLOAD_STORE_PASSWORD') ?: System.getenv('MAVRIXFY_UPLOAD_STORE_PASSWORD')
-            def uploadKeyAlias = findProperty('MAVRIXFY_UPLOAD_KEY_ALIAS') ?: System.getenv('MAVRIXFY_UPLOAD_KEY_ALIAS')
-            def uploadKeyPassword = findProperty('MAVRIXFY_UPLOAD_KEY_PASSWORD') ?: System.getenv('MAVRIXFY_UPLOAD_KEY_PASSWORD')
-            if (uploadStoreFile && uploadStorePassword && uploadKeyAlias && uploadKeyPassword) {
-                storeFile file(uploadStoreFile)
-                storePassword uploadStorePassword
-                keyAlias uploadKeyAlias
-                keyPassword uploadKeyPassword
-            }
-        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig (signingConfigs.release.storeFile ? signingConfigs.release : signingConfigs.debug)
+            // Caution! In production, you need to generate your own keystore file.
+            // see https://reactnative.dev/docs/signed-apk-android.
+            signingConfig signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
@@ -151,17 +130,6 @@ android {
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
-    }
-    bundle {
-        language {
-            enableSplit = false
-        }
-        density {
-            enableSplit = true
-        }
-        abi {
-            enableSplit = true
-        }
     }
 }
 
@@ -192,7 +160,6 @@ dependencies {
     runtimeOnly("io.ktor:ktor-client-cio:3.5.2")
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
-    implementation("androidx.media:media:1.7.0")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
@@ -220,3 +187,31 @@ dependencies {
 }
 
 apply plugin: 'com.google.gms.google-services'
+// YouTube runtime metadata isolation: reflection keeps newer library metadata out of Kotlin 2.1 compilation.
+configurations.matching { it.name.endsWith("CompileClasspath") }.configureEach {
+    resolutionStrategy.force("org.jetbrains.kotlin:kotlin-stdlib:2.1.20",
+        "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.20", "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.1.20",
+        "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.8.1", "org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.8.1")
+}
+
+// Mavrixfy playback build configuration
+android {
+    defaultConfig {
+        ndk { abiFilters (*(findProperty('reactNativeArchitectures')?.split(',') ?: ['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'])) }
+    }
+    signingConfigs {
+        release {
+            def uploadStoreFile = findProperty('MAVRIXFY_UPLOAD_STORE_FILE') ?: System.getenv('MAVRIXFY_UPLOAD_STORE_FILE')
+            def uploadStorePassword = findProperty('MAVRIXFY_UPLOAD_STORE_PASSWORD') ?: System.getenv('MAVRIXFY_UPLOAD_STORE_PASSWORD')
+            def uploadKeyAlias = findProperty('MAVRIXFY_UPLOAD_KEY_ALIAS') ?: System.getenv('MAVRIXFY_UPLOAD_KEY_ALIAS')
+            def uploadKeyPassword = findProperty('MAVRIXFY_UPLOAD_KEY_PASSWORD') ?: System.getenv('MAVRIXFY_UPLOAD_KEY_PASSWORD')
+            if (uploadStoreFile && uploadStorePassword && uploadKeyAlias && uploadKeyPassword) {
+                storeFile file(uploadStoreFile)
+                storePassword uploadStorePassword
+                keyAlias uploadKeyAlias
+                keyPassword uploadKeyPassword
+            }
+        }
+    }
+    buildTypes { release { signingConfig signingConfigs.release.storeFile ? signingConfigs.release : signingConfigs.debug } }
+}

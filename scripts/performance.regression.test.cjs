@@ -38,9 +38,10 @@ test('decorative consumers share one lifecycle listener and release it on unmoun
 });
 
 test('collapsed/background player creates no full player UI; expanding/restoring recreates it', () => {
+  let portraitLayoutReady = true;
   const react = {
     memo: fn => fn, useEffect: fn => fn(), useLayoutEffect: fn => fn(), useCallback: fn => fn, useMemo: fn => fn(), useRef: value => ({ current: value }),
-    useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}],
+    useState: () => [portraitLayoutReady, next => { portraitLayoutReady = next; }],
     createElement: (type, props, ...children) => ({ type, props, children }),
   };
   let foreground = true;
@@ -118,7 +119,7 @@ test('collapsed/background player creates no full player UI; expanding/restoring
   assert.equal(containsSheet(expanded), true);
   const firstSheet = expanded.children.find(child => child?.type === 'NativeBottomSheet');
   assert.equal(firstSheet.props.containerLayoutState, undefined, 'native sheet measures its own hosting container');
-  assert.equal(expanded.props.onLayout, undefined, 'no competing window-height synchronization');
+  assert.equal(typeof expanded.props.onLayout, 'function', 'native layout gates orientation without overriding the sheet height');
   landscape = true;
   windowHeight = 390;
   assert.ok(containsDetails(PlayerScreen()), 'rotation alone does not activate StandBy');
@@ -129,6 +130,7 @@ test('collapsed/background player creates no full player UI; expanding/restoring
   assert.equal(containsWakeLock(standby), true);
   assert.equal(containsSheet(standby), false, 'landscape has no unused native sheet gesture surface');
   assert.deepEqual(closedSheets, ['queue', 'add-songs']);
+  standby.props.onLayout({ nativeEvent: { layout: { width: 844, height: 390 } } });
   const overlay = standby.children.find(child => child?.type === 'StandByOverlay');
   const queuedSong = { id: 'upcoming-song' };
   overlay.props.onPlayQueueSong(queuedSong);
@@ -137,6 +139,9 @@ test('collapsed/background player creates no full player UI; expanding/restoring
   assert.equal(overlay.props.onOpenQueue, undefined, 'standby has no sheet-opening queue callback');
   overlay.props.onExitStandBy();
   assert.equal(ui.current, 'expanded', 'exit returns to full player rather than collapsing');
+  const rotating = PlayerScreen();
+  assert.equal(containsSheet(rotating), false, 'portrait sheet cannot mount into the outgoing landscape viewport');
+  rotating.props.onLayout({ nativeEvent: { layout: { width: 390, height: 844 } } });
   landscape = false;
   windowHeight = 844;
   const restoredSheet = PlayerScreen().children.find(child => child?.type === 'NativeBottomSheet');

@@ -1,12 +1,19 @@
 /**
- * Expo Audio player for the Expo Go runtime. Custom builds use StandardAudioPlayer.
+ * Preview-only Expo Go/web audio. Development and production builds use NativePlaybackPlayer.
  */
 import type { Song } from "@/lib/musicData";
 import { logger } from "@/lib/logger";
 import type { AudioPlayer } from "expo-audio";
-import { createAudioPlayer,setAudioModeAsync } from "expo-audio";
 import { isPrematurePlaybackEnd, playbackDuration, playbackPosition } from "./audioTimeline";
 import { clearPreparedAudio, prepareNextAudio, releasePreparedAudio, takePreparedAudio } from "./nextTrackPreload";
+// Keep the preview module uninitialized in native development/production builds.
+function previewAudio(): typeof import("expo-audio") {
+  // Metro requires a literal module name for the preview-only dependency.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("expo-audio");
+}
+const createAudioPlayer: typeof import("expo-audio").createAudioPlayer = (...args) => previewAudio().createAudioPlayer(...args);
+const setAudioModeAsync: typeof import("expo-audio").setAudioModeAsync = (...args) => previewAudio().setAudioModeAsync(...args);
 
 // ─── singletons ───────────────────────────────────────────────────────────────
 

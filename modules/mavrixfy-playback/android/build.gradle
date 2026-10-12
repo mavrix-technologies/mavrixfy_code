@@ -1,0 +1,19 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+group = 'com.mavrixfy.playback'
+version = '1.0.0'
+android {
+  namespace 'com.mavrixfy.playback'
+  defaultConfig { versionCode 1; versionName '1.0.0'; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
+}
+dependencies {
+  implementation 'androidx.media3:media3-exoplayer:1.9.0'
+  implementation 'androidx.media3:media3-exoplayer-hls:1.9.0'
+  implementation 'androidx.media3:media3-exoplayer-dash:1.9.0'
+  implementation 'androidx.media3:media3-session:1.9.0'
+  androidTestImplementation 'androidx.test:runner:1.6.2'
+  androidTestImplementation 'androidx.test:core:1.6.1'
+  androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}

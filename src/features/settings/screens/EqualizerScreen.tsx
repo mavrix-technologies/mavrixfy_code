@@ -288,7 +288,7 @@ function useEqualizerState() {
   const [activeBandIdx, setActiveBandIdx] = useState<number | null>(null);
   const activeBandIndexRef = useRef<number | null>(null);
   const equalizerReady = settings !== null;
-  const effectsError = equalizerSupported() ? null : "Presets are saved. To hear the equalizer, use an installed APK or IPA; Expo Go does not include the audio processor.";
+  const effectsError = equalizerSupported() ? null : "Presets are saved. Audio effects currently require an Android development build or installed APK. This iOS player and Expo Go do not support EQ processing.";
   useEffect(() => {
     let mounted = true;
     void getSettings().then(saved => { if (mounted) {

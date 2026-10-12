@@ -24,7 +24,6 @@ class MainApplication : Application(), ReactApplication {
           add(MavrixfyYouTubePackage())
           // Packages that cannot be autolinked yet can be added manually here, for example:
           // add(MyReactNativePackage())
-          add(MavrixfyMediaLibraryPackage())
         }
     )
   }

@@ -1,8 +1,6 @@
-const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const test = require("node:test");
 const ts = require("typescript");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -88,7 +86,7 @@ function fixture({ youtubeResolver = async () => { throw new Error("Unexpected Y
       addEventListener: (name, fn) => controls.set(name, fn),
     },
   };
-  const filename = path.resolve("src/services/audio/StandardAudioPlayer.tsx");
+  const filename = path.resolve("scripts/fixtures/legacy-audio-renderer.txt");
   const code = ts.transpileModule(fs.readFileSync(filename, "utf8"), {
     compilerOptions: {
       jsx: ts.JsxEmit.React,

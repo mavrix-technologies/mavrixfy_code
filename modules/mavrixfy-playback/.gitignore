@@ -1,0 +1,9 @@
+android/build/
+android/.gradle/
+android/.cxx/
+!ios/
+!ios/**
+ios/build/
+ios/Pods/
+node_modules/
+.DS_Store

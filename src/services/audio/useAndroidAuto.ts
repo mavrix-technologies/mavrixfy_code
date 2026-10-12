@@ -1,14 +1,13 @@
 import { useEffect, useRef } from "react";
-import { NativeEventEmitter, NativeModules, Platform } from "react-native";
+import { getNativeCarClient } from "./NativePlaybackPlayer";
 import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { searchRepository } from "@/lib/searchRepository";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 
-const mediaLibrary =
-  Platform.OS === "android" ? NativeModules.MavrixfyMediaLibrary : null;
-const emitter = mediaLibrary ? new NativeEventEmitter(mediaLibrary) : null;
+const mediaLibrary = getNativeCarClient();
+const emitter = mediaLibrary;
 
 export function useAndroidAuto({
   queue,

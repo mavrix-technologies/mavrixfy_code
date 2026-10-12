@@ -11,16 +11,15 @@ import { useAudioSyncListeners } from "@/services/audio/audioSyncListeners";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { resetPlaybackEngine,updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { usePlayerCoreState } from "@/services/audio/usePlayerCoreState";
-import { StandardAudioRenderer } from "@/services/audio/StandardAudioRenderer";
 import { logger } from "@/lib/logger";
-import { Event, RepeatMode, StandardAudioPlayer, State } from "@/services/audio/StandardAudioPlayer";
+import { Event, RepeatMode, NativePlaybackPlayer, State } from "@/services/audio/NativePlaybackPlayer";
 import { isRunningInExpoGo } from "expo";
 import { useEffect,type ReactNode } from "react";
 import { Platform } from "react-native";
 import { PlayerContextTree } from "./PlayerContextProviders";
 
 
-const TrackPlayer = !isRunningInExpoGo() && Platform.OS !== "web" ? StandardAudioPlayer : null;
+const TrackPlayer = !isRunningInExpoGo() && Platform.OS !== "web" ? NativePlaybackPlayer : null;
 
 type NativeSubscription = {
   remove: () => void;
@@ -232,6 +231,7 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
   });
 
   useAudioSyncListeners({
+    playRequestIdRef: core.playRequestIdRef,
     setPlaybackQuality: core.setPlaybackQuality,
     isPlayerReady: core.isPlayerReady,
     TrackPlayer,
@@ -315,7 +315,6 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
 
   return (
     <PlayerContextTree playbackValues={playbackValues}>
-      {TrackPlayer ? <StandardAudioRenderer /> : null}
       {children}
     </PlayerContextTree>
   );

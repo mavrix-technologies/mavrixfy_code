@@ -13,7 +13,7 @@ import type { SleepTimerState, PlaybackQualityState } from "@/types/playbackType
 import { toDurationSeconds } from "@/utils/timeFormatters";
 import { useEffect,useRef,type MutableRefObject } from "react";
 import { AppState,Platform } from "react-native";
-import type { NativePlaybackPlayer, State as AudioState, Event as AudioEvent } from "./StandardAudioPlayer";
+import type { NativePlaybackPlayer, State as AudioState, Event as AudioEvent } from "./NativePlaybackPlayer";
 
 interface UseAudioSyncListenersOptions {
   setPlaybackQuality?: (update: (previous: PlaybackQualityState) => PlaybackQualityState) => void;
@@ -35,6 +35,7 @@ interface UseAudioSyncListenersOptions {
   playbackLoadingRef: MutableRefObject<boolean>;
   desiredPlayStateRef: MutableRefObject<boolean | null>;
   pendingPlayRequestRef: MutableRefObject<PendingPlayRequest | null>;
+  playRequestIdRef?: MutableRefObject<number>;
   positionSecondsRef: MutableRefObject<number>;
   setNativePosition: (pos: number) => void;
   setNativeDuration: (value: number | ((previous: number) => number), source?: "media" | "catalog") => void;
@@ -80,6 +81,7 @@ export function useAudioSyncListeners({
   playbackLoadingRef,
   desiredPlayStateRef,
   pendingPlayRequestRef,
+  playRequestIdRef,
   positionSecondsRef,
   setNativePosition,
   setNativeDuration,
@@ -148,6 +150,7 @@ export function useAudioSyncListeners({
       subscribeTrackPlayerEvent(Event.RemotePrevious, () => void prevSongRef.current()),
       subscribeTrackPlayerEvent(Event.PlaybackInterruption, (event: { resumed: boolean }) => {
         if (event.resumed) {
+          if (desiredPlayStateRef.current === false) return;
           playIntent();
         } else {
           // A transient system interruption pauses output temporarily.
@@ -198,7 +201,7 @@ export function useAudioSyncListeners({
         if (typeof event?.playWhenReady !== "boolean") return;
         // Output stops during a system interruption without cancelling the
         // user's Play intent. The native interruption handler owns its resume.
-        if (!event.playWhenReady && event.reason === "interruption") return;
+        if (!event.playWhenReady && (event.reason === "interruption" || event.reason === "source-change")) return;
         // A native queue replacement may emit a stale resume after the user
         // has paused. The explicit user intent must always win that race.
         if (desiredPlayStateRef.current === false) {
@@ -322,6 +325,12 @@ export function useAudioSyncListeners({
       }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
         const currentQ = queueRef.current;
+        if (event?.externalSelection && playRequestIdRef) {
+          playRequestIdRef.current += 1;
+          pendingPlayRequestRef.current = null;
+          playbackLoadingRef.current = false;
+          setPlaybackLoading(false);
+        }
 
         // 1. Identify track by ID if available from native event
         const activeTrackId =

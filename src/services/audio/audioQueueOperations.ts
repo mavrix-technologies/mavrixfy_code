@@ -8,7 +8,7 @@ import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { songToTrack,withResolvedPlaybackUrl } from "@/services/audio/PlayerPlaybackResolver";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { useCallback,type MutableRefObject } from "react";
-import type { NativePlaybackPlayer, RepeatMode as AudioRepeatMode } from "./StandardAudioPlayer";
+import type { NativePlaybackPlayer, RepeatMode as AudioRepeatMode } from "./NativePlaybackPlayer";
 
 interface UseAudioQueueOperationsOptions {
   queue: Song[];

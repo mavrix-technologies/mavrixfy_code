@@ -46,6 +46,12 @@ test('manual Pause remains authoritative during a system interruption',()=>{
  assert.equal(f.options.desiredPlayStateRef.current,false);assert.equal(f.pauses(),1);
 });
 
+test('a late internal source-change pause cannot cancel requested playback',()=>{
+ const f=fixture();f.options.playbackLoadingRef.current=false;f.options.pendingPlayRequestRef.current=null;
+ f.ready(false,'source-change');assert.equal(f.options.desiredPlayStateRef.current,true);
+ f.ready(false,'pause');assert.equal(f.options.desiredPlayStateRef.current,false);
+});
+
 test('native interruption events and shared listeners preserve intent together',async()=>{
  const {fixture:audioFixture,tracks,tick}=require('./helpers/audio-player-fixture.cjs');
  const native=audioFixture();const player=native.StandardAudioPlayer;
