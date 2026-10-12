@@ -284,6 +284,44 @@ test("native progress keeps the effective seek position written by the progress 
   assert.equal(f.options.positionSecondsRef.current, 90);
 });
 
+test("native progress recovers a missed automatic track-change without mixing timelines", async () => {
+  const f = fixture({ activeIndex: 0 });
+  const durations = [];
+  f.options.setNativeDuration = value => durations.push(value);
+  f.options.TrackPlayer.getPlaybackSnapshot = async () => ({ queue: f.songs, index: 1, duration: 200, position: 7, state: "playing" });
+  f.listen(); f.events.get("progress")({ track: 1, trackId: "b", duration: 200, position: 7 }); await tick();
+  assert.equal(f.options.currentSongRef.current.id, "b");
+  assert.equal(f.options.queueIndexRef.current, 1);
+  assert.equal(f.options.positionSecondsRef.current, 7);
+  assert.equal(durations.at(-1), 200);
+});
+
+test("outgoing progress cannot revert a newer native selection", async () => {
+  const f = fixture(); f.listen();
+  f.events.get("progress")({ track: 0, trackId: "a", duration: 700, position: 600 }); await tick();
+  assert.equal(f.options.currentSongRef.current.id, "b");
+  assert.equal(f.options.positionSecondsRef.current, 37);
+});
+
+test("confirmed pending selection is reconciled instead of losing its only active event", () => {
+  const f = fixture({ activeIndex: 0 });
+  f.options.pendingPlayRequestRef.current = { id: 7, songId: "b" }; f.listen();
+  f.events.get("active")({ index: 1, track: { id: "b" } });
+  assert.equal(f.options.currentSongRef.current.id, "b");
+  assert.equal(f.options.pendingPlayRequestRef.current, null);
+});
+
+test("progress from the outgoing source cannot complete a pending Play or pollute catalog duration", () => {
+  const f = fixture({ activeIndex: 0 });
+  const pending = { id: 7, songId: "b" }; f.options.pendingPlayRequestRef.current = pending; f.listen();
+  f.events.get("progress")({ track: 0, trackId: "a", duration: 700, position: 600 });
+  assert.equal(f.options.pendingPlayRequestRef.current, pending);
+  assert.equal(f.options.positionSecondsRef.current, 37);
+  f.options.pendingPlayRequestRef.current = null;
+  f.events.get("progress")({ track: 0, trackId: "a", duration: 700, position: 10 });
+  assert.equal(f.songs[0].duration, 180);
+});
+
 test("native transport notifications reconcile intent without echoing Play Pause or Stop", async () => {
   const f = fixture(); f.listen();
   await f.events.get("remote-play")(); await tick();

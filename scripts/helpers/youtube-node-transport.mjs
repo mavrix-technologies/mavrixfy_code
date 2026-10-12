@@ -13,6 +13,7 @@ export async function loadYouTubeNodeTransport() {
   const output = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022,
   } }).outputText.replace('import "./runtime";', "")
+    .replace('import { Platform as RuntimePlatform } from "react-native";', "const RuntimePlatform = { OS: process.env.MAVRIXFY_PROBE_PLATFORM || 'android' };")
     .replace('import { fetch as streamFetch } from "expo/fetch";', 'const streamFetch = globalThis.fetch;')
     .replace('"./YouTubeArtwork"', '"./youtube-artwork-probe.mjs"')
     .replace('"./YouTubeArtists"', '"./youtube-artists-probe.mjs"')

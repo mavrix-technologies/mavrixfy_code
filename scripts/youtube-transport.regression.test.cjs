@@ -34,7 +34,7 @@ test("real music parser retains empty-tab messages alongside a usable queue with
   assert.equal(unsupported.content, null);
   assert.ok(errors.some(error => error.error_type === "typecheck"));
 });
-function fixture({ info, fetchStatus = () => 200, contentType = "audio/mp4", music = {}, nodes = {}, actions = {}, parser = {}, lazyPlayer = false, ciphered = false, apiText = "{}", responseClass = Response, streamFetchOverride, timerScale = 1, mintProof = async () => null } = {}) {
+function fixture({ platform = "android", info, fetchStatus = () => 200, contentType = "audio/mp4", music = {}, nodes = {}, actions = {}, parser = {}, lazyPlayer = false, ciphered = false, apiText = "{}", responseClass = Response, streamFetchOverride, timerScale = 1, mintProof = async () => null } = {}) {
   const clients = [], requests = [];
   const playerLoads = [], sessionOptions = [], cancelledBodies = [];
   const format = { has_audio: true, has_video: false, mime_type: "audio/mp4", bitrate: 128000, approx_duration_ms: 188125,
@@ -65,6 +65,7 @@ function fixture({ info, fetchStatus = () => 200, contentType = "audio/mp4", mus
         return { ok: status >= 200 && status < 300, status };
       } }, require: name => {
       if (name === "./runtime") return {};
+      if (name === "react-native") return { Platform: { OS: platform } };
       if (name === "./YouTubePoToken") return { youtubePoTokens: { mint: mintProof } };
       if (name === "expo/fetch") return { fetch: streamFetchOverride ? (url, options) => streamFetchOverride(url, options, fetchStream) : fetchStream };
       if (name === "./YouTubeArtists") return require("./helpers/youtube-artists-fixture.cjs");
@@ -229,6 +230,23 @@ test("medium without a standard AAC tier chooses the best available source inste
     mime_type: "audio/mp4", bitrate, url: `https://rr1.googlevideo.com/videoplayback?expire=2000&bitrate=${bitrate}` }));
   const f = fixture({ info: async () => ({ playability_status: { status: "OK" }, streaming_data: { adaptive_formats: formats } }) });
   assert.equal((await f.api.resolveStream("abcdefghijk", "medium", "medium-without-standard")).bitrate, 256000);
+});
+
+test("iOS selects AAC-LC instead of the lower-bitrate HE-AAC timing path", async () => {
+  const formats = [[48000, "mp4a.40.5"], [128000, "mp4a.40.2"], [256000, "mp4a.40.2"]].map(([bitrate, codec]) => ({
+    has_audio: true, has_video: false, mime_type: `audio/mp4; codecs="${codec}"`, bitrate,
+    approx_duration_ms: 214024, url: `https://rr1.googlevideo.com/videoplayback?expire=2000&bitrate=${bitrate}`,
+  }));
+  const info = async () => ({ playability_status: { status: "OK" }, streaming_data: { adaptive_formats: formats } });
+  for (const [quality, expected] of [["low", 128000], ["medium", 128000], ["high", 256000]]) {
+    const f = fixture({ platform: "ios", info });
+    const stream = await f.api.resolveStream("abcdefghijk", quality, quality);
+    assert.equal(stream.bitrate, expected);
+    assert.match(stream.mimeType, /mp4a\.40\.2/);
+    assert.equal(stream.durationSeconds, 214.024);
+  }
+  const android = fixture({ info });
+  assert.equal((await android.api.resolveStream("abcdefghijk", "low", "android-low")).bitrate, 48000);
 });
 test("API fetch uses the same anonymous stack and preserves buffered response metadata", async () => {
   const f = fixture();

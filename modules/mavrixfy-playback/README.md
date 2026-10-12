@@ -367,3 +367,71 @@ runs in the shared JS controller; unresolved background successors therefore
 remain dependent on that controller being able to execute. A fully native
 resolver or server-resolved queue would be a separate architectural migration,
 not something provided by AVPlayer or Media3 alone.
+
+## USB duration investigation
+
+The connected iPhone's newest saved playback state identified the user-confirmed
+song as `youtube_Jf6_O8NmZ08` (Dhurandhar The Mega Mix Mashup), with catalog and
+selected-stream duration both 338.848 seconds. The reported approximately
+eleven-minute display does not match that metadata. USB syslog showed playback
+activity but did not expose this item's AVPlayer duration, so the source of the
+long value is not yet device-proven. Screenshot service returned InvalidService;
+screen inspection/operation was unavailable through that service.
+
+AVURLAsset now requests `AVURLAssetPreferPreciseDurationAndTimingKey: true`,
+instead of accepting the default approximate timing preference. Precision can
+increase preparation time and does not prove this particular stream is fixed.
+An item readiness log records item/stream/catalog durations and media ID, with
+no signed URL or headers, so the updated IPA can show which value disagrees.
+Swift grammar and diff whitespace checks pass; Xcode compilation, duration
+comparison and physical seek/playback verification remain outstanding.
+
+## Recording: stale song UI during playback
+
+Decoded the supplied 18.75-second recording. Sampled frames retain Bandhu 2.0
+artwork/title and a 6:11 total while seeking from approximately 3:04 to 1:31,
+then 5:22. The user reports that different audio plays under this unchanged UI;
+the audio identity was not independently verified from the frames.
+
+Found a reproducible shared-controller gap: pending selection could discard its
+only matching active-track event; progress for the advanced native index was
+then rejected against the old UI index. Matching selection events now reconcile
+the requested song. Native progress/seek events include media ID. A mismatched
+progress owner is confirmed against one native snapshot before reconciling the
+UI and timeline, so stale outgoing ticks cannot revert a newer selection.
+Removed mutation of catalog song duration from native progress. iOS periodic
+progress obtains its owner from the actual AVPlayerItem mapping, reconciling a
+changed current item before publishing its timeline.
+
+529 JavaScript regressions, TypeScript and Android native/test Kotlin compilation
+passed; lint has zero errors and ten existing warnings. Swift grammar parsing
+passed, not Xcode compilation. The USB iPhone was no longer connected during
+this follow-up. Updated native builds and repetition of the recording's
+seek/automatic transition sequence remain required for device verification.
+
+## 52 Bars silent-tail investigation
+
+The supplied lock-screen screenshot shows 5:41 elapsed plus 1:27 remaining:
+7:08 total, exactly twice the official audio's 3:34. The app's real resolver
+returned 214.024 seconds for official audio ID `6y9_c5Qavhs`, selecting VISIONOS
+itag 139, HE-AAC (`mp4a.40.5`), approximately 50 kb/s. A complete local download
+and decode measured 214.024399 seconds of container/track time and 214.060045
+seconds of decoded audio, with 44.1 kHz output. The file itself does not contain
+428 seconds of audio. These observations make the native HE-AAC timing path a
+strong suspect; they do not establish the exact AVFoundation defect without a
+device-side comparison.
+
+The iOS direct-file resolver now accepts AAC-LC (`mp4a.40.2`) audio formats.
+This changes source compatibility, not displayed duration or an artificial
+end-of-song timer. The same live resolver probe now selects itag 140 at about
+131 kb/s with 214.024 seconds; container inspection reports AAC-LC, 44.1 kHz,
+214.024399 seconds. Android's quality selection and muted video formats are
+unaffected. iOS low quality now selects the lowest available AAC-LC tier, so
+this test used more bandwidth than the former approximately 50 kb/s HE-AAC.
+If a client offers no AAC-LC format, normal client failover continues.
+
+530 regressions, TypeScript and zero-error lint passed (ten existing warnings).
+The iPhone was unavailable to USB tools (`NoDeviceConnectedError`), so the new
+format has not been played through AVPlayer to completion on that phone.
+Re-test full playback, seek, automatic Next and lock-screen timing on the
+updated app before considering the silent-tail symptom resolved.

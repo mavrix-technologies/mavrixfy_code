@@ -1,4 +1,5 @@
 import "./runtime";
+import { Platform as RuntimePlatform } from "react-native";
 import { selectVideoFormats } from "./YouTubeVideoFormats";
 import { youtubePoTokens } from "./YouTubePoToken";
 import { Constants, Helpers, Innertube, Parser, Platform, Player, YTNodes } from "youtubei.js/react-native";
@@ -452,8 +453,11 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
               const reason = info.playability_status?.reason || "Video unavailable";
               throw new Error(`${status}: ${reason}`);
             }
+            // Keep Apple's direct-file audio path on AAC-LC while investigating
+            // the observed doubled HE-AAC timeline and silent tail.
             const formats = [...(info.streaming_data?.adaptive_formats || []), ...(video ? info.streaming_data?.formats || [] : [])]
               .filter(format => (video ? format.has_video && format.mime_type.startsWith("video/mp4") && /avc1/i.test(format.mime_type) : format.has_audio && !format.has_video && format.mime_type.startsWith("audio/mp4")) &&
+                (video || RuntimePlatform.OS !== "ios" || /\bmp4a\.40\.2\b/i.test(format.mime_type)) &&
                 (format.url || format.signature_cipher || format.cipher))
               .sort((a, b) => a.bitrate - b.bitrate);
             if (!formats.length) throw new Error(video ? "No compatible H.264 video stream" : "No compatible AAC audio stream");

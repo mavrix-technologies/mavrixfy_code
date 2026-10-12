@@ -53,8 +53,10 @@ private final class NativePlayback {
       DispatchQueue.main.async { self?.reconcileItem() }
     })
     progressObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] _ in
-      guard let self, self.index >= 0 else { return }
-      self.event("playback-progress", ["position": self.position(), "duration": self.duration(), "track": self.index])
+      guard let self, let item = self.player.currentItem,
+        let currentIndex = self.itemIndices[ObjectIdentifier(item)], self.tracks.indices.contains(currentIndex) else { return }
+      if currentIndex != self.index { self.reconcileItem() }
+      self.event("playback-progress", ["position": self.position(), "duration": self.duration(), "track": currentIndex, "trackId": self.tracks[currentIndex]["id"] ?? ""])
       self.nowPlaying()
     }
     let center = NotificationCenter.default
@@ -147,7 +149,7 @@ private final class NativePlayback {
     guard seconds.isFinite else { return }
     let item = player.currentItem
     player.seek(to: CMTime(seconds: max(0, seconds), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
-      DispatchQueue.main.async { guard let self, finished, self.player.currentItem === item else { return }; self.event("playback-progress", ["position": self.position(), "duration": self.duration(), "track": self.index]); self.nowPlaying() }
+      DispatchQueue.main.async { guard let self, finished, self.player.currentItem === item, self.tracks.indices.contains(self.index) else { return }; self.event("playback-progress", ["position": self.position(), "duration": self.duration(), "track": self.index, "trackId": self.tracks[self.index]["id"] ?? ""]); self.nowPlaying() }
     }
   }
   private func makeItem(_ track: [String: Any]) throws -> AVPlayerItem {
@@ -155,7 +157,10 @@ private final class NativePlayback {
       ["https", "http", "file"].contains(url.scheme?.lowercased() ?? "") else {
       throw NSError(domain: "MavrixfyPlayback", code: 1, userInfo: [NSLocalizedDescriptionKey: "Playback stream is not ready. Select the song again."])
     }
-    let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": track["headers"] as? [String: String] ?? [:]])
+    let asset = AVURLAsset(url: url, options: [
+      AVURLAssetPreferPreciseDurationAndTimingKey: true,
+      "AVURLAssetHTTPHeaderFieldsKey": track["headers"] as? [String: String] ?? [:]
+    ])
     return AVPlayerItem(asset: asset)
   }
   private func select(_ next: Int, _ seconds: Double, preserveCurrent: Bool = false) throws {
@@ -195,7 +200,17 @@ private final class NativePlayback {
     index = currentIndex
     fillQueueWindow(from: currentIndex)
     itemObservation = current.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-      DispatchQueue.main.async { guard let self, item === self.player.currentItem else { return }; if item.status == .failed { self.failItem(item) } }
+      DispatchQueue.main.async {
+        guard let self, item === self.player.currentItem else { return }
+        if item.status == .failed { self.failItem(item) }
+        else if item.status == .readyToPlay, self.tracks.indices.contains(self.index) {
+          let track = self.tracks[self.index]
+          let measured = item.duration.seconds
+          let resolved = track["playbackDurationSeconds"] as? Double ?? 0
+          let catalog = track["duration"] as? Double ?? 0
+          self.playbackLog.info("Ready track=\(track["id"] as? String ?? "unknown", privacy: .public) itemSeconds=\(measured) streamSeconds=\(resolved) catalogSeconds=\(catalog)")
+        }
+      }
     }
     event("playback-active-track", ["index": index, "track": tracks[index], "externalSelection": remoteSelection])
     remoteSelection = false

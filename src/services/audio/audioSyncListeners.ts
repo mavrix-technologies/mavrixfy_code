@@ -121,6 +121,102 @@ export function useAudioSyncListeners({
       isPlayingRef.current = true;
       updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
     };
+    const reconcileActiveTrack = (event: any) => {
+        const currentQ = queueRef.current;
+        if (event?.externalSelection && playRequestIdRef) {
+          playRequestIdRef.current += 1;
+          pendingPlayRequestRef.current = null;
+          playbackLoadingRef.current = false;
+          setPlaybackLoading(false);
+        }
+
+        // 1. Identify track by ID if available from native event
+        const activeTrackId =
+          typeof event?.track?.id === "string"
+            ? event?.track?.id
+            : typeof event?.track === "string"
+            ? event?.track
+            : null;
+
+        const pending = pendingPlayRequestRef.current;
+        // A matching native selection confirms the requested source. Ignore
+        // outgoing selections, without dropping the new track's only event.
+        if (pending && activeTrackId !== pending.songId) return;
+        if (pending) pendingPlayRequestRef.current = null;
+
+        const activeSong = currentQ.find((song) => song.id === activeTrackId);
+        const localTrack = /^(?:file|content):\/\//i.test(event?.track?.url || "");
+        const youtubeStream = !localTrack && activeSong && isYouTubeSong(activeSong) ? peekYouTubeStream(activeSong) : undefined;
+        if (youtubeStream) {
+          const bitrate = Number.isFinite(youtubeStream.bitrate) && youtubeStream.bitrate > 0 ? Math.round(youtubeStream.bitrate / 1000) : 0;
+          setPlaybackQuality?.((previous) => ({ ...previous, actualBitrate: bitrate,
+            qualityLabel: `${bitrate > 0 ? `${bitrate}kbps` : "Original audio"}${youtubeStream.codec ? ` · ${youtubeStream.codec}` : ""}`, isFallback: false }));
+        }
+
+        const nextIndex =
+          typeof event?.index === "number"
+            ? event.index
+            : typeof event?.nextTrack === "number"
+            ? event.nextTrack
+            : -1;
+
+        let targetSong: Song | undefined;
+        let resolvedIndex = -1;
+
+        // A synchronized native index identifies the playing occurrence even
+        // when the queue contains the same song more than once.
+        if (isNativeQueueSyncedRef?.current && nextIndex >= 0 && nextIndex < currentQ.length &&
+          (!activeTrackId || String(currentQ[nextIndex].id) === String(activeTrackId))) {
+          targetSong = currentQ[nextIndex];
+          resolvedIndex = nextIndex;
+        }
+
+        if (!targetSong && activeTrackId) {
+          const foundIndex = currentQ.findIndex((s) => String(s.id) === String(activeTrackId));
+          if (foundIndex >= 0) {
+            targetSong = currentQ[foundIndex];
+            resolvedIndex = foundIndex;
+          }
+        }
+
+        // Only fall back to index if the native queue is confirmed 1:1 synchronized
+        if (!targetSong && isNativeQueueSyncedRef?.current && nextIndex >= 0 && nextIndex < currentQ.length) {
+          targetSong = currentQ[nextIndex];
+          resolvedIndex = nextIndex;
+        }
+
+        // If native queue is unsynced and no track ID matched, DO NOT blind-revert to queue[0]!
+        if (!targetSong) return;
+
+        if (String(targetSong.id) !== String(currentSongRef.current?.id) || resolvedIndex !== queueIndexRef.current) {
+          currentSongRef.current = targetSong;
+          setCurrentSong(targetSong);
+          if (resolvedIndex >= 0) {
+            setQueueIndex(resolvedIndex);
+            queueIndexRef.current = resolvedIndex;
+          }
+          setSeekOverride(null);
+          setNativePosition(0);
+          positionSecondsRef.current = 0;
+          const initialDuration = toDurationSeconds(event?.track?.duration || targetSong.duration);
+          setNativeDuration(initialDuration > 0 ? initialDuration : 0, "catalog");
+
+          // The native player already selected this source. Reconcile metadata
+          // without reloading it or overriding a user's pause/resume intent.
+          updatePlaybackEngineSnapshot({
+            currentSong: targetSong,
+            ...(resolvedIndex >= 0 ? { queueIndex: resolvedIndex } : {}),
+          });
+
+          if (resolvedIndex >= 0) {
+            prefetchAdjacentTrackStreams(currentQ, resolvedIndex);
+            if (triggerAutoplayAppend && resolvedIndex >= currentQ.length - 2) {
+              void triggerAutoplayAppend(targetSong, currentQ);
+            }
+          }
+        }
+    };
+
     const unsubs = [
       subscribeTrackPlayerEvent(Event.RemotePlay, () => {
         playIntent();
@@ -241,14 +337,29 @@ export function useAudioSyncListeners({
         showPlaybackNotice(`Playback error: ${errorMsg}`);
       }),
       subscribeTrackPlayerEvent(Event.PlaybackProgressUpdated, (event: any) => {
-        // Only filter out if this event is explicitly for a stale pending play request
-        if (
-          pendingPlayRequestRef.current &&
-          event?.track?.id &&
-          String(event.track.id) !== String(pendingPlayRequestRef.current.songId)
-        ) {
-          return;
+        const trackId = typeof event?.trackId === "string" ? event.trackId : event?.track?.id;
+        if (trackId) {
+          if (pendingPlayRequestRef.current && trackId !== pendingPlayRequestRef.current.songId) return;
+          if (trackId !== currentSongRef.current?.id ||
+            (isNativeQueueSyncedRef?.current && typeof event.track === "number" && event.track !== queueIndexRef.current)) {
+            const requestId = playRequestIdRef?.current;
+            // Confirm against one current native snapshot: a delayed outgoing
+            // tick must not undo a newer selection or overwrite its timeline.
+            void TrackPlayer.getPlaybackSnapshot().then(state => {
+              if (requestId !== playRequestIdRef?.current) return;
+              const track = state.queue[state.index];
+              if (track?.id !== trackId || (pendingPlayRequestRef.current && trackId !== pendingPlayRequestRef.current.songId)) return;
+              reconcileActiveTrack({ index: state.index, track });
+              if (currentSongRef.current?.id !== trackId) return;
+              if (state.duration > 0) setNativeDuration(state.duration);
+              setNativePosition(state.position);
+            }).catch(error => logger.warn("[Audio] Progress reconciliation failed", error));
+            return;
+          }
+          if (trackId !== currentSongRef.current?.id) return;
         }
+        // Older native binaries cannot identify a pending source's progress.
+        if (!trackId && pendingPlayRequestRef.current) return;
         if (
           isNativeQueueSyncedRef?.current &&
           typeof event?.track === "number" &&
@@ -269,7 +380,6 @@ export function useAudioSyncListeners({
           }
         }
 
-        const song = currentSongRef.current;
         const nativeDuration = typeof event?.duration === "number" && event.duration > 0
           ? event.duration
           : 0;
@@ -277,108 +387,12 @@ export function useAudioSyncListeners({
         if (nativeDuration > 0) {
           const dur = nativeDuration;
           setNativeDuration((prev) => (Math.abs(prev - dur) > 0.5 ? dur : prev));
-          if (song && (!song.duration || song.duration <= 0)) {
-            song.duration = dur;
-          }
         }
         // Install this source's duration before clamping its position.
         setNativePosition(pos);
 
       }),
-      subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, (event: any) => {
-        const currentQ = queueRef.current;
-        if (event?.externalSelection && playRequestIdRef) {
-          playRequestIdRef.current += 1;
-          pendingPlayRequestRef.current = null;
-          playbackLoadingRef.current = false;
-          setPlaybackLoading(false);
-        }
-
-        // 1. Identify track by ID if available from native event
-        const activeTrackId =
-          typeof event?.track?.id === "string"
-            ? event?.track?.id
-            : typeof event?.track === "string"
-            ? event?.track
-            : null;
-
-        const pending = pendingPlayRequestRef.current;
-        // Any in-flight pending request means we are mid-transition; ignore ALL native
-        // track-change events until the transition completes.
-        if (pending) return;
-
-        const activeSong = currentQ.find((song) => song.id === activeTrackId);
-        const localTrack = /^(?:file|content):\/\//i.test(event?.track?.url || "");
-        const youtubeStream = !localTrack && activeSong && isYouTubeSong(activeSong) ? peekYouTubeStream(activeSong) : undefined;
-        if (youtubeStream) {
-          const bitrate = Number.isFinite(youtubeStream.bitrate) && youtubeStream.bitrate > 0 ? Math.round(youtubeStream.bitrate / 1000) : 0;
-          setPlaybackQuality?.((previous) => ({ ...previous, actualBitrate: bitrate,
-            qualityLabel: `${bitrate > 0 ? `${bitrate}kbps` : "Original audio"}${youtubeStream.codec ? ` · ${youtubeStream.codec}` : ""}`, isFallback: false }));
-        }
-
-        const nextIndex =
-          typeof event?.index === "number"
-            ? event.index
-            : typeof event?.nextTrack === "number"
-            ? event.nextTrack
-            : -1;
-
-        let targetSong: Song | undefined;
-        let resolvedIndex = -1;
-
-        // A synchronized native index identifies the playing occurrence even
-        // when the queue contains the same song more than once.
-        if (isNativeQueueSyncedRef?.current && nextIndex >= 0 && nextIndex < currentQ.length &&
-          (!activeTrackId || String(currentQ[nextIndex].id) === String(activeTrackId))) {
-          targetSong = currentQ[nextIndex];
-          resolvedIndex = nextIndex;
-        }
-
-        if (!targetSong && activeTrackId) {
-          const foundIndex = currentQ.findIndex((s) => String(s.id) === String(activeTrackId));
-          if (foundIndex >= 0) {
-            targetSong = currentQ[foundIndex];
-            resolvedIndex = foundIndex;
-          }
-        }
-
-        // Only fall back to index if the native queue is confirmed 1:1 synchronized
-        if (!targetSong && isNativeQueueSyncedRef?.current && nextIndex >= 0 && nextIndex < currentQ.length) {
-          targetSong = currentQ[nextIndex];
-          resolvedIndex = nextIndex;
-        }
-
-        // If native queue is unsynced and no track ID matched, DO NOT blind-revert to queue[0]!
-        if (!targetSong) return;
-
-        if (String(targetSong.id) !== String(currentSongRef.current?.id) || resolvedIndex !== queueIndexRef.current) {
-          currentSongRef.current = targetSong;
-          setCurrentSong(targetSong);
-          if (resolvedIndex >= 0) {
-            setQueueIndex(resolvedIndex);
-            queueIndexRef.current = resolvedIndex;
-          }
-          setSeekOverride(null);
-          setNativePosition(0);
-          positionSecondsRef.current = 0;
-          const initialDuration = toDurationSeconds(event?.track?.duration || targetSong.duration);
-          setNativeDuration(initialDuration > 0 ? initialDuration : 0, "catalog");
-
-          // The native player already selected this source. Reconcile metadata
-          // without reloading it or overriding a user's pause/resume intent.
-          updatePlaybackEngineSnapshot({
-            currentSong: targetSong,
-            ...(resolvedIndex >= 0 ? { queueIndex: resolvedIndex } : {}),
-          });
-
-          if (resolvedIndex >= 0) {
-            prefetchAdjacentTrackStreams(currentQ, resolvedIndex);
-            if (triggerAutoplayAppend && resolvedIndex >= currentQ.length - 2) {
-              void triggerAutoplayAppend(targetSong, currentQ);
-            }
-          }
-        }
-      }),
+      subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, reconcileActiveTrack),
       subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, async (event?: { reason?: string }) => {
         const wantsPlayback = () => desiredPlayStateRef.current !== false;
         if (!wantsPlayback() || playbackLoadingRef.current || pendingPlayRequestRef.current) return;

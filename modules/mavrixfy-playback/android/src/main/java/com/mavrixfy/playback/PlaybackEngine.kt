@@ -107,7 +107,7 @@ class PlaybackEngine private constructor(private val context: Context) {
     })
     handler.post(object : Runnable {
       override fun run() {
-        if (player.mediaItemCount > 0) event("playback-progress", mapOf("position" to player.currentPosition / 1000.0, "duration" to duration(), "track" to player.currentMediaItemIndex))
+        if (player.mediaItemCount > 0) event("playback-progress", mapOf("position" to player.currentPosition / 1000.0, "duration" to duration(), "track" to player.currentMediaItemIndex, "trackId" to player.currentMediaItem?.mediaId))
         handler.postDelayed(this, if (player.isPlaying) 500 else 1000)
       }
     })
@@ -185,7 +185,7 @@ class PlaybackEngine private constructor(private val context: Context) {
       "play" -> { internalChange = false; if (player.playbackState == Player.STATE_ENDED) player.seekToDefaultPosition(); if (player.playbackState == Player.STATE_IDLE) player.prepare(); player.play() }
       "pause" -> { cancelCarResolution?.invoke(); internalChange = false; player.pause() }
       "stop" -> { cancelCarResolution?.invoke(); internalChange = false; player.pause(); player.seekTo(0) }
-      "seek" -> { player.seekTo((position * 1000).toLong()); event("playback-progress", mapOf("position" to position, "duration" to duration(), "track" to player.currentMediaItemIndex)) }
+      "seek" -> { player.seekTo((position * 1000).toLong()); event("playback-progress", mapOf("position" to position, "duration" to duration(), "track" to player.currentMediaItemIndex, "trackId" to player.currentMediaItem?.mediaId)) }
       "reset" -> { cancelCarResolution?.invoke(); internalChange = false; player.stop(); player.clearMediaItems(); tracks.clear(); equalizer?.enabled = false }
       "repeat" -> player.repeatMode = when(args["mode"]) { "track" -> Player.REPEAT_MODE_ONE; "queue" -> Player.REPEAT_MODE_ALL; else -> Player.REPEAT_MODE_OFF }
       "volume" -> player.volume = ((args["volume"] as? Number)?.toFloat() ?: 1f).coerceIn(0f, 1f)
