@@ -159,7 +159,7 @@ test("native palette extraction uses accurate sampling and coalesces requests un
   const palettes = await Promise.all(Array.from({ length: 10 }, () => colors.extractArtworkColors(master)));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].uri, art.artworkAnalysisUrl(master));
-  assert.equal(calls[0].options.key, `artwork-palette-v3:${master}`);
+  assert.equal(calls[0].options.key, `artwork-palette-v5:android:native:${master}`);
   assert.equal(calls[0].options.quality, "high");
   assert.equal(calls[0].options.pixelSpacing, 2);
   assert.equal(colors.getImmediateArtworkPalette(master), palettes[0]);
@@ -345,4 +345,46 @@ test("song rows animate real selection changes without scheduling no-op animatio
   active = true; render(); assert.equal(calls, 1); assert.equal(shared.value, 1);
   render(); assert.equal(calls, 1);
   active = false; render(); assert.equal(calls, 2); assert.equal(shared.value, 0);
+});
+
+
+test("iOS release quality selection bypasses ads; unavailable/failed Android ads allow selection", async () => {
+  for (const [platform, result, expected, adsExpected] of [
+    ["ios", "cancelled", true, 0], ["android", "failed", true, 1],
+    ["android", "unavailable", true, 1], ["android", "earned", true, 1],
+    ["android", "cancelled", false, 1],
+  ]) {
+    const saved = []; let ads = 0;
+    const service = load("src/services/ads/highQualityEntitlementService.ts", {
+      "react-native": { Platform: { OS: platform } },
+      "@/lib/storage": { getSettings: async () => ({}), isHighQualityEntitled: () => false,
+        saveSettings: async patch => saved.push(patch) },
+      "./rewardedAdService": { runRewardedAd: async () => { ads++; return result; } },
+    });
+    assert.equal(await service.requestHighQualityUnlockWithRewardedAd(), expected);
+    assert.equal(ads, adsExpected);
+    assert.equal(saved.length, expected ? 1 : 0);
+    if (expected) assert.equal(saved[0].streamingQuality, "high");
+  }
+});
+
+test("iOS palette keeps UIImageColors roles and isolates native release cache", async () => {
+  let config;
+  const colors = load("src/lib/colorExtractor.ts", {
+    "./colorMath": load("src/lib/colorMath.ts", {}),
+    "@/services/youtube/YouTubeArtwork": art,
+    "@react-native-async-storage/async-storage": { getItem: async () => null, setItem: async () => {} },
+    "expo-constants": { executionEnvironment: "bare" }, react: {},
+    "react-native": { Platform: { OS: "ios" } },
+    "react-native-image-colors": { getColors: async (_, options) => {
+      config = options;
+      return { platform: "ios", background: "#882211", primary: "#DDBBAA", secondary: "#CC3322", detail: "#22CC33" };
+    } },
+  }, "", { setTimeout: () => 1, clearTimeout() {} });
+  const palette = await colors.extractArtworkColors("https://art.example/cover.jpg");
+  assert.equal(palette.rawDominant, "#882211");
+  assert.equal(palette.rawVibrant, "#DDBBAA");
+  assert.equal(palette.accent, "#DDBBAA", "native foreground is not re-saturated");
+  assert.equal(palette.lyricsBg, palette.background);
+  assert.match(config.key, /v5:ios:native/);
 });

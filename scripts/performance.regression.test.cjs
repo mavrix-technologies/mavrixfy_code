@@ -41,12 +41,17 @@ test('shared player sheet closes once and retains its presentation through backg
   let foreground = true, focused = true, standbyEnabled = false, viewport = null;
   const closedSheets = [], played = [], focusEffects = [], closed = [], backHandlers = [];
   const refs = [];
-  let refIndex = 0;
+  let refIndex = 0, stateIndex = 0, playerViewport = null, dirty = false;
   const ui = { current: 'mini', expandPlayer: () => { ui.current = 'expanded'; }, collapsePlayer: () => { ui.current = 'mini'; } };
   const react = {
     memo: fn => fn, useEffect: fn => fn(), useCallback: fn => fn, useMemo: fn => fn(), useRef: value => refs[refIndex++] ??= { current: value }, useState: initial => {
-      if (viewport === null) viewport = typeof initial === 'function' ? initial() : initial;
-      return [viewport, next => { viewport = typeof next === "function" ? next(viewport) : next; }];
+      const slot = stateIndex++;
+      if (slot === 0) {
+        if (viewport === null) viewport = typeof initial === 'function' ? initial() : initial;
+        return [viewport, next => { viewport = typeof next === "function" ? next(viewport) : next; }];
+      }
+      if (playerViewport === null) playerViewport = initial;
+      return [playerViewport, next => { playerViewport = typeof next === "function" ? next(playerViewport) : next; dirty = true; }];
     },
     createElement: (type, props, ...children) => ({ type, props, children }),
   };
@@ -86,7 +91,7 @@ test('shared player sheet closes once and retains its presentation through backg
     '../components/PlayerBottomDetailsSection', '../components/PlayerControlsSection',
     '../components/PlayerEmptyState', '../components/PlayerStickyHeader', '../hooks/useLegacyPlayerViewState']) dependencies[name] = {};
   const { PlayerScreen } = load('src/features/player/screens/PlayerScreen.tsx', dependencies);
-  const render = () => { refIndex = 0; return PlayerScreen(); };
+  const render = () => { let tree; do { dirty = false; refIndex = 0; stateIndex = 0; tree = PlayerScreen(); } while (dirty); return tree; };
   const content = node => node?.type?.name === 'LegacyPlayerScreenView' ? node : node?.children?.map(content).find(Boolean);
   const find = (node, type) => node?.type === type ? node : node?.children?.map(child => find(child, type)).find(Boolean);
   const initial = render();
@@ -125,10 +130,16 @@ test('shared player sheet closes once and retains its presentation through backg
   assert.equal(closed.at(-1), 'sheet-close', 'Android Back uses the same sheet animation');
   content(first).props.onEnterStandBy();
   const standby = render();
-  assert.equal(content(standby), undefined);
+  assert.ok(content(standby), "player stays mounted beneath StandBy");
+  assert.equal(content(standby).props.interactionReady, false);
   assert.ok(find(standby, 'BottomSheet'), 'StandBy keeps the sheet mounted');
   assert.equal(find(standby, 'BottomSheet').props.enableContentPanningGesture, undefined, 'gesture host type stays stable underneath StandBy');
   assert.deepEqual(closedSheets, ['queue', 'add-songs']);
+  find(standby, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 844, height: 390 } } });
+  const landscapeStandby = render();
+  assert.equal(content(landscapeStandby).props.viewport.width, 390, 'hidden player does not resize its carousel during StandBy');
+  assert.equal(find(landscapeStandby, 'StandByOverlay').props.rootViewport.width, 844);
+  find(landscapeStandby, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
   const overlay = find(standby, 'StandByOverlay');
   const song = { id: 'next' }; overlay.props.onPlayQueueSong(song);
   assert.equal(played[0].song, song);

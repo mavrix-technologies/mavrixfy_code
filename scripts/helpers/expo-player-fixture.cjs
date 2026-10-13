@@ -3,6 +3,7 @@ const vm = require("node:vm");
 const ts = require("typescript");
 function fixture({ loaded = true, starts = true, fakeTimers = false, mode = async () => {}, audioFactory } = {}) {
   const players = [];
+  const warnings = [];
   const preloads = new Map(); const releasedPreloads = [];
   let activePreload = null;
   const timers = new Map(); const timerDelays = []; let timerId = 0;
@@ -41,9 +42,9 @@ function fixture({ loaded = true, starts = true, fakeTimers = false, mode = asyn
         clearPreparedAudio: () => { preloads.clear(); if(activePreload) releasedPreloads.push(activePreload); activePreload = null; },
       };
       if (name === "./audioTimeline") return require("./audio-timeline-fixture.cjs");
-      if (name === "@/lib/logger") return { logger: { debug() {}, warn() {} } };
+      if (name === "@/lib/logger") return { logger: { debug() {}, warn: (...args) => warnings.push(args) } };
       throw new Error(name); } });
-  return { ...module.exports, players, preloads, releasedPreloads, timerDelays, fireTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); } };
+  return { ...module.exports, players, warnings, preloads, releasedPreloads, timerDelays, fireTimers() { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); } };
 }
 
 module.exports = { fixture };

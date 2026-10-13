@@ -172,15 +172,22 @@ test('the visible backdrop runs independently of song play/pause',()=>{
   vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/features/player/components/PlayerAmbientBackdrop.tsx','utf8'),{
     compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}
   }).outputText,{module,exports:module.exports,require:name=>deps[name]});
-  const tree=module.exports.PlayerAmbientBackdrop({shouldRender:true,backgroundVideoId:'abcdefghijk',screenHeight:800,screenWidth:390,
+  const props={shouldRender:true,backgroundVideoId:'abcdefghijk',screenHeight:800,screenWidth:390,
     isLowEnd:false,quality:'high',isScreenFocused:true,playerIsPlaying:false,fullscreenLyricsVisible:false,
     trackScrollX:{interpolate:()=>1},activeQueueIndex:0,trackPageWidth:390,
-    artworkPalette:{accent:'#f00',background:'#200',text:'#fff',isDark:true,primary:'#f00'}});
+    screenSong:{id:'song',coverUrl:'https://art.example/cover.jpg'},
+    artworkPalette:{accent:'#f00',background:'#200',text:'#fff',isDark:true,primary:'#f00'}};
+  const tree=module.exports.PlayerAmbientBackdrop(props);
   const nodes=[];const visit=node=>{if(!node||typeof node!=='object')return;nodes.push(node);for(const child of node.props?.children||[])visit(child);};visit(tree);
   const video=nodes.find(node=>node.type==='Video');
   assert.equal(video.props.active,true);assert.equal(video.props.videoId,'abcdefghijk');
   assert.ok(nodes.some(node=>node.type==='Gradient'&&node.props.colors[0]==='a'));
   assert.ok(nodes.some(node=>node.type==='Gradient'&&node.props.style.height===320));
+  assert.equal(nodes.some(node=>node.type==='Image'),false);
+  nodes.length=0; visit(module.exports.PlayerAmbientBackdrop({...props,shouldRender:false}));
+  assert.equal(nodes.some(node=>node.type==='Image'),false, 'colour ambient has no artwork image layer');
+  assert.ok(nodes.some(node=>node.type==='Gradient'));
+  assert.equal(nodes.some(node=>node.type==='Video'),false);
 });
 
 

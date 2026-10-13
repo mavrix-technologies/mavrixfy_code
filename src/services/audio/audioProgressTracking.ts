@@ -166,6 +166,9 @@ export function useAudioProgressTracking({
         if (!mounted) return;
         if (status.didJustFinish && finishedSongRef.current === currentSongRef.current?.id) return;
         if (status.error) {
+          // Startup failures belong to loadAndPlay's awaited command. Starting
+          // another playSong here races its cleanup and cancels the recovery.
+          if (pendingPlayRequestRef.current) return;
           const song = currentSongRef.current;
           const retry = fallbackRetryRef.current;
           const currentPos = Math.max(positionSecondsRef.current, Number.isFinite(status.position) ? status.position : 0);

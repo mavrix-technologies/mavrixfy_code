@@ -14,6 +14,7 @@ export interface PlaybackEngineSnapshot {
   desiredPlayState: boolean | null;
   isBuffering: boolean;
   isLoading: boolean;
+  isReconnecting: boolean;
   autoplaySongIds: string[];
   isAutoplayLoading: boolean;
   error: string | null;
@@ -42,6 +43,7 @@ const INITIAL_SNAPSHOT: PlaybackEngineSnapshot = {
   desiredPlayState: null,
   isBuffering: false,
   isLoading: false,
+  isReconnecting: false,
   error: null,
   isShuffled: false,
   repeatMode: "off",
@@ -108,7 +110,7 @@ export function updatePlaybackEngineSnapshot(update: SnapshotUpdater): void {
   emitPlaybackEngine();
 }
 
-function usePlaybackEngineSelector<T>(
+export function usePlaybackEngineSelector<T>(
   selector: (snapshot: PlaybackEngineSnapshot) => T,
   isEqual: (left: T, right: T) => boolean = Object.is
 ): T {

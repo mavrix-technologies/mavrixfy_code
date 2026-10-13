@@ -1,4 +1,4 @@
-import { isYouTubeSong, peekYouTubeStream, youTubePlaybackErrorMessage, youTubePlaybackErrorDetails, clearYouTubeConnectionStreams } from "@/services/youtube/YouTubeMusic";
+import { isYouTubeSong, peekYouTubeStream, youTubePlaybackErrorMessage, youTubePlaybackErrorDetails } from "@/services/youtube/YouTubeMusic";
 import { getSettings } from "@/lib/storage";
 import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import { logger } from "@/lib/logger";
@@ -189,6 +189,7 @@ export function useAudioPlaybackCommands({
         desiredPlayState: true,
         isPlaying: true,
         isLoading: true,
+        isReconnecting: false,
         isBuffering: false,
         error: null,
       });
@@ -217,25 +218,26 @@ export function useAudioPlaybackCommands({
         try {
           audioUrl = await Promise.race([
           resolvePlaybackUrlCached(targetSong),
-          new Promise<null>((resolve) => { resolutionTimer = setTimeout(() => resolve(null), isYouTubeSong(targetSong) ? 27000 : 12000); }),
-        ]).finally(() => clearTimeout(resolutionTimer));
+          new Promise<never>((_, reject) => { resolutionTimer = setTimeout(() => reject(new Error("Audio stream resolution timed out.")), isYouTubeSong(targetSong) ? 27000 : 12000); }),
+          ]).finally(() => clearTimeout(resolutionTimer));
         } catch (initialResolutionError) {
-          if (isYouTubeSong(targetSong) && reqId === playRequestIdRef.current) {
-            if (typeof clearYouTubeConnectionStreams === "function") clearYouTubeConnectionStreams();
-            try {
-              let retryTimer: ReturnType<typeof setTimeout> | undefined;
-              audioUrl = await Promise.race([
-                resolvePlaybackUrlCached(targetSong),
-                new Promise<null>((resolve) => { retryTimer = setTimeout(() => resolve(null), 15000); }),
-              ]).finally(() => clearTimeout(retryTimer));
-            } catch {
-              throw initialResolutionError;
-            }
-          } else {
-            throw initialResolutionError;
-          }
+          const detail = youTubePlaybackErrorDetails(initialResolutionError);
+          const retryable = !/LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot|private|removed|restricted/i.test(detail) &&
+            /network request failed|failed to fetch|timed out|timeout|ECONNRESET|ETIMEDOUT|HTTP (?:408|429|5\d\d)/i.test(detail);
+          if (!retryable) throw initialResolutionError;
+          if (reqId !== playRequestIdRef.current || !isCurrentAccount(scope) || !desiredPlayStateRef.current) return;
+          updatePlaybackEngineSnapshot({ isReconnecting: true });
+          await new Promise<void>(resolve => setTimeout(resolve, 1200));
+          if (reqId !== playRequestIdRef.current || !isCurrentAccount(scope) || !desiredPlayStateRef.current) return;
+          // One recovery attempt for the selected track; native owns rebuffering once loaded.
+          let retryTimer: ReturnType<typeof setTimeout> | undefined;
+          audioUrl = await Promise.race([
+            resolvePlaybackUrlCached(targetSong),
+            new Promise<never>((_, reject) => { retryTimer = setTimeout(() => reject(new Error("Audio stream resolution timed out.")), 15000); }),
+          ]).finally(() => clearTimeout(retryTimer));
         }
         if (reqId !== playRequestIdRef.current || !isCurrentAccount(scope)) return;
+        updatePlaybackEngineSnapshot({ isReconnecting: false });
 
         if (!audioUrl) {
           if (pendingPlayRequestRef.current?.id === reqId) {
@@ -333,9 +335,8 @@ export function useAudioPlaybackCommands({
           prefetchAdjacentTrackStreams(q, targetIndex);
         } else if (canUseLightweightAudioFallback) {
           if (reqId !== playRequestIdRef.current) return;
-          await ExpoAvPlayer.loadAndPlay(audioUrl, resolvedSong, () =>
-            reqId === playRequestIdRef.current && desiredPlayStateRef.current !== false
-          , initialPos);
+          const shouldPlay = () => reqId === playRequestIdRef.current && isCurrentAccount(scope) && desiredPlayStateRef.current !== false;
+          await ExpoAvPlayer.loadAndPlay(audioUrl, resolvedSong, shouldPlay, initialPos);
           if (reqId === playRequestIdRef.current) prefetchAdjacentTrackStreams(q, targetIndex);
         }
       } catch (error) {
@@ -344,8 +345,8 @@ export function useAudioPlaybackCommands({
         const notice = isYouTubeSong(targetSong) ? youTubePlaybackErrorMessage(error) : "Could not start playback.";
         const upstreamRequiresSignIn = isYouTubeSong(targetSong) && /LOGIN_REQUIRED|SIGN_IN_REQUIRED/.test(youTubePlaybackErrorDetails(error));
         // A missing `playing` event by the startup deadline is not a native
-        // decoder error. Keep it quiet for users and log it as a retryable
-        // connection delay; explicit errors still get the normal notice.
+        // decoder error. Verification errors are terminal for this connection;
+        // retain the selected song and never advance the queue on failure.
         if (nativeStartupTimedOut || upstreamRequiresSignIn) {
           logger.warn(upstreamRequiresSignIn ? "[Player] Upstream requires verification for this track" : "[Player] Audio startup is still pending after the native wait window",
             { songId: targetSong.id, reason: upstreamRequiresSignIn ? "sign_in_required" : "startup_timeout",
@@ -357,9 +358,6 @@ export function useAudioPlaybackCommands({
             ? `[Player] playSong failed ${JSON.stringify({ songId: targetSong.id, message: notice, cause: youTubePlaybackErrorDetails(error) })}`
             : "[Player] playSong failed", error);
         }
-        if (upstreamRequiresSignIn) {
-          if (typeof clearYouTubeConnectionStreams === "function") clearYouTubeConnectionStreams();
-        }
         if (pendingPlayRequestRef.current?.id === reqId) {
           pendingPlayRequestRef.current = null;
         }
@@ -370,27 +368,13 @@ export function useAudioPlaybackCommands({
         setPlaybackLoading(false);
         updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false,
           error: nativeStartupTimedOut ? "Audio playback timed out. Tap Play to retry." : notice });
-        if (!nativeStartupTimedOut) {
-
-          const canAutoSkip = q.length > 1 && (repeatModeRef.current === "all" || targetIndex < q.length - 1);
-          if (upstreamRequiresSignIn && canAutoSkip) {
-            showPlaybackNotice("Track unavailable. Playing next track...");
-            setTimeout(() => {
-              if (reqId === playRequestIdRef.current) {
-                nextSongRef.current?.();
-              }
-            }, 300);
-          } else {
-            showPlaybackNotice(notice);
-          }
-
-        }
+        if (!nativeStartupTimedOut) showPlaybackNotice(notice);
       } finally {
         if (reqId === playRequestIdRef.current) {
           pendingPlayRequestRef.current = null;
           playbackLoadingRef.current = false;
           setPlaybackLoading(false);
-          updatePlaybackEngineSnapshot({ isLoading: false });
+          updatePlaybackEngineSnapshot({ isLoading: false, isReconnecting: false });
         }
       }
     },

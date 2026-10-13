@@ -451,7 +451,14 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
             // Bootstrap overlaps remaining direct profiles after an access failure.
             const poToken = client === "MWEB" ? await mintProof() : undefined;
             check();
-            if (client === "MWEB" && !poToken) { failures.push(`MWEB: Attestation unavailable (${youtubePoTokens.failureReason || "no native token host"})`); continue; }
+            if (client === "MWEB" && !poToken) {
+              failures.push(`MWEB: Attestation unavailable (${youtubePoTokens.failureReason || "no native token host"})`);
+              if (failures.some(f => /confirm.*not a bot/i.test(f))) {
+                verificationBlockedUntil = Date.now() + 60_000;
+                throw new Error(`${video ? "Video" : "Audio"} unavailable. LOGIN_REQUIRED: Sign in to confirm you’re not a bot`);
+              }
+              continue;
+            }
             // WEB player requests need the signature timestamp, not just the
             // decipher function after a response has already been rejected.
             if (client === "WEB" || client === "MWEB") { await preparePlayer(yt); check(); }
@@ -463,14 +470,27 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
             }
             // Keep Apple's direct-file audio path on AAC-LC while investigating
             // the observed doubled HE-AAC timeline and silent tail.
+            // Android uses ExoPlayer/Media3 which natively supports both AAC-LC and high-fidelity Opus (itag 251, ~160kbps).
+            const isAudioFormatCompatible = (format: { has_audio?: boolean; has_video?: boolean; mime_type: string }) => {
+              if (!format.has_audio || format.has_video) return false;
+              if (format.mime_type.startsWith("audio/mp4")) {
+                return RuntimePlatform.OS !== "ios" || /\bmp4a\.40\.2\b/i.test(format.mime_type);
+              }
+              if (RuntimePlatform.OS === "android" && format.mime_type.startsWith("audio/webm") && /opus/i.test(format.mime_type)) {
+                return true;
+              }
+              return false;
+            };
+
             const formats = [...(info.streaming_data?.adaptive_formats || []), ...(video ? info.streaming_data?.formats || [] : [])]
-              .filter(format => (video ? format.has_video && format.mime_type.startsWith("video/mp4") && /avc1/i.test(format.mime_type) : format.has_audio && !format.has_video && format.mime_type.startsWith("audio/mp4")) &&
-                (video || RuntimePlatform.OS !== "ios" || /\bmp4a\.40\.2\b/i.test(format.mime_type)) &&
-                (format.url || format.signature_cipher || format.cipher))
+              .filter(format => (video
+                ? format.has_video && format.mime_type.startsWith("video/mp4") && /avc1/i.test(format.mime_type)
+                : isAudioFormatCompatible(format)
+              ) && (format.url || format.signature_cipher || format.cipher))
               .sort((a, b) => a.bitrate - b.bitrate);
-            if (!formats.length) throw new Error(video ? "No compatible H.264 video stream" : "No compatible AAC audio stream");
-            // Medium avoids premium/high-bitrate formats when a standard AAC
-            // format exists. High selects the best actually available AAC track.
+            if (!formats.length) throw new Error(video ? "No compatible H.264 video stream" : "No compatible audio stream");
+            // Medium avoids premium/high-bitrate formats when a standard AAC/Opus
+            // format exists. High selects the best actually available audio track.
             const standard = formats.filter(format => format.bitrate <= 160000);
             const candidates = video ? selectVideoFormats(formats, quality) : quality === "low" ? formats : quality === "medium"
               ? (standard.length ? standard.reverse() : formats.reverse())
@@ -505,7 +525,7 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
                   try {
                     check();
                     if (!response.ok) throw new Error(`Audio GET HTTP ${response.status}`);
-                    if (!(video ? /^video\/mp4(?:;|$)/i : /^audio\/mp4(?:;|$)/i).test(response.headers.get("content-type") || ""))
+                    if (!(video ? /^video\/mp4(?:;|$)/i : /^audio\/(?:mp4|webm)(?:;|$)/i).test(response.headers.get("content-type") || ""))
                       throw new Error(video ? "Video GET returned a non-MP4 response" : "Audio GET returned a non-AAC response");
                   } finally { await response.body?.cancel(); }
                 } finally {
@@ -517,7 +537,7 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
                 // video once; the rejected profile becomes eligible after a minute.
                 const stream: YouTubeStream | YouTubeVideoStream = { videoId, url, headers, expiresAt,
                   ...(video ? { height: format.height || 0 } : {}),
-                  bitrate: format.bitrate, mimeType: format.mime_type, codec: video ? "h264" : "aac", clientProfile: client, resolutionId,
+                  bitrate: format.bitrate, mimeType: format.mime_type, codec: video ? "h264" : /opus/i.test(format.mime_type) ? "opus" : "aac", clientProfile: client, resolutionId,
                   durationSeconds: Number.isFinite(format.approx_duration_ms) && format.approx_duration_ms > 0
                     ? format.approx_duration_ms / 1000 : undefined };
                 successfulClients[lane] = client;
@@ -528,11 +548,15 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
           } catch (error) {
             check();
             const detail = safeError(error);
-            if (/LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot/i.test(detail)) {
-              // Connection verification is shared by audio/video and preloads.
-              // Track-specific sign-in restrictions must not block other songs.
-              if (/confirm.*not a bot/i.test(detail)) verificationBlockedUntil = Date.now() + 60_000;
+            if (/LOGIN_REQUIRED|SIGN_IN_REQUIRED/i.test(detail) && !/confirm.*not a bot/i.test(detail)) {
               throw new Error(`${video ? "Video" : "Audio"} unavailable. ${detail}`);
+            }
+            if (/confirm.*not a bot/i.test(detail)) {
+              if (client === "MWEB") {
+                verificationBlockedUntil = Date.now() + 60_000;
+                throw new Error(`${video ? "Video" : "Audio"} unavailable. ${detail}`);
+              }
+              if (round === 0) void mintProof();
             }
             failures.push(`${client}: ${detail}`);
             if (round === 0 && /HTTP (?:401|403)/i.test(detail)) void mintProof();
@@ -544,6 +568,9 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
         const previous = session;
         if (previous && (await previous) === yt && session === previous) session = undefined;
         check(); yt = await youtube(); proof = undefined; check();
+      }
+      if (failures.some(error => /confirm.*not a bot/i.test(error))) {
+        verificationBlockedUntil = Date.now() + 60_000;
       }
       throw new Error(`${video ? "Video" : "Audio"} unavailable. ${failures.join("; ")}`);
     });

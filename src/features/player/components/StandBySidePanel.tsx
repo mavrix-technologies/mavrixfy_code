@@ -1,13 +1,14 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, useWindowDimensions, type ListRenderItemInfo } from "react-native";
 import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import type { Song } from "@/lib/musicData";
 import { getSongLyrics, type LyricLine, type LyricsResult } from "@/services/lyricsService";
 import { getPlaybackProgressSnapshot, subscribePlaybackProgress } from "@/services/audio/playbackProgressStore";
 import { unescapeHtml } from "@/utils/stringUtils";
 import { getStandByLyricIndex } from "./standByLyrics";
 import type { StandByPanel } from "./StandByActions";
+import QueueSleepTimer from "./QueueSleepTimer";
 
 interface StandBySidePanelProps {
   panel: StandByPanel;
@@ -20,9 +21,11 @@ interface StandBySidePanelProps {
   onPlayQueueSong: (song: Song) => void;
   onSeek: (ratio: number) => void;
   onTouchActivity: () => void;
+  onBack?: () => void;
 }
 
 export const StandBySidePanel = memo(function StandBySidePanel(props: StandBySidePanelProps) {
+  if (props.panel === "timer") return <QueueSleepTimer embedded onBack={props.onBack ?? props.onTouchActivity} />;
   return props.panel === "queue" ? <StandByQueue {...props} /> : <StandByLyrics key={props.song.id} {...props} />;
 });
 
@@ -55,7 +58,7 @@ const StandByQueue = memo(function StandByQueue({ song, queue, queueIndex, prima
         removeClippedSubviews={false}
         showsVerticalScrollIndicator={false}
         onScrollBeginDrag={onTouchActivity}
-        ListEmptyComponent={<View style={styles.empty}><Ionicons name="list-outline" size={30} color={secondaryColor} /><Text style={[styles.emptyText, { color: secondaryColor }]}>You’re at the end of the queue.</Text></View>}
+        ListEmptyComponent={<View style={styles.empty}><MaterialIcons name="queue-music" size={30} color={secondaryColor} /><Text style={[styles.emptyText, { color: secondaryColor }]}>You’re at the end of the queue.</Text></View>}
       />
     </View>
   );
@@ -70,14 +73,13 @@ const StandByLyrics = memo(function StandByLyrics({ song, primaryColor, secondar
   const [viewportHeight, setViewportHeight] = useState(0);
   const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
   const userScrolling = useRef(false);
+  const alignedIndex = useRef(-1);
   const listRef = useRef<FlatList<LyricLine>>(null);
   useEffect(() => {
     let mounted = true;
-    setLyrics(null);
-    userScrolling.current = false;
     void getSongLyrics({ id: song.id, title: song.title, artist: song.artist, album: song.album, duration: song.duration })
       .then(result => { if (mounted) setLyrics(result); })
-      .catch(() => { if (mounted) setLyrics(EMPTY_LYRICS); });
+      .catch(() => { if (mounted) setLyrics(previous => previous ?? EMPTY_LYRICS); });
     return () => { mounted = false; };
   }, [song.id, song.title, song.artist, song.album, song.duration]);
 
@@ -85,10 +87,12 @@ const StandByLyrics = memo(function StandByLyrics({ song, primaryColor, secondar
   const getActiveIndex = useCallback(() => lyrics?.synced ? getStandByLyricIndex(lyrics.lines, getPlaybackProgressSnapshot().positionMillis / 1000) : -1, [lyrics]);
   const activeIndex = useSyncExternalStore(lyrics?.synced ? subscribePlaybackProgress : subscribeInactive, getActiveIndex, getActiveIndex);
   const scrollToActive = useCallback(() => {
-    if (activeIndex < 0 || !lyrics?.synced || userScrolling.current) return;
+    if (activeIndex < 0 || !lyrics?.synced || !listRef.current || userScrolling.current || alignedIndex.current === activeIndex) return;
+    alignedIndex.current = activeIndex;
     listRef.current?.scrollToIndex({ index: activeIndex, animated: !reduceMotion, viewPosition: 0.5 });
   }, [activeIndex, lyrics?.synced, reduceMotion]);
   useEffect(() => {
+    alignedIndex.current = -1;
     scrollToActive();
   }, [minRowHeight, viewportHeight, scrollToActive]);
 
@@ -126,21 +130,23 @@ const StandByLyrics = memo(function StandByLyrics({ song, primaryColor, secondar
           keyExtractor={lyricKey}
           onScrollToIndexFailed={({ index, averageItemLength }) => {
             if (userScrolling.current) return;
+            alignedIndex.current = -1;
             // Wrapped lyrics have natural heights. Move into the measured
             // region; content-size changes retry precise active-line alignment.
-            listRef.current?.scrollToOffset({ offset: averageItemLength * index, animated: false });
+            listRef.current?.scrollToOffset({ offset: averageItemLength * index, animated: !reduceMotion });
           }}
           initialNumToRender={6}
           maxToRenderPerBatch={6}
           windowSize={5}
           removeClippedSubviews={false}
           showsVerticalScrollIndicator={false}
-          onScrollBeginDrag={() => { onTouchActivity(); userScrolling.current = true; }}
+          contentInsetAdjustmentBehavior="never"
+          onScrollBeginDrag={() => { onTouchActivity(); userScrolling.current = true; alignedIndex.current = -1; }}
           onScrollEndDrag={() => { userScrolling.current = false; }}
           onMomentumScrollBegin={() => { userScrolling.current = true; }}
           onMomentumScrollEnd={() => { userScrolling.current = false; }}
           onContentSizeChange={scrollToActive}
-          ListEmptyComponent={<View style={styles.empty}><Ionicons name="mic-outline" size={30} color={secondaryColor} /><Text style={[styles.emptyText, { color: secondaryColor }]}>Lyrics aren’t available for this track.</Text></View>}
+          ListEmptyComponent={<View style={styles.empty}><MaterialIcons name="lyrics" size={30} color={secondaryColor} /><Text style={[styles.emptyText, { color: secondaryColor }]}>Lyrics aren’t available for this track.</Text></View>}
         />
       )}
     </View>
@@ -157,7 +163,7 @@ const styles = StyleSheet.create({
   queueSong: { flex: 1, minWidth: 0 },
   queueTitle: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
   queueArtist: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 3 },
-  lyricRow: { justifyContent: "center", paddingVertical: 4 },
+  lyricRow: { justifyContent: "center", paddingVertical: 7 },
   lyricText: { fontSize: 22, lineHeight: 30, fontFamily: "Inter_600SemiBold" },
   empty: { flexGrow: 1, alignItems: "center", justifyContent: "center", gap: 12, paddingVertical: 20 },
   emptyText: { fontSize: 12, fontFamily: "Inter_500Medium", textAlign: "center", lineHeight: 18 },

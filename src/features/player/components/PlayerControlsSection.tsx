@@ -1,4 +1,6 @@
 import { MaterialCommunityIcons,MaterialIcons } from "@expo/vector-icons";
+import { PlaybackInfo } from "./PlaybackInfo";
+import { AudioOutputPicker } from "./AudioOutputPicker";
 import React from "react";
 import { Text, View } from "react-native";
 import * as Animated from "@/lib/nativeAnimated";
@@ -422,6 +424,10 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
               color={playerRepeatMode !== "off" ? selectedControlIconColor : sideControlIconColor}
             />
           </SmoothControlButton>
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16 }}>
+          <PlaybackInfo />
+          <AudioOutputPicker />
         </View>
       </View>
     </View>

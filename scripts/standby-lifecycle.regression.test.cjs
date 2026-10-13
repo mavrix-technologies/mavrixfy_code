@@ -29,7 +29,7 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 
 function orientationFixture({ ios = false, web = false, lockAsync = async () => {} } = {}) {
   const calls = [];
-  const OrientationLock = { LANDSCAPE: 1, PORTRAIT_UP: 3 };
+  const OrientationLock = { LANDSCAPE_RIGHT: 1, PORTRAIT_UP: 3 };
   const orientation = load('src/features/player/hooks/standByOrientation.ts', {
     'expo-screen-orientation': { OrientationLock, lockAsync: lock => {
       calls.push(lock);
@@ -89,7 +89,7 @@ function hookFixture({ web = false, storage = {}, impact = async () => {} } = {}
     'expo-haptics': { ImpactFeedbackStyle: { Light: 'light' } },
     '@/constants/platform': { IS_WEB: web },
     './standByOrientation': { setStandByOrientation: enabled => {
-      orientation.push(enabled); return Promise.resolve();
+      orientation.push(enabled); return Promise.resolve(true);
     } },
   }, {
     setTimeout: (fn, duration) => {
@@ -150,10 +150,10 @@ test('late landscape completion is followed by portrait restoration before clean
   const open = f.setStandByOrientation(true);
   await settle();
   const close = f.setStandByOrientation(false);
-  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE]);
+  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE_RIGHT]);
   opening.resolve();
   await Promise.all([open, close]);
-  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE, f.OrientationLock.PORTRAIT_UP]);
+  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE_RIGHT, f.OrientationLock.PORTRAIT_UP]);
 });
 
 test('rapid close and reopen skips obsolete queued portrait requests', async () => {
@@ -165,13 +165,13 @@ test('rapid close and reopen skips obsolete queued portrait requests', async () 
   const reopen = f.setStandByOrientation(true);
   opening.resolve();
   await Promise.all([open, close, reopen]);
-  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE, f.OrientationLock.LANDSCAPE]);
+  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE_RIGHT, f.OrientationLock.LANDSCAPE_RIGHT]);
 });
 
 test('iPhone and Android request landscape explicitly and failures do not block portrait restoration', async () => {
   const ios = orientationFixture({ ios: true });
   await ios.setStandByOrientation(true);
-  assert.deepEqual(ios.calls, [ios.OrientationLock.LANDSCAPE]);
+  assert.deepEqual(ios.calls, [ios.OrientationLock.LANDSCAPE_RIGHT]);
   const android = orientationFixture({ lockAsync: async lock => {
     if (lock !== 3) throw Error('Unavailable orientation policy');
   } });
@@ -362,5 +362,32 @@ test('rapid style selection persists once per change and late restoration cannot
   restored.resolve('true'); await settle();
   assert.deepEqual(writes, ['night', 'classic', 'ambient']);
   assert.equal(f.render().standByStyle, 'ambient');
+  f.unmount();
+});
+
+
+test('exit restores portrait before revealing the player and re-entry cancels pending exit', async () => {
+  const f = hookFixture();
+  let state = f.render(); state.enterStandBy(); state = f.render();
+  state.exitStandBy(); state = f.render();
+  await settle(); state = f.render();
+  assert.equal(state.isStandByActive, true, 'landscape overlay covers the player during restoration');
+  assert.equal(f.orientation.at(-1), false);
+  state.enterStandBy(); state = f.render();
+  f.setDimensions(390, 844); state = f.render();
+  assert.equal(state.isStandByActive, true, 're-entry cancels the previous exit');
+  state.exitStandBy(); state = f.render();
+  assert.equal(state.isStandByActive, false, 'portrait layout allows immediate exit');
+  f.unmount();
+});
+
+
+test('portrait window events cannot reveal the player before its route layout is portrait', async () => {
+  const f = hookFixture(); let state = f.render({viewport:{width:844,height:390}});
+  state.enterStandBy(); state=f.render(); state.exitStandBy(); state=f.render();
+  f.setDimensions(390,844); state=f.render();
+  assert.equal(state.isStandByActive,true,'window event alone does not finish exit');
+  state=f.render({viewport:{width:390,height:844}});
+  assert.equal(state.isStandByActive,false,'native route measurement completes exit');
   f.unmount();
 });

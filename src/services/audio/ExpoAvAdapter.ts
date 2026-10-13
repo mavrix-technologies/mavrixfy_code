@@ -195,11 +195,12 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
   const myGen = generation;
 
   let p: AudioPlayer;
+  let prepared: string | null = null;
 
   try {
     await ensureAudioMode();
     if (myGen !== generation) return;
-    const prepared = await takePreparedAudio(url, song?.playbackHeaders, () => myGen === generation);
+    prepared = await takePreparedAudio(url, song?.playbackHeaders, () => myGen === generation);
     if (myGen !== generation) return;
     p = createAudioPlayer(prepared ? { uri: prepared } : { uri: url, headers: song?.playbackHeaders },
       { updateInterval: 500, keepAudioSessionActive: true });
@@ -266,6 +267,13 @@ export async function loadAndPlay(url: string, song?: Partial<Song> | null, shou
       activePlayer = null;
       killPlayer(p);
       releasePreparedAudio();
+      // Native Expo Go exposes only a localized error string. Record which
+      // source failed without logging signed URLs, filesystem paths or headers.
+      logger.warn(`[Audio] Preview load failed ${JSON.stringify({ songId: song?.id,
+        source: prepared ? "prepared-file" : /^https?:/i.test(url) ? "remote" : "local-file",
+        expired: typeof song?.youtubeAudioExpiresAt === "number" && song.youtubeAudioExpiresAt <= Date.now(),
+        reason: error instanceof Error ? error.message.replace(/https?:\/\/\S+/gi, "[url]").slice(0, 200) : "Native load rejected",
+      })}`);
       throw error;
     } finally {
       clearTimeout(timer);

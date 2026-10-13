@@ -1,7 +1,8 @@
-import React, { memo, useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import React, { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   AccessibilityInfo,
-  Modal,
+  BackHandler,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,10 +12,9 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 import { Image } from "expo-image";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { BatteryState, useBatteryLevel, useBatteryState } from "expo-battery";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppIsActive } from "@/lib/appActivity";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { PlayerSlider } from "@/components/PlayerSlider";
@@ -26,11 +26,15 @@ import type { StandByStyle } from "../hooks/useStandByMode";
 import { StandByAmbientBackdrop } from "./StandByAmbientBackdrop";
 import { StandByActions, type StandByPanel } from "./StandByActions";
 import { StandBySidePanel } from "./StandBySidePanel";
+import * as Animated from "@/lib/nativeAnimated";
+import { PlaybackInfo } from "./PlaybackInfo";
 
 export interface StandByOverlayProps {
   visible: boolean;
+  rootViewport?: { width: number; height: number };
   song: Song | null;
   accentColor?: string;
+  ambientColor?: string;
   backgroundColor?: string;
   liked: boolean;
   queue: Song[];
@@ -40,6 +44,7 @@ export interface StandByOverlayProps {
   repeatMode: "off" | "all" | "one";
   standByStyle: StandByStyle;
   controlsDimmed: boolean;
+  sleepTimerLabel?: string;
   onTogglePlay: () => void;
   onSkipNext: () => void;
   onSkipPrev: () => void;
@@ -55,8 +60,10 @@ export interface StandByOverlayProps {
 
 export const StandByOverlay = memo(function StandByOverlay({
   visible,
+  rootViewport,
   song,
   accentColor = "#E4E4E7",
+  ambientColor,
   backgroundColor = "#243B55",
   liked,
   queue,
@@ -66,6 +73,7 @@ export const StandByOverlay = memo(function StandByOverlay({
   repeatMode,
   standByStyle,
   controlsDimmed,
+  sleepTimerLabel,
   onTogglePlay,
   onSkipNext,
   onSkipPrev,
@@ -78,23 +86,52 @@ export const StandByOverlay = memo(function StandByOverlay({
   onExitStandBy,
   onTouchActivity,
 }: StandByOverlayProps) {
-  const { width, height, fontScale } = useWindowDimensions();
-  const [viewport, setViewport] = useState({ width, height });
+  const dimensions = useWindowDimensions();
+  const { fontScale } = dimensions;
+  const { width, height } = rootViewport ?? dimensions;
+  const insets = useSafeAreaInsets();
+  const [viewport, setViewport] = useState({
+    width: Math.max(0, width - insets.left - insets.right),
+    height, rootWidth: width, rootHeight: height,
+  });
   const measureViewport = useCallback(({ nativeEvent }: LayoutChangeEvent) => {
     const { width: nextWidth, height: nextHeight } = nativeEvent.layout;
     if (nextWidth <= 0 || nextHeight <= 0) return;
-    setViewport(previous => previous.width === nextWidth && previous.height === nextHeight
-      ? previous : { width: nextWidth, height: nextHeight });
-  }, []);
+    setViewport(previous => previous.width === nextWidth && previous.height === nextHeight && previous.rootWidth === width && previous.rootHeight === height
+      ? previous : { width: nextWidth, height: nextHeight, rootWidth: width, rootHeight: height });
+  }, [width, height]);
   const isNightMode = standByStyle === "night";
   const isAmbient = standByStyle === "ambient";
   const shouldDim = controlsDimmed && !isAmbient;
   // Measure inside native safe-area padding: window dimensions can lag rotation.
-  const layout = getStandByLayout(viewport.width, viewport.height, fontScale, { top: 0, right: 0, bottom: 0, left: 0 });
+  const measured = viewport.rootWidth === width && viewport.rootHeight === height;
+  const verticalInset = Math.max(insets.top, insets.bottom);
+  const layout = getStandByLayout(
+    measured ? viewport.width : Math.max(0, width - insets.left - insets.right),
+    measured ? viewport.height : height,
+    fontScale, { top: verticalInset, right: 0, bottom: verticalInset, left: 0 });
   // Until the native preference is known, use a static transition.
   const [reduceMotion, setReduceMotion] = useState(true);
   const [panel, setPanel] = useState<StandByPanel | null>(null);
-  const controlsOpacity = shouldDim ? 0.55 : 1;
+  const [dimOpacity] = useState(() => new Animated.Value(1));
+  const dimTargetRef = useRef(1);
+  useEffect(() => {
+    const target = visible && shouldDim ? 0.72 : 1;
+    dimOpacity.stopAnimation();
+    if (!visible || reduceMotion) {
+      dimTargetRef.current = target;
+      dimOpacity.setValue(target);
+      return;
+    }
+    if (dimTargetRef.current === target) return;
+    dimTargetRef.current = target;
+    const animation = Animated.timing(dimOpacity, {
+      toValue: target, duration: 450, easing: Easing.inOut(Easing.quad),
+      useNativeDriver: true, isInteraction: false,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [visible, shouldDim, reduceMotion, dimOpacity]);
   const backToControls = useCallback(() => {
     onTouchActivity();
     setPanel(null);
@@ -103,6 +140,16 @@ export const StandByOverlay = memo(function StandByOverlay({
   useEffect(() => {
     if (!visible) setPanel(null);
   }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (panel === null) onExitStandBy?.();
+      else backToControls();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [visible, panel, onExitStandBy, backToControls]);
 
   useEffect(() => {
     let mounted = true;
@@ -154,12 +201,12 @@ export const StandByOverlay = memo(function StandByOverlay({
 
   const controlRows = (
     <View style={[styles.controlRows, compactControls && styles.compactRows]}>
-      <View testID="standby-playback-controls" style={[styles.controls, { opacity: controlsOpacity }]}>
+      <View testID="standby-playback-controls" style={styles.controls}>
         <Pressable onPress={() => runAction(onToggleShuffle)} style={controlButtonStyle} accessibilityRole="button" accessibilityLabel="Shuffle" accessibilityState={{ selected: isShuffled }}>
-          <Ionicons name="shuffle" size={24} color={isShuffled ? selectedColor : inactiveColor} />
+          <MaterialCommunityIcons name="shuffle-variant" size={24} color={isShuffled ? selectedColor : inactiveColor} />
         </Pressable>
         <Pressable onPress={() => runAction(onSkipPrev)} style={[...controlButtonStyle, styles.flexControl]} accessibilityRole="button" accessibilityLabel="Previous track">
-          <Ionicons name="play-skip-back" size={30} color={primaryColor} />
+          <MaterialCommunityIcons name="skip-previous" size={compactControls ? 36 : 38} color={primaryColor} />
         </Pressable>
         <View style={[styles.playSlot, compactControls && styles.compactPlaySlot]}>
           <Pressable
@@ -172,15 +219,14 @@ export const StandByOverlay = memo(function StandByOverlay({
           </Pressable>
         </View>
         <Pressable onPress={() => runAction(onSkipNext)} style={[...controlButtonStyle, styles.flexControl]} accessibilityRole="button" accessibilityLabel="Next track">
-          <Ionicons name="play-skip-forward" size={30} color={primaryColor} />
+          <MaterialCommunityIcons name="skip-next" size={compactControls ? 36 : 38} color={primaryColor} />
         </Pressable>
         <Pressable onPress={() => runAction(onToggleRepeat)} style={controlButtonStyle} accessibilityRole="button" accessibilityLabel={`Repeat: ${repeatMode}`} accessibilityState={{ selected: repeatMode !== "off" }}>
-          <Ionicons name="repeat" size={24} color={repeatMode !== "off" ? selectedColor : inactiveColor} />
-          {repeatMode === "one" && <Text accessible={false} style={[styles.repeatBadge, { color: selectedColor }]}>1</Text>}
+          <MaterialCommunityIcons name={repeatMode === "one" ? "repeat-once" : "repeat"} size={24} color={repeatMode !== "off" ? selectedColor : inactiveColor} />
         </Pressable>
       </View>
-      <View style={{ opacity: controlsOpacity }}>
-        <StandByActions compact={layout.compact} primaryColor={primaryColor} secondaryColor={secondaryColor} onSelectPanel={setPanel} onTouchActivity={onTouchActivity} />
+      <View>
+        <StandByActions timerLabel={sleepTimerLabel} compact={layout.compact} primaryColor={primaryColor} secondaryColor={secondaryColor} onSelectPanel={setPanel} onTouchActivity={onTouchActivity} />
       </View>
     </View>
   );
@@ -189,9 +235,9 @@ export const StandByOverlay = memo(function StandByOverlay({
   // scroll the whole pane, where all controls cannot physically fit together.
   const scrollAll = layout.contentHeight < 300 || fontScale > 1.4;
   const trackDetails = (
-    <View style={[styles.trackDetails, verticalSpacing]}>
-      <View style={[styles.header, { opacity: controlsOpacity }]}>
-        <StandByClock active={visible} compact={layout.compact} primaryColor={primaryColor} secondaryColor={secondaryColor} />
+    <View style={[styles.trackDetails, { gap: verticalSpacing.gap + 8 }]}>
+      <View style={styles.header}>
+        <StandByClock active={visible} compact={height < 360 || fontScale > 1.4} primaryColor={primaryColor} secondaryColor={secondaryColor} />
         <View style={styles.headerActions}>
           <Pressable onPress={() => runAction(() => onSelectStyle(nextStyle))} style={styles.headerButton} accessibilityRole="button" accessibilityLabel={`StandBy style: ${styleName}`} accessibilityHint={`Switch to ${nextStyle === "classic" ? "Classic" : nextStyle === "night" ? "Night" : "Ambient"}`} accessibilityValue={{ text: styleName }}>
             <Ionicons name={isAmbient ? "color-palette-outline" : isNightMode ? "moon" : "moon-outline"} size={22} color={primaryColor} />
@@ -228,9 +274,10 @@ export const StandByOverlay = memo(function StandByOverlay({
             startDelay={2000}
             endDelay={1200}
           />
+          <PlaybackInfo color={secondaryColor} />
         </View>
         <Pressable onPress={() => runAction(onToggleLike)} style={styles.saveButton} accessibilityRole="button" accessibilityLabel={liked ? "Remove from liked songs" : "Save to liked songs"} accessibilityState={{ selected: liked }}>
-          <Ionicons name={liked ? "heart" : "heart-outline"} size={22} color={liked ? selectedColor : primaryColor} />
+          <MaterialCommunityIcons name={liked ? "heart" : "heart-outline"} size={22} color={liked ? selectedColor : primaryColor} />
         </Pressable>
       </View>
     </View>
@@ -248,12 +295,9 @@ export const StandByOverlay = memo(function StandByOverlay({
   );
 
   return (
-    <Modal visible presentationStyle="fullScreen" animationType="fade"
-      supportedOrientations={["portrait", "landscape-left", "landscape-right"]}
-      onRequestClose={panel === null ? onExitStandBy : backToControls}>
-    <SafeAreaProvider style={styles.surface}>
-    <GestureHandlerRootView style={styles.surface}>
+    <View style={styles.surface}>
     <SafeAreaView
+      edges={["left", "right"]}
       testID="standby-overlay"
       pointerEvents={visible ? "auto" : "none"}
       accessibilityViewIsModal={visible}
@@ -263,8 +307,8 @@ export const StandByOverlay = memo(function StandByOverlay({
       onTouchStart={onTouchActivity}
       style={[styles.surface, { backgroundColor: isAmbient ? backgroundColor : "#000000" }]}
     >
-      {visible && isAmbient && song && <StandByAmbientBackdrop key={song.id} song={song} accentColor={accentColor} backgroundColor={backgroundColor} reduceMotion={reduceMotion} />}
-      <View onLayout={measureViewport} testID="standby-viewport" style={[
+      {visible && isAmbient && song && <StandByAmbientBackdrop key={song.id} song={song} accentColor={ambientColor ?? accentColor} backgroundColor={backgroundColor} reduceMotion={reduceMotion} />}
+      <Animated.View onLayout={measureViewport} testID="standby-viewport" style={[
         styles.root,
         {
           paddingLeft: layout.paddingLeft,
@@ -272,6 +316,7 @@ export const StandByOverlay = memo(function StandByOverlay({
           paddingTop: layout.paddingTop,
           paddingBottom: layout.paddingBottom,
           gap: layout.gap,
+          opacity: dimOpacity,
         },
       ]}
     >
@@ -295,7 +340,7 @@ export const StandByOverlay = memo(function StandByOverlay({
 
       <View testID="standby-content" style={styles.contentSection}>
         {panel === null ? (
-          <View style={[styles.playerPane, verticalSpacing]}>
+          <View style={[styles.playerPane, { gap: Math.max(6, verticalSpacing.gap - 12) }]}>
             {scrollAll ? (
               <ScrollView style={styles.panelScroll} contentContainerStyle={[styles.content, verticalSpacing]} showsVerticalScrollIndicator={false} bounces={false}>
                 {trackDetails}
@@ -317,17 +362,15 @@ export const StandByOverlay = memo(function StandByOverlay({
                 <Ionicons name="chevron-back" size={22} color={primaryColor} />
                 <Text style={[styles.backLabel, { color: primaryColor }]}>Back</Text>
               </Pressable>
-              <Text accessibilityRole="header" style={[styles.paneTitle, { color: primaryColor }]}>{panel === "queue" ? "Queue" : "Lyrics"}</Text>
+              <Text accessibilityRole="header" style={[styles.paneTitle, { color: primaryColor }]}>{panel === "queue" ? "Queue" : panel === "timer" ? "Sleep timer" : "Lyrics"}</Text>
             </View>
-            {visible && song && <StandBySidePanel panel={panel} song={song} queue={queue} queueIndex={queueIndex} primaryColor={primaryColor} secondaryColor={secondaryColor} reduceMotion={reduceMotion} onPlayQueueSong={onPlayQueueSong} onSeek={onSeek} onTouchActivity={onTouchActivity} />}
+            {visible && song && <StandBySidePanel panel={panel} song={song} queue={queue} queueIndex={queueIndex} primaryColor={primaryColor} secondaryColor={secondaryColor} reduceMotion={reduceMotion} onPlayQueueSong={onPlayQueueSong} onSeek={onSeek} onTouchActivity={onTouchActivity} onBack={backToControls} />}
           </View>
         )}
       </View>
-      </View>
+      </Animated.View>
     </SafeAreaView>
-    </GestureHandlerRootView>
-    </SafeAreaProvider>
-    </Modal>
+    </View>
   );
 });
 
@@ -405,7 +448,7 @@ const StandByClock = memo(function StandByClock({ active, compact, primaryColor,
         {`${now.getHours() % 12 || 12}:${String(now.getMinutes()).padStart(2, "0")} ${now.getHours() >= 12 ? "PM" : "AM"}`}
       </Text>
       <View style={styles.dateRow}>
-        <Text numberOfLines={1} style={[styles.clockDate, compact && styles.compactClockDate, { color: secondaryColor }]}>
+        <Text numberOfLines={1} style={[styles.clockDate, { color: secondaryColor }]}>
           {now.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }).toUpperCase()}
         </Text>
         {active && foreground && <StandByBattery color={secondaryColor} />}
@@ -422,7 +465,7 @@ const StandByBattery = memo(function StandByBattery({ color }: { color: string }
   const charging = state === BatteryState.CHARGING;
   return (
     <View style={styles.battery} accessible accessibilityLabel={`Battery ${percentage}%${charging ? ", charging" : ""}`}>
-      <Ionicons name={charging ? "battery-charging-outline" : level <= 0.2 ? "battery-dead-outline" : level >= 0.95 ? "battery-full-outline" : "battery-half-outline"} size={18} color={color} />
+      <Ionicons name={charging ? "battery-charging-outline" : level <= 0.2 ? "battery-dead-outline" : level >= 0.95 ? "battery-full-outline" : "battery-half-outline"} size={14} color={color} />
       <Text numberOfLines={1} style={[styles.batteryText, { color }]}>{percentage}%</Text>
     </View>
   );
@@ -452,13 +495,12 @@ const styles = StyleSheet.create({
   paneTitle: { fontSize: 16, fontFamily: "Inter_700Bold" },
   header: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8, paddingHorizontal: 8 },
   clock: { flex: 1, minWidth: 100 },
-  clockTime: { fontSize: 44, lineHeight: 48, fontFamily: "Inter_700Bold", letterSpacing: -1.2, fontVariant: ["tabular-nums"] },
-  compactClockTime: { fontSize: 32, lineHeight: 36 },
-  dateRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10, marginTop: 4 },
-  clockDate: { fontSize: 13, fontFamily: "Inter_600SemiBold", letterSpacing: 1.0 },
-  compactClockDate: { fontSize: 11 },
-  battery: { flexDirection: "row", alignItems: "center", gap: 5 },
-  batteryText: { fontSize: 12, fontFamily: "Inter_600SemiBold", fontVariant: ["tabular-nums"] },
+  clockTime: { fontSize: 56, lineHeight: 62, fontFamily: "BebasNeue_400Regular", letterSpacing: 0.5, fontVariant: ["tabular-nums"], includeFontPadding: false },
+  compactClockTime: { fontSize: 44, lineHeight: 50 },
+  dateRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: -5 },
+  clockDate: { flexShrink: 1, fontSize: 11, lineHeight: 14, fontFamily: "Inter_600SemiBold", letterSpacing: 0.5, includeFontPadding: false },
+  battery: { flexDirection: "row", alignItems: "center", gap: 4 },
+  batteryText: { fontSize: 11, lineHeight: 14, fontFamily: "Inter_600SemiBold", fontVariant: ["tabular-nums"], includeFontPadding: false },
   headerActions: { flexDirection: "row", flexWrap: "wrap", maxWidth: "100%", alignItems: "center", gap: 4 },
   headerButton: { width: STANDBY_CONTROL_SIZE, height: STANDBY_CONTROL_SIZE, borderRadius: STANDBY_CONTROL_SIZE / 2, backgroundColor: "rgba(255, 255, 255, 0.1)", alignItems: "center", justifyContent: "center" },
   trackInfo: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8 },
@@ -482,6 +524,5 @@ const styles = StyleSheet.create({
   narrowControls: { flexGrow: 0, flexShrink: 0 },
   playButton: { width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center" },
   compactPlayButton: { width: 56, height: 56, borderRadius: 28 },
-  repeatBadge: { position: "absolute", top: 6, right: 8, fontSize: 10, fontFamily: "Inter_700Bold" },
   pressed: { opacity: 0.85 },
 });

@@ -330,6 +330,8 @@ async function executeDownload(songId: string): Promise<void> {
       ext = "flac";
     } else if (cleanUrl.endsWith(".wav")) {
       ext = "wav";
+    } else if (cleanUrl.endsWith(".webm") || contentType.includes("audio/webm") || contentType.includes("opus")) {
+      ext = "webm";
     } else {
       ext = "m4a";
     }

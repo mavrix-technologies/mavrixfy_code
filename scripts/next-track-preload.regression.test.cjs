@@ -10,13 +10,14 @@ function fixture() {
   const storage = {
     cacheDirectory: "file:///cache/",
     deleteAsync: async uri => { removed.push(uri); }, makeDirectoryAsync: async () => {},
+    moveAsync: async ({ from, to }) => { const task = tasks.find(task => task.uri === from); task.uri = to; },
     getInfoAsync: async uri => ({ exists: !evicted, isDirectory: false, size: tasks.find(task => task.uri === uri)?.size || 128 }),
     createDownloadResumable: (url, uri, options, progress) => {
       let resolve; const promise = new Promise(done => { resolve = done; });
       const task = { url, uri, options, progress, size: 128, cancelled: false,
         downloadAsync: () => promise,
         cancelAsync: async () => { task.cancelled = true; resolve(undefined); },
-        complete: (status = 200, headers = {}) => resolve({ status, headers, uri }),
+        complete: (status = 200, headers = { "Content-Type": "audio/mp4" }) => resolve({ status, headers, uri }),
       }; tasks.push(task); return task;
     },
   };
@@ -51,6 +52,26 @@ test("replacing a queue preload cancels and removes the old partial file", async
   assert.equal(await f.takePreparedAudio("https://media.example/old"), null);
   assert.equal(await f.takePreparedAudio("https://media.example/next"), f.tasks[1].uri);
   assert.ok(f.removed.includes(f.tasks[0].uri));
+});
+
+test("preloads keep their declared media container instead of a generic audio extension", async () => {
+  for (const [mime, extension] of [["audio/mp4; codecs=mp4a.40.2", "m4a"], ["audio/mpeg", "mp3"], ["audio/aac", "aac"]]) {
+    const f = fixture(), url = "https://media.example/videoplayback";
+    const pending = f.prepareNextAudio(url); await tick();
+    f.tasks[0].complete(200, { "Content-Type": mime }); await pending;
+    assert.ok((await f.takePreparedAudio(url)).endsWith(`.${extension}`));
+  }
+});
+
+test("unknown container responses and files truncated after prefetch are not consumed", async () => {
+  const f = fixture(), url = "https://media.example/videoplayback";
+  let pending = f.prepareNextAudio(url); await tick();
+  f.tasks[0].complete(200, { "Content-Type": "application/octet-stream" }); await pending;
+  assert.equal(await f.takePreparedAudio(url), null);
+  pending = f.prepareNextAudio(url); await tick();
+  f.tasks[1].complete(); await pending;
+  f.tasks[1].size = 64;
+  assert.equal(await f.takePreparedAudio(url), null);
 });
 
 test("preload is bounded by file size and time; partial HTTP responses are rejected", async () => {

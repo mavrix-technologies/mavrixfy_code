@@ -2,7 +2,7 @@ import * as FileSystem from "expo-file-system/legacy";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const TIMEOUT_MS = 25_000;
-type Prepared = { key: string; uri: string };
+type Prepared = { key: string; uri: string; size: number };
 let ready: Prepared | null = null;
 let active: Prepared | null = null;
 let pending: { key: string; cancel: () => void } | null = null;
@@ -30,7 +30,7 @@ export async function prepareNextAudio(url: string, headers?: Record<string, str
   })();
   try { await initialized; } catch { initialized = null; return; }
   if (request !== revision) return;
-  const uri = `${directory}${Date.now()}-${request}.audio`;
+  let uri = `${directory}${Date.now()}-${request}.download`;
   let cancelled = false;
   let task: ReturnType<typeof FileSystem.createDownloadResumable>;
   const cancel = () => {
@@ -50,7 +50,19 @@ export async function prepareNextAudio(url: string, headers?: Record<string, str
     const length = Number(Object.entries(result.headers || {}).find(([name]) => name.toLowerCase() === "content-length")?.[1]);
     if (request !== revision || !info.exists || info.isDirectory || info.size <= 0 || info.size > MAX_BYTES ||
       /text\/html|application\/json/i.test(contentType) || (length > 0 && info.size !== length)) return;
-    ready = { key, uri };
+    // AVPlayer receives a local URL without the response's Content-Type.
+    // Keep the actual container extension instead of an unrecognized .audio.
+    const mime = contentType.split(";")[0].trim().toLowerCase();
+    const extension = ({ "audio/mp4": "m4a", "video/mp4": "mp4", "audio/x-m4a": "m4a", "audio/mpeg": "mp3",
+      "audio/aac": "aac", "audio/wav": "wav", "audio/x-wav": "wav", "audio/flac": "flac", "audio/ogg": "ogg", "audio/webm": "webm" } as Record<string, string>)[mime]
+      || /\.(m4a|mp4|mp3|aac|wav|flac|ogg|opus|webm)(?:[?#]|$)/i.exec(url)?.[1]?.toLowerCase();
+    // Unknown responses are optional preloads, never trusted playback files.
+    if (!extension) return;
+    const playableUri = uri.replace(/\.download$/, `.${extension}`);
+    await FileSystem.moveAsync({ from: uri, to: playableUri });
+    uri = playableUri;
+    if (request !== revision) return;
+    ready = { key, uri, size: info.size };
   } catch {
     // Prefetch is optional. The selected source still uses its normal resolver.
   } finally {
@@ -66,7 +78,7 @@ export async function takePreparedAudio(url: string, headers?: Record<string, st
   // Cache files can be evicted by the OS between prefetch and selection.
   const info = await FileSystem.getInfoAsync(candidate.uri).catch(() => null);
   if (ready !== candidate || !isCurrent()) return null;
-  if (!info?.exists || info.isDirectory || info.size <= 0) {
+  if (!info?.exists || info.isDirectory || info.size !== candidate.size) {
     ready = null; void remove(candidate.uri); return null;
   }
   releasePreparedAudio();

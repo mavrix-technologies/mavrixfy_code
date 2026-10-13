@@ -55,8 +55,8 @@ test("measured native viewport replaces stale portrait dimensions after rotation
   const layout = getStandByLayout(688, 360, 1, noInsets);
   assert.equal(find(tree, element => element.props.testID === "standby-artwork").props.style[1].width, layout.artworkSize);
   assert.equal(find(tree, element => element.type === "StandByActions").props.compact, true);
-  assert.equal(tree.type, "Modal");
-  assert.equal(tree.props.presentationStyle, "fullScreen", "landscape is independent of the portrait sheet size");
+  assert.equal(tree.type, "View");
+  assert.equal(find(tree, element => element.type === "Modal"), undefined, "one root window owns rotation");
   assert.ok(find(tree, element => element.type === "SafeAreaView"), "native insets reserve system-navigation space before measuring");
   viewport.props.onLayout({ nativeEvent: { layout: { width: 0, height: 0 } } });
   assert.ok(find(overlay.render(), element => element.props.testID === "standby-artwork"), "transient zero-sized frames do not reset layout");
@@ -140,6 +140,7 @@ function fixture(options = {}) {
   class Value {
     constructor(value) { this.value = value; }
     setValue(value) { this.value = value; }
+    stopAnimation() {}
   }
   const animated = {
     Value,
@@ -159,7 +160,7 @@ function fixture(options = {}) {
   }
   const native = {
     View: "View", Modal: "Modal", Text: "Text", Pressable: "Pressable", ScrollView: "ScrollView", FlatList: "FlatList", ActivityIndicator: "ActivityIndicator",
-    Platform: { OS: "android" }, Easing: { out: value => value, cubic: "cubic" },
+    Platform: { OS: "android" }, Easing: { out: value => value, inOut: value => value, quad: "quad", cubic: "cubic" },
     StyleSheet: { create: value => value, hairlineWidth: 0.5, absoluteFillObject: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 } },
     useWindowDimensions: () => ({ width: 844, height: 390, fontScale: 1, ...options.dimensions }),
     AccessibilityInfo: {
@@ -172,8 +173,8 @@ function fixture(options = {}) {
     react, "react-native": native, "expo-image": { Image: "Image" },
     "react-native-gesture-handler": { GestureHandlerRootView: "GestureHandlerRootView" },
     "expo-battery": { BatteryState: { CHARGING: 2 }, useBatteryLevel: () => batteryLevel, useBatteryState: () => batteryState },
-    "@expo/vector-icons": { Ionicons: "Ionicons", MaterialCommunityIcons: "MaterialCommunityIcons" },
-    "react-native-safe-area-context": { SafeAreaProvider: "SafeAreaProvider", SafeAreaView: "SafeAreaView" },
+    "@expo/vector-icons": { MaterialIcons: "MaterialIcons", Ionicons: "Ionicons", MaterialCommunityIcons: "MaterialCommunityIcons" },
+    "react-native-safe-area-context": { SafeAreaProvider: "SafeAreaProvider", SafeAreaView: "SafeAreaView", useSafeAreaInsets: () => options.insets ?? noInsets },
     "@/lib/nativeAnimated": animated, "@/lib/appActivity": { useAppIsActive: () => foreground },
     "@/components/PingPongScroll": { PingPongScroll: "PingPongScroll" },
     "@/components/PlayerSlider": { PlayerSlider: "PlayerSlider" },
@@ -186,6 +187,7 @@ function fixture(options = {}) {
     "./StandByAmbientBackdrop": { StandByAmbientBackdrop: "StandByAmbientBackdrop" },
     "./StandByActions": { StandByActions: "StandByActions" },
     "./StandBySidePanel": { StandBySidePanel: "StandBySidePanel" },
+    "./PlaybackInfo": { PlaybackInfo: "PlaybackInfo" },
   }, {
     Date: FakeDate,
     setTimeout: (fn, delay) => { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
@@ -355,13 +357,13 @@ test("only visible Ambient mounts the backdrop; all styles retain identical cont
     if (panelStyle) assert.deepEqual(panel.props.style, panelStyle);
     panelStyle = panel.props.style;
     assert.equal(find(tree, element => element.type === "StandBySidePanel"), undefined, "controls are the default view");
-    const header = find(tree, element => element.type === "View" && element.props.style?.[0]?.justifyContent === "space-between");
-    assert.equal(header.props.style[1].opacity, style === "ambient" ? 1 : 0.55);
+    const dimLayer = find(tree, element => element.props.testID === "standby-viewport");
+    assert.equal(dimLayer.props.style[1].opacity.value, style === "ambient" ? 1 : 0.72);
   }
   await f.resolveReduceMotion(false);
   overlay.render();
   const exiting = overlay.render(props({ standByStyle: "ambient", visible: false }));
-  assert.equal(exiting, null, "exit removes the shell immediately");
+  assert.equal(exiting, null, "inactive overlay leaves the shared player surface");
   overlay.unmount();
 });
 
@@ -392,8 +394,9 @@ test("only Queue and Lyrics remain in the action row and both open inline", () =
   const f = fixture(); const calls = [];
   const { StandByActions } = load("src/features/player/components/StandByActions.tsx", {
     react: f.react, "react-native": f.native,
-    "@expo/vector-icons": { Ionicons: "Ionicons" },
+    "@expo/vector-icons": { MaterialIcons: "MaterialIcons", Ionicons: "Ionicons" },
     "./standByLayout": layoutModule,
+    "./AudioOutputPicker": { AudioOutputPicker: "AudioOutputPicker" },
   }, { React: f.react });
   const actionsProps = { primaryColor: "#fff", secondaryColor: "#ddd", onSelectPanel: value => calls.push(value), onTouchActivity: () => calls.push("wake") };
   const actions = f.mount(StandByActions, actionsProps);
@@ -405,12 +408,12 @@ test("only Queue and Lyrics remain in the action row and both open inline", () =
   const playback = overlay.render();
   const shuffle = find(playback, element => element.props.accessibilityLabel === "Shuffle");
   const repeat = find(playback, element => element.props.accessibilityLabel === "Repeat: off");
-  const buttons = tree.props.children.filter(Boolean);
+  const buttons = tree.props.children.filter(child => child?.type === "Pressable");
   assert.equal(buttons[0].props.children[0].props.style[0].width, shuffle.props.style[0].width, "Queue shares Shuffle's left-edge center");
-  assert.equal(buttons[1].props.children[0].props.style[0].width, repeat.props.style[0].width, "Lyrics shares Repeat's right-edge center");
+  assert.equal(buttons[2].props.children[0].props.style[0].width, repeat.props.style[0].width, "Lyrics shares Repeat's right-edge center");
   overlay.unmount();
   assert.equal(find(tree, element => element.type === "Modal"), undefined);
-  assert.equal(buttons.length, 2);
+  assert.equal(buttons.length, 3);
   assert.equal(find(tree, element => element.props.accessibilityLabel === "Show song options"), undefined);
   for (const label of ["Show playback queue", "Show lyrics"]) find(tree, element => element.props.accessibilityLabel === label).props.onPress();
   assert.deepEqual(calls, ["wake", "queue", "wake", "lyrics"]);
@@ -444,7 +447,7 @@ test("Queue and Lyrics replace controls in the same half and Back restores contr
     const f = fixture({ dimensions });
     const overlay = f.mount(f.StandByOverlay, props());
     const tree = overlay.render();
-    const root = find(tree, element => element.type === "View" && element.props.style?.[0]?.flexDirection === "row");
+    const root = find(tree, element => element.props.testID === "standby-viewport");
     assert.equal(root.props.style[0].alignItems, "stretch", "artwork and controls share top/bottom edges");
     assert.equal(find(tree, element => element.type === "ScrollView" && element.props.horizontal), undefined, "normal layouts have no horizontal wrappers");
     const artwork = find(tree, element => element.props.testID === "standby-artwork");
@@ -474,15 +477,16 @@ test("Queue and Lyrics replace controls in the same half and Back restores contr
 test("hardware Back and accessibility escape return to controls before exiting, with no retained listeners", () => {
   const f = fixture();
   const overlay = f.mount(f.StandByOverlay, props());
-  assert.equal(f.backListenerCount(), 0);
+  overlay.render();
+  assert.equal(f.backListenerCount(), 1);
   for (const view of ["queue", "lyrics"]) {
     find(overlay.render(), element => element.type === "StandByActions").props.onSelectPanel(view);
     overlay.render();
-    assert.equal(f.backListenerCount(), 0);
-    assert.equal(overlay.render().props.presentationStyle, "fullScreen");
-    overlay.render().props.onRequestClose();
+    assert.equal(f.backListenerCount(), 1);
+    assert.equal(overlay.render().type, "View");
+    assert.equal(f.hardwareBack(), true);
     assert.ok(find(overlay.render(), element => element.type === "StandByActions"));
-    assert.equal(f.backListenerCount(), 0);
+    assert.equal(f.backListenerCount(), 1);
   }
   find(overlay.render(), element => element.type === "StandByActions").props.onSelectPanel("lyrics");
   find(overlay.render(), element => element.props.testID === "standby-overlay").props.onAccessibilityEscape();
@@ -493,6 +497,7 @@ test("hardware Back and accessibility escape return to controls before exiting, 
   assert.equal(f.backListenerCount(), 0);
   assert.ok(find(overlay.render(props()), element => element.type === "StandByActions"));
   overlay.unmount();
+  assert.equal(f.backListenerCount(), 0);
 });
 
 test("right-half controls stay visible through Queue, Back and Reduce Motion changes", async () => {
@@ -540,7 +545,7 @@ function inlinePanelFixture(options = {}) {
   const pending = new Promise((resolve, reject) => { resolveLyrics = resolve; rejectLyrics = reject; });
   const { StandBySidePanel } = load("src/features/player/components/StandBySidePanel.tsx", {
     react: f.react, "react-native": f.native, "expo-image": { Image: "Image" },
-    "@expo/vector-icons": { Ionicons: "Ionicons" },
+    "@expo/vector-icons": { MaterialIcons: "MaterialIcons", Ionicons: "Ionicons" },
     "@/utils/stringUtils": { unescapeHtml: value => value },
     "@/services/lyricsService": { getSongLyrics: () => { requests++; return pending; } },
     "@/services/audio/playbackProgressStore": {
@@ -548,6 +553,7 @@ function inlinePanelFixture(options = {}) {
       subscribePlaybackProgress: () => { subscriptions++; return () => { subscriptions--; }; },
     },
     "./standByLyrics": lyricsModule,
+    "./QueueSleepTimer": { default: "QueueSleepTimer" },
   }, { React: f.react });
   function mount(overrides = {}) {
     const wrapper = f.mount(StandBySidePanel, { panel: "queue", song: { id: "song", title: "Current song", artist: "Artist", duration: 180.5 }, queue: [], queueIndex: 0, primaryColor: "#fff", secondaryColor: "#aaa", reduceMotion: false, onPlayQueueSong() {}, onSeek() {}, onTouchActivity() {}, ...overrides });
@@ -609,6 +615,7 @@ test("synced inline lyrics highlight, seek with the latest duration, pause follo
   assert.equal(text.props.numberOfLines, undefined, "long lyrics wrap without a hard cutoff");
   assert.equal(list.props.getItemLayout, undefined, "wrapped lyrics use natural height instead of fixed blank space");
   assert.equal(row.props.style[1].minHeight, 44);
+  assert.equal(row.props.style[0].paddingVertical, 7, "single and wrapped lines have identical vertical padding");
   assert.equal(row.props.style[1].height, undefined);
   const offsets = [];
   list.props.ref.current.scrollToOffset = value => offsets.push(value);
@@ -630,6 +637,10 @@ test("synced inline lyrics highlight, seek with the latest duration, pause follo
   activeList.props.onLayout({ nativeEvent: { layout: { height: 240 } } });
   const resizedList = find(panel.render(), element => element.type === "FlatList");
   assert.equal(resizedList.props.contentContainerStyle.paddingVertical, 98, "first and last lines can reach the center of the measured viewport");
+  const beforeContentUpdates = scrolls.length;
+  resizedList.props.onContentSizeChange(); resizedList.props.onContentSizeChange();
+  assert.equal(scrolls.length, beforeContentUpdates, "layout updates cannot restart the same active-line scroll");
+  assert.equal(resizedList.props.contentInsetAdjustmentBehavior, "never");
   assert.equal(find(tree, element => element.type === "Modal"), undefined);
   panel.unmount();
   assert.equal(f.subscriptions(), 0);
@@ -730,7 +741,7 @@ test("clock aligns to minute boundaries and clears its timer while hidden or bac
 
 
 test("normal landscape keeps seek, playback and actions outside the metadata scroll area", () => {
-  for (const dimensions of [{ width: 640, height: 360, fontScale: 1 }, { width: 844, height: 390, fontScale: 1 }, { width: 915, height: 412, fontScale: 1 }]) {
+  for (const dimensions of [{ width: 640, height: 390, fontScale: 1 }, { width: 844, height: 390, fontScale: 1 }, { width: 915, height: 412, fontScale: 1 }]) {
     const f = fixture({ dimensions, insets: { ...noInsets, left: 44, bottom: 21 } });
     const overlay = f.mount(f.StandByOverlay, props());
     const tree = overlay.render();
@@ -771,7 +782,7 @@ test("battery appears beside the date, reflects charging, and hides unknown valu
   assert.equal(battery.render().props.accessibilityLabel, "Battery 78%");
   f.setBattery(0.8, 2);
   assert.equal(battery.render().props.accessibilityLabel, "Battery 80%, charging");
-  assert.equal(find(battery.render(), element => element.props.name === "battery-charging-outline").props.size, 18);
+  assert.equal(find(battery.render(), element => element.props.name === "battery-charging-outline").props.size, 14);
   for (const value of [-1, NaN, 1.1]) { f.setBattery(value); assert.equal(battery.render(), null); }
   f.setForeground(false);
   assert.equal(find(clock.render(), element => element.type?.name === "StandByBattery"), undefined);
@@ -797,4 +808,61 @@ test("title and progress share an inset that leaves room for the slider thumb, a
     assert.ok(button.props.style.backgroundColor);
   }
   progress.unmount(); overlay.unmount();
+});
+
+
+test('re-entry uses current route dimensions before its first safe-area layout event', () => {
+  const f=fixture(); const overlay=f.mount(f.StandByOverlay,props({rootViewport:{width:844,height:390}}));
+  let tree=overlay.render();
+  find(tree,node=>node.props.testID==='standby-viewport').props.onLayout({nativeEvent:{layout:{width:760,height:360}}});
+  overlay.render(props({visible:false,rootViewport:{width:390,height:844}}));
+  tree=overlay.render(props({rootViewport:{width:390,height:844}}));
+  assert.equal(find(tree,node=>node.props.testID==='standby-artwork'),undefined,'old landscape measurement cannot crop portrait re-entry');
+  overlay.unmount();
+});
+
+
+test('artwork and every control share one cancellable native dim/wake fade', async () => {
+  const f=fixture(); const overlay=f.mount(f.StandByOverlay,props());
+  overlay.render(); await f.resolveReduceMotion(false); overlay.render();
+  let tree=overlay.render(props({controlsDimmed:true}));
+  const root=find(tree,node=>node.props.testID==='standby-viewport');
+  const dim=f.animations.at(-1);
+  assert.equal(dim.value,root.props.style[1].opacity);
+  assert.equal(dim.config.toValue,0.72); assert.equal(dim.config.duration,450);
+  assert.equal(dim.config.useNativeDriver,true); assert.equal(dim.config.isInteraction,false);
+  assert.ok(find(root,node=>node.props.testID==='standby-artwork'));
+  assert.ok(find(root,node=>node.props.testID==='standby-playback-controls'));
+  tree=overlay.render(props({controlsDimmed:false}));
+  const wake=f.animations.at(-1);
+  assert.equal(dim.stopped,true,'touch interrupts dimming immediately');
+  assert.equal(wake.value,dim.value); assert.equal(wake.config.toValue,1);
+  assert.equal(wake.config.duration,dim.config.duration);
+  overlay.unmount(); assert.equal(wake.stopped,true);
+});
+
+
+test("landscape content balances top and bottom safe-area space without a fixed offset", () => {
+  const f=fixture({dimensions:{width:844,height:390,fontScale:1},insets:{...noInsets,bottom:21}});
+  const overlay=f.mount(f.StandByOverlay,props());const tree=overlay.render();
+  const root=find(tree,node=>node.props.testID==='standby-viewport');
+  assert.equal(root.props.style[1].paddingTop,37);
+  assert.equal(root.props.style[1].paddingBottom,37);
+  const safeArea=find(tree,node=>node.props.testID==='standby-overlay');
+  assert.deepEqual(Array.from(safeArea.props.edges),['left','right']);
+  overlay.unmount();
+});
+
+
+test("clock sizing stays consistent when safe-area spacing changes", () => {
+  const insets={...noInsets,bottom:0};const f=fixture({insets});const overlay=f.mount(f.StandByOverlay,props());
+  let tree=overlay.render();let clock=find(tree,node=>node.type?.name==='StandByClock');
+  assert.equal(clock.props.compact,false);
+  insets.bottom=34;tree=overlay.render();clock=find(tree,node=>node.type?.name==='StandByClock');
+  assert.equal(clock.props.compact,false,'safe-area padding does not switch the time font size');
+  const clockView=f.mount(clock.type,clock.props);
+  const date=find(clockView.render(),node=>node.type==='Text'&&node.props.style?.[0]?.fontSize===11);
+  assert.equal(date.props.adjustsFontSizeToFit,undefined);
+  assert.equal(date.props.style[0].lineHeight,14);
+  clockView.unmount();overlay.unmount();
 });

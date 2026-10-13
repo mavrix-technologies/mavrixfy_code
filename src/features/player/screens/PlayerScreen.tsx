@@ -94,7 +94,7 @@ const LegacyPlayerScreenView = memo(function LegacyPlayerScreenView({ interactio
           isLowEnd={s.isLowEnd}
           quality={s.videoBackgroundQuality}
           backgroundVideoId={s.backgroundVideoId}
-          isScreenFocused={s.isScreenFocused}
+          isScreenFocused={s.isScreenFocused && interactionReady}
           fullscreenLyricsVisible={s.fullscreenLyricsVisible}
           initialOffsetMs={ambientStartPositionMs}
           trackScrollX={s.scrollX}
@@ -251,12 +251,6 @@ export const PlayerScreen = memo(function PlayerScreen() {
   const dismissedRef = useRef(false);
   const { width, height } = useWindowDimensions();
   const [viewport, setViewport] = useState<{ width: number; height: number }>(() => ({ width, height }));
-  // Measure the route, never the sheet's animated mask or scroll content.
-  const onLayout = useCallback(({ nativeEvent: { layout } }: LayoutChangeEvent) => {
-    if (layout.width <= 0 || layout.height <= 0) return;
-    setViewport(previous => previous.width === layout.width && previous.height === layout.height
-      ? previous : { width: layout.width, height: layout.height });
-  }, []);
   const onSheetClosed = useCallback(() => {
     if (dismissedRef.current) return;
     dismissedRef.current = true;
@@ -271,8 +265,19 @@ export const PlayerScreen = memo(function PlayerScreen() {
   const { currentSong, queue, queueIndex, isShuffled, repeatMode } = usePlaybackNowPlaying();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
 
-  const standBy = useStandByMode({ isPlayerExpanded: focused && Boolean(activeSong) });
+  const standBy = useStandByMode({ isPlayerExpanded: focused && Boolean(activeSong), viewport });
   const { isStandByActive } = standBy;
+  const [playerViewport, setPlayerViewport] = useState(viewport);
+  if (!isStandByActive && playerViewport !== viewport) setPlayerViewport(viewport);
+  // Measure the route, never the sheet's animated mask or scroll content.
+  const onLayout = useCallback(({ nativeEvent: { layout } }: LayoutChangeEvent) => {
+    if (layout.width <= 0 || layout.height <= 0) return;
+    setViewport(previous => previous.width === layout.width && previous.height === layout.height
+      ? previous : { width: layout.width, height: layout.height });
+    if (!isStandByActive) setPlayerViewport(previous => previous.width === layout.width && previous.height === layout.height
+      ? previous : { width: layout.width, height: layout.height });
+  }, [isStandByActive]);
+
 
   useEffect(() => {
     if (!standBy.isStandByActive) return;
@@ -281,7 +286,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
   }, [standBy.isStandByActive]);
 
   const { isPlaying } = usePlaybackPlayState();
-  const { togglePlay, nextSong, prevSong, seekTo, toggleShuffle, toggleRepeat, toggleLike, isLiked, playSong } = usePlayerActions();
+  const { togglePlay, nextSong, prevSong, seekTo, toggleShuffle, toggleRepeat, toggleLike, isLiked, playSong, sleepTimer } = usePlayerActions();
   const artworkPalette = useArtworkPalette(activeSong?.coverUrl);
   const handleToggleLike = useCallback(() => {
     if (activeSong) void toggleLike(activeSong);
@@ -301,7 +306,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayout}>
-      <StatusBar hidden={standBy.isStandByActive} animated style="light" />
+      <StatusBar hidden={standBy.isStandByActive} style="light" />
       {standBy.isStandByActive && <StandByKeepAwake />}
       <BottomSheet ref={sheetRef} index={0} snapPoints={PLAYER_SNAP_POINTS}
         style={styles.playerSheetFrame}
@@ -309,16 +314,19 @@ export const PlayerScreen = memo(function PlayerScreen() {
         backgroundStyle={{ backgroundColor: "#000000", borderRadius: 0 }}
         handleComponent={null}
         onClose={onSheetClosed}>
-        <View style={{ width: viewport.width, height: viewport.height }}>
-          {foreground && !isStandByActive && <LegacyPlayerScreenView viewport={viewport}
-            interactionReady={focused} onEnterStandBy={standBy.enterStandBy} onClose={closeSheet} />}
+        <View pointerEvents={isStandByActive ? "none" : "auto"}
+          style={{ width: playerViewport.width, height: playerViewport.height }}>
+          {foreground && <LegacyPlayerScreenView viewport={playerViewport}
+            interactionReady={focused && !isStandByActive} onEnterStandBy={standBy.enterStandBy} onClose={closeSheet} />}
         </View>
       </BottomSheet>
 
       <StandByOverlay
         visible={standBy.isStandByActive}
+        rootViewport={viewport}
         song={activeSong}
         accentColor={artworkPalette?.accent}
+        ambientColor={artworkPalette?.rawDominant}
         backgroundColor={artworkPalette?.background}
         liked={activeSong ? isLiked(activeSong.id) : false}
         queue={queue}
@@ -328,6 +336,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
         repeatMode={repeatMode}
         standByStyle={standBy.standByStyle}
         controlsDimmed={standBy.controlsDimmed}
+        sleepTimerLabel={sleepTimer?.label}
         onTogglePlay={togglePlay}
         onSkipNext={nextSong}
         onSkipPrev={prevSong}

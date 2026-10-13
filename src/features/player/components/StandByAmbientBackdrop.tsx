@@ -11,7 +11,7 @@ export const StandByAmbientBackdrop = memo(function StandByAmbientBackdrop({
 
   return (
     <View pointerEvents="none" accessible={false} style={StyleSheet.absoluteFillObject}>
-      <LinearGradient colors={[accentColor, backgroundColor, "#203448"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
+      <LinearGradient colors={[accentColor, backgroundColor]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
       {song.coverUrl && (
         <Image
           source={{ uri: song.coverUrl }}
@@ -22,7 +22,7 @@ export const StandByAmbientBackdrop = memo(function StandByAmbientBackdrop({
         />
       )}
       <LinearGradient
-        colors={["rgba(15, 23, 42, 0.28)", "rgba(15, 23, 42, 0.68)"]}
+        colors={["rgba(0, 0, 0, 0.28)", "rgba(0, 0, 0, 0.68)"]}
         start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFillObject}
       />

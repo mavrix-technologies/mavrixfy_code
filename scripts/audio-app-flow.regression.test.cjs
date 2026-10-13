@@ -8,13 +8,14 @@ const ref = current => ({ current });
 const noop = () => {};
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
-function load(filename, imports) {
+function load(filename, imports, globals = {}) {
   const module = { exports: {} };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(filename, "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, {
     module, exports: module.exports,
     setTimeout: (fn, delay) => delay === 800 ? 0 : setTimeout(fn, delay), clearTimeout,
+    ...globals,
     require: name => {
       if (name in imports) return imports[name];
       throw new Error(`Unexpected dependency: ${name}`);
@@ -23,9 +24,10 @@ function load(filename, imports) {
   return module.exports;
 }
 
-function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nativeIds, activeIndex = 1 } = {}) {
+function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nativeIds, activeIndex = 1, youtube = false, resolveUrl = async song => song.audioUrl, expoPlayer = {} } = {}) {
   const songs = queueIds.map(id => ({ id, title: id, artist: "Artist", duration: 180, audioUrl: `https://audio.example/${id}` }));
   let nativeQueue = (nativeIds ?? queueIds).map(id => ({ id, url: `https://audio.example/${id}`, accountId: "guest" }));
+  const scheduledDelays = [];
   const calls = [], snapshots = [], progressUpdates = [], foreground = [], saved = [], cleanups = [], events = new Map();
   const options = {
     currentSong: null, currentSongRef: ref(songs[activeIndex]), queueRef: ref(songs), originalQueueRef: ref(songs),
@@ -41,7 +43,7 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     prefetchAdjacentTrackStreams: noop, showPlaybackNotice: message => calls.push(["notice", message]),
     clearSleepTimer: () => { options.sleepTimerRef.current = null; },
     isPlayerReady: ready, ensurePlayerReady: () => initialization?.promise ?? Promise.resolve(true), canUseLightweightAudioFallback: false,
-    resolvePlaybackUrlCached: async song => song.audioUrl,
+    resolvePlaybackUrlCached: resolveUrl,
     enqueueNativeQueueMutation: async operation => operation(),
     nativeQueueIdsMatch: (native, queue) => native.length === queue.length && native.every((item, index) => item.id === queue[index].id),
     replaceNativeQueuePreservingState: async (queue, index) => { calls.push(["replace", queue.map(song => song.id), index]); },
@@ -78,7 +80,7 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     "@/lib/arrayUtils": { shufflePlaybackQueue: (songs, index) => ({ queue: index < 0 ? [...songs].reverse() : [songs[index], ...songs.filter((_, i) => i !== index).reverse()], index: 0 }) },
     "@/lib/logger": { logger: { warn: noop, error: noop } },
     "@/lib/storage": { getSettings: async () => ({ smartAutoplayEnabled: false }) },
-    "@/services/audio/ExpoAvAdapter": {},
+    "@/services/audio/ExpoAvAdapter": expoPlayer,
     "@/services/audio/PlaybackEngine": { updatePlaybackEngineSnapshot: patch => snapshots.push(patch) },
     "@/services/audio/playbackProgressStore": { updatePlaybackProgress: patch => progressUpdates.push(patch) },
     "@/services/audio/PlayerPlaybackResolver": {
@@ -87,19 +89,44 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     },
     "@/services/audio/audioNativeQueueLane": { isSameQueueContent: (a, b) => a.length === b.length && a.every((song, index) => song.id === b[index].id) },
     "@/services/player/playerPersistenceService": { playerPersistenceService: storage },
-    "@/services/youtube/YouTubeMusic": { isYouTubeSong: () => false, peekYouTubeStream: noop },
+    "@/services/youtube/YouTubeMusic": { isYouTubeSong: () => youtube, peekYouTubeStream: noop,
+      youTubePlaybackErrorDetails: String, youTubePlaybackErrorMessage: String,
+      clearYouTubeConnectionStreams: () => calls.push(["clear-streams"]) },
     "@/services/carPlayService": { carPlayService: { isAvailable: () => false } },
     "@/utils/timeFormatters": { toDurationSeconds: Number },
     "./audioTimeline": require("./helpers/audio-timeline-fixture.cjs"),
   };
-  const commands = load("src/services/audio/audioPlaybackCommands.ts", imports).useAudioPlaybackCommands(options);
+  if (expoPlayer.loadAndPlay) { options.TrackPlayer = null; options.canUseLightweightAudioFallback = true; }
+  const commands = load("src/services/audio/audioPlaybackCommands.ts", imports, { setTimeout: (fn, delay) => { scheduledDelays.push(delay); return delay === 800 ? 0 : setTimeout(fn, delay); } }).useAudioPlaybackCommands(options);
   const operations = load("src/services/audio/audioQueueOperations.ts", imports).useAudioQueueOperations({ ...options, playSong: commands.playSong });
-  return { options, commands, operations, calls, songs, snapshots, progressUpdates, storage, events, foreground, saved, cleanups,
+  return { options, commands, operations, calls, scheduledDelays, songs, snapshots, progressUpdates, storage, events, foreground, saved, cleanups,
     startup: () => load("src/services/audio/audioStartupReconcile.ts", imports).useStartupPlaybackReconcile(options),
     listen: () => load("src/services/audio/audioSyncListeners.ts", imports).useAudioSyncListeners(options),
     changeAccount: () => accountGeneration++,
   };
 }
+
+test("Expo decoder failure stops without a fresh-source loop or queue advance", async () => {
+  let attempts = 0;
+  const f = fixture({ youtube: true, expoPlayer: { beginTrackChange: noop, loadAndPlay: async () => {
+    attempts++; throw new Error("Cannot Open");
+  } } });
+  await f.commands.playSong(f.songs[1], f.songs);
+  assert.equal(attempts, 1);
+  assert.equal(f.options.currentSongRef.current.id, "b");
+  assert.equal(f.options.desiredPlayStateRef.current, false);
+});
+
+test("Expo verification failure never resets authentication or retries the decoder", async () => {
+  let attempts = 0;
+  const f = fixture({ youtube: true, expoPlayer: { beginTrackChange: noop, loadAndPlay: async () => {
+    attempts++; throw new Error("Cannot Open: SIGN_IN_REQUIRED");
+  } } });
+  f.options.TrackPlayer = null; f.options.canUseLightweightAudioFallback = true;
+  await f.commands.playSong(f.songs[1], f.songs);
+  assert.equal(attempts, 1);
+  assert.ok(!f.calls.some(c => c[0] === "reject-stream" || c[0] === "clear-streams"));
+});
 
 test("shared Next starts the selected audio even when output is temporarily paused", async () => {
   const f = fixture();
@@ -528,3 +555,61 @@ for (const resume of [false, true]) {
     assert.equal(f.options.pendingPlayRequestRef.current, null);
   });
 }
+
+
+test("verification failure keeps the selected song and cooldown, without retry or auto-next", async () => {
+  let attempts=0, next=0;
+  const f=fixture({youtube:true,resolveUrl:async()=>{attempts++;throw Error("LOGIN_REQUIRED: Sign in to confirm you are not a bot");}});
+  f.options.repeatModeRef.current="all"; f.options.nextSongRef.current=()=>next++;
+  await f.commands.playSong(f.songs[1],f.songs);
+  assert.equal(attempts,1); assert.equal(next,0);
+  assert.equal(f.options.currentSongRef.current.id,"b");
+  assert.equal(f.options.queueIndexRef.current,1);
+  assert.equal(f.options.playbackLoadingRef.current,false);
+  assert.equal(f.options.desiredPlayStateRef.current,false);
+  assert.equal(f.scheduledDelays.includes(300),false);
+  assert.equal(f.scheduledDelays.includes(1200),false);
+  assert.equal(f.calls.some(([name])=>name==="clear-streams"),false);
+});
+
+test("temporary stream failure retries the same song once after a delay and resumes it", async () => {
+  let attempts=0;
+  const f=fixture({resolveUrl:async song=>{if(++attempts===1)throw Error("Network request failed"); return song.audioUrl;}});
+  const playing=f.commands.playSong(f.songs[1],f.songs); await tick();
+  assert.equal(attempts,1); assert.equal(f.options.playbackLoadingRef.current,true);
+  assert.equal(f.snapshots.findLast(patch => "isReconnecting" in patch).isReconnecting,true);
+  await playing;
+  assert.equal(attempts,2); assert.ok(f.scheduledDelays.includes(1200));
+  assert.equal(f.snapshots.findLast(patch => "isReconnecting" in patch).isReconnecting,false);
+  assert.equal(f.options.currentSongRef.current.id,"b");
+  assert.equal(f.calls.filter(([name])=>name==="play").length,1);
+});
+
+test("temporary stream failure exhausts one retry without advancing the queue", async () => {
+  let attempts=0;
+  const f=fixture({resolveUrl:async()=>{attempts++;throw Error("HTTP 503");}});
+  await f.commands.playSong(f.songs[1],f.songs);
+  assert.equal(attempts,2); assert.equal(f.options.currentSongRef.current.id,"b");
+  assert.equal(f.options.playbackLoadingRef.current,false);
+  assert.equal(f.calls.some(([name])=>name==="play"),false);
+});
+
+test("Pause during retry delay prevents another resolve or audible restart", async () => {
+  let attempts=0;
+  const f=fixture({resolveUrl:async()=>{attempts++;throw Error("Network request failed");}});
+  const playing=f.commands.playSong(f.songs[1],f.songs); await tick();
+  f.options.desiredPlayStateRef.current=false;
+  await playing;
+  assert.equal(attempts,1); assert.equal(f.calls.some(([name])=>name==="play"),false);
+  assert.equal(f.options.desiredPlayStateRef.current,false);
+});
+
+test("new selection supersedes delayed retry without replacing the new song", async () => {
+  const attempts=[];
+  const f=fixture({resolveUrl:async song=>{attempts.push(song.id); if(song.id==="b")throw Error("Network request failed");return song.audioUrl;}});
+  const outgoing=f.commands.playSong(f.songs[1],f.songs); await tick();
+  await f.commands.playSong(f.songs[2],f.songs); await outgoing;
+  assert.deepEqual(attempts,["b","c"]);
+  assert.equal(f.options.currentSongRef.current.id,"c");
+  assert.equal(f.calls.filter(([name])=>name==="play").length,1);
+});

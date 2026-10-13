@@ -1,5 +1,6 @@
 import { getSettings,isHighQualityEntitled,saveSettings } from "@/lib/storage";
 import { runRewardedAd } from "./rewardedAdService";
+import { Platform } from "react-native";
 
 export const DEFAULT_HIGH_QUALITY_DURATION_HOURS = 0;
 
@@ -31,7 +32,7 @@ export async function requestHighQualityUnlockWithRewardedAd(
   _onLoadingChange?: (loading: boolean) => void
 ): Promise<boolean> {
   const isDev = typeof __DEV__ !== "undefined" && __DEV__;
-  if (isDev) {
+  if (isDev || Platform.OS === "ios") {
     await unlockHighQuality();
     return true;
   }
@@ -41,8 +42,8 @@ export async function requestHighQualityUnlockWithRewardedAd(
   }
 
   return runRewardedAd().then((result) => {
-    // Unsupported runtimes retain free access; a dismissed or failed ad grants no reward.
-    if (result !== "earned" && result !== "unavailable") return false;
+    // No fill, load errors and unavailable ads must not block quality selection.
+    if (result === "cancelled") return false;
     return unlockHighQuality().then(() => true);
   });
 }

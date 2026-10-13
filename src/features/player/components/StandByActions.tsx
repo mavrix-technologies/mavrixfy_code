@@ -1,14 +1,16 @@
 import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { MaterialIcons } from "@expo/vector-icons";
 import { STANDBY_CONTROL_SIZE } from "./standByLayout";
+import { AudioOutputPicker } from "./AudioOutputPicker";
 
-export type StandByPanel = "queue" | "lyrics";
+export type StandByPanel = "queue" | "lyrics" | "timer";
 
 export interface StandByActionsProps {
   primaryColor: string;
   secondaryColor: string;
   compact?: boolean;
+  timerLabel?: string;
   onSelectPanel: (panel: StandByPanel) => void;
   onTouchActivity: () => void;
 }
@@ -19,11 +21,16 @@ export const StandByActions = memo(function StandByActions(props: StandByActions
   return (
     <View style={styles.actions}>
       <Pressable onPress={() => run(() => props.onSelectPanel("queue"))} style={styles.button} accessibilityRole="button" accessibilityLabel="Show playback queue">
-        <View style={[styles.iconSlot, props.compact && styles.compactIconSlot]}><Ionicons name="list-outline" size={20} color={props.primaryColor} /></View>
+        <View style={[styles.iconSlot, props.compact && styles.compactIconSlot]}><MaterialIcons name="queue-music" size={20} color={props.primaryColor} /></View>
         <Text numberOfLines={1} style={[styles.label, { color: props.secondaryColor }]}>Queue</Text>
       </Pressable>
+      <Pressable onPress={() => run(() => props.onSelectPanel("timer"))} style={styles.button} accessibilityRole="button" accessibilityLabel={props.timerLabel ? `Sleep timer: ${props.timerLabel}` : "Sleep timer"}>
+        <View style={[styles.iconSlot, props.compact && styles.compactIconSlot]}><MaterialIcons name="timer" size={20} color={props.primaryColor} /></View>
+        <Text numberOfLines={1} style={[styles.label, { color: props.secondaryColor }]}>{props.timerLabel ?? "Timer"}</Text>
+      </Pressable>
+      <AudioOutputPicker label compact={props.compact} color={props.secondaryColor} onTouchActivity={props.onTouchActivity} />
       <Pressable onPress={() => run(() => props.onSelectPanel("lyrics"))} style={styles.button} accessibilityRole="button" accessibilityLabel="Show lyrics">
-        <View style={[styles.iconSlot, props.compact && styles.compactIconSlot]}><Ionicons name="mic-outline" size={20} color={props.primaryColor} /></View>
+        <View style={[styles.iconSlot, props.compact && styles.compactIconSlot]}><MaterialIcons name="lyrics" size={20} color={props.primaryColor} /></View>
         <Text numberOfLines={1} style={[styles.label, { color: props.secondaryColor }]}>Lyrics</Text>
       </Pressable>
     </View>

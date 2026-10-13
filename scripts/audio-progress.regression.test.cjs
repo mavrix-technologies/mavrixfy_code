@@ -32,6 +32,18 @@ function fixture({ position = 40, requestId = 1, persistedRead = async () => nul
   return { render, song, options, updates, emit: value => status(value), next: () => next };
 }
 
+test("Expo startup error is owned by the pending command without competing status recovery", () => {
+  const f = fixture(); let resumed = 0;
+  f.options.pendingPlayRequestRef.current = { id: 1 };
+  f.options.desiredPlayStateRef.current = true;
+  f.options.playbackLoadingRef.current = true;
+  f.options.playSongRef.current = () => resumed++;
+  f.render(); f.emit({ error: "Cannot Open", position: 0 });
+  assert.equal(resumed, 0);
+  assert.equal(f.options.desiredPlayStateRef.current, true);
+  assert.equal(f.options.playbackLoadingRef.current, true);
+});
+
 test("Expo transport recovery covers ordinary remote songs and resumes at the last reported position", () => {
   const f = fixture(); f.song.source = "jiosaavn"; f.song.audioUrl = "https://media.example/song.mp3";
   const resumes = []; f.options.playSongRef.current = (...args) => resumes.push(args);f.render();

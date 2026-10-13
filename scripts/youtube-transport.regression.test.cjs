@@ -248,6 +248,28 @@ test("iOS selects AAC-LC instead of the lower-bitrate HE-AAC timing path", async
   const android = fixture({ info });
   assert.equal((await android.api.resolveStream("abcdefghijk", "low", "android-low")).bitrate, 48000);
 });
+
+test("Android selects high-fidelity Opus (itag 251) while iOS isolates AAC-LC", async () => {
+  const formats = [
+    { has_audio: true, has_video: false, mime_type: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 128000,
+      approx_duration_ms: 214024, url: "https://rr1.googlevideo.com/videoplayback?expire=2000&bitrate=128000" },
+    { has_audio: true, has_video: false, mime_type: 'audio/webm; codecs="opus"', bitrate: 160000,
+      approx_duration_ms: 214024, url: "https://rr1.googlevideo.com/videoplayback?expire=2000&bitrate=160000" },
+  ];
+  const info = async () => ({ playability_status: { status: "OK" }, streaming_data: { adaptive_formats: formats } });
+
+  const android = fixture({ platform: "android", info, contentType: "audio/webm" });
+  const androidStream = await android.api.resolveStream("abcdefghijk", "high", "android-opus");
+  assert.equal(androidStream.bitrate, 160000);
+  assert.equal(androidStream.codec, "opus");
+  assert.match(androidStream.mimeType, /audio\/webm/);
+
+  const ios = fixture({ platform: "ios", info, contentType: "audio/mp4" });
+  const iosStream = await ios.api.resolveStream("abcdefghijk", "high", "ios-aac");
+  assert.equal(iosStream.bitrate, 128000);
+  assert.equal(iosStream.codec, "aac");
+  assert.match(iosStream.mimeType, /mp4a\.40\.2/);
+});
 test("API fetch uses the same anonymous stack and preserves buffered response metadata", async () => {
   const f = fixture();
   await f.api.resolveStream("abcdefghijk", "medium", "stream");
@@ -372,10 +394,46 @@ test("verification stops retries and pauses audio/video requests until cooldown 
   await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "first"), /LOGIN_REQUIRED/);
   await assert.rejects(f.api.resolveStream("12345678901", "medium", "next"), /SIGN_IN_REQUIRED/);
   await assert.rejects(f.api.resolveVideoStream("12345678901", "medium", "video"), /SIGN_IN_REQUIRED/);
-  assert.equal(calls, 1); assert.equal(mints, 0); assert.equal(f.requests.length, 0);
+  assert.equal(calls, 3); assert.equal(mints, 1); assert.equal(f.requests.length, 0);
   now += 60001;
   await assert.rejects(f.api.resolveStream("12345678901", "medium", "later"), /LOGIN_REQUIRED/);
-  assert.equal(calls, 2);
+  assert.equal(calls, 6);
+});
+
+for (const platform of ["android", "ios"]) {
+  for (const quality of ["low", "medium", "high"]) {
+    test(`${platform}/${quality}: direct verification rejection triggers token minting and MWEB fallback before cooldown`, async () => {
+      const calls = []; let mints = 0;
+      const f = fixture({ platform, mintProof: async () => { mints++; return "a".repeat(160); },
+        info: async (id, options) => {
+          calls.push({ id, ...options });
+          return { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you’re not a bot" } };
+        } });
+      await assert.rejects(f.api.resolveStream("G8Voqp9rR8E", quality, "selected"), /LOGIN_REQUIRED/);
+      assert.equal(calls.length, 4);
+      assert.deepEqual(calls.map(c => c.client), ["VISIONOS", "ANDROID_VR", "TV", "MWEB"]);
+      assert.equal(calls[0].id, "G8Voqp9rR8E");
+      assert.equal(mints, 1); assert.equal(f.requests.length, 0);
+      await assert.rejects(f.api.resolveStream("NNpVL7xauj8", quality, "next"), /SIGN_IN_REQUIRED/);
+      assert.equal(calls.length, 4);
+    });
+  }
+}
+
+test("a minted and attached MWEB proof does not override an upstream verification rejection", async () => {
+  let mints = 0; const calls = [], proof = "a".repeat(160);
+  const f = fixture({ mintProof: async () => { mints++; return proof; }, info: async (_, options) => {
+    calls.push(options);
+    if (options.client !== "MWEB") throw new Error("HTTP 403");
+    assert.equal(options.po_token, proof);
+    return { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you're not a bot" } };
+  } });
+  await assert.rejects(f.api.resolveStream("G8Voqp9rR8E", "medium", "proof-attached"), /LOGIN_REQUIRED/);
+  assert.equal(mints, 1);
+  assert.deepEqual(calls.map(c => c.client), ["VISIONOS", "ANDROID_VR", "TV", "MWEB"]);
+  assert.equal(f.requests.length, 0);
+  await assert.rejects(f.api.resolveStream("NNpVL7xauj8", "medium", "after-proof"), /SIGN_IN_REQUIRED/);
+  assert.equal(mints, 1);
 });
 test("track-specific sign-in restriction does not block other tracks", async () => {
   let calls = 0;

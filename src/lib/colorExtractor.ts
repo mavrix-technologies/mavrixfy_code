@@ -364,7 +364,8 @@ export function ensureDarkHexColor(
 }
 
 const COLOR_CACHE_MAX_ENTRIES = 200;
-const STORAGE_KEY_PALETTES = "@mavrixfy_palette_cache_v3";
+const PALETTE_CACHE_VERSION = `v5:${Platform.OS}:${Constants.executionEnvironment === "storeClient" || Constants.appOwnership === "expo" ? "expo-go" : "native"}`;
+const STORAGE_KEY_PALETTES = `@mavrixfy_palette_cache_${PALETTE_CACHE_VERSION}`;
 const paletteCache = new Map<string, ArtworkPalette>();
 const pendingRequests = new Map<string, Promise<ArtworkPalette>>();
 
@@ -378,7 +379,7 @@ void (async () => {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === "object") {
         for (const [k, v] of Object.entries(parsed)) {
-          if (v && typeof v === "object") {
+          if (v && typeof v === "object" && !paletteCache.has(k)) {
             paletteCache.set(k, v as ArtworkPalette);
           }
         }
@@ -567,6 +568,7 @@ export function useArtworkPalette(
 
     let isMounted = true;
     void extractArtworkColors(key).then((extracted) => {
+      if (isDefaultPalette(extracted)) return;
       if (isMounted) {
         setResolved((previous) =>
           previous.key === key &&
@@ -643,8 +645,10 @@ async function extractArtworkColorsUncached(
         cache: true,
         quality: "high",
         pixelSpacing: 2,
-        key: `artwork-palette-v3:${cacheKey}`,
+        key: `artwork-palette-${PALETTE_CACHE_VERSION}:${cacheKey}`,
       });
+      if (result.platform === "ios" && [result.background, result.primary, result.secondary, result.detail]
+        .every(color => !color || color.toUpperCase() === "#0E1016")) return DEFAULT_ARTWORK_PALETTE;
 
       const palette = mapImageColorsToPalette(result);
       if (!isDefaultPalette(palette)) {
@@ -658,6 +662,8 @@ async function extractArtworkColorsUncached(
       // Native extraction failed or unavailable, fall back smoothly
     }
   }
+
+  if (Platform.OS === "ios" && canUseNativeImageColors()) return DEFAULT_ARTWORK_PALETTE;
 
   const palette = await extractJpegArtworkPalette(
     artworkAnalysisUrl(cacheKey)
@@ -838,39 +844,10 @@ export function dedupeAndDarkenSwatches(
 
 function mapImageColorsToPalette(result: ImageColorsResult): ArtworkPalette {
   if (result.platform === "ios") {
-    const bgStats = getColorStats(result.background);
-    const primaryStats = getColorStats(result.primary);
-    const secondaryStats = getColorStats(result.secondary);
-    const detailStats = getColorStats(result.detail);
-
-    const candidates = [primaryStats, secondaryStats, detailStats, bgStats].filter(
-      (c): c is NonNullable<typeof c> =>
-        c !== null && c.hex !== "#000000" && c.hex !== "#0E1016"
-    );
-
-    const sortedByVibrancy = candidates
-      .slice()
-      .sort((a, b) => b.vibrancy - a.vibrancy);
-    const bestAccent =
-      sortedByVibrancy.length > 0
-        ? sortedByVibrancy[0].hex
-        : result.primary ||
-          result.detail ||
-          result.background ||
-          DEFAULT_ARTWORK_PALETTE.accent;
-    const secondaryAccent =
-      sortedByVibrancy.length > 1 ? sortedByVibrancy[1].hex : bestAccent;
-
-    const bestDominant =
-      bgStats && bgStats.hex !== "#000000" && bgStats.hex !== "#0E1016"
-        ? bgStats.hex
-        : result.background || DEFAULT_ARTWORK_PALETTE.background;
-
-    const rawDom =
-      normalizeHexColor(bestDominant) ?? DEFAULT_ARTWORK_PALETTE.background;
-    const rawVib =
-      normalizeHexColor(bestAccent) ?? DEFAULT_ARTWORK_PALETTE.accent;
-    const rawSec = normalizeHexColor(secondaryAccent) ?? rawVib;
+    // UIImageColors defines background and foreground roles; keep those roles.
+    const rawDom = pickColor(result.background) ?? DEFAULT_ARTWORK_PALETTE.background;
+    const rawVib = pickColor(result.primary, result.secondary, result.detail, rawDom) ?? rawDom;
+    const rawSec = pickColor(result.secondary, result.detail, rawVib) ?? rawVib;
 
     const swatches = dedupeAndDarkenSwatches(
       [
@@ -885,13 +862,16 @@ function mapImageColorsToPalette(result: ImageColorsResult): ArtworkPalette {
       rawDom
     );
 
-    return createArtworkPalette({
+    const palette = createArtworkPalette({
       rawDom,
       rawVib,
       rawSec,
       rawMuted: result.detail || result.secondary,
       swatches,
     });
+    return { ...palette, accent: rawVib, primary: rawVib, secondaryAccent: rawSec,
+      lyricsBg: palette.background,
+      ambientGradient: getArtworkAmbientGradientStops(rawDom, palette.background, "#000000") };
   }
 
   // Android / Web: Evaluate all available profile swatches

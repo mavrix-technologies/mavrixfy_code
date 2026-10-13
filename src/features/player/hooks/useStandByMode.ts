@@ -5,6 +5,7 @@ import { useAppIsActive } from "@/lib/appActivity";
 import * as Haptics from "expo-haptics";
 import { IS_WEB } from "@/constants/platform";
 import { setStandByOrientation } from "./standByOrientation";
+import { useWindowDimensions } from "react-native";
 
 // Retain the historical key so existing true/false preferences migrate in place.
 const STORAGE_KEY_STANDBY_STYLE = "@mavrixfy_standby_night_mode";
@@ -15,19 +16,23 @@ export type StandByStyle = "classic" | "night" | "ambient";
 
 export interface UseStandByModeOptions {
   isPlayerExpanded: boolean;
+  viewport?: { width: number; height: number };
 }
 
-export function useStandByMode({ isPlayerExpanded }: UseStandByModeOptions) {
+export function useStandByMode({ isPlayerExpanded, viewport }: UseStandByModeOptions) {
   const foreground = useAppIsActive();
   const [enabled, setEnabled] = useState(false);
+  const [exiting, setExiting] = useState(false);
+  const dimensions = useWindowDimensions();
+  const { width, height } = viewport ?? dimensions;
   // Only the explicit player button enters StandBy. Window changes affect
   // layout, never activation, so rotation cannot hide/recreate the controls.
   if (!isPlayerExpanded && enabled) setEnabled(false);
   const isStandByActive = enabled && isPlayerExpanded && foreground;
   const enterStandBy = useCallback(() => {
-    if (isPlayerExpanded) setEnabled(true);
+    if (isPlayerExpanded) { setExiting(false); setEnabled(true); }
   }, [isPlayerExpanded]);
-  const exitStandBy = useCallback(() => setEnabled(false), []);
+  const exitStandBy = useCallback(() => setExiting(true), []);
 
   const [standByStyle, setStandByStyle] = useState<StandByStyle>("classic");
   const dimmingEnabled = isStandByActive && standByStyle !== "ambient";
@@ -64,8 +69,17 @@ export function useStandByMode({ isPlayerExpanded }: UseStandByModeOptions) {
   // Restore portrait when the player closes, backgrounds, or unmounts.
   useEffect(() => {
     if (IS_WEB) return;
-    void setStandByOrientation(isStandByActive);
-  }, [isStandByActive]);
+    let current = true;
+    void setStandByOrientation(isStandByActive && !exiting).then((applied) => {
+      if (current && exiting && !applied) setEnabled(false);
+    });
+    return () => { current = false; };
+  }, [isStandByActive, exiting]);
+  // Reveal the portrait player only after its native window has resized.
+  if (exiting && (IS_WEB || height >= width || !isStandByActive)) {
+    setEnabled(false);
+    setExiting(false);
+  }
   useEffect(() => () => { if (!IS_WEB) void setStandByOrientation(false); }, []);
 
   const clearDimTimer = useCallback(() => {

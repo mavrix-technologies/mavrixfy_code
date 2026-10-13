@@ -110,7 +110,7 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
     extractArtworkColors(coverUrl).then((palette) => {
       if (!isMounted) return;
 
-      const newStops = getArtworkAmbientGradientStops(palette.accent, palette.background, Colors.background);
+      const newStops = getArtworkAmbientGradientStops(palette.rawDominant ?? palette.accent, palette.background, Colors.background);
       gCachedCoverUrl = coverUrl;
       gCachedColorStops = newStops;
 

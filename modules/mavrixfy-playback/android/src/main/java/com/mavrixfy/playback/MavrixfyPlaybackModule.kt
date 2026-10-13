@@ -1,6 +1,8 @@
 package com.mavrixfy.playback
 
 import android.content.Intent
+import android.media.MediaRouter2
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import expo.modules.kotlin.modules.Module
@@ -28,6 +30,12 @@ class MavrixfyPlaybackModule : Module() {
       engine.command(name, args)
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("snapshot") { engine.snapshot() }.runOnQueue(Queues.MAIN)
+    AsyncFunction("showAudioOutputPicker") {
+      if (Build.VERSION.SDK_INT >= 34) {
+        val activity = appContext.currentActivity ?: return@AsyncFunction false
+        MediaRouter2.getInstance(activity).showSystemOutputSwitcher()
+      } else false
+    }.runOnQueue(Queues.MAIN)
     OnDestroy { Handler(Looper.getMainLooper()).post { PlaybackEngine.instance?.detachBridge() } }
   }
 }
