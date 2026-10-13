@@ -33,6 +33,7 @@ export interface YouTubeNative {
   cancel(requestId: string): void;
   related(videoId: string, requestId: string): Promise<NativeTrack[]>;
   rejectStream(resolutionId: string): void;
+  resetVerification?(): void;
 }
 let transport: YouTubeNative | undefined;
 let sequence = 0;
@@ -208,6 +209,7 @@ export function clearYouTubeConnectionStreams(): void {
   streams.clear();
   pending.clear();
   latest.clear();
+  transport?.resetVerification?.();
 }
 export function peekYouTubeStream(song: Song, quality?: string): YouTubeStream | undefined {
   const stream = streams.get(song.id);
@@ -222,8 +224,8 @@ export async function resolveYouTubeStream(song: Song, quality?: string): Promis
   if (inFlight) { latest.set(song.id, inFlight); return inFlight; }
   const videoId = song.youtubeVideoId || song.videoId || song.id.replace(/^youtube_/, "");
   const promise = invoke((module, id) => module.resolveStream(videoId, requestedQuality, id)).then((stream) => {
-    if (!stream.url.startsWith("https://") || stream.expiresAt <= Date.now()) throw new Error("YouTube returned an expired stream");
-    if (pending.get(key) !== promise) throw new Error("YouTube stream request superseded");
+    if (!stream.url.startsWith("https://") || stream.expiresAt <= Date.now()) throw new Error("Audio stream expired");
+    if (pending.get(key) !== promise) throw new Error("Audio stream request superseded");
     stream.requestedQuality = requestedQuality;
     if (latest.get(song.id) === promise) {
       if (streams.size >= 60) streams.delete(streams.keys().next().value!);
@@ -260,7 +262,7 @@ export function youTubePlaybackErrorMessage(error: unknown): string {
   const message = youTubePlaybackErrorDetails(error);
   if (/allow audio in this browser/i.test(message)) return "Tap Play to allow audio in this browser.";
   if (/LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot/i.test(message))
-    return "YouTube is asking this connection to verify, so this track can't play here right now. Try again later.";
+    return "This track requires connection to verify, so it can't play right now. Try again later.";
   if (/sign in/i.test(message))
     return "This track needs sign-in outside Mavrixfy. Try another version.";
   if (/timed out|timeout|aborterror/i.test(message)) return "Mavrixfy Music playback timed out. Tap Play to retry.";

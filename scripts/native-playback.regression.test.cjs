@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
-function fixture({ expoGo = false, missing = false, failedSetup = false } = {}) {
+function fixture({ expoGo = false, missing = false, failedSetup = false, resolveStream = async () => ({}) } = {}) {
   const calls = []; const listeners = new Set(); let setups = 0;
   const state = { queue: [], index: -1, state: 'none', position: 0, duration: 0, playWhenReady: false, equalizerAvailable: true };
   const bridge = {
@@ -26,6 +26,9 @@ function fixture({ expoGo = false, missing = false, failedSetup = false } = {}) 
     'expo-modules-core':{requireOptionalNativeModule:()=>missing?null:bridge},expo:{isRunningInExpoGo:()=>expoGo},
     'react-native':{Platform:{OS:'android'}},'./equalizerConfig':{EQ_FREQUENCIES_HZ:Array(15).fill(100)},
     '@/lib/logger':{logger:{warn(){}}},'./playbackContract':contract,'./audioEqualizer':{syncEqualizerWithNative:async()=>{}},
+    '@/services/youtube/YouTubeMusic': { resolveYouTubeStream: resolveStream },
+    './PlayerPlaybackResolver': { getRequestedQualityPreference: async () => ({ effective: 'medium' }) },
+    './audioTimeline': { playbackStreamMetadata: () => ({}) },
   });
   return {...api,calls,state,setups:()=>setups,listeners,
     emit:(name,data)=>listeners.forEach(listener=>listener({name,data})),};
@@ -33,9 +36,29 @@ function fixture({ expoGo = false, missing = false, failedSetup = false } = {}) 
 function load(path, deps) {
   const module = {exports:{}};
   const code = ts.transpileModule(fs.readFileSync(path,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  vm.runInNewContext(code,{module,exports:module.exports,require:name=>{if(!(name in deps))throw Error(name);return deps[name];}});
+  vm.runInNewContext(code,{Date,module,exports:module.exports,require:name=>{if(!(name in deps))throw Error(name);return deps[name];}});
   return module.exports;
 }
+test('native progress exposes real buffering and remains compatible with older binaries', async () => {
+  const f = fixture();
+  f.state.position = 12.25; f.state.duration = 180; f.state.buffered = 64.125;
+  assert.equal((await f.NativePlaybackPlayer.getProgress()).buffered, 64.125);
+  delete f.state.buffered;
+  assert.equal((await f.NativePlaybackPlayer.getProgress()).buffered, 0);
+});
+
+test('native queue resolves only the next track, not the remaining queue', async () => {
+  const resolved = [];
+  const f = fixture({ resolveStream: async song => {
+    resolved.push(song.id);
+    return { url: 'https://audio.example/next', expiresAt: Date.now() + 300000 };
+  } });
+  await f.NativePlaybackPlayer.setQueue(['a', 'b', 'c', 'd'].map(id => ({ id: `youtube_${id}`, source: 'youtube' })), 0);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(resolved, ['youtube_b']);
+  assert.equal(f.calls.filter(([name]) => name === 'update').length, 1);
+});
+
 test('development and production share one native initialization and event subscription',async()=>{
   const f=fixture();await Promise.all([f.NativePlaybackPlayer.setupPlayer(),f.NativePlaybackPlayer.setupPlayer()]);
   assert.equal(f.setups(),1);assert.equal(f.listeners.size,1);

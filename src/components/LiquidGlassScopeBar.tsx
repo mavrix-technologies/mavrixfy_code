@@ -1,6 +1,6 @@
 import { LiquidGlassView } from "@/components/LiquidGlassView";
 import { triggerImpact } from "@/lib/haptics";
-import { Ionicons } from "@expo/vector-icons";
+
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { memo,useCallback } from "react";
 import {
@@ -42,7 +42,7 @@ export function LiquidGlassScopeBar<T extends string>({
   const renderItem = useCallback(
     ({ item: option }: { item: LiquidGlassScopeBarOption<T> }) => {
       const isActive = option.key === activeKey;
-      const isYouTube = option.key === "youtube";
+
       return (
         <Pressable
           accessibilityRole="button"
@@ -55,14 +55,7 @@ export function LiquidGlassScopeBar<T extends string>({
             pressed && styles.segmentPressed,
           ]}
         >
-          {isYouTube && (
-            <Ionicons
-              name="logo-youtube"
-              size={13}
-              color={isActive ? "#080B11" : "#FF0033"}
-              style={styles.segmentIcon}
-            />
-          )}
+          
           <Text
             style={[
               styles.segmentText,
@@ -133,9 +126,6 @@ const styles = StyleSheet.create({
   },
   segmentPressed: {
     opacity: 0.8,
-  },
-  segmentIcon: {
-    marginRight: 5,
   },
   segmentText: {
     fontSize: 13,

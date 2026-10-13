@@ -407,7 +407,7 @@ export function LikedSongMatchesView({
       <View style={styles.divider} />
       <View style={{ paddingHorizontal: 18, paddingVertical: 10 }}>
         <Text style={styles.emptyHint}>
-          Tap a match to replace this exact Liked Songs entry for “{song.title}”. Your original saved record and JioSaavn URL stay preserved.
+          Tap a match to replace this exact Liked Songs entry for “{song.title}”. Your original saved record stays preserved.
         </Text>
       </View>
       {loading ? (

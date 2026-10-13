@@ -1,8 +1,7 @@
 import React, { memo, useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   AccessibilityInfo,
-  BackHandler,
-  Platform,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +13,8 @@ import {
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { BatteryState, useBatteryLevel, useBatteryState } from "expo-battery";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useAppIsActive } from "@/lib/appActivity";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import { PlayerSlider } from "@/components/PlayerSlider";
@@ -103,15 +103,6 @@ export const StandByOverlay = memo(function StandByOverlay({
   useEffect(() => {
     if (!visible) setPanel(null);
   }, [visible]);
-
-  useEffect(() => {
-    if (!visible || panel === null || Platform.OS !== "android") return;
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      backToControls();
-      return true;
-    });
-    return () => subscription.remove();
-  }, [backToControls, panel, visible]);
 
   useEffect(() => {
     let mounted = true;
@@ -257,6 +248,11 @@ export const StandByOverlay = memo(function StandByOverlay({
   );
 
   return (
+    <Modal visible presentationStyle="fullScreen" animationType="fade"
+      supportedOrientations={["portrait", "landscape-left", "landscape-right"]}
+      onRequestClose={panel === null ? onExitStandBy : backToControls}>
+    <SafeAreaProvider style={styles.surface}>
+    <GestureHandlerRootView style={styles.surface}>
     <SafeAreaView
       testID="standby-overlay"
       pointerEvents={visible ? "auto" : "none"}
@@ -329,6 +325,9 @@ export const StandByOverlay = memo(function StandByOverlay({
       </View>
       </View>
     </SafeAreaView>
+    </GestureHandlerRootView>
+    </SafeAreaProvider>
+    </Modal>
   );
 });
 

@@ -1,11 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import { NativeViewGestureHandler } from "react-native-gesture-handler";
+import { NativeViewGestureHandler, Pressable } from "react-native-gesture-handler";
 import React,{ memo,useCallback,useState } from "react";
 import {
-Pressable,
 Text,
 View,
-type GestureResponderEvent,
 type StyleProp,
 type ViewStyle,
 } from "react-native";
@@ -18,8 +16,8 @@ import { styles } from "../styles/playerScreenStyles";
 export type SmoothControlButtonProps = {
   children: React.ReactNode;
   onPress?: () => void;
-  onPressIn?: (event: GestureResponderEvent) => void;
-  onPressOut?: (event: GestureResponderEvent) => void;
+  onPressIn?: React.ComponentProps<typeof Pressable>["onPressIn"];
+  onPressOut?: React.ComponentProps<typeof Pressable>["onPressOut"];
   style?: StyleProp<ViewStyle>;
   hitSlop?: React.ComponentProps<typeof Pressable>["hitSlop"];
   disabled?: boolean;
@@ -38,28 +36,14 @@ export function SmoothControlButton({
   accessibilityLabel,
   accessibilityRole,
 }: SmoothControlButtonProps) {
-  const handlePressIn = useCallback(
-    (event: GestureResponderEvent) => {
-      onPressIn?.(event);
-    },
-    [onPressIn]
-  );
-
-  const handlePressOut = useCallback(
-    (event: GestureResponderEvent) => {
-      onPressOut?.(event);
-    },
-    [onPressOut]
-  );
-
   return (
     <Pressable
       android_disableSound
       disabled={disabled}
       hitSlop={hitSlop}
       onPress={onPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
       accessibilityLabel={accessibilityLabel}
       accessibilityRole={accessibilityRole}
       style={({ pressed }) => [style, pressed && styles.quickButtonPressed]}
@@ -119,6 +103,8 @@ PlayerPlayButton.displayName = "PlayerPlayButton";
 export type PlayerSpotifyProgressProps = {
   progressRatio: number;
   totalLengthMs: number;
+  bufferedRatio?: number;
+  isBuffering?: boolean;
   totalSongSec: number;
   isShortScreen: boolean;
   seekTo: (ratio: number) => void;
@@ -128,6 +114,8 @@ export type PlayerSpotifyProgressProps = {
 export const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   progressRatio,
   totalLengthMs,
+  bufferedRatio,
+  isBuffering,
   totalSongSec,
   isShortScreen,
   seekTo,
@@ -151,8 +139,6 @@ export const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
     [onSeekingChange]
   );
 
-  const SLIDER_MAX = 1000;
-  const sliderValue = Math.round(currentRatio * SLIDER_MAX);
   const currentDisplayTime = formatDuration(
     Math.min(effectiveDurationSec, currentTimeSec)
   );
@@ -163,12 +149,12 @@ export const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
   }, [updateSeeking]);
 
   const handleValueChange = useCallback((value: number) => {
-    const normalized = clampUnit(value / SLIDER_MAX);
+    const normalized = clampUnit(value);
     setScrubProgress(normalized);
   }, []);
 
   const handleSlidingComplete = useCallback((value: number) => {
-    const normalized = clampUnit(value / SLIDER_MAX);
+    const normalized = clampUnit(value);
     setIsScrubbing(false);
     updateSeeking(false);
     setScrubProgress(normalized);
@@ -185,15 +171,17 @@ export const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
     <View
       style={[
         styles.spotifyProgressWrap,
-        { marginTop: isShortScreen ? 14 : 18, marginHorizontal: isShortScreen ? 16 : 20 },
+        { marginHorizontal: isShortScreen ? 16 : 20 },
       ]}
     >
       <NativeViewGestureHandler disallowInterruption>
       <View collapsable={false}>
       <PlayerSlider
-        value={sliderValue}
+        value={currentRatio}
         minimumValue={0}
-        maximumValue={SLIDER_MAX}
+        maximumValue={1}
+        bufferedValue={bufferedRatio}
+        isBuffering={isBuffering}
         onSlidingStart={handleSlidingStart}
         onValueChange={handleValueChange}
         onSlidingComplete={handleSlidingComplete}
@@ -208,7 +196,7 @@ export const PlayerSpotifyProgress = memo(function PlayerSpotifyProgress({
       />
       </View>
       </NativeViewGestureHandler>
-      <View style={styles.spotifyTimeRow}>
+      <View style={styles.spotifyTimeRow} pointerEvents="none">
         <Text style={styles.spotifyTimeText}>{currentDisplayTime}</Text>
         <Text style={styles.spotifyTimeText}>{displayDuration}</Text>
       </View>

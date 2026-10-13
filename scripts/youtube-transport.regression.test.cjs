@@ -34,7 +34,7 @@ test("real music parser retains empty-tab messages alongside a usable queue with
   assert.equal(unsupported.content, null);
   assert.ok(errors.some(error => error.error_type === "typecheck"));
 });
-function fixture({ platform = "android", info, fetchStatus = () => 200, contentType = "audio/mp4", music = {}, nodes = {}, actions = {}, parser = {}, lazyPlayer = false, ciphered = false, apiText = "{}", responseClass = Response, streamFetchOverride, timerScale = 1, mintProof = async () => null } = {}) {
+function fixture({ now = () => 1000000, platform = "android", info, fetchStatus = () => 200, contentType = "audio/mp4", music = {}, nodes = {}, actions = {}, parser = {}, lazyPlayer = false, ciphered = false, apiText = "{}", responseClass = Response, streamFetchOverride, timerScale = 1, mintProof = async () => null } = {}) {
   const clients = [], requests = [];
   const playerLoads = [], sessionOptions = [], cancelledBodies = [];
   const format = { has_audio: true, has_video: false, mime_type: "audio/mp4", bitrate: 128000, approx_duration_ms: 188125,
@@ -59,7 +59,7 @@ function fixture({ platform = "android", info, fetchStatus = () => 200, contentT
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   vm.runInNewContext(code, { module, exports: module.exports, setTimeout: (callback, ms) => setTimeout(callback, ms * timerScale), clearTimeout, URL, AbortController, Response: responseClass,
-    Date: { now: () => 1000000 }, globalThis: { crypto: { randomUUID: () => "nonce" },
+    Date: { now }, globalThis: { crypto: { randomUUID: () => "nonce" },
       fetch: async (url, options) => {
         requests.push({ url, options }); const status = fetchStatus(options);
         return { ok: status >= 200 && status < 300, status };
@@ -363,37 +363,36 @@ test("cancelled extraction cannot validate or return a late player response", as
   await assert.rejects(pending, /cancelled/);
   assert.equal(f.requests.length, 0);
 });
-test("a login-rejected client does not prevent the next profile from resolving the stream", async () => {
-  const clients = [];
-  const f = fixture({ info: async (videoId, { client }) => {
-    clients.push(client);
-    if (client === "VISIONOS") return { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you are not a bot" } };
-    return { playability_status: { status: "OK" }, streaming_data: { adaptive_formats: [{ has_audio: true,
-      has_video: false, mime_type: "audio/mp4", bitrate: 128000,
-      url: `https://rr1.googlevideo.com/videoplayback?expire=2000&video=${videoId}` }] } };
-  } });
-  const stream = await f.api.resolveStream("abcdefghijk", "medium", "stream");
-  assert.equal(stream.clientProfile, "ANDROID_VR");
-  assert.deepEqual(clients, ["VISIONOS", "ANDROID_VR"]);
-  assert.equal(f.requests.length, 1);
-});
-
-test("all rejected profiles remain bounded and report the upstream verification reason", async () => {
-  const clients = [];
-  const f = fixture({ info: async (_, { client }) => {
-    clients.push(client);
+test("verification stops retries and pauses audio/video requests until cooldown expires", async () => {
+  let now = 1000000, calls = 0, mints = 0;
+  const f = fixture({ now: () => now, mintProof: async () => { mints++; return null; }, info: async () => {
+    calls++;
     return { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you are not a bot" } };
   } });
-  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "stream"), /LOGIN_REQUIRED: Sign in to confirm/);
-  assert.deepEqual(clients, ["VISIONOS", "ANDROID_VR", "TV", "WEB"]);
-  assert.equal(f.requests.length, 0);
+  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "first"), /LOGIN_REQUIRED/);
+  await assert.rejects(f.api.resolveStream("12345678901", "medium", "next"), /SIGN_IN_REQUIRED/);
+  await assert.rejects(f.api.resolveVideoStream("12345678901", "medium", "video"), /SIGN_IN_REQUIRED/);
+  assert.equal(calls, 1); assert.equal(mints, 0); assert.equal(f.requests.length, 0);
+  now += 60001;
+  await assert.rejects(f.api.resolveStream("12345678901", "medium", "later"), /LOGIN_REQUIRED/);
+  assert.equal(calls, 2);
+});
+test("track-specific sign-in restriction does not block other tracks", async () => {
+  let calls = 0;
+  const f = fixture({ info: async () => {
+    calls++;
+    return { playability_status: { status: "LOGIN_REQUIRED", reason: "Private video" } };
+  } });
+  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "first"), /Private video/);
+  await assert.rejects(f.api.resolveStream("12345678901", "medium", "second"), /Private video/);
+  assert.equal(calls, 2);
 });
 
 test("attested MWEB uses a video-bound proof for player and GVS without re-encoding the signed URL", async () => {
   const proof = "a".repeat(160), calls = [];
   const f = fixture({ mintProof: async () => proof, info: async (videoId, options) => {
     calls.push(options);
-    if (options.client !== "MWEB") return { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you are not a bot" } };
+    if (options.client !== "MWEB") throw new Error("HTTP 403");
     assert.equal(options.po_token, proof);
     return { playability_status: { status: "OK" }, streaming_data: { adaptive_formats: [{ has_audio: true,
       has_video: false, mime_type: "audio/mp4", bitrate: 128000,

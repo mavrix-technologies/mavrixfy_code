@@ -7,7 +7,7 @@ import { Event, type NativeTrack } from "./playbackContract";
 import type { Song } from "@/lib/musicData";
 export { Event, RepeatMode, State } from "./playbackContract";
 
-type Snapshot = { queue: NativeTrack[]; index: number; state: string; position: number; duration: number; playWhenReady: boolean; equalizerAvailable: boolean };
+type Snapshot = { queue: NativeTrack[]; index: number; state: string; position: number; duration: number; buffered?: number; playWhenReady: boolean; equalizerAvailable: boolean };
 type Bridge = {
   setup(): Promise<Snapshot>;
   command(name: string, args: Record<string, unknown>): Promise<Snapshot>;
@@ -64,7 +64,7 @@ async function snapshot() { return (await ready()).snapshot(); }
 async function warmQueue() {
   const version = selection;
   const state = await snapshot();
-  for (let index = state.index + 1; index < Math.min(state.queue.length, state.index + 4); index++) {
+  for (let index = state.index + 1; index < Math.min(state.queue.length, state.index + 2); index++) {
     const track = state.queue[index];
     if (track.source !== "youtube" && !track.id?.startsWith("youtube_")) continue;
     if (track.url && Number(track.youtubeAudioExpiresAt) > Date.now() + 120_000) continue;
@@ -81,7 +81,10 @@ async function warmQueue() {
         const current = await snapshot();
         if (version !== selection || current.queue[index]?.id !== track.id || index <= current.index) return;
         await command("update", { index, onlyUpcoming: true, metadata: { ...playbackStreamMetadata(stream), url: stream.url, headers: stream.headers, youtubeAudioExpiresAt: stream.expiresAt } });
-      } catch { logger.warn("[Audio] Upcoming stream is not prepared yet"); }
+      } catch (error) {
+        if (!/LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot/i.test(String(error)))
+          logger.warn("[Audio] Upcoming stream is not prepared yet");
+      }
       finally { warming.delete(key); }
     })();
   }
@@ -126,7 +129,7 @@ export const NativePlaybackPlayer = {
   async getActiveTrackIndex() { return (await snapshot()).index; },
   async getPlaybackState() { return { state: (await snapshot()).state }; },
   getPlaybackSnapshot: snapshot,
-  async getProgress() { const state = await snapshot(); return { position: state.position, duration: state.duration, buffered: 0 }; },
+  async getProgress() { const state = await snapshot(); return { position: state.position, duration: state.duration, buffered: state.buffered ?? 0 }; },
   async updateMetadataForTrack(index: number, metadata: Partial<NativeTrack>) { await command("update", { index, metadata }); },
   async prepareTrack(track: NativeTrack) {
     const version = selection; const state = await snapshot();

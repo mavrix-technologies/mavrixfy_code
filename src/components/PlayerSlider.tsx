@@ -2,10 +2,14 @@ import React,{ memo,useCallback,useEffect,useMemo,useRef } from "react";
 import { StyleSheet,View } from "react-native";
 import { Gesture,GestureDetector } from "react-native-gesture-handler";
 import Reanimated,{
+Easing,
+cancelAnimation,
 useAnimatedStyle,
 useSharedValue,
+withRepeat,
+withTiming,
 } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
+import { scheduleOnRN, scheduleOnUI } from "react-native-worklets";
 
 import {
 PLAYER_SLIDER_MAXIMUM_TRACK_COLOR,
@@ -22,6 +26,8 @@ export type PlayerSliderProps = {
   minimumValue: number;
   maximumValue: number;
   disabled?: boolean;
+  bufferedValue?: number;
+  isBuffering?: boolean;
   onSlidingStart?: () => void;
   onValueChange?: (value: number) => void;
   onSlidingComplete?: (value: number) => void;
@@ -37,6 +43,8 @@ export const PlayerSlider = memo(function PlayerSlider({
   minimumValue,
   maximumValue,
   disabled = false,
+  bufferedValue = 0,
+  isBuffering = false,
   onSlidingStart,
   onValueChange,
   onSlidingComplete,
@@ -46,20 +54,39 @@ export const PlayerSlider = memo(function PlayerSlider({
   accessibilityRole,
   accessibilityValue,
 }: PlayerSliderProps) {
+  const range = maximumValue - minimumValue;
+  const normalizedValue = range > 0 ? clampUnit((value - minimumValue) / range) : 0;
+  const normalizedBuffer = range > 0 ? clampUnit((bufferedValue - minimumValue) / range) : 0;
   const trackWidth = useSharedValue(0);
-  const visualProgress = useSharedValue(0);
+  const visualProgress = useSharedValue(normalizedValue);
+  const bufferedProgress = useSharedValue(normalizedBuffer);
+  const loadingOpacity = useSharedValue(1);
   const isSlidingShared = useSharedValue(0);
   const didCompleteGesture = useSharedValue(0);
   const isSlidingRef = useRef(false);
   const lastProgressUpdateRef = useRef(0);
-  const range = maximumValue - minimumValue;
-  const normalizedValue = range > 0 ? clampUnit((value - minimumValue) / range) : 0;
 
   useEffect(() => {
-    if (!isSlidingRef.current) {
-      visualProgress.value = normalizedValue;
+    scheduleOnUI((next: number) => {
+      "worklet";
+      if (isSlidingShared.value === 0) {
+        visualProgress.value = withTiming(next, { duration: 500, easing: Easing.linear });
+      }
+    }, normalizedValue);
+  }, [isSlidingShared, normalizedValue, visualProgress]);
+
+  useEffect(() => {
+    bufferedProgress.value = withTiming(normalizedBuffer, { duration: 500, easing: Easing.linear });
+  }, [bufferedProgress, normalizedBuffer]);
+
+  useEffect(() => {
+    if (isBuffering) {
+      loadingOpacity.value = withRepeat(withTiming(0.78, { duration: 900 }), -1, true);
+    } else {
+      loadingOpacity.value = 1;
     }
-  }, [normalizedValue, visualProgress]);
+    return () => cancelAnimation(loadingOpacity);
+  }, [isBuffering, loadingOpacity]);
 
   useEffect(() => {
     if (!disabled) return;
@@ -167,6 +194,12 @@ export const PlayerSlider = memo(function PlayerSlider({
   const fillAnimatedStyle = useAnimatedStyle(() => ({
     width: Math.max(0, trackWidth.value * visualProgress.value),
   }));
+  const bufferAnimatedStyle = useAnimatedStyle(() => ({
+    width: Math.max(0, trackWidth.value * bufferedProgress.value),
+  }));
+  const loadingAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: loadingOpacity.value,
+  }));
 
   const thumbAnimatedStyle = useAnimatedStyle(() => ({
     opacity: disabled ? 0.45 : 1,
@@ -192,9 +225,10 @@ export const PlayerSlider = memo(function PlayerSlider({
         }}
         style={[styles.playerSlider, disabled && styles.playerSliderDisabled]}
       >
-        <View style={styles.playerSliderTrack}>
+        <Reanimated.View style={[styles.playerSliderTrack, loadingAnimatedStyle]}>
+          <Reanimated.View style={[styles.playerSliderFill, styles.playerSliderBuffer, bufferAnimatedStyle]} />
           <Reanimated.View style={[styles.playerSliderFill, fillAnimatedStyle]} />
-        </View>
+        </Reanimated.View>
         <Reanimated.View pointerEvents="none" style={[styles.playerSliderThumb, thumbAnimatedStyle]} />
       </View>
     </GestureDetector>
@@ -235,5 +269,8 @@ const styles = StyleSheet.create({
     height: PLAYER_SLIDER_THUMB_SIZE,
     borderRadius: PLAYER_SLIDER_THUMB_SIZE / 2,
     backgroundColor: PLAYER_SLIDER_THUMB_COLOR,
+  },
+  playerSliderBuffer: {
+    backgroundColor: "rgba(247,250,255,0.16)",
   },
 });

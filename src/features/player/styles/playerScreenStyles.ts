@@ -10,22 +10,14 @@ import { StyleSheet } from "react-native";
 import { playerArtistStyles } from "./playerArtistStyles";
 
 export const styles = StyleSheet.create({
-  sheetContainer: {
-    position: "absolute",
-    zIndex: 998,
-    overflow: "hidden",
-  },
-  contentWrap: {
-    flex: 1,
-  },
   container: {
     flex: 1,
     backgroundColor: "#000000",
   },
-  playerSheetSurface: {
-    flex: 1,
-    backgroundColor: "#000000",
-    overflow: "visible",
+  playerSheetFrame: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: "hidden",
   },
   backdropOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -46,9 +38,6 @@ export const styles = StyleSheet.create({
     right: 0,
     zIndex: 0,
     overflow: "hidden",
-  },
-  playerForeground: {
-    flex: 1,
   },
   topBar: {
     height: 54,
@@ -327,7 +316,7 @@ export const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 6,
+    gap: 0,
   },
   songBlockCompact: {
     marginTop: 10,
@@ -344,7 +333,7 @@ export const styles = StyleSheet.create({
     height: 58,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 2,
+    paddingHorizontal: 0,
     overflow: "hidden",
     position: "relative",
   },
@@ -380,6 +369,7 @@ export const styles = StyleSheet.create({
     backgroundColor: "transparent",
     borderWidth: 0,
     flexShrink: 0,
+    transform: [{ translateY: 3 }],
   },
   songTitle: {
     color: "#FFFFFF",
@@ -420,7 +410,7 @@ export const styles = StyleSheet.create({
   },
 
   spotifyProgressWrap: {
-    marginTop: 14,
+    marginTop: 4,
     marginHorizontal: 20,
     paddingHorizontal: 0,
     paddingVertical: 0,
@@ -463,7 +453,7 @@ export const styles = StyleSheet.create({
     backgroundColor: PLAYER_SLIDER_THUMB_COLOR,
   },
   spotifyTimeRow: {
-    marginTop: 1,
+    marginTop: -8,
     flexDirection: "row",
     justifyContent: "space-between",
   },
@@ -480,7 +470,7 @@ export const styles = StyleSheet.create({
     marginHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "space-between",
     gap: 8,
   },
   controlsRowCompact: {

@@ -244,11 +244,13 @@ const ROW_SPRING = { damping: 28, mass: 0.5, stiffness: 220, overshootClamping: 
 type QueueContentProps = {
   interactionReady: boolean;
   onClose: () => void;
-  onReady: () => void;
+  onReady?: () => void;
+  nativeScreen?: boolean;
+  onOpenPlayer?: () => void;
 };
 
 /** Playback subscriptions and list allocations exist only while the sheet is visible. */
-const QueueContent = React.memo(({ interactionReady, onClose, onReady }: QueueContentProps) => {
+export const QueueContent = React.memo(({ interactionReady, onClose, onReady, nativeScreen = false, onOpenPlayer }: QueueContentProps) => {
   const insets = useSafeAreaInsets();
   const [timerOpen, setTimerOpen] = useState(false);
   const handleTimerBack = useCallback(() => setTimerOpen(false), []);
@@ -369,16 +371,18 @@ const QueueContent = React.memo(({ interactionReady, onClose, onReady }: QueueCo
   const bottomPad = Math.max(insets.bottom, 12);
 
   const handleViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken<QueueItem>[] }) => {
-    if (viewableItems.some(item => item.isViewable)) onReady();
+    if (viewableItems.some(item => item.isViewable)) onReady?.();
   }, [onReady]);
 
   const handleNowPlayingPress = useCallback(() => {
+    if (onOpenPlayer) { onOpenPlayer(); return; }
     onClose();
     expandPlayer();
-  }, [onClose]);
+  }, [onClose, onOpenPlayer]);
 
+  const Container = nativeScreen ? View : BottomSheetView;
   return (
-    <BottomSheetView style={s.sheetContent} onLayout={data.length === 0 ? onReady : undefined}>
+    <Container style={s.sheetContent} onLayout={data.length === 0 ? onReady : undefined}>
       {/* Keep the list mounted and measured so Back preserves its scroll position. */}
       <View style={[s.contentPage, timerOpen && s.hiddenPage]} pointerEvents={timerOpen ? "none" : "auto"}
         accessibilityElementsHidden={timerOpen} importantForAccessibility={timerOpen ? "no-hide-descendants" : "auto"}>
@@ -437,7 +441,7 @@ const QueueContent = React.memo(({ interactionReady, onClose, onReady }: QueueCo
       <View style={{ height: bottomPad }} />
       </View>
       {timerOpen && <QueueSleepTimer onBack={handleTimerBack} />}
-    </BottomSheetView>
+    </Container>
   );
 });
 QueueContent.displayName = "QueueContent";

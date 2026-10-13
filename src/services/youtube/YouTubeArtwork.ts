@@ -43,9 +43,14 @@ export function youTubeDisplayArtworkUrl(raw: string | undefined, pixels: number
   return video ? `https://i.ytimg.com/vi/${video[1]}/${pixels > 192 ? "maxresdefault" : "mqdefault"}.jpg` : youTubeArtworkUrl(raw, pixels);
 }
 
-export function youTubeArtworkFallbackUrl(raw: string | undefined): string {
+export function youTubeArtworkFallbackUrl(raw: string | undefined, failedUrl?: string): string {
   const video = raw?.match(/^https?:\/\/i\.ytimg\.com\/vi(?:_webp)?\/([\w-]{11})\/[^/?]+/i);
-  if (video) return `https://i.ytimg.com/vi/${video[1]}/mqdefault.jpg`;
+  if (video) {
+    const base = `https://i.ytimg.com/vi/${video[1]}/`;
+    const tiers = ["sddefault", "hqdefault", "mqdefault"];
+    const failedTier = tiers.findIndex(tier => failedUrl === `${base}${tier}.jpg`);
+    return `${base}${tiers[Math.min(failedTier + 1, tiers.length - 1)]}.jpg`;
+  }
   return youTubeArtworkUrl(raw, 512);
 }
 

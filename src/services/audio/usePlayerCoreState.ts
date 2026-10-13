@@ -4,7 +4,7 @@ import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import type { Song } from "@/lib/musicData";
 import { getSettings } from "@/lib/storage";
 import type { PlaybackQualityState } from "@/types/playbackTypes";
-import { showGlobalToast } from "@/utils/globalToast";
+import { showGlobalToast, type ToastAction } from "@/utils/globalToast";
 import { useCallback,useEffect,useRef,useState } from "react";
 import { useAudioNativeQueueLane } from "./audioNativeQueueLane";
 import { useStartupPlaybackReconcile } from "./audioStartupReconcile";
@@ -95,11 +95,11 @@ export function usePlayerCoreState({
   // Refs are kept synchronously up-to-date at the call site (state setter + ref write together).
   // Removed one-render-delayed useEffect ref-sync wrappers to prevent auto-pause from stale reads.
 
-  const showPlaybackNotice = useCallback((message: string) => {
+  const showPlaybackNotice = useCallback((message: string, action?: ToastAction) => {
     const now = Date.now();
     if (now - lastPlaybackNoticeAtRef.current < 1200) return;
     lastPlaybackNoticeAtRef.current = now;
-    showGlobalToast(message);
+    showGlobalToast(message, action);
   }, []);
 
   const ensurePlayerReady = useCallback(async (): Promise<boolean> => {

@@ -3,13 +3,12 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback } from "react";
 import {
   FlatList,
-  Pressable,
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
 import Colors from "@/constants/colors";
-import { FlatList as GestureFlatList } from "react-native-gesture-handler";
+import { FlatList as GestureFlatList, Pressable } from "react-native-gesture-handler";
 import { styles } from "../styles/playerScreenStyles";
 import { StableArtworkImage, type ArtworkQueueItem } from "./PlayerArtworkViews";
 

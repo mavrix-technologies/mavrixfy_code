@@ -4,6 +4,7 @@ import { isYouTubeSong, peekYouTubeStream } from "@/services/youtube/YouTubeMusi
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
+import { updatePlaybackProgress } from "@/services/audio/playbackProgressStore";
 import type { SeekOverride } from "@/services/audio/audioProgressTracking";
 import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { carPlayService } from "@/services/carPlayService";
@@ -353,6 +354,7 @@ export function useAudioSyncListeners({
               if (currentSongRef.current?.id !== trackId) return;
               if (state.duration > 0) setNativeDuration(state.duration);
               setNativePosition(state.position);
+              updatePlaybackProgress({ bufferedPositionMillis: Math.max(0, state.buffered ?? 0) * 1000 });
             }).catch(error => logger.warn("[Audio] Progress reconciliation failed", error));
             return;
           }
@@ -390,6 +392,8 @@ export function useAudioSyncListeners({
         }
         // Install this source's duration before clamping its position.
         setNativePosition(pos);
+        updatePlaybackProgress({ bufferedPositionMillis: typeof event.buffered === "number" && Number.isFinite(event.buffered)
+          ? Math.max(0, event.buffered) * 1000 : 0 });
 
       }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, reconcileActiveTrack),
@@ -523,6 +527,7 @@ export function useAudioSyncListeners({
             }
             if (typeof prog.position === "number") {
               setNativePosition(prog.position);
+              updatePlaybackProgress({ bufferedPositionMillis: Math.max(0, prog.buffered ?? 0) * 1000 });
             }
           }
         } catch {

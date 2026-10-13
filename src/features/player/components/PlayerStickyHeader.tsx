@@ -3,7 +3,8 @@ import { getSolidHeaderColor } from "@/lib/colorExtractor";
 import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
 import { Ionicons } from "@expo/vector-icons";
 import React, { memo, useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { Pressable } from "react-native-gesture-handler";
 import { unescapeHtml } from "@/utils/stringUtils";
 
 // ─── White progress bar — pinned to the very bottom edge of the sticky header ───
@@ -148,6 +149,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
         ]}
       >
         {/* Left: dismiss / minimize */}
+        <View style={localStyles.headerLeft}>
         <Pressable
           style={({ pressed }) => [
             localStyles.iconBtn,
@@ -160,6 +162,7 @@ export const PlayerStickyHeader = React.memo(function PlayerStickyHeader({
         >
           <Ionicons name="chevron-down" size={28} color="#FFFFFF" />
         </Pressable>
+        </View>
 
         {/* Centre: dual-state title */}
         <View style={localStyles.headerCenter}>
@@ -308,6 +311,7 @@ const localStyles = StyleSheet.create({
   },
   headerCenter: {
     flex: 1,
+    minWidth: 0,
     alignItems: "center",
     justifyContent: "center",
     position: "relative",
@@ -355,7 +359,8 @@ const localStyles = StyleSheet.create({
     justifyContent: "center",
     position: "relative",
   },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: 4 },
+  headerLeft: { width: 100, alignItems: "flex-start" },
+  headerActions: { width: 100, flexDirection: "row", alignItems: "center", gap: 4 },
   rightButtonLayer: {
     position: "absolute",
     top: 0,

@@ -18,11 +18,15 @@ test("Google artwork sizing preserves crop flags and query strings", () => {
   assert.equal(art.youTubeArtworkUrl(unrelated), unrelated);
   assert.equal(art.youTubeArtworkUrl("https://elsewhere.com/art=s60"), "https://elsewhere.com/art=s60");
 });
-test("video thumbnails preserve server cropping and use an unpadded fallback", () => {
+test("video thumbnails preserve server cropping and try higher resolution fallbacks first", () => {
   const url = "https://i.ytimg.com/vi/abcdefghijk/hq720.jpg?sqp=resize-token";
   assert.equal(art.youTubeDisplayArtworkUrl(url, 1200), url);
   assert.equal(art.youTubeDisplayArtworkUrl(url, 192), url);
-  assert.equal(art.youTubeArtworkFallbackUrl(url), "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg");
+  const base = "https://i.ytimg.com/vi/abcdefghijk/";
+  assert.equal(art.youTubeArtworkFallbackUrl(url), base + "sddefault.jpg");
+  assert.equal(art.youTubeArtworkFallbackUrl(url, base + "sddefault.jpg"), base + "hqdefault.jpg");
+  assert.equal(art.youTubeArtworkFallbackUrl(url, base + "hqdefault.jpg"), base + "mqdefault.jpg");
+  assert.equal(art.youTubeArtworkFallbackUrl(url, base + "mqdefault.jpg"), base + "mqdefault.jpg");
   assert.equal(art.youTubeArtworkUrl(url), url);
 });
 
@@ -72,7 +76,12 @@ test("artwork fallback is bounded, detects placeholder masters and ignores old c
   const primary = render(props);
   primary.onLoad({ source: { width: 120, height: 90 } });
   const fallback = render(props);
-  assert.match(fallback.source.uri, /mqdefault/);
+  assert.match(fallback.source.uri, /sddefault/);
+  fallback.onLoad({ source: { width: 120, height: 90 } });
+  const high = render(props);
+  assert.match(high.source.uri, /hqdefault/);
+  high.onError({ error: "missing" });
+  assert.match(render(props).source.uri, /mqdefault/);
   let errors = 0;
   render({ ...props, onError: () => errors++ }).onError({ error: "missing" });
   assert.equal(errors, 1);

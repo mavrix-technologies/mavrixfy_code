@@ -182,3 +182,42 @@ test('the visible backdrop runs independently of song play/pause',()=>{
   assert.ok(nodes.some(node=>node.type==='Gradient'&&node.props.colors[0]==='a'));
   assert.ok(nodes.some(node=>node.type==='Gradient'&&node.props.style.height===320));
 });
+
+
+test('artist details are immediately cached across player reopen and keyed to the selected artist', async () => {
+  const { QueryClient, QueryObserver } = require('@tanstack/query-core');
+  const options = new Map();
+  let calls = 0;
+  const module = { exports: {} };
+  const dependencies = {
+    react: { useCallback: fn => fn },
+    '@tanstack/react-query': { useQuery: query => { options.set(query.queryKey[0], query); return {}; } },
+    '@/data/providers/ArtistProvider': { getArtistDetails: async (id, name) => { calls++; return { id, name }; } },
+    '@/lib/musicData': {}, '@/services/youtube/YouTubeArtists': { validArtistChannelId: () => true },
+    '@/utils/navigation': {}, 'expo-router': {}, '@/services/youtube/YouTubeMusic': {},
+  };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/features/player/hooks/useArtistDiscovery.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, { module, exports: module.exports, require: name => dependencies[name] });
+  const render = (id, artist) => {
+    module.exports.useArtistDiscovery({ enabled: true, screenSong: { id: 'song', artist, artistRefs: [{ id }] }, playingQueue: [], activeQueueIndex: 0, playSong() {} });
+    return options.get('playerArtistDetails');
+  };
+  const client = new QueryClient();
+  const first = new QueryObserver(client, render('artist-one', 'First Artist'));
+  const stopFirst = first.subscribe(() => {});
+  while (first.getCurrentResult().isFetching) await new Promise(resolve => setImmediate(resolve));
+  stopFirst(); first.destroy();
+  const reopened = new QueryObserver(client, render('artist-one', 'First Artist'));
+  assert.equal(reopened.getCurrentResult().data.name, 'First Artist', 'cached artist is available before the opening render');
+  const stopReopened = reopened.subscribe(() => {});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 1, 'reopening does not issue another artist lookup');
+  stopReopened(); reopened.destroy();
+  const changed = new QueryObserver(client, render('artist-two', 'Second Artist'));
+  const stopChanged = changed.subscribe(() => {});
+  while (changed.getCurrentResult().isFetching) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(changed.getCurrentResult().data.name, 'Second Artist');
+  assert.equal(calls, 2);
+  stopChanged(); changed.destroy(); client.clear();
+});

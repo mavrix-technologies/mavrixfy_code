@@ -37,119 +37,206 @@ test('decorative consumers share one lifecycle listener and release it on unmoun
   stop(); assert.equal(removals, 2);
 });
 
-test('collapsed/background player creates no full player UI; expanding/restoring recreates it', () => {
-  let portraitLayoutReady = true;
+test('shared player sheet closes once and retains its presentation through background and StandBy', () => {
+  let foreground = true, focused = true, standbyEnabled = false, viewport = null;
+  const closedSheets = [], played = [], focusEffects = [], closed = [], backHandlers = [];
+  const refs = [];
+  let refIndex = 0;
+  const ui = { current: 'mini', expandPlayer: () => { ui.current = 'expanded'; }, collapsePlayer: () => { ui.current = 'mini'; } };
   const react = {
-    memo: fn => fn, useEffect: fn => fn(), useLayoutEffect: fn => fn(), useCallback: fn => fn, useMemo: fn => fn(), useRef: value => ({ current: value }),
-    useState: () => [portraitLayoutReady, next => { portraitLayoutReady = next; }],
+    memo: fn => fn, useEffect: fn => fn(), useCallback: fn => fn, useMemo: fn => fn(), useRef: value => refs[refIndex++] ??= { current: value }, useState: initial => {
+      if (viewport === null) viewport = typeof initial === 'function' ? initial() : initial;
+      return [viewport, next => { viewport = typeof next === "function" ? next(viewport) : next; }];
+    },
     createElement: (type, props, ...children) => ({ type, props, children }),
   };
-  let foreground = true;
-  let landscape = false;
-  let windowHeight = 800;
-  let standbyEnabled = false;
-  const closedSheets = [];
-  const playedQueueSongs = [];
-  const ui = { current: 'mini' };
   const dependencies = {
     react,
     '@/lib/appActivity': { useAppIsActive: () => foreground },
-    '@/constants/platform': { IS_ANDROID: false },
-    '@/lib/playerUIState': { playerUIStateStore: ui, usePlayerUIState: () => ui.current },
+    '@/constants/platform': { IS_IOS: true },
+    '@/lib/playerUIState': { playerUIStateStore: ui },
+    'expo-router': { useIsFocused: () => focused, useFocusEffect: fn => focusEffects.push(fn), useNavigation: () => ({ canGoBack: () => true, goBack: () => closed.push('route-back') }) },
     '@/lib/queueRef': { globalQueueSheetRef: { current: { collapse: () => closedSheets.push('queue') } } },
     '@/lib/addSongsSheetRef': { globalAddSongsSheetRef: { current: { collapse: () => closedSheets.push('add-songs') } } },
     'expo-status-bar': { StatusBar: 'StatusBar' },
     'expo-keep-awake': { useKeepAwake() {} },
-    'expo-router': { router: { push() {} } },
     '@/services/audio/PlaybackEngine': {
       usePlaybackNowPlaying: () => ({ currentSong: { id: 'song' }, queue: [], queueIndex: 0 }),
       usePlaybackPlayState: () => ({ isPlaying: false }),
-      usePlaybackQueueState: () => ({ isShuffled: false, repeatMode: 'off' }),
     },
-    '@/contexts/PlayerContextDefs': {
-      usePlayerActions: () => ({
-        togglePlay: () => {}, nextSong: () => {}, prevSong: () => {}, seekTo: () => {}, toggleShuffle: () => {}, toggleRepeat: () => {}, toggleLike: () => {}, isLiked: () => false,
-        playSong: (song, queue) => playedQueueSongs.push({ song, queue }),
-      }),
-    },
-    '@/lib/colorExtractor': {
-      useArtworkPalette: () => ({ accent: '#fff', background: '#000' }),
-    },
-    '@/lib/nativeAnimated': { createAnimatedComponent: () => 'AnimatedScrollView' },
-    'react-native': { useWindowDimensions: () => ({ height: windowHeight }), StyleSheet: { absoluteFillObject: {} } },
-    'react-native-reanimated': { View: 'AnimatedView', useSharedValue: value => ({ value, get() { return this.value; }, set(next) { this.value = next; } }), useAnimatedStyle: fn => fn() },
-    'react-native-gesture-handler': { Gesture: { Pan: () => {
-      const gesture = {};
-      for (const method of ['activeOffsetY', 'failOffsetY', 'failOffsetX', 'onUpdate', 'onEnd']) gesture[method] = () => gesture;
-      return gesture;
-    } }, GestureDetector: 'GestureDetector' },
-    '../styles/playerScreenStyles': { styles: {} },
-    '../hooks/usePlayerSheetState': { usePlayerSheetState: () => ({
-      visible: ui.current === 'expanded', interactionReady: false,
+    '@/contexts/PlayerContextDefs': { usePlayerActions: () => ({
+      isLiked: () => false, playSong: (song, queue) => played.push({ song, queue }),
     }) },
-    '@gorhom/bottom-sheet': { __esModule: true, default: 'NativeBottomSheet', BottomSheetView: 'BottomSheetView' },
-  };
-  for (const name of ['@/components/FullscreenKaraokeModal', '@/services/audio/playbackProgressStore', '@/utils/navigation',
-    'expo-linear-gradient', 'react-native-worklets', '../components/PlayerAmbientBackdrop', '../components/PlayerTrackCarousel',
-    '../components/PlayerArtworkViews', '../components/PlayerBottomDetailsSection', '../components/PlayerControlsSection',
-    '../components/PlayerDiscoverySections', '../components/PlayerEmptyState', '../components/PlayerStickyHeader',
-    '../hooks/useLegacyPlayerViewState', '../components/StandByOverlay']) dependencies[name] = {};
-  dependencies['../components/StandByOverlay'] = { StandByOverlay: 'StandByOverlay' };
-  dependencies['../hooks/useStandByMode'] = {
-    useStandByMode: () => ({
-      isLandscape: landscape,
-      isStandByActive: standbyEnabled && ui.current === 'expanded',
+    '@/lib/colorExtractor': { useArtworkPalette: () => ({ accent: '#fff', background: '#000' }), getArtworkAmbientGradientStops: () => ['rgba(25,80,130,0.42)', '#000'] },
+    'react-native': { View: 'View', useWindowDimensions: () => ({ width: 390, height: 844 }), BackHandler: { addEventListener: (_name, handler) => { backHandlers.push(handler); return { remove() {} }; } } },
+    '@gorhom/bottom-sheet': { __esModule: true, default: 'BottomSheet' },
+    'react-native-safe-area-context': { SafeAreaProvider: 'SafeAreaProvider', useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
+    'react-native-gesture-handler': { GestureHandlerRootView: 'GestureHandlerRootView' },
+    'react-native-reanimated': {},
+    '../styles/playerScreenStyles': { styles: { container: { flex: 1 } } },
+    '../components/StandByOverlay': { StandByOverlay: 'StandByOverlay' },
+    '../hooks/useStandByMode': { useStandByMode: () => ({
+      isStandByActive: standbyEnabled && focused && foreground,
       enterStandBy: () => { standbyEnabled = true; },
       exitStandBy: () => { standbyEnabled = false; },
-      standByStyle: 'classic',
-      controlsDimmed: false,
-      handleTouch: () => {},
-      selectStyle: () => {},
-    }),
+    }) },
   };
+  for (const name of ['@/components/FullscreenKaraokeModal', '@/services/audio/playbackProgressStore',
+    'react-native-worklets', '../components/PlayerAmbientBackdrop', '../components/PlayerTrackCarousel',
+    '../components/PlayerBottomDetailsSection', '../components/PlayerControlsSection',
+    '../components/PlayerEmptyState', '../components/PlayerStickyHeader', '../hooks/useLegacyPlayerViewState']) dependencies[name] = {};
   const { PlayerScreen } = load('src/features/player/screens/PlayerScreen.tsx', dependencies);
-  assert.equal(PlayerScreen(), null);
-  ui.current = 'expanded';
-  const expanded = PlayerScreen();
-  const containsDetails = node => Boolean(node && (node.type?.name === 'LegacyPlayerScreenView' || node.children?.some(containsDetails)));
-  const containsWakeLock = node => Boolean(node && (node.type?.name === 'StandByKeepAwake' || node.children?.some(containsWakeLock)));
-  assert.ok(containsDetails(expanded));
-  assert.equal(containsWakeLock(expanded), false);
-  const containsSheet = node => Boolean(node && (node.type === 'NativeBottomSheet' || node.children?.some(containsSheet)));
-  assert.equal(containsSheet(expanded), true);
-  const firstSheet = expanded.children.find(child => child?.type === 'NativeBottomSheet');
-  assert.equal(firstSheet.props.containerLayoutState, undefined, 'native sheet measures its own hosting container');
-  assert.equal(typeof expanded.props.onLayout, 'function', 'native layout gates orientation without overriding the sheet height');
-  landscape = true;
-  windowHeight = 390;
-  assert.ok(containsDetails(PlayerScreen()), 'rotation alone does not activate StandBy');
-  const details = expanded.children.find(child => child?.type === 'NativeBottomSheet').children[0];
-  details.props.onEnterStandBy();
-  const standby = PlayerScreen();
-  assert.equal(containsDetails(standby), false);
-  assert.equal(containsWakeLock(standby), true);
-  assert.equal(containsSheet(standby), false, 'landscape has no unused native sheet gesture surface');
+  const render = () => { refIndex = 0; return PlayerScreen(); };
+  const content = node => node?.type?.name === 'LegacyPlayerScreenView' ? node : node?.children?.map(content).find(Boolean);
+  const find = (node, type) => node?.type === type ? node : node?.children?.map(child => find(child, type)).find(Boolean);
+  const initial = render();
+  assert.equal(content(initial).props.viewport.height, 844, 'player content exists on the first render, before sheet animation starts');
+  assert.equal(find(initial, 'View').props.onLayout, undefined, 'scroll content must never be measured as the screen viewport');
+  assert.equal(find(initial, 'View').props.style.height, 844, 'sheet content is bounded by the route, not its scrollable children');
+  find(initial, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
+  const first = render();
+  assert.equal(content(first).props.viewport.width, 390);
+  assert.equal(content(first).props.viewport.height, 740, 'layout uses the outer route height, independent of sheet animation and scroll content');
+  assert.equal(find(first, 'View').props.style.height, 740);
+  const saved = viewport;
+  find(first, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
+  assert.equal(viewport, saved, 'unchanged layout does not trigger a state update');
+  find(first, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 0, height: 0 } } });
+  assert.equal(viewport, saved, 'temporary empty layouts cannot collapse player content');
+  find(first, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 844, height: 390 } } });
+  const rotated = render();
+  assert.equal(content(rotated).props.viewport.height, 390, 'rotation uses the new visible viewport');
+  assert.equal(find(rotated, 'View').props.style.width, 844);
+  find(rotated, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
+  const leave = focusEffects.at(-1)();
+  assert.equal(ui.current, 'expanded');
+  const sheet = find(first, 'BottomSheet');
+  assert.equal(content(first).props.interactionReady, true, 'controls stay usable during opening');
+  assert.equal(sheet.props.snapPoints[0], '100%');
+  assert.equal(sheet.props.backgroundStyle.backgroundColor, '#000000', 'translucent artwork colours must sit over an opaque sheet base');
+  assert.equal(sheet.props.handleComponent, null, 'no grabber or separate safe-area handle height');
+  sheet.props.ref.current = { forceClose: () => closed.push('sheet-close') };
+  content(first).props.onClose();
+  assert.deepEqual(closed, ['sheet-close'], 'header requests close without popping the route early');
+  sheet.props.onClose(); sheet.props.onClose();
+  assert.deepEqual(closed, ['sheet-close', 'route-back'], 'duplicate completion does not pop another route');
+  const back = backHandlers.at(-1);
+  assert.equal(back(), true);
+  assert.equal(closed.at(-1), 'sheet-close', 'Android Back uses the same sheet animation');
+  content(first).props.onEnterStandBy();
+  const standby = render();
+  assert.equal(content(standby), undefined);
+  assert.ok(find(standby, 'BottomSheet'), 'StandBy keeps the sheet mounted');
+  assert.equal(find(standby, 'BottomSheet').props.enableContentPanningGesture, undefined, 'gesture host type stays stable underneath StandBy');
   assert.deepEqual(closedSheets, ['queue', 'add-songs']);
-  standby.props.onLayout({ nativeEvent: { layout: { width: 844, height: 390 } } });
-  const overlay = standby.children.find(child => child?.type === 'StandByOverlay');
-  const queuedSong = { id: 'upcoming-song' };
-  overlay.props.onPlayQueueSong(queuedSong);
-  assert.equal(playedQueueSongs[0].song, queuedSong);
-  assert.equal(playedQueueSongs[0].queue, overlay.props.queue);
-  assert.equal(overlay.props.onOpenQueue, undefined, 'standby has no sheet-opening queue callback');
+  const overlay = find(standby, 'StandByOverlay');
+  const song = { id: 'next' }; overlay.props.onPlayQueueSong(song);
+  assert.equal(played[0].song, song);
   overlay.props.onExitStandBy();
-  assert.equal(ui.current, 'expanded', 'exit returns to full player rather than collapsing');
-  const rotating = PlayerScreen();
-  assert.equal(containsSheet(rotating), false, 'portrait sheet cannot mount into the outgoing landscape viewport');
-  rotating.props.onLayout({ nativeEvent: { layout: { width: 390, height: 844 } } });
-  landscape = false;
-  windowHeight = 844;
-  const restoredSheet = PlayerScreen().children.find(child => child?.type === 'NativeBottomSheet');
-  assert.equal(restoredSheet.props.containerLayoutState, undefined, 'restoration receives a fresh native measurement');
-  assert.ok(containsDetails(PlayerScreen()));
-  foreground = false; assert.equal(PlayerScreen(), null);
-  foreground = true; assert.ok(containsDetails(PlayerScreen()));
-  ui.current = 'mini'; assert.equal(PlayerScreen(), null);
+  assert.ok(content(render()), 'StandBy Back restores the same route');
+  assert.equal(find(render(), 'BottomSheet').props.enableContentPanningGesture, undefined);
+  assert.equal(ui.current, 'expanded');
+  foreground = false;
+  assert.equal(content(render()), undefined);
+  assert.ok(find(render(), 'BottomSheet'), 'backgrounding does not remount the sheet');
+  foreground = true; assert.ok(content(render()));
+  leave(); assert.equal(ui.current, 'mini');
+});
+
+test('opening keeps content geometry stable and header mode resists scroll jitter', () => {
+  let stateUpdates = 0;
+  const react = {
+    memo: fn => fn, useCallback: fn => fn, useMemo: fn => fn(), useRef: value => ({ current: value }),
+    useState: initial => [initial, () => stateUpdates++],
+    createElement: (type, props, ...children) => ({ type, props, children }),
+  };
+  const dependencies = {
+    react, 'react-native': { View: 'View' },
+    '@gorhom/bottom-sheet': { BottomSheetScrollView: 'Scroll' },
+    'react-native-reanimated': { useSharedValue: value => ({ value, set(next) { this.value = next; } }) },
+    '../styles/playerScreenStyles': { styles: {} },
+    '../hooks/useLegacyPlayerViewState': { useLegacyPlayerViewState: () => {
+      return { screenSong: { id: 'song' }, playbackState: { isPlaying: true }, artworkPalette: { accent: '#fff' },
+        screenWidth: 390, screenHeight: 844, interactionReady: true };
+    } },
+    '../components/PlayerBottomDetailsSection': { PlayerBottomDetailsSection: 'Details' },
+    '../components/PlayerControlsSection': { PlayerControlsSection: 'Controls' },
+    '@/services/audio/playbackProgressStore': { getPlaybackProgressSnapshot: () => ({ positionMillis: 0 }) },
+  };
+  for (const name of ['@/components/FullscreenKaraokeModal', '@/lib/appActivity', '@/lib/playerUIState',
+    'expo-router', '@/services/audio/PlaybackEngine', '@/contexts/PlayerContextDefs', '@/lib/colorExtractor',
+    '@/lib/queueRef', '@/lib/addSongsSheetRef', 'react-native-safe-area-context', 'react-native-gesture-handler',
+    'expo-status-bar', 'expo-keep-awake', '../components/PlayerAmbientBackdrop', '../components/PlayerTrackCarousel',
+    '../components/PlayerEmptyState', '../components/PlayerStickyHeader', '../hooks/useStandByMode',
+    '../components/StandByOverlay']) dependencies[name] = {};
+  const { LegacyPlayerScreenView } = load('src/features/player/screens/PlayerScreen.tsx', dependencies, {}, '\nexport { LegacyPlayerScreenView };');
+  const find = (node, type) => node?.type === type ? node : node?.children?.map(child => find(child, type)).find(Boolean);
+  const opening = LegacyPlayerScreenView({ interactionReady: true, viewport: { width: 390, height: 844 } });
+  assert.ok(find(opening, 'Controls'));
+  assert.ok(find(opening, 'Details'), 'lyrics and discovery container exist from the initial render');
+  const opened = LegacyPlayerScreenView({ interactionReady: true, viewport: { width: 390, height: 844 } });
+  assert.ok(find(opened, 'Details'));
+  const scroll = find(opening, 'Scroll').props.onScroll;
+  for (const y of [0, 49, 51, 49, 51, 70, 79]) scroll({ nativeEvent: { contentOffset: { y } } });
+  assert.equal(stateUpdates, 0, 'small scroll jitter does not flip the header');
+  for (const y of [80, 90, 79, 70, 51, 49, 41]) scroll({ nativeEvent: { contentOffset: { y } } });
+  assert.equal(stateUpdates, 1, 'sticky header stays active until scrolling back past the exit threshold');
+  for (const y of [40, 39, 0]) scroll({ nativeEvent: { contentOffset: { y } } });
+  assert.equal(stateUpdates, 2, 'scroll frames do not repeatedly schedule player rerenders');
+});
+
+test('slider starts at the current position and playback updates never override a live drag', () => {
+  const shared = [], effects = [], cleanups = [], uiTasks = [], animations = [], handlers = {};
+  let repeats = 0, cancellations = 0;
+  let sharedIndex = 0;
+  const react = {
+    memo: fn => fn, useCallback: fn => fn, useMemo: fn => fn(), useRef: value => ({ current: value }),
+    useEffect: fn => effects.push(fn),
+    createElement: (type, props, ...children) => ({ type, props, children }),
+  };
+  const pan = {};
+  for (const name of ['enabled', 'minDistance', 'onTouchesDown', 'onBegin', 'onUpdate', 'onEnd', 'onTouchesUp', 'onFinalize']) {
+    pan[name] = value => { handlers[name] = value; return pan; };
+  }
+  const { PlayerSlider } = load('src/components/PlayerSlider.tsx', {
+    react,
+    'react-native': { View: 'View', StyleSheet: { create: value => value } },
+    'react-native-gesture-handler': { GestureDetector: 'GestureDetector', Gesture: { Pan: () => pan } },
+    'react-native-reanimated': {
+      __esModule: true, default: { View: 'AnimatedView' }, Easing: { linear: 'linear' },
+      useSharedValue: value => shared[sharedIndex++] ??= { value }, useAnimatedStyle: fn => fn(),
+      withTiming: (value, config) => { animations.push({ value, config }); return value; },
+      withRepeat: value => { repeats++; return value; }, cancelAnimation() { cancellations++; },
+    },
+    'react-native-worklets': { scheduleOnUI: (fn, ...args) => uiTasks.push(() => fn(...args)), scheduleOnRN() {} },
+    '@/lib/sliderUtils': load('src/lib/sliderUtils.ts'),
+  });
+  const render = (value, extra = {}) => { sharedIndex = 0; return PlayerSlider({ value, minimumValue: 0, maximumValue: 1, ...extra }); };
+  const flush = () => { effects.splice(0).forEach(fn => { const cleanup = fn(); if (cleanup) cleanups.push(cleanup); }); uiTasks.splice(0).forEach(fn => fn()); };
+  render(0.63);
+  assert.equal(shared[1].value, 0.63, 'opening must not flash an empty bar');
+  flush();
+  render(0.631234); flush();
+  assert.equal(shared[1].value, 0.631234, 'native progress retains full precision');
+  assert.equal(animations.at(-1).config.duration, 500);
+  assert.equal(animations.at(-1).config.easing, 'linear');
+  shared[0].value = 100;
+  handlers.onTouchesDown({ allTouches: [{ x: 80 }] });
+  animations.length = 0;
+  render(0.64); flush();
+  assert.equal(animations.some(animation => animation.value === 0.64), false, 'UI-thread drag ownership works even before JS receives sliding-start');
+  assert.equal(shared[1].value, 0.8);
+  handlers.onUpdate({ x: 85 });
+  assert.equal(shared[1].value, 0.85, 'scrubbing follows the finger immediately');
+  render(0.64, { bufferedValue: 0.91, isBuffering: true }); flush();
+  assert.equal(shared[2].value, 0.91, 'loaded audio has its own layer without changing played position');
+  assert.equal(shared[1].value, 0.85);
+  assert.equal(repeats, 1);
+  cleanups.forEach(fn => fn());
+  assert.ok(cancellations > 0, 'loading animations release their loop on unmount');
+  render(0.64, { bufferedValue: 0.91, isBuffering: false }); flush();
+  assert.equal(shared[3].value, 1, 'normal playback restores a steady bar');
+  assert.equal(repeats, 1, 'ready playback never starts a loading loop');
 });
 
 test('playing equalizer bars stop their repeat loops when the app backgrounds', () => {
@@ -185,6 +272,7 @@ test('player header opens StandBy from the button immediately left of song optio
     '@/services/audio/playbackProgressStore': { usePlaybackProgressStore: () => ({ positionMillis: 0, duration: 0 }) },
     '@expo/vector-icons': { Ionicons: 'Icon' },
     '@/utils/stringUtils': { unescapeHtml: value => value },
+    'react-native-gesture-handler': { Pressable: 'Pressable' },
   });
   for (const isScrolled of [false, true]) {
     let opened = 0;

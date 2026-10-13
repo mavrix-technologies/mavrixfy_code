@@ -26,7 +26,7 @@ function load(filename, imports) {
 function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nativeIds, activeIndex = 1 } = {}) {
   const songs = queueIds.map(id => ({ id, title: id, artist: "Artist", duration: 180, audioUrl: `https://audio.example/${id}` }));
   let nativeQueue = (nativeIds ?? queueIds).map(id => ({ id, url: `https://audio.example/${id}`, accountId: "guest" }));
-  const calls = [], snapshots = [], foreground = [], saved = [], cleanups = [], events = new Map();
+  const calls = [], snapshots = [], progressUpdates = [], foreground = [], saved = [], cleanups = [], events = new Map();
   const options = {
     currentSong: null, currentSongRef: ref(songs[activeIndex]), queueRef: ref(songs), originalQueueRef: ref(songs),
     queueIndexRef: ref(activeIndex), userQueuedSongIdsRef: ref([]), isShuffledRef: ref(false), repeatModeRef: ref("off"),
@@ -80,6 +80,7 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     "@/lib/storage": { getSettings: async () => ({ smartAutoplayEnabled: false }) },
     "@/services/audio/ExpoAvAdapter": {},
     "@/services/audio/PlaybackEngine": { updatePlaybackEngineSnapshot: patch => snapshots.push(patch) },
+    "@/services/audio/playbackProgressStore": { updatePlaybackProgress: patch => progressUpdates.push(patch) },
     "@/services/audio/PlayerPlaybackResolver": {
       withResolvedPlaybackUrl: (song, audioUrl) => ({ ...song, audioUrl }), resolveAudioUrl: song => song.audioUrl,
       songToTrack: (song, url) => ({ ...song, url: url || song.audioUrl }),
@@ -93,7 +94,7 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
   };
   const commands = load("src/services/audio/audioPlaybackCommands.ts", imports).useAudioPlaybackCommands(options);
   const operations = load("src/services/audio/audioQueueOperations.ts", imports).useAudioQueueOperations({ ...options, playSong: commands.playSong });
-  return { options, commands, operations, calls, songs, snapshots, storage, events, foreground, saved, cleanups,
+  return { options, commands, operations, calls, songs, snapshots, progressUpdates, storage, events, foreground, saved, cleanups,
     startup: () => load("src/services/audio/audioStartupReconcile.ts", imports).useStartupPlaybackReconcile(options),
     listen: () => load("src/services/audio/audioSyncListeners.ts", imports).useAudioSyncListeners(options),
     changeAccount: () => accountGeneration++,
@@ -330,6 +331,19 @@ test("native transport notifications reconcile intent without echoing Play Pause
   assert.equal(f.options.desiredPlayStateRef.current, false);
   await f.events.get("remote-stop")();
   assert.deepEqual(f.calls, []);
+});
+
+test("buffered progress follows the accepted source and ignores outgoing or invalid data", () => {
+  const f = fixture(); f.listen();
+  f.events.get("progress")({ track: 1, trackId: "b", position: 12, duration: 180, buffered: 64.125 });
+  assert.equal(f.progressUpdates.at(-1).bufferedPositionMillis, 64125);
+  f.options.pendingPlayRequestRef.current = { songId: "c" };
+  const count = f.progressUpdates.length;
+  f.events.get("progress")({ track: 1, trackId: "b", position: 13, duration: 180, buffered: 170 });
+  assert.equal(f.progressUpdates.length, count);
+  f.options.pendingPlayRequestRef.current = null;
+  f.events.get("progress")({ track: 1, trackId: "b", position: 14, duration: 180, buffered: NaN });
+  assert.equal(f.progressUpdates.at(-1).bufferedPositionMillis, 0);
 });
 
 test("native progress applies the new duration before clamping its position", () => {

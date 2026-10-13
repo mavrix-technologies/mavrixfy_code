@@ -2,7 +2,7 @@ import type { PlayerProgressContextValue } from "@/types/playbackTypes";
 import { useSyncExternalStore } from "react";
 import { useAppIsActive } from "@/lib/appActivity";
 
-export type ProgressSnapshot = PlayerProgressContextValue;
+export type ProgressSnapshot = PlayerProgressContextValue & { bufferedPositionMillis?: number };
 
 let currentProgress: ProgressSnapshot = {
   progress: 0,
@@ -31,11 +31,13 @@ export function updatePlaybackProgress(patch: Partial<ProgressSnapshot>): void {
   const progress = patch.progress !== undefined ? patch.progress : currentProgress.progress;
   const duration = patch.duration !== undefined ? patch.duration : currentProgress.duration;
   const positionMillis = patch.positionMillis !== undefined ? patch.positionMillis : currentProgress.positionMillis;
+  const bufferedPositionMillis = patch.bufferedPositionMillis ?? currentProgress.bufferedPositionMillis;
 
   if (
     progress === currentProgress.progress &&
     duration === currentProgress.duration &&
-    positionMillis === currentProgress.positionMillis
+    positionMillis === currentProgress.positionMillis &&
+    bufferedPositionMillis === currentProgress.bufferedPositionMillis
   ) {
     return;
   }
@@ -44,6 +46,7 @@ export function updatePlaybackProgress(patch: Partial<ProgressSnapshot>): void {
     progress,
     duration,
     positionMillis,
+    bufferedPositionMillis,
   };
 
   emit();
@@ -53,7 +56,8 @@ export function resetPlaybackProgress(): void {
   if (
     currentProgress.progress === 0 &&
     currentProgress.duration === 0 &&
-    currentProgress.positionMillis === 0
+    currentProgress.positionMillis === 0 &&
+    !currentProgress.bufferedPositionMillis
   ) {
     return;
   }

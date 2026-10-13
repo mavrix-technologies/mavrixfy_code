@@ -7,7 +7,6 @@ import { AuthProvider,useAuth } from "@/contexts/AuthContext";
 import { DownloadProvider } from "@/contexts/DownloadContext";
 import { NetworkProvider } from "@/contexts/NetworkContext";
 import { PlayerProvider } from "@/contexts/PlayerContext";
-import { PlayerScreen } from "@/features/player/screens/PlayerScreen";
 import { useScreenTracking } from "@/hooks/useScreenTracking";
 import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import { logAppOpen } from "@/lib/analytics";
@@ -24,7 +23,7 @@ import { showAppLaunchAd } from "@/services/ads/appLaunchAdService";
 import { syncEqualizerWithNative } from "@/services/audio/audioEqualizer";
 import { YouTubePoTokenHost } from "@/services/youtube/YouTubePoTokenHost";
 import { checkAppVersion,registerForPushNotificationsAsync } from "@/services/notificationService";
-import { showGlobalToast,subscribeGlobalToast } from "@/utils/globalToast";
+import { showGlobalToast,subscribeGlobalToast,type ToastAction } from "@/utils/globalToast";
 import { runAfterIdle } from "@/utils/idleTask";
 import { Anton_400Regular } from "@expo-google-fonts/anton";
 import { BebasNeue_400Regular } from "@expo-google-fonts/bebas-neue";
@@ -44,7 +43,9 @@ import { StatusBar } from "expo-status-bar";
 import { useCallback,useEffect,useState } from "react";
 import {
 LogBox,
+Linking,
 Platform,
+Pressable,
 StyleSheet,
 Text,
 View,
@@ -127,6 +128,8 @@ LogBox.ignoreLogs([
   "setBackgroundColorAsync",
 ]);
 
+export const unstable_settings = { anchor: "(tabs)" };
+
 const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "profile", "delete-account"]);
 const NAV_OVERLAY_SEGMENTS = new Set(["playlist", "artist", "downloads", "downloaded-songs"]);
 
@@ -152,10 +155,12 @@ function GlobalToast() {
   const [opacity] = useState(() => new Animated.Value(0));
   const [message, setMessage] = useState("Added to queue");
   const [visible, setVisible] = useState(false);
+  const [action, setAction] = useState<ToastAction>();
 
-  const showToast = useCallback((nextMessage: string) => {
+  const showToast = useCallback((nextMessage: string, nextAction?: ToastAction) => {
     // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
     setMessage(nextMessage);
+    setAction(nextAction);
     setVisible(true);
   }, []);
 
@@ -176,7 +181,7 @@ function GlobalToast() {
         isInteraction: false,
         useNativeDriver: true,
       }),
-      Animated.delay(GLOBAL_TOAST_VISIBLE_MS),
+      Animated.delay(action ? 8000 : GLOBAL_TOAST_VISIBLE_MS),
       Animated.timing(opacity, {
         toValue: 0,
         duration: 160,
@@ -194,7 +199,7 @@ function GlobalToast() {
     return () => {
       animation.stop();
     };
-  }, [visible, message, opacity]);
+  }, [visible, message, opacity, action]);
 
   if (!visible) return null;
 
@@ -205,7 +210,7 @@ function GlobalToast() {
   });
 
   return (
-    <View pointerEvents="none" style={[styles.toastHost, { bottom: Math.max(142, insets.bottom + 126) }]}>
+    <View pointerEvents="box-none" style={[styles.toastHost, { bottom: Math.max(142, insets.bottom + 126) }]}>
       <Animated.View
         style={[
           styles.toast,
@@ -215,8 +220,16 @@ function GlobalToast() {
           },
         ]}
       >
-        <Ionicons name="checkmark-circle" size={16} color={Colors.primary} />
+        <Ionicons name={action ? "information-circle" : "checkmark-circle"} size={16} color={Colors.primary} />
         <Text style={styles.toastText}>{message}</Text>
+        {action && <Pressable accessibilityRole="link" accessibilityLabel={action.label}
+          style={{ minHeight: 44, justifyContent: "center" }}
+          onPress={() => {
+            setVisible(false);
+            void Linking.openURL(action.url).catch(() => showGlobalToast("Could not open YouTube."));
+          }}>
+          <Text style={{ color: Colors.primary, fontWeight: "600" }}>{action.label}</Text>
+        </Pressable>}
       </Animated.View>
     </View>
   );
@@ -309,18 +322,22 @@ function useRootLayoutNavigation() {
 
 const isAndroid = Platform.OS === "android";
 
-// /player is a deep-link bridge; the persistent sheet owns its animation.
+// The route hosts one shared gesture-driven player surface on both platforms.
 const playerScreenOptions = {
   presentation: "transparentModal" as const,
   animation: "none" as const,
+  gestureEnabled: false,
   contentStyle: { backgroundColor: "transparent" },
 };
 
 const queueScreenOptions = {
-  presentation: isAndroid ? ("transparentModal" as const) : ("modal" as const),
+  presentation: "formSheet" as const,
   animation: "slide_from_bottom" as const,
   animationDuration: 250,
-  contentStyle: { backgroundColor: isAndroid ? "transparent" : "#1E1E1E" },
+  sheetAllowedDetents: [1],
+  sheetGrabberVisible: true,
+  sheetCornerRadius: 24,
+  contentStyle: { backgroundColor: "#1E1E1E" },
 };
 
 const songOptionsScreenOptions = {
@@ -368,7 +385,7 @@ function RootLayoutNav() {
         }}
       >
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="player" options={playerScreenOptions} />
+        <Stack.Screen name="player" options={playerScreenOptions} dangerouslySingular />
         <Stack.Screen name="queue" options={queueScreenOptions} />
         <Stack.Screen name="song-options" options={songOptionsScreenOptions} />
         <Stack.Screen name="artist-mix" options={artistMixScreenOptions} />
@@ -388,8 +405,6 @@ function RootLayoutNav() {
         </View>
       ) : null}
 
-      {/* Global Player Overlay — always mounted globally above all screens (tabs, playlist, artist, etc.) */}
-      <PlayerScreen />
       <YouTubePoTokenHost />
 
       <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
@@ -499,6 +514,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.cardBorderStrong,
   },
   toastText: {
+    flexShrink: 1,
     color: Colors.text,
     fontSize: 13,
     fontFamily: "Inter_700Bold",

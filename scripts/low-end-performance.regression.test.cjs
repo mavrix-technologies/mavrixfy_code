@@ -313,7 +313,7 @@ test("shared player visibility snapshots coalesce identical transitions and unsu
   let notify = 0, unsubscribe;
   const ui = load("src/lib/playerUIState.ts", { react: { useSyncExternalStore: (subscribe, get) => {
     unsubscribe = subscribe(() => notify++); return get();
-  } } });
+  } }, "expo-router": { router: {} } });
   assert.equal(ui.usePlayerUIState(), "hidden");
   ui.playerUIStateStore.expandPlayer(); ui.playerUIStateStore.expandPlayer(); assert.equal(notify, 1);
   ui.playerUIStateStore.collapsePlayer(); assert.equal(notify, 2);

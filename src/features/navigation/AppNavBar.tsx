@@ -281,12 +281,12 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     [miniSwipeX, nextSong, prevSong]
   );
 
-  // The gesture callback runs on taps, after render; openPlayer reads its lock ref there.
   const miniTapGesture = useMemo(
     () =>
       Gesture.Tap()
         .runOnJS(true)
-        .onEnd(() => {
+        .onEnd((_event, success) => {
+          if (!success) return;
           if (!IS_WEB) {
             void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
           }

@@ -3,11 +3,11 @@ import * as Haptics from "expo-haptics";
 import React,{ useEffect,useRef } from "react";
 import {
 Platform,
-Pressable,
 StyleSheet,
 type StyleProp,
 type ViewStyle,
 } from "react-native";
+import { Pressable } from "react-native-gesture-handler";
 import Animated,{
 interpolate,
 useAnimatedStyle,

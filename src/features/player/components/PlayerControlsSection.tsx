@@ -6,6 +6,7 @@ import * as Animated from "@/lib/nativeAnimated";
 import { PingPongScroll } from "@/components/PingPongScroll";
 import type { Song } from "@/lib/musicData";
 import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
+import { usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { unescapeHtml } from "@/utils/stringUtils";
 import { styles } from "../styles/playerScreenStyles";
 import type { ArtworkQueueItem } from "./PlayerArtworkViews";
@@ -311,7 +312,7 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
         >
           <MaterialIcons
             name="queue-music"
-            size={songDetailIconSize + 3}
+            size={songDetailIconSize}
             color="rgba(255, 255, 255, 0.75)"
           />
         </SmoothControlButton>
@@ -332,7 +333,7 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
         <SpotifyMotionSaveButton
           liked={liked}
           onToggleLike={onToggleLike}
-          iconSize={songDetailIconSize + 4}
+          iconSize={songDetailIconSize + 1}
           style={styles.songDetailCleanActionBtn}
           activeColor={selectedControlIconColor}
           inactiveColor="rgba(255, 255, 255, 0.75)"
@@ -357,7 +358,8 @@ export const PlayerControlsSection = React.memo(function PlayerControlsSection({
             styles.controlsRow,
             {
               marginTop: isShortScreen ? 2 : 4,
-              marginHorizontal: isShortScreen ? 16 : 20,
+              marginHorizontal: (isShortScreen ? 16 : 20)
+                - (playerIconBtnStyle.width - shuffleRepeatIconSize) / 2,
               marginBottom: isShortScreen ? 2 : 4,
               gap: controlsRowGap,
             },
@@ -431,6 +433,9 @@ PlayerControlsSection.displayName = "PlayerControlsSection";
 const LivePlayerProgress = React.memo(function LivePlayerProgress(
   props: Omit<React.ComponentProps<typeof PlayerSpotifyProgress>, "progressRatio" | "totalLengthMs">
 ) {
-  const { progress, duration } = usePlaybackProgressStore();
-  return <PlayerSpotifyProgress {...props} progressRatio={progress} totalLengthMs={duration} />;
+  const { progress, duration, bufferedPositionMillis = 0 } = usePlaybackProgressStore();
+  const { isBuffering, isLoading, desiredPlayState } = usePlaybackPlayState();
+  return <PlayerSpotifyProgress {...props} progressRatio={progress} totalLengthMs={duration}
+    bufferedRatio={duration > 0 ? bufferedPositionMillis / duration : 0}
+    isBuffering={desiredPlayState !== false && (isBuffering || isLoading)} />;
 });

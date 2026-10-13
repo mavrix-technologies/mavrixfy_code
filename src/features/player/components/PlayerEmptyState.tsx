@@ -1,20 +1,22 @@
 import Colors from "@/constants/colors";
-import { safeGoBack } from "@/utils/navigation";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { ActivityIndicator,Pressable,Text,View } from "react-native";
+import { ActivityIndicator,Text,View } from "react-native";
+import { Pressable } from "react-native-gesture-handler";
 import { styles } from "../styles/playerScreenStyles";
 
 export interface PlayerEmptyStateProps {
   topInset: number;
   isLoadingDevTrack: boolean;
   onLoadDevTrack: () => void;
+  onClose: () => void;
 }
 
 export const PlayerEmptyState = React.memo(function PlayerEmptyState({
   topInset,
   isLoadingDevTrack,
   onLoadDevTrack,
+  onClose,
 }: PlayerEmptyStateProps) {
   return (
     <View style={[styles.emptyContainer, { paddingTop: topInset }]}>
@@ -39,12 +41,9 @@ export const PlayerEmptyState = React.memo(function PlayerEmptyState({
                 </>
               )}
             </Pressable>
-            <Pressable onPress={safeGoBack} style={styles.emptyBackButton}>
-              <Ionicons name="arrow-down" size={26} color={Colors.text} />
-            </Pressable>
           </>
         ) : null}
-        <Pressable onPress={safeGoBack} style={styles.emptyBackButton}>
+        <Pressable onPress={onClose} accessibilityLabel="Minimise player" accessibilityRole="button" style={styles.emptyBackButton}>
           <Ionicons name="arrow-down" size={26} color={Colors.text} />
         </Pressable>
       </View>

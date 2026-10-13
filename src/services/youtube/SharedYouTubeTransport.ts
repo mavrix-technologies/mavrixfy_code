@@ -379,6 +379,7 @@ export const sharedYouTubeTransport: YouTubeNative = {
     });
   },
   resolveStream(videoId, quality, id) { return resolveMediaStream(videoId, quality, id); },
+  resetVerification() { verificationBlockedUntil = 0; },
   resolveVideoStream(videoId, quality, id) { return resolveMediaStream(videoId, quality, id, true) as Promise<YouTubeVideoStream>; },
   resolveOfficialMusicVideo(query, id) {
     return request(id, async check => {
@@ -411,9 +412,15 @@ export const sharedYouTubeTransport: YouTubeNative = {
 
 type StreamClient = "VISIONOS" | "ANDROID_VR" | "TV" | "MWEB" | "WEB";
 const successfulClients: { audio?: StreamClient; video?: StreamClient } = {};
+let verificationBlockedUntil = 0;
+function checkVerificationCooldown() {
+  if (Date.now() < verificationBlockedUntil)
+    throw new Error("SIGN_IN_REQUIRED: Upstream verification required. Try again later.");
+}
 function resolveMediaStream(videoId: string, quality: string, id: string, video = false) {
     return request(id, async (check, signal) => {
-      if (!/^[\w-]{11}$/.test(videoId)) throw new Error("Invalid YouTube video ID");
+      if (!/^[\w-]{11}$/.test(videoId)) throw new Error("Invalid video ID");
+      checkVerificationCooldown();
       let yt = await youtube(); check();
       const failures: string[] = [];
       const lane = video ? "video" : "audio";
@@ -435,6 +442,7 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
         if (preferred && clients.includes(preferred)) clients.sort((a, b) => Number(b === preferred) - Number(a === preferred));
         for (const client of clients) {
           check();
+          checkVerificationCooldown();
           try {
             const resolutionId = `${videoId}:${client}`;
             if (!video && Date.now() - (rejected.get(resolutionId) || 0) < 60000) throw new Error("Recently rejected audio profile");
@@ -477,7 +485,7 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
                 }
                 const playbackUrl = new URL(url); check();
                 if (playbackUrl.protocol !== "https:" || !playbackUrl.hostname.endsWith(".googlevideo.com"))
-                  throw new Error("Invalid YouTube audio origin");
+                  throw new Error("Invalid audio origin");
                 // Add the video-bound GVS proof without re-encoding the signed URL.
                 if (poToken && !playbackUrl.searchParams.has("pot")) url += `${url.includes("?") ? "&" : "?"}pot=${encodeURIComponent(poToken)}`;
                 const headers = { ...Constants.STREAM_HEADERS,
@@ -520,8 +528,14 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
           } catch (error) {
             check();
             const detail = safeError(error);
+            if (/LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot/i.test(detail)) {
+              // Connection verification is shared by audio/video and preloads.
+              // Track-specific sign-in restrictions must not block other songs.
+              if (/confirm.*not a bot/i.test(detail)) verificationBlockedUntil = Date.now() + 60_000;
+              throw new Error(`${video ? "Video" : "Audio"} unavailable. ${detail}`);
+            }
             failures.push(`${client}: ${detail}`);
-            if (round === 0 && /LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot|HTTP (?:401|403)/i.test(detail)) void mintProof();
+            if (round === 0 && /HTTP (?:401|403)/i.test(detail)) void mintProof();
           }
         }
         // A long-lived visitor session can become stale. Refresh it once after
@@ -531,6 +545,6 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
         if (previous && (await previous) === yt && session === previous) session = undefined;
         check(); yt = await youtube(); proof = undefined; check();
       }
-      throw new Error(`YouTube ${video ? "video" : "audio"} unavailable. ${failures.join("; ")}`);
+      throw new Error(`${video ? "Video" : "Audio"} unavailable. ${failures.join("; ")}`);
     });
 }

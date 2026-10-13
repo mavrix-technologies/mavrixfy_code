@@ -117,6 +117,7 @@ export function useAudioProgressTracking({
       return;
     }
     progressSongIdRef.current = songId;
+    updatePlaybackProgress({ bufferedPositionMillis: 0 });
     finishedSongRef.current = null;
     if (mediaDurationRef.current?.songId !== songId) mediaDurationRef.current = null;
     if (currentSong?.id) {

@@ -1,33 +1,20 @@
-import Colors from "@/constants/colors";
-import { globalQueueSheetRef } from "@/lib/queueRef";
-import { useRouter } from "expo-router";
-import { useEffect } from "react";
-import { ActivityIndicator,StyleSheet,View } from "react-native";
+import { QueueContent } from "@/components/QueueBottomSheet";
+import { router, useIsFocused, useNavigation } from "expo-router";
+import { useCallback } from "react";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
-export function QueueScreen() {
-  const router = useRouter();
-
-  useEffect(() => {
-    // Open the global queue sheet directly
-    globalQueueSheetRef.current?.expand();
-    // Redirect to /player screen underneath the sheet
-    router.replace({ pathname: "/player", params: { fromQueue: "true" } });
-  }, [router]);
-
+/** Reuse queue actions/list while the native stack owns presentation. */
+export default function QueueScreen() {
+  const focused = useIsFocused();
+  const navigation = useNavigation();
+  const onClose = useCallback(() => {
+    if (navigation.canGoBack()) navigation.goBack();
+    else router.replace("/(tabs)");
+  }, [navigation]);
+  const onOpenPlayer = useCallback(() => router.dismissTo("/player"), []);
   return (
-    <View style={styles.container}>
-      <ActivityIndicator size="large" color={Colors.primary} />
-    </View>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: "#1E1E1E" }}>
+      <QueueContent nativeScreen interactionReady={focused} onClose={onClose} onOpenPlayer={onOpenPlayer} />
+    </GestureHandlerRootView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-});
-
-export default QueueScreen;

@@ -10,7 +10,6 @@ usePlaybackPlayState,
 import { getPlaybackProgressSnapshot } from "@/services/audio/playbackProgressStore";
 import { router,useNavigation } from "expo-router";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
-import { useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useArtistDiscovery } from "./useArtistDiscovery";
 import { usePlayerQueueSwipe } from "./usePlayerQueueCarousel";
@@ -21,8 +20,8 @@ import { useDevTrackHelper } from "./useDevTrackHelper";
 import { usePlayerLayoutMetrics } from "./usePlayerLayoutMetrics";
 import { usePlayerLiveQueue } from "./usePlayerLiveQueue";
 
-export function useLegacyPlayerViewState(interactionReady: boolean) {
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+export function useLegacyPlayerViewState(interactionReady: boolean, viewport: { width: number; height: number }) {
+  const { width: screenWidth, height: screenHeight } = viewport;
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
 
@@ -49,7 +48,6 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
 
   const [isProgressSeeking, setIsProgressSeeking] = useState(false);
   const prevSongIdRef = useRef(currentSong?.id);
-  const optionsPressLockRef = useRef(false);
   const [fullscreenLyricsVisible, setFullscreenLyricsVisible] = useState(false);
 
   const {
@@ -87,9 +85,7 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
   );
 
   const handleSongOptionsPress = useCallback(() => {
-    if (!screenSong || optionsPressLockRef.current) return;
-
-    optionsPressLockRef.current = true;
+    if (!screenSong) return;
     router.push({
       pathname: "/song-options",
       params: {
@@ -100,11 +96,7 @@ export function useLegacyPlayerViewState(interactionReady: boolean) {
         playlistSource: "",
         playlistName: "",
       },
-    });
-
-    setTimeout(() => {
-      optionsPressLockRef.current = false;
-    }, 600);
+    }, { dangerouslySingular: () => "song-options" });
   }, [screenSong]);
 
   const {

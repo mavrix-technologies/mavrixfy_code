@@ -55,7 +55,9 @@ test("measured native viewport replaces stale portrait dimensions after rotation
   const layout = getStandByLayout(688, 360, 1, noInsets);
   assert.equal(find(tree, element => element.props.testID === "standby-artwork").props.style[1].width, layout.artworkSize);
   assert.equal(find(tree, element => element.type === "StandByActions").props.compact, true);
-  assert.equal(tree.type, "SafeAreaView", "native insets reserve system-navigation space before measuring");
+  assert.equal(tree.type, "Modal");
+  assert.equal(tree.props.presentationStyle, "fullScreen", "landscape is independent of the portrait sheet size");
+  assert.ok(find(tree, element => element.type === "SafeAreaView"), "native insets reserve system-navigation space before measuring");
   viewport.props.onLayout({ nativeEvent: { layout: { width: 0, height: 0 } } });
   assert.ok(find(overlay.render(), element => element.props.testID === "standby-artwork"), "transient zero-sized frames do not reset layout");
   overlay.unmount();
@@ -156,7 +158,7 @@ function fixture(options = {}) {
     static now() { return time; }
   }
   const native = {
-    View: "View", Text: "Text", Pressable: "Pressable", ScrollView: "ScrollView", FlatList: "FlatList", ActivityIndicator: "ActivityIndicator",
+    View: "View", Modal: "Modal", Text: "Text", Pressable: "Pressable", ScrollView: "ScrollView", FlatList: "FlatList", ActivityIndicator: "ActivityIndicator",
     Platform: { OS: "android" }, Easing: { out: value => value, cubic: "cubic" },
     StyleSheet: { create: value => value, hairlineWidth: 0.5, absoluteFillObject: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 } },
     useWindowDimensions: () => ({ width: 844, height: 390, fontScale: 1, ...options.dimensions }),
@@ -168,9 +170,10 @@ function fixture(options = {}) {
   };
   const { StandByOverlay } = load("src/features/player/components/StandByOverlay.tsx", {
     react, "react-native": native, "expo-image": { Image: "Image" },
+    "react-native-gesture-handler": { GestureHandlerRootView: "GestureHandlerRootView" },
     "expo-battery": { BatteryState: { CHARGING: 2 }, useBatteryLevel: () => batteryLevel, useBatteryState: () => batteryState },
     "@expo/vector-icons": { Ionicons: "Ionicons", MaterialCommunityIcons: "MaterialCommunityIcons" },
-    "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
+    "react-native-safe-area-context": { SafeAreaProvider: "SafeAreaProvider", SafeAreaView: "SafeAreaView" },
     "@/lib/nativeAnimated": animated, "@/lib/appActivity": { useAppIsActive: () => foreground },
     "@/components/PingPongScroll": { PingPongScroll: "PingPongScroll" },
     "@/components/PlayerSlider": { PlayerSlider: "PlayerSlider" },
@@ -475,13 +478,14 @@ test("hardware Back and accessibility escape return to controls before exiting, 
   for (const view of ["queue", "lyrics"]) {
     find(overlay.render(), element => element.type === "StandByActions").props.onSelectPanel(view);
     overlay.render();
-    assert.equal(f.backListenerCount(), 1);
-    assert.equal(f.hardwareBack(), true);
+    assert.equal(f.backListenerCount(), 0);
+    assert.equal(overlay.render().props.presentationStyle, "fullScreen");
+    overlay.render().props.onRequestClose();
     assert.ok(find(overlay.render(), element => element.type === "StandByActions"));
     assert.equal(f.backListenerCount(), 0);
   }
   find(overlay.render(), element => element.type === "StandByActions").props.onSelectPanel("lyrics");
-  overlay.render().props.onAccessibilityEscape();
+  find(overlay.render(), element => element.props.testID === "standby-overlay").props.onAccessibilityEscape();
   assert.ok(find(overlay.render(), element => element.type === "StandByActions"));
   find(overlay.render(), element => element.type === "StandByActions").props.onSelectPanel("queue");
   overlay.render();

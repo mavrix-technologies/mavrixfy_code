@@ -1,4 +1,4 @@
-import { isYouTubeSong, peekYouTubeStream, youTubePlaybackErrorMessage, youTubePlaybackErrorDetails } from "@/services/youtube/YouTubeMusic";
+import { isYouTubeSong, peekYouTubeStream, youTubePlaybackErrorMessage, youTubePlaybackErrorDetails, clearYouTubeConnectionStreams } from "@/services/youtube/YouTubeMusic";
 import { getSettings } from "@/lib/storage";
 import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import { logger } from "@/lib/logger";
@@ -12,6 +12,7 @@ import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 import { playbackDuration, playbackPosition } from "./audioTimeline";
+import type { ToastAction } from "@/utils/globalToast";
 import type { NativePlaybackPlayer, State as AudioState } from "./NativePlaybackPlayer";
 import { useCallback,useEffect,type MutableRefObject } from "react";
 
@@ -49,7 +50,7 @@ interface UseAudioPlaybackCommandsOptions {
   ensurePlayerReady: () => Promise<boolean>;
   State: typeof AudioState;
   canUseLightweightAudioFallback: boolean;
-  showPlaybackNotice: (msg: string) => void;
+  showPlaybackNotice: (msg: string, action?: ToastAction) => void;
   playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number) => Promise<void> | void>;
   togglePlayRef: MutableRefObject<() => Promise<void> | void>;
   nextSongRef: MutableRefObject<() => void>;
@@ -212,10 +213,28 @@ export function useAudioPlaybackCommands({
 
       try {
         let resolutionTimer: ReturnType<typeof setTimeout> | undefined;
-        const audioUrl = await Promise.race([
+        let audioUrl: string | null = null;
+        try {
+          audioUrl = await Promise.race([
           resolvePlaybackUrlCached(targetSong),
           new Promise<null>((resolve) => { resolutionTimer = setTimeout(() => resolve(null), isYouTubeSong(targetSong) ? 27000 : 12000); }),
         ]).finally(() => clearTimeout(resolutionTimer));
+        } catch (initialResolutionError) {
+          if (isYouTubeSong(targetSong) && reqId === playRequestIdRef.current) {
+            if (typeof clearYouTubeConnectionStreams === "function") clearYouTubeConnectionStreams();
+            try {
+              let retryTimer: ReturnType<typeof setTimeout> | undefined;
+              audioUrl = await Promise.race([
+                resolvePlaybackUrlCached(targetSong),
+                new Promise<null>((resolve) => { retryTimer = setTimeout(() => resolve(null), 15000); }),
+              ]).finally(() => clearTimeout(retryTimer));
+            } catch {
+              throw initialResolutionError;
+            }
+          } else {
+            throw initialResolutionError;
+          }
+        }
         if (reqId !== playRequestIdRef.current || !isCurrentAccount(scope)) return;
 
         if (!audioUrl) {
@@ -338,6 +357,9 @@ export function useAudioPlaybackCommands({
             ? `[Player] playSong failed ${JSON.stringify({ songId: targetSong.id, message: notice, cause: youTubePlaybackErrorDetails(error) })}`
             : "[Player] playSong failed", error);
         }
+        if (upstreamRequiresSignIn) {
+          if (typeof clearYouTubeConnectionStreams === "function") clearYouTubeConnectionStreams();
+        }
         if (pendingPlayRequestRef.current?.id === reqId) {
           pendingPlayRequestRef.current = null;
         }
@@ -348,7 +370,21 @@ export function useAudioPlaybackCommands({
         setPlaybackLoading(false);
         updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false,
           error: nativeStartupTimedOut ? "Audio playback timed out. Tap Play to retry." : notice });
-        if (!nativeStartupTimedOut) showPlaybackNotice(notice);
+        if (!nativeStartupTimedOut) {
+
+          const canAutoSkip = q.length > 1 && (repeatModeRef.current === "all" || targetIndex < q.length - 1);
+          if (upstreamRequiresSignIn && canAutoSkip) {
+            showPlaybackNotice("Track unavailable. Playing next track...");
+            setTimeout(() => {
+              if (reqId === playRequestIdRef.current) {
+                nextSongRef.current?.();
+              }
+            }, 300);
+          } else {
+            showPlaybackNotice(notice);
+          }
+
+        }
       } finally {
         if (reqId === playRequestIdRef.current) {
           pendingPlayRequestRef.current = null;

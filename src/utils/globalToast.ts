@@ -1,7 +1,8 @@
 // Global toast utility — separated here so src/features/* can import it
 // without violating the boundary rule against importing from app/_layout.
 
-type GlobalToastListener = (message: string) => void;
+export type ToastAction = { label: string; url: string };
+type GlobalToastListener = (message: string, action?: ToastAction) => void;
 
 const globalToastListeners = new Set<GlobalToastListener>();
 
@@ -12,6 +13,6 @@ export function subscribeGlobalToast(listener: GlobalToastListener): () => void 
   };
 }
 
-export function showGlobalToast(message = "Added to queue") {
-  globalToastListeners.forEach((listener) => listener(message));
+export function showGlobalToast(message = "Added to queue", action?: ToastAction) {
+  globalToastListeners.forEach((listener) => listener(message, action));
 }

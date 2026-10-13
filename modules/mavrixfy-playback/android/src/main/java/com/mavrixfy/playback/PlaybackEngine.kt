@@ -107,7 +107,7 @@ class PlaybackEngine private constructor(private val context: Context) {
     })
     handler.post(object : Runnable {
       override fun run() {
-        if (player.mediaItemCount > 0) event("playback-progress", mapOf("position" to player.currentPosition / 1000.0, "duration" to duration(), "track" to player.currentMediaItemIndex, "trackId" to player.currentMediaItem?.mediaId))
+        if (player.mediaItemCount > 0) event("playback-progress", mapOf("position" to player.currentPosition / 1000.0, "duration" to duration(), "buffered" to player.bufferedPosition.coerceAtLeast(0) / 1000.0, "track" to player.currentMediaItemIndex, "trackId" to player.currentMediaItem?.mediaId))
         handler.postDelayed(this, if (player.isPlaying) 500 else 1000)
       }
     })
@@ -122,7 +122,7 @@ class PlaybackEngine private constructor(private val context: Context) {
   }
   private fun duration(): Double = if (player.duration == C.TIME_UNSET) 0.0 else player.duration.coerceAtLeast(0) / 1000.0
   fun snapshot(): Map<String, Any?> = mapOf("queue" to tracks, "index" to if (tracks.isEmpty()) -1 else player.currentMediaItemIndex,
-    "state" to status(), "position" to player.currentPosition / 1000.0, "duration" to duration(), "playWhenReady" to player.playWhenReady,
+    "state" to status(), "position" to player.currentPosition / 1000.0, "duration" to duration(), "buffered" to player.bufferedPosition.coerceAtLeast(0) / 1000.0, "playWhenReady" to player.playWhenReady,
     "equalizerAvailable" to (equalizer != null))
   private fun source(track: Map<String, Any?>): MediaSource {
     val url = track["url"] as? String ?: ""

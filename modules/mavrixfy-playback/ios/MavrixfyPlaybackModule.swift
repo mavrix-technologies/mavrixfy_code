@@ -56,7 +56,7 @@ private final class NativePlayback {
       guard let self, let item = self.player.currentItem,
         let currentIndex = self.itemIndices[ObjectIdentifier(item)], self.tracks.indices.contains(currentIndex) else { return }
       if currentIndex != self.index { self.reconcileItem() }
-      self.event("playback-progress", ["position": self.position(), "duration": self.duration(), "track": currentIndex, "trackId": self.tracks[currentIndex]["id"] ?? ""])
+      self.event("playback-progress", ["position": self.position(), "duration": self.duration(), "buffered": self.bufferedPosition(), "track": currentIndex, "trackId": self.tracks[currentIndex]["id"] ?? ""])
       self.nowPlaying()
     }
     let center = NotificationCenter.default
@@ -119,6 +119,16 @@ private final class NativePlayback {
   private func duration() -> Double {
     return player.currentItem.map { PlaybackTimeline.duration($0) } ?? 0
   }
+  private func bufferedPosition() -> Double {
+    let currentPosition = position()
+    return player.currentItem?.loadedTimeRanges.compactMap { value -> Double? in
+      let range = value.timeRangeValue
+      let start = range.start.seconds
+      let end = CMTimeRangeGetEnd(range).seconds
+      guard start.isFinite, end.isFinite, start <= currentPosition, end >= currentPosition else { return nil }
+      return max(0, end)
+    }.max() ?? 0
+  }
   private func status() -> String {
     if player.currentItem?.status == .failed { return "error" }
     if tracks.isEmpty { return "none" }
@@ -127,7 +137,7 @@ private final class NativePlayback {
     if player.timeControlStatus == .waitingToPlayAtSpecifiedRate { return "buffering" }
     return "paused"
   }
-  func snapshot() -> [String: Any] { return ["queue": tracks, "index": index, "state": status(), "position": position(), "duration": duration(), "playWhenReady": intendedPlay, "equalizerAvailable": false] }
+  func snapshot() -> [String: Any] { return ["queue": tracks, "index": index, "state": status(), "position": position(), "duration": duration(), "buffered": bufferedPosition(), "playWhenReady": intendedPlay, "equalizerAvailable": false] }
   private func activate() throws {
     let session = AVAudioSession.sharedInstance()
     try session.setCategory(.playback, mode: .default, policy: .longFormAudio, options: [])
