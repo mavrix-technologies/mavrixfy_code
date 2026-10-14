@@ -21,7 +21,7 @@ import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import { triggerImpact } from "@/lib/haptics";
 import { type Song } from "@/lib/musicData";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";

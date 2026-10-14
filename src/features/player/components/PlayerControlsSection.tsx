@@ -1,4 +1,5 @@
-import { MaterialCommunityIcons,MaterialIcons } from "@expo/vector-icons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { PlaybackInfo } from "./PlaybackInfo";
 import { AudioOutputPicker } from "./AudioOutputPicker";
 import React from "react";

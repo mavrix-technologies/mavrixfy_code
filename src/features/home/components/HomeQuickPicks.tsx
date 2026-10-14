@@ -3,7 +3,7 @@ import EqualizerBars from "@/components/EqualizerBars";
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
 import { type Song } from "@/lib/musicData";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
 import { MusicArtwork } from "@/components/MusicArtwork";
 import { useRouter } from "expo-router";

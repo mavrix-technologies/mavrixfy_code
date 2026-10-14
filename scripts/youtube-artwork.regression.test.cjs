@@ -58,7 +58,7 @@ test("playlist image ranking uses consistent dimensions for labeled and URL size
 });
 test("artwork fallback is bounded, detects placeholder masters and ignores old callbacks", () => {
   const slots = []; let cursor = 0;
-  const react = { memo: fn => fn, useMemo: fn => fn(), useCallback: fn => fn,
+  const react = { memo: fn => fn, useMemo: fn => fn(), useCallback: fn => fn, useLayoutEffect: fn => fn(),
     useState: initial => { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], value => { slots[i] = value; }]; },
     useRef: value => { const i = cursor++; return slots[i] ??= { current: value }; } };
   const module = { exports: {} };

@@ -11,7 +11,7 @@ import { formatDuration,getBestImageUrl,type Song } from "@/lib/musicData";
 import { searchYouTubeMusic } from "@/services/youtube/YouTubeMusic";
 import { addSongToPlaylist,getUserPlaylists } from "@/lib/storage";
 import { showGlobalToast } from "@/utils/globalToast";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { MusicArtwork } from "@/components/MusicArtwork";
 import { router } from "expo-router";
 import React,{ useCallback,useEffect,useMemo,useState } from "react";

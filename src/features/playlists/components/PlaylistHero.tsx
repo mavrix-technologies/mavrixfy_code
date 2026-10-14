@@ -2,7 +2,7 @@ import { CollectionActionRow } from "@/components/CollectionActionRow";
 import Colors from "@/constants/colors";
 import { colorWithAlpha,useArtworkPalette } from "@/lib/colorExtractor";
 import { type Song } from "@/lib/musicData";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { MusicArtwork } from "@/components/MusicArtwork";
 import { LinearGradient } from "expo-linear-gradient";
 import React,{ useMemo } from "react";

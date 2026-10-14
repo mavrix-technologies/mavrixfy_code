@@ -1,5 +1,5 @@
 import { type AppSettings } from "@/lib/storage";
-import { type Ionicons } from "@expo/vector-icons";
+import type Ionicons from "@expo/vector-icons/Ionicons";
 
 export const QUALITY_OPTIONS: { label: string; value: "auto" | "low" | "medium" | "high" }[] = [
   { label: "Auto", value: "auto" },

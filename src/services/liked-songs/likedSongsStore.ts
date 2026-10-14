@@ -1,5 +1,5 @@
 import type { Song } from "@/lib/musicData";
-import { likedSongDocumentIds, mergeLikedSongIdentities } from "./likedSongFormat";
+import { likedSongDocumentIds, likedSongDocumentIdSet, mergeLikedSongIdentities } from "./likedSongFormat";
 import { create } from "zustand";
 
 export interface LikedSongsState {
@@ -51,7 +51,7 @@ export const useLikedSongsStore = create<LikedSongsState>((set) => ({
       if (!state.ids.has(songId)) {
         return state;
       }
-      const songs = state.songs.filter(s => !likedSongDocumentIds(s).includes(songId));
+      const songs = state.songs.filter(s => !likedSongDocumentIdSet(s).has(songId));
       return { songs, ids: new Set(songs.flatMap(likedSongDocumentIds)) };
     });
   },

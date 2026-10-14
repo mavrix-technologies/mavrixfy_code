@@ -3,7 +3,7 @@ import { IS_ANDROID,IS_WEB } from "@/constants/platform";
 import { triggerImpact } from "@/lib/haptics";
 import { formatDuration,type Song } from "@/lib/musicData";
 import { getSongLyrics,type LyricLine,type LyricsResult } from "@/services/lyricsService";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { memo,useCallback,useEffect,useMemo,useRef,useState } from "react";

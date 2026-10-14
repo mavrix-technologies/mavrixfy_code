@@ -1,7 +1,7 @@
 import Colors from "@/constants/colors";
 import * as Animated from "@/lib/nativeAnimated";
 import { safeGoBack } from "@/utils/navigation";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 

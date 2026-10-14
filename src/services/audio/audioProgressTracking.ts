@@ -1,6 +1,6 @@
 import type { Song } from "@/lib/musicData";
 import { logger } from "@/lib/logger";
-import { isYouTubeSong, rejectYouTubeStream } from "@/services/youtube/YouTubeMusic";
+import { isYouTubeSong, peekYouTubeStream, rejectYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import {
@@ -172,6 +172,11 @@ export function useAudioProgressTracking({
           const song = currentSongRef.current;
           const retry = fallbackRetryRef.current;
           const currentPos = Math.max(positionSecondsRef.current, Number.isFinite(status.position) ? status.position : 0);
+          if (song && desiredPlayStateRef.current !== false && peekYouTubeStream?.(song, undefined, true)?.clientProfile === "JIOSAAVN") {
+            rejectYouTubeStream(song);
+            void playSongRef.current(song, queueRef.current, currentPos);
+            return;
+          }
           const progressed = !retry || retry.songId !== song?.id || currentPos > (retry.position || 0) + 5;
           const retryCount = progressed ? 0 : ((retry?.count || 0) + 1);
           const remote = song && (isYouTubeSong(song) || /^https?:\/\//i.test(song.audioUrl || ""));

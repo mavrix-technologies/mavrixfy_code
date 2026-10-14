@@ -61,13 +61,13 @@ async function command(name: string, args: Record<string, unknown> = {}) {
   return snapshot;
 }
 async function snapshot() { return (await ready()).snapshot(); }
-async function warmQueue() {
+async function warmQueue(force = false) {
   const version = selection;
   const state = await snapshot();
   for (let index = state.index + 1; index < Math.min(state.queue.length, state.index + 2); index++) {
     const track = state.queue[index];
     if (track.source !== "youtube" && !track.id?.startsWith("youtube_")) continue;
-    if (track.url && Number(track.youtubeAudioExpiresAt) > Date.now() + 120_000) continue;
+    if (!force && track.url && Number(track.youtubeAudioExpiresAt) > Date.now() + 120_000) continue;
     const key = `${version}:${index}:${track.id}`;
     if (warming.has(key)) continue;
     warming.add(key);
@@ -76,8 +76,11 @@ async function warmQueue() {
         const { resolveYouTubeStream } = await import("@/services/youtube/YouTubeMusic");
         const { getRequestedQualityPreference } = await import("./PlayerPlaybackResolver");
         const { playbackStreamMetadata } = await import("./audioTimeline");
-        const { effective } = await getRequestedQualityPreference();
-        const stream = await resolveYouTubeStream({ ...track, id: track.id || "", source: "youtube" } as Song, effective);
+        const { effective, preferJioSaavn } = await getRequestedQualityPreference();
+        const stream = await resolveYouTubeStream({ ...track, duration: Number(track.duration) || 0, id: track.id || "", source: "youtube" } as Song,
+          effective, effective !== "low" && preferJioSaavn);
+        const preference = await getRequestedQualityPreference();
+        if (Boolean(preference.preferJioSaavn) !== Boolean(preferJioSaavn)) return;
         const current = await snapshot();
         if (version !== selection || current.queue[index]?.id !== track.id || index <= current.index) return;
         await command("update", { index, onlyUpcoming: true, metadata: { ...playbackStreamMetadata(stream), url: stream.url, headers: stream.headers, youtubeAudioExpiresAt: stream.expiresAt } });
@@ -92,6 +95,7 @@ async function warmQueue() {
 
 /** One API; native owns its queue, focus, decoder, clock and automatic transitions. */
 export const NativePlaybackPlayer = {
+  async refreshUpcomingSources() { if (bridge) { selection++; await warmQueue(true); } },
   async setupPlayer() { await ready(); },
   addEventListener(name: string, listener: (event: any) => void) {
     const group = listeners.get(name) ?? new Set(); group.add(listener); listeners.set(name, group);

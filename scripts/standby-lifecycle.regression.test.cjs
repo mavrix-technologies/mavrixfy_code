@@ -29,7 +29,7 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 
 function orientationFixture({ ios = false, web = false, lockAsync = async () => {} } = {}) {
   const calls = [];
-  const OrientationLock = { LANDSCAPE_RIGHT: 1, PORTRAIT_UP: 3 };
+  const OrientationLock = { LANDSCAPE: 5, LANDSCAPE_LEFT: 6, LANDSCAPE_RIGHT: 7, PORTRAIT_UP: 3 };
   const orientation = load('src/features/player/hooks/standByOrientation.ts', {
     'expo-screen-orientation': { OrientationLock, lockAsync: lock => {
       calls.push(lock);
@@ -44,7 +44,7 @@ function hookFixture({ web = false, storage = {}, impact = async () => {} } = {}
   const slots = []; const pendingEffects = []; const timers = new Map();
   const allTimers = new Map(); const orientation = [];
   let index = 0; let dirty = false; let unmounted = false; let lateUpdates = 0;
-  let foreground = true; let dimensions = { width: 844, height: 390 };
+  let foreground = true, backgrounded = false; let dimensions = { width: 844, height: 390 };
   let props = { isPlayerExpanded: true }; let nextTimer = 1;
   const changed = (previous, next) => !previous || next.some((value, i) => !Object.is(value, previous[i]));
   const react = {
@@ -85,7 +85,7 @@ function hookFixture({ web = false, storage = {}, impact = async () => {} } = {}
       default: { getItem: async () => null, setItem: async () => {}, ...storage },
     },
     '@/lib/haptics': { triggerImpact: impact },
-    '@/lib/appActivity': { useAppIsActive: () => foreground },
+    '@/lib/appActivity': { useAppIsActive: () => foreground, useAppIsBackgrounded: () => backgrounded },
     'expo-haptics': { ImpactFeedbackStyle: { Light: 'light' } },
     '@/constants/platform': { IS_WEB: web },
     './standByOrientation': { setStandByOrientation: enabled => {
@@ -111,7 +111,8 @@ function hookFixture({ web = false, storage = {}, impact = async () => {} } = {}
   }
   return {
     render, orientation, timers, allTimers,
-    setForeground: value => { foreground = value; },
+    setForeground: value => { foreground = value; backgrounded = !value; },
+    setAppState: value => { foreground = value === 'active'; backgrounded = value === 'background'; },
     setDimensions: (width, height) => { dimensions = { width, height }; },
     fireTimer: id => { const timer = timers.get(id); timers.delete(id); timer.fn(); },
     unmount() { unmounted = true; slots.forEach(slot => slot?.cleanup?.()); },
@@ -146,14 +147,14 @@ test('StandBy entry, style, rotation, exit and unmount leave the shared audio so
 
 test('late landscape completion is followed by portrait restoration before cleanup settles', async () => {
   const opening = deferred();
-  const f = orientationFixture({ lockAsync: lock => lock === 1 ? opening.promise : Promise.resolve() });
+  const f = orientationFixture({ lockAsync: lock => lock === 5 ? opening.promise : Promise.resolve() });
   const open = f.setStandByOrientation(true);
   await settle();
   const close = f.setStandByOrientation(false);
-  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE_RIGHT]);
+  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE]);
   opening.resolve();
   await Promise.all([open, close]);
-  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE_RIGHT, f.OrientationLock.PORTRAIT_UP]);
+  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE, f.OrientationLock.PORTRAIT_UP]);
 });
 
 test('rapid close and reopen skips obsolete queued portrait requests', async () => {
@@ -165,30 +166,30 @@ test('rapid close and reopen skips obsolete queued portrait requests', async () 
   const reopen = f.setStandByOrientation(true);
   opening.resolve();
   await Promise.all([open, close, reopen]);
-  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE_RIGHT, f.OrientationLock.LANDSCAPE_RIGHT]);
+  assert.deepEqual(f.calls, [f.OrientationLock.LANDSCAPE, f.OrientationLock.LANDSCAPE]);
 });
 
 test('iPhone and Android request landscape explicitly and failures do not block portrait restoration', async () => {
   const ios = orientationFixture({ ios: true });
   await ios.setStandByOrientation(true);
-  assert.deepEqual(ios.calls, [ios.OrientationLock.LANDSCAPE_RIGHT]);
+  assert.deepEqual(ios.calls, [ios.OrientationLock.LANDSCAPE]);
   const android = orientationFixture({ lockAsync: async lock => {
     if (lock !== 3) throw Error('Unavailable orientation policy');
   } });
   await android.setStandByOrientation(true);
   await android.setStandByOrientation(false);
-  assert.deepEqual(android.calls, [1, 3]);
+  assert.deepEqual(android.calls, [5, 3]);
 });
 
 test('obsolete failed opening never unlocks the newer portrait request', async () => {
   const opening = deferred();
-  const f = orientationFixture({ lockAsync: lock => lock === 1 ? opening.promise : Promise.resolve() });
+  const f = orientationFixture({ lockAsync: lock => lock === 5 ? opening.promise : Promise.resolve() });
   const open = f.setStandByOrientation(true);
   await settle();
   const close = f.setStandByOrientation(false);
   opening.reject(Error('Opening failed'));
   await Promise.all([open, close]);
-  assert.deepEqual(f.calls, [1, 3]);
+  assert.deepEqual(f.calls, [5, 3]);
 });
 
 test('only explicit activation opens standby and closing/backgrounding releases rotation and dim timers', async () => {
@@ -228,6 +229,28 @@ test('only explicit activation opens standby and closing/backgrounding releases 
   state = f.render({ isPlayerExpanded: true });
   assert.equal(state.isStandByActive, false, 'reopening the player does not restore a closed StandBy session');
   await settle();
+  f.unmount();
+});
+
+test('iOS Control Center and route-picker inactive states preserve StandBy orientation and panel visibility', async () => {
+  const f = hookFixture(); let state = f.render();
+  state.enterStandBy(); state = f.render();
+  f.fireTimer([...f.timers.keys()][0]); state = f.render();
+  assert.equal(state.controlsDimmed, true);
+  const orientationCount = f.orientation.length;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    f.setAppState('inactive'); state = f.render();
+    assert.equal(state.isStandByActive, true);
+    assert.equal(f.timers.size, 0);
+    assert.equal(state.controlsDimmed, true, 'system overlays do not flash the dimmed artwork awake');
+    f.setAppState('active'); state = f.render();
+    assert.equal(state.isStandByActive, true); assert.equal(f.timers.size, 1);
+  }
+  assert.equal(f.orientation.length, orientationCount, 'no portrait/landscape requests on temporary inactivity');
+  f.setAppState('inactive'); f.render();
+  f.setAppState('background'); state = f.render();
+  assert.equal(state.isStandByActive, false);
+  assert.equal(f.orientation.at(-1), false, 'actual Home/background still restores portrait');
   f.unmount();
 });
 

@@ -7,7 +7,7 @@ import { NavImportIcon } from "@/components/OfficialNavIcons";
 import Colors from "@/constants/colors";
 import { IS_IOS,IS_WEB } from "@/constants/platform";
 import { triggerImpact } from "@/lib/haptics";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";

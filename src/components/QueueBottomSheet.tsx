@@ -1,6 +1,6 @@
 /** Queue sheet: the list owns scrolling/reordering; the header owns dismissal. */
 
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetView,

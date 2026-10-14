@@ -8,7 +8,8 @@ import {
 import { artworkAnalysisUrl } from "@/services/youtube/YouTubeArtwork";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Platform } from "react-native";
 
 export { colorWithAlpha } from "./colorMath";
@@ -517,18 +518,19 @@ export function extractArtworkColors(imageUrl: string): Promise<ArtworkPalette> 
 
 export function preloadDominantColors(
   imageUrls: (string | null | undefined)[]
-): void {
+): () => void {
   // Expo Go does not include the native image-colors module.
-  if (!canUseNativeImageColors()) return;
+  if (!canUseNativeImageColors()) return () => {};
+  let cancelled = false;
 
-  // Preloading is sequential so adjacent covers don't compete with playback/rendering.
-  void (async () => {
-    for (const rawUrl of imageUrls) {
-      const url = rawUrl?.trim();
-      if (!url || paletteCache.has(normalizeArtworkUrl(url))) continue;
-      await extractArtworkColors(url).catch(() => {});
-    }
-  })();
+  // Keep one extraction in flight so adjacent covers do not compete with playback.
+  void imageUrls.reduce<Promise<void>>((previous, rawUrl) => previous.then(() => {
+    if (cancelled) return;
+    const url = rawUrl?.trim();
+    if (!url || paletteCache.has(normalizeArtworkUrl(url))) return;
+    return extractArtworkColors(url).then(() => {}, () => {});
+  }), Promise.resolve());
+  return () => { cancelled = true; };
 }
 
 export function getImmediateArtworkPalette(
@@ -555,53 +557,25 @@ export function useArtworkPalette(
   imageUrl: string | null | undefined
 ): ArtworkPalette {
   const key = normalizeArtworkUrl(imageUrl);
-  const [resolved, setResolved] = useState<{
-    key: string;
-    palette: ArtworkPalette;
-  }>(() => ({
-    key,
-    palette: getImmediateArtworkPalette(key),
-  }));
-
-  useEffect(() => {
-    if (!key) return;
-
-    let isMounted = true;
-    void extractArtworkColors(key).then((extracted) => {
-      if (isDefaultPalette(extracted)) return;
-      if (isMounted) {
-        setResolved((previous) =>
-          previous.key === key &&
-          previous.palette.background === extracted.background &&
-          previous.palette.accent === extracted.accent &&
-          previous.palette.text === extracted.text
-            ? previous
-            : { key, palette: extracted }
-        );
-      }
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [key]);
-
+  const { data } = useQuery({
+    queryKey: ["artwork-palette", key],
+    queryFn: () => extractArtworkColors(key),
+    enabled: Boolean(key),
+    staleTime: 5 * 60_000,
+    gcTime: 5 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    placeholderData: previous => previous,
+    initialData: () => {
+      const cached = getImmediateArtworkPalette(key);
+      return isDefaultPalette(cached) ? undefined : cached;
+    },
+  });
+  const [lastPalette, setLastPalette] = useState(() => getImmediateArtworkPalette(key));
+  if (data && !isDefaultPalette(data) && lastPalette !== data) setLastPalette(data);
   if (!key) return DEFAULT_ARTWORK_PALETTE;
-  if (resolved.key === key) return resolved.palette;
-
-  const immediate = getImmediateArtworkPalette(key);
-  if (immediate !== DEFAULT_ARTWORK_PALETTE) {
-    return immediate;
-  }
-
-  // If the previous song already resolved a palette, keep showing it while
-  // the new song's colors are being extracted. This eliminates unwanted
-  // color flashes or fallback jumps during track transitions.
-  if (resolved.palette && resolved.palette !== DEFAULT_ARTWORK_PALETTE) {
-    return resolved.palette;
-  }
-
-  return DEFAULT_ARTWORK_PALETTE;
+  // Retain the last resolved colors when a new extraction is pending or unavailable.
+  return data && !isDefaultPalette(data) ? data : lastPalette;
 }
 
 function canUseNativeImageColors(): boolean {

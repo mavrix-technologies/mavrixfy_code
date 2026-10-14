@@ -1,5 +1,5 @@
-import { EQ_FREQUENCIES_HZ, EQ_Q } from "./equalizerConfig";
-export { EQ_FREQUENCIES_HZ, EQ_Q } from "./equalizerConfig";
+import { EQ_FREQUENCIES_HZ, EQ_Q } from "../../src/services/audio/equalizerConfig";
+export { EQ_FREQUENCIES_HZ, EQ_Q } from "../../src/services/audio/equalizerConfig";
 
 type Coefficients = { b0: number; b1: number; b2: number; a0: number; a1: number; a2: number };
 

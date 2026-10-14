@@ -6,6 +6,51 @@ const ts = require("typescript");
 const { fixture: playerFixture, tick } = require("./helpers/audio-player-fixture.cjs");
 const track = { videoId: "abcdefghijk", title: "Same title", artist: "Same artist", coverUrl: "", duration: 180 };
 
+
+test("optional JioSaavn source uses the shared timeline/cache and OFF restores YouTube", async () => {
+  let attempts = 0;
+  const f = fixture({}, 'ios', true, async (song, videoId) => {
+    attempts++;
+    return { videoId, url: 'https://aac.saavncdn.com/audio.mp4', expiresAt: 1300000,
+      headers: {}, bitrate: 320000, codec: '', clientProfile: 'JIOSAAVN', resolutionId: 'jiosaavn:catalog', durationSeconds: 180 };
+  });
+  const song = f.normalizeYouTubeTrack(track);
+  const preferred = await f.resolveYouTubeStream(song, 'high', true);
+  assert.equal(preferred.clientProfile, 'JIOSAAVN');
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.youTubeSongWithStream(song).id, song.id);
+  assert.equal(f.youTubeSongWithStream(song).playbackDurationSeconds, 180);
+  assert.equal(await f.resolveYouTubeStream(song, 'high', true), preferred);
+  assert.equal(attempts, 1);
+  const original = await f.resolveYouTubeStream(song, 'high', false);
+  assert.notEqual(original.url, preferred.url);
+  assert.equal(f.calls.length, 1);
+});
+
+test("failed optional decoder source is excluded for recovery; YouTube is tried once", async () => {
+  let attempts = 0;
+  const f = fixture({}, 'android', true, async (_, videoId) => {
+    attempts++;
+    return { videoId, url: 'https://aac.saavncdn.com/audio.mp4', expiresAt: 1300000,
+      headers: {}, bitrate: 320000, codec: '', clientProfile: 'JIOSAAVN', resolutionId: 'jiosaavn:catalog' };
+  });
+  const song = f.normalizeYouTubeTrack(track);
+  await f.resolveYouTubeStream(song, 'high', true);
+  f.rejectYouTubeStream(song);
+  await f.resolveYouTubeStream(song, 'high', true);
+  assert.equal(attempts, 1);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.rejected.length, 0);
+});
+
+test("empty or failed optional lookup retains original YouTube resolution", async () => {
+  for (const resolver of [async () => null, async () => { throw Error('unavailable'); }]) {
+    const f = fixture({}, 'android', true, resolver);
+    await f.resolveYouTubeStream(f.normalizeYouTubeTrack(track), 'high', true);
+    assert.equal(f.calls.length, 1);
+  }
+});
+
 test("extractor aggregate errors retain timeout and network classification", () => {
   const f = fixture();
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: timeout"), /timed out/);
@@ -35,7 +80,7 @@ test("network change discards signed streams so the next play resolves for the n
   assert.notEqual(first.url, fresh.url);
   assert.equal(f.calls.length, 2);
 });
-function fixture(overrides = {}, platform = "android", installed = true) {
+function fixture(overrides = {}, platform = "android", installed = true, preferredStream = async () => null) {
   const calls = [], cancelled = [], rejected = [];
   let now = 1000000;
   const native = {
@@ -55,6 +100,7 @@ function fixture(overrides = {}, platform = "android", installed = true) {
       if (name === "./YouTubeArtwork") return require("./helpers/youtube-artwork-fixture.cjs");
       if (name === "../audio/audioTimeline") return require("./helpers/audio-timeline-fixture.cjs");
       if (name === "./SharedYouTubeTransport") return { sharedYouTubeTransport: native };
+      if (name === "../audio/preferredJioSaavnStream") return { preferredJioSaavnStream: preferredStream };
       throw new Error(name);
     } });
   return { ...module.exports, calls, cancelled, rejected, advance: ms => now += ms };

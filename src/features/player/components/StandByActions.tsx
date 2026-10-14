@@ -1,8 +1,7 @@
 import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { MaterialIcons } from "@expo/vector-icons";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { STANDBY_CONTROL_SIZE } from "./standByLayout";
-import { AudioOutputPicker } from "./AudioOutputPicker";
 
 export type StandByPanel = "queue" | "lyrics" | "timer";
 
@@ -28,7 +27,6 @@ export const StandByActions = memo(function StandByActions(props: StandByActions
         <View style={[styles.iconSlot, props.compact && styles.compactIconSlot]}><MaterialIcons name="timer" size={20} color={props.primaryColor} /></View>
         <Text numberOfLines={1} style={[styles.label, { color: props.secondaryColor }]}>{props.timerLabel ?? "Timer"}</Text>
       </Pressable>
-      <AudioOutputPicker label compact={props.compact} color={props.secondaryColor} onTouchActivity={props.onTouchActivity} />
       <Pressable onPress={() => run(() => props.onSelectPanel("lyrics"))} style={styles.button} accessibilityRole="button" accessibilityLabel="Show lyrics">
         <View style={[styles.iconSlot, props.compact && styles.compactIconSlot]}><MaterialIcons name="lyrics" size={20} color={props.primaryColor} /></View>
         <Text numberOfLines={1} style={[styles.label, { color: props.secondaryColor }]}>Lyrics</Text>

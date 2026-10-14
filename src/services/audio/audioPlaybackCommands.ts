@@ -1,4 +1,4 @@
-import { isYouTubeSong, peekYouTubeStream, youTubePlaybackErrorMessage, youTubePlaybackErrorDetails } from "@/services/youtube/YouTubeMusic";
+import { isYouTubeSong, peekYouTubeStream, rejectYouTubeStream, youTubePlaybackErrorMessage, youTubePlaybackErrorDetails } from "@/services/youtube/YouTubeMusic";
 import { getSettings } from "@/lib/storage";
 import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import { logger } from "@/lib/logger";
@@ -341,6 +341,12 @@ export function useAudioPlaybackCommands({
         }
       } catch (error) {
         if (reqId !== playRequestIdRef.current) return;
+        // The opt-in alternate gets one source fallback, never a queue advance.
+        if (isCurrentAccount(scope) && desiredPlayStateRef.current !== false && peekYouTubeStream(targetSong, undefined, true)?.clientProfile === "JIOSAAVN") {
+          rejectYouTubeStream(targetSong);
+          await playSongRef.current(targetSong, q, initialPos);
+          return;
+        }
         const nativeStartupTimedOut = error instanceof Error && /^Audio (?:loading|start) timed out\.$/.test(error.message);
         const notice = isYouTubeSong(targetSong) ? youTubePlaybackErrorMessage(error) : "Could not start playback.";
         const upstreamRequiresSignIn = isYouTubeSong(targetSong) && /LOGIN_REQUIRED|SIGN_IN_REQUIRED/.test(youTubePlaybackErrorDetails(error));
@@ -390,6 +396,7 @@ export function useAudioPlaybackCommands({
       isShuffledRef,
       originalQueueRef,
       playRequestIdRef,
+      playSongRef,
       playbackLoadingRef,
       pendingPlayRequestRef,
       prefetchAdjacentTrackStreams,

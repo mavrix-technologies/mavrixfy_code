@@ -2,7 +2,7 @@ import Colors from "@/constants/colors";
 import { FirestorePlaylist } from "@/lib/firestore";
 import { UserPlaylist } from "@/lib/storage";
 import type { ParsedSong } from "@/types/import";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useCallback } from "react";

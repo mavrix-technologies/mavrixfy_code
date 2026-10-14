@@ -1,6 +1,6 @@
 import DownloadButton from "@/components/DownloadButton";
 import type { Song } from "@/lib/musicData";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { MusicArtwork } from "@/components/MusicArtwork";
 import { useCallback } from "react";
 import {

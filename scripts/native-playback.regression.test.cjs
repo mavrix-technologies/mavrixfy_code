@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
 function fixture({ expoGo = false, missing = false, failedSetup = false, resolveStream = async () => ({}) } = {}) {
+  const preference = { effective: 'medium', preferJioSaavn: false };
   const calls = []; const listeners = new Set(); let setups = 0;
   const state = { queue: [], index: -1, state: 'none', position: 0, duration: 0, playWhenReady: false, equalizerAvailable: true };
   const bridge = {
@@ -27,10 +28,10 @@ function fixture({ expoGo = false, missing = false, failedSetup = false, resolve
     'react-native':{Platform:{OS:'android'}},'./equalizerConfig':{EQ_FREQUENCIES_HZ:Array(15).fill(100)},
     '@/lib/logger':{logger:{warn(){}}},'./playbackContract':contract,'./audioEqualizer':{syncEqualizerWithNative:async()=>{}},
     '@/services/youtube/YouTubeMusic': { resolveYouTubeStream: resolveStream },
-    './PlayerPlaybackResolver': { getRequestedQualityPreference: async () => ({ effective: 'medium' }) },
+    './PlayerPlaybackResolver': { getRequestedQualityPreference: async () => ({ ...preference }) },
     './audioTimeline': { playbackStreamMetadata: () => ({}) },
   });
-  return {...api,calls,state,setups:()=>setups,listeners,
+  return {...api,calls,state,preference,setups:()=>setups,listeners,
     emit:(name,data)=>listeners.forEach(listener=>listener({name,data})),};
 }
 function load(path, deps) {
@@ -108,6 +109,27 @@ test('resolved next source updates the native queue without allocating a preload
   assert.equal(f.state.queue[1].url,'https://b');assert.equal(f.state.queue[1].headers.Referer,'music');
   assert.equal(f.calls.at(-1)[0],'update');
   assert.equal(f.calls.at(-1)[1].onlyUpcoming,true);
+});
+
+test('source preference refresh updates only the upcoming song and reaches native preloading', async () => {
+  const requests=[];
+  const f=fixture({resolveStream:async(song,quality,prefer)=>{
+    requests.push({id:song.id,quality,prefer,duration:song.duration});
+    return {url:prefer?'https://aac.saavncdn.com/preferred.mp4':'https://media.example/youtube',headers:{},expiresAt:Date.now()+300000};
+  }});
+  await f.NativePlaybackPlayer.setQueue([{id:'a',url:'https://current'},
+    {id:'youtube_b',source:'youtube',title:'Song',artist:'Artist',duration:214,url:'https://old',youtubeAudioExpiresAt:Date.now()+300000}]);
+  f.preference.preferJioSaavn=true;
+  await f.NativePlaybackPlayer.refreshUpcomingSources();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(requests,[{id:'youtube_b',quality:'medium',prefer:true,duration:214}]);
+  assert.equal(f.state.queue[0].url,'https://current');
+  assert.equal(f.state.queue[1].url,'https://aac.saavncdn.com/preferred.mp4');
+  f.preference.preferJioSaavn=false;
+  await f.NativePlaybackPlayer.refreshUpcomingSources();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.state.queue[1].url,'https://media.example/youtube');
+  assert.equal(f.state.index,0);
 });
 test('Android car browsing acknowledges the native request without a second playback command',async()=>{
   const f=fixture();const car=f.getNativeCarClient();let event;

@@ -2,6 +2,36 @@
 
 Prepared 2026-10-10, Asia/Calcutta. This is an execution checklist with honest pending results, not a claim of device certification. All real-device observations and statuses below are **NOT TESTED**.
 
+## Performance checkpoint — 14 October 2026
+
+This checkpoint distinguishes automated verification from device measurements. The user confirmed that a physical-device test is not currently possible. No new FPS, startup-latency, thermal, battery or audible playback measurement was collected. React Doctor's score is a static-analysis result, not proof of lag-free playback.
+
+Changes: replaced icon barrel imports with documented per-family imports while retaining the same icons, removed the unused Syne font package/startup loading, and made queued artwork-color preload work cancellable on screen cleanup. An already-started native extraction or image prefetch is not aborted by that cancellation; subsequent palette work is skipped. PR/main CI now also runs dependency installation, TypeScript, regression tests and lint.
+
+Measured Android production-export comparison, using the same export options:
+
+- Hermes bytecode: 9,335,032 bytes before, 9,259,612 bytes after.
+- Exported asset files: 7,677,576 bytes before, 5,901,296 bytes after (about 23% smaller).
+- Asset registry entries: 48 before, 32 after; bundled modules: 3,611 before, 3,583 after.
+- Optimized iOS export: 9,100,596 bytes of Hermes bytecode and 4,935,627 bytes of exported assets. No matching iOS before measurement was collected.
+
+These are uncompressed export measurements, excluding source maps. They are not installed app size, App Store download size, APK/AAB size or a startup-time benchmark. Metrics and build logs are local ignored artifacts under `outputs/performance-*`.
+
+Completed: 571 regression tests passed, including cancellation after preload starts and artwork-query transition coverage; TypeScript passed; lint had zero errors and ten existing warnings; a fresh full React Doctor scan scored 100/100. Android and iOS production JavaScript/Hermes exports succeeded. Workflow YAML structure was verified locally; the new GitHub job has not been executed remotely.
+
+Native Android validation exposed a forced Java 25 Gradle daemon criterion and a Prefab configuration failure. The daemon criteria were regenerated for installed Java 17 with Gradle's official task. The subsequent offline `:app:assembleRelease` succeeded, including all four configured ABI builds, resource shrinking, R8 and APK packaging. The fresh universal APK is `android/app/build/outputs/apk/release/app-release.apk` (126,845,423 bytes); no comparable native APK baseline was measured. The build still reports Kotlin-metadata parsing warnings from R8 and Gradle deprecation warnings, so successful packaging does not establish runtime compatibility. Those warnings were not suppressed. Native iOS compilation still requires macOS/Xcode.
+
+### Physical-device acceptance before calling the release smooth
+
+1. Measure repeated cold and warm release launches on a lower-end Android phone and an iPhone; record median and tail latency rather than one best run. Record app/build identity, refresh rate, thermal state and network conditions.
+2. Capture frame timing during 50 rapid player open/close cycles, list scrolling, queue dragging, lyrics scrolling and StandBy entry/exit in both landscape directions. Check visually for flashes, clipped controls and unexpected touch interception.
+3. Run a 30-minute playback/seek/automatic-next soak with foreground/background and screen locking. Compare memory, CPU, thermal and battery readings over time; verify old screens stop subscriptions and pending optional work.
+4. Exercise offline launch, slow network, source failure, interruption, Bluetooth route changes and reconnect. Verify song identity, audible output, duration and UI progress agree. Authentication/provider rejection must remain distinct from decoder/network failure.
+5. On iOS, profile Animation Hitches, main-thread hangs and allocations with Instruments. On Android, use a release-like profileable build with Macrobenchmark/Perfetto for reproducible launch and frame traces. These tools are recommended here, not claimed to have been run.
+6. Repeat after a relevant change and retain before/after artifacts. Static checks, integration tests, production exports, native compilation and real-device profiling cover different failure modes; none alone certifies every situation.
+
+Official basis: [React Native performance guidance](https://reactnative.dev/docs/performance) recommends release-mode measurements and explains native/UI versus JS thread costs; [Expo bundle analysis](https://docs.expo.dev/guides/analyzing-bundles/) provides production-export analysis; [Android Macrobenchmark](https://developer.android.com/topic/performance/benchmarking/macrobenchmark-overview) describes release-like profileable targets; [Apple responsiveness guidance](https://developer.apple.com/documentation/xcode/improving-app-responsiveness) covers Instruments and hang/hitch diagnosis. These are public platform engineering practices, not claims about Spotify's private test system.
+
 The available Android SDK reported no connected device/emulator with `adb devices -l` and no configured AVD with `emulator -list-avds`. The host is Windows, has no Xcode, and has no generated native iOS project or connected Apple test device. These environment limitations prevent observations of actual audio output, lock-screen controls, Bluetooth, calls, manufacturer battery restrictions, and car behavior. Native compilation and JavaScript simulations cannot substitute for those observations.
 
 ## Build and runtime identification before execution

@@ -14,7 +14,7 @@ import { colorWithAlpha } from "@/lib/colorExtractor";
 import { triggerImpact } from "@/lib/haptics";
 import * as Animated from "@/lib/nativeAnimated";
 import { getSettings } from "@/lib/storage";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";

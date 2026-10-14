@@ -10,7 +10,8 @@ export function setStandByOrientation(enabled: boolean): Promise<boolean> {
   if (IS_WEB) return Promise.resolve(true);
 
   const request = ++orientationRequest;
-  const lock = enabled ? ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT : ScreenOrientation.OrientationLock.PORTRAIT_UP;
+  // Allow the OS to follow either landscape side; never force a fixed edge up.
+  const lock = enabled ? ScreenOrientation.OrientationLock.LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP;
   let applied = false;
 
   orientationQueue = orientationQueue.then(async () => {

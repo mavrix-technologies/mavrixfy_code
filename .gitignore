@@ -67,6 +67,8 @@ dhu-*.png
 PODFILE_FIX.txt
 
 # Local tooling / editor artifacts
+.lint-review.json
+/classes.jar
 .vscode/
 .gradle-local/
 .idea/

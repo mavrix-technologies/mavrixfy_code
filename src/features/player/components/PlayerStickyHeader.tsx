@@ -1,7 +1,7 @@
 import Animated, { Extrapolation, interpolate, useAnimatedStyle, type SharedValue } from "react-native-reanimated";
 import { getSolidHeaderColor } from "@/lib/colorExtractor";
 import { usePlaybackProgressStore } from "@/services/audio/playbackProgressStore";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { memo, useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Pressable } from "react-native-gesture-handler";

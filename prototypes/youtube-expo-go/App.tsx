@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useMemo, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -48,7 +48,7 @@ export default function App() {
     finally { if (mounted.current && version === request.current) setBusy(false); }
   };
 
-  const openPlaylist = async (playlist: YouTubePlaylist) => {
+  const openPlaylist = useCallback(async (playlist: YouTubePlaylist) => {
     const version = ++request.current;
     setBusy(true); setError(''); setMessage(`Loading ${playlist.title}…`);
     try {
@@ -58,9 +58,9 @@ export default function App() {
       setMessage(`${playlist.title}: ${page.songs.length} tracks${page.hasMore ? ' (first page only in this prototype)' : ''}`);
     } catch (reason) { if (mounted.current && version === request.current) setError(safeError(reason)); }
     finally { if (mounted.current && version === request.current) setBusy(false); }
-  };
+  }, []);
 
-  const play = async (song: YouTubeSong, fresh = false) => {
+  const play = useCallback(async (song: YouTubeSong, fresh = false) => {
     const version = ++playbackRequest.current;
     wantsPlay.current = true;
     setPlayIntent(true);
@@ -81,7 +81,7 @@ export default function App() {
         wantsPlay.current = false; setPlayIntent(false); setMessage('This stream could not be played.'); setError(safeError(reason));
       }
     }
-  };
+  }, [player]);
 
   const toggle = () => {
     wantsPlay.current = !wantsPlay.current;
@@ -90,6 +90,12 @@ export default function App() {
     else { player.pause(); setMessage('Paused.'); }
   };
 
+  const handleSelect = useCallback((item: YouTubeSong | YouTubePlaylist) => {
+    if ('videoId' in item) void play(item); else void openPlaylist(item);
+  }, [play, openPlaylist]);
+  const renderItem = useCallback(({ item }: { item: YouTubeSong | YouTubePlaylist }) => (
+    <SearchResultRow item={item} disabled={busy} onSelect={handleSelect} />
+  ), [busy, handleSelect]);
   const items = tab === 'songs' ? songs : playlists;
   return (
     <SafeAreaProvider><SafeAreaView style={styles.page}>
@@ -114,13 +120,7 @@ export default function App() {
       <FlatList<YouTubeSong | YouTubePlaylist> data={items} keyExtractor={item => item.id}
         contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled"
         ListEmptyComponent={<Text style={styles.empty}>Search results will appear here.</Text>}
-        renderItem={({ item }) => <Pressable style={styles.row} disabled={busy}
-          onPress={() => 'videoId' in item ? void play(item) : void openPlaylist(item)}>
-          {item.coverUrl ? <Image source={{ uri: item.coverUrl }} style={styles.cover} /> : <View style={styles.cover} />}
-          <View style={styles.rowText}><Text style={styles.title} numberOfLines={2}>{item.title}</Text>
-            <Text style={styles.subtitle} numberOfLines={1}>{item.artist}</Text></View>
-          <Text style={styles.action}>{'videoId' in item ? '▶' : '›'}</Text>
-        </Pressable>} />
+        renderItem={renderItem} />
       {current && <View style={styles.player}>
         <Text numberOfLines={1} style={styles.title}>{current.title}</Text>
         <Text selectable style={styles.subtitle}>{current.videoId} · {quality}</Text>
@@ -134,6 +134,19 @@ export default function App() {
     </SafeAreaView></SafeAreaProvider>
   );
 }
+
+const SearchResultRow = memo(function SearchResultRow({ item, disabled, onSelect }: {
+  item: YouTubeSong | YouTubePlaylist; disabled: boolean; onSelect: (item: YouTubeSong | YouTubePlaylist) => void;
+}) {
+  const handlePress = useCallback(() => onSelect(item), [item, onSelect]);
+  const source = useMemo(() => ({ uri: item.coverUrl }), [item.coverUrl]);
+  return <Pressable style={styles.row} disabled={disabled} onPress={handlePress}>
+    {item.coverUrl ? <Image source={source} style={styles.cover} /> : <View style={styles.cover} />}
+    <View style={styles.rowText}><Text style={styles.title} numberOfLines={2}>{item.title}</Text>
+      <Text style={styles.subtitle} numberOfLines={1}>{item.artist}</Text></View>
+    <Text style={styles.action}>{'videoId' in item ? '▶' : '›'}</Text>
+  </Pressable>;
+});
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: '#10131d' }, header: { padding: 20, paddingBottom: 8 },

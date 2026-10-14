@@ -1,5 +1,5 @@
 import Colors from "@/constants/colors";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import React from "react";
 import { ActivityIndicator,Text,View } from "react-native";
 import { Pressable } from "react-native-gesture-handler";

@@ -18,7 +18,7 @@ type AppSettings,
 import { requestHighQualityUnlockWithRewardedAd } from "@/services/ads/highQualityEntitlementService";
 import { checkAppVersion,getInstalledAppVersion,getInstalledBuildNumber } from "@/services/notificationService";
 import { safeGoBack } from "@/utils/navigation";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image } from "expo-image";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -101,6 +101,7 @@ export function ProfileScreen() {
     streamingQuality: "medium",
     highQualityUnlocked: false,
     highQualityExpiresAt: null,
+    preferJioSaavnAudio: false,
     videoBackgroundQuality: "auto",
     smartAutoplayEnabled: true,
     smartAutoplayMode: "similar-trending",
@@ -146,6 +147,12 @@ export function ProfileScreen() {
 
   const updateSettings = useCallback(async (partial: Partial<AppSettings>) => {
     await saveSettings(partial);
+    if (typeof partial.preferJioSaavnAudio === "boolean") {
+      const { invalidateQualityPreferenceCache } = await import("@/services/audio/PlayerPlaybackResolver");
+      invalidateQualityPreferenceCache();
+      const { NativePlaybackPlayer } = await import("@/services/audio/NativePlaybackPlayer");
+      void NativePlaybackPlayer.refreshUpcomingSources().catch(() => {});
+    }
     setSettings((current) => ({ ...current, ...partial }));
 
     if (typeof partial.hapticsEnabled === "boolean") {

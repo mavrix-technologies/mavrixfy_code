@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import React from "react";
 import { ActivityIndicator,Pressable,StyleSheet,Text,View } from "react-native";
 
@@ -161,6 +161,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.15)",
   },
   segmentTabText: {
+    textAlign: "center",
     color: "rgba(255, 255, 255, 0.45)",
     fontSize: 13.5,
     fontFamily: "Inter_500Medium",

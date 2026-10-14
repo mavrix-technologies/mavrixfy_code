@@ -9,10 +9,12 @@ function load(file, dependencies = {}, globals = {}) {
   const code = ts.transpileModule(fs.readFileSync(file, "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React, esModuleInterop: true },
   }).outputText;
-  vm.runInNewContext(code, { module, exports: module.exports, require: name => {
+  vm.runInNewContext(code, { module, exports: module.exports, require: function resolveTestDependency(name) { if (name.startsWith("@expo/vector-icons/")) return { __esModule: true, default: resolveTestDependency("@expo/vector-icons")[name.split("/").pop()] };
+
     if (!(name in dependencies)) throw new Error(`Unexpected dependency: ${name}`);
     return dependencies[name];
-  }, ...globals });
+
+}, ...globals });
   return module.exports;
 }
 
@@ -134,6 +136,11 @@ function fixture(options = {}) {
       react.useEffect(() => subscribe(() => { owner.dirty = true; }), [subscribe]);
       return getSnapshot();
     },
+  };
+  react.useEffectEvent = fn => {
+    const latest = react.useRef(fn);
+    latest.current = fn;
+    return react.useCallback((...args) => latest.current(...args), []);
   };
   react.default = react;
   react.useLayoutEffect = react.useEffect;
@@ -396,7 +403,6 @@ test("only Queue and Lyrics remain in the action row and both open inline", () =
     react: f.react, "react-native": f.native,
     "@expo/vector-icons": { MaterialIcons: "MaterialIcons", Ionicons: "Ionicons" },
     "./standByLayout": layoutModule,
-    "./AudioOutputPicker": { AudioOutputPicker: "AudioOutputPicker" },
   }, { React: f.react });
   const actionsProps = { primaryColor: "#fff", secondaryColor: "#ddd", onSelectPanel: value => calls.push(value), onTouchActivity: () => calls.push("wake") };
   const actions = f.mount(StandByActions, actionsProps);

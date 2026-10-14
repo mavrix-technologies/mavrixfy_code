@@ -21,7 +21,7 @@ import { triggerImpact } from "@/lib/haptics";
 import { Song } from "@/lib/musicData";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { DownloadItem } from "@/types/downloads";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { LinearGradient } from "expo-linear-gradient";

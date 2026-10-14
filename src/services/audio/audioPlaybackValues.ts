@@ -9,6 +9,8 @@ SleepTimerState,
 } from "@/types/playbackTypes";
 import { useMemo } from "react";
 
+const noopVolume = () => {};
+
 interface UseAudioPlaybackValuesProps {
   currentSong: Song | null;
   queue: Song[];
@@ -81,7 +83,7 @@ export function useAudioPlaybackValues(props: UseAudioPlaybackValuesProps) {
     setTextColor,
     changeStreamingQuality,
     volume = 1,
-    setVolume = () => {},
+    setVolume = noopVolume,
   } = props;
 
   const rowActionsValue = useMemo(

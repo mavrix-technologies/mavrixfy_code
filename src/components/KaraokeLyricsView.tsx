@@ -1,7 +1,8 @@
 import { type Song } from "@/lib/musicData";
 import * as Animated from "@/lib/nativeAnimated";
 import { getSongLyrics, type LyricsResult } from "@/services/lyricsService";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -55,8 +56,8 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
   const [colorA, setColorA] = useState(targetBgColor);
   const [colorB, setColorB] = useState(targetBgColor);
   const activeColorRef = useRef(targetBgColor);
-  const opacityA = useRef(new Animated.Value(1)).current;
-  const opacityB = useRef(new Animated.Value(0)).current;
+  const [opacityA] = useState(() => new Animated.Value(1));
+  const [opacityB] = useState(() => new Animated.Value(0));
   const activeLayerRef = useRef<0 | 1>(0);
 
   useEffect(() => {
@@ -90,8 +91,8 @@ export const KaraokeLyricsView = memo(function KaraokeLyricsView({
   }, [targetBgColor, opacityA, opacityB]);
 
   // Smooth content crossfade on song change
-  const contentFadeAnim = useRef(new Animated.Value(1)).current;
-  const contentSlideAnim = useRef(new Animated.Value(0)).current;
+  const [contentFadeAnim] = useState(() => new Animated.Value(1));
+  const [contentSlideAnim] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     if (!song?.title) {

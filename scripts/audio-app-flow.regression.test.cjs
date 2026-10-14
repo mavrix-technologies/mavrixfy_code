@@ -24,7 +24,7 @@ function load(filename, imports, globals = {}) {
   return module.exports;
 }
 
-function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nativeIds, activeIndex = 1, youtube = false, resolveUrl = async song => song.audioUrl, expoPlayer = {} } = {}) {
+function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nativeIds, activeIndex = 1, youtube = false, preferredSource = false, resolveUrl = async song => song.audioUrl, expoPlayer = {} } = {}) {
   const songs = queueIds.map(id => ({ id, title: id, artist: "Artist", duration: 180, audioUrl: `https://audio.example/${id}` }));
   let nativeQueue = (nativeIds ?? queueIds).map(id => ({ id, url: `https://audio.example/${id}`, accountId: "guest" }));
   const scheduledDelays = [];
@@ -89,7 +89,9 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     },
     "@/services/audio/audioNativeQueueLane": { isSameQueueContent: (a, b) => a.length === b.length && a.every((song, index) => song.id === b[index].id) },
     "@/services/player/playerPersistenceService": { playerPersistenceService: storage },
-    "@/services/youtube/YouTubeMusic": { isYouTubeSong: () => youtube, peekYouTubeStream: noop,
+    "@/services/youtube/YouTubeMusic": { isYouTubeSong: () => youtube,
+      peekYouTubeStream: () => preferredSource ? { clientProfile: 'JIOSAAVN' } : undefined,
+      rejectYouTubeStream: () => { preferredSource = false; calls.push(['reject-source']); },
       youTubePlaybackErrorDetails: String, youTubePlaybackErrorMessage: String,
       clearYouTubeConnectionStreams: () => calls.push(["clear-streams"]) },
     "@/services/carPlayService": { carPlayService: { isAvailable: () => false } },
@@ -612,4 +614,30 @@ test("new selection supersedes delayed retry without replacing the new song", as
   assert.deepEqual(attempts,["b","c"]);
   assert.equal(f.options.currentSongRef.current.id,"c");
   assert.equal(f.calls.filter(([name])=>name==="play").length,1);
+});
+
+test("JioSaavn startup failure falls back on the same song once without auto-next", async () => {
+  let loads = 0;
+  const f = fixture({ youtube: true, preferredSource: true,
+    expoPlayer: { beginTrackChange: noop, loadAndPlay: async () => { if (++loads === 1) throw Error('Cannot Open'); } } });
+  await f.commands.playSong(f.songs[1], f.songs, 37);
+  assert.equal(loads, 2);
+  assert.equal(f.calls.filter(([name]) => name === 'reject-source').length, 1);
+  assert.equal(f.options.currentSongRef.current.id, 'b');
+  assert.equal(f.options.positionSecondsRef.current, 37);
+  assert.equal(f.calls.filter(([name]) => name === 'notice').length, 0);
+});
+
+
+test("native JioSaavn terminal error retains position and falls back; paused intent prevents restart", async () => {
+  for (const paused of [true, false]) {
+    const f = fixture({ youtube: true, preferredSource: true });
+    f.listen();
+    f.options.desiredPlayStateRef.current = !paused;
+    f.events.get('error')({ trackId: 'b', message: 'Source unavailable' });
+    await tick(); await tick();
+    assert.equal(f.calls.filter(([name]) => name === 'reject-source').length, paused ? 0 : 1);
+    assert.equal(f.options.currentSongRef.current.id, 'b');
+    assert.equal(f.options.positionSecondsRef.current, 37);
+  }
 });

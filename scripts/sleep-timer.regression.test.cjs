@@ -11,7 +11,8 @@ function load(file, dependencies = {}, globals = {}) {
   const module = { exports: {} };
   vm.runInNewContext(compiled, {
     module, exports: module.exports, ...globals,
-    require(name) {
+    require: function resolveTestDependency(name) {
+      if (name.startsWith("@expo/vector-icons/")) return { __esModule: true, default: resolveTestDependency("@expo/vector-icons")[name.split("/").pop()] };
       if (name in dependencies) return dependencies[name];
       throw new Error(`Unexpected dependency: ${name}`);
     },
@@ -66,7 +67,7 @@ function timerFixture() {
   return { render, timeouts, toasts, expired: () => expired, unmount: runtime.unmount };
 }
 
-function editorFixture(timer = null) {
+function editorFixture(timer = null, embedded = false) {
   const runtime = hooks(), selected = [];
   let returned = 0, cleared = 0;
   const jsx = (type, props) => ({ type, props });
@@ -84,7 +85,7 @@ function editorFixture(timer = null) {
   });
   function render() {
     runtime.reset();
-    const tree = Timer.default({ onBack: () => { returned++; } });
+    const tree = Timer.default({ onBack: () => { returned++; }, embedded });
     const nodes = [];
     function visit(node) {
       if (!node || typeof node !== "object") return;
@@ -181,4 +182,43 @@ test("an active timer initializes from remaining duration and Turn off returns t
   ui.buttons.find(x => x.props.accessibilityLabel === "Turn off sleep timer").props.onPress();
   assert.equal(f.cleared(), 1);
   assert.equal(f.returned(), 1);
+});
+
+test("StandBy uses one action to start or cancel the active timer even with zero selected duration", () => {
+  const inactive = editorFixture(null, true);
+  inactive.render().buttons.find(x => "disabled" in x.props).props.onPress();
+  assert.deepEqual(inactive.selected, [30]);
+  assert.equal(inactive.cleared(), 0);
+  for (const timer of [
+    { mode: "duration", label: "30 min", endsAt: Date.now() + 30 * 60000 },
+    { mode: "end-of-stack", label: "End of queue", endsAt: null },
+  ]) {
+    const active = editorFixture(timer, true);
+    const initial = active.render();
+    initial.pickers[0].props.onValueChange(0);
+    initial.pickers[1].props.onValueChange(0);
+    const ui = active.render();
+    const cancel = ui.buttons.filter(x => x.props.accessibilityLabel === "Turn off sleep timer");
+    assert.equal(cancel.length, 1);
+    assert.equal(cancel[0].props.disabled, false);
+    cancel[0].props.onPress();
+    assert.equal(active.cleared(), 1);
+    assert.equal(active.returned(), 1);
+    assert.deepEqual(active.selected, []);
+  }
+});
+
+test("StandBy reserves footer space outside the scrolling picker", () => {
+  const ui = editorFixture(null, true).render();
+  const action = ui.buttons.find(node => "disabled" in node.props);
+  const scroll = ui.nodes.find(node => node.type === "ScrollView");
+  function contains(node, target) {
+    if (node === target) return true;
+    if (Array.isArray(node)) return node.some(child => contains(child, target));
+    return Boolean(node?.props && contains(node.props.children, target));
+  }
+  assert.equal(contains(scroll, action), false);
+  const footer = ui.nodes.find(node => node.type === "View" && contains(node, action) && node.props.style?.flexShrink === 0);
+  assert.ok(footer);
+  assert.equal(footer.props.style.flexDirection, "row");
 });

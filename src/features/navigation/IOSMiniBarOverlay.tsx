@@ -14,7 +14,7 @@ import { expandPlayer } from "@/lib/playerUIState";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { useMiniPlayerSecondaryControl } from "@/lib/storage";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { MusicArtwork } from "@/components/MusicArtwork";
 import { scheduleArtworkPreload } from "@/lib/artworkPreload";
 import { useRouter } from "expo-router";

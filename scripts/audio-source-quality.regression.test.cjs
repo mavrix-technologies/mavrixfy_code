@@ -34,12 +34,14 @@ function fixture({ local = null, download = null, entitled = true, network = "wi
 }
 const song = { id: "youtube_abcdefghijk", source: "youtube", title: "Track", duration: 180 };
 
+
 test("High uses the original source URL and reports its real AAC bitrate without upsampling claims", async () => {
   const f = fixture();
   const result = await f.resolvePlaybackUrlWithDetails(song, "high");
   assert.deepEqual(f.resolutions, ["high"]);
   assert.equal(result.url, f.original);
   assert.equal(result.qualityState.actualBitrate, 131);
+  assert.equal(result.qualityState.codec, "aac");
   assert.equal(result.qualityState.qualityLabel, "131kbps · aac");
   assert.equal(f.catalog.length, 0);
 });
@@ -59,6 +61,7 @@ test("offline quality uses stored source bitrate rather than claiming every down
   assert.equal(result.url, "file:///track.m4a");
   assert.equal(result.qualityState.actualBitrate, 131);
   assert.equal(result.qualityState.qualityLabel, "Offline (131kbps · aac)");
+  assert.equal(result.qualityState.codec, "aac");
   assert.equal(f.resolutions.length, 0);
 });
 

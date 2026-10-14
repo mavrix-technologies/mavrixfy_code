@@ -10,7 +10,7 @@ onSnapshot,
 type Unsubscribe,
 doc, writeBatch,
 } from "firebase/firestore";
-import { readLikedSong, mergeLikedSongIdentities, likedSongDocumentIds, likedSongIdentityKey, likedAtMillis, youtubeIdentity, youtubeLikedMetadata } from "./likedSongFormat";
+import { readLikedSong, mergeLikedSongIdentities, likedSongDocumentIds, likedSongDocumentIdSet, likedSongIdentityKey, likedAtMillis, youtubeIdentity, youtubeLikedMetadata } from "./likedSongFormat";
 import { useLikedSongsStore } from "./likedSongsStore";
 
 const CACHE_KEY_PREFIX = "@mavrixfy_liked_songs_";
@@ -218,8 +218,9 @@ export async function toggleLikeSong(userId: string | null | undefined, song: So
 
 async function performToggleLike(userId: string | null | undefined, song: Song, scope: ReturnType<typeof getAccountScope>): Promise<boolean> {
   if (!song?.id) return false;
+  const identity = likedSongIdentityKey(song);
   const previousSong = useLikedSongsStore.getState().songs.find(item =>
-    likedSongDocumentIds(item).includes(song.id) || likedSongIdentityKey(item) === likedSongIdentityKey(song));
+    likedSongDocumentIdSet(item).has(song.id) || likedSongIdentityKey(item) === identity);
   const songId = previousSong?.id || song.id;
   const isCurrentlyLiked = useLikedSongsStore.getState().ids.has(songId);
   const willBeLiked = !isCurrentlyLiked;

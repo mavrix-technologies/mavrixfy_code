@@ -3,7 +3,7 @@ import { useDownloads } from "@/contexts/DownloadContext";
 import { formatBytes } from "@/lib/downloads/storagePolicy";
 import { triggerImpact } from "@/lib/haptics";
 import { type AppSettings } from "@/lib/storage";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { useCallback } from "react";
 import { Alert,Pressable,StyleSheet,Switch,Text,View } from "react-native";
@@ -92,6 +92,21 @@ export function ProfilePlaybackSection({
             value={settings.streamingQuality}
             loadingValue={loadingQuality}
             onChange={onQualityChange}
+          />
+        </View>
+
+        <View style={[styles.row, styles.rowDivider]}>
+          <Ionicons name="musical-notes-outline" size={22} color="rgba(255, 255, 255, 0.7)" style={styles.rowIcon} />
+          <View style={styles.rowTextCol}>
+            <Text style={styles.rowTitle}>Prefer higher-quality audio</Text>
+            <Text style={styles.rowSubtitle}>Matching JioSaavn audio when available, otherwise YouTube. Skipped in Low quality.</Text>
+          </View>
+          <Switch
+            accessibilityLabel="Prefer higher-quality audio"
+            value={settings.preferJioSaavnAudio}
+            onValueChange={(value) => updateSettings({ preferJioSaavnAudio: value })}
+            trackColor={{ false: "rgba(255, 255, 255, 0.1)", true: Colors.primary }}
+            thumbColor="#FFFFFF"
           />
         </View>
 

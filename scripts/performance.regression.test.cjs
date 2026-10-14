@@ -9,10 +9,12 @@ function load(file, dependencies = {}, globals = {}, extraSource = '') {
   const module = { exports: {} };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8') + extraSource, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
-  }).outputText, { module, exports: module.exports, require: name => {
+  }).outputText, { module, exports: module.exports, require: function resolveTestDependency(name) { if (name.startsWith("@expo/vector-icons/")) return { __esModule: true, default: resolveTestDependency("@expo/vector-icons")[name.split("/").pop()] };
+
     if (!(name in dependencies)) throw Error(`Unmocked dependency ${name}`);
     return dependencies[name];
-  }, ...globals });
+
+}, ...globals });
   return module.exports;
 }
 
@@ -27,7 +29,10 @@ test('decorative consumers share one lifecycle listener and release it on unmoun
   AppState.currentState = 'background'; nativeListener('background');
   assert.equal(activity.getAppIsActive(), false);
   assert.equal(notifications, 20);
-  nativeListener('inactive'); assert.equal(notifications, 20);
+  assert.equal(activity.getAppIsBackgrounded(), true);
+  nativeListener('inactive'); assert.equal(notifications, 40);
+  assert.equal(activity.getAppIsBackgrounded(), false, 'inactive system overlays are not a backgrounded app');
+  assert.equal(activity.getAppIsActive(), false);
   AppState.currentState = 'active'; nativeListener('active');
   assert.equal(activity.getAppIsActive(), true);
   unsubscribe.forEach(fn => fn()); assert.equal(removals, 1);
@@ -57,7 +62,7 @@ test('shared player sheet closes once and retains its presentation through backg
   };
   const dependencies = {
     react,
-    '@/lib/appActivity': { useAppIsActive: () => foreground },
+    '@/lib/appActivity': { useAppIsActive: () => foreground, useAppIsBackgrounded: () => !foreground },
     '@/constants/platform': { IS_IOS: true },
     '@/lib/playerUIState': { playerUIStateStore: ui },
     'expo-router': { useIsFocused: () => focused, useFocusEffect: fn => focusEffects.push(fn), useNavigation: () => ({ canGoBack: () => true, goBack: () => closed.push('route-back') }) },
@@ -139,6 +144,7 @@ test('shared player sheet closes once and retains its presentation through backg
   const landscapeStandby = render();
   assert.equal(content(landscapeStandby).props.viewport.width, 390, 'hidden player does not resize its carousel during StandBy');
   assert.equal(find(landscapeStandby, 'StandByOverlay').props.rootViewport.width, 844);
+  assert.equal(find(landscapeStandby, 'StatusBar').props.hidden, false, 'StandBy must not hide the system status bar');
   find(landscapeStandby, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
   const overlay = find(standby, 'StandByOverlay');
   const song = { id: 'next' }; overlay.props.onPlayQueueSong(song);

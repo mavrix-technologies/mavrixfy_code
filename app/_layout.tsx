@@ -32,8 +32,11 @@ import { Inter_500Medium } from "@expo-google-fonts/inter/500Medium";
 import { Inter_600SemiBold } from "@expo-google-fonts/inter/600SemiBold";
 import { Inter_700Bold } from "@expo-google-fonts/inter/700Bold";
 import { Inter_800ExtraBold } from "@expo-google-fonts/inter/800ExtraBold";
-import { Syne_700Bold,Syne_800ExtraBold } from "@expo-google-fonts/syne";
-import { Feather,FontAwesome,Ionicons,MaterialCommunityIcons,MaterialIcons } from "@expo/vector-icons";
+import Feather from "@expo/vector-icons/Feather";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { QueryClientProvider } from "@tanstack/react-query";
 import Constants from "expo-constants";
 import { useFonts } from "expo-font";
@@ -438,8 +441,6 @@ export default function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
     Inter_800ExtraBold,
-    Syne_700Bold,
-    Syne_800ExtraBold,
     BebasNeue_400Regular,
     Anton_400Regular,
     ...Ionicons.font,

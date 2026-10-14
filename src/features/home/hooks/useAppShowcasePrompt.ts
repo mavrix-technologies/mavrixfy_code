@@ -59,7 +59,7 @@ export function useAppShowcasePrompt(ready: boolean): void {
             return;
           }
 
-          // 2. Check Streaming Quality: If user is ALREADY on 320 kbps (high), NEVER show!
+          // Do not prompt when the best-available quality preference is selected.
           const settings = await getSettings();
           if (settings.streamingQuality === "high") {
             return;

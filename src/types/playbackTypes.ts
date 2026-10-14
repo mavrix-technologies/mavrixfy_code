@@ -14,6 +14,8 @@ export interface PlaybackQualityState {
   requested: "auto" | "low" | "medium" | "high";
   /** Reported source bitrate in kbps; 0 means not known, never an assumed quality tier. */
   actualBitrate: number;
+  /** Source-reported codec; absent when the provider has not identified it. */
+  codec?: string;
   qualityLabel: string;
   unlocked: boolean;
   isFallback: boolean;

@@ -1,6 +1,6 @@
 import Colors from "@/constants/colors";
 import { AppVersionInfo,checkAppVersion } from "@/services/notificationService";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";

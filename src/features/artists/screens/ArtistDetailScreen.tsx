@@ -28,7 +28,7 @@ import { showGlobalToast } from "@/utils/globalToast";
 import { safeGoBack } from "@/utils/navigation";
 import { shareArtist } from "@/utils/shareUtils";
 import { formatFollowers,pickFirst } from "@/utils/stringUtils";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams,useRouter } from "expo-router";
@@ -308,7 +308,7 @@ function useArtistScreenView() {
     } catch {
       if (routeRef.current === artistId) showGlobalToast("Could not load more songs. Tap to retry.");
     } finally {
-      if (routeRef.current === artistId) setLoadingMore(false);
+      setLoadingMore(previous => routeRef.current === artistId ? false : previous);
     }
   }, [loadingMore, hasMore, artistId, artist]);
 

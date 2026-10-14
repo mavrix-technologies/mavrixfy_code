@@ -24,7 +24,7 @@ export async function unlockHighQuality(_durationHours?: number): Promise<void> 
 }
 
 /**
- * Directly runs the Rewarded Ad to unlock High Quality (Up to 320 kbps).
+ * Unlocks the app's best-available quality preference, not provider Premium access.
  * Clean and direct: no confirmation dialogs, no loading spinners, no extra elements.
  * Returns true if High Quality is unlocked.
  */

@@ -1,5 +1,5 @@
 import * as Animated from "@/lib/nativeAnimated";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { useCallback } from "react";
 import {
   FlatList,

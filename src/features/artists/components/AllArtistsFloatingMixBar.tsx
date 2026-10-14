@@ -1,5 +1,5 @@
 import Colors from "@/constants/colors";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { memo } from "react";
 import {
 Pressable,

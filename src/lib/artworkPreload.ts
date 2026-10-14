@@ -6,10 +6,15 @@ import { preloadDominantColors } from "./colorExtractor";
 
 /** Warm the same URLs as MusicArtwork without decoding offscreen masters into memory. */
 export function scheduleArtworkPreload(urls: string[], layoutSize: number): () => void {
-  return runAfterIdle(() => {
+  let cancelPalettePreload: (() => void) | undefined;
+  const cancelIdle = runAfterIdle(() => {
     const pixels = artworkPixelSize(layoutSize, PixelRatio.get());
-    const sources = [...new Set(urls.map(url => youTubeDisplayArtworkUrl(url, pixels)))];
+    const sources = [...new Set(urls.map(url => youTubeDisplayArtworkUrl(url, pixels)).filter(Boolean))];
     void Image.prefetch(sources, "disk").catch(() => {});
-    preloadDominantColors(urls);
+    cancelPalettePreload = preloadDominantColors(urls);
   });
+  return () => {
+    cancelIdle();
+    cancelPalettePreload?.();
+  };
 }

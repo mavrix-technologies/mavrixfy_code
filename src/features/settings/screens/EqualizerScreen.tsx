@@ -6,7 +6,7 @@ import { previewEqualizer, saveEqualizer, equalizerSupported, type EqualizerSett
 import { EQ_FREQUENCIES_HZ, EQ_MAX_GAIN_DB, FLAT_EQUALIZER, normalizeEqualizer } from "@/services/audio/equalizerConfig";
 import { safeGoBack } from "@/utils/navigation";
 import { isRunningInExpoGo } from "expo";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {

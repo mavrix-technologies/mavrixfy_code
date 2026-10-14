@@ -4,6 +4,8 @@
 **Scope:** Current local code, user-provided logs, aur official playback documentation.  
 **Language:** Hinglish, with exact technical names where necessary.
 
+**Current implementation update — 14 October 2026:** At the user's request, the recent Jamendo/FLAC integration was removed: provider resolver, direct Jamendo selections, development test button, iOS FLAC Asset preparation/timeout, provider-specific fallback entries and unused codec metadata. The Jamendo client-ID environment entry and related tests/mocks were removed. Optional JioSaavn and existing YouTube playback remain. Earlier Jamendo/FLAC sections below are historical research, not descriptions of an enabled feature. Verification after removal: 569 regression tests passed, TypeScript typecheck passed, and ESLint passed on changed application files. No physical-device playback test was performed for this removal.
+
 ## 1. Sabse important finding
 
 Aapke latest log mein audio source resolve hone se pehle YouTube access reject ho raha hai:
@@ -372,3 +374,311 @@ The second song's immediate rejection is not evidence of a separate player-info 
 **Physical-device status:** ADB listed no attached Android phone in this test turn. No physical Android/iOS Play/Pause/Next, complete-song, background or audible output test was completed in this turn.
 
 No production transport/client-order/cooldown changes were made as part of this testing request. Next meaningful verification is a real native-runtime attestation trace that records client, mint outcome and proof-attached status without exposing token values. Mocked token success and a Node probe without a token host cannot replace that check.
+
+## 18. LastWave-Native and open-source comparison
+
+The local `E:\Mavrixfy\LastWave-Native` implementation was inspected alongside upstream projects. This is a source-code comparison, not proof that those apps play the failing video on the user's current network.
+
+### LastWave-Native: observed implementation
+
+- `InnerTubeMusicApi.kt` checks scoped stream caches and deduplicates resolution requests. A total deadline bounds the complete resolver operation.
+- Its resolution chain includes a bounded direct-URL fast path, an InnerTubeX stage, then bounded direct-client/NewPipe fallback racing. It does not have the same immediate global-stop policy as Mavrixfy for every first-client login rejection.
+- Compatible token-dependent clients receive proof state from the existing BotGuard generator. The generator exposes separate `playerToken` and `sessionToken` fields. Binding and client expectations must be checked before copying their use into a different implementation.
+- `BotGuardTokenGenerator.kt` uses an Android WebView, cached minting state, a 10-second cold-start budget, a 3-second warm budget, and a three-failure/15-minute bootstrap cooldown. It is not an automatic CAPTCHA-checkbox or temporary-account implementation.
+- `InnerTubeXStreamExtractor.kt` passes visitor/account context through its compatibility adapter. The direct `WEB_REMIX` path can also use the connected YouTube account's authentication context.
+- This account context is managed by `YtMusicAuthManager.kt`; it is not created by inventing an account ID. Mavrixfy's present Firebase/Google app login must not be treated as equivalent YouTube request authentication.
+- LastWave lets Media3 open validate some candidate URLs instead of blocking all stages on a pre-return media probe. That is a latency/validation tradeoff, not a verification guarantee.
+
+Relevant local files:
+
+- `E:\Mavrixfy\LastWave-Native\app\src\main\java\com\lastwave\app\data\music\InnerTubeMusicApi.kt`
+- `E:\Mavrixfy\LastWave-Native\app\src\main\java\com\lastwave\app\data\music\InnerTubeXStreamExtractor.kt`
+- `E:\Mavrixfy\LastWave-Native\app\src\main\java\com\lastwave\app\data\music\YouTubeStreamExtractor.kt`
+- `E:\Mavrixfy\LastWave-Native\app\src\main\java\com\lastwave\app\data\music\potoken\BotGuardTokenGenerator.kt`
+- `E:\Mavrixfy\LastWave-Native\app\src\main\java\com\lastwave\app\data\ytmusic\YtMusicAuthManager.kt`
+
+### Other upstream sources
+
+**NewPipeExtractor:** Its current extractor explicitly classifies bot sign-in denial as `SignInConfirmNotBotException`. It therefore also acknowledges this failure rather than guaranteeing it cannot happen. Its inspected development source documents that the PO-provider setter is currently inactive until supporting-client/SABR integration is available. Adding this dependency alone is not a universal fix. [Inspected extractor source](https://github.com/TeamNewPipe/NewPipeExtractor/blob/dev/extractor/src/main/java/org/schabi/newpipe/extractor/services/youtube/extractors/YoutubeStreamExtractor.java).
+
+**ArchiveTune:** Its playback utility has explicit authentication state, client-compatible proof selection, visitor/account context, separate player/GVS proof checks, and stale-context handling. That is a more developed request-context architecture than appending one generic token everywhere. It remains a reverse-engineered client, not an official access guarantee. [Inspected playback utility](https://github.com/rukamori/ArchiveTune/blob/main/app/src/main/kotlin/moe/rukamori/archivetune/utils/YTPlayerUtils.kt).
+
+**Metrolist:** The repository describes YouTube account login and credits a cipher/PoToken integration. This supports checking integration/context rather than assuming it uses a CAPTCHA autofill. Its README was inspected; its exact playback source path was not retrieved in this review, so no specific code-level fallback behavior is attributed to it. [Repository](https://github.com/MetrolistGroup/Metrolist).
+
+**BgUtils:** Its maintainers describe a reverse-engineered attestation/minter flow and content-bound Web tokens. The minter is reused, and request binding matters. This is proof generation, not a substitute for genuine account authentication. [Maintainer documentation](https://github.com/LuanRT/BgUtils).
+
+**yt-dlp:** Its maintainer guide separates Player, GVS and subtitle token contexts and warns that token applicability depends on client/platform/binding. It explicitly treats enforcement as changing. A Web token should not be assumed usable as an Android/iOS-client token merely because the app runs on that phone platform. [Maintainer PO-token guide](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide).
+
+### Concrete Mavrixfy gap and recommendation
+
+Mavrixfy can stop at a first direct-client verification response before its existing MWEB proof path is evaluated. This is an observed control-flow difference, not proof that MWEB would succeed. The manager's mere presence does not establish that the failing request was attested.
+
+The next targeted work is to record client identity, proof-host readiness, mint outcome, proof binding/context and attachment status in an actual native runtime without exposing tokens. Then test the existing compatible proof path independently before deciding whether resolver ordering/error classification needs a bounded change.
+
+Do not copy LastWave's entire Android-only racing stack into the React Native app. NewPipe/InnerTubeX integrations are not drop-in iOS equivalents, and their additional architecture conflicts with the requested minimal cross-platform approach unless evidence justifies it. No CAPTCHA automation, invented-account login, token rotation loop or production resolver change was added by this research.
+
+
+## 19. Full linked-app survey — 14 October 2026
+
+### Review scope and limits
+
+The supplied [app index](https://github.com/chayotic/Open-Source-Music-Streaming-Apps) was fetched live. Its duplicate platform entries reduce to **58 unique GitHub repositories**. All 58 READMEs were retrieved and screened. The separate Monochrome website and its README were also reviewed. Seven shortlisted repositories had their source trees inspected; **18 source/config files** were retrieved, plus two additional Just-Listen files to verify its API base and Android player context. Exact commits and paths are in the local research manifest. This is broad documentation coverage plus targeted source inspection, **not an audit of every file or a working-playback certification for every app**.
+
+Some GitHub metadata requests returned 403 while README retrieval succeeded. Those entries have incomplete license/maintenance metadata. No repository installation scripts were executed; no app was built or tested on a phone in this survey.
+
+### Useful findings for Mavrixfy
+
+**1. Audius is a concrete alternative streaming API.** Just-Listen's current source sets its base URL to https://api.audius.co, consistent with its Audius-backed README. Audius documents catalog search and track streaming endpoints. A small provider adapter could hand a resolved source to our existing Media3/AVPlayer connection; replacing the playback engines is unnecessary. Expo fallback can consume an ordinary compatible audio source, but actual runtime testing remains required. [Audius API](https://docs.audius.co/api/), [Just-Listen API client](https://github.com/RLD-JL/Just-Listen/blob/a29ff29fe2a4222c1d3e6801eead9bbcb99a4bb6/shared/src/commonMain/kotlin/com/rld/justlisten/datalayer/webservices/ApiClient.kt).
+
+Live read-only probe at **2026-10-14T05:45:21.100Z**: trending metadata returned **200**. Ungated track **GEG9ZWx**, “Rowsfred - CLAWN (Original Mix) [Eclipse Records]”, reported **210 seconds**. A request for bytes 0–1023 returned **206, audio/mpeg, bytes 0-1023/8405906**; response body was cancelled. This verifies an accessible MP3 response for one public track, not full-song decoding, all tracks, guaranteed uptime, or phone output. The README's 320 kbps statement was not independently established for every track.
+
+Audius has its own catalog: it is **not a guaranteed substitute for the same Bollywood/YouTube selections**. Gated content has additional access requirements. Before product deployment, review Audius's API terms and music-player eligibility; public HTTP access alone does not establish every intended redistribution/use right. [Track APIs](https://docs.audius.co/sdk/tracks/), [Audius Open Music License](https://audius.org/open-music-license.pdf).
+
+**2. OpenSubsonic/Jellyfin is useful for an owned or authorized library.** Supersonic separates providers and implements source URL resolution. Its Subsonic implementation sends codec/bitrate options or raw format. The official stream endpoint supports raw output without transcoding. This can preserve original quality when the library and device support it; it does not supply a free commercial catalog. [Subsonic implementation](https://github.com/supersonic-app/supersonic/blob/f28980f8d79d0c6b43d43b512c99d84a66632e47/backend/mediaprovider/subsonic/subsonicmediaprovider.go), [Jellyfin implementation](https://github.com/supersonic-app/supersonic/blob/f28980f8d79d0c6b43d43b512c99d84a66632e47/backend/mediaprovider/jellyfin/jellyfinmediaprovider.go), [OpenSubsonic stream documentation](https://opensubsonic.netlify.app/docs/endpoints/stream/).
+
+**3. Spotube/Bloomee offer useful provider patterns.** Spotube models track matching separately from stream URL, container, codec and quality information. Bloomee resolves through the owning plugin and keeps local files in their own lane. These are good concepts for our existing resolver, not a reason to import an entire Flutter/Rust/plugin runtime. Plugin source availability remains a dependency. [Spotube source model](https://github.com/team-spotube/spotube/blob/69a310c78f5ceaf4eab7dfee98f187d38211c9ba/lib/models/metadata/audio_source.dart), [Bloomee resolver](https://github.com/HemantKArya/BloomeeTunes/blob/6fdb37d7d53c91c37fdd293c31a7a139ebae319e/lib/services/player/media_resolver_service.dart).
+
+Bloomee's replacement service scores alternate candidates and permits explicit application to playlists. Its threshold is an app heuristic, not proof that a candidate is the identical recording. Mavrixfy should not blindly play a cover/remix/mashup while retaining the original metadata. If alternate sources are introduced, match recording identity and duration; preserve source identity throughout playback. [Replacement implementation](https://github.com/HemantKArya/BloomeeTunes/blob/6fdb37d7d53c91c37fdd293c31a7a139ebae319e/lib/services/meta_resolver/smart_track_replacement_service.dart).
+
+**4. YouTube extractors remain dependent on YouTube access.** Musify's source requests a stream manifest through a direct/fallback path or configured proxy, then selects audio streams. SimpMusic's README acknowledges dependence on unofficial APIs; its core is a separate Git submodule, whose internals were not audited here. These examples establish implementations, not a guaranteed cure for our LOGIN_REQUIRED error. [Musify resolution](https://github.com/gokadzev/Musify/blob/9ddeeb113a5c022660a698c4ced9e4683a1b72a9/lib/services/common_services.dart), [SimpMusic](https://github.com/maxrave-dev/SimpMusic).
+
+**5. RiPlay demonstrates the official-player alternative.** Its README specifies an IFrame player wrapper inside a WebView. This is a different product integration from extracting audio into AVPlayer/Media3; visible player behavior, background handling and UI need separate validation. [RiPlay](https://github.com/fast4x/RiPlay), [YouTube IFrame documentation](https://developers.google.com/youtube/iframe_api_reference).
+
+**6. Monochrome is not a freely reusable production audio endpoint.** Its README limits the hosted API to its official instances and describes supplying one's own paid HiFi endpoint for other deployments. Its website exposes configurable provider instances. Its attractive lossless UI does not establish source permission, unrestricted backend access, or Mavrixfy reliability. [Monochrome deployment requirements](https://github.com/monochrome-music/monochrome/blob/main/README.md).
+
+### Minimal recommendation
+
+Keep the single existing native playback connection. Improve or extend the **source provider layer**, only when a usable catalog and access contract are established:
+
+- For a new discoverable catalog: evaluate Audius with real target-song searches, API eligibility and physical-device tests first.
+- For original/high-quality owned music: an OpenSubsonic/Navidrome or Jellyfin adapter is the clearest option.
+- For YouTube-supported integration: evaluate a visible official player as a separate product choice.
+- For current extraction: retain honest error handling. None of the reviewed documentation/source proves a universal verification bypass or 100% access guarantee.
+- Report actual source codec/bitrate; “High” selects the best available compatible source, not fabricated 320 kbps/lossless quality. Do not transcode low-quality input upward and call it enhanced quality.
+
+Copying source requires checking that repository's actual license against our distribution model. Architecture ideas can be evaluated without copying whole implementations.
+
+This survey made **no production resolver, authentication, player or UI changes**. Earlier sections describe earlier code snapshots; do not treat the old early-terminal-client finding or AAC-only selection as a fresh audit of the current transport. Current code must be checked before applying any further targeted change.
+
+### Coverage ledger: every unique GitHub entry
+
+The following is README-level screening unless deeper inspection was identified above. Provider labels summarize the inspected project descriptions; they do not certify implemented features or current availability.
+
+- [ArchiveTune](https://github.com/rukamori/ArchiveTune): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Audiofy](https://github.com/googol-apps/Audiofy): Primarily local/offline playback; no replacement online catalog.
+- [AuraMusic](https://github.com/TeamAuraMusic/AuraMusic): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Auxio](https://github.com/OxygenCobalt/Auxio): Primarily local/offline playback; no replacement online catalog.
+- [BitChord](https://github.com/kushagrasinghx/BitChord): YouTube and configured high-resolution module sources.
+- [BloomeeTunes](https://github.com/HemantKArya/BloomeeTunes): Flutter/Rust content-resolver plugins; architectural reference.
+- [BoomingMusic](https://github.com/mardous/BoomingMusic): Primarily local/offline playback; no replacement online catalog.
+- [CuteMusic](https://github.com/sosauce/Chocola): Primarily local/offline playback; no replacement online catalog.
+- [Echo Music](https://github.com/EchoMusicApp/Echo-Music): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Elovaire](https://github.com/droidbeauty/elovaire-music): Primarily local/offline playback; no replacement online catalog.
+- [Gramophone](https://github.com/FoedusProgramme/Gramophone): Primarily local/offline playback; no replacement online catalog.
+- [Gyawun Music](https://github.com/sheikhhaziq/gyawun_music): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Harmonoid](https://github.com/harmonoid/harmonoid): Local playback reference; README specifies PolyForm Strict license.
+- [HiFidelity](https://github.com/rvarunrathod/HiFidelity): Primarily local/offline playback; no replacement online catalog.
+- [Just-Listen](https://github.com/RLD-JL/Just-Listen): Audius catalog; Android/iOS; concrete alternative API.
+- [Kreate](https://github.com/knighthat/Kreate): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [limusic](https://github.com/SimoHypers/limusic): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Lotus](https://github.com/dn0ne/lotus): Primarily local/offline playback; no replacement online catalog.
+- [Lune](https://github.com/MrDemonc/Lune): Primarily local/offline playback; no replacement online catalog.
+- [lyraMusic](https://github.com/lyraMusicApp/lyraMusic): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [M3-Play](https://github.com/JAY01-CYBER/M3-Play): Android streaming app; exact resolver not established by README review.
+- [Meld](https://github.com/FrancescoGrazioso/Meld): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Metrolist](https://github.com/MetrolistGroup/Metrolist): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [mucke](https://github.com/moritz-weber/mucke): Primarily local/offline playback; no replacement online catalog.
+- [muffon](https://github.com/staniel359/muffon): Desktop multi-source client; backend availability is another dependency.
+- [Music](https://github.com/MissingCore/Music): React Native local player reference; no replacement streaming catalog.
+- [Music-You](https://github.com/DanielSevillano/music-you): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Musify](https://github.com/gokadzev/Musify): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Muzo](https://github.com/Shashwat-CODING/Muzo): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Muzza](https://github.com/Maloy-Android/Muzza): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [N-Zik](https://github.com/N-Zik-Group/N-Zik): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Namida](https://github.com/namidaco/namida): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [NomaTune](https://github.com/Shahdullah/NomaTune): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Nora](https://github.com/Sandakan/Nora): Primarily local/offline playback; no replacement online catalog.
+- [Nuclear](https://github.com/nukeop/nuclear): Desktop multi-source client; not a React Native streaming SDK.
+- [OnePlayer](https://github.com/googol-apps/OnePlayer): Primarily local/offline playback; no replacement online catalog.
+- [Pear Desktop](https://github.com/pear-devs/pear-desktop): Desktop wrapper for YouTube Music web application.
+- [Phonograph Plus](https://github.com/chr56/Phonograph_Plus): Primarily local/offline playback; no replacement online catalog.
+- [Pixel Player OSS](https://github.com/PixelPlayerHQ/PixelPlayerOSS): Primarily local/offline playback; no replacement online catalog.
+- [Retro Music Player](https://github.com/RetroMusicPlayer/RetroMusicPlayer): Primarily local/offline playback; no replacement online catalog.
+- [Rhythm](https://github.com/cromaguy/Rhythm): Primarily local/offline playback; no replacement online catalog.
+- [RiPlay](https://github.com/fast4x/RiPlay): README specifies official YouTube IFrame player in WebView.
+- [SimpMusic](https://github.com/maxrave-dev/SimpMusic): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [sonora](https://github.com/sonorahq/sonora): Subscription-service integrations and own/local libraries.
+- [SoundPod](https://github.com/arunnechully/SoundPod): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [SpatialFlow](https://github.com/MythicalSHUB/SpatialFlow): Media3/local and WebRemix features; not proof of universal catalog access.
+- [SpotiFlac](https://github.com/spotiflacapp/SpotiFLAC-Mobile): Extension-dependent source retrieval; source access must be established.
+- [Spotube](https://github.com/team-spotube/spotube): Plugin-based metadata/audio providers; source/quality model useful.
+- [Spotui](https://github.com/Spotui/Spotui): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [Stash](https://github.com/rawnaldclark/Stash): Connected libraries and offline features; source access remains separate.
+- [Supersonic](https://github.com/dweymouth/supersonic): Own Subsonic/OpenSubsonic or Jellyfin library.
+- [Tauon Music Box](https://github.com/Taiko2k/TauonMusicBox): Local and personal-server libraries.
+- [Tryptify](https://github.com/tryptz/Tryptify): Media3/audio processing reference; not an independent catalog guarantee.
+- [Velune](https://github.com/nikhilvishwakarma00/Velune): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [ViTune](https://github.com/bartoostveen/ViTune): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [VIVI Music](https://github.com/vivizzz007/vivi-music): YouTube-dependent streaming/local features; no guaranteed verification remedy.
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp): Extractor CLI; not a cross-platform Expo audio SDK.
+- [YTMusicUltimate](https://github.com/dayanch96/YTMusicUltimate): Tweak for the official iOS YouTube Music app, not an audio SDK.
+
+Monochrome is the additional web entry reviewed separately above. Research snapshots, inventory, pinned source references and the bounded Audius probe are stored under outputs/streaming-research (ignored research artifacts).
+
+## 20. Best-available quality implementation and live check — 14 October 2026
+
+The streaming preference displays **High** (shortened at the user's request) while retaining the persisted `high` value. Playback information carries the source-reported codec separately and shows it beside the reported bitrate. Offline codec metadata is used only for completed downloads. Loading/error states suppress outgoing quality details; buffering can retain the selected source information. Default showcase copy no longer promises universal 320 kbps. Updating that script does not update already-deployed Firestore copy.
+
+No new playback engine, profile-racing loop, token reset, account authentication or external addon was introduced. The existing highest-compatible-format selection and iOS AAC-LC restriction remain. Controlled regression fixtures already demonstrate selecting a returned 256 kbps AAC-LC source on iOS; the compatibility restriction is not a universal 128 kbps cap.
+
+Live checks used the app's actual shared transport through its Node test adapter, on the same video **G8Voqp9rR8E**, with `high` requested:
+
+- Android selection profile: VISIONOS response, **AAC-LC**, source-reported **224 kbps**, **179.716 seconds**, resolution **704 ms**.
+- iOS selection profile: VISIONOS response, **AAC-LC**, source-reported **224 kbps**, **179.716 seconds**, resolution **2883 ms**.
+
+The Node adapter applies platform format filtering but has no native attestation WebView. These are source resolution/media-validation results, not Android/iPhone decoding or audible full-song tests. The source was accessible during this check; that does not establish that the earlier verification rejection is permanently resolved. Bitrate is provider metadata, not a measurement of headphone output or an independent bandwidth estimate.
+
+Local LastWave comparison: its default quality preference is tier 27 (up to 24-bit/192 kHz), but its lossless resolver requires an enabled configured addon URL. Without it, that path returns null. Its YouTube source selection uses direct InnerTube, InnerTubeX and NewPipe; higher-quality FLAC is a separate source/backend, not a YouTube transformation. LastWave's quality badges also contain sample-rate-based bit-depth assumptions, so badge text alone is insufficient for comparison.
+
+ADB listed no connected physical device, and the inspected local LastWave logs contained no usable per-song quality measurements. A same-song audible LastWave-versus-Mavrixfy comparison and addon availability were not verified. No addon endpoint, secret or signed media URL was printed.
+
+Repeatable safe source check: `node scripts/youtube-shared.probe.mjs --quality-audit VIDEO_ID`; set `MAVRIXFY_PROBE_PLATFORM=ios` to test iOS format filtering. This uses best-available selection and prints only video ID, codec, bitrate, client, MIME type, duration and timing.
+
+## 21. Optional JioSaavn audio preference — 14 October 2026
+
+At the user's request, Profile > Streaming & Downloads now includes **Prefer JioSaavn audio**, default **OFF**. OFF keeps the original resolution flow. ON tries a matching catalog source before YouTube; explicit Low quality skips this high-quality preference. It does not change an already audible source simply because the switch changed. Upcoming native preparation is refreshed to follow the preference.
+
+The opt-in resolver uses the existing configured `/api/search/songs` backend, not a new official JioSaavn SDK. One combined search/media-validation deadline is four seconds. Candidates require normalized title equality, a common named artist, and duration difference no greater than 1% (bounded between two and five seconds). Unknown identity/duration, remixes/live versions with different titles, absent high-quality formats, unsafe source hosts and failed media responses retain YouTube. High-quality candidates must advertise at least 256 kbps; only HTTPS saavncdn.com sources are accepted. Metadata matching is conservative but does not constitute an ISRC-level or waveform identity proof.
+
+The audio source is selected before loading into the same existing AVPlayer/Media3/Expo connection. Original song IDs and library/queue identity remain; selected source headers and duration travel through the existing shared stream metadata. No simultaneous audible player or mid-song upgrade loop was added. A chosen JioSaavn source failing during startup or later playback can fall back to YouTube for the same song/position when Play intent is still active. The failed optional source is excluded for sixty seconds; a subsequent YouTube rejection still stops normally instead of rapidly skipping songs or retrying indefinitely.
+
+The source codec is left unknown when only MIME is available; a tier label is not used to manufacture an AAC/FLAC claim. Quality reporting uses the catalog-advertised bitrate and media validation, not measured headphone output.
+
+Live public-backend check for **52 Bars / Karan Aujla, Ikky** returned catalog ID **4nvYwtL_**, **214 seconds**, with 12/48/96/160/320 kbps tiers. Running the actual optional resolver against that entry returned **JIOSAAVN, 320 kbps, 214 seconds, audio/mp4**, in **2098 ms**. The public default endpoint was tested; deployed app remote configuration may select a different endpoint. No signed audio URL was printed. Physical-device audible playback remains unverified.
+
+Earlier sections describing an unconditional YouTube-only provider lane refer to behavior before this explicit opt-in feature. They remain true with the switch OFF, not with the switch ON. This feature is a separate-source preference; it does not authenticate YouTube or remove its verification requirement.
+
+## 22. Matching FLAC-first preference — 14 October 2026
+
+The existing optional Profile switch is now labelled **Prefer higher-quality audio**. ON chooses a matching Jamendo FLAC source, then matching high-quality JioSaavn audio, then the original YouTube resolver. OFF retains the original flow. Low quality still avoids these optional higher-bandwidth sources. The persisted setting name is retained for compatibility with the already-installed preference.
+
+Jamendo uses only the supplied public Client ID, with an EXPO_PUBLIC_JAMENDO_CLIENT_ID override. No client secret is stored or required for catalog reads. Jamendo lookup and media validation have a 3.5-second combined deadline; JioSaavn retains its four-second deadline. Search is scoped to the song title and lead artist before checking exact normalized title, shared named artist and close duration. A same-name unrelated song is not accepted. FLAC is accepted only after reading the actual fLaC file signature, not just MIME or extension. This identifies the container, not whether the artist uploaded an original lossless master.
+
+The same shared source metadata, native player and queue-preparation connection are used. A terminal optional-source failure excludes that provider/song pair for sixty seconds and tries the next source, preserving song identity and position when play intent remains active. Jamendo and JioSaavn failures have separate exclusions, so failure of FLAC does not suppress the matching JioSaavn candidate. There is no infinite retry or auto-next loop. Playback quality shows FLAC/Lossless without inventing a constant bitrate.
+
+The initial public API probe returned genuine 16-bit/44.1 kHz stereo FLAC for “Wish You Were Here” by The.madpix.project. “52 Bars / Karan Aujla” had no Jamendo result, and “Lat Lag Gayee” search returned unrelated titles that the matcher rejects. Those examples retain the next available source. Physical-device decode/output is still a separate unverified check; metadata/media access is not audible playback certification.
+
+The implemented Jamendo resolver was subsequently exercised live against the same matching “Wish You Were Here” recording: FLAC header validation passed and the selected 270-second source resolved in 1650 ms. No constant FLAC bitrate was claimed. Full regression run: 572 tests passed; the subsequently added Jamendo startup-fallback case passed in the focused 89-test run. Typecheck and changed-file lint passed.
+
+## 23. iOS Expo FLAC load rejection — 14 October 2026
+
+The device reported `Cannot Open` for jamendo_1214935 through ExpoAvAdapter, after source resolution. This establishes an Expo/native audio-load failure, not a YouTube verification error. The localized string alone does not identify the underlying AVFoundation error domain or prove its exact cause.
+
+Live HTTP checks for the selected source returned unrestricted HTTP 200 and ranged HTTP 206, audio/x-flac, total length 33,508,858 bytes, no redirect and no pathname extension. Earlier bounded bytes verified a real FLAC header. This is HTTP/header evidence, not proof of complete-file integrity or native decode support.
+
+The installed expo-audio source specifically notes iOS loading limitations when asset type cannot be inferred. The targeted mitigation now awaits Expo Asset download with explicit `type: flac` for remote FLAC handled by the iOS Expo fallback, then passes the resulting typed local URI to the same player. No conversion or second playback engine is introduced. Asset caching remains Expo-managed. The initial download wait is bounded to 45 seconds, and generation checks prevent a superseded selection from starting audio after caching completes. Initial playback may therefore wait for the approximately 33.5 MB sample to cache.
+
+AAC and Android source loading retain their normal streaming path. Existing optional next-track preparation now recognizes audio/x-flac as well as audio/flac; its existing size bound is unchanged. Stream codec metadata identifies optional matched FLAC selections for the iOS Expo path. This mitigation does not alter the production custom Swift AVPlayer implementation or certify physical-device playback.
+
+Full regression suite: **577 passed**. Typecheck and changed-file lint passed. Tests exercise typed FLAC caching, unchanged AAC/Android paths and cancellation during caching. Retest Play FLAC test after reload to establish whether this resolves the reported iPhone load failure; a remaining rejection requires local-file/native-error evidence rather than a claimed universal fix.
+
+## 24. FLAC cache timeout and smaller device test — 14 October 2026
+
+The iPhone subsequently reported `FLAC loading timed out.` This is the application's 45-second Asset-download wait deadline, not a new decoder rejection. A complete local-network HTTP transfer of the original 33,508,858-byte FLAC finished in **37,400 ms**. It was therefore not stuck in that host test, but the test cannot establish the iPhone's throughput or native URLSession behavior. A small slowdown is sufficient to exceed 45 seconds. The current typed-file mitigation waits for the entire file, so this is not instant progressive lossless playback.
+
+The development-only Play FLAC test now uses **Hello — Paul Werner**, Jamendo track **1429496**, duration **31 seconds**. The complete **3,440,957-byte** FLAC transferred locally in **4992 ms** and began with the valid fLaC signature. This smaller sample isolates device decoder/output testing from the long file's startup cost. It does not claim to solve full-length FLAC startup latency. No timeout increase or new retry loop was added.
+
+The changed test-button file passes lint. Physical-device playback of the new sample remains unverified. Expo Asset's download operation is not cancelled by the Promise timeout; generation guards prevent obsolete playback, but full download cancellation is not established by those guards. Treat the current iOS complete-file path as a compatibility test, not certified production streaming. Matching optional-source failures still use the existing bounded provider fallback.
+
+## 25. Official Jamendo full-support review — 14 October 2026
+
+### What full support actually means
+
+Jamendo describes a catalog of hundreds of thousands of tracks, including albums, artists, playlists and radio. Its application plans do not establish access to every external mainstream recording. The existing selective YouTube-recording matcher exposes only the intersection between catalogs. Full integration requires directly discovering and selecting Jamendo tracks. [Developer overview](https://developer.jamendo.com/v3.0).
+
+### Official API implementation requirements
+
+Catalog reads require Client ID; OAuth is for user-private data and account actions. Read/write is not a larger music-catalog tier. Higher-consumption accounts must follow Jamendo's account-specific process; its public homepage advertises a non-commercial monthly allowance while authentication documentation separately describes a high-consumption contact threshold. Do not assume either is this commercial application's granted quota. [Authentication and usage](https://developer.jamendo.com/v3.0/authentication).
+
+Track browsing should include singles and album tracks, use relevance for searches, and page through offset/limit rather than retrieving the entire library. Supported audio formats include FLAC, Ogg and MP3 variants; FLAC does not specify a fixed bit-depth/sample-rate tier. Stream using the returned audio field. [Track API](https://developer.jamendo.com/v3.0/tracks).
+
+Albums and artist pages have dedicated track endpoints. Playlist track retrieval needs its own parameters and singles inclusion. [Album tracks](https://developer.jamendo.com/v3.0/albums/tracks), [artist tracks](https://developer.jamendo.com/v3.0/artists/tracks), [playlist tracks](https://developer.jamendo.com/v3.0/playlists/tracks). A playlist-list/ZIP endpoint is not interchangeable with individual FLAC track streaming. [Playlist listing](https://developer.jamendo.com/v3.0/playlists).
+
+### Live verification using this application's Client ID
+
+- Two track pages returned distinct IDs 241–243 and 244–246, HTTP 200/API code 0.
+- Album 358282 returned its track list; artist lookup found Paul Werner, ID 461414.
+- Radio discovery returned results; similar-track lookup was successful but empty for the short sample, so discovery must handle empty results normally.
+- Passing a blanket audioformat=flac to playlist listing produced HTTP 200 but API code 3. Removing that unsupported parameter made listing succeed; playlists/hots also succeeded. Artist/radio listing returned warnings for that extraneous parameter.
+
+This proves selected endpoint access and exposes a concrete integration trap: request options must be endpoint-specific, and HTTP success alone is insufficient. Handle headers.code, error_message and warnings, including rate-limit code 6. [Response codes](https://developer.jamendo.com/v3.0/response-codes). It is not an exhaustive catalog availability or physical-device test.
+
+### Missing pieces in current Mavrixfy code
+
+1. SearchRepository searches only YouTube; there is no paginated Jamendo browse/search experience.
+2. The optional matcher reads only ten artist/title-filtered candidates. Strict verification should stay, but candidate retrieval can be improved separately from accepting a recording.
+3. Direct Jamendo selections should resolve by their stable Jamendo ID. Current sample selections still re-search title/artist.
+4. Creator/provider attribution and direct track backlinks are incomplete, and per-track licensing metadata is not propagated through the source model.
+5. iOS Expo FLAC currently requires whole-file caching. Actual device failures and large-file transfer measurements establish that this path cannot yet be called smooth production streaming. Asset timeout does not cancel its underlying download. Native IPA playback and seek/background/end-to-end coverage remain unverified.
+6. The shared engine, queue IDs, duration, seek and source-failure logic should remain unified while provider metadata becomes explicit. Do not turn a Jamendo miss into a similarly named but different recording.
+
+### Commercial rollout and content handling
+
+Published API terms require contacting Jamendo for commercial use, observing content licenses, creator/provider attribution and backlinks. They limit offline-oriented caching and permit caching only as reasonably necessary for operation. Marking Usage=Commercial in the supplied dashboard is not evidence of an executed agreement. Confirm this application's actual commercial scope, rate allowance and permitted playback/cache use with Jamendo. This review did not contact anyone or access the authenticated portal. [Published API terms](https://devportal.jamendo.com/api_terms_of_use), which identify their last modification as September 2013.
+
+### Implementation order
+
+First establish the account's production scope. Then add a small paginated Jamendo provider to search/browse, stable-ID track resolution, artwork and attribution. Follow with endpoint-aware errors, deduplicated metadata requests and bounded source caching. Validate native Android and iOS playback before enabling a production lossless preference. Offer an honestly labelled compatible-source fallback where FLAC cannot start reliably. OAuth comes later only if Jamendo-account favorites/playlists are wanted. Existing YouTube/JioSaavn playback can remain available in parallel.
+
+This turn changed documentation/research artifacts only. It did not silently expand the catalog UI, authenticate a Jamendo user, alter production player code or claim the existing iPhone issue solved.
+
+## 26. VxMusic and SpotiFLAC source review — 14 October 2026
+
+### Scope and reproducibility
+
+Inspected repository trees, websites, registry, and 32 targeted source/documentation/license files. Focus: source resolution, matching, quality fallback, provider verification, download validation and playback integration. This was not an exhaustive line-by-line review of every UI file or a security certification. Public code was read as data; downloaded applications/extensions were not executed.
+
+Pinned source snapshots:
+
+- VxMusic: `4b502818af11033a26927aaa14661129e5769518`.
+- ClashFLAC: `0897400decfa510d8addd56ab23b25710fc99463`.
+- SpotiFLAC desktop (`spotbye`): `90f51a4da5bff0ec51183dd5e789a78e6f6a009d`.
+- SpotiFLAC Mobile: `5a8952659b247fd95f1914a56db60825657fe26d`.
+- SpotiFLAC extensions (`zarzet`): `0290b263802d3418e45583612574b749289bf369`.
+
+Files and fetch manifests are under ignored `outputs/streaming-research/inspected/` and `source-jobs*.json`. The registry was read from its moving main branch, not a pinned revision.
+
+### What VxMusic actually does
+
+`LosslessMusicApi.kt` searches a separate backend, verifies title/performer/recording variants and optionally duration, then requests a direct media URL. Quality codes include 27, 7, 6 and 5; the last is MP3 320, so a successful resolution is not necessarily lossless. Backend location and optional API key come from build configuration. A hosted Qobuz backend is the default; this is not an official public SDK or evidence that Mavrixfy has permission to use that deployment. [Pinned resolver](https://github.com/ABCGop/VxMusic/blob/4b502818af11033a26927aaa14661129e5769518/app/src/main/java/com/abcg/music/data/lossless/LosslessMusicApi.kt).
+
+Important implementation findings in `MusicPlayer.kt`:
+
+- The inspected `resolveRemoteTrackAudioStream` chooses lossless first when preferred, then JioSaavn, then a second lossless attempt when not initially preferred. It throws when these fail. Despite the README's YouTube-fallback claim, this particular function does not invoke the YouTube resolver.
+- `resolveLosslessTrackAudioStream` sets `isLossless = true` even when the resolver returns format 5 (MP3). This is a classification defect; do not copy it.
+- It constructs a stable cache key from track identity plus format, avoiding signed-URL changes fragmenting the cache. This is a useful design pattern.
+- Lossless bitrate figures in the resolver are PCM calculations/constants, not measurements of compressed FLAC delivery. They should not be shown as measured network bitrate.
+
+[Pinned playback implementation](https://github.com/ABCGop/VxMusic/blob/4b502818af11033a26927aaa14661129e5769518/app/src/main/java/com/abcg/music/playback/MusicPlayer.kt).
+
+VxMusic links ClashFLAC, but the inspected versions are not directly interchangeable: VxMusic expects `/api/track/{id}/url` and an object-shaped search response; ClashFLAC exposes `/api/qobuz/stream/{track_id}` and its top-level `/api/search` returns an Amazon catalog list. An adapter or different backend deployment is required. ClashFLAC's setup depends on provider accounts/credentials; its README also contains experimental/personal-use qualifications. Open-source availability does not establish streaming-service permission. [Server](https://github.com/ajisth69/ClashFLAC/blob/0897400decfa510d8addd56ab23b25710fc99463/server.py), [Qobuz routes](https://github.com/ajisth69/ClashFLAC/blob/0897400decfa510d8addd56ab23b25710fc99463/qobuz/routes.py), [Account setup](https://github.com/ajisth69/ClashFLAC/blob/0897400decfa510d8addd56ab23b25710fc99463/setup.md).
+
+### What SpotiFLAC actually does
+
+The inspected desktop build uses Go/Wails; mobile uses Flutter/Dart, Rust and platform bridges. These are separate projects, not a drop-in React Native playback package. The website's branding/framework descriptions should not override source dependencies. Mobile requires a configured extension repository and enabled providers. [Desktop dependencies](https://github.com/spotbye/SpotiFLAC/blob/90f51a4da5bff0ec51183dd5e789a78e6f6a009d/go.mod), [Mobile README](https://github.com/spotiflacapp/SpotiFLAC-Mobile/blob/5a8952659b247fd95f1914a56db60825657fe26d/README.md).
+
+Spotify and Apple Music entries can supply metadata rather than lossless audio. The inspected registry separately marks download providers including Qobuz, Tidal, Amazon, Deezer and JioSaavn; JioSaavn is described as AAC. Installing a provider or finding matching artwork does not prove a full FLAC source exists. [Provider registry](https://raw.githubusercontent.com/spotiflacapp/spotiflac-extension/main/registry.json).
+
+Desktop Qobuz/Tidal code uses community download services, with configurable alternatives. Its request layer handles unauthorized/precondition-required responses and verification. Mobile Qobuz/Tidal extensions can also return `verification_required`; successful downloads return a file path and actual quality metadata. Thus "no account required" on a landing page does not mean no server-side access checks, guaranteed uptime, or a commercially supported audio API. [Desktop Qobuz adapter](https://github.com/spotbye/SpotiFLAC/blob/90f51a4da5bff0ec51183dd5e789a78e6f6a009d/backend/qobuz_community.go), [Request handling](https://github.com/spotbye/SpotiFLAC/blob/90f51a4da5bff0ec51183dd5e789a78e6f6a009d/backend/community_endpoints.go), [Qobuz extension](https://github.com/zarzet/SpotiFLAC-Extension/blob/0290b263802d3418e45583612574b749289bf369/sources/qobuz-web/index.js), [Tidal extension](https://github.com/zarzet/SpotiFLAC-Extension/blob/0290b263802d3418e45583612574b749289bf369/sources/tidal-web/index.js).
+
+Useful patterns include strict recording identity checks, provider-specific quality selection, cancellation boundaries, rejecting preview-length files and validating actual output/container metadata before publication. Desktop download validation checks unexpectedly short previews and large duration mismatches; it tolerates relatively broad differences and skips validation when duration cannot be read, so it is not a universal correctness guarantee. Mobile has a separate preview player and a regular music-player service; a playable preview does not verify full-track FLAC delivery. [Download validation](https://github.com/spotbye/SpotiFLAC/blob/90f51a4da5bff0ec51183dd5e789a78e6f6a009d/backend/download_validation.go), [Mobile download orchestration](https://github.com/spotiflacapp/SpotiFLAC-Mobile/blob/5a8952659b247fd95f1914a56db60825657fe26d/rust_backend/crates/extensions/src/backend/downloads.rs).
+
+An open report describes invalid FLAC headers on some Android downloads; it is a user report, not a reproduced diagnosis. These projects are not evidence of failure-free delivery. [Issue 1078](https://github.com/spotbye/SpotiFLAC/issues/1078).
+
+### Recommendation for Mavrixfy
+
+Keep the existing shared queue, Media3/AVPlayer and Expo adapter. Add a small provider adapter only after its full-track source, access permission, expiry and native compatibility are established. Resolve recording identity (prefer ISRC where available, otherwise verified metadata), accept an actual supported media URL, and preserve the original source when the optional provider is unavailable. Report decoded/container quality honestly; never mark MP3/AAC as lossless.
+
+Use these repositories as references for validation and provider boundaries, rather than copying an entire extension runtime, private deployment access, credentials or decryption pipeline. VxMusic is GPL-3.0, inspected desktop/mobile SpotiFLAC licenses are MIT, and the inspected extension repository is Apache-2.0; source-license obligations and music access rights are separate.
+
+No live provider credential test, full-song audible test, native build, or reproduction of the current iPhone FLAC timeout was performed in this review. A new provider does not by itself fix the existing iOS Expo full-file preparation delay. Production player code was unchanged.

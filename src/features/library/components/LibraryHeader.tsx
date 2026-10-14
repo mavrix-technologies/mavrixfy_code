@@ -2,7 +2,7 @@ import { NavLikedIcon } from "@/components/OfficialNavIcons";
 import Colors from "@/constants/colors";
 import { type FollowedArtist } from "@/lib/followedArtists";
 import type { SavedCollection } from "@/lib/savedCollections";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { memo } from "react";
 import { Pressable,StyleSheet,Text,View } from "react-native";
 import { ArtistRow } from "./ArtistRow";

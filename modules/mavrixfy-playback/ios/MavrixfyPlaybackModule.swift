@@ -1,6 +1,5 @@
 import ExpoModulesCore
 import AVFoundation
-import AVKit
 import MediaPlayer
 import UIKit
 import OSLog
@@ -8,8 +7,6 @@ import OSLog
 public final class MavrixfyPlaybackModule: Module {
   public func definition() -> ModuleDefinition {
     Name("MavrixfyPlayback")
-    Constants(["audioOutputPickerAvailable": true])
-    View(AudioOutputPickerView.self) {}
     Events("playbackEvent")
     AsyncFunction("setup") { () -> [String: Any] in
       let engine = NativePlayback.shared
@@ -21,21 +18,6 @@ public final class MavrixfyPlaybackModule: Module {
     }.runOnQueue(.main)
     AsyncFunction("snapshot") { NativePlayback.shared.snapshot() }.runOnQueue(.main)
     OnDestroy { NativePlayback.shared.emit = nil }
-  }
-}
-
-private final class AudioOutputPickerView: ExpoView {
-  private let picker = AVRoutePickerView()
-  required init(appContext: AppContext? = nil) {
-    super.init(appContext: appContext)
-    picker.tintColor = .white
-    picker.activeTintColor = .systemGreen
-    picker.prioritizesVideoDevices = false
-    addSubview(picker)
-  }
-  override func layoutSubviews() {
-    super.layoutSubviews()
-    picker.frame = bounds
   }
 }
 

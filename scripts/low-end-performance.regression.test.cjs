@@ -5,6 +5,72 @@ const test = require("node:test");
 const ts = require("typescript");
 const art = require("./helpers/youtube-artwork-fixture.cjs");
 
+test("closing a screen cancels the remaining sequential artwork palette preloads", async () => {
+  const calls = []; let finish;
+  const colors = load('src/lib/colorExtractor.ts', {
+    './colorMath': load('src/lib/colorMath.ts', {}), '@/services/youtube/YouTubeArtwork': art,
+    '@react-native-async-storage/async-storage': { getItem: async () => null, setItem: async () => {} },
+    'expo-constants': { executionEnvironment: 'bare' }, react: {},
+    'react-native': { Platform: { OS: 'android' } },
+    'react-native-image-colors': { getColors: uri => {
+      calls.push(uri); return new Promise(resolve => { finish = resolve; });
+    } },
+  }, '', { setTimeout: () => 1, clearTimeout() {} });
+  const cancel = colors.preloadDominantColors(['https://art.test/first.jpg', 'https://art.test/second.jpg']);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 1);
+  cancel();
+  finish({ platform: 'android', dominant: '#112288', vibrant: '#3366CC' });
+  for (let i = 0; i < 3; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, 1, 'the second image must not start after cleanup');
+});
+
+test("artwork query keeps prior colors through rapid selection and failed extraction", async t => {
+  const { QueryClient, QueryObserver } = require('@tanstack/react-query');
+  const client = new QueryClient();
+  let observer, unsubscribe, state, dirty;
+  const waiting = new Map();
+  const flush = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
+  t.after(() => { unsubscribe?.(); client.clear(); });
+  const colors = load('src/lib/colorExtractor.ts', {
+    './colorMath': load('src/lib/colorMath.ts', {}), '@/services/youtube/YouTubeArtwork': art,
+    '@react-native-async-storage/async-storage': { getItem: async () => null, setItem: async () => {} },
+    'expo-constants': { executionEnvironment: 'bare' }, 'react-native': { Platform: { OS: 'android' } },
+    react: { useState: initial => {
+      if (state === undefined) state = typeof initial === 'function' ? initial() : initial;
+      return [state, next => { dirty = true; state = next; }];
+    } },
+    '@tanstack/react-query': { useQuery: options => {
+      if (!observer) { observer = new QueryObserver(client, options); unsubscribe = observer.subscribe(() => {}); }
+      else observer.setOptions(options);
+      return observer.getCurrentResult();
+    } },
+    'react-native-image-colors': { getColors: uri => {
+      if (uri.includes('first')) return Promise.resolve({ platform: 'android', dominant: '#AA1111', vibrant: '#CC2222' });
+      if (uri.includes('failed')) return Promise.reject(Error('No image'));
+      return new Promise(resolve => waiting.set(uri, resolve));
+    } },
+  }, '', { AbortController, fetch: async () => ({ ok: false }), setTimeout: () => 1, clearTimeout() {} });
+  const render = uri => {
+    let palette;
+    for (let i = 0; i < 5; i++) { dirty = false; palette = colors.useArtworkPalette(uri); if (!dirty) return palette; }
+    throw Error('Artwork render did not settle');
+  };
+  const first = 'https://art.test/first.jpg', second = 'https://art.test/second.jpg', third = 'https://art.test/third.jpg';
+  const red = await colors.extractArtworkColors(first);
+  assert.equal(render(first), red);
+  assert.equal(render(second), red); await flush();
+  assert.equal(render(third), red); await flush();
+  waiting.get(second)({ platform: 'android', dominant: '#1111AA', vibrant: '#2222CC' }); await flush();
+  assert.equal(render(third), red, 'obsolete extraction cannot replace the active artwork colors');
+  waiting.get(third)({ platform: 'android', dominant: '#11AA11', vibrant: '#22CC22' }); await flush();
+  const green = render(third);
+  assert.notEqual(green, red);
+  assert.equal(render('https://art.test/failed.jpg'), green); await flush();
+  assert.equal(render('https://art.test/failed.jpg'), green, 'unavailable source retains previous colors');
+  assert.equal(render(''), colors.DEFAULT_ARTWORK_PALETTE);
+});
+
 test("festival animation uses density-sized animated WebP only for unsigned Cloudinary uploads", () => {
   const { getFestivalArtworkUrl } = load("src/features/home/components/festivalArtwork.ts", {}, "", { URL });
   const source = "https://res.cloudinary.com/demo/image/upload/v123/banner.gif";
@@ -23,10 +89,13 @@ function load(filename, dependencies, extra = "", globals = {}) {
       jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
   }).outputText;
   vm.runInNewContext(code + extra, { module, exports: module.exports, __DEV__: false,
-    ...globals, require: name => {
+    ...globals, require: function resolveTestDependency(name) { if (name.startsWith("@expo/vector-icons/")) return { __esModule: true, default: resolveTestDependency("@expo/vector-icons")[name.split("/").pop()] };
+
+      if (name === "@tanstack/react-query") return dependencies[name] || {};
       if (!(name in dependencies)) throw new Error(`Unexpected dependency ${name}`);
       return dependencies[name];
-    } });
+
+} });
   return module.exports;
 }
 
@@ -88,23 +157,26 @@ test("ad initialization retries after failure and stays unavailable in Expo Go",
 test("artwork warmup waits for idle, uses display-sized disk sources, and can be cancelled", () => {
   let task;
   const images = [], palettes = [];
+  let stoppedPalettes = 0;
   const { scheduleArtworkPreload } = load("src/lib/artworkPreload.ts", {
     "@/services/youtube/YouTubeArtwork": art,
     "@/utils/idleTask": { runAfterIdle: callback => { task = callback; return () => { task = undefined; }; } },
     "expo-image": { Image: { prefetch: (urls, policy) => { images.push({ urls, policy }); return Promise.resolve(true); } } },
     "react-native": { PixelRatio: { get: () => 3 } },
-    "./colorExtractor": { preloadDominantColors: urls => palettes.push(urls) },
+    "./colorExtractor": { preloadDominantColors: urls => { palettes.push(urls); return () => { stoppedPalettes++; }; } },
   });
   const master = "https://lh3.googleusercontent.com/art=w1200-h1200-l90-rj";
   const cancel = scheduleArtworkPreload([master], 44);
   assert.equal(images.length, 0);
   cancel();
   assert.equal(task, undefined);
-  scheduleArtworkPreload([master, master], 44);
+  const cancelStarted = scheduleArtworkPreload([master, master], 44);
   task();
   assert.equal(images[0].policy, "disk");
   assert.deepEqual(Array.from(images[0].urls), [art.youTubeDisplayArtworkUrl(master, art.artworkPixelSize(44, 3))]);
   assert.equal(palettes[0][0], master);
+  cancelStarted();
+  assert.equal(stoppedPalettes, 1, "cleanup cancels queued palette work after idle has started");
 });
 
 test("display artwork covers device pixels without oversized list thumbnails", () => {

@@ -15,12 +15,12 @@ import { dedupeImportRows,matchImportedSongs } from "@/lib/song-matcher";
 import { addSongToPlaylist,createUserPlaylist,getUserPlaylists } from "@/lib/storage";
 import { ParsedSong } from "@/types/import";
 import { safeGoBack } from "@/utils/navigation";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { File } from "expo-file-system";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router,useLocalSearchParams } from "expo-router";
-import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { useCallback,useEffect,useEffectEvent,useMemo,useRef,useState } from "react";
 import {
 ActivityIndicator,
 FlatList,
@@ -115,6 +115,18 @@ export function ImportSongsFileScreen() {
     }
   }, [user]);
 
+  const beginMatching = useEffectEvent((songs: ParsedSong[]) => {
+      setParsedSongs(songs);
+      setProcessedCount(0);
+      setFoundCount(0);
+      setSearchProgress(0);
+      setStep("searching");
+  });
+  const finishMatching = useEffectEvent((matched: ParsedSong[]) => {
+    setParsedSongs(matched);
+    setStep("review");
+  });
+
   useEffect(() => {
     const controller = new AbortController();
     isMountedRef.current = true;
@@ -125,11 +137,7 @@ export function ImportSongsFileScreen() {
       const result = parseFile(content, fileName || "file.txt");
       if (!result.songs.length) throw new Error(result.errors.slice(0, 4).join("\n") || "No songs found in this file.");
       const songs = dedupeImportRows(result.songs);
-      setParsedSongs(songs);
-      setProcessedCount(0);
-      setFoundCount(0);
-      setSearchProgress(0);
-      setStep("searching");
+      beginMatching(songs);
       const matched = await matchImportedSongs(songs, controller.signal, (processed, found) => {
         if (controller.signal.aborted) return;
         setProcessedCount(processed);
@@ -137,8 +145,7 @@ export function ImportSongsFileScreen() {
         setSearchProgress(Math.floor(processed / songs.length * 100));
       });
       if (controller.signal.aborted) return;
-      setParsedSongs(matched);
-      setStep("review");
+      finishMatching(matched);
     }
     void loadAndMatch().catch(error => {
       if (controller.signal.aborted) return;

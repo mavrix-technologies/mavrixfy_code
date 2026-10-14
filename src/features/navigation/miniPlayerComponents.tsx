@@ -8,7 +8,7 @@ type MiniPlayerBannerConfig,
 import type { Song } from "@/lib/musicData";
 import * as Animated from "@/lib/nativeAnimated";
 import type { MiniPlayerSecondaryControl } from "@/lib/storage";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React,{ useCallback,useEffect,useMemo,useRef,useState } from "react";

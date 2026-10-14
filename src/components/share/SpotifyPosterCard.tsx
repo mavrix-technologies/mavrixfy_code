@@ -1,5 +1,5 @@
 import { type ShareSheetData } from "@/utils/shareSheet";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { memo } from "react";

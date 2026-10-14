@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, useWindowDimensions, type ListRenderItemInfo } from "react-native";
 import { Image } from "expo-image";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import type { Song } from "@/lib/musicData";
 import { getSongLyrics, type LyricLine, type LyricsResult } from "@/services/lyricsService";
 import { getPlaybackProgressSnapshot, subscribePlaybackProgress } from "@/services/audio/playbackProgressStore";
@@ -25,7 +26,7 @@ interface StandBySidePanelProps {
 }
 
 export const StandBySidePanel = memo(function StandBySidePanel(props: StandBySidePanelProps) {
-  if (props.panel === "timer") return <QueueSleepTimer embedded onBack={props.onBack ?? props.onTouchActivity} />;
+  if (props.panel === "timer") return <QueueSleepTimer embedded primaryColor={props.primaryColor} secondaryColor={props.secondaryColor} onBack={props.onBack ?? props.onTouchActivity} />;
   return props.panel === "queue" ? <StandByQueue {...props} /> : <StandByLyrics key={props.song.id} {...props} />;
 });
 

@@ -3,7 +3,7 @@ import { extractArtworkColors,type ArtworkPalette } from "@/lib/colorExtractor";
 import { triggerImpact } from "@/lib/haptics";
 import { showGlobalToast } from "@/utils/globalToast";
 import { closeShareSheet,subscribeShareSheet,type ShareSheetData } from "@/utils/shareSheet";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { memo,useCallback,useEffect,useMemo,useState } from "react";

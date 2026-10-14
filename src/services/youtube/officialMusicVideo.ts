@@ -28,8 +28,8 @@ function matchesArtist(query: OfficialMusicVideoQuery, candidate: OfficialMusicV
   if (ids.size && candidate.artists.some(artist => artist.id && ids.has(artist.id))) return true;
 
   const wanted = query.artist.split(/\s+(?:feat\.?|ft\.?|featuring|with)\s+|\s*[&,]\s*/i).map(normalize).filter(Boolean);
-  const found = candidate.artists.map(artist => normalize(artist.name));
-  return wanted.some(name => found.includes(name));
+  const found = new Set(candidate.artists.map(artist => normalize(artist.name)));
+  return wanted.some(name => found.has(name));
 }
 
 function coreTitle(value: string): string {

@@ -10,7 +10,8 @@ import React,{ useCallback,useMemo } from "react";
 import {
 Platform,
 StyleSheet,
-ScrollView,
+FlatList,
+type ListRenderItemInfo,
 } from "react-native";
 import Animated,{
 useAnimatedStyle,
@@ -34,6 +35,8 @@ UNIFIED_HEADER_MENU_HEIGHT,UNIFIED_HEADER_TOP_BAR_HEIGHT
 
 export const UNIFIED_HEADER_TOTAL_HEIGHT =
   UNIFIED_HEADER_TOP_BAR_HEIGHT + UNIFIED_HEADER_MENU_HEIGHT;
+
+const categoryKey = (item: MusicCategoryItem) => item.id;
 
 interface HomeUnifiedTopHeaderProps {
   topInset: number;
@@ -177,7 +180,7 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
   }, [themeConfig?.customCategories, themeConfig?.menuLabels]);
 
   const renderCategoryItem = useCallback(
-    (item: MusicCategoryItem, index: number) => {
+    ({ item, index }: ListRenderItemInfo<MusicCategoryItem>) => {
       const active = selectedCategory === item.id;
 
       return (
@@ -267,10 +270,10 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
 
       {/* A small native scroll row keeps every menu option mounted without clipping. */}
       <Animated.View style={[styles.menuRailRow, menuRailAnimatedStyle]} pointerEvents="box-none">
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}
-          overScrollMode="never" removeClippedSubviews={false} contentContainerStyle={styles.menuScrollContent}>
-          {categoriesData.map(renderCategoryItem)}
-        </ScrollView>
+        <FlatList data={categoriesData} renderItem={renderCategoryItem} keyExtractor={categoryKey}
+          horizontal showsHorizontalScrollIndicator={false} bounces={false}
+          overScrollMode="never" removeClippedSubviews={false} contentContainerStyle={styles.menuScrollContent}
+          initialNumToRender={categoriesData.length} maxToRenderPerBatch={categoriesData.length} />
       </Animated.View>
     </Animated.View>
   );

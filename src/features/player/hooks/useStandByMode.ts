@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { triggerImpact } from "@/lib/haptics";
-import { useAppIsActive } from "@/lib/appActivity";
+import { useAppIsActive, useAppIsBackgrounded } from "@/lib/appActivity";
 import * as Haptics from "expo-haptics";
 import { IS_WEB } from "@/constants/platform";
 import { setStandByOrientation } from "./standByOrientation";
@@ -21,6 +21,7 @@ export interface UseStandByModeOptions {
 
 export function useStandByMode({ isPlayerExpanded, viewport }: UseStandByModeOptions) {
   const foreground = useAppIsActive();
+  const backgrounded = useAppIsBackgrounded();
   const [enabled, setEnabled] = useState(false);
   const [exiting, setExiting] = useState(false);
   const dimensions = useWindowDimensions();
@@ -28,7 +29,7 @@ export function useStandByMode({ isPlayerExpanded, viewport }: UseStandByModeOpt
   // Only the explicit player button enters StandBy. Window changes affect
   // layout, never activation, so rotation cannot hide/recreate the controls.
   if (!isPlayerExpanded && enabled) setEnabled(false);
-  const isStandByActive = enabled && isPlayerExpanded && foreground;
+  const isStandByActive = enabled && isPlayerExpanded && !backgrounded;
   const enterStandBy = useCallback(() => {
     if (isPlayerExpanded) { setExiting(false); setEnabled(true); }
   }, [isPlayerExpanded]);
@@ -106,8 +107,8 @@ export function useStandByMode({ isPlayerExpanded, viewport }: UseStandByModeOpt
   }, [scheduleDimTimer]);
 
   useEffect(() => {
-    dimmingActiveRef.current = dimmingEnabled;
-    if (dimmingEnabled) {
+    dimmingActiveRef.current = dimmingEnabled && foreground;
+    if (dimmingEnabled && foreground) {
       scheduleDimTimer();
     } else {
       clearDimTimer();
@@ -117,7 +118,7 @@ export function useStandByMode({ isPlayerExpanded, viewport }: UseStandByModeOpt
       dimmingActiveRef.current = false;
       clearDimTimer();
     };
-  }, [dimmingEnabled, scheduleDimTimer, clearDimTimer]);
+  }, [dimmingEnabled, foreground, scheduleDimTimer, clearDimTimer]);
 
   const selectStyle = useCallback((next: StandByStyle) => {
     if (next === styleRef.current) return;

@@ -1,5 +1,5 @@
 import { FullscreenKaraokeModal } from "@/components/FullscreenKaraokeModal";
-import { useAppIsActive } from "@/lib/appActivity";
+import { useAppIsActive, useAppIsBackgrounded } from "@/lib/appActivity";
 import { playerUIStateStore } from "@/lib/playerUIState";
 import { router, useFocusEffect, useIsFocused, useNavigation } from "expo-router";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
@@ -244,6 +244,7 @@ const PLAYER_SNAP_POINTS = ["100%"];
 
 export const PlayerScreen = memo(function PlayerScreen() {
   const foreground = useAppIsActive();
+  const backgrounded = useAppIsBackgrounded();
   const focused = useIsFocused();
   const navigation = useNavigation();
   const sheetRef = useRef<BottomSheet>(null);
@@ -306,7 +307,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayout}>
-      <StatusBar hidden={standBy.isStandByActive} style="light" />
+      <StatusBar hidden={false} style="light" />
       {standBy.isStandByActive && <StandByKeepAwake />}
       <BottomSheet ref={sheetRef} index={0} snapPoints={PLAYER_SNAP_POINTS}
         style={styles.playerSheetFrame}
@@ -316,7 +317,7 @@ export const PlayerScreen = memo(function PlayerScreen() {
         onClose={onSheetClosed}>
         <View pointerEvents={isStandByActive ? "none" : "auto"}
           style={{ width: playerViewport.width, height: playerViewport.height }}>
-          {foreground && <LegacyPlayerScreenView viewport={playerViewport}
+          {!backgrounded && <LegacyPlayerScreenView viewport={playerViewport}
             interactionReady={focused && !isStandByActive} onEnterStandBy={standBy.enterStandBy} onClose={closeSheet} />}
         </View>
       </BottomSheet>

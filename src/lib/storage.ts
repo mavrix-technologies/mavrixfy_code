@@ -66,6 +66,7 @@ export interface AppSettings {
   streamingQuality: "auto" | "low" | "medium" | "high";
   highQualityUnlocked: boolean;
   highQualityExpiresAt?: number | null;
+  preferJioSaavnAudio: boolean;
   videoBackgroundQuality: YouTubeVideoQualityPreference;
   smartAutoplayEnabled: boolean;
   smartAutoplayMode: SmartAutoplayMode;
@@ -86,6 +87,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   streamingQuality: "medium",
   highQualityUnlocked: false,
   highQualityExpiresAt: null,
+  preferJioSaavnAudio: false,
   videoBackgroundQuality: "auto",
   smartAutoplayEnabled: true,
   smartAutoplayMode: "similar-trending",
@@ -427,6 +429,7 @@ export async function getSettings(): Promise<AppSettings> {
     ...saved,
     equalizer: normalizeEqualizer(saved.equalizer),
     hapticsEnabled: Boolean(saved.hapticsEnabled),
+    preferJioSaavnAudio: saved.preferJioSaavnAudio === true,
     videoBackgroundQuality: normalizeYouTubeVideoQuality(saved.videoBackgroundQuality),
     smartAutoplayEnabled: saved.smartAutoplayEnabled !== undefined ? Boolean(saved.smartAutoplayEnabled) : DEFAULT_SETTINGS.smartAutoplayEnabled,
     smartAutoplayMode: normalizeSmartAutoplayMode(saved.smartAutoplayMode),

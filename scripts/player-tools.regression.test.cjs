@@ -11,9 +11,11 @@ function load(file, deps) {
   const module = { exports: {} };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React, esModuleInterop: true,
-  } }).outputText, { React: react, module, exports: module.exports, require: name => {
+  } }).outputText, { React: react, module, exports: module.exports, require: function resolveTestDependency(name) { if (name.startsWith("@expo/vector-icons/")) return { __esModule: true, default: resolveTestDependency("@expo/vector-icons")[name.split("/").pop()] };
+
     if (!(name in deps)) throw Error(`Missing dependency ${name}`); return deps[name];
-  } });
+
+} });
   return module.exports;
 }
 function nodes(tree) {
@@ -22,9 +24,7 @@ function nodes(tree) {
 }
 
 test('playback status distinguishes buffering, reconnecting and verification failures', () => {
-  const { playbackStatusLabel: label } = load('src/features/player/components/PlaybackInfo.tsx', {
-    react, 'react-native': native, '@/contexts/PlayerContextDefs': {}, '@/services/audio/PlaybackEngine': {},
-  });
+  const { playbackStatusLabel: label } = load('src/services/audio/playbackStatusLabel.ts', {});
   assert.equal(label({}), null);
   assert.equal(label({ isLoading: true }), 'Loading…');
   assert.equal(label({ isBuffering: true }), 'Buffering…');
@@ -35,41 +35,46 @@ test('playback status distinguishes buffering, reconnecting and verification fai
 
 test('quality UI reports source bitrate, never the requested tier as measured bitrate', () => {
   let status = null;
-  const quality = { requested: 'high', actualBitrate: 128, qualityLabel: '128kbps' };
+  const quality = { requested: 'high', actualBitrate: 128, qualityLabel: '128kbps', codec: 'aac' };
   const { PlaybackInfo } = load('src/features/player/components/PlaybackInfo.tsx', {
     react, 'react-native': native, '@/contexts/PlayerContextDefs': { usePlayerActions: () => ({ playbackQuality: quality }) },
     '@/services/audio/PlaybackEngine': { usePlaybackEngineSelector: () => status },
+    '@/services/audio/playbackStatusLabel': load('src/services/audio/playbackStatusLabel.ts', {}),
   });
   const text = () => nodes(PlaybackInfo({})).filter(node => node.type === 'Text').map(node => node.props.children[0]);
-  assert.deepEqual(text(), ['High requested · 128 kbps']);
+  assert.deepEqual(text(), ['High requested · AAC · 128 kbps']);
   status = 'Loading…'; assert.deepEqual(text(), ['Loading…']);
   assert.match(PlaybackInfo({}).props.accessibilityLabel, /High requested · bitrate unavailable/);
-  status = null; quality.actualBitrate = 0; assert.deepEqual(text(), ['High requested · bitrate unavailable']);
+  status = null; quality.actualBitrate = 0; quality.codec = undefined;
+  assert.deepEqual(text(), ['High requested · bitrate unavailable']);
   quality.qualityLabel = 'Offline'; quality.actualBitrate = 192;
   assert.deepEqual(text(), ['Offline · 192 kbps']);
+  quality.codec = 'opus'; status = 'Buffering…';
+  assert.match(PlaybackInfo({}).props.accessibilityLabel, /Offline · OPUS · 192 kbps/);
 });
 
-test('audio output uses the native iOS picker and hides it in Expo Go or older native builds', () => {
-  let managers = 0;
-  for (const [expoGo, supported, expected] of [[false, true, true], [true, true, false], [false, false, false]]) {
+test('iOS Expo output picker remains available without the custom playback module', () => {
+  for (const expoGo of [true, false]) {
+    let nativeLookups = 0, touched = 0;
     const { AudioOutputPicker } = load('src/features/player/components/AudioOutputPicker.tsx', {
       react, 'react-native': native, expo: { isRunningInExpoGo: () => expoGo },
-      'expo-modules-core': { requireOptionalNativeModule: () => ({ audioOutputPickerAvailable: supported }),
-        requireNativeViewManager: () => { managers++; return 'NativeAirPlay'; } },
+      'expo-video': { VideoAirPlayButton: 'ExpoAirPlay' },
+      'expo-modules-core': { requireOptionalNativeModule: () => { nativeLookups++; return null; } },
       '@expo/vector-icons': {}, '@/utils/globalToast': {},
     });
-    const tree = AudioOutputPicker({});
-    assert.equal(Boolean(tree), expected);
-    if (expected) assert.ok(nodes(tree).some(node => node.type === 'NativeAirPlay'));
+    const tree = AudioOutputPicker({ label: true, onTouchActivity: () => touched++ });
+    const button = nodes(tree).find(node => node.type === 'ExpoAirPlay');
+    assert.ok(button); assert.equal(button.props.prioritizeVideoDevices, false);
+    button.props.onBeginPresentingRoutes(); assert.equal(touched, 1);
+    assert.equal(nativeLookups, 0);
   }
-  assert.equal(managers, 1);
 });
 
 test('Android uses the system output switcher on API 34 and Bluetooth settings on older versions', async () => {
   for (const version of [34, 30]) {
     const calls = [];
     const { AudioOutputPicker } = load('src/features/player/components/AudioOutputPicker.tsx', {
-      react, 'react-native': { ...native, Platform: { OS: 'android', Version: version },
+      react, 'expo-video': { VideoAirPlayButton: 'ExpoAirPlay' }, 'react-native': { ...native, Platform: { OS: 'android', Version: version },
         Linking: { sendIntent: async action => calls.push(action) } },
       expo: { isRunningInExpoGo: () => false },
       'expo-modules-core': { requireOptionalNativeModule: () => ({ showAudioOutputPicker: async () => { calls.push('system'); return true; } }) },

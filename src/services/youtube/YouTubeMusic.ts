@@ -14,6 +14,7 @@ export interface YouTubeStream {
   videoId: string; url: string; headers: Record<string, string>; expiresAt: number;
   bitrate: number; mimeType: string; codec: string; clientProfile: string; resolutionId: string;
   requestedQuality?: string;
+  preferJioSaavn?: boolean;
   durationSeconds?: number;
 }
 export interface YouTubeVideoStream extends YouTubeStream { height: number }
@@ -203,30 +204,47 @@ export async function relatedYouTubeSongs(song: Song, signal?: AbortSignal): Pro
 const streams = new Map<string, YouTubeStream>();
 const pending = new Map<string, Promise<YouTubeStream>>();
 const latest = new Map<string, Promise<YouTubeStream>>();
+const rejectedAlternates = new Map<string, number>();
 // A signed URL can be bound to the old connection. This does not stop audio
 // already handed to the player or clear catalog/library caches.
 export function clearYouTubeConnectionStreams(): void {
   streams.clear();
   pending.clear();
   latest.clear();
+  rejectedAlternates.clear();
   transport?.resetVerification?.();
 }
-export function peekYouTubeStream(song: Song, quality?: string): YouTubeStream | undefined {
+export function peekYouTubeStream(song: Song, quality?: string, includeExpired = false): YouTubeStream | undefined {
   const stream = streams.get(song.id);
-  return stream && stream.expiresAt - Date.now() > 120000 && (!quality || stream.requestedQuality === quality) ? stream : undefined;
+  // Error handling may identify an expired source; playback resolution never reuses it.
+  return stream && (includeExpired || stream.expiresAt - Date.now() > 120000) && (!quality || stream.requestedQuality === quality) ? stream : undefined;
 }
-export async function resolveYouTubeStream(song: Song, quality?: string): Promise<YouTubeStream> {
+export async function resolveYouTubeStream(song: Song, quality?: string, preferJioSaavn = false): Promise<YouTubeStream> {
   const requestedQuality = quality || "medium";
   const cached = peekYouTubeStream(song, requestedQuality);
-  if (cached) { latest.delete(song.id); return cached; }
-  const key = `${song.id}:${requestedQuality}`;
+  if (cached && Boolean(cached.preferJioSaavn) === preferJioSaavn) { latest.delete(song.id); return cached; }
+  const key = `${song.id}:${requestedQuality}:${preferJioSaavn}`;
   const inFlight = pending.get(key);
   if (inFlight) { latest.set(song.id, inFlight); return inFlight; }
   const videoId = song.youtubeVideoId || song.videoId || song.id.replace(/^youtube_/, "");
-  const promise = invoke((module, id) => module.resolveStream(videoId, requestedQuality, id)).then((stream) => {
+  const promise = (async () => {
+    if (preferJioSaavn) {
+      try {
+        if (Date.now() - (rejectedAlternates.get(`${song.id}:JIOSAAVN`) || 0) < 60_000)
+          return invoke((module, id) => module.resolveStream(videoId, requestedQuality, id));
+        const { preferredJioSaavnStream } = await import("../audio/preferredJioSaavnStream");
+        const alternate = await preferredJioSaavnStream(song, videoId);
+        if (alternate) return alternate;
+      } catch {
+        // Optional source availability must not prevent original playback.
+      }
+    }
+    return invoke((module, id) => module.resolveStream(videoId, requestedQuality, id));
+  })().then((stream) => {
     if (!stream.url.startsWith("https://") || stream.expiresAt <= Date.now()) throw new Error("Audio stream expired");
     if (pending.get(key) !== promise) throw new Error("Audio stream request superseded");
     stream.requestedQuality = requestedQuality;
+    stream.preferJioSaavn = preferJioSaavn;
     if (latest.get(song.id) === promise) {
       if (streams.size >= 60) streams.delete(streams.keys().next().value!);
       streams.set(song.id, stream);
@@ -242,7 +260,10 @@ export async function resolveYouTubeStream(song: Song, quality?: string): Promis
 }
 export function invalidateYouTubeStream(song: Pick<Song, "id">, rejectProfile = false): void {
   const previous = streams.get(song.id);
-  if (rejectProfile && previous) transport?.rejectStream(previous.resolutionId);
+  if (rejectProfile && previous?.clientProfile === "JIOSAAVN") {
+    if (rejectedAlternates.size >= 60) rejectedAlternates.delete(rejectedAlternates.keys().next().value!);
+    rejectedAlternates.set(`${song.id}:${previous.clientProfile}`, Date.now());
+  } else if (rejectProfile && previous) transport?.rejectStream(previous.resolutionId);
   streams.delete(song.id);
   latest.delete(song.id);
   for (const key of pending.keys()) if (key.startsWith(`${song.id}:`)) pending.delete(key);

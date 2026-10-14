@@ -13,7 +13,7 @@ import { useLikedSongs } from "@/contexts/PlayerContext";
 import { type FollowedArtist } from "@/lib/followedArtists";
 import { getSavedCollections, type SavedCollection } from "@/lib/savedCollections";
 import { triggerImpact } from "@/lib/haptics";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useFocusEffect } from "expo-router";
@@ -57,6 +57,17 @@ const LibraryEmptyState = React.memo(({ onAddPress }: { onAddPress: () => void }
   </View>
 ));
 LibraryEmptyState.displayName = "LibraryEmptyState";
+
+const LibraryTopActions = React.memo(function LibraryTopActions({ onSearch, onCreate }: {
+  onSearch: () => void; onCreate: () => void;
+}) {
+  return <View style={styles.topHeaderActions}>
+    <AppTopHeaderIconButton customIcon={<NavSearchIcon size={20} color="#F8FBF9" />}
+      accessibilityLabel="Search library" onPress={onSearch} haptic={false} />
+    <AppTopHeaderIconButton iconName="add" accessibilityLabel="Create playlist" onPress={onCreate}
+      iconSize={26} iconColor="#F8FBF9" variant="default" haptic={true} />
+  </View>;
+});
 
 export function LibraryScreen() {
   const insets = useSafeAreaInsets();
@@ -208,28 +219,9 @@ export function LibraryScreen() {
     []
   );
 
-  const headerActions = useMemo(
-    () => (
-      <View style={styles.topHeaderActions}>
-        <AppTopHeaderIconButton
-          customIcon={<NavSearchIcon size={20} color="#F8FBF9" />}
-          accessibilityLabel="Search library"
-          onPress={openLibrarySearch}
-          haptic={false}
-        />
-        <AppTopHeaderIconButton
-          iconName="add"
-          accessibilityLabel="Create playlist"
-          onPress={handleAddPress}
-          iconSize={26}
-          iconColor="#F8FBF9"
-          variant="default"
-          haptic={true}
-        />
-      </View>
-    ),
-    [openLibrarySearch, handleAddPress]
-  );
+  const headerActions = useMemo(() => (
+    <LibraryTopActions onSearch={openLibrarySearch} onCreate={handleAddPress} />
+  ), [openLibrarySearch, handleAddPress]);
 
   const listHeader = useMemo(
     () => (
@@ -273,8 +265,8 @@ export function LibraryScreen() {
     [totalTrackCount, playlists.length, openDownloads]
   );
 
-  if (isLoading && playlists.length === 0) {
-    return (
+
+  return (isLoading && playlists.length === 0 ? (
       <View style={styles.container}>
         <LinearGradient
           colors={[Colors.backgroundGradientStart, Colors.background, Colors.background]}
@@ -293,10 +285,7 @@ export function LibraryScreen() {
           <SongRowSkeleton count={6} />
         </View>
       </View>
-    );
-  }
-
-  return (
+  ) : (
     <View style={styles.container}>
       <LinearGradient
         colors={[Colors.backgroundGradientStart, Colors.background, Colors.background]}
@@ -357,8 +346,7 @@ export function LibraryScreen() {
         onClose={resetCreateModal}
       />
     </View>
-  );
-}
+  ));}
 
 export default LibraryScreen;
 

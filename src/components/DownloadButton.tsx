@@ -13,7 +13,7 @@ import type { Song } from '@/lib/musicData';
 import { requestDownloadWithRewardedAd } from '@/services/ads/rewardedDownloadAdService';
 import { resolvePlaybackUrlWithDetails, withResolvedPlaybackUrl } from '@/services/audio/PlayerPlaybackResolver';
 import { isYouTubeSong } from '@/services/youtube/YouTubeMusic';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { ActivityIndicator,Alert,Pressable,StyleSheet,Text,View } from 'react-native';

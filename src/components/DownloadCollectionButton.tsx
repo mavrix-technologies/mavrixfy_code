@@ -13,7 +13,7 @@ import { onQueueEvent } from "@/lib/downloads/downloadManager";
 import { formatBytes } from "@/lib/downloads/storagePolicy";
 import { triggerImpact } from "@/lib/haptics";
 import type { Song } from "@/lib/musicData";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
 import { useCallback,useEffect,useMemo,useState,type ComponentProps } from "react";
 import {

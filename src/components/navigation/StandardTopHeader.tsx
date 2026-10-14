@@ -1,5 +1,5 @@
 import { safeGoBack } from "@/utils/navigation";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import React, { memo } from "react";
 import {
   Insets,

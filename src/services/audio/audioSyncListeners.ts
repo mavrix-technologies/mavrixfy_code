@@ -1,6 +1,6 @@
 import { getSettings } from "@/lib/storage";
 import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
-import { isYouTubeSong, peekYouTubeStream } from "@/services/youtube/YouTubeMusic";
+import { isYouTubeSong, peekYouTubeStream, rejectYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
@@ -150,7 +150,7 @@ export function useAudioSyncListeners({
         const youtubeStream = !localTrack && activeSong && isYouTubeSong(activeSong) ? peekYouTubeStream(activeSong) : undefined;
         if (youtubeStream) {
           const bitrate = Number.isFinite(youtubeStream.bitrate) && youtubeStream.bitrate > 0 ? Math.round(youtubeStream.bitrate / 1000) : 0;
-          setPlaybackQuality?.((previous) => ({ ...previous, actualBitrate: bitrate,
+          setPlaybackQuality?.((previous) => ({ ...previous, actualBitrate: bitrate, codec: youtubeStream.codec,
             qualityLabel: `${bitrate > 0 ? `${bitrate}kbps` : "Original audio"}${youtubeStream.codec ? ` · ${youtubeStream.codec}` : ""}`, isFallback: false }));
         }
 
@@ -324,6 +324,16 @@ export function useAudioSyncListeners({
           failedSong.id === error.trackId ||
           failedSong.id.replace(/^youtube_/, "") === String(error.trackId).replace(/^youtube_/, "");
         if (!isSameTrack) return;
+        if (failedSong && peekYouTubeStream(failedSong, undefined, true)?.clientProfile === "JIOSAAVN") {
+          // Startup is owned by the awaited Play command; subsequent errors
+          // fall back once to YouTube at the same playback position.
+          if (pendingPlayRequestRef.current) return;
+          if (desiredPlayStateRef.current !== false) {
+            rejectYouTubeStream(failedSong);
+            void playSongRef.current(failedSong, queueRef.current, Math.max(0, positionSecondsRef.current));
+            return;
+          }
+        }
         // The native source owns reconnects. A terminal error must not trigger
         // a second retry loop that competes with its queue/selection generation.
         logger.error("[Player] PlaybackError event", error);

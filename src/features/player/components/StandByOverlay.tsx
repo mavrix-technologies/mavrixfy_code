@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import React, { memo, useCallback, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
 import {
   AccessibilityInfo,
   BackHandler,
@@ -12,7 +12,8 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 import { Image } from "expo-image";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { BatteryState, useBatteryLevel, useBatteryState } from "expo-battery";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppIsActive } from "@/lib/appActivity";
@@ -112,7 +113,12 @@ export const StandByOverlay = memo(function StandByOverlay({
     fontScale, { top: verticalInset, right: 0, bottom: verticalInset, left: 0 });
   // Until the native preference is known, use a static transition.
   const [reduceMotion, setReduceMotion] = useState(true);
-  const [panel, setPanel] = useState<StandByPanel | null>(null);
+  const [panelState, setPanelState] = useState<{ visible: boolean; panel: StandByPanel | null }>({ visible, panel: null });
+  if (panelState.visible !== visible) setPanelState({ visible, panel: null });
+  const panel = panelState.visible === visible ? panelState.panel : null;
+  const setPanel = useCallback((selected: StandByPanel | null) => {
+    setPanelState({ visible, panel: selected });
+  }, [visible]);
   const [dimOpacity] = useState(() => new Animated.Value(1));
   const dimTargetRef = useRef(1);
   useEffect(() => {
@@ -135,21 +141,18 @@ export const StandByOverlay = memo(function StandByOverlay({
   const backToControls = useCallback(() => {
     onTouchActivity();
     setPanel(null);
-  }, [onTouchActivity]);
+  }, [onTouchActivity, setPanel]);
 
-  useEffect(() => {
-    if (!visible) setPanel(null);
-  }, [visible]);
-
+  const handleHardwareBack = useEffectEvent(() => {
+    if (panel === null) onExitStandBy?.();
+    else backToControls();
+    return true;
+  });
   useEffect(() => {
     if (!visible) return;
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (panel === null) onExitStandBy?.();
-      else backToControls();
-      return true;
-    });
+    const subscription = BackHandler.addEventListener("hardwareBackPress", handleHardwareBack);
     return () => subscription.remove();
-  }, [visible, panel, onExitStandBy, backToControls]);
+  }, [visible]);
 
   useEffect(() => {
     let mounted = true;
@@ -197,39 +200,9 @@ export const StandByOverlay = memo(function StandByOverlay({
   const compactControls = layout.compact || layout.controlsWidth < STANDBY_CONTROL_SIZE * 4 + 64;
   const artworkSize = Math.max(0, layout.artworkSize - 24);
   const verticalSpacing = { gap: Math.max(10, Math.min(28, Math.round(layout.contentHeight / 20))) };
-  const controlButtonStyle = [styles.controlButton, compactControls && styles.compactControl];
-
-  const controlRows = (
-    <View style={[styles.controlRows, compactControls && styles.compactRows]}>
-      <View testID="standby-playback-controls" style={styles.controls}>
-        <Pressable onPress={() => runAction(onToggleShuffle)} style={controlButtonStyle} accessibilityRole="button" accessibilityLabel="Shuffle" accessibilityState={{ selected: isShuffled }}>
-          <MaterialCommunityIcons name="shuffle-variant" size={24} color={isShuffled ? selectedColor : inactiveColor} />
-        </Pressable>
-        <Pressable onPress={() => runAction(onSkipPrev)} style={[...controlButtonStyle, styles.flexControl]} accessibilityRole="button" accessibilityLabel="Previous track">
-          <MaterialCommunityIcons name="skip-previous" size={compactControls ? 36 : 38} color={primaryColor} />
-        </Pressable>
-        <View style={[styles.playSlot, compactControls && styles.compactPlaySlot]}>
-          <Pressable
-            onPress={() => runAction(onTogglePlay)}
-            style={({ pressed }) => [styles.playButton, compactControls && styles.compactPlayButton, { backgroundColor: primaryColor }, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel={isPlaying ? "Pause" : "Play"}
-          >
-            <Ionicons name={isPlaying ? "pause" : "play"} size={30} color="#000000" />
-          </Pressable>
-        </View>
-        <Pressable onPress={() => runAction(onSkipNext)} style={[...controlButtonStyle, styles.flexControl]} accessibilityRole="button" accessibilityLabel="Next track">
-          <MaterialCommunityIcons name="skip-next" size={compactControls ? 36 : 38} color={primaryColor} />
-        </Pressable>
-        <Pressable onPress={() => runAction(onToggleRepeat)} style={controlButtonStyle} accessibilityRole="button" accessibilityLabel={`Repeat: ${repeatMode}`} accessibilityState={{ selected: repeatMode !== "off" }}>
-          <MaterialCommunityIcons name={repeatMode === "one" ? "repeat-once" : "repeat"} size={24} color={repeatMode !== "off" ? selectedColor : inactiveColor} />
-        </Pressable>
-      </View>
-      <View>
-        <StandByActions timerLabel={sleepTimerLabel} compact={layout.compact} primaryColor={primaryColor} secondaryColor={secondaryColor} onSelectPanel={setPanel} onTouchActivity={onTouchActivity} />
-      </View>
-    </View>
-  );
+  const controlRows = renderStandByPlaybackControls({ compactControls, compactActions: layout.compact,
+    runAction, isShuffled, onToggleShuffle, onSkipPrev, onTogglePlay, isPlaying, onSkipNext, onToggleRepeat,
+    repeatMode, primaryColor, secondaryColor, selectedColor, inactiveColor, sleepTimerLabel, setPanel, onTouchActivity });
 
   // Keep transport visible; short or enlarged-text windows
   // scroll the whole pane, where all controls cannot physically fit together.
@@ -373,6 +346,49 @@ export const StandByOverlay = memo(function StandByOverlay({
     </View>
   );
 });
+
+function renderStandByPlaybackControls({ compactControls, compactActions, runAction, isShuffled,
+  onToggleShuffle, onSkipPrev, onTogglePlay, isPlaying, onSkipNext, onToggleRepeat, repeatMode,
+  primaryColor, secondaryColor, selectedColor, inactiveColor, sleepTimerLabel, setPanel, onTouchActivity }: Pick<StandByOverlayProps,
+  "isShuffled" | "onToggleShuffle" | "onSkipPrev" | "onTogglePlay" | "isPlaying" | "onSkipNext" | "onToggleRepeat" | "repeatMode" | "sleepTimerLabel" | "onTouchActivity"> & {
+    compactControls: boolean; compactActions: boolean; runAction: (action: () => void) => void;
+    primaryColor: string; secondaryColor: string; selectedColor: string; inactiveColor: string;
+    setPanel: (panel: StandByPanel) => void;
+  }) {
+  const controlButtonStyle = [styles.controlButton, compactControls && styles.compactControl];
+  return (
+    <View style={[styles.controlRows, compactControls && styles.compactRows]}>
+      <View testID="standby-playback-controls" style={styles.controls}>
+        <Pressable onPress={() => runAction(onToggleShuffle)} style={controlButtonStyle} accessibilityRole="button" accessibilityLabel="Shuffle" accessibilityState={{ selected: isShuffled }}>
+          <MaterialCommunityIcons name="shuffle-variant" size={24} color={isShuffled ? selectedColor : inactiveColor} />
+        </Pressable>
+        <Pressable onPress={() => runAction(onSkipPrev)} style={[...controlButtonStyle, styles.flexControl]} accessibilityRole="button" accessibilityLabel="Previous track">
+          <MaterialCommunityIcons name="skip-previous" size={compactControls ? 36 : 38} color={primaryColor} />
+        </Pressable>
+        <View style={[styles.playSlot, compactControls && styles.compactPlaySlot]}>
+          <Pressable
+            onPress={() => runAction(onTogglePlay)}
+            style={({ pressed }) => [styles.playButton, compactControls && styles.compactPlayButton, { backgroundColor: primaryColor }, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel={isPlaying ? "Pause" : "Play"}
+          >
+            <Ionicons name={isPlaying ? "pause" : "play"} size={30} color="#000000" />
+          </Pressable>
+        </View>
+        <Pressable onPress={() => runAction(onSkipNext)} style={[...controlButtonStyle, styles.flexControl]} accessibilityRole="button" accessibilityLabel="Next track">
+          <MaterialCommunityIcons name="skip-next" size={compactControls ? 36 : 38} color={primaryColor} />
+        </Pressable>
+        <Pressable onPress={() => runAction(onToggleRepeat)} style={controlButtonStyle} accessibilityRole="button" accessibilityLabel={`Repeat: ${repeatMode}`} accessibilityState={{ selected: repeatMode !== "off" }}>
+          <MaterialCommunityIcons name={repeatMode === "one" ? "repeat-once" : "repeat"} size={24} color={repeatMode !== "off" ? selectedColor : inactiveColor} />
+        </Pressable>
+      </View>
+      <View>
+        <StandByActions timerLabel={sleepTimerLabel} compact={compactActions} primaryColor={primaryColor} secondaryColor={secondaryColor} onSelectPanel={setPanel} onTouchActivity={onTouchActivity} />
+      </View>
+    </View>
+
+  );
+}
 
 const subscribeInactive = () => () => {};
 

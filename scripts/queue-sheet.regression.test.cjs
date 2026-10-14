@@ -81,7 +81,7 @@ function fixture({ platform = "ios" } = {}) {
   vm.runInNewContext(compile("src/services/audio/queueDrag.ts"), { module: helper, exports: helper.exports });
   vm.runInNewContext(compile("src/components/styles/queueBottomSheetStyles.ts"), {
     module: styles, exports: styles.exports,
-    require(name) {
+    require: function resolveTestDependency(name) {
       if (name === "react-native") return { StyleSheet: { create: value => value, hairlineWidth: 1 } };
       if (name.endsWith("colors")) return { __esModule: true, default: { primary: "green" } };
       throw new Error(`Unexpected style dependency: ${name}`);
@@ -89,7 +89,8 @@ function fixture({ platform = "ios" } = {}) {
   });
   vm.runInNewContext(compile("src/components/QueueBottomSheet.tsx"), {
     module: compiled, exports: compiled.exports,
-    require(name) {
+    require: function resolveTestDependency(name) {
+      if (name.startsWith("@expo/vector-icons/")) return { __esModule: true, default: resolveTestDependency("@expo/vector-icons")[name.split("/").pop()] };
       if (name === "react") return { ...react, default: react };
       if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
       if (name === "react-native") return { View: "View", Text: "Text", Pressable: "Pressable",

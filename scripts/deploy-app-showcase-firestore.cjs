@@ -180,7 +180,7 @@ async function main() {
     enabled: options.enabled !== undefined ? options.enabled : (existing.title ? existing.enabled : true),
     devEnabled: options.devEnabled !== undefined ? options.devEnabled : (existing.title ? existing.devEnabled : true),
     title: options.title !== undefined ? options.title : "Unlock High Quality Audio",
-    subtitle: options.subtitle !== undefined ? options.subtitle : "Experience crystal-clear studio sound and listen to your songs in maximum 320 kbps fidelity.",
+    subtitle: options.subtitle !== undefined ? options.subtitle : "Listen in the best audio quality available from each source.",
     ctaText: options.ctaText !== undefined ? options.ctaText : "UNLOCK HIGH QUALITY",
     ctaRoute: options.ctaRoute !== undefined ? options.ctaRoute : "/profile/streaming-downloads",
     subtext: options.subtext !== undefined ? options.subtext : "Adjust audio streaming quality anytime in Settings.",

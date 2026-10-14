@@ -3,7 +3,7 @@ import { ArtistCard,getAllPopularArtists,searchArtists } from "@/data/providers/
 import { triggerImpact } from "@/lib/haptics";
 import { getBestImageUrl } from "@/lib/musicData";
 import { safeGoBack } from "@/utils/navigation";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";

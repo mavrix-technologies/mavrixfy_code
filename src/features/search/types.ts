@@ -1,7 +1,7 @@
 import type { Song } from "@/lib/musicData";
 import type { ResultFilter } from "@/lib/searchRepository";
 import type { SearchHistoryItem } from "@/lib/storage";
-import type { Ionicons } from "@expo/vector-icons";
+import type Ionicons from "@expo/vector-icons/Ionicons";
 
 export interface RecentSearchItem {
   id: string;

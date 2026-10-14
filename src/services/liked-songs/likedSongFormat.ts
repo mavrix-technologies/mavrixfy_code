@@ -31,8 +31,11 @@ function youtubeIdFromUrl(url: unknown): string | null {
   } catch { return null; }
 }
 export function likedSongDocumentIds(song: Song): string[] {
+  return [...likedSongDocumentIdSet(song)];
+}
+export function likedSongDocumentIdSet(song: Song): Set<string> {
   const aliases = Array.isArray(song.likedSongDocumentIds) ? song.likedSongDocumentIds : [];
-  return [...new Set([song.id, ...aliases])].filter(id => typeof id === "string" && !!id && !id.includes("/"));
+  return new Set([song.id, ...aliases].filter(id => typeof id === "string" && !!id && !id.includes("/")));
 }
 /** Only offer a JioSaavn-to-YouTube mapping when this like has a usable legacy audio URL. */
 export function hasJioSaavnAudioUrl(song: Partial<Song>): boolean {

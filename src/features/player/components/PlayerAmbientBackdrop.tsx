@@ -62,8 +62,8 @@ export const PlayerAmbientBackdrop = React.memo(function PlayerAmbientBackdrop({
   const [stopsA, setStopsA] = useState<ArtworkAmbientGradientStops>(initialStops);
   const [stopsB, setStopsB] = useState<ArtworkAmbientGradientStops>(initialStops);
   const activeStopsRef = useRef<ArtworkAmbientGradientStops>(initialStops);
-  const opacityA = useRef(new Animated.Value(1)).current;
-  const opacityB = useRef(new Animated.Value(0)).current;
+  const [opacityA] = useState(() => new Animated.Value(1));
+  const [opacityB] = useState(() => new Animated.Value(0));
   const activeLayerRef = useRef<0 | 1>(0);
 
   useEffect(() => {

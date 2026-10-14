@@ -1,6 +1,6 @@
 import Colors from "@/constants/colors";
 import { triggerImpact } from "@/lib/haptics";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { memo,useCallback } from "react";
 import { Pressable,StyleSheet,Text,View } from "react-native";

@@ -4,7 +4,7 @@
 
 import Colors from "@/constants/colors";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { router } from "expo-router";
 import { ActivityIndicator,Pressable,StyleSheet,Text,View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

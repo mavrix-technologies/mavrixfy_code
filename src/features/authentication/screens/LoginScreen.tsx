@@ -6,7 +6,7 @@ import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
 import { getGoogleMobileIdToken } from "@/lib/googleAuth";
 import { triggerImpact,triggerNotification } from "@/lib/haptics";
 import { openPrivacyPolicy,openTermsOfService } from "@/lib/legal";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import Constants from "expo-constants";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";

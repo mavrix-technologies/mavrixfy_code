@@ -6,7 +6,7 @@ import { triggerImpact } from "@/lib/haptics";
 import { logger } from "@/lib/logger";
 import { type Song } from "@/lib/musicData";
 import { usePlaybackRowState } from "@/services/audio/PlaybackEngine";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { MusicArtwork } from "@/components/MusicArtwork";
 import { router } from "expo-router";

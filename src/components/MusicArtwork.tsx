@@ -1,5 +1,5 @@
 import { Image, type ImageProps } from "expo-image";
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useLayoutEffect, useRef, useState } from "react";
 import { PixelRatio } from "react-native";
 import { artworkPixelSize, youTubeDisplayArtworkUrl, youTubeArtworkFallbackUrl } from "@/services/youtube/YouTubeArtwork";
 
@@ -12,7 +12,7 @@ export const MusicArtwork = memo(function MusicArtwork({ uri, size = 148, onErro
   const display = failed?.primary === primary ? failed.fallback : primary;
   const fallback = useMemo(() => youTubeArtworkFallbackUrl(uri, display), [uri, display]);
   const activeSource = useRef(display);
-  activeSource.current = display;
+  useLayoutEffect(() => { activeSource.current = display; }, [display]);
   const source = useMemo(() => display ? { uri: display } : undefined, [display]);
   const handleError = useCallback<NonNullable<ImageProps["onError"]>>(event => {
     if (activeSource.current !== display) return;

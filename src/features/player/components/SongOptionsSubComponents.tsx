@@ -1,6 +1,6 @@
 import Colors from "@/constants/colors";
 import { UserPlaylist } from "@/lib/storage";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import React,{ useCallback } from "react";
 import { ActivityIndicator,Pressable,Text,View } from "react-native";

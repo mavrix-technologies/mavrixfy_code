@@ -2,7 +2,7 @@ import { displayArtworkUrl } from "@/lib/artworkDisplay";
 import Colors from "@/constants/colors";
 import type { ArtistCard } from "@/data/providers/ArtistProvider";
 import { getBestImageUrl } from "@/lib/musicData";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import { memo,useCallback } from "react";
 import {

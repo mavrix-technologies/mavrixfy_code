@@ -15,7 +15,7 @@ test('LastWave curves use 15 ISO bands and ±8dB validated migration',()=>{
 });
 
 for (const platform of ['ios', 'android']) test(`${platform}: disabled/flat EQ bypasses filters, enabled EQ retains safe headroom and system ducking`, async () => {
- const dsp = load('src/services/audio/equalizerDsp.ts', { './equalizerConfig': config });
+ const dsp = load('scripts/helpers/equalizer-dsp-fixture.ts', { '../../src/services/audio/equalizerConfig': config });
  const f = playerFixture({ platform, headroomDb: dsp.calculateEqHeadroomDb });
  await f.StandardAudioPlayer.setupPlayer();
  await f.StandardAudioPlayer.setQueue(tracks);
@@ -49,7 +49,7 @@ for (const platform of ['ios', 'android']) test(`${platform}: disabled/flat EQ b
  assert.equal(gain.connections.size, 0);
 });
 test('combined-response headroom is finite and bands above sample rate limit are skipped',()=>{
- const dsp=load('src/services/audio/equalizerDsp.ts',{'./equalizerConfig':config});
+ const dsp=load('scripts/helpers/equalizer-dsp-fixture.ts',{'../../src/services/audio/equalizerConfig':config});
  assert.equal(dsp.calculateEqHeadroomDb(Array(15).fill(0),48000),0);
  assert.ok(dsp.calculateEqHeadroomDb(Array(15).fill(8),48000)>8);
  const gains=Array(15).fill(0);gains[14]=8;assert.equal(dsp.calculateEqHeadroomDb(gains,22050),0);

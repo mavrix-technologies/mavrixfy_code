@@ -4,7 +4,16 @@ import { Buffer } from "node:buffer";
 import { loadYouTubeNodeTransport } from "./helpers/youtube-node-transport.mjs";
 const api = await loadYouTubeNodeTransport();
 try {
-  if (process.argv[2] === "--explore") {
+  if (process.argv[2] === "--quality-audit") {
+    const videoId = process.argv[3];
+    if (!/^[\w-]{11}$/.test(videoId || "")) throw new Error("Provide an 11-character video ID");
+    const startedAt = Date.now();
+    const stream = await api.resolveStream(videoId, "high", "probe-quality");
+    console.log(JSON.stringify({ videoId, platform: process.env.MAVRIXFY_PROBE_PLATFORM || "android",
+      requested: "high", client: stream.clientProfile, codec: stream.codec, mime: stream.mimeType,
+      bitrateKbps: Math.round(stream.bitrate / 1000), durationSeconds: stream.durationSeconds,
+      resolutionMs: Date.now() - startedAt }));
+  } else if (process.argv[2] === "--explore") {
     const explore = await api.explore("probe-explore");
     console.log(JSON.stringify({ sections: explore.sections.map(section => ({ title: section.title, category: section.category,
       songs: section.songs.length, items: section.playlists.map(item => ({ name: item.name, kind: item.kind, id: item.id })) })) }));

@@ -1,9 +1,7 @@
-import {
-FontAwesome,
-FontAwesome5,
-Ionicons,
-MaterialCommunityIcons,
-} from "@expo/vector-icons";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { memo } from "react";
 import { Pressable,ScrollView,Text,View } from "react-native";
 import { styles } from "./shareModalStyles";

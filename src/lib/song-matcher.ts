@@ -31,7 +31,7 @@ export function selectImportedSong(row: ParsedSong, candidates: Song[]): Song | 
   if (!title) return null;
   const ranked = candidates.flatMap(song => {
     if (!youtubeIdentity(song) || titleKey(song.title) !== title || versionKey(song.title) !== versionKey(row.title)) return [];
-    const names = artistNames(song.artist), shared = artists.filter(name => names.includes(name)).length;
+    const names = new Set(artistNames(song.artist)), shared = artists.filter(name => names.has(name)).length;
     if (artists.length && !shared) return [];
     const delta = duration > 0 && song.duration > 0 ? Math.abs(duration - song.duration) : 0;
     if (duration > 0 && song.duration > 0 && delta > Math.max(8, duration * 0.05)) return [];
