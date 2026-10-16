@@ -2,10 +2,10 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import { useVisibleImageAnimation } from "@/lib/useVisibleImageAnimation";
 import React from "react";
-import { Pressable,StyleSheet,Text,View } from "react-native";
-import Animated, { type SharedValue } from "react-native-reanimated";
+import { Pressable,StyleSheet,Text,View,type ViewStyle } from "react-native";
+import Animated, { type AnimatedStyle,type SharedValue } from "react-native-reanimated";
 
-export const UNIFIED_HEADER_TOP_BAR_HEIGHT = 48;
+import { UNIFIED_HEADER_TOP_BAR_HEIGHT } from "../constants/homeNavConstants";
 
 export interface HomeTopBarRowProps {
   handleProfilePress: () => void;
@@ -15,7 +15,7 @@ export interface HomeTopBarRowProps {
   headerIconColor: string;
   titleColor: string;
   titleText: string;
-  topBarAnimatedStyle: any;
+  topBarAnimatedStyle: AnimatedStyle<ViewStyle>;
   scrollY?: number | SharedValue<number>;
 }
 

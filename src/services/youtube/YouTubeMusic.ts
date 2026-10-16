@@ -279,11 +279,19 @@ export function youTubePlaybackErrorDetails(error: unknown): string {
     .replace(/(authorization|cookie|token|signature)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
     .slice(0, 2000);
 }
+/** A provider verification rejection cannot be repaired by a short network retry. */
+export function isYouTubeVerificationError(error: unknown): boolean {
+  return /LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot/i.test(youTubePlaybackErrorDetails(error));
+}
 export function youTubePlaybackErrorMessage(error: unknown): string {
   const message = youTubePlaybackErrorDetails(error);
   if (/allow audio in this browser/i.test(message)) return "Tap Play to allow audio in this browser.";
-  if (/LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot/i.test(message))
-    return "This track requires connection to verify, so it can't play right now. Try again later.";
+  if (isYouTubeVerificationError(error))
+    return "YouTube requires verification for this track. Try again later or choose another track.";
+  if (/INVALID_VIDEO_ID/i.test(message)) return "This song has an invalid YouTube link. Choose another track.";
+  if (/NO_DIRECT_AUDIO_URL|UNSUPPORTED_FORMAT/i.test(message)) return "No supported audio stream is available for this track.";
+  if (/RATE_LIMITED|HTTP 429/i.test(message)) return "YouTube is limiting requests. Please try again later.";
+  if (/MEDIA_FORBIDDEN/i.test(message)) return "Could not access this song's audio stream. Tap Play to retry.";
   if (/sign in/i.test(message))
     return "This track needs sign-in outside Mavrixfy. Try another version.";
   if (/timed out|timeout|aborterror/i.test(message)) return "Mavrixfy Music playback timed out. Tap Play to retry.";

@@ -50,9 +50,9 @@ interface HomeFeedState {
 }
 
 export function useHomeFeedData({ compact = false }: { compact?: boolean } = {}) {
-  const { isChecking } = useNetwork();
+  const { isChecking, isOnline } = useNetwork();
   const mountedRef = useRef(true);
-  const activeLoadRef = useRef<Promise<void> | null>(null);
+  const activeLoadRef = useRef<{ promise: Promise<void>; forceRefresh: boolean; online: boolean } | null>(null);
   const initialLoadRef = useRef(false);
 
   const [feedState, setFeedState] = useState<HomeFeedState>(() => ({
@@ -72,23 +72,24 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
       const items = await getRecentlyPlayed();
       const topItems = items.slice(0, 16);
       if (!mountedRef.current) return;
-      setRecentlyPlayed((prev) => {
-        if (
-          prev.length === topItems.length &&
-          prev.every((item, i) => item.id === topItems[i]?.id)
-        ) {
-          return prev;
-        }
-        return topItems;
-      });
+      setRecentlyPlayed(topItems);
     } catch {
       // ignore storage read failures
     }
   }, []);
 
   const loadHomeFeed = useCallback(
-    async (forceRefresh = false) => {
-      if (activeLoadRef.current) return activeLoadRef.current;
+    async function loadFeed(forceRefresh = false): Promise<void> {
+      const active = activeLoadRef.current;
+      if (active) {
+        await active.promise.catch(() => {}); // The owning load reports failures.
+        // Join equivalent loads; queue one fresh request when a normal load
+        // overlaps an explicit refresh or reconnects during disk hydration.
+        if (mountedRef.current && ((forceRefresh && !active.forceRefresh) || (isOnline && !active.online))) {
+          return loadFeed(forceRefresh);
+        }
+        return;
+      }
       const task = (async () => {
         // 1. Instant Cache Hydration: Single batched state update
         if (!session.hydrated) {
@@ -127,7 +128,7 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
           }
         }
 
-        void loadRecentlyPlayed();
+        if (!mountedRef.current || !isOnline) return;
 
         // 2. Network Fetching: Concurrent fetch without staggered UI re-renders
         const officialTask = getOfficialHomeFeed(forceRefresh)
@@ -169,8 +170,8 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
 
         const artistsTask = compact ? Promise.resolve([] as ArtistCard[]) : getFeaturedArtists().catch(() => [] as ArtistCard[]);
 
-        const [officialRes, quickPicksRes, playlistsRes, artistsRes] =
-          await Promise.allSettled([
+        const [officialFeed, quickPicksFeed, playlists, artists] =
+          await Promise.all([
             officialTask,
             quickPicksTask,
             playlistsTask,
@@ -185,21 +186,21 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
         let newQuickSongs = session.quickPickSongs;
         let newPool = session.quickPicksPool;
 
-        if (officialRes.status === "fulfilled" && officialRes.value?.categories?.length) {
-          newCategories = officialRes.value.categories;
+        if (officialFeed?.categories.length) {
+          newCategories = officialFeed.categories;
         }
 
-        if (playlistsRes.status === "fulfilled" && playlistsRes.value.length > 0) {
-          newPlaylists = playlistsRes.value;
+        if (playlists.length > 0) {
+          newPlaylists = playlists;
         }
 
-        if (artistsRes.status === "fulfilled" && artistsRes.value.length > 0) {
-          newArtists = artistsRes.value;
+        if (artists.length > 0) {
+          newArtists = artists;
         }
 
-        if (quickPicksRes.status === "fulfilled" && quickPicksRes.value?.all?.length) {
-          newPool = quickPicksRes.value;
-          newQuickSongs = quickPicksRes.value.all;
+        if (quickPicksFeed?.all.length) {
+          newPool = quickPicksFeed;
+          newQuickSongs = quickPicksFeed.all;
         }
 
         session.categories = newCategories;
@@ -208,7 +209,7 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
         session.quickPickSongs = newQuickSongs;
         session.quickPicksPool = newPool;
 
-        if (session.categories.length > 0) {
+        if (newCategories.length || newPlaylists.length || newArtists.length || newQuickSongs.length) {
           session.hydrated = true;
           void setCachedHomeFeedSnapshot({
             categories: newCategories,
@@ -230,14 +231,17 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
         });
       })();
 
-      activeLoadRef.current = task;
+      activeLoadRef.current = { promise: task, forceRefresh, online: isOnline };
       try {
         await task;
+      } catch (error) {
+        logger.warn("[Home] Feed load failed:", error);
       } finally {
-        if (activeLoadRef.current === task) activeLoadRef.current = null;
+        if (activeLoadRef.current?.promise === task) activeLoadRef.current = null;
+        if (mountedRef.current) setFeedState(previous => previous.loading ? { ...previous, loading: false } : previous);
       }
     },
-    [compact, loadRecentlyPlayed]
+    [compact, isOnline]
   );
 
   useEffect(() => {
@@ -279,16 +283,18 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
         clearCachedHomePublicPlaylists(),
         clearFeaturedArtistsCache(),
         clearQuickPicksCache(),
+        loadRecentlyPlayed(),
       ]);
       await loadHomeFeed(true);
     } finally {
       if (mountedRef.current) setRefreshing(false);
     }
-  }, [loadHomeFeed]);
+  }, [loadHomeFeed, loadRecentlyPlayed]);
 
   const hasContent =
     feedState.categories.length > 0 ||
     feedState.quickPickSongs.length > 0 ||
+    feedState.featuredArtists.length > 0 ||
     feedState.publicPlaylists.length > 0 ||
     recentlyPlayed.length > 0;
 

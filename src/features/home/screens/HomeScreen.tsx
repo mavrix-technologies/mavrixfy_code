@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getFeaturedArtists } from "@/data/providers/ArtistProvider";
-import React,{ useCallback,useMemo,useRef,useState } from "react";
+import React,{ useCallback,useEffect,useMemo,useRef,useState } from "react";
 
 import Colors from "@/constants/colors";
 import AdMobBanner from "@/components/AdMobBanner";
@@ -8,6 +8,7 @@ import OfflineBanner from "@/components/OfflineBanner";
 import OfflineScreen from "@/components/OfflineScreen";
 import { useNetwork } from "@/contexts/NetworkContext";
 import { usePlayerRowActions } from "@/contexts/PlayerContext";
+import { globalHomeScrollRef } from "@/lib/homeScrollRef";
 import {
 FlatList,
 Platform,
@@ -15,22 +16,26 @@ RefreshControl,
 StyleSheet,
 View,
 type ListRenderItemInfo,
+type LayoutChangeEvent,
 } from "react-native";
 import Animated,{
 useAnimatedScrollHandler,
+useAnimatedStyle,
 useSharedValue,
+withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { getQuickPicksForCategory } from "@/data/providers/QuickPicksProvider";
 import { FestivalHeaderBanner } from "../components/FestivalHeaderBanner";
+import { HomeAnnouncementBanner } from "../components/HomeAnnouncementBanner";
+import {
+getCachedMiniPlayerBannerConfig,
+subscribeToMiniPlayerBannerConfig,
+} from "@/lib/miniPlayerBannerConfig";
 import { HomeAmbientBackdrop } from "../components/HomeAmbientBackdrop";
 import { HomeArtistsSection } from "../components/HomeArtistsSection";
-import {
-HomeHorizontalSection,
-type HomeCardItem,
-} from "../components/HomeHorizontalSection";
-import { homeDisplayText } from "../components/homeDisplayText";
+import { HomeHorizontalSection } from "../components/HomeHorizontalSection";
 import { HomeQuickPicks } from "../components/HomeQuickPicks";
 import { HomeRecentlyPlayed } from "../components/HomeRecentlyPlayed";
 import {
@@ -49,6 +54,7 @@ import { useYouTubeHomeFeed } from "../hooks/useYouTubeHomeFeed";
 import { HomeYouTubeContent, HomeYouTubeStatus } from "../components/HomeYouTubeContent";
 import { clearYouTubeHomeCache } from "@/services/youtube/YouTubeMusic";
 import { useAppShowcasePrompt } from "../hooks/useAppShowcasePrompt";
+import { useHomeAnnouncement } from "../hooks/useHomeAnnouncement";
 import {
 HOME_CATEGORY_TITLES,
 useHomeSectionData,
@@ -56,14 +62,29 @@ useHomeSectionData,
 } from "../hooks/useHomeSectionData";
 
 import { buildHomeSections, type HomeListItem } from "../hooks/buildHomeSections";
+import type { MavrixfyCategory } from "../constants/homeNavConstants";
 const homeSectionKeyExtractor = (item: HomeListItem) => item.id;
+const isNativeHome = Platform.OS !== "web";
 
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { playSong } = usePlayerRowActions();
   const { isOnline, isChecking } = useNetwork();
-  const topInset = Platform.OS === "web" ? 67 : insets.top;
+  const [bannerConfig, setBannerConfig] = useState(getCachedMiniPlayerBannerConfig);
+  useEffect(() => subscribeToMiniPlayerBannerConfig(setBannerConfig), []);
+  const hasTopBanner = bannerConfig.enabled && bannerConfig.items.length > 0;
+  const topInset = Math.max(0, insets.top);
+  const [measuredNoticeHeight, setMeasuredNoticeHeight] = useState(0);
+  const noticeHeight = hasTopBanner ? measuredNoticeHeight : 0;
+  const handleNoticeLayout = useCallback((event: LayoutChangeEvent) => {
+    const height = Math.ceil(event.nativeEvent.layout.height);
+    if (height > 0) setMeasuredNoticeHeight(height);
+  }, []);
   const flatListRef = useRef<FlatList<HomeListItem> | null>(null);
+  const attachHomeList = useCallback((list: FlatList<HomeListItem> | null) => {
+    flatListRef.current = list;
+    globalHomeScrollRef.current = list;
+  }, []);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const refreshInFlightRef = useRef(false);
   const youtube = useYouTubeHomeFeed();
@@ -82,30 +103,28 @@ export function HomeScreen() {
     refreshing,
     hasContent,
     handleRefresh,
-  } = useHomeFeedData({ compact: Platform.OS !== "web" });
+  } = useHomeFeedData({ compact: isNativeHome });
   const artistsQuery = useQuery({ queryKey: ["home", "youtube-artists-v1"], queryFn: () => getFeaturedArtists(),
-    enabled: isOnline && Platform.OS !== "web", staleTime: 2 * 60 * 60 * 1000,
+    enabled: isOnline && isNativeHome, staleTime: 2 * 60 * 60 * 1000,
     refetchOnMount: false, refetchOnWindowFocus: false, refetchOnReconnect: false });
   const { refetch: refetchArtists } = artistsQuery;
   const featuredArtists = artistsQuery.data || cachedArtists;
   useAppShowcasePrompt((hasContent || Boolean(youtube.data)) && !loadingMainContent && !refreshing && isOnline && !isChecking);
 
-  const [selectedCategory, setSelectedCategory] = useState<string>("All");
-  const prevCategoryRef = useRef<string>("All");
+  const [selectedCategory, setSelectedCategory] = useState<MavrixfyCategory>("All");
 
-  const handleSelectCategory = useCallback((category: string) => {
-    if (category === prevCategoryRef.current) return;
-    prevCategoryRef.current = category;
+  const handleSelectCategory = useCallback((category: MavrixfyCategory) => {
+    if (category === selectedCategory) return;
     setSelectedCategory(category);
     flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-  }, []);
+  }, [selectedCategory]);
 
   const displayedQuickPicks = useMemo(() => {
     const list = getQuickPicksForCategory(quickPicksPool, selectedCategory);
     return selectedCategory === "All" && list.length === 0 ? quickPickSongs : list;
   }, [quickPicksPool, selectedCategory, quickPickSongs]);
 
-  const jioSectionData = useHomeSectionData({
+  const catalogSections = useHomeSectionData({
     selectedCategory,
     categories,
     quickPickSongs: displayedQuickPicks,
@@ -114,8 +133,9 @@ export function HomeScreen() {
     publicPlaylists,
     loadingMainContent,
   });
-  const sectionData = useMemo(() => buildHomeSections(selectedCategory, Platform.OS !== "web",
-    youtube.data?.sections || [], jioSectionData, explore.data?.sections || []), [jioSectionData, selectedCategory, youtube.data?.sections, explore.data?.sections]);
+  const sectionData = useMemo(() => buildHomeSections(selectedCategory, isNativeHome,
+    youtube.data?.sections || [], catalogSections, explore.data?.sections || []), [catalogSections, selectedCategory, youtube.data?.sections, explore.data?.sections]);
+  const hasReleases = sectionData.some(row => row.type === "youtube-section" && row.section.category === "new-releases");
   const retryYouTube = useCallback(() => { clearYouTubeHomeCache(); void refetchYouTube(); }, [refetchYouTube]);
   const retryExplore = useCallback(() => { clearYouTubeHomeCache(); void refetchExplore(); }, [refetchExplore]);
   const refreshHome = useCallback(async () => {
@@ -123,9 +143,12 @@ export function HomeScreen() {
     refreshInFlightRef.current = true;
     setPullRefreshing(true);
     try {
-      clearYouTubeHomeCache();
-      await handleRefresh();
-      await Promise.allSettled([refetchArtists(), ...(Platform.OS !== "web" ? [refetchYouTube(), refetchExplore()] : [])]);
+      if (isNativeHome) clearYouTubeHomeCache();
+      await Promise.allSettled([
+        // The catalog refresh clears the artist provider cache before refetching.
+        handleRefresh().then(() => isNativeHome ? refetchArtists() : undefined),
+        ...(isNativeHome ? [refetchYouTube(), refetchExplore()] : []),
+      ]);
     } finally {
       refreshInFlightRef.current = false;
       setPullRefreshing(false);
@@ -138,7 +161,7 @@ export function HomeScreen() {
 
       switch (item.type) {
         case "releases-status":
-          content = <HomeYouTubeStatus hasFeed={Boolean(explore.data)} loading={explore.isFetching || (explore.isPending && isOnline)} failed={explore.isError} online={isOnline} onRetry={retryExplore} emptyMessage={explore.data && !sectionData.some(row => row.type === "youtube-section") ? "Nothing to show yet. Pull to refresh." : undefined} />;
+          content = <HomeYouTubeStatus hasFeed={Boolean(explore.data)} loading={explore.isFetching || (explore.isPending && isOnline)} failed={explore.isError} online={isOnline} onRetry={retryExplore} emptyMessage={explore.data && !hasReleases ? "Nothing to show yet. Pull to refresh." : undefined} />;
           break;
         case "youtube-quick-picks":
           content = youtube.data?.songs.length
@@ -169,8 +192,8 @@ export function HomeScreen() {
           content = (
             <React.Fragment>
               <HomeHorizontalSection
-                title={homeDisplayText(HOME_CATEGORY_TITLES[item.category.id] || item.category.title)}
-                items={item.category.results as unknown as HomeCardItem[]}
+                title={HOME_CATEGORY_TITLES[item.category.id] || item.category.title}
+                items={item.category.results}
               />
               {item.showAd && !loadingMainContent ? (
                 <AdMobBanner loadDelayMs={1200} />
@@ -185,7 +208,7 @@ export function HomeScreen() {
           content = (
             <HomeHorizontalSection
               title="Featured Playlists"
-              items={publicPlaylists as unknown as HomeCardItem[]}
+              items={publicPlaylists}
               isFirestore
             />
           );
@@ -199,7 +222,7 @@ export function HomeScreen() {
 
       if (!content) return null;
 
-      return <View key={item.id}>{content}</View>;
+      return <View>{content}</View>;
     },
     [
       displayedQuickPicks,
@@ -208,11 +231,9 @@ export function HomeScreen() {
       playSong,
       publicPlaylists,
       recentlyPlayed,
-      youtube.data, youtube.isFetching, youtube.isPending, youtube.isError, isOnline, retryYouTube, explore.data, explore.isFetching, explore.isPending, explore.isError, retryExplore, sectionData,
+      youtube.data, youtube.isFetching, youtube.isPending, youtube.isError, isOnline, retryYouTube, explore.data, explore.isFetching, explore.isPending, explore.isError, retryExplore, hasReleases,
     ]
   );
-
-  const keyExtractor = homeSectionKeyExtractor;
 
   // Header and banner visibility track scrolling on the UI thread.
   const scrollY = useSharedValue(0);
@@ -225,6 +246,16 @@ export function HomeScreen() {
   });
 
   const festivalTheme = useFestivalTheme();
+  const announcement = useHomeAnnouncement(bannerConfig, scrollY,
+    noticeHeight > 0 && isOnline && !isChecking && (hasContent || Boolean(youtube.data)) && !loadingMainContent && !refreshing);
+  const animatedNoticeHeight = useSharedValue(0);
+  useEffect(() => {
+    animatedNoticeHeight.value = withTiming(announcement.visible ? noticeHeight : 0, { duration: 260 });
+  }, [announcement.visible, noticeHeight, animatedNoticeHeight]);
+  const noticeSpacerStyle = useAnimatedStyle(() => ({ height: animatedNoticeHeight.value }));
+  const noticeSlideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: animatedNoticeHeight.value - noticeHeight }],
+  }));
 
   const contentContainerStyle = useMemo(
     () => [
@@ -247,47 +278,66 @@ export function HomeScreen() {
 
       {/* ── Ambient Backdrop: Moves naturally with feed on scroll (100% Native Reanimated) ── */}
       <HomeAmbientBackdrop
-        topInset={topInset}
         themeConfig={festivalTheme}
         scrollY={scrollY}
       />
 
-      {/* ── Unified Header: Top Bar + Sticky Music Category Nav Rail ── */}
+      {/* ── Unified Header: Notice + Top Bar + Sticky Music Category Nav Rail ── */}
       <HomeUnifiedTopHeader
         topInset={topInset}
         selectedCategory={selectedCategory}
         onSelectCategory={handleSelectCategory}
         scrollY={scrollY}
         themeConfig={festivalTheme}
+        announcementHeight={animatedNoticeHeight}
+        announcement={hasTopBanner ? (
+          <Animated.View style={[styles.noticeClip, noticeSpacerStyle]} pointerEvents={announcement.visible ? "auto" : "none"}>
+            <Animated.View style={noticeSlideStyle}>
+              <View onLayout={handleNoticeLayout}>
+                <HomeAnnouncementBanner
+                  config={bannerConfig}
+                  scrollY={scrollY}
+                  hiddenAfter={noticeHeight}
+                  presented={announcement.visible}
+                  onDismiss={announcement.dismiss}
+                  edgeBackgroundColor={festivalTheme?.enabled ? festivalTheme.themeAccentColor : undefined}
+                />
+              </View>
+            </Animated.View>
+          </Animated.View>
+        ) : undefined}
       />
 
       {/* ── Home Content Scroll Layer (Animated FlatList running on UI Thread) ── */}
       <Animated.FlatList
-        ref={flatListRef as any}
+        ref={attachHomeList}
         data={sectionData}
-        keyExtractor={keyExtractor}
+        keyExtractor={homeSectionKeyExtractor}
         renderItem={renderSectionItem}
         ListHeaderComponent={
-          festivalTheme?.enabled ? (
-            <View style={styles.listHeaderWrap}>
-              {/* Seamless Overscroll Background for Pull-Down Refresh:
-                  Fills the space above the banner with themeAccentColor so there is never a black gap */}
-              <View
-                style={[
-                  styles.overscrollFill,
-                  {
-                    backgroundColor: festivalTheme.themeAccentColor || "#ffb900",
-                  },
-                ]}
-                pointerEvents="none"
-              />
-              <FestivalHeaderBanner
-                themeConfig={festivalTheme}
-                scrollY={scrollY}
-                contentTopOffset={topInset + UNIFIED_HEADER_TOTAL_HEIGHT}
-              />
-            </View>
-          ) : null
+          <View>
+            <Animated.View style={noticeSpacerStyle} pointerEvents="none" />
+            {festivalTheme?.enabled ? (
+              <View style={styles.listHeaderWrap}>
+                {/* Seamless Overscroll Background for Pull-Down Refresh:
+                    Fills the space above the banner with themeAccentColor so there is never a black gap */}
+                <View
+                  style={[
+                    styles.overscrollFill,
+                    {
+                      backgroundColor: festivalTheme.themeAccentColor || "#ffb900",
+                    },
+                  ]}
+                  pointerEvents="none"
+                />
+                <FestivalHeaderBanner
+                  themeConfig={festivalTheme}
+                  scrollY={scrollY}
+                  contentTopOffset={topInset + (announcement.visible ? noticeHeight : 0) + UNIFIED_HEADER_TOTAL_HEIGHT}
+                />
+              </View>
+            ) : null}
+          </View>
         }
         ListEmptyComponent={loading ? <HomeLoadingSkeleton /> : null}
         style={styles.scroll}
@@ -302,7 +352,7 @@ export function HomeScreen() {
             tintColor={Colors.primary}
             colors={[Colors.primary]}
             progressBackgroundColor={Colors.surface}
-            progressViewOffset={topInset + UNIFIED_HEADER_TOTAL_HEIGHT}
+            progressViewOffset={topInset + (announcement.visible ? noticeHeight : 0) + UNIFIED_HEADER_TOTAL_HEIGHT}
           />
         }
         scrollEventThrottle={16}
@@ -327,6 +377,7 @@ const styles = StyleSheet.create({
   listHeaderWrap: {
     position: "relative",
   },
+  noticeClip: { overflow: "hidden" },
   overscrollFill: {
     position: "absolute",
     top: -1000,

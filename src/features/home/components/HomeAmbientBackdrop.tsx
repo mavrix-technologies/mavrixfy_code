@@ -7,7 +7,6 @@ extractArtworkColors,
 getArtworkAmbientGradientStops,
 type ArtworkAmbientGradientStops,
 } from "@/lib/colorExtractor";
-import { type Song } from "@/lib/musicData";
 import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 import { LinearGradient } from "expo-linear-gradient";
 import React,{ useEffect,useRef,useState } from "react";
@@ -37,19 +36,15 @@ let gCachedCoverUrl: string | null = null;
 let gCachedColorStops: ArtworkAmbientGradientStops = DEFAULT_GRADIENT_COLORS;
 
 interface HomeAmbientBackdropProps {
-  currentSong?: Song | null;
-  topInset?: number;
   themeConfig?: FestivalThemeConfig;
   scrollY?: number | SharedValue<number>;
 }
 
 export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
-  currentSong: propSong,
   themeConfig,
   scrollY = 0,
 }: HomeAmbientBackdropProps) {
-  const { currentSong: contextSong } = usePlaybackNowPlaying();
-  const currentSong = propSong !== undefined ? propSong : contextSong;
+  const { currentSong } = usePlaybackNowPlaying();
   const isFestivalMode = themeConfig?.enabled === true;
 
 
@@ -84,7 +79,7 @@ export const HomeAmbientBackdrop = React.memo(function HomeAmbientBackdrop({
     if (isFestivalMode) return;
 
     const coverUrl = currentSong?.coverUrl || null;
-    if (coverUrl === activeCoverUrlRef.current && gCachedCoverUrl) {
+    if (coverUrl === activeCoverUrlRef.current && coverUrl === gCachedCoverUrl) {
       return;
     }
     activeCoverUrlRef.current = coverUrl;
@@ -209,31 +204,12 @@ const styles = StyleSheet.create({
     height: 780,
     zIndex: 0,
   },
-  topGlowContainer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    zIndex: 0,
-  },
   gradientFill: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-  },
-  imageBackgroundLayer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    overflow: "hidden",
-  },
-  festiveImage: {
-    width: "100%",
-    height: "100%",
-    opacity: 1,
   },
 });
 

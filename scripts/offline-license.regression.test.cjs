@@ -39,6 +39,7 @@ test('unavailable offline-license server retains the existing local grace policy
   assert.equal(license.status, 'active');
   assert.equal(license.songId, 'song');
   assert.equal(license.quality, 'medium');
+  assert.equal(license.issuedByServer, false);
   assert.ok(Date.parse(license.expiresAt) > Date.now() + 29 * 86400000);
   assert.equal(f.warnings.length, 1);
 });

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Mavrixfy</title>
+  <desc>Original ten-bar waveform, reconstructed as scalable geometry from the official app icon.</desc>
+  <defs>
+    <linearGradient id="bar0" x2="0" y2="1">
+      <stop stop-color="#0080fb"/><stop offset=".25" stop-color="#0281fd"/><stop offset=".5" stop-color="#0281fc"/><stop offset=".75" stop-color="#017ffc"/><stop offset="1" stop-color="#027cfb"/>
+    </linearGradient>
+    <linearGradient id="bar1" x2="0" y2="1">
+      <stop stop-color="#0290fd"/><stop offset=".25" stop-color="#0291fd"/><stop offset=".5" stop-color="#0291fd"/><stop offset=".75" stop-color="#028cfd"/><stop offset="1" stop-color="#0186fb"/>
+    </linearGradient>
+    <linearGradient id="bar2" x2="0" y2="1">
+      <stop stop-color="#00abfc"/><stop offset=".25" stop-color="#00acfd"/><stop offset=".5" stop-color="#00aafb"/><stop offset=".75" stop-color="#00a1fc"/><stop offset="1" stop-color="#0197fc"/>
+    </linearGradient>
+    <linearGradient id="bar3" x2="0" y2="1">
+      <stop stop-color="#00bef9"/><stop offset=".25" stop-color="#00c0f9"/><stop offset=".5" stop-color="#00c4f8"/><stop offset=".75" stop-color="#00c2f9"/><stop offset="1" stop-color="#00c1fb"/>
+    </linearGradient>
+    <linearGradient id="bar4" x2="0" y2="1">
+      <stop stop-color="#00d9ed"/><stop offset=".25" stop-color="#01d9ea"/><stop offset=".5" stop-color="#00daeb"/><stop offset=".75" stop-color="#00d9ea"/><stop offset="1" stop-color="#00d8e9"/>
+    </linearGradient>
+    <linearGradient id="bar5" x2="0" y2="1">
+      <stop stop-color="#00e1bc"/><stop offset=".25" stop-color="#00e2bf"/><stop offset=".5" stop-color="#00e3bf"/><stop offset=".75" stop-color="#00e1bc"/><stop offset="1" stop-color="#00dfb9"/>
+    </linearGradient>
+    <linearGradient id="bar6" x2="0" y2="1">
+      <stop stop-color="#01e3a9"/><stop offset=".25" stop-color="#00e2a8"/><stop offset=".5" stop-color="#01e2a9"/><stop offset=".75" stop-color="#00e2aa"/><stop offset="1" stop-color="#00e4aa"/>
+    </linearGradient>
+    <linearGradient id="bar7" x2="0" y2="1">
+      <stop stop-color="#bbed17"/><stop offset=".25" stop-color="#b6ec15"/><stop offset=".5" stop-color="#b3ec16"/><stop offset=".75" stop-color="#b2eb15"/><stop offset="1" stop-color="#b0ea16"/>
+    </linearGradient>
+    <linearGradient id="bar8" x2="0" y2="1">
+      <stop stop-color="#beed16"/><stop offset=".25" stop-color="#beed19"/><stop offset=".5" stop-color="#beed17"/><stop offset=".75" stop-color="#bbec17"/><stop offset="1" stop-color="#bbeb18"/>
+    </linearGradient>
+    <linearGradient id="bar9" x2="0" y2="1">
+      <stop stop-color="#c3ed18"/><stop offset=".25" stop-color="#c4ed19"/><stop offset=".5" stop-color="#c4ee1a"/><stop offset=".75" stop-color="#c4ee1b"/><stop offset="1" stop-color="#c1ec19"/>
+    </linearGradient>
+  </defs>
+  <g id="waveform">
+    <rect x="153" y="420" width="47" height="176" rx="23.5" fill="url(#bar0)"/>
+    <rect x="228" y="342" width="47" height="340" rx="23.5" fill="url(#bar1)"/>
+    <rect x="302" y="246" width="46" height="532" rx="23" fill="url(#bar2)"/>
+    <rect x="375" y="359" width="47" height="255" rx="23.5" fill="url(#bar3)"/>
+    <rect x="450" y="435" width="47" height="223" rx="23.5" fill="url(#bar4)"/>
+    <rect x="534" y="435" width="47" height="225" rx="23.5" fill="url(#bar5)"/>
+    <rect x="608" y="359" width="47" height="249" rx="23.5" fill="url(#bar6)"/>
+    <rect x="680" y="246" width="47" height="532" rx="23.5" fill="url(#bar7)"/>
+    <rect x="752" y="342" width="46" height="339" rx="23" fill="url(#bar8)"/>
+    <rect x="824" y="430" width="47" height="167" rx="23.5" fill="url(#bar9)"/>
+  </g>
+</svg>

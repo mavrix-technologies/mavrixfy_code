@@ -35,16 +35,25 @@ test("real music parser retains empty-tab messages alongside a usable queue with
   assert.ok(errors.some(error => error.error_type === "typecheck"));
 });
 function fixture({ now = () => 1000000, platform = "android", info, fetchStatus = () => 200, contentType = "audio/mp4", music = {}, nodes = {}, actions = {}, parser = {}, lazyPlayer = false, ciphered = false, apiText = "{}", responseClass = Response, streamFetchOverride, timerScale = 1, mintProof = async () => null } = {}) {
-  const clients = [], requests = [];
+  const clients = [], requests = [], diagnostics = [], formatSelections = [];
   const playerLoads = [], sessionOptions = [], cancelledBodies = [];
   const format = { has_audio: true, has_video: false, mime_type: "audio/mp4", bitrate: 128000, approx_duration_ms: 188125,
     url: ciphered ? undefined : "https://rr1.googlevideo.com/videoplayback?expire=2000&n=original%2Bvalue",
     signature_cipher: ciphered ? "cipher" : undefined,
     decipher: async () => "https://rr1.googlevideo.com/videoplayback?expire=2000" };
-  const yt = { music, actions, session: { player: lazyPlayer ? undefined : {}, context: { client: { visitorData: "visitor" } } }, getBasicInfo: info || (async (_, { client }) => {
+  const getInfo = info || (async (_, { client }) => {
     clients.push(client); return { cpn: "playback-nonce", playability_status: { status: "OK" },
       streaming_data: { adaptive_formats: [format] } };
-  }) };
+  });
+  const yt = { music, actions, session: { player: lazyPlayer ? undefined : {}, context: { client: { visitorData: "visitor" } } },
+    getBasicInfo: async (videoId, options) => {
+      const response = await getInfo(videoId, options);
+      const formats = [...(response.streaming_data?.adaptive_formats || []), ...(response.streaming_data?.formats || [])];
+      formats.forEach((format, index) => { format.itag ??= index + 1; });
+      return { basic_info: { id: videoId }, ...response, chooseFormat: response.chooseFormat || (options => {
+        formatSelections.push(options); return formats.find(format => format.itag === options.itag);
+      }) };
+    } };
   const constants = { STREAM_HEADERS: { Referer: "https://www.youtube.com/" }, CLIENTS: Object.fromEntries(
     ["VISIONOS", "ANDROID_VR", "TV"].map(client => [client, { USER_AGENT: client }])) };
   const fetchStream = async (url, options) => {
@@ -58,7 +67,7 @@ function fixture({ now = () => 1000000, platform = "android", info, fetchStatus 
   const code = ts.transpileModule(fs.readFileSync("src/services/youtube/SharedYouTubeTransport.ts", "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  vm.runInNewContext(code, { module, exports: module.exports, setTimeout: (callback, ms) => setTimeout(callback, ms * timerScale), clearTimeout, URL, AbortController, Response: responseClass,
+  vm.runInNewContext(code, { module, exports: module.exports, __DEV__: true, console: { info: (label, data) => diagnostics.push({ label, ...data }) }, setTimeout: (callback, ms) => setTimeout(callback, ms * timerScale), clearTimeout, URL, AbortController, Response: responseClass,
     Date: { now }, globalThis: { crypto: { randomUUID: () => "nonce" },
       fetch: async (url, options) => {
         requests.push({ url, options }); const status = fetchStatus(options);
@@ -81,7 +90,7 @@ function fixture({ now = () => 1000000, platform = "android", info, fetchStatus 
       };
       throw new Error(name);
     } });
-  return { api: module.exports.sharedYouTubeTransport, clients, requests, playerLoads, sessionOptions, cancelledBodies };
+  return { api: module.exports.sharedYouTubeTransport, clients, requests, playerLoads, sessionOptions, cancelledBodies, diagnostics, formatSelections };
 }
 
 test("official video lookup reads title endpoints and localized shelves, then searches credits only on a miss", async () => {
@@ -291,55 +300,71 @@ test("catalog buffering preserves UTF-8 with React Native's Latin-1 ArrayBuffer 
   const response = await f.sessionOptions[0].fetch("https://www.youtube.com/youtubei/v1/browse");
   assert.deepEqual(await response.json(), metadata);
 });
-test("403 client is discarded and the exact video's next YouTube client is validated", async () => {
-  const f = fixture({ fetchStatus: options => options.headers["User-Agent"] === "VISIONOS" ? 403 : 200 });
+test("media 403 resolves one fresh URL on the same session and client", async () => {
+  let resolutions = 0;
+  const f = fixture({ info: async videoId => ({ playability_status: { status: "OK" }, streaming_data: {
+    adaptive_formats: [{ has_audio: true, has_video: false, mime_type: "audio/mp4", bitrate: 128000,
+      url: `https://rr1.googlevideo.com/videoplayback?expire=2000&id=${videoId}&resolution=${++resolutions}` }],
+  } }), fetchStatus: (_, url) => url.includes("resolution=1") ? 403 : 200 });
   const stream = await f.api.resolveStream("abcdefghijk", "medium", "stream");
   assert.equal(stream.videoId, "abcdefghijk");
-  assert.equal(stream.clientProfile, "ANDROID_VR");
-  assert.equal(f.clients.join(","), "VISIONOS,ANDROID_VR");
+  assert.equal(stream.clientProfile, "VISIONOS");
+  assert.equal(f.sessionOptions.length, 1);
+  assert.equal(resolutions, 2);
+  assert.match(stream.url, /resolution=2/);
   assert.deepEqual(f.cancelledBodies, [403, 200]);
 });
 
-test("a rejected AAC format tries the next same-video format before another client", async () => {
+test("a non-audio response tries the next compatible format before another client", async () => {
   const formats = [256000, 128000].map(bitrate => ({ has_audio: true, has_video: false,
     mime_type: "audio/mp4", bitrate, url: `https://rr1.googlevideo.com/videoplayback?expire=2000&bitrate=${bitrate}` }));
   const f = fixture({ info: async () => ({ playability_status: { status: "OK" }, streaming_data: { adaptive_formats: formats } }),
-    fetchStatus: (_, url) => url.includes("bitrate=256000") ? 403 : 200 });
+    streamFetchOverride: async (url, options, fetchStream) => {
+      const response = await fetchStream(url, options);
+      if (url.includes("bitrate=256000")) response.headers.set("content-type", "text/html");
+      return response;
+    } });
   const stream = await f.api.resolveStream("abcdefghijk", "high", "stream");
   assert.equal(stream.bitrate, 128000);
   assert.equal(stream.videoId, "abcdefghijk");
   assert.equal(stream.clientProfile, "VISIONOS");
-  assert.deepEqual(f.cancelledBodies, [403, 200]);
+  assert.deepEqual(f.cancelledBodies, [200, 200]);
 });
 
-test("access-rejected session refreshes once and validates the same video", async () => {
+test("verification during a media refresh stops immediately without replacing the session", async () => {
   let attempts = 0;
-  const f = fixture({ fetchStatus: () => ++attempts <= 4 ? 403 : 200 });
-  const stream = await f.api.resolveStream("abcdefghijk", "medium", "stream");
-  assert.equal(f.sessionOptions.length, 2);
-  assert.equal(stream.videoId, "abcdefghijk");
-  assert.equal(stream.clientProfile, "VISIONOS");
-  assert.equal(attempts, 5);
+  const f = fixture({ info: async () => ++attempts === 1
+    ? { playability_status: { status: "OK" }, streaming_data: { adaptive_formats: [{ has_audio: true,
+      has_video: false, mime_type: "audio/mp4", bitrate: 128000, url: "https://rr1.googlevideo.com/videoplayback?expire=2000" }] } }
+    : { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you are not a bot" } }, fetchStatus: () => 403 });
+  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "stream"), error => error.code === "LOGIN_REQUIRED" && error.stage === "player");
+  assert.equal(f.sessionOptions.length, 1);
+  assert.equal(f.requests.length, 1);
+  assert.equal(attempts, 2);
 });
 
 test("persistent access rejection stays bounded and leaves no retry loop", async () => {
   const f = fixture({ fetchStatus: () => 403 });
-  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "stream"), /Audio GET HTTP 403/);
-  assert.equal(f.sessionOptions.length, 2);
-  assert.equal(f.requests.length, 6);
+  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "stream"), error =>
+    error.code === "MEDIA_FORBIDDEN" && error.stage === "media" && error.httpStatus === 403 && error.retryExhausted);
+  assert.equal(f.sessionOptions.length, 1);
+  assert.equal(f.requests.length, 2);
+  assert.deepEqual(f.clients, ["VISIONOS", "VISIONOS"]);
 });
 
-test("hung media validation aborts and lets the next client resolve within the request budget", async () => {
-  let aborted = false;
+test("hung media validation aborts and retries once on the same initialized client", async () => {
+  let aborted = false, validations = 0;
   const f = fixture({ timerScale: 0.001, streamFetchOverride: (url, options, fetchStream) => {
-    if (options.headers["User-Agent"] !== "VISIONOS") return fetchStream(url, options);
+    if (++validations > 1) return fetchStream(url, options);
     return new Promise((_, reject) => options.signal.addEventListener("abort", () => {
       aborted = true; reject(new Error("Audio request timed out"));
     }, { once: true }));
   } });
   const stream = await f.api.resolveStream("abcdefghijk", "medium", "stream");
   assert.equal(aborted, true);
-  assert.equal(stream.clientProfile, "ANDROID_VR");
+  assert.equal(stream.clientProfile, "VISIONOS");
+  assert.equal(validations, 2);
+  assert.equal(f.sessionOptions.length, 1);
 });
 
 test("expired format is skipped before a media request and a fresh format can play", async () => {
@@ -394,15 +419,15 @@ test("verification stops retries and pauses audio/video requests until cooldown 
   await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "first"), /LOGIN_REQUIRED/);
   await assert.rejects(f.api.resolveStream("12345678901", "medium", "next"), /SIGN_IN_REQUIRED/);
   await assert.rejects(f.api.resolveVideoStream("12345678901", "medium", "video"), /SIGN_IN_REQUIRED/);
-  assert.equal(calls, 3); assert.equal(mints, 1); assert.equal(f.requests.length, 0);
+  assert.equal(calls, 1); assert.equal(mints, 0); assert.equal(f.requests.length, 0);
   now += 60001;
   await assert.rejects(f.api.resolveStream("12345678901", "medium", "later"), /LOGIN_REQUIRED/);
-  assert.equal(calls, 6);
+  assert.equal(calls, 2);
 });
 
 for (const platform of ["android", "ios"]) {
   for (const quality of ["low", "medium", "high"]) {
-    test(`${platform}/${quality}: direct verification rejection triggers token minting and MWEB fallback before cooldown`, async () => {
+    test(`${platform}/${quality}: verification rejection stops before another client or token mint`, async () => {
       const calls = []; let mints = 0;
       const f = fixture({ platform, mintProof: async () => { mints++; return "a".repeat(160); },
         info: async (id, options) => {
@@ -410,12 +435,12 @@ for (const platform of ["android", "ios"]) {
           return { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you’re not a bot" } };
         } });
       await assert.rejects(f.api.resolveStream("G8Voqp9rR8E", quality, "selected"), /LOGIN_REQUIRED/);
-      assert.equal(calls.length, 4);
-      assert.deepEqual(calls.map(c => c.client), ["VISIONOS", "ANDROID_VR", "TV", "MWEB"]);
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls.map(c => c.client), ["VISIONOS"]);
       assert.equal(calls[0].id, "G8Voqp9rR8E");
-      assert.equal(mints, 1); assert.equal(f.requests.length, 0);
+      assert.equal(mints, 0); assert.equal(f.requests.length, 0);
       await assert.rejects(f.api.resolveStream("NNpVL7xauj8", quality, "next"), /SIGN_IN_REQUIRED/);
-      assert.equal(calls.length, 4);
+      assert.equal(calls.length, 1);
     });
   }
 }
@@ -425,7 +450,7 @@ test("a minted and attached MWEB proof does not override an upstream verificatio
   const f = fixture({ mintProof: async () => { mints++; return proof; }, info: async (_, options) => {
     calls.push(options);
     if (options.client !== "MWEB") throw new Error("HTTP 403");
-    assert.equal(options.po_token, proof);
+    assert.equal(options.po_token, undefined);
     return { playability_status: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you're not a bot" } };
   } });
   await assert.rejects(f.api.resolveStream("G8Voqp9rR8E", "medium", "proof-attached"), /LOGIN_REQUIRED/);
@@ -446,12 +471,12 @@ test("track-specific sign-in restriction does not block other tracks", async () 
   assert.equal(calls, 2);
 });
 
-test("attested MWEB uses a video-bound proof for player and GVS without re-encoding the signed URL", async () => {
+test("attested MWEB attaches its video-bound proof only to GVS and preserves the signed URL", async () => {
   const proof = "a".repeat(160), calls = [];
   const f = fixture({ mintProof: async () => proof, info: async (videoId, options) => {
     calls.push(options);
     if (options.client !== "MWEB") throw new Error("HTTP 403");
-    assert.equal(options.po_token, proof);
+    assert.equal(options.po_token, undefined);
     return { playability_status: { status: "OK" }, streaming_data: { adaptive_formats: [{ has_audio: true,
       has_video: false, mime_type: "audio/mp4", bitrate: 128000,
       url: `https://rr1.googlevideo.com/videoplayback?expire=2000&n=original%2Bvalue&video=${videoId}` }] } };
@@ -480,6 +505,98 @@ test("a working direct profile avoids attestation and is prioritized on the next
   await f.api.resolveStream("12345678901", "high", "second-profile");
   assert.deepEqual(calls, ["ANDROID_VR"]);
   assert.equal(mints, 0);
+});
+
+test("invalid IDs never initialize a YouTube session", async () => {
+  const f = fixture();
+  await assert.rejects(f.api.resolveStream("invalid", "medium", "bad-id"), error => error.code === "INVALID_VIDEO_ID" && error.stage === "input");
+  assert.equal(f.sessionOptions.length, 0);
+  assert.equal(f.requests.length, 0);
+});
+
+test("library-thrown verification metadata is terminal and diagnostics exclude credentials", async () => {
+  let calls = 0;
+  const f = fixture({ info: async () => {
+    calls++;
+    throw Object.assign(new Error("Player rejected https://example.test/?token=signed-secret\nCookie: cookie-secret"), {
+      info: { error_type: "LOGIN_REQUIRED", reason: "Sign in to confirm you are not a bot; token=proof-secret" },
+    });
+  } });
+  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "thrown-login"), error => {
+    assert.equal(error.code, "LOGIN_REQUIRED");
+    assert.doesNotMatch(error.message, /signed-secret|cookie-secret|proof-secret/);
+    return true;
+  });
+  assert.equal(calls, 1);
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.diagnostics[0].code, "LOGIN_REQUIRED");
+  assert.doesNotMatch(JSON.stringify(f.diagnostics), /secret|example\.test|Cookie|token=/);
+});
+
+test("rate limiting stops without trying another client or recreating the session", async () => {
+  let calls = 0;
+  const f = fixture({ info: async () => { calls++; throw new Error("HTTP 429"); } });
+  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "rate-limit"), error => error.code === "RATE_LIMITED" && error.httpStatus === 429);
+  assert.equal(calls, 1);
+  assert.equal(f.sessionOptions.length, 1);
+});
+
+test("missing and incompatible sources produce separate format errors without media requests", async () => {
+  for (const [format, code] of [
+    [{ has_audio: true, has_video: false, mime_type: "audio/mp4", bitrate: 128000 }, "NO_DIRECT_AUDIO_URL"],
+    [{ has_audio: true, has_video: false, mime_type: "audio/ogg", bitrate: 128000, url: "https://rr1.googlevideo.com/videoplayback?expire=2000" }, "UNSUPPORTED_FORMAT"],
+  ]) {
+    const f = fixture({ info: async () => ({ playability_status: { status: "OK" }, streaming_data: { adaptive_formats: [format] } }) });
+    await assert.rejects(f.api.resolveStream("abcdefghijk", "high", "no-source"), error => error.code === code && error.stage === "format");
+    assert.equal(f.requests.length, 0);
+  }
+});
+
+test("missing and wrong video details never reach format selection or the decoder", async () => {
+  for (const basic_info of [undefined, { id: "12345678901" }]) {
+    const f = fixture({ info: async () => ({ basic_info, playability_status: { status: "OK" } }) });
+    await assert.rejects(f.api.resolveStream("abcdefghijk", "high", "wrong-video"), error => error.code === "UNAVAILABLE" && error.stage === "player");
+    assert.equal(f.formatSelections.length, 0);
+    assert.equal(f.requests.length, 0);
+  }
+});
+
+test("empty decipher output is rejected before media fetch", async () => {
+  const f = fixture({ info: async () => ({ playability_status: { status: "OK" }, streaming_data: { adaptive_formats: [{
+    has_audio: true, has_video: false, mime_type: "audio/mp4", bitrate: 128000,
+    signature_cipher: "cipher", decipher: async () => "",
+  }] } }) });
+  await assert.rejects(f.api.resolveStream("abcdefghijk", "high", "empty-cipher"), error => error.code === "NO_DIRECT_AUDIO_URL" && error.stage === "decipher");
+  assert.equal(f.requests.length, 0);
+});
+
+test("successful extraction uses chooseFormat and emits only scalar stage diagnostics", async () => {
+  const f = fixture();
+  await f.api.resolveStream("abcdefghijk", "medium", "first-song");
+  await f.api.resolveStream("12345678901", "medium", "second-song");
+  assert.equal(f.sessionOptions.length, 1);
+  assert.equal(f.formatSelections.length, 2);
+  assert.equal(f.formatSelections[0].type, "audio");
+  assert.equal(f.diagnostics[0].hasVideoDetails, true);
+  assert.equal(f.diagnostics[0].hasStreamingData, true);
+  assert.equal(f.diagnostics[0].audioFormatCount, 1);
+  assert.equal(f.diagnostics[1].stage, "media");
+  assert.equal(f.diagnostics[1].httpStatus, 200);
+  assert.doesNotMatch(JSON.stringify(f.diagnostics), /googlevideo|expire=|original%2Bvalue/);
+});
+
+test("a persistent timeout has one retry and cancellation interrupts recovery delay", async () => {
+  let calls = 0;
+  const f = fixture({ timerScale: 0.001, info: async () => { calls++; throw new Error("Request timed out"); } });
+  await assert.rejects(f.api.resolveStream("abcdefghijk", "medium", "timeout"), error => error.code === "NETWORK_TIMEOUT" && error.retryExhausted);
+  assert.equal(calls, 2);
+  let cancelledCalls = 0;
+  const cancelled = fixture({ info: async () => { cancelledCalls++; throw new Error("Request timed out"); } });
+  const pending = cancelled.api.resolveStream("abcdefghijk", "medium", "cancel-delay");
+  await tick();
+  cancelled.api.cancel("cancel-delay");
+  await assert.rejects(pending, /cancelled/);
+  assert.equal(cancelledCalls, 1);
 });
 
 test("home keeps upstream shelf titles and preserves linked playlist publisher identity", async () => {

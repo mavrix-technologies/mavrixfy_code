@@ -6,7 +6,7 @@ export function attestationHttpAllowed(url: string, method: string): boolean {
     if (method === "POST") return parsed.hostname === "www.youtube.com" &&
       parsed.pathname === "/api/jnn/v1/GenerateIT" && !parsed.search && !parsed.hash;
     return method === "GET" && !parsed.search && !parsed.hash &&
-      ((parsed.hostname === "www.youtube.com" && /^\/s\/player\/[\w-]+\/.*\.js$/.test(parsed.pathname)) ||
+      ((parsed.hostname === "www.youtube.com" && (parsed.pathname === "/" || /^\/s\/player\/[\w-]+\/.*\.js$/.test(parsed.pathname))) ||
        (parsed.hostname === "www.google.com" && /^\/js\/(?:th|bg)\/[\w-]+\.js$/.test(parsed.pathname)));
   } catch { return false; }
 }

@@ -43,9 +43,11 @@ test('decorative consumers share one lifecycle listener and release it on unmoun
 });
 
 test('shared player sheet closes once and retains its presentation through background and StandBy', () => {
-  let foreground = true, focused = true, standbyEnabled = false, viewport = null;
+  let foreground = true, focused = true, standbyEnabled = false, viewport = null, canGoBack = true;
   const closedSheets = [], played = [], focusEffects = [], closed = [], backHandlers = [];
   const refs = [];
+  const sharedValues = [];
+  let sharedIndex = 0;
   let refIndex = 0, stateIndex = 0, playerViewport = null, dirty = false;
   const ui = { current: 'mini', expandPlayer: () => { ui.current = 'expanded'; }, collapsePlayer: () => { ui.current = 'mini'; } };
   const react = {
@@ -65,7 +67,7 @@ test('shared player sheet closes once and retains its presentation through backg
     '@/lib/appActivity': { useAppIsActive: () => foreground, useAppIsBackgrounded: () => !foreground },
     '@/constants/platform': { IS_IOS: true },
     '@/lib/playerUIState': { playerUIStateStore: ui },
-    'expo-router': { useIsFocused: () => focused, useFocusEffect: fn => focusEffects.push(fn), useNavigation: () => ({ canGoBack: () => true, goBack: () => closed.push('route-back') }) },
+    'expo-router': { router: { replace: path => closed.push(path) }, useIsFocused: () => focused, useFocusEffect: fn => focusEffects.push(fn), useNavigation: () => ({ canGoBack: () => canGoBack, goBack: () => closed.push('route-back') }) },
     '@/lib/queueRef': { globalQueueSheetRef: { current: { collapse: () => closedSheets.push('queue') } } },
     '@/lib/addSongsSheetRef': { globalAddSongsSheetRef: { current: { collapse: () => closedSheets.push('add-songs') } } },
     'expo-status-bar': { StatusBar: 'StatusBar' },
@@ -82,7 +84,11 @@ test('shared player sheet closes once and retains its presentation through backg
     '@gorhom/bottom-sheet': { __esModule: true, default: 'BottomSheet' },
     'react-native-safe-area-context': { SafeAreaProvider: 'SafeAreaProvider', useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
     'react-native-gesture-handler': { GestureHandlerRootView: 'GestureHandlerRootView' },
-    'react-native-reanimated': {},
+    'react-native-reanimated': { useSharedValue: initial => sharedValues[sharedIndex++] ??= {
+      value: initial,
+      get() { return this.value; },
+      modify(update) { this.value = update(this.value); },
+    } },
     '../styles/playerScreenStyles': { styles: { container: { flex: 1 } } },
     '../components/StandByOverlay': { StandByOverlay: 'StandByOverlay' },
     '../hooks/useStandByMode': { useStandByMode: () => ({
@@ -96,10 +102,25 @@ test('shared player sheet closes once and retains its presentation through backg
     '../components/PlayerBottomDetailsSection', '../components/PlayerControlsSection',
     '../components/PlayerEmptyState', '../components/PlayerStickyHeader', '../hooks/useLegacyPlayerViewState']) dependencies[name] = {};
   const { PlayerScreen } = load('src/features/player/screens/PlayerScreen.tsx', dependencies);
-  const render = () => { let tree; do { dirty = false; refIndex = 0; stateIndex = 0; tree = PlayerScreen(); } while (dirty); return tree; };
+  const render = () => { let tree; do { dirty = false; refIndex = 0; stateIndex = 0; sharedIndex = 0; tree = PlayerScreen(); } while (dirty); return tree; };
   const content = node => node?.type?.name === 'LegacyPlayerScreenView' ? node : node?.children?.map(content).find(Boolean);
   const find = (node, type) => node?.type === type ? node : node?.children?.map(child => find(child, type)).find(Boolean);
   const initial = render();
+  const initialSheet = find(initial, 'BottomSheet');
+  const layoutState = initialSheet.props.containerLayoutState;
+  assert.equal(layoutState.get().height, 844, 'supported layout API seeds the first frame before native measurement');
+  assert.deepEqual(Object.keys(layoutState.get().offset).sort(), ['bottom', 'left', 'right', 'top']);
+  // Run the installed library's actual dev validator: the type declarations
+  // still accept containerHeight, but the runtime deliberately rejects it.
+  const { usePropsValidator } = load('node_modules/@gorhom/bottom-sheet/src/hooks/usePropsValidator.ts', {
+    react,
+    invariant: require('invariant'),
+    '../components/bottomSheet/constants': { INITIAL_SNAP_POINT: -999 },
+  });
+  assert.throws(() => usePropsValidator({ ...initialSheet.props, containerHeight: 844 }), /containerHeight.*deprecated/);
+  assert.doesNotThrow(() => usePropsValidator(initialSheet.props));
+  // The hosting container updates this same shared value after measurement.
+  layoutState.modify(state => ({ ...state, height: 740, offset: { top: 47, bottom: 0, left: 0, right: 0 } }));
   assert.equal(content(initial).props.viewport.height, 844, 'player content exists on the first render, before sheet animation starts');
   assert.equal(find(initial, 'View').props.onLayout, undefined, 'scroll content must never be measured as the screen viewport');
   assert.equal(find(initial, 'View').props.style.height, 844, 'sheet content is bounded by the route, not its scrollable children');
@@ -125,14 +146,31 @@ test('shared player sheet closes once and retains its presentation through backg
   assert.equal(sheet.props.snapPoints[0], '100%');
   assert.equal(sheet.props.backgroundStyle.backgroundColor, '#000000', 'translucent artwork colours must sit over an opaque sheet base');
   assert.equal(sheet.props.handleComponent, null, 'no grabber or separate safe-area handle height');
-  sheet.props.ref.current = { forceClose: () => closed.push('sheet-close') };
+  assert.equal(sheet.props.animateOnMount, false, 'opening must not wait for an additional sheet spring');
+  assert.equal(sheet.props.containerHeight, undefined, 'deprecated layout props must not reach the native runtime');
+  assert.equal(sheet.props.containerOffset, undefined);
+  assert.equal(sheet.props.containerLayoutState, layoutState, 'layout changes retain the shared container state');
+  assert.equal(sheet.props.containerLayoutState.get().height, 740);
+  assert.equal(sheet.props.containerLayoutState.get().offset.top, 47, 'measured offsets are preserved across renders');
+  assert.doesNotThrow(() => usePropsValidator(sheet.props));
   content(first).props.onClose();
-  assert.deepEqual(closed, ['sheet-close'], 'header requests close without popping the route early');
+  assert.deepEqual(closed, ['route-back'], 'header closes immediately without waiting for a sheet callback');
   sheet.props.onClose(); sheet.props.onClose();
-  assert.deepEqual(closed, ['sheet-close', 'route-back'], 'duplicate completion does not pop another route');
+  assert.deepEqual(closed, ['route-back'], 'late gesture completion does not pop another route');
+  refs.length = 0; render(); // A fresh player route has its own dismissal guard.
   const back = backHandlers.at(-1);
   assert.equal(back(), true);
-  assert.equal(closed.at(-1), 'sheet-close', 'Android Back uses the same sheet animation');
+  assert.deepEqual(closed, ['route-back', 'route-back'], 'Android Back closes immediately too');
+  back();
+  assert.equal(closed.length, 2, 'repeated Back cannot pop the underlying screen');
+  refs.length = 0;
+  const draggedSheet = find(render(), 'BottomSheet');
+  draggedSheet.props.onClose(); draggedSheet.props.onClose();
+  assert.equal(closed.length, 3, 'drag completion still dismisses exactly once');
+  refs.length = 0; canGoBack = false;
+  content(render()).props.onClose();
+  assert.equal(closed.at(-1), '/(tabs)', 'a direct player link returns to tabs');
+  canGoBack = true;
   content(first).props.onEnterStandBy();
   const standby = render();
   assert.ok(content(standby), "player stays mounted beneath StandBy");

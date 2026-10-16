@@ -99,12 +99,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/mavrixfy_splash.png",
-          "imageWidth": 180,
+          "image": "./assets/images/mavrixfy_launch_background.png",
+          "imageWidth": 224,
           "resizeMode": "contain",
           "backgroundColor": "#10141A",
           "dark": {
-            "image": "./assets/images/mavrixfy_splash.png",
+            "image": "./assets/images/mavrixfy_launch_background.png",
             "backgroundColor": "#10141A"
           }
         }
@@ -192,8 +192,7 @@
         }
       ],
       "./plugins/withAndroidAuto",
-      "./plugins/withPlaybackBuild",
-      "./plugins/withYouTubeMusic"
+      "./plugins/withPlaybackBuild"
     ],
     "experiments": {
       "typedRoutes": true

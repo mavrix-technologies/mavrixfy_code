@@ -11,7 +11,7 @@ import {
   useWindowDimensions,
   type LayoutChangeEvent,
 } from "react-native";
-import { Image } from "expo-image";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { BatteryState, useBatteryLevel, useBatteryState } from "expo-battery";
@@ -297,7 +297,7 @@ export const StandByOverlay = memo(function StandByOverlay({
         <View testID="standby-artwork" collapsable={false} style={[styles.artworkColumn, { width: layout.artworkColumnWidth }]}>
           <View collapsable={false} style={[styles.artworkCard, { width: artworkSize, height: artworkSize }]}>
           {song?.coverUrl ? (
-            <Image source={{ uri: song.coverUrl }} style={{ width: artworkSize, height: artworkSize }} contentFit="contain" transition={0} accessible={false} />
+            <MusicArtwork uri={song.coverUrl} size={artworkSize} recyclingKey={song.id} style={{ width: artworkSize, height: artworkSize }} contentFit="cover" contentPosition="center" transition={0} accessible={false} />
           ) : (
             <View style={styles.artworkFallback}>
               <Ionicons name="musical-notes" size={Math.min(layout.artworkColumnWidth, layout.contentHeight) * 0.35} color={secondaryColor} />

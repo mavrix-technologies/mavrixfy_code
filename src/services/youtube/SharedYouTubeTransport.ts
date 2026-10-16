@@ -125,7 +125,9 @@ const continuations = new Map<string, { playlistId: string; page: MusicPlaylist;
 let sequence = 0;
 const rejected = new Map<string, number>();
 function safeError(error: unknown) {
-  return (error instanceof Error ? error.message : String(error)).replace(/https?:\/\/[^\s"']+/g, "[URL]").slice(0, 400);
+  return (error instanceof Error ? error.message : String(error))
+    .replace(/https?:\/\/[^\s"']+/gi, "[URL]")
+    .replace(/(?:authorization|cookie|(?:po_?)?token|signature)\s*[:=]\s*[^\r\n;,]+/gi, "[redacted]").slice(0, 400);
 }
 function parseHomeShelves(homeSections: Iterable<InstanceType<typeof YTNodes.MusicCarouselShelf> | InstanceType<typeof YTNodes.MusicTastebuilderShelf>>, includeAlbums = false) {
   const songs: NativeTrack[] = [], playlists: NativePlaylist[] = [];
@@ -379,7 +381,7 @@ export const sharedYouTubeTransport: YouTubeNative = {
     });
   },
   resolveStream(videoId, quality, id) { return resolveMediaStream(videoId, quality, id); },
-  resetVerification() { verificationBlockedUntil = 0; },
+  resetVerification() { verificationBlockedUntil = 0; verificationBlockedReason = ""; },
   resolveVideoStream(videoId, quality, id) { return resolveMediaStream(videoId, quality, id, true) as Promise<YouTubeVideoStream>; },
   resolveOfficialMusicVideo(query, id) {
     return request(id, async check => {
@@ -411,63 +413,113 @@ export const sharedYouTubeTransport: YouTubeNative = {
 };
 
 type StreamClient = "VISIONOS" | "ANDROID_VR" | "TV" | "MWEB" | "WEB";
+type ExtractionStage = "input" | "session" | "attestation" | "player" | "format" | "decipher" | "media";
+type ExtractionCode = "INVALID_VIDEO_ID" | "LOGIN_REQUIRED" | "NO_DIRECT_AUDIO_URL" | "NETWORK_TIMEOUT" |
+  "NETWORK_ERROR" | "MEDIA_FORBIDDEN" | "UNSUPPORTED_FORMAT" | "RATE_LIMITED" | "UNAVAILABLE";
+export class YouTubeExtractionError extends Error {
+  retryExhausted = false;
+  constructor(readonly code: ExtractionCode, readonly stage: ExtractionStage, detail: string, readonly httpStatus?: number) {
+    super(`${code}: ${safeError(detail)}`);
+    this.name = "YouTubeExtractionError";
+  }
+}
+function extractionError(error: unknown, stage: ExtractionStage): YouTubeExtractionError {
+  if (error instanceof YouTubeExtractionError) return error;
+  const upstream = error as { info?: { status?: string; reason?: string; error_type?: string } } | null;
+  const detail = safeError(error);
+  const status = upstream?.info?.status || upstream?.info?.error_type || "";
+  const reason = upstream?.info?.reason || "";
+  const text = `${status} ${reason} ${detail}`;
+  const httpStatus = Number(/(?:HTTP|status code)\s+(\d{3})/i.exec(text)?.[1]) || undefined;
+  const code: ExtractionCode = /LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot|login required/i.test(text) ? "LOGIN_REQUIRED"
+    : httpStatus === 429 ? "RATE_LIMITED"
+    : /timed out|timeout|AbortError|ETIMEDOUT/i.test(text) ? "NETWORK_TIMEOUT"
+    : stage === "media" && httpStatus === 403 ? "MEDIA_FORBIDDEN"
+    : /network request failed|failed to fetch|ECONNRESET/i.test(text) ? "NETWORK_ERROR"
+    : /No compatible|non-AAC|non-MP4/i.test(text) ? "UNSUPPORTED_FORMAT" : "UNAVAILABLE";
+  return new YouTubeExtractionError(code, stage, `${status} ${reason} ${detail}`.trim(), httpStatus);
+}
+function extractionDiagnostic(data: {
+  videoId: string; client: StreamClient; stage: ExtractionStage; elapsedMs: number;
+  playabilityStatus?: string; hasVideoDetails?: boolean; hasStreamingData?: boolean; audioFormatCount?: number;
+  code?: ExtractionCode; httpStatus?: number;
+}) {
+  // Only fixed categories and scalar counts: never log upstream objects or URLs.
+  if (typeof __DEV__ !== "undefined" && __DEV__) console.info("[YouTube extraction]", data);
+}
+function recoveryDelay(signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const abort = () => { clearTimeout(timer); reject(new Error("YouTube request cancelled")); };
+    const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, 350);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) { signal.removeEventListener("abort", abort); abort(); }
+  });
+}
 const successfulClients: { audio?: StreamClient; video?: StreamClient } = {};
 let verificationBlockedUntil = 0;
+let verificationBlockedReason = "";
+function blockVerification(reason: string) {
+  verificationBlockedUntil = Date.now() + 60_000;
+  verificationBlockedReason = reason;
+}
 function checkVerificationCooldown() {
   if (Date.now() < verificationBlockedUntil)
-    throw new Error("SIGN_IN_REQUIRED: Upstream verification required. Try again later.");
+    throw new YouTubeExtractionError("LOGIN_REQUIRED", "player", `SIGN_IN_REQUIRED: Upstream verification required. ${verificationBlockedReason} Try again later.`);
 }
 function resolveMediaStream(videoId: string, quality: string, id: string, video = false) {
     return request(id, async (check, signal) => {
-      if (!/^[\w-]{11}$/.test(videoId)) throw new Error("Invalid video ID");
+      if (!/^[\w-]{11}$/.test(videoId)) throw new YouTubeExtractionError("INVALID_VIDEO_ID", "input", "Invalid video ID");
       checkVerificationCooldown();
-      let yt = await youtube(); check();
+      const yt = await youtube().catch(error => { throw extractionError(error, "session"); }); check();
       const failures: string[] = [];
+      let lastFailure: YouTubeExtractionError | undefined;
+      let recoveryUsed = false;
       const lane = video ? "video" : "audio";
-      let proof: Promise<string | null> | undefined;
-      const mintProof = () => proof ??= youtubePoTokens.mint(videoId, yt.session.context.client.visitorData || "", async () => {
-        const response = await yt.getAttestationChallenge("ENGAGEMENT_TYPE_UNBOUND");
-        const challenge = response.bg_challenge;
-        if (!challenge?.program || !challenge.global_name) throw new Error("Attestation challenge unavailable");
-        return { program: challenge.program, globalName: challenge.global_name,
-          interpreterUrl: { privateDoNotAccessOrElseTrustedResourceUrlWrappedValue:
-            challenge.interpreter_url.private_do_not_access_or_else_trusted_resource_url_wrapped_value } };
-      });
       // Direct clients already supply usable URLs. Only ciphered formats need
       // player preparation; don't rewrite the signed direct URL on Hermes.
       // IOS formats can reject open-ended decoder requests (see LastWave).
-      for (let round = 0; round < 2; round++) {
-        const clients: StreamClient[] = round === 0 ? ["VISIONOS", "ANDROID_VR", "TV", "MWEB", "WEB"] : ["VISIONOS", "ANDROID_VR"];
+      {
+        const clients: StreamClient[] = ["VISIONOS", "ANDROID_VR", "TV", "MWEB", "WEB"];
         const preferred = successfulClients[lane];
         if (preferred && clients.includes(preferred)) clients.sort((a, b) => Number(b === preferred) - Number(a === preferred));
-        for (const client of clients) {
+        for (let attempt = 0; attempt < clients.length; attempt++) {
+          const client = clients[attempt];
           check();
           checkVerificationCooldown();
+          const startedAt = Date.now();
+          let stage: ExtractionStage = "player";
           try {
             const resolutionId = `${videoId}:${client}`;
             if (!video && Date.now() - (rejected.get(resolutionId) || 0) < 60000) throw new Error("Recently rejected audio profile");
-            if (client === "MWEB" && !proof && preferred !== "MWEB") continue;
             // Web proofs belong to a Web client, never VISIONOS/ANDROID_VR.
-            // Bootstrap overlaps remaining direct profiles after an access failure.
-            const poToken = client === "MWEB" ? await mintProof() : undefined;
+            stage = "attestation";
+            const poToken = client === "MWEB"
+              ? await youtubePoTokens.mint(videoId, yt.session.context.client.visitorData || "") : undefined;
             check();
             if (client === "MWEB" && !poToken) {
               failures.push(`MWEB: Attestation unavailable (${youtubePoTokens.failureReason || "no native token host"})`);
-              if (failures.some(f => /confirm.*not a bot/i.test(f))) {
-                verificationBlockedUntil = Date.now() + 60_000;
-                throw new Error(`${video ? "Video" : "Audio"} unavailable. LOGIN_REQUIRED: Sign in to confirm you’re not a bot`);
-              }
               continue;
             }
             // WEB player requests need the signature timestamp, not just the
             // decipher function after a response has already been rejected.
+            stage = "decipher";
             if (client === "WEB" || client === "MWEB") { await preparePlayer(yt); check(); }
-            const info = await yt.getBasicInfo(videoId, { client, ...(poToken ? { po_token: poToken } : {}) }); check();
+            stage = "player";
+            // MWEB's video-bound proof is for GVS, not the player request.
+            // Basic info avoids the unrelated /next request made by getInfo().
+            const info = await yt.getBasicInfo(videoId, { client }); check();
+            const status = info.playability_status?.status || "UNKNOWN";
+            extractionDiagnostic({ videoId, client, stage, elapsedMs: Date.now() - startedAt,
+              playabilityStatus: /^[A-Z_]{1,40}$/.test(status) ? status : "UNKNOWN",
+              hasVideoDetails: Boolean(info.basic_info?.id),
+              hasStreamingData: Boolean(info.streaming_data),
+              audioFormatCount: info.streaming_data?.adaptive_formats.filter(format => format.has_audio && !format.has_video).length || 0 });
             if (info.playability_status?.status !== "OK") {
-              const status = info.playability_status?.status || "UNKNOWN";
               const reason = info.playability_status?.reason || "Video unavailable";
               throw new Error(`${status}: ${reason}`);
             }
+            if (info.basic_info?.id !== videoId) throw new YouTubeExtractionError("UNAVAILABLE", stage, "Missing or mismatched video details");
+            stage = "format";
             // Keep Apple's direct-file audio path on AAC-LC while investigating
             // the observed doubled HE-AAC timeline and silent tail.
             // Android uses ExoPlayer/Media3 which natively supports both AAC-LC and high-fidelity Opus (itag 251, ~160kbps).
@@ -482,13 +534,16 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
               return false;
             };
 
-            const formats = [...(info.streaming_data?.adaptive_formats || []), ...(video ? info.streaming_data?.formats || [] : [])]
+            const compatibleFormats = [...(info.streaming_data?.adaptive_formats || []), ...(video ? info.streaming_data?.formats || [] : [])]
               .filter(format => (video
                 ? format.has_video && format.mime_type.startsWith("video/mp4") && /avc1/i.test(format.mime_type)
                 : isAudioFormatCompatible(format)
-              ) && (format.url || format.signature_cipher || format.cipher))
+              ))
               .sort((a, b) => a.bitrate - b.bitrate);
-            if (!formats.length) throw new Error(video ? "No compatible H.264 video stream" : "No compatible audio stream");
+            const formats = compatibleFormats.filter(format => format.url || format.signature_cipher || format.cipher);
+            if (!formats.length) throw new YouTubeExtractionError(
+              !compatibleFormats.length && info.streaming_data?.adaptive_formats.some(format => format.has_audio) ? "UNSUPPORTED_FORMAT" : "NO_DIRECT_AUDIO_URL", stage,
+              video ? "No compatible H.264 video stream" : "No compatible audio stream");
             // Medium avoids premium/high-bitrate formats when a standard AAC/Opus
             // format exists. High selects the best actually available audio track.
             const standard = formats.filter(format => format.bitrate <= 160000);
@@ -496,13 +551,17 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
               ? (standard.length ? standard.reverse() : formats.reverse())
               : formats.reverse();
             const formatFailures: string[] = [];
-            for (const format of candidates.slice(0, 2)) {
+            for (const candidate of candidates.slice(0, 2)) {
               try {
+                stage = "format";
+                const format = info.chooseFormat({ itag: candidate.itag, type: video ? "video" : "audio" });
                 let url = format.url;
                 if (!url) {
+                  stage = "decipher";
                   await preparePlayer(yt); check();
                   url = await format.decipher(yt.session.player);
                 }
+                if (!url) throw new YouTubeExtractionError("NO_DIRECT_AUDIO_URL", stage, "No usable URL after deciphering");
                 const playbackUrl = new URL(url); check();
                 if (playbackUrl.protocol !== "https:" || !playbackUrl.hostname.endsWith(".googlevideo.com"))
                   throw new Error("Invalid audio origin");
@@ -521,12 +580,14 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
                 if (signal.aborted) abort();
                 const timer = setTimeout(abort, 5000);
                 try {
+                  stage = "media";
                   const response = await streamFetch(url, { headers, credentials: "omit", signal: controller.signal });
                   try {
                     check();
                     if (!response.ok) throw new Error(`Audio GET HTTP ${response.status}`);
                     if (!(video ? /^video\/mp4(?:;|$)/i : /^audio\/(?:mp4|webm)(?:;|$)/i).test(response.headers.get("content-type") || ""))
                       throw new Error(video ? "Video GET returned a non-MP4 response" : "Audio GET returned a non-AAC response");
+                    extractionDiagnostic({ videoId, client, stage, elapsedMs: Date.now() - startedAt, httpStatus: response.status });
                   } finally { await response.body?.cancel(); }
                 } finally {
                   clearTimeout(timer);
@@ -542,36 +603,39 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
                     ? format.approx_duration_ms / 1000 : undefined };
                 successfulClients[lane] = client;
                 return stream;
-              } catch (error) { check(); formatFailures.push(safeError(error)); }
+              } catch (error) {
+                check();
+                const failure = extractionError(error, stage);
+                if (["MEDIA_FORBIDDEN", "NETWORK_TIMEOUT", "NETWORK_ERROR", "LOGIN_REQUIRED", "RATE_LIMITED"].includes(failure.code)) throw failure;
+                lastFailure = failure;
+                formatFailures.push(safeError(failure));
+              }
             }
-            throw new Error(formatFailures.join(", "));
+            throw new YouTubeExtractionError(lastFailure?.code || "NO_DIRECT_AUDIO_URL", lastFailure?.stage || stage, formatFailures.join(", "));
           } catch (error) {
             check();
-            const detail = safeError(error);
-            if (/LOGIN_REQUIRED|SIGN_IN_REQUIRED/i.test(detail) && !/confirm.*not a bot/i.test(detail)) {
-              throw new Error(`${video ? "Video" : "Audio"} unavailable. ${detail}`);
+            const failure = extractionError(error, stage);
+            extractionDiagnostic({ videoId, client, stage: failure.stage, elapsedMs: Date.now() - startedAt,
+              code: failure.code, httpStatus: failure.httpStatus });
+            if (failure.code === "LOGIN_REQUIRED") {
+              if (/confirm.*not a bot/i.test(failure.message)) blockVerification("YouTube requires verification for this session.");
+              throw failure;
             }
-            if (/confirm.*not a bot/i.test(detail)) {
-              if (client === "MWEB") {
-                verificationBlockedUntil = Date.now() + 60_000;
-                throw new Error(`${video ? "Video" : "Audio"} unavailable. ${detail}`);
-              }
-              if (round === 0) void mintProof();
+            if (failure.code === "RATE_LIMITED") throw failure;
+            if (["MEDIA_FORBIDDEN", "NETWORK_TIMEOUT", "NETWORK_ERROR"].includes(failure.code)) {
+              if (recoveryUsed) { failure.retryExhausted = true; throw failure; }
+              recoveryUsed = true;
+              await recoveryDelay(signal); check();
+              // Resolve a fresh URL once using the same initialized session.
+              attempt--;
+              continue;
             }
-            failures.push(`${client}: ${detail}`);
-            if (round === 0 && /HTTP (?:401|403)/i.test(detail)) void mintProof();
+            lastFailure = failure;
+            failures.push(`${client}: ${safeError(failure)}`);
           }
         }
-        // A long-lived visitor session can become stale. Refresh it once after
-        // access/session rejection; never retry private/removed videos endlessly.
-        if (round !== 0 || !failures.some(error => /HTTP (?:401|403)|status code (?:401|403)|page needs to be reloaded/i.test(error))) break;
-        const previous = session;
-        if (previous && (await previous) === yt && session === previous) session = undefined;
-        check(); yt = await youtube(); proof = undefined; check();
       }
-      if (failures.some(error => /confirm.*not a bot/i.test(error))) {
-        verificationBlockedUntil = Date.now() + 60_000;
-      }
-      throw new Error(`${video ? "Video" : "Audio"} unavailable. ${failures.join("; ")}`);
+      throw new YouTubeExtractionError(lastFailure?.code || "UNAVAILABLE", lastFailure?.stage || "player",
+        `${video ? "Video" : "Audio"} unavailable. ${failures.join("; ")}`);
     });
 }

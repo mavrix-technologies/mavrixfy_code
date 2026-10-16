@@ -587,6 +587,22 @@ test("temporary stream failure retries the same song once after a delay and resu
   assert.equal(f.calls.filter(([name])=>name==="play").length,1);
 });
 
+test("YouTube extraction retry exhaustion and rate limits do not start another player retry", async () => {
+  for (const failure of [
+    Object.assign(Error("NETWORK_TIMEOUT: Request timed out"), { retryExhausted: true }),
+    Object.assign(Error("RATE_LIMITED: HTTP 429"), { code: "RATE_LIMITED" }),
+  ]) {
+    let attempts = 0;
+    const f = fixture({ youtube: true, resolveUrl: async () => { attempts++; throw failure; } });
+    await f.commands.playSong(f.songs[1], f.songs);
+    assert.equal(attempts, 1);
+    assert.equal(f.scheduledDelays.includes(1200), false);
+    assert.equal(f.calls.some(([name]) => name === "play"), false);
+    assert.equal(f.options.currentSongRef.current.id, "b");
+    assert.equal(f.options.playbackLoadingRef.current, false);
+  }
+});
+
 test("temporary stream failure exhausts one retry without advancing the queue", async () => {
   let attempts=0;
   const f=fixture({resolveUrl:async()=>{attempts++;throw Error("HTTP 503");}});

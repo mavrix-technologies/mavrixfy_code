@@ -19,10 +19,17 @@ function load(file, dependencies = {}, globals = {}) {
 }
 
 const music = load('src/lib/musicData.ts', {
+  '@/services/youtube/YouTubeArtwork': require('./helpers/youtube-artwork-fixture.cjs'),
   '@/lib/arrayUtils': { sortedCopy: (items, compare) => [...items].sort(compare), mapFilter: (items, map, filter) => items.map(map).filter(filter) },
   '@/utils/timeFormatters': {},
 });
 const quality = load('src/lib/downloads/audioQuality.ts');
+const youtube = load('src/services/youtube/YouTubeMusic.ts', {
+  'react-native': { Platform: { OS: 'ios' } },
+  './YouTubeArtists': require('./helpers/youtube-artists-fixture.cjs'),
+  './YouTubeArtwork': require('./helpers/youtube-artwork-fixture.cjs'),
+  '../audio/audioTimeline': require('./helpers/audio-timeline-fixture.cjs'),
+});
 
 test('quality fallback reports the actual provider label and ranks numeric bitrates', () => {
   const candidates = [{ quality: '160kbps', url: 'https://audio.example/160.m4a' },
@@ -110,7 +117,7 @@ test('a delayed local-file validation cannot return a previous account download'
 });
 
 function queueFixture({ source, onPause, onCancel, fetchResponse, promote } = {}) {
-  const items = new Map(), transfers = [], timers = new Map(), errors = [], deletedFiles = [];
+  const items = new Map(), transfers = [], timers = new Map(), errors = [], warnings = [], invalidated = [], deletedFiles = [];
   let sequence = 0;
   const queue = load('src/lib/downloads/downloadQueue.ts', {
     '@/lib/accountScope': { getAccountScope: () => ({ accountId: 'user' }), isCurrentAccount: () => true },
@@ -125,9 +132,9 @@ function queueFixture({ source, onPause, onCancel, fetchResponse, promote } = {}
       getTempDownloadUri: id => `file:///temp/${id}`, hasSufficientStorage: async () => true,
       promoteTempToTrack: promote || (async id => `file:///tracks/${id}.m4a`),
     },
-    '@/lib/logger': { logger: { warn() {}, error: (...args) => errors.push(args) } },
+    '@/lib/logger': { logger: { warn: (...args) => warnings.push(args), error: (...args) => errors.push(args) } },
     '@/lib/musicData': music,
-    '@/services/youtube/YouTubeMusic': { invalidateYouTubeStream() {},
+    '@/services/youtube/YouTubeMusic': { ...youtube, invalidateYouTubeStream: song => invalidated.push(song.id),
       resolveYouTubeStream: source || (async () => ({ url: 'https://media.example/song.m4a', expiresAt: Date.now() + 300000 })) },
     'expo-file-system/legacy': { deleteAsync: async uri => { deletedFiles.push(uri); }, createDownloadResumable: () => {
       const transfer = {
@@ -144,10 +151,59 @@ function queueFixture({ source, onPause, onCancel, fetchResponse, promote } = {}
     clearTimeout: id => timers.delete(id) });
   const item = index => ({ songId: `youtube_abcdefghij${index}`, accountId: 'user', youtubeVideoId: `abcdefghij${index}`,
     title: 'Song', artist: 'Artist', album: '', coverUrl: '', duration: 180, quality: 'medium', status: 'queued', retryCount: 0 });
-  return { ...queue, items, transfers, timers, errors, deletedFiles, item };
+  return { ...queue, items, transfers, timers, errors, warnings, invalidated, deletedFiles, item };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const preferences = { wifiOnly: false, chargingOnly: false, quality: 'medium', autoDeleteExpired: false };
+
+for (const message of ['SIGN_IN_REQUIRED: Upstream verification required. Try again later.',
+  'LOGIN_REQUIRED: Sign in to confirm you’re not a bot', 'Sign in to confirm you are not a bot']) {
+  test(`verification stops this download after one attempt: ${message}`, async () => {
+    let attempts = 0; const failures = [];
+    const f = queueFixture({ source: async () => { attempts++; throw Error(message); } });
+    f.onQueueEvent('failed', (id, item) => failures.push(item));
+    const item = f.item(0);
+    await f.enqueueDownload(item, preferences); await tick();
+    const failed = f.items.get(item.songId);
+    assert.equal(failed.status, 'failed'); assert.equal(failed.retryCount, 1);
+    assert.match(failed.failureReason, /YouTube requires verification/);
+    assert.doesNotMatch(failed.failureReason, /SIGN_IN_REQUIRED|LOGIN_REQUIRED/);
+    assert.equal(failures.length, 1); assert.equal(attempts, 1);
+    assert.equal(f.timers.size, 0); assert.equal(f.transfers.length, 0);
+    assert.equal(f.errors.length, 0); assert.equal(f.warnings.length, 1);
+    assert.equal(f.invalidated.length, 0, 'verification must not discard a separate cached playback source');
+  });
+}
+
+test('manual retry can recover a verification failure without leaving the queue occupied', async () => {
+  let blocked = true, attempts = 0;
+  const f = queueFixture({ source: async () => {
+    attempts++;
+    if (blocked) throw Error('SIGN_IN_REQUIRED: Upstream verification required');
+    return { url: 'https://media.example/song.m4a', expiresAt: Date.now() + 300000 };
+  } });
+  const item = f.item(0);
+  await f.enqueueDownload(item, preferences); await tick();
+  assert.equal(f.items.get(item.songId).status, 'failed');
+  blocked = false;
+  await f.retryDownload(item.songId, preferences); await tick();
+  assert.equal(attempts, 2); assert.equal(f.transfers.length, 1);
+  assert.equal(f.items.get(item.songId).failureReason, null);
+  assert.equal(f.items.get(item.songId).retryCount, 0);
+  f.transfers[0].resolve({ status: 200, headers: { 'Content-Type': 'audio/mp4' } }); await tick();
+  assert.equal(f.items.get(item.songId).status, 'completed');
+});
+
+test('pausing during resolution survives a late verification rejection without failure or retry', async () => {
+  let reject;
+  const f = queueFixture({ source: () => new Promise((_, no) => { reject = no; }) });
+  const item = f.item(0);
+  await f.enqueueDownload(item, preferences); await tick();
+  await f.pauseDownload(item.songId);
+  reject(Error('SIGN_IN_REQUIRED: Upstream verification required')); await tick();
+  assert.equal(f.items.get(item.songId).status, 'paused');
+  assert.equal(f.timers.size, 0); assert.equal(f.warnings.length, 0);
+});
 
 test('pausing during source resolution survives a late source rejection without retrying', async () => {
   let failSource;

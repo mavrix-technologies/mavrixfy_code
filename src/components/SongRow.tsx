@@ -176,7 +176,6 @@ const SongRow = memo(function SongRow({
             contentFit="cover"
             cachePolicy="memory-disk"
             priority="normal"
-            placeholder={{ blurhash: "L5H2EC=PM+yV+^$gM_e-4Wo0WB%M" }}
             transition={0}
           />
         </View>

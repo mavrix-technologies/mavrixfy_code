@@ -3,6 +3,8 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import QueueBottomSheet from "@/components/QueueBottomSheet";
 import { ShareModal } from "@/components/ShareModal";
 import Colors from "@/constants/colors";
+import { LaunchSplash } from "@/features/launch/LaunchSplash";
+import { hideNativeSplash } from "@/features/launch/nativeSplash";
 import { AuthProvider,useAuth } from "@/contexts/AuthContext";
 import { DownloadProvider } from "@/contexts/DownloadContext";
 import { NetworkProvider } from "@/contexts/NetworkContext";
@@ -38,10 +40,8 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { QueryClientProvider } from "@tanstack/react-query";
-import Constants from "expo-constants";
 import { useFonts } from "expo-font";
 import { DarkTheme,Stack,ThemeProvider,useRouter,useSegments } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useCallback,useEffect,useState } from "react";
 import {
@@ -52,60 +52,11 @@ Pressable,
 StyleSheet,
 Text,
 View,
+type LayoutChangeEvent,
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { MD3DarkTheme,PaperProvider } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { AppNavBar } from "./(tabs)/_layout";
-
-function isExpoGoRuntime(): boolean {
-  return Constants.executionEnvironment === "storeClient" || Constants.appOwnership === "expo";
-}
-
-let splashPrevented = false;
-let splashPreventFailed = false;
-let splashHideRequested = false;
-
-function isMissingNativeSplashError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error || "");
-  return message.includes("No native splash screen registered");
-}
-
-void SplashScreen.preventAutoHideAsync()
-  .then(() => {
-    splashPrevented = true;
-  })
-  .catch((error) => {
-    splashPreventFailed = true;
-    if (!isMissingNativeSplashError(error)) {
-      logger.warn("[RootLayout] Failed to prevent splash auto-hide", error);
-    }
-  });
-
-function hideSplashScreenSafely(reason: string) {
-  if (splashHideRequested || splashPreventFailed) return;
-  if (!splashPrevented) {
-    setTimeout(() => hideSplashScreenSafely(reason), 50);
-    return;
-  }
-
-  splashHideRequested = true;
-  try {
-    void SplashScreen.hideAsync().catch((error) => {
-      if (!isMissingNativeSplashError(error)) {
-        logger.warn("[RootLayout] Failed to hide splash screen", { reason, error });
-      }
-    });
-  } catch (error) {
-    if (!isMissingNativeSplashError(error)) {
-      logger.warn("[RootLayout] Failed to hide splash screen", { reason, error });
-    }
-  }
-}
-
-if (!isExpoGoRuntime()) {
-  SplashScreen.setOptions({ fade: false, duration: 0 });
-}
 
 // Filter out noisy expo-notifications warnings in the terminal console when testing in Expo Go
 if (__DEV__) {
@@ -134,7 +85,6 @@ LogBox.ignoreLogs([
 export const unstable_settings = { anchor: "(tabs)" };
 
 const NAV_UNMOUNT_SEGMENTS = new Set(["login", "onboarding", "import-songs", "profile", "delete-account"]);
-const NAV_OVERLAY_SEGMENTS = new Set(["playlist", "artist", "downloads", "downloaded-songs"]);
 
 const GLOBAL_TOAST_VISIBLE_MS = 1050;
 
@@ -306,13 +256,6 @@ function useRootLayoutNavigation() {
 
   const activeSegment = segments[0] as string;
   const unmountNavBar = NAV_UNMOUNT_SEGMENTS.has(activeSegment);
-  const isPlayerScreen = activeSegment === "player";
-  const showNavOverlay =
-    !loading &&
-    (isAuthenticated || isAllowedGuest) &&
-    !unmountNavBar &&
-    !isPlayerScreen &&
-    NAV_OVERLAY_SEGMENTS.has(activeSegment);
 
   useEffect(() => {
     if (unmountNavBar) {
@@ -320,7 +263,9 @@ function useRootLayoutNavigation() {
     }
   }, [unmountNavBar]);
 
-  return { showNavOverlay };
+  const redirectPending = (isAuthenticated && activeSegment === "login") ||
+    (!isAuthenticated && !isAllowedGuest && activeSegment === "(tabs)");
+  return { launchReady: !loading && !!activeSegment && !redirectPending };
 }
 
 const isAndroid = Platform.OS === "android";
@@ -360,22 +305,30 @@ const artistMixScreenOptions = {
   }),
 };
 
-function RootLayoutNav() {
-  const { showNavOverlay } = useRootLayoutNavigation();
+function RootLayoutNav({ launchComplete, onReady }: { launchComplete: boolean; onReady: () => void }) {
+  const { launchReady } = useRootLayoutNavigation();
   const { loading } = useAuth();
+  const [navigationLaidOut, setNavigationLaidOut] = useState(false);
+  const markNavigationLaidOut = useCallback(({ nativeEvent: { layout } }: LayoutChangeEvent) => {
+    if (layout.width > 0 && layout.height > 0) setNavigationLaidOut(true);
+  }, []);
 
   useEffect(() => {
-    if (!loading) {
-      hideSplashScreenSafely("authReady");
+    if (launchReady && navigationLaidOut) onReady();
+  }, [launchReady, navigationLaidOut, onReady]);
+
+  useEffect(() => {
+    if (!loading && launchComplete) {
       const timer = setTimeout(() => {
         void showAppLaunchAd();
       }, 1200);
       return () => clearTimeout(timer);
     }
-  }, [loading]);
+  }, [loading, launchComplete]);
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1 }} onLayout={markNavigationLaidOut} accessibilityElementsHidden={!launchComplete}
+      importantForAccessibility={launchComplete ? "auto" : "no-hide-descendants"}>
       <Stack
         screenOptions={{
           headerShown: false,
@@ -402,12 +355,6 @@ function RootLayoutNav() {
         <Stack.Screen name="equalizer" />
       </Stack>
 
-      {showNavOverlay ? (
-        <View style={[StyleSheet.absoluteFill, { zIndex: 997 }]} pointerEvents="box-none">
-          <AppNavBar />
-        </View>
-      ) : null}
-
       <YouTubePoTokenHost />
 
       <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
@@ -420,6 +367,11 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   const [error, setError] = useState<Error | null>(null);
+  // Owned above AuthProvider's keyed subtree: signing in must not replay startup.
+  const [launchReady, setLaunchReady] = useState(false);
+  const [launchComplete, setLaunchComplete] = useState(false);
+  const markLaunchReady = useCallback(() => setLaunchReady(true), []);
+  const finishLaunch = useCallback(() => setLaunchComplete(true), []);
 
   useEffect(() => {
     void initRemoteConfig();
@@ -435,7 +387,7 @@ export default function RootLayout() {
     }
   }, []);
 
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,
@@ -451,7 +403,7 @@ export default function RootLayout() {
   });
 
   const handleError = useCallback((err: Error) => {
-    hideSplashScreenSafely("rootError");
+    void hideNativeSplash("rootError");
     setError(err);
   }, []);
 
@@ -464,10 +416,6 @@ export default function RootLayout() {
     );
   }
 
-  if (!fontsLoaded) {
-    return null;
-  }
-
   return (
     <ErrorBoundary onError={handleError}>
       <QueryClientProvider client={queryClient}>
@@ -476,18 +424,21 @@ export default function RootLayout() {
             <PaperProvider theme={paperTheme}>
               <NetworkProvider>
                 <AuthProvider>
-                  <DownloadProvider>
-                    <PlayerProvider>
-                      <StatusBar style="light" />
-                      <RootLayoutNav />
-                      <GlobalToast />
-                      <ShareModal />
-                    </PlayerProvider>
-                  </DownloadProvider>
+                  {(fontsLoaded || fontError) ? (
+                    <DownloadProvider>
+                      <PlayerProvider>
+                        <RootLayoutNav launchComplete={launchComplete} onReady={markLaunchReady} />
+                        <GlobalToast />
+                        <ShareModal />
+                      </PlayerProvider>
+                    </DownloadProvider>
+                  ) : null}
                 </AuthProvider>
               </NetworkProvider>
             </PaperProvider>
           </ThemeProvider>
+          <StatusBar style="light" />
+          {!launchComplete && <LaunchSplash ready={launchReady} onComplete={finishLaunch} />}
         </GestureHandlerRootView>
       </QueryClientProvider>
     </ErrorBoundary>

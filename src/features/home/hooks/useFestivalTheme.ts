@@ -24,19 +24,21 @@ export function useFestivalTheme() {
 
   useEffect(() => {
     let isMounted = true;
+    let receivedLiveTheme = false;
 
     // 1. Read cached theme immediately
     void getCachedFestivalTheme(isDevOrAdmin).then((cached) => {
-      if (isMounted) {
+      if (isMounted && !receivedLiveTheme) {
         setTheme(cached);
         prefetchBannerImage(cached.backgroundImageUrl);
       }
-    });
+    }).catch(() => {});
 
     // 2. Real-time live subscription to Firestore appConfig/festivalTheme
     const unsubscribe = subscribeRemoteFestivalTheme(
       (updated) => {
         if (isMounted) {
+          receivedLiveTheme = true;
           setTheme(updated);
           prefetchBannerImage(updated.backgroundImageUrl);
         }

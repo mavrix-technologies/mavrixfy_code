@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, useWindowDimensions, type ListRenderItemInfo } from "react-native";
-import { Image } from "expo-image";
+import { MusicArtwork } from "@/components/MusicArtwork";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import type { Song } from "@/lib/musicData";
@@ -36,7 +36,7 @@ const StandByQueue = memo(function StandByQueue({ song, queue, queueIndex, prima
   const upcoming = useMemo(() => queue.slice(Math.max(0, queueIndex + 1)), [queue, queueIndex]);
   const renderItem = useCallback(({ item }: ListRenderItemInfo<Song>) => (
     <Pressable onPress={() => { onTouchActivity(); onPlayQueueSong(item); }} style={[styles.queueRow, { height: rowHeight }]} accessibilityRole="button" accessibilityLabel={`Play ${unescapeHtml(item.title)}, ${unescapeHtml(item.artist)}`}>
-      {item.coverUrl ? <Image source={{ uri: item.coverUrl }} style={styles.queueArtwork} contentFit="cover" accessible={false} /> : <Ionicons name="musical-notes" size={26} color={secondaryColor} style={styles.queueArtwork} />}
+      {item.coverUrl ? <MusicArtwork uri={item.coverUrl} size={48} recyclingKey={item.id} style={styles.queueArtwork} contentFit="cover" accessible={false} /> : <Ionicons name="musical-notes" size={26} color={secondaryColor} style={styles.queueArtwork} />}
       <View style={styles.queueSong}>
         <Text numberOfLines={1} style={[styles.queueTitle, { color: primaryColor }]}>{unescapeHtml(item.title)}</Text>
         <Text numberOfLines={1} style={[styles.queueArtist, { color: secondaryColor }]}>{unescapeHtml(item.artist)}</Text>

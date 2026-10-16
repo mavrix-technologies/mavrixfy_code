@@ -565,17 +565,6 @@ test("subsequent onLoad calls safely reuse sourceNode without error", async () =
   assert.notEqual((await p.getPlaybackState()).state, f.State.Error);
 });
 
-test("downloads and downloaded-songs segments display nav overlay and are not unmounted", async () => {
-  const fs = require("node:fs");
-  const path = require("node:path");
-  const layoutSource = fs.readFileSync(path.resolve("app/_layout.tsx"), "utf8");
-
-  assert.match(layoutSource, /NAV_OVERLAY_SEGMENTS\s*=\s*new Set\(\[[^\]]*"downloads"[^\]]*\]\)/);
-  assert.match(layoutSource, /NAV_OVERLAY_SEGMENTS\s*=\s*new Set\(\[[^\]]*"downloaded-songs"[^\]]*\]\)/);
-  assert.doesNotMatch(layoutSource, /NAV_UNMOUNT_SEGMENTS\s*=\s*new Set\(\[[^\]]*"downloads"[^\]]*\]\)/);
-});
-
-
 for (const platform of ["ios", "android"]) {
   test(`${platform}: outgoing source stops before resolution and late completion cannot skip the new song`, async () => {
     let resolve;

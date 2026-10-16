@@ -27,7 +27,7 @@ promoteTempToTrack,
 } from "@/lib/downloads/filesystem";
 import { logger } from "@/lib/logger";
 import { getBestAudioUrlWithQuality } from "@/lib/musicData";
-import { invalidateYouTubeStream, resolveYouTubeStream } from "@/services/youtube/YouTubeMusic";
+import { invalidateYouTubeStream, isYouTubeVerificationError, resolveYouTubeStream, youTubePlaybackErrorDetails, youTubePlaybackErrorMessage } from "@/services/youtube/YouTubeMusic";
 import type { Song } from "@/lib/musicData";
 import { type DownloadItem,type DownloadPreferences,type DownloadStatus } from "@/types/downloads";
 import {
@@ -405,9 +405,28 @@ async function executeDownload(songId: string): Promise<void> {
     // A late transport failure cannot undo a user pause/delete or account teardown.
     if (suspended || !current || current.status !== "downloading") return;
 
+    const youtubeSource = songId.startsWith("youtube_") || !!item.youtubeVideoId;
+    if (youtubeSource && isYouTubeVerificationError(err)) {
+      // The resolver already tried its bounded profiles/attestation and applies
+      // a verification cooldown. Retrying at 2/5/10 seconds only repeats failure.
+      clearRetryTimer(songId);
+      const failedItem = await updateStatus(songId, "failed", {
+        retryCount: (current.retryCount ?? 0) + 1,
+        failureReason: youTubePlaybackErrorMessage(err),
+        failedAt: new Date().toISOString(),
+      }, "downloading");
+      if (failedItem) {
+        logger.warn("[DownloadQueue] YouTube verification required; automatic retry stopped", {
+          songId, reason: youTubePlaybackErrorDetails(err),
+        });
+        emitQueueEvent("failed", songId, failedItem);
+      }
+      return;
+    }
+
     logger.error("[DownloadQueue] download failed", { songId, error: err?.message });
 
-    if (songId.startsWith("youtube_") || item.youtubeVideoId) {
+    if (youtubeSource) {
       const videoId = item.youtubeVideoId || songId.replace(/^youtube_/, "");
       if (/^[\w-]{11}$/.test(videoId)) {
         invalidateYouTubeStream({ id: `youtube_${videoId}` });

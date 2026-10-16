@@ -4,6 +4,7 @@ import { type FirestorePlaylist } from "@/lib/firestore";
 import { type Song } from "@/lib/musicData";
 import { type RecentlyPlayedItem } from "@/lib/storage";
 import { useMemo } from "react";
+import type { MavrixfyCategory } from "../constants/homeNavConstants";
 
 export const HOME_CATEGORY_TITLES: Record<string, string> = {
   "new-arrivals": "New Releases",
@@ -33,7 +34,7 @@ export type HomeSectionItem =
   | { id: "loading-main"; type: "loading-main" };
 
 interface UseHomeSectionDataParams {
-  selectedCategory: string;
+  selectedCategory: MavrixfyCategory;
   categories: CatalogCategoryData[];
   quickPickSongs: Song[];
   recentlyPlayed: RecentlyPlayedItem[];
@@ -54,7 +55,6 @@ export function useHomeSectionData({
   return useMemo<HomeSectionItem[]>(() => {
     const items: HomeSectionItem[] = [];
 
-    // 1. RECENTLY PLAYED TAB
     if (selectedCategory === "Recently Played") {
       if (recentlyPlayed.length > 0) {
         items.push({ id: "recently-played", type: "recently-played" });
@@ -65,28 +65,6 @@ export function useHomeSectionData({
       return items;
     }
 
-    // 2. TRENDING TAB
-    if (selectedCategory === "Trending") {
-      const trendingCat = categories.find((c) => c.id === "trending");
-      const popularCat = categories.find((c) => c.id === "popular");
-      if (trendingCat) {
-        items.push({ id: `cat-${trendingCat.id}`, type: "category", category: trendingCat, showAd: false });
-      }
-      if (quickPickSongs.length > 0) {
-        items.push({ id: "quick-picks", type: "quick-picks" });
-      } else if (loadingMainContent) {
-        items.push({ id: "loading-quick", type: "loading-quick" });
-      }
-      if (popularCat && popularCat.id !== trendingCat?.id) {
-        items.push({ id: `cat-${popularCat.id}`, type: "category", category: popularCat, showAd: false });
-      }
-      if (featuredArtists.length > 0) {
-        items.push({ id: "artists", type: "artists" });
-      }
-      return items;
-    }
-
-    // 3. NEW RELEASES TAB
     if (selectedCategory === "New Releases") {
       const newArrivals = categories.find((c) => c.id === "new-releases" || c.id === "new-arrivals");
       if (newArrivals) {
@@ -103,97 +81,6 @@ export function useHomeSectionData({
       return items;
     }
 
-    // 4. CHARTS TAB
-    if (selectedCategory === "Charts") {
-      const chartsCat = categories.find((c) => c.id === "charts" || c.id === "top-charts" || c.id === "popular");
-      if (chartsCat) {
-        items.push({ id: `cat-${chartsCat.id}`, type: "category", category: chartsCat, showAd: false });
-      }
-      if (quickPickSongs.length > 0) {
-        items.push({ id: "quick-picks", type: "quick-picks" });
-      } else if (loadingMainContent) {
-        items.push({ id: "loading-quick", type: "loading-quick" });
-      }
-      const trendingCat = categories.find((c) => c.id === "trending");
-      if (trendingCat) {
-        items.push({ id: `cat-${trendingCat.id}`, type: "category", category: trendingCat, showAd: false });
-      }
-      return items;
-    }
-
-    // 5. BOLLYWOOD TAB
-    if (selectedCategory === "Bollywood") {
-      const bCat = categories.find((c) => c.id === "bollywood" || c.id === "fresh-hits" || c.id === "editorial");
-      if (bCat) {
-        items.push({ id: `cat-${bCat.id}`, type: "category", category: bCat, showAd: false });
-      }
-      if (quickPickSongs.length > 0) {
-        items.push({ id: "quick-picks", type: "quick-picks" });
-      } else if (loadingMainContent) {
-        items.push({ id: "loading-quick", type: "loading-quick" });
-      }
-      if (featuredArtists.length > 0) {
-        items.push({ id: "artists", type: "artists" });
-      }
-      const romanceCat = categories.find((c) => c.id === "romance" || c.id === "moods");
-      if (romanceCat) {
-        items.push({ id: `cat-${romanceCat.id}`, type: "category", category: romanceCat, showAd: false });
-      }
-      return items;
-    }
-
-    // 6. ROMANTIC TAB
-    if (selectedCategory === "Romantic") {
-      const rCat = categories.find((c) => c.id === "romance" || c.id === "moods");
-      if (rCat) {
-        items.push({ id: `cat-${rCat.id}`, type: "category", category: rCat, showAd: false });
-      }
-      if (publicPlaylists.length > 0) {
-        items.push({ id: "public-playlists", type: "public-playlists" });
-      }
-      return items;
-    }
-
-    // 7. PARTY MIX TAB
-    if (selectedCategory === "Party Mix") {
-      const pCat = categories.find((c) => c.id === "party-mix" || c.id === "moods" || c.id === "trending");
-      if (pCat) {
-        items.push({ id: `cat-${pCat.id}`, type: "category", category: pCat, showAd: false });
-      }
-      const bCat = categories.find((c) => c.id === "bollywood" || c.id === "fresh-hits");
-      if (bCat) {
-        items.push({ id: `cat-${bCat.id}`, type: "category", category: bCat, showAd: false });
-      }
-      return items;
-    }
-
-    // 8. FESTIVE TAB
-    if (selectedCategory === "Festive") {
-      const pCat = categories.find((c) => c.id === "festive" || c.id === "party-mix" || c.id === "bollywood");
-      if (pCat) {
-        items.push({ id: `cat-${pCat.id}`, type: "category", category: pCat, showAd: false });
-      }
-      if (publicPlaylists.length > 0) {
-        items.push({ id: "public-playlists", type: "public-playlists" });
-      }
-      return items;
-    }
-
-    // 9. LO-FI TAB
-    if (selectedCategory === "Lo-Fi") {
-      const lCat = categories.find(
-        (c) => c.id === "chill-vibes" || c.id === "lo-fi" || c.id === "moods" || c.id === "romance"
-      );
-      if (lCat) {
-        items.push({ id: `cat-${lCat.id}`, type: "category", category: lCat, showAd: false });
-      }
-      if (publicPlaylists.length > 0) {
-        items.push({ id: "public-playlists", type: "public-playlists" });
-      }
-      return items;
-    }
-
-    // 10. DEFAULT "ALL" TAB (Full Rich Curation)
     if (quickPickSongs.length > 0) {
       items.push({ id: "quick-picks", type: "quick-picks" });
     } else if (loadingMainContent) {

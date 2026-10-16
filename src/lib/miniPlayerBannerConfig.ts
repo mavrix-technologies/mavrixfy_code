@@ -8,6 +8,7 @@ import { Linking } from "react-native";
 export type MiniPlayerBannerItem = {
   enabled?: boolean;
   text: string;
+  subtitle?: string;
   iconName: string;
   linkUrl: string;
   backgroundColor?: string;
@@ -18,12 +19,18 @@ export type MiniPlayerBannerItem = {
 export type MiniPlayerBannerConfig = {
   enabled: boolean;
   intervalSeconds: number;
+  displaySeconds?: number;
+  showDelaySeconds?: number;
+  cooldownHours?: number;
   items: MiniPlayerBannerItem[];
 };
 
 export const DEFAULT_MINI_PLAYER_BANNER_CONFIG: MiniPlayerBannerConfig = {
   enabled: false,
   intervalSeconds: 4.5,
+  displaySeconds: 8,
+  showDelaySeconds: 3,
+  cooldownHours: 6,
   items: [],
 };
 
@@ -65,6 +72,7 @@ function normalizeBannerItem(raw: unknown): MiniPlayerBannerItem | null {
   return {
     enabled: item.enabled !== false,
     text,
+    subtitle: typeof item.subtitle === "string" ? item.subtitle.trim() : undefined,
     linkUrl,
     iconName,
     backgroundColor:
@@ -116,8 +124,17 @@ function normalizeBannerConfig(data: unknown): MiniPlayerBannerConfig {
   return {
     enabled: enabled && items.length > 0,
     intervalSeconds,
+    displaySeconds: boundedNumber(record.displaySeconds, 8, 4, 10),
+    showDelaySeconds: boundedNumber(record.showDelaySeconds, 3, 0, 30),
+    cooldownHours: boundedNumber(record.cooldownHours, 6, 1, 168),
     items,
   };
+}
+
+function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
+  if (value === undefined || value === null || value === "") return fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
 }
 
 /**

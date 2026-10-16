@@ -62,6 +62,8 @@ function fixture(settings = { streamingQuality: "medium" }, history = null, isDe
         };
       if (name.endsWith("storage"))
         return { getSettings: async () => settings };
+      if (name.endsWith("appShowcaseConfig"))
+        return { isAppShowcaseEnabled: () => true, isAppShowcaseDevEnabled: () => false };
       if (name.endsWith("logger")) return { logger: { warn() {}, info() {}, debug() {} } };
       throw new Error(name);
     },

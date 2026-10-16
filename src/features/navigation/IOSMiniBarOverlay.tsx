@@ -5,11 +5,6 @@ import { mapFilter } from "@/lib/arrayUtils";
 import {
 useArtworkPalette,
 } from "@/lib/colorExtractor";
-import {
-getCachedMiniPlayerBannerConfig,
-subscribeToMiniPlayerBannerConfig,
-type MiniPlayerBannerConfig,
-} from "@/lib/miniPlayerBannerConfig";
 import { expandPlayer } from "@/lib/playerUIState";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { useMiniPlayerSecondaryControl } from "@/lib/storage";
@@ -28,7 +23,6 @@ import { noopPlayerAction } from "./layoutUtils";
 import {
 IOSMiniPlayerMixBadge,
 IOSMiniPlayerProgressBar,
-MiniPlayerBannerView,
 MiniPlayerSecondaryControlButton,
 } from "./miniPlayerComponents";
 
@@ -139,10 +133,6 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
   const setAlbumColor = playerActions?.setAlbumColor ?? noopPlayerAction;
   const setTextColor = playerActions?.setTextColor ?? noopPlayerAction;
   const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
-  const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(() => getCachedMiniPlayerBannerConfig());
-  useEffect(() => {
-    return subscribeToMiniPlayerBannerConfig(setBannerConfig);
-  }, []);
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const [failedCoverUrl, setFailedCoverUrl] = useState<string>();
   const coverFailed = failedCoverUrl === activeSong?.coverUrl;
@@ -225,9 +215,6 @@ export function NativeMiniPlayerOverlay({ inTabScreen = true }: MiniPlayerOverla
     <GestureDetector gesture={expandGesture}>
     <View collapsable={false} pointerEvents="box-none" style={[styles.iosMiniPlayerRoot, { bottom: bottomOffset }]}>
       <View style={[styles.iosMiniPlayerShell, { backgroundColor: shellBgColor, borderColor: shellBorderColor }]}>
-        {bannerConfig.enabled && bannerConfig.items.length > 0 ? (
-          <MiniPlayerBannerView config={bannerConfig} />
-        ) : null}
         <View style={styles.iosMiniPlayerRow}>
           <Pressable style={styles.iosMiniPlayerMain} onPress={openPlayer} android_disableSound>
             <View style={styles.iosMiniPlayerArtworkShell}>

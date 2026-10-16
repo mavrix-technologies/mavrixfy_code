@@ -57,11 +57,11 @@ export function normalizeImageList(raw: unknown): JioSaavnImage[] {
         }
 
         if (!item || typeof item !== "object") return null;
-        const image = item as { quality?: unknown; url?: unknown; link?: unknown };
+        const image = item as { quality?: unknown; url?: unknown; link?: unknown; width?: unknown; height?: unknown };
         const url = toTrimmedString(image.url) || toTrimmedString(image.link);
         if (!url) return null;
         return {
-          quality: toTrimmedString(image.quality),
+          quality: toTrimmedString(image.quality) || imageDimensions(image.width, image.height),
           url,
         };
       },
@@ -71,9 +71,16 @@ export function normalizeImageList(raw: unknown): JioSaavnImage[] {
     if (normalized.length > 0) return normalized;
   }
 
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return normalizeImageList([raw]);
   const direct = toTrimmedString(raw);
   if (!direct) return [];
   return [{ quality: "", url: direct }];
+}
+
+function imageDimensions(rawWidth: unknown, rawHeight: unknown): string {
+  const width = Number(rawWidth), height = Number(rawHeight);
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+    ? `${Math.round(width)}x${Math.round(height)}` : "";
 }
 
 export function parseSongCountValue(raw: any): number {

@@ -277,54 +277,6 @@ export const styles = StyleSheet.create({
   playerSectionIOS: {
     borderBottomColor: "rgba(255, 255, 255, 0.08)",
   },
-  miniBannerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 3.5,
-    minHeight: 22,
-    backgroundColor: "transparent",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255, 255, 255, 0.14)",
-  },
-  miniBannerRowPressed: {
-    opacity: 0.75,
-  },
-  miniBannerContent: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    minWidth: 0,
-  },
-  miniBannerIcon: {
-    marginRight: 6.5,
-  },
-  miniBannerText: {
-    flex: 1,
-    fontSize: 11.5,
-    fontFamily: "Inter_600SemiBold",
-    color: "#E2E8F0",
-    letterSpacing: -0.2,
-  },
-  miniBannerDots: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3.5,
-    marginRight: 6,
-    marginLeft: 6,
-  },
-  miniBannerDot: {
-    width: 3.5,
-    height: 3.5,
-    borderRadius: 2,
-    backgroundColor: "rgba(255,255,255,0.28)",
-  },
-  miniBannerDotActive: {
-    transform: [{ scale: 1.25 }],
-    borderRadius: 2,
-    backgroundColor: "#FFFFFF",
-  },
-
   playerTopEdge: {
     position: "absolute",
     top: 0,

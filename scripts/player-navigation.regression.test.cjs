@@ -75,3 +75,58 @@ test('native queue reuses queue content and returns to the player without redire
   content.props.onClose(); content.props.onOpenPlayer();
   assert.deepEqual(actions, ['back', '/player']);
 });
+
+test('covered navigation retains the selected tab through repeated player and queue open/close', () => {
+  let pathname = '/library', state;
+  const { useActiveNavTab } = load('src/features/navigation/useActiveNavTab.ts', {
+    react: { useState: initial => { state ??= initial; return [state, next => { state = next; }]; } },
+    'expo-router': { usePathname: () => pathname },
+  });
+  const render = path => { pathname = path; return useActiveNavTab(); };
+  for (const [path, expected] of [['/library', 'library'], ['/search', 'search'], ['/liked-songs', 'liked-songs'], ['/downloads', 'library']]) {
+    assert.equal(render(path), expected);
+    for (let i = 0; i < 50; i++) {
+      assert.equal(render('/player'), expected);
+      assert.equal(render('/queue'), expected);
+      assert.equal(render('/song-options'), expected);
+      assert.equal(render('/player'), expected);
+      assert.equal(render(path), expected);
+    }
+  }
+  assert.equal(render('/'), 'index', 'an actual Home navigation still changes selection');
+});
+
+test('secondary screens own their dock so a modal naturally covers it', () => {
+  let auth = { loading: false, isAuthenticated: true, isGuest: false };
+  const jsx = { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
+  const { ScreenWithNavigation } = load('src/features/navigation/ScreenWithNavigation.tsx', {
+    'react/jsx-runtime': jsx,
+    'react-native': { View: 'View' },
+    '@/contexts/AuthContext': { useAuth: () => auth },
+    '@/lib/authFeatures': { GUEST_LOGIN_ENABLED: true },
+    './AppNavBar': { AppNavBar: 'AppNavBar' },
+  });
+  const dependencies = {
+    'react/jsx-runtime': jsx,
+    '@/features/navigation/ScreenWithNavigation': { ScreenWithNavigation },
+    '@/constants/colors': { __esModule: true, default: { background: '#000' } },
+    'expo-router': { Stack: 'Stack' },
+    '@/features/downloads/screens/DownloadedSongsScreen': { DownloadedSongsScreen: 'Downloads' },
+  };
+  for (const file of ['app/playlist/_layout.tsx', 'app/artist/_layout.tsx', 'app/downloads.tsx']) {
+    const tree = load(file, dependencies).default();
+    assert.equal(tree.type, ScreenWithNavigation);
+    const rendered = tree.type(tree.props);
+    assert.equal(rendered.props.children[0], tree.props.children);
+    assert.equal(rendered.props.children[1].type, 'AppNavBar');
+  }
+  const downloads = load('app/downloads.tsx', dependencies).default;
+  assert.equal(load('app/downloaded-songs.tsx', { './downloads': { __esModule: true, default: downloads } }).default, downloads,
+    'both download URLs keep the same screen-owned dock');
+  auth = { loading: true, isAuthenticated: true, isGuest: false };
+  assert.equal(ScreenWithNavigation({ children: 'screen' }).props.children[1], false);
+  auth = { loading: false, isAuthenticated: false, isGuest: false };
+  assert.equal(ScreenWithNavigation({ children: 'screen' }).props.children[1], false);
+  auth.isGuest = true;
+  assert.equal(ScreenWithNavigation({ children: 'screen' }).props.children[1].type, 'AppNavBar');
+});

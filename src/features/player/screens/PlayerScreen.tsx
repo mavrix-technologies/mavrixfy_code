@@ -247,12 +247,16 @@ export const PlayerScreen = memo(function PlayerScreen() {
   const backgrounded = useAppIsBackgrounded();
   const focused = useIsFocused();
   const navigation = useNavigation();
-  const sheetRef = useRef<BottomSheet>(null);
-  const closeSheet = useCallback(() => sheetRef.current?.forceClose(), []);
   const dismissedRef = useRef(false);
   const { width, height } = useWindowDimensions();
+  // Seed the first frame; BottomSheet's hosting container keeps the measured
+  // height and window offsets current through layout changes and rotation.
+  const containerLayoutState = useSharedValue({
+    height,
+    offset: { top: 0, bottom: 0, left: 0, right: 0 },
+  });
   const [viewport, setViewport] = useState<{ width: number; height: number }>(() => ({ width, height }));
-  const onSheetClosed = useCallback(() => {
+  const closePlayer = useCallback(() => {
     if (dismissedRef.current) return;
     dismissedRef.current = true;
     if (navigation.canGoBack()) navigation.goBack();
@@ -299,26 +303,27 @@ export const PlayerScreen = memo(function PlayerScreen() {
   useEffect(() => {
     if (!focused || isStandByActive || !foreground) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      closeSheet();
+      closePlayer();
       return true;
     });
     return () => subscription.remove();
-  }, [focused, isStandByActive, foreground, closeSheet]);
+  }, [focused, isStandByActive, foreground, closePlayer]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayout}>
       <StatusBar hidden={false} style="light" />
       {standBy.isStandByActive && <StandByKeepAwake />}
-      <BottomSheet ref={sheetRef} index={0} snapPoints={PLAYER_SNAP_POINTS}
+      <BottomSheet index={0} snapPoints={PLAYER_SNAP_POINTS}
         style={styles.playerSheetFrame}
+        animateOnMount={false} containerLayoutState={containerLayoutState}
         enableDynamicSizing={false} enablePanDownToClose enableOverDrag={false}
         backgroundStyle={{ backgroundColor: "#000000", borderRadius: 0 }}
         handleComponent={null}
-        onClose={onSheetClosed}>
+        onClose={closePlayer}>
         <View pointerEvents={isStandByActive ? "none" : "auto"}
           style={{ width: playerViewport.width, height: playerViewport.height }}>
           {!backgrounded && <LegacyPlayerScreenView viewport={playerViewport}
-            interactionReady={focused && !isStandByActive} onEnterStandBy={standBy.enterStandBy} onClose={closeSheet} />}
+            interactionReady={focused && !isStandByActive} onEnterStandBy={standBy.enterStandBy} onClose={closePlayer} />}
         </View>
       </BottomSheet>
 

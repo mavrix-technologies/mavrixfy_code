@@ -4,7 +4,7 @@ import { type ComponentProps } from "react";
 export type IoniconsName = ComponentProps<typeof Ionicons>["name"];
 
 export interface MusicCategoryItem {
-  id: string;
+  id: MavrixfyCategory;
   label: string;
   focusedIcon: IoniconsName;
   unfocusedIcon: IoniconsName;
@@ -19,4 +19,7 @@ export const MAVRIXFY_MUSIC_CATEGORIES: readonly MusicCategoryItem[] = [
   { id: "Recently Played", label: "Recent", focusedIcon: "time", unfocusedIcon: "time-outline" },
 ] as const;
 
-export type MavrixfyCategory = string;
+export type MavrixfyCategory = "All" | "Songs" | "Playlists" | "Albums" | "New Releases" | "Recently Played";
+
+export const UNIFIED_HEADER_TOP_BAR_HEIGHT = 48;
+export const UNIFIED_HEADER_MENU_HEIGHT = 58;

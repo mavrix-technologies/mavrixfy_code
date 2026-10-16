@@ -1,6 +1,7 @@
 import { mapFilter,sortedCopy } from "@/lib/arrayUtils";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 import type { PlaybackStreamMetadata } from "@/services/audio/audioTimeline";
+import { saavnArtworkUrl } from "@/services/youtube/YouTubeArtwork";
 export interface Song extends PlaybackStreamMetadata {
   id: string;
   title: string;
@@ -79,21 +80,6 @@ export interface Playlist {
   songCount?: number;
 }
 
-function normalizeJioSaavnImageUrl(rawUrl: string): string {
-  let trimmed = String(rawUrl || "").trim();
-  if (!trimmed) return "";
-
-  // Upgrade insecure http:// to https:// to satisfy iOS ATS in release/IPA builds
-  if (trimmed.startsWith("http://")) {
-    trimmed = "https://" + trimmed.slice(7);
-  }
-
-  // Prefer higher-res covers (500x500) over lower resolutions (50x50, 150x150).
-  return trimmed.replace(/[-_]?(50x50|150x150)(?=\b|\.jpg)/gi, (match) => {
-    return match.startsWith("-") ? "-500x500" : match.startsWith("_") ? "_500x500" : "500x500";
-  });
-}
-
 function qualityScore(quality: string | undefined, url: string | undefined): number {
   const qualityKey = String(quality || "").trim().toLowerCase();
   const match = qualityKey.match(/^(\d{2,4})x(\d{2,4})$/i) || String(url || "").match(/(\d{2,4})x(\d{2,4})/i);
@@ -105,10 +91,13 @@ function qualityScore(quality: string | undefined, url: string | undefined): num
 
 export function getBestImageUrl(images: JioSaavnImage[]): string {
   if (!images || images.length === 0) return "";
-  const sorted = sortedCopy(images, (a, b) => {
-    return qualityScore(b.quality, b.url) - qualityScore(a.quality, a.url);
-  });
-  return normalizeJioSaavnImageUrl(sorted[0]?.url || "");
+  let best = "", score = -1;
+  for (const image of images) {
+    if (!image?.url?.trim()) continue;
+    const next = qualityScore(image.quality, image.url);
+    if (next > score) { best = image.url; score = next; }
+  }
+  return saavnArtworkUrl(best);
 }
 
 export type AudioCandidate = {

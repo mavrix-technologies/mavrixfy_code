@@ -178,6 +178,7 @@ function fixture(options = {}) {
   };
   const { StandByOverlay } = load("src/features/player/components/StandByOverlay.tsx", {
     react, "react-native": native, "expo-image": { Image: "Image" },
+    "@/components/MusicArtwork": { MusicArtwork: "MusicArtwork" },
     "react-native-gesture-handler": { GestureHandlerRootView: "GestureHandlerRootView" },
     "expo-battery": { BatteryState: { CHARGING: 2 }, useBatteryLevel: () => batteryLevel, useBatteryState: () => batteryState },
     "@expo/vector-icons": { MaterialIcons: "MaterialIcons", Ionicons: "Ionicons", MaterialCommunityIcons: "MaterialCommunityIcons" },
@@ -430,6 +431,7 @@ test("StandBy Ambient uses artwork and colors without mounting any media player"
   const f = fixture();
   const { StandByAmbientBackdrop } = load("src/features/player/components/StandByAmbientBackdrop.tsx", {
     react: f.react, "react-native": f.native, "expo-image": { Image: "Image" },
+    "@/components/MusicArtwork": { MusicArtwork: "MusicArtwork" },
     "expo-linear-gradient": { LinearGradient: "LinearGradient" },
   }, { React: f.react });
   const backdropProps = { song: { id: "song", coverUrl: "https://example.test/cover.jpg" }, accentColor: "#3f8faa", backgroundColor: "#223344", reduceMotion: false };
@@ -551,6 +553,7 @@ function inlinePanelFixture(options = {}) {
   const pending = new Promise((resolve, reject) => { resolveLyrics = resolve; rejectLyrics = reject; });
   const { StandBySidePanel } = load("src/features/player/components/StandBySidePanel.tsx", {
     react: f.react, "react-native": f.native, "expo-image": { Image: "Image" },
+    "@/components/MusicArtwork": { MusicArtwork: "MusicArtwork" },
     "@expo/vector-icons": { MaterialIcons: "MaterialIcons", Ionicons: "Ionicons" },
     "@/utils/stringUtils": { unescapeHtml: value => value },
     "@/services/lyricsService": { getSongLyrics: () => { requests++; return pending; } },

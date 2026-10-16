@@ -56,9 +56,20 @@ test("extractor aggregate errors retain timeout and network classification", () 
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: timeout"), /timed out/);
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: Network request failed"), /connect/);
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: Audio HTTP 403"), /connect/);
-  assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. SIGN_IN_REQUIRED: YouTube requires verification"), /connection to verify/);
+  assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. SIGN_IN_REQUIRED: YouTube requires verification"), /YouTube requires verification/);
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: interpreter error"), /Could not play/);
   assert.match(f.youTubePlaybackErrorMessage("Video unavailable: private video"), /unavailable/);
+});
+
+test("verification classification distinguishes provider rejection from transient connection failures", () => {
+  const f = fixture();
+  for (const error of [new Error("SIGN_IN_REQUIRED: Upstream verification required. Try again later."),
+    "LOGIN_REQUIRED: Private video", "Sign in to confirm you’re not a bot", "sign_in_required: upstream verification"]) {
+    assert.equal(f.isYouTubeVerificationError(error), true);
+    assert.match(f.youTubePlaybackErrorMessage(error), /verification/);
+  }
+  for (const error of [new Error("Network request failed"), "Audio HTTP 403", "Audio stream expired", "Request timed out"])
+    assert.equal(f.isYouTubeVerificationError(error), false);
 });
 
 test("playback diagnostics redact signed URLs and credentials", () => {

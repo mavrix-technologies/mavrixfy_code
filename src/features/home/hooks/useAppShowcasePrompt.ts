@@ -5,7 +5,9 @@ import { Alert, AppState, Platform } from "react-native";
 import {
   accountStorageKey,
   getAccountScope,
+  isCurrentAccount,
 } from "@/lib/accountScope";
+import { isAppShowcaseEnabled, isAppShowcaseDevEnabled } from "@/lib/appShowcaseConfig";
 import { getSettings } from "@/lib/storage";
 
 const STORAGE_KEY = "@mavrixfy_app_showcase_prompt_v1";
@@ -44,20 +46,11 @@ export function useAppShowcasePrompt(ready: boolean): void {
 
       let active = true;
       const initialScope = getAccountScope();
+      const canPresent = () => active && isCurrentAccount(initialScope) && AppState.currentState === "active";
 
       const timer = setTimeout(() => {
         void (async () => {
-          if (!active) return;
-
-          const currentScope = getAccountScope();
-          // Ensure account scope has not changed while waiting
-          if (
-            initialScope.accountId !== null &&
-            currentScope.accountId !== null &&
-            initialScope.accountId !== currentScope.accountId
-          ) {
-            return;
-          }
+          if (!canPresent()) return;
 
           // Do not prompt when the best-available quality preference is selected.
           const settings = await getSettings();
@@ -65,34 +58,23 @@ export function useAppShowcasePrompt(ready: boolean): void {
             return;
           }
 
-          // 3. Remote master toggle & Remote Dev Testing flag strictly from Firestore
-          let isPromptEnabled = true;
-          let isDevRemoteTesting = false;
-          try {
-            const { isAppShowcaseEnabled, isAppShowcaseDevEnabled } = require("@/lib/appShowcaseConfig");
-            isPromptEnabled = isAppShowcaseEnabled();
-            isDevRemoteTesting = isAppShowcaseDevEnabled();
-          } catch {
-            // Guarded for non-mocked/standalone test environments
-          }
-
-          if (!isPromptEnabled) {
-            return;
-          }
+          if (!canPresent() || !isAppShowcaseEnabled()) return;
 
           // 4. Official frequency limit & cooldown check (bypassed only when devEnabled is true in Firestore)
-          const key = accountStorageKey(STORAGE_KEY, currentScope.accountId);
+          const key = accountStorageKey(STORAGE_KEY, initialScope.accountId);
           const raw = await AsyncStorage.getItem(key);
           const history = raw ? JSON.parse(raw) : { count: 0, lastShownAt: 0 };
+          const count = Number.isSafeInteger(history?.count) && history.count >= 0 ? history.count : 0;
+          const lastShownAt = typeof history?.lastShownAt === "number" && Number.isFinite(history.lastShownAt) ? history.lastShownAt : 0;
 
-          if (!isDev || !isDevRemoteTesting) {
+          if (!isDev || !isAppShowcaseDevEnabled()) {
             if (shownThisSession) return;
-            if (history.count >= MAX_SHOW_COUNT) return;
-            if (Date.now() - history.lastShownAt < COOLDOWN_INTERVAL_MS) return;
+            if (count >= MAX_SHOW_COUNT) return;
+            if (Date.now() - lastShownAt < COOLDOWN_INTERVAL_MS) return;
           }
 
           // 5. Lifecycle state guard before presenting
-          if (!active || AppState.currentState !== "active") {
+          if (!canPresent()) {
             return;
           }
 
@@ -101,15 +83,15 @@ export function useAppShowcasePrompt(ready: boolean): void {
           await AsyncStorage.setItem(
             key,
             JSON.stringify({
-              count: history.count + 1,
+              count: count + 1,
               lastShownAt: Date.now(),
             }),
           );
 
-          if (!active || AppState.currentState !== "active") return;
+          if (!canPresent()) return;
 
           if (modalListeners.size > 0) {
-            modalListeners.forEach((listener) => listener(true));
+            triggerAppShowcaseModal();
           } else {
             Alert.alert(
               "Mavrixfy Showcase",
@@ -125,7 +107,7 @@ export function useAppShowcasePrompt(ready: boolean): void {
               ],
             );
           }
-        })();
+        })().catch(() => {}); // Storage failures must not reject a Home focus effect.
       }, PROMPT_DELAY_MS);
 
       return () => {

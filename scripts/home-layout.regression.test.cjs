@@ -3,12 +3,15 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const ts = require("typescript");
-function load(filename) {
+function load(filename, dependencies = {}) {
   const module = { exports: {} };
   const code = ts.transpileModule(fs.readFileSync(filename, "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  vm.runInNewContext(code, { module, exports: module.exports, require() { throw new Error("Unexpected runtime dependency"); } });
+  vm.runInNewContext(code, { module, exports: module.exports, require(name) {
+    if (!(name in dependencies)) throw new Error(`Unexpected runtime dependency ${name}`);
+    return dependencies[name];
+  } });
   return module.exports;
 }
 const { buildHomeSections } = load("src/features/home/hooks/buildHomeSections.ts");
@@ -87,4 +90,20 @@ test("menu filters real content types without adding substitute provider rows", 
   const releases = buildHomeSections("New Releases", true, [], jio, explore);
   assert.equal(releases.length, 1);
   assert.equal(releases[0].section.playlists[0], playlist);
+});
+
+test("catalog section cleanup preserves active All, Recent and New Releases content and loading states", () => {
+  const { useHomeSectionData } = load("src/features/home/hooks/useHomeSectionData.ts", { react: { useMemo: fn => fn() } });
+  const input = { selectedCategory: "All", categories: [{ id: "trending" }, { id: "new-releases" }, { id: "editorial" }],
+    quickPickSongs: [{ id: "song" }], recentlyPlayed: [{ id: "recent" }], featuredArtists: [{ id: "artist" }],
+    publicPlaylists: [{ id: "community" }], loadingMainContent: false };
+  assert.equal(useHomeSectionData(input).map(row => row.id).join(","),
+    "quick-picks,recently-played,artists,cat-trending,cat-new-releases,cat-editorial,public-playlists");
+  assert.equal(useHomeSectionData(input).filter(row => row.showAd).length, 1);
+  assert.equal(useHomeSectionData({ ...input, selectedCategory: "Recently Played" }).map(row => row.id).join(","), "recently-played,artists");
+  assert.equal(useHomeSectionData({ ...input, selectedCategory: "New Releases" }).map(row => row.id).join(","), "cat-new-releases,quick-picks,public-playlists");
+  for (const selectedCategory of ["All", "Songs", "Playlists", "Albums"]) {
+    const rows = useHomeSectionData({ ...input, selectedCategory, categories: [], quickPickSongs: [], featuredArtists: [], publicPlaylists: [], loadingMainContent: true });
+    assert.equal(rows.map(row => row.id).join(","), "loading-quick,recently-played,loading-main");
+  }
 });

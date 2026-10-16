@@ -2,6 +2,7 @@
 import { BotGuardClient } from "bgutils-js/botguard";
 import { WebPoMinter } from "bgutils-js/webpo";
 import { buildURL, getHeaders } from "bgutils-js/utils";
+import { extractPageAttestation } from "./helpers/youtube-page-attestation.mjs";
 
 let minter, botguard, expiresAt = 0, httpId = 0;
 const requests = new Map();
@@ -9,9 +10,10 @@ const send = data => window.ReactNativeWebView.postMessage(JSON.stringify(data))
 function nativeFetch(url, init = {}) {
   const id = ++httpId;
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { requests.delete(id); reject(new Error("Attestation HTTP timeout")); }, 8000);
+    const timer = setTimeout(() => { requests.delete(id); reject(new Error("Attestation HTTP timeout")); }, 6000);
     requests.set(id, { resolve, reject, timer });
-    send({ type: "http", id, url, method: init.method || "GET", headers: init.headers, body: init.body });
+    send({ type: "http", id, url, method: init.method || "GET",
+      headers: { ...init.headers, "user-agent": navigator.userAgent }, body: init.body });
   });
 }
 window.receiveAttestationHttp = reply => {
@@ -23,21 +25,23 @@ window.receiveAttestationHttp = reply => {
     text: async () => reply.body, json: async () => JSON.parse(reply.body) });
 };
 window.runAttestationCommand = async command => {
-  let stage = "interpreter";
+  let stage = "page";
   try {
     if (command.operation === "bootstrap") {
-      const challenge = command.challenge;
-      if (!challenge?.program || !challenge.globalName) throw new Error("Invalid challenge");
       await botguard?.shutdown();
       minter = undefined;
-      let script = challenge.interpreterJavascript?.privateDoNotAccessOrElseSafeScriptWrappedValue;
-      if (!script) {
-        const url = challenge.interpreterUrl?.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue;
-        if (!url) throw new Error("Missing interpreter");
-        const response = await nativeFetch(url.startsWith("//") ? `https:${url}` : url);
-        if (!response.ok) throw new Error("Interpreter unavailable");
-        script = await response.text();
-      }
+      expiresAt = 0;
+      const page = await nativeFetch("https://www.youtube.com/", { headers: { "accept-language": "en-US,en;q=0.7" } });
+      if (!page.ok) throw new Error("Attestation page unavailable");
+      const { config, challenge } = extractPageAttestation(await page.text());
+      // The initial challenge is bound to this page's EVENT_ID. /att/get cannot
+      // replace it; fetching a separate config produces silently rejected tokens.
+      window.yt = { config_: config };
+      stage = "interpreter";
+      const url = challenge.interpreterUrl.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue;
+      const interpreter = await nativeFetch(url.startsWith("//") ? `https:${url}` : url);
+      if (!interpreter.ok) throw new Error("Interpreter unavailable");
+      const script = await interpreter.text();
       // The remote interpreter runs only in the isolated WebView, never Hermes.
       const element = document.createElement("script");
       element.textContent = script; document.head.appendChild(element); element.remove();

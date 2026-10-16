@@ -114,8 +114,6 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
   playSong,
 }: {
   songs: Song[];
-  currentSongId?: string | null;
-  currentSong?: Song | null;
   playSong: (song: Song, queue?: Song[]) => void;
 }) {
   const router = useRouter();
@@ -235,9 +233,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
 
-  quickPickRowActive: {
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-  },
   quickPickMain: {
     flex: 1,
     flexDirection: "row",

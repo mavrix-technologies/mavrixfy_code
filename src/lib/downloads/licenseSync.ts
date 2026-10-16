@@ -8,7 +8,7 @@ import { getDeviceId } from "./deviceInfo";
 import { loadAllDownloads, patchDownload } from "./downloadStore";
 
 export interface IssuedLicense extends OfflineLicense {
-  issuedByServer: true;
+  issuedByServer: boolean;
   quality: DownloadQuality;
 }
 
@@ -52,7 +52,7 @@ export async function issueOfflineLicense(
     songId,
     deviceId,
     status: "active",
-    issuedByServer: true,
+    issuedByServer: false,
     quality,
     rightsVersion: 1,
     expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),

@@ -8,11 +8,6 @@ useArtworkPalette,
 import { triggerImpact } from "@/lib/haptics";
 import { globalHomeScrollRef } from "@/lib/homeScrollRef";
 import { useLastMix } from "@/lib/lastMix";
-import {
-getCachedMiniPlayerBannerConfig,
-subscribeToMiniPlayerBannerConfig,
-type MiniPlayerBannerConfig,
-} from "@/lib/miniPlayerBannerConfig";
 import * as Animated from "@/lib/nativeAnimated";
 import { expandPlayer } from "@/lib/playerUIState";
 import { globalQueueSheetRef } from "@/lib/queueRef";
@@ -22,7 +17,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
 import { MusicArtwork } from "@/components/MusicArtwork";
 import { scheduleArtworkPreload } from "@/lib/artworkPreload";
-import { usePathname,useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import {
 Pressable,
@@ -37,7 +32,6 @@ import Colors from "@/constants/colors";
 import { styles } from "./layoutStyles";
 
 import {
-MiniPlayerBannerView,
 MiniPlayerProgressBar,
 MiniPlayerSecondaryControlButton,
 } from "./miniPlayerComponents";
@@ -54,6 +48,7 @@ getTabHref,
 type VisibleRoute,
 } from "./navTabConstants";
 import { MemoizedNavTabItem } from "./NavTabItem";
+import { useActiveNavTab } from "./useActiveNavTab";
 
 const MINI_SWIPE_THRESHOLD = 26;
 const miniCoverSize = 44;
@@ -65,7 +60,7 @@ export type AppNavBarProps = {
 // react-doctor-disable-next-line react-doctor/no-giant-component -- navigation bar component
 export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const { push: routerPush, navigate: routerNavigate } = useRouter();
-  const pathname = usePathname();
+  const activeTab = useActiveNavTab();
   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   useEffect(() => {
@@ -73,29 +68,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     const hide = Keyboard.addListener(IS_IOS ? "keyboardWillHide" : "keyboardDidHide", () => setKeyboardVisible(false));
     return () => { show.remove(); hide.remove(); };
   }, []);
-
-  const activeTab = useMemo<VisibleRoute>(() => {
-    if (!pathname || pathname === "/" || pathname === "/index") return "index";
-    if (pathname === "/search" || pathname.startsWith("/search/")) return "search";
-    if (
-      pathname === "/library" ||
-      pathname.startsWith("/library/") ||
-      pathname === "/downloads" ||
-      pathname.startsWith("/downloads/") ||
-      pathname === "/downloaded-songs" ||
-      pathname.startsWith("/downloaded-songs/")
-    )
-      return "library";
-    if (pathname === "/liked-songs" || pathname.startsWith("/liked-songs/")) return "liked-songs";
-    if (
-      pathname === "/import-songs" ||
-      pathname.startsWith("/import-songs/") ||
-      pathname === "/import-songs-file" ||
-      pathname.startsWith("/import-songs-file")
-    )
-      return "import-songs";
-    return "index";
-  }, [pathname]);
 
   const isWeb = IS_WEB;
   const isIOS = IS_IOS;
@@ -123,11 +95,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const [failedCoverUrl, setFailedCoverUrl] = useState<string>();
   const coverFailed = failedCoverUrl === activeSong?.coverUrl;
   const artworkPalette = useArtworkPalette(activeSong?.coverUrl);
-  const [bannerConfig, setBannerConfig] = useState<MiniPlayerBannerConfig>(() => getCachedMiniPlayerBannerConfig());
-
-  useEffect(() => {
-    return subscribeToMiniPlayerBannerConfig(setBannerConfig);
-  }, []);
 
   const handleTabPress = useCallback(
     (route: VisibleRoute, isFocused: boolean) => {
@@ -231,7 +198,8 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const miniPanGesture = useMemo(
     () =>
       Gesture.Pan()
-        .activeOffsetX([-4, 4])
+        // Match tap slop: a small finger drift must not steal an opening tap.
+        .activeOffsetX([-10, 10])
         .failOffsetY([-12, 12])
         .runOnJS(true)
         .onUpdate((event) => {
@@ -287,10 +255,10 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
         .runOnJS(true)
         .onEnd((_event, success) => {
           if (!success) return;
+          openPlayer();
           if (!IS_WEB) {
             void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
           }
-          openPlayer();
         }),
     [openPlayer]
   );
@@ -413,10 +381,6 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                 { backgroundColor: playerSectionBg, borderBottomColor: playerSectionDivider },
               ]}
             >
-              {bannerConfig.enabled && bannerConfig.items.length > 0 ? (
-                <MiniPlayerBannerView config={bannerConfig} />
-              ) : null}
-
               <View style={[styles.playerRow, { height: miniPlayerHeight }]}>
                 <GestureDetector gesture={miniSwipeGesture}>
                   <Animated.View

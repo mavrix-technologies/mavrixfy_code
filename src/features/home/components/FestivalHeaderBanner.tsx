@@ -2,7 +2,7 @@ import { useVisibleImageAnimation } from "@/lib/useVisibleImageAnimation";
 import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { type SharedValue } from "react-native-reanimated";
 import {
   ActivityIndicator,
@@ -42,22 +42,14 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
   const imageSource = optimizedSource === failedOptimizedSource ? backgroundImageUrl : optimizedSource;
   const configuredRatio = themeConfig?.aspectRatio;
 
-  // 1. Stable aspect ratio resolution (Configured > Cached > Standard 16:9)
-  const [aspectRatio, setAspectRatio] = useState<number>(() => {
-    if (configuredRatio && configuredRatio > 0) return configuredRatio;
-    if (backgroundImageUrl && gBannerAspectRatioCache[backgroundImageUrl]) {
-      return gBannerAspectRatioCache[backgroundImageUrl];
-    }
-    return DEFAULT_BANNER_ASPECT_RATIO;
-  });
-
-  const [isLoaded, setIsLoaded] = useState<boolean>(() => {
-    // If the image was already measured in cache, it's likely already in memory/disk cache
-    return Boolean(backgroundImageUrl && gBannerAspectRatioCache[backgroundImageUrl]);
-  });
-  const [hasError, setHasError] = useState<boolean>(false);
-
-  const effectiveRatio = aspectRatio > 0 ? aspectRatio : DEFAULT_BANNER_ASPECT_RATIO;
+  const [measuredImage, setMeasuredImage] = useState<{ url: string; ratio: number } | null>(null);
+  const [loadedSource, setLoadedSource] = useState<string | null>(null);
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const measuredRatio = measuredImage?.url === backgroundImageUrl ? measuredImage?.ratio
+    : backgroundImageUrl ? gBannerAspectRatioCache[backgroundImageUrl] : undefined;
+  const effectiveRatio = configuredRatio && configuredRatio > 0 ? configuredRatio : measuredRatio || DEFAULT_BANNER_ASPECT_RATIO;
+  const isLoaded = loadedSource === imageSource;
+  const hasError = imageSource !== null && failedSource === imageSource;
   const rawHeight = Math.round(screenWidth / effectiveRatio);
   const minHeight = 140;
   const maxHeight = Math.round(Math.min(screenHeight * 0.42, 330));
@@ -66,34 +58,22 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
   const { imageRef, animationActive } = useVisibleImageAnimation(imageSource, scrollY,
     contentTopOffset + bannerHeight);
 
-  // Sync aspect ratio if themeConfig changes dynamically
-  useEffect(() => {
-    if (configuredRatio && configuredRatio > 0) {
-      setAspectRatio(configuredRatio);
-    } else if (backgroundImageUrl && gBannerAspectRatioCache[backgroundImageUrl]) {
-      setAspectRatio(gBannerAspectRatioCache[backgroundImageUrl]);
-    }
-  }, [configuredRatio, backgroundImageUrl]);
-
   // Handle successful image load
   const handleLoad = useCallback(
     (e: { source: { width: number; height: number } }) => {
       const { width, height } = e.source;
-      setIsLoaded(true);
-      setHasError(false);
+      setLoadedSource(imageSource);
+      setFailedSource(previous => previous === imageSource ? null : previous);
 
       if (width > 0 && height > 0) {
         const ratio = width / height;
         if (backgroundImageUrl) {
           gBannerAspectRatioCache[backgroundImageUrl] = ratio;
-        }
-        // Only update if not explicitly pinned by remote config
-        if (!configuredRatio) {
-          setAspectRatio((prev) => (Math.abs(prev - ratio) > 0.05 ? ratio : prev));
+          setMeasuredImage({ url: backgroundImageUrl, ratio });
         }
       }
     },
-    [backgroundImageUrl, configuredRatio]
+    [backgroundImageUrl, imageSource]
   );
 
   const handleError = useCallback(() => {
@@ -101,8 +81,7 @@ export const FestivalHeaderBanner = React.memo(function FestivalHeaderBanner({
       setFailedOptimizedSource(imageSource);
       return;
     }
-    setIsLoaded(true);
-    setHasError(true);
+    setFailedSource(imageSource);
   }, [imageSource, backgroundImageUrl]);
 
   if (!themeConfig || !themeConfig.enabled) {

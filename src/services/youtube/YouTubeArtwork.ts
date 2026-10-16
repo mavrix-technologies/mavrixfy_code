@@ -23,35 +23,54 @@ export function youTubeArtworkUrl(raw: string | undefined, pixels = 1200): strin
   if (!url) return "";
   const host = url.match(/^https?:\/\/([^/]+)/i)?.[1]?.toLowerCase();
   if (!host || !["googleusercontent.com", "ggpht.com"].some(domain => host === domain || host.endsWith(`.${domain}`))) return url;
-  const target = Math.min(1200, Math.max(96, Math.ceil(pixels)));
+  const target = Math.min(1200, Math.max(96, Math.ceil(Number.isFinite(pixels) ? pixels : 1200)));
   // Signed query strings and unrelated '=...' tokens are deliberately untouched.
   const queryStart = url.search(/[?#]/);
   const base = queryStart < 0 ? url : url.slice(0, queryStart);
   const suffix = queryStart < 0 ? "" : url.slice(queryStart);
-  return base.replace(/=(?:w\d+-h\d+|s\d+)(?=[-]|$)/i, match =>
-    match.startsWith("=s") ? `=s${target}` : `=w${target}-h${target}`) + suffix;
+  return base.replace(/=(?:w(\d+)-h(\d+)|s\d+)(?=[-]|$)/i, (match, width, height) => {
+    if (!width) return `=s${target}`;
+    if (Number(width) <= 0 || Number(height) <= 0) return match;
+    // Resize proportionally; forcing a rectangular source to square distorts it.
+    const scale = Math.min(target / Math.min(Number(width), Number(height)), 2048 / Math.max(Number(width), Number(height)));
+    return `=w${Math.round(Number(width) * scale)}-h${Math.round(Number(height) * scale)}`;
+  }) + suffix;
 }
 
-/** Optional video masters belong to the view, never to persisted song metadata. */
-export function youTubeDisplayArtworkUrl(raw: string | undefined, pixels: number): string {
-  const video = raw?.match(/^https?:\/\/i\.ytimg\.com\/vi(?:_webp)?\/([\w-]{11})\/[^/?]+/i);
-  // Music can supply an already cropped video thumbnail through sqp. Keep its
-  // original transform instead of replacing it with an uncropped video still.
-  if (video && /[?&]sqp=/.test(raw!)) return raw!;
-  // High thumbnails are 4:3 and can contain letterbox padding. Keep the
-  // widescreen master for cards/player covers; native decoding fits the view.
-  return video ? `https://i.ytimg.com/vi/${video[1]}/${pixels > 192 ? "maxresdefault" : "mqdefault"}.jpg` : youTubeArtworkUrl(raw, pixels);
+/** Only resize the documented filename variants on the provider's own CDN. */
+export function saavnArtworkUrl(raw: string, pixels = 500): string {
+  const url = raw.trim().replace(/^\/\//, "https://");
+  if (!/^https?:\/\/(?:[\w-]+\.)*saavncdn\.com\//i.test(url)) return url;
+  const secure = url.replace(/^http:/i, "https:");
+  // Do not modify signed URLs or guess a resolution that the CDN does not offer.
+  if (/[?#]/.test(secure)) return secure;
+  const size = pixels <= 150 ? 150 : 500;
+  return secure.replace(/([_-])(?:50|150|500)x(?:50|150|500)(?=\.(?:jpe?g|png|webp)$)/i, `$1${size}x${size}`);
 }
 
-export function youTubeArtworkFallbackUrl(raw: string | undefined, failedUrl?: string): string {
-  const video = raw?.match(/^https?:\/\/i\.ytimg\.com\/vi(?:_webp)?\/([\w-]{11})\/[^/?]+/i);
+/** One finite source order shared by rendering, previews and prefetching. */
+export function artworkCandidates(raw: string | undefined, pixels: number): string[] {
+  const url = raw?.trim().replace(/^\/\//, "https://") || "";
+  if (!url) return [];
+  const video = url.match(/^https?:\/\/i\.ytimg\.com\/vi(?:_webp)?\/([\w-]{11})\/[^/?]+/i);
   if (video) {
     const base = `https://i.ytimg.com/vi/${video[1]}/`;
-    const tiers = ["sddefault", "hqdefault", "mqdefault"];
-    const failedTier = tiers.findIndex(tier => failedUrl === `${base}${tier}.jpg`);
-    return `${base}${tiers[Math.min(failedTier + 1, tiers.length - 1)]}.jpg`;
+    // A signed Music crop is the authentic cover. Preserve it, including its query.
+    const primary = /[?&]sqp=/.test(url) ? url : `${base}${pixels > 180 ? "maxresdefault" : "mqdefault"}.jpg`;
+    const tiers = pixels > 180 || /[?&]sqp=/.test(url)
+      ? ["maxresdefault", "sddefault", "hqdefault", "mqdefault"] : ["mqdefault", "hqdefault"];
+    return [...new Set([primary, ...tiers.map(tier => `${base}${tier}.jpg`), url])];
   }
-  return youTubeArtworkUrl(raw, 512);
+  const primary = saavnArtworkUrl(youTubeArtworkUrl(url, pixels), pixels);
+  const candidates = [primary];
+  if (primary !== youTubeArtworkUrl(url, pixels)) candidates.push(saavnArtworkUrl(url, 150));
+  for (const size of [512, 256, 128]) candidates.push(youTubeArtworkUrl(url, Math.min(pixels, size)));
+  candidates.push(url);
+  return [...new Set(candidates)];
+}
+
+export function youTubeDisplayArtworkUrl(raw: string | undefined, pixels: number): string {
+  return artworkCandidates(raw, pixels)[0] || "";
 }
 
 export function artworkPixelSize(layoutSize: number, density: number): number {

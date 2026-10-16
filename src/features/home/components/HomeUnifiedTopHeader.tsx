@@ -6,26 +6,29 @@ import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import React,{ useCallback,useMemo } from "react";
+import React,{ useCallback,useMemo,type ReactNode } from "react";
 import {
 Platform,
 StyleSheet,
 FlatList,
+View,
 type ListRenderItemInfo,
 } from "react-native";
 import Animated,{
 useAnimatedStyle,
+useDerivedValue,
 type SharedValue,
 } from "react-native-reanimated";
 import {
 MAVRIXFY_MUSIC_CATEGORIES,
+UNIFIED_HEADER_MENU_HEIGHT,
+UNIFIED_HEADER_TOP_BAR_HEIGHT,
+type MavrixfyCategory,
 type MusicCategoryItem,
 } from "../constants/homeNavConstants";
 
 import {
 CategoryTabItem,
-UNIFIED_HEADER_MENU_HEIGHT,
-UNIFIED_HEADER_TOP_BAR_HEIGHT,
 } from "./CategoryTabItem";
 import { HomeTopBarRow } from "./HomeTopBarRow";
 
@@ -40,12 +43,13 @@ const categoryKey = (item: MusicCategoryItem) => item.id;
 
 interface HomeUnifiedTopHeaderProps {
   topInset: number;
-  selectedCategory: string;
-  onSelectCategory: (category: string) => void;
+  selectedCategory: MavrixfyCategory;
+  onSelectCategory: (category: MavrixfyCategory) => void;
   scrollY?: number | SharedValue<number>;
-  isElevated?: boolean;
-  elevationProgress?: number;
   themeConfig?: FestivalThemeConfig;
+  announcement?: ReactNode;
+  /** Measured announcement height below the status-bar safe area. */
+  announcementHeight?: number | SharedValue<number>;
 }
 
 export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
@@ -54,10 +58,20 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
   onSelectCategory,
   scrollY = 0,
   themeConfig,
+  announcement,
+  announcementHeight = 0,
 }: HomeUnifiedTopHeaderProps) {
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
   const isIOS = Platform.OS === "ios";
+  const hasAnnouncement = Boolean(announcement);
+  const noticeHeight = useDerivedValue(() => hasAnnouncement
+    ? typeof announcementHeight === "number" ? announcementHeight : announcementHeight.value : 0);
+  const collapseDistance = useDerivedValue(() => noticeHeight.value + UNIFIED_HEADER_TOP_BAR_HEIGHT);
+  const categoryScrollY = useDerivedValue(() => {
+    const y = typeof scrollY === "number" ? scrollY : scrollY?.value || 0;
+    return Math.max(0, y - noticeHeight.value);
+  });
 
   // Dynamic remote Title customization
   const titleText = themeConfig?.titleText?.trim() || "MAVRIXFY";
@@ -103,19 +117,29 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
     [onSelectCategory, selectedCategory]
   );
 
-  // 100% UI-Thread Reanimated Transforms (Seamless shrink, zero layout shifts, zero CPU frame drops)
+  // Keep scroll-driven header geometry on the UI thread.
   const headerContainerAnimatedStyle = useAnimatedStyle(() => {
     "worklet";
     const y = typeof scrollY === "number" ? scrollY : scrollY ? scrollY.value : 0;
-    const clampedY = Math.min(UNIFIED_HEADER_TOP_BAR_HEIGHT, Math.max(0, y));
+    const clampedY = Math.min(collapseDistance.value, Math.max(0, y));
     return {
-      height: topInset + UNIFIED_HEADER_TOTAL_HEIGHT - clampedY,
+      height: topInset + noticeHeight.value + UNIFIED_HEADER_TOTAL_HEIGHT - clampedY,
     };
+  });
+
+  const movingContentStyle = useAnimatedStyle(() => {
+    const y = typeof scrollY === "number" ? scrollY : scrollY?.value || 0;
+    return { transform: [{ translateY: -Math.min(collapseDistance.value, Math.max(0, y)) }] };
+  });
+
+  const safeAreaProtectionStyle = useAnimatedStyle(() => {
+    const y = typeof scrollY === "number" ? scrollY : scrollY?.value || 0;
+    return { opacity: Math.min(1, Math.max(0, y) / 16) };
   });
 
   const stickyDockBgAnimatedStyle = useAnimatedStyle(() => {
     "worklet";
-    const y = typeof scrollY === "number" ? scrollY : scrollY ? scrollY.value : 0;
+    const y = categoryScrollY.value;
     const clampedY = Math.min(UNIFIED_HEADER_TOP_BAR_HEIGHT, Math.max(0, y));
     const progress = Math.min(1, Math.max(0, clampedY / UNIFIED_HEADER_TOP_BAR_HEIGHT));
     return {
@@ -125,27 +149,17 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
 
   const topBarAnimatedStyle = useAnimatedStyle(() => {
     "worklet";
-    const y = typeof scrollY === "number" ? scrollY : scrollY ? scrollY.value : 0;
+    const y = categoryScrollY.value;
     const clampedY = Math.min(UNIFIED_HEADER_TOP_BAR_HEIGHT, Math.max(0, y));
     const opacity = Math.max(0, 1 - clampedY / (UNIFIED_HEADER_TOP_BAR_HEIGHT * 0.75));
     return {
-      transform: [{ translateY: -clampedY }],
       opacity,
-    };
-  });
-
-  const menuRailAnimatedStyle = useAnimatedStyle(() => {
-    "worklet";
-    const y = typeof scrollY === "number" ? scrollY : scrollY ? scrollY.value : 0;
-    const clampedY = Math.min(UNIFIED_HEADER_TOP_BAR_HEIGHT, Math.max(0, y));
-    return {
-      transform: [{ translateY: -clampedY }],
     };
   });
 
   const festivalOverlayAnimatedStyle = useAnimatedStyle(() => {
     "worklet";
-    const y = typeof scrollY === "number" ? scrollY : scrollY ? scrollY.value : 0;
+    const y = categoryScrollY.value;
     const clampedY = Math.min(UNIFIED_HEADER_TOP_BAR_HEIGHT, Math.max(0, y));
     const progress = clampedY / UNIFIED_HEADER_TOP_BAR_HEIGHT;
     return {
@@ -160,7 +174,7 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
         const cat = themeConfig.customCategories?.find(category => category.id === item.id);
         if (!cat) return item;
         return {
-        id: cat.id,
+        id: item.id,
         label: cat.label || cat.id,
         focusedIcon: (cat.icon as any) || "musical-notes",
         unfocusedIcon: (`${cat.icon || "musical-notes"}-outline` as any),
@@ -180,18 +194,16 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
   }, [themeConfig?.customCategories, themeConfig?.menuLabels]);
 
   const renderCategoryItem = useCallback(
-    ({ item, index }: ListRenderItemInfo<MusicCategoryItem>) => {
+    ({ item }: ListRenderItemInfo<MusicCategoryItem>) => {
       const active = selectedCategory === item.id;
 
       return (
         <CategoryTabItem
-          key={item.id}
           item={item}
-          index={index}
           active={active}
           isIOS={isIOS}
           isFestival={isFestival}
-          scrollY={scrollY}
+          scrollY={categoryScrollY}
           festiveActiveTextColor={festiveActiveTextColor}
           festiveActiveIconColor={festiveActiveIconColor}
           festiveInactiveColor={festiveInactiveColor}
@@ -208,7 +220,7 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
       festiveActiveTextColor,
       festiveInactiveColor,
       festiveIndicatorColor,
-      scrollY,
+      categoryScrollY,
       selectedCategory,
     ]
   );
@@ -217,9 +229,6 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
     <Animated.View
       style={[
         styles.headerRoot,
-        {
-          paddingTop: topInset,
-        },
         headerContainerAnimatedStyle,
       ]}
       pointerEvents="box-none"
@@ -255,26 +264,36 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
         </Animated.View>
       )}
 
-      {/* ── Collapsible Top Bar Row (GPU Translated on UI Thread) ── */}
-      <HomeTopBarRow
-        handleProfilePress={handleProfilePress}
-        handleDownloadPress={handleDownloadPress}
-        isAuthenticated={isAuthenticated}
-        user={user}
-        headerIconColor={headerIconColor}
-        titleColor={titleColor}
-        titleText={titleText}
-        topBarAnimatedStyle={topBarAnimatedStyle}
-        scrollY={scrollY}
-      />
+      <Animated.View style={movingContentStyle} pointerEvents="box-none">
+        <View style={{ height: topInset }} />
+        {announcement}
 
-      {/* A small native scroll row keeps every menu option mounted without clipping. */}
-      <Animated.View style={[styles.menuRailRow, menuRailAnimatedStyle]} pointerEvents="box-none">
-        <FlatList data={categoriesData} renderItem={renderCategoryItem} keyExtractor={categoryKey}
-          horizontal showsHorizontalScrollIndicator={false} bounces={false}
-          overScrollMode="never" removeClippedSubviews={false} contentContainerStyle={styles.menuScrollContent}
-          initialNumToRender={categoriesData.length} maxToRenderPerBatch={categoriesData.length} />
+        {/* The announcement and branding move together; only categories remain docked. */}
+        <HomeTopBarRow
+          handleProfilePress={handleProfilePress}
+          handleDownloadPress={handleDownloadPress}
+          isAuthenticated={isAuthenticated}
+          user={user}
+          headerIconColor={headerIconColor}
+          titleColor={titleColor}
+          titleText={titleText}
+          topBarAnimatedStyle={topBarAnimatedStyle}
+          scrollY={categoryScrollY}
+        />
+
+        {/* A small native scroll row keeps every menu option mounted without clipping. */}
+        <View style={styles.menuRailRow} pointerEvents="box-none">
+          <FlatList data={categoriesData} renderItem={renderCategoryItem} keyExtractor={categoryKey}
+            horizontal showsHorizontalScrollIndicator={false} bounces={false}
+            overScrollMode="never" removeClippedSubviews={false} contentContainerStyle={styles.menuScrollContent}
+            initialNumToRender={categoriesData.length} maxToRenderPerBatch={categoriesData.length} />
+        </View>
       </Animated.View>
+      <Animated.View pointerEvents="none" style={[
+        styles.safeAreaProtection,
+        { height: topInset },
+        safeAreaProtectionStyle,
+      ]} />
     </Animated.View>
   );
 });
@@ -293,6 +312,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     position: "relative",
     zIndex: 2,
+  },
+  safeAreaProtection: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 3,
+    backgroundColor: Colors.background,
   },
   menuScrollContent: {
     flexDirection: "row",

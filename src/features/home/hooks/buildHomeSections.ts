@@ -1,5 +1,6 @@
 import type { HomeSectionItem } from "./useHomeSectionData";
 import type { YouTubeHomeSection } from "@/services/youtube/YouTubeMusic";
+import type { MavrixfyCategory } from "../constants/homeNavConstants";
 
 export type HomeListItem = HomeSectionItem
   | { id: "youtube-quick-picks"; type: "youtube-quick-picks" }
@@ -7,7 +8,7 @@ export type HomeListItem = HomeSectionItem
   | { id: "releases-status"; type: "releases-status" }
   | { id: string; type: "youtube-section"; section: YouTubeHomeSection };
 
-export function buildHomeSections(category: string, youtubeEnabled: boolean, sections: YouTubeHomeSection[],
+export function buildHomeSections(category: MavrixfyCategory, youtubeEnabled: boolean, sections: YouTubeHomeSection[],
   jioSections: HomeSectionItem[], explore: YouTubeHomeSection[] = []): HomeListItem[] {
   if (!youtubeEnabled || category === "Recently Played") return jioSections;
   // Provider rows retain their own data and tap queues. JioSaavn is never a
@@ -15,6 +16,7 @@ export function buildHomeSections(category: string, youtubeEnabled: boolean, sec
   const jio = jioSections.filter(item => item.type === "category").slice(0, 2);
   const rows = (items: YouTubeHomeSection[]): HomeListItem[] => items.map(section => ({ id: section.id, type: "youtube-section", section }));
   const releaseShelves = explore.filter(section => section.category === "new-releases");
+  const hasRegionalShelves = explore.some(section => section.id.startsWith("youtube-regional-"));
   const latest: YouTubeHomeSection = { id: "youtube-new-releases", title: "New Releases", category: "new-releases",
     songs: [...new Map(releaseShelves.flatMap(section => section.songs).map(song => [song.id, song])).values()],
     playlists: [...new Map(releaseShelves.flatMap(section => section.playlists).map(item => [item.id, item])).values()],
@@ -22,7 +24,7 @@ export function buildHomeSections(category: string, youtubeEnabled: boolean, sec
   const discovery = [
     ...explore.filter(section => section.category !== "new-releases"),
     ...sections.filter(section => section.id === "youtube-for-you" ||
-      (!explore.some(row => row.id.startsWith("youtube-regional-")) &&
+      (!hasRegionalShelves &&
         /\b(hindi|punjabi|tamil|telugu|marathi|bengali|bollywood|indian)\b/i.test(section.title))),
   ];
   const releasesAvailable = latest.songs.length || latest.playlists.length;
@@ -37,9 +39,9 @@ export function buildHomeSections(category: string, youtubeEnabled: boolean, sec
   }
   const youtube: HomeListItem[] = [
     { id: "youtube-quick-picks", type: "youtube-quick-picks" },
-    ...(latest.songs.length || latest.playlists.length ? rows([latest]) : [{ id: "releases-status", type: "releases-status" } as HomeListItem]),
+    ...(releasesAvailable ? rows([latest]) : [{ id: "releases-status", type: "releases-status" } as HomeListItem]),
     ...rows(discovery),
-    ...(latest.songs.length || latest.playlists.length ? [{ id: "releases-status", type: "releases-status" } as HomeListItem] : []),
+    ...(releasesAvailable ? [{ id: "releases-status", type: "releases-status" } as HomeListItem] : []),
     { id: "youtube-status", type: "youtube-status" },
   ];
   // Keep two independent catalog breaks after the primary discovery rows.

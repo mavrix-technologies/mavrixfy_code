@@ -1,0 +1,12 @@
+{
+  "staggerMs": 36,
+  "barDurationMs": 340,
+  "settleMs": 0,
+  "fadeMs": 180,
+  "reducedFadeMs": 120,
+  "rise": 14,
+  "initialScaleY": 0.12,
+  "overshootScaleY": 1.02,
+  "overshootAt": 0.82,
+  "opacityAt": 0.2
+}

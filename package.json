@@ -3,11 +3,12 @@
   "main": "index.js",
   "version": "3.3.0",
   "scripts": {
+    "icons:generate": "node scripts/generate-app-icons.cjs",
+    "icons:preview": "node scripts/generate-launch-preview.cjs",
     "expo:start:static:build": "npx expo start --no-dev --minify --localhost",
     "start": "npx expo start --dev-client",
     "start:expo-go": "npx expo start --go",
     "start:dev-client": "npx expo start --dev-client",
-    "youtube:expo-go": "npm --prefix prototypes/youtube-expo-go start --",
     "youtube:build-token": "node scripts/build-youtube-po-token.mjs",
     "lint": "npx expo lint",
     "lint:fix": "npx expo lint --fix",
@@ -97,8 +98,7 @@
     "react-native-web": "^0.21.0",
     "react-native-webview": "13.16.1",
     "react-native-worklets": "0.10.1",
-    "react-native-youtube-iframe": "^2.4.1",
-    "youtubei.js": "18.1.0",
+    "youtubei.js": "^18.1.0",
     "zod": "^4.4.3",
     "zustand": "^5.0.15"
   },
@@ -113,6 +113,7 @@
     "eslint": "^9.31.0",
     "eslint-config-expo": "~57.0.2",
     "patch-package": "^8.0.1",
+    "sharp": "^0.35.5",
     "typescript": "~6.0.3"
   },
   "expo": {

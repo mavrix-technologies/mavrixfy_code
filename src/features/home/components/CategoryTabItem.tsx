@@ -7,12 +7,10 @@ type SharedValue,
 } from "react-native-reanimated";
 import { type MusicCategoryItem } from "../constants/homeNavConstants";
 
-export const UNIFIED_HEADER_TOP_BAR_HEIGHT = 48;
-export const UNIFIED_HEADER_MENU_HEIGHT = 58;
+import { UNIFIED_HEADER_TOP_BAR_HEIGHT, UNIFIED_HEADER_MENU_HEIGHT } from "../constants/homeNavConstants";
 
 export interface CategoryTabItemProps {
   item: MusicCategoryItem;
-  index: number;
   active: boolean;
   isIOS: boolean;
   isFestival: boolean;
@@ -21,12 +19,11 @@ export interface CategoryTabItemProps {
   festiveActiveIconColor: string;
   festiveInactiveColor: string;
   festiveIndicatorColor: string;
-  onPress: (item: MusicCategoryItem, index: number) => void;
+  onPress: (item: MusicCategoryItem) => void;
 }
 
 export const CategoryTabItem = React.memo(function CategoryTabItem({
   item,
-  index,
   active,
   isIOS,
   isFestival,
@@ -38,8 +35,8 @@ export const CategoryTabItem = React.memo(function CategoryTabItem({
   onPress,
 }: CategoryTabItemProps) {
   const handlePress = useCallback(() => {
-    onPress(item, index);
-  }, [item, index, onPress]);
+    onPress(item);
+  }, [item, onPress]);
 
   // UI-thread opacity for festive active colors: 1 at rest (scrollY = 0), fades to 0 when scrolled to sticky dock
   const festiveAnimatedStyle = useAnimatedStyle(() => {

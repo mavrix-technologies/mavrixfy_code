@@ -52,6 +52,7 @@ g/
 
 # Examples and test resources
 examples/
+prototypes/
 .idea/
 .vscode/
 tools/
@@ -70,6 +71,11 @@ yarn-error.log*
 
 # Test files
 __tests__/
+scripts/*.regression.test.cjs
+scripts/*.test.swift
+scripts/fixtures/
+scripts/helpers/*-fixture.cjs
+scripts/helpers/equalizer-dsp-fixture.ts
 *.test.ts
 *.test.tsx
 *.spec.ts

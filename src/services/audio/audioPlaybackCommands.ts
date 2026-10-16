@@ -222,7 +222,10 @@ export function useAudioPlaybackCommands({
           ]).finally(() => clearTimeout(resolutionTimer));
         } catch (initialResolutionError) {
           const detail = youTubePlaybackErrorDetails(initialResolutionError);
-          const retryable = !/LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot|private|removed|restricted/i.test(detail) &&
+          const extractionFailure = initialResolutionError as { retryExhausted?: boolean; code?: string } | null;
+          const extractionStopsRecovery = isYouTubeSong(targetSong) &&
+            (extractionFailure?.retryExhausted || extractionFailure?.code === "RATE_LIMITED");
+          const retryable = !extractionStopsRecovery && !/LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot|private|removed|restricted/i.test(detail) &&
             /network request failed|failed to fetch|timed out|timeout|ECONNRESET|ETIMEDOUT|HTTP (?:408|429|5\d\d)/i.test(detail);
           if (!retryable) throw initialResolutionError;
           if (reqId !== playRequestIdRef.current || !isCurrentAccount(scope) || !desiredPlayStateRef.current) return;
