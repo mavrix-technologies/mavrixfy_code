@@ -11,6 +11,16 @@ import Colors from "@/constants/colors";
 import { FlatList as GestureFlatList, Pressable } from "react-native-gesture-handler";
 import { styles } from "../styles/playerScreenStyles";
 import { StableArtworkImage, type ArtworkQueueItem } from "./PlayerArtworkViews";
+import Reanimated, { useAnimatedStyle, type SharedValue } from "react-native-reanimated";
+
+const ArtworkSlot = React.memo(function ArtworkSlot({ active, visibility, children }: {
+  active: boolean;
+  visibility?: SharedValue<number>;
+  children: React.ReactNode;
+}) {
+  const animatedStyle = useAnimatedStyle(() => ({ opacity: active ? visibility?.get() ?? 1 : 1 }));
+  return <Reanimated.View style={[styles.albumArtParallax, animatedStyle]}>{children}</Reanimated.View>;
+});
 
 const AnimatedSongFlatList = Animated.createAnimatedComponent(
   GestureFlatList as React.ComponentType<any>
@@ -33,6 +43,10 @@ export interface PlayerTrackCarouselProps {
   onScroll: any;
   onMomentumScrollEnd: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   getItemLayout: any;
+  transitionArtworkRef?: React.RefObject<View | null>;
+  onArtworkLayout?: () => void;
+  artworkVisibility?: SharedValue<number>;
+  onArtworkReady?: (songId: string, coverUrl: string | undefined) => void;
 }
 
 export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
@@ -52,6 +66,10 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
   onScroll,
   onMomentumScrollEnd,
   getItemLayout,
+  transitionArtworkRef,
+  onArtworkLayout,
+  artworkVisibility,
+  onArtworkReady,
 }: PlayerTrackCarouselProps) {
   const [videoCrossfadeAnim] = React.useState(() => new Animated.Value(videoVisible ? 0 : 1));
   const actualCardWidth = cardWidth ?? artworkSize;
@@ -65,6 +83,11 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
       useNativeDriver: true,
     }).start();
   }, [videoVisible, videoCrossfadeAnim]);
+
+  const handleMomentumScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    onMomentumScrollEnd(event);
+    onArtworkLayout?.();
+  }, [onArtworkLayout, onMomentumScrollEnd]);
 
   const renderArtworkCard = useCallback(
     ({ item, index }: { item: ArtworkQueueItem; index: number }) => {
@@ -117,6 +140,9 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
 
       return (
         <Pressable
+          ref={isActiveCard ? transitionArtworkRef : undefined}
+          collapsable={false}
+          onLayout={isActiveCard ? onArtworkLayout : undefined}
           style={[
             styles.artCarouselTouch,
             {
@@ -145,20 +171,24 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
               },
             ]}
           >
-            <View style={styles.albumArtParallax}>
+            <ArtworkSlot active={isActiveCard} visibility={artworkVisibility}>
               {item.song.coverUrl?.trim() ? (
                 <StableArtworkImage
                   uri={item.song.coverUrl.trim()}
                   size={artworkSize}
                   recyclingKey={item.artworkKey}
                   priority={isActiveCard ? "high" : "normal"}
+                  onDisplay={isActiveCard ? () => onArtworkReady?.(item.song.id, item.song.coverUrl) : undefined}
+                  onLoad={isActiveCard ? () => onArtworkReady?.(item.song.id, item.song.coverUrl) : undefined}
+                  onError={isActiveCard ? () => onArtworkReady?.(item.song.id, item.song.coverUrl) : undefined}
                 />
               ) : (
-                <View style={[styles.albumArt, styles.albumFallback]}>
+                <View style={[styles.albumArt, styles.albumFallback]}
+                  onLayout={isActiveCard ? () => onArtworkReady?.(item.song.id, item.song.coverUrl) : undefined}>
                   <Ionicons name="musical-notes" size={58} color={Colors.subtext} />
                 </View>
               )}
-            </View>
+            </ArtworkSlot>
           </Animated.View>
         </Pressable>
       );
@@ -174,6 +204,10 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
       scrollX,
       videoCrossfadeAnim,
       videoVisible,
+      transitionArtworkRef,
+      onArtworkLayout,
+      artworkVisibility,
+      onArtworkReady,
     ]
   );
 
@@ -200,7 +234,7 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
             paddingRight: actualSideInset,
           },
         ]}
-        style={styles.artCarousel}
+        style={[styles.artCarousel, { height: artworkSize }]}
         getItemLayout={getItemLayout}
         initialScrollIndex={activeQueueIndex}
         initialNumToRender={3}
@@ -209,8 +243,10 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
         updateCellsBatchingPeriod={50}
         removeClippedSubviews={false}
         onScroll={onScroll}
+        onLayout={onArtworkLayout}
+        onContentSizeChange={onArtworkLayout}
         scrollEventThrottle={16}
-        onMomentumScrollEnd={onMomentumScrollEnd}
+        onMomentumScrollEnd={handleMomentumScrollEnd}
       />
     </View>
   );

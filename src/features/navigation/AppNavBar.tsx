@@ -9,7 +9,9 @@ import { triggerImpact } from "@/lib/haptics";
 import { globalHomeScrollRef } from "@/lib/homeScrollRef";
 import { useLastMix } from "@/lib/lastMix";
 import * as Animated from "@/lib/nativeAnimated";
-import { expandPlayer } from "@/lib/playerUIState";
+import { expandPlayerFromMiniPlayer, expandPlayerFromMiniPlayerBounds } from "@/lib/playerUIState";
+import Reanimated from "react-native-reanimated";
+import { usePlayerDockMotion } from "./usePlayerDockMotion";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { useMiniPlayerSecondaryControl } from "@/lib/storage";
 import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
@@ -55,10 +57,12 @@ const miniCoverSize = 44;
 
 export type AppNavBarProps = {
   hidden?: boolean;
+  /** Reuse the unchanged mini row while the route morphs; no duplicate controls. */
+  transitionPreview?: boolean;
 };
 
 // react-doctor-disable-next-line react-doctor/no-giant-component -- navigation bar component
-export function AppNavBar({ hidden = false }: AppNavBarProps) {
+export function AppNavBar({ hidden = false, transitionPreview = false }: AppNavBarProps) {
   const { push: routerPush, navigate: routerNavigate } = useRouter();
   const activeTab = useActiveNavTab();
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -89,8 +93,13 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const hasActiveMiniPlayer = Boolean(activeSong);
   const miniPlayerRef = useRef<View>(null);
+  const miniPlayerBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const handleMiniPlayerLayout = useCallback(() => {
-    // no-op — tour removed
+    miniPlayerRef.current?.measureInWindow((x, y, width, height) => {
+      if (width > 0 && height > 0) {
+        miniPlayerBoundsRef.current = { x, y, width, height };
+      }
+    });
   }, []);
   const [failedCoverUrl, setFailedCoverUrl] = useState<string>();
   const coverFailed = failedCoverUrl === activeSong?.coverUrl;
@@ -113,7 +122,14 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     [routerNavigate]
   );
 
-  const openPlayer = expandPlayer;
+  const openPlayer = useCallback(() => {
+    const cached = miniPlayerBoundsRef.current;
+    if (cached && activeSong?.id) {
+      expandPlayerFromMiniPlayerBounds(cached, activeSong.id, artworkPalette.background || Colors.surface, 10);
+    } else {
+      expandPlayerFromMiniPlayer(miniPlayerRef.current, activeSong?.id, artworkPalette.background || Colors.surface, 10);
+    }
+  }, [activeSong?.id, artworkPalette.background]);
 
   const openMiniPlayerQueue = useCallback(() => {
     globalQueueSheetRef.current?.expand();
@@ -253,6 +269,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
     () =>
       Gesture.Tap()
         .runOnJS(true)
+        // eslint-disable-next-line react-hooks/refs -- The gesture invokes this callback after the tap, outside render.
         .onEnd((_event, success) => {
           if (!success) return;
           openPlayer();
@@ -283,6 +300,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
 
   const TAB_BAR_HEIGHT = 50;
   const resolvedBottomInset = isWeb ? 0 : Math.max(bottomInset, 0);
+  const { navStyle, miniStyle } = usePlayerDockMotion(TAB_BAR_HEIGHT + resolvedBottomInset, transitionPreview);
   const navIconSize = isNarrowMobile ? 22 : 24;
   const navLabelSize = isNarrowMobile ? 9.5 : 10.5;
   const navLabelLineHeight = 13;
@@ -350,13 +368,14 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
   return (
     <>
       <View
-        pointerEvents={navHidden ? "none" : "box-none"}
+        pointerEvents={navHidden || transitionPreview ? "none" : "box-none"}
         accessibilityElementsHidden={navHidden}
         importantForAccessibility={navHidden ? "no-hide-descendants" : "auto"}
         style={[
           styles.wrapper,
           { bottom: 0 },
           navHidden && styles.wrapperHidden,
+          transitionPreview && { position: "relative", bottom: undefined },
         ]}
       >
         <View
@@ -368,10 +387,10 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
             !hasActiveMiniPlayer && isIOS && styles.containerNavOnlyIOS,
           ]}
         >
-          <View pointerEvents="none" style={[styles.glassLayer, { backgroundColor: containerGlassBase }]} />
+          <Reanimated.View pointerEvents="none" style={[styles.glassLayer, { backgroundColor: containerGlassBase }, miniStyle]} />
 
           {hasActiveMiniPlayer && activeSong ? (
-            <View
+            <Reanimated.View
               ref={miniPlayerRef}
               onLayout={handleMiniPlayerLayout}
               collapsable={false}
@@ -379,6 +398,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                 styles.playerSection,
                 isIOS && styles.playerSectionIOS,
                 { backgroundColor: playerSectionBg, borderBottomColor: playerSectionDivider },
+                miniStyle,
               ]}
             >
               <View style={[styles.playerRow, { height: miniPlayerHeight }]}>
@@ -395,7 +415,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                       },
                     ]}
                   >
-                    <View style={[styles.coverWrap, { width: miniCoverSlotSize }]}>
+                    <View style={[styles.coverWrap, { width: miniCoverSlotSize }, transitionPreview && { opacity: 0 }]}>
                       {coverUrl && !coverFailed ? (
                         <MusicArtwork
                           key={activeSong.id}
@@ -561,10 +581,10 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                   color={overTrash ? "#ff6b6b" : "rgba(255,255,255,0.84)"}
                 />
               </Animated.View>
-            </View>
+            </Reanimated.View>
           ) : null}
 
-          <View
+          <Reanimated.View
             style={[
               styles.navContent,
               isIOS && styles.navContentIOS,
@@ -577,9 +597,11 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                 borderTopColor: "rgba(255, 255, 255, 0.08)",
               },
               !hasActiveMiniPlayer && styles.navContentNavOnly,
+              navStyle,
+              transitionPreview && { display: "none" },
             ]}
           >
-            {NAV_ITEMS.map((item) => {
+            {!transitionPreview && NAV_ITEMS.map((item) => {
               const isFocused = item.route === activeTab;
 
               return (
@@ -599,7 +621,7 @@ export function AppNavBar({ hidden = false }: AppNavBarProps) {
                 />
               );
             })}
-          </View>
+          </Reanimated.View>
         </View>
       </View>
     </>

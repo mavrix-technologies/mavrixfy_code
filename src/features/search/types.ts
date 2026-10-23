@@ -85,45 +85,73 @@ export const STITCH_BROWSE_CATEGORIES: BrowseCategory[] = [
   {
     id: "bollywood",
     title: "Bollywood",
-    color: "#5203D5",
+    color: "#8400e7",
     isHero: true,
     imageUrl:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuDF65iTajyxJ3pY_3UEgaEW904AIU2tgjMxR5nFVYA-a4pMW61Kv8YDwfMgptSw3ucmCvM1KahK-8SJ1uh3RB_pXxlJbGvdq6-zw277CJj1UUhPTeUNpmTYkdwKvLKpFcricdxCBw8Z6UTISEL6keZa5GWMv4vjHlGOpMuTw8_GZF-pmQvE3_kEQSk5RIrhD6dB5uDLIPrxgpgh8fBQk2z9ORzDfj1FqWnlXAl9DqmYpuygexks2zhfYCb2Pm8NIgCA8ga2fOz9Tok",
+      "https://is1-ssl.mzstatic.com/image/thumb/Music112/v4/9f/13/ca/9f13ca3b-e533-03e0-f19a-f0aaa774581d/196589311191.jpg/600x600bb.jpg",
   },
   {
-    id: "pop",
-    title: "Pop",
+    id: "punjabi",
+    title: "Punjabi",
+    color: "#e91429",
+    imageUrl:
+      "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/d3/08/bc/d308bc6a-20e1-6532-d933-35d1b429210e/5054197755538.jpg/600x600bb.jpg",
+  },
+  {
+    id: "podcasts",
+    title: "Podcasts",
     color: "#006450",
     imageUrl:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuCZIhRFtHlrYaSCGix2eKc62r5E2OGJmi4Mr-bozt_oxoy55OJw0TkuTaeteOmFnfFONc7_XzQVPGli7S-7IJKcgBk4TpnK6EWRMHlbrc0trTsyl7hKAHWH4UgU3B7bw1ZrGHjxWQYVi6k_e-fjUyVunPndYiCeaOkaNv0W2J8A4VQpg1ApyKZChtYlKbZozPO6BZ_Hq85UkZYIDUMzlJI_wyklKcbdkvGMTcyFrk8LWKZxphmy3ae1Pqiv92T7icXwqznnLT588ZI",
+      "https://is1-ssl.mzstatic.com/image/thumb/Podcasts116/v4/58/6e/a9/586ea984-3bf8-302e-a8fd-2e7b002044d2/mza_2944927475341717105.jpg/600x600bb.jpg",
   },
   {
-    id: "hip-hop",
-    title: "Hip-Hop",
-    color: "#BA5D07",
+    id: "indian_pop",
+    title: "Indian Pop",
+    color: "#148a08",
     imageUrl:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuD2KE4nLxpvF1LiA-NnK3zqUt5OwAyWqDLbv_rY9LGLUo1d3v7KDYVFHZFcdedYGc5vYOG3YsIyk3P_z8S6seI84xHk5lc8gsq6ciHOH319bfM-rLiKhULw3q2ZnAPo0OPNWkqqCqe7n-M6WepbtMG8L15wNXx875FRsHQGf2iZ2kiHID4B38IjGR1YprFRntfDQbkORI0ntzMg2ZtTk6HojgBnBrO_5J4gJSbZrmlqp-H4D6rGADt9vp1Fz_CDmu-OqTYEXqMvAwo",
+      "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/8a/89/e4/8a89e445-d2c6-f8ac-a828-27818b0c1afe/859749638209_cover.jpg/600x600bb.jpg",
   },
   {
-    id: "rock",
-    title: "Rock",
-    color: "#E8115B",
+    id: "south_cinema",
+    title: "South Cinema",
+    color: "#bc5900",
     imageUrl:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBRgyg4EDVFPBmagvQ0AY014mXu54WLUXwlGXxC8n_HEvNhBFgo5hOuMr6J6vRIoWFhrdYTMNA38g4lsukc6ZjN2ajd8D-eXvyhUuAfSjRz-XXRpWVFaIJh3sTVWpxr5XJbg4EEpWZg9R8gAoEntObreXkfAgPald-vwI8sxI4kvO1R3ncM_t-eyK-BKsSaLOUh0nOjBzwMuJq8ycLTpYIabDLhWMjmilC20GzVrQq_JL6IJieFb_AKGwj-6kaKK0CUqtnPVhsC9-A",
+      "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/db/ad/5e/dbad5e8b-0bee-d962-92d4-021c90e375ac/8902894362092_cover.jpg/600x600bb.jpg",
   },
   {
-    id: "indie",
-    title: "Indie",
-    color: "#608108",
+    id: "desi_hiphop",
+    title: "Desi Hip-Hop",
+    color: "#e1118c",
     imageUrl:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBMB3olxHY8oMxn-jGk7VtkK2hD6B8iQI4KFypQfJqwp7y2A8bdDsOtVvg5TVl5hy4b3AAw6yEtky0N9OyCyXEfmQl923IQF0J_WjH1-0FmSowMuo6j0FvfuI1t1aAZ6wFi7nHmStnAJEtO5mWqPaQwZQQM4QFy-QnFBu11xQYWsAMnhJBYY6duROuq7te-xhHLZn5Vx15fjXEKwTkFXH1jxLjgc-KiX0_oTl6G84EImZC6gMMKeu6JxDHbuPCnVHtrZD3kO06p7Ko",
+      "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/d3/08/bc/d308bc6a-20e1-6532-d933-35d1b429210e/5054197755538.jpg/600x600bb.jpg",
   },
   {
-    id: "jazz",
-    title: "Jazz",
-    color: "#1E3264",
+    id: "romance",
+    title: "Romance",
+    color: "#dc148c",
     imageUrl:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuD9ZgG99z-1Gv7n0qQ6a1g9h6K8q8Xn5w3-e8q0l8v6l3g2l7w0v5k0w6a8d8q3d3e8q1l3g0k3a4j7l3l8v3d9k0k7w8q2l0d7l3k7a8q6e2k3",
+      "https://is1-ssl.mzstatic.com/image/thumb/Music112/v4/9f/13/ca/9f13ca3b-e533-03e0-f19a-f0aaa774581d/196589311191.jpg/600x600bb.jpg",
+  },
+  {
+    id: "lofi_chill",
+    title: "Lo-Fi Chill",
+    color: "#503750",
+    imageUrl:
+      "https://is1-ssl.mzstatic.com/image/thumb/Music122/v4/2e/0b/c0/2e0bc070-112f-a827-6ad8-6bc64f7caaff/840214460180.png/600x600bb.jpg",
+  },
+  {
+    id: "devotional",
+    title: "Devotional",
+    color: "#27856a",
+    imageUrl:
+      "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/ca/8f/1a/ca8f1a18-5a41-325f-2fc1-460395ee58fb/8902894356459_cover.jpg/600x600bb.jpg",
+  },
+  {
+    id: "workout",
+    title: "Workout",
+    color: "#777777",
+    imageUrl:
+      "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/db/ad/5e/dbad5e8b-0bee-d962-92d4-021c90e375ac/8902894362092_cover.jpg/600x600bb.jpg",
   },
 ];
 

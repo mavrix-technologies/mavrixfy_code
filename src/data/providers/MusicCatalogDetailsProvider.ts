@@ -91,7 +91,8 @@ export function fetchPlaylistDetailsPage(
   limit: number,
   playlistLink?: string
 ): Promise<PlaylistDetailsPageResult> {
-  const sourceQuery = playlistLink
+  const isSpotify = playlistId.startsWith("pl_") || playlistId.startsWith("sp_") || Boolean(playlistLink?.includes("spotify"));
+  const sourceQuery = (playlistLink && !isSpotify)
     ? `link=${encodeURIComponent(playlistLink)}`
     : `id=${encodeURIComponent(playlistId)}`;
   const apiPage = Math.max(0, page - 1);

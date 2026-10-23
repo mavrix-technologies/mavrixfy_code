@@ -46,19 +46,26 @@ test('shared player sheet closes once and retains its presentation through backg
   let foreground = true, focused = true, standbyEnabled = false, viewport = null, canGoBack = true;
   const closedSheets = [], played = [], focusEffects = [], closed = [], backHandlers = [];
   const refs = [];
+  const states = [], effectDeps = [], animationFrames = [];
   const sharedValues = [];
   let sharedIndex = 0;
-  let refIndex = 0, stateIndex = 0, playerViewport = null, dirty = false;
-  const ui = { current: 'mini', expandPlayer: () => { ui.current = 'expanded'; }, collapsePlayer: () => { ui.current = 'mini'; } };
+  let refIndex = 0, stateIndex = 0, effectIndex = 0, dirty = false;
+  const ui = { current: 'mini', expandPlayer: () => { ui.current = 'expanded'; }, collapsePlayer: () => { ui.current = 'mini'; }, beginCollapse: () => { ui.current = 'collapsing'; } };
   const react = {
-    memo: fn => fn, useEffect: fn => fn(), useCallback: fn => fn, useMemo: fn => fn(), useRef: value => refs[refIndex++] ??= { current: value }, useState: initial => {
+    memo: fn => fn, useEffect: (fn, deps) => {
+      const slot = effectIndex++;
+      if (effectDeps[slot] && deps?.every((value, index) => Object.is(value, effectDeps[slot][index]))) return;
+      effectDeps[slot] = deps;
+      fn();
+    }, useCallback: fn => fn, useMemo: fn => fn(), useRef: value => refs[refIndex++] ??= { current: value }, useState: initial => {
       const slot = stateIndex++;
-      if (slot === 0) {
-        if (viewport === null) viewport = typeof initial === 'function' ? initial() : initial;
-        return [viewport, next => { viewport = typeof next === "function" ? next(viewport) : next; }];
-      }
-      if (playerViewport === null) playerViewport = initial;
-      return [playerViewport, next => { playerViewport = typeof next === "function" ? next(playerViewport) : next; dirty = true; }];
+      if (!(slot in states)) states[slot] = typeof initial === 'function' ? initial() : initial;
+      if (slot === 3) viewport = states[slot];
+      return [states[slot], update => {
+        const next = typeof update === 'function' ? update(states[slot]) : update;
+        if (!Object.is(next, states[slot])) { states[slot] = next; dirty = true; }
+        if (slot === 3) viewport = next;
+      }];
     },
     createElement: (type, props, ...children) => ({ type, props, children }),
   };
@@ -66,8 +73,11 @@ test('shared player sheet closes once and retains its presentation through backg
     react,
     '@/lib/appActivity': { useAppIsActive: () => foreground, useAppIsBackgrounded: () => !foreground },
     '@/constants/platform': { IS_IOS: true },
-    '@/lib/playerUIState': { playerUIStateStore: ui },
-    'expo-router': { router: { replace: path => closed.push(path) }, useIsFocused: () => focused, useFocusEffect: fn => focusEffects.push(fn), useNavigation: () => ({ canGoBack: () => canGoBack, goBack: () => closed.push('route-back') }) },
+    '@/lib/playerUIState': { playerUIStateStore: ui, readMiniPlayerOrigin: () => null },
+    'expo-router/react-navigation': { usePreventRemove() {} },
+    'expo-router': { useLocalSearchParams: () => ({}), router: { replace: path => closed.push(path) }, useIsFocused: () => focused, useFocusEffect: fn => focusEffects.push(fn), useNavigation: () => navigation },
+    '../components/PlayerContainerTransition': { PlayerContainerTransition: 'Transition' },
+    '../hooks/usePlayerArtworkMeasurement': { usePlayerArtworkMeasurement: () => ({ contentRef: {}, transitionArtworkRef: {}, artwork: null, measureArtwork() {} }) },
     '@/lib/queueRef': { globalQueueSheetRef: { current: { collapse: () => closedSheets.push('queue') } } },
     '@/lib/addSongsSheetRef': { globalAddSongsSheetRef: { current: { collapse: () => closedSheets.push('add-songs') } } },
     'expo-status-bar': { StatusBar: 'StatusBar' },
@@ -97,14 +107,19 @@ test('shared player sheet closes once and retains its presentation through backg
       exitStandBy: () => { standbyEnabled = false; },
     }) },
   };
+  const navigation = { canGoBack: () => canGoBack, goBack: () => closed.push('route-back') };
   for (const name of ['@/components/FullscreenKaraokeModal', '@/services/audio/playbackProgressStore',
     'react-native-worklets', '../components/PlayerAmbientBackdrop', '../components/PlayerTrackCarousel',
     '../components/PlayerBottomDetailsSection', '../components/PlayerControlsSection',
     '../components/PlayerEmptyState', '../components/PlayerStickyHeader', '../hooks/useLegacyPlayerViewState']) dependencies[name] = {};
-  const { PlayerScreen } = load('src/features/player/screens/PlayerScreen.tsx', dependencies);
-  const render = () => { let tree; do { dirty = false; refIndex = 0; stateIndex = 0; sharedIndex = 0; tree = PlayerScreen(); } while (dirty); return tree; };
+  const { PlayerScreen } = load('src/features/player/screens/PlayerScreen.tsx', dependencies, {
+    requestAnimationFrame: fn => { animationFrames.push(fn); return animationFrames.length; }, cancelAnimationFrame() {},
+  });
+  const render = () => { let tree; do { dirty = false; refIndex = 0; stateIndex = 0; effectIndex = 0; sharedIndex = 0; tree = PlayerScreen(); } while (dirty); return tree; };
   const content = node => node?.type?.name === 'LegacyPlayerScreenView' ? node : node?.children?.map(content).find(Boolean);
   const find = (node, type) => node?.type === type ? node : node?.children?.map(child => find(child, type)).find(Boolean);
+  const freshRoute = () => { refs.length = 0; states.length = 0; effectDeps.length = 0; return render(); };
+  const completeClose = () => { find(render(), 'Transition').props.onCloseComplete(); animationFrames.shift()(); render(); };
   const initial = render();
   const initialSheet = find(initial, 'BottomSheet');
   const layoutState = initialSheet.props.containerLayoutState;
@@ -122,23 +137,23 @@ test('shared player sheet closes once and retains its presentation through backg
   // The hosting container updates this same shared value after measurement.
   layoutState.modify(state => ({ ...state, height: 740, offset: { top: 47, bottom: 0, left: 0, right: 0 } }));
   assert.equal(content(initial).props.viewport.height, 844, 'player content exists on the first render, before sheet animation starts');
-  assert.equal(find(initial, 'View').props.onLayout, undefined, 'scroll content must never be measured as the screen viewport');
-  assert.equal(find(initial, 'View').props.style.height, 844, 'sheet content is bounded by the route, not its scrollable children');
-  find(initial, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
+  assert.equal(typeof find(initial, 'View').props.onLayout, 'function', 'outer route owns viewport measurement');
+  assert.equal(find(initial, 'BottomSheet').children[0].props.style.height, 844, 'sheet content is bounded by the route, not its scrollable children');
+  find(initial, 'View').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
   const first = render();
   assert.equal(content(first).props.viewport.width, 390);
   assert.equal(content(first).props.viewport.height, 740, 'layout uses the outer route height, independent of sheet animation and scroll content');
-  assert.equal(find(first, 'View').props.style.height, 740);
+  assert.equal(find(first, 'BottomSheet').children[0].props.style.height, 740);
   const saved = viewport;
-  find(first, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
+  find(first, 'View').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
   assert.equal(viewport, saved, 'unchanged layout does not trigger a state update');
-  find(first, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 0, height: 0 } } });
+  find(first, 'View').props.onLayout({ nativeEvent: { layout: { width: 0, height: 0 } } });
   assert.equal(viewport, saved, 'temporary empty layouts cannot collapse player content');
-  find(first, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 844, height: 390 } } });
+  find(first, 'View').props.onLayout({ nativeEvent: { layout: { width: 844, height: 390 } } });
   const rotated = render();
   assert.equal(content(rotated).props.viewport.height, 390, 'rotation uses the new visible viewport');
-  assert.equal(find(rotated, 'View').props.style.width, 844);
-  find(rotated, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
+  assert.equal(find(rotated, 'BottomSheet').children[0].props.style.width, 844);
+  find(rotated, 'View').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
   const leave = focusEffects.at(-1)();
   assert.equal(ui.current, 'expanded');
   const sheet = find(first, 'BottomSheet');
@@ -154,23 +169,31 @@ test('shared player sheet closes once and retains its presentation through backg
   assert.equal(sheet.props.containerLayoutState.get().offset.top, 47, 'measured offsets are preserved across renders');
   assert.doesNotThrow(() => usePropsValidator(sheet.props));
   content(first).props.onClose();
-  assert.deepEqual(closed, ['route-back'], 'header closes immediately without waiting for a sheet callback');
+  assert.deepEqual(closed, [], 'header requests reverse motion before removing its native route');
+  assert.equal(ui.current, 'collapsing');
+  completeClose();
+  assert.deepEqual(closed, ['route-back']);
   sheet.props.onClose(); sheet.props.onClose();
   assert.deepEqual(closed, ['route-back'], 'late gesture completion does not pop another route');
-  refs.length = 0; render(); // A fresh player route has its own dismissal guard.
+  freshRoute(); // A fresh player route has its own dismissal guard.
   const back = backHandlers.at(-1);
   assert.equal(back(), true);
-  assert.deepEqual(closed, ['route-back', 'route-back'], 'Android Back closes immediately too');
+  assert.equal(closed.length, 1, 'Android Back also waits for the morph');
+  completeClose();
+  assert.deepEqual(closed, ['route-back', 'route-back']);
   back();
   assert.equal(closed.length, 2, 'repeated Back cannot pop the underlying screen');
-  refs.length = 0;
-  const draggedSheet = find(render(), 'BottomSheet');
+  const draggedSheet = find(freshRoute(), 'BottomSheet');
   draggedSheet.props.onClose(); draggedSheet.props.onClose();
+  completeClose();
   assert.equal(closed.length, 3, 'drag completion still dismisses exactly once');
-  refs.length = 0; canGoBack = false;
-  content(render()).props.onClose();
+  canGoBack = false;
+  content(freshRoute()).props.onClose();
+  completeClose();
   assert.equal(closed.at(-1), '/(tabs)', 'a direct player link returns to tabs');
   canGoBack = true;
+  freshRoute();
+  ui.expandPlayer();
   content(first).props.onEnterStandBy();
   const standby = render();
   assert.ok(content(standby), "player stays mounted beneath StandBy");
@@ -178,12 +201,12 @@ test('shared player sheet closes once and retains its presentation through backg
   assert.ok(find(standby, 'BottomSheet'), 'StandBy keeps the sheet mounted');
   assert.equal(find(standby, 'BottomSheet').props.enableContentPanningGesture, undefined, 'gesture host type stays stable underneath StandBy');
   assert.deepEqual(closedSheets, ['queue', 'add-songs']);
-  find(standby, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 844, height: 390 } } });
+  find(standby, 'View').props.onLayout({ nativeEvent: { layout: { width: 844, height: 390 } } });
   const landscapeStandby = render();
   assert.equal(content(landscapeStandby).props.viewport.width, 390, 'hidden player does not resize its carousel during StandBy');
   assert.equal(find(landscapeStandby, 'StandByOverlay').props.rootViewport.width, 844);
   assert.equal(find(landscapeStandby, 'StatusBar').props.hidden, false, 'StandBy must not hide the system status bar');
-  find(landscapeStandby, 'GestureHandlerRootView').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
+  find(landscapeStandby, 'View').props.onLayout({ nativeEvent: { layout: { width: 390, height: 740 } } });
   const overlay = find(standby, 'StandByOverlay');
   const song = { id: 'next' }; overlay.props.onPlayQueueSong(song);
   assert.equal(played[0].song, song);
@@ -223,13 +246,15 @@ test('opening keeps content geometry stable and header mode resists scroll jitte
     '@/lib/queueRef', '@/lib/addSongsSheetRef', 'react-native-safe-area-context', 'react-native-gesture-handler',
     'expo-status-bar', 'expo-keep-awake', '../components/PlayerAmbientBackdrop', '../components/PlayerTrackCarousel',
     '../components/PlayerEmptyState', '../components/PlayerStickyHeader', '../hooks/useStandByMode',
-    '../components/StandByOverlay']) dependencies[name] = {};
+    '../components/StandByOverlay', 'expo-router/react-navigation', 'react-native-worklets',
+    '../components/PlayerContainerTransition', '../hooks/usePlayerArtworkMeasurement']) dependencies[name] = {};
   const { LegacyPlayerScreenView } = load('src/features/player/screens/PlayerScreen.tsx', dependencies, {}, '\nexport { LegacyPlayerScreenView };');
   const find = (node, type) => node?.type === type ? node : node?.children?.map(child => find(child, type)).find(Boolean);
-  const opening = LegacyPlayerScreenView({ interactionReady: true, viewport: { width: 390, height: 844 } });
+  const props = { interactionReady: true, viewport: { width: 390, height: 844 }, scrollY: { set() {} } };
+  const opening = LegacyPlayerScreenView(props);
   assert.ok(find(opening, 'Controls'));
   assert.ok(find(opening, 'Details'), 'lyrics and discovery container exist from the initial render');
-  const opened = LegacyPlayerScreenView({ interactionReady: true, viewport: { width: 390, height: 844 } });
+  const opened = LegacyPlayerScreenView(props);
   assert.ok(find(opened, 'Details'));
   const scroll = find(opening, 'Scroll').props.onScroll;
   for (const y of [0, 49, 51, 49, 51, 70, 79]) scroll({ nativeEvent: { contentOffset: { y } } });

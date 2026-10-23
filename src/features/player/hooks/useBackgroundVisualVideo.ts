@@ -27,7 +27,7 @@ export function useBackgroundVisualVideo({
   const [isNavigationFocused, setIsNavigationFocused] = useState(() => navigation.isFocused());
   const isAppActive = useAppIsActive();
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(
-    () => playerUIStateStore.current === "expanded"
+    () => playerUIStateStore.current === "expanded" || playerUIStateStore.current === "collapsing"
   );
   const isScreenFocused = isNavigationFocused && isAppActive && isPlayerExpanded;
   const [isLowEnd, setIsLowEnd] = useState(false);
@@ -56,7 +56,7 @@ export function useBackgroundVisualVideo({
     const unsubscribeSettings = subscribeSettings(applySettings);
     const focus = navigation.addListener("focus", () => { setIsNavigationFocused(true); refresh(); });
     const blur = navigation.addListener("blur", () => setIsNavigationFocused(false));
-    const unsubscribePlayer = playerUIStateStore.subscribe(state => setIsPlayerExpanded(state === "expanded"));
+    const unsubscribePlayer = playerUIStateStore.subscribe(state => setIsPlayerExpanded(state === "expanded" || state === "collapsing"));
     return () => { active = false; unsubscribeSettings(); focus(); blur(); unsubscribePlayer(); };
   }, [navigation]);
 

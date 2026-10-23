@@ -15,7 +15,7 @@ export interface Song extends PlaybackStreamMetadata {
   year?: string;
   language?: string;
   popularity?: number;
-  source?: "jiosaavn" | "gaana" | "local" | "youtube";
+  source?: "jiosaavn" | "gaana" | "local" | "youtube" | "spotify";
   playCount?: number;
   videoId?: string;
   youtubeVideoId?: string;
@@ -182,9 +182,9 @@ export function parseBitrateFromQuality(quality: string | undefined): number {
 }
 
 export const QUALITY_LABELS: Record<StreamingQuality, string[]> = {
-  auto: ["160kbps", "96kbps", "48kbps", "320kbps", "12kbps"],
+  auto: ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"],
   low: ["96kbps", "48kbps", "12kbps", "160kbps", "320kbps"],
-  medium: ["160kbps", "96kbps", "48kbps", "320kbps", "12kbps"],
+  medium: ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"],
   high: ["320kbps", "160kbps", "96kbps", "48kbps", "12kbps"],
 };
 

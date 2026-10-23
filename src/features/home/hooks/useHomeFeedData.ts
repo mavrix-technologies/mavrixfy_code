@@ -1,6 +1,6 @@
 import { useNetwork, useOnReconnect } from "@/contexts/NetworkContext";
 import { clearFeaturedArtistsCache, getFeaturedArtists, type ArtistCard } from "@/data/providers/ArtistProvider";
-import { getHomeCatalogCategories } from "@/data/providers/MusicCatalogProvider";
+import { getHomeCatalogCategories, getSpotifyCatalogCategory, getAllSpotifyCategories, getSpotifyMixesCategory, getSpotifyMoodsCategory, SPOTIFY_FLAGSHIP_PRESETS } from "@/data/providers/MusicCatalogProvider";
 import { getOfficialHomeFeed, getOfficialHomeSongs } from "@/data/providers/MusicCatalogFeedService";
 import type { CatalogCategoryData } from "@/data/providers/MusicCatalogTypes";
 import {
@@ -33,7 +33,14 @@ const DEFAULT_POOL: QuickPicksPool = {
 
 const session = {
   hydrated: false,
-  categories: [] as CatalogCategoryData[],
+  categories: [
+    {
+      id: "spotify",
+      title: "Top Hits & Trending",
+      results: SPOTIFY_FLAGSHIP_PRESETS,
+      isFresh: false,
+    },
+  ] as CatalogCategoryData[],
   publicPlaylists: [] as FirestorePlaylist[],
   featuredArtists: [] as ArtistCard[],
   quickPickSongs: [] as Song[],
@@ -104,7 +111,17 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
               ...DEFAULT_POOL,
               all: snapshot.quickPickSongs,
             };
-            session.categories = snapshot.categories;
+            const mergedCategories = [
+              {
+                id: "spotify",
+                title: "Top Hits & Trending",
+                results: SPOTIFY_FLAGSHIP_PRESETS,
+                isFresh: false,
+              },
+              getSpotifyMixesCategory(),
+              getSpotifyMoodsCategory(),
+            ];
+            session.categories = mergedCategories;
             session.publicPlaylists = playlists;
             session.featuredArtists = snapshot.featuredArtists;
             session.quickPickSongs = snapshot.quickPickSongs;
@@ -170,9 +187,10 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
 
         const artistsTask = compact ? Promise.resolve([] as ArtistCard[]) : getFeaturedArtists().catch(() => [] as ArtistCard[]);
 
-        const [officialFeed, quickPicksFeed, playlists, artists] =
+        const [officialFeed, spotifyCategories, quickPicksFeed, playlists, artists] =
           await Promise.all([
             officialTask,
+            getAllSpotifyCategories(forceRefresh),
             quickPicksTask,
             playlistsTask,
             artistsTask,
@@ -186,9 +204,7 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
         let newQuickSongs = session.quickPickSongs;
         let newPool = session.quickPicksPool;
 
-        if (officialFeed?.categories.length) {
-          newCategories = officialFeed.categories;
-        }
+        newCategories = spotifyCategories;
 
         if (playlists.length > 0) {
           newPlaylists = playlists;

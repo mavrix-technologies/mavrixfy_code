@@ -1,9 +1,11 @@
+import { getSongProvider, isSongProviderAllowed } from "@/lib/providerFilter";
 import { isYouTubeSong, peekYouTubeStream, resolveYouTubeStream, youTubeSongWithStream, invalidateYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { getAccountScope } from "@/lib/accountScope";
 import { getLocalPlaybackUrl, getSongDownload } from "@/lib/downloads/downloadManager";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { convertJioSaavnSong, resolveAudioStreamWithQuality } from "@/lib/musicData";
+import { isAudioPreviewUrl } from "@/services/spotify/SpotifyCatalogService";
 import * as Storage from "@/lib/storage";
 import type { PlaybackQualityState,ResolvedPlaybackResult } from "@/types/playbackTypes";
 import { toDurationSeconds } from "@/utils/timeFormatters";
@@ -160,23 +162,8 @@ export function invalidateQualityPreferenceCache(): void {
 }
 
 export async function detectAutoStreamingQuality(unlocked: boolean): Promise<"low" | "medium" | "high"> {
-  try {
-    const netState = await Network.getNetworkStateAsync();
-    // Cellular Auto requests the provider's lower-bandwidth tier.
-    if (netState.type === Network.NetworkStateType.CELLULAR) {
-      return "low";
-    }
-    // Wi-Fi Auto requests the best available tier when entitled; otherwise Medium.
-    if (
-      netState.type === Network.NetworkStateType.WIFI ||
-      netState.type === Network.NetworkStateType.ETHERNET
-    ) {
-      return unlocked ? "high" : "medium";
-    }
-  } catch {
-    // Keep the safe medium-quality default when network state is unavailable.
-  }
-  return "medium";
+  // Always output highest quality audio (320kbps) as requested by user
+  return unlocked !== false ? "high" : "medium";
 }
 
 export async function getRequestedQualityPreference(): Promise<{
@@ -199,12 +186,13 @@ export async function getRequestedQualityPreference(): Promise<{
     if (requested === "auto") {
       effective = await detectAutoStreamingQuality(unlocked);
     } else if (requested === "high") {
-      effective = unlocked ? "high" : "medium";
+      effective = "high";
     } else {
       effective = requested;
     }
 
-    cachedQualityPreference = { requested, effective, unlocked, cachedAt: now, preferJioSaavn: settings.preferJioSaavnAudio === true };
+    const preferJioSaavn = settings.preferJioSaavnAudio === true && settings.enableJioSaavn !== false;
+    cachedQualityPreference = { requested, effective, unlocked, cachedAt: now, preferJioSaavn };
     return cachedQualityPreference;
   } catch (e) {
     logger.error("[Player] Failed to determine streaming quality preference", e);
@@ -217,6 +205,12 @@ export async function resolvePlaybackUrlWithDetails(
   song: Song,
   forcedQuality?: "auto" | "low" | "medium" | "high"
 ): Promise<ResolvedPlaybackResult> {
+  const settings = await Storage.getSettings();
+  if (!isSongProviderAllowed(song, settings)) {
+    const provider = getSongProvider(song);
+    const providerLabel = provider === "jiosaavn" ? "JioSaavn" : provider === "spotify" ? "Spotify" : "YouTube Music";
+    throw new Error(`${providerLabel} playback is turned off in Settings.`);
+  }
   const { requested, effective, unlocked, preferJioSaavn } = await getRequestedQualityPreference();
   let targetQuality: "low" | "medium" | "high";
 
@@ -287,6 +281,26 @@ export async function resolvePlaybackUrlWithDetails(
       unlocked, isFallback: false } };
   }
 
+  // iTunes / Spotify track audio resolution (E:\ria resolveFullSong pattern)
+  if (song.id.startsWith("itunes_") || song.source === "spotify" || song.id.startsWith("sp_")) {
+    try {
+      const { resolveFullSongAudio } = await import("@/services/spotify/SpotifyCatalogService");
+      const resolved = await resolveFullSongAudio(song);
+      if (resolved?.url && !isAudioPreviewUrl(resolved.url)) {
+        return {
+          url: resolved.url,
+          qualityState: {
+            requested: effectiveRequested,
+            actualBitrate: resolved.bitrate,
+            qualityLabel: `${resolved.bitrate}kbps`,
+            unlocked,
+            isFallback: false,
+          },
+        };
+      }
+    } catch {}
+  }
+
   // Older like caches did not retain audio URLs. Refresh by the original catalog ID,
   // only inside the original provider lane; this cannot run after a YouTube failure.
   if (song.likedSongDocumentIds?.length && (!song.source || song.source === "jiosaavn")
@@ -305,7 +319,7 @@ export async function resolvePlaybackUrlWithDetails(
       const stream = resolveAudioStreamWithQuality(song.downloadUrl, targetQuality);
       if (stream?.url) {
         const playableUrl = readAudioCandidate(stream.url);
-        if (playableUrl) {
+        if (playableUrl && !isAudioPreviewUrl(playableUrl)) {
           return {
             url: playableUrl,
             qualityState: {
@@ -323,10 +337,39 @@ export async function resolvePlaybackUrlWithDetails(
     }
   }
 
-  // 4. Direct audio URL fallback (Non-YouTube tracks only)
-  const fallbackUrl = resolveAudioUrl(song as SongPlaybackSource) || null;
+  // 4. Direct audio URL fallback (Non-YouTube tracks only - strictly reject previews)
+  const rawFallback = resolveAudioUrl(song as SongPlaybackSource) || null;
+  const directCandidate = rawFallback && !isAudioPreviewUrl(rawFallback) ? rawFallback : null;
+  if (directCandidate) {
+    return {
+      url: directCandidate,
+      qualityState: {
+        ...defaultQualityState,
+        isFallback: true,
+      },
+    };
+  }
+
+  // If candidate was a 30s preview or missing, force resolve full-length 320kbps song
+  try {
+    const { resolveFullSongAudio } = await import("@/services/spotify/SpotifyCatalogService");
+    const resolved = await resolveFullSongAudio(song);
+    if (resolved?.url && !isAudioPreviewUrl(resolved.url)) {
+      return {
+        url: resolved.url,
+        qualityState: {
+          requested: effectiveRequested,
+          actualBitrate: resolved.bitrate,
+          qualityLabel: `${resolved.bitrate}kbps`,
+          unlocked,
+          isFallback: false,
+        },
+      };
+    }
+  } catch {}
+
   return {
-    url: fallbackUrl,
+    url: null,
     qualityState: {
       ...defaultQualityState,
       isFallback: true,

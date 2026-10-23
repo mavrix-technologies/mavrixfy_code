@@ -77,6 +77,11 @@ const searchCache = new Map<string, { at: number; results: SearchResults }>();
 export async function searchYouTubeMusic(query: string, filter: ResultFilter, signal?: AbortSignal): Promise<SearchResults> {
   if (signal?.aborted) throw new Error("YouTube request cancelled");
   if (!query.trim()) return { songs: [], playlists: [], albums: [], artists: [] };
+  const { getSettings } = await import("@/lib/storage");
+  const settings = await getSettings();
+  if (settings.enableYouTubeMusic === false) {
+    return { songs: [], playlists: [], albums: [], artists: [] };
+  }
   const key = `${filter}:${query.trim().toLowerCase()}`;
   const cached = searchCache.get(key);
   if (cached && Date.now() - cached.at < 180000) return cached.results;
@@ -220,6 +225,14 @@ export function peekYouTubeStream(song: Song, quality?: string, includeExpired =
   return stream && (includeExpired || stream.expiresAt - Date.now() > 120000) && (!quality || stream.requestedQuality === quality) ? stream : undefined;
 }
 export async function resolveYouTubeStream(song: Song, quality?: string, preferJioSaavn = false): Promise<YouTubeStream> {
+  const { getSettings } = await import("@/lib/storage");
+  const settings = await getSettings();
+  if (settings.enableYouTubeMusic === false && song.source !== "spotify") {
+    throw new Error("YouTube Music playback is turned off in Settings.");
+  }
+  if (settings.enableJioSaavn === false) {
+    preferJioSaavn = false;
+  }
   const requestedQuality = quality || "medium";
   const cached = peekYouTubeStream(song, requestedQuality);
   if (cached && Boolean(cached.preferJioSaavn) === preferJioSaavn) { latest.delete(song.id); return cached; }

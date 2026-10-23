@@ -480,13 +480,16 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
 
   const handlePlaylistPress = useCallback(
     (playlist: PlaylistResult, meta: string) => {
+      const isSpotify = playlist.id.startsWith("pl_") || playlist.id.startsWith("sp_");
+      const isYouTube = playlist.id.startsWith("youtube_");
       routerPush(
         {
           pathname: "/playlist/[id]",
           params: {
             id: String(playlist.id).trim(),
-            jiosaavn: "false",
-            youtube: "true",
+            jiosaavn: String(!isYouTube),
+            youtube: String(isYouTube),
+            spotify: String(isSpotify),
             firestore: "false",
             link: playlist.url || "",
             title: playlist.name,

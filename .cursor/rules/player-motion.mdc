@@ -1,0 +1,20 @@
+---
+description: Preserve the accepted mini-player expansion and original player UI
+globs: src/features/player/**,src/features/navigation/**,src/lib/playerUIState.ts
+alwaysApply: false
+---
+
+# Player motion
+
+- Preserve mini-player and PlayerScreen layout, controls, artwork sizing and features. Change transition logic only unless the user requests a redesign.
+- Keep the accepted 520ms open/close curve (0.22, 1, 0.36, 1). Do not shorten it or add rasterization/experimental flags without evidence and user intent.
+- Keep Expo Router Native Stack as route owner. The user-authorized measured mini-player morph is a custom music surface inside that native route.
+- Run animation progress and measurement on the UI thread. Avoid per-frame React state and JS shared-value reads.
+- Measure active artwork with screen coordinates relative to the fixed content container; local FlatList coordinates omit its scroll offset.
+- Coalesce measurement requests and ignore superseded or unmounted callbacks. Test nonzero queue indices and changed viewport sizes.
+- Keep image request size stable during motion. Match placeholderContentFit to contentFit. Hand off after the destination onDisplay or its explicit error/fallback event, never a decode timeout.
+- Cancel animations on cleanup and guard queued completion callbacks so interrupted/unmounted transitions cannot remove another route.
+- Keep playback state in PlaybackEngine. Do not introduce a second playback owner for animation.
+- Validate transition, navigation and artwork regressions, TypeScript and affected-file lint. Report actual device/build coverage; do not claim zero dropped frames or 120fps without physical-device release profiling.
+
+Official references: [Reanimated measurement](https://docs.swmansion.com/react-native-reanimated/docs/advanced/measure/), [performance](https://docs.swmansion.com/react-native-reanimated/docs/guides/performance/), [Expo Image](https://docs.expo.dev/versions/v57.0.0/sdk/image/).

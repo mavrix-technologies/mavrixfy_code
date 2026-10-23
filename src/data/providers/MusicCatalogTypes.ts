@@ -100,6 +100,16 @@ export const JIOSAAVN_CATEGORY_CACHE_TTL_MS = CATALOG_CATEGORY_CACHE_TTL_MS;
 
 export const DEFAULT_CATALOG_CATEGORIES: CatalogCategory[] = [
   {
+    id: "spotify",
+    title: "Spotify Top Hits & Playlists",
+    searchTerms: [
+      "spotify hits",
+      "top 50 india",
+      "viral 50",
+      "trending hindi",
+    ],
+  },
+  {
     id: "trending",
     title: "Trending Now",
     searchTerms: [

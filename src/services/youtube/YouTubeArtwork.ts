@@ -61,6 +61,28 @@ export function artworkCandidates(raw: string | undefined, pixels: number): stri
       ? ["maxresdefault", "sddefault", "hqdefault", "mqdefault"] : ["mqdefault", "hqdefault"];
     return [...new Set([primary, ...tiers.map(tier => `${base}${tier}.jpg`), url])];
   }
+
+  // Handle Spotify mosaic image composite URLs (mosaic.scdn.co/640/<hash1><hash2>...)
+  // Dynamically extract the track artwork hashes contained directly within the mosaic URL
+  const mosaic = url.match(/^https?:\/\/mosaic\.scdn\.co\/\d+\/([a-f0-9]{40})/i);
+  if (mosaic && mosaic[1]) {
+    const hash = mosaic[1];
+    const hqHash = hash.replace(/^ab67616d00001e02/, "ab67616d0000b273");
+    return [
+      `https://i.scdn.co/image/${hqHash}`,
+      `https://i.scdn.co/image/${hash}`,
+      url,
+    ];
+  }
+  // Handle Spotify pickasso images (prefer 640x640 'cafe' variant, then original)
+  if (/^https?:\/\/pickasso\.spotifycdn\.com/i.test(url)) {
+    const highRes = url.replace(/ab67c0de0000(?:deef|bada|f00d)/, "ab67c0de0000cafe");
+    return highRes !== url ? [highRes, url] : [url];
+  }
+  // Handle standard Spotify CDN
+  if (/^https?:\/\/([a-z0-9-]+\.)*(?:scdn\.co|spotifycdn\.com)/i.test(url)) {
+    return [url];
+  }
   const primary = saavnArtworkUrl(youTubeArtworkUrl(url, pixels), pixels);
   const candidates = [primary];
   if (primary !== youTubeArtworkUrl(url, pixels)) candidates.push(saavnArtworkUrl(url, 150));

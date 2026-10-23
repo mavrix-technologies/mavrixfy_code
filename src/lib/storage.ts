@@ -81,13 +81,16 @@ export interface AppSettings {
   gapless: boolean;
   normalizeVolume: boolean;
   ambientBackdropEnabled: boolean;
+  enableJioSaavn: boolean;
+  enableSpotify: boolean;
+  enableYouTubeMusic: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  streamingQuality: "medium",
-  highQualityUnlocked: false,
+  streamingQuality: "high",
+  highQualityUnlocked: true,
   highQualityExpiresAt: null,
-  preferJioSaavnAudio: false,
+  preferJioSaavnAudio: true,
   videoBackgroundQuality: "auto",
   smartAutoplayEnabled: true,
   smartAutoplayMode: "similar-trending",
@@ -102,6 +105,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   gapless: true,
   normalizeVolume: false,
   ambientBackdropEnabled: false,
+  enableJioSaavn: true,
+  enableSpotify: true,
+  enableYouTubeMusic: true,
 };
 
 
@@ -429,7 +435,8 @@ export async function getSettings(): Promise<AppSettings> {
     ...saved,
     equalizer: normalizeEqualizer(saved.equalizer),
     hapticsEnabled: Boolean(saved.hapticsEnabled),
-    preferJioSaavnAudio: saved.preferJioSaavnAudio === true,
+    preferJioSaavnAudio: saved.preferJioSaavnAudio !== undefined ? saved.preferJioSaavnAudio === true : DEFAULT_SETTINGS.preferJioSaavnAudio,
+    highQualityUnlocked: saved.highQualityUnlocked !== undefined ? Boolean(saved.highQualityUnlocked) : DEFAULT_SETTINGS.highQualityUnlocked,
     videoBackgroundQuality: normalizeYouTubeVideoQuality(saved.videoBackgroundQuality),
     smartAutoplayEnabled: saved.smartAutoplayEnabled !== undefined ? Boolean(saved.smartAutoplayEnabled) : DEFAULT_SETTINGS.smartAutoplayEnabled,
     smartAutoplayMode: normalizeSmartAutoplayMode(saved.smartAutoplayMode),
@@ -441,6 +448,9 @@ export async function getSettings(): Promise<AppSettings> {
     gapless: saved.gapless !== undefined ? Boolean(saved.gapless) : DEFAULT_SETTINGS.gapless,
     normalizeVolume: saved.normalizeVolume !== undefined ? Boolean(saved.normalizeVolume) : DEFAULT_SETTINGS.normalizeVolume,
     ambientBackdropEnabled: saved.ambientBackdropEnabled !== undefined ? Boolean(saved.ambientBackdropEnabled) : DEFAULT_SETTINGS.ambientBackdropEnabled,
+    enableJioSaavn: saved.enableJioSaavn !== undefined ? Boolean(saved.enableJioSaavn) : true,
+    enableSpotify: saved.enableSpotify !== undefined ? Boolean(saved.enableSpotify) : true,
+    enableYouTubeMusic: saved.enableYouTubeMusic !== undefined ? Boolean(saved.enableYouTubeMusic) : true,
   };
 }
 

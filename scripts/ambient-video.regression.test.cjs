@@ -228,3 +228,30 @@ test('artist details are immediately cached across player reopen and keyed to th
   assert.equal(calls, 2);
   stopChanged(); changed.destroy(); client.clear();
 });
+
+test('collapse retains the decoded backdrop until the player actually returns to the dock', async () => {
+  const slots = [], effects = []; let cursor = 0, listener;
+  const react = {
+    useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial;
+      return [slots[i], next => { slots[i] = typeof next === 'function' ? next(slots[i]) : next; }]; },
+    useEffect(fn, deps) { const i = cursor++; if (!(i in slots)) { slots[i] = deps; effects.push(fn); } },
+  };
+  const module = { exports: {} };
+  const dependencies = {
+    react, '@/lib/devicePerformance': { getDevicePerformanceProfile: async () => ({ isLowEndDevice: false }) },
+    '@/lib/appActivity': { useAppIsActive: () => true }, '@/lib/logger': { logger: { warn() {} } },
+    '@/lib/playerUIState': { playerUIStateStore: { current: 'expanded', subscribe: fn => { listener = fn; return () => {}; } } },
+    '@/lib/storage': { getSettings: async () => ({ ambientBackdropEnabled: true, videoBackgroundQuality: 'auto' }), subscribeSettings: () => () => {} },
+  };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/features/player/hooks/useBackgroundVisualVideo.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, { module, exports: module.exports, __DEV__: false, require: name => dependencies[name] });
+  const navigation = { isFocused: () => true, addListener: () => () => {} };
+  const render = () => { cursor = 0; const result = module.exports.useBackgroundVisualVideo({
+    screenSong: { id: 'youtube_abcdefghijk', source: 'youtube' }, navigation,
+  }); effects.splice(0).forEach(fn => fn()); return result; };
+  render(); await Promise.resolve();
+  assert.equal(render().shouldRenderBackgroundVideo, true);
+  listener('collapsing'); assert.equal(render().shouldRenderBackgroundVideo, true);
+  listener('mini'); assert.equal(render().shouldRenderBackgroundVideo, false);
+});

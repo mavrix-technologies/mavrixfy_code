@@ -1,3 +1,6 @@
+import { fetchLiveSpotifyPlaylistTracks, searchLiveITunesSongs, SPOTIFY_PRESETS } from "@/services/spotify/SpotifyCatalogService";
+import { isSongProviderAllowed, isPlaylistProviderAllowed } from "@/lib/providerFilter";
+import { getSettings, subscribeSettings, type AppSettings } from "@/lib/storage";
 import { loadYouTubePlaylist } from "@/services/youtube/YouTubeMusic";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -62,6 +65,15 @@ export function usePlaylistDetailData({
   hasPrefilledHeader,
 }: UsePlaylistDetailDataProps) {
   const { user } = useAuth();
+  const isSpotifyPlaylist = playlistId.startsWith("pl_") || playlistId.startsWith("sp_") || Boolean(initialTitle?.toLowerCase().includes("spotify"));
+  const [sourceSettings, setSourceSettings] = useState<Partial<AppSettings>>({ enableJioSaavn: true, enableSpotify: true, enableYouTubeMusic: true });
+
+  useEffect(() => {
+    let mounted = true;
+    void getSettings().then((s) => { if (mounted) setSourceSettings(s); });
+    const unsub = subscribeSettings((s) => { if (mounted) setSourceSettings(s); });
+    return () => { mounted = false; unsub(); };
+  }, []);
 
   // Instant synchronous memory cache lookup
   const initialCached = getCachedPlaylist(playlistId);
@@ -105,10 +117,11 @@ export function usePlaylistDetailData({
       const title = String(song.title || "").trim();
       if (!id || !title || seen.has(id)) continue;
       seen.add(id);
-      out.push({ ...song, id, title, audioUrl: String(song.audioUrl || "").trim() });
+      out.push({ ...song, id, title, audioUrl: String(song.audioUrl || "").trim(), source: isSpotifyPlaylist ? ("spotify" as const) : song.source });
     }
-    const playable = out.filter((s) => s.audioUrl.length > 0);
-    return playable.length > 0 ? playable : out;
+    const allowed = out.filter((s) => isSongProviderAllowed(s, sourceSettings));
+    const playable = allowed.filter((s) => s.audioUrl.length > 0);
+    return playable.length > 0 ? playable : allowed;
   }, []);
 
   const applyJioPlaylistData = useCallback(
@@ -268,6 +281,61 @@ export function usePlaylistDetailData({
           setCachedPlaylist(playlistId, { id: playlistId, name: data.name, coverUrl: data.coverUrl,
             description: `${data.songs.length} songs · Mavrixfy Music`, songs: data.songs, isFirestore: false });
           return;
+        }
+
+        // SPOTIFY LIVE EMBED & PRESETS (Directly from E:\ria)
+        if (isSpotifyPlaylist) {
+          try {
+            const spotifyTracks = await fetchLiveSpotifyPlaylistTracks(playlistId);
+            if (!isCancelled() && spotifyTracks && spotifyTracks.length > 0) {
+              const allowed = spotifyTracks.filter((s) => isSongProviderAllowed(s, sourceSettings));
+              setSongs(allowed);
+              setPlaylistName(playlistName || initialTitle);
+              setPlaylistCover(playlistCover || initialCover || spotifyTracks[0]?.coverUrl || "");
+              setPlaylistDescription(playlistDescription || initialDescription || `${allowed.length} songs · Spotify`);
+              setCachedPlaylist(playlistId, {
+                id: playlistId,
+                name: playlistName || initialTitle,
+                description: playlistDescription || initialDescription || `${allowed.length} songs · Spotify`,
+                coverUrl: playlistCover || initialCover || spotifyTracks[0]?.coverUrl || "",
+                songs: allowed,
+                isFirestore: false,
+              });
+              finishPlaylistLoad();
+              return;
+            }
+          } catch {}
+
+          if (!isCancelled()) {
+            try {
+              const preset = SPOTIFY_PRESETS.find((p) => p.id === playlistId || p.spotifyId === playlistId);
+              let fallbackQuery = preset?.query || "";
+              if (!fallbackQuery && playlistId.startsWith("pl_dyn_")) {
+                const parts = playlistId.replace("pl_dyn_", "").split("_");
+                fallbackQuery = decodeURIComponent(parts.slice(1).join(" ") || playlistName || initialTitle);
+              }
+              if (!fallbackQuery) fallbackQuery = playlistName || initialTitle || "Top 50 Hindi Bollywood";
+
+              const itunesTracks = await searchLiveITunesSongs(fallbackQuery, 30);
+              if (!isCancelled() && itunesTracks && itunesTracks.length > 0) {
+                const allowed = itunesTracks.filter((s) => isSongProviderAllowed(s, sourceSettings));
+                setSongs(allowed);
+                setPlaylistName(playlistName || initialTitle);
+                setPlaylistCover(playlistCover || initialCover || itunesTracks[0]?.coverUrl || "");
+                setPlaylistDescription(playlistDescription || initialDescription || `${allowed.length} songs · Spotify Mix`);
+                setCachedPlaylist(playlistId, {
+                  id: playlistId,
+                  name: playlistName || initialTitle,
+                  description: playlistDescription || initialDescription || `${allowed.length} songs · Spotify Mix`,
+                  coverUrl: playlistCover || initialCover || itunesTracks[0]?.coverUrl || "",
+                  songs: allowed,
+                  isFirestore: false,
+                });
+                finishPlaylistLoad();
+                return;
+              }
+            } catch {}
+          }
         }
 
         // 2. FAST LOCAL CHECK: Custom created or local playlists

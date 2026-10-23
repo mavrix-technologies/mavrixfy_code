@@ -93,7 +93,7 @@ test("menu filters real content types without adding substitute provider rows", 
 });
 
 test("catalog section cleanup preserves active All, Recent and New Releases content and loading states", () => {
-  const { useHomeSectionData } = load("src/features/home/hooks/useHomeSectionData.ts", { react: { useMemo: fn => fn() } });
+  const { useHomeSectionData } = load("src/features/home/hooks/useHomeSectionData.ts", { react: { useMemo: fn => fn() }, "@/lib/providerFilter": { isSongProviderAllowed: () => true, isPlaylistProviderAllowed: () => true } });
   const input = { selectedCategory: "All", categories: [{ id: "trending" }, { id: "new-releases" }, { id: "editorial" }],
     quickPickSongs: [{ id: "song" }], recentlyPlayed: [{ id: "recent" }], featuredArtists: [{ id: "artist" }],
     publicPlaylists: [{ id: "community" }], loadingMainContent: false };

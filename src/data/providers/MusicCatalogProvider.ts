@@ -183,6 +183,7 @@ function rankPlaylists(
   categoryId?: string
 ): CatalogPlaylistResult[] {
   if (!Array.isArray(playlists) || playlists.length === 0) return [];
+  if (categoryId === "spotify") return playlists;
   return playlists
     .filter((p): p is CatalogPlaylistResult => Boolean(p && p.id && p.name))
     .map((p) => {
@@ -202,6 +203,23 @@ async function fetchCategoryFast(
   limit: number,
   forceRefresh: boolean
 ): Promise<CatalogPlaylistResult[]> {
+  if (categoryId === "spotify") {
+    const spotifyUrls = getCatalogSearchBaseUrls().map((base) => `${base.replace(/\/+$/, "")}/spotify/playlists`);
+    for (const url of spotifyUrls) {
+      try {
+        const response = await fetchWithTimeout(url, { headers: { Accept: "application/json" } }, FAST_TIMEOUT_MS);
+        if (response.ok) {
+          const json = await response.json();
+          const list = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
+          if (list.length > 0) {
+            return list as CatalogPlaylistResult[];
+          }
+        }
+      } catch {
+        // continue to fallback
+      }
+    }
+  }
   const baseTerm = FAST_SEARCH_TERMS[categoryId] ?? `${categoryId} songs`;
   const term = ["bollywood", "new-arrivals", "top-charts", "party-mix", "romance"].includes(categoryId)
     ? `${baseTerm} ${new Date().getFullYear()}`
@@ -385,3 +403,357 @@ export async function getHomeCatalogCategories(options?: {
 }
 
 export const getHomeJioSaavnCategories = getHomeCatalogCategories;
+
+export const SPOTIFY_FLAGSHIP_PRESETS: CatalogPlaylistResult[] = [
+  {
+    id: "pl_trending_india",
+    name: "Trending Now India",
+    description: "Every track making waves across India right now.",
+    songCount: 50,
+    image: [
+      { quality: "50x50", url: "https://i.scdn.co/image/ab67706f00000002b30d7e201b1c0085357deb4a" },
+      { quality: "150x150", url: "https://i.scdn.co/image/ab67706f00000002b30d7e201b1c0085357deb4a" },
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67706f00000002b30d7e201b1c0085357deb4a" },
+    ],
+  },
+  {
+    id: "pl_hot_hits_hindi",
+    name: "Hot Hits Hindi",
+    description: "Hottest Hindi tracks making waves right now. Cover: Arijit Singh",
+    songCount: 50,
+    image: [
+      { quality: "50x50", url: "https://i.scdn.co/image/ab67706f00000002cdb9f3aa5daf93253b072a55" },
+      { quality: "150x150", url: "https://i.scdn.co/image/ab67706f00000002cdb9f3aa5daf93253b072a55" },
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67706f00000002cdb9f3aa5daf93253b072a55" },
+    ],
+  },
+  {
+    id: "pl_bollywood_central",
+    name: "Bollywood Central",
+    description: "Central destination for all your favorite Bollywood music.",
+    songCount: 50,
+    image: [
+      { quality: "50x50", url: "https://i.scdn.co/image/ab67706f00000002fc392f1c1d0f9a1148b9fb8b" },
+      { quality: "150x150", url: "https://i.scdn.co/image/ab67706f00000002fc392f1c1d0f9a1148b9fb8b" },
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67706f00000002fc392f1c1d0f9a1148b9fb8b" },
+    ],
+  },
+  {
+    id: "pl_top50_india",
+    name: "Top 50 - India",
+    description: "Your daily update of the most played tracks in India right now.",
+    songCount: 50,
+    image: [
+      { quality: "50x50", url: "https://charts-images.scdn.co/assets/locale_en/regional/daily/region_in_default.jpg" },
+      { quality: "150x150", url: "https://charts-images.scdn.co/assets/locale_en/regional/daily/region_in_default.jpg" },
+      { quality: "500x500", url: "https://charts-images.scdn.co/assets/locale_en/regional/daily/region_in_default.jpg" },
+    ],
+  },
+  {
+    id: "pl_top50_global",
+    name: "Top 50 - Global",
+    description: "Your daily update of the most played tracks right now - Global.",
+    songCount: 50,
+    image: [
+      { quality: "50x50", url: "https://charts-images.scdn.co/assets/locale_en/regional/daily/region_global_default.jpg" },
+      { quality: "150x150", url: "https://charts-images.scdn.co/assets/locale_en/regional/daily/region_global_default.jpg" },
+      { quality: "500x500", url: "https://charts-images.scdn.co/assets/locale_en/regional/daily/region_global_default.jpg" },
+    ],
+  },
+  {
+    id: "pl_viral50_india",
+    name: "Viral 50 - India",
+    description: "Your daily update of the most viral tracks in India right now.",
+    songCount: 50,
+    image: [
+      { quality: "50x50", url: "https://charts-images.scdn.co/assets/locale_en/viral/daily/region_in_default.jpg" },
+      { quality: "150x150", url: "https://charts-images.scdn.co/assets/locale_en/viral/daily/region_in_default.jpg" },
+      { quality: "500x500", url: "https://charts-images.scdn.co/assets/locale_en/viral/daily/region_in_default.jpg" },
+    ],
+  },
+  {
+    id: "pl_hot_hits_punjabi",
+    name: "Hot Hits Punjabi",
+    description: "The hottest tracks in Punjabi music right now.",
+    songCount: 50,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67706f000000028585020686db2e3afb0791f8" },
+    ],
+  },
+  {
+    id: "pl_mega_punjabi",
+    name: "Mega Punjabi Hits",
+    description: "Mega Punjabi anthems dominating the charts.",
+    songCount: 75,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67706f000000029ec61175e1fe7acf4e2867f6" },
+    ],
+  },
+];
+
+export const SPOTIFY_MADE_FOR_YOU_PRESETS: CatalogPlaylistResult[] = [
+  {
+    id: "pl_daily_mix_1",
+    name: "Daily Mix 1",
+    description: "Arijit Singh, Pritam, Sachin-Jigar and romantic Bollywood favorites.",
+    songCount: 50,
+    image: [
+      { quality: "500x500", url: "https://dailymix-images.scdn.co/v2/img/ab6761610000e5ebcb6926f44f620555ba444fca/1/en/default" },
+    ],
+  },
+  {
+    id: "pl_daily_mix_2",
+    name: "Daily Mix 2",
+    description: "AP Dhillon, Shubh, Karan Aujla and fresh Punjabi powerhouse anthems.",
+    songCount: 50,
+    image: [
+      { quality: "500x500", url: "https://dailymix-images.scdn.co/v2/img/ab6761610000e5eb0261696c5df3be99da6ed3f3/2/en/default" },
+    ],
+  },
+  {
+    id: "pl_daily_mix_3",
+    name: "Daily Mix 3",
+    description: "Darshan Raval, Jasleen Royal, Armaan Malik high energy pop anthems.",
+    songCount: 50,
+    image: [
+      { quality: "500x500", url: "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/4b/73/1e/4b731eb5-13ab-825a-d164-fc665b2f02e5/5054197730122.jpg/600x600bb.jpg" },
+    ],
+  },
+  {
+    id: "pl_daily_mix_4",
+    name: "Daily Mix 4",
+    description: "Anuv Jain, Prateek Kuhad, The Local Train acoustic soulful melodies.",
+    songCount: 50,
+    image: [
+      { quality: "500x500", url: "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/02/e7/77/02e77709-a5f6-5470-9e5b-70a0d6ff45ed/25UM1IM13936.rgb.jpg/600x600bb.jpg" },
+    ],
+  },
+  {
+    id: "pl_discover_weekly",
+    name: "Discover Weekly",
+    description: "Your weekly mixtape of fresh music. Handpicked for you every Monday.",
+    songCount: 30,
+    image: [
+      { quality: "500x500", url: "https://pickasso.spotifycdn.com/image/ab67c0de0000cafe/dt/v1/img/dw/cover/en" },
+    ],
+  },
+  {
+    id: "pl_release_radar",
+    name: "Release Radar",
+    description: "Catch all the latest music from artists you follow, updated every Friday.",
+    songCount: 30,
+    image: [
+      { quality: "500x500", url: "https://pickasso.spotifycdn.com/image/ab67c0de0000cafe/dt/v1/img/release-radar-v4/7uIbLdzzSEqnX0Pkrb56cR/en" },
+    ],
+  },
+  {
+    id: "pl_radar_india",
+    name: "RADAR India",
+    description: "Discover the most exciting emerging artists from India.",
+    songCount: 40,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67706f000000020bbf9f4165316179e75ec63b" },
+    ],
+  },
+];
+
+export const SPOTIFY_MOODS_PRESETS: CatalogPlaylistResult[] = [
+  {
+    id: "pl_house_party",
+    name: "House Party Hits",
+    description: "Turn up the volume with the ultimate Indian party bangers.",
+    songCount: 50,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67706f000000022468362accf60bcfadaf4916" },
+    ],
+  },
+  {
+    id: "pl_bollywood_dance",
+    name: "Bollywood Dance Music",
+    description: "Electrifying Bollywood dance, club remixes, and party anthems.",
+    songCount: 75,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67706f0000000299e454572d0578183d97ecc2" },
+    ],
+  },
+  {
+    id: "pl_all_out_00s",
+    name: "All Out 00s Hindi",
+    description: "The defining Bollywood tracks from 2000 to 2009.",
+    songCount: 100,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67706f00000002c4eeffa35b610f28592c6950" },
+    ],
+  },
+  {
+    id: "pl_bollywood_mush",
+    name: "Bollywood Mush",
+    description: "Heartfelt, romantic and acoustic Bollywood love songs.",
+    songCount: 75,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67706f00000002087eaebce35bd015db2942e0" },
+    ],
+  },
+  {
+    id: "pl_indie_india",
+    name: "Indie India",
+    description: "Best of the Indian independent music scene.",
+    songCount: 75,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67706f00000002656f14776fbb39aa2ae900f0" },
+    ],
+  },
+  {
+    id: "pl_satvik",
+    name: "Satvik's",
+    description: "Personal mix • Raabta, Shiddat, Toofan, AP Dhillon",
+    songCount: 100,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67616d0000b2731bcc10d3bd1d77d7c3f164c6" },
+    ],
+  },
+  {
+    id: "pl_soulful",
+    name: "Soulful",
+    description: "Darshan Raval, Arijit Singh, AKASH MEHTA, Animal",
+    songCount: 93,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67616d0000b27389bfe45fc54eb733eeab9a84" },
+    ],
+  },
+  {
+    id: "pl_morning",
+    name: "Morning fresh song",
+    description: "Start your morning with fresh energy, upbeat vibe and feel good songs",
+    songCount: 24,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67616d0000b2731aac2079e5047e1bfd1b59d9" },
+    ],
+  },
+  {
+    id: "pl_travel_hindi",
+    name: "Travel Songs (Hindi)",
+    description: "Bollywood Roadtrip Hindi | Best Indie Travels | Safarnama Vibes",
+    songCount: 100,
+    image: [
+      { quality: "500x500", url: "https://image-cdn-fa.spotifycdn.com/image/ab67706c0000da8404fd89ab8064c32896fd0cdc" },
+    ],
+  },
+  {
+    id: "pl_old_is_gold",
+    name: "Old is gold 🍷",
+    description: "Timeless classic retro Hindi Bollywood melodies and golden era hits.",
+    songCount: 100,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67616d0000b2732f4210662c10380e7d836877" },
+    ],
+  },
+  {
+    id: "pl_party_songs",
+    name: "Party songs",
+    description: "High bass and energy dance anthems for parties and celebrations.",
+    songCount: 20,
+    image: [
+      { quality: "500x500", url: "https://i.scdn.co/image/ab67616d0000b27315bdb7a86250e53e8a80163d" },
+    ],
+  },
+];
+
+const FLAGSHIP_PLAYLIST_IDS = new Set([
+  "pl_trending_india", "pl_hot_hits_hindi", "pl_bollywood_central",
+  "pl_top50_india", "pl_top50_global", "pl_viral50_india",
+  "pl_hot_hits_punjabi", "pl_mega_punjabi"
+]);
+
+const MIXES_PLAYLIST_IDS = new Set([
+  "pl_daily_mix_1", "pl_daily_mix_2", "pl_daily_mix_3", "pl_daily_mix_4",
+  "pl_discover_weekly", "pl_release_radar", "pl_radar_india"
+]);
+
+const MOODS_PLAYLIST_IDS = new Set([
+  "pl_house_party", "pl_bollywood_dance", "pl_all_out_00s",
+  "pl_bollywood_mush", "pl_indie_india", "pl_satvik", "pl_soulful",
+  "pl_morning", "pl_travel_hindi", "pl_old_is_gold", "pl_party_songs"
+]);
+
+function shuffleCatalogItems<T>(items: readonly T[]): T[] {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+export async function getSpotifyCatalogCategory(forceRefresh = false): Promise<CatalogCategoryData> {
+  try {
+    const fresh = await fetchCategoryFast("spotify", 25, forceRefresh);
+    if (fresh && fresh.length > 0) {
+      const filtered = fresh.filter((p) => FLAGSHIP_PLAYLIST_IDS.has(p.id));
+      const combined = dedupeByPlaylistId([...filtered, ...SPOTIFY_FLAGSHIP_PRESETS])
+        .filter((p) => FLAGSHIP_PLAYLIST_IDS.has(p.id));
+      return {
+        id: "spotify",
+        title: "Top Hits & Trending",
+        results: forceRefresh ? shuffleCatalogItems(combined) : combined,
+        isFresh: true,
+      };
+    }
+  } catch {}
+  return {
+    id: "spotify",
+    title: "Top Hits & Trending",
+    results: forceRefresh ? shuffleCatalogItems(SPOTIFY_FLAGSHIP_PRESETS) : SPOTIFY_FLAGSHIP_PRESETS,
+    isFresh: false,
+  };
+}
+
+export function getSpotifyMixesCategory(shuffle = true, freshList: CatalogPlaylistResult[] = []): CatalogCategoryData {
+  const filtered = freshList.filter((p) => MIXES_PLAYLIST_IDS.has(p.id));
+  const combined = dedupeByPlaylistId([...filtered, ...SPOTIFY_MADE_FOR_YOU_PRESETS])
+    .filter((p) => MIXES_PLAYLIST_IDS.has(p.id));
+  return {
+    id: "spotify-mixes",
+    title: "Made For You & Daily Mixes",
+    results: shuffle ? shuffleCatalogItems(combined) : combined,
+    isFresh: filtered.length > 0,
+  };
+}
+
+export function getSpotifyMoodsCategory(shuffle = true, freshList: CatalogPlaylistResult[] = []): CatalogCategoryData {
+  const filtered = freshList.filter((p) => MOODS_PLAYLIST_IDS.has(p.id));
+  const combined = dedupeByPlaylistId([...filtered, ...SPOTIFY_MOODS_PRESETS])
+    .filter((p) => MOODS_PLAYLIST_IDS.has(p.id));
+  return {
+    id: "spotify-moods",
+    title: "Moods & Party Anthems",
+    results: shuffle ? shuffleCatalogItems(combined) : combined,
+    isFresh: filtered.length > 0,
+  };
+}
+
+export async function getAllSpotifyCategories(forceRefresh = false): Promise<CatalogCategoryData[]> {
+  let freshList: CatalogPlaylistResult[] = [];
+  try {
+    const fetched = await fetchCategoryFast("spotify", 30, forceRefresh);
+    if (fetched && fetched.length > 0) {
+      freshList = fetched;
+    }
+  } catch {}
+
+  const freshFlagship = freshList.filter((p) => FLAGSHIP_PLAYLIST_IDS.has(p.id));
+  const combinedFlagship = dedupeByPlaylistId([...freshFlagship, ...SPOTIFY_FLAGSHIP_PRESETS])
+    .filter((p) => FLAGSHIP_PLAYLIST_IDS.has(p.id));
+
+  const flagshipCategory: CatalogCategoryData = {
+    id: "spotify",
+    title: "Top Hits & Trending",
+    results: forceRefresh ? shuffleCatalogItems(combinedFlagship) : combinedFlagship,
+    isFresh: freshFlagship.length > 0,
+  };
+
+  const mixesCategory = getSpotifyMixesCategory(forceRefresh, freshList);
+  const moodsCategory = getSpotifyMoodsCategory(forceRefresh, freshList);
+
+  return [flagshipCategory, mixesCategory, moodsCategory];
+}

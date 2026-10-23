@@ -62,9 +62,104 @@ useHomeSectionData,
 } from "../hooks/useHomeSectionData";
 
 import { buildHomeSections, type HomeListItem } from "../hooks/buildHomeSections";
+import { getSettings, subscribeSettings } from "@/lib/storage";
 import type { MavrixfyCategory } from "../constants/homeNavConstants";
 const homeSectionKeyExtractor = (item: HomeListItem) => item.id;
 const isNativeHome = Platform.OS !== "web";
+
+interface HomeFeedItemProps {
+  item: HomeListItem;
+  explore: any;
+  hasReleases: boolean;
+  isOnline: boolean;
+  retryExplore: () => void;
+  retryYouTube: () => void;
+  youtube: any;
+  playSong: (song: any, queue?: any[]) => void;
+  displayedQuickPicks: any[];
+  recentlyPlayed: any[];
+  loadingMainContent: boolean;
+  publicPlaylists: any[];
+}
+
+const HomeFeedSectionRow = React.memo(function HomeFeedSectionRow({
+  item,
+  explore,
+  hasReleases,
+  isOnline,
+  retryExplore,
+  retryYouTube,
+  youtube,
+  playSong,
+  displayedQuickPicks,
+  recentlyPlayed,
+  loadingMainContent,
+  publicPlaylists,
+}: HomeFeedItemProps) {
+  switch (item.type) {
+    case "releases-status":
+      return (
+        <HomeYouTubeStatus
+          hasFeed={Boolean(explore.data)}
+          loading={explore.isFetching || (explore.isPending && isOnline)}
+          failed={explore.isError}
+          online={isOnline}
+          onRetry={retryExplore}
+          emptyMessage={explore.data && !hasReleases ? "Nothing to show yet. Pull to refresh." : undefined}
+        />
+      );
+    case "youtube-quick-picks": {
+      const quickSongs = (youtube.data?.songs && youtube.data.songs.length > 0)
+        ? youtube.data.songs
+        : displayedQuickPicks;
+      return quickSongs && quickSongs.length ? (
+        <HomeQuickPicks songs={quickSongs} playSong={playSong} />
+      ) : (youtube.isFetching && isOnline) ? (
+        <HomeQuickPicksSkeleton />
+      ) : null;
+    }
+    case "youtube-section":
+      return <HomeYouTubeContent section={item.section} />;
+    case "youtube-status":
+      return (
+        <HomeYouTubeStatus
+          hasFeed={Boolean(youtube.data)}
+          loading={youtube.isFetching || (youtube.isPending && isOnline)}
+          failed={youtube.isError}
+          online={isOnline}
+          onRetry={retryYouTube}
+        />
+      );
+    case "quick-picks":
+      return <HomeQuickPicks songs={displayedQuickPicks} playSong={playSong} />;
+    case "loading-quick":
+      return <HomeQuickPicksSkeleton />;
+    case "recently-played":
+      return <HomeRecentlyPlayed items={recentlyPlayed} playSong={playSong} />;
+    case "category":
+      return (
+        <View>
+          <HomeHorizontalSection
+            title={HOME_CATEGORY_TITLES[item.category.id] || item.category.title}
+            items={item.category.results}
+          />
+          {item.showAd && !loadingMainContent ? <AdMobBanner loadDelayMs={1200} /> : null}
+        </View>
+      );
+    case "public-playlists":
+      return (
+        <HomeHorizontalSection
+          title="Featured Playlists"
+          items={publicPlaylists}
+          isFirestore
+        />
+      );
+    case "loading-main":
+      return <HomeSectionSkeleton />;
+    default:
+      return null;
+  }
+});
 
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -112,6 +207,43 @@ export function HomeScreen() {
   useAppShowcasePrompt((hasContent || Boolean(youtube.data)) && !loadingMainContent && !refreshing && isOnline && !isChecking);
 
   const [selectedCategory, setSelectedCategory] = useState<MavrixfyCategory>("All");
+  const [sourceSettings, setSourceSettings] = useState({
+    enableJioSaavn: true,
+    enableSpotify: true,
+    enableYouTubeMusic: true,
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    void getSettings().then((s) => {
+      if (mounted) {
+        setSourceSettings({
+          enableJioSaavn: s.enableJioSaavn,
+          enableSpotify: s.enableSpotify,
+          enableYouTubeMusic: s.enableYouTubeMusic,
+        });
+        if (s.enableSpotify === false && selectedCategory === "Spotify") {
+          setSelectedCategory("All");
+        }
+      }
+    });
+    const unsub = subscribeSettings((s) => {
+      if (mounted) {
+        setSourceSettings({
+          enableJioSaavn: s.enableJioSaavn,
+          enableSpotify: s.enableSpotify,
+          enableYouTubeMusic: s.enableYouTubeMusic,
+        });
+        if (s.enableSpotify === false && selectedCategory === "Spotify") {
+          setSelectedCategory("All");
+        }
+      }
+    });
+    return () => {
+      mounted = false;
+      unsub();
+    };
+  }, [selectedCategory]);
 
   const handleSelectCategory = useCallback((category: MavrixfyCategory) => {
     if (category === selectedCategory) return;
@@ -124,6 +256,9 @@ export function HomeScreen() {
     return selectedCategory === "All" && list.length === 0 ? quickPickSongs : list;
   }, [quickPicksPool, selectedCategory, quickPickSongs]);
 
+  // On HomeScreen, JioSaavn editorial content is completely removed while keeping background 320kbps playback intact
+  const homeSourceSettings = useMemo(() => ({ ...sourceSettings, enableJioSaavn: false }), [sourceSettings]);
+
   const catalogSections = useHomeSectionData({
     selectedCategory,
     categories,
@@ -132,9 +267,10 @@ export function HomeScreen() {
     featuredArtists,
     publicPlaylists,
     loadingMainContent,
+    sourceSettings: homeSourceSettings,
   });
   const sectionData = useMemo(() => buildHomeSections(selectedCategory, isNativeHome,
-    youtube.data?.sections || [], catalogSections, explore.data?.sections || []), [catalogSections, selectedCategory, youtube.data?.sections, explore.data?.sections]);
+    youtube.data?.sections || [], catalogSections, explore.data?.sections || [], homeSourceSettings), [catalogSections, selectedCategory, youtube.data?.sections, explore.data?.sections, homeSourceSettings]);
   const hasReleases = sectionData.some(row => row.type === "youtube-section" && row.section.category === "new-releases");
   const retryYouTube = useCallback(() => { clearYouTubeHomeCache(); void refetchYouTube(); }, [refetchYouTube]);
   const retryExplore = useCallback(() => { clearYouTubeHomeCache(); void refetchExplore(); }, [refetchExplore]);
@@ -156,82 +292,34 @@ export function HomeScreen() {
   }, [handleRefresh, isOnline, refetchYouTube, refetchExplore, refetchArtists]);
 
   const renderSectionItem = useCallback(
-    ({ item }: ListRenderItemInfo<HomeListItem>) => {
-      let content: React.ReactNode = null;
-
-      switch (item.type) {
-        case "releases-status":
-          content = <HomeYouTubeStatus hasFeed={Boolean(explore.data)} loading={explore.isFetching || (explore.isPending && isOnline)} failed={explore.isError} online={isOnline} onRetry={retryExplore} emptyMessage={explore.data && !hasReleases ? "Nothing to show yet. Pull to refresh." : undefined} />;
-          break;
-        case "youtube-quick-picks":
-          content = youtube.data?.songs.length
-            ? <HomeQuickPicks songs={youtube.data.songs} playSong={playSong} />
-            : youtube.isFetching && isOnline ? <HomeQuickPicksSkeleton /> : null;
-          break;
-        case "youtube-section":
-          content = <HomeYouTubeContent section={item.section} />;
-          break;
-        case "youtube-status":
-          content = <HomeYouTubeStatus hasFeed={Boolean(youtube.data)} loading={youtube.isFetching || (youtube.isPending && isOnline)} failed={youtube.isError} online={isOnline} onRetry={retryYouTube} />;
-          break;
-        case "quick-picks":
-          content = (
-            <HomeQuickPicks
-              songs={displayedQuickPicks}
-              playSong={playSong}
-            />
-          );
-          break;
-        case "loading-quick":
-          content = <HomeQuickPicksSkeleton />;
-          break;
-        case "recently-played":
-          content = <HomeRecentlyPlayed items={recentlyPlayed} playSong={playSong} />;
-          break;
-        case "category":
-          content = (
-            <React.Fragment>
-              <HomeHorizontalSection
-                title={HOME_CATEGORY_TITLES[item.category.id] || item.category.title}
-                items={item.category.results}
-              />
-              {item.showAd && !loadingMainContent ? (
-                <AdMobBanner loadDelayMs={1200} />
-              ) : null}
-            </React.Fragment>
-          );
-          break;
-        case "artists":
-          content = <HomeArtistsSection artists={featuredArtists} />;
-          break;
-        case "public-playlists":
-          content = (
-            <HomeHorizontalSection
-              title="Featured Playlists"
-              items={publicPlaylists}
-              isFirestore
-            />
-          );
-          break;
-        case "loading-main":
-          content = <HomeSectionSkeleton />;
-          break;
-        default:
-          content = null;
-      }
-
-      if (!content) return null;
-
-      return <View>{content}</View>;
-    },
+    ({ item }: ListRenderItemInfo<HomeListItem>) => (
+      <HomeFeedSectionRow
+        item={item}
+        explore={explore}
+        hasReleases={hasReleases}
+        isOnline={isOnline}
+        retryExplore={retryExplore}
+        retryYouTube={retryYouTube}
+        youtube={youtube}
+        playSong={playSong}
+        displayedQuickPicks={displayedQuickPicks}
+        recentlyPlayed={recentlyPlayed}
+        loadingMainContent={loadingMainContent}
+        publicPlaylists={publicPlaylists}
+      />
+    ),
     [
-      displayedQuickPicks,
-      featuredArtists,
-      loadingMainContent,
+      explore,
+      hasReleases,
+      isOnline,
+      retryExplore,
+      retryYouTube,
+      youtube,
       playSong,
-      publicPlaylists,
+      displayedQuickPicks,
       recentlyPlayed,
-      youtube.data, youtube.isFetching, youtube.isPending, youtube.isError, isOnline, retryYouTube, explore.data, explore.isFetching, explore.isPending, explore.isError, retryExplore, hasReleases,
+      loadingMainContent,
+      publicPlaylists,
     ]
   );
 
@@ -356,11 +444,11 @@ export function HomeScreen() {
           />
         }
         scrollEventThrottle={16}
-        initialNumToRender={3}
+        initialNumToRender={2}
         maxToRenderPerBatch={2}
         updateCellsBatchingPeriod={50}
-        windowSize={3}
-        removeClippedSubviews={Platform.OS === "android"}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS !== "web"}
       />
       <AppShowcaseModal />
     </View>

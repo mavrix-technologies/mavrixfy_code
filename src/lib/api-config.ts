@@ -107,6 +107,11 @@ function isPrivateDevelopmentApiUrl(value: string): boolean {
 }
 
 export function getMusicApiUrl(): string {
+  // Priority 1: In __DEV__, directly honor local dev server configured in .env
+  if (__DEV__ && process.env.EXPO_PUBLIC_MUSIC_API_URL) {
+    const devUrl = normalizeApiUrl(normalizeBaseUrl(process.env.EXPO_PUBLIC_MUSIC_API_URL));
+    if (devUrl) return devUrl;
+  }
   // Dynamic priority: Firebase Remote Config > EXPO_PUBLIC_MUSIC_API_URL > SONG_API_BASE_URL > fallback
   try {
     // Lazy import to avoid circular dep at module load time
@@ -129,17 +134,59 @@ export function getApiUrl(): string {
 
 export function buildAppApiUrl(path: string): string {
   let baseUrl = APP_API_BASE_URL;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getRemoteConfigAppApiUrl } = require("./remoteConfig") as {
-      getRemoteConfigAppApiUrl: () => string;
-    };
-    const remoteUrl = getRemoteConfigAppApiUrl().trim();
-    const safeRemoteUrl = normalizeApiUrl(normalizeBaseUrl(remoteUrl));
-    if (safeRemoteUrl) baseUrl = safeRemoteUrl;
-  } catch {
-    // Fall back to env
+  if (__DEV__ && process.env.EXPO_PUBLIC_APP_API_URL) {
+    const devApp = normalizeApiUrl(normalizeBaseUrl(process.env.EXPO_PUBLIC_APP_API_URL));
+    if (devApp) baseUrl = devApp;
+  } else {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getRemoteConfigAppApiUrl } = require("./remoteConfig") as {
+        getRemoteConfigAppApiUrl: () => string;
+      };
+      const remoteUrl = getRemoteConfigAppApiUrl().trim();
+      const safeRemoteUrl = normalizeApiUrl(normalizeBaseUrl(remoteUrl));
+      if (safeRemoteUrl) baseUrl = safeRemoteUrl;
+    } catch {
+      // Fall back to env
+    }
   }
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${baseUrl}${normalizedPath.startsWith("/api/") ? normalizedPath : `/api${normalizedPath}`}`;
+}
+
+export async function fetchAppApi(path: string, init?: RequestInit): Promise<Response> {
+  const primaryUrl = buildAppApiUrl(path);
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const apiPath = normalizedPath.startsWith("/api/") ? normalizedPath : `/api${normalizedPath}`;
+  const fallbackUrl = `https://mavrixfy-song-api.vercel.app${apiPath}`;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const mergedSignal = init?.signal
+      ? (AbortSignal.any ? AbortSignal.any([init.signal, controller.signal]) : controller.signal)
+      : controller.signal;
+
+    const res = await fetch(primaryUrl, { ...init, signal: mergedSignal });
+    clearTimeout(timeoutId);
+    if (res.ok) return res;
+  } catch {}
+
+  if (primaryUrl !== fallbackUrl) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(fallbackUrl, { ...init, signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (res.ok) return res;
+    } catch {}
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 3000);
+  try {
+    return await fetch(primaryUrl, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }

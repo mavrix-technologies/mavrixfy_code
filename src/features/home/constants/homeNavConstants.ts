@@ -12,6 +12,7 @@ export interface MusicCategoryItem {
 
 export const MAVRIXFY_MUSIC_CATEGORIES: readonly MusicCategoryItem[] = [
   { id: "All", label: "All", focusedIcon: "musical-notes", unfocusedIcon: "musical-notes-outline" },
+  { id: "Spotify", label: "Featured", focusedIcon: "sparkles", unfocusedIcon: "sparkles-outline" },
   { id: "Songs", label: "Songs", focusedIcon: "musical-note", unfocusedIcon: "musical-note-outline" },
   { id: "Playlists", label: "Playlists", focusedIcon: "list", unfocusedIcon: "list-outline" },
   { id: "Albums", label: "Albums", focusedIcon: "disc", unfocusedIcon: "disc-outline" },
@@ -19,7 +20,7 @@ export const MAVRIXFY_MUSIC_CATEGORIES: readonly MusicCategoryItem[] = [
   { id: "Recently Played", label: "Recent", focusedIcon: "time", unfocusedIcon: "time-outline" },
 ] as const;
 
-export type MavrixfyCategory = "All" | "Songs" | "Playlists" | "Albums" | "New Releases" | "Recently Played";
+export type MavrixfyCategory = "All" | "Spotify" | "Songs" | "Playlists" | "Albums" | "New Releases" | "Recently Played";
 
 export const UNIFIED_HEADER_TOP_BAR_HEIGHT = 48;
 export const UNIFIED_HEADER_MENU_HEIGHT = 58;

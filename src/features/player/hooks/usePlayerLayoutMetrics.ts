@@ -2,6 +2,15 @@ import { IS_WEB } from "@/constants/platform";
 import { useMemo } from "react";
 import { type EdgeInsets } from "react-native-safe-area-context";
 
+/** Shared by the real carousel and its transition image so cache variants match. */
+export function getPlayerArtworkSize(screenWidth: number, screenHeight: number) {
+  const isVeryShortScreen = screenHeight <= 700;
+  const targetWidth = Math.max(200, Math.round(screenWidth * 0.79));
+  const heightLimit = Math.max(isVeryShortScreen ? 220 : 240,
+    Math.floor(screenHeight * (isVeryShortScreen ? 0.34 : screenHeight <= 760 ? 0.38 : 0.42)));
+  return Math.min(targetWidth, heightLimit);
+}
+
 export function usePlayerLayoutMetrics(
   screenWidth: number,
   screenHeight: number,
@@ -25,13 +34,7 @@ export function usePlayerLayoutMetrics(
     IS_WEB ? 16 : Math.max(insets.bottom, 0) + 24;
 
   const cardGap = 16;
-  const targetCardWidth = Math.max(200, Math.round(screenWidth * 0.79));
-
-  const trackSwipeHeightByScreen = Math.max(
-    isVeryShortScreen ? 220 : 240,
-    Math.floor(screenHeight * (isVeryShortScreen ? 0.34 : isShortScreen ? 0.38 : 0.42))
-  );
-  const cardWidth = Math.min(targetCardWidth, trackSwipeHeightByScreen);
+  const cardWidth = getPlayerArtworkSize(screenWidth, screenHeight);
   const trackSwipeAreaHeight = cardWidth;
   const trackSwipeCardWidth = cardWidth;
   const trackSwipeCardGap = cardGap;

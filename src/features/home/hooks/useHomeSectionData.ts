@@ -1,3 +1,4 @@
+import { isSongProviderAllowed, isPlaylistProviderAllowed } from "@/lib/providerFilter";
 import { type ArtistCard } from "@/data/providers/ArtistProvider";
 import { type CatalogCategoryData } from "@/data/providers/MusicCatalogProvider";
 import { type FirestorePlaylist } from "@/lib/firestore";
@@ -7,6 +8,9 @@ import { useMemo } from "react";
 import type { MavrixfyCategory } from "../constants/homeNavConstants";
 
 export const HOME_CATEGORY_TITLES: Record<string, string> = {
+  spotify: "Top Hits & Trending",
+  "spotify-mixes": "Made For You & Daily Mixes",
+  "spotify-moods": "Moods & Party Anthems",
   "new-arrivals": "New Releases",
   "new-releases": "New Releases",
   popular: "Most Popular",
@@ -41,6 +45,7 @@ interface UseHomeSectionDataParams {
   featuredArtists: ArtistCard[];
   publicPlaylists: FirestorePlaylist[];
   loadingMainContent: boolean;
+  sourceSettings?: { enableJioSaavn?: boolean; enableSpotify?: boolean; enableYouTubeMusic?: boolean };
 }
 
 export function useHomeSectionData({
@@ -51,45 +56,68 @@ export function useHomeSectionData({
   featuredArtists,
   publicPlaylists,
   loadingMainContent,
+  sourceSettings,
 }: UseHomeSectionDataParams): HomeSectionItem[] {
   return useMemo<HomeSectionItem[]>(() => {
+    const hasSpotify = categories.some((c) => c.id?.startsWith("spotify"));
+    const enableJioSaavn = sourceSettings?.enableJioSaavn !== undefined
+      ? sourceSettings.enableJioSaavn
+      : !hasSpotify;
+    const enableSpotify = sourceSettings?.enableSpotify ?? true;
+    const enableYouTubeMusic = sourceSettings?.enableYouTubeMusic ?? true;
+
+    const filteredCategories = categories.filter((cat) => {
+      if (cat.id?.startsWith("spotify")) return enableSpotify;
+      return enableJioSaavn;
+    });
+    const filteredQuickPicks = enableJioSaavn
+      ? quickPickSongs.filter((song) => isSongProviderAllowed(song, sourceSettings))
+      : [];
+    const filteredArtists = enableJioSaavn ? featuredArtists : [];
+    const filteredRecent = recentlyPlayed.filter((item) => {
+      if (item.type === "song") {
+        return isSongProviderAllowed(item.data || { id: item.id }, sourceSettings);
+      }
+      return isPlaylistProviderAllowed(item.id, sourceSettings);
+    });
+    const filteredPublicPlaylists = publicPlaylists.filter((p) => isPlaylistProviderAllowed(p.id, sourceSettings));
     const items: HomeSectionItem[] = [];
 
     if (selectedCategory === "Recently Played") {
-      if (recentlyPlayed.length > 0) {
+      if (filteredRecent.length > 0) {
         items.push({ id: "recently-played", type: "recently-played" });
       }
-      if (featuredArtists.length > 0) {
+      if (filteredArtists.length > 0) {
         items.push({ id: "artists", type: "artists" });
       }
       return items;
     }
 
     if (selectedCategory === "New Releases") {
-      const newArrivals = categories.find((c) => c.id === "new-releases" || c.id === "new-arrivals");
+      const newArrivals = filteredCategories.find((c) => c.id === "new-releases" || c.id === "new-arrivals");
       if (newArrivals) {
         items.push({ id: `cat-${newArrivals.id}`, type: "category", category: newArrivals, showAd: false });
       }
-      if (quickPickSongs.length > 0) {
+      if (filteredQuickPicks.length > 0) {
         items.push({ id: "quick-picks", type: "quick-picks" });
       } else if (loadingMainContent) {
         items.push({ id: "loading-quick", type: "loading-quick" });
       }
-      if (publicPlaylists.length > 0) {
+      if (filteredPublicPlaylists.length > 0) {
         items.push({ id: "public-playlists", type: "public-playlists" });
       }
       return items;
     }
 
-    if (quickPickSongs.length > 0) {
+    if (filteredQuickPicks.length > 0) {
       items.push({ id: "quick-picks", type: "quick-picks" });
     } else if (loadingMainContent) {
       items.push({ id: "loading-quick", type: "loading-quick" });
     }
-    if (recentlyPlayed.length > 0) items.push({ id: "recently-played", type: "recently-played" });
-    if (featuredArtists.length > 0) items.push({ id: "artists", type: "artists" });
+    if (filteredRecent.length > 0) items.push({ id: "recently-played", type: "recently-played" });
+    if (filteredArtists.length > 0) items.push({ id: "artists", type: "artists" });
 
-    categories.forEach((cat, idx) => {
+    filteredCategories.forEach((cat, idx) => {
       items.push({
         id: `cat-${cat.id}`,
         type: "category",
@@ -98,10 +126,10 @@ export function useHomeSectionData({
       });
     });
 
-    if (publicPlaylists.length > 0) items.push({ id: "public-playlists", type: "public-playlists" });
+    if (filteredPublicPlaylists.length > 0) items.push({ id: "public-playlists", type: "public-playlists" });
     const hasBelowRecentContent =
       featuredArtists.length > 0 ||
-      categories.length > 0 ||
+      filteredCategories.length > 0 ||
       publicPlaylists.length > 0;
     if (loadingMainContent && !hasBelowRecentContent) {
       items.push({ id: "loading-main", type: "loading-main" });

@@ -522,13 +522,13 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
             stage = "format";
             // Keep Apple's direct-file audio path on AAC-LC while investigating
             // the observed doubled HE-AAC timeline and silent tail.
-            // Android uses ExoPlayer/Media3 which natively supports both AAC-LC and high-fidelity Opus (itag 251, ~160kbps).
+            // Android uses ExoPlayer/Media3 and Web uses modern HTML5 audio, which natively support both AAC-LC and high-fidelity Opus (itag 251, ~160kbps).
             const isAudioFormatCompatible = (format: { has_audio?: boolean; has_video?: boolean; mime_type: string }) => {
               if (!format.has_audio || format.has_video) return false;
               if (format.mime_type.startsWith("audio/mp4")) {
                 return RuntimePlatform.OS !== "ios" || /\bmp4a\.40\.2\b/i.test(format.mime_type);
               }
-              if (RuntimePlatform.OS === "android" && format.mime_type.startsWith("audio/webm") && /opus/i.test(format.mime_type)) {
+              if ((RuntimePlatform.OS === "android" || RuntimePlatform.OS === "web") && format.mime_type.startsWith("audio/webm") && /opus/i.test(format.mime_type)) {
                 return true;
               }
               return false;

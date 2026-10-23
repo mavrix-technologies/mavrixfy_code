@@ -84,7 +84,7 @@ function emitPlaybackEngine(): void {
   listeners.forEach((listener) => listener());
 }
 
-function getPlaybackEngineSnapshot(): PlaybackEngineSnapshot {
+export function getPlaybackEngineSnapshot(): PlaybackEngineSnapshot {
   return snapshot;
 }
 

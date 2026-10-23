@@ -26,6 +26,7 @@ export const getJioSaavnSearchBaseUrls = getCatalogSearchBaseUrls;
 const CACHE_PREFIX = "@mavrixfy_catalog_category_v4";
 const CATEGORY_STALE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const CATEGORY_TTL_MS: Record<string, number> = {
+  spotify: 30 * 60 * 1000,
   trending: 30 * 60 * 1000,
   "top-charts": 45 * 60 * 1000,
   bollywood: 60 * 60 * 1000,

@@ -16,12 +16,17 @@ export function isEligibleQuickPickSong(song: Song): boolean {
   if (/^(unknown|unknown artist)$/i.test(song.title.trim()) || /^(unknown|unknown artist)$/i.test(song.artist.trim())) return false;
   if (!Number.isFinite(song.duration) || song.duration < 60) return false;
   if (UNWANTED_VERSION.test(`${song.title} ${song.album}`)) return false;
-  try {
-    const url = new URL(song.audioUrl);
-    return url.protocol === "https:" && !/(?:^|[\/_.-])(preview|sample|snippet|teaser)(?:[\/_.-]|$)/i.test(url.pathname);
-  } catch {
-    return false;
+  if (song.audioUrl && song.audioUrl.trim()) {
+    try {
+      const url = new URL(song.audioUrl);
+      if (url.protocol !== "https:" || /(?:^|[\/_.-])(preview|sample|snippet|teaser)(?:[\/_.-]|$)/i.test(url.pathname)) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
   }
+  return true;
 }
 
 /** Preserve editorial order while limiting duplicates and repeated artists. */

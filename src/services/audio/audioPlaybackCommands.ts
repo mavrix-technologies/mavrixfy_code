@@ -1,3 +1,4 @@
+import { getSongProvider, isSongProviderAllowed } from "@/lib/providerFilter";
 import { isYouTubeSong, peekYouTubeStream, rejectYouTubeStream, youTubePlaybackErrorMessage, youTubePlaybackErrorDetails } from "@/services/youtube/YouTubeMusic";
 import { getSettings } from "@/lib/storage";
 import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
@@ -110,6 +111,13 @@ export function useAudioPlaybackCommands({
   const playSong = useCallback(
     async (song: Song, requestedQueue?: Song[], startPositionSeconds?: number) => {
       if (!song?.id) return;
+      const currentSettings = await getSettings();
+      if (!isSongProviderAllowed(song, currentSettings)) {
+        const provider = getSongProvider(song);
+        const name = provider === "jiosaavn" ? "JioSaavn" : provider === "spotify" ? "Spotify" : "YouTube Music";
+        showPlaybackNotice(`${name} is turned off in Settings.`);
+        return;
+      }
       const scope = getAccountScope();
       const reqId = ++playRequestIdRef.current;
       pendingPlayRequestRef.current = {
@@ -218,12 +226,12 @@ export function useAudioPlaybackCommands({
         try {
           audioUrl = await Promise.race([
           resolvePlaybackUrlCached(targetSong),
-          new Promise<never>((_, reject) => { resolutionTimer = setTimeout(() => reject(new Error("Audio stream resolution timed out.")), isYouTubeSong(targetSong) ? 27000 : 12000); }),
+          new Promise<never>((_, reject) => { resolutionTimer = setTimeout(() => reject(new Error("Audio stream resolution timed out.")), (isYouTubeSong(targetSong) || targetSong.source === "spotify" || targetSong.id.startsWith("sp_") || targetSong.id.startsWith("itunes_")) ? 27000 : 12000); }),
           ]).finally(() => clearTimeout(resolutionTimer));
         } catch (initialResolutionError) {
           const detail = youTubePlaybackErrorDetails(initialResolutionError);
           const extractionFailure = initialResolutionError as { retryExhausted?: boolean; code?: string } | null;
-          const extractionStopsRecovery = isYouTubeSong(targetSong) &&
+          const extractionStopsRecovery = (isYouTubeSong(targetSong) || targetSong.source === "spotify") &&
             (extractionFailure?.retryExhausted || extractionFailure?.code === "RATE_LIMITED");
           const retryable = !extractionStopsRecovery && !/LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot|private|removed|restricted/i.test(detail) &&
             /network request failed|failed to fetch|timed out|timeout|ECONNRESET|ETIMEDOUT|HTTP (?:408|429|5\d\d)/i.test(detail);
@@ -591,10 +599,19 @@ export function useAudioPlaybackCommands({
     if (cq.length === 0) return;
 
     if (repeatModeRef.current === "all" || ci < cq.length - 1) {
-      const nextIndex = (ci + 1) % cq.length;
-      const targetSong = cq[nextIndex];
-      if (targetSong) {
+      const settings = await getSettings();
+      let nextIndex = (ci + 1) % cq.length;
+      let targetSong = cq[nextIndex];
+      let steps = 0;
+      while (targetSong && !isSongProviderAllowed(targetSong, settings) && steps < cq.length) {
+        nextIndex = (nextIndex + 1) % cq.length;
+        targetSong = cq[nextIndex];
+        steps++;
+      }
+      if (targetSong && isSongProviderAllowed(targetSong, settings)) {
         await playSong(targetSong, cq);
+      } else {
+        showPlaybackNotice("No songs available from active sources.");
       }
     } else {
       // Reached end of queue: check smart autoplay before stopping
@@ -707,9 +724,16 @@ export function useAudioPlaybackCommands({
     if (cq.length === 0) return;
 
     if (repeatModeRef.current === "all" || ci > 0) {
-      const prevIndex = (ci - 1 + cq.length) % cq.length;
-      const targetSong = cq[prevIndex];
-      if (targetSong) {
+      const settings = await getSettings();
+      let prevIndex = (ci - 1 + cq.length) % cq.length;
+      let targetSong = cq[prevIndex];
+      let steps = 0;
+      while (targetSong && !isSongProviderAllowed(targetSong, settings) && steps < cq.length) {
+        prevIndex = (prevIndex - 1 + cq.length) % cq.length;
+        targetSong = cq[prevIndex];
+        steps++;
+      }
+      if (targetSong && isSongProviderAllowed(targetSong, settings)) {
         void playSong(targetSong, cq);
       }
     } else {

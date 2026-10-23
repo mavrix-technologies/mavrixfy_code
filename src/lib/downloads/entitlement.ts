@@ -6,9 +6,8 @@
  */
 
 import { db } from "@/lib/firebase";
-import { logger } from "@/lib/logger";
-import { type DownloadEntitlement,type TrackRights,DOWNLOAD_DEVICE_LIMIT,LICENSE_GRACE_PERIOD_DAYS,MAX_OFFLINE_SONGS } from "@/types/downloads";
-import { doc,getDoc } from "firebase/firestore";
+import { type DownloadEntitlement, type TrackRights, DOWNLOAD_DEVICE_LIMIT, LICENSE_GRACE_PERIOD_DAYS, MAX_OFFLINE_SONGS } from "@/types/downloads";
+import { doc, getDoc } from "firebase/firestore";
 
 // ─── Entitlement ──────────────────────────────────────────────────────────────
 
@@ -28,8 +27,13 @@ export async function getDownloadEntitlement(uid: string): Promise<DownloadEntit
   try {
     if (!db) return fullAccess;
 
-    const snap = await getDoc(doc(db, "users", uid));
-    if (!snap.exists()) return fullAccess;
+    // Timeout getDoc after 2 seconds to fail open instantly without blocking on poor connections
+    const userDocRef = doc(db, "users", uid);
+    const snap = await Promise.race([
+      getDoc(userDocRef),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error("Firestore offline timeout")), 2000)),
+    ]);
+    if (!snap || !snap.exists()) return fullAccess;
 
     const data = snap.data();
     const status: string = data?.subscriptionStatus ?? "";
@@ -46,9 +50,8 @@ export async function getDownloadEntitlement(uid: string): Promise<DownloadEntit
     }
 
     return fullAccess;
-  } catch (err) {
-    logger.error("[Entitlement] getDownloadEntitlement failed", err);
-    // Fail open — don't block downloads on a network error.
+  } catch {
+    // Fail open quietly on offline or timeout without spamming errors
     return fullAccess;
   }
 }
@@ -74,9 +77,12 @@ export async function getTrackRights(songId: string): Promise<TrackRights> {
     if (!db) return permissive;
 
     const songRef = doc(db, "songs", songId);
-    const snap = await getDoc(songRef);
+    const snap = await Promise.race([
+      getDoc(songRef),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error("Firestore offline timeout")), 2000)),
+    ]);
 
-    if (!snap.exists()) return permissive;
+    if (!snap || !snap.exists()) return permissive;
 
     const d = snap.data();
     return {
@@ -87,8 +93,7 @@ export async function getTrackRights(songId: string): Promise<TrackRights> {
       offlineMaxQuality: d?.offlineMaxQuality ?? "high",
       rightsVersion: typeof d?.rightsVersion === "number" ? d.rightsVersion : 1,
     };
-  } catch (err) {
-    logger.error("[Entitlement] getTrackRights failed", err);
+  } catch {
     return permissive;
   }
 }

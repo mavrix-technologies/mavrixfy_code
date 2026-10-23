@@ -204,7 +204,7 @@ export async function getPublicPlaylists(maxCount: number = 100): Promise<Firest
     }
 
     const playlistsRef = collection(db, "playlists");
-    let querySnapshot;
+    let querySnapshot: any;
 
     try {
       const q = query(
@@ -213,15 +213,15 @@ export async function getPublicPlaylists(maxCount: number = 100): Promise<Firest
         orderBy("updatedAt", "desc"),
         limit(maxCount)
       );
-      querySnapshot = await getDocsFromServer(q);
+      querySnapshot = await Promise.race([getDocs(q), new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 2000))]);
     } catch (error) {
       if ((error as { code?: string })?.code !== "failed-precondition") throw error;
       const q = query(playlistsRef, where("isPublic", "==", true), limit(maxCount));
-      querySnapshot = await getDocsFromServer(q);
+      querySnapshot = await Promise.race([getDocs(q), new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 2000))]);
     }
 
     const playlists: FirestorePlaylist[] = [];
-    querySnapshot.forEach((doc) => {
+    querySnapshot.forEach((doc: any) => {
       playlists.push({ id: doc.id, ...doc.data() } as FirestorePlaylist);
     });
 
