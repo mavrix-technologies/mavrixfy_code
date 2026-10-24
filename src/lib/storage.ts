@@ -66,7 +66,6 @@ export interface AppSettings {
   streamingQuality: "auto" | "low" | "medium" | "high";
   highQualityUnlocked: boolean;
   highQualityExpiresAt?: number | null;
-  preferJioSaavnAudio: boolean;
   videoBackgroundQuality: YouTubeVideoQualityPreference;
   smartAutoplayEnabled: boolean;
   smartAutoplayMode: SmartAutoplayMode;
@@ -81,16 +80,12 @@ export interface AppSettings {
   gapless: boolean;
   normalizeVolume: boolean;
   ambientBackdropEnabled: boolean;
-  enableJioSaavn: boolean;
-  enableSpotify: boolean;
-  enableYouTubeMusic: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
   streamingQuality: "high",
   highQualityUnlocked: true,
   highQualityExpiresAt: null,
-  preferJioSaavnAudio: true,
   videoBackgroundQuality: "auto",
   smartAutoplayEnabled: true,
   smartAutoplayMode: "similar-trending",
@@ -105,11 +100,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   gapless: true,
   normalizeVolume: false,
   ambientBackdropEnabled: false,
-  enableJioSaavn: true,
-  enableSpotify: true,
-  enableYouTubeMusic: true,
 };
-
 
 const SEARCH_HISTORY_LIMIT = 12;
 
@@ -179,10 +170,10 @@ async function getJSON<T>(key: string, fallback: T): Promise<T> {
 
     const data = await AsyncStorage.getItem(key);
     const parsed = data ? JSON.parse(data) : fallback;
-    
+
     // Store in memory cache
     memoryCache.set(key, { data: parsed, timestamp: Date.now() });
-    
+
     return parsed;
   } catch {
     return fallback;
@@ -253,7 +244,7 @@ async function setJSON(key: string, value: unknown): Promise<void> {
   try {
     // Update memory cache immediately
     memoryCache.set(key, { data: value, timestamp: Date.now() });
-    
+
     // Persist to AsyncStorage
     await AsyncStorage.setItem(key, JSON.stringify(value));
   } catch (err: any) {
@@ -327,13 +318,13 @@ export async function updateUserPlaylist(
   const playlists = await getUserPlaylists();
   const idx = playlists.findIndex(p => p.id === playlistId);
   if (idx === -1) return;
-  
+
   playlists[idx] = {
     ...playlists[idx],
     ...updates,
     updatedAt: Date.now(),
   };
-  
+
   await setJSON(storageKey, playlists);
 }
 
@@ -426,8 +417,8 @@ function normalizeMiniPlayerSecondaryControl(value: unknown): MiniPlayerSecondar
 
 export async function getSettings(): Promise<AppSettings> {
   const saved = { ...await getJSON<Partial<AppSettings>>(KEYS.SETTINGS, DEFAULT_SETTINGS) } as Partial<AppSettings> & Record<string, unknown>;
-  // Ignore settings from older builds that offered spatial audio effects.
-  for (const key of ["surroundSoundEnabled", "surroundStrength", "surroundSpeed", "reverbPreset", "rotating8DEnabled"]) {
+  // Ignore removed effect settings and provider switches from older builds.
+  for (const key of ["surroundSoundEnabled", "surroundStrength", "surroundSpeed", "reverbPreset", "rotating8DEnabled", "preferJioSaavnAudio", "enableJioSaavn", "enableSpotify", "enableYouTubeMusic"]) {
     delete saved[key];
   }
   return {
@@ -435,7 +426,7 @@ export async function getSettings(): Promise<AppSettings> {
     ...saved,
     equalizer: normalizeEqualizer(saved.equalizer),
     hapticsEnabled: Boolean(saved.hapticsEnabled),
-    preferJioSaavnAudio: saved.preferJioSaavnAudio !== undefined ? saved.preferJioSaavnAudio === true : DEFAULT_SETTINGS.preferJioSaavnAudio,
+
     highQualityUnlocked: saved.highQualityUnlocked !== undefined ? Boolean(saved.highQualityUnlocked) : DEFAULT_SETTINGS.highQualityUnlocked,
     videoBackgroundQuality: normalizeYouTubeVideoQuality(saved.videoBackgroundQuality),
     smartAutoplayEnabled: saved.smartAutoplayEnabled !== undefined ? Boolean(saved.smartAutoplayEnabled) : DEFAULT_SETTINGS.smartAutoplayEnabled,
@@ -448,9 +439,7 @@ export async function getSettings(): Promise<AppSettings> {
     gapless: saved.gapless !== undefined ? Boolean(saved.gapless) : DEFAULT_SETTINGS.gapless,
     normalizeVolume: saved.normalizeVolume !== undefined ? Boolean(saved.normalizeVolume) : DEFAULT_SETTINGS.normalizeVolume,
     ambientBackdropEnabled: saved.ambientBackdropEnabled !== undefined ? Boolean(saved.ambientBackdropEnabled) : DEFAULT_SETTINGS.ambientBackdropEnabled,
-    enableJioSaavn: saved.enableJioSaavn !== undefined ? Boolean(saved.enableJioSaavn) : true,
-    enableSpotify: saved.enableSpotify !== undefined ? Boolean(saved.enableSpotify) : true,
-    enableYouTubeMusic: saved.enableYouTubeMusic !== undefined ? Boolean(saved.enableYouTubeMusic) : true,
+
   };
 }
 

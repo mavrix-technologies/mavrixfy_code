@@ -14,24 +14,18 @@ export function buildHomeSections(
   sections: YouTubeHomeSection[],
   jioSections: HomeSectionItem[],
   explore: YouTubeHomeSection[] = [],
-  sourceSettings?: { enableJioSaavn?: boolean; enableSpotify?: boolean; enableYouTubeMusic?: boolean }
+  includeCatalog?: boolean
 ): HomeListItem[] {
-  const enableSpotify = sourceSettings?.enableSpotify ?? true;
-  const enableYouTubeMusic = (sourceSettings?.enableYouTubeMusic ?? true) && youtubeEnabled;
 
   if (category === "Recently Played" || !youtubeEnabled) return jioSections;
 
-  const spotifySections = enableSpotify
-    ? jioSections.filter((item) => item.type === "category" && item.category?.id?.startsWith("spotify"))
-    : [];
-  const spotifySection = spotifySections[0] || (enableSpotify ? jioSections.find((item) => item.type === "category" && item.category?.id === "spotify") : undefined);
+  const spotifySections = jioSections.filter((item) => item.type === "category" && item.category?.id?.startsWith("spotify"));
+  const spotifySection = spotifySections[0] || jioSections.find((item) => item.type === "category" && item.category?.id === "spotify");
   const spotifyMixes = spotifySections.find((item) => item.type === "category" && item.category?.id === "spotify-mixes");
   const spotifyMoods = spotifySections.find((item) => item.type === "category" && item.category?.id === "spotify-moods");
 
-  const enableJioSaavn = sourceSettings?.enableJioSaavn !== undefined
-    ? sourceSettings.enableJioSaavn
-    : (spotifySections.length > 0 ? false : true);
-  const otherJio = enableJioSaavn
+  const showCatalog = includeCatalog ?? spotifySections.length === 0;
+  const otherJio = showCatalog
     ? jioSections.filter((item) => item.type === "category" && !item.category?.id?.startsWith("spotify")).slice(0, 2)
     : [];
   const jio = otherJio;
@@ -39,8 +33,8 @@ export function buildHomeSections(
   const rows = (items: YouTubeHomeSection[]): HomeListItem[] =>
     items.map((section) => ({ id: section.id, type: "youtube-section", section }));
 
-  const releaseShelves = enableYouTubeMusic ? explore.filter((section) => section.category === "new-releases") : [];
-  const hasRegionalShelves = enableYouTubeMusic && explore.some((section) => section.id.startsWith("youtube-regional-"));
+  const releaseShelves = youtubeEnabled ? explore.filter((section) => section.category === "new-releases") : [];
+  const hasRegionalShelves = youtubeEnabled && explore.some((section) => section.id.startsWith("youtube-regional-"));
   const latest: YouTubeHomeSection = {
     id: "youtube-new-releases",
     title: "New Releases",
@@ -53,7 +47,7 @@ export function buildHomeSections(
     /\b(tamil|telugu|marathi|bengali|kannada|malayalam|bhojpuri|gujarati)\b/i.test(text);
 
   const seenDiscoveryIds = new Set<string>();
-  const discovery = enableYouTubeMusic
+  const discovery = youtubeEnabled
     ? [
         ...explore.filter(
           (section) =>
@@ -99,9 +93,9 @@ export function buildHomeSections(
 
     return [
       ...(category === "Playlists" ? (spotifySections.length ? spotifySections : spotifySection ? [spotifySection] : []) : []),
-      ...(category === "Songs" && enableYouTubeMusic ? ([{ id: "youtube-quick-picks", type: "youtube-quick-picks" }] as HomeListItem[]) : []),
+      ...(category === "Songs" && youtubeEnabled ? ([{ id: "youtube-quick-picks", type: "youtube-quick-picks" }] as HomeListItem[]) : []),
       ...rows(filtered),
-      ...(enableYouTubeMusic ? [{ id: "youtube-status", type: "youtube-status" } as HomeListItem] : []),
+      ...(youtubeEnabled ? [{ id: "youtube-status", type: "youtube-status" } as HomeListItem] : []),
     ];
   }
 
@@ -111,7 +105,7 @@ export function buildHomeSections(
   const secondDiscovery = spotifyMoods ? remainingDiscovery.shift() : null;
 
   const youtube: HomeListItem[] = [
-    ...(enableYouTubeMusic ? [{ id: "youtube-quick-picks", type: "youtube-quick-picks" } as HomeListItem] : []),
+    ...(youtubeEnabled ? [{ id: "youtube-quick-picks", type: "youtube-quick-picks" } as HomeListItem] : []),
     ...(spotifySection ? [spotifySection] : []),
     ...(releasesAvailable ? rows([latest]) : ([{ id: "releases-status", type: "releases-status" }] as HomeListItem[])),
     ...(firstDiscovery ? rows([firstDiscovery]) : []),
@@ -119,11 +113,11 @@ export function buildHomeSections(
     ...(secondDiscovery ? rows([secondDiscovery]) : []),
     ...(spotifyMoods ? [spotifyMoods] : []),
     ...rows(remainingDiscovery),
-    ...(enableYouTubeMusic ? [{ id: "youtube-status", type: "youtube-status" } as HomeListItem] : []),
+    ...(youtubeEnabled ? [{ id: "youtube-status", type: "youtube-status" } as HomeListItem] : []),
   ];
 
   const result = [...youtube];
-  if (enableJioSaavn) {
+  if (showCatalog) {
     jio.forEach((item, index) => result.splice(Math.min(4 + index * 4, result.length - 1), 0, item));
     const artists = jioSections.find((item) => item.type === "artists");
     if (artists) result.splice(Math.min(3, result.length), 0, artists);

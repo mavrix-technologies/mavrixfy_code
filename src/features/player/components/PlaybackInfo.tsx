@@ -4,10 +4,13 @@ import { StyleSheet, Text, View } from "react-native";
 import { usePlayerActions } from "@/contexts/PlayerContextDefs";
 import { usePlaybackEngineSelector } from "@/services/audio/PlaybackEngine";
 import { getSongProvider } from "@/lib/providerFilter";
+import { useAuth } from "@/contexts/AuthContext";
 
 const qualityNames = { auto: "Auto", low: "Low", medium: "Medium", high: "High" };
 
 export const PlaybackInfo = memo(function PlaybackInfo({ color = "rgba(255,255,255,0.65)" }: { color?: string }) {
+  const { user } = useAuth();
+  const isAdmin = user?.isAdmin === true;
   const { playbackQuality } = usePlayerActions();
   const currentSong = usePlaybackEngineSelector((state) => state.currentSong);
   const status = usePlaybackEngineSelector(playbackStatusLabel);
@@ -27,14 +30,15 @@ export const PlaybackInfo = memo(function PlaybackInfo({ color = "rgba(255,255,2
     ? "Offline"
     : `${qualityNames[playbackQuality.requested] || "High"} requested`;
   const codec = !status || status === "Buffering…" ? playbackQuality.codec?.toUpperCase() : undefined;
-  const bitrateStr = Number.isFinite(bitrate) && bitrate > 0 ? `${Math.round(bitrate)} kbps` : "320 kbps";
+  const bitrateStr = Number.isFinite(bitrate) && bitrate > 0 ? `${Math.round(bitrate)} kbps` : "bitrate unavailable";
 
   const quality = [sourceName, preference, codec, bitrateStr].filter(Boolean).join(" · ");
+  const label = isAdmin ? (status ? `${sourceName} · ${status}` : quality) : (status || "Mavrixfy Music");
 
   return (
-    <View style={styles.info} accessible accessibilityLabel={[status, quality].filter(Boolean).join(". ")}>
+    <View style={styles.info} accessible accessibilityLabel={isAdmin ? [status, quality].filter(Boolean).join(". ") : label}>
       <Text numberOfLines={1} style={[styles.label, { color }]} accessibilityLiveRegion="polite">
-        {status ? `${sourceName} · ${status}` : quality}
+        {label}
       </Text>
     </View>
   );

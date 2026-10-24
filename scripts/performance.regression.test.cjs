@@ -44,6 +44,7 @@ test('decorative consumers share one lifecycle listener and release it on unmoun
 
 test('shared player sheet closes once and retains its presentation through background and StandBy', () => {
   let foreground = true, focused = true, standbyEnabled = false, viewport = null, canGoBack = true;
+  let preventRemoval, removalBlocked;
   const closedSheets = [], played = [], focusEffects = [], closed = [], backHandlers = [];
   const refs = [];
   const states = [], effectDeps = [], animationFrames = [];
@@ -74,8 +75,8 @@ test('shared player sheet closes once and retains its presentation through backg
     '@/lib/appActivity': { useAppIsActive: () => foreground, useAppIsBackgrounded: () => !foreground },
     '@/constants/platform': { IS_IOS: true },
     '@/lib/playerUIState': { playerUIStateStore: ui, readMiniPlayerOrigin: () => null },
-    'expo-router/react-navigation': { usePreventRemove() {} },
-    'expo-router': { useLocalSearchParams: () => ({}), router: { replace: path => closed.push(path) }, useIsFocused: () => focused, useFocusEffect: fn => focusEffects.push(fn), useNavigation: () => navigation },
+    'expo-router': { usePreventRemove: (blocked, callback) => { removalBlocked = blocked; preventRemoval = callback; },
+      useLocalSearchParams: () => ({}), router: { replace: path => closed.push(path) }, useIsFocused: () => focused, useFocusEffect: fn => focusEffects.push(fn), useNavigation: () => navigation },
     '../components/PlayerContainerTransition': { PlayerContainerTransition: 'Transition' },
     '../hooks/usePlayerArtworkMeasurement': { usePlayerArtworkMeasurement: () => ({ contentRef: {}, transitionArtworkRef: {}, artwork: null, measureArtwork() {} }) },
     '@/lib/queueRef': { globalQueueSheetRef: { current: { collapse: () => closedSheets.push('queue') } } },
@@ -192,6 +193,12 @@ test('shared player sheet closes once and retains its presentation through backg
   completeClose();
   assert.equal(closed.at(-1), '/(tabs)', 'a direct player link returns to tabs');
   canGoBack = true;
+  freshRoute();
+  let repeatedRemoval = 0;
+  preventRemoval({ repeat: () => { assert.equal(removalBlocked, false); repeatedRemoval++; } });
+  assert.equal(repeatedRemoval, 0, 'SDK 58 removal waits for the reverse morph');
+  completeClose();
+  assert.equal(repeatedRemoval, 1, 'resume the exact blocked action through the Router repeat callback');
   freshRoute();
   ui.expandPlayer();
   content(first).props.onEnterStandBy();

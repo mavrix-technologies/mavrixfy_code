@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PixelRatio, type LayoutRectangle, type View } from "react-native";
+import { PixelRatio, type LayoutRectangle, type ViewInstance } from "react-native";
 import { measure, useAnimatedRef, type MeasuredDimensions } from "react-native-reanimated";
 import { scheduleOnRN, scheduleOnUI } from "react-native-worklets";
 import { getPlayerArtworkSize } from "./usePlayerLayoutMetrics";
@@ -24,8 +24,8 @@ let cachedArtworkRect: LayoutRectangle | null = null;
 let cachedArtworkViewportKey: string | null = null;
 
 export function usePlayerArtworkMeasurement(viewport: { width: number; height: number }) {
-  const contentRef = useAnimatedRef<View>();
-  const transitionArtworkRef = useAnimatedRef<View>();
+  const contentRef = useAnimatedRef<ViewInstance>();
+  const transitionArtworkRef = useAnimatedRef<ViewInstance>();
   const density = PixelRatio.get();
   const expectedSize = getPlayerArtworkSize(viewport.width, viewport.height);
   const viewportKey = `${viewport.width}x${viewport.height}`;

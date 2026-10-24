@@ -19,7 +19,7 @@ export function useVisibleImageAnimation(source: string | null | undefined,
     () => (typeof scrollY === "number" ? scrollY : scrollY?.value || 0) < visibleUntil,
     (visible, previous) => {
       if (visible !== previous) scheduleOnRN(setInViewport, visible);
-    }, [scrollY, visibleUntil]
+    }
   );
   useEffect(() => {
     const image = imageRef.current;

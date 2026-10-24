@@ -529,7 +529,7 @@ test("library-thrown verification metadata is terminal and diagnostics exclude c
   });
   assert.equal(calls, 1);
   assert.equal(f.requests.length, 0);
-  assert.equal(f.diagnostics[0].code, "LOGIN_REQUIRED");
+  assert.equal(f.diagnostics.length, 0);
   assert.doesNotMatch(JSON.stringify(f.diagnostics), /secret|example\.test|Cookie|token=/);
 });
 
@@ -570,18 +570,14 @@ test("empty decipher output is rejected before media fetch", async () => {
   assert.equal(f.requests.length, 0);
 });
 
-test("successful extraction uses chooseFormat and emits only scalar stage diagnostics", async () => {
+test("successful extraction uses chooseFormat without emitting console diagnostics", async () => {
   const f = fixture();
   await f.api.resolveStream("abcdefghijk", "medium", "first-song");
   await f.api.resolveStream("12345678901", "medium", "second-song");
   assert.equal(f.sessionOptions.length, 1);
   assert.equal(f.formatSelections.length, 2);
   assert.equal(f.formatSelections[0].type, "audio");
-  assert.equal(f.diagnostics[0].hasVideoDetails, true);
-  assert.equal(f.diagnostics[0].hasStreamingData, true);
-  assert.equal(f.diagnostics[0].audioFormatCount, 1);
-  assert.equal(f.diagnostics[1].stage, "media");
-  assert.equal(f.diagnostics[1].httpStatus, 200);
+  assert.equal(f.diagnostics.length, 0);
   assert.doesNotMatch(JSON.stringify(f.diagnostics), /googlevideo|expire=|original%2Bvalue/);
 });
 

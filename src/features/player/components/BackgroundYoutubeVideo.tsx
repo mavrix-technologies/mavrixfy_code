@@ -42,11 +42,10 @@ function NativeVisual({ videoId, stream, active, initialOffsetMs, onFirstFrame, 
   const onFrame = useCallback(() => {
     if (hasFrame.current) return;
     hasFrame.current = true;
-    if (__DEV__) console.info("[VideoBackground] first frame rendered", { videoId, height: stream.height });
     onFirstFrame?.();
     reveal.current = Animated.timing(opacity, { toValue: 1, duration: 650, useNativeDriver: true });
     reveal.current.start();
-  }, [onFirstFrame, opacity, stream.height, videoId]);
+  }, [onFirstFrame, opacity]);
 
   useEffect(() => () => { reveal.current?.stop(); }, []);
   useEffect(() => {
@@ -110,18 +109,8 @@ export const BackgroundYoutubeVideo = memo(function BackgroundYoutubeVideo(props
         title: props.song.title,
         error: officialVideo.error instanceof Error ? officialVideo.error.message : String(officialVideo.error),
       });
-    } else if (officialVideo.data) {
-      if (__DEV__) console.info("[VideoBackground] official music video selected", {
-        audioVideoId: props.videoId,
-        officialVideoId: officialVideo.data,
-      });
-    } else if (officialVideo.isSuccess && __DEV__) {
-      console.info("[VideoBackground] no official music video match", {
-        audioVideoId: props.videoId,
-        title: props.song.title,
-      });
     }
-  }, [officialVideo.data, officialVideo.error, officialVideo.isSuccess, props.song.title, props.videoId]);
+  }, [officialVideo.error, props.song.title, props.videoId]);
   useEffect(() => {
     if (error && officialVideoId) {
       logger.warn("[VideoBackground] video stream resolution failed", {

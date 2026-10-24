@@ -111,3 +111,11 @@ android/local.properties
 *service-account*.json
 firebase-service-account.json
 app.aab.json
+
+# Local agent/editor state and generated audit caches
+.agents/
+.codex/
+.cursor/
+.vercel/
+.native-doctor/
+.native-doctor-cache/

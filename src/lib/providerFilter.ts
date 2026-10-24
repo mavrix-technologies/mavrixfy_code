@@ -1,5 +1,4 @@
 import type { Song } from "./musicData";
-import type { AppSettings } from "./storage";
 
 export type MusicProvider = "jiosaavn" | "spotify" | "youtube" | "local";
 
@@ -29,32 +28,4 @@ export function getSongProvider(
     return "youtube";
   }
   return "jiosaavn";
-}
-
-export function isSongProviderAllowed(
-  song: Partial<Song> | { id?: string; source?: string; audioUrl?: string; playlistId?: string } | null | undefined,
-  settings: Partial<AppSettings> | null | undefined
-): boolean {
-  if (!song) return true;
-  const provider = getSongProvider(song);
-  if (provider === "local") return true;
-  if (!settings) return true;
-  if (provider === "spotify") return settings.enableSpotify !== false;
-  if (provider === "youtube") return settings.enableYouTubeMusic !== false;
-  if (provider === "jiosaavn") return settings.enableJioSaavn !== false;
-  return true;
-}
-
-export function isPlaylistProviderAllowed(
-  playlistId: string | undefined | null,
-  settings: Partial<AppSettings> | null | undefined
-): boolean {
-  if (!playlistId || !settings) return true;
-  if (playlistId.startsWith("pl_") || playlistId.startsWith("sp_")) {
-    return settings.enableSpotify !== false;
-  }
-  if (playlistId.startsWith("youtube_") || playlistId.startsWith("VL") || playlistId.startsWith("RD")) {
-    return settings.enableYouTubeMusic !== false;
-  }
-  return settings.enableJioSaavn !== false;
 }

@@ -45,17 +45,36 @@ test('deep links, invalid measurements, unrelated tracks and stale bounds fall b
 const metrics = load('src/features/player/hooks/usePlayerLayoutMetrics.ts', {
   react: { useMemo: fn => fn() }, '@/constants/platform': { IS_WEB: false },
 });
-function frame({ entered = false, closing = false, moving = true, destinationArtworkReady = true,
+function frame({ entered, closing = false, moving = true, destinationArtworkReady = true, reducedMotion = false,
   artwork = { x: 24, y: 100, width: 342, height: 342 } } = {}) {
   const effects = [], callbacks = [], configs = [], frames = new Map(), timers = new Map(); let nextFrame = 0, nextTimer = 0;
+  const states = [], refs = [], shared = [], deps = [], cleanups = [];
+  let stateIndex = 0, refIndex = 0, sharedIndex = 0, effectIndex = 0;
+  let dirty = false;
   const jsx = (type, props) => ({ type, props });
   const component = load('src/features/player/components/PlayerContainerTransition.tsx', {
-    react: { useState: () => [entered, () => {}], useMemo: fn => fn(), useEffect: fn => effects.push(fn) },
+    react: {
+      useState: initial => {
+        const slot = stateIndex++;
+        if (!(slot in states)) states[slot] = slot === 0 && entered !== undefined ? entered : initial;
+        return [states[slot], next => { if (states[slot] !== next) { states[slot] = next; dirty = true; } }];
+      },
+      useRef: initial => refs[refIndex++] ??= { current: initial },
+      useMemo: fn => fn(),
+      useEffect: (fn, nextDeps) => {
+        const slot = effectIndex++;
+        if (deps[slot] && nextDeps.every((value, i) => Object.is(value, deps[slot][i]))) return;
+        deps[slot] = nextDeps;
+        effects.push(() => { cleanups[slot]?.(); cleanups[slot] = fn(); });
+      },
+    },
     'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { View: 'View', PixelRatio: { get: () => 2 }, StyleSheet: { absoluteFill: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 }, create: value => value } },
     'react-native-reanimated': { __esModule: true, default: { View: 'Animated.View' },
       Easing: { bezier: (...points) => points }, useAnimatedStyle: fn => ({ evaluate: fn }),
-      useReducedMotion: () => false, useSharedValue: initial => { let current = initial; return { get: () => current, set: value => { current = value; } }; }, cancelAnimation: () => {},
+      useReducedMotion: () => reducedMotion, useSharedValue: initial => shared[sharedIndex++] ??= {
+        current: initial, get() { return this.current; }, set(value) { this.current = value; },
+      }, cancelAnimation: () => {},
       withDelay: (delay, value) => { configs.at(-1).delay = delay; return value; },
       withTiming: (value, config, callback) => { if (callback) callbacks.push(callback); configs.push(config); return value; } },
     'react-native-worklets': { scheduleOnRN: fn => fn(), scheduleOnUI: fn => fn() },
@@ -68,24 +87,42 @@ function frame({ entered = false, closing = false, moving = true, destinationArt
   let opened = 0, closed = 0;
   let destinationVisibility = 0;
   const artworkVisibility = { get: () => destinationVisibility, set: value => { destinationVisibility = value; } };
-  const tree = component.PlayerContainerTransition({ origin: {
+  let props = { origin: {
     sheet: { x: 0, y: 700, width: 390, height: 55 }, artwork: { x: 10, y: 5.5, width: 44, height: 44 }, backgroundColor: '#161616',
   }, song: { coverUrl: 'cover' }, viewport: { width: 390, height: 854 }, routeOffset: { x: 0, y: 24 }, artwork,
   closing, moving, artworkVisibility, destinationArtworkReady,
-  onOpenComplete: () => opened++, onCloseComplete: () => closed++, children: 'Original player content' });
-  const sheet = tree.props.children;
-  const cleanups = effects.map(effect => effect());
+  onOpenComplete: () => opened++, onCloseComplete: () => closed++, children: 'Original player content' };
   const flatten = node => Object.assign({}, ...node.props.style.filter(Boolean).map(style => style.evaluate ? style.evaluate() : style));
-  const art = flatten(sheet.props.children[2]);
-  const transform = Object.assign({}, ...art.transform);
-  return { sheet: flatten(sheet), ui: flatten(sheet.props.children[0]), mini: flatten(sheet.props.children[1]),
-    contentProps: sheet.props.children[0].props,
-    art: { ...art, width: art.width * transform.scaleX, height: art.height * transform.scaleY,
-      left: transform.translateX, top: transform.translateY, borderRadius: art.borderRadius * transform.scaleX },
-    image: sheet.props.children[2].props.children,
-    destinationVisibility: () => destinationVisibility,
-    content: sheet.props.children[0].props.children, miniContent: sheet.props.children[1].props.children,
-    effects, callbacks, configs, cleanups, frames, timers, opened: () => opened, closed: () => closed };
+  const render = (updates = {}) => {
+    props = { ...props, ...updates };
+    let tree;
+    do {
+      dirty = false;
+      stateIndex = refIndex = sharedIndex = effectIndex = 0;
+      tree = component.PlayerContainerTransition(props);
+      effects.splice(0).forEach(fn => fn());
+    } while (dirty);
+    const sheet = tree.props.children;
+    const artNode = sheet.props.children[2];
+    const art = artNode && flatten(artNode);
+    const transform = art && Object.assign({}, ...art.transform);
+    return { sheet: flatten(sheet), ui: flatten(sheet.props.children[0]),
+      mini: sheet.props.children[1] && flatten(sheet.props.children[1]),
+      contentProps: sheet.props.children[0].props,
+      art: art && { ...art, width: art.width * transform.scaleX, height: art.height * transform.scaleY,
+        left: transform.translateX, top: transform.translateY, borderRadius: art.borderRadius * transform.scaleX },
+      image: artNode && artNode.props.children,
+      content: sheet.props.children[0].props.children, miniContent: sheet.props.children[1]?.props?.children };
+  };
+  return { ...render(), render, destinationVisibility: () => destinationVisibility,
+    effects, callbacks, configs, cleanups, frames, timers, opened: () => opened, closed: () => closed,
+    flushFrames: () => { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); },
+    fireTimer: delay => {
+      const entry = [...timers].find(([, timer]) => timer.delay === delay);
+      assert(entry, `expected a ${delay}ms timer`);
+      timers.delete(entry[0]); entry[1].fn();
+    },
+  };
 }
 test('the sheet morphs between measured endpoints, preserving original player content and its final layout', () => {
   const mini = frame(), full = frame({ entered: true }), close = frame({ entered: true, closing: true });
@@ -115,7 +152,7 @@ test('restored smooth motion keeps the reference easing, symmetric duration and 
   assert.equal(open.configs.at(-1).duration, 520);
   assert.equal(close.configs.at(-1).duration, 520);
   assert.deepEqual(Array.from(open.configs.at(-1).easing), [0.22, 1, 0.36, 1]);
-  assert.deepEqual(open.configs.map(config => config.duration), [320, 420, 200, 280, 520]);
+  assert.deepEqual(open.configs.map(config => config.duration), [320, 200, 280, 520]);
   assert.equal(open.configs[0].delay, 80);
   assert.equal(close.configs[0].delay, 0);
   assert.equal(close.ui.opacity, 0);
@@ -133,7 +170,7 @@ test('an unfinished destination retains the overlay; a decoded destination is re
   const waiting = frame({ entered: true, moving: false, destinationArtworkReady: false });
   assert.equal(waiting.art.opacity, 1);
   assert.equal(waiting.destinationVisibility(), 0);
-  assert.equal(waiting.timers.size, 0, 'elapsed time must not reveal an image that has not displayed');
+  assert.equal(waiting.destinationVisibility(), 0, 'the animation watchdog does not reveal an undecoded image');
   const ready = frame({ entered: true, moving: false, destinationArtworkReady: true });
   assert.equal(ready.destinationVisibility(), 1);
   assert.equal(ready.art.opacity, 0);
@@ -167,7 +204,7 @@ test('artwork coordinates use the visible scrolled card, independent of queue in
 test('opening waits for artwork layout; interrupted closing cannot remove the native route', () => {
   const waiting = frame({ artwork: null });
   assert.equal(waiting.frames.size, 0);
-  assert.equal(waiting.timers.size, 0, 'a slow layout must not start towards guessed coordinates');
+  assert.equal(waiting.timers.size, 1, 'slow layout gets a bounded fallback without guessed artwork coordinates');
   assert.equal(waiting.art.left, 10);
   assert.equal(waiting.art.top, 5.5);
   const f = frame({ entered: true, closing: true });
@@ -185,6 +222,101 @@ test('a queued successful completion cannot navigate after cleanup', () => {
     assert.equal(f.opened(), 0);
     assert.equal(f.closed(), 0);
   }
+});
+
+test('missing artwork bounds fall back to a usable full player and can still close', () => {
+  const f = frame({ artwork: null });
+  assert.equal(f.opened(), 0);
+  f.fireTimer(400);
+  const opened = f.render();
+  assert.equal(opened.sheet.height, 854);
+  assert.equal(opened.art, false, 'fallback never invents a destination for the shared image');
+  assert.equal(f.destinationVisibility(), 1);
+  f.callbacks.at(-1)(true);
+  assert.equal(f.opened(), 1);
+  f.render({ moving: false });
+  f.render({ closing: true, moving: true });
+  f.callbacks.at(-1)(true);
+  assert.equal(f.closed(), 1);
+  assert.equal(f.timers.size, 0);
+});
+
+test('a late valid layout takes the measured morph and cancels the layout fallback', () => {
+  const f = frame({ artwork: null });
+  f.render({ artwork: { x: 30, y: 110, width: 330, height: 330 } });
+  f.flushFrames();
+  const opened = f.render();
+  assert.equal(opened.art.left, 30);
+  assert.equal(opened.art.top, 110);
+  assert.equal(opened.art.width, 330);
+  assert.equal([...f.timers.values()].some(timer => timer.delay === 400), false);
+  f.callbacks.at(-1)(true);
+  assert.equal(f.timers.size, 0);
+});
+
+test('callback and layout changes cannot restart an in-flight morph or shift its image', () => {
+  const f = frame({ entered: true });
+  const initialAnimations = f.configs.length;
+  let completed = 0;
+  for (let i = 0; i < 20; i++) {
+    const next = f.render({ onOpenComplete: () => completed++,
+      artwork: { x: 80 + i, y: 140, width: 230, height: 230 } });
+    assert.equal(next.art.left, 24);
+    assert.equal(next.art.width, 342);
+  }
+  assert.equal(f.configs.length, initialAnimations);
+  f.callbacks[0](true);
+  assert.equal(completed, 1, 'the latest callback receives the original completion');
+  assert.equal(f.timers.size, 0);
+});
+
+test('lost native completions settle opening and closing exactly once', () => {
+  for (const closing of [false, true]) {
+    const f = frame({ entered: true, closing });
+    f.callbacks[0](false);
+    assert.equal(f.opened() + f.closed(), 0);
+    f.fireTimer(820);
+    assert.equal(f.opened(), closing ? 0 : 1);
+    assert.equal(f.closed(), closing ? 1 : 0);
+    f.callbacks[0](true);
+    assert.equal(f.opened() + f.closed(), 1, 'a delayed success cannot complete twice');
+    assert.equal(f.timers.size, 0);
+  }
+});
+
+test('rapid close during mounting or opening cancels stale completions and releases recovery timers', () => {
+  for (let i = 0; i < 25; i++) {
+    const f = frame({ artwork: i % 2 ? null : { x: 24, y: 100, width: 342, height: 342 } });
+    if (i % 2 === 0) { f.flushFrames(); f.render(); }
+    const oldCallbacks = [...f.callbacks];
+    f.render({ closing: true });
+    oldCallbacks.forEach(callback => callback(true));
+    assert.equal(f.opened(), 0);
+    f.fireTimer(820);
+    assert.equal(f.closed(), 1);
+    f.cleanups.forEach(cleanup => cleanup?.());
+    assert.equal(f.frames.size, 0);
+    assert.equal(f.timers.size, 0);
+  }
+});
+
+test('unmount cancels layout and completion recovery; reduced motion needs no shared image', () => {
+  for (const entered of [false, true]) {
+    const f = frame({ entered });
+    const queuedTimers = [...f.timers.values()];
+    f.cleanups.forEach(cleanup => cleanup?.());
+    assert.equal(f.timers.size, 0);
+    assert.equal(f.frames.size, 0);
+    queuedTimers.forEach(timer => timer.fn());
+    f.callbacks.forEach(callback => callback(true));
+    assert.equal(f.opened() + f.closed(), 0);
+  }
+  const reduced = frame({ reducedMotion: true, artwork: null });
+  assert.equal(reduced.sheet.height, 854);
+  assert.equal(reduced.art, false);
+  assert.equal(reduced.destinationVisibility(), 1);
+  reduced.callbacks[0](true);
+  assert.equal(reduced.opened(), 1);
 });
 
 function measurementFixture(web) {

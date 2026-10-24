@@ -8,7 +8,7 @@ LayoutAnimation,
 Platform,
 Pressable,
 Text,
-TextInput,
+type TextInputInstance,
 UIManager,
 View,
 } from "react-native";
@@ -45,7 +45,7 @@ export default SearchScreen;
 function SearchScreenView() {
   const params = useLocalSearchParams<{ q?: string | string[]; name?: string | string[] }>();
   const searchEngine = useSearchEngine(params);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
 
   const {
     isOnline,

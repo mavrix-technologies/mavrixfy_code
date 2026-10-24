@@ -139,6 +139,7 @@ function fixture(options = {}) {
       useSharedValue: initial => react.useMemo(() => shared(initial), []),
       useReducedMotion: () => !!options.reduceMotion,
       useAnimatedStyle: fn => ({ snapshot: fn }),
+      useAnimatedProps: fn => ({ snapshot: fn }),
       withTiming: (to, config, callback) => ({ timing: true, to, config, callback }),
       cancelAnimation,
       useAnimatedReaction(prepare, respond) {
@@ -243,7 +244,7 @@ test("fast startup fades on the UI thread without an intermediate JS callback or
   assert.equal(f.values[1].get(), 0, "UI completes even while RN callbacks are deliberately not serviced");
   assert.equal(f.completed, 0); assert.equal(f.pendingRN.length, 1);
   const notify = f.pendingRN[0]; f.flushRN(); notify(); assert.equal(f.completed, 1);
-  assert.equal(f.timers.size, 0, "no startup timer controls visual phases");
+  assert.equal(f.timers.size, 1, "only the lost-completion watchdog uses a timer");
   f.instance.unmount();
 });
 
@@ -270,13 +271,44 @@ test("Reduce Motion skips reveal and waits only for screen readiness before its 
 test("unmount cancels pending handoff and active motion, and ignores a queued RN completion", async () => {
   const hidden = deferred(), pending = fixture({ hidden: hidden.promise });
   pending.logoLaidOut(); pending.instance.unmount(); hidden.resolve(); await flush();
-  assert.equal(pending.starts.length, 0);
+  assert.equal(pending.animations.size, 0);
+  assert.equal(pending.completed, 0);
   const running = fixture(); running.logoLaidOut(); await flush();
   running.advanceUI(100); running.instance.unmount();
   assert.equal(running.animations.size, 0); assert.equal(running.completed, 0);
   const ending = fixture(); ending.logoLaidOut(); await flush();
   ending.advanceUI(ending.motion.LAUNCH_REVEAL_MS + 180);
   ending.instance.unmount(); ending.flushRN(); assert.equal(ending.completed, 0);
+});
+
+test("native hide acknowledgement cannot stall the reveal or hold an invisible touch blocker", async () => {
+  const hidden = deferred();
+  const f = fixture({ hidden: hidden.promise });
+  const tree = f.logoLaidOut();
+  assert.equal(f.starts.length, 1);
+  assert.equal(tree.props.animatedProps.snapshot().pointerEvents, 'auto');
+  f.advanceUI(f.motion.LAUNCH_REVEAL_MS + 180);
+  assert.equal(tree.props.animatedProps.snapshot().pointerEvents, 'none');
+  assert.equal(f.completed, 0, 'RN completion can remain busy while native touches are released');
+  f.flushRN();
+  assert.equal(f.completed, 1);
+  hidden.resolve(); await flush();
+  assert.equal(f.starts.length, 2, 'late native acknowledgement cannot replay the reveal');
+  f.instance.unmount();
+});
+
+test("a cancelled fade or lost RN completion recovers once, only after the destination is ready", async () => {
+  const f = fixture({ ready: false }); f.logoLaidOut();
+  assert.equal(f.timers.size, 0, 'loading/authentication must not be bypassed by a splash timeout');
+  f.advanceUI(f.motion.LAUNCH_REVEAL_MS);
+  f.props.ready = true; f.instance.render();
+  const timer = [...f.timers.values()][0];
+  assert.ok(timer.ms > f.motion.LAUNCH_REVEAL_MS + 180);
+  f.animations.clear();
+  timer.fn(); timer.fn(); f.flushRN();
+  assert.equal(f.completed, 1);
+  f.instance.unmount();
+  assert.equal(f.timers.size, 0);
 });
 
 test("bar geometry is continuous, bounded and reaches the same final logo at different frame rates", () => {
@@ -314,6 +346,7 @@ test("startup belongs to the app root, survives auth remounts, and schedules ads
     imports[statement.moduleSpecifier.text] = entry;
   }
   let authenticated = true, replacements = 0, ads = 0, fontsLoaded = false;
+  const idleJobs = [], maintenance = [];
   let segments = ["(tabs)"];
   Object.assign(imports, {
     react: f.imports.react, "react/jsx-runtime": f.imports["react/jsx-runtime"],
@@ -321,6 +354,10 @@ test("startup belongs to the app root, survives auth remounts, and schedules ads
     "@/constants/colors": { __esModule: true, default: { background: "#121212" } },
     "react-native-paper": { MD3DarkTheme: { colors: {} }, PaperProvider: "PaperProvider" },
     "expo-font": { useFonts: () => [fontsLoaded] },
+    "@/utils/idleTask": { runAfterIdle: fn => { idleJobs.push(fn); return noop; } },
+    "@/lib/remoteConfig": { initRemoteConfig: () => maintenance.push("config") },
+    "@/lib/analytics": { logAppOpen: () => maintenance.push("analytics") },
+    "@/services/audio/audioEqualizer": { syncEqualizerWithNative: () => maintenance.push("equalizer") },
     "expo-router": { Stack: Object.assign(noop, { Screen: "Stack.Screen" }),
       useRouter: () => ({ replace: () => { replacements++; } }), useSegments: () => segments },
     "@/contexts/AuthContext": { AuthProvider: "AuthProvider", useAuth: () => ({ loading: false, isAuthenticated: authenticated, isGuest: false }) },
@@ -351,8 +388,12 @@ test("startup belongs to the app root, survives auth remounts, and schedules ads
   assert.equal([...f.timers.values()].some(timer => timer.ms === 1200), false);
   tree = root.render(); launch = find(tree, node => node.type === "LaunchSplash");
   assert.equal(launch.props.ready, true);
+  assert.equal(idleJobs.length, 0, "maintenance does not compete with the intro or first Home layout");
   launch.props.onComplete(); before.unmount();
   tree = root.render(); assert.equal(find(tree, node => node.type === "LaunchSplash"), undefined);
+  assert.equal(maintenance.length, 0);
+  assert.equal(idleJobs.length, 1); idleJobs[0]();
+  assert.deepEqual(maintenance, ["config", "analytics", "equalizer"]);
   // AuthProvider replaces its keyed children on sign-in, while RootLayout stays mounted.
   authenticated = true; segments = ["(tabs)"];
   nav = find(tree, node => node.type?.name === "RootLayoutNav");

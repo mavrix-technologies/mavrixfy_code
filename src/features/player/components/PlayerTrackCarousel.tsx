@@ -6,6 +6,7 @@ import {
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ViewInstance,
 } from "react-native";
 import Colors from "@/constants/colors";
 import { FlatList as GestureFlatList, Pressable } from "react-native-gesture-handler";
@@ -43,7 +44,7 @@ export interface PlayerTrackCarouselProps {
   onScroll: any;
   onMomentumScrollEnd: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   getItemLayout: any;
-  transitionArtworkRef?: React.RefObject<View | null>;
+  transitionArtworkRef?: React.RefObject<ViewInstance | null>;
   onArtworkLayout?: () => void;
   artworkVisibility?: SharedValue<number>;
   onArtworkReady?: (songId: string, coverUrl: string | undefined) => void;

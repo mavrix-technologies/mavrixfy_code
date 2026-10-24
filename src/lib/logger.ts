@@ -1,14 +1,8 @@
-/** Development diagnostics and compact release error labels. */
+/** Keep existing diagnostic call sites silent in every build. */
 type LogArgs = unknown[];
-const label = (args: LogArgs): string => typeof args[0] === "string" ? args[0] : "[Mavrixfy] Error";
+const silent = (..._args: LogArgs): void => undefined;
 
 export const logger = {
-  warn: (...args: LogArgs) => {
-    if (__DEV__) console.warn(...args);
-    else console.warn(label(args));
-  },
-  error: (...args: LogArgs) => {
-    if (__DEV__) console.error(...args);
-    else console.error(label(args));
-  },
+  warn: silent,
+  error: silent,
 };

@@ -17,6 +17,7 @@ const NONCE_CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstu
 
 function getAppleAuthenticationModule(actionLabel: string): AppleAuthenticationModule {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Load optional native Apple sign-in only when requested.
     return require("expo-apple-authentication") as AppleAuthenticationModule;
   } catch {
     throw new Error(

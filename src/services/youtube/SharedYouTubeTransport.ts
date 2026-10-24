@@ -439,14 +439,7 @@ function extractionError(error: unknown, stage: ExtractionStage): YouTubeExtract
     : /No compatible|non-AAC|non-MP4/i.test(text) ? "UNSUPPORTED_FORMAT" : "UNAVAILABLE";
   return new YouTubeExtractionError(code, stage, `${status} ${reason} ${detail}`.trim(), httpStatus);
 }
-function extractionDiagnostic(data: {
-  videoId: string; client: StreamClient; stage: ExtractionStage; elapsedMs: number;
-  playabilityStatus?: string; hasVideoDetails?: boolean; hasStreamingData?: boolean; audioFormatCount?: number;
-  code?: ExtractionCode; httpStatus?: number;
-}) {
-  // Only fixed categories and scalar counts: never log upstream objects or URLs.
-  if (typeof __DEV__ !== "undefined" && __DEV__) console.info("[YouTube extraction]", data);
-}
+
 function recoveryDelay(signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     const abort = () => { clearTimeout(timer); reject(new Error("YouTube request cancelled")); };
@@ -486,7 +479,6 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
           const client = clients[attempt];
           check();
           checkVerificationCooldown();
-          const startedAt = Date.now();
           let stage: ExtractionStage = "player";
           try {
             const resolutionId = `${videoId}:${client}`;
@@ -509,11 +501,7 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
             // Basic info avoids the unrelated /next request made by getInfo().
             const info = await yt.getBasicInfo(videoId, { client }); check();
             const status = info.playability_status?.status || "UNKNOWN";
-            extractionDiagnostic({ videoId, client, stage, elapsedMs: Date.now() - startedAt,
-              playabilityStatus: /^[A-Z_]{1,40}$/.test(status) ? status : "UNKNOWN",
-              hasVideoDetails: Boolean(info.basic_info?.id),
-              hasStreamingData: Boolean(info.streaming_data),
-              audioFormatCount: info.streaming_data?.adaptive_formats.filter(format => format.has_audio && !format.has_video).length || 0 });
+
             if (info.playability_status?.status !== "OK") {
               const reason = info.playability_status?.reason || "Video unavailable";
               throw new Error(`${status}: ${reason}`);
@@ -587,7 +575,7 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
                     if (!response.ok) throw new Error(`Audio GET HTTP ${response.status}`);
                     if (!(video ? /^video\/mp4(?:;|$)/i : /^audio\/(?:mp4|webm)(?:;|$)/i).test(response.headers.get("content-type") || ""))
                       throw new Error(video ? "Video GET returned a non-MP4 response" : "Audio GET returned a non-AAC response");
-                    extractionDiagnostic({ videoId, client, stage, elapsedMs: Date.now() - startedAt, httpStatus: response.status });
+
                   } finally { await response.body?.cancel(); }
                 } finally {
                   clearTimeout(timer);
@@ -615,8 +603,7 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
           } catch (error) {
             check();
             const failure = extractionError(error, stage);
-            extractionDiagnostic({ videoId, client, stage: failure.stage, elapsedMs: Date.now() - startedAt,
-              code: failure.code, httpStatus: failure.httpStatus });
+
             if (failure.code === "LOGIN_REQUIRED") {
               if (/confirm.*not a bot/i.test(failure.message)) blockVerification("YouTube requires verification for this session.");
               throw failure;

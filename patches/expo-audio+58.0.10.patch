@@ -1,0 +1,63 @@
+diff --git a/node_modules/expo-audio/ios/AudioRecords.swift b/node_modules/expo-audio/ios/AudioRecords.swift
+index 7b8b421..89bc0d4 100644
+--- a/node_modules/expo-audio/ios/AudioRecords.swift
++++ b/node_modules/expo-audio/ios/AudioRecords.swift
+@@ -74,6 +74,8 @@ struct Metadata: Record {
+   @Field var artist: String?
+   @Field var albumTitle: String?
+   @Field var artworkUrl: URL?
++  // Selected stream timeline, independent of AVPlayer's duration estimate.
++  @Field var durationSeconds: Double?
+ }
+ 
+ struct LockScreenOptions: Record {
+diff --git a/node_modules/expo-audio/ios/MediaController.swift b/node_modules/expo-audio/ios/MediaController.swift
+index 9b66e45..538168b 100644
+--- a/node_modules/expo-audio/ios/MediaController.swift
++++ b/node_modules/expo-audio/ios/MediaController.swift
+@@ -126,13 +126,27 @@ class MediaController {
+       info.removeValue(forKey: MPMediaItemPropertyPlaybackDuration)
+       info.removeValue(forKey: MPNowPlayingInfoPropertyElapsedPlaybackTime)
+     } else {
+-      info[MPMediaItemPropertyPlaybackDuration] = playable.duration
+-      info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = playable.currentTime
++      info[MPMediaItemPropertyPlaybackDuration] = playbackDuration(for: playable)
++      info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = playbackPosition(playable.currentTime, for: playable)
+     }
+     info[MPNowPlayingInfoPropertyPlaybackRate] = playable.isPlaying ? playable.lockScreenPlayer.rate : 0.0
+     info[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
+   }
+ 
++  private func playbackDuration(for playable: any LockScreenPlayable) -> Double {
++    if let resolved = playable.metadata?.durationSeconds, resolved.isFinite, resolved > 0 {
++      return resolved
++    }
++    let duration = playable.duration
++    return duration.isFinite && duration > 0 ? duration : 0
++  }
++
++  private func playbackPosition(_ seconds: Double, for playable: any LockScreenPlayable) -> Double {
++    let position = seconds.isFinite ? max(0, seconds) : 0
++    let duration = playbackDuration(for: playable)
++    return duration > 0 ? min(position, duration) : position
++  }
++
+   private func applyUserMetadata(_ info: inout [String: Any], from metadata: Metadata) {
+     updateInfo(&info, key: MPMediaItemPropertyTitle, value: metadata.title)
+     updateInfo(&info, key: MPMediaItemPropertyArtist, value: metadata.artist)
+@@ -331,12 +345,13 @@ class MediaController {
+     remoteCommandTargets.append((remoteCommandCenter.togglePlayPauseCommand, togglePlayPauseTarget))
+ 
+     let changePlaybackPositionTarget = remoteCommandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+-      guard let playable = self?.activePlayable,
++      guard let self, let playable = self.activePlayable,
+       let event = event as? MPChangePlaybackPositionCommandEvent else {
+         return .commandFailed
+       }
+ 
+-      let seekTime = MediaController.cmTime(seconds: event.positionTime)
++      guard event.positionTime.isFinite else { return .commandFailed }
++      let seekTime = MediaController.cmTime(seconds: self.playbackPosition(event.positionTime, for: playable))
+       playable.lockScreenPlayer.seek(to: seekTime)
+ 
+       return .success

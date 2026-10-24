@@ -25,7 +25,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
-import {FlatList,Pressable,StyleSheet,Text,TextInput,View,type NativeScrollEvent,type NativeSyntheticEvent } from "react-native";
+import {FlatList,Pressable,StyleSheet,Text,View,type TextInputInstance,type NativeScrollEvent,type NativeSyntheticEvent } from "react-native";
 import Animated,{
 Easing,
 useAnimatedStyle,
@@ -81,7 +81,7 @@ export function LikedSongsScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
   const [isSearchMode, setIsSearchMode] = useState(false);
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInputInstance>(null);
   const { isHeaderElevated, handleHeaderScroll } = useAppTopHeaderScrollElevation();
 
   // Reanimated shared values for the search overlay
@@ -434,7 +434,7 @@ export function LikedSongsScreen() {
                         <Ionicons name="close" size={14} color="#042115" style={{ marginRight: 4 }} />
                         <Text style={[styles.moodChipText, styles.moodChipTextActive]}>{selectedMood}</Text>
                       </Pressable>
-                    ) : null
+                    ) : undefined
                   }
                   renderItem={renderMoodChip}
                 />
@@ -557,7 +557,7 @@ export function LikedSongsScreen() {
                     {`No liked songs matched "${searchQuery}"`}
                   </Text>
                 </View>
-              ) : null
+              ) : undefined
             }
           />
         </Animated.View>

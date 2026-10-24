@@ -10,7 +10,7 @@ import { clearYouTubeConnectionStreams } from "./YouTubeMusic";
 
 const source = { html: youtubePoTokenHtml, baseUrl: "https://www.youtube.com" };
 function TokenEngine({ generation }: { generation: number }) {
-  const view = useRef<WebView>(null);
+  const view = useRef<WebView<object>>(null);
   const detach = useRef<(() => void) | undefined>(undefined);
   const http = useRef(new Map<number, AbortController>());
   const mounted = useRef(true);
@@ -60,7 +60,7 @@ function TokenEngine({ generation }: { generation: number }) {
     } catch { youtubePoTokens.engineFailed(generation); }
   }
   return <View style={styles.engine} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-    <WebView ref={view} source={source} originWhitelist={["https://www.youtube.com"]}
+    <WebView<object> ref={view} source={source} originWhitelist={["https://www.youtube.com"]}
       javaScriptEnabled sharedCookiesEnabled={false} thirdPartyCookiesEnabled={false}
       scrollEnabled={false} setSupportMultipleWindows={false} onMessage={onMessage}
       onShouldStartLoadWithRequest={request => request.url === "about:blank" || request.url === "https://www.youtube.com/" || request.url === "https://www.youtube.com"}

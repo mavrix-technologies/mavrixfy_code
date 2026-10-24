@@ -1,4 +1,3 @@
-import { isSongProviderAllowed, isPlaylistProviderAllowed } from "@/lib/providerFilter";
 import { type ArtistCard } from "@/data/providers/ArtistProvider";
 import { type CatalogCategoryData } from "@/data/providers/MusicCatalogProvider";
 import { type FirestorePlaylist } from "@/lib/firestore";
@@ -45,7 +44,7 @@ interface UseHomeSectionDataParams {
   featuredArtists: ArtistCard[];
   publicPlaylists: FirestorePlaylist[];
   loadingMainContent: boolean;
-  sourceSettings?: { enableJioSaavn?: boolean; enableSpotify?: boolean; enableYouTubeMusic?: boolean };
+  includeCatalog?: boolean;
 }
 
 export function useHomeSectionData({
@@ -56,31 +55,16 @@ export function useHomeSectionData({
   featuredArtists,
   publicPlaylists,
   loadingMainContent,
-  sourceSettings,
+  includeCatalog,
 }: UseHomeSectionDataParams): HomeSectionItem[] {
   return useMemo<HomeSectionItem[]>(() => {
     const hasSpotify = categories.some((c) => c.id?.startsWith("spotify"));
-    const enableJioSaavn = sourceSettings?.enableJioSaavn !== undefined
-      ? sourceSettings.enableJioSaavn
-      : !hasSpotify;
-    const enableSpotify = sourceSettings?.enableSpotify ?? true;
-    const enableYouTubeMusic = sourceSettings?.enableYouTubeMusic ?? true;
-
-    const filteredCategories = categories.filter((cat) => {
-      if (cat.id?.startsWith("spotify")) return enableSpotify;
-      return enableJioSaavn;
-    });
-    const filteredQuickPicks = enableJioSaavn
-      ? quickPickSongs.filter((song) => isSongProviderAllowed(song, sourceSettings))
-      : [];
-    const filteredArtists = enableJioSaavn ? featuredArtists : [];
-    const filteredRecent = recentlyPlayed.filter((item) => {
-      if (item.type === "song") {
-        return isSongProviderAllowed(item.data || { id: item.id }, sourceSettings);
-      }
-      return isPlaylistProviderAllowed(item.id, sourceSettings);
-    });
-    const filteredPublicPlaylists = publicPlaylists.filter((p) => isPlaylistProviderAllowed(p.id, sourceSettings));
+    const showCatalog = includeCatalog ?? !hasSpotify;
+    const filteredCategories = categories.filter(cat => cat.id?.startsWith("spotify") || showCatalog);
+    const filteredQuickPicks = showCatalog ? quickPickSongs : [];
+    const filteredArtists = showCatalog ? featuredArtists : [];
+    const filteredRecent = recentlyPlayed;
+    const filteredPublicPlaylists = publicPlaylists;
     const items: HomeSectionItem[] = [];
 
     if (selectedCategory === "Recently Played") {
@@ -144,5 +128,6 @@ export function useHomeSectionData({
     quickPickSongs,
     recentlyPlayed,
     selectedCategory,
+    includeCatalog,
   ]);
 }

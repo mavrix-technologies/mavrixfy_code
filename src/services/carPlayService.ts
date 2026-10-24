@@ -6,13 +6,22 @@ const { MavrixfyCarPlayModule } = NativeModules;
 
 const carPlayEmitter =
   Platform.OS === "ios" && MavrixfyCarPlayModule
-    ? new NativeEventEmitter(MavrixfyCarPlayModule)
+    ? new NativeEventEmitter<CarPlayEvents>(MavrixfyCarPlayModule)
     : null;
 
 export interface CarPlayPlaySongEvent {
   songId: string;
   song?: Partial<Song>;
 }
+
+type CarPlayEvents = {
+  onCarPlayPlaySong: [event: CarPlayPlaySongEvent];
+  onCarPlayToggleFavorite: [];
+  onCarPlayToggleShuffle: [];
+  onCarPlayToggleRepeat: [];
+  onCarPlayOpenQueue: [];
+  onCarPlayConnectionChanged: [data: { connected: boolean }];
+};
 
 export interface CarPlayNowPlayingState {
   songId?: string;

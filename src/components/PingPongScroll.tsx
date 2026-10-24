@@ -8,9 +8,8 @@ import {
   StyleSheet,
   Text,
   type LayoutChangeEvent,
-  type NativeSyntheticEvent,
   type StyleProp,
-  type TextLayoutEventData,
+  type TextLayoutEvent,
   type TextStyle,
   View,
 } from "react-native";
@@ -157,7 +156,7 @@ export const PingPongScroll: React.FC<PingPongScrollProps> = ({
     if (width > 0) setContainerWidth((current) => (current === width ? current : width));
   };
 
-  const handleTextLinesLayout = (event: NativeSyntheticEvent<TextLayoutEventData>) => {
+  const handleTextLinesLayout = (event: TextLayoutEvent) => {
     const lineWidth = event.nativeEvent.lines[0]?.width;
     if (typeof lineWidth === "number") {
       const measuredWidth = Math.ceil(lineWidth);

@@ -11,7 +11,8 @@ import React,{ useCallback,useEffect,useMemo,useRef,useState } from "react";
 import {
 Pressable,
 Text,
-View
+View,
+type ViewInstance,
 } from "react-native";
 import { styles } from "./layoutStyles";
 
@@ -42,7 +43,7 @@ export function MiniPlayerSecondaryControlButton({
   onPrev,
   onMore,
 }: MiniPlayerSecondaryControlButtonProps) {
-  const buttonRef = useRef<View>(null);
+  const buttonRef = useRef<ViewInstance>(null);
   const action = (() => {
     switch (control) {
       case "next":

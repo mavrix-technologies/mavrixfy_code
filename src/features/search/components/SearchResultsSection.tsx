@@ -54,6 +54,6 @@ export const SearchResultsSection = memo(function SearchResultsSection(props: Se
         contentContainerStyle={[styles.resultsContent, { paddingBottom: 146 }]} automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled"
         onScroll={props.onScroll} scrollEventThrottle={16} initialNumToRender={10} maxToRenderPerBatch={8} windowSize={7}
         ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>{`No results for "${props.searchDisplayQuery}"`}</Text><Text style={styles.emptySubtext}>Check the spelling, or search for something else.</Text></View>}
-        ListFooterComponent={rows.length ? <AdMobBanner loadDelayMs={600} /> : null} />}
+        ListFooterComponent={rows.length ? <AdMobBanner loadDelayMs={600} /> : undefined} />}
   </View>;
 });

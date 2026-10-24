@@ -13,14 +13,11 @@ import { useScreenTracking } from "@/hooks/useScreenTracking";
 import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import { logAppOpen } from "@/lib/analytics";
 import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
-import { initializeMobileAds } from "@/lib/googleMobileAds";
-import { getCachedHomePublicPlaylists } from "@/lib/homeCache";
 import { logger } from "@/lib/logger";
 import * as Animated from "@/lib/nativeAnimated";
 import { queryClient } from "@/lib/query-client";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { initRemoteConfig } from "@/lib/remoteConfig";
-import { getRecentlyPlayed,runOneTimeMigrations } from "@/lib/storage";
 import { showAppLaunchAd } from "@/services/ads/appLaunchAdService";
 import { syncEqualizerWithNative } from "@/services/audio/audioEqualizer";
 import { YouTubePoTokenHost } from "@/services/youtube/YouTubePoTokenHost";
@@ -58,26 +55,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { MD3DarkTheme,PaperProvider } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-// Filter out noisy expo-notifications warnings in the terminal console when testing in Expo Go
-if (__DEV__) {
-  const originalWarn = console.warn;
-  console.warn = (...args) => {
-    if (
-      args[0] &&
-      typeof args[0] === "string" &&
-      args[0].includes("expo-notifications")
-    ) {
-      return;
-    }
-    originalWarn(...args);
-  };
-
-
-}
-
 LogBox.ignoreLogs([
-  "expo-notifications functionality is not fully supported in Expo Go",
-  "expo-notifications: Android Push notifications",
   "Unable to activate keep awake",
   "setBackgroundColorAsync",
 ]);
@@ -179,7 +157,7 @@ function GlobalToast() {
           style={{ minHeight: 44, justifyContent: "center" }}
           onPress={() => {
             setVisible(false);
-            void Linking.openURL(action.url).catch(() => showGlobalToast("Could not open YouTube."));
+            void Linking.openURL(action.url).catch(() => showGlobalToast("Could not open the link."));
           }}>
           <Text style={{ color: Colors.primary, fontWeight: "600" }}>{action.label}</Text>
         </Pressable>}
@@ -188,21 +166,7 @@ function GlobalToast() {
   );
 }
 
-// ─── Background content pre-warm ─────────────────────────────────────────────
-let preWarmStarted = false;
-// react-doctor-disable-next-line react-doctor/only-export-components -- intentional cache pre-warm export
-export function preWarmHomeCache() {
-  if (preWarmStarted) return;
-  preWarmStarted = true;
-  Promise.allSettled([
-    getCachedHomePublicPlaylists({ allowStale: true }),
-    getRecentlyPlayed(),
-    runOneTimeMigrations(),
-    initializeMobileAds(),
-  ]).catch(() => { });
-}
-
-function useRootLayoutNavigation() {
+function useRootLayoutNavigation(launchComplete: boolean) {
   useScreenTracking();
   const { replace: routerReplace } = useRouter();
   const segments = useSegments();
@@ -211,9 +175,10 @@ function useRootLayoutNavigation() {
 
   // ── App Startup & Version Check Sequence ────────────────────────────────────
   useEffect(() => {
-    if (loading) return;
+    if (loading || !launchComplete) return;
 
     let isActive = true;
+    let cancelIdle: (() => void) | undefined;
 
     const run = async () => {
       if (!isActive) return;
@@ -229,7 +194,7 @@ function useRootLayoutNavigation() {
     };
 
     const timer = setTimeout(() => {
-      runAfterIdle(() => {
+      cancelIdle = runAfterIdle(() => {
         run().catch((err) => logger.error("[Layout] Startup check failed:", err));
       });
     }, 3000);
@@ -237,8 +202,9 @@ function useRootLayoutNavigation() {
     return () => {
       isActive = false;
       clearTimeout(timer);
+      cancelIdle?.();
     };
-  }, [loading, firebaseUser?.uid, routerReplace]);
+  }, [loading, launchComplete, firebaseUser?.uid, routerReplace]);
 
   useEffect(() => {
     if (loading) return;
@@ -306,7 +272,7 @@ const artistMixScreenOptions = {
 };
 
 function RootLayoutNav({ launchComplete, onReady }: { launchComplete: boolean; onReady: () => void }) {
-  const { launchReady } = useRootLayoutNavigation();
+  const { launchReady } = useRootLayoutNavigation(launchComplete);
   const { loading } = useAuth();
   const [navigationLaidOut, setNavigationLaidOut] = useState(false);
   const markNavigationLaidOut = useCallback(({ nativeEvent: { layout } }: LayoutChangeEvent) => {
@@ -335,7 +301,6 @@ function RootLayoutNav({ launchComplete, onReady }: { launchComplete: boolean; o
           contentStyle: { backgroundColor: Colors.background },
           animation: "slide_from_right",
           animationDuration: 240,
-          freezeOnBlur: true,
           gestureEnabled: true,
           fullScreenGestureEnabled: false,
         }}
@@ -374,11 +339,9 @@ export default function RootLayout() {
   const finishLaunch = useCallback(() => setLaunchComplete(true), []);
 
   useEffect(() => {
-    void initRemoteConfig();
-    void logAppOpen();
-    void syncEqualizerWithNative();
     if (Platform.OS === "android") {
       try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- Load optional Android SystemUI inside its platform guard.
         const SystemUI = require("expo-system-ui");
         SystemUI.setBackgroundColorAsync?.(Colors.background)?.catch?.(() => { });
       } catch {
@@ -386,6 +349,15 @@ export default function RootLayout() {
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (!launchComplete) return;
+    return runAfterIdle(() => {
+      void initRemoteConfig();
+      void logAppOpen();
+      void syncEqualizerWithNative();
+    });
+  }, [launchComplete]);
 
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,

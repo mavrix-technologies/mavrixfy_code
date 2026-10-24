@@ -89,6 +89,7 @@ export async function ensureDownloadsDirs(uid?: string | null): Promise<void> {
 
     if (Platform.OS === "ios") {
       try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- Load the optional iOS backup API only inside its platform guard.
         const ExpoFS = require("expo-file-system/legacy");
         if (typeof ExpoFS.setExcludedFromBackupAsync === "function") {
           await ExpoFS.setExcludedFromBackupAsync(root, true);

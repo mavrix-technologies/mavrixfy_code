@@ -33,8 +33,7 @@ export function useHomeAnnouncement(config: MiniPlayerBannerConfig, scrollY: Sha
 
   useAnimatedReaction(
     () => scrollY.value <= 1,
-    (next, previous) => { if (next !== previous) scheduleOnRN(setAtTop, next); },
-    [scrollY]
+    (next, previous) => { if (next !== previous) scheduleOnRN(setAtTop, next); }
   );
 
   useEffect(() => subscribeAppShowcaseModal(setShowcaseVisible), []);

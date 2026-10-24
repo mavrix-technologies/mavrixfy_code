@@ -6,6 +6,7 @@ import {
   Pressable,
   StyleSheet,
   TextInput,
+  type TextInputInstance,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
@@ -26,7 +27,7 @@ export type SearchHeaderFieldProps = {
 };
 
 export const SearchHeaderField = memo(
-  forwardRef<TextInput, SearchHeaderFieldProps>(function SearchHeaderField(
+  forwardRef<TextInputInstance, SearchHeaderFieldProps>(function SearchHeaderField(
     {
       value,
       onChangeText,
@@ -42,9 +43,9 @@ export const SearchHeaderField = memo(
     ref
   ) {
     const isDark = theme === "dark";
-    const innerInputRef = useRef<TextInput>(null);
+    const innerInputRef = useRef<TextInputInstance>(null);
 
-    useImperativeHandle(ref, () => innerInputRef.current as TextInput);
+    useImperativeHandle(ref, () => innerInputRef.current as TextInputInstance);
 
     const handleContainerTouch = () => {
       if (!innerInputRef.current?.isFocused()) {

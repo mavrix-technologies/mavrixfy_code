@@ -7,6 +7,7 @@ let _db: Firestore | null = null;
 function getDb(): Firestore | null {
   if (_db) return _db;
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Load Firebase lazily to avoid eager initialization and circular imports.
     const { db } = require("@/lib/firebase");
     _db = db;
     return _db;

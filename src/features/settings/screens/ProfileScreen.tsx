@@ -29,7 +29,6 @@ Platform,
 Pressable,
 ScrollView,
 StyleSheet,
-Switch,
 Text,
 View,
 } from "react-native";
@@ -102,7 +101,6 @@ export function ProfileScreen() {
     streamingQuality: "medium",
     highQualityUnlocked: false,
     highQualityExpiresAt: null,
-    preferJioSaavnAudio: false,
     videoBackgroundQuality: "auto",
     smartAutoplayEnabled: true,
     smartAutoplayMode: "similar-trending",
@@ -117,9 +115,7 @@ export function ProfileScreen() {
     gapless: true,
     normalizeVolume: false,
     ambientBackdropEnabled: false,
-    enableJioSaavn: true,
-    enableSpotify: true,
-    enableYouTubeMusic: true,
+
   });
 
   useEffect(() => {
@@ -151,12 +147,6 @@ export function ProfileScreen() {
 
   const updateSettings = useCallback(async (partial: Partial<AppSettings>) => {
     await saveSettings(partial);
-    if (typeof partial.preferJioSaavnAudio === "boolean") {
-      const { invalidateQualityPreferenceCache } = await import("@/services/audio/PlayerPlaybackResolver");
-      invalidateQualityPreferenceCache();
-      const { NativePlaybackPlayer } = await import("@/services/audio/NativePlaybackPlayer");
-      void NativePlaybackPlayer.refreshUpcomingSources().catch(() => {});
-    }
     setSettings((current) => ({ ...current, ...partial }));
 
     if (typeof partial.hapticsEnabled === "boolean") {
@@ -278,47 +268,6 @@ export function ProfileScreen() {
 
   const appVersion = getInstalledAppVersion();
   const buildNumber = getInstalledBuildNumber();
-    const handleSourceToggle = useCallback(
-    async (key: "enableJioSaavn" | "enableSpotify" | "enableYouTubeMusic", nextVal: boolean) => {
-      const nextSettings = {
-        ...settings,
-        [key]: nextVal,
-      };
-
-      if (!nextVal) {
-        const nextState = {
-          enableJioSaavn: key === "enableJioSaavn" ? nextVal : settings.enableJioSaavn,
-          enableSpotify: key === "enableSpotify" ? nextVal : settings.enableSpotify,
-          enableYouTubeMusic: key === "enableYouTubeMusic" ? nextVal : settings.enableYouTubeMusic,
-        };
-        const activeCount = Object.values(nextState).filter(Boolean).length;
-        if (activeCount === 0) {
-          Alert.alert("At Least One Source Required", "You must keep at least one music source active.");
-          return;
-        }
-
-        try {
-          const { getPlaybackEngineSnapshot, updatePlaybackEngineSnapshot } = await import("@/services/audio/PlaybackEngine");
-          const { isSongProviderAllowed } = await import("@/lib/providerFilter");
-          const snap = getPlaybackEngineSnapshot();
-          if (snap?.currentSong && !isSongProviderAllowed(snap.currentSong, nextSettings)) {
-            const { NativePlaybackPlayer } = await import("@/services/audio/NativePlaybackPlayer");
-            await NativePlaybackPlayer.pause().catch(() => {});
-            updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
-          }
-        } catch {
-          // Ignore
-        }
-      }
-
-      await updateSettings({ [key]: nextVal });
-      const { invalidateQualityPreferenceCache } = await import("@/services/audio/PlayerPlaybackResolver");
-      invalidateQualityPreferenceCache();
-      notifyHomeCacheInvalidated();
-    },
-    [settings, updateSettings]
-  );
-
   const openSection = (target: ProfileSection) => routerPush(`/profile/${target}` as any);
 
   return (
@@ -355,62 +304,6 @@ export function ProfileScreen() {
               isAuthenticated={isAuthenticated}
               onSignInPress={() => routerReplace("/login")}
             />
-            <Text style={styles.sectionLabel}>MUSIC SOURCES</Text>
-            <View style={styles.sectionGroup}>
-              <View style={[styles.sourceRow, styles.sourceRowDivider]}>
-                <View style={styles.sourceRowLeft}>
-                  <View style={[styles.sourceIconWrap, { backgroundColor: "rgba(0, 210, 196, 0.15)" }]}>
-                    <Ionicons name="musical-notes" size={20} color="#00D2C4" />
-                  </View>
-                  <View style={styles.sourceTextWrap}>
-                    <Text style={styles.sourceTitle}>JioSaavn</Text>
-                    <Text style={styles.sourceSubtitle}>Bollywood, regional charts & daily hits</Text>
-                  </View>
-                </View>
-                <Switch
-                  accessibilityLabel="Toggle JioSaavn music source"
-                  value={settings.enableJioSaavn}
-                  onValueChange={(val) => handleSourceToggle("enableJioSaavn", val)}
-                  trackColor={{ false: "#3A3A3C", true: Colors.primary }} thumbColor="#FFFFFF"
-                />
-              </View>
-              <View style={[styles.sourceRow, styles.sourceRowDivider]}>
-                <View style={styles.sourceRowLeft}>
-                  <View style={[styles.sourceIconWrap, { backgroundColor: "rgba(29, 185, 84, 0.15)" }]}>
-                    <Ionicons name={"radio" as any} size={20} color="#1DB954" />
-                  </View>
-                  <View style={styles.sourceTextWrap}>
-                    <Text style={styles.sourceTitle}>Spotify</Text>
-                    <Text style={styles.sourceSubtitle}>Flagship playlists, charts & Daily Mixes</Text>
-                  </View>
-                </View>
-                <Switch
-                  accessibilityLabel="Toggle Spotify music source"
-                  value={settings.enableSpotify}
-                  onValueChange={(val) => handleSourceToggle("enableSpotify", val)}
-                  trackColor={{ false: "#3A3A3C", true: "#1DB954" }} thumbColor="#FFFFFF"
-                />
-              </View>
-
-              <View style={styles.sourceRow}>
-                <View style={styles.sourceRowLeft}>
-                  <View style={[styles.sourceIconWrap, { backgroundColor: "rgba(255, 0, 0, 0.15)" }]}>
-                    <Ionicons name="logo-youtube" size={20} color="#FF0000" />
-                  </View>
-                  <View style={styles.sourceTextWrap}>
-                    <Text style={styles.sourceTitle}>YouTube Music</Text>
-                    <Text style={styles.sourceSubtitle}>Quick picks, video backdrops & live audio</Text>
-                  </View>
-                </View>
-                <Switch
-                  accessibilityLabel="Toggle YouTube Music source"
-                  value={settings.enableYouTubeMusic}
-                  onValueChange={(val) => handleSourceToggle("enableYouTubeMusic", val)}
-                  trackColor={{ false: "#3A3A3C", true: "#FF0000" }} thumbColor="#FFFFFF"
-                />
-              </View>
-            </View>
-
             <Text style={styles.sectionLabel}>PREFERENCES</Text>
             <View style={styles.sectionGroup}>
               <SimpleRow icon="cloud-download-outline" title="Streaming & Downloads" onPress={() => openSection("streaming-downloads")} />
@@ -527,46 +420,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginLeft: 6,
   },
-  sourceRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    minHeight: 64,
-  },
-  sourceRowDivider: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255, 255, 255, 0.07)",
-  },
-  sourceRowLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-    marginRight: 12,
-  },
-  sourceIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 14,
-  },
-  sourceTextWrap: {
-    flex: 1,
-  },
-  sourceTitle: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
-  },
-  sourceSubtitle: {
-    color: "rgba(255, 255, 255, 0.45)",
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    marginTop: 2,
-  },
+
   sectionGroup: {
     borderRadius: 16,
     backgroundColor: "rgba(255, 255, 255, 0.04)",

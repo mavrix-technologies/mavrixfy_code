@@ -246,7 +246,7 @@ function AllArtistsScreenView() {
   const keyExtractor = useCallback((item: ArtistCard) => `artist-grid-${item.id}`, []);
 
   const ListEmptyComponent = useMemo(() => {
-    if (showLoader) return null;
+    if (showLoader) return undefined;
     return (
       <View style={styles.center}>
         <Ionicons name="person-outline" size={48} color="rgba(255,255,255,0.2)" />

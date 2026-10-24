@@ -4,12 +4,9 @@ import {
   searchLiveITunesArtists,
   searchSpotifyPlaylists,
   generateDynamicSpotifyPlaylists,
-  fetchLiveSpotifyPlaylistTracks,
   SPOTIFY_PRESETS,
   SPOTIFY_PODCASTS,
 } from "@/services/spotify/SpotifyCatalogService";
-import { getSettings } from "@/lib/storage";
-import { isSongProviderAllowed, isPlaylistProviderAllowed } from "@/lib/providerFilter";
 import { fetchAppApi } from "@/lib/api-config";
 import { convertJioSaavnSong } from "@/lib/musicData";
 import { getPlayableRemoteAudioUrl, Song, type JioSaavnImage } from "@/lib/musicData";
@@ -83,12 +80,11 @@ export async function fetchYouTubeSuggestions(query: string, signal?: AbortSigna
   const trimmed = query.trim();
   if (!trimmed || trimmed.length < 2) return [];
 
-  const settings = await getSettings().catch(() => null);
   const qLower = trimmed.toLowerCase();
   const suggestions: string[] = [];
 
   // 1. Spotify Presets & Podcasts Autocomplete (from E:\ria)
-  if (settings && settings.enableSpotify !== false) {
+
     for (const p of SPOTIFY_PRESETS) {
       if (p.name.toLowerCase().includes(qLower) || p.query.toLowerCase().includes(qLower)) {
         suggestions.push(p.name);
@@ -99,7 +95,6 @@ export async function fetchYouTubeSuggestions(query: string, signal?: AbortSigna
         suggestions.push(pod.title);
       }
     }
-  }
 
   // 2. Spotify / JioSaavn Server Autocomplete
   const serverPromise = (async () => {
@@ -146,7 +141,7 @@ export async function fetchYouTubeSuggestions(query: string, signal?: AbortSigna
 
   // 4. YouTube Autocomplete
   const ytPromise = (async () => {
-    if (settings && settings.enableYouTubeMusic === false) return [];
+
     try {
       const url = `https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(trimmed)}`;
       const data = await fetchJsonStrict<[string, string[]]>(url, signal, 4000).catch(() => null);
@@ -249,7 +244,6 @@ export async function searchRepository(
   if (!trimmed) return EMPTY_RESULTS;
   if (signal?.aborted) throw new Error("Search cancelled");
 
-  const settings = await getSettings();
   const qLower = trimmed.toLowerCase();
   const isSpotifyQuery = qLower.includes("spot");
 
@@ -261,7 +255,7 @@ export async function searchRepository(
   const tasks: Promise<void>[] = [];
 
   // 1. SPOTIFY SEARCH (iTunes India & Spotify API & Presets & Dynamic Playlists)
-  if (settings.enableSpotify !== false) {
+
     // A. Live iTunes India Songs (100% Spotify Source)
     if (filter === "all" || filter === "songs") {
       tasks.push(
@@ -270,9 +264,8 @@ export async function searchRepository(
             const itunesSongs = await searchLiveITunesSongs(trimmed, 25, signal);
             for (const s of itunesSongs) {
               const spTrack = { ...s, source: "spotify" as const };
-              if (isSongProviderAllowed(spTrack, settings)) {
+
                 songs.push(spTrack);
-              }
             }
           } catch {}
         })()
@@ -312,9 +305,8 @@ export async function searchRepository(
                   genre: raw.language || "Hindi",
                 };
 
-                if (isSongProviderAllowed(spTrack, settings)) {
+
                   songs.push(spTrack);
-                }
               }
             }
           } catch {}
@@ -390,10 +382,9 @@ export async function searchRepository(
         playlists.push(...dynamicPlaylists);
       }
     }
-  }
 
   // 2. JIOSAAVN SEARCH (Bollywood, Hindi, Punjabi Catalog & Albums/Playlists)
-  if (settings.enableJioSaavn !== false) {
+
     tasks.push(
       (async () => {
         try {
@@ -419,7 +410,7 @@ export async function searchRepository(
 
                 for (const raw of rawList) {
                   const s = convertJioSaavnSong(raw);
-                  if (s?.id && isSongProviderAllowed(s, settings)) {
+                  if (s?.id) {
                     songs.push(s);
                   }
                 }
@@ -497,32 +488,30 @@ export async function searchRepository(
         } catch {}
       })()
     );
-  }
 
   // 3. YOUTUBE MUSIC SEARCH
-  if (settings.enableYouTubeMusic !== false) {
+
     tasks.push(
       (async () => {
         try {
           const ytResults = await searchYouTubeMusic(trimmed, filter, signal);
           if (ytResults) {
             for (const s of ytResults.songs || []) {
-              if (isSongProviderAllowed(s, settings)) songs.push(s);
+              songs.push(s);
             }
             for (const p of ytResults.playlists || []) {
-              if (isPlaylistProviderAllowed(p.id, settings)) playlists.push(p);
+              playlists.push(p);
             }
             for (const a of ytResults.albums || []) {
-              if (isPlaylistProviderAllowed(a.id, settings)) albums.push(a);
+              albums.push(a);
             }
             for (const ar of ytResults.artists || []) {
-              if (isPlaylistProviderAllowed(ar.id, settings)) artists.push(ar);
+              artists.push(ar);
             }
           }
         } catch {}
       })()
     );
-  }
 
   await Promise.allSettled(tasks);
 

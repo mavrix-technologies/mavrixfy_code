@@ -106,6 +106,7 @@ function homeFixture(topInset, platform = "ios") {
   const homeScrollRef = { current: null };
   const jsx = (type, props) => ({ type, props });
   const react = {
+    memo: fn => fn,
     useState(initial) {
       const i = cursor++;
       if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;

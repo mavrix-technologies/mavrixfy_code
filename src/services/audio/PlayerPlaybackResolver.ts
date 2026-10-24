@@ -1,4 +1,3 @@
-import { getSongProvider, isSongProviderAllowed } from "@/lib/providerFilter";
 import { isYouTubeSong, peekYouTubeStream, resolveYouTubeStream, youTubeSongWithStream, invalidateYouTubeStream } from "@/services/youtube/YouTubeMusic";
 import { getAccountScope } from "@/lib/accountScope";
 import { getLocalPlaybackUrl, getSongDownload } from "@/lib/downloads/downloadManager";
@@ -10,7 +9,6 @@ import * as Storage from "@/lib/storage";
 import type { PlaybackQualityState,ResolvedPlaybackResult } from "@/types/playbackTypes";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 
-import * as Network from "expo-network";
 import { getInfoAsync } from "expo-file-system/legacy";
 
 export type SongPlaybackSource = Partial<Song> & {
@@ -191,12 +189,12 @@ export async function getRequestedQualityPreference(): Promise<{
       effective = requested;
     }
 
-    const preferJioSaavn = settings.preferJioSaavnAudio === true && settings.enableJioSaavn !== false;
+    const preferJioSaavn = true;
     cachedQualityPreference = { requested, effective, unlocked, cachedAt: now, preferJioSaavn };
     return cachedQualityPreference;
   } catch (e) {
     logger.error("[Player] Failed to determine streaming quality preference", e);
-    return { requested: "auto", effective: "medium", unlocked: false, preferJioSaavn: false };
+    return { requested: "auto", effective: "medium", unlocked: false, preferJioSaavn: true };
   }
 }
 
@@ -205,12 +203,6 @@ export async function resolvePlaybackUrlWithDetails(
   song: Song,
   forcedQuality?: "auto" | "low" | "medium" | "high"
 ): Promise<ResolvedPlaybackResult> {
-  const settings = await Storage.getSettings();
-  if (!isSongProviderAllowed(song, settings)) {
-    const provider = getSongProvider(song);
-    const providerLabel = provider === "jiosaavn" ? "JioSaavn" : provider === "spotify" ? "Spotify" : "YouTube Music";
-    throw new Error(`${providerLabel} playback is turned off in Settings.`);
-  }
   const { requested, effective, unlocked, preferJioSaavn } = await getRequestedQualityPreference();
   let targetQuality: "low" | "medium" | "high";
 

@@ -3,7 +3,7 @@
 Android uses Media3 ExoPlayer 1.9.0 and a MediaLibraryService. iOS uses
 AVQueuePlayer (an AVPlayer subclass), AVAudioSession and MPRemoteCommandCenter.
 Expo development builds and production builds use the same local Expo module.
-The application remains on its installed Expo SDK 57 / React Native 0.86.
+The application uses Expo SDK 58 / React Native 0.88.
 
 `src/services/audio/NativePlaybackPlayer.ts` is the shared application API.
 Normal player, StandBy, queue, lyrics and car controls delegate to this API.
@@ -23,6 +23,9 @@ before placing playable items in the queue, and validate expiry/network errors.
 Rebuild the native client after this migration. A Metro reload or OTA update
 cannot install the module. The runtime version changed to prevent this bundle
 from reaching older binaries.
+
+SDK 58 uses runtime `3.5.0-35000-sdk58-native-player2`. Rebuild both native
+clients when moving from SDK 57; clearing Metro alone does not upgrade them.
 
 - Android: `npm run android`, then `npm start` when reusing the installed client.
 - iOS on macOS/Xcode: `npm run ios`; alternatively use the existing EAS
@@ -210,9 +213,9 @@ failed item are suppressed. This addresses confirmed unsafe loading behavior;
 it does not prove that every reported timeout was caused by queue pressure.
 
 USB logs also reported UIKit rejecting the legacy UIDevice orientation setter.
-`patches/expo-screen-orientation+57.0.2.patch` retains that fallback only before
-iOS 16 and updates supported orientations before requesting scene geometry on
-modern iOS. Targeted patch-package application was verified.
+`patches/expo-screen-orientation+58.0.3.patch` removes that unsupported setter
+and updates supported orientations before requesting scene geometry. SDK 58
+requires iOS 16.4 or later, so the legacy fallback is no longer needed.
 
 TypeScript and all 515 JavaScript regressions passed. Swift compilation and the
 new native behavior have NOT been verified on the phone: Windows lacks Xcode,
@@ -461,3 +464,5 @@ Swift grammar parsing is not native compilation. 530 JavaScript regressions
 and TypeScript passed locally. USB diagnostics currently report no connected
 iPhone. A new signed IPA and device testing remain required to confirm the
 timing fix and check that complete audio plays before automatic Next.
+
+Release packaging runs `verifyReleaseSigning` and requires all four `MAVRIXFY_UPLOAD_*` values. Missing credentials or the Android debug keystore stop release packaging. Debug development builds keep their normal signing configuration.

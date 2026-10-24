@@ -21,18 +21,26 @@ test('search reducer starts with songs, clears stale rows while typing and keeps
  state = f.searchScreenReducer(state,{type:'CLEAR_SEARCH'});
  assert.equal(state.resultFilter,'albums');assert.equal(state.searchLoading,false);
 });
-test('search delegates only to the music catalog and autocomplete uses LastWave video suggestions', async () => {
- const calls=[];let endpoint;
- const f = load('src/lib/searchRepository.ts', {
-  '@/lib/musicData':{},'@/utils/timeFormatters':{},
-  '@/services/youtube/YouTubeMusic':{searchYouTubeMusic:async(...args)=>{calls.push(args);return empty;}},
-  '@/utils/asyncUtils':{fetchJsonStrict:async(...args)=>{endpoint=args;return ['a',['a','ab']];}}
+test('search merges available catalogs and aborts before dispatching new work', async () => {
+ const calls=[], endpoints=[];let suggestionEndpoint;
+ const song={id:'catalog',title:'Catalog Song',artist:'Artist'};
+ const f=load('src/lib/searchRepository.ts', {
+  '@/services/spotify/SpotifyCatalogService': { searchLiveITunesSongs:async()=>[{id:'sp_track',title:'Featured Song',artist:'Artist'}],
+    searchSpotifyPlaylists:()=>[],generateDynamicSpotifyPlaylists:()=>[],SPOTIFY_PRESETS:[],SPOTIFY_PODCASTS:[] },
+  '@/lib/api-config': {fetchAppApi:async path=>{endpoints.push(path);return {ok:true,json:async()=>({data:{results:path.startsWith('/search/songs')?[song]:[]}})};}},
+  '@/lib/musicData': {convertJioSaavnSong:s=>s}, '@/utils/timeFormatters':{},
+  '@/services/youtube/YouTubeMusic': {searchYouTubeMusic:async(...args)=>{calls.push(args);return {...empty,songs:[{id:'youtube_abcdefghijk',title:'Music Song',artist:'Artist'}]};}},
+  '@/utils/asyncUtils': {fetchJsonStrict:async(...args)=>{suggestionEndpoint=args;return ['ab',['ab','abc']];}}
  });
- await f.searchRepository(' a ','songs'); assert.equal(calls.length,1);assert.equal(calls[0][0],'a');assert.equal(calls[0][1],'songs');
- const controller = new AbortController();controller.abort();await assert.rejects(f.searchRepository('a','songs',controller.signal), /cancelled/);
- await f.searchRepository('   ','songs'); assert.equal(calls.length,1);
- assert.equal((await f.fetchYouTubeSuggestions('a')).join(),'a,ab');assert.match(endpoint[0], /ds=yt&/);assert.equal(endpoint[2],5000);
+ const result=await f.searchRepository(' ab ','songs');
+ assert.equal(calls.length,1);assert.equal(calls[0][0],'ab');assert.equal(calls[0][1],'songs');
+ assert.deepEqual(Array.from(result.songs,s=>s.id).sort(),['catalog','sp_track','youtube_abcdefghijk']);
+ assert.ok(endpoints.some(path=>path.startsWith('/spotify/search')));assert.ok(endpoints.some(path=>path.startsWith('/search/songs')));
+ const controller=new AbortController();controller.abort();await assert.rejects(f.searchRepository('ab','songs',controller.signal),/cancelled/);
+ await f.searchRepository('   ','songs');assert.equal(calls.length,1);
+ assert.equal((await f.fetchYouTubeSuggestions('ab')).join(),'ab,abc');assert.match(suggestionEndpoint[0],/ds=yt&/);assert.equal(suggestionEndpoint[2],4000);
 });
+
 test('home restores the artists row once while keeping Quick Picks first', () => {
  const {buildHomeSections} = load('src/features/home/hooks/buildHomeSections.ts');
  const result=buildHomeSections('All',true,[],[{id:'artists',type:'artists'},{id:'break',type:'category'}]);

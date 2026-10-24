@@ -425,7 +425,7 @@ function usePlaylistDetailView() {
             <Text style={{ color: Colors.subtext }}>{loadingMore ? "Loading remaining tracks…" : loadError}</Text>
             {!loadingMore && <Pressable onPress={retryLoad} accessibilityRole="button" hitSlop={10}><Text style={{ color: Colors.text }}>Retry</Text></Pressable>}
           </View>
-        ) : null}
+        ) : undefined}
         contentContainerStyle={contentContainerStyle}
         onScroll={handleScroll}
         scrollEventThrottle={32}

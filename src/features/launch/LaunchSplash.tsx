@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import Animated, {
-  cancelAnimation, Easing, ReduceMotion, useAnimatedReaction, useAnimatedStyle,
+  cancelAnimation, Easing, ReduceMotion, useAnimatedProps, useAnimatedReaction, useAnimatedStyle,
   useReducedMotion, useSharedValue, withTiming, type SharedValue,
 } from "react-native-reanimated";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
@@ -78,17 +78,21 @@ export function LaunchSplash({ ready, onComplete }: { ready: boolean; onComplete
 
   useEffect(() => {
     if (!laidOut || !logoReady) return;
-    let cancelled = false;
-    void hideNativeSplash("logoReady").then(() => {
-      if (cancelled) return;
-      // No fonts/auth wait and no asynchronous accessibility query before first motion.
-      started.set(true);
-      clock.set(reduceMotion ? LAUNCH_REVEAL_MS : withTiming(LAUNCH_REVEAL_MS, {
-        duration: LAUNCH_REVEAL_MS, easing: Easing.linear,
-      }));
-    });
-    return () => { cancelled = true; };
+    // Dispatch native dismissal without waiting for its JS acknowledgement.
+    void hideNativeSplash("logoReady");
+    started.set(true);
+    clock.set(reduceMotion ? LAUNCH_REVEAL_MS : withTiming(LAUNCH_REVEAL_MS, {
+      duration: LAUNCH_REVEAL_MS, easing: Easing.linear,
+    }));
   }, [laidOut, logoReady, clock, started, reduceMotion]);
+
+  useEffect(() => {
+    if (!ready || !laidOut || !logoReady) return;
+    // Recover a cancelled animation or lost completion callback without waiting forever.
+    const deadline = (reduceMotion ? 0 : LAUNCH_REVEAL_MS) + motion.fadeMs + 400;
+    const timer = setTimeout(finish, deadline);
+    return () => clearTimeout(timer);
+  }, [ready, laidOut, logoReady, reduceMotion, finish]);
 
   useAnimatedReaction(
     () => active.get() && started.get() && canExit.get() && clock.get() >= LAUNCH_REVEAL_MS,
@@ -106,8 +110,9 @@ export function LaunchSplash({ ready, onComplete }: { ready: boolean; onComplete
   );
 
   const overlayStyle = useAnimatedStyle(() => ({ opacity: opacity.get() }));
+  const overlayProps = useAnimatedProps(() => ({ pointerEvents: opacity.get() === 0 ? "none" as const : "auto" as const }));
   return (
-    <Animated.View testID="launch-splash" onLayout={markLaidOut}
+    <Animated.View testID="launch-splash" onLayout={markLaidOut} animatedProps={overlayProps}
       accessible accessibilityRole="progressbar" accessibilityLabel="Mavrixfy is starting"
       style={[styles.overlay, overlayStyle]}>
       <View style={styles.logo} onLayout={markLogoReady} testID="launch-logo" accessible={false}>

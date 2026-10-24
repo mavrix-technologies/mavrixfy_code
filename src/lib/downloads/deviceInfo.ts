@@ -55,6 +55,7 @@ export function getDeviceInfo(): Promise<DeviceInfo> {
 
   // Try to get the device model name from expo-device if available.
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Optional device metadata must retain a fallback when a native module is unavailable.
     const Device = require("expo-device");
     modelName = Device.modelName ?? Device.deviceName ?? "Unknown Device";
   } catch {
@@ -64,6 +65,7 @@ export function getDeviceInfo(): Promise<DeviceInfo> {
 
   let appVersion = "1.0.0";
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Optional device metadata must retain a fallback when a native module is unavailable.
     const Constants = require("expo-constants");
     appVersion =
       Constants.default?.nativeAppVersion ??

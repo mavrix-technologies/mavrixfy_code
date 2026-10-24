@@ -52,8 +52,7 @@ export const HomeAnnouncementBanner = React.memo(function HomeAnnouncementBanner
     },
     (next, previous) => {
       if (next !== previous) scheduleOnRN(setScrollVisibility, next);
-    },
-    [scrollY, hiddenAfter]
+    }
   );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [fade] = useState(() => new Animated.Value(1));

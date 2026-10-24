@@ -34,7 +34,6 @@ getCachedMiniPlayerBannerConfig,
 subscribeToMiniPlayerBannerConfig,
 } from "@/lib/miniPlayerBannerConfig";
 import { HomeAmbientBackdrop } from "../components/HomeAmbientBackdrop";
-import { HomeArtistsSection } from "../components/HomeArtistsSection";
 import { HomeHorizontalSection } from "../components/HomeHorizontalSection";
 import { HomeQuickPicks } from "../components/HomeQuickPicks";
 import { HomeRecentlyPlayed } from "../components/HomeRecentlyPlayed";
@@ -62,7 +61,6 @@ useHomeSectionData,
 } from "../hooks/useHomeSectionData";
 
 import { buildHomeSections, type HomeListItem } from "../hooks/buildHomeSections";
-import { getSettings, subscribeSettings } from "@/lib/storage";
 import type { MavrixfyCategory } from "../constants/homeNavConstants";
 const homeSectionKeyExtractor = (item: HomeListItem) => item.id;
 const isNativeHome = Platform.OS !== "web";
@@ -207,44 +205,6 @@ export function HomeScreen() {
   useAppShowcasePrompt((hasContent || Boolean(youtube.data)) && !loadingMainContent && !refreshing && isOnline && !isChecking);
 
   const [selectedCategory, setSelectedCategory] = useState<MavrixfyCategory>("All");
-  const [sourceSettings, setSourceSettings] = useState({
-    enableJioSaavn: true,
-    enableSpotify: true,
-    enableYouTubeMusic: true,
-  });
-
-  useEffect(() => {
-    let mounted = true;
-    void getSettings().then((s) => {
-      if (mounted) {
-        setSourceSettings({
-          enableJioSaavn: s.enableJioSaavn,
-          enableSpotify: s.enableSpotify,
-          enableYouTubeMusic: s.enableYouTubeMusic,
-        });
-        if (s.enableSpotify === false && selectedCategory === "Spotify") {
-          setSelectedCategory("All");
-        }
-      }
-    });
-    const unsub = subscribeSettings((s) => {
-      if (mounted) {
-        setSourceSettings({
-          enableJioSaavn: s.enableJioSaavn,
-          enableSpotify: s.enableSpotify,
-          enableYouTubeMusic: s.enableYouTubeMusic,
-        });
-        if (s.enableSpotify === false && selectedCategory === "Spotify") {
-          setSelectedCategory("All");
-        }
-      }
-    });
-    return () => {
-      mounted = false;
-      unsub();
-    };
-  }, [selectedCategory]);
-
   const handleSelectCategory = useCallback((category: MavrixfyCategory) => {
     if (category === selectedCategory) return;
     setSelectedCategory(category);
@@ -256,9 +216,6 @@ export function HomeScreen() {
     return selectedCategory === "All" && list.length === 0 ? quickPickSongs : list;
   }, [quickPicksPool, selectedCategory, quickPickSongs]);
 
-  // On HomeScreen, JioSaavn editorial content is completely removed while keeping background 320kbps playback intact
-  const homeSourceSettings = useMemo(() => ({ ...sourceSettings, enableJioSaavn: false }), [sourceSettings]);
-
   const catalogSections = useHomeSectionData({
     selectedCategory,
     categories,
@@ -267,10 +224,10 @@ export function HomeScreen() {
     featuredArtists,
     publicPlaylists,
     loadingMainContent,
-    sourceSettings: homeSourceSettings,
+    includeCatalog: false,
   });
   const sectionData = useMemo(() => buildHomeSections(selectedCategory, isNativeHome,
-    youtube.data?.sections || [], catalogSections, explore.data?.sections || [], homeSourceSettings), [catalogSections, selectedCategory, youtube.data?.sections, explore.data?.sections, homeSourceSettings]);
+    youtube.data?.sections || [], catalogSections, explore.data?.sections || [], false), [catalogSections, selectedCategory, youtube.data?.sections, explore.data?.sections]);
   const hasReleases = sectionData.some(row => row.type === "youtube-section" && row.section.category === "new-releases");
   const retryYouTube = useCallback(() => { clearYouTubeHomeCache(); void refetchYouTube(); }, [refetchYouTube]);
   const retryExplore = useCallback(() => { clearYouTubeHomeCache(); void refetchExplore(); }, [refetchExplore]);
@@ -427,7 +384,7 @@ export function HomeScreen() {
             ) : null}
           </View>
         }
-        ListEmptyComponent={loading ? <HomeLoadingSkeleton /> : null}
+        ListEmptyComponent={loading ? <HomeLoadingSkeleton /> : undefined}
         style={styles.scroll}
         contentContainerStyle={contentContainerStyle}
         showsVerticalScrollIndicator={false}

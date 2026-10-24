@@ -1,8 +1,7 @@
 import { FullscreenKaraokeModal } from "@/components/FullscreenKaraokeModal";
 import { useAppIsActive, useAppIsBackgrounded } from "@/lib/appActivity";
 import { playerUIStateStore, readMiniPlayerOrigin } from "@/lib/playerUIState";
-import { router, useFocusEffect, useIsFocused, useNavigation, useLocalSearchParams } from "expo-router";
-import { usePreventRemove, type NavigationAction } from "expo-router/react-navigation";
+import { router, useFocusEffect, useIsFocused, useNavigation, useLocalSearchParams, usePreventRemove } from "expo-router";
 import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import { usePlayerActions } from "@/contexts/PlayerContextDefs";
 import { useArtworkPalette } from "@/lib/colorExtractor";
@@ -18,6 +17,7 @@ useWindowDimensions,
 type LayoutChangeEvent,
 type NativeScrollEvent,
 type NativeSyntheticEvent,
+type ViewInstance,
 } from "react-native";
 import BottomSheet, { BottomSheetScrollView, useGestureEventsHandlersDefault, type GestureEventsHandlersHookType } from "@gorhom/bottom-sheet";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -43,7 +43,7 @@ type LegacyPlayerProps = {
   viewport: { width: number; height: number };
   onEnterStandBy: () => void;
   onClose: () => void;
-  transitionArtworkRef: React.RefObject<View | null>;
+  transitionArtworkRef: React.RefObject<ViewInstance | null>;
   onArtworkLayout: () => void;
   artworkVisibility: SharedValue<number>;
   onArtworkReady: (songId: string, coverUrl: string | undefined) => void;
@@ -271,8 +271,8 @@ export const PlayerScreen = memo(function PlayerScreen() {
   const dismissedRef = useRef(false);
   const [closing, setClosing] = useState(false);
   const [canLeave, setCanLeave] = useState(false);
-  const pendingAction = useRef<NavigationAction | null>(null);
-  const routeRef = useRef<View>(null);
+  const pendingRemoval = useRef<(() => void) | null>(null);
+  const routeRef = useRef<ViewInstance>(null);
   const [routeOffset, setRouteOffset] = useState<{ x: number; y: number } | null>(() => ({ x: 0, y: 0 }));
   const scrollY = useSharedValue(0);
   const { width, height } = useWindowDimensions();
@@ -292,22 +292,25 @@ export const PlayerScreen = memo(function PlayerScreen() {
     playerUIStateStore.collapsePlayer();
     closeFrameRef.current = requestAnimationFrame(() => setCanLeave(true));
   }, []);
-  useEffect(() => {
-    if (!canLeave) return;
-    if (pendingAction.current) navigation.dispatch(pendingAction.current);
-    else if (navigation.canGoBack()) navigation.goBack();
-    else router.replace("/(tabs)");
-  }, [canLeave, navigation]);
   const closePlayer = useCallback(() => {
     if (dismissedRef.current) return;
     dismissedRef.current = true;
     playerUIStateStore.beginCollapse();
     setClosing(true);
   }, []);
-  usePreventRemove(!canLeave, ({ data }) => {
-    pendingAction.current = data.action;
+  usePreventRemove(!canLeave, ({ repeat }) => {
+    pendingRemoval.current = repeat;
     closePlayer();
   });
+  useEffect(() => {
+    if (!canLeave) return;
+    if (pendingRemoval.current) {
+      const repeat = pendingRemoval.current;
+      pendingRemoval.current = null;
+      repeat();
+    } else if (navigation.canGoBack()) navigation.goBack();
+    else router.replace("/(tabs)");
+  }, [canLeave, navigation]);
   useFocusEffect(useCallback(() => {
     playerUIStateStore.expandPlayer();
     return () => playerUIStateStore.collapsePlayer();

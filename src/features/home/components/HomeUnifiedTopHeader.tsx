@@ -1,5 +1,4 @@
 import Colors from "@/constants/colors";
-import { getSettings, subscribeSettings } from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
 import { colorWithAlpha } from "@/lib/colorExtractor";
 import { triggerImpact } from "@/lib/haptics";
@@ -7,7 +6,7 @@ import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import React,{ useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import React,{ useCallback, useMemo, type ReactNode } from "react";
 import {
 Platform,
 StyleSheet,
@@ -63,11 +62,6 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
   announcementHeight = 0,
 }: HomeUnifiedTopHeaderProps) {
   const router = useRouter();
-  const [enableSpotify, setEnableSpotify] = useState(true);
-  useEffect(() => {
-    void getSettings().then((s) => setEnableSpotify(s.enableSpotify));
-    return subscribeSettings((s) => setEnableSpotify(s.enableSpotify));
-  }, []);
   const { user, isAuthenticated } = useAuth();
   const isIOS = Platform.OS === "ios";
   const hasAnnouncement = Boolean(announcement);
@@ -190,15 +184,15 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
 
     const labelOverrides = themeConfig?.menuLabels;
     if (labelOverrides && typeof labelOverrides === "object") {
-      const base = enableSpotify ? MAVRIXFY_MUSIC_CATEGORIES : MAVRIXFY_MUSIC_CATEGORIES.filter(c => c.id !== "Spotify");
+      const base = MAVRIXFY_MUSIC_CATEGORIES;
     return base.map((item) => ({
         ...item,
         label: labelOverrides[item.id] || labelOverrides[item.label] || item.label,
       }));
     }
 
-    return enableSpotify ? MAVRIXFY_MUSIC_CATEGORIES : MAVRIXFY_MUSIC_CATEGORIES.filter(c => c.id !== "Spotify");
-  }, [enableSpotify, themeConfig?.customCategories, themeConfig?.menuLabels]);
+    return MAVRIXFY_MUSIC_CATEGORIES;
+  }, [themeConfig?.customCategories, themeConfig?.menuLabels]);
 
   const renderCategoryItem = useCallback(
     ({ item }: ListRenderItemInfo<MusicCategoryItem>) => {

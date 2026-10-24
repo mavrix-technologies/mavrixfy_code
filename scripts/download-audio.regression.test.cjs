@@ -166,7 +166,7 @@ for (const message of ['SIGN_IN_REQUIRED: Upstream verification required. Try ag
     await f.enqueueDownload(item, preferences); await tick();
     const failed = f.items.get(item.songId);
     assert.equal(failed.status, 'failed'); assert.equal(failed.retryCount, 1);
-    assert.match(failed.failureReason, /YouTube requires verification/);
+    assert.match(failed.failureReason, /requires verification/);
     assert.doesNotMatch(failed.failureReason, /SIGN_IN_REQUIRED|LOGIN_REQUIRED/);
     assert.equal(failures.length, 1); assert.equal(attempts, 1);
     assert.equal(f.timers.size, 0); assert.equal(f.transfers.length, 0);

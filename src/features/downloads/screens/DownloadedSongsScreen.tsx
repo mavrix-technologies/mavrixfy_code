@@ -284,7 +284,7 @@ export function DownloadedSongsScreen() {
                   {`No downloaded songs matched "${searchQuery}"`}
                 </Text>
               </View>
-            ) : null
+            ) : undefined
           }
         />
       </View>

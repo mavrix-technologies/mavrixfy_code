@@ -94,7 +94,7 @@ export function SongOptionsMainSheet({
           ListHeaderComponent={
             canShowDownload ? (
               <DownloadButton song={song} size={22} showLabel={true} />
-            ) : null
+            ) : undefined
           }
         />
       </View>

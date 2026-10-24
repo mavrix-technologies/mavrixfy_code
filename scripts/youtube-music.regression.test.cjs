@@ -56,7 +56,7 @@ test("extractor aggregate errors retain timeout and network classification", () 
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: timeout"), /timed out/);
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: Network request failed"), /connect/);
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: Audio HTTP 403"), /connect/);
-  assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. SIGN_IN_REQUIRED: YouTube requires verification"), /YouTube requires verification/);
+  assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. SIGN_IN_REQUIRED: YouTube requires verification"), /requires verification/);
   assert.match(f.youTubePlaybackErrorMessage("YouTube audio unavailable. VISIONOS: interpreter error"), /Could not play/);
   assert.match(f.youTubePlaybackErrorMessage("Video unavailable: private video"), /unavailable/);
 });

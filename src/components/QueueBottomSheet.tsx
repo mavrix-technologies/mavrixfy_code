@@ -21,7 +21,7 @@ import React, {
 } from "react";
 import {
   BackHandler,
-  type ViewToken,
+  type ListViewToken,
   Platform,
   Pressable,
   Text,
@@ -370,7 +370,7 @@ export const QueueContent = React.memo(({ interactionReady, onClose, onReady, na
 
   const bottomPad = Math.max(insets.bottom, 12);
 
-  const handleViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken<QueueItem>[] }) => {
+  const handleViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ListViewToken[] }) => {
     if (viewableItems.some(item => item.isViewable)) onReady?.();
   }, [onReady]);
 

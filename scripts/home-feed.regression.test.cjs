@@ -59,9 +59,9 @@ function feedFixture({ online = true, snapshot = null, official } = {}) {
   const h = harness('src/features/home/hooks/useHomeFeedData.ts', react => ({
     '@/contexts/NetworkContext': { useNetwork: () => ({ isOnline: mode.online, isChecking: false }), useOnReconnect: fn => { mode.reconnect = fn; } },
     '@/data/providers/ArtistProvider': { getFeaturedArtists: async () => [], clearFeaturedArtistsCache: async () => { mode.clears++; } },
-    '@/data/providers/MusicCatalogProvider': { getHomeCatalogCategories: async () => [] },
+    '@/data/providers/MusicCatalogProvider': { getHomeCatalogCategories: async () => [], SPOTIFY_FLAGSHIP_PRESETS: [], getAllSpotifyCategories: async () => (await mode.latestFeed).categories },
     '@/data/providers/MusicCatalogFeedService': {
-      getOfficialHomeFeed: force => { mode.requests.push(force); return official ? official(force) : Promise.resolve({ categories: [category], songs: [] }); },
+      getOfficialHomeFeed: force => { mode.requests.push(force); return mode.latestFeed = official ? official(force) : Promise.resolve({ categories: [category], songs: [] }); },
       getOfficialHomeSongs: async () => [],
     },
     '@/data/providers/QuickPicksProvider': { clearQuickPicksCache: async () => {}, fetchQuickPicksFeed: async () => null },

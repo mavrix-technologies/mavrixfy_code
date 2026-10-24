@@ -1,8 +1,6 @@
 import type { Song } from "@/lib/musicData";
 import type { AlbumResult, ArtistResult, PlaylistResult } from "@/lib/searchRepository";
-import { buildAppApiUrl, fetchAppApi } from "@/lib/api-config";
-import { getSettings } from "@/lib/storage";
-import { isSongProviderAllowed } from "@/lib/providerFilter";
+import { fetchAppApi } from "@/lib/api-config";
 
 export function isAudioPreviewUrl(url?: string | null): boolean {
   if (!url || typeof url !== "string") return false;
@@ -655,19 +653,8 @@ export async function searchLiveITunesArtists(query: string, limit = 10, signal?
   }
 }
 
-/**
- * Full-Length Song Audio Stream Resolver
- * (Direct implementation of E:\ria\server.js & app.js resolveFullSong pattern)
- * Plays Spotify songs using Spotify Audio Engine (YouTube Stream), NOT via JioSaavn.
- * When JioSaavn is turned off, Spotify tracks continue to stream seamlessly!
- */
-/**
- * Full-Length Song Audio Stream Resolver
- * Prioritizes Pristine 320kbps Studio Master Audio (from JioSaavn CDN)
- * When JioSaavn is unavailable or disabled, seamlessly streams via Spotify Audio Engine (YouTube VISIONOS)
- */
+/** Existing playback order: catalog URL, JioSaavn high-quality audio, then YouTube. */
 export async function resolveFullSongAudio(song: Song): Promise<{ url: string; bitrate: number } | null> {
-  const settings = await getSettings();
   const cleanTitle = song.title.replace(/\(.*?\)/g, "").replace(/\[.*?\]/g, "").replace(/\{.*?\}/g, "").trim();
   const primaryArtist = (song.artist || "").split(/[,&]/)[0].trim();
   const searchQ = `${cleanTitle} ${primaryArtist}`.trim();
@@ -684,117 +671,115 @@ export async function resolveFullSongAudio(song: Song): Promise<{ url: string; b
   }
 
   // 2. HIGHEST QUALITY PRIORITY: 320kbps Master Stream from JioSaavn CDN
-  if (settings.enableJioSaavn !== false) {
-    const queries = [searchQ, cleanTitle].filter(Boolean);
-    for (const q of queries) {
-      try {
-        const resp = await fetchAppApi(`/search/songs?query=${encodeURIComponent(q)}&limit=5`);
-        if (resp?.ok) {
-          const payload = await resp.json();
-          const results = [
-            payload?.data?.results,
-            payload?.data?.songs?.results,
-            payload?.data?.songs,
-            payload?.results,
-            payload?.songs,
-            payload?.data,
-          ].find(Array.isArray) || [];
 
-          for (const raw of results) {
-            if (!raw?.downloadUrl) continue;
-            const dl = Array.isArray(raw.downloadUrl) ? raw.downloadUrl : [];
-            const best = dl.find((d: any) => d.quality === "320kbps") || dl[dl.length - 1];
-            const streamUrl = best?.url || best?.link;
-            if (streamUrl && typeof streamUrl === "string" && streamUrl.startsWith("http") && !isAudioPreviewUrl(streamUrl)) {
-              return { url: streamUrl, bitrate: 320 };
-            }
+  const queries = [searchQ, cleanTitle].filter(Boolean);
+  for (const q of queries) {
+    try {
+      const resp = await fetchAppApi(`/search/songs?query=${encodeURIComponent(q)}&limit=5`);
+      if (resp?.ok) {
+        const payload = await resp.json();
+        const results = [
+          payload?.data?.results,
+          payload?.data?.songs?.results,
+          payload?.data?.songs,
+          payload?.results,
+          payload?.songs,
+          payload?.data,
+        ].find(Array.isArray) || [];
+
+        for (const raw of results) {
+          if (!raw?.downloadUrl) continue;
+          const dl = Array.isArray(raw.downloadUrl) ? raw.downloadUrl : [];
+          const best = dl.find((d: any) => d.quality === "320kbps") || dl[dl.length - 1];
+          const streamUrl = best?.url || best?.link;
+          if (streamUrl && typeof streamUrl === "string" && streamUrl.startsWith("http") && !isAudioPreviewUrl(streamUrl)) {
+            return { url: streamUrl, bitrate: 320 };
           }
         }
-      } catch {}
-    }
+      }
+    } catch {}
   }
 
   // 3. Spotify Audio Engine: Resolve via YouTube Audio Stream (VISIONOS Unblocked Transport)
-  if (settings.enableSpotify !== false) {
-    // 0. Query mavrixfy-song-api resolve-full-song endpoint
-    try {
-      const resp = await fetchAppApi(`/spotify/resolve-full-song?query=${encodeURIComponent(searchQ)}`);
-      if (resp?.ok) {
-        const json = await resp.json();
-        if (json?.data?.streamUrl && !isAudioPreviewUrl(json.data.streamUrl)) {
-          return { url: json.data.streamUrl, bitrate: json.data.bitrate || 320 };
-        }
-        if (json?.data?.videoId) {
-          const { resolveYouTubeStream } = await import("@/services/youtube/YouTubeMusic");
-          const ytSong: Song = {
-            id: `youtube_${json.data.videoId}`,
-            title: song.title,
-            artist: song.artist,
-            album: song.album || "Spotify Single",
-            duration: song.duration,
-            coverUrl: song.coverUrl,
-            audioUrl: "",
-            source: "spotify",
-            genre: song.genre || "Music",
-            youtubeVideoId: json.data.videoId,
-          };
-          const stream = await resolveYouTubeStream(ytSong, "high", settings.enableJioSaavn !== false);
-          if (stream?.url && !isAudioPreviewUrl(stream.url)) {
-            const kbps = Math.round((stream.bitrate || 320000) / 1000);
-            return { url: stream.url, bitrate: kbps > 0 ? kbps : 320 };
-          }
-        }
-      }
-    } catch {}
 
-    // A. Direct YouTube Audio Scraper
-    try {
-      const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQ + " Audio Song")}`;
-      const yres = await fetch(searchUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        },
-      });
-      if (yres.ok) {
-        const text = await yres.text();
-        const match = text.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-        if (match && match[1]) {
-          const { resolveYouTubeStream } = await import("@/services/youtube/YouTubeMusic");
-          const ytSong: Song = {
-            id: `youtube_${match[1]}`,
-            title: song.title,
-            artist: song.artist,
-            album: song.album || "Spotify Single",
-            duration: song.duration,
-            coverUrl: song.coverUrl,
-            audioUrl: "",
-            source: "spotify",
-            genre: song.genre || "Music",
-            youtubeVideoId: match[1],
-          };
-          const stream = await resolveYouTubeStream(ytSong, "high", settings.enableJioSaavn !== false);
-          if (stream?.url && !isAudioPreviewUrl(stream.url)) {
-            const kbps = Math.round((stream.bitrate || 320000) / 1000);
-            return { url: stream.url, bitrate: kbps > 0 ? kbps : 320 };
-          }
-        }
+  // 0. Query mavrixfy-song-api resolve-full-song endpoint
+  try {
+    const resp = await fetchAppApi(`/spotify/resolve-full-song?query=${encodeURIComponent(searchQ)}`);
+    if (resp?.ok) {
+      const json = await resp.json();
+      if (json?.data?.streamUrl && !isAudioPreviewUrl(json.data.streamUrl)) {
+        return { url: json.data.streamUrl, bitrate: json.data.bitrate || 320 };
       }
-    } catch {}
-
-    // B. YouTube Music search
-    try {
-      const { searchYouTubeMusic, resolveYouTubeStream } = await import("@/services/youtube/YouTubeMusic");
-      const ytResults = await searchYouTubeMusic(searchQ, "songs");
-      const topSong = ytResults.songs?.[0];
-      if (topSong) {
-        const stream = await resolveYouTubeStream({ ...topSong, source: "spotify" }, "high", settings.enableJioSaavn !== false);
+      if (json?.data?.videoId) {
+        const { resolveYouTubeStream } = await import("@/services/youtube/YouTubeMusic");
+        const ytSong: Song = {
+          id: `youtube_${json.data.videoId}`,
+          title: song.title,
+          artist: song.artist,
+          album: song.album || "Spotify Single",
+          duration: song.duration,
+          coverUrl: song.coverUrl,
+          audioUrl: "",
+          source: "spotify",
+          genre: song.genre || "Music",
+          youtubeVideoId: json.data.videoId,
+        };
+        const stream = await resolveYouTubeStream(ytSong, "high", true);
         if (stream?.url && !isAudioPreviewUrl(stream.url)) {
           const kbps = Math.round((stream.bitrate || 320000) / 1000);
           return { url: stream.url, bitrate: kbps > 0 ? kbps : 320 };
         }
       }
-    } catch {}
-  }
+    }
+  } catch {}
+
+  // A. Direct YouTube Audio Scraper
+  try {
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQ + " Audio Song")}`;
+    const yres = await fetch(searchUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+    });
+    if (yres.ok) {
+      const text = await yres.text();
+      const match = text.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+      if (match && match[1]) {
+        const { resolveYouTubeStream } = await import("@/services/youtube/YouTubeMusic");
+        const ytSong: Song = {
+          id: `youtube_${match[1]}`,
+          title: song.title,
+          artist: song.artist,
+          album: song.album || "Spotify Single",
+          duration: song.duration,
+          coverUrl: song.coverUrl,
+          audioUrl: "",
+          source: "spotify",
+          genre: song.genre || "Music",
+          youtubeVideoId: match[1],
+        };
+        const stream = await resolveYouTubeStream(ytSong, "high", true);
+        if (stream?.url && !isAudioPreviewUrl(stream.url)) {
+          const kbps = Math.round((stream.bitrate || 320000) / 1000);
+          return { url: stream.url, bitrate: kbps > 0 ? kbps : 320 };
+        }
+      }
+    }
+  } catch {}
+
+  // B. YouTube Music search
+  try {
+    const { searchYouTubeMusic, resolveYouTubeStream } = await import("@/services/youtube/YouTubeMusic");
+    const ytResults = await searchYouTubeMusic(searchQ, "songs");
+    const topSong = ytResults.songs?.[0];
+    if (topSong) {
+      const stream = await resolveYouTubeStream({ ...topSong, source: "spotify" }, "high", true);
+      if (stream?.url && !isAudioPreviewUrl(stream.url)) {
+        const kbps = Math.round((stream.bitrate || 320000) / 1000);
+        return { url: stream.url, bitrate: kbps > 0 ? kbps : 320 };
+      }
+    }
+  } catch {}
 
   return null;
 }

@@ -9,6 +9,7 @@ import { getExpoExtra } from "./expoExtra";
 // Suppress transient WebChannel retry warnings in console
 setLogLevel("error");
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- Firebase native persistence is supplied by the platform-specific runtime export.
 const { getReactNativePersistence } = require("firebase/auth") as {
   getReactNativePersistence: (storage: typeof AsyncStorage) => unknown;
 };

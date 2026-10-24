@@ -35,6 +35,7 @@ export async function getGoogleMobileIdToken(actionLabel: string = "Google Sign-
     let googleSigninModule: GoogleSigninModule;
 
     try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Load native Google sign-in only on the supported sign-in path.
       googleSigninModule = require("@react-native-google-signin/google-signin") as GoogleSigninModule;
     } catch {
       throw new Error(

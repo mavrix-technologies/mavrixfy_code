@@ -11,6 +11,10 @@ ${marker}
 android {
     defaultConfig {
         ndk { abiFilters (*(findProperty('reactNativeArchitectures')?.split(',') ?: ['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'])) }
+        if (System.getProperty('os.name').toLowerCase().contains('windows')) {
+            // SDK CMake 3.22 bundles Ninja 1.10, which cannot read long object paths.
+            externalNativeBuild { cmake { arguments '-DCMAKE_OBJECT_PATH_MAX=240' } }
+        }
     }
     signingConfigs {
         release {
@@ -26,7 +30,25 @@ android {
             }
         }
     }
-    buildTypes { release { signingConfig signingConfigs.release.storeFile ? signingConfigs.release : signingConfigs.debug } }
+    buildTypes { release { signingConfig signingConfigs.release } }
+}
+
+// Never create a production artifact with missing or debug signing credentials.
+def verifyReleaseSigning = tasks.register('verifyReleaseSigning') {
+    doLast {
+        def signing = android.signingConfigs.release
+        if (!signing.storeFile || !signing.storeFile.exists() || !signing.storePassword || !signing.keyAlias || !signing.keyPassword) {
+            throw new GradleException('Production signing is not configured. Set MAVRIXFY_UPLOAD_STORE_FILE, MAVRIXFY_UPLOAD_STORE_PASSWORD, MAVRIXFY_UPLOAD_KEY_ALIAS and MAVRIXFY_UPLOAD_KEY_PASSWORD before building a release.')
+        }
+        if (signing.storeFile.canonicalFile == android.signingConfigs.debug.storeFile.canonicalFile) {
+            throw new GradleException('Production releases cannot use the debug keystore.')
+        }
+    }
+}
+tasks.configureEach {
+    if (name in ['assembleRelease', 'bundleRelease', 'packageRelease', 'signReleaseBundle']) {
+        dependsOn verifyReleaseSigning
+    }
 }
 `;
     return mod;

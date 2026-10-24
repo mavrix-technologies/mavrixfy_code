@@ -14,6 +14,7 @@ function fixture({ local = null, download = null, entitled = true, network = "wi
       resolveYouTubeStream: async (song, quality) => { resolutions.push(quality); if (youtubeError) throw youtubeError; return { url: original, bitrate: 130595, codec: "aac" }; },
       invalidateYouTubeStream() {}, peekYouTubeStream() {}, youTubeSongWithStream: song => song,
     },
+    "@/services/spotify/SpotifyCatalogService": { isAudioPreviewUrl: () => false, resolveFullSongAudio: async () => null },
     "@/lib/accountScope": { getAccountScope: () => ({}) },
     "@/lib/downloads/downloadManager": { getLocalPlaybackUrl: async () => local, getSongDownload: async () => download },
     "@/lib/logger": { logger: { error() {} } },
@@ -46,13 +47,13 @@ test("High uses the original source URL and reports its real AAC bitrate without
   assert.equal(f.catalog.length, 0);
 });
 
-test("High entitlement and cellular Auto retain their existing quality policies", async () => {
+test("High entitlement is respected and Auto chooses the highest permitted quality", async () => {
   const locked = fixture({ entitled: false });
   await locked.resolvePlaybackUrlWithDetails(song, "high");
   assert.deepEqual(locked.resolutions, ["medium"]);
   const cellular = fixture({ network: "cellular" });
   await cellular.resolvePlaybackUrlWithDetails(song, "auto");
-  assert.deepEqual(cellular.resolutions, ["low"]);
+  assert.deepEqual(cellular.resolutions, ["high"]);
 });
 
 test("offline quality uses stored source bitrate rather than claiming every download is 320kbps", async () => {

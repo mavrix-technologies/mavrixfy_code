@@ -1,6 +1,6 @@
 import { useNetwork, useOnReconnect } from "@/contexts/NetworkContext";
 import { clearFeaturedArtistsCache, getFeaturedArtists, type ArtistCard } from "@/data/providers/ArtistProvider";
-import { getHomeCatalogCategories, getSpotifyCatalogCategory, getAllSpotifyCategories, getSpotifyMixesCategory, getSpotifyMoodsCategory, SPOTIFY_FLAGSHIP_PRESETS } from "@/data/providers/MusicCatalogProvider";
+import { getHomeCatalogCategories, getAllSpotifyCategories, SPOTIFY_FLAGSHIP_PRESETS } from "@/data/providers/MusicCatalogProvider";
 import { getOfficialHomeFeed, getOfficialHomeSongs } from "@/data/providers/MusicCatalogFeedService";
 import type { CatalogCategoryData } from "@/data/providers/MusicCatalogTypes";
 import {
@@ -111,17 +111,7 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
               ...DEFAULT_POOL,
               all: snapshot.quickPickSongs,
             };
-            const mergedCategories = [
-              {
-                id: "spotify",
-                title: "Top Hits & Trending",
-                results: SPOTIFY_FLAGSHIP_PRESETS,
-                isFresh: false,
-              },
-              getSpotifyMixesCategory(),
-              getSpotifyMoodsCategory(),
-            ];
-            session.categories = mergedCategories;
+            session.categories = snapshot.categories;
             session.publicPlaylists = playlists;
             session.featuredArtists = snapshot.featuredArtists;
             session.quickPickSongs = snapshot.quickPickSongs;
@@ -187,7 +177,7 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
 
         const artistsTask = compact ? Promise.resolve([] as ArtistCard[]) : getFeaturedArtists().catch(() => [] as ArtistCard[]);
 
-        const [officialFeed, spotifyCategories, quickPicksFeed, playlists, artists] =
+        const [, spotifyCategories, quickPicksFeed, playlists, artists] =
           await Promise.all([
             officialTask,
             getAllSpotifyCategories(forceRefresh),

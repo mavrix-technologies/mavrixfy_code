@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { router } from "expo-router";
-import type { LayoutRectangle, View } from "react-native";
+import type { LayoutRectangle, ViewInstance } from "react-native";
 
 export type MiniPlayerOrigin = {
   songId: string;
@@ -14,7 +14,7 @@ export type MiniPlayerOrigin = {
 
 /** Capture only the dock; artwork coordinates are its existing fixed layout. */
 export function expandPlayerFromMiniPlayer(
-  view: View | null,
+  view: ViewInstance | null,
   songId: string | undefined,
   backgroundColor: string,
   artworkLeft: number,

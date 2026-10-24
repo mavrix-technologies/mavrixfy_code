@@ -27,6 +27,7 @@ Keyboard,
 StyleSheet,
 View,
 useWindowDimensions,
+type ViewInstance,
 } from "react-native";
 import { Gesture,GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -92,7 +93,7 @@ export function AppNavBar({ hidden = false, transitionPreview = false }: AppNavB
   const miniPlayerSecondaryControl = useMiniPlayerSecondaryControl();
   const activeSong = currentSong ?? queue[queueIndex] ?? queue[0] ?? null;
   const hasActiveMiniPlayer = Boolean(activeSong);
-  const miniPlayerRef = useRef<View>(null);
+  const miniPlayerRef = useRef<ViewInstance>(null);
   const miniPlayerBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const handleMiniPlayerLayout = useCallback(() => {
     miniPlayerRef.current?.measureInWindow((x, y, width, height) => {
@@ -129,7 +130,7 @@ export function AppNavBar({ hidden = false, transitionPreview = false }: AppNavB
     } else {
       expandPlayerFromMiniPlayer(miniPlayerRef.current, activeSong?.id, artworkPalette.background || Colors.surface, 10);
     }
-  }, [activeSong?.id, artworkPalette.background]);
+  }, [activeSong, artworkPalette.background]);
 
   const openMiniPlayerQueue = useCallback(() => {
     globalQueueSheetRef.current?.expand();

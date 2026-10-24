@@ -22,11 +22,12 @@ type NotificationsType = typeof import("expo-notifications");
 let notificationsModule: NotificationsType | null = null;
 
 function getNotifications(): NotificationsType | null {
-  if (IS_ANDROID && isRunningInExpoGo()) {
+  if (isRunningInExpoGo()) {
     return null;
   }
   if (!notificationsModule) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Expo Go must skip the unsupported native notifications module.
       notificationsModule = require("expo-notifications");
     } catch {
       return null;
