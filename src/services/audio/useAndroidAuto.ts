@@ -5,6 +5,7 @@ import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
 import { searchRepository } from "@/lib/searchRepository";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
+import { getSettings, subscribeSettings } from "@/lib/storage";
 
 const mediaLibrary = getNativeCarClient();
 const emitter = mediaLibrary;
@@ -54,6 +55,7 @@ export function useAndroidAuto({
   const searchAbort = useRef<AbortController | null>(null);
   const scopeRef = useRef<ReturnType<typeof getAccountScope> | null>(null);
   const publishedCatalog = useRef({ json: "", id: "" });
+  const carSettings = useRef({ streamingQuality: "medium", dataSaverEnabled: false });
   const activeId = currentSong?.id || "";
   const liked = likedSongs.some((song) => song.id === activeId);
 
@@ -77,13 +79,20 @@ export function useAndroidAuto({
     scopeRef.current = scope;
     const publish = () => {
       const metadata = (songs: Song[]) =>
-        songs.slice(0, 200).map(({ id, title, artist, coverUrl }) => ({
+        songs.slice(0, 100).map(({ id, title, artist, coverUrl, duration, source, audioUrl, youtubeAudioExpiresAt, playbackHeaders }) => ({
           id,
           title,
           artist,
           coverUrl,
+          duration,
+          source,
+          audioUrl,
+          youtubeAudioExpiresAt,
+          headers: playbackHeaders,
         }));
       const json = JSON.stringify({
+        accountId: scope.accountId ?? "guest",
+        ...carSettings.current,
         queue: metadata(library.current.queue),
         favorites: metadata(library.current.favorites),
         recent: metadata(library.current.recent),
@@ -97,6 +106,13 @@ export function useAndroidAuto({
       mediaLibrary.updateCatalog(json, activeId);
     };
     publish();
+    const publishSettings = (settings: { streamingQuality: string; dataSaverEnabled: boolean }) => {
+      if (!active || !isCurrentAccount(scope)) return;
+      carSettings.current = { streamingQuality: settings.streamingQuality, dataSaverEnabled: settings.dataSaverEnabled };
+      publish();
+    };
+    const unsubscribeSettings = subscribeSettings(publishSettings);
+    void getSettings().then(publishSettings).catch(error => logger.warn("[AndroidAuto] Settings sync failed", error));
     void playerPersistenceService
       .getRecentlyPlayed()
       .then((recent) => {
@@ -112,6 +128,7 @@ export function useAndroidAuto({
       );
     return () => {
       active = false;
+      unsubscribeSettings();
     };
   }, [queue, activeId, likedSongs]);
 
@@ -136,19 +153,32 @@ export function useAndroidAuto({
     );
     const playSelection = async (id: string, requestId: string) => {
       searchAbort.current?.abort();
-      const groups = Object.values(library.current);
-      const selectedQueue = groups.find((songs) =>
-        songs.some((song) => song.id === id),
-      );
-      const selected = selectedQueue?.find((song) => song.id === id);
-      if (!selected) {
-        mediaLibrary.reportError(
-          "This song is no longer available. Select another song.",
-        );
-        await mediaLibrary.completeSelection(requestId, undefined, "Song unavailable");
-        return;
-      }
+      const scope = getAccountScope();
       try {
+        const groups = Object.values(library.current);
+        let selectedQueue = groups.find(songs => songs.some(song => song.id === id));
+        let selected = selectedQueue?.find(song => song.id === id);
+        if (!selected && mediaLibrary.getSelection) {
+          const native = await mediaLibrary.getSelection(id);
+          selectedQueue = native.queue.map(track => ({
+            id: track.id, title: track.title || "Unknown", artist: track.artist || "Mavrixfy",
+            album: track.album || "", genre: "Music", duration: Number(track.duration) || 0,
+            coverUrl: track.artwork || "", audioUrl: track.url || "", source: track.source,
+            playbackHeaders: track.headers, youtubeAudioExpiresAt: track.youtubeAudioExpiresAt,
+          } as Song));
+          selected = selectedQueue[native.index]?.id === id ? selectedQueue[native.index] : selectedQueue.find(song => song.id === id);
+        }
+        if (!isCurrentAccount(scope)) {
+          await mediaLibrary.completeSelection(requestId, undefined, "Selection cancelled");
+          return;
+        }
+        if (!selected) {
+          mediaLibrary.reportError("This song is no longer available. Select another song.");
+          await mediaLibrary.completeSelection(requestId, undefined, "Song unavailable");
+          return;
+        }
+        // The existing app selection owns UI state, queue persistence and source
+        // resolution whenever the phone's client is running.
         await actions.current.playSong(selected, selectedQueue);
         await mediaLibrary.completeSelection(requestId, selected.id);
       } catch (error) {
@@ -201,7 +231,9 @@ export function useAndroidAuto({
           }).catch(error => logger.warn("[AndroidAuto] Search acknowledgement failed", error));
       },
     );
+    mediaLibrary.setReady?.(true);
     return () => {
+      mediaLibrary.setReady?.(false);
       play.remove();
       controls.remove();
       mediaLibrary.updateControls?.("", false, "off", false);
@@ -209,7 +241,7 @@ export function useAndroidAuto({
       searchAbort.current?.abort();
       publishedCatalog.current = { json: "", id: "" };
       mediaLibrary.updateCatalog(
-        JSON.stringify({ queue: [], favorites: [], recent: [] }),
+        JSON.stringify({ accountId: getAccountScope().accountId ?? "guest", queue: [], favorites: [], recent: [] }),
         "",
       );
     };

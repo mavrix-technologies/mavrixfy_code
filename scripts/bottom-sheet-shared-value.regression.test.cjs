@@ -13,7 +13,7 @@ test('bottom-sheet layout listeners are released across repeated player mounts',
     module, exports: module.exports,
     require: name => ({
       react: { useMemo: fn => fn(), useState: fn => [fn()], useEffect: fn => effects.push(fn) },
-      'react-native': { Dimensions: {
+      'react-native': { Platform: { OS: 'android' }, Dimensions: {
         get: () => ({ width: 360, height: 772 }),
         addEventListener: (_event, fn) => { listeners.add(fn); return { remove: () => listeners.delete(fn) }; },
       } },

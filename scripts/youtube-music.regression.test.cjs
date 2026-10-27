@@ -127,6 +127,19 @@ test("YouTube search keeps provider-qualified IDs and playlist results without a
   assert.equal(results.albums.length, 0);
 });
 
+test("a search finishing after Home refresh cannot refill the cleared cache", async () => {
+  let finish; let searches = 0;
+  const fresh = {songs:[],playlists:[],artists:[]};
+  const f = fixture({search: async () => { searches++; return searches === 1 ? new Promise(resolve => { finish=resolve; }) : fresh; }});
+  const outgoing = f.searchYouTubeMusic('Artist','artists');
+  await Promise.resolve();
+  f.clearYouTubeSearchCache(); finish(fresh); await outgoing;
+  await f.searchYouTubeMusic('Artist','artists');
+  assert.equal(searches,2);
+  await f.searchYouTubeMusic('Artist','artists');
+  assert.equal(searches,2);
+});
+
 test("artist search and detail share YouTube identities and playable deferred streams on both platforms", async () => {
   const channel = "UC" + "a".repeat(22);
   for (const platform of ["android", "ios"]) {

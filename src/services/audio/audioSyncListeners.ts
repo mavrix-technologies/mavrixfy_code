@@ -7,12 +7,11 @@ import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
 import { updatePlaybackProgress } from "@/services/audio/playbackProgressStore";
 import type { SeekOverride } from "@/services/audio/audioProgressTracking";
 import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
-import { carPlayService } from "@/services/carPlayService";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import type { SleepTimerState, PlaybackQualityState } from "@/types/playbackTypes";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 import { useEffect,type MutableRefObject } from "react";
-import { AppState,Platform } from "react-native";
+import { AppState } from "react-native";
 import type { NativePlaybackPlayer, State as AudioState, Event as AudioEvent } from "./NativePlaybackPlayer";
 
 interface UseAudioSyncListenersOptions {
@@ -44,21 +43,13 @@ interface UseAudioSyncListenersOptions {
   sleepTimerRef: MutableRefObject<SleepTimerState | null>;
   clearSleepTimer: () => void;
   showPlaybackNotice: (msg: string) => void;
-  likedSongs: Song[];
-  likedSongsRef: MutableRefObject<Song[]>;
-  playSong: (song: Song, queue?: Song[], position?: number) => Promise<void> | void;
   playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number) => Promise<void> | void>;
   nextSongRef: MutableRefObject<() => void>;
   prevSongRef: MutableRefObject<() => void>;
   isNativeQueueSyncedRef?: MutableRefObject<boolean>;
   triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[]) => Promise<Song[]>;
-  isShuffled?: boolean;
   repeatMode?: "off" | "all" | "one";
   repeatModeRef?: MutableRefObject<"off" | "all" | "one">;
-  toggleShuffle?: () => void;
-  toggleRepeat?: () => void;
-  toggleLike?: (song: Song) => Promise<void> | void;
-  likedSongIds?: string[] | Set<string>;
 }
 
 export function useAudioSyncListeners({
@@ -90,21 +81,13 @@ export function useAudioSyncListeners({
   sleepTimerRef,
   clearSleepTimer,
   showPlaybackNotice,
-  likedSongs,
-  likedSongsRef,
-  playSong,
   playSongRef,
   nextSongRef,
   prevSongRef,
   isNativeQueueSyncedRef,
   triggerAutoplayAppend,
-  isShuffled,
   repeatMode,
   repeatModeRef,
-  toggleShuffle,
-  toggleRepeat,
-  toggleLike,
-  likedSongIds,
 }: UseAudioSyncListenersOptions) {
   // TrackPlayer native event handlers
   useEffect(() => {
@@ -173,7 +156,9 @@ export function useAudioSyncListeners({
         }
 
         if (!targetSong && activeTrackId) {
-          const foundIndex = currentQ.findIndex((s) => String(s.id) === String(activeTrackId));
+          const requestedIndex = queueIndexRef.current;
+          const foundIndex = currentQ[requestedIndex]?.id === activeTrackId ? requestedIndex
+            : currentQ.findIndex((s) => String(s.id) === String(activeTrackId));
           if (foundIndex >= 0) {
             targetSong = currentQ[foundIndex];
             resolvedIndex = foundIndex;
@@ -181,7 +166,7 @@ export function useAudioSyncListeners({
         }
 
         // Only fall back to index if the native queue is confirmed 1:1 synchronized
-        if (!targetSong && isNativeQueueSyncedRef?.current && nextIndex >= 0 && nextIndex < currentQ.length) {
+        if (!targetSong && !activeTrackId && isNativeQueueSyncedRef?.current && nextIndex >= 0 && nextIndex < currentQ.length) {
           targetSong = currentQ[nextIndex];
           resolvedIndex = nextIndex;
         }
@@ -253,6 +238,8 @@ export function useAudioSyncListeners({
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackState, (event: any) => {
+        const pending = pendingPlayRequestRef.current;
+        if (pending && event?.trackId && event.trackId !== pending.songId) return;
         const nextState = event && typeof event === "object" && "state" in event ? event.state : event;
 
         switch (nextState) {
@@ -354,10 +341,14 @@ export function useAudioSyncListeners({
           if (trackId !== currentSongRef.current?.id ||
             (isNativeQueueSyncedRef?.current && typeof event.track === "number" && event.track !== queueIndexRef.current)) {
             const requestId = playRequestIdRef?.current;
+            const selectedSong = currentSongRef.current;
+            const selectedIndex = queueIndexRef.current;
+            const scope = getAccountScope();
             // Confirm against one current native snapshot: a delayed outgoing
             // tick must not undo a newer selection or overwrite its timeline.
             void TrackPlayer.getPlaybackSnapshot().then(state => {
-              if (requestId !== playRequestIdRef?.current) return;
+              if (!isCurrentAccount(scope) || requestId !== playRequestIdRef?.current ||
+                selectedSong !== currentSongRef.current || selectedIndex !== queueIndexRef.current) return;
               const track = state.queue[state.index];
               if (track?.id !== trackId || (pendingPlayRequestRef.current && trackId !== pendingPlayRequestRef.current.songId)) return;
               reconcileActiveTrack({ index: state.index, track });
@@ -407,11 +398,14 @@ export function useAudioSyncListeners({
 
       }),
       subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, reconcileActiveTrack),
-      subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, async (event?: { reason?: string }) => {
+      subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, async (event?: { reason?: string; trackId?: string; index?: number }) => {
         const wantsPlayback = () => desiredPlayStateRef.current !== false;
         if (!wantsPlayback() || playbackLoadingRef.current || pendingPlayRequestRef.current) return;
+        if (event?.trackId && (event.trackId !== currentSongRef.current?.id ||
+          (isNativeQueueSyncedRef?.current && typeof event.index === "number" && event.index !== queueIndexRef.current))) return;
         if (event?.reason === "unresolved-next") {
-          const next = queueRef.current[queueIndexRef.current + 1];
+          const next = queueRef.current[queueIndexRef.current + 1] ||
+            ((repeatModeRef?.current || repeatMode) === "all" ? queueRef.current[0] : undefined);
           if (next) void playSongRef.current(next, queueRef.current);
           return;
         }
@@ -550,111 +544,4 @@ export function useAudioSyncListeners({
     return () => sub.remove();
   }, [isPlayerReady, TrackPlayer, currentSongRef, isNativeQueueSyncedRef, pendingPlayRequestRef, playbackLoadingRef, queueIndexRef, queueRef, setCurrentSong, setNativeDuration, setNativePosition, setQueueIndex]);
 
-  // Sync state and listen for playback requests from Apple CarPlay
-  useEffect(() => {
-    if (Platform.OS !== "ios" || !carPlayService.isAvailable()) return;
-
-    void carPlayService.syncFavorites(likedSongs);
-
-    playerPersistenceService.getUserPlaylists()
-      .then((playlists) => {
-        if (playlists && playlists.length > 0) {
-          void carPlayService.syncPlaylists(playlists);
-        }
-      })
-      .catch(() => {});
-
-    playerPersistenceService.getRecentlyPlayed()
-      .then((recent) => {
-        const recentSongs: Song[] = (recent || []).flatMap((item) => {
-          const s = item.data as Song;
-          return s && s.id ? [s] : [];
-        });
-        if (recentSongs.length > 0) {
-          void carPlayService.syncRecent(recentSongs);
-        }
-      })
-      .catch(() => {});
-
-    if (currentSong) {
-      const hasLiked =
-        likedSongIds instanceof Set
-          ? likedSongIds.has(currentSong.id)
-          : Array.isArray(likedSongIds)
-            ? likedSongIds.includes(currentSong.id)
-            : false;
-      const isFav = Boolean(
-        currentSong.id &&
-          (hasLiked || likedSongsRef.current.some((s) => s.id === currentSong.id))
-      );
-      void carPlayService.syncNowPlaying({
-        songId: currentSong.id,
-        title: currentSong.title,
-        artist: currentSong.artist,
-        album: currentSong.album || "",
-        coverUrl: currentSong.coverUrl || "",
-        duration: toDurationSeconds(currentSong.duration),
-        elapsedTime: positionSecondsRef.current || 0,
-        isPlaying: isPlayingRef.current,
-        isFavorite: isFav,
-        isShuffle: Boolean(isShuffled),
-        repeatMode: repeatMode || "off",
-        queueCount: queueRef.current.length,
-      });
-    }
-
-    const unsubPlay = carPlayService.onPlaySong((event) => {
-      if (event.song && (event.song as Song).id) {
-        void playSong(event.song as Song);
-      } else if (event.songId) {
-        const found =
-          queueRef.current.find((s) => s.id === event.songId) ||
-          likedSongsRef.current.find((s) => s.id === event.songId);
-        if (found) {
-          void playSong(found);
-        }
-      }
-    });
-
-    const unsubFav = carPlayService.onToggleFavorite(() => {
-      const active = currentSongRef.current;
-      if (active && toggleLike) {
-        void toggleLike(active);
-      }
-    });
-
-    const unsubShuffle = carPlayService.onToggleShuffle(() => {
-      if (toggleShuffle) {
-        toggleShuffle();
-      }
-    });
-
-    const unsubRepeat = carPlayService.onToggleRepeat(() => {
-      if (toggleRepeat) {
-        toggleRepeat();
-      }
-    });
-
-    return () => {
-      unsubPlay();
-      unsubFav();
-      unsubShuffle();
-      unsubRepeat();
-    };
-  }, [
-    likedSongs,
-    playSong,
-    likedSongsRef,
-    queueRef,
-    currentSong,
-    isShuffled,
-    repeatMode,
-    likedSongIds,
-    toggleShuffle,
-    toggleRepeat,
-    toggleLike,
-    positionSecondsRef,
-    isPlayingRef,
-    currentSongRef,
-  ]);
 }

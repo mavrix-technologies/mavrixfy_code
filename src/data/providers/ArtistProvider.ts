@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { loadYouTubeArtist, loadYouTubeArtistSongs, searchYouTubeMusic } from "@/services/youtube/YouTubeMusic";
+import { clearYouTubeSearchCache, loadYouTubeArtist, loadYouTubeArtistSongs, searchYouTubeMusic } from "@/services/youtube/YouTubeMusic";
 import { artistChannelId, validArtistChannelId, type ArtistCard, type ArtistDetails } from "@/services/youtube/YouTubeArtists";
 export type { ArtistCard, ArtistDetails, ArtistAlbum } from "@/services/youtube/YouTubeArtists";
 
@@ -10,6 +10,17 @@ const pending = new Map<string, Promise<ArtistDetails | null>>();
 let featured: { at: number; data: ArtistCard[] } | undefined;
 let featuredRequest: Promise<ArtistCard[]> | undefined;
 let generation = 0;
+
+/** Read-only startup fallback: do not start discovery requests while offline. */
+export async function getCachedFeaturedArtists(): Promise<ArtistCard[]> {
+  try {
+    const stored = featured ?? JSON.parse(await AsyncStorage.getItem(`${PREFIX}:featured`) || "null");
+    if (!stored || !Number.isFinite(stored.at) || stored.at > Date.now() ||
+      Date.now() - stored.at > 24 * 60 * 60 * 1000 || !Array.isArray(stored.data)) return [];
+    return stored.data.filter((artist: ArtistCard) => artist && validArtistChannelId(artist.id) &&
+      typeof artist.name === "string" && Array.isArray(artist.image)).slice(0, 24);
+  } catch { return []; }
+}
 
 export function getImmediateCachedArtist(id: string): ArtistDetails | null {
   const cached = memory.get(validArtistChannelId(id) ? `youtube_artist_${artistChannelId(id)}` : id);
@@ -86,6 +97,7 @@ export async function getFeaturedArtists(options?: { forceRefresh?: boolean }): 
 }
 export async function clearFeaturedArtistsCache() {
   generation++; featured = undefined; featuredRequest = undefined;
+  clearYouTubeSearchCache();
   await AsyncStorage.removeItem(`${PREFIX}:featured`).catch(() => {});
 }
 export function getArtistSongs(id: string, cursor = "") { return loadYouTubeArtistSongs(id, cursor); }

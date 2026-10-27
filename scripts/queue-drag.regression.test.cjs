@@ -101,6 +101,7 @@ test("native draggable worklet selects the last slot at the exact content bounda
   vm.runInNewContext(worklet, {
     module: compiled, exports: compiled.exports,
     require(name) {
+      if (name === "react-native") return { Platform: { OS: "android" } };
       if (name === "react-native-reanimated") return {
         useDerivedValue: fn => shared(fn()), withSpring: value => value,
       };

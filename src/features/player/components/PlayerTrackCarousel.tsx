@@ -42,6 +42,7 @@ export interface PlayerTrackCarouselProps {
   videoVisible: boolean;
   onTrackPress: (index: number) => void;
   onScroll: any;
+  onScrollBeginDrag: () => void;
   onMomentumScrollEnd: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   getItemLayout: any;
   transitionArtworkRef?: React.RefObject<ViewInstance | null>;
@@ -65,6 +66,7 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
   videoVisible,
   onTrackPress,
   onScroll,
+  onScrollBeginDrag,
   onMomentumScrollEnd,
   getItemLayout,
   transitionArtworkRef,
@@ -244,6 +246,7 @@ export const PlayerTrackCarousel = React.memo(function PlayerTrackCarousel({
         updateCellsBatchingPeriod={50}
         removeClippedSubviews={false}
         onScroll={onScroll}
+        onScrollBeginDrag={onScrollBeginDrag}
         onLayout={onArtworkLayout}
         onContentSizeChange={onArtworkLayout}
         scrollEventThrottle={16}

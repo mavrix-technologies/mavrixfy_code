@@ -151,7 +151,7 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
     sleepTimerRef,
   });
 
-  const { likedSongIds, likedSongs, likedSongsRef, isLiked, toggleLike } = useAudioLikedSync({
+  const { likedSongIds, likedSongs, isLiked, toggleLike } = useAudioLikedSync({
     userId: authUser?.id,
   });
 
@@ -173,8 +173,6 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
     TrackPlayer,
     isPlayerReady: core.isPlayerReady,
     ensurePlayerReady: core.ensurePlayerReady,
-    RepeatMode,
-    repeatModeRef: core.repeatModeRef,
     enqueueNativeQueueMutation: core.enqueueNativeQueueMutation,
     canUseLightweightAudioFallback,
     showPlaybackNotice: core.showPlaybackNotice,
@@ -259,21 +257,13 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
     sleepTimerRef,
     clearSleepTimer,
     showPlaybackNotice: core.showPlaybackNotice,
-    likedSongs,
-    likedSongsRef,
-    playSong,
     playSongRef: core.playSongRef,
     nextSongRef: core.nextSongRef,
     prevSongRef: core.prevSongRef,
     isNativeQueueSyncedRef: core.isNativeQueueSyncedRef,
     triggerAutoplayAppend: core.triggerAutoplayAppend,
-    isShuffled: core.isShuffled,
     repeatMode: core.repeatMode,
     repeatModeRef: core.repeatModeRef,
-    toggleShuffle,
-    toggleRepeat,
-    toggleLike,
-    likedSongIds,
   });
 
   const playbackValues = useAudioPlaybackValues({

@@ -310,7 +310,7 @@ export function useAudioPlaybackCommands({
                 return songToTrack(queueSong, cachedUrl || null, streamUrlCache.current);
               });
 
-              const hasValidUrl = (t: any) => t?.source === "youtube" || (typeof t?.url === "string" && t.url.length > 5);
+              const hasValidUrl = (t: any) => TrackPlayer!.supportsUnresolvedQueue || t?.source === "youtube" || (typeof t?.url === "string" && t.url.length > 5);
               const allTracksValid = nativeTracks.length === q.length && nativeTracks.every(hasValidUrl);
 
               if (allTracksValid) {

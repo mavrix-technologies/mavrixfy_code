@@ -79,6 +79,9 @@ jobs:
             -o "$RUNNER_TEMP/ios-playback-timeline-tests"
           "$RUNNER_TEMP/ios-playback-timeline-tests"
 
+      - name: Test production playback engine on iOS simulator
+        run: bash scripts/test-ios-playback-engine.sh
+
       # Generate fresh native configuration before restoring build caches.
       - name: Prebuild iOS
         run: npx expo prebuild --platform ios --clean --no-install

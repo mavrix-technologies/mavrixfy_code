@@ -1,9 +1,24 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { withAndroidManifest, withMainApplication, withDangerousMod } = require("@expo/config-plugins");
+const { withAndroidManifest, withMainApplication, withDangerousMod, withStringsXml } = require("@expo/config-plugins");
 
 /** Media3's local module supplies the only playback/library service. */
 module.exports = function withAndroidAuto(config) {
+  config = withStringsXml(config, mod => {
+    const fallback = String(config.extra?.musicApiDomain || "mavrixfy-song-api.vercel.app");
+    const configured = process.env.EXPO_PUBLIC_APP_API_URL || process.env.EXPO_PUBLIC_MUSIC_API_URL || fallback;
+    let api;
+    try {
+      api = new URL(/^https?:\/\//i.test(configured) ? configured : `https://${configured}`);
+      if (api.protocol !== "https:" || /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(api.hostname)) throw new Error("Non-production API");
+    } catch {
+      api = new URL(/^https:\/\//i.test(fallback) ? fallback : `https://${fallback}`);
+    }
+    const strings = mod.modResults.resources.string || [];
+    mod.modResults.resources.string = strings.filter(item => item.$.name !== "mavrixfy_car_api_base_url");
+    mod.modResults.resources.string.push({ $: { name: "mavrixfy_car_api_base_url", translatable: "false" }, _: api.href.replace(/\/$/, "") });
+    return mod;
+  });
   config = withAndroidManifest(config, mod => {
     const app = mod.modResults.manifest.application[0];
     app["meta-data"] = (app["meta-data"] || []).filter(entry => entry.$["android:name"] !== "com.google.android.gms.car.application");

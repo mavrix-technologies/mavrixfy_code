@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger";
+import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
 import type { Song } from "@/lib/musicData";
 import * as ExpoAvPlayer from "@/services/audio/ExpoAvAdapter";
 import { updatePlaybackEngineSnapshot } from "@/services/audio/PlaybackEngine";
@@ -11,7 +12,7 @@ withResolvedPlaybackUrl,
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import type { PlaybackQualityState } from "@/types/playbackTypes";
 import { useCallback,useRef,type MutableRefObject } from "react";
-import type { NativePlaybackPlayer, RepeatMode as AudioRepeatMode } from "./NativePlaybackPlayer";
+import type { NativePlaybackPlayer } from "./NativePlaybackPlayer";
 
 interface UseAudioQualityControlOptions {
   desiredPlayStateRef?: MutableRefObject<boolean | null>;
@@ -31,8 +32,6 @@ interface UseAudioQualityControlOptions {
   TrackPlayer: NativePlaybackPlayer | null;
   isPlayerReady: boolean;
   ensurePlayerReady: () => Promise<boolean>;
-  RepeatMode: typeof AudioRepeatMode;
-  repeatModeRef: MutableRefObject<"off" | "all" | "one">;
   enqueueNativeQueueMutation: (op: () => Promise<void>) => Promise<void>;
   canUseLightweightAudioFallback: boolean;
   showPlaybackNotice: (msg: string) => void;
@@ -56,8 +55,6 @@ export function useAudioQualityControl({
   TrackPlayer,
   isPlayerReady,
   ensurePlayerReady,
-  RepeatMode,
-  repeatModeRef,
   enqueueNativeQueueMutation,
   canUseLightweightAudioFallback,
   showPlaybackNotice,
@@ -66,19 +63,21 @@ export function useAudioQualityControl({
   const changeStreamingQuality = useCallback(
     async (quality: "auto" | "low" | "medium" | "high") => {
       const version = ++qualityRequest.current;
+      const scope = getAccountScope();
       const requestId = playRequestIdRef?.current;
       await playerPersistenceService.saveStreamingQuality(quality);
-      if (version !== qualityRequest.current) return;
+      if (version !== qualityRequest.current || !isCurrentAccount(scope)) return;
       invalidateQualityPreferenceCache();
 
       streamUrlCache.current.clear();
       streamResolveCache.current.clear();
+      if (requestId !== playRequestIdRef?.current) return;
 
       const activeSong = currentSongRef.current;
       if (!activeSong) return;
 
       const wasPlaying = isPlayingRef.current;
-      const isCurrent = () => version === qualityRequest.current &&
+      const isCurrent = () => isCurrentAccount(scope) && version === qualityRequest.current &&
         currentSongRef.current?.id === activeSong.id && requestId === playRequestIdRef?.current;
       const shouldPlay = () => isCurrent() && (desiredPlayStateRef?.current ?? wasPlaying);
 
@@ -90,55 +89,38 @@ export function useAudioQualityControl({
           return;
         }
 
-        setPlaybackQuality(qualityState);
-
         const resolvedSong = withResolvedPlaybackUrl(currentSongRef.current!, newAudioUrl);
-        currentSongRef.current = resolvedSong;
-        setCurrentSong(resolvedSong);
-
-        const currentIdx = queueIndexRef.current;
-        const updatedJsQueue = queueRef.current.map((s, idx) =>
-          idx === currentIdx ? resolvedSong : s
-        );
-        queueRef.current = updatedJsQueue;
-        setQueue(updatedJsQueue);
-
-        const updatedSourceQueue = originalQueueRef.current.map((s) =>
-          s.id === resolvedSong.id ? resolvedSong : s
-        );
-        originalQueueRef.current = updatedSourceQueue;
-        setSourceQueue(updatedSourceQueue);
-        updatePlaybackEngineSnapshot({ currentSong: resolvedSong, queue: updatedJsQueue, sourceQueue: updatedSourceQueue });
+        const publishQuality = () => {
+          setPlaybackQuality(qualityState);
+          currentSongRef.current = resolvedSong;
+          setCurrentSong(resolvedSong);
+          const updatedJsQueue = queueRef.current.map((song, index) =>
+            index === queueIndexRef.current ? resolvedSong : song);
+          queueRef.current = updatedJsQueue;
+          setQueue(updatedJsQueue);
+          const updatedSourceQueue = originalQueueRef.current.map((song) =>
+            song.id === resolvedSong.id ? resolvedSong : song);
+          originalQueueRef.current = updatedSourceQueue;
+          setSourceQueue(updatedSourceQueue);
+          updatePlaybackEngineSnapshot({ currentSong: resolvedSong, queue: updatedJsQueue, sourceQueue: updatedSourceQueue });
+        };
 
         if (TrackPlayer && (isPlayerReady || (await ensurePlayerReady()))) {
           await enqueueNativeQueueMutation(async () => {
             if (!isCurrent()) return;
-            const nativeQueue = await TrackPlayer!.getQueue();
+            const nativeState = await TrackPlayer!.getPlaybackSnapshot();
             if (!isCurrent()) return;
-            const activeIdx = await TrackPlayer!.getActiveTrackIndex();
-            if (!isCurrent()) return;
+            const { queue: nativeQueue, index: activeIdx } = nativeState;
             if (!nativeQueue.length || !Number.isInteger(activeIdx) || activeIdx < 0 || activeIdx >= nativeQueue.length ||
               nativeQueue[activeIdx]?.id !== resolvedSong.id) return;
 
-            const updatedNativeQueue = nativeQueue.map((track: any, idx: number) =>
-              idx === activeIdx
-                ? songToTrack(resolvedSong, newAudioUrl, streamUrlCache.current)
-                : track
-            );
-
-            await TrackPlayer!.setQueue(updatedNativeQueue, activeIdx, Math.max(0, positionSecondsRef.current));
-            if (!isCurrent()) return;
-
-            if (RepeatMode) {
-              const repeatMap: Record<string, any> = {
-                off: RepeatMode.Off,
-                all: RepeatMode.Queue,
-                one: RepeatMode.Track,
-              };
-              await TrackPlayer!.setRepeatMode(
-                repeatMap[repeatModeRef.current] ?? RepeatMode.Off
-              ).catch(() => {});
-            }
+            // Native validates the active occurrence again when applying this
+            // update, retaining its own live position, queue and repeat mode.
+            const applied = await TrackPlayer!.updateCurrentTrack(activeIdx,
+              songToTrack(resolvedSong, newAudioUrl, streamUrlCache.current));
+            if (!isCurrent() || applied.index !== activeIdx ||
+              applied.queue[activeIdx]?.id !== resolvedSong.id || applied.queue[activeIdx]?.url !== newAudioUrl) return;
+            publishQuality();
 
             if (shouldPlay()) {
               await TrackPlayer!.play();
@@ -147,6 +129,7 @@ export function useAudioQualityControl({
             }
           });
         } else if (canUseLightweightAudioFallback) {
+          publishQuality();
           const positionSec = Math.max(0, positionSecondsRef.current);
           await ExpoAvPlayer.loadAndPlay(newAudioUrl, resolvedSong, shouldPlay, positionSec);
           if (!isCurrent()) return;
@@ -169,8 +152,6 @@ export function useAudioQualityControl({
       positionSecondsRef,
       queueIndexRef,
       queueRef,
-      repeatModeRef,
-      RepeatMode,
       setCurrentSong,
       setPlaybackQuality,
       setQueue,

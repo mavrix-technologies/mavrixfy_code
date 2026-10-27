@@ -146,6 +146,7 @@ const LegacyPlayerScreenView = memo(function LegacyPlayerScreenView({ interactio
                 onTrackPress={s.handleTrackChange}
                 onScroll={s.handleScroll}
                 onMomentumScrollEnd={s.handleScrollFinished}
+                onScrollBeginDrag={s.handleScrollBeginDrag}
                 getItemLayout={s.trackSwipeGetItemLayout}
                 transitionArtworkRef={transitionArtworkRef}
                 onArtworkLayout={onArtworkLayout}

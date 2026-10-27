@@ -12,7 +12,7 @@ Native owns decoding, its timeline, buffering and automatic queue advancement.
 JavaScript owns song resolution, account preferences and queue business rules.
 
 Media3 preloads five seconds of the next playlist item. AVQueuePlayer prepares
-its queued items. JavaScript resolves the next three signed streaming URLs and
+its queued items. JavaScript resolves the next signed streaming URL and
 updates only upcoming items; it creates no extra playback decoder. Signed URLs
 still require the resolver: indefinite background playback beyond already
 resolved items is not guaranteed if iOS suspends JavaScript. Resolve streams
@@ -24,8 +24,9 @@ Rebuild the native client after this migration. A Metro reload or OTA update
 cannot install the module. The runtime version changed to prevent this bundle
 from reaching older binaries.
 
-SDK 58 uses runtime `3.5.0-35000-sdk58-native-player2`. Rebuild both native
-clients when moving from SDK 57; clearing Metro alone does not upgrade them.
+The Android car fix uses runtime `3.5.0-35002-sdk58-native-player3`; the iOS
+lock-screen repair uses `3.5.0-35001-sdk58-native-player3`. Rebuild both native clients when moving from
+SDK 57; clearing Metro alone does not upgrade them.
 
 - Android: `npm run android`, then `npm start` when reusing the installed client.
 - iOS on macOS/Xcode: `npm run ios`; alternatively use the existing EAS
@@ -49,8 +50,21 @@ remain saved, but processing is disabled. Adding iOS EQ requires a separately
 verified compatible processing implementation.
 
 Native notification/lock-screen queue transport operates on the prepared native
-queue. Android Auto browse/search/like/shuffle additionally needs the active
-JavaScript catalog/resolver; cold-start catalog resolution is not implemented.
+queue. Android Auto can now start its MediaLibraryService without a phone
+Activity or React bridge. It restores the last account's published library and
+prepared sources from private app storage, and offers native public browse,
+search, voice selection and playback resumption for a fresh installation.
+The host config plugin supplies the production API URL; browse requests have an
+eight-second deadline and selections an 8.5-second deadline. Native public
+streams respect the last synced streaming-quality and Data Saver preferences.
+
+With the phone's car listeners registered, personal-library selections continue
+through the shared JavaScript resolver. Without them, unexpired prepared audio
+is reused, or the native catalog resolves an exact title/artist/duration match.
+Tracks without a valid source or matching recording report unavailability;
+provider verification is not bypassed. Like actions require the phone's account
+client and are not advertised on a cold connection. Native shuffle and repeat
+remain available. Account changes discard prepared sources and resume state.
 
 Run `npm test` and `npm run typecheck`. Native bridge regression tests are
 mock-based. For actual Android decoder/foreground-service tests, connect an
@@ -466,3 +480,95 @@ iPhone. A new signed IPA and device testing remain required to confirm the
 timing fix and check that complete audio plays before automatic Next.
 
 Release packaging runs `verifyReleaseSigning` and requires all four `MAVRIXFY_UPLOAD_*` values. Missing credentials or the Android debug keystore stop release packaging. Debug development builds keep their normal signing configuration.
+
+## Android Auto cold-start verification on 2026-10-27
+
+Android 17 x86_64 emulator with 16 KB pages: all 14 native instrumentation
+tests passed. New coverage connects through the platform MediaBrowser without
+an Activity or React bridge, browses a fresh installation and a persisted
+library, plays a real remote stream, resolves voice selections, cancels a
+pending selection on Pause, and resumes after the service is recreated.
+The live browse/play/search/cancel flow also passed three isolated repeat runs.
+Repository tests cover account isolation, expired URLs, preview rejection,
+exact recording matching, headers, saved quality and Data Saver.
+
+All 680 JavaScript regressions, TypeScript and changed TypeScript lint passed.
+Release Kotlin compilation and the merged release manifest passed verification:
+version code 35002, one native media service with modern and legacy browser
+discovery, Android Auto metadata and all eight optional hardware declarations.
+
+Physical follow-up used a USB-connected vivo 1901 on Android 11 with Google's
+Desktop Head Unit and the phone's Android Auto head unit server. All 15 native
+instrumentation tests passed, including live online browsing and playback.
+The standalone, optimized QA APK was installed in place without clearing app
+data; phone playback does not require Metro.
+
+DHU verification passed fresh native browsing, Hindi and English song lists,
+selection, audible playback (confirmed by the user), Pause/Resume, Next,
+Previous, queue selection and automatic advancement. Opening the phone app
+keeps the selected song, artwork and playback state synchronized with the car.
+Testing exposed a single-item queue restoration bug and a warm phone/car
+selection mismatch; both were repaired and retested on the final QA build.
+
+After stopping DHU and reinstalling the identical signed QA APK in place to
+terminate the app process, the phone stayed on its launcher. Reconnecting DHU
+and pressing Play restored Ride It from its saved position (about 28 seconds)
+and retained all 30 queued songs. Next and Previous selected the expected
+tracks with the full queue intact. Playback was paused after verification.
+Artifacts are under `outputs/physical-auto-35002/`; the QA APK is
+`Mavrixfy-3.5.0-35002-car-qa.apk`. This APK uses local QA signing and is not the
+Play upload bundle. Actual vehicle hardware and Google Assistant speech
+recognition were not tested; native search selection was tested. These results
+do not establish Google Play approval.
+
+This repair requires a new native AAB; an OTA update cannot repair version
+35001's service. Build with `npm run build:playstore:aab`, replace the rejected
+bundle on every affected Play track and submit the changes for review.
+
+## iOS lock-screen selection repair on 2026-10-27
+
+The iOS engine now lives in `ios/NativePlayback.swift`; the Expo module is only
+its bridge. Snapshot reads and mutations reconcile AVQueuePlayer's actual
+current item before interpreting a queue index. This prevents an upcoming URL
+update, arriving before KVO delivery, from relabeling the new audio with the
+previous song's metadata. Repeated KVO/snapshot reads no longer publish duplicate
+active selections. Now Playing includes content identity and logical queue
+position/count, and refreshes Next immediately when repeat or the queue changes.
+
+iOS retains unresolved playlist entries in its logical queue, keeping Next
+available. Prepared lock-screen selections stay native; unresolved or expired
+sources use the shared resolver. Rapid commands during resolution use the latest
+requested song, and Play cannot resume the outgoing source while resolution is
+pending. EOF continuation waits until AVQueuePlayer removes the ended item.
+Already prepared repeat-all playback still wraps without JavaScript.
+
+Quality changes now conditionally update the native active occurrence, retaining
+its live clock and queue instead of replacing the full queue. Native track-ID
+and active-index checks reject stale updates after Next or reorder on both
+platforms. Source warming preserves downloaded files, including when a download
+is prepared while a remote resolution is pending. Old progress snapshots cannot
+revert a newer selection. Removed the
+unimplemented CarPlay bridge facade, its unreachable effect and unused liked-song
+ref; Android Auto remains implemented by the existing native media service.
+Artwork carousel selection now requires an actual user drag. Programmatic
+alignment after lock-screen Next cannot select another song, and rapid user
+swipes no longer lose playback commands to an arbitrary cooldown.
+
+Regression coverage includes rapid lock-screen Next, unknown IDs, duplicate
+occurrences, delayed progress, stale quality/preloads, account changes and
+repeat-all resolution and artwork gesture ownership. All 700 JavaScript tests,
+TypeScript and repository-wide
+lint passed. Android 17 emulator instrumentation passed 15 tests; the optional
+online car test was skipped (16 declared tests, zero failures). The macOS
+workflow now runs the production engine against
+local PCM assets on an iOS simulator via `scripts/test-ios-playback-engine.sh`.
+Windows Swift grammar checks passed; they do not replace Xcode compilation.
+The new simulator harness and a physical iPhone lock-screen session still need
+to run on macOS/the rebuilt iOS client. Background continuation still depends
+on JavaScript when an upcoming source has not been resolved.
+
+The repair follows Apple's AVPlayer current-item observation and remote-command
+model: https://developer.apple.com/documentation/avfoundation/avplayer/currentitem
+and https://developer.apple.com/documentation/mediaplayer/mpremotecommandcenter.
+iOS build 35001 requires a new native IPA; do not deliver it to player2 binaries
+as an OTA-only repair.

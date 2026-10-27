@@ -6,7 +6,7 @@ const ts = require("typescript");
 const channel = "youtube_artist_UC" + "a".repeat(22);
 function providerFixture(overrides = {}) {
   const storage = new Map(); let now = 1000000; let loads = 0;
-  const api = { searchYouTubeMusic: async () => ({ artists: [{ id: channel, name: "Artist", image: [] }] }),
+  const api = { clearYouTubeSearchCache: () => {}, searchYouTubeMusic: async () => ({ artists: [{ id: channel, name: "Artist", image: [] }] }),
     loadYouTubeArtist: async id => { loads++; return { id, name: "Artist", image: [], topSongs: [], topAlbums: [], similarArtists: [], hasMoreSongs: false }; },
     ...overrides };
   const module = { exports: {} };
@@ -20,7 +20,7 @@ function providerFixture(overrides = {}) {
       setItem: async (key, data) => storage.set(key, data), removeItem: async key => storage.delete(key) };
     throw new Error(name);
   } });
-  return { ...module.exports, loads: () => loads, advance: ms => now += ms };
+  return { ...module.exports, storage, loads: () => loads, advance: ms => now += ms };
 }
 test("artist requests coalesce, expire, and resolve saved legacy IDs only by exact name", async () => {
   const f = providerFixture();
@@ -46,6 +46,20 @@ test("featured artists use bounded discovery, qualified identities, and a coales
   assert.equal(queries, 4); assert.equal(maximum, 2);
   await f.getAllPopularArtists(); assert.equal(queries, 4);
   await f.getAllPopularArtists({ forceRefresh: true }); assert.equal(queries, 8);
+});
+
+test("Home reads saved artist profiles offline without making discovery requests", async () => {
+  const f = providerFixture({searchYouTubeMusic: async () => { throw Error('Must not use network'); }});
+  const key = '@mavrixfy_youtube_artists_v1:featured';
+  f.storage.set(key, JSON.stringify({at:1000000, data:[{id:channel,name:'Artist',image:[]}]}));
+  assert.equal((await f.getCachedFeaturedArtists())[0].id, channel);
+  f.advance(24 * 60 * 60 * 1000 + 1);
+  assert.equal((await f.getCachedFeaturedArtists()).length,0);
+  for (const value of ['{broken',JSON.stringify({at:1000000,data:{}}),JSON.stringify({at:1000000,data:[{id:'invalid',name:'Artist',image:[]}]})]) {
+    const invalid = providerFixture();
+    invalid.storage.set(key,value);
+    assert.equal((await invalid.getCachedFeaturedArtists()).length,0);
+  }
 });
 
 function followedFixture(search) {

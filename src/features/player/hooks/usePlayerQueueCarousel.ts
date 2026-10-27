@@ -23,69 +23,48 @@ export function usePlayerQueueSwipe({
   const listRef = useRef<FlatList<ArtworkQueueItem> | null>(null);
   const hasAlignedListRef = useRef(false);
   const prevListSongIdRef = useRef(currentSongId);
-  const pendingTargetIndexRef = useRef<number | null>(null);
   const userScrolledToIndexRef = useRef<number | null>(null);
-  const skipCooldownRef = useRef(false);
-  const skipCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearSkipCooldownTimer = useCallback(() => {
-    if (!skipCooldownTimerRef.current) return;
-    clearTimeout(skipCooldownTimerRef.current);
-    skipCooldownTimerRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      clearSkipCooldownTimer();
-    };
-  }, [clearSkipCooldownTimer]);
+  const userScrollingRef = useRef(false);
 
   const handleTrackChange = useCallback(
     (targetIndex: number) => {
       if (targetIndex < 0 || targetIndex >= playingQueue.length || targetIndex === activeQueueIndex) {
         return;
       }
-      if (skipCooldownRef.current) return;
-      skipCooldownRef.current = true;
-      clearSkipCooldownTimer();
-      skipCooldownTimerRef.current = setTimeout(() => {
-        skipCooldownRef.current = false;
-        skipCooldownTimerRef.current = null;
-      }, 350);
-
       const targetSong = playingQueue[targetIndex];
       if (!targetSong) {
         return;
       }
 
+      userScrollingRef.current = false;
       playSong(targetSong, playingQueue);
     },
-    [activeQueueIndex, clearSkipCooldownTimer, playSong, playingQueue]
+    [activeQueueIndex, playSong, playingQueue]
   );
 
   useEffect(() => {
-    pendingTargetIndexRef.current = activeQueueIndex;
-  }, [activeQueueIndex]);
+    userScrollingRef.current = false;
+  }, [activeQueueIndex, currentSongId]);
+
+  const handleScrollBeginDrag = useCallback(() => {
+    userScrollingRef.current = true;
+  }, []);
 
   const handleScrollFinished = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (playingQueue.length <= 1 || pageWidth <= 0) {
-        return;
-      }
+      // scrollToOffset also ends with momentum events on iOS. Aligning artwork
+      // after native Next must never send a second playback selection.
+      if (!userScrollingRef.current) return;
+      userScrollingRef.current = false;
+      if (playingQueue.length <= 1 || pageWidth <= 0) return;
 
       const rawIndex = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
       const targetIndex = Math.max(0, Math.min(rawIndex, playingQueue.length - 1));
 
-      if (
-        targetIndex === activeQueueIndex ||
-        targetIndex === pendingTargetIndexRef.current
-      ) {
-        return;
-      }
+      if (targetIndex === activeQueueIndex) return;
 
       // Mark that user manually scrolled the list here so useEffect doesn't fight the gesture
       userScrolledToIndexRef.current = targetIndex;
-      pendingTargetIndexRef.current = targetIndex;
       handleTrackChange(targetIndex);
     },
     [activeQueueIndex, pageWidth, handleTrackChange, playingQueue.length]
@@ -132,6 +111,7 @@ export function usePlayerQueueSwipe({
     scrollX,
     listRef,
     handleTrackChange,
+    handleScrollBeginDrag,
     handleScrollFinished,
     handleScroll,
   };

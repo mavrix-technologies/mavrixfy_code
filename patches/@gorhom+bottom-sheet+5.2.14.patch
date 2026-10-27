@@ -1,17 +1,335 @@
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheet.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheet.js
+index a7748c0..41dd821 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheet.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheet.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -124,7 +125,7 @@ const BottomSheetComponent = /*#__PURE__*/(0, _react.forwardRef)(function Bottom
+       return _constants.INITIAL_LAYOUT_VALUE;
+     }
+     return containerHeight - highestDetentPosition;
+-  }, [animatedLayoutState, animatedDetentsState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, animatedDetentsState] : undefined);
+   const animatedCurrentIndex = (0, _hooks.useReactiveSharedValue)(animateOnMount ? -1 : _providedIndex);
+   const animatedPosition = (0, _reactNativeReanimated.useSharedValue)(_reactNative.Dimensions.get('window').height);
+ 
+@@ -158,7 +159,7 @@ const BottomSheetComponent = /*#__PURE__*/(0, _react.forwardRef)(function Bottom
+       isSnapPointsNormalized = true;
+     }
+     return isContainerHeightCalculated && isHandleHeightCalculated && isSnapPointsNormalized;
+-  }, [animatedLayoutState, animatedDetentsState, handleComponent]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, animatedDetentsState, handleComponent] : undefined);
+   const isInTemporaryPosition = (0, _reactNativeReanimated.useSharedValue)(false);
+   const animatedContainerHeightDidChange = (0, _reactNativeReanimated.useSharedValue)(false);
+ 
+@@ -227,7 +228,7 @@ const BottomSheetComponent = /*#__PURE__*/(0, _react.forwardRef)(function Bottom
+       return _constants.SHEET_STATE.OVER_EXTENDED;
+     }
+     return _constants.SHEET_STATE.OPENED;
+-  }, [animatedLayoutState, animatedDetentsState, animatedKeyboardState, animatedPosition, animatedSheetHeight, isInTemporaryPosition, keyboardBehavior]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, animatedDetentsState, animatedKeyboardState, animatedPosition, animatedSheetHeight, isInTemporaryPosition, keyboardBehavior] : undefined);
+   const {
+     state: animatedScrollableState,
+     status: animatedScrollableStatus,
+@@ -275,7 +276,7 @@ const BottomSheetComponent = /*#__PURE__*/(0, _react.forwardRef)(function Bottom
+       return nextIndex;
+     }
+     return currentIndex;
+-  }, [android_keyboardInputMode, animatedAnimationState, animatedLayoutState, animatedCurrentIndex, animatedPosition, animatedDetentsState, isInTemporaryPosition, isLayoutCalculated]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [android_keyboardInputMode, animatedAnimationState, animatedLayoutState, animatedCurrentIndex, animatedPosition, animatedDetentsState, isInTemporaryPosition, isLayoutCalculated] : undefined);
+   //#endregion
+ 
+   //#region private methods
+@@ -1087,7 +1088,7 @@ const BottomSheetComponent = /*#__PURE__*/(0, _react.forwardRef)(function Bottom
+     if (animationStatus === _constants.ANIMATION_STATUS.RUNNING && animationSource === _constants.ANIMATION_SOURCE.GESTURE && nextIndex === -1) {
+       animateToPosition(closedDetentPosition, _constants.ANIMATION_SOURCE.GESTURE);
+     }
+-  }, [animatedContainerHeightDidChange, animatedAnimationState, animatedDetentsState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedContainerHeightDidChange, animatedAnimationState, animatedDetentsState] : undefined);
+ 
+   /**
+    * Reaction to the `snapPoints` change, to insure that the sheet position reflect
+@@ -1121,7 +1122,7 @@ const BottomSheetComponent = /*#__PURE__*/(0, _react.forwardRef)(function Bottom
+       });
+     }
+     evaluatePosition(_constants.ANIMATION_SOURCE.SNAP_POINT_CHANGE);
+-  }, [isLayoutCalculated, didAnimateOnMount, animatedDetentsState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [isLayoutCalculated, didAnimateOnMount, animatedDetentsState] : undefined);
+ 
+   /**
+    * Reaction to the keyboard state change.
+@@ -1217,7 +1218,7 @@ const BottomSheetComponent = /*#__PURE__*/(0, _react.forwardRef)(function Bottom
+     }
+     const animationConfigs = (0, _utilities.getKeyboardAnimationConfigs)(easing, duration);
+     evaluatePosition(_constants.ANIMATION_SOURCE.KEYBOARD, animationConfigs);
+-  }, [$modal, bottomInset, keyboardBehavior, keyboardBlurBehavior, android_keyboardInputMode, animatedKeyboardState, animatedLayoutState, getEvaluatedPosition]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [$modal, bottomInset, keyboardBehavior, keyboardBlurBehavior, android_keyboardInputMode, animatedKeyboardState, animatedLayoutState, getEvaluatedPosition] : undefined);
+ 
+   /**
+    * sets provided animated position
+@@ -1226,7 +1227,7 @@ const BottomSheetComponent = /*#__PURE__*/(0, _react.forwardRef)(function Bottom
+     if (_providedAnimatedPosition) {
+       _providedAnimatedPosition.value = _animatedPosition + topInset;
+     }
+-  }, [_providedAnimatedPosition, topInset]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [_providedAnimatedPosition, topInset] : undefined);
+ 
+   /**
+    * sets provided animated index
+@@ -1235,7 +1236,7 @@ const BottomSheetComponent = /*#__PURE__*/(0, _react.forwardRef)(function Bottom
+     if (_providedAnimatedIndex) {
+       _providedAnimatedIndex.value = _animatedIndex;
+     }
+-  }, [_providedAnimatedIndex]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [_providedAnimatedIndex] : undefined);
+ 
+   /**
+    * React to `index` prop to snap the sheet to the new position.
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheetBody.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheetBody.js
+index d24edba..344b248 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheetBody.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheetBody.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -28,7 +29,7 @@ function BottomSheetBodyComponent({
+     transform: [{
+       translateY: animatedPosition.get()
+     }]
+-  }), [animatedPosition, animatedIndex]);
++  }), ReanimatedDependencyPlatform.OS === 'web' ? [animatedPosition, animatedIndex] : undefined);
+   const containerStyle = (0, _react.useMemo)(() => [style, _styles.styles.container, containerAnimatedStyle], [style, containerAnimatedStyle]);
+   //#endregion
+ 
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheetContent.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheetContent.js
+index 36be0a6..37b20a9 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheetContent.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheet/BottomSheetContent.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -98,7 +99,7 @@ function BottomSheetContentComponent({
+      * @link (https://github.com/gorhom/react-native-bottom-sheet/issues/470)
+      */
+     return Math.max(contentHeight, 0);
+-  }, [animatedLayoutState, animatedKeyboardState, animatedSheetHeight, isInTemporaryPosition, keyboardBehavior]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, animatedKeyboardState, animatedSheetHeight, isInTemporaryPosition, keyboardBehavior] : undefined);
+   const animatedPaddingBottom = (0, _reactNativeReanimated.useDerivedValue)(() => {
+     const containerHeight = animatedLayoutState.get().containerHeight;
+     /**
+@@ -131,7 +132,7 @@ function BottomSheetContentComponent({
+       paddingBottom = overDragSafePaddingBottom + keyboardHeightWithinContainer;
+     }
+     return paddingBottom;
+-  }, [overDragResistanceFactor, animatedPosition, animatedLayoutState, animatedDetentsState, animatedKeyboardState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [overDragResistanceFactor, animatedPosition, animatedLayoutState, animatedDetentsState, animatedKeyboardState] : undefined);
+   //#endregion
+ 
+   //#region styles
+@@ -168,7 +169,7 @@ function BottomSheetContentComponent({
+         overrideReduceMotion
+       })
+     };
+-  }, [overDragResistanceFactor, enableDynamicSizing, detached, animationConfigs, overrideReduceMotion, animatedLayoutState, animatedContentHeightMax, animatedLayoutState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [overDragResistanceFactor, enableDynamicSizing, detached, animationConfigs, overrideReduceMotion, animatedLayoutState, animatedContentHeightMax, animatedLayoutState] : undefined);
+   const contentContainerStyle = (0, _react.useMemo)(() => [detached ? {
+     overflow: 'visible'
+   } : {
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetBackdrop/BottomSheetBackdrop.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetBackdrop/BottomSheetBackdrop.js
+index f779d6d..dbc8506 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetBackdrop/BottomSheetBackdrop.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetBackdrop/BottomSheetBackdrop.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -75,7 +76,7 @@ const BottomSheetBackdropComponent = ({
+   //#region styles
+   const containerAnimatedStyle = (0, _reactNativeReanimated.useAnimatedStyle)(() => ({
+     opacity: (0, _reactNativeReanimated.interpolate)(animatedIndex.value, [-1, disappearsOnIndex, appearsOnIndex], [0, 0, opacity], _reactNativeReanimated.Extrapolation.CLAMP)
+-  }), [animatedIndex, appearsOnIndex, disappearsOnIndex, opacity]);
++  }), ReanimatedDependencyPlatform.OS === 'web' ? [animatedIndex, appearsOnIndex, disappearsOnIndex, opacity] : undefined);
+   const containerStyle = (0, _react.useMemo)(() => [_reactNative.StyleSheet.absoluteFill, _styles.styles.backdrop, style, containerAnimatedStyle], [style, containerAnimatedStyle]);
+   //#endregion
+ 
+@@ -85,7 +86,7 @@ const BottomSheetBackdropComponent = ({
+       return;
+     }
+     (0, _reactNativeReanimated.runOnJS)(handleContainerTouchability)(shouldDisableTouchability);
+-  }, [disappearsOnIndex]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [disappearsOnIndex] : undefined);
+ 
+   // addressing updating the state after unmounting.
+   // [link](https://github.com/gorhom/react-native-bottom-sheet/issues/1376)
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetFooter/BottomSheetFooter.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetFooter/BottomSheetFooter.js
+index 11ce00d..f1d71b1 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetFooter/BottomSheetFooter.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetFooter/BottomSheetFooter.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -44,7 +45,7 @@ function BottomSheetFooterComponent({
+         translateY: Math.max(0, footerTranslateY)
+       }]
+     };
+-  }, [bottomInset, animatedKeyboardState, animatedFooterPosition]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [bottomInset, animatedKeyboardState, animatedFooterPosition] : undefined);
+   const containerStyle = (0, _react.useMemo)(() => [_styles.styles.container, style, containerAnimatedStyle], [style, containerAnimatedStyle]);
+   //#endregion
+ 
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetFooter/BottomSheetFooterContainer.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetFooter/BottomSheetFooterContainer.js
+index 60ef22f..65a7338 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetFooter/BottomSheetFooterContainer.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetFooter/BottomSheetFooterContainer.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -42,7 +43,7 @@ const BottomSheetFooterContainerComponent = ({
+     }
+     footerTranslateY = footerTranslateY - footerHeight - handleHeight;
+     return footerTranslateY;
+-  }, [animatedKeyboardState, animatedPosition, animatedLayoutState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedKeyboardState, animatedPosition, animatedLayoutState] : undefined);
+   //#endregion
+ 
+   return /*#__PURE__*/(0, _jsxRuntime.jsx)(FooterComponent, {
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.js
+index d4fe0df..1e947e8 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -34,7 +35,7 @@ function BottomSheetRefreshControlComponent({
+   //#region variables
+   const animatedProps = (0, _reactNativeReanimated.useAnimatedProps)(() => ({
+     enabled: animatedScrollableState.value === _constants.SCROLLABLE_STATUS.UNLOCKED
+-  }), [animatedScrollableState.value]);
++  }), ReanimatedDependencyPlatform.OS === 'web' ? [animatedScrollableState.value] : undefined);
+   const gesture = (0, _react.useMemo)(() => draggableGesture ? _reactNativeGestureHandler.Gesture.Native().simultaneousWithExternalGesture(...draggableGesture.toGestureArray(), ...scrollableGesture.toGestureArray()).shouldCancelWhenOutside(true) : undefined, [draggableGesture, scrollableGesture]);
+ 
+   //#endregion
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetScrollable/createBottomSheetScrollableComponent.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetScrollable/createBottomSheetScrollableComponent.js
+index ff22b0e..84b8517 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetScrollable/createBottomSheetScrollableComponent.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/components/bottomSheetScrollable/createBottomSheetScrollableComponent.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -67,7 +68,7 @@ ScrollableComponent) {
+     const scrollableAnimatedProps = (0, _reactNativeReanimated.useAnimatedProps)(() => ({
+       decelerationRate: _constants.SCROLLABLE_DECELERATION_RATE_MAPPER[animatedScrollableState.value],
+       showsVerticalScrollIndicator: showsVerticalScrollIndicator ? animatedScrollableState.value === _constants.SCROLLABLE_STATUS.UNLOCKED : showsVerticalScrollIndicator
+-    }), [animatedScrollableState, showsVerticalScrollIndicator]);
++    }), ReanimatedDependencyPlatform.OS === 'web' ? [animatedScrollableState, showsVerticalScrollIndicator] : undefined);
+     const scrollableGesture = (0, _react.useMemo)(() => draggableGesture ? _reactNativeGestureHandler.Gesture.Native()
+     // @ts-expect-error
+     .simultaneousWithExternalGesture(draggableGesture).shouldCancelWhenOutside(false) : undefined, [draggableGesture]);
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedDetents.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedDetents.js
+index c378c3c..4e49d53 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedDetents.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedDetents.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -88,7 +89,7 @@ const useAnimatedDetents = (detents, layoutState, enableDynamicSizing, maxDynami
+       highestDetentPosition,
+       closedDetentPosition
+     };
+-  }, [detents, layoutState, enableDynamicSizing, maxDynamicContentSize, detached, $modal, bottomInset]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [detents, layoutState, enableDynamicSizing, maxDynamicContentSize, detached, $modal, bottomInset] : undefined);
+   return state;
+ };
+ exports.useAnimatedDetents = useAnimatedDetents;
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedKeyboard.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedKeyboard.js
+index b15a074..61587d7 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedKeyboard.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedKeyboard.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -114,7 +115,7 @@ const useAnimatedKeyboard = () => {
+       return;
+     }
+     handleKeyboardEvent(cachedState.status, cachedState.height, cachedState.duration, cachedState.easing);
+-  }, [temporaryCachedState, handleKeyboardEvent]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [temporaryCachedState, handleKeyboardEvent] : undefined);
+   //#endregion
+ 
+   return {
 diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedLayout.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedLayout.js
-index 973d05c..b484b5f 100644
+index 973d05c..2242fc3 100644
 --- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedLayout.js
 +++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useAnimatedLayout.js
-@@ -86,7 +86,7 @@ function useAnimatedLayout(containerLayoutState, topInset, bottomInset, modal, s
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -70,7 +71,7 @@ function useAnimatedLayout(containerLayoutState, topInset, bottomInset, modal, s
+       _state.containerHeight = modal ? result - verticalInset : result;
+       return _state;
      });
-   }, [state, verticalInset, modal]);
+-  }, [state, verticalInset, modal]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [state, verticalInset, modal] : undefined);
+   (0, _reactNativeReanimated.useAnimatedReaction)(() => containerLayoutState?.get().height, (result, previous) => {
+     if (!result || result === previous) {
+       return;
+@@ -84,9 +85,9 @@ function useAnimatedLayout(containerLayoutState, topInset, bottomInset, modal, s
+       _state.containerHeight = modal ? result - verticalInset : result;
+       return _state;
+     });
+-  }, [state, verticalInset, modal]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [state, verticalInset, modal] : undefined);
    (0, _react.useEffect)(() => {
 -    _reactNative.Dimensions.addEventListener('change', ({
 +    const subscription = _reactNative.Dimensions.addEventListener('change', ({
        window
      }) => {
        state.modify(_state => {
-@@ -96,6 +96,7 @@ function useAnimatedLayout(containerLayoutState, topInset, bottomInset, modal, s
+@@ -96,6 +97,7 @@ function useAnimatedLayout(containerLayoutState, topInset, bottomInset, modal, s
          return _state;
        });
      });
@@ -19,6 +337,26 @@ index 973d05c..b484b5f 100644
    }, [state]);
    //#endregion
  
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useBottomSheetContentContainerStyle.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useBottomSheetContentContainerStyle.js
+index 4c9661f..ab19442 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useBottomSheetContentContainerStyle.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useBottomSheetContentContainerStyle.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -70,7 +71,7 @@ function useBottomSheetContentContainerStyle(enableFooterMarginAdjustment, _styl
+         });
+       }
+     }
+-  }, [animatedLayoutState, enableFooterMarginAdjustment]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, enableFooterMarginAdjustment] : undefined);
+   //#endregion
+   return style;
+ }
 diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useReactiveSharedValue.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useReactiveSharedValue.js
 index 9677560..d052733 100644
 --- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useReactiveSharedValue.js
@@ -40,20 +378,379 @@ index 9677560..d052733 100644
    (0, _react.useEffect)(() => {
      return () => {
        if (valueRef.current) {
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useScrollHandler.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useScrollHandler.js
+index 5a07ca9..da86d4f 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useScrollHandler.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useScrollHandler.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -51,7 +52,7 @@ const useScrollHandler = (useScrollEventsHandlers = _useScrollEventsHandlersDefa
+     },
+     onMomentumBegin: handleOnMomentumBegin,
+     onMomentumEnd: handleOnMomentumEnd
+-  }, [handleOnScroll, handleOnBeginDrag, handleOnEndDrag, handleOnMomentumBegin, handleOnMomentumEnd, onScroll, onScrollBeginDrag, onScrollEndDrag]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [handleOnScroll, handleOnBeginDrag, handleOnEndDrag, handleOnMomentumBegin, handleOnMomentumEnd, onScroll, onScrollBeginDrag, onScrollEndDrag] : undefined);
+   return {
+     scrollHandler,
+     scrollableRef,
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useScrollable.js b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useScrollable.js
+index 3a7658e..0bfe3f8 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useScrollable.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/commonjs/hooks/useScrollable.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++const ReanimatedDependencyPlatform = require("react-native").Platform;
+ Object.defineProperty(exports, "__esModule", {
+   value: true
+ });
+@@ -52,7 +53,7 @@ const useScrollable = (enableContentPanningGesture, animatedSheetState, animated
+       return _constants.SCROLLABLE_STATUS.UNLOCKED;
+     }
+     return _constants.SCROLLABLE_STATUS.LOCKED;
+-  }, [enableContentPanningGesture, animatedSheetState, animatedKeyboardState, animatedAnimationState, state]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [enableContentPanningGesture, animatedSheetState, animatedKeyboardState, animatedAnimationState, state] : undefined);
+   //#endregion
+ 
+   //#region callbacks
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheet.js b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheet.js
+index ca4bb3b..a25aa5d 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheet.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheet.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import invariant from 'invariant';
+ import React, { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo } from 'react';
+ import { Dimensions, Platform, StyleSheet } from 'react-native';
+@@ -117,7 +118,7 @@ const BottomSheetComponent = /*#__PURE__*/forwardRef(function BottomSheet(props,
+       return INITIAL_LAYOUT_VALUE;
+     }
+     return containerHeight - highestDetentPosition;
+-  }, [animatedLayoutState, animatedDetentsState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, animatedDetentsState] : undefined);
+   const animatedCurrentIndex = useReactiveSharedValue(animateOnMount ? -1 : _providedIndex);
+   const animatedPosition = useSharedValue(Dimensions.get('window').height);
+ 
+@@ -151,7 +152,7 @@ const BottomSheetComponent = /*#__PURE__*/forwardRef(function BottomSheet(props,
+       isSnapPointsNormalized = true;
+     }
+     return isContainerHeightCalculated && isHandleHeightCalculated && isSnapPointsNormalized;
+-  }, [animatedLayoutState, animatedDetentsState, handleComponent]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, animatedDetentsState, handleComponent] : undefined);
+   const isInTemporaryPosition = useSharedValue(false);
+   const animatedContainerHeightDidChange = useSharedValue(false);
+ 
+@@ -220,7 +221,7 @@ const BottomSheetComponent = /*#__PURE__*/forwardRef(function BottomSheet(props,
+       return SHEET_STATE.OVER_EXTENDED;
+     }
+     return SHEET_STATE.OPENED;
+-  }, [animatedLayoutState, animatedDetentsState, animatedKeyboardState, animatedPosition, animatedSheetHeight, isInTemporaryPosition, keyboardBehavior]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, animatedDetentsState, animatedKeyboardState, animatedPosition, animatedSheetHeight, isInTemporaryPosition, keyboardBehavior] : undefined);
+   const {
+     state: animatedScrollableState,
+     status: animatedScrollableStatus,
+@@ -268,7 +269,7 @@ const BottomSheetComponent = /*#__PURE__*/forwardRef(function BottomSheet(props,
+       return nextIndex;
+     }
+     return currentIndex;
+-  }, [android_keyboardInputMode, animatedAnimationState, animatedLayoutState, animatedCurrentIndex, animatedPosition, animatedDetentsState, isInTemporaryPosition, isLayoutCalculated]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [android_keyboardInputMode, animatedAnimationState, animatedLayoutState, animatedCurrentIndex, animatedPosition, animatedDetentsState, isInTemporaryPosition, isLayoutCalculated] : undefined);
+   //#endregion
+ 
+   //#region private methods
+@@ -1080,7 +1081,7 @@ const BottomSheetComponent = /*#__PURE__*/forwardRef(function BottomSheet(props,
+     if (animationStatus === ANIMATION_STATUS.RUNNING && animationSource === ANIMATION_SOURCE.GESTURE && nextIndex === -1) {
+       animateToPosition(closedDetentPosition, ANIMATION_SOURCE.GESTURE);
+     }
+-  }, [animatedContainerHeightDidChange, animatedAnimationState, animatedDetentsState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedContainerHeightDidChange, animatedAnimationState, animatedDetentsState] : undefined);
+ 
+   /**
+    * Reaction to the `snapPoints` change, to insure that the sheet position reflect
+@@ -1114,7 +1115,7 @@ const BottomSheetComponent = /*#__PURE__*/forwardRef(function BottomSheet(props,
+       });
+     }
+     evaluatePosition(ANIMATION_SOURCE.SNAP_POINT_CHANGE);
+-  }, [isLayoutCalculated, didAnimateOnMount, animatedDetentsState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [isLayoutCalculated, didAnimateOnMount, animatedDetentsState] : undefined);
+ 
+   /**
+    * Reaction to the keyboard state change.
+@@ -1210,7 +1211,7 @@ const BottomSheetComponent = /*#__PURE__*/forwardRef(function BottomSheet(props,
+     }
+     const animationConfigs = getKeyboardAnimationConfigs(easing, duration);
+     evaluatePosition(ANIMATION_SOURCE.KEYBOARD, animationConfigs);
+-  }, [$modal, bottomInset, keyboardBehavior, keyboardBlurBehavior, android_keyboardInputMode, animatedKeyboardState, animatedLayoutState, getEvaluatedPosition]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [$modal, bottomInset, keyboardBehavior, keyboardBlurBehavior, android_keyboardInputMode, animatedKeyboardState, animatedLayoutState, getEvaluatedPosition] : undefined);
+ 
+   /**
+    * sets provided animated position
+@@ -1219,7 +1220,7 @@ const BottomSheetComponent = /*#__PURE__*/forwardRef(function BottomSheet(props,
+     if (_providedAnimatedPosition) {
+       _providedAnimatedPosition.value = _animatedPosition + topInset;
+     }
+-  }, [_providedAnimatedPosition, topInset]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [_providedAnimatedPosition, topInset] : undefined);
+ 
+   /**
+    * sets provided animated index
+@@ -1228,7 +1229,7 @@ const BottomSheetComponent = /*#__PURE__*/forwardRef(function BottomSheet(props,
+     if (_providedAnimatedIndex) {
+       _providedAnimatedIndex.value = _animatedIndex;
+     }
+-  }, [_providedAnimatedIndex]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [_providedAnimatedIndex] : undefined);
+ 
+   /**
+    * React to `index` prop to snap the sheet to the new position.
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheetBody.js b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheetBody.js
+index a139ede..96705bd 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheetBody.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheetBody.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { memo, useMemo } from 'react';
+ import { Platform } from 'react-native';
+ import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+@@ -23,7 +24,7 @@ function BottomSheetBodyComponent({
+     transform: [{
+       translateY: animatedPosition.get()
+     }]
+-  }), [animatedPosition, animatedIndex]);
++  }), ReanimatedDependencyPlatform.OS === 'web' ? [animatedPosition, animatedIndex] : undefined);
+   const containerStyle = useMemo(() => [style, styles.container, containerAnimatedStyle], [style, containerAnimatedStyle]);
+   //#endregion
+ 
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheetContent.js b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheetContent.js
+index e4696b2..e1443b6 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheetContent.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheet/BottomSheetContent.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { memo, useMemo } from 'react';
+ import Animated, { useAnimatedStyle, useDerivedValue } from 'react-native-reanimated';
+ import { INITIAL_LAYOUT_VALUE, KEYBOARD_BEHAVIOR, KEYBOARD_STATUS } from '../../constants';
+@@ -92,7 +93,7 @@ function BottomSheetContentComponent({
+      * @link (https://github.com/gorhom/react-native-bottom-sheet/issues/470)
+      */
+     return Math.max(contentHeight, 0);
+-  }, [animatedLayoutState, animatedKeyboardState, animatedSheetHeight, isInTemporaryPosition, keyboardBehavior]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, animatedKeyboardState, animatedSheetHeight, isInTemporaryPosition, keyboardBehavior] : undefined);
+   const animatedPaddingBottom = useDerivedValue(() => {
+     const containerHeight = animatedLayoutState.get().containerHeight;
+     /**
+@@ -125,7 +126,7 @@ function BottomSheetContentComponent({
+       paddingBottom = overDragSafePaddingBottom + keyboardHeightWithinContainer;
+     }
+     return paddingBottom;
+-  }, [overDragResistanceFactor, animatedPosition, animatedLayoutState, animatedDetentsState, animatedKeyboardState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [overDragResistanceFactor, animatedPosition, animatedLayoutState, animatedDetentsState, animatedKeyboardState] : undefined);
+   //#endregion
+ 
+   //#region styles
+@@ -162,7 +163,7 @@ function BottomSheetContentComponent({
+         overrideReduceMotion
+       })
+     };
+-  }, [overDragResistanceFactor, enableDynamicSizing, detached, animationConfigs, overrideReduceMotion, animatedLayoutState, animatedContentHeightMax, animatedLayoutState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [overDragResistanceFactor, enableDynamicSizing, detached, animationConfigs, overrideReduceMotion, animatedLayoutState, animatedContentHeightMax, animatedLayoutState] : undefined);
+   const contentContainerStyle = useMemo(() => [detached ? {
+     overflow: 'visible'
+   } : {
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetBackdrop/BottomSheetBackdrop.js b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetBackdrop/BottomSheetBackdrop.js
+index aac25f6..3bc5fe6 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetBackdrop/BottomSheetBackdrop.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetBackdrop/BottomSheetBackdrop.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+ import { StyleSheet } from 'react-native';
+ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+@@ -70,7 +71,7 @@ const BottomSheetBackdropComponent = ({
+   //#region styles
+   const containerAnimatedStyle = useAnimatedStyle(() => ({
+     opacity: interpolate(animatedIndex.value, [-1, disappearsOnIndex, appearsOnIndex], [0, 0, opacity], Extrapolation.CLAMP)
+-  }), [animatedIndex, appearsOnIndex, disappearsOnIndex, opacity]);
++  }), ReanimatedDependencyPlatform.OS === 'web' ? [animatedIndex, appearsOnIndex, disappearsOnIndex, opacity] : undefined);
+   const containerStyle = useMemo(() => [StyleSheet.absoluteFill, styles.backdrop, style, containerAnimatedStyle], [style, containerAnimatedStyle]);
+   //#endregion
+ 
+@@ -80,7 +81,7 @@ const BottomSheetBackdropComponent = ({
+       return;
+     }
+     runOnJS(handleContainerTouchability)(shouldDisableTouchability);
+-  }, [disappearsOnIndex]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [disappearsOnIndex] : undefined);
+ 
+   // addressing updating the state after unmounting.
+   // [link](https://github.com/gorhom/react-native-bottom-sheet/issues/1376)
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetFooter/BottomSheetFooter.js b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetFooter/BottomSheetFooter.js
+index ccb11e6..f04f260 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetFooter/BottomSheetFooter.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetFooter/BottomSheetFooter.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { memo, useCallback, useMemo, useRef } from 'react';
+ import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+ import { KEYBOARD_STATUS } from '../../constants';
+@@ -39,7 +40,7 @@ function BottomSheetFooterComponent({
+         translateY: Math.max(0, footerTranslateY)
+       }]
+     };
+-  }, [bottomInset, animatedKeyboardState, animatedFooterPosition]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [bottomInset, animatedKeyboardState, animatedFooterPosition] : undefined);
+   const containerStyle = useMemo(() => [styles.container, style, containerAnimatedStyle], [style, containerAnimatedStyle]);
+   //#endregion
+ 
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetFooter/BottomSheetFooterContainer.js b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetFooter/BottomSheetFooterContainer.js
+index 2a3a168..eb94e79 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetFooter/BottomSheetFooterContainer.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetFooter/BottomSheetFooterContainer.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { memo } from 'react';
+ import { useDerivedValue } from 'react-native-reanimated';
+ import { INITIAL_LAYOUT_VALUE, KEYBOARD_STATUS } from '../../constants';
+@@ -37,7 +38,7 @@ const BottomSheetFooterContainerComponent = ({
+     }
+     footerTranslateY = footerTranslateY - footerHeight - handleHeight;
+     return footerTranslateY;
+-  }, [animatedKeyboardState, animatedPosition, animatedLayoutState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedKeyboardState, animatedPosition, animatedLayoutState] : undefined);
+   //#endregion
+ 
+   return /*#__PURE__*/_jsx(FooterComponent, {
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.js b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.js
+index c64033e..f85453b 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { memo, useContext, useMemo } from 'react';
+ import { RefreshControl } from 'react-native';
+ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+@@ -29,7 +30,7 @@ function BottomSheetRefreshControlComponent({
+   //#region variables
+   const animatedProps = useAnimatedProps(() => ({
+     enabled: animatedScrollableState.value === SCROLLABLE_STATUS.UNLOCKED
+-  }), [animatedScrollableState.value]);
++  }), ReanimatedDependencyPlatform.OS === 'web' ? [animatedScrollableState.value] : undefined);
+   const gesture = useMemo(() => draggableGesture ? Gesture.Native().simultaneousWithExternalGesture(...draggableGesture.toGestureArray(), ...scrollableGesture.toGestureArray()).shouldCancelWhenOutside(true) : undefined, [draggableGesture, scrollableGesture]);
+ 
+   //#endregion
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetScrollable/createBottomSheetScrollableComponent.js b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetScrollable/createBottomSheetScrollableComponent.js
+index b9c84ad..9672707 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetScrollable/createBottomSheetScrollableComponent.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/components/bottomSheetScrollable/createBottomSheetScrollableComponent.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { forwardRef, useContext, useImperativeHandle, useMemo } from 'react';
+ import { Gesture } from 'react-native-gesture-handler';
+ import { useAnimatedProps } from 'react-native-reanimated';
+@@ -62,7 +63,7 @@ ScrollableComponent) {
+     const scrollableAnimatedProps = useAnimatedProps(() => ({
+       decelerationRate: SCROLLABLE_DECELERATION_RATE_MAPPER[animatedScrollableState.value],
+       showsVerticalScrollIndicator: showsVerticalScrollIndicator ? animatedScrollableState.value === SCROLLABLE_STATUS.UNLOCKED : showsVerticalScrollIndicator
+-    }), [animatedScrollableState, showsVerticalScrollIndicator]);
++    }), ReanimatedDependencyPlatform.OS === 'web' ? [animatedScrollableState, showsVerticalScrollIndicator] : undefined);
+     const scrollableGesture = useMemo(() => draggableGesture ? Gesture.Native()
+     // @ts-expect-error
+     .simultaneousWithExternalGesture(draggableGesture).shouldCancelWhenOutside(false) : undefined, [draggableGesture]);
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedDetents.js b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedDetents.js
+index 01fb85c..61f92e6 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedDetents.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedDetents.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import { useDerivedValue } from 'react-native-reanimated';
+ import { INITIAL_LAYOUT_VALUE } from '../constants';
+ import { normalizeSnapPoint } from '../utilities';
+@@ -85,7 +86,7 @@ export const useAnimatedDetents = (detents, layoutState, enableDynamicSizing, ma
+       highestDetentPosition,
+       closedDetentPosition
+     };
+-  }, [detents, layoutState, enableDynamicSizing, maxDynamicContentSize, detached, $modal, bottomInset]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [detents, layoutState, enableDynamicSizing, maxDynamicContentSize, detached, $modal, bottomInset] : undefined);
+   return state;
+ };
+ //# sourceMappingURL=useAnimatedDetents.js.map
+\ No newline at end of file
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedKeyboard.js b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedKeyboard.js
+index 8004523..5ad3c24 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedKeyboard.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedKeyboard.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import { useCallback, useEffect, useRef } from 'react';
+ import { Dimensions, Keyboard, Platform } from 'react-native';
+ import { runOnUI, useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
+@@ -110,7 +111,7 @@ export const useAnimatedKeyboard = () => {
+       return;
+     }
+     handleKeyboardEvent(cachedState.status, cachedState.height, cachedState.duration, cachedState.easing);
+-  }, [temporaryCachedState, handleKeyboardEvent]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [temporaryCachedState, handleKeyboardEvent] : undefined);
+   //#endregion
+ 
+   return {
 diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedLayout.js b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedLayout.js
-index b0eec93..67713a2 100644
+index b0eec93..2fb5014 100644
 --- a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedLayout.js
 +++ b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedLayout.js
-@@ -82,7 +82,7 @@ export function useAnimatedLayout(containerLayoutState, topInset, bottomInset, m
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import { useEffect, useMemo, useState } from 'react';
+ import { Dimensions } from 'react-native';
+ import { makeMutable, useAnimatedReaction } from 'react-native-reanimated';
+@@ -66,7 +67,7 @@ export function useAnimatedLayout(containerLayoutState, topInset, bottomInset, m
+       _state.containerHeight = modal ? result - verticalInset : result;
+       return _state;
      });
-   }, [state, verticalInset, modal]);
+-  }, [state, verticalInset, modal]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [state, verticalInset, modal] : undefined);
+   useAnimatedReaction(() => containerLayoutState?.get().height, (result, previous) => {
+     if (!result || result === previous) {
+       return;
+@@ -80,9 +81,9 @@ export function useAnimatedLayout(containerLayoutState, topInset, bottomInset, m
+       _state.containerHeight = modal ? result - verticalInset : result;
+       return _state;
+     });
+-  }, [state, verticalInset, modal]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [state, verticalInset, modal] : undefined);
    useEffect(() => {
 -    Dimensions.addEventListener('change', ({
 +    const subscription = Dimensions.addEventListener('change', ({
        window
      }) => {
        state.modify(_state => {
-@@ -92,6 +92,7 @@ export function useAnimatedLayout(containerLayoutState, topInset, bottomInset, m
+@@ -92,6 +93,7 @@ export function useAnimatedLayout(containerLayoutState, topInset, bottomInset, m
          return _state;
        });
      });
@@ -61,6 +758,26 @@ index b0eec93..67713a2 100644
    }, [state]);
    //#endregion
  
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useBottomSheetContentContainerStyle.js b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useBottomSheetContentContainerStyle.js
+index 75a594a..000eb29 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useBottomSheetContentContainerStyle.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useBottomSheetContentContainerStyle.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import { useMemo, useState } from 'react';
+ import { Platform, StyleSheet } from 'react-native';
+ import { runOnJS, useAnimatedReaction } from 'react-native-reanimated';
+@@ -66,7 +67,7 @@ export function useBottomSheetContentContainerStyle(enableFooterMarginAdjustment
+         });
+       }
+     }
+-  }, [animatedLayoutState, enableFooterMarginAdjustment]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, enableFooterMarginAdjustment] : undefined);
+   //#endregion
+   return style;
+ }
 diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useReactiveSharedValue.js b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useReactiveSharedValue.js
 index f0461dd..498d422 100644
 --- a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useReactiveSharedValue.js
@@ -90,12 +807,436 @@ index f0461dd..498d422 100644
    useEffect(() => {
      return () => {
        if (valueRef.current) {
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useScrollHandler.js b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useScrollHandler.js
+index 6ed8293..30016fa 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useScrollHandler.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useScrollHandler.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import { runOnJS, useAnimatedRef, useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
+ import { workletNoop as noop } from '../utilities';
+ import { useScrollEventsHandlersDefault } from './useScrollEventsHandlersDefault';
+@@ -47,7 +48,7 @@ export const useScrollHandler = (useScrollEventsHandlers = useScrollEventsHandle
+     },
+     onMomentumBegin: handleOnMomentumBegin,
+     onMomentumEnd: handleOnMomentumEnd
+-  }, [handleOnScroll, handleOnBeginDrag, handleOnEndDrag, handleOnMomentumBegin, handleOnMomentumEnd, onScroll, onScrollBeginDrag, onScrollEndDrag]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [handleOnScroll, handleOnBeginDrag, handleOnEndDrag, handleOnMomentumBegin, handleOnMomentumEnd, onScroll, onScrollBeginDrag, onScrollEndDrag] : undefined);
+   return {
+     scrollHandler,
+     scrollableRef,
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useScrollable.js b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useScrollable.js
+index dc5fcd7..35d6e89 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useScrollable.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useScrollable.js
+@@ -1,5 +1,6 @@
+ "use strict";
+ 
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import { useCallback, useRef } from 'react';
+ import { useDerivedValue, useSharedValue } from 'react-native-reanimated';
+ import { ANIMATION_STATUS, KEYBOARD_STATUS, SCROLLABLE_STATUS, SCROLLABLE_TYPE, SHEET_STATE } from '../constants';
+@@ -48,7 +49,7 @@ export const useScrollable = (enableContentPanningGesture, animatedSheetState, a
+       return SCROLLABLE_STATUS.UNLOCKED;
+     }
+     return SCROLLABLE_STATUS.LOCKED;
+-  }, [enableContentPanningGesture, animatedSheetState, animatedKeyboardState, animatedAnimationState, state]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [enableContentPanningGesture, animatedSheetState, animatedKeyboardState, animatedAnimationState, state] : undefined);
+   //#endregion
+ 
+   //#region callbacks
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheet.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheet.tsx
+index fc52033..db79433 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheet.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheet.tsx
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import invariant from 'invariant';
+ import React, {
+   forwardRef,
+@@ -211,7 +212,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+       }
+ 
+       return containerHeight - highestDetentPosition;
+-    }, [animatedLayoutState, animatedDetentsState]);
++    }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, animatedDetentsState] : undefined);
+     const animatedCurrentIndex = useReactiveSharedValue(
+       animateOnMount ? -1 : _providedIndex
+     );
+@@ -255,7 +256,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+         isHandleHeightCalculated &&
+         isSnapPointsNormalized
+       );
+-    }, [animatedLayoutState, animatedDetentsState, handleComponent]);
++    }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, animatedDetentsState, handleComponent] : undefined);
+     const isInTemporaryPosition = useSharedValue(false);
+     const animatedContainerHeightDidChange = useSharedValue(false);
+ 
+@@ -340,7 +341,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+       }
+ 
+       return SHEET_STATE.OPENED;
+-    }, [
++    }, ReanimatedDependencyPlatform.OS === 'web' ? [
+       animatedLayoutState,
+       animatedDetentsState,
+       animatedKeyboardState,
+@@ -348,7 +349,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+       animatedSheetHeight,
+       isInTemporaryPosition,
+       keyboardBehavior,
+-    ]);
++    ] : undefined);
+     const {
+       state: animatedScrollableState,
+       status: animatedScrollableStatus,
+@@ -422,7 +423,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+       }
+ 
+       return currentIndex;
+-    }, [
++    }, ReanimatedDependencyPlatform.OS === 'web' ? [
+       android_keyboardInputMode,
+       animatedAnimationState,
+       animatedLayoutState,
+@@ -431,7 +432,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+       animatedDetentsState,
+       isInTemporaryPosition,
+       isLayoutCalculated,
+-    ]);
++    ] : undefined);
+     //#endregion
+ 
+     //#region private methods
+@@ -1570,11 +1571,11 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           animateToPosition(closedDetentPosition, ANIMATION_SOURCE.GESTURE);
+         }
+       },
+-      [
++      ReanimatedDependencyPlatform.OS === 'web' ? [
+         animatedContainerHeightDidChange,
+         animatedAnimationState,
+         animatedDetentsState,
+-      ]
++      ] : undefined
+     );
+ 
+     /**
+@@ -1617,7 +1618,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+ 
+         evaluatePosition(ANIMATION_SOURCE.SNAP_POINT_CHANGE);
+       },
+-      [isLayoutCalculated, didAnimateOnMount, animatedDetentsState]
++      ReanimatedDependencyPlatform.OS === 'web' ? [isLayoutCalculated, didAnimateOnMount, animatedDetentsState] : undefined
+     );
+ 
+     /**
+@@ -1737,7 +1738,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+         const animationConfigs = getKeyboardAnimationConfigs(easing, duration);
+         evaluatePosition(ANIMATION_SOURCE.KEYBOARD, animationConfigs);
+       },
+-      [
++      ReanimatedDependencyPlatform.OS === 'web' ? [
+         $modal,
+         bottomInset,
+         keyboardBehavior,
+@@ -1746,7 +1747,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+         animatedKeyboardState,
+         animatedLayoutState,
+         getEvaluatedPosition,
+-      ]
++      ] : undefined
+     );
+ 
+     /**
+@@ -1759,7 +1760,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           _providedAnimatedPosition.value = _animatedPosition + topInset;
+         }
+       },
+-      [_providedAnimatedPosition, topInset]
++      ReanimatedDependencyPlatform.OS === 'web' ? [_providedAnimatedPosition, topInset] : undefined
+     );
+ 
+     /**
+@@ -1772,7 +1773,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
+           _providedAnimatedIndex.value = _animatedIndex;
+         }
+       },
+-      [_providedAnimatedIndex]
++      ReanimatedDependencyPlatform.OS === 'web' ? [_providedAnimatedIndex] : undefined
+     );
+ 
+     /**
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetBody.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetBody.tsx
+index 91b6a6a..1bb3e0e 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetBody.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetBody.tsx
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { memo, useMemo } from 'react';
+ import { Platform } from 'react-native';
+ import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+@@ -25,7 +26,7 @@ function BottomSheetBodyComponent({ style, children }: BottomSheetBodyProps) {
+         },
+       ],
+     }),
+-    [animatedPosition, animatedIndex]
++    ReanimatedDependencyPlatform.OS === 'web' ? [animatedPosition, animatedIndex] : undefined
+   );
+   const containerStyle = useMemo(
+     () => [style, styles.container, containerAnimatedStyle],
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetContent.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetContent.tsx
+index 4a69a68..0ba22a5 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetContent.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheet/BottomSheetContent.tsx
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { memo, useMemo } from 'react';
+ import type { ViewProps, ViewStyle } from 'react-native';
+ import Animated, {
+@@ -123,13 +124,13 @@ function BottomSheetContentComponent({
+      * @link (https://github.com/gorhom/react-native-bottom-sheet/issues/470)
+      */
+     return Math.max(contentHeight, 0);
+-  }, [
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [
+     animatedLayoutState,
+     animatedKeyboardState,
+     animatedSheetHeight,
+     isInTemporaryPosition,
+     keyboardBehavior,
+-  ]);
++  ] : undefined);
+   const animatedPaddingBottom = useDerivedValue(() => {
+     const containerHeight = animatedLayoutState.get().containerHeight;
+     /**
+@@ -169,13 +170,13 @@ function BottomSheetContentComponent({
+     }
+ 
+     return paddingBottom;
+-  }, [
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [
+     overDragResistanceFactor,
+     animatedPosition,
+     animatedLayoutState,
+     animatedDetentsState,
+     animatedKeyboardState,
+-  ]);
++  ] : undefined);
+   //#endregion
+ 
+   //#region styles
+@@ -211,7 +212,7 @@ function BottomSheetContentComponent({
+         overrideReduceMotion,
+       }),
+     };
+-  }, [
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [
+     overDragResistanceFactor,
+     enableDynamicSizing,
+     detached,
+@@ -220,7 +221,7 @@ function BottomSheetContentComponent({
+     animatedLayoutState,
+     animatedContentHeightMax,
+     animatedLayoutState,
+-  ]);
++  ] : undefined);
+   const contentContainerStyle = useMemo(
+     () => [
+       detached
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetBackdrop/BottomSheetBackdrop.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetBackdrop/BottomSheetBackdrop.tsx
+index a0345b0..a1e61cf 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetBackdrop/BottomSheetBackdrop.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetBackdrop/BottomSheetBackdrop.tsx
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, {
+   memo,
+   useCallback,
+@@ -105,7 +106,7 @@ const BottomSheetBackdropComponent = ({
+         Extrapolation.CLAMP
+       ),
+     }),
+-    [animatedIndex, appearsOnIndex, disappearsOnIndex, opacity]
++    ReanimatedDependencyPlatform.OS === 'web' ? [animatedIndex, appearsOnIndex, disappearsOnIndex, opacity] : undefined
+   );
+   const containerStyle = useMemo(
+     () => [
+@@ -127,7 +128,7 @@ const BottomSheetBackdropComponent = ({
+       }
+       runOnJS(handleContainerTouchability)(shouldDisableTouchability);
+     },
+-    [disappearsOnIndex]
++    ReanimatedDependencyPlatform.OS === 'web' ? [disappearsOnIndex] : undefined
+   );
+ 
+   // addressing updating the state after unmounting.
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetDebugView/ReText.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetDebugView/ReText.tsx
+index 3091565..15df75e 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetDebugView/ReText.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetDebugView/ReText.tsx
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React from 'react';
+ import { type TextProps as RNTextProps, TextInput } from 'react-native';
+ import Animated, {
+@@ -50,12 +51,12 @@ const ReText = ({ text, value: _providedValue, style }: TextProps) => {
+     }
+ 
+     return `${text}: ${rawValue}`;
+-  }, [text, _providedValue]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [text, _providedValue] : undefined);
+   const animatedProps = useAnimatedProps(() => {
+     return {
+       text: providedValue.get(),
+     };
+-  }, [providedValue]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [providedValue] : undefined);
+   return (
+     <AnimatedTextInput
+       underlineColorAndroid="transparent"
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooter.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooter.tsx
+index 639f2af..26468b5 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooter.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooter.tsx
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { memo, useCallback, useMemo, useRef } from 'react';
+ import type { LayoutChangeEvent } from 'react-native';
+ import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+@@ -44,7 +45,7 @@ function BottomSheetFooterComponent({
+         },
+       ],
+     };
+-  }, [bottomInset, animatedKeyboardState, animatedFooterPosition]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [bottomInset, animatedKeyboardState, animatedFooterPosition] : undefined);
+   const containerStyle = useMemo(
+     () => [styles.container, style, containerAnimatedStyle],
+     [style, containerAnimatedStyle]
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooterContainer.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooterContainer.tsx
+index 183903f..1f53774 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooterContainer.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetFooter/BottomSheetFooterContainer.tsx
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { memo } from 'react';
+ import { useDerivedValue } from 'react-native-reanimated';
+ import { INITIAL_LAYOUT_VALUE, KEYBOARD_STATUS } from '../../constants';
+@@ -31,7 +32,7 @@ const BottomSheetFooterContainerComponent = ({
+ 
+     footerTranslateY = footerTranslateY - footerHeight - handleHeight;
+     return footerTranslateY;
+-  }, [animatedKeyboardState, animatedPosition, animatedLayoutState]);
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [animatedKeyboardState, animatedPosition, animatedLayoutState] : undefined);
+   //#endregion
+ 
+   return <FooterComponent animatedFooterPosition={animatedFooterPosition} />;
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.tsx
+index 36a1a60..fdef75c 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetRefreshControl/BottomSheetRefreshControl.android.tsx
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, { memo, useContext, useMemo } from 'react';
+ import { RefreshControl, type RefreshControlProps } from 'react-native';
+ import {
+@@ -38,7 +39,7 @@ function BottomSheetRefreshControlComponent({
+     () => ({
+       enabled: animatedScrollableState.value === SCROLLABLE_STATUS.UNLOCKED,
+     }),
+-    [animatedScrollableState.value]
++    ReanimatedDependencyPlatform.OS === 'web' ? [animatedScrollableState.value] : undefined
+   );
+ 
+   const gesture = useMemo(
+diff --git a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetScrollable/createBottomSheetScrollableComponent.tsx b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetScrollable/createBottomSheetScrollableComponent.tsx
+index 6a57f51..3f4823f 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetScrollable/createBottomSheetScrollableComponent.tsx
++++ b/node_modules/@gorhom/bottom-sheet/src/components/bottomSheetScrollable/createBottomSheetScrollableComponent.tsx
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import React, {
+   forwardRef,
+   useContext,
+@@ -82,7 +83,7 @@ export function createBottomSheetScrollableComponent<T, P>(
+           ? animatedScrollableState.value === SCROLLABLE_STATUS.UNLOCKED
+           : showsVerticalScrollIndicator,
+       }),
+-      [animatedScrollableState, showsVerticalScrollIndicator]
++      ReanimatedDependencyPlatform.OS === 'web' ? [animatedScrollableState, showsVerticalScrollIndicator] : undefined
+     );
+ 
+     const scrollableGesture = useMemo(
+diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedDetents.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedDetents.ts
+index cc34d3b..6c8692e 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedDetents.ts
++++ b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedDetents.ts
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import { type SharedValue, useDerivedValue } from 'react-native-reanimated';
+ import type { BottomSheetProps } from '../components/bottomSheet';
+ import { INITIAL_LAYOUT_VALUE } from '../constants';
+@@ -106,7 +107,7 @@ export const useAnimatedDetents = (
+       highestDetentPosition,
+       closedDetentPosition,
+     };
+-  }, [
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [
+     detents,
+     layoutState,
+     enableDynamicSizing,
+@@ -114,6 +115,6 @@ export const useAnimatedDetents = (
+     detached,
+     $modal,
+     bottomInset,
+-  ]);
++  ] : undefined);
+   return state;
+ };
+diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedKeyboard.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedKeyboard.ts
+index d7051bf..aa32295 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedKeyboard.ts
++++ b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedKeyboard.ts
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import { useCallback, useEffect, useRef } from 'react';
+ import {
+   Dimensions,
+@@ -168,7 +169,7 @@ export const useAnimatedKeyboard = () => {
+         cachedState.easing
+       );
+     },
+-    [temporaryCachedState, handleKeyboardEvent]
++    ReanimatedDependencyPlatform.OS === 'web' ? [temporaryCachedState, handleKeyboardEvent] : undefined
+   );
+   //#endregion
+ 
 diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedLayout.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedLayout.ts
-index 68c674d..564833c 100644
+index 68c674d..91cb4e8 100644
 --- a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedLayout.ts
 +++ b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedLayout.ts
-@@ -106,13 +106,14 @@ export function useAnimatedLayout(
-     [state, verticalInset, modal]
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import { useEffect, useMemo, useState } from 'react';
+ import { Dimensions } from 'react-native';
+ import {
+@@ -85,7 +86,7 @@ export function useAnimatedLayout(
+         return _state;
+       });
+     },
+-    [state, verticalInset, modal]
++    ReanimatedDependencyPlatform.OS === 'web' ? [state, verticalInset, modal] : undefined
+   );
+   useAnimatedReaction(
+     () => containerLayoutState?.get().height,
+@@ -103,16 +104,17 @@ export function useAnimatedLayout(
+         return _state;
+       });
+     },
+-    [state, verticalInset, modal]
++    ReanimatedDependencyPlatform.OS === 'web' ? [state, verticalInset, modal] : undefined
    );
    useEffect(() => {
 -    Dimensions.addEventListener('change', ({ window }) => {
@@ -110,6 +1251,24 @@ index 68c674d..564833c 100644
    }, [state]);
    //#endregion
  
+diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useBottomSheetContentContainerStyle.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useBottomSheetContentContainerStyle.ts
+index 6c0bffe..5ef3a53 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/hooks/useBottomSheetContentContainerStyle.ts
++++ b/node_modules/@gorhom/bottom-sheet/src/hooks/useBottomSheetContentContainerStyle.ts
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import { useMemo, useState } from 'react';
+ import {
+   Platform,
+@@ -81,7 +82,7 @@ export function useBottomSheetContentContainerStyle(
+         }
+       }
+     },
+-    [animatedLayoutState, enableFooterMarginAdjustment]
++    ReanimatedDependencyPlatform.OS === 'web' ? [animatedLayoutState, enableFooterMarginAdjustment] : undefined
+   );
+   //#endregion
+   return style;
 diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useReactiveSharedValue.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useReactiveSharedValue.ts
 index 905fd06..5de7781 100644
 --- a/node_modules/@gorhom/bottom-sheet/src/hooks/useReactiveSharedValue.ts
@@ -137,3 +1296,55 @@ index 905fd06..5de7781 100644
  
    useEffect(() => {
      return () => {
+diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollHandler.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollHandler.ts
+index a791083..1d34f9f 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollHandler.ts
++++ b/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollHandler.ts
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import {
+   runOnJS,
+   useAnimatedRef,
+@@ -56,7 +57,7 @@ export const useScrollHandler = (
+       onMomentumBegin: handleOnMomentumBegin,
+       onMomentumEnd: handleOnMomentumEnd,
+     },
+-    [
++    ReanimatedDependencyPlatform.OS === 'web' ? [
+       handleOnScroll,
+       handleOnBeginDrag,
+       handleOnEndDrag,
+@@ -65,7 +66,7 @@ export const useScrollHandler = (
+       onScroll,
+       onScrollBeginDrag,
+       onScrollEndDrag,
+-    ]
++    ] : undefined
+   );
+ 
+   return { scrollHandler, scrollableRef, scrollableContentOffsetY };
+diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollable.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollable.ts
+index 9c19051..44f65df 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollable.ts
++++ b/node_modules/@gorhom/bottom-sheet/src/hooks/useScrollable.ts
+@@ -1,3 +1,4 @@
++import { Platform as ReanimatedDependencyPlatform } from "react-native";
+ import { type RefObject, useCallback, useRef } from 'react';
+ import type { NodeHandle } from 'react-native';
+ import {
+@@ -74,13 +75,13 @@ export const useScrollable = (
+     }
+ 
+     return SCROLLABLE_STATUS.LOCKED;
+-  }, [
++  }, ReanimatedDependencyPlatform.OS === 'web' ? [
+     enableContentPanningGesture,
+     animatedSheetState,
+     animatedKeyboardState,
+     animatedAnimationState,
+     state,
+-  ]);
++  ] : undefined);
+   //#endregion
+ 
+   //#region callbacks

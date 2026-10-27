@@ -94,6 +94,7 @@ if (Test-Path "package.json") {
             "modules/mavrixfy-playback/expo-module.config.json",
             "modules/mavrixfy-playback/ios/MavrixfyPlayback.podspec",
             "modules/mavrixfy-playback/ios/MavrixfyPlaybackModule.swift"
+            "modules/mavrixfy-playback/ios/NativePlayback.swift"
         )) {
             if (Test-Path -LiteralPath $nativeFile) {
                 Write-Host "   ✅ $nativeFile" -ForegroundColor Green

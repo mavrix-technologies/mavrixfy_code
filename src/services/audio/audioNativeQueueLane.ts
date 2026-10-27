@@ -126,7 +126,7 @@ export function useAudioNativeQueueLane({
       const nativeTracks = await buildNativeQueueTracks(songs, forcedUrls);
       if (!isCurrent() ||
         currentSongRef.current?.id !== songs[activeIndex]?.id) return;
-      if (nativeTracks.some((track) => track?.source !== "youtube" && !readAudioCandidate(track?.url))) {
+      if (!TrackPlayer.supportsUnresolvedQueue && nativeTracks.some((track) => track?.source !== "youtube" && !readAudioCandidate(track?.url))) {
         throw new Error("One or more queue tracks have no playable audio URL.");
       }
 

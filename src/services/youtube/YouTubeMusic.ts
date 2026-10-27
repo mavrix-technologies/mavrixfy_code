@@ -72,7 +72,8 @@ function normalizeTracks(tracks: NativeTrack[]): Song[] {
   for (const track of tracks) if (/^[\w-]{11}$/.test(track.videoId)) unique.set(track.videoId, normalizeYouTubeTrack(track));
   return [...unique.values()];
 }
-export function clearYouTubeSearchCache() { searchCache.clear(); }
+let searchCacheGeneration = 0;
+export function clearYouTubeSearchCache() { searchCacheGeneration++; searchCache.clear(); }
 const searchCache = new Map<string, { at: number; results: SearchResults }>();
 export async function searchYouTubeMusic(query: string, filter: ResultFilter, signal?: AbortSignal): Promise<SearchResults> {
   if (signal?.aborted) throw new Error("YouTube request cancelled");
@@ -80,13 +81,14 @@ export async function searchYouTubeMusic(query: string, filter: ResultFilter, si
   const key = `${filter}:${query.trim().toLowerCase()}`;
   const cached = searchCache.get(key);
   if (cached && Date.now() - cached.at < 180000) return cached.results;
+  const generation = searchCacheGeneration;
   const data = await invoke((module, id) => module.search(query.trim(), filter, id), signal);
   const playlists: PlaylistResult[] = data.playlists.map((item) => ({
     id: `youtube_playlist_${item.id}`, name: item.name, songCount: item.songCount,
     image: item.coverUrl ? [{ quality: "1200x1200", url: youTubeArtworkUrl(item.coverUrl) }] : [], url: item.url, description: item.description,
   }));
   const results: SearchResults = { songs: normalizeTracks(data.songs), playlists, albums: (data.albums || []).map(item => ({ id: `youtube_album_${item.id}`, name: item.name, songCount: item.songCount, url: item.url, image: item.coverUrl ? [{ quality: "1200x1200", url: youTubeArtworkUrl(item.coverUrl) }] : [], description: item.description })), artists: (data.artists || []).filter(item => validArtistChannelId(item.id)).map(normalizeYouTubeArtist) };
-  if (!signal?.aborted) {
+  if (generation === searchCacheGeneration && !signal?.aborted) {
     if (searchCache.size >= 40) searchCache.delete(searchCache.keys().next().value!);
     searchCache.set(key, { at: Date.now(), results });
   }

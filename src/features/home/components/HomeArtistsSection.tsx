@@ -39,12 +39,15 @@ const ArtistItem = memo(function ArtistItem({
         pressed && styles.artistCardPressed,
       ]}
       onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${artist.name} artist profile`}
     >
       <Image
         source={{ uri: imageUrl || undefined }}
         style={styles.artistImage}
         contentFit="cover"
         cachePolicy="memory-disk"
+        recyclingKey={artist.id}
         transition={150}
       />
       <Text style={styles.artistName} numberOfLines={1}>
@@ -106,6 +109,8 @@ export const HomeArtistsSection = memo(function HomeArtistsSection({
         <Text style={styles.title}>Featured Artists</Text>
         <Pressable
           hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="View all artists"
           style={({ pressed }) => [styles.viewAllBtn, pressed && styles.viewAllBtnPressed]}
           onPress={() => {
             void triggerImpact(Haptics.ImpactFeedbackStyle.Light);

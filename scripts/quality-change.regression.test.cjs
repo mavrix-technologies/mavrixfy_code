@@ -6,6 +6,7 @@ const test = require('node:test');
 const { fixture: audioFixture, tick } = require('./helpers/audio-player-fixture.cjs');
 
 async function fixture({ singleNativeTrack = false, fallback = false, duplicateNativeTrack = false } = {}) {
+  let generation = 0;
   const audio = audioFixture();
   const songs = ['a', 'b', 'c'].map(id => ({
     id, title: id.toUpperCase(), artist: id, duration: 180,
@@ -31,6 +32,7 @@ async function fixture({ singleNativeTrack = false, fallback = false, duplicateN
   const fallbackLoads = [];
   const qualities = [];
   const dependencies = {
+    '@/lib/accountScope': { getAccountScope: () => ({ generation }), isCurrentAccount: scope => scope.generation === generation },
     react: { useCallback: fn => fn, useRef: ref },
     '@/lib/logger': { logger: { error() {} } },
     '@/services/audio/PlaybackEngine': { updatePlaybackEngineSnapshot() {} },
@@ -60,7 +62,17 @@ async function fixture({ singleNativeTrack = false, fallback = false, duplicateN
   const options = {
     ...state, TrackPlayer: fallback ? null : {
       ...player,
+      getPlaybackSnapshot: async () => ({ queue: await player.getQueue(), index: await player.getActiveTrackIndex(), ...await player.getProgress() }),
       setQueue: async (...args) => { queues.push(args); return player.setQueue(...args); },
+      updateCurrentTrack: async (index, track) => {
+        const queue = await player.getQueue();
+        if (index === await player.getActiveTrackIndex() && queue[index]?.id === track.id) {
+          const position = (await player.getProgress()).position;
+          queue[index] = track; queues.push([queue, index, position]);
+          await player.setQueue(queue, index, position);
+        }
+        return { queue: await player.getQueue(), index: await player.getActiveTrackIndex(), ...await player.getProgress() };
+      },
     },
     isPlayerReady: true, ensurePlayerReady: async () => true,
     RepeatMode: audio.RepeatMode,
@@ -73,7 +85,7 @@ async function fixture({ singleNativeTrack = false, fallback = false, duplicateN
   const resolve = (index, quality) => pending[index].resolve({
     url: `https://test/b-${quality}.mp3`, qualityState: { requested: quality, actualBitrate: quality === 'high' ? 320 : 96 },
   });
-  return { state, player, audio, songs, pending, queues, qualities, fallbackLoads, activeEvents, changeStreamingQuality, resolve };
+  return { state, player, audio, songs, pending, queues, qualities, fallbackLoads, activeEvents, changeStreamingQuality, resolve, options, changeAccount: () => generation++ };
 }
 
 test('quality reload never selects the first queue song or changes artwork', async () => {
@@ -170,4 +182,44 @@ test('quality reload preserves the active occurrence of a duplicated song ID', a
   assert.equal(f.queues[0][1], 1);
   assert.equal((await f.player.getQueue())[0].url, 'https://test/a-old.mp3');
   assert.equal((await f.player.getQueue())[1].url, 'https://test/b-high.mp3');
+});
+
+test('quality reload reads one native snapshot and retains the actual native clock', async () => {
+  const f = await fixture();
+  await f.player.seekTo(81.5);
+  f.options.TrackPlayer.getPlaybackSnapshot = async () => ({ queue: await f.player.getQueue(), index: 1, position: 30 });
+  f.options.TrackPlayer.getQueue = f.options.TrackPlayer.getActiveTrackIndex = () => { throw Error('Separate reads may straddle Next'); };
+  const pending = f.changeStreamingQuality('high'); await tick();
+  f.resolve(0, 'high'); await pending;
+  assert.equal(f.queues[0][2], 81.5);
+});
+
+test('native Next between quality snapshot and apply cannot reload or republish the outgoing track', async () => {
+  const f = await fixture();
+  const update = f.options.TrackPlayer.updateCurrentTrack;
+  f.options.TrackPlayer.updateCurrentTrack = async (...args) => { await f.player.skip(2); return update(...args); };
+  const pending = f.changeStreamingQuality('high'); await tick();
+  f.resolve(0, 'high'); await pending;
+  assert.equal(f.queues.length, 0);
+  assert.equal(f.qualities.length, 0);
+  assert.equal((await f.player.getActiveTrack()).id, 'c');
+});
+
+test('quality resolution cannot replace metadata after native automatic Next precedes its JS event', async () => {
+  const f = await fixture();
+  const pending = f.changeStreamingQuality('high'); await tick();
+  await f.player.skip(2);
+  f.resolve(0, 'high'); await pending;
+  assert.equal(f.queues.length, 0);
+  assert.equal(f.qualities.length, 0);
+  assert.equal(f.state.currentSongRef.current.audioUrl, 'https://test/b-old.mp3');
+  assert.equal((await f.player.getActiveTrack()).id, 'c');
+});
+
+test('quality resolution cannot update the previous account', async () => {
+  const f = await fixture();
+  const pending = f.changeStreamingQuality('high'); await tick();
+  f.changeAccount(); f.resolve(0, 'high'); await pending;
+  assert.equal(f.queues.length, 0);
+  assert.equal(f.qualities.length, 0);
 });

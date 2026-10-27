@@ -52,7 +52,7 @@ class PlaybackEngine private constructor(private val context: Context) {
   private var serviceAttached = false
   fun attachService() { serviceAttached = true }
   fun detachService() { serviceAttached = false; releaseIfUnowned() }
-  fun detachBridge() { emit = null; releaseIfUnowned() }
+  fun detachBridge() { emit = null; carClientReady = false; releaseIfUnowned() }
   private fun releaseIfUnowned() {
     if (serviceAttached || emit != null) return
     handler.removeCallbacksAndMessages(null)
@@ -60,9 +60,11 @@ class PlaybackEngine private constructor(private val context: Context) {
     player.release()
     if (instance === this) instance = null
   }
-  var catalog = JSONObject()
+  internal val carLibrary = CarMediaRepository(context)
+  var catalogChanged: (() -> Unit)? = null
   var controls = emptyMap<String, Any?>()
   var controlsChanged: (() -> Unit)? = null
+  var carClientReady = false
   var carResolutionComplete: ((Map<String, Any?>) -> Unit)? = null
   var cancelCarResolution: (() -> Unit)? = null
   var remoteSelection = false
@@ -80,6 +82,7 @@ class PlaybackEngine private constructor(private val context: Context) {
         if (state == Player.STATE_ENDED) event("playback-queue-ended")
       }
       override fun onIsPlayingChanged(isPlaying: Boolean) {
+        if (!isPlaying) carLibrary.rememberPosition(player.currentMediaItem?.mediaId, player.currentPosition)
         event("playback-state", mapOf("state" to status()))
       }
       override fun onPlayWhenReadyChanged(ready: Boolean, reason: Int) {
@@ -92,6 +95,10 @@ class PlaybackEngine private constructor(private val context: Context) {
       }
       override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
         val index = player.currentMediaItemIndex
+        tracks.getOrNull(index)?.takeIf { item != null && it["id"] == item.mediaId }?.let {
+          carLibrary.rememberSelection(it)
+          catalogChanged?.invoke()
+        }
         event("playback-active-track", mapOf("index" to index, "track" to tracks.getOrNull(index), "externalSelection" to remoteSelection))
         remoteSelection = false
       }
@@ -147,8 +154,21 @@ class PlaybackEngine private constructor(private val context: Context) {
     val index = (args["index"] as? Number)?.toInt() ?: 0
     val position = ((args["position"] as? Number)?.toDouble() ?: 0.0).coerceAtLeast(0.0)
     when (name) {
+      "carSelection" -> {
+        val selection = carLibrary.preparedSelection(args["id"] as? String ?: "")
+        return snapshot() + mapOf("queue" to selection.tracks, "index" to selection.index)
+      }
+      "carClient" -> { carClientReady = args["ready"] == true; controlsChanged?.invoke() }
       "carResolution" -> carResolutionComplete?.invoke(args)
-      "catalog" -> catalog = JSONObject(args["json"] as? String ?: "{}")
+      "catalog" -> {
+        if (carLibrary.updateCatalog(args["json"] as? String ?: "{}")) {
+          cancelCarResolution?.invoke()
+          if (tracks.any { (it["accountId"] ?: "guest") != carLibrary.owner }) {
+            tracks.clear(); player.stop(); player.clearMediaItems()
+          }
+        }
+        catalogChanged?.invoke()
+      }
       "controls" -> { controls = args; controlsChanged?.invoke() }
       "setQueue" -> {
         val next = (args["tracks"] as? List<Map<String, Any?>> ?: emptyList()).toMutableList()
@@ -157,6 +177,9 @@ class PlaybackEngine private constructor(private val context: Context) {
         val target = next.getOrNull(index)
         val preserve = args["preserveCurrentTrack"] == true && current != null && target != null && current["id"] == target["id"] && current["url"] == target["url"] && current["headers"] == target["headers"]
         tracks = next
+        carLibrary.rememberSources(next)
+        carLibrary.rememberQueue(next)
+        catalogChanged?.invoke()
         if (next.isEmpty()) player.clearMediaItems()
         else if (preserve) {
           next.forEachIndexed { at, track ->
@@ -169,8 +192,11 @@ class PlaybackEngine private constructor(private val context: Context) {
         } else { player.setMediaSources(next.map(::source), index.coerceIn(0, next.lastIndex), (position * 1000).toLong()); player.prepare(); player.playWhenReady = playing }
       }
       "update" -> if (index in tracks.indices) {
+        if (args["expectedTrackId"] != null && args["expectedTrackId"] != tracks[index]["id"]) return snapshot()
+        if (args["onlyCurrent"] == true && index != player.currentMediaItemIndex) return snapshot()
         if (args["onlyUpcoming"] == true && index <= player.currentMediaItemIndex) return snapshot()
         val old = tracks[index]; val next = old + (args["metadata"] as? Map<String, Any?> ?: emptyMap()); tracks[index] = next
+        carLibrary.rememberSources(listOf(next))
         if (old["url"] != next["url"] || old["headers"] != next["headers"]) {
           val current = player.currentMediaItemIndex; val pos = player.currentPosition; val playing = player.playWhenReady
           player.replaceMediaItem(index, source(next).mediaItem)

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getFeaturedArtists } from "@/data/providers/ArtistProvider";
+import { clearFeaturedArtistsCache, getCachedFeaturedArtists, getFeaturedArtists, type ArtistCard } from "@/data/providers/ArtistProvider";
 import React,{ useCallback,useEffect,useMemo,useRef,useState } from "react";
 
 import Colors from "@/constants/colors";
@@ -37,6 +37,7 @@ import { HomeAmbientBackdrop } from "../components/HomeAmbientBackdrop";
 import { HomeHorizontalSection } from "../components/HomeHorizontalSection";
 import { HomeQuickPicks } from "../components/HomeQuickPicks";
 import { HomeRecentlyPlayed } from "../components/HomeRecentlyPlayed";
+import { HomeArtistsSection } from "../components/HomeArtistsSection";
 import {
 HomeLoadingSkeleton,
 HomeQuickPicksSkeleton,
@@ -78,6 +79,7 @@ interface HomeFeedItemProps {
   recentlyPlayed: any[];
   loadingMainContent: boolean;
   publicPlaylists: any[];
+  featuredArtists: ArtistCard[];
 }
 
 const HomeFeedSectionRow = React.memo(function HomeFeedSectionRow({
@@ -93,6 +95,7 @@ const HomeFeedSectionRow = React.memo(function HomeFeedSectionRow({
   recentlyPlayed,
   loadingMainContent,
   publicPlaylists,
+  featuredArtists,
 }: HomeFeedItemProps) {
   switch (item.type) {
     case "releases-status":
@@ -134,6 +137,8 @@ const HomeFeedSectionRow = React.memo(function HomeFeedSectionRow({
       return <HomeQuickPicksSkeleton />;
     case "recently-played":
       return <HomeRecentlyPlayed items={recentlyPlayed} playSong={playSong} />;
+    case "artists":
+      return <HomeArtistsSection artists={featuredArtists} />;
     case "category":
       return (
         <View>
@@ -201,8 +206,17 @@ export function HomeScreen() {
     enabled: isOnline && isNativeHome, staleTime: 2 * 60 * 60 * 1000,
     refetchOnMount: false, refetchOnWindowFocus: false, refetchOnReconnect: false });
   const { refetch: refetchArtists } = artistsQuery;
-  const featuredArtists = artistsQuery.data || cachedArtists;
-  useAppShowcasePrompt((hasContent || Boolean(youtube.data)) && !loadingMainContent && !refreshing && isOnline && !isChecking);
+  const [storedArtists, setStoredArtists] = useState<ArtistCard[]>([]);
+  useEffect(() => {
+    if (!isNativeHome) return;
+    let active = true;
+    void getCachedFeaturedArtists().then(artists => { if (active) setStoredArtists(artists); });
+    return () => { active = false; };
+  }, []);
+  const featuredArtists = useMemo(() => artistsQuery.data?.length ? artistsQuery.data :
+    storedArtists.length ? storedArtists : cachedArtists || [], [artistsQuery.data, storedArtists, cachedArtists]);
+  const hasVisibleContent = hasContent || featuredArtists.length > 0 || Boolean(youtube.data) || Boolean(explore.data);
+  useAppShowcasePrompt(hasVisibleContent && !loadingMainContent && !refreshing && isOnline && !isChecking);
 
   const [selectedCategory, setSelectedCategory] = useState<MavrixfyCategory>("All");
   const handleSelectCategory = useCallback((category: MavrixfyCategory) => {
@@ -238,9 +252,11 @@ export function HomeScreen() {
     try {
       if (isNativeHome) clearYouTubeHomeCache();
       await Promise.allSettled([
-        // The catalog refresh clears the artist provider cache before refetching.
-        handleRefresh().then(() => isNativeHome ? refetchArtists() : undefined),
-        ...(isNativeHome ? [refetchYouTube(), refetchExplore()] : []),
+        handleRefresh(),
+        ...(isNativeHome ? [
+          clearFeaturedArtistsCache().then(() => refetchArtists()),
+          refetchYouTube(), refetchExplore(),
+        ] : []),
       ]);
     } finally {
       refreshInFlightRef.current = false;
@@ -263,6 +279,7 @@ export function HomeScreen() {
         recentlyPlayed={recentlyPlayed}
         loadingMainContent={loadingMainContent}
         publicPlaylists={publicPlaylists}
+        featuredArtists={featuredArtists}
       />
     ),
     [
@@ -277,6 +294,7 @@ export function HomeScreen() {
       recentlyPlayed,
       loadingMainContent,
       publicPlaylists,
+      featuredArtists,
     ]
   );
 
@@ -292,7 +310,7 @@ export function HomeScreen() {
 
   const festivalTheme = useFestivalTheme();
   const announcement = useHomeAnnouncement(bannerConfig, scrollY,
-    noticeHeight > 0 && isOnline && !isChecking && (hasContent || Boolean(youtube.data)) && !loadingMainContent && !refreshing);
+    noticeHeight > 0 && isOnline && !isChecking && hasVisibleContent && !loadingMainContent && !refreshing);
   const animatedNoticeHeight = useSharedValue(0);
   useEffect(() => {
     animatedNoticeHeight.value = withTiming(announcement.visible ? noticeHeight : 0, { duration: 260 });
@@ -313,7 +331,7 @@ export function HomeScreen() {
     [insets.bottom, topInset]
   );
 
-  if (!isOnline && !isChecking && !hasContent && !youtube.data && !explore.data && !loading) {
+  if (!isOnline && !isChecking && !hasVisibleContent && !loading) {
     return <OfflineScreen />;
   }
 

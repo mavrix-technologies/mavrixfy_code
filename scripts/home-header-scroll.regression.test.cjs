@@ -102,7 +102,8 @@ test("timed entrance and dismissal reclaim header space at every intermediate an
 
 function homeFixture(topInset, platform = "ios") {
   let cursor = 0, slots = [];
-  const mode = { visible: false, online: true, events: [], refreshCatalog: () => Promise.resolve() };
+  const mode = { visible: false, online: true, hasContent: true, artists: undefined, cachedArtists: [], storedArtists: [],
+    events: [], refreshCatalog: () => Promise.resolve() };
   const homeScrollRef = { current: null };
   const jsx = (type, props) => ({ type, props });
   const react = {
@@ -120,8 +121,9 @@ function homeFixture(topInset, platform = "ios") {
   const imports = {
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
-    "@tanstack/react-query": { useQuery: () => ({ ...query, refetch: async () => { mode.events.push("artists"); } }) },
-    "@/data/providers/ArtistProvider": {},
+    "@tanstack/react-query": { useQuery: () => ({ ...query, data: mode.artists, refetch: async () => { mode.events.push("artists"); } }) },
+    "@/data/providers/ArtistProvider": { getCachedFeaturedArtists: async () => mode.storedArtists,
+      clearFeaturedArtistsCache: async () => { mode.events.push("clear-artists"); } },
     "@/constants/colors": { __esModule: true, default: { background: "#0B0F14" } },
     "@/components/AdMobBanner": {}, "@/components/OfflineBanner": {}, "@/components/OfflineScreen": {},
     "@/contexts/NetworkContext": { useNetwork: () => ({ isOnline: mode.online, isChecking: false }) },
@@ -141,7 +143,7 @@ function homeFixture(topInset, platform = "ios") {
     "../components/HomeAnnouncementBanner": { HomeAnnouncementBanner: "Notice" },
     "../hooks/useHomeAnnouncement": { useHomeAnnouncement: () => ({ visible: mode.visible, dismiss: () => { mode.visible = false; } }) },
     "../hooks/useFestivalTheme": { useFestivalTheme: () => undefined },
-    "../hooks/useHomeFeedData": { useHomeFeedData: () => ({ hasContent: true, quickPicksPool: [],
+    "../hooks/useHomeFeedData": { useHomeFeedData: () => ({ hasContent: mode.hasContent, quickPicksPool: [], featuredArtists: mode.cachedArtists,
       handleRefresh: () => { mode.events.push("catalog"); return mode.refreshCatalog(); } }) },
     "../hooks/useYouTubeHomeFeed": { useYouTubeHomeFeed: () => ({ ...query, explore: { ...query, refetch: async () => { mode.events.push("explore"); } } }) },
     "../hooks/useAppShowcasePrompt": { useAppShowcasePrompt: noop },
@@ -152,6 +154,7 @@ function homeFixture(topInset, platform = "ios") {
   // These children do not participate in header measurement in this fixture.
   for (const name of ["FestivalHeaderBanner", "HomeAmbientBackdrop", "HomeArtistsSection", "HomeHorizontalSection", "homeDisplayText", "HomeQuickPicks", "HomeRecentlyPlayed", "HomeSkeletons", "HomeYouTubeContent"])
     imports[`../components/${name}`] = {};
+  imports['../components/HomeArtistsSection'] = {HomeArtistsSection:'Artists'};
   const module = { exports: {} };
   const code = ts.transpileModule(fs.readFileSync("src/features/home/screens/HomeScreen.tsx", "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
@@ -222,10 +225,20 @@ test("pull-to-refresh loads feeds concurrently and coalesces repeated pulls", as
   f.mode.refreshCatalog = () => new Promise(resolve => { finishCatalog = resolve; });
   const refresh = find(f.render(), "Feed").props.refreshControl.props.onRefresh;
   const first = refresh(), repeated = refresh();
-  assert.deepEqual(f.mode.events, ["clear", "catalog", "home", "explore"], "YouTube feeds start while catalog refresh is pending");
+  assert.deepEqual(f.mode.events, ["clear", "catalog", "clear-artists", "home", "explore"], "all independent feeds start while catalog refresh is pending");
   assert.equal(find(f.render(), "Feed").props.refreshControl.props.refreshing, true);
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(f.mode.events.at(-1), "artists", "artists refresh without waiting for the catalog");
   finishCatalog(); await Promise.all([first, repeated]);
-  assert.deepEqual(f.mode.events, ["clear", "catalog", "home", "explore", "artists"]);
+  assert.deepEqual(f.mode.events, ["clear", "catalog", "clear-artists", "home", "explore", "artists"]);
+  assert.equal(find(f.render(), "Feed").props.refreshControl.props.refreshing, false);
+});
+
+test("a catalog refresh failure does not block artist refresh or leave the spinner running", async () => {
+  const f = homeFixture(47);
+  f.mode.refreshCatalog = async () => { throw Error('Catalog offline'); };
+  await find(f.render(), "Feed").props.refreshControl.props.onRefresh();
+  assert.equal(f.mode.events.includes('artists'), true);
   assert.equal(find(f.render(), "Feed").props.refreshControl.props.refreshing, false);
 });
 
@@ -236,4 +249,26 @@ test("web refresh skips disabled native queries and offline pull does no work", 
   f.mode.online = false;
   await find(f.render(), "Feed").props.refreshControl.props.onRefresh();
   assert.deepEqual(f.mode.events, ["catalog"]);
+});
+
+test("Home renders artist profiles and preserves saved cards when fresh discovery returns empty", () => {
+  const f = homeFixture(47);
+  const saved = [{id:'youtube_artist_saved',name:'Saved',image:[]}];
+  f.mode.cachedArtists = saved; f.mode.artists = [];
+  const row = find(f.render(),'Feed').props.renderItem({item:{id:'artists',type:'artists'}});
+  const artists = row.type(row.props);
+  assert.equal(artists.type,'Artists');
+  assert.equal(artists.props.artists,saved);
+});
+
+test("offline Home uses disk-cached profiles instead of hiding them behind the offline screen", async () => {
+  const f = homeFixture(47);
+  f.mode.online = false; f.mode.hasContent = false;
+  f.mode.storedArtists = [{id:'youtube_artist_saved',name:'Saved',image:[]}];
+  f.render(); await Promise.resolve();
+  const feed = find(f.render(),'Feed');
+  assert.ok(feed);
+  const row = feed.props.renderItem({item:{id:'artists',type:'artists'}});
+  assert.equal(row.type(row.props).props.artists,f.mode.storedArtists);
+  assert.equal(f.mode.events.length,0);
 });

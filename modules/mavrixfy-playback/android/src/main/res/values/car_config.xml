@@ -1,0 +1,4 @@
+<resources>
+  <!-- The host config plugin overrides this with the app's configured API. -->
+  <string name="mavrixfy_car_api_base_url" translatable="false">https://mavrixfy-song-api.vercel.app</string>
+</resources>

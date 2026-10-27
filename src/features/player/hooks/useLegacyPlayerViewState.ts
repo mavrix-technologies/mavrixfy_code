@@ -204,6 +204,7 @@ export function useLegacyPlayerViewState(interactionReady: boolean, viewport: { 
     listRef,
     handleTrackChange,
     handleScrollFinished,
+    handleScrollBeginDrag,
     handleScroll,
   } = usePlayerQueueSwipe({
     playingQueue,
@@ -271,6 +272,7 @@ export function useLegacyPlayerViewState(interactionReady: boolean, viewport: { 
     listRef,
     handleTrackChange,
     handleScrollFinished,
+    handleScrollBeginDrag,
     handleScroll,
     togglePlay,
     toggleShuffle,

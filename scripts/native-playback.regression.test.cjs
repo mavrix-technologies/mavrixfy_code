@@ -100,7 +100,7 @@ test('native bridge payload omits undefined optional song fields at every depth'
   assert.equal(Object.hasOwn(track.headers,'Authorization'),false);
   assert.equal(track.headers.Referer,'music');assert.equal(track.details.present,null);
   assert.equal(Object.hasOwn(track.details,'missing'),false);assert.equal(track.duration,0);
-  await p.updateMetadataForTrack(0,{artist:undefined,title:'Updated'});
+  await p.updateCurrentTrack(0,{id:'a',artist:undefined,title:'Updated'});
   assert.equal(Object.hasOwn(f.calls.at(-1)[1].metadata,'artist'),false);
 });
 test('resolved next source updates the native queue without allocating a preload player',async()=>{
@@ -109,6 +109,52 @@ test('resolved next source updates the native queue without allocating a preload
   assert.equal(f.state.queue[1].url,'https://b');assert.equal(f.state.queue[1].headers.Referer,'music');
   assert.equal(f.calls.at(-1)[0],'update');
   assert.equal(f.calls.at(-1)[1].onlyUpcoming,true);
+  assert.equal(f.calls.at(-1)[1].expectedTrackId,'b');
+});
+
+test('an outdated upcoming quality cannot install a stream after the effective preference changes', async () => {
+  let finish;
+  const f = fixture({ resolveStream: () => new Promise(resolve => { finish = resolve; }) });
+  await f.NativePlaybackPlayer.setQueue([{id:'a',url:'https://current'}, {id:'youtube_b',source:'youtube'}]);
+  await new Promise(resolve => setImmediate(resolve));
+  f.preference.effective = 'low';
+  finish({url:'https://old-high-quality',expiresAt:Date.now()+300000});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.calls.filter(([name]) => name === 'update').length, 0);
+});
+
+test('active source reload is conditional and leaves queue ownership with native', async () => {
+  const f = fixture();
+  await f.NativePlaybackPlayer.setQueue([{id:'a',url:'https://a'},{id:'b',url:'https://b'}],1);
+  f.calls.length = 0;
+  await f.NativePlaybackPlayer.updateCurrentTrack(1,{id:'b',url:'https://b-new'});
+  assert.equal(f.calls.length,1);
+  const [name,args] = f.calls[0];
+  assert.equal(name,'update');
+  assert.equal(args.onlyCurrent,true);
+  assert.equal(args.expectedTrackId,'b');
+  assert.equal(args.index,1);
+});
+
+test('upcoming source warming preserves downloaded audio even during a quality refresh', async () => {
+  let resolutions = 0;
+  const f = fixture({ resolveStream: async () => { resolutions++; return {url:'https://remote'}; } });
+  await f.NativePlaybackPlayer.setQueue([{id:'a',url:'https://a'}, {id:'youtube_b',source:'youtube',url:'file:///downloads/b.m4a'}]);
+  await f.NativePlaybackPlayer.refreshUpcomingSources();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(resolutions,0);
+  assert.equal(f.state.queue[1].url,'file:///downloads/b.m4a');
+});
+
+test('a stream resolved before download preparation cannot replace the newly installed local source', async () => {
+  let finish;
+  const f = fixture({ resolveStream: () => new Promise(resolve => { finish = resolve; }) });
+  await f.NativePlaybackPlayer.setQueue([{id:'a',url:'https://a'}, {id:'youtube_b',source:'youtube'}]);
+  await new Promise(resolve => setImmediate(resolve));
+  await f.NativePlaybackPlayer.prepareTrack({id:'youtube_b',source:'youtube',url:'file:///downloads/b.m4a'});
+  finish({url:'https://remote',expiresAt:Date.now()+300000});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.state.queue[1].url,'file:///downloads/b.m4a');
 });
 
 test('source preference refresh updates only the upcoming song and reaches native preloading', async () => {

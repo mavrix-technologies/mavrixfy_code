@@ -141,6 +141,34 @@ class PlaybackIntegrationTest {
       scenario.close()
     }
   }
+  @Test fun delayedSourceUpdatesCannotOverwriteReorderedOrAdvancedTracks() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val scenario = ActivityScenario.launch(PlaybackTestActivity::class.java)
+    lateinit var engine: PlaybackEngine
+    val files = listOf("a", "b", "c").map { mapOf("id" to it, "url" to tone("conditional-$it.wav", 8)) }
+    try {
+      onMain {
+        engine = PlaybackEngine.get(context)
+        @Suppress("UNCHECKED_CAST")
+        fun queued() = engine.snapshot()["queue"] as List<Map<String, Any?>>
+        engine.command("setQueue", mapOf("tracks" to files, "index" to 0))
+        engine.command("move", mapOf("index" to 2, "to" to 1))
+        engine.command("update", mapOf("index" to 2, "expectedTrackId" to "c", "onlyUpcoming" to true,
+          "metadata" to mapOf("url" to "https://invalid.example/stale-preload")))
+        assertEquals(files[1]["url"], queued()[2]["url"])
+        engine.command("skip", mapOf("index" to 1))
+        engine.command("update", mapOf("index" to 0, "expectedTrackId" to "a", "onlyCurrent" to true,
+          "metadata" to mapOf("url" to "https://invalid.example/stale-quality")))
+        assertEquals(files[0]["url"], queued()[0]["url"])
+        assertEquals(1, engine.snapshot()["index"])
+        engine.command("update", mapOf("index" to 1, "expectedTrackId" to "c", "onlyCurrent" to true,
+          "metadata" to mapOf("url" to files[1]["url"])))
+        assertEquals(files[1]["url"], queued()[1]["url"])
+        assertEquals(3, queued().size)
+        assertEquals(false, engine.snapshot()["playWhenReady"])
+      }
+    } finally { onMain { engine.command("reset", emptyMap()) }; scenario.close() }
+  }
   @Test fun transientAudioFocusResumesUnlessTheUserPausedDuringInterruption() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val scenario = ActivityScenario.launch(PlaybackTestActivity::class.java)
@@ -189,6 +217,7 @@ class PlaybackIntegrationTest {
     try {
       onMain {
         engine = PlaybackEngine.get(context)
+        engine.carClientReady = true
         engine.emit = { name, data ->
           if (name == "car-play-media") {
             requests.add(data)

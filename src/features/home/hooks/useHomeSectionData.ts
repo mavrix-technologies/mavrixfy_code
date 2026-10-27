@@ -62,7 +62,7 @@ export function useHomeSectionData({
     const showCatalog = includeCatalog ?? !hasSpotify;
     const filteredCategories = categories.filter(cat => cat.id?.startsWith("spotify") || showCatalog);
     const filteredQuickPicks = showCatalog ? quickPickSongs : [];
-    const filteredArtists = showCatalog ? featuredArtists : [];
+    const filteredArtists = featuredArtists;
     const filteredRecent = recentlyPlayed;
     const filteredPublicPlaylists = publicPlaylists;
     const items: HomeSectionItem[] = [];
@@ -99,7 +99,7 @@ export function useHomeSectionData({
       items.push({ id: "loading-quick", type: "loading-quick" });
     }
     if (filteredRecent.length > 0) items.push({ id: "recently-played", type: "recently-played" });
-    if (filteredArtists.length > 0) items.push({ id: "artists", type: "artists" });
+    if (selectedCategory === "All" && filteredArtists.length > 0) items.push({ id: "artists", type: "artists" });
 
     filteredCategories.forEach((cat, idx) => {
       items.push({

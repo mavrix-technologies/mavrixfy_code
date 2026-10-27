@@ -28,6 +28,7 @@ function fixture({ viewport = 400, content = 6000, offset = 0, rowTop = 340, hor
   vm.runInNewContext(code, {
     module: compiled, exports: compiled.exports,
     require(name) {
+      if (name === "react-native") return { Platform: { OS: "android" } };
       if (name === "react") return { useCallback: fn => fn, useEffect: fn => effects.push(fn) };
       if (name === "react-native-reanimated") return {
         useAnimatedRef: () => animatedRef,

@@ -48,7 +48,7 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     nativeQueueIdsMatch: (native, queue) => native.length === queue.length && native.every((item, index) => item.id === queue[index].id),
     replaceNativeQueuePreservingState: async (queue, index) => { calls.push(["replace", queue.map(song => song.id), index]); },
     subscribeTrackPlayerEvent: (event, callback) => { events.set(event, callback); return noop; },
-    Event: { PlaybackProgressUpdated: "progress", PlaybackActiveTrackChanged: "active", PlaybackQueueEnded: "ended", PlaybackError: "error", RemotePlay: "remote-play", RemotePause: "remote-pause", RemoteStop: "remote-stop" },
+    Event: { PlaybackState: "state", PlaybackProgressUpdated: "progress", PlaybackActiveTrackChanged: "active", PlaybackQueueEnded: "ended", PlaybackError: "error", RemotePlay: "remote-play", RemotePause: "remote-pause", RemoteStop: "remote-stop", RemoteNext: "remote-next", RemotePrevious: "remote-previous" },
     State: { Playing: "playing", Paused: "paused", None: "none", Stopped: "stopped", Error: "error", Ended: "ended" },
     RepeatMode: { Off: "off", Queue: "all", Track: "one" },
   };
@@ -94,7 +94,6 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
       rejectYouTubeStream: () => { preferredSource = false; calls.push(['reject-source']); },
       youTubePlaybackErrorDetails: String, youTubePlaybackErrorMessage: String,
       clearYouTubeConnectionStreams: () => calls.push(["clear-streams"]) },
-    "@/services/carPlayService": { carPlayService: { isAvailable: () => false } },
     "@/utils/timeFormatters": { toDurationSeconds: Number },
     "./audioTimeline": require("./helpers/audio-timeline-fixture.cjs"),
   };
@@ -270,6 +269,68 @@ test("native track advancement keeps active playback without loading it a second
   assert.equal(f.options.playbackLoadingRef.current, false);
 });
 
+test("iOS retains unresolved playlist entries so lock-screen Next represents the complete queue", async () => {
+  const f = fixture({ activeIndex: 0 });
+  f.options.TrackPlayer.supportsUnresolvedQueue = true;
+  delete f.songs[1].audioUrl;
+  f.songs[1].source = 'spotify';
+  await f.commands.playSong(f.songs[0], f.songs);
+  const queue = await f.options.TrackPlayer.getQueue();
+  assert.deepEqual(Array.from(queue, song => song.id), ['a', 'b', 'c']);
+  assert.equal(queue[1].url, undefined);
+  assert.equal(f.options.isNativeQueueSyncedRef.current, true);
+});
+
+test("rapid unresolved lock-screen Next advances from the latest requested song", async () => {
+  const streams = new Map();
+  const f = fixture({ activeIndex: 0, resolveUrl: song => {
+    const stream = deferred(); streams.set(song.id, stream); return stream.promise;
+  } });
+  f.options.playSongRef.current = f.commands.playSong;
+  f.options.nextSongRef.current = f.commands.nextSong;
+  f.listen();
+  f.events.get('remote-next')();
+  assert.equal(f.options.currentSongRef.current.id, 'b');
+  f.events.get('remote-next')();
+  assert.equal(f.options.currentSongRef.current.id, 'c');
+  streams.get('c').resolve('https://audio.example/c'); await tick();
+  streams.get('b').resolve('https://audio.example/b'); await tick();
+  assert.equal(f.options.currentSongRef.current.id, 'c');
+  assert.equal(f.options.queueIndexRef.current, 2);
+  assert.equal(f.calls.filter(([name]) => name === 'queue').length, 1);
+});
+
+test("outgoing playing events cannot confirm a different pending song", () => {
+  const f = fixture({ activeIndex: 1 });
+  const pending = { id: 8, songId: 'c' };
+  f.options.pendingPlayRequestRef.current = pending;
+  f.options.playbackLoadingRef.current = true;
+  f.listen();
+  f.events.get('state')({ state: 'playing', trackId: 'b' });
+  assert.equal(f.options.pendingPlayRequestRef.current, pending);
+  assert.equal(f.options.playbackLoadingRef.current, true);
+});
+
+test("a delayed queue-end event from an outgoing track cannot skip the current song", async () => {
+  const f = fixture({ activeIndex: 1 });
+  f.options.desiredPlayStateRef.current = true;
+  f.options.playSongRef.current = () => { throw Error('Stale EOF must not advance'); };
+  f.listen();
+  await f.events.get('ended')({ reason: 'unresolved-next', trackId: 'a', index: 0 });
+  assert.equal(f.options.currentSongRef.current.id, 'b');
+});
+
+test("unresolved repeat-all wraps through the shared resolver", async () => {
+  const f = fixture({ activeIndex: 2 });
+  f.options.desiredPlayStateRef.current = true;
+  f.options.repeatModeRef.current = 'all';
+  const selections = [];
+  f.options.playSongRef.current = song => selections.push(song.id);
+  f.listen();
+  await f.events.get('ended')({ reason: 'unresolved-next', trackId: 'c', index: 2 });
+  assert.deepEqual(selections, ['a']);
+});
+
 test("a late queue-ended event cannot start another song after pause", async () => {
   const f = fixture({ activeIndex: 0 });
   f.options.playSongRef.current = () => { throw Error("paused queue must not advance"); };
@@ -331,6 +392,31 @@ test("outgoing progress cannot revert a newer native selection", async () => {
   f.events.get("progress")({ track: 0, trackId: "a", duration: 700, position: 600 }); await tick();
   assert.equal(f.options.currentSongRef.current.id, "b");
   assert.equal(f.options.positionSecondsRef.current, 37);
+});
+
+test("a delayed progress snapshot cannot revert a newer native track event", async () => {
+  const f = fixture({ activeIndex: 0 }); const read = deferred();
+  f.options.TrackPlayer.getPlaybackSnapshot = () => read.promise;
+  f.listen();
+  f.events.get('progress')({ track: 1, trackId: 'b', duration: 180, position: 45 });
+  f.events.get('active')({ index: 2, track: { id: 'c' } });
+  read.resolve({ queue: f.songs, index: 1, duration: 180, position: 45 }); await tick();
+  assert.equal(f.options.currentSongRef.current.id, 'c');
+  assert.equal(f.options.queueIndexRef.current, 2);
+  assert.equal(f.options.positionSecondsRef.current, 0);
+});
+
+test("an explicit unknown native track ID cannot borrow another song's artwork by index", () => {
+  const f = fixture({ activeIndex: 1 }); f.listen();
+  f.events.get('active')({ index: 0, track: { id: 'external-other-song' } });
+  assert.equal(f.options.currentSongRef.current.id, 'b');
+  assert.equal(f.options.queueIndexRef.current, 1);
+});
+
+test("a single-item native queue keeps the requested duplicate occurrence", () => {
+  const f = fixture({ queueIds: ['a', 'a', 'b'], activeIndex: 1, nativeIds: ['a'] }); f.listen();
+  f.events.get('active')({ index: 0, track: { id: 'a' } });
+  assert.equal(f.options.queueIndexRef.current, 1);
 });
 
 test("confirmed pending selection is reconciled instead of losing its only active event", () => {

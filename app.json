@@ -12,7 +12,8 @@
       "supportsTablet": true,
       "icon": "./assets/images/mavrixfy_icon.png",
       "bundleIdentifier": "com.mavrixfy.app",
-      "buildNumber": "35000",
+      "buildNumber": "35001",
+      "runtimeVersion": "3.5.0-35001-sdk58-native-player3",
       "bitcode": false,
       "usesAppleSignIn": true,
       "infoPlist": {
@@ -63,7 +64,8 @@
     "android": {
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
-      "versionCode": 35000,
+      "versionCode": 35002,
+      "runtimeVersion": "3.5.0-35002-sdk58-native-player3",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icon_foreground.png",
@@ -192,7 +194,8 @@
         }
       ],
       "./plugins/withAndroidAuto",
-      "./plugins/withPlaybackBuild"
+      "./plugins/withPlaybackBuild",
+      "./plugins/withOptionalHardware"
     ],
     "experiments": {
       "typedRoutes": true

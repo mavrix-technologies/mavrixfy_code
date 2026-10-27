@@ -19,6 +19,15 @@ const track = song => ({ ...song, url:song.audioUrl, artwork:song.coverUrl });
 async function fixture({ nativeSingleTrack = false } = {}) {
   const f = playerFixture();
   const player = f.StandardAudioPlayer;
+  player.getPlaybackSnapshot = async () => ({ queue: await player.getQueue(), index: await player.getActiveTrackIndex(), ...await player.getProgress() });
+  player.updateCurrentTrack = async (index, metadata) => {
+    const state = await player.getPlaybackSnapshot();
+    if (state.index === index && state.queue[index]?.id === metadata.id) {
+      state.queue[index] = metadata;
+      await player.setQueue(state.queue, index, state.position);
+    }
+    return player.getPlaybackSnapshot();
+  };
   await player.setQueue(nativeSingleTrack ? [track(songs[1])] : songs.map(track), nativeSingleTrack ? 0 : 1, 35);
   await player.play();
   const options = {
@@ -41,6 +50,7 @@ async function fixture({ nativeSingleTrack = false } = {}) {
   }).outputText, {
     module, exports:module.exports,
     require(name) {
+      if (name.endsWith('accountScope')) return { getAccountScope: () => ({}), isCurrentAccount: () => true };
       if (name.endsWith("YouTubeMusic")) return { isYouTubeSong: song => song.source === "youtube" || song.id?.startsWith("youtube_") };
       if (name.endsWith("ExpoAvAdapter")) return { prepareNextTrack: async () => {} };
       if (name === 'react') return { useCallback:fn => fn, useRef:value => ({ current:value }) };

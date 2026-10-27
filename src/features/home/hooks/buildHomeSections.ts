@@ -20,7 +20,8 @@ export function buildHomeSections(
   if (category === "Recently Played" || !youtubeEnabled) return jioSections;
 
   const spotifySections = jioSections.filter((item) => item.type === "category" && item.category?.id?.startsWith("spotify"));
-  const spotifySection = spotifySections[0] || jioSections.find((item) => item.type === "category" && item.category?.id === "spotify");
+  const spotifySection = spotifySections.find((item) => item.type === "category" && item.category.id === "spotify") ||
+    spotifySections.find((item) => item.type === "category" && !["spotify-mixes", "spotify-moods"].includes(item.category.id));
   const spotifyMixes = spotifySections.find((item) => item.type === "category" && item.category?.id === "spotify-mixes");
   const spotifyMoods = spotifySections.find((item) => item.type === "category" && item.category?.id === "spotify-moods");
 
@@ -119,9 +120,9 @@ export function buildHomeSections(
   const result = [...youtube];
   if (showCatalog) {
     jio.forEach((item, index) => result.splice(Math.min(4 + index * 4, result.length - 1), 0, item));
-    const artists = jioSections.find((item) => item.type === "artists");
-    if (artists) result.splice(Math.min(3, result.length), 0, artists);
   }
+  const artists = jioSections.find((item) => item.type === "artists");
+  if (artists) result.splice(Math.min(3, result.length), 0, artists);
   const recent = jioSections.find((item) => item.type === "recently-played");
   if (recent) result.splice(1, 0, recent);
   return result;

@@ -107,3 +107,31 @@ test("catalog section cleanup preserves active All, Recent and New Releases cont
     assert.equal(rows.map(row => row.id).join(","), "loading-quick,recently-played,loading-main");
   }
 });
+
+test("featured artist profiles remain on native Home when legacy catalog shelves are disabled", () => {
+  const { useHomeSectionData } = load("src/features/home/hooks/useHomeSectionData.ts", { react: { useMemo: fn => fn() } });
+  const input = { selectedCategory: 'All', categories: [{id:'spotify',results:[]},{id:'trending',results:[]}],
+    quickPickSongs: [], recentlyPlayed: [{id:'recent'}], featuredArtists: [{id:'youtube_artist_artist'}],
+    publicPlaylists: [], loadingMainContent:false, includeCatalog:false };
+  const catalog = useHomeSectionData(input);
+  const result = buildHomeSections('All',true,[],catalog,[],false);
+  assert.equal(result.filter(row => row.type === 'artists').length, 1);
+  assert.equal(result.some(row => row.type === 'category' && row.category.id === 'trending'), false);
+  assert.equal(result.some(row => row.type === 'recently-played'), true);
+  assert.equal(buildHomeSections('Recently Played',true,[],useHomeSectionData({...input,selectedCategory:'Recently Played'}),[],false)
+    .some(row => row.type === 'artists'), true);
+  for (const category of ['Songs','Albums','Playlists','New Releases','Spotify']) {
+    const rows = buildHomeSections(category,true,[],useHomeSectionData({...input,selectedCategory:category}),[],false);
+    assert.equal(rows.some(row => row.type === 'artists'), false, category);
+  }
+});
+
+test("partial Spotify shelves never duplicate a row or its FlatList key", () => {
+  for (const ids of [['spotify-mixes'],['spotify-moods'],['spotify-mixes','spotify-moods'],['spotify','spotify-mixes','spotify-moods']]) {
+    const categories = ids.map(id => ({id:'cat-'+id,type:'category',category:{id,results:[]}}));
+    const rows = buildHomeSections('All',true,[],categories,[],false);
+    const keys = Array.from(rows, row => row.id);
+    assert.equal(new Set(keys).size, keys.length);
+    assert.deepEqual(Array.from(rows.filter(row => row.type === 'category'), row => row.category.id).sort(), ids.slice().sort());
+  }
+});

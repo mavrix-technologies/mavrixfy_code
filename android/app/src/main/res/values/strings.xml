@@ -1,6 +1,7 @@
 <resources>
   <string name="app_name">Mavrixfy</string>
-  <string name="expo_runtime_version">3.5.0-35000-sdk58-native-player2</string>
+  <string name="expo_runtime_version">3.5.0-35002-sdk58-native-player3</string>
   <string name="expo_system_ui_user_interface_style" translatable="false">automatic</string>
   <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
+  <string name="mavrixfy_car_api_base_url" translatable="false">https://mavrixfy-song-api.vercel.app</string>
 </resources>

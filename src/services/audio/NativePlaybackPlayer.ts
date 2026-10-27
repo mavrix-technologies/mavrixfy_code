@@ -61,11 +61,13 @@ async function command(name: string, args: Record<string, unknown> = {}) {
   return snapshot;
 }
 async function snapshot() { return (await ready()).snapshot(); }
+function isLocalSource(track: NativeTrack) { return /^(?:file|content):\/\/|^\//i.test(track.url ?? ""); }
 async function warmQueue(force = false) {
   const version = selection;
   const state = await snapshot();
   for (let index = state.index + 1; index < Math.min(state.queue.length, state.index + 2); index++) {
     const track = state.queue[index];
+    if (isLocalSource(track)) continue;
     if (track.source !== "youtube" && !track.id?.startsWith("youtube_")) continue;
     if (!force && track.url && Number(track.youtubeAudioExpiresAt) > Date.now() + 120_000) continue;
     const key = `${version}:${index}:${track.id}`;
@@ -80,10 +82,10 @@ async function warmQueue(force = false) {
         const stream = await resolveYouTubeStream({ ...track, duration: Number(track.duration) || 0, id: track.id || "", source: "youtube" } as Song,
           effective, effective !== "low" && preferJioSaavn);
         const preference = await getRequestedQualityPreference();
-        if (Boolean(preference.preferJioSaavn) !== Boolean(preferJioSaavn)) return;
+        if (preference.effective !== effective || Boolean(preference.preferJioSaavn) !== Boolean(preferJioSaavn)) return;
         const current = await snapshot();
-        if (version !== selection || current.queue[index]?.id !== track.id || index <= current.index) return;
-        await command("update", { index, onlyUpcoming: true, metadata: { ...playbackStreamMetadata(stream), url: stream.url, headers: stream.headers, youtubeAudioExpiresAt: stream.expiresAt } });
+        if (version !== selection || current.queue[index]?.id !== track.id || index <= current.index || isLocalSource(current.queue[index])) return;
+        await command("update", { index, expectedTrackId: track.id, onlyUpcoming: true, metadata: { ...playbackStreamMetadata(stream), url: stream.url, headers: stream.headers, youtubeAudioExpiresAt: stream.expiresAt } });
       } catch (error) {
         if (!/LOGIN_REQUIRED|SIGN_IN_REQUIRED|confirm.*not a bot/i.test(String(error)))
           logger.warn("[Audio] Upcoming stream is not prepared yet");
@@ -95,6 +97,9 @@ async function warmQueue(force = false) {
 
 /** One API; native owns its queue, focus, decoder, clock and automatic transitions. */
 export const NativePlaybackPlayer = {
+  // AVQueuePlayer keeps unresolved songs in its logical playlist and resolves
+  // them through the shared controller when selected, without hiding Next.
+  supportsUnresolvedQueue: Platform.OS === "ios",
   async refreshUpcomingSources() { if (bridge) { selection++; await warmQueue(true); } },
   async setupPlayer() { await ready(); },
   addEventListener(name: string, listener: (event: any) => void) {
@@ -134,13 +139,15 @@ export const NativePlaybackPlayer = {
   async getPlaybackState() { return { state: (await snapshot()).state }; },
   getPlaybackSnapshot: snapshot,
   async getProgress() { const state = await snapshot(); return { position: state.position, duration: state.duration, buffered: state.buffered ?? 0 }; },
-  async updateMetadataForTrack(index: number, metadata: Partial<NativeTrack>) { await command("update", { index, metadata }); },
+  async updateCurrentTrack(index: number, track: NativeTrack) {
+    return command("update", { index, expectedTrackId: track.id, onlyCurrent: true, metadata: track });
+  },
   async prepareTrack(track: NativeTrack) {
     const version = selection; const state = await snapshot();
     const index = state.queue.findIndex((candidate, i) => i > state.index && candidate.id === track.id);
     if (index < 0 || version !== selection) return;
     // Install the resolved URL. Native queue preloading owns its media data.
-    await command("update", { index, onlyUpcoming: true, metadata: track });
+    await command("update", { index, expectedTrackId: track.id, onlyUpcoming: true, metadata: track });
   },
 };
 // eslint-disable-next-line @typescript-eslint/no-redeclare
@@ -149,6 +156,8 @@ export function getNativeCarClient() {
   if (!bridge || Platform.OS !== "android") return null;
   const events: Record<string, string> = { MavrixfyPlayMediaId: "car-play-media", MavrixfyPlaySearch: "car-search", MavrixfyPlaybackAction: "car-action" };
   return {
+    getSelection(id: string) { return command("carSelection", { id }); },
+    setReady(ready: boolean) { void command("carClient", { ready }).catch(error => logger.warn("[Car] Client registration failed", error)); },
     addListener(name: string, listener: (event: any) => void) { return NativePlaybackPlayer.addEventListener(events[name] || name, listener); },
     updateCatalog(json: string, _activeId: string) { void command("catalog", { json }).catch(error => logger.warn("[Car] Catalog failed", error)); },
     updateControls(id: string, shuffled: boolean, repeat: string, liked: boolean) { void command("controls", { id, shuffled, repeat, liked }).catch(error => logger.warn("[Car] Controls failed", error)); },

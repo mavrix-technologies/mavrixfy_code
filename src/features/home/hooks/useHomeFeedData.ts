@@ -287,15 +287,14 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
     try {
       await Promise.allSettled([
         clearCachedHomePublicPlaylists(),
-        clearFeaturedArtistsCache(),
-        clearQuickPicksCache(),
+        ...(compact ? [] : [clearFeaturedArtistsCache(), clearQuickPicksCache()]),
         loadRecentlyPlayed(),
       ]);
       await loadHomeFeed(true);
     } finally {
       if (mountedRef.current) setRefreshing(false);
     }
-  }, [loadHomeFeed, loadRecentlyPlayed]);
+  }, [compact, loadHomeFeed, loadRecentlyPlayed]);
 
   const hasContent =
     feedState.categories.length > 0 ||
