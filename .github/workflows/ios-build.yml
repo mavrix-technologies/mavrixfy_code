@@ -54,16 +54,21 @@ jobs:
         run: |
           set -euo pipefail
           if [ -d "/Applications/Xcode_16.2.app/Contents/Developer" ]; then
-            export DEVELOPER_DIR="/Applications/Xcode_16.2.app/Contents/Developer"
+            XCODE_DIR="/Applications/Xcode_16.2.app/Contents/Developer"
           elif [ -d "/Applications/Xcode_16.1.app/Contents/Developer" ]; then
-            export DEVELOPER_DIR="/Applications/Xcode_16.1.app/Contents/Developer"
+            XCODE_DIR="/Applications/Xcode_16.1.app/Contents/Developer"
           elif [ -d "/Applications/Xcode_16.0.app/Contents/Developer" ]; then
-            export DEVELOPER_DIR="/Applications/Xcode_16.0.app/Contents/Developer"
+            XCODE_DIR="/Applications/Xcode_16.0.app/Contents/Developer"
+          elif [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+            XCODE_DIR="/Applications/Xcode.app/Contents/Developer"
           else
-            export DEVELOPER_DIR="$(xcode-select -p)"
+            XCODE_DIR="$(xcode-select -p)"
           fi
+          echo "Selecting Xcode at: $XCODE_DIR"
+          sudo xcode-select -s "$XCODE_DIR"
+          export DEVELOPER_DIR="$XCODE_DIR"
           echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
-          test -d "$DEVELOPER_DIR"
+          xcrun simctl list >/dev/null 2>&1 || true
           version=$(xcodebuild -version)
           echo "$version"
           echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
@@ -155,8 +160,28 @@ jobs:
           cd ios
           set -euo pipefail
           case "$BUILD_TARGET" in
-            device) sdk=iphoneos; destination='generic/platform=iOS'; architecture=arm64 ;;
-            simulator) sdk=iphonesimulator; destination='generic/platform=iOS Simulator'; architecture=$(uname -m) ;;
+            device)
+              sdk=iphoneos
+              destination='generic/platform=iOS'
+              architecture=arm64
+              ;;
+            simulator)
+              sdk=iphonesimulator
+              architecture=$(uname -m)
+              xcrun simctl list devices available >/dev/null 2>&1 || true
+              sim_udid=$(xcrun simctl list devices available --json | python3 -c '
+import json, sys
+devs = [d for r in json.load(sys.stdin).get("devices", {}).values() for d in r if "iPhone" in d.get("name", "")]
+if devs:
+    print(next((d["udid"] for d in devs if d.get("state") == "Booted"), devs[0]["udid"]))
+' 2>/dev/null || true)
+              if [ -n "$sim_udid" ]; then
+                xcrun simctl boot "$sim_udid" 2>/dev/null || true
+                destination="platform=iOS Simulator,id=$sim_udid"
+              else
+                destination="generic/platform=iOS Simulator"
+              fi
+              ;;
             *) echo "Unsupported build target: $BUILD_TARGET"; exit 1 ;;
           esac
           xcodebuild -workspace Mavrixfy.xcworkspace \
@@ -171,6 +196,9 @@ jobs:
             -parallelizeTargets \
             -jobs $(sysctl -n hw.logicalcpu) \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
             COMPILER_INDEX_STORE_ENABLE=NO \
             ARCHS="$architecture" \
             build 2>&1 | tee build.log
