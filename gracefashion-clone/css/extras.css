@@ -1,0 +1,32 @@
+:root {
+  --font-instrument-sans: "Instrument Sans", "Instrument Sans Fallback", sans-serif;
+  --font-space-grotesk: "Space Grotesk", "Space Grotesk Fallback", sans-serif;
+}
+
+html, body { margin: 0; background: #fff; }
+.h-screen-safe { height: 100svh; min-height: 100vh; }
+.hero-stage { height: 100svh; min-height: 100vh; position: relative; overflow: hidden; background: #000; }
+
+.hero-pixel {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  grid-template-rows: repeat(10, 1fr);
+}
+.hero-pixel span { background: #000; }
+
+.deck-card { will-change: transform; }
+.reveal { opacity: 0; filter: blur(12px); transform: translateY(12px); transition: opacity .7s ease, filter .7s ease, transform .7s ease; }
+.reveal.is-in { opacity: 1; filter: none; transform: none; }
+
+.ai-door-canvas { background-color: #0a0a0a; background-image: radial-gradient(circle, rgba(255,255,255,.22) 1.2px, transparent 1.2px); background-size: 24px 24px; }
+.dot-grid { background-color: #0a0a0a; background-image: radial-gradient(circle, rgba(255,255,255,.22) 1.2px, transparent 1.2px); background-size: 24px 24px; }
+
+.quote-stack { display: grid; }
+.quote-stack blockquote { grid-column: 1; grid-row: 1; }
+
+.tab-track { position: relative; }
+.tab-fill { position: absolute; inset: 0 auto 0 0; background: #000; height: 1px; top: 50%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; filter: none; transform: none; }
+}

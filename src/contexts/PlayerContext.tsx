@@ -90,6 +90,12 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
   });
 
   const { sleepTimer, sleepTimerRef, setSleepTimer, clearSleepTimer } = useAudioSleepTimer({
+    onEndOfQueueChange: (enabled) => {
+      // Repeat is suppressed in the shared bridge while this boundary is
+      // armed, including later queue synchronizations and Repeat changes.
+      // Restoring repeat mode never issues a Play command.
+      void TrackPlayer?.setStopAtQueueEnd?.(enabled).catch(error => logger.warn("[Audio] End-of-queue boundary failed", error));
+    },
     onTimerExpire: () => {
       const desiredRef = core.desiredPlayStateRef;
       desiredRef.current = false;

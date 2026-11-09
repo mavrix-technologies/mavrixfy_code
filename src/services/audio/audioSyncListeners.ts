@@ -10,9 +10,10 @@ import type { PendingPlayRequest } from "@/services/audio/usePlayerCoreState";
 import { playerPersistenceService } from "@/services/player/playerPersistenceService";
 import type { SleepTimerState, PlaybackQualityState } from "@/types/playbackTypes";
 import { toDurationSeconds } from "@/utils/timeFormatters";
-import { useEffect,type MutableRefObject } from "react";
+import { useEffect,useRef,type MutableRefObject } from "react";
 import { AppState } from "react-native";
 import type { NativePlaybackPlayer, State as AudioState, Event as AudioEvent } from "./NativePlaybackPlayer";
+type SourceRequest = { requestId?: number; index?: number; trackId?: string; position?: number };
 
 interface UseAudioSyncListenersOptions {
   setPlaybackQuality?: (update: (previous: PlaybackQualityState) => PlaybackQualityState) => void;
@@ -43,11 +44,11 @@ interface UseAudioSyncListenersOptions {
   sleepTimerRef: MutableRefObject<SleepTimerState | null>;
   clearSleepTimer: () => void;
   showPlaybackNotice: (msg: string) => void;
-  playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number) => Promise<void> | void>;
+  playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number, sourceRequestId?: number) => Promise<void> | void>;
   nextSongRef: MutableRefObject<() => void>;
   prevSongRef: MutableRefObject<() => void>;
   isNativeQueueSyncedRef?: MutableRefObject<boolean>;
-  triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[]) => Promise<Song[]>;
+  triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[], shouldAppend?: () => boolean) => Promise<Song[]>;
   repeatMode?: "off" | "all" | "one";
   repeatModeRef?: MutableRefObject<"off" | "all" | "one">;
 }
@@ -89,6 +90,7 @@ export function useAudioSyncListeners({
   repeatMode,
   repeatModeRef,
 }: UseAudioSyncListenersOptions) {
+  const sourceResolverRef = useRef<((event: SourceRequest) => Promise<void>) | null>(null);
   // TrackPlayer native event handlers
   useEffect(() => {
     if (!isPlayerReady || !TrackPlayer) return;
@@ -105,6 +107,42 @@ export function useAudioSyncListeners({
       isPlayingRef.current = true;
       updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
     };
+    let disposed = false;
+    const wantsSource = () => desiredPlayStateRef.current !== false;
+    let lastSourceRequestId: number | undefined;
+    const validatingSourceRequests = new Set<number>();
+    const resolveSelectedSource = async (event: SourceRequest) => {
+      if (disposed || typeof event.requestId !== "number" || !Number.isFinite(event.requestId) || event.requestId === lastSourceRequestId ||
+        validatingSourceRequests.has(event.requestId) ||
+        typeof event.index !== "number" || !Number.isInteger(event.index) || !event.trackId ||
+        !wantsSource() || playbackLoadingRef.current || pendingPlayRequestRef.current) return;
+      validatingSourceRequests.add(event.requestId);
+      try {
+      const scope = getAccountScope();
+      const revision = playRequestIdRef?.current;
+      const selectedSong = currentSongRef.current;
+      const logicalIndex = queueIndexRef.current;
+      const state = await TrackPlayer.getPlaybackSnapshot();
+      const request = state.sourceRequest;
+      if (disposed || !isCurrentAccount(scope) || revision !== playRequestIdRef?.current || selectedSong !== currentSongRef.current ||
+        logicalIndex !== queueIndexRef.current || !wantsSource() || playbackLoadingRef.current || pendingPlayRequestRef.current ||
+        request?.requestId !== event.requestId || request.index !== event.index || request.trackId !== event.trackId ||
+        state.index !== event.index || state.queue[state.index]?.id !== event.trackId || state.queue[state.index]?.url) return;
+      const song = isNativeQueueSyncedRef?.current ? queueRef.current[event.index] : queueRef.current[logicalIndex];
+      if (!song || song.id !== event.trackId || currentSongRef.current?.id !== song.id) return;
+      const position = typeof event.position === "number" && Number.isFinite(event.position) ? Math.max(0, event.position) : 0;
+      lastSourceRequestId = event.requestId;
+      try {
+        await playSongRef.current(song, queueRef.current, position, event.requestId);
+      } finally {
+        // Success replaces the source and retires its token. A provider failure
+        // leaves the same pending token: settle it without a later second error
+        // from the native deadline. Newer native requests cannot be affected.
+        await TrackPlayer.finishSourceRequest?.(event.requestId);
+      }
+      } finally { validatingSourceRequests.delete(event.requestId); }
+    };
+    sourceResolverRef.current = resolveSelectedSource;
     const reconcileActiveTrack = (event: any) => {
         const currentQ = queueRef.current;
         if (event?.externalSelection && playRequestIdRef) {
@@ -196,14 +234,17 @@ export function useAudioSyncListeners({
 
           if (resolvedIndex >= 0) {
             prefetchAdjacentTrackStreams(currentQ, resolvedIndex);
-            if (triggerAutoplayAppend && resolvedIndex >= currentQ.length - 2) {
-              void triggerAutoplayAppend(targetSong, currentQ);
+            if (triggerAutoplayAppend && sleepTimerRef.current?.mode !== "end-of-stack" && resolvedIndex >= currentQ.length - 2) {
+              void triggerAutoplayAppend(targetSong, currentQ, () => sleepTimerRef.current?.mode !== "end-of-stack");
             }
           }
         }
     };
 
     const unsubs = [
+      subscribeTrackPlayerEvent(Event.PlaybackSourceRequired, (event: SourceRequest) => {
+        void resolveSelectedSource(event).catch(error => logger.warn("[Audio] Source handoff failed", error));
+      }),
       subscribeTrackPlayerEvent(Event.RemotePlay, () => {
         playIntent();
         if (playbackLoadingRef.current) return;
@@ -403,28 +444,37 @@ export function useAudioSyncListeners({
         if (!wantsPlayback() || playbackLoadingRef.current || pendingPlayRequestRef.current) return;
         if (event?.trackId && (event.trackId !== currentSongRef.current?.id ||
           (isNativeQueueSyncedRef?.current && typeof event.index === "number" && event.index !== queueIndexRef.current))) return;
-        if (event?.reason === "unresolved-next") {
-          const next = queueRef.current[queueIndexRef.current + 1] ||
-            ((repeatModeRef?.current || repeatMode) === "all" ? queueRef.current[0] : undefined);
-          if (next) void playSongRef.current(next, queueRef.current);
-          return;
-        }
         const endedSong = currentSongRef.current;
         const isStillEnded = () => currentSongRef.current === endedSong &&
           !playbackLoadingRef.current && !pendingPlayRequestRef.current;
-        if (sleepTimerRef.current?.mode === "end-of-stack") {
-          clearSleepTimer();
+        const nextQueuedSong = queueRef.current[queueIndexRef.current + 1];
+        // A native queue may contain only the loaded source. Its EOF does not
+        // end the logical playlist, and an unresolved successor is still part
+        // of the current queue. Stop at its actual tail, before repeat wraps.
+        if (sleepTimerRef.current?.mode === "end-of-stack" && !nextQueuedSong) {
+          const endedTimer = sleepTimerRef.current;
+          const endedRequestId = playRequestIdRef?.current;
           desiredPlayStateRef.current = false;
           setIsPlaying(false);
           isPlayingRef.current = false;
           playbackLoadingRef.current = false;
           setPlaybackLoading(false);
           updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isLoading: false, isBuffering: false });
+          // At EOF native playWhenReady can remain true. Pause it before the
+          // timer releases RepeatOff, so restoring repeat cannot restart audio.
+          try {
+            await TrackPlayer.pause();
+          } catch (error) {
+            logger.warn("[Audio] End-of-queue pause failed", error);
+            return;
+          }
+          if (isStillEnded() && endedRequestId === playRequestIdRef?.current &&
+            !wantsPlayback() && sleepTimerRef.current === endedTimer) clearSleepTimer();
           return;
         }
 
         const effectiveRepeat = repeatModeRef?.current || repeatMode;
-        const next = queueRef.current[queueIndexRef.current + 1] ||
+        const next = nextQueuedSong ||
           (effectiveRepeat === "all" ? queueRef.current[0] : undefined);
         if (next) {
           void playSongRef.current(next, queueRef.current);
@@ -437,7 +487,7 @@ export function useAudioSyncListeners({
           if (settings?.smartAutoplayEnabled && triggerAutoplayAppend) {
             const seed = currentSongRef.current || queueRef.current[queueRef.current.length - 1];
             if (seed) {
-              const recs = await triggerAutoplayAppend(seed, queueRef.current);
+              const recs = await triggerAutoplayAppend(seed, queueRef.current, () => sleepTimerRef.current?.mode !== "end-of-stack");
               if (!isStillEnded() || !wantsPlayback()) return;
               if (recs.length > 0) {
                 void playSongRef.current(recs[0], queueRef.current);
@@ -459,7 +509,22 @@ export function useAudioSyncListeners({
       }),
     ];
 
+    // A native event can precede listener installation or JS can have been
+    // suspended. Recover its still-current token from one authoritative snapshot.
+    if (typeof TrackPlayer.getPlaybackSnapshot === "function") {
+      const initialRevision = playRequestIdRef?.current;
+      const initialQueue = queueRef.current;
+      const initialScope = getAccountScope();
+      void TrackPlayer.getPlaybackSnapshot().then(state => {
+        if (disposed || !state.sourceRequest || !isCurrentAccount(initialScope) || initialRevision !== playRequestIdRef?.current || initialQueue !== queueRef.current ||
+          desiredPlayStateRef.current === false || playbackLoadingRef.current || pendingPlayRequestRef.current) return;
+        reconcileActiveTrack({ index: state.index, track: state.queue[state.index] });
+        return resolveSelectedSource(state.sourceRequest);
+      }).catch(error => logger.warn("[Audio] Pending source reconciliation failed", error));
+    }
     return () => {
+      disposed = true;
+      if (sourceResolverRef.current === resolveSelectedSource) sourceResolverRef.current = null;
       unsubs.forEach((unsub) => unsub?.());
     };
     // playSong, nextSong, prevSong are accessed via refs (playSongRef/nextSongRef/prevSongRef)
@@ -501,12 +566,14 @@ export function useAudioSyncListeners({
       if (nextState === "active" && TrackPlayer && isPlayerReady) {
         const selectedSong = currentSongRef.current;
         const selectedQueue = queueRef.current;
+        const scope = getAccountScope();
+        const revision = playRequestIdRef?.current;
         if (playbackLoadingRef.current || pendingPlayRequestRef.current) return;
         try {
           const prog = await TrackPlayer.getPlaybackSnapshot();
           const nativeIndex = prog.index;
           const activeTrack = prog.queue[nativeIndex];
-          if (currentSongRef.current !== selectedSong || queueRef.current !== selectedQueue ||
+          if (!isCurrentAccount(scope) || revision !== playRequestIdRef?.current || currentSongRef.current !== selectedSong || queueRef.current !== selectedQueue ||
             playbackLoadingRef.current || pendingPlayRequestRef.current) return;
           if (!activeTrack?.id) return;
           const synchronizedIndex = isNativeQueueSyncedRef?.current && typeof nativeIndex === "number" && Number.isInteger(nativeIndex) &&
@@ -534,6 +601,7 @@ export function useAudioSyncListeners({
               updatePlaybackProgress({ bufferedPositionMillis: Math.max(0, prog.buffered ?? 0) * 1000 });
             }
           }
+          if (prog.sourceRequest) await sourceResolverRef.current?.(prog.sourceRequest);
         } catch {
           // ignore non-fatal sync errors
         }
@@ -542,6 +610,6 @@ export function useAudioSyncListeners({
 
     const sub = AppState.addEventListener("change", handleAppStateChange);
     return () => sub.remove();
-  }, [isPlayerReady, TrackPlayer, currentSongRef, isNativeQueueSyncedRef, pendingPlayRequestRef, playbackLoadingRef, queueIndexRef, queueRef, setCurrentSong, setNativeDuration, setNativePosition, setQueueIndex]);
+  }, [isPlayerReady, TrackPlayer, currentSongRef, isNativeQueueSyncedRef, pendingPlayRequestRef, playbackLoadingRef, playRequestIdRef, queueIndexRef, queueRef, setCurrentSong, setNativeDuration, setNativePosition, setQueueIndex]);
 
 }

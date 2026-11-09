@@ -4,5 +4,6 @@ export const Event = {
   RemotePlay: "remote-play", RemotePause: "remote-pause", RemoteStop: "remote-stop", RemoteNext: "remote-next", RemotePrevious: "remote-previous", RemoteSeek: "remote-seek",
   PlaybackInterruption: "playback-interruption", PlaybackState: "playback-state", PlaybackPlayWhenReadyChanged: "playback-play-when-ready", PlaybackError: "playback-error",
   PlaybackProgressUpdated: "playback-progress", PlaybackActiveTrackChanged: "playback-active-track", PlaybackQueueEnded: "playback-queue-ended",
+  PlaybackSourceRequired: "playback-source-required",
 } as const;
 export type NativeTrack = { id?: string; url?: string; headers?: Record<string, string>; source?: string; youtubeVideoId?: string; title?: string; artist?: string; album?: string; artwork?: string; duration?: number; [key: string]: unknown };

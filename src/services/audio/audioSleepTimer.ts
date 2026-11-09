@@ -5,12 +5,18 @@ import { formatSleepTimerDuration, isValidSleepTimerDuration } from "./sleepTime
 
 interface UseAudioSleepTimerOptions {
   onTimerExpire: () => void;
+  onEndOfQueueChange?: (enabled: boolean) => void;
 }
 
-export function useAudioSleepTimer({ onTimerExpire }: UseAudioSleepTimerOptions) {
+export function useAudioSleepTimer({ onTimerExpire, onEndOfQueueChange }: UseAudioSleepTimerOptions) {
   const [sleepTimer, setSleepTimerState] = useState<SleepTimerState | null>(null);
   const sleepTimerRef = useRef<SleepTimerState | null>(null);
   const sleepTimerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onEndOfQueueChangeRef = useRef(onEndOfQueueChange);
+
+  useEffect(() => {
+    onEndOfQueueChangeRef.current = onEndOfQueueChange;
+  }, [onEndOfQueueChange]);
 
   useEffect(() => {
     sleepTimerRef.current = sleepTimer;
@@ -23,10 +29,14 @@ export function useAudioSleepTimer({ onTimerExpire }: UseAudioSleepTimerOptions)
     }
   }, []);
 
-  useEffect(() => clearSleepTimerTimeout, [clearSleepTimerTimeout]);
+  useEffect(() => () => {
+    clearSleepTimerTimeout();
+    onEndOfQueueChangeRef.current?.(false);
+  }, [clearSleepTimerTimeout]);
 
   const clearSleepTimer = useCallback(() => {
     clearSleepTimerTimeout();
+    onEndOfQueueChangeRef.current?.(false);
     sleepTimerRef.current = null;
     setSleepTimerState(null);
   }, [clearSleepTimerTimeout]);
@@ -37,6 +47,7 @@ export function useAudioSleepTimer({ onTimerExpire }: UseAudioSleepTimerOptions)
       clearSleepTimerTimeout();
 
       if (selection === "end-of-stack") {
+        onEndOfQueueChangeRef.current?.(true);
         const nextTimer: SleepTimerState = {
           mode: "end-of-stack",
           label: "End of queue",
@@ -49,6 +60,7 @@ export function useAudioSleepTimer({ onTimerExpire }: UseAudioSleepTimerOptions)
       }
 
       const minutes = selection;
+      onEndOfQueueChangeRef.current?.(false);
       const endsAt = Date.now() + minutes * 60 * 1000;
       const nextTimer: SleepTimerState = {
         mode: "duration",

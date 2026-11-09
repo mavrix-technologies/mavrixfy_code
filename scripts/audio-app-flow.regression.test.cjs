@@ -24,7 +24,7 @@ function load(filename, imports, globals = {}) {
   return module.exports;
 }
 
-function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nativeIds, activeIndex = 1, youtube = false, preferredSource = false, resolveUrl = async song => song.audioUrl, expoPlayer = {} } = {}) {
+function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nativeIds, activeIndex = 1, youtube = false, preferredSource = false, resolveUrl = async song => song.audioUrl, expoPlayer = {}, triggerAutoplayAppend } = {}) {
   const songs = queueIds.map(id => ({ id, title: id, artist: "Artist", duration: 180, audioUrl: `https://audio.example/${id}` }));
   let nativeQueue = (nativeIds ?? queueIds).map(id => ({ id, url: `https://audio.example/${id}`, accountId: "guest" }));
   const scheduledDelays = [];
@@ -36,7 +36,7 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     playbackLoadingRef: ref(false), desiredPlayStateRef: ref(false), pendingPlayRequestRef: ref(null), playRequestIdRef: ref(0),
     streamUrlCache: ref(new Map()), isNativeQueueSyncedRef: ref(nativeQueue.length === songs.length),
     playSongRef: ref(noop), togglePlayRef: ref(noop), seekToRef: ref(noop), nextSongRef: ref(noop), prevSongRef: ref(noop),
-    likedSongsRef: ref([]), likedSongs: [], sleepTimerRef: ref(null),
+    likedSongsRef: ref([]), likedSongs: [], sleepTimerRef: ref(null), triggerAutoplayAppend,
     setCurrentSong: noop, setQueue: noop, setSourceQueue: noop, setQueueIndex: noop, setUserQueuedSongIds: noop,
     setIsPlaying: noop, setPlaybackLoading: noop, setIsShuffled: noop, setRepeatMode: noop,
     setNativePosition: value => { options.positionSecondsRef.current = value; }, setNativeDuration: noop, setSeekOverride: noop,
@@ -48,7 +48,7 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     nativeQueueIdsMatch: (native, queue) => native.length === queue.length && native.every((item, index) => item.id === queue[index].id),
     replaceNativeQueuePreservingState: async (queue, index) => { calls.push(["replace", queue.map(song => song.id), index]); },
     subscribeTrackPlayerEvent: (event, callback) => { events.set(event, callback); return noop; },
-    Event: { PlaybackState: "state", PlaybackProgressUpdated: "progress", PlaybackActiveTrackChanged: "active", PlaybackQueueEnded: "ended", PlaybackError: "error", RemotePlay: "remote-play", RemotePause: "remote-pause", RemoteStop: "remote-stop", RemoteNext: "remote-next", RemotePrevious: "remote-previous" },
+    Event: { PlaybackState: "state", PlaybackProgressUpdated: "progress", PlaybackActiveTrackChanged: "active", PlaybackQueueEnded: "ended", PlaybackSourceRequired: "source-required", PlaybackError: "error", RemotePlay: "remote-play", RemotePause: "remote-pause", RemoteStop: "remote-stop", RemoteNext: "remote-next", RemotePrevious: "remote-previous" },
     State: { Playing: "playing", Paused: "paused", None: "none", Stopped: "stopped", Error: "error", Ended: "ended" },
     RepeatMode: { Off: "off", Queue: "all", Track: "one" },
   };
@@ -106,6 +106,74 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     changeAccount: () => accountGeneration++,
   };
 }
+
+async function pendingSourceFixture() {
+  const f = fixture({ youtube: true });
+  const request = { requestId: 7, index: 1, trackId: "b", position: 12 };
+  const state = { queue: f.songs.map(song => ({ id: song.id, url: "" })), index: 1, position: 12, duration: 180, sourceRequest: request };
+  f.options.TrackPlayer.getPlaybackSnapshot = async () => state;
+  const resolved = [], settled = [];
+  f.options.playSongRef.current = async (...args) => resolved.push(args);
+  f.options.TrackPlayer.finishSourceRequest = async token => settled.push(token);
+  f.listen(); // Install while paused, so recovery cannot race the test event.
+  await tick();
+  f.options.desiredPlayStateRef.current = true;
+  return { ...f, request, state, resolved, settled };
+}
+
+test("native pending source resolves its selected occurrence and settles the exact token once", async () => {
+  const f = await pendingSourceFixture();
+  f.events.get("source-required")(f.request);
+  f.events.get("source-required")(f.request);
+  await tick(); await tick();
+  assert.equal(f.resolved.length, 1);
+  assert.equal(f.resolved[0][0], f.songs[1]);
+  assert.equal(f.resolved[0][2], 12);
+  assert.equal(f.resolved[0][3], 7);
+  assert.deepEqual(f.settled, [7]);
+});
+
+test("pending source validation rejects Pause, Stop, account changes, new selection, reorder and unmount", async () => {
+  for (const change of [
+    f => f.events.get("remote-pause")(),
+    f => f.events.get("remote-stop")(),
+    f => f.changeAccount(),
+    f => { f.options.playRequestIdRef.current++; },
+    f => { f.options.queueIndexRef.current = 2; },
+    f => { f.state.sourceRequest = { ...f.request, requestId: 8 }; },
+    f => f.cleanups.forEach(cleanup => cleanup()),
+  ]) {
+    const f = await pendingSourceFixture();
+    const waiting = deferred();
+    f.options.TrackPlayer.getPlaybackSnapshot = () => waiting.promise;
+    f.events.get("source-required")(f.request);
+    change(f);
+    waiting.resolve(f.state);
+    await tick(); await tick();
+    assert.equal(f.resolved.length, 0);
+    assert.equal(f.settled.length, 0);
+  }
+});
+
+test("failed source resolver settles its token without auto-next or automatic retry", async () => {
+  const f = await pendingSourceFixture();
+  f.options.playSongRef.current = async () => { f.resolved.push("failed"); throw Error("Provider unavailable"); };
+  f.events.get("source-required")(f.request);
+  await tick(); await tick();
+  f.events.get("source-required")(f.request);
+  await tick();
+  assert.deepEqual(f.resolved, ["failed"]);
+  assert.deepEqual(f.settled, [7]);
+  assert.equal(f.options.currentSongRef.current.id, "b");
+});
+
+test("foreground snapshot recovers a missed pending source event", async () => {
+  const f = await pendingSourceFixture();
+  await tick(); // Let the initial paused snapshot guard retire.
+  await Promise.all(f.foreground.map(listener => listener("active")));
+  assert.equal(f.resolved.length, 1);
+  assert.equal(f.resolved[0][3], 7);
+});
 
 test("Expo decoder failure stops without a fresh-source loop or queue advance", async () => {
   let attempts = 0;
@@ -505,11 +573,135 @@ test("foreground reconciliation consumes one native snapshot for track index dur
 });
 
 test("end-of-queue sleep timer clears resume intent", async () => {
-  const f = fixture(); f.options.desiredPlayStateRef.current = true;
+  const f = fixture({ activeIndex: 2 }); f.options.desiredPlayStateRef.current = true;
   f.options.sleepTimerRef.current = { mode: "end-of-stack" }; f.listen();
   await f.events.get("ended")();
   assert.equal(f.options.desiredPlayStateRef.current, false);
   assert.equal(f.options.sleepTimerRef.current, null);
+});
+
+test("end-of-queue timer resolves a normal EOF's remaining logical song", async () => {
+  const f = fixture({ activeIndex: 1 });
+  f.options.desiredPlayStateRef.current = true;
+  const timer = { mode: "end-of-stack" };
+  f.options.sleepTimerRef.current = timer;
+  const selections = [];
+  f.options.playSongRef.current = song => selections.push(song.id);
+  f.listen();
+  await f.events.get("ended")({ trackId: "b", index: 1 });
+  assert.deepEqual(selections, ["c"]);
+  assert.equal(f.options.sleepTimerRef.current, timer);
+  assert.equal(f.options.desiredPlayStateRef.current, true);
+});
+
+test("end-of-queue timer prevents unresolved repeat-all from wrapping at the logical tail", async () => {
+  const f = fixture({ activeIndex: 2 });
+  f.options.desiredPlayStateRef.current = true;
+  f.options.repeatModeRef.current = "all";
+  f.options.sleepTimerRef.current = { mode: "end-of-stack" };
+  f.options.playSongRef.current = () => { throw Error("timer must prevent repeat wrapping"); };
+  f.listen();
+  await f.events.get("ended")({ reason: "unresolved-next", trackId: "c", index: 2 });
+  assert.equal(f.options.sleepTimerRef.current, null);
+  assert.equal(f.options.desiredPlayStateRef.current, false);
+});
+
+test("end-of-queue pauses native output before releasing the repeat boundary", async () => {
+  const f = fixture({ activeIndex: 2 });
+  const paused = deferred(), actions = [];
+  f.options.desiredPlayStateRef.current = true;
+  f.options.sleepTimerRef.current = { mode: "end-of-stack" };
+  f.options.TrackPlayer.pause = async () => { actions.push('pause'); await paused.promise; };
+  f.options.clearSleepTimer = () => { actions.push('release-repeat'); f.options.sleepTimerRef.current = null; };
+  f.listen();
+  const ending = f.events.get('ended')({ trackId: 'c', index: 2 });
+  assert.deepEqual(actions, ['pause']);
+  assert.equal(f.options.desiredPlayStateRef.current, false);
+  assert.ok(f.options.sleepTimerRef.current);
+  paused.resolve(); await ending;
+  assert.deepEqual(actions, ['pause', 'release-repeat']);
+});
+
+test("a failed native pause retains the sleep boundary instead of restoring repeat", async () => {
+  const f = fixture({ activeIndex: 2 });
+  f.options.desiredPlayStateRef.current = true;
+  const timer = { mode: "end-of-stack" };
+  f.options.sleepTimerRef.current = timer;
+  f.options.TrackPlayer.pause = async () => { throw Error('Native unavailable'); };
+  f.listen();
+  await f.events.get('ended')({ trackId: 'c', index: 2 });
+  assert.equal(f.options.sleepTimerRef.current, timer);
+  assert.equal(f.options.desiredPlayStateRef.current, false);
+});
+
+test("end-of-queue timer suppresses proactive autoplay on Play and native advancement", async () => {
+  let appended = 0;
+  const f = fixture({ activeIndex: 0, triggerAutoplayAppend: async () => { appended++; return []; } });
+  f.options.sleepTimerRef.current = { mode: "end-of-stack" };
+  await f.commands.playSong(f.songs[1], f.songs);
+  f.listen();
+  f.events.get("active")({ track: { id: "c" }, index: 2 });
+  assert.equal(appended, 0);
+});
+
+test("autoplay callers pass a live timer policy to a pending provider request", async () => {
+  const policies = [];
+  const f = fixture({ activeIndex: 0, triggerAutoplayAppend: async (_song, _queue, shouldAppend) => {
+    policies.push(shouldAppend); return [];
+  } });
+  await f.commands.playSong(f.songs[1], f.songs);
+  f.listen();
+  f.events.get("active")({ track: { id: "c" }, index: 2 });
+  assert.equal(policies.length, 2);
+  assert.ok(policies.every(policy => policy()));
+  f.options.sleepTimerRef.current = { mode: "end-of-stack" };
+  assert.ok(policies.every(policy => !policy()));
+});
+
+test("arming end-of-queue during recommendation retrieval preserves the queue and permits retry after cancellation", async () => {
+  const requests = [];
+  const imports = {
+    react: { useRef: ref, useState: value => [value, noop], useCallback: fn => fn, useEffect: noop },
+    "@/services/youtube/YouTubeMusic": { isYouTubeSong: () => true },
+    "@/lib/logger": { logger: { error: noop, warn: noop } },
+    "@/lib/accountScope": { getAccountScope: () => ({}), isCurrentAccount: () => true },
+    "@/lib/storage": { getSettings: async () => ({ smartAutoplayEnabled: true }) },
+    "@/utils/globalToast": { showGlobalToast: noop },
+    "./audioNativeQueueLane": { useAudioNativeQueueLane: () => ({}) },
+    "./audioStartupReconcile": { useStartupPlaybackReconcile: noop },
+    "./PlaybackEngine": { updatePlaybackEngineSnapshot: noop },
+    "./PlayerPlaybackResolver": {},
+    "./smartAutoplayService": { fetchAutoplayRecommendations: () => {
+      const request = deferred(); requests.push(request); return request.promise;
+    } },
+    "./ExpoAvAdapter": {},
+  };
+  const { usePlayerCoreState } = load("src/services/audio/usePlayerCoreState.ts", imports);
+  const core = usePlayerCoreState({ TrackPlayer: null, State: {}, RepeatMode: {} });
+  const seed = { id: "a" }, recommendation = { id: "b" }, queue = [seed];
+  core.queueRef.current = queue;
+  core.originalQueueRef.current = queue;
+  let allowed = false;
+  const policy = () => allowed;
+  assert.deepEqual(Array.from(await core.triggerAutoplayAppend(seed, queue, policy)), []);
+  assert.equal(requests.length, 0);
+  allowed = true;
+  const first = core.triggerAutoplayAppend(seed, queue, policy);
+  await tick();
+  assert.equal(requests.length, 1);
+  allowed = false;
+  requests[0].resolve([recommendation]);
+  await first;
+  assert.equal(core.queueRef.current, queue);
+  assert.equal(core.originalQueueRef.current, queue);
+  assert.equal(core.lastAutoplaySeedIdRef.current, null);
+  allowed = true;
+  const second = core.triggerAutoplayAppend(seed, queue, policy);
+  await tick();
+  assert.equal(requests.length, 2);
+  requests[1].resolve([recommendation]);
+  await second;
+  assert.deepEqual(Array.from(core.queueRef.current, song => song.id), ["a", "b"]);
 });
 
 test("a selected duplicate song plays its requested queue occurrence", async () => {

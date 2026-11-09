@@ -6,17 +6,21 @@ import { deduplicateSongs } from "@/lib/searchUtils";
 import type { SmartAutoplayMode } from "@/lib/smartAutoplayConfig";
 import { getSettings } from "@/lib/storage";
 import { fetchJson } from "@/utils/asyncUtils";
+import { getAccountScope, isCurrentAccount } from "@/lib/accountScope";
+import { rankYouTubeCandidates } from "@/services/youtube/YouTubeRecommendationPolicy";
 
 const RECENT_AUTOPLAY_IDS = new Set<string>();
 const MAX_RECENT_AUTOPLAY_CACHE = 60;
+let recentScope = getAccountScope();
 
 function rememberAutoplaySong(id: string) {
   if (!id) return;
-  if (RECENT_AUTOPLAY_IDS.size >= MAX_RECENT_AUTOPLAY_CACHE) {
+  RECENT_AUTOPLAY_IDS.delete(id);
+  RECENT_AUTOPLAY_IDS.add(id);
+  if (RECENT_AUTOPLAY_IDS.size > MAX_RECENT_AUTOPLAY_CACHE) {
     const first = RECENT_AUTOPLAY_IDS.values().next().value;
     if (first) RECENT_AUTOPLAY_IDS.delete(first);
   }
-  RECENT_AUTOPLAY_IDS.add(id);
 }
 
 function parseSongArray(items: any): Song[] {
@@ -75,9 +79,9 @@ export interface FetchAutoplayRecommendationsOptions {
 }
 
 /**
- * Generates continuous, Spotify-style song recommendations based on the seed song.
- * Guaranteed to exclude the searched song and any of its variants/remixes,
- * returning distinct, related songs by similar artists and genres.
+ * Retrieve provider recommendations for the current queue. YouTube retains
+ * distinct recording versions and provider relevance, with shared identity and
+ * artist-diversity handling used by home discovery.
  */
 export async function fetchAutoplayRecommendations({
   seedSong,
@@ -87,11 +91,26 @@ export async function fetchAutoplayRecommendations({
   signal,
 }: FetchAutoplayRecommendationsOptions): Promise<Song[]> {
   if (!seedSong) return [];
+  const scope = getAccountScope();
+  const assertCurrent = () => {
+    if (signal?.aborted || !isCurrentAccount(scope)) throw new Error("Autoplay request cancelled");
+  };
+  assertCurrent();
+  if (scope.generation !== recentScope.generation || scope.accountId !== recentScope.accountId) {
+    RECENT_AUTOPLAY_IDS.clear();
+    recentScope = scope;
+  }
+  limit = Number.isFinite(limit) ? Math.min(60, Math.max(0, Math.floor(limit))) : 15;
+  if (!limit) return [];
   // YouTube queues stay independent; catalog autoplay is never used as a substitute.
   if (isYouTubeSong(seedSong)) {
-    const used = new Set(currentQueue.map((song) => song.id));
-    return (await relatedYouTubeSongs(seedSong, signal)).filter((song) => !used.has(song.id)).slice(0, limit);
+    const candidates = await relatedYouTubeSongs(seedSong, signal);
+    assertCurrent();
+    const songs = rankYouTubeCandidates(candidates.filter(isYouTubeSong), [seedSong, ...currentQueue], limit, RECENT_AUTOPLAY_IDS);
+    songs.forEach(song => rememberAutoplaySong(song.id));
+    return songs;
   }
+  assertCurrent();
 
   let mode = explicitMode;
   if (!mode) {
@@ -103,6 +122,7 @@ export async function fetchAutoplayRecommendations({
     }
   }
 
+  assertCurrent();
   const apiUrl = getApiUrl();
   const rawCandidates: Song[] = [];
   const { primary: primaryArtist, secondary: secondaryArtist } = extractArtistNames(seedSong.artist);
@@ -160,6 +180,7 @@ export async function fetchAutoplayRecommendations({
 
   // Await all discovery queries concurrently
   const queryResults = await Promise.allSettled(queryPromises);
+  assertCurrent();
   for (const result of queryResults) {
     if (result.status === "fulfilled" && Array.isArray(result.value)) {
       rawCandidates.push(...result.value);

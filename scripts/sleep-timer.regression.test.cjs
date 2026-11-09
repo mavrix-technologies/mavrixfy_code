@@ -50,7 +50,7 @@ function hooks() {
   };
 }
 
-function timerFixture() {
+function timerFixture({ onEndOfQueueChange } = {}) {
   const runtime = hooks(), timeouts = new Map(), toasts = [];
   let nextId = 1, expired = 0;
   const onTimerExpire = () => { expired++; };
@@ -63,7 +63,7 @@ function timerFixture() {
     setTimeout: (callback, delay) => { const id = nextId++; timeouts.set(id, { callback, delay }); return id; },
     clearTimeout: id => timeouts.delete(id),
   });
-  const render = () => { runtime.reset(); return useAudioSleepTimer({ onTimerExpire }); };
+  const render = () => { runtime.reset(); return useAudioSleepTimer({ onTimerExpire, onEndOfQueueChange }); };
   return { render, timeouts, toasts, expired: () => expired, unmount: runtime.unmount };
 }
 
@@ -144,6 +144,23 @@ test("end of queue removes a timed deadline and Turn off clears both modes", () 
   assert.equal(f.render().sleepTimer.endsAt, null);
   f.render().clearSleepTimer();
   assert.equal(f.render().sleepTimer, null);
+});
+
+test("end-of-queue policy is armed synchronously and released on replacement, cancellation and unmount", () => {
+  const boundaries = [];
+  const f = timerFixture({ onEndOfQueueChange: enabled => boundaries.push(enabled) });
+  f.render().setSleepTimer("end-of-stack");
+  assert.deepEqual(boundaries, [true]);
+  assert.equal(f.expired(), 0);
+  f.render().setSleepTimer(30);
+  assert.deepEqual(boundaries, [true, false]);
+  f.render().setSleepTimer("end-of-stack");
+  f.render().clearSleepTimer();
+  assert.deepEqual(boundaries, [true, false, true, false]);
+  f.render().setSleepTimer("end-of-stack");
+  f.unmount();
+  assert.deepEqual(boundaries.slice(-2), [true, false]);
+  assert.equal(f.expired(), 0, 'changing the repeat boundary is not a playback action');
 });
 
 test("native picker edits arbitrary hours/minutes without starting a timer until confirmed", () => {

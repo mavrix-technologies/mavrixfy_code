@@ -106,11 +106,19 @@ class PlaybackService : MediaLibraryService() {
       }
     }
     val remotePlayer = object : ForwardingPlayer(engine.player) {
-      override fun play() { engine.internalChange = false; engine.event("remote-play"); engine.player.play() }
-      override fun pause() { engine.cancelCarResolution?.invoke(); engine.internalChange = false; engine.event("remote-pause"); engine.player.pause() }
-      override fun setPlayWhenReady(ready: Boolean) { if (!ready) engine.cancelCarResolution?.invoke(); engine.internalChange = false; engine.event(if (ready) "remote-play" else "remote-pause"); engine.player.playWhenReady = ready }
-      override fun stop() { engine.cancelCarResolution?.invoke(); engine.internalChange = false; engine.event("remote-stop"); engine.player.stop() }
-      private fun select(action: () -> Unit) { val resume = engine.internalChange; engine.internalChange = false; engine.remoteSelection = true; action(); if (resume) engine.player.play(); Handler(Looper.getMainLooper()).post { engine.remoteSelection = false } }
+      override fun play() { engine.event("remote-play"); engine.command("play", emptyMap()) }
+      override fun pause() { engine.event("remote-pause"); engine.command("pause", emptyMap()) }
+      override fun setPlayWhenReady(ready: Boolean) { if (ready) play() else pause() }
+      override fun stop() { engine.cancelCarResolution?.invoke(); engine.cancelSourceRequest(); engine.internalChange = false; engine.event("remote-stop"); engine.player.stop() }
+      private fun select(action: () -> Unit) {
+        engine.cancelCarResolution?.invoke()
+        val resume = engine.internalChange
+        engine.internalChange = false
+        engine.remoteSelection = true
+        action()
+        if (resume) engine.player.play()
+        Handler(Looper.getMainLooper()).post { engine.remoteSelection = false }
+      }
       override fun seekToNext() { select { engine.player.seekToNext() } }
       override fun seekToPrevious() { select { engine.player.seekToPrevious() } }
       override fun seekToNextMediaItem() { select { engine.player.seekToNextMediaItem() } }

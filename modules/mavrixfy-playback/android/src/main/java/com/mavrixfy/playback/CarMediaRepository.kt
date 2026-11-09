@@ -119,7 +119,7 @@ internal class CarMediaRepository(
   fun resumeItem(): JSONObject? = preferences.getString("resumeId", null)?.let(::find) ?: group("recent").firstOrNull() ?: group("queue").firstOrNull()
   fun resumePosition(): Long {
     val song = resumeItem() ?: return 0
-    val position = preferences.getLong("resumePosition", 0)
+    val position = preferences.getLong("resumePosition", 0).coerceAtLeast(0)
     val duration = (song.optDouble("duration", 0.0) * 1000).toLong()
     return if (song.optString("id") == preferences.getString("resumeId", null) && (duration <= 0 || position < duration - 1000)) position else 0
   }

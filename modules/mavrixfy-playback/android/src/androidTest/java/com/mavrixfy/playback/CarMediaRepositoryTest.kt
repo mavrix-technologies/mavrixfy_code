@@ -106,4 +106,18 @@ class CarMediaRepositoryTest {
     assertEquals(1, selection.index)
     assertEquals(selection, restored.preparedSelection("b"))
   }
+
+  @Test fun restoredResumePositionRejectsNegativeAndCompletedSavedPositions() {
+    val song = JSONObject().put("id", "resume").put("title", "Saved song").put("duration", 180)
+      .put("audioUrl", "https://media.example/resume.mp4")
+    CarMediaRepository(context).updateCatalog(JSONObject().put("accountId", "guest").put("queue", JSONArray().put(song)).toString())
+    val preferences = context.getSharedPreferences("mavrixfy_car_library", Context.MODE_PRIVATE)
+    val restored = CarMediaRepository(context) { throw AssertionError("Resume validation must not resolve media") }
+    for (invalid in listOf(-1L, -5000L, 180000L, Long.MAX_VALUE)) {
+      preferences.edit().putString("resumeId", "resume").putLong("resumePosition", invalid).commit()
+      assertEquals("Invalid persisted position $invalid", 0L, restored.resumePosition())
+    }
+    preferences.edit().putLong("resumePosition", 12000L).commit()
+    assertEquals(12000L, restored.resumePosition())
+  }
 }

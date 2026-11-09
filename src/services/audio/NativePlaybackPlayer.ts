@@ -7,7 +7,8 @@ import { Event, type NativeTrack } from "./playbackContract";
 import type { Song } from "@/lib/musicData";
 export { Event, RepeatMode, State } from "./playbackContract";
 
-type Snapshot = { queue: NativeTrack[]; index: number; state: string; position: number; duration: number; buffered?: number; playWhenReady: boolean; equalizerAvailable: boolean };
+type Snapshot = { queue: NativeTrack[]; index: number; state: string; position: number; duration: number; buffered?: number; playWhenReady: boolean; equalizerAvailable: boolean;
+  sourceRequest?: { requestId: number; index: number; trackId: string; position: number } | null; supportsSourceRequests?: boolean };
 type Bridge = {
   setup(): Promise<Snapshot>;
   command(name: string, args: Record<string, unknown>): Promise<Snapshot>;
@@ -21,6 +22,10 @@ const listeners = new Map<string, Set<(event: any) => void>>();
 let selection = 0;
 const warming = new Set<string>();
 let lastEffects = { equalizerAvailable: false };
+let supportsSourceRequests = false;
+let requestedRepeatMode = "off";
+let stopAtQueueEnd = false;
+let repeatMutation: Promise<unknown> = Promise.resolve();
 async function ready(): Promise<Bridge> {
   if (!bridge) throw new Error("Mavrixfy native playback is missing. Rebuild the Expo development client or production app.");
   if (!setup) {
@@ -44,6 +49,7 @@ async function ready(): Promise<Bridge> {
     });
     setup = bridge.setup().then(snapshot => {
       lastEffects = { equalizerAvailable: snapshot.equalizerAvailable };
+      supportsSourceRequests = snapshot.supportsSourceRequests === true;
       void import("./audioEqualizer").then(({ syncEqualizerWithNative }) => syncEqualizerWithNative()).catch(error => logger.warn("[Audio] EQ restore failed", error));
     }).catch(error => { subscription?.remove(); subscription = null; setup = null; throw error; });
   }
@@ -61,6 +67,15 @@ async function command(name: string, args: Record<string, unknown> = {}) {
   return snapshot;
 }
 async function snapshot() { return (await ready()).snapshot(); }
+function syncRepeatMode() {
+  // The sleep boundary wins over queue rebuilds and Repeat button changes.
+  // Serialize writes so an older in-flight mode cannot restore repeat after
+  // the timer was armed; cancellation restores the most recent user choice.
+  const apply = () => command("repeat", { mode: stopAtQueueEnd ? "off" : requestedRepeatMode });
+  const pending = repeatMutation.then(apply, apply);
+  repeatMutation = pending.then(() => undefined, () => undefined);
+  return pending;
+}
 function isLocalSource(track: NativeTrack) { return /^(?:file|content):\/\/|^\//i.test(track.url ?? ""); }
 async function warmQueue(force = false) {
   const version = selection;
@@ -99,14 +114,15 @@ async function warmQueue(force = false) {
 export const NativePlaybackPlayer = {
   // AVQueuePlayer keeps unresolved songs in its logical playlist and resolves
   // them through the shared controller when selected, without hiding Next.
-  supportsUnresolvedQueue: Platform.OS === "ios",
+  get supportsUnresolvedQueue() { return Platform.OS === "ios" || Platform.OS === "android" && supportsSourceRequests; },
   async refreshUpcomingSources() { if (bridge) { selection++; await warmQueue(true); } },
   async setupPlayer() { await ready(); },
+  async finishSourceRequest(requestId: number) { await command("sourceRequestFinished", { requestId }); },
   addEventListener(name: string, listener: (event: any) => void) {
     const group = listeners.get(name) ?? new Set(); group.add(listener); listeners.set(name, group);
     return { remove: () => { group.delete(listener); } };
   },
-  beginTrackChange() { selection++; void command("begin").catch(error => logger.warn("[Audio] Track-change pause failed", error)); },
+  beginTrackChange(sourceRequestId?: number) { selection++; void command("begin", { sourceRequestId }).catch(error => logger.warn("[Audio] Track-change pause failed", error)); },
   async setQueue(tracks: NativeTrack[], initialIndex = 0, initialPosition = 0, preserveCurrentTrack = false) {
     selection++;
     await command("setQueue", { tracks, index: initialIndex, position: initialPosition, preserveCurrentTrack });
@@ -118,7 +134,7 @@ export const NativePlaybackPlayer = {
   },
   async remove(index: number) { await command("remove", { index }); },
   async move(fromIndex: number, toIndex: number) { await command("move", { index: fromIndex, to: toIndex }); },
-  async reset() { selection++; await command("reset"); },
+  async reset() { selection++; requestedRepeatMode = "off"; await command("reset"); },
   async play() { await command("play"); },
   async pause() { await command("pause"); },
   async stop() { await command("stop"); },
@@ -131,7 +147,8 @@ export const NativePlaybackPlayer = {
   async skipToNext() { const state = await snapshot(); if (state.index + 1 < state.queue.length) await this.skip(state.index + 1); },
   async skipToPrevious() { const state = await snapshot(); await this.skip(state.position > 3 ? state.index : Math.max(0, state.index - 1)); },
   async finishQueue() { await command("pause"); listeners.get(Event.PlaybackQueueEnded)?.forEach(listener => listener({})); },
-  async setRepeatMode(mode: string) { await command("repeat", { mode }); },
+  async setRepeatMode(mode: string) { requestedRepeatMode = mode; await syncRepeatMode(); },
+  async setStopAtQueueEnd(enabled: boolean) { stopAtQueueEnd = enabled; await syncRepeatMode(); },
   setVolume(volume: number) { if (Number.isFinite(volume)) void command("volume", { volume: Math.max(0, Math.min(1, volume)) }).catch(error => logger.warn("[Audio] Volume failed", error)); },
   async getQueue() { return (await snapshot()).queue; },
   async getActiveTrack() { const state = await snapshot(); return state.queue[state.index]; },

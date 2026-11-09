@@ -51,12 +51,12 @@ interface UseAudioPlaybackCommandsOptions {
   State: typeof AudioState;
   canUseLightweightAudioFallback: boolean;
   showPlaybackNotice: (msg: string, action?: ToastAction) => void;
-  playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number) => Promise<void> | void>;
+  playSongRef: MutableRefObject<(song: Song, queue?: Song[], startPositionSeconds?: number, sourceRequestId?: number) => Promise<void> | void>;
   togglePlayRef: MutableRefObject<() => Promise<void> | void>;
   nextSongRef: MutableRefObject<() => void>;
   prevSongRef: MutableRefObject<() => void>;
   seekToRef: MutableRefObject<(progress: number) => Promise<void> | void>;
-  triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[]) => Promise<Song[]>;
+  triggerAutoplayAppend?: (seedSong: Song, currentQueue: Song[], shouldAppend?: () => boolean) => Promise<Song[]>;
   autoplaySongIdsRef?: MutableRefObject<string[]>;
   lastAutoplaySeedIdRef?: MutableRefObject<string | null>;
   sleepTimerRef?: MutableRefObject<any>;
@@ -108,7 +108,7 @@ export function useAudioPlaybackCommands({
   sleepTimerRef,
 }: UseAudioPlaybackCommandsOptions) {
   const playSong = useCallback(
-    async (song: Song, requestedQueue?: Song[], startPositionSeconds?: number) => {
+    async (song: Song, requestedQueue?: Song[], startPositionSeconds?: number, sourceRequestId?: number) => {
       if (!song?.id) return;
       const scope = getAccountScope();
       const reqId = ++playRequestIdRef.current;
@@ -138,7 +138,7 @@ export function useAudioPlaybackCommands({
 
       // Retire outgoing audio and its callbacks before URL resolution or UI swap.
       // URL prefetch is retained; only the selected track owns audible output.
-      if (TrackPlayer?.beginTrackChange) TrackPlayer.beginTrackChange();
+      if (TrackPlayer?.beginTrackChange) TrackPlayer.beginTrackChange(sourceRequestId);
       else if (!TrackPlayer && canUseLightweightAudioFallback) ExpoAvPlayer.beginTrackChange();
 
       // 1. Instant local UI feedback
@@ -169,8 +169,8 @@ export function useAudioPlaybackCommands({
       }
 
       desiredPlayStateRef.current = true;
-      setIsPlaying(true);
-      isPlayingRef.current = true;
+      setIsPlaying(sourceRequestId == null);
+      isPlayingRef.current = sourceRequestId == null;
       playbackLoadingRef.current = true;
       setPlaybackLoading(true);
       setSeekOverride(null);
@@ -187,7 +187,7 @@ export function useAudioPlaybackCommands({
         autoplaySongIds: isNewQueue ? [] : (autoplaySongIdsRef?.current || []),
         queueIndex: targetIndex,
         desiredPlayState: true,
-        isPlaying: true,
+        isPlaying: sourceRequestId == null,
         isLoading: true,
         isReconnecting: false,
         isBuffering: false,
@@ -195,8 +195,8 @@ export function useAudioPlaybackCommands({
       });
 
       // Proactively fetch and append similar songs if queue is near end
-      if (triggerAutoplayAppend && (q.length - targetIndex <= 2)) {
-        void triggerAutoplayAppend(targetSong, q);
+      if (triggerAutoplayAppend && sleepTimerRef?.current?.mode !== "end-of-stack" && (q.length - targetIndex <= 2)) {
+        void triggerAutoplayAppend(targetSong, q, () => sleepTimerRef?.current?.mode !== "end-of-stack");
       }
 
       // 2. Offload persistence completely off the critical tap path
@@ -288,7 +288,12 @@ export function useAudioPlaybackCommands({
                 const nativeTrack = nativeQueue[targetIndex];
                 // Resolution may replace an expired URL or revoke a managed
                 // local file. Only reuse the native item if it still matches.
-                if (nativeTrack?.id === targetSong.id && nativeTrack.url === audioUrl) {
+                const sameHeaders = (left: unknown, right: unknown) => {
+                  const entries = (headers: unknown) => Object.entries((headers ?? {}) as Record<string, unknown>)
+                    .map(([key, value]) => [key.toLowerCase(), String(value)]).sort(([a], [b]) => a.localeCompare(b));
+                  return JSON.stringify(entries(left)) === JSON.stringify(entries(right));
+                };
+                if (nativeTrack?.id === targetSong.id && nativeTrack.url === audioUrl && sameHeaders(nativeTrack.headers, targetTrack.headers)) {
                   await TrackPlayer!.skip(targetIndex, initialPos);
                   if (reqId !== playRequestIdRef.current) return;
                   if (desiredPlayStateRef.current === false) await TrackPlayer!.pause();
@@ -310,7 +315,7 @@ export function useAudioPlaybackCommands({
                 return songToTrack(queueSong, cachedUrl || null, streamUrlCache.current);
               });
 
-              const hasValidUrl = (t: any) => TrackPlayer!.supportsUnresolvedQueue || t?.source === "youtube" || (typeof t?.url === "string" && t.url.length > 5);
+              const hasValidUrl = (t: any) => TrackPlayer!.supportsUnresolvedQueue || (typeof t?.url === "string" && t.url.length > 5);
               const allTracksValid = nativeTracks.length === q.length && nativeTracks.every(hasValidUrl);
 
               if (allTracksValid) {
@@ -423,6 +428,7 @@ export function useAudioPlaybackCommands({
       canUseLightweightAudioFallback,
       autoplaySongIdsRef,
       lastAutoplaySeedIdRef,
+      sleepTimerRef,
       triggerAutoplayAppend,
     ]
   );
@@ -605,7 +611,7 @@ export function useAudioPlaybackCommands({
           const seed = cq[ci] || currentSongRef.current;
           if (seed) {
             showPlaybackNotice("Finding similar songs...");
-            const recs = await triggerAutoplayAppend(seed, cq);
+            const recs = await triggerAutoplayAppend(seed, cq, () => sleepTimerRef?.current?.mode !== "end-of-stack");
             if (!stillCurrent() || desiredPlayStateRef.current === false) return;
             if (recs.length > 0) {
               void playSong(recs[0], queueRef.current);

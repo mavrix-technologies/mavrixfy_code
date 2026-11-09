@@ -65,7 +65,7 @@
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
       "versionCode": 35002,
-      "runtimeVersion": "3.5.0-35002-sdk58-native-player3",
+      "runtimeVersion": "3.5.0-35002-sdk58-native-player4",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icon_foreground.png",

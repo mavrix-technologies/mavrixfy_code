@@ -5,6 +5,51 @@ AVQueuePlayer (an AVPlayer subclass), AVAudioSession and MPRemoteCommandCenter.
 Expo development builds and production builds use the same local Expo module.
 The application uses Expo SDK 58 / React Native 0.88.
 
+## Playback logic follow-up, 2026-11-08
+
+Android now advertises pending-source support. An unresolved queue occurrence
+waits without attempting network I/O; native requests the shared resolver with
+a unique token, selected index and position. Pause/Stop/new selection invalidate
+stale requests. Queue edits refresh occurrence tokens, and a 45-second native
+deadline stops an unresolved selection with an explicit retryable error. JS
+recovers missed requests from foreground/startup snapshots. Older Android
+binaries retain the prepared-source fallback. This still needs JS resolution
+and does not promise indefinite playback while JS is suspended.
+
+React bridge teardown detaches only its own emitter, preserving a newer bridge
+and a service-owned engine. Saved state validates queue occurrences and position
+and rejects old-account reads. Home/radio use up to four diverse recent seeds,
+interleaved provider results, recording deduplication and soft artist diversity.
+These are app policies; Google's private recommendation model was not recovered.
+
+743 JavaScript regressions, TypeScript, changed-file lint and Android production
+and instrumentation Kotlin compilation passed. Native tests cover pending-source automatic
+advance, reorder, preserved queue replacement and bridge ownership in addition
+to the earlier source-refresh cases. Android device execution remains pending.
+See `outputs/youtube-music-9.44.52-rea/audio-review/research-applied.md`.
+
+## Audio robustness review, 2026-11-07
+
+HTTP headers now participate in Android media-source identity. Upcoming
+same-URL header changes recreate the source; active-source refresh preserves
+the selected index, position, play intent and shuffle order. Refreshing an
+active source can rebuffer prepared successors, while retaining the same player.
+Remote Stop followed by Play uses the shared idle/ended preparation logic.
+Native queue mutations also update the persisted car-library queue.
+
+The shared controller's End of queue timer now prevents new autoplay appends,
+including requests already in flight, and suppresses native repeat until its
+boundary is released. Existing logical successors continue; native Pause
+finishes before repeat is restored at the tail. Minute-based sleep timers
+remain JavaScript timers and are not guaranteed during JS suspension.
+
+All 721 JavaScript regressions, TypeScript, changed-file lint, Android production
+Kotlin and instrumentation Kotlin compilation passed. Six native regression
+tests cover header refresh (including shuffle), remote Stop/Replay and queue
+persistence. They were compiled but not run: no device was connected, and the
+saved emulator's system image was missing. Rebuild the native Android client
+and run the connected tests before treating these changes as device-verified.
+
 `src/services/audio/NativePlaybackPlayer.ts` is the shared application API.
 Normal player, StandBy, queue, lyrics and car controls delegate to this API.
 Screen mounting, rotation and dismissal must never create or destroy a player.
@@ -24,7 +69,7 @@ Rebuild the native client after this migration. A Metro reload or OTA update
 cannot install the module. The runtime version changed to prevent this bundle
 from reaching older binaries.
 
-The Android car fix uses runtime `3.5.0-35002-sdk58-native-player3`; the iOS
+The Android pending-source protocol uses runtime `3.5.0-35002-sdk58-native-player4`; the iOS
 lock-screen repair uses `3.5.0-35001-sdk58-native-player3`. Rebuild both native clients when moving from
 SDK 57; clearing Metro alone does not upgrade them.
 

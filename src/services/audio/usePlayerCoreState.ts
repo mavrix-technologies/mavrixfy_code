@@ -251,15 +251,15 @@ export function usePlayerCoreState({
   const lastAutoplaySeedIdRef = useRef<string | null>(null);
 
   const triggerAutoplayAppend = useCallback(
-    async (seedSong: Song, currentQueue: Song[]): Promise<Song[]> => {
-      if (!seedSong?.id || autoplayInFlightRef.current) return [];
+    async (seedSong: Song, currentQueue: Song[], shouldAppend: () => boolean = () => true): Promise<Song[]> => {
+      if (!shouldAppend() || !seedSong?.id || autoplayInFlightRef.current) return [];
       if (lastAutoplaySeedIdRef.current === seedSong.id) return [];
       autoplayInFlightRef.current = true;
       const sourceQueue = originalQueueRef.current;
       const scope = getAccountScope();
       try {
         const settings = await getSettings();
-        if (!settings.smartAutoplayEnabled) return [];
+        if (!settings.smartAutoplayEnabled || !shouldAppend()) return [];
 
         lastAutoplaySeedIdRef.current = seedSong.id;
         updatePlaybackEngineSnapshot({ isAutoplayLoading: true });
@@ -271,6 +271,13 @@ export function usePlayerCoreState({
           limit: 12,
         });
 
+        if (!shouldAppend()) {
+          // A sleep timer can be armed while provider recommendations are in
+          // flight. Preserve the existing queue and allow a later retry if the
+          // timer is cancelled instead of consuming this seed permanently.
+          if (lastAutoplaySeedIdRef.current === seedSong.id) lastAutoplaySeedIdRef.current = null;
+          return [];
+        }
         if (!isCurrentAccount(scope) || sourceQueue !== originalQueueRef.current) return [];
         const existingIds = new Set(queueRef.current.map((song) => song.id));
         const additions = recommendations.filter((song) => {

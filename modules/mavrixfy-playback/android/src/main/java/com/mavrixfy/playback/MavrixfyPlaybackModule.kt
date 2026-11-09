@@ -11,11 +11,14 @@ import expo.modules.kotlin.functions.Queues
 
 class MavrixfyPlaybackModule : Module() {
   private val engine get() = PlaybackEngine.get(requireNotNull(appContext.reactContext))
+  private val binding by lazy(LazyThreadSafetyMode.NONE) {
+    PlaybackBridgeBinding { name, data -> sendEvent("playbackEvent", mapOf("name" to name, "data" to data)) }
+  }
   override fun definition() = ModuleDefinition {
     Name("MavrixfyPlayback")
     Events("playbackEvent")
     AsyncFunction("setup") {
-      engine.emit = { name, data -> sendEvent("playbackEvent", mapOf("name" to name, "data" to data)) }
+      binding.attach(engine)
       val context = requireNotNull(appContext.reactContext)
       context.startService(Intent(context, PlaybackService::class.java))
       engine.snapshot()
@@ -36,6 +39,9 @@ class MavrixfyPlaybackModule : Module() {
         MediaRouter2.getInstance(activity).showSystemOutputSwitcher()
       } else false
     }.runOnQueue(Queues.MAIN)
-    OnDestroy { Handler(Looper.getMainLooper()).post { PlaybackEngine.instance?.detachBridge() } }
+    OnDestroy {
+      val detach = binding.detachAction()
+      Handler(Looper.getMainLooper()).post { detach() }
+    }
   }
 }

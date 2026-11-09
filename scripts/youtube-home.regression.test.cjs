@@ -6,6 +6,8 @@ const ts = require("typescript");
 const song = (id, artist = "Artist", source = "youtube") => ({ id, artist, source, title: id });
 function fixture(overrides = {}) {
   const calls = [];
+  const account = { accountId: "guest", generation: 0 };
+  const accountApi = { getAccountScope: () => ({ ...account }), isCurrentAccount: scope => scope.accountId === account.accountId && scope.generation === account.generation };
   const api = {
     isYouTubeSong: item => item.source === "youtube" || item.id.startsWith("youtube_"),
     loadYouTubeHome: async () => ({ songs: [], playlists: [{ id: "youtube_playlist_one" }, { id: "youtube_playlist_two" }, { id: "youtube_playlist_three" }] }),
@@ -17,8 +19,13 @@ function fixture(overrides = {}) {
   const code = ts.transpileModule(fs.readFileSync("src/services/youtube/YouTubeHomeRecommendations.ts", "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  vm.runInNewContext(code, { module, exports: module.exports, require: () => api });
-  return { ...module.exports, calls };
+  const policy = { exports: {} };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync("src/services/youtube/YouTubeRecommendationPolicy.ts", "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, { module: policy, exports: policy.exports });
+  const deps = { "./YouTubeMusic": api, "@/lib/accountScope": accountApi, "./YouTubeRecommendationPolicy": policy.exports };
+  vm.runInNewContext(code, { module, exports: module.exports, require: name => { if (!(name in deps)) throw Error(name); return deps[name]; } });
+  return { ...module.exports, calls, account };
 }
 test("discovery deduplicates, excludes recent seeds/JioSaavn, and spreads artists", () => {
   const f = fixture();
@@ -35,10 +42,10 @@ test("guest home samples only two YouTube mixes without using radio or Jio seeds
   assert.equal(feed.songs.length, 2);
   assert.equal(feed.personalized, false);
 });
-test("only two YouTube radio seeds are used and their recommendations take priority", async () => {
+test("recent radio seeds are bounded and artist-diverse while recommendations retain priority", async () => {
   const f = fixture({ loadYouTubeHome: async () => ({ songs: [song("youtube_home", "Home")], playlists: [] }) });
-  const feed = await f.getYouTubeHomeRecommendations([song("jio", "Jio", "jiosaavn"), song("youtube_a"), song("youtube_b"), song("youtube_c")], new AbortController().signal);
-  assert.equal(f.calls.join(","), "youtube_a,youtube_b");
+  const feed = await f.getYouTubeHomeRecommendations([song("jio", "Jio", "jiosaavn"), song("youtube_a", "A"), song("youtube_b", "A"), song("youtube_c", "B"), song("youtube_d", "C"), song("youtube_e", "D"), song("youtube_f", "E")], new AbortController().signal);
+  assert.equal(f.calls.join(","), "youtube_a,youtube_c,youtube_d,youtube_e");
   assert.equal(feed.songs.map(item => item.id).join(","), "youtube_radio,youtube_home");
   assert.equal(feed.personalized, true);
 });

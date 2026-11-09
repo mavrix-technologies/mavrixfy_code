@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
-function fixture({ expoGo = false, missing = false, failedSetup = false, resolveStream = async () => ({}) } = {}) {
+function fixture({ expoGo = false, missing = false, failedSetup = false, resolveStream = async () => ({}), onRepeat = async () => {} } = {}) {
   const preference = { effective: 'medium', preferJioSaavn: false };
   const calls = []; const listeners = new Set(); let setups = 0;
   const state = { queue: [], index: -1, state: 'none', position: 0, duration: 0, playWhenReady: false, equalizerAvailable: true };
@@ -19,6 +19,7 @@ function fixture({ expoGo = false, missing = false, failedSetup = false, resolve
       if(name==='pause') Object.assign(state,{state:'paused',playWhenReady:false});
       if(name==='skip') Object.assign(state,{index:args.index,position:args.position});
       if(name==='reset') Object.assign(state,{queue:[],index:-1,state:'none',playWhenReady:false});
+      if(name==='repeat') { await onRepeat(args.mode); state.repeatMode = args.mode; }
       return {...state};
     },
   };
@@ -40,6 +41,16 @@ function load(path, deps) {
   vm.runInNewContext(code,{Date,module,exports:module.exports,require:name=>{if(!(name in deps))throw Error(name);return deps[name];}});
   return module.exports;
 }
+test('unresolved Android queue support requires an explicit native capability', async () => {
+  for (const capability of [undefined, false, true]) {
+    const f = fixture();
+    f.state.supportsSourceRequests = capability;
+    assert.equal(f.NativePlaybackPlayer.supportsUnresolvedQueue, false);
+    await f.NativePlaybackPlayer.setupPlayer();
+    assert.equal(f.NativePlaybackPlayer.supportsUnresolvedQueue, capability === true);
+  }
+});
+
 test('native progress exposes real buffering and remains compatible with older binaries', async () => {
   const f = fixture();
   f.state.position = 12.25; f.state.duration = 180; f.state.buffered = 64.125;
@@ -84,6 +95,42 @@ test('shared Play, Next and Seek delegate to native ownership and preserve secon
   const f=fixture();const p=f.NativePlaybackPlayer;await p.setQueue([{id:'a',url:'https://a'},{id:'b',url:'https://b'}]);await p.play();await p.skipToNext();await p.seekTo(43.5);
   assert.equal(f.state.index,1);assert.equal(f.state.playWhenReady,true);
   assert.equal(f.calls.at(-1)[1].position,43.5);await assert.rejects(p.seekTo(NaN),/Invalid/);
+});
+
+test('end-of-queue boundary suppresses native repeats and restores the latest user choice without Play', async () => {
+  const f = fixture(); const p = f.NativePlaybackPlayer;
+  await p.setRepeatMode('all');
+  await p.setStopAtQueueEnd(true);
+  assert.equal(f.state.repeatMode, 'off');
+  await p.setRepeatMode('one');
+  assert.equal(f.state.repeatMode, 'off', 'queue edits and repeat changes cannot undo the sleep boundary');
+  await p.setStopAtQueueEnd(false);
+  assert.equal(f.state.repeatMode, 'one');
+  assert.equal(f.calls.some(([name]) => name === 'play'), false);
+  assert.equal(f.state.playWhenReady, false);
+  await p.setStopAtQueueEnd(true);
+  await p.reset();
+  await p.setRepeatMode('all');
+  assert.equal(f.state.repeatMode, 'off', 'a queue reset cannot silently cancel the still-armed timer');
+  await p.setStopAtQueueEnd(false);
+  assert.equal(f.state.repeatMode, 'all', 'only the timer owner releases its boundary');
+});
+
+test('repeat updates serialize arm and cancel around an in-flight native command', async () => {
+  let complete; let block = false;
+  const f = fixture({ onRepeat: async () => { if (block) { block = false; await new Promise(resolve => { complete = resolve; }); } } });
+  const p = f.NativePlaybackPlayer;
+  await p.setRepeatMode('all');
+  block = true;
+  const arming = p.setStopAtQueueEnd(true);
+  await new Promise(resolve => setImmediate(resolve));
+  const cancelling = p.setStopAtQueueEnd(false);
+  const choosing = p.setRepeatMode('one');
+  assert.equal(f.calls.filter(([name]) => name === 'repeat').length, 2, 'later native writes wait for the in-flight one');
+  complete(); await Promise.all([arming, cancelling, choosing]);
+  assert.equal(f.state.repeatMode, 'one');
+  assert.equal(f.calls.at(-1)[1].mode, 'one');
+  assert.equal(f.calls.some(([name]) => name === 'play'), false);
 });
 test('invalid queue selections cannot mutate native state',async()=>{
   const f=fixture();const p=f.NativePlaybackPlayer;await p.setQueue([{id:'a',url:'https://a'}]);
