@@ -169,12 +169,7 @@ jobs:
               sdk=iphonesimulator
               architecture=$(uname -m)
               xcrun simctl list devices available >/dev/null 2>&1 || true
-              sim_udid=$(xcrun simctl list devices available --json | python3 -c '
-import json, sys
-devs = [d for r in json.load(sys.stdin).get("devices", {}).values() for d in r if "iPhone" in d.get("name", "")]
-if devs:
-    print(next((d["udid"] for d in devs if d.get("state") == "Booted"), devs[0]["udid"]))
-' 2>/dev/null || true)
+              sim_udid=$(xcrun simctl list devices available --json | python3 -c "import json, sys; d=json.load(sys.stdin).get('devices', {}); devs=[x for r in d.values() for x in r if 'iPhone' in x.get('name', '')]; print(devs[0]['udid'] if devs else '')" 2>/dev/null || true)
               if [ -n "$sim_udid" ]; then
                 xcrun simctl boot "$sim_udid" 2>/dev/null || true
                 destination="platform=iOS Simulator,id=$sim_udid"
