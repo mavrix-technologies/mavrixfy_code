@@ -53,24 +53,38 @@ jobs:
         id: toolchain
         run: |
           set -euo pipefail
-          if [ -d "/Applications/Xcode_16.2.app/Contents/Developer" ]; then
-            XCODE_DIR="/Applications/Xcode_16.2.app/Contents/Developer"
-          elif [ -d "/Applications/Xcode_16.1.app/Contents/Developer" ]; then
-            XCODE_DIR="/Applications/Xcode_16.1.app/Contents/Developer"
-          elif [ -d "/Applications/Xcode_16.0.app/Contents/Developer" ]; then
-            XCODE_DIR="/Applications/Xcode_16.0.app/Contents/Developer"
-          elif [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
-            XCODE_DIR="/Applications/Xcode.app/Contents/Developer"
-          else
+          XCODE_DIR=""
+          INSTALLED_RUNTIMES=$(xcrun simctl list runtimes 2>/dev/null || true)
+          for candidate in \
+            "/Applications/Xcode.app/Contents/Developer" \
+            "/Applications/Xcode_16.4.app/Contents/Developer" \
+            "/Applications/Xcode_16.3.app/Contents/Developer" \
+            "/Applications/Xcode_16.2.app/Contents/Developer" \
+            "/Applications/Xcode_16.1.app/Contents/Developer" \
+            "/Applications/Xcode_16.0.app/Contents/Developer"; do
+            if [ -d "$candidate" ]; then
+              ios_ver=$(DEVELOPER_DIR="$candidate" xcodebuild -showsdks 2>/dev/null | sed -n 's/.*iphoneos\([0-9.]*\).*/\1/p' | head -n1 || true)
+              if [ -n "$ios_ver" ] && echo "$INSTALLED_RUNTIMES" | grep -q "iOS ${ios_ver%.*}"; then
+                XCODE_DIR="$candidate"
+                break
+              fi
+              if [ -z "$XCODE_DIR" ]; then
+                XCODE_DIR="$candidate"
+              fi
+            fi
+          done
+          if [ -z "$XCODE_DIR" ]; then
             XCODE_DIR="$(xcode-select -p)"
           fi
           echo "Selecting Xcode at: $XCODE_DIR"
           sudo xcode-select -s "$XCODE_DIR"
           export DEVELOPER_DIR="$XCODE_DIR"
           echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          sudo xcodebuild -runFirstLaunch || true
           xcrun simctl list >/dev/null 2>&1 || true
           version=$(xcodebuild -version)
           echo "$version"
+          xcodebuild -showsdks || true
           echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
           echo "xcode=$(echo "$version" | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           echo "dependencies=${{ hashFiles('package-lock.json','plugins/**','modules/**/*.podspec','modules/**/package.json','modules/**/expo-module.config.json','patches/**','app.config.js','app.json') }}" >> "$GITHUB_OUTPUT"
@@ -179,6 +193,12 @@ jobs:
               ;;
             *) echo "Unsupported build target: $BUILD_TARGET"; exit 1 ;;
           esac
+          dest_check=$(xcodebuild -workspace Mavrixfy.xcworkspace -scheme Mavrixfy -showdestinations 2>&1 || true)
+          if echo "$dest_check" | grep -qi "is not installed"; then
+            echo "Required iOS platform is not installed for active Xcode; downloading iOS platform..."
+            sudo xcodebuild -runFirstLaunch || true
+            xcodebuild -downloadPlatform iOS
+          fi
           xcodebuild -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
             -configuration Release \
