@@ -18,8 +18,11 @@ export const SearchFilterBar = memo(function SearchFilterBar({ activeKey, onSele
             accessibilityRole="tab"
             accessibilityState={{ selected }}
             onPress={() => onSelect(option.key)}
-            style={({ pressed, hovered }) => [styles.tab, selected && styles.selected,
-              !selected && (pressed || hovered) && styles.highlighted]}
+            style={(state) => {
+              const hovered = "hovered" in state && Boolean((state as { hovered?: boolean }).hovered);
+              return [styles.tab, selected && styles.selected,
+                !selected && (state.pressed || hovered) && styles.highlighted];
+            }}
           >
             <Text numberOfLines={1} style={[styles.label, selected && styles.selectedLabel]}>
               {option.label}
