@@ -25,7 +25,7 @@ concurrency:
 jobs:
   build-ios:
     name: iOS ${{ inputs.target || 'device' }} (Release, no signing)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     defaults:
       run:
@@ -54,25 +54,34 @@ jobs:
         run: |
           set -euo pipefail
           XCODE_DIR=""
+          FALLBACK_XCODE=""
           INSTALLED_RUNTIMES=$(xcrun simctl list runtimes 2>/dev/null || true)
-          for candidate in \
-            "/Applications/Xcode.app/Contents/Developer" \
-            "/Applications/Xcode_16.4.app/Contents/Developer" \
-            "/Applications/Xcode_16.3.app/Contents/Developer" \
-            "/Applications/Xcode_16.2.app/Contents/Developer" \
-            "/Applications/Xcode_16.1.app/Contents/Developer" \
-            "/Applications/Xcode_16.0.app/Contents/Developer"; do
-            if [ -d "$candidate" ]; then
+          CANDIDATES=()
+          if [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+            CANDIDATES+=("/Applications/Xcode.app/Contents/Developer")
+          fi
+          while IFS= read -r app_path; do
+            dev_path="$app_path/Contents/Developer"
+            if [ -d "$dev_path" ] && [ "$dev_path" != "/Applications/Xcode.app/Contents/Developer" ]; then
+              CANDIDATES+=("$dev_path")
+            fi
+          done < <(ls -1dr /Applications/Xcode_26*.app 2>/dev/null || true)
+          for candidate in "${CANDIDATES[@]}"; do
+            swift_ver=$(DEVELOPER_DIR="$candidate" xcrun swiftc --version 2>/dev/null | sed -n 's/.*Swift version \([0-9.]*\).*/\1/p' | head -n1 || true)
+            swift_major=${swift_ver%%.*}
+            swift_minor=${swift_ver#*.}; swift_minor=${swift_minor%%.*}
+            if [ -n "$swift_ver" ] && { [ "${swift_major:-0}" -gt 6 ] || { [ "${swift_major:-0}" -eq 6 ] && [ "${swift_minor:-0}" -ge 2 ]; }; }; then
               ios_ver=$(DEVELOPER_DIR="$candidate" xcodebuild -showsdks 2>/dev/null | sed -n 's/.*iphoneos\([0-9.]*\).*/\1/p' | head -n1 || true)
               if [ -n "$ios_ver" ] && echo "$INSTALLED_RUNTIMES" | grep -q "iOS ${ios_ver%.*}"; then
                 XCODE_DIR="$candidate"
                 break
               fi
-              if [ -z "$XCODE_DIR" ]; then
-                XCODE_DIR="$candidate"
+              if [ -z "$FALLBACK_XCODE" ]; then
+                FALLBACK_XCODE="$candidate"
               fi
             fi
           done
+          XCODE_DIR="${XCODE_DIR:-${FALLBACK_XCODE:-}}"
           if [ -z "$XCODE_DIR" ]; then
             XCODE_DIR="$(xcode-select -p)"
           fi
@@ -84,6 +93,7 @@ jobs:
           xcrun simctl list >/dev/null 2>&1 || true
           version=$(xcodebuild -version)
           echo "$version"
+          xcrun swiftc --version || true
           xcodebuild -showsdks || true
           echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
           echo "xcode=$(echo "$version" | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
@@ -199,6 +209,7 @@ jobs:
             sudo xcodebuild -runFirstLaunch || true
             xcodebuild -downloadPlatform iOS
           fi
+          set +e
           xcodebuild -workspace Mavrixfy.xcworkspace \
             -scheme Mavrixfy \
             -configuration Release \
@@ -217,6 +228,14 @@ jobs:
             COMPILER_INDEX_STORE_ENABLE=NO \
             ARCHS="$architecture" \
             build 2>&1 | tee build.log
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$build_status" -ne 0 ]; then
+            echo "=== Xcode build failed (exit $build_status) — matching error lines ==="
+            grep -nE "error:|fatal error:|\[ExpoModulesJSI\]|PhaseScriptExecution failed|BUILD FAILED" build.log | tail -n 80 || true
+            python3 -c 'import glob, gzip, re; files=sorted(glob.glob("../node_modules/expo-modules-jsi/apple/.DerivedData/Logs/Build/*.xcactivitylog")); print("\n=== ExpoModulesJSI xcactivitylog errors ===") if files else None; lines=[l for f in files[-1:] for l in re.split(r"[\r\n]+", gzip.open(f, "rt", errors="replace").read()) if "error:" in l or "fatal" in l.lower()]; print("\n".join(lines[-60:])) if lines else None' 2>/dev/null || true
+            exit "$build_status"
+          fi
 
       - name: Upload native build diagnostics
         if: always()
